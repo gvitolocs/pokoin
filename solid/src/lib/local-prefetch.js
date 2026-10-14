@@ -12,6 +12,7 @@ import {
 } from '@market/api.js';
 import { realPublicCardId } from '@market/card-stub.js';
 import { gameBasename } from '@market/game.js';
+import { afterHero } from '@market/hero-gate.js';
 import { relatedFromPage } from '@market/related-cards.js';
 import { peekHandoffCard } from './card-handoff.js';
 import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-queue.js';
@@ -95,7 +96,7 @@ function scanViewport() {
 /** Tiles render after their data: look once soon after a navigation and once more later. */
 function scanSoon() {
   scanTimers.forEach(clearTimeout);
-  scanTimers = [800, 2500].map((ms) => setTimeout(() => idle(scanViewport), ms));
+  scanTimers = [800, 2500].map((ms) => setTimeout(() => afterHero(() => idle(scanViewport)), ms));
 }
 
 /**

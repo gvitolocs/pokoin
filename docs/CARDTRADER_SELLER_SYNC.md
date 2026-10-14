@@ -20,6 +20,48 @@ For every `marketplace_user_listings` row whose `source_listing_id` is
 `sold_out` rows remain in Postgres for audit/history but are excluded from the
 seller shop and inventory UI.
 
+## Inventory link direction (2026-10-14)
+
+Connecting CardTrader links the two inventories; it is not a one-off import.
+Profile → CardTrader → **Inventory link** stores which way *new* stock is
+copied as `inventorySync.direction` on `seller_integrations/{uid}__cardtrader`
+(`POST /api/cardtrader-sync {"direction": …}` stores it and runs a sync; the
+status carries it as `inventorySync`). Code: `pokoin-rust/crates/external/src/cardtrader/link.rs`.
+
+| Direction | Reconcile imports CardTrader-only products | Reconcile lists Pokoin-only listings on CardTrader |
+| --- | --- | --- |
+| `ct_to_pokoin` (default; the behavior before the setting) | yes | no |
+| `pokoin_to_ct` | no (counted as `notImported`) | yes |
+| `both` | yes | yes |
+
+Linked rows stay in sync both ways in every direction (webhook + reconcile for
+CardTrader sales, `increment -n` for Pokoin sales). 1-Day Ready accounts are
+always CardTrader → Pokoin (`409 cardtrader_one_day_ready` for the others).
+
+The push runs after the plan applied its links, in the same periodic job and
+manual sync, at most `CARDTRADER_PUSH_BATCH` (default 100) listings per run:
+active Pokémon listings with stock, no `source_listing_id` and not a CardTrader
+import. Each is claimed with the outbox's compare-and-set (`'' →
+ct:pending:link-<ms>`), created with `user_data_field = pokoin:<listing id>`,
+then linked over the claim (`origin = 'push'` product link). A refused create
+releases the claim (the listing goes to the back of the queue); an in-doubt
+create keeps it and the next reconcile links the product by its
+`user_data_field`. A listing whose exact card + facets are already in the
+CardTrader export is skipped (`alreadyOnCardTrader`): the plan links a twin
+only when it is the single match, so pushing the rest would sell it twice.
+Results land in the sync summary as `pushedToCardTrader`.
+
+## Power Tools location import
+
+Profile → CardTrader → **Import locations** uploads one Power Tools stock CSV
+per game (`powerToolsCsv: {game: csv}` with `stackSize`, `numberedInStack`,
+`locationParse`). `previewGames` lists the games in the export,
+`previewPowerTools` shows how the locations read and sample matches without
+writing; the import itself is a normal sync whose rows are matched to
+CardTrader products (`reconcile_power_tools_with_cardtrader`) and whose
+locations go onto the linked Pokoin listings. Unmatched rows on either side are
+`summary.powerToolsReconcile.ctOnly` / `ptOnly` for `/inventory/sync-review`.
+
 ## Sale accounting invariant
 
 A connected seller's `ct:<product_id>` row is an inventory mirror. When its
@@ -184,8 +226,9 @@ ssh pi-home 'systemctl status pokoin-rust-job-cardtrader-seller-reconcile.timer 
 ssh pi-home 'journalctl -u pokoin-rust-job@cardtrader-seller-reconcile.service -n 100 --no-pager'
 ```
 
-A manual seller sync remains available from the Profile UI or authenticated
-`POST /api/cardtrader-sync`. Never infer removal from an incomplete export.
+A manual seller sync remains available from the Profile UI (Sync now) or
+authenticated `POST /api/cardtrader-sync`. Never infer removal from an
+incomplete export.
 
 Deploy the sale-accounting guard from an exact `origin/main` commit:
 

@@ -229,7 +229,7 @@ function CardTraderAssetsPanel(props) {
             </span>
           </Show>
         </header>
-        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Run Sync CardTrader in Profile.</p>}>
+        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Press Sync now under CardTrader in Profile.</p>}>
           <div class="seller-listing-list" data-testid="cardtrader-1dr-grid">
             <For each={shown()}>
               {(item) => (

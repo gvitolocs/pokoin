@@ -680,12 +680,15 @@ pub struct ReconcileArgs<'a> {
     pub token: Option<String>,
     pub one_day_ready: Option<bool>,
     pub on_progress: Option<Box<dyn Fn(Value) + Send + Sync>>,
-    pub power_tools_by_game: Option<Value>,
+    /// Power Tools rows per game: their locations go onto the matched listings.
+    pub power_tools_by_game: Option<crate::cardtrader::link::PowerToolsByGame>,
     pub preview_games_only: bool,
+    /// Which way new stock is copied; `None` reads the integration doc.
+    pub direction: Option<crate::cardtrader::link::Direction>,
 }
 
 pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResult<Value> {
-    let ReconcileArgs { firestore, db, ct, uid, seller_name, token, one_day_ready, on_progress, power_tools_by_game: _, preview_games_only } = args;
+    let ReconcileArgs { firestore, db, ct, uid, seller_name, token, one_day_ready, on_progress, power_tools_by_game, preview_games_only, direction } = args;
     let emit = |partial: Value| {
         if let Some(callback) = &on_progress {
             callback(partial);
@@ -798,7 +801,11 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         return reconcile_one_day_ready_assets(db, firestore, ct, &seller_uid, products, allow_destructive, gate_reason, &mut summary, &emit, &token).await;
     }
 
-    reconcile_linked_listings(
+    let direction = match direction {
+        Some(direction) => direction,
+        None => crate::cardtrader::link::read_direction(firestore, &seller_uid).await,
+    };
+    let mut result = reconcile_linked_listings(
         &PgReconcileStore(db),
         firestore,
         ct,
@@ -808,9 +815,50 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         &seller_country,
         &export,
         export_started_at.as_deref(),
+        direction.imports(),
         &emit,
     )
-    .await
+    .await?;
+    let mut amended = false;
+    if let Some(by_game) = power_tools_by_game.as_ref() {
+        let (mut reconcile, locations) = crate::cardtrader::link::power_tools_reconcile(products, by_game);
+        match crate::cardtrader::link::apply_power_tools_locations(db, &seller_uid, &locations).await {
+            Ok(applied) => reconcile["locationsApplied"] = json!(applied),
+            Err(error) => {
+                reconcile["error"] = json!(error.message);
+                result["summary"]["errors"].incr(1);
+            }
+        }
+        let review = reconcile["ctOnly"].as_array().is_some_and(|rows| !rows.is_empty())
+            || reconcile["ptOnly"].as_array().is_some_and(|rows| !rows.is_empty());
+        result["summary"]["powerToolsReconcile"] = reconcile;
+        result["summary"]["needsPowerToolsReview"] = json!(review);
+        amended = true;
+    }
+    // Pokoin → CardTrader: list what is only on Pokoin, after the plan linked
+    // every Pokoin listing that already has a CardTrader twin.
+    if direction.pushes() {
+        let on_cardtrader = crate::cardtrader::link::export_facets(products);
+        let pushed = crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::push_batch(), &on_cardtrader).await;
+        result["summary"]["pushedToCardTrader"] = pushed;
+        amended = true;
+    }
+    result["summary"]["direction"] = json!(direction.as_str());
+    if amended {
+        let complete = result["complete"] == true;
+        record_seller_sync(
+            db,
+            &seller_uid,
+            result["summary"]["errors"].as_i64().unwrap_or(0) == 0,
+            !complete,
+            if complete { "" } else { result["gateReason"].as_str().unwrap_or_default() },
+            &result["summary"],
+            result["summary"]["inventory"].as_i64().unwrap_or(0),
+            complete,
+        )
+        .await?;
+    }
+    Ok(result)
 }
 
 /// The Postgres reads and writes of the standard (not 1-Day Ready)
@@ -954,6 +1002,7 @@ pub(crate) async fn reconcile_linked_listings(
     seller_country: &str,
     export: &ProductsExport,
     export_started_at: Option<&str>,
+    import_new: bool,
     emit: &(dyn Fn(Value) + Send + Sync),
 ) -> ApiResult<Value> {
     let listings = store.seller_listings(seller_uid).await?;
@@ -963,6 +1012,11 @@ pub(crate) async fn reconcile_linked_listings(
     let mut summary = plan.summary.clone();
     for key in APPLIED_COUNTERS {
         summary[key] = json!(0);
+    }
+    if !import_new {
+        // Pokoin → CardTrader only: CardTrader-only products stay off Pokoin.
+        summary["imported"] = json!(0);
+        summary["notImported"] = json!(0);
     }
 
     // First row wins on a duplicate id, as the linear find did.
@@ -978,7 +1032,7 @@ pub(crate) async fn reconcile_linked_listings(
         .actions
         .iter()
         .filter_map(|action| match action {
-            PlannedAction::Import { card_id, .. } if !card_id.is_empty() => Some(card_id.clone()),
+            PlannedAction::Import { card_id, .. } if import_new && !card_id.is_empty() => Some(card_id.clone()),
             _ => None,
         })
         .collect();
@@ -1017,6 +1071,10 @@ pub(crate) async fn reconcile_linked_listings(
                         summary["matchedExisting"].incr(1);
                         store.upsert_link(seller_uid, product_id, listing_id, &product.blueprint_id, product.quantity, "match", false).await?;
                     }
+                    Ok(())
+                }
+                PlannedAction::Import { .. } if !import_new => {
+                    summary["notImported"].incr(1);
                     Ok(())
                 }
                 PlannedAction::Import { product_id, card_id, .. } => {
@@ -1641,7 +1699,7 @@ mod tests {
                    "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"}})
         };
         let export = ProductsExport::from_rows(&[product(1, 1), product(2, 3)]);
-        let run = || reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, None, &|_| {});
+        let run = || reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, None, true, &|_| {});
 
         let first = run().await.unwrap();
         let summary = &first["summary"];
@@ -1668,6 +1726,31 @@ mod tests {
         assert_eq!(second["gateReason"], "complete_ok");
         assert_eq!(fetches.load(Ordering::SeqCst), 1, "no order fetch without new removals");
         assert_eq!(store.take_writes(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn pokoin_to_cardtrader_link_imports_nothing() {
+        let ct = CardTraderClient::with_base("http://127.0.0.1:9".into());
+        let firestore = crate::firebase::MemoryFirestore::new();
+        let product = |id: u32| {
+            json!({"id": id, "blueprint_id": 100, "game_id": 5, "quantity": 1, "price": 2.0,
+                   "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"}})
+        };
+        let export = ProductsExport::from_rows(&[product(7)]);
+
+        let store = MemoryStore::default();
+        let only_push = reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, None, false, &|_| {})
+            .await
+            .unwrap();
+        assert_eq!((only_push["summary"]["imported"].clone(), only_push["summary"]["notImported"].clone()), (json!(0), json!(1)));
+        assert!(store.listings.lock().unwrap().is_empty(), "CardTrader-only stock stays off Pokoin");
+        assert!(!store.take_writes().iter().any(|w| w.starts_with("import")));
+
+        let store = MemoryStore::default();
+        reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, None, true, &|_| {})
+            .await
+            .unwrap();
+        assert!(store.take_writes().contains(&"import imported-7".to_string()));
     }
 
     #[test]

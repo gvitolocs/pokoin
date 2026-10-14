@@ -583,11 +583,17 @@ pub fn active_native_listing_predicate(alias: &str) -> String {
 }
 
 /// `gradedListingSummaryJoin(candidateAlias)`.
+///
+/// Aggregates the active graded native listings once and inner-joins the
+/// result, so only cards with such a listing are read. A per-card lateral
+/// here ran the listings scan (no index can serve `card_id::bigint`) for
+/// every one of the ~75k versions and hit the 30 s statement timeout.
 pub fn graded_listing_summary_join(candidate_alias: &str) -> String {
     format!(
         "
-    left join lateral (
+    join (
       select
+        listing.card_id_bigint,
         count(*)::integer as active_listing_count,
         coalesce(sum(coalesce(listing.quantity_available, 0)), 0)::integer as listed_quantity,
         min(listing.price_pkn) as lowest_price_pkn,
@@ -600,10 +606,11 @@ pub fn graded_listing_summary_join(candidate_alias: &str) -> String {
           case when native_listing.card_id ~ '^[0-9]+$' then native_listing.card_id::bigint else null end as card_id_bigint
         from public.marketplace_user_listings native_listing
       ) listing
-      where listing.card_id_bigint = {candidate_alias}.card_id
+      where listing.card_id_bigint is not null
         and listing.graded = true
         and {}
-    ) graded_listings on true
+      group by listing.card_id_bigint
+    ) graded_listings on graded_listings.card_id_bigint = {candidate_alias}.card_id
   ",
         active_native_listing_predicate("listing")
     )
@@ -725,6 +732,82 @@ pub async fn rows_for_versions(
     args: &RowsForVersionsArgs,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let (route_card_id, route_card_slug) = resolve_card_route(&args.card_id, &args.card_slug, "");
+    let normalized_card_id = js::number(Some(&Value::String(route_card_id)));
+    let normalized_expansion = clean_text(Some(&Value::String(args.expansion_name.clone())), 120);
+    let normalized_product_type = clean_text(Some(&Value::String(args.product_type.clone())), 60);
+    let normalized_product_category =
+        clean_product_category(Some(&Value::String(args.product_category.clone())));
+    let cheapest_cache_relation = if normalized_product_category == "graded" {
+        String::new()
+    } else {
+        cheapest_homepage_cache_relation_name(pool).await?
+    };
+    let (sql, values) = rows_for_versions_sql(args, &cheapest_cache_relation);
+
+    let binds: Vec<super::sql_json::SqlBind> = values
+        .iter()
+        .map(|value| match value {
+            SqlParam::Text(text) => super::sql_json::SqlBind::Text(text.clone()),
+            SqlParam::Int(n) => super::sql_json::SqlBind::Int(*n),
+        })
+        .collect();
+    let rows = super::sql_json::rows_json(pool, &sql, &binds).await?;
+
+    let filtered_by_route = !rows.is_empty()
+        || !args.query.is_empty()
+        || !normalized_expansion.is_empty()
+        || !args.same_as_card_id.is_empty()
+        || !normalized_product_type.is_empty()
+        || !normalized_product_category.is_empty();
+    if filtered_by_route {
+        return Ok(rows
+            .iter()
+            .map(card_emoji::with_card_emoji_fields)
+            .collect());
+    }
+
+    let fallback_rows = candidate_rows_for_card_id(
+        pool,
+        if js::is_safe_integer(normalized_card_id) {
+            normalized_card_id as i64
+        } else {
+            0
+        },
+    )
+    .await?;
+    if route_card_slug.is_empty() {
+        return Ok(fallback_rows
+            .iter()
+            .map(card_emoji::with_card_emoji_fields)
+            .collect());
+    }
+    Ok(fallback_rows
+        .iter()
+        .filter(|row| {
+            let canonical_path = canonical_path_for_row(row);
+            let canonical_slug = if !canonical_path.is_empty() {
+                canonical_path
+                    .split('/')
+                    .filter(|part| !part.is_empty())
+                    .skip(4)
+                    .collect::<Vec<_>>()
+                    .join("-")
+            } else {
+                canonical_slug_for_row(row)
+            };
+            canonical_slug_matches(&canonical_slug, &route_card_slug)
+        })
+        .map(card_emoji::with_card_emoji_fields)
+        .collect())
+}
+
+/// The `rowsForVersions` statement and its `$n` binds. `cheapest_cache_relation`
+/// feeds the CardTrader availability lateral; graded reads ignore it.
+pub fn rows_for_versions_sql(
+    args: &RowsForVersionsArgs,
+    cheapest_cache_relation: &str,
+) -> (String, Vec<SqlParam>) {
+    let (route_card_id, route_card_slug) = resolve_card_route(&args.card_id, &args.card_slug, "");
     let mut values: Vec<SqlParam> = Vec::new();
     let expansion_number_sql = projected_expansion_number_sql();
     let expansion_number_int_sql = projected_expansion_number_int_sql(&expansion_number_sql);
@@ -803,15 +886,8 @@ pub async fn rows_for_versions(
         &args.search_language,
         &mut values,
     );
-    if graded_only {
-        where_clause += " and coalesce(graded_listings.active_listing_count, 0) > 0";
-    }
+    // Graded reads need no extra filter: the graded summary is an inner join.
     values.push(SqlParam::Int(clean_limit(args.limit)));
-    let cheapest_cache_relation = if graded_only {
-        String::new()
-    } else {
-        cheapest_homepage_cache_relation_name(pool).await?
-    };
     let availability_sql = if graded_only {
         graded_availability_columns("graded_listings")
     } else {
@@ -820,7 +896,7 @@ pub async fn rows_for_versions(
     let availability_join_sql = if graded_only {
         graded_listing_summary_join("versions")
     } else {
-        card_trader_availability_join("versions", &cheapest_cache_relation)
+        card_trader_availability_join("versions", cheapest_cache_relation)
     };
 
     let sql = format!(
@@ -903,61 +979,7 @@ pub async fn rows_for_versions(
         values.len()
     );
 
-    let binds: Vec<super::sql_json::SqlBind> = values
-        .iter()
-        .map(|value| match value {
-            SqlParam::Text(text) => super::sql_json::SqlBind::Text(text.clone()),
-            SqlParam::Int(n) => super::sql_json::SqlBind::Int(*n),
-        })
-        .collect();
-    let rows = super::sql_json::rows_json(pool, &sql, &binds).await?;
-
-    let filtered_by_route = !rows.is_empty()
-        || !args.query.is_empty()
-        || !normalized_expansion.is_empty()
-        || !args.same_as_card_id.is_empty()
-        || !normalized_product_type.is_empty()
-        || !normalized_product_category.is_empty();
-    if filtered_by_route {
-        return Ok(rows
-            .iter()
-            .map(card_emoji::with_card_emoji_fields)
-            .collect());
-    }
-
-    let fallback_rows = candidate_rows_for_card_id(
-        pool,
-        if js::is_safe_integer(normalized_card_id) {
-            normalized_card_id as i64
-        } else {
-            0
-        },
-    )
-    .await?;
-    if route_card_slug.is_empty() {
-        return Ok(fallback_rows
-            .iter()
-            .map(card_emoji::with_card_emoji_fields)
-            .collect());
-    }
-    Ok(fallback_rows
-        .iter()
-        .filter(|row| {
-            let canonical_path = canonical_path_for_row(row);
-            let canonical_slug = if !canonical_path.is_empty() {
-                canonical_path
-                    .split('/')
-                    .filter(|part| !part.is_empty())
-                    .skip(4)
-                    .collect::<Vec<_>>()
-                    .join("-")
-            } else {
-                canonical_slug_for_row(row)
-            };
-            canonical_slug_matches(&canonical_slug, &route_card_slug)
-        })
-        .map(card_emoji::with_card_emoji_fields)
-        .collect())
+    (sql, values)
 }
 
 fn plural_re() -> &'static regex::Regex {
@@ -1175,6 +1197,46 @@ mod tests {
         );
         assert!(graded_listing_summary_join("versions").contains("listing.graded = true"));
         assert!(active_native_listing_predicate("listing").contains("listing.status = 'active'"));
+    }
+
+    #[test]
+    fn graded_versions_read_the_listings_once() {
+        let graded = RowsForVersionsArgs {
+            product_category: "graded".into(),
+            limit: 48,
+            ..Default::default()
+        };
+        let (sql, values) = rows_for_versions_sql(&graded, "");
+        // One grouped pass over the graded listings, inner-joined by card id.
+        assert!(sql.contains("group by listing.card_id_bigint"), "{sql}");
+        assert!(
+            sql.contains("    join (\n      select\n        listing.card_id_bigint,"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(") graded_listings on graded_listings.card_id_bigint = versions.card_id"),
+            "{sql}"
+        );
+        assert_eq!(
+            sql.matches("from public.marketplace_user_listings").count(),
+            1,
+            "{sql}"
+        );
+        // A lateral over the listings re-scans them for every version (30 s, then 500).
+        for lateral in sql.split("lateral (").skip(1) {
+            let body = lateral.split(" on true").next().unwrap_or("");
+            assert!(!body.contains("marketplace_user_listings"), "{body}");
+        }
+        assert!(!sql.contains("cardtrader_cache"), "{sql}");
+        assert!(matches!(values.as_slice(), [SqlParam::Int(48)]));
+
+        let all = RowsForVersionsArgs {
+            limit: 48,
+            ..Default::default()
+        };
+        let (sql, _) = rows_for_versions_sql(&all, "public.cardtrader_blueprint_listing_cache");
+        assert!(sql.contains("from public.cardtrader_blueprint_listing_cache cardtrader_cache"));
+        assert!(!sql.contains("marketplace_user_listings"), "{sql}");
     }
 
     #[test]

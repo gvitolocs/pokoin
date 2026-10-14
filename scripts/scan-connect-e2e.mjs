@@ -218,7 +218,7 @@ async function main() {
   phone.on('pageerror', (e) => console.log('phone pageerror', e.message));
 
   // Answer the SPA's desk-session request the way the Chrome extension does
-  // (market/src/auth.jsx). The API side accepts `seller:<uid>` only in dev.
+  // (solid/src/stores/auth.js). The API side accepts `seller:<uid>` only in dev.
   await desktopCtx.addInitScript((uid) => {
     window.addEventListener('message', (event) => {
       if (event.data && event.data.type === 'POKOIN_EXTENSION_DESK_SESSION_REQUEST') {

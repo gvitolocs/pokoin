@@ -2,7 +2,7 @@
 
 ## Marketplaces (live)
 
-One shared React SPA (`market/`, Vercel project `web`). The first path segment
+One shared Solid SPA (`solid/`, shared modules in `market/`). The first path segment
 picks the game via [`market/src/game.js`](../market/src/game.js). Pokemon stays
 on `pokoin.com` with no prefix. Every other TCG is `pokoin.com/{slug}`.
 API calls append `?game=` and send `x-pokoin-game`.
@@ -152,7 +152,7 @@ artist/profile identity once instead of on every card row
 | Postgres **writer** / historicization | **nezopt NVMe** `pokoin-marketplace-postgres-15t` (`127.0.0.1:25432`, LAN `192.168.178.55:25432`) | Snapshot book, `archiveMissing`, `sold_daily`, observations. Data dir `/home/nez/data/pokoin-marketplace-postgres/`. Always on (no 22:00 HDD night-off). HDD copy kept for rollback. |
 | Dump persist tunnel | nezopt user unit `pokoin-oracle-dump-pg-tunnel` | Oracle `127.0.0.1:15543` → nezopt `127.0.0.1:25432`. `MARKETPLACE_DATABASE_SSL=0`. |
 | Postgres on Pi | Docker `pokoin-marketplace-postgres-replica` | Streaming **replica of nezopt writer** (`primary_conninfo` `192.168.178.55:25432`, slot `pokoin_pi_replica`, `sslmode=disable`). `max_connections` must be ≥ primary (120). Never dump-write or migrate here. Oracle SSH tunnel `:15432` is disabled. |
-| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. Route-level lazy chunks (`App.jsx` — every page except `Home` is `React.lazy`; main bundle 1.75 MB raw / ~487 KB gzip since 2026-10-02), and `/market/assets/*` hashed files are `immutable` 1y via `vercel.json`. |
+| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. Route-level lazy chunks (`solid/src/router.js` — every page except `Home` is its own chunk), and `/market/s/*` hashed files are `immutable` 1y. |
 
 Install the persist tunnel on nezopt:
 `scripts/install-oracle-dump-nezopt-tunnel.sh`. Recreate the Oracle CardTrader

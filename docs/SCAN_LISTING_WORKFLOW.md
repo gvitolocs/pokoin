@@ -100,7 +100,7 @@ foil). It comes from the snapshot and is corrected with `i` (reverse) or `.`
 
 Bar between Batch Defaults and the queue. Uses the **same header typeahead
 engine** (`liveSuggestGroups` + `fetchSuggestRanked`, docs/TYPEAHEAD.md) via
-`market/src/use-live-suggest.js`.
+`solid/src/lib/live-suggest.js`.
 
 Flow (candyext KB "How to add one or more unsorted cards: SINGLE CARD"):
 
@@ -276,7 +276,7 @@ client-only state except the undo stack and focus.
 
 | Path | Role |
 | --- | --- |
-| `market/src/pages/ScanDesk.jsx` | Page: connect card, Batch Defaults Bar, queue, submit |
+| `solid/src/pages/ScanDesk.jsx` | Page: connect card, Batch Defaults Bar, queue, submit |
 | `market/src/scan-model.js` | Row reducer (seq ordering), stack key, counts, submit readiness |
 | `market/src/scan-stream.js` | Stream client, reconnect, cursor |
 | `market/src/scan-shortcuts.js` | Key → command map, focus guard |

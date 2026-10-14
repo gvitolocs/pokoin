@@ -254,7 +254,7 @@ function SyncReviewDesk() {
         fallback={(
           <DeskPanel title="Review">
             <p class="page-lede muted">
-              No Power Tools mismatch from the last sync. Run Sync CardTrader from Profile with Power Tools CSVs first.
+              No Power Tools mismatch from the last sync. Use Import locations under CardTrader in Profile with your Power Tools CSVs first.
             </p>
           </DeskPanel>
         )}
