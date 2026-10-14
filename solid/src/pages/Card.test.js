@@ -25,6 +25,14 @@ test('desk title, set and artist drag their own bundles without starting a tile 
   assert.match(page, /onPointerDown=\{\(\) => preloadDragImage\(artistCover\(\)\)\}/);
 });
 
+test('a desk not painted from a peek shows the stored copy and merges the revalidated page', () => {
+  assert.match(page, /fresh: Boolean\(cached\),\n\s+onUpdate: showCard,/);
+  assert.match(page, /fetchVersionSet\(cardId, \{ onUpdate: showVersionSet \}\)\.then\(showVersionSet\)/);
+  // Listings stay live: never a stored copy.
+  assert.match(page, /fetchListings\(cardId, \{ fresh: true, maxAgeMs \}\)/);
+  assert.match(page, /includeOffers: false/);
+});
+
 test('the desk language list follows the printing nationality', () => {
   assert.match(page, /languagesForNationality/);
 });

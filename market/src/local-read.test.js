@@ -146,6 +146,49 @@ test('stale-while-revalidate: a changed body is stored and reaches onUpdate and 
   unsubscribe();
 });
 
+test('an onUpdate read shows the stored copy beside a plain read in flight, and joins that request', async () => {
+  for (const [answer, expected] of [['{"v":2}', [{ v: 2 }]], ['{"v":1}', []]]) {
+    let release;
+    const t = setup({
+      answers: { [URL_A]: () => new Promise((resolve) => { release = () => resolve({ text: answer }); }) },
+    });
+    t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+    // A route preload: may not show the old copy, so it waits for the network.
+    const plain = t.reader.read(URL_A);
+    await flush();
+    assert.equal(t.fetched.length, 1);
+    const updates = [];
+    assert.deepEqual(await t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) }), { v: 1 });
+    assert.equal(t.fetched.length, 1, 'the revalidation is the request already in flight');
+    release();
+    assert.deepEqual(await plain, JSON.parse(answer));
+    await flush();
+    assert.deepEqual(updates, expected);
+    assert.equal(t.fetched.length, 1);
+  }
+});
+
+test('a revalidation that finds the copy gone drops it: the next read shows the 404', async () => {
+  const t = setup();
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const updates = [];
+  assert.deepEqual(await t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) }), { v: 1 });
+  await flush();
+  await flush();
+  assert.deepEqual(updates, []);
+  assert.deepEqual(t.removed, [URL_A]);
+  assert.equal(t.reader.peek(URL_A), undefined);
+  await assert.rejects(t.reader.read(URL_A, { onUpdate: () => {} }), (err) => err.status === 404);
+  // Any other failure keeps the copy.
+  const down = setup({ answers: { [URL_A]: Object.assign(new Error('Bad gateway'), { status: 502 }) } });
+  down.stored.set(URL_A, { body: '{"v":1}', savedAt: down.now() - FRESH_MS * 10 });
+  assert.deepEqual(await down.reader.read(URL_A, { onUpdate: () => {} }), { v: 1 });
+  await flush();
+  await flush();
+  assert.deepEqual(down.removed, []);
+  assert.deepEqual(down.reader.peek(URL_A), { v: 1 });
+});
+
 test('without onUpdate an old copy waits for the network, and stands in only when it fails', async () => {
   const fail = Object.assign(new Error('The network request failed.'), { status: 530 });
   const t = setup({ answers: { [URL_A]: fail } });

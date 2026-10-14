@@ -157,12 +157,22 @@ function VersionsPage(props) {
   }
 
   document.title = 'Versions · Pokoin';
+  // Stored copies of both reads paint at once; a revalidated one lands in
+  // `revised` and the lineup recomputes in place.
+  const [revised, setRevised] = createSignal({});
+  const revise = (field) => (value) => {
+    if (!disposed) setRevised((prev) => ({ ...prev, [field]: value }));
+  };
   // Satellite TCGs have no CLIP version-set yet — soft-fail so card-page
   // rarities still paint the Rarity Lineup.
-  const data = createMemo(() => Promise.all([
-    fetchVersionSet(cardId).catch(() => ({ printings: [] })),
-    fetchCard(cardId, { lang, slug }).catch(() => null),
-  ]).then(([set, page]) => {
+  const reads = Promise.all([
+    fetchVersionSet(cardId, { onUpdate: revise('set') }).catch(() => ({ printings: [] })),
+    fetchCard(cardId, { lang, slug, onUpdate: revise('page') }).catch(() => null),
+  ]);
+  // Exact-name batches are asked once: a revalidation does not rename the printing.
+  let batched = false;
+
+  function load(set, page) {
     const printings = Array.isArray(set?.printings) ? set.printings : [];
     const name = printings.find((row) => String(row.id) === cardId)?.name
       || printings[0]?.name
@@ -173,7 +183,8 @@ function VersionsPage(props) {
       .map(cardFromCatalogRow)
       .filter((row) => row.id);
     loaded = { artCards: rowsFrom(printings), rarities };
-    if (name && name !== 'Card') {
+    if (name && name !== 'Card' && !batched) {
+      batched = true;
       fetchExactNameCards(name, { lang }).then(addBatch).catch(() => {});
       // Meili stops once a page has no exact hit. Item and trainer
       // reprints are the whole name, so the SQL catalog is the full list.
@@ -189,7 +200,12 @@ function VersionsPage(props) {
       ...loaded,
       error: !printings.length && !rarities.length && !page?.card ? 'Card not found.' : '',
     };
-  }));
+  }
+
+  const data = createMemo(() => {
+    const { set: newSet, page: newPage } = revised();
+    return reads.then(([set, page]) => load(newSet || set, newPage || page));
+  });
 
   const nameRows = createMemo(() => batches().reduce((acc, rows) => mergePrintingRows(acc, rows), data().rarities));
   const groups = createMemo(() => groupsFor(data().artCards, nameRows()));

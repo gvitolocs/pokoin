@@ -12,7 +12,8 @@
  *   refreshes the row's date; a changed one is stored, kept, and announced to
  *   `subscribe` listeners and the read's `onUpdate`.
  * - A copy older than `maxStaleMs` waits for the network, and still answers
- *   when the network fails.
+ *   when the network fails. One the revalidation finds gone (404 / 410) is
+ *   dropped, so the next read shows the answer.
  * - A read that may show an old copy gives the store STORE_WAIT_MS (an open
  *   database answers in under 1 ms; opening it takes ~7 ms, creating it on a
  *   first visit ~70 ms) before asking the network too; one that may not asks
@@ -126,23 +127,50 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     return value;
   }
 
-  /** Ask the network again; resolves to the new value, or undefined when unchanged or failed. */
+  /** A copy that is gone (404 / 410) is not shown again: the next read asks the network. */
+  function forget(url) {
+    const row = memory.get(url);
+    if (row) {
+      memory.delete(url);
+      memoryChars -= row.text.length;
+    }
+    quietly(() => store.remove(url));
+  }
+
+  /**
+   * Ask the network again; resolves to the new value, or undefined when
+   * unchanged or failed. A read already asking the network (a route preload
+   * the view did not wait for) is this revalidation: it lands the answer itself.
+   */
   function revalidate(url) {
     let job = revalidating.get(url);
     if (!job) {
       const old = memory.get(url)?.text;
-      job = Promise.resolve()
-        .then(() => fetchText(url, { priority: 'low' }))
-        .then(({ text, etag }) => {
-          if (text === old) {
-            const row = memory.get(url);
-            if (row) row.savedAt = now();
-            quietly(() => store.confirm(url, now()));
-            return undefined;
-          }
-          return land(url, text, etag);
+      const running = inflight.get(url);
+      if (running) {
+        running.adopted = true;
+        running.readers += 1;
+      }
+      job = (running
+        ? running.promise.then(() => {
+          const row = memory.get(url);
+          return row && row.text !== old ? row.value : undefined;
         })
-        .catch(() => undefined)
+        : Promise.resolve()
+          .then(() => fetchText(url, { priority: 'low' }))
+          .then(({ text, etag }) => {
+            if (text === old) {
+              const row = memory.get(url);
+              if (row) row.savedAt = now();
+              quietly(() => store.confirm(url, now()));
+              return undefined;
+            }
+            return land(url, text, etag);
+          }))
+        .catch((err) => {
+          if (err?.status === 404 || err?.status === 410) forget(url);
+          return undefined;
+        })
         .finally(() => revalidating.delete(url));
       revalidating.set(url, job);
     }
