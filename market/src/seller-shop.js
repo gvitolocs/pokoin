@@ -74,10 +74,31 @@ export function sellerFromPayload(data, handle, sample, previous = null) {
     username,
     displayName,
     photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || previous?.photoUrl || '',
+    country: String(row?.country || '').trim().toUpperCase() || previous?.country || '',
     associate: associateRole
       ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() }
       : (previous?.associate || null),
   };
+}
+
+/** How soon after painting a shop asks `fresh=1`, and the waits while a moved shop's new book is built. */
+export const SELLER_FRESH_FIRST_MS = 1500;
+export const SELLER_FRESH_RETRY_MS = [20_000, 40_000, 80_000, 160_000];
+
+/**
+ * What a painted book does with a `fresh=1` answer
+ * (`{ maxUpdatedAt, book: { stamp, version } | null }`):
+ * - 'current': the shop has not moved since this book;
+ * - 'refetch': a newer book is stored, read it by its `book.version`;
+ * - 'wait': the shop moved and its new book is still being built.
+ */
+export function sellerFreshAction(book, fresh) {
+  const loaded = String(book?.maxUpdatedAt || '');
+  const live = String(fresh?.maxUpdatedAt || '');
+  if (!fresh || !live || live === loaded) return 'current';
+  const stored = fresh.book;
+  if (stored?.version && String(stored.stamp || '') !== loaded) return 'refetch';
+  return 'wait';
 }
 
 /** Card stub + desk path a shop row links to (same shape the cart and drag payloads read). */

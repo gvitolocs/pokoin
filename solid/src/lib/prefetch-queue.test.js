@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-queue.js';
 
-test('links to card desks, version pages, set pages and artist pages are prefetch targets', () => {
+test('links to card desks, version pages, set pages, artist pages and seller shops are prefetch targets', () => {
   assert.deepEqual(linkTarget('/marketplace/en/cards/612968/card-night-stretcher'), {
     kind: 'card', key: 'card:en:612968', id: '612968', lang: 'en', slug: 'card-night-stretcher',
   });
@@ -11,9 +11,10 @@ test('links to card desks, version pages, set pages and artist pages are prefetc
   assert.equal(linkTarget('/marketplace/en/cards/7/versions').kind, 'versions');
   assert.deepEqual(linkTarget('/marketplace/sets/surging-sparks'), { kind: 'set', key: 'set:surging-sparks', slug: 'surging-sparks' });
   assert.deepEqual(linkTarget('/marketplace/en/artists/toyste-beach'), { kind: 'artist', key: 'artist:toyste-beach', slug: 'toyste-beach' });
+  assert.deepEqual(linkTarget('/marketplace/it/users/RedShakkio'), { kind: 'seller', key: 'seller:redshakkio', handle: 'RedShakkio' });
   assert.equal(linkTarget('/magic/marketplace/sets/x', { base: '/magic' }).key, 'set:x');
   for (const path of ['/marketplace', '/marketplace/sets', '/marketplace/search', '/cart', '/marketplace/en/artists',
-    '/marketplace/en/cards/not-a-number/x', '/marketplace/en/users/givi', '/checkout']) {
+    '/marketplace/en/cards/not-a-number/x', '/marketplace/en/users', '/marketplace/en/users/givi/x', '/checkout']) {
     assert.equal(linkTarget(path), null, path);
   }
   // Provisional URL ids map to the public id the desk reads.

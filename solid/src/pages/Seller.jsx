@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Repeat, Show, untrack } from 'solid-js';
 import { useNavigate, useParams, useSearchParams } from '@solidjs/router';
-import { fetchSellerShop } from '@market/api.js';
+import { fetchSellerShop, fetchSellerSnapshot } from '@market/api.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { game } from '@market/game.js';
@@ -11,11 +11,14 @@ import { filterSellerBook } from '@market/seller-shop-filter.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import {
   SELLER_CONDITION_FILTERS,
+  SELLER_FRESH_FIRST_MS,
+  SELLER_FRESH_RETRY_MS,
   SELLER_LANG_FILTERS,
   SELLER_PAGE_SIZE as PAGE_SIZE,
   SELLER_RARITY_FILTERS,
   isOneDayReady,
   sellerFiltersNarrow,
+  sellerFreshAction,
   sellerFromPayload,
   sellerOfferRow,
 } from '@market/seller-shop.js';
@@ -28,10 +31,10 @@ import { authUser, signedIn } from '../stores/auth.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 
-/** A changed shop's new book is built behind the request: how often and how soon to ask again. */
-// A tab that comes back after this long asks for the book again (one stored,
-// compact read); an unchanged shop answers the same book.
+// A tab that comes back after this long asks fresh=1 whether the shop moved.
 const BOOK_REVISIT_MS = 60_000;
+
+const isBook = (data) => Boolean(data?.book && Array.isArray(data.listings));
 
 function ShopToggle(props) {
   return (
@@ -71,11 +74,13 @@ function SkeletonRows() {
 }
 
 /**
- * Public seller shop: one request. The whole book (stored compact on the API,
- * ~250 ms) paints the shop and every filter / sort / page runs locally on it;
- * the listings cache paints first on a revisit. Server pages are only the
- * fallback when the book is unavailable. A tab that comes back after a minute
- * asks for the book again.
+ * Public seller shop: one request. The shop snapshot (the stored book, c1v2 +
+ * brotli 11, edge-cached; local-first, so a revisit paints from the store)
+ * paints the shop and every filter / sort / page runs locally on it. Without a
+ * snapshot the live book route (`book=1`) answers, and server pages are the
+ * fallback when neither does. After painting, and when a tab comes back after
+ * a minute, `fresh=1` compares the shop's stamp with the book's: only a moved
+ * shop reads its book again.
  * Not ported yet: the rubber-band multi-select of shop rows (rows drag
  * themselves).
  */
@@ -157,22 +162,41 @@ function SellerShop(props) {
     },
   );
 
-  // The whole book, asked for with the first page: it is what makes the
-  // filters instant, so it does not wait behind the page it replaces.
+  // Where the book came from: the snapshot, or the live book route.
+  let bookSource = 'snapshot';
+  let disposed = false;
+  function adopt(data) {
+    if (disposed) return;
+    setBook(() => data);
+    setBookPhase('ready');
+    putSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
+  }
+
+  // The whole book on mount: the snapshot (a stored copy paints at once and
+  // the network copy replaces it when it differs), else the live book route.
   createEffect(() => true, () => {
     let cancelled = false;
     setBook(null);
     setBookPhase('loading');
-    fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
+    fetchSellerSnapshot(handle, { onUpdate: (data) => !cancelled && isBook(data) && adopt(data) })
       .then((data) => {
-        if (cancelled) return;
-        if (!data?.book || !Array.isArray(data.listings)) {
+        if (cancelled) return null;
+        if (isBook(data)) {
+          adopt(data);
+          checkFresh(SELLER_FRESH_FIRST_MS);
+          return null;
+        }
+        bookSource = 'live';
+        return fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow });
+      })
+      .then((data) => {
+        if (cancelled || data === null) return;
+        if (!isBook(data)) {
           setBookPhase('server');
           return;
         }
-        setBook(() => data);
-        setBookPhase('ready');
-        putSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
+        adopt(data);
+        checkFresh(SELLER_FRESH_FIRST_MS);
       })
       .catch(() => {
         if (!cancelled) setBookPhase('server');
@@ -182,9 +206,37 @@ function SellerShop(props) {
     };
   });
 
-  // Revisit: a tab hidden for a minute asks for the book again when it comes
-  // back (the old fresh=1 stamp check ran the full paged query, ~2 s, after
-  // every filter change and never found a stamp).
+  // Freshness: one cheap stamp read (fresh=1, edge-cached seconds). A moved
+  // shop reads the newer stored book by its version, or waits while it is
+  // built; an unchanged shop costs nothing more.
+  let freshTimer = 0;
+  let freshTries = 0;
+  function checkFresh(delay) {
+    clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => {
+      const current = untrack(book);
+      if (disposed || !current || document.visibilityState === 'hidden') return;
+      fetchSellerShop(handle, { fresh: true, sellerUid: current.seller?.uid || sellerUidNow, game: selectedGame })
+        .then((fresh) => {
+          const action = sellerFreshAction(current, fresh);
+          if (action === 'current') {
+            freshTries = 0;
+            return;
+          }
+          const next = bookSource === 'live'
+            ? fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
+            : action === 'refetch' ? fetchSellerSnapshot(handle, { version: fresh.book.version }) : Promise.resolve(null);
+          return next.then((data) => {
+            if (isBook(data) && String(data.maxUpdatedAt || '') !== String(current.maxUpdatedAt || '')) adopt(data);
+            const behind = sellerFreshAction(untrack(book), fresh) !== 'current';
+            if (behind && freshTries < SELLER_FRESH_RETRY_MS.length) checkFresh(SELLER_FRESH_RETRY_MS[freshTries++]);
+          });
+        })
+        .catch(() => {});
+    }, delay);
+  }
+
+  // Revisit: a tab hidden for a minute asks fresh=1 when it comes back.
   onSettled(() => {
     let hiddenAt = 0;
     const onVisibility = () => {
@@ -192,20 +244,17 @@ function SellerShop(props) {
         hiddenAt = Date.now();
         return;
       }
-      const current = untrack(book);
-      if (!current || !hiddenAt || Date.now() - hiddenAt < BOOK_REVISIT_MS) return;
+      if (!untrack(book) || !hiddenAt || Date.now() - hiddenAt < BOOK_REVISIT_MS) return;
       hiddenAt = 0;
-      fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
-        .then((data) => {
-          if (!data?.book || !Array.isArray(data.listings)) return;
-          if (String(data.maxUpdatedAt || '') === String(current.maxUpdatedAt || '')) return;
-          setBook(() => data);
-          putSeller((value) => sellerFromPayload(data, handle, data.listings[0], value));
-        })
-        .catch(() => {});
+      freshTries = 0;
+      checkFresh(0);
     };
     document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      clearTimeout(freshTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   });
 
   // Server pages only when the book is unavailable: while it downloads the
@@ -287,8 +336,8 @@ function SellerShop(props) {
   const display = () => seller().displayName || publicListingSellerName(sample(), handle);
   const tag = () => seller().username || sellerHandle(sample()) || handle;
   const showTag = () => tag() && tag().toLowerCase() !== String(display() || '').toLowerCase();
-  const country = () => sellerCountryFlag(sample()?.sellerCountry);
-  const countryShort = () => sellerCountryShort(sample()?.sellerCountry);
+  const country = () => sellerCountryFlag(seller().country || sample()?.sellerCountry);
+  const countryShort = () => sellerCountryShort(seller().country || sample()?.sellerCountry);
   const ready = () => Boolean((shown() || []).some(isOneDayReady));
   const totalPages = () => Math.max(1, Math.ceil(productCount() / PAGE_SIZE) || 1);
   const safePage = () => Math.min(Math.max(1, page()), totalPages());

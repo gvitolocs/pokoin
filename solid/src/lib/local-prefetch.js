@@ -5,6 +5,7 @@ import {
   fetchArtist,
   fetchCard,
   fetchExpansion,
+  fetchSellerSnapshot,
   fetchVersionSet,
   prefetchCardDesk,
   setSlug,
@@ -21,8 +22,8 @@ import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-que
  * (market/src/local-read.js), so the click paints from memory.
  *
  * - Intent: the router's own delegated intent listener (pointer resting
- *   60 ms, touchstart, focus) is the only one; for card desks, version, set
- *   and artist pages it warms the route code and queues the page data here.
+ *   60 ms, touchstart, focus) is the only one; for card desks, version, set,
+ *   artist and seller pages it warms the route code and queues the page data here.
  * - Viewport: after each navigation, the first few visible card / set tiles.
  * - Desk: once a card desk loads, its related cards and its set.
  * Loads run at idle with `priority: 'low'`, at most 4 at once, newest intent
@@ -53,6 +54,8 @@ function load(target, signal, intent) {
       ]);
     case 'set':
       return fetchExpansion({ slug: target.slug, limit: EXPANSION_PAGE, offset: 0, prefetch: true, signal });
+    case 'seller':
+      return fetchSellerSnapshot(target.handle, { prefetch: true, signal });
     default:
       return fetchArtist(target.slug, { limit: 5000, prefetch: true, signal });
   }

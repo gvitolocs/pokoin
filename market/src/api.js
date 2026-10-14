@@ -1661,6 +1661,37 @@ export function fetchListSnapshot(kind, key, options = {}) {
     .catch(() => null);
 }
 
+/** The list keys the API stores (`[a-z0-9._-]`): any other handle has no snapshot. */
+export function sellerSnapshotKey(handle) {
+  const key = String(handle || '').trim().replace(/^@/, '').toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(key) ? key : '';
+}
+
+const isSellerBook = (data) => Boolean(data?.book && Array.isArray(data.listings));
+
+/**
+ * Seller shop snapshot (`kind=seller`): the whole book as the API stores it,
+ * built on nezopt (k3s `build-lists-sellers`), c1v2 + brotli 11, kept a minute
+ * at the edge. Read local-first like every list snapshot: a stored copy paints
+ * at once and `onUpdate` gets the network copy when it differs.
+ * `version` (a `fresh=1` answer's `book.version`) names a newer stored book:
+ * a URL the edge has not cached, read past the store. Null when the shop has
+ * no snapshot; the page then asks `marketplace-seller-shop?book=1`.
+ * Prices are display only: cart and checkout verify them live.
+ */
+export function fetchSellerSnapshot(handle, { version = '', ...options } = {}) {
+  const key = sellerSnapshotKey(handle);
+  if (!key) {
+    return Promise.resolve(null);
+  }
+  const read = version
+    ? getJson(`${listSnapshotPath('seller', key)}&v=${encodeURIComponent(version)}`, { signal: options.signal })
+      .then((payload) => (isC1(payload) ? decodeC1(payload, c1Dictionary) : payload))
+      .catch(() => null)
+    : fetchListSnapshot('seller', key, options);
+  return read.then((data) => (isSellerBook(data) ? data : null));
+}
+
 let listDictionaryPrimed = false;
 
 /** Off while Cloudflare cannot cache `dcb` per dictionary: its passthrough mode

@@ -66,6 +66,14 @@ The slow public desks answer from `marketplace_page_snapshots` (migration `scrip
 
 `related` is a nearest-neighbour index: for every single, the 12 best cards by the SPA's `scoreRelated` weights plus same CLIP artwork, Pokédex ±2 (evolution-line proxy), era, release proximity and print language, ties broken by listed availability and popularity. Rows are list-snapshot tile rows (`cardFromCatalogRow`). Contract: `related` is an array of at most 12 tile rows, best first; absent or empty means the client uses its own picker.
 
+### Seller shops
+
+`GET /api/marketplace-list?kind=seller&key=<username>&format=c1v2` serves a stored seller book (`marketplace_seller_books`, migrations `116` and `119`, `crates/commerce/src/handlers/seller_book.rs`): the whole active singles book of one shop, no row cap, c1v2. One primary-key read by `(game, username)`; no profile lookup, no stamp query, no encoding on the request. The k3s CronJob `build-lists-sellers` (`job build-lists --kind=seller`, every 2 min, against the nezopt writer) writes each book's brotli-11 copy (`br`), its `version` (the ETag) and its header (photo, ship-from country), and skips a seller whose stamp (`max(updated_at)`) and profile have not moved. Answers are `public, max-age=30, s-maxage=60, stale-while-revalidate=86400`, `br` when stored; a book older than 2 days (builder stopped) answers 404 and the page uses `marketplace-seller-shop?book=1`.
+
+`GET /api/marketplace-seller-shop?sellerUsername=…&fresh=1[&sellerUid=…]` answers `{maxUpdatedAt, book: {stamp, version}}` (public for 10 s): the page paints from the snapshot, then refetches only when the shop moved — `…&v=<version>` when a newer book is stored, else it asks again while the book is rebuilt.
+
+Builders: the Pi never builds seller books (`scripts/install-pokoin-rust.py` pins `POKOIN_SELLER_BOOK_WORKER=0`); the overflow pods' sweep (every 30 s) and the listing outbox rebuild changed books on nezopt within seconds, without `br`, and the CronJob adds it on its next run. Cart and checkout verify every price live; a snapshot price is display only.
+
 `marketplace-native-sales` answers `sales: []` from an in-memory set of card ids that have any Sold-on-Pokoin row (`crates/commerce/src/sales_index.rs`, Firestore delta every 30 s, full reload every 6 h) instead of one Firestore query per desk.
 
 Every public cacheable `GET /api/*` 200 carries a strong `ETag` and answers `304` to `If-None-Match`; every response carries `Server-Timing` (`sql`, `ser`, `build`, `src`, `total`, plus `edge` at the edge listener).
