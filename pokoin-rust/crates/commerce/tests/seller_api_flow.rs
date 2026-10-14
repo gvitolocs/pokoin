@@ -288,7 +288,7 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(rest["events"], json!([]));
 
     // --- list a card, at most once per key ----------------------------------
-    let item = json!({"id":"cr_1","identity":{"game":"pokemon","name":"Sylveon","publicId":"555001"},"language":"EN","condition":"NM","finish":"standard","quantity":2,"price":3.5,"currency":"EUR","location":"BIN-09"});
+    let item = json!({"id":"cr_1","identity":{"game":"pokemon","name":"Sylveon","setName":"Verified expansion","number":"017/100","art":"https://cdn.pokoin.com/verified.jpg","publicId":"555001"},"language":"EN","condition":"NM","finish":"standard","quantity":2,"price":3.5,"currency":"EUR","location":"BIN-09"});
     let (status, listed) = connector(&app, &token, json!({"action":"list","channel":"pokoin","item":item,"idempotencyKey":"list:cr_1"})).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert_eq!((listed["confirmed"].clone(), listed["created"].clone(), listed["stockMode"].clone()), (json!(true), json!(true), json!("absolute")));
@@ -302,6 +302,8 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     .await
     .unwrap();
     assert_eq!(row, ("555001".into(), 2, "IT".into(), "BIN-09".into(), 700.0));
+    let metadata: (String, String, String, String) = sqlx::query_as("select card_name,set_name,collector_number,card_image_url from marketplace_user_listings where card_id='555001'").fetch_one(&pool).await.unwrap();
+    assert_eq!(metadata,("Sylveon".into(),"Verified expansion".into(),"017/100".into(),"https://cdn.pokoin.com/verified.jpg".into()));
     // An item with no Pokoin card id is refused and its key stays free.
     let (status, unmapped) = connector(&app, &token, json!({"action":"list","item":{"identity":{"name":"?"},"quantity":1,"price":1},"idempotencyKey":"list:cr_2"})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{unmapped}");
