@@ -387,6 +387,95 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status,StatusCode::OK,"{restock}");assert_eq!(restock["status"],"paused");
     assert!(sqlx::query("UPDATE marketplace_user_listings SET status='active' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.is_err());
 
+    // --- update changes only what it carries; repeats change nothing --------
+    let update = |item: Value, listing: &uuid::Uuid| {
+        json!({"action":"update","channel":"pokoin","listingId":listing.to_string(),"item":item})
+    };
+    let change = json!({"priceEurCents":250,"condition":"sp","language":"it","printing":"Reverse Holo","signed":true,"location":"BOX-9"});
+    let (status, upd) = connector(&app, &token, update(change.clone(), &mine)).await;
+    assert_eq!(status, StatusCode::OK, "{upd}");
+    assert_eq!((upd["confirmed"].clone(), upd["changed"].clone(), upd["listingId"].clone()), (json!(true), json!(true), json!(mine.to_string())));
+    assert_eq!(upd["listing"]["priceEurCents"], 250);
+    assert_eq!(upd["listing"]["condition"], "SP");
+    assert_eq!(upd["listing"]["language"], "IT");
+    assert_eq!(upd["listing"]["reverse"], true);
+    assert_eq!(upd["listing"]["signed"], true);
+    assert_eq!(upd["listing"]["altered"], false);
+    assert_eq!(upd["listing"]["location"], "BOX-9");
+    assert_eq!(upd["listing"]["status"], "active");
+    let row: (f64, String, bool) = sqlx::query_as(
+        "select price_pkn::float8, condition, reverse from public.marketplace_user_listings where id = $1",
+    )
+    .bind(mine)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row, (500.0, "SP".into(), true));
+    // The same update again: the listing already looks like that.
+    let (_, again) = connector(&app, &token, update(change, &mine)).await;
+    assert_eq!(again["changed"], false, "{again}");
+    assert_eq!(again["listing"]["priceEurCents"], 250);
+    // priceEurCents 0 is unpriced inventory: pause it, never touch the price.
+    let (_, unpriced) = connector(&app, &token, update(json!({"priceEurCents":0}), &mine)).await;
+    assert_eq!(unpriced["changed"], true, "{unpriced}");
+    assert_eq!(unpriced["listing"]["status"], "paused");
+    assert_eq!(unpriced["listing"]["priceEurCents"], 250);
+    let price: f64 = sqlx::query_scalar("select price_pkn::float8 from public.marketplace_user_listings where id = $1")
+        .bind(mine)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(price, 500.0);
+    // Unknown and foreign listings do not exist for this grant.
+    let (status, missing) = connector(&app, &token, update(json!({"location":"X"}), &uuid::Uuid::new_v4())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["code"], "listing_not_found");
+    let (status, _) = connector(&app, &token, update(json!({"location":"X"}), &theirs)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // A removed listing answers listing_removed.
+    let gone: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, price_pkn, quantity_available, status) \
+         values ('220962', 'seller-1', 400, 0, 'inactive') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, removed) = connector(&app, &token, update(json!({"location":"X"}), &gone)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{removed}");
+    assert_eq!(removed["code"], "listing_removed");
+
+    // --- unlist is the seller UI's delete: inactive, quantity 0, idempotent -
+    let (_, unlisted) = connector(&app, &token, json!({"action":"unlist","listingId":mine.to_string()})).await;
+    assert_eq!((unlisted["confirmed"].clone(), unlisted["changed"].clone()), (json!(true), json!(true)), "{unlisted}");
+    let row: (String, i32) = sqlx::query_as("select status, quantity_available from public.marketplace_user_listings where id = $1")
+        .bind(mine)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row, ("inactive".into(), 0));
+    let (_, again) = connector(&app, &token, json!({"action":"unlist","listingId":mine.to_string()})).await;
+    assert_eq!((again["confirmed"].clone(), again["changed"].clone()), (json!(true), json!(false)));
+    // Updating it now answers listing_removed, like any other removed listing.
+    let (status, removed) = connector(&app, &token, update(json!({"location":"X"}), &mine)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{removed}");
+    assert_eq!(removed["code"], "listing_removed");
+    let (status, _) = connector(&app, &token, json!({"action":"unlist","listingId":theirs.to_string()})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // --- every listing names its tool item ----------------------------------
+    let (_, page) = connector(&app, &token, json!({"action":"listings"})).await;
+    let entries = page["listings"].as_array().unwrap();
+    let relisted = entries.iter().find(|l| l["listingId"] == listed["listingId"]).expect("the listed card");
+    assert_eq!(relisted["externalKey"], "cardrails:list:cr_1");
+    assert_eq!(relisted["signed"], false);
+    assert_eq!(relisted["altered"], false);
+    // The update response carries the same external key and the flags.
+    let cr_id = uuid::Uuid::parse_str(relisted["listingId"].as_str().unwrap()).unwrap();
+    let (_, moved) = connector(&app, &token, update(json!({"location":"BIN-12"}), &cr_id)).await;
+    assert_eq!(moved["changed"], true, "{moved}");
+    assert_eq!(moved["listing"]["externalKey"], "cardrails:list:cr_1");
+    assert!(moved["listing"]["signed"].is_boolean() && moved["listing"]["altered"].is_boolean());
+
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;
     assert_eq!(status, StatusCode::CONFLICT, "a grant with no webhook URL has nothing to test");

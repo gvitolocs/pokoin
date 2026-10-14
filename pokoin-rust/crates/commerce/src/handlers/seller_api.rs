@@ -6,8 +6,9 @@
 //!
 //! `POST /api/cardrails/connector` and `POST /api/seller-api/v1` — `Bearer
 //! pkn_…`. One body `{ action, … }`: `connect`, `locations`, `webhook`,
-//! `listings`, `stock`, `list`, `sales`, `events`. The Card Rails path only
-//! accepts a `cardrails:stock` grant; the generic path accepts any grant.
+//! `listings`, `stock`, `list`, `update`, `unlist`, `sales`, `events`. The
+//! Card Rails path only accepts a `cardrails:stock` grant; the generic path
+//! accepts any grant.
 use std::collections::HashMap;
 
 use axum::body::Bytes;
@@ -360,7 +361,33 @@ async fn last_sold_minimums(state: &DomainState, rows: &[Value]) -> HashMap<Sold
     }
 }
 
-fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>) -> Value {
+/// This grant's `list` idempotency keys for the given listings: the tool's
+/// own item ids, reported back as `externalKey: "cardrails:<key>"`.
+async fn external_keys(state: &DomainState, grant: uuid::Uuid, listing_ids: &[uuid::Uuid]) -> HashMap<String, String> {
+    if listing_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows: Result<Vec<(uuid::Uuid, String)>, _> = sqlx::query_as(
+        "select listing_id, idempotency_key from public.seller_api_listing_keys \
+         where grant_id = $1 and listing_id = any($2)",
+    )
+    .bind(grant)
+    .bind(listing_ids)
+    // The writer, not the replica: the key is written moments before the
+    // listing exists, and the tool reads `listings` right after `list`.
+    .fetch_all(state.write_db())
+    .await;
+    match rows {
+        Ok(rows) => rows.into_iter().map(|(id, key)| (id.to_string(), key)).collect(),
+        Err(error) => {
+            // Never fails the page over this: the field stays null.
+            tracing::warn!(error = %error, "external-key lookup failed for a cardrails listings page");
+            HashMap::new()
+        }
+    }
+}
+
+fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &HashMap<String, String>) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
     let last_sold_min_eur_cents = blueprint_id_of(&row["card_id"]).and_then(|blueprint_id| {
         let key = (
@@ -387,6 +414,8 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>) -> Value {
         "priceEurCents": live::json_number(if price_pkn.is_finite() { (price_pkn / PKN_PER_EUR_CENT as f64).round() } else { 0.0 }),
         "reverse": row["reverse"] == true,
         "firstEdition": row["first_edition"] == true,
+        "signed": row["signed"] == true,
+        "altered": row["altered"] == true,
         "foilState": row["foil_state"],
         "location": row["location"],
         "updatedAt": row["updated_at"],
@@ -394,6 +423,9 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>) -> Value {
         // version/printing over the last 30 days, in EUR cents; absent when
         // Pokoin never sold a copy of it in that window.
         "lastSoldMinEurCents": last_sold_min_eur_cents,
+        // The tool item this listing was created from (`list`'s
+        // idempotency key on this grant); null when Pokoin did not make it.
+        "externalKey": external.get(&live::field(row, "id", 80)).map(|key| json!(format!("cardrails:{key}"))).unwrap_or(Value::Null),
     })
 }
 
@@ -412,9 +444,12 @@ async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Va
     .fetch_all(state.write_db())
     .await?;
     let next = if rows.len() as i64 == limit { rows.last().map(|row| row["id"].clone()) } else { None };
+    let ids: Vec<uuid::Uuid> =
+        rows.iter().filter_map(|row| uuid::Uuid::parse_str(&live::field(row, "id", 80)).ok()).collect();
+    let external = external_keys(state, grant.id, &ids).await;
     let sold = last_sold_minimums(state, &rows).await;
     Ok(json!({
-        "listings": rows.iter().map(|row| tool_listing(row, &sold)).collect::<Vec<_>>(),
+        "listings": rows.iter().map(|row| tool_listing(row, &sold, &external)).collect::<Vec<_>>(),
         "cursor": next.unwrap_or(Value::Null),
     }))
 }
@@ -651,6 +686,168 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     }))
 }
 
+/// A connector listing id the grant can never name: unknown, not malformed.
+fn listing_uuid(id: &str) -> Result<uuid::Uuid, ApiError> {
+    uuid::Uuid::parse_str(id)
+        .map_err(|_| ApiError::not_found("Listing not found for this seller.").with_code("listing_not_found"))
+}
+
+/// The seller's raw listing row. Another seller's listing does not exist,
+/// exactly like the marketplace update path answers.
+async fn seller_listing_row(state: &DomainState, seller_uid: &str, id: uuid::Uuid) -> Result<Value, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        "select to_jsonb(l) from public.marketplace_user_listings l where id = $1 and seller_uid = $2",
+    )
+    .bind(id)
+    .bind(seller_uid)
+    .fetch_optional(state.write_db())
+    .await?
+    .ok_or_else(|| ApiError::not_found("Listing not found for this seller.").with_code("listing_not_found"))
+}
+
+/// The `update` patch for a tool's item: only the fields the item carries
+/// change, mapped exactly like `list` (`listing_body`). A price of 0 or less
+/// is unpriced inventory: it pauses the listing and sends no price.
+pub fn update_patch(item: &Value) -> Result<Value, ApiError> {
+    let given = |key: &str| item.get(key).is_some_and(|value| !value.is_null());
+    let mut patch = json!({});
+    if given("priceEurCents") {
+        let cents = live::number(&item["priceEurCents"]);
+        if !cents.is_finite() {
+            return Err(ApiError::bad_request("This item has no valid price."));
+        }
+        if cents <= 0.0 {
+            patch["status"] = json!("paused");
+        } else {
+            patch["pricePkn"] = json!((cents * PKN_PER_EUR_CENT as f64).round());
+        }
+    }
+    if given("condition") {
+        let condition = live::field(item, "condition", 20).to_uppercase();
+        // The marketplace update resets an empty condition/language to its
+        // default; normalize here so a repeat of the same item is a no-op.
+        patch["condition"] = json!(if condition.is_empty() { "NM" } else { &condition });
+    }
+    if given("language") {
+        let language = live::field(item, "language", 10).to_uppercase();
+        patch["language"] = json!(if language.is_empty() { "EN" } else { &language });
+    }
+    if given("printing") || given("finish") {
+        let finish = live::first(item, &["finish", "printing"], 40).to_lowercase().replace([' ', '-'], "_");
+        patch["reverse"] = json!(finish == "reverse" || finish == "reverse_holo");
+        patch["foilState"] =
+            json!(if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else { "standard" });
+        if finish == "first_edition" {
+            patch["firstEdition"] = json!(true);
+        }
+    }
+    if given("firstEdition") {
+        patch["firstEdition"] = json!(item["firstEdition"] == true);
+    }
+    if given("signed") {
+        patch["signed"] = json!(item["signed"] == true);
+    }
+    if given("altered") {
+        patch["altered"] = json!(item["altered"] == true);
+    }
+    if given("location") {
+        let location = match &item["location"] {
+            Value::String(label) => label.trim().to_string(),
+            _ => live::first(item, &["locationLabel", "locationCode"], 64),
+        };
+        patch["location"] = json!(location.chars().take(64).collect::<String>());
+    }
+    Ok(patch)
+}
+
+/// Would this patch change the stored listing? Repeating the same `update`
+/// must answer `changed: false`, so a retry never rewrites or re-queues.
+fn patch_differs(row: &Value, patch: &Value) -> bool {
+    if patch.get("pricePkn").is_some_and(|price| live::number(&row["price_pkn"]) != live::number(price)) {
+        return true;
+    }
+    for (key, column, max) in [
+        ("condition", "condition", 20),
+        ("language", "language", 10),
+        ("foilState", "foil_state", 40),
+        ("location", "location", 64),
+    ] {
+        if patch.get(key).is_some_and(|value| live::field(row, column, max) != value.as_str().unwrap_or_default()) {
+            return true;
+        }
+    }
+    for (key, column) in
+        [("reverse", "reverse"), ("firstEdition", "first_edition"), ("signed", "signed"), ("altered", "altered")]
+    {
+        if patch.get(key).is_some() && (row[column] == true) != (patch[key] == true) {
+            return true;
+        }
+    }
+    if patch.get("status").is_some_and(|status| live::field(row, "status", 20) != status.as_str().unwrap_or_default()) {
+        return true;
+    }
+    false
+}
+
+/// Change one listing from a tool's item. Only present fields change, and
+/// repeating the same update changes nothing. The write goes through the
+/// marketplace's own update path, so validation, events and the CardTrader
+/// sync stay identical to a seller editing by hand.
+async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
+    only_pokoin(body)?;
+    let id = text_field(body, &["listingId"], 80);
+    let uuid = listing_uuid(&id)?;
+    if !body["item"].is_object() {
+        return Err(ApiError::bad_request("Send the fields to change in `item`."));
+    }
+    let patch = update_patch(&body["item"])?;
+    let row = seller_listing_row(state, &grant.seller_uid, uuid).await?;
+    if !matches!(live::field(&row, "status", 20).as_str(), "active" | "paused" | "sold_out") {
+        return Err(ApiError::conflict("This listing was removed on Pokoin.").with_code("listing_removed"));
+    }
+    let changed = patch_differs(&row, &patch);
+    let row = if changed {
+        super::listings::update_listing(state, &seller_claims(grant), &uuid.to_string(), &patch).await?;
+        // The marketplace update returns its public shape; read the raw row
+        // back for the tool's listing shape.
+        sqlx::query_scalar::<_, Value>("select to_jsonb(l) from public.marketplace_user_listings l where id = $1")
+            .bind(uuid)
+            .fetch_one(state.write_db())
+            .await?
+    } else {
+        row
+    };
+    let sold = last_sold_minimums(state, std::slice::from_ref(&row)).await;
+    let external = external_keys(state, grant.id, &[uuid]).await;
+    Ok(json!({
+        "confirmed": true,
+        "listingId": id,
+        "changed": changed,
+        "listing": tool_listing(&row, &sold, &external),
+    }))
+}
+
+/// Take a listing off the market: Pokoin's own removed state (`inactive`,
+/// quantity 0), the same write the seller UI's delete makes. Repeating the
+/// call changes nothing.
+async fn unlist(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
+    only_pokoin(body)?;
+    let id = text_field(body, &["listingId"], 80);
+    let uuid = listing_uuid(&id)?;
+    let row = seller_listing_row(state, &grant.seller_uid, uuid).await?;
+    if live::field(&row, "status", 20) == "inactive" {
+        return Ok(json!({ "confirmed": true, "listingId": id, "changed": false }));
+    }
+    super::listings::update_listing(
+        state,
+        &seller_claims(grant),
+        &uuid.to_string(),
+        &json!({ "status": "inactive", "quantityAvailable": 0 }),
+    )
+    .await?;
+    Ok(json!({ "confirmed": true, "listingId": id, "changed": true }))
+}
+
 /// A paid order as the flat sale lines an inventory tool records: the listing
 /// it mapped (`externalId`) and the references it dedupes on.
 pub fn sale_lines(order: &Value) -> Vec<Value> {
@@ -739,6 +936,8 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         "listings" => listings(state, &grant, &body).await?,
         "stock" => stock(state, &grant, &body).await?,
         "list" => list(state, &grant, &body).await?,
+        "update" => update(state, &grant, &body).await?,
+        "unlist" => unlist(state, &grant, &body).await?,
         "sold-prices" => sold_prices(state,&body).await?,
         "sales" => events(state, &grant, &body, true).await?,
         "events" => events(state, &grant, &body, false).await?,
@@ -806,15 +1005,104 @@ mod tests {
             "quantity_available": 1, "status": "active", "price_pkn": 38.0, "reverse": false,
             "first_edition": false, "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
         });
+        let none: HashMap<String, String> = HashMap::new();
         // Exact facet match: picked up.
         let sold: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), false, false), 1250)]);
-        assert_eq!(tool_listing(&row, &sold)["lastSoldMinEurCents"], 1250);
+        assert_eq!(tool_listing(&row, &sold, &none)["lastSoldMinEurCents"], 1250);
         // No row for this exact variant (e.g. only a reverse sold): omitted, not guessed.
         let other: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), true, false), 1250)]);
-        assert_eq!(tool_listing(&row, &other)["lastSoldMinEurCents"], Value::Null);
-        assert_eq!(tool_listing(&row, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &other, &none)["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &HashMap::new(), &none)["lastSoldMinEurCents"], Value::Null);
+    }
+
+    #[test]
+    fn tool_listing_names_the_external_key_and_the_flags() {
+        let row = json!({
+            "id": "l1", "card_id": "798728", "marketplace_game": "pokemon", "card_name": "Popplio",
+            "set_name": "Pitch Black", "collector_number": "018/084", "condition": "NM", "language": "EN",
+            "quantity_available": 1, "status": "active", "price_pkn": 38.0, "reverse": false,
+            "first_edition": false, "signed": true, "altered": false,
+            "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
+        });
+        let external: HashMap<String, String> = HashMap::from([("l1".to_string(), "cr_9".to_string())]);
+        let listing = tool_listing(&row, &HashMap::new(), &external);
+        assert_eq!(listing["externalKey"], "cardrails:cr_9");
+        assert_eq!(listing["signed"], true);
+        assert_eq!(listing["altered"], false);
+        // A row without the flag columns and without a key: booleans false, key null.
+        let bare = json!({"id": "l2", "card_id": "1"});
+        let listing = tool_listing(&bare, &HashMap::new(), &HashMap::new());
+        assert_eq!(listing["externalKey"], Value::Null);
+        assert_eq!(listing["signed"], false);
+        assert_eq!(listing["altered"], false);
+    }
+
+    #[test]
+    fn update_patch_maps_present_fields_like_list_and_skips_absent_ones() {
+        let full = json!({"priceEurCents":19,"condition":"sp","language":"it","printing":"Reverse Holo",
+            "firstEdition":true,"signed":false,"altered":true,"location":"  box·3·41  "});
+        let patch = update_patch(&full).unwrap();
+        assert_eq!(patch["pricePkn"], 38.0);
+        assert_eq!(patch["condition"], "SP");
+        assert_eq!(patch["language"], "IT");
+        assert_eq!(patch["reverse"], true);
+        assert_eq!(patch["foilState"], "reverse");
+        assert_eq!(patch["firstEdition"], true);
+        assert_eq!(patch["signed"], false);
+        assert_eq!(patch["altered"], true);
+        assert_eq!(patch["location"], "box·3·41");
+        // Absent fields are not in the patch at all.
+        let only_price = update_patch(&json!({"priceEurCents":19})).unwrap();
+        assert_eq!(only_price["pricePkn"], 38.0);
+        assert!(only_price.get("condition").is_none() && only_price.get("status").is_none());
+        // A printing alone moves reverse/foilState; first-edition printing sets the flag.
+        let holo = update_patch(&json!({"printing":"Holo"})).unwrap();
+        assert_eq!(holo["foilState"], "holo");
+        assert_eq!(holo["reverse"], false);
+        let first = update_patch(&json!({"printing":"First Edition"})).unwrap();
+        assert_eq!(first["firstEdition"], true);
+        assert!(first.get("foilState").is_some());
+        // null is as good as absent.
+        let nulled = update_patch(&json!({"condition":null,"signed":true})).unwrap();
+        assert!(nulled.get("condition").is_none());
+        assert_eq!(nulled["signed"], true);
+        // Locations cut at 64 characters, like `list`.
+        let long = update_patch(&json!({"location":"x".repeat(80)})).unwrap();
+        assert_eq!(long["location"], "x".repeat(64));
+    }
+
+    #[test]
+    fn update_patch_pauses_unpriced_instead_of_sending_a_price() {
+        let patch = update_patch(&json!({"priceEurCents":0})).unwrap();
+        assert_eq!(patch["status"], "paused");
+        assert!(patch.get("pricePkn").is_none());
+        assert_eq!(update_patch(&json!({"priceEurCents":-1})).unwrap()["status"], "paused");
+        assert!(update_patch(&json!({"priceEurCents":"oops"})).is_err());
+        // A real price never flips the status by itself.
+        let patch = update_patch(&json!({"priceEurCents":250})).unwrap();
+        assert_eq!(patch["pricePkn"], 500.0);
+        assert!(patch.get("status").is_none());
+    }
+
+    #[test]
+    fn patch_differs_only_when_a_present_field_moves() {
+        let row = json!({
+            "price_pkn": 38.0, "condition": "NM", "language": "EN", "reverse": false,
+            "first_edition": false, "signed": false, "altered": false,
+            "foil_state": "standard", "location": "box·1", "status": "active",
+        });
+        assert!(!patch_differs(&row, &update_patch(&json!({"priceEurCents":19})).unwrap()));
+        assert!(patch_differs(&row, &update_patch(&json!({"priceEurCents":20})).unwrap()));
+        // Same condition, spelled loosely: the patch normalizes to what is stored.
+        assert!(!patch_differs(&row, &update_patch(&json!({"condition":"nm"})).unwrap()));
+        assert!(patch_differs(&row, &update_patch(&json!({"condition":"PL"})).unwrap()));
+        assert!(!patch_differs(&row, &update_patch(&json!({"signed":false})).unwrap()));
+        assert!(patch_differs(&row, &update_patch(&json!({"signed":true})).unwrap()));
+        assert!(!patch_differs(&row, &json!({})));
+        assert!(!patch_differs(&row, &json!({"status":"active"})));
+        assert!(patch_differs(&row, &json!({"status":"paused"})));
     }
 
     #[test]
