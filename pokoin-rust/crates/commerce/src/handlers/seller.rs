@@ -27,7 +27,7 @@ const BOOK_COLUMNS: &str = "id, card_id, seller_country, marketplace_game, condi
      variant_state, sealed, graded, shipping_available, card_name, card_image_url, set_name, \
      collector_number, status, created_at, updated_at";
 
-fn clean_username(value: &str) -> String {
+pub(super) fn clean_username(value: &str) -> String {
     value
         .trim()
         .trim_start_matches('@')
@@ -362,6 +362,7 @@ async fn book_rarities(
 fn book_body(
     rows: &[sqlx::postgres::PgRow],
     seller: &Seller,
+    header: &ShopHeader,
     game: &str,
     stamp: &str,
     rarities: &HashMap<String, String>,
@@ -377,10 +378,14 @@ fn book_body(
             listing
         })
         .collect();
+    let mut head = seller_payload(seller, header.photo_url.clone());
+    if let Some(country) = &header.country {
+        head["country"] = json!(country);
+    }
     let book = json!({
         "book": true,
         "game": game,
-        "seller": seller_payload(seller, None),
+        "seller": head,
         "listings": listings,
         "total": rows.len(),
         "unique": rows.len(),
@@ -441,6 +446,34 @@ fn book_response(body: std::sync::Arc<Vec<u8>>, compact: Wanted) -> Response {
         "application/json"
     };
     pokoin_api_common::http::raw(axum::http::StatusCode::OK, content_type, body.as_ref().clone(), &headers)
+}
+
+/// The shop header fields only the snapshot builder reads (`users/{uid}`):
+/// the request path builds books without them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShopHeader {
+    pub photo_url: Option<String>,
+    pub country: Option<String>,
+}
+
+impl ShopHeader {
+    /// `photoUrl` (https only) and `shipFromCountry` of a `users/{uid}` document.
+    pub fn from_user(user: &Value) -> Self {
+        let photo_url = user
+            .get("photoUrl")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| url.starts_with("https://"))
+            .map(str::to_owned);
+        let country = Some(normalize_country(
+            user.get("shipFromCountry")
+                .or_else(|| user.get("ship_from_country"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ))
+        .filter(|code| !code.is_empty());
+        Self { photo_url, country }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -590,6 +623,17 @@ pub(super) async fn build_book(
     catalog_game: &str,
     compact: Wanted,
 ) -> Result<(String, Vec<u8>, usize), ApiError> {
+    build_book_with(state, seller, &ShopHeader::default(), catalog_game, compact).await
+}
+
+/// [`build_book`] with the shop header the snapshot builder read.
+pub(super) async fn build_book_with(
+    state: &DomainState,
+    seller: &Seller,
+    header: &ShopHeader,
+    catalog_game: &str,
+    compact: Wanted,
+) -> Result<(String, Vec<u8>, usize), ApiError> {
     let Some(pools) = state.game_pools(catalog_game).await else {
         return Err(DomainState::game_catalog_unconfigured(catalog_game));
     };
@@ -607,8 +651,8 @@ pub(super) async fn build_book(
     let rows = run_shop_sql(read_db, catalog_game, &sql, &values, &where_sql, optional_visual_clause.as_deref()).await?;
     let rarities = book_rarities(read_db, &rows, catalog_game == "pokemon").await;
     let listings = rows.len();
-    let (game, seller, built_stamp) = (catalog_game.to_string(), seller.clone(), stamp.clone());
-    let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &game, &built_stamp, &rarities, compact))
+    let (game, seller, header, built_stamp) = (catalog_game.to_string(), seller.clone(), header.clone(), stamp.clone());
+    let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &header, &game, &built_stamp, &rarities, compact))
         .await
         .map_err(|error| {
             tracing::error!(%error, "seller book task failed");
@@ -627,6 +671,13 @@ pub async fn marketplace_seller_shop(
         .unwrap_or_default();
     if username.trim().is_empty() {
         return Err(ApiError::bad_request("sellerUsername is required."));
+    }
+    if truthy_flag(query.get("fresh")) {
+        let game = query
+            .get("game")
+            .map(|value| super::cart::normalize_game(value).unwrap_or("pokemon"))
+            .unwrap_or("pokemon");
+        return seller_freshness(&state, &username, query.get("sellerUid"), if game.is_empty() { "pokemon" } else { game }).await;
     }
     let seller = seller_profile_for_username(&state, &username).await?;
     let game = query
@@ -919,9 +970,111 @@ pub(super) async fn seller_activity_stamp(
     .bind(uid)
     .fetch_one(read_db)
     .await?;
-    Ok(stamp
+    Ok(stamp_text(stamp))
+}
+
+/// A seller's last-change stamp: max(updated_at), RFC 3339 with milliseconds.
+pub(super) fn stamp_text(max_updated_at: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    max_updated_at
         .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
-        .unwrap_or_default())
+        .unwrap_or_default()
+}
+
+/// Firebase uids are short ASCII ids; anything else is not a seller.
+fn clean_uid(value: &str) -> Option<String> {
+    let uid = value.trim();
+    let ok = !uid.is_empty()
+        && uid.len() <= 128
+        && uid.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'));
+    ok.then(|| uid.to_owned())
+}
+
+/// The shop identity of a uid, for the snapshot builder: the same cache-first
+/// public profile the request path reads (so a built book's `profile` matches
+/// what `seller_book::serve` compares), and the latest listing's seller name
+/// when the profile has no handle (the request path's listing fallback).
+pub(super) async fn seller_for_uid(state: &DomainState, uid: &str, listing_name: &str) -> Result<Option<Seller>, ApiError> {
+    let firestore = state.firestore()?;
+    let cache = state.profile_cache();
+    let profiles = crate::seller_cache::read_public_profiles(
+        cache.as_ref().map(|cache| cache as &dyn crate::seller_cache::ProfileCache),
+        firestore,
+        &[uid.to_string()],
+    )
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let profile = profiles.get(uid).cloned().unwrap_or_default();
+    Ok(seller_from_profile(uid, &profile, listing_name))
+}
+
+/// `seller_profile_for_username`'s naming rules, from the uid side.
+pub(super) fn seller_from_profile(uid: &str, profile: &crate::seller_cache::PublicSellerProfile, listing_name: &str) -> Option<Seller> {
+    let username = Some(clean_username(&profile.username))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| clean_username(listing_name));
+    if username.is_empty() || uid.trim().is_empty() {
+        return None;
+    }
+    let display_name = if profile.display_name.is_empty() || profile.display_name.contains('@') {
+        username.clone()
+    } else {
+        profile.display_name.clone()
+    };
+    // A shop found by its listing name has no registry entry: the route
+    // reports PKN as accepted for it, and so does its book.
+    let accepts_pkn = profile.accepts_pkn || clean_username(&profile.username).is_empty();
+    Some(Seller { uid: uid.to_string(), username, display_name, accepts_pkn })
+}
+
+/// `fresh=1` is public for a few seconds: a busy shop costs the origin one
+/// stamp read per window, and a stamp at most ~30 s old only delays a refetch.
+const FRESH_CACHE: &str = "public, max-age=5, s-maxage=10, stale-while-revalidate=20";
+
+/// `fresh=1`: the seller's live stamp next to the stamp and version of the
+/// stored book (`GET /api/marketplace-list?kind=seller`), so the page refetches
+/// only when its book moved and knows whether a newer one is already stored.
+/// Two index reads; `sellerUid` (public on every listing) or the stored book
+/// skips the profile lookup.
+async fn seller_freshness(
+    state: &DomainState,
+    username: &str,
+    hinted_uid: Option<&String>,
+    catalog_game: &str,
+) -> Result<Response, ApiError> {
+    let handle = clean_username(username);
+    // Without migration 119 (or 116) there is no stored book: no snapshot.
+    let stored: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "select seller_uid, stamp, version from public.marketplace_seller_books
+          where game = $1 and username = $2 order by built_at desc limit 1",
+    )
+    .bind(catalog_game)
+    .bind(&handle)
+    .fetch_optional(state.read_db())
+    .await
+    .unwrap_or(None);
+    let uid = match hinted_uid.and_then(|value| clean_uid(value)) {
+        Some(uid) => uid,
+        None => match &stored {
+            Some((uid, ..)) => uid.clone(),
+            None => seller_profile_for_username(state, &handle).await?.uid,
+        },
+    };
+    let Some(pools) = state.game_pools(catalog_game).await else {
+        return Err(DomainState::game_catalog_unconfigured(catalog_game));
+    };
+    let live = seller_activity_stamp(&pools.read, &uid)
+        .await
+        .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+    let book = stored
+        .filter(|(stored_uid, ..)| *stored_uid == uid)
+        .map(|(_, stamp, version)| json!({ "stamp": stamp, "version": version }));
+    let body = json!({ "fresh": true, "sellerUid": uid, "maxUpdatedAt": live, "book": book });
+    Ok(pokoin_api_common::http::raw(
+        axum::http::StatusCode::OK,
+        "application/json; charset=utf-8",
+        serde_json::to_vec(&body).unwrap_or_default(),
+        &[("cache-control", FRESH_CACHE)],
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,6 +1309,42 @@ mod tests {
     }
 
     #[test]
+    fn a_shop_header_reads_the_https_photo_and_the_ship_from_country() {
+        let header = ShopHeader::from_user(&json!({"photoUrl": " https://lh3.test/p.jpg ", "shipFromCountry": "it"}));
+        assert_eq!(header.photo_url.as_deref(), Some("https://lh3.test/p.jpg"));
+        assert_eq!(header.country.as_deref(), Some("IT"));
+        let header = ShopHeader::from_user(&json!({"photoUrl": "javascript:alert(1)", "ship_from_country": "EU"}));
+        assert_eq!(header, ShopHeader::default(), "no script URLs; EU is not a country");
+    }
+
+    #[test]
+    fn a_uid_names_its_shop_like_the_username_route() {
+        use crate::seller_cache::PublicSellerProfile;
+        let profile = |username: &str, display: &str, pkn: bool| PublicSellerProfile {
+            username: username.into(),
+            display_name: display.into(),
+            accepts_pkn: pkn,
+        };
+        let seller = seller_from_profile("u1", &profile("RedShakkio", "Red Shakkio", false), "ignored").unwrap();
+        assert_eq!((seller.username.as_str(), seller.display_name.as_str(), seller.accepts_pkn), ("redshakkio", "Red Shakkio", false));
+        // No registered handle: the latest listing name, and PKN accepted, as
+        // the route answers a shop it finds by listing name.
+        let seller = seller_from_profile("u2", &profile("", "me@mail.test", false), " E2E ").unwrap();
+        assert_eq!((seller.username.as_str(), seller.display_name.as_str(), seller.accepts_pkn), ("e2e", "e2e", true));
+        assert!(seller_from_profile("u3", &profile("", "", true), "").is_none());
+        assert!(seller_from_profile(" ", &profile("x", "", true), "").is_none());
+    }
+
+    #[test]
+    fn only_plain_uids_skip_the_profile_lookup() {
+        assert_eq!(clean_uid(" PUH1ygG9mOOyQRPXaY5Fa1W6DKd2 ").as_deref(), Some("PUH1ygG9mOOyQRPXaY5Fa1W6DKd2"));
+        assert!(clean_uid("").is_none());
+        assert!(clean_uid("associate:redshakkio").is_none());
+        assert!(clean_uid(&"a".repeat(129)).is_none());
+        assert_eq!(stamp_text(None), "");
+    }
+
+    #[test]
     fn missing_optional_relations_are_detected() {
         // A replica without the optional catalog/blueprint tables reports a
         // missing relation, which is the only case that degrades gracefully.
@@ -1368,7 +1557,7 @@ mod book_tests {
             .map(|n| ((200000 + n).to_string(), if n % 3 == 0 { "Common" } else { "Rare Holo" }.to_string()))
             .collect();
         let started = std::time::Instant::now();
-        let body = book_body(&rows, &seller, "pokemon", "2026-10-11T00:00:00Z", &rarities, Wanted::DEFAULT);
+        let body = book_body(&rows, &seller, &ShopHeader::default(), "pokemon", "2026-10-11T00:00:00Z", &rarities, Wanted::DEFAULT);
         let took = started.elapsed();
         let book: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(book["book"], true);
@@ -1385,7 +1574,7 @@ mod book_tests {
         // The compact form is the same book, exactly, in a fraction of the bytes.
         let wanted = Wanted::from_parts(None, "format=c1v2");
         let started = std::time::Instant::now();
-        let compact = book_body(&rows, &seller, "pokemon", "2026-10-11T00:00:00Z", &rarities, wanted);
+        let compact = book_body(&rows, &seller, &ShopHeader::default(), "pokemon", "2026-10-11T00:00:00Z", &rarities, wanted);
         let compact_took = started.elapsed();
         let decoded = pokoin_api_common::compact::decode::decode(&serde_json::from_slice(&compact).unwrap()).unwrap();
         assert_eq!(decoded, book);
