@@ -530,6 +530,17 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
         "location": location.chars().take(64).collect::<String>(),
         "targets": { "pokoin": true, "cardtrader": false },
     });
+    // CardRails already resolved the printing. Keep its verified metadata even
+    // when the generic marketplace versions view has not indexed that card yet.
+    for (destination, source, maximum) in [
+        ("cardName", "name", 240),
+        ("setName", "setName", 240),
+        ("collectorNumber", "number", 80),
+        ("cardImageUrl", "art", 800),
+    ] {
+        let value = live::field(identity, source, maximum);
+        if !value.is_empty() { body[destination] = json!(value); }
+    }
     let game = live::field(identity, "game", 40);
     if !game.is_empty() {
         body["marketplaceGame"] = json!(game);
@@ -808,9 +819,13 @@ mod tests {
 
     #[test]
     fn listing_body_maps_a_card_rails_item() {
-        let item = json!({"id":"cr_1","identity":{"game":"pokemon","name":"Espurr","publicId":"220962"},"language":"en","condition":"nm","finish":"reverse","quantity":3,"price":12.5,"currency":"EUR","location":"BIN-07"});
+        let item = json!({"id":"cr_1","identity":{"game":"pokemon","name":"Espurr","setName":"BREAKpoint","number":"059/122","art":"https://cdn.pokoin.com/espurr.jpg","publicId":"220962"},"language":"en","condition":"nm","finish":"reverse","quantity":3,"price":12.5,"currency":"EUR","location":"BIN-07"});
         let body = listing_body(&item, "alice", "IT").unwrap();
         assert_eq!(body["cardId"], "220962");
+        assert_eq!(body["cardName"], "Espurr");
+        assert_eq!(body["setName"], "BREAKpoint");
+        assert_eq!(body["collectorNumber"], "059/122");
+        assert_eq!(body["cardImageUrl"], "https://cdn.pokoin.com/espurr.jpg");
         // 200 PKN per euro.
         assert_eq!(body["pricePkn"], 2500.0);
         assert_eq!(body["quantityAvailable"], 3);
