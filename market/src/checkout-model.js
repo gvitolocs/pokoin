@@ -4,8 +4,11 @@
 
 import { countryFromLocale } from './pkn.js';
 import { SHIP_TO_COUNTRIES } from './ship-countries.js';
+import { isBookableShippingService } from './shipping-choice.js';
 import {
+  cheapestServiceId,
   isUntrackedService,
+  parcelServiceLabel,
   pokoinFlexOption,
   previewShipment,
   previewShipmentCents,
@@ -161,8 +164,79 @@ export function checkoutShipOptions({ nft, sellerParcels, buyerCountry, allowUnt
   return options;
 }
 
+/** The letter services one seller parcel can book on its lane, cheapest first. */
+export function checkoutParcelOptions({ from, to, count, allowUntracked = true }) {
+  if (!from || !to || !(Number(count) > 0)) return [];
+  return shippingServiceOptions({ fromCountry: from, toCountry: to, cardCount: count })
+    .filter((row) => !row.unavailable && isBookableShippingService(row.id))
+    .filter((row) => allowUntracked || !isUntrackedService(row))
+    .map((row) => ({ ...row, label: parcelServiceLabel(row) }))
+    .sort((a, b) => a.amountCents - b.amountCents);
+}
+
+/**
+ * One parcel per seller, each on its own service, by the cart's rule: the
+ * buyer's pick for that parcel, else the order-wide service when that lane
+ * offers it (the picked one, else the cheapest one every parcel offers), else
+ * the parcel's cheapest. `services` ({ sellerUid: serviceId }) is what the
+ * quote and the Stripe session book.
+ */
+export function checkoutParcelShipping({ nft, sellerParcels, buyerCountry, allowUntracked, picks = {}, service = '' }) {
+  if (nft) return { parcels: [], services: {}, cents: 0, missing: 0 };
+  const to = String(buyerCountry || '').toUpperCase();
+  const lanes = (sellerParcels || []).map((group) => ({
+    group,
+    options: checkoutParcelOptions({ from: group.from, to, count: group.count, allowUntracked }),
+  }));
+  const byId = new Map();
+  for (const { options } of lanes) {
+    for (const option of options) {
+      const row = byId.get(option.id) || { id: option.id, tracked: option.tracked, amountCents: 0, parcels: 0 };
+      row.amountCents += option.amountCents;
+      row.parcels += 1;
+      byId.set(option.id, row);
+    }
+  }
+  const orderRows = [...byId.values()].map((row) => ({ ...row, complete: row.parcels === lanes.length }));
+  const active = orderRows.some((row) => row.id === service)
+    ? service
+    : cheapestServiceId(orderRows, { allowUntracked });
+  const parcels = [];
+  const services = {};
+  let cents = 0;
+  let missing = 0;
+  for (const { group, options } of lanes) {
+    const wanted = picks?.[group.sellerId] || '';
+    const picked = (wanted && options.find((row) => row.id === wanted))
+      || (active && options.find((row) => row.id === active))
+      || options[0]
+      || null;
+    parcels.push({
+      sellerId: group.sellerId,
+      sellerName: group.sellerName,
+      from: group.from,
+      to,
+      count: group.count,
+      options,
+      serviceId: picked?.id || '',
+      amountCents: picked ? picked.amountCents : null,
+      tracked: picked ? picked.tracked !== false : true,
+      serviceName: picked?.serviceName || '',
+      carrier: picked?.carrier || '',
+      fallback: Boolean(wanted && picked && picked.id !== wanted),
+    });
+    if (picked) {
+      services[group.sellerId] = picked.id;
+      cents += picked.amountCents;
+    } else {
+      missing += 1;
+    }
+  }
+  return { parcels, services, cents, missing };
+}
+
 /** Euro-cents shipping: the server quote, else the rate-table preview; null when a parcel has no rate. */
-export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParcels, buyerCountry, tracked }) {
+export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParcels, buyerCountry, tracked, services = {} }) {
   if (nft || !itemCount) return 0;
   if (quote && Number.isFinite(Number(quote.shippingTotalCents))) {
     return Number(quote.shippingTotalCents);
@@ -174,7 +248,7 @@ export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParc
       fromCountry: group.from,
       toCountry: buyerCountry,
       cardCount: group.count,
-      tracked,
+      tracked: services[group.sellerId] ? services[group.sellerId] !== 'untracked' : tracked,
     });
     if (cents == null) return null;
     total += cents;

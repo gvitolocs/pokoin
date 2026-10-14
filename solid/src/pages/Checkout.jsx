@@ -22,6 +22,7 @@ import {
   MISSING_LISTING_ERROR,
   addressFieldRequired,
   checkoutCartPayload,
+  checkoutParcelShipping,
   checkoutSellerKey,
   checkoutSellerParcels,
   checkoutShipOptions,
@@ -43,7 +44,6 @@ import {
 } from '@market/pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '@market/ship-countries.js';
 import {
-  cheapestServiceId,
   eurCentsFromPkn,
   pknFromEurCents,
   untrackedAllowed,
@@ -111,16 +111,27 @@ function CheckoutDesk() {
   const [showAddressForm, setShowAddressForm] = createSignal(false);
   const [quote, setQuote] = createSignal(null);
   const [quoteError, setQuoteError] = createSignal('');
-  // The service picked in the cart carries over; checkout still lists every option.
-  const [shippingService, setShippingService] = createSignal(untrack(() => cartShippingChoice().service || 'tracked'));
-  const [shippingPicked, setShippingPicked] = createSignal(untrack(() => Boolean(cartShippingChoice().service)));
+  // The services picked in the cart carry over (order-wide and per seller
+  // parcel); checkout still lists every option.
+  const [shippingService, setShippingService] = createSignal(untrack(() => cartShippingChoice().service || ''));
+  const [parcelPicks, setParcelPicks] = createSignal(untrack(() => ({ ...(cartShippingChoice().parcels || {}) })));
   const [pknRefused, setPknRefused] = createSignal([]); // sellers who take card payments only
 
   const nft = () => nftOnly() && cartCanNftOnly();
   const buyerCountry = () => String(selectedAddressCountry(addresses(), addressId()) || draft().countryCode || 'DK').toUpperCase();
-  const shippingTracked = () => shippingService() !== 'untracked';
   const sellerParcels = createMemo(() => checkoutSellerParcels(items(), quote()?.sellerOrigins || {}));
   const allowUntracked = () => untrackedAllowed(eurCentsFromPkn(subtotalPkn()));
+  // One service per seller parcel; the quote and the Stripe session book exactly these.
+  const parcelShipping = createMemo(() => checkoutParcelShipping({
+    nft: nft(),
+    sellerParcels: sellerParcels(),
+    buyerCountry: buyerCountry(),
+    allowUntracked: allowUntracked(),
+    picks: parcelPicks(),
+    service: shippingService(),
+  }));
+  const shippingServices = () => parcelShipping().services;
+  const shippingTracked = () => Object.values(shippingServices()).every((id) => id !== 'untracked');
   const shipOptions = createMemo(() => checkoutShipOptions({
     nft: nft(),
     sellerParcels: sellerParcels(),
@@ -134,6 +145,7 @@ function CheckoutDesk() {
     sellerParcels: sellerParcels(),
     buyerCountry: buyerCountry(),
     tracked: shippingTracked(),
+    services: shippingServices(),
   }));
   const shippingPkn = () => (nft()
     ? 0
@@ -175,18 +187,15 @@ function CheckoutDesk() {
     return formatLocalFromEurCents(cents, displayCurrency());
   }
 
-  // Cheapest bookable service unless the buyer picked one. Untracked is not bookable above €20.
-  createEffect(
-    () => [shipOptions(), shippingService(), shippingPicked()],
-    ([options, current, picked]) => {
-      if (!options.length) return;
-      const selectable = options.filter((row) => !row.unavailable);
-      if (!picked || !selectable.some((row) => row.id === current)) {
-        const next = cheapestServiceId(selectable, { allowUntracked: untrack(allowUntracked) }) || 'tracked';
-        if (next !== current) setShippingService(next);
-      }
-    },
-  );
+  /** The buyer's service for one seller parcel; a single parcel's pick is the order's too. */
+  function pickParcelService(sellerId, serviceId, { orderWide = false } = {}) {
+    setParcelPicks((current) => ({ ...current, [sellerId]: serviceId }));
+    if (orderWide) setShippingService(serviceId);
+    setCartShippingChoice({
+      ...(orderWide ? { service: serviceId } : {}),
+      parcel: { key: sellerId, service: serviceId },
+    });
+  }
 
   createEffect(
     () => preferFiat() && payMethod() === 'pkn',
@@ -267,7 +276,8 @@ function CheckoutDesk() {
       return {
         items: checkoutCartPayload(items()),
         ...(addressId() ? { shippingAddressId: addressId() } : { toCountry: buyerCountry() }),
-        shippingService: shippingService(),
+        shippingService: shippingTracked() ? 'tracked' : 'untracked',
+        shippingServices: shippingServices(),
         tracked: shippingTracked(),
         insurance: cartInsurance() && !nft() && !allowUntracked(),
       };
@@ -390,7 +400,8 @@ function CheckoutDesk() {
         buyerEmail: authUser()?.email || '',
         items: checkoutCartPayload(rows),
         shippingAddressId: addressId(),
-        shippingService: shippingService(),
+        shippingService: shippingTracked() ? 'tracked' : 'untracked',
+        shippingServices: shippingServices(),
         tracked: shippingTracked(),
         insurance: insured() && !nft(),
         usePknDiscount: pknDiscountPkn() >= 1,
@@ -511,6 +522,43 @@ function CheckoutDesk() {
                     {shippingPreviewCents() != null ? ` · ${moneyFromEurCents(shippingPreviewCents())}` : ''}
                   </p>
                   <Switch fallback={<p class="page-lede">Looking up shipping…</p>}>
+                    {/* Several sellers: one parcel each, each on its own service (as in the cart). */}
+                    <Match when={parcelShipping().parcels.length > 1}>
+                      <div class="checkout-pay" aria-label="Shipping service per parcel">
+                        <span class="checkout-pay-label">Shipping</span>
+                        <For each={parcelShipping().parcels}>
+                          {(parcel) => (
+                            <label class="sell-field checkout-parcel-ship">
+                              <span>
+                                Parcel from {parcel.sellerName || 'seller'}
+                                {' · '}
+                                {shipFromCountryName(parcel.from) || parcel.from || '?'} → {shipFromCountryName(parcel.to) || parcel.to}
+                                {' · '}
+                                {parcel.count} {parcel.count === 1 ? 'card' : 'cards'}
+                              </span>
+                              <Show
+                                when={parcel.options.length}
+                                fallback={<em>No shipping service on this route yet.</em>}
+                              >
+                                <select
+                                  aria-label={`Shipping for the parcel from ${parcel.sellerName || 'this seller'}`}
+                                  value={parcel.serviceId}
+                                  onChange={(event) => pickParcelService(parcel.sellerId, event.target.value)}
+                                >
+                                  <For each={parcel.options}>
+                                    {(option) => (
+                                      <option value={option.id}>
+                                        {option.label} · {moneyFromEurCents(option.amountCents)}
+                                      </option>
+                                    )}
+                                  </For>
+                                </select>
+                              </Show>
+                            </label>
+                          )}
+                        </For>
+                      </div>
+                    </Match>
                     <Match when={shipOptions().length}>
                       <div class="checkout-pay" role="radiogroup" aria-label="Shipping service">
                         <span class="checkout-pay-label">Shipping</span>
@@ -522,7 +570,7 @@ function CheckoutDesk() {
                                 class={[
                                   'checkout-pay-option',
                                   {
-                                    'is-on': shippingService() === option.id,
+                                    'is-on': parcelShipping().parcels[0]?.serviceId === option.id,
                                     'is-unavailable': unavailable,
                                     'is-pokoin-flex': option.brand === 'pokoin-flex',
                                   },
@@ -531,13 +579,12 @@ function CheckoutDesk() {
                                 <input
                                   type="radio"
                                   name="shippingService"
-                                  checked={!unavailable && shippingService() === option.id}
+                                  checked={!unavailable && parcelShipping().parcels[0]?.serviceId === option.id}
                                   disabled={unavailable}
                                   onChange={() => {
-                                    if (unavailable) return;
-                                    setShippingPicked(true);
-                                    setShippingService(option.id);
-                                    setCartShippingChoice({ service: option.id });
+                                    const parcel = parcelShipping().parcels[0];
+                                    if (unavailable || !parcel) return;
+                                    pickParcelService(parcel.sellerId, option.id, { orderWide: true });
                                   }}
                                 />
                                 <span>

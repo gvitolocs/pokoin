@@ -1182,6 +1182,93 @@ async fn connect_state_lives_on_the_firestore_user_document() {
 }
 
 #[tokio::test]
+async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
+    use pokoin_commerce::domain::shipping::{find_rate, package_tier_for_count_default, RateCatalog};
+    let (app, firestore) = harness().await;
+    for (uid, country) in [("red", "IT"), ("givi", "DK")] {
+        firestore
+            .create_document(
+                "users",
+                uid,
+                &json!({ "username": uid, "shipFromCountry": country }),
+            )
+            .await
+            .expect("seller");
+    }
+    let items = json!([
+        { "listingId": "l1", "sellerUid": "red", "quantity": 1, "unitPricePkn": 200 },
+        { "listingId": "l2", "sellerUid": "givi", "quantity": 2, "unitPricePkn": 400 },
+    ]);
+    let price = |from: &str, cards: i64, tracked: bool| {
+        let tier = package_tier_for_count_default(cards).unwrap();
+        let rate = find_rate(from, "DK", &tier, tracked, RateCatalog::default_catalog()).unwrap();
+        (rate.price_eur_cents as i64, rate.is_tracked())
+    };
+
+    let (status, quote) = call(
+        &app,
+        "POST",
+        "/api/marketplace-checkout-quote",
+        Some(json!({
+            "items": items,
+            "toCountry": "DK",
+            "tracked": true,
+            "shippingServices": { "red": "untracked", "givi": "tracked" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quote}");
+    let (red_cents, red_tracked) = price("IT", 1, false);
+    let (givi_cents, givi_tracked) = price("DK", 2, true);
+    let shipments = quote["shipments"].as_array().expect("shipments");
+    assert_eq!(shipments.len(), 2);
+    assert_eq!(shipments[0]["sellerId"], json!("red"));
+    assert_eq!(shipments[0]["fromCountry"], json!("IT"));
+    assert_eq!(shipments[0]["amountCents"], json!(red_cents));
+    assert_eq!(shipments[0]["tracked"], json!(red_tracked));
+    assert_eq!(shipments[1]["sellerId"], json!("givi"));
+    assert_eq!(shipments[1]["amountCents"], json!(givi_cents));
+    assert_eq!(
+        shipments[1]["serviceId"],
+        json!(if givi_tracked { "tracked" } else { "untracked" })
+    );
+    assert_eq!(quote["shippingTotalCents"], json!(red_cents + givi_cents));
+    // 1000 PKN of cards = 500 cents.
+    assert_eq!(quote["grandTotalCents"], json!(500 + red_cents + givi_cents));
+    assert_eq!(quote["tracked"], json!(false));
+    assert_eq!(quote["shippingServices"]["givi"], shipments[1]["serviceId"]);
+
+    // The single order-wide flag still prices every parcel alike.
+    let (status, legacy) = call(
+        &app,
+        "POST",
+        "/api/marketplace-checkout-quote",
+        Some(json!({ "items": items, "toCountry": "DK", "shippingService": "tracked" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{legacy}");
+    assert_eq!(
+        legacy["shippingTotalCents"],
+        json!(price("IT", 1, true).0 + price("DK", 2, true).0)
+    );
+
+    // A Packlink parcel cannot be booked: refused, never re-priced as a letter.
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/api/marketplace-checkout-quote",
+        Some(json!({
+            "items": items,
+            "toCountry": "DK",
+            "shippingServices": { "red": "packlink:22131" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert_eq!(refused["code"], json!("shipping_service_unavailable"));
+}
+
+#[tokio::test]
 async fn seller_transfers_resolve_a_ready_account_from_the_user_document() {
     // releaseSellerTransfers must read the Connect account from users/{uid}
     // (never a profile table). With no Stripe key configured the transfer

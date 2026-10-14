@@ -2889,14 +2889,20 @@ pub async fn create_order_checkout_session(
             })
         })
         .collect();
+    // Same pricing as /api/marketplace-checkout-quote: each seller parcel on the
+    // service the buyer picked for it, the untracked cap and the 5% insurance.
+    let plan = crate::domain::shipping::ServicePlan::from_body(&body)?;
+    let insurance = body.get("insurance").and_then(Value::as_bool) == Some(true);
     let catalog = crate::domain::shipping::RateCatalog::default_catalog();
-    let quote = crate::domain::shipping::quote_checkout(
+    let quote = crate::domain::shipping::quote_checkout_with(
         &quote_items,
         &seller_origins,
         &to_country,
-        true,
+        &plan,
         catalog,
     )?;
+    let tracked = quote.tracked;
+    let quote = crate::domain::shipping::guard_checkout_quote(quote, tracked, insurance)?;
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, Some(&order_id)).await?;
@@ -3002,6 +3008,7 @@ pub async fn create_order_checkout_session(
         "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
         "totalEURCents": quote.grand_total_cents,
         "shippingEURCents": quote.shipping_total_cents,
+        "insuranceEURCents": quote.insurance_cents,
         "pknDiscount": {
             "pkn": held_discount_pkn,
             "eurCents": discount_eur_cents,
@@ -3039,6 +3046,13 @@ pub async fn create_order_checkout_session(
                     "sellerTransferCents": shipment.amount_cents,
                     "amountCents": shipment.amount_cents,
                     "tracked": shipment.tracked,
+                    "serviceId": shipment.service_id(),
+                    "rateId": shipment.rate_id,
+                    "carrier": shipment.carrier,
+                    "serviceName": shipment.service_name,
+                    "fromCountry": shipment.from_country,
+                    "toCountry": shipment.to_country,
+                    "cardCount": shipment.card_count,
                 })
             })
             .collect::<Vec<_>>(),
@@ -3060,9 +3074,12 @@ pub async fn create_order_checkout_session(
     Ok(private_json(json!({
         "orderId": order_id,
         "id": session_id,
+        // Both web checkouts open `checkoutUrl`; `url` stays for older callers.
+        "checkoutUrl": url,
         "url": url,
         "totalEURCents": charge_cents,
         "shippingEURCents": quote.shipping_total_cents,
+        "insuranceEURCents": quote.insurance_cents,
         "discountPkn": discount_pkn,
         "discountEurCents": discount_eur_cents,
     })))

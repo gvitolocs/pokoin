@@ -98,3 +98,33 @@ lines and their shipping share are card-only, `pokoin-rust/crates/commerce/src/h
 - Ensure `ADDRESS_ENCRYPTION_KEY` is set in the Pi Rust env (`/srv/pokoin/rust/pokoin-api.env`) before first address write.
 
 Refresh rates with `scripts/sync-shipping-rates.py` (PackZoo + porto-data + dao letters; writes API + SPA JSON). Daily timer: `pokoin-shipping-rates-sync.timer`. The API copy is compiled in, so new rates need a Rust release plus the web deploy.
+
+## Shipping service per seller parcel (2026-10-14)
+
+Each seller's cards ship as one parcel on that seller's lane, and the buyer picks a
+service for each parcel (cart `/cart`, then `/checkout`). The cart keeps the picks
+as `cartShippingChoice().parcels` (`{ sellerUid: serviceId }`, session storage);
+checkout prefills from them (`checkoutParcelShipping` in
+[`market/src/checkout-model.js`](../market/src/checkout-model.js)) and sends them
+to both `POST /api/marketplace-checkout-quote` and
+`POST /api/create-order-checkout-session`:
+
+```json
+{ "shippingServices": { "sellerUidA": "untracked", "sellerUidB": "tracked" },
+  "shippingService": "untracked", "tracked": false, "insurance": false }
+```
+
+- `shippingServices` (object, or `[{ sellerUid, serviceId }]`) wins per seller;
+  sellers it leaves out use the order-wide `tracked` / `shippingTracked` /
+  `shippingService` flag, which is how older clients still work.
+- Bookable services are the letter rates, `tracked` and `untracked`. Live Packlink
+  rates (`packlink:N`) are quotes only: nothing buys their labels and
+  `PACKLINK_API_KEY` is unset in production, so the cart does not offer them and
+  the API refuses a Packlink parcel (400 `shipping_service_unavailable`) instead of
+  re-pricing it. Unknown ids are 400 `invalid_shipping_service`.
+- The €20 untracked cap applies to the order: any untracked parcel on a card
+  subtotal above €20 is 400 `untracked_not_allowed`. Insurance (5%) is unchanged.
+- The session prices exactly like the quote (same services, cap and insurance),
+  stores `serviceId`, `rateId`, `carrier` and `serviceName` on each `shipments[]`
+  row plus `insuranceEURCents`, and answers `checkoutUrl` (and `url`).
+- Quote shipments carry `serviceId`; the quote also returns `shippingServices`.

@@ -3,7 +3,14 @@
 
 import { fetchShippingOptions } from './api.js';
 import { orderServices, parcelEstimate, parcelServices, tierRoom } from './cart-shipping.js';
-import { cheapestServiceId, eurCentsFromPkn, isUntrackedService, untrackedAllowed } from './shipping-quote.js';
+import { isBookableShippingService } from './shipping-choice.js';
+import {
+  cheapestServiceId,
+  eurCentsFromPkn,
+  isUntrackedService,
+  parcelServiceLabel,
+  untrackedAllowed,
+} from './shipping-quote.js';
 
 export function shippingIso(value) {
   const code = String(value || '').trim().toUpperCase();
@@ -65,6 +72,7 @@ export function liveShippingServices({ liveByKey, seedServices, ticked, allowUnt
       const options = liveByKey.get(group.key);
       if (!options?.length) continue;
       for (const option of options) {
+        if (!isBookableShippingService(option.id)) continue;
         const row = byId.get(option.id) || {
           id: option.id,
           label: option.label || option.serviceName || option.id,
@@ -95,19 +103,10 @@ export function activeShippingService(services, service, allowUntracked) {
     : cheapestServiceId(services, { allowUntracked });
 }
 
-/** Letter rates read like the parcel header ("Untracked letter (Poste Italiane)"); Packlink keeps its service name. */
-function parcelOptionLabel(row) {
-  if (row.id === 'tracked' || row.id === 'untracked') {
-    const kind = row.tracked !== false ? 'Tracked' : 'Untracked letter';
-    return row.carrier ? `${kind} (${row.carrier})` : kind;
-  }
-  return row.label || row.serviceName || (row.tracked !== false ? 'Tracked' : 'Untracked letter');
-}
-
 function parcelOption(row) {
   return {
     id: row.id,
-    label: parcelOptionLabel(row),
+    label: parcelServiceLabel(row),
     amountCents: Number(row.amountCents) || 0,
     tracked: row.tracked !== false,
     serviceName: row.serviceName || '',
@@ -118,14 +117,15 @@ function parcelOption(row) {
 
 /**
  * The services one seller's parcel can use on its own lane (seller country →
- * buyer), cheapest first: live Packlink + letter rates once they land, the
- * seeded table before that.
+ * buyer), cheapest first: the live letter rates once they land, the seeded
+ * table before that. Only services checkout can book are offered.
  */
 export function parcelShippingOptions({ liveByKey, group, country, allowUntracked }) {
   const to = shippingIso(country);
-  const live = liveByKey?.get?.(group.key);
-  const rows = live?.length
-    ? live.filter((row) => !row.unavailable)
+  const live = (liveByKey?.get?.(group.key) || [])
+    .filter((row) => !row.unavailable && isBookableShippingService(row.id));
+  const rows = live.length
+    ? live
     : parcelServices({ from: group.sellerCountry, to, cards: group.selectedCount });
   return rows
     .filter((row) => allowUntracked || !isUntrackedService(row))

@@ -29,6 +29,15 @@ export function isShippingServiceId(value) {
   return id === 'tracked' || id === 'untracked' || /^packlink:\d+$/.test(id);
 }
 
+/**
+ * Services checkout can book: the letter rates. Live Packlink rates are quotes
+ * only (nothing buys their labels), so a parcel never ships on one.
+ */
+export function isBookableShippingService(value) {
+  const id = String(value || '');
+  return id === 'tracked' || id === 'untracked';
+}
+
 export function readShippingService() {
   const value = read(SERVICE_KEY);
   return isShippingServiceId(value) ? value : '';
@@ -87,7 +96,7 @@ export function readParcelServices() {
     const parsed = JSON.parse(sessionStorage.getItem(PARCELS_KEY) || '{}');
     const out = {};
     for (const [key, id] of Object.entries(parsed || {})) {
-      if (key && isShippingServiceId(id)) out[key] = id;
+      if (key && isBookableShippingService(id)) out[key] = id;
     }
     return out;
   } catch (_) {
@@ -98,7 +107,7 @@ export function readParcelServices() {
 export function writeParcelServices(parcels) {
   const clean = {};
   for (const [key, id] of Object.entries(parcels || {})) {
-    if (key && isShippingServiceId(id)) clean[key] = id;
+    if (key && isBookableShippingService(id)) clean[key] = id;
   }
   try {
     if (Object.keys(clean).length) sessionStorage.setItem(PARCELS_KEY, JSON.stringify(clean));

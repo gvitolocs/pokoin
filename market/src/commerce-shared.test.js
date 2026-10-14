@@ -113,12 +113,12 @@ test('live shipping: complete services first, then cheapest', () => {
   const ticked = tickedShippingGroups([{ key: 'a', selectedCount: 1, sellerCountry: 'IT' }, { key: 'b', selectedCount: 0, sellerCountry: 'DE' }]);
   assert.deepEqual(ticked.map((g) => g.key), ['a']);
   const services = liveShippingServices({
-    liveByKey: new Map([['a', [{ id: 'x', amountCents: 500 }, { id: 'y', amountCents: 300 }]]]),
+    liveByKey: new Map([['a', [{ id: 'tracked', amountCents: 500 }, { id: 'untracked', amountCents: 300, tracked: false }]]]),
     seedServices: [],
     ticked,
     allowUntracked: true,
   });
-  assert.deepEqual(services.map((s) => s.id), ['y', 'x']);
+  assert.deepEqual(services.map((s) => s.id), ['untracked', 'tracked']);
 });
 
 test('cart rails inputs', () => {

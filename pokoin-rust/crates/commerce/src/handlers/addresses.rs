@@ -470,17 +470,14 @@ pub async fn marketplace_checkout_quote(
         seller_origins.insert(seller_id.clone(), listing_country);
     }
 
-    let tracked = body.get("tracked").and_then(Value::as_bool) != Some(false)
-        && body.get("shippingTracked").and_then(Value::as_bool) != Some(false)
-        && !body
-            .get("shippingService")
-            .and_then(Value::as_str)
-            .map(|value| value.eq_ignore_ascii_case("untracked"))
-            .unwrap_or(false);
+    // One service per seller parcel (`shippingServices`), else the order-wide flag.
+    let plan = shipping::ServicePlan::from_body(&body)?;
     let insurance = body.get("insurance").and_then(Value::as_bool) == Some(true);
 
     let catalog = RateCatalog::default_catalog();
-    let quote = shipping::quote_checkout(&items, &seller_origins, &to_country, tracked, catalog)?;
+    let quote =
+        shipping::quote_checkout_with(&items, &seller_origins, &to_country, &plan, catalog)?;
+    let tracked = quote.tracked;
     let quote = shipping::guard_checkout_quote(quote, tracked, insurance)?;
 
     Ok(private_json(json!({
@@ -493,6 +490,7 @@ pub async fn marketplace_checkout_quote(
             "cardCount": shipment.card_count,
             "packageTier": shipment.package_tier,
             "tracked": shipment.tracked,
+            "serviceId": shipment.service_id(),
             "estimatedWeightGrams": shipment.estimated_weight_grams,
             "carrier": shipment.carrier,
             "serviceName": shipment.service_name,
@@ -506,6 +504,11 @@ pub async fn marketplace_checkout_quote(
         "grandTotalCents": quote.grand_total_cents,
         "currency": quote.currency,
         "tracked": quote.tracked,
+        "shippingServices": quote
+            .shipments
+            .iter()
+            .map(|shipment| (shipment.seller_id.clone(), json!(shipment.service_id())))
+            .collect::<serde_json::Map<String, Value>>(),
         "insuranceCents": quote.insurance_cents,
         "sellerOrigins": seller_origins,
         "shippingAddressId": if address_id.is_empty() { Value::Null } else { json!(address_id) },
