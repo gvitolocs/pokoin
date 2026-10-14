@@ -168,6 +168,32 @@ test('an onUpdate read shows the stored copy beside a plain read in flight, and 
   }
 });
 
+test('a slow store does not send a second request when the read in flight landed meanwhile', async () => {
+  let release;
+  const t = setup({
+    storeDelayMs: 60,
+    answers: {
+      [URL_A]: () => (release
+        ? { text: '{"v":2}' }
+        : new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); })),
+    },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const plain = t.reader.read(URL_A);
+  await flush();
+  const updates = [];
+  // The desk mounts while the preload is still out; the preload lands before
+  // the store answers (busy main thread, cold database).
+  const desk = t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) });
+  release();
+  assert.deepEqual(await plain, { v: 2 });
+  assert.deepEqual(await desk, { v: 2 });
+  assert.equal(t.fetched.length, 1);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(t.fetched.length, 1);
+  assert.deepEqual(updates, []);
+});
+
 test('a revalidation that finds the copy gone drops it: the next read shows the 404', async () => {
   const t = setup();
   t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });

@@ -296,9 +296,10 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
       const row = prefetch
         ? await pending
         : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs)]);
-      if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
+      // A read in flight (the route preload) may have landed while the store was asked.
       const raced = memory.get(url);
       if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);
+      if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
       const usable = fromRow(url, row, maxStaleMs);
       if (usable?.value) {
         remember(url, usable.text, usable.savedAt, usable.value);
