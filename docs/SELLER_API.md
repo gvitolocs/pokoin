@@ -61,10 +61,12 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | `scan-settings` | — | `{ batchId, scanSettings }` — latest open (otherwise latest submitted) scan batch defaults, normalized for Card Rails; read-only and seller-scoped. Includes game, language, finish, condition, flags, quantity, merge policy and the exact location/stack/start position. |
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
-| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, foilState, location, updatedAt, lastSoldMinEurCents }], cursor }` |
+| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, signed, altered, foilState, location, updatedAt, lastSoldMinEurCents, externalKey }], cursor }` |
 | `sold-prices` | `items` (≤ 500, id, identity.publicId, condition, language, printing, firstEdition) | `{ prices: [{ itemId, publicId, minEurCents, priceSource }], windowDays: 30 }`; exact sold facets first, CardTrader tile minimum if absent, null if neither exists |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
 | `list` | `item`, `idempotencyKey`, `channel?` | `{ confirmed: true, listingId, stockMode: "absolute", created }` |
+| `update` | `listingId`, `item` (any of `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
+| `unlist` | `listingId`, `channel?` | `{ confirmed: true, listingId, changed }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
 | `events` | `cursor?` | `{ events: [envelope], cursor, more }` — everything |
 
@@ -80,6 +82,25 @@ Rules worth knowing:
   `item` is the Card Rails inventory item: `identity.publicId` is the Pokoin
   card id (required), `price` is EUR (200 PKN per euro) or pass `pricePkn`,
   `quantity`, `condition`, `language`, `finish`/`printing`, explicit `firstEdition`, `signed`, `altered`, `location`. `priceEurCents` is also supported. An unpriced item must explicitly use `status: "paused"`; it cannot become an active zero-price sale. Apply `scripts/sql/118_unpriced_paused_inventory.sql` before deploying this support.
+- **`update` changes only the fields the item carries.** Same mapping as
+  `list`: `priceEurCents` converts to PKN (200 per euro), `condition` and
+  `language` upper-case, `printing` (`Standard`, `Holo`, `Reverse Holo`,
+  `First Edition`) sets `reverse`/`foilState`, `location` is trimmed to 64
+  characters. Repeating the same update answers `changed: false` and writes
+  nothing. `priceEurCents` of 0 or less is unpriced inventory: the listing is
+  paused and no price is sent. Only live listings can be updated — active,
+  paused or sold out; anything else answers `409 listing_removed`, and an
+  unknown (or another seller's) listing answers `404 listing_not_found`.
+- **`unlist` takes a listing off the market.** It is the same write the
+  seller UI's delete makes: status `inactive`, quantity 0, a `listing.destroy`
+  event, and the CardTrader product (if any) is destroyed. Repeating the call
+  answers `changed: false`. An unlisted listing disappears from `listings` and
+  can no longer be updated — only re-listed by creating it again.
+- **`externalKey`** on every `listings` entry (and in `update`'s `listing`) is
+  the `idempotencyKey` of the `list` call that created the listing on this
+  grant, verbatim (Card Rails sends `cardrails:<item id>`). It is null for listings the
+  tool did not create, so a tool can match its inventory against Pokoin
+  without keeping its own crosswalk.
 - **`lastSoldMinEurCents`** is the lowest confirmed Pokoin sale price for
   that exact card version/printing (same blueprint, condition, language,
   reverse and first-edition state — never a graded slab, never mixed) over

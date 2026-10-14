@@ -95,7 +95,7 @@ function RarityCards(props) {
   );
 }
 
-/** /marketplace/:lang/rarities(/:slug) (market/src/pages/RarityHub.jsx). */
+/** /marketplace/:lang/rarities(/:slug). */
 export default function RarityHub() {
   const params = useParams();
   const lang = () => params.lang || 'en';

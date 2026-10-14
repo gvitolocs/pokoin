@@ -140,7 +140,7 @@ function flattenPrintings(groups) {
 }
 
 /**
- * Header search + typeahead (market/src/components/Chrome.jsx). The input
+ * Header search + typeahead. The input
  * repaints on every keystroke on its own; the ranking, network paging and
  * catalog hydration run on `term`, committed after that paint. Rows are keyed
  * by card id, so a re-rank moves and patches existing rows (FLIP) instead of

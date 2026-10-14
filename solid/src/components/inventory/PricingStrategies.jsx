@@ -74,7 +74,7 @@ function formatPknLite(value) {
 const sellerUid = () => authUid() || accountProfile()?.uid || '';
 
 /**
- * PowerTools-style pricing strategies (market/src/components/PricingStrategies.jsx):
+ * PowerTools-style pricing strategies:
  * any number of rules, applied to live inventory after a dry-run preview.
  */
 export default function PricingStrategies(props) {

@@ -130,7 +130,7 @@ function EraSets(props) {
   );
 }
 
-/** /marketplace/eras and /marketplace/eras/:eraId (market/src/pages/Era.jsx). */
+/** /marketplace/eras and /marketplace/eras/:eraId. */
 export default function Era() {
   const params = useParams();
   const pokemon = isPokemonGame();

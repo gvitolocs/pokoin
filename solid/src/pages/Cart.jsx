@@ -95,7 +95,7 @@ function RemovedNote(props) {
 }
 
 /**
- * /cart (market/src/pages/Cart.jsx) in Amazon's basket layout: ticked rows
+ * /cart in Amazon's basket layout: ticked rows
  * check out, unticked rows stay; every row is re-checked against its live
  * listing; one parcel per seller. Signed in, the cart is the account's, and
  * the carousels come from GET /api/marketplace-recommendations — the

@@ -129,7 +129,7 @@ function PromoWordmark(props) {
 }
 
 /**
- * Home hero (market/src/components/PromoCarousel.jsx): five current
+ * Home hero: five current
  * expansions with a fan of their chase cards, auto-advancing every 5.5 s
  * unless hovered, focused, hidden or reduced-motion. The stage paints with
  * its copy and fixed fan box on the first frame, so the scans landing later

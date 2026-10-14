@@ -8,6 +8,7 @@ import { publicListingSellerName, sellerCountryFlag, sellerCountryShort, sellerH
 import { getSearchLang } from '@market/locale.js';
 import { rememberSellerIdentity, seedSellerListings, sellerIdentitySeed } from '@market/seller-seed.js';
 import { filterSellerBook } from '@market/seller-shop-filter.js';
+import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import {
   SELLER_CONDITION_FILTERS,
   SELLER_LANG_FILTERS,
@@ -21,6 +22,7 @@ import {
 import Avatar from '../components/Avatar.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
+import { listingSelected } from '../lib/select-band.js';
 import { accountProfile } from '../stores/account.js';
 import { authUser, signedIn } from '../stores/auth.js';
 import { addCartItem } from '../stores/cart.js';
@@ -68,7 +70,7 @@ function SkeletonRows() {
 }
 
 /**
- * Public seller shop (market/src/pages/Seller.jsx). The first page comes from
+ * Public seller shop. The first page comes from
  * a small paged query (or the listings cache) while the whole book downloads
  * beside it; every filter / sort / page then runs locally on the book. A fresh
  * stamp check refetches the book when the seller's listings changed.
@@ -324,6 +326,7 @@ function SellerShop(props) {
   );
 
   const rows = createMemo(() => (shown() || []).map((offer, index) => ({ offer, index, ...sellerOfferRow(offer, lang()) })));
+  const shownOffers = createMemo(() => rows().map((row) => row.enriched));
 
   return (
     <Show
@@ -454,14 +457,15 @@ function SellerShop(props) {
                   </Show>
                 )}
               >
-                <ShopList class="seller-shop-list">
+                <ShopList class="seller-shop-list" offers={shownOffers()}>
                   <For each={rows()} keyed={(row) => row.offer.id || `${row.cardId}-${row.index}`}>
                     {(row) => (
                       <ShopListingRow
                         offer={row().enriched}
                         card={row().cardStub}
                         showCard
-                        selected={false}
+                        selected={listingSelected().has(listingSelectId(row().enriched))}
+                        dragOffers={shopDragOffers(shownOffers(), listingSelected(), row().enriched)}
                         onCart={(qty) => {
                           const { offer, cardId, cardStub, enriched } = row();
                           if (!cardId || !offer.id) return;

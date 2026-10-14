@@ -69,28 +69,13 @@ test('game paths rewrite to the market SPA', () => {
   assert.ok(hit, '/one-piece/marketplace must rewrite to the market SPA');
 });
 
-test('satellite search ignores the Pokémon print chip (blank nationality)', () => {
+// The Era/Sets/Search/SearchBox side is guarded in solid/src/components/{Chrome,SearchBox}.test.js.
+test('satellite set icons stay off the Pokémon catalogs', () => {
   const root = path.dirname(fileURLToPath(import.meta.url));
-  const search = fs.readFileSync(path.join(root, 'pages/Search.jsx'), 'utf8');
-  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
-  assert.match(search, /activePrintLang = \(!isPokemonGame\(\) \|\| tab === 'users'\) \? 'all' : printLang/);
-  assert.match(search, /showPrint=\{isPokemonGame\(\)\}/);
-  assert.match(chrome, /fetchSuggest\(term, \{[^}]*printLang: 'all'/s);
-});
-
-test('satellite eras and set icons stay off the Pokémon catalogs', () => {
-  const root = path.dirname(fileURLToPath(import.meta.url));
-  const era = fs.readFileSync(path.join(root, 'pages/Era.jsx'), 'utf8');
   const logos = fs.readFileSync(path.join(root, 'set-logos.js'), 'utf8');
-  const sets = fs.readFileSync(path.join(root, 'pages/Sets.jsx'), 'utf8');
-  assert.match(era, /SatelliteEras/);
-  assert.match(era, /isPokemonGame/);
-  assert.match(era, /does not use Pokémon TCG blocks/);
   assert.match(logos, /satelliteExpansionPrefix/);
   assert.match(logos, /if \(!isPokemonGame\(hostname\)\) return ''/);
   assert.match(logos, /\/card-images\/\$\{slug\}\/expansions/);
-  assert.match(sets, /satelliteGroups/);
-  assert.match(sets, /pokemon \? \(/);
 });
 
 test('each marketplace game has a CardTrader-matching icon SVG', () => {
@@ -106,7 +91,4 @@ test('each marketplace game has a CardTrader-matching icon SVG', () => {
   }
   assert.match(gameIconSrc('pokemon'), /(?:^|\/)games\/pokemon\.svg$/);
   assert.match(gameIconSrc('riftbound'), /(?:^|\/)games\/riftbound\.svg$/);
-  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /gameIconSrc/);
-  assert.match(chrome, /className="game-icon"/);
 });

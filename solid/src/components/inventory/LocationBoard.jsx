@@ -15,7 +15,7 @@ function stackHref(stack) {
 const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
 
 /**
- * One box (market/src/components/LocationBoard.jsx): every listing stored in
+ * One box: every listing stored in
  * it, grouped per divider stack, then position, then listed date.
  */
 export default function LocationBoard(props) {

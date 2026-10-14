@@ -323,7 +323,7 @@ function HoldingDetail(props) {
   );
 }
 
-/** /marketplace/portfolio and /marketplace/portfolio/:listingId (market/src/pages/Portfolio.jsx). */
+/** /marketplace/portfolio and /marketplace/portfolio/:listingId. */
 export default function Portfolio() {
   const params = useParams();
   return (

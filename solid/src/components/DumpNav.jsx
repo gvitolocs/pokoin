@@ -6,7 +6,7 @@ const LINKS = [
   { to: '/marketplace/portfolio', label: 'Portfolio', match: (path) => path.startsWith('/marketplace/portfolio') },
 ];
 
-/** Explore / Portfolio tabs (market/src/components/DumpNav.jsx). */
+/** Explore / Portfolio tabs. */
 export default function DumpNav() {
   const location = useLocation();
   return (

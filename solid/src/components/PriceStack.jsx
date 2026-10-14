@@ -1,6 +1,6 @@
 import { Match, Switch } from 'solid-js';
 
-/** Buyer price, local fiat over PKN (market/src/components/PriceStack.jsx). */
+/** Buyer price, local fiat over PKN. */
 export default function PriceStack(props) {
   const local = () => props.parts?.local || '';
   const pkn = () => props.parts?.pkn || '';

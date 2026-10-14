@@ -38,7 +38,7 @@ function EventPanel(props) {
   );
 }
 
-/** /marketplace/competitive (market/src/pages/Competitive.jsx): the snapshot overview. */
+/** /marketplace/competitive: the snapshot overview. */
 export default function Competitive() {
   const data = competitiveData();
   const featured = data.decks.filter((deck) => deck.featured).slice(0, 6);

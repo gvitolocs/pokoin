@@ -10,7 +10,7 @@ import {
 import { Alert, DeskPanel, FilePill, PageHead, Thread } from '../components/Desk.jsx';
 import { usePageTitle } from './tools/board.jsx';
 
-/** Public photo identify page: /scan, /cardscan, /scancard (market/src/pages/Scan.jsx). */
+/** Public photo identify page: /scan, /cardscan, /scancard. */
 export default function Scan() {
   const navigate = useNavigate();
   const [preview, setPreview] = createSignal('');

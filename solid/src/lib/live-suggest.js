@@ -15,7 +15,7 @@ import { printLang, searchLang } from '../stores/locale.js';
 
 /**
  * Same typeahead engine as the header search bar, as a flat list of pickable
- * printings: the Solid port of market/src/use-live-suggest.js (+ its
+ * printings: the Solid port of the React useLiveSuggest hook (+ its
  * use-progressive-suggest.js pool). Keystrokes paint from the local ranker
  * (paintCatalogGroups); progressive Meili pages and catalog hydration only
  * feed the suggest-live cache and bump a tick so the list re-reads it. Every

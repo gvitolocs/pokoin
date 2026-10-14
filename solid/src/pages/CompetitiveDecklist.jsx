@@ -68,7 +68,7 @@ function Missing() {
   return <NotInSnapshot>That decklist is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/decklists/:decklistId (market/src/pages/CompetitiveDecklist.jsx). */
+/** /marketplace/competitive/decklists/:decklistId. */
 export default function CompetitiveDecklist() {
   const params = useParams();
   return (

@@ -1,7 +1,7 @@
 // Guard: the framework-agnostic core of market/src (API client, caches,
-// identity, ranking, …) is shared with the Solid app, so its static import
-// graph must never reach React, Firebase, or a .jsx file. Dynamic import()
-// is allowed — that is how Firestore stays lazy.
+// identity, ranking, …) is what the Solid app and the edge workers share, so
+// its static import graph must never reach a UI framework, Firebase, or a
+// .jsx file. Dynamic import() is allowed — that is how Firestore stays lazy.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -156,12 +156,12 @@ test('staticSpecifiers reads static imports and re-exports only', () => {
     '  b,',
     '  c as d,',
     "} from './b.js';",
-    "import * as e from 'react';",
+    "import * as e from 'firebase/app';",
     "import './side.css';",
     "export { f } from './f.js';",
     "export * from './g.js';",
     "const lazy = () => import('firebase/firestore');",
-    "// import x from 'react-dom';",
+    "// import x from 'firebase/auth';",
     "const url = import.meta.env.BASE_URL;",
     "export function from() { return 'x'; }",
   ].join('\n');
@@ -171,7 +171,7 @@ test('staticSpecifiers reads static imports and re-exports only', () => {
     './f.js',
     './g.js',
     './side.css',
-    'react',
+    'firebase/app',
   ]);
 });
 

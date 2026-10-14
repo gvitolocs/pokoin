@@ -139,7 +139,7 @@ function Missing() {
   return <NotInSnapshot>That player is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/players[/:playerId] (market/src/pages/CompetitivePlayers.jsx). */
+/** /marketplace/competitive/players[/:playerId]. */
 export default function CompetitivePlayers() {
   const params = useParams();
   return (

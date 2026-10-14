@@ -597,7 +597,7 @@ function ArtistDesk(props) {
   );
 }
 
-/** /marketplace/:lang/artists(/:artistSlug) (market/src/pages/Artist.jsx). */
+/** /marketplace/:lang/artists(/:artistSlug). */
 export default function Artist() {
   const params = useParams();
   const lang = () => params.lang || 'en';

@@ -15,6 +15,7 @@ import {
   refundInputFromAmount,
   visibleOrders,
 } from './order-status.js';
+import { applyRedirect } from '../../scripts/write-cloudflare-web-routing.mjs';
 
 const NOW = new Date('2026-09-28T10:10:00Z').getTime();
 
@@ -74,13 +75,12 @@ test('refund input converts to the order unit', () => {
   assert.match(newRefundToken(), /^rf[0-9a-f]{24}$/);
 });
 
-test('vercel and vite serve /sales (Sold history) as the market SPA', () => {
+test('Cloudflare and vercel serve /sales (Sold history) as the SPA shell', () => {
   const root = path.dirname(fileURLToPath(import.meta.url));
   const vercel = JSON.parse(fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8'));
-  const viteSrc = fs.readFileSync(path.join(root, '../vite.config.js'), 'utf8');
   const rewrites = vercel.rewrites || [];
   for (const source of ['/sales', '/sales/', '/orders']) {
     assert.ok(rewrites.some((r) => r.source === source && r.destination === '/market/index.html'), source);
+    assert.equal(applyRedirect(source)?.location, '/market/app', source);
   }
-  assert.match(viteSrc, /url === '\/sales'/);
 });

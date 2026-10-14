@@ -3,7 +3,7 @@ import { lazy } from 'solid-js';
 /**
  * Tools, admin and content pages: the test.pokoin.com review boards, the
  * Scan Connect desk and photo scan, CardTrader sync review, admin, forum,
- * about and careers. Same URLs as market/src/App.jsx; every page is its own
+ * about and careers. Same URLs as the React app; every page is its own
  * chunk. Boards render bare (lib/bare-pages.js).
  */
 const TestsDashboard = lazy(() => import('../pages/TestsDashboard.jsx'));

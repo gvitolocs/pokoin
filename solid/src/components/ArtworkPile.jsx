@@ -12,8 +12,8 @@ import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
 
 /**
- * Artist album tile for a same-artwork group: stacked sheets + count chip
- * (market/src/components/ArtworkPile.jsx). A plain click opens the pile
+ * Artist album tile for a same-artwork group: stacked sheets + count chip.
+ * A plain click opens the pile
  * overlay; Ctrl/Cmd/Shift extend the grid selection like CardTile.
  */
 export function ArtistPileTile(props) {

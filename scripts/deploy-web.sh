@@ -100,6 +100,10 @@ say "unit tests"
   node --test --test-force-exit $(ls market/src/*.test.js | grep -v 'search-token-triples\.test\.js$') >"$stage/tests.log" 2>&1) \
   || { tail -30 "$stage/tests.log" >&2; die "tests failed"; }
 grep -E "^# (tests|pass|fail)" "$stage/tests.log"
+# The UI guards live with the Solid app.
+(cd "$stage/solid" && npm ci --no-audit --no-fund >/dev/null && npm test >"$stage/solid-tests.log" 2>&1) \
+  || { tail -30 "$stage/solid-tests.log" >&2; die "solid tests failed"; }
+grep -E "^# (tests|pass|fail)" "$stage/solid-tests.log"
 
 say "vercel build + deploy"
 (cd "$stage" && V build --prod --yes >"$stage/build.log" 2>&1) || { tail -30 "$stage/build.log" >&2; die "build failed"; }

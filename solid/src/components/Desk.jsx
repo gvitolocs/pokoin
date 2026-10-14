@@ -2,7 +2,7 @@ import { children, For, Show } from 'solid-js';
 import { flagSrc } from '@market/locale.js';
 
 /**
- * Desk building blocks (market/src/components/Desk.jsx): same markup and
+ * Desk building blocks: same markup and
  * classes, so market/src/styles.css applies unchanged. Slots that React took
  * as elements (`leading`, `meta`, `extra`, `actions`) are passed the same way;
  * each slot is resolved once (`children`) so testing it does not build it twice.

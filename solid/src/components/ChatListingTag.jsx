@@ -187,7 +187,7 @@ function CardTag(props) {
   );
 }
 
-/** A card, listing or bundle attached to a chat message or draft (market/src/components/ChatListingTag.jsx). */
+/** A card, listing or bundle attached to a chat message or draft. */
 export default function ChatListingTag(props) {
   return (
     <Show

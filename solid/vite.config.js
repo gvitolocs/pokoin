@@ -70,16 +70,16 @@ function entryGroup(id, ctx) {
   return walk(id) ? 'index' : null;
 }
 
-/** The Solid app must never bundle React. Shared modules come from market/src,
- * so a hook import there would silently drag react-dom in; fail the build instead. */
+/** The site is Solid only. Shared modules come from market/src, so a React
+ * import there (or a dependency that brings react along) fails the build. */
 const FORBIDDEN = /^(react|react-dom|react-router|react-router-dom)(\/|$)/;
 function forbidReact() {
   return {
     name: 'pokoin-forbid-react',
     enforce: 'pre',
     resolveId(source, importer) {
-      if (FORBIDDEN.test(source) && process.env.SOLID_ALLOW_REACT !== '1') {
-        throw new Error(`Solid app imported "${source}" from ${importer || '?'} — split the React hook out of that shared module.`);
+      if (FORBIDDEN.test(source)) {
+        throw new Error(`"${source}" imported from ${importer || '?'}: the site is Solid only.`);
       }
       return null;
     },
@@ -128,11 +128,11 @@ function prefetchSuggestEngine() {
 }
 
 export default defineConfig(({ command }) => ({
-  // Same base as the React build: shared modules build asset URLs from
-  // import.meta.env.BASE_URL (flags, game icons, data/catalog.json) that the
-  // React build already publishes under /market/. Only Solid chunks move to /market/s/.
+  // Shared modules build asset URLs from import.meta.env.BASE_URL (flags, game
+  // icons, data/catalog.json): market/public is published under /market/, the
+  // chunks under /market/s/.
   base: command === 'build' ? '/market/' : '/',
-  publicDir: command === 'build' ? false : path.join(marketDir, 'public'),
+  publicDir: path.join(marketDir, 'public'),
   plugins: [forbidReact(), solid(), serveLandingHome(), prefetchSuggestEngine()],
   resolve: {
     alias: { '@market': path.join(marketDir, 'src') },

@@ -36,7 +36,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import { loadAuth } from '../stores/auth.js';
 import { authSession } from '../stores/session.js';
 
-// Same pure helpers as market/src/pages/Home.jsx.
+// Pure helpers.
 function cardsForIds(cards, ids) {
   const byId = new Map((cards || []).map((card) => [String(card.id), card]));
   return (ids || []).map((id) => byId.get(String(id))).filter(tileHasName).filter(isSetDeskCard);
@@ -114,7 +114,7 @@ const HOME_KEEP_MS = 120_000;
 let kept = null;
 
 /**
- * Marketplace landing (market/src/pages/Home.jsx). The home vector lives in a
+ * Marketplace landing. The home vector lives in a
  * store reconciled by card id: a priced refresh or a late rail patches the
  * tiles whose fields changed instead of re-rendering every rail.
  */

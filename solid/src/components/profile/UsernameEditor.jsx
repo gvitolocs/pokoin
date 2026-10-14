@@ -20,7 +20,7 @@ function setProfileUsername(name) {
 }
 
 /**
- * Profile header handle (market/src/components/UsernameEditor.jsx): `@username`
+ * Profile header handle: `@username`
  * with a pencil. The server repairs or assigns the registered name on load;
  * the pencil edits it in place (Enter saves, Escape cancels).
  */

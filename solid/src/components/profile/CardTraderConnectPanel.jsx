@@ -92,8 +92,8 @@ function SyncProgress(props) {
 }
 
 /**
- * CardTrader connect / disconnect / sync panel for Profile
- * (market/src/components/CardTraderConnectPanel.jsx). `onStatus` hears every
+ * CardTrader connect / disconnect / sync panel for Profile.
+ * `onStatus` hears every
  * status load; `showWipe` false leaves Delete all inventory to the danger zone.
  */
 export default function CardTraderConnectPanel(props) {

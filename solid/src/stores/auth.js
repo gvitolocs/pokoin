@@ -13,12 +13,12 @@ import { authSession, refreshSession } from './session.js';
  * Firebase Auth is not on the first paint: the header and price labels start
  * from the cached session (`pokoin.auth.session`), and the SDK loads on idle
  * or on the first bearer request, whichever comes first. The token cache
- * (`pokoin.auth.token`) is shared with the React UI, so a fresh token can be
- * sent without loading Firebase at all.
+ * (`pokoin.auth.token`) survives reloads, so a fresh token can be sent
+ * without loading Firebase at all.
  *
  * The extension side panel frames the SPA in a credentialless iframe with no
  * Firebase persistence: the parent extension posts a desk session (uid + ID
- * token) instead, as in React auth.jsx. Sign-in flows live in pages/Auth.jsx;
+ * token) instead. Sign-in flows live in pages/Auth.jsx;
  * the users/{uid} + balances/{uid} read is stores/account.js.
  */
 const [firebaseUser, setFirebaseUser] = createSignal(undefined);
@@ -42,7 +42,7 @@ function dropSession() {
   refreshSession();
 }
 
-/** Firebase answered. Same rules as React auth.jsx onAuthStateChanged. */
+/** Firebase answered (onAuthStateChanged). */
 function onFirebaseUser(user) {
   setFirebaseUser(() => user || null);
   if (user) {

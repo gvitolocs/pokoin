@@ -266,26 +266,6 @@ test('live Meili names join the pool without replacing priors', () => {
   assert.equal(next.find((row) => row.compact === 'omanyte').prior, 8);
 });
 
-test('Chrome ranks from one character and opens the popup at three', () => {
-  const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
-  assert.match(chrome, /useProgressiveSuggest/);
-  assert.match(chrome, /progressive\.projected/);
-  assert.match(chrome, /paintCatalogGroups/);
-  assert.match(chrome, /printLang/);
-  assert.match(chrome, /suggestLiveReady/);
-  assert.match(chrome, /fetchSearch,/);
-  assert.match(chrome, /kind: catalogTab/);
-  assert.match(chrome, /catalogIntent/);
-  assert.match(chrome, /fetchArtist/);
-  assert.match(chrome, /liveTick/);
-  assert.match(chrome, /SearchTabs/);
-  assert.match(chrome, /searchTab/);
-  assert.equal(chrome.includes('fetchSuggestRanked'), false);
-  assert.equal(chrome.includes('setGroups(liveSuggestGroups'), false);
-  assert.equal(chrome.includes('suggest-pending'), false);
-  assert.equal(chrome.includes('term.length < 2'), false);
-});
-
 test('fetchSuggestRanked counts the search total, never suggest estimates', async () => {
   const result = await fetchSuggestRanked('pikachu gx 30th', {
     pool: FIXTURE,
@@ -322,17 +302,6 @@ test('fetchSuggestRanked falls back to lookup counts without a search total', as
   });
   assert.ok(Number.isFinite(result.count) && result.count >= 0);
   assert.notEqual(result.count, 49, 'the extra-name estimate must not become the count');
-});
-
-test('Chrome View-all count prefers the payload total, keeps the suggest baseline', () => {
-  const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(chrome, /setHitCount\(count\)/);
-  assert.doesNotMatch(chrome, /count:\s*hitCount/);
-  // Exact totals override; the suggest estimate survives where the payload
-  // has none (singles rides the Meili candidates window today).
-  assert.match(chrome, /const total = Number\(payload\?\.total\);/);
-  assert.match(chrome, /Number\.isFinite\(total\) && total > 0/);
-  assert.match(chrome, /setHitCount\(Number\(data\?\.count\) \|\| 0\)/);
 });
 
 test('hgss energy peels the set code and keeps the name', () => {

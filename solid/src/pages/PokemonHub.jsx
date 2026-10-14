@@ -110,7 +110,7 @@ function SpeciesCards(props) {
   );
 }
 
-/** /marketplace/:lang/pokemon(/:slug) (market/src/pages/PokemonHub.jsx). */
+/** /marketplace/:lang/pokemon(/:slug). */
 export default function PokemonHub() {
   const params = useParams();
   const lang = () => params.lang || 'en';

@@ -1,4 +1,4 @@
-// Cart rails in Amazon's layout (market/src/components/BasketShelf.jsx):
+// Cart rails in Amazon's layout:
 // paged carousels, product cards with "Add to cart", the recently-viewed
 // column and the Your Items tabs.
 

@@ -4,7 +4,7 @@ import { getBearer } from '../../stores/auth.js';
 
 export const WIPE_CONFIRM = 'DELETE ALL LISTINGS';
 
-/** Confirm-gated wipe of every Pokoin listing across TCGs (market/src/components/WipeAllInventory.jsx). */
+/** Confirm-gated wipe of every Pokoin listing across TCGs. */
 export default function WipeAllInventory(props) {
   const [open, setOpen] = createSignal(false);
   const [confirm, setConfirm] = createSignal('');

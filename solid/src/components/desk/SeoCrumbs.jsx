@@ -1,6 +1,6 @@
 import { For, Show } from 'solid-js';
 
-/** Breadcrumb trail (market/src/components/SeoCrumbs.jsx). */
+/** Breadcrumb trail. */
 export default function SeoCrumbs(props) {
   const crumbs = () => (props.items || []).filter((item) => item && item.name);
   return (

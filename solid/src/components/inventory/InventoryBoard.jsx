@@ -107,8 +107,8 @@ function LocLink(props) {
 }
 
 /**
- * PowerTools-style listing manager for the MyPokoin desk
- * (market/src/components/InventoryBoard.jsx): summary tiles, a filter rail
+ * PowerTools-style listing manager for the MyPokoin desk:
+ * summary tiles, a filter rail
  * and a dense thumbnail table, or stacks / titles groupings.
  */
 export default function InventoryBoard(props) {

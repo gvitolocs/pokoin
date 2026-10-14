@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
-const cardArt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/CardArt.jsx'), 'utf8');
 
 test('home rail arrows sit in a reserved gutter beside the track', () => {
   assert.match(css, /grid-template-columns:\s*var\(--rail-gutter\) minmax\(0, 1fr\) var\(--rail-gutter\)/);
@@ -85,15 +84,8 @@ test('More versions sits on a gold halo so the link is visible without set circl
   assert.match(css, /\.more-versions\.is-solo \{[^}]*box-shadow:/);
 });
 
-test('era names are gold links to the era setlist', () => {
-  const root = dirname(fileURLToPath(import.meta.url));
-  const versions = readFileSync(join(root, 'pages/Versions.jsx'), 'utf8');
-  const sets = readFileSync(join(root, 'pages/Sets.jsx'), 'utf8');
+test('era names are gold links to the era setlist (CSS)', () => {
   assert.match(css, /\.era-link \{[^}]*color:\s*var\(--yellow\)/);
-  assert.match(versions, /className="era-link"/);
-  assert.match(versions, /eraHref\(group\.label\)/);
-  assert.match(versions, /<h2>Others from the expansion<\/h2>/);
-  assert.match(sets, /headingHref\(era\)/);
 });
 
 test('set browse list view is one column with compact row tiles', () => {
@@ -103,60 +95,19 @@ test('set browse list view is one column with compact row tiles', () => {
   assert.match(css, /\.tile-row \.art-cut \{[^}]*width:\s*5\.6rem/);
 });
 
-test('unpriced CardTile copy is Out of stock, not an em dash', () => {
-  const root = dirname(fileURLToPath(import.meta.url));
-  const tile = readFileSync(join(root, 'components/CardTile.jsx'), 'utf8');
-  assert.match(tile, /price \? <PriceStack[^;]*: 'Out of stock'/);
-  assert.doesNotMatch(tile, /price \|\| '—'/);
+test('unpriced CardTile copy is Out of stock, not an em dash (CSS)', () => {
   assert.match(css, /\.tile-meta \.oos \{[^}]*font-size:\s*0\.72rem/);
-  const related = readFileSync(join(root, 'components/RelatedCards.jsx'), 'utf8');
-  assert.match(related, /overlayCatalogTilePrices/);
-  assert.match(related, /priced\.slice\(0, 12\)/);
 });
 
-test('artist tiles are still album photos of the leftover illustration, not hover-scaled cards', () => {
-  const root = dirname(fileURLToPath(import.meta.url));
-  const tile = readFileSync(join(root, 'components/CardTile.jsx'), 'utf8');
-  const artist = readFileSync(join(root, 'pages/Artist.jsx'), 'utf8');
-  const carousel = readFileSync(join(root, 'components/Carousel.jsx'), 'utf8');
-  assert.match(tile, /cut = false/);
-  assert.match(tile, /imageSrc\(card, 'hero'\)/);
-  assert.match(tile, /full=\{cut\}/);
-  assert.match(tile, /card=\{cut \? card : undefined\}/);
-  assert.match(tile, /albumShadeStyle\(card\)/);
-  assert.match(tile, /cut \? \(/);
-  assert.match(tile, /identity\.tileLine/);
-  assert.doesNotMatch(tile, /cut \? displayName/);
-  assert.match(artist, /albumShadeStyle\(row\)/);
-  assert.match(artist, /<CardTile key=\{albumTileKey\(group\.cards\[0\]\)\} card=\{group\.cards\[0\]\} rank=\{index\} cut \/>/);
-  assert.match(artist, /<ArtistPileTile key=\{group\.key\} group=\{group\} rank=\{index\} onOpen=\{setPile\} \/>/);
+// The tile/artist/pile markup is guarded in solid/src/components/tiles.test.js.
+test('artist album tiles are photos of the leftover illustration, not hover-scaled cards (CSS)', () => {
   // Piles wrap the tile in a div, so two-row tall cards must span from the wrapper.
-  const pile = readFileSync(join(root, 'components/ArtworkPile.jsx'), 'utf8');
-  assert.match(pile, /tile-pile-wrap\$\{tall \? " tile-pile-tall" : ""\}/);
   assert.match(css, /\.tile-pile-wrap\.tile-pile-tall \{[^}]*grid-row:\s*span 2/);
   // Shift/ctrl/meta on a pile extends the selection; only plain clicks open the overlay.
-  assert.match(pile, /event\.metaKey \|\| event\.ctrlKey \|\| event\.shiftKey/);
-  assert.match(pile, /select\.click\(rep\.id, event\)/);
   // Fast flings that skip past the sentinel must still load more tiles.
   // Once the sentinel is above the viewport, appending reflows rows above the user.
-  assert.match(artist, /rect\.bottom >= 0 && rect\.top <= window\.innerHeight \+ 800/);
-  assert.doesNotMatch(artist, /if \(upward\) return/);
-  assert.match(artist, /album-other-prints/);
   assert.doesNotMatch(css, /\.tile-album \.tile-art::before \{[^}]*backdrop-filter:/);
   assert.doesNotMatch(css, /\.tile-album \.tile-art::after \{[^}]*backdrop-filter:/);
-  assert.match(cardArt, /figureMask && showFigure/);
-  assert.match(artist, /fetchArtist\(artistSlug, \{ limit: ARTIST_FIRST \}\)/);
-  assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
-  assert.match(artist, /peekArtist\(artistSlug, 5000\)/);
-  assert.match(artist, /restoredPageView/);
-  assert.match(artist, /'singles'/);
-  assert.match(artist, /sort !== 'pokedex'/);
-  assert.match(readFileSync(join(root, 'components/SearchToolbar.jsx'), 'utf8'), /value="pokedex"/);
-  assert.match(artist, /className="tile artist-tile tile-cut tile-album"/);
-  assert.match(artist, /className="grid album-grid/);
-  assert.match(artist, /<SkeletonTile key=\{index\} album \/>/);
-  assert.match(artist, /cut\s*\n\s*full/);
-  assert.match(carousel, /album = false/);
   assert.match(css, /\.grid\.album-grid \{[^}]*grid-template-columns:\s*repeat\(4/);
   assert.match(css, /\.grid\.album-grid \{[^}]*grid-auto-flow:\s*dense/);
   assert.doesNotMatch(css, /html, body \{\s*overflow-x:\s*clip/);
@@ -171,7 +122,6 @@ test('artist tiles are still album photos of the leftover illustration, not hove
     css,
     /@supports \(object-view-box: none\) \{[\s\S]*?left:\s*0;[\s\S]*?object-view-box:\s*xywh\(/,
   );
-  assert.match(readFileSync(join(root, 'pages/Home.jsx'), 'utf8'), /className="page home"/);
   assert.match(css, /\.tile-album \{/);
   assert.match(css, /\.tile-album\.tile-tall \{[^}]*grid-row:\s*span 2/);
   assert.match(css, /\.tile-album\.tile-tall \{[^}]*width:\s*100%/);
@@ -236,17 +186,8 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(css, /\.tile-album \.tile-art::after \{[^}]*mask-image:\s*linear-gradient\(to top/);
   assert.doesNotMatch(css, /\.tile-album \.tile-meta \{[^}]*backdrop-filter:/);
   assert.doesNotMatch(css, /\.tile-album \.tile-meta::before/);
-  assert.match(tile, /tall \? 'tile-tall'/);
-  assert.match(tile, /item \? 'tile-item'/);
-  assert.match(tile, /isLandscapePrintName\(card\.name\)/);
-  assert.match(tile, /landscape \? 'is-landscape'/);
-  assert.match(tile, /cut=\{cut && !landscape && !item\}/);
-  assert.match(tile, /cutSurface="album"/);
   assert.match(css, /\.tile\.tile-album:hover img,/);
   assert.match(css, /transform:\s*none !important/);
-  assert.match(cardArt, /className="art-figure-layer art-figure-hover"/);
-  assert.match(cardArt, /className="art-figure-layer art-figure-shadow"/);
-  assert.match(cardArt, /--art-figure-mask/);
   assert.match(
     css,
     /\.tile\.tile-album\.tile-tall:hover \.art-cut img\.art-figure-hover,[\s\S]*?transform:\s*scale\(1\.12\) !important/,
@@ -272,10 +213,6 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(css, /\.tile-album\.is-landscape \.tile-art \{[^}]*aspect-ratio:\s*88 \/ 63/);
   assert.match(css, /\.tile-album\.is-landscape \.tile-art \{[^}]*container-type:\s*size/);
   assert.match(css, /\.tile\.tile-album\.is-landscape img,[^}]*rotate\(90deg\)/);
-  assert.doesNotMatch(
-    readFileSync(join(root, 'pages/Home.jsx'), 'utf8'),
-    /<CardTile[^>]*\scut/,
-  );
 });
 
 test('list-form selects use a transparent chevron so Standard is not covered', () => {

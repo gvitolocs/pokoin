@@ -38,7 +38,7 @@ function setProfilePhoto(url) {
 }
 
 /**
- * Profile photo editor sheet (market/src/components/AvatarEditor.jsx). Pick
+ * Profile photo editor sheet. Pick
  * (file, camera, drop, paste) → crop (drag / pinch / wheel / keys, 90° turns)
  * → upload. Mounted while open.
  */

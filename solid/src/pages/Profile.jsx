@@ -60,7 +60,7 @@ function money({ currency, amount }) {
   return currency === 'EUR' ? `€${(amount / 100).toFixed(2)}` : `${formatPknNumber(amount)} PKN`;
 }
 
-/** market/src/wallet.jsx shortAddress. */
+/** 0x1234…abcd for an address. */
 function shortAddress(address) {
   const value = String(address || '');
   if (value.length < 12) return value || '—';
@@ -539,7 +539,7 @@ function ProfileDesk() {
   );
 }
 
-/** /profile (market/src/pages/Profile.jsx). The extension side panel frames it (D000040). */
+/** /profile. The extension side panel frames it (D000040). */
 export default function Profile() {
   document.title = 'Profile · Pokoin';
   return (

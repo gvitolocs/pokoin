@@ -152,7 +152,7 @@ function AdminDesk() {
   );
 }
 
-/** /admin, /marketplace/admin and the expansion-symbol editor (market/src/pages/Admin.jsx). */
+/** /admin, /marketplace/admin and the expansion-symbol editor. */
 export default function Admin() {
   const location = useLocation();
   usePageTitle('Admin · Pokoin');

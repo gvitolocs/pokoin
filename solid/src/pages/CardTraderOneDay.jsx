@@ -210,7 +210,7 @@ function OneDayDesk() {
   );
 }
 
-/** /mypokoin/1dr (market/src/pages/CardTraderOneDay.jsx). */
+/** /mypokoin/1dr. */
 export default function CardTraderOneDay() {
   document.title = 'CardTrader 1-DR · Pokoin';
   return (

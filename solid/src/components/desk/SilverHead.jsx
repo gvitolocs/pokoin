@@ -19,7 +19,7 @@ import { authReady, getBearer, signedIn } from '../../stores/auth.js';
 import { profile } from '../../stores/session.js';
 
 /**
- * Silver off-site pills, or the unlock prompt (market/src/pages/Card.jsx
+ * Silver off-site pills, or the unlock prompt (was in the React Card desk,
  * SilverHead). Silver comes from the cached session profile.
  */
 export default function SilverHead(props) {

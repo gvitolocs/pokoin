@@ -5,8 +5,8 @@ import { fiatFromPkn, formatPknNumber } from '@market/pkn.js';
 import { getBearer, signedIn } from '../../stores/auth.js';
 
 /**
- * Pokoin / CardTrader target chips + primary action
- * (market/src/components/InventoryTargets.jsx). `mode` is "add" or "list".
+ * Pokoin / CardTrader target chips + primary action.
+ * `mode` is "add" or "list".
  * Signed-out visitors skip the bearer so the desk never loads Firebase for them.
  */
 export default function InventoryTargets(props) {
