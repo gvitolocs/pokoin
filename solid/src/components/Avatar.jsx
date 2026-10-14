@@ -8,7 +8,7 @@ function currentDpr() {
 }
 
 /**
- * Round profile picture (market/src/components/Avatar.jsx). Without a photo
+ * Round profile picture. Without a photo
  * (or when it fails to load) it shows the golden Pokoin mascot on the user's
  * pastel; `seed` (uid) keeps the pastel stable. `label` makes it an image for
  * screen readers, otherwise it is decorative. `variant="chip"` is the topbar

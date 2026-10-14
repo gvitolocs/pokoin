@@ -19,7 +19,8 @@ function executableInlineScripts(html) {
 
 test('landing and marketplace boot from same-origin files', () => {
   const landing = readFileSync(join(root, 'index.html'), 'utf8');
-  const market = readFileSync(join(root, 'market/index.html'), 'utf8');
+  // The SPA shell is the Solid app's index.html (published as /market/index.html).
+  const market = readFileSync(join(root, 'solid/index.html'), 'utf8');
   assert.equal(executableInlineScripts(landing).length, 0);
   assert.equal(executableInlineScripts(market).length, 0);
   assert.match(landing, /src="home\/landing-boot\.js"/);

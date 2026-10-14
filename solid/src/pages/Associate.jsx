@@ -571,7 +571,7 @@ function AssociateDesk() {
   );
 }
 
-/** /associate (market/src/pages/Associate.jsx). `?associatePreview` (dev/localhost) shows fixtures. */
+/** /associate. `?associatePreview` (dev/localhost) shows fixtures. */
 export default function Associate() {
   const [params] = useSearchParams();
   document.title = 'Associate · Pokoin';

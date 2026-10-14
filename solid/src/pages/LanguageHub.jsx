@@ -83,7 +83,7 @@ function LanguageSets(props) {
   );
 }
 
-/** /marketplace/:lang/languages(/:slug) (market/src/pages/LanguageHub.jsx). */
+/** /marketplace/:lang/languages(/:slug). */
 export default function LanguageHub() {
   const params = useParams();
   const lang = () => params.lang || 'en';

@@ -1,7 +1,7 @@
 import { createEffect } from 'solid-js';
 import { applySeoHead } from '@market/seo-head.js';
 
-/** Head tags for the current page (market/src/seo-head.js, shared with React). */
+/** Head tags for the current page (market/src/seo-head.js). */
 export default function SeoHead(props) {
   createEffect(
     () => ({

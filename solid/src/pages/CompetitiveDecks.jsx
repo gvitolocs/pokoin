@@ -157,7 +157,7 @@ function Missing() {
   return <NotInSnapshot>That deck is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/decks[/:deckId] (market/src/pages/CompetitiveDecks.jsx). */
+/** /marketplace/competitive/decks[/:deckId]. */
 export default function CompetitiveDecks() {
   const params = useParams();
   return (

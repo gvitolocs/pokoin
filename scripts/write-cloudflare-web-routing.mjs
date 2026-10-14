@@ -109,17 +109,12 @@ export function redirectLines() {
   return lines;
 }
 
-/**
- * `scriptHashes`: CSP hashes of inline scripts the build emitted (the React/Solid
- * switch, scripts/build-ui-shell.mjs). Without them the policy is unchanged.
- */
-export function headerLines({ scriptHashes = [] } = {}) {
-  const inline = scriptHashes.map((hash) => ` '${hash}'`).join('');
+export function headerLines() {
   return `/*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000
-  Content-Security-Policy: base-uri 'self'; object-src 'none'; frame-ancestors 'self' chrome-extension:; script-src 'self' https://apis.google.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://pokoin.firebaseapp.com${inline}
+  Content-Security-Policy: base-uri 'self'; object-src 'none'; frame-ancestors 'self' chrome-extension:; script-src 'self' https://apis.google.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://pokoin.firebaseapp.com
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
@@ -135,9 +130,6 @@ export function headerLines({ scriptHashes = [] } = {}) {
 
 /working.html
   Cache-Control: public, max-age=0, must-revalidate
-
-/market/assets/*
-  Cache-Control: public, max-age=31536000, immutable
 
 /market/s/*
   Cache-Control: public, max-age=31536000, immutable
@@ -252,10 +244,7 @@ export function writeCloudflareRouting(root) {
   const counts = assertRedirectBudget(lines);
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, '_redirects'), `${lines.join('\n')}\n`);
-  // The React/Solid switch (scripts/build-ui-shell.mjs) is an inline script: allow its hash.
-  const switchFile = path.join(root, 'market', 'ui-switch.json');
-  const scriptHashes = fs.existsSync(switchFile) ? [JSON.parse(fs.readFileSync(switchFile, 'utf8')).hash] : [];
-  fs.writeFileSync(path.join(root, '_headers'), headerLines({ scriptHashes }));
+  fs.writeFileSync(path.join(root, '_headers'), headerLines());
   fs.writeFileSync(path.join(root, '.assetsignore'), 'download/*.zip\ndownload/*.ZIP\n');
 
   const landing = path.join(root, 'landing.html');

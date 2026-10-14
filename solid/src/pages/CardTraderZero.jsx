@@ -299,7 +299,7 @@ function ZeroDesk() {
   );
 }
 
-/** /mypokoin/zero (market/src/pages/CardTraderZero.jsx). 1-Day Ready accounts move to /mypokoin/1dr. */
+/** /mypokoin/zero. 1-Day Ready accounts move to /mypokoin/1dr. */
 export default function CardTraderZero() {
   document.title = 'CardTrader Zero · Pokoin';
   return (

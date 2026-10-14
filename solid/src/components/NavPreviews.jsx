@@ -12,7 +12,7 @@ import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
 
 /**
- * Header hover cards (market/src/components/NavPreviews.jsx). One lazy
+ * Header hover cards. One lazy
  * chunk: Chrome imports it on the first hover / focus of a nav icon and
  * renders a preview only while its icon is hovered.
  */

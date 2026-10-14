@@ -99,7 +99,7 @@ function Aisle(props) {
   );
 }
 
-/** /product/:kind (market/src/pages/Products.jsx): sealed, graded, jumbo and NFT aisles. */
+/** /product/:kind: sealed, graded, jumbo and NFT aisles. */
 export default function Products() {
   const params = useParams();
   return (

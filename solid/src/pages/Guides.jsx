@@ -5,7 +5,7 @@ import { EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 
-/** Guide bodies (same copy and links as market/src/pages/Guides.jsx). */
+/** Guide bodies (copy and links). */
 const BODIES = {
   'pokemon-card-condition-guide': () => (
     <>
@@ -117,7 +117,7 @@ function Guide(props) {
   );
 }
 
-/** /marketplace/:lang/guides(/:slug) (market/src/pages/Guides.jsx). */
+/** /marketplace/:lang/guides(/:slug). */
 export default function Guides() {
   const params = useParams();
   const guide = () => SEO_GUIDES.find((row) => row.slug === params.slug) || null;

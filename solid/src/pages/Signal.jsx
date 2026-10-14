@@ -2,7 +2,7 @@ import { createSignal, onSettled, Show } from 'solid-js';
 import { fetchHome, fetchPortfolio, formatPkn } from '@market/api.js';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 
-/** /marketplace/signal (market/src/pages/Signal.jsx): honest native-shop snapshot. */
+/** /marketplace/signal: honest native-shop snapshot. */
 export default function Signal() {
   const [home, setHome] = createSignal(null);
   const [portfolio, setPortfolio] = createSignal(null);

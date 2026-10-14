@@ -6,7 +6,7 @@ import '@market/referral.css';
 import AuthLink from '../components/AuthLink.jsx';
 import { authConfirmed, authUser, loadAuth } from '../stores/auth.js';
 
-/** pokoin.com/join/<username> — the landing an invite link opens (market/src/pages/Join.jsx). */
+/** pokoin.com/join/<username> — the landing an invite link opens. */
 export default function Join() {
   const params = useParams();
   const navigate = useNavigate();

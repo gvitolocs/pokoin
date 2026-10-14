@@ -4,7 +4,7 @@ import { COMP_NAV, FLAG, SPRITE, competitiveData } from '@market/competitive.js'
 import CardArt from './CardArt.jsx';
 import { PageHead } from './Desk.jsx';
 
-/** Head and section tabs shared by the competitive pages (market/src/components/CompetitiveNav.jsx). */
+/** Head and section tabs shared by the competitive pages. */
 export default function CompetitiveNav() {
   const location = useLocation();
   const data = competitiveData();

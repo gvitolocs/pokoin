@@ -10,7 +10,7 @@ const LOCATION_MODES = [
 ];
 
 /**
- * After Sync (market/src/components/CardTraderPowerToolsModal.jsx): ask Power
+ * After Sync: ask Power
  * Tools? → upload CSV per TCG → analyze → confirm mapping from their data.
  */
 export default function CardTraderPowerToolsModal(props) {

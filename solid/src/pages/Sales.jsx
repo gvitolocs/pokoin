@@ -349,7 +349,7 @@ function SalesDesk() {
   );
 }
 
-/** /sales (market/src/pages/Sales.jsx): sold history, partial refunds, tracking. */
+/** /sales: sold history, partial refunds, tracking. */
 export default function Sales() {
   onSettled(() => {
     document.title = 'Sold history · Pokoin';

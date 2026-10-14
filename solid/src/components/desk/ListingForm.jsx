@@ -86,7 +86,7 @@ function CameraIcon() {
 }
 
 /**
- * "List your card" / "Edit listing" (market/src/pages/Card.jsx ListingForm).
+ * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
  */

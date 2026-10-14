@@ -19,7 +19,7 @@ function money(value) {
 }
 
 /**
- * /marketplace/explore (market/src/pages/Explore.jsx): the Pokoin catalog
+ * /marketplace/explore: the Pokoin catalog
  * dump in PKN with a filter rail. Back restores the filters and the shown
  * count (D00005C); the grid grows 48 at a time from a sentinel.
  */

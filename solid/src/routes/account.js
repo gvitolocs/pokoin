@@ -2,7 +2,7 @@ import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
 /**
- * Account, seller and onboarding pages (React URL map: market/src/App.jsx).
+ * Account, seller and onboarding pages (the React app's URLs).
  * Every page is its own chunk. React registered each path with and without a
  * trailing slash; the Solid router matches both.
  */

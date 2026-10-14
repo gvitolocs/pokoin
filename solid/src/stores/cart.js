@@ -23,7 +23,7 @@ import { authSession } from './session.js';
 export { CART_KEY };
 
 /**
- * The browser cart (market/src/cart.jsx): same localStorage keys, same row
+ * The browser cart: same localStorage keys, same row
  * rules (market/src/cart-rows.js), same account-cart sync engine. Plain
  * module variables are the source of truth so a burst of adds in one tick
  * (a dropped artist) folds into one list; the signals publish it and the
@@ -69,7 +69,7 @@ function commit(nextItems, nextSaved = savedRows, nextGift = giftOn) {
 }
 
 if (browser) {
-  // Another tab (or the React UI in one) changed the cart.
+  // Another tab changed the cart.
   window.addEventListener('storage', (event) => {
     if (event.key === CART_KEY || event.key === null) {
       rows = readCartRows(CART_KEY);
@@ -118,7 +118,7 @@ export function updateCart(fn) {
 }
 
 // ---------------------------------------------------------------------------
-// Account cart sync (market/src/cart-sync.js): same engine, same triggers.
+// Account cart sync: same engine, same triggers.
 // Started (and its chunk loaded) after the first paint so a signed-in visit
 // does not pull Firebase Auth in before the page is up.
 let syncStarted = false;

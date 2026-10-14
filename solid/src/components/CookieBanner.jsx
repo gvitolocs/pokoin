@@ -3,7 +3,7 @@ import { COOKIE_BANNER_COPY, acceptCookieConsent, shouldShowCookieBanner } from 
 import AppLink from './AppLink.jsx';
 
 /**
- * Cookie notice (market/src/components/CookieBanner.jsx). While open it
+ * Cookie notice. While open it
  * publishes its height as --cookie-banner-h so the bottom-right chat button
  * and panel sit above it instead of covering Accept; the observer and resize
  * listener exist only while it is open.

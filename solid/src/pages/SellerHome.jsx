@@ -336,7 +336,7 @@ function LiveDashboard() {
 }
 
 /**
- * /dashboard (market/src/pages/SellerHome.jsx): Portfolio / Your collection,
+ * /dashboard: Portfolio / Your collection,
  * asking value, collection chart, Sell and Buy. Ownership first (D00006G).
  * `?dashPreview` on dev/localhost shows fixtures.
  */

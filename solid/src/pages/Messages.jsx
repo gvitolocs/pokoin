@@ -111,7 +111,7 @@ function NewConversation(props) {
   );
 }
 
-/** /messages (market/src/pages/Messages.jsx): Poko first, then the cached previews, refreshed every 15 s. */
+/** /messages: Poko first, then the cached previews, refreshed every 15 s. */
 export default function Messages() {
   loadAuth().catch(() => {});
   const first = paintableChatPreviews();

@@ -3,7 +3,7 @@ import { For, Show } from 'solid-js';
 const URL_SPLIT_RE = /(https?:\/\/[^\s<>\]\)]+)/g;
 const URL_TEST_RE = /^https?:\/\/[^\s<>\]\)]+$/i;
 
-/** Plain chat prose with clickable bare URLs (market/src/components/ChatText.jsx). */
+/** Plain chat prose with clickable bare URLs. */
 export default function ChatText(props) {
   const raw = () => String(props.text || '');
   return (

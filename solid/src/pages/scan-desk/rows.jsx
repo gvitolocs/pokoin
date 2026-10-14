@@ -206,7 +206,7 @@ function CandidateAlts(props) {
 const FLAG_FIELDS = ['firstEdition', 'signed', 'altered'];
 const FLAG_SHORT = { firstEdition: '1st', signed: 'S', altered: 'A' };
 
-/** One queue row (market/src/pages/ScanDesk.jsx QueueRow). `row` is the live row. */
+/** One queue row. `row` is the live row. */
 export function QueueRow(props) {
   const row = () => props.row;
   const stateLabel = () => {

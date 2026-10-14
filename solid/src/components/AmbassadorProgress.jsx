@@ -11,7 +11,7 @@ function Glyph(props) {
   );
 }
 
-/** Collector → Ambassador → Senior → City, trainer-badge style (market/src/components/AmbassadorProgress.jsx). */
+/** Collector → Ambassador → Senior → City, trainer-badge style. */
 export function TierLadder(props) {
   const current = () => tierIndex(props.tier || 'collector');
   return (

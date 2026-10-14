@@ -4,7 +4,7 @@ import RedirectTo from '../pages/RedirectTo.jsx';
 /**
  * Public browse pages: catalog hubs, set desks, artists, product aisles, shops,
  * the competitive snapshot, the site map and the static site pages. Same URLs
- * as market/src/App.jsx; every page is its own chunk.
+ * as the React app; every page is its own chunk.
  */
 const Sets = lazy(() => import('../pages/Sets.jsx'));
 const Era = lazy(() => import('../pages/Era.jsx'));

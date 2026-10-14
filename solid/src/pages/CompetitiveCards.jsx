@@ -120,7 +120,7 @@ function Missing() {
   return <NotInSnapshot>That card is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/cards[/:cardId] (market/src/pages/CompetitiveCards.jsx). */
+/** /marketplace/competitive/cards[/:cardId]. */
 export default function CompetitiveCards() {
   const params = useParams();
   const card = () => competitiveData().cards.find((row) => row.id === params.cardId) || null;

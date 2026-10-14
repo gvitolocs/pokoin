@@ -347,7 +347,7 @@ function InventoryDesk() {
 }
 
 /**
- * Pokémon seller stock desk (market/src/pages/Inventory.jsx): /mypokoin and its
+ * Pokémon seller stock desk: /mypokoin and its
  * import / settings / collection / location tabs. Seller inventory lists only
  * active or paused rows with stock (liveInventoryListings, D00005R).
  */

@@ -528,24 +528,10 @@ test('dragging the desk frame uses a pile of the held card', () => {
   assert.equal(kids[0].tagName, 'CANVAS');
 });
 
-test('the large desk scan owns the drag gesture and piles with related multi-select', () => {
-  const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
-  assert.match(page, /function DeskArtFrame/);
-  assert.match(page, /data-card-id=\{id/);
-  assert.match(page, /cardsReference\(group\)/);
-  assert.match(page, /CardSelectGrid/);
-  assert.match(page, /embedded/);
-  assert.match(page, /import \{ getChatDock \} from '\.\.\/chat-dock-store\.js'/);
-  assert.doesNotMatch(page, /<button[\s\S]*className="art-frame"/);
-});
-
 test('writeListingDrag also stamps text/plain so Chrome keeps <a> drags alive', () => {
   const src = readFileSync(new URL('./chat-listing.js', import.meta.url), 'utf8');
   assert.match(src, /setData\('text\/plain'/);
   assert.match(src, /setData\('text\/uri-list'/);
-  const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
-  assert.match(page, /onPointerDown=\{\(\) => preloadDragImage\(\s*expansionLogoSrc/);
-  assert.match(page, /onPointerDown=\{\(\) => preloadDragImage\(artistCover\)\}/);
 });
 
 test('a homepage card is not a seller card', () => {
@@ -558,35 +544,7 @@ test('a homepage card is not a seller card', () => {
   assert.equal(isSellerCard(traded), false);
 });
 
-test('SetGuideGrid drags the whole set card, not only the wordmark img', () => {
-  const src = readFileSync(new URL('./components/SetGuideGrid.jsx', import.meta.url), 'utf8');
-  assert.match(src, /className="set-guide-card"[\s\S]*?draggable/);
-  assert.match(src, /kind: 'expansion'/);
-  assert.match(src, /draggable=\{false\}/);
-});
-
-test('shop rows show message + cart icons; row click never adds to cart', () => {
-  const src = readFileSync(new URL('./components/ShopListing.jsx', import.meta.url), 'utf8');
-  assert.match(src, /Message this seller about this listing/);
-  assert.match(src, /Add to cart/);
-  assert.match(src, /onCart/);
-  assert.equal(src.includes('onBuy'), false);
-  assert.match(src, /sellerUid/);
-  assert.match(src, /className="ct-qty"/);
-  assert.match(src, /choices > 1/);
-  assert.match(src, /className="ct-qty is-single"/);
-  assert.equal(src.includes('of {stock'), false);
-  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);
-  assert.equal(src.includes("closest?.('.shop-art"), false);
-  assert.match(src, /className="art-cut shop-art"/);
-  assert.match(src, /qty: pick/);
-  assert.match(src, /writeListingDrag\(event, \{ \.\.\.mixed, qty: pick/);
-  const tag = readFileSync(new URL('./components/ChatListingTag.jsx', import.meta.url), 'utf8');
-  const stepper = readFileSync(new URL('./components/QtyStepper.jsx', import.meta.url), 'utf8');
+test('chat qty badge is yellow', () => {
   const css = readFileSync(new URL('./chat-dock.css', import.meta.url), 'utf8');
-  assert.match(tag, /QtyStepper/);
-  assert.match(stepper, /className = 'chat-qty'/);
-  assert.match(tag, /className="chat-qty-badge"/);
   assert.match(css, /\.chat-qty-badge[\s\S]*var\(--yellow/);
-  assert.equal(tag.includes('footer={quantity}'), false);
 });

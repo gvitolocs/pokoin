@@ -5,8 +5,8 @@ import { cdnFetchUrl } from '@market/image-urls.js';
 import { expansionCode, expansionSymbolSrc } from '@market/set-logos.js';
 
 /**
- * Circular expansion mark, or the letter code when the PNG is missing
- * (market/src/components/ExpansionMark.jsx). Loads from cdn.pokoin.com
+ * Circular expansion mark, or the letter code when the PNG is missing.
+ * Loads from cdn.pokoin.com
  * directly: /card-images/* is a zone 301 to the CDN, one redirect per symbol.
  */
 export default function ExpansionMark(props) {
