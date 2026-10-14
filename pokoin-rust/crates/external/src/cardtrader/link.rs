@@ -435,8 +435,10 @@ pub async fn apply_power_tools_locations(db: &DbPools, seller_uid: &str, locatio
 
 // --------------------------------------------------- Pokoin → CardTrader push
 
-/// Listings pushed per reconcile run unless `CARDTRADER_PUSH_BATCH` says otherwise.
-pub const DEFAULT_PUSH_BATCH: i64 = 100;
+/// Listings pushed per reconcile run unless `CARDTRADER_PUSH_BATCH` says
+/// otherwise. One create is ~0.3 s, so a full batch stays well inside the
+/// 15-minute reconcile lock and CardTrader's request limits.
+pub const DEFAULT_PUSH_BATCH: i64 = 500;
 
 pub fn push_batch() -> i64 {
     std::env::var("CARDTRADER_PUSH_BATCH")
@@ -447,34 +449,44 @@ pub fn push_batch() -> i64 {
 }
 
 /// Active Pokémon listings with stock and no CardTrader product yet, never
-/// CardTrader's own imports. Oldest change first, so a listing CardTrader
-/// refused (released with a fresh `updated_at`) waits behind the others.
-const PUSH_CANDIDATES_SQL: &str = r#"
-      select to_jsonb(listing) as listing
+/// CardTrader's own imports. "No CardTrader product" is any source that is not
+/// `ct:…`: empty, or another channel's id such as a Scan Connect item
+/// (`scan:<id>`), which Scan's own CardTrader push also replaces. Oldest
+/// change first, so a listing CardTrader refused (released with a fresh
+/// `updated_at`) waits behind the others.
+const PUSH_CANDIDATES_WHERE: &str = r#"
       from public.marketplace_user_listings as listing
       where listing.seller_uid = $1
         and listing.status = 'active'
         and listing.quantity_available > 0
-        and coalesce(listing.source_listing_id, '') = ''
+        and coalesce(listing.source_listing_id, '') not like 'ct:%'
         and coalesce(listing.source, '') <> $2
         and coalesce(nullif(listing.marketplace_game, ''), 'pokemon') = 'pokemon'
         and listing.card_id ~ '^[0-9]+$'
-      order by listing.updated_at asc, listing.id
-      limit $3
 "#;
 
+fn push_candidates_sql() -> String {
+    format!("select to_jsonb(listing) as listing {PUSH_CANDIDATES_WHERE} order by listing.updated_at asc, listing.id limit $3")
+}
+
+fn push_remaining_sql() -> String {
+    format!("select count(*)::bigint as remaining {PUSH_CANDIDATES_WHERE}")
+}
+
 /// Same compare-and-set as the outbox push: only one writer moves a listing
-/// from no source to `ct:pending:…`, so a listing is never created twice.
+/// from the source it was read with to `ct:pending:…`, so a listing is never
+/// created twice.
 const CLAIM_SQL: &str = r#"
       update public.marketplace_user_listings
       set source_listing_id = $2, updated_at = now()
-      where id = $1::uuid and coalesce(source_listing_id, '') = ''
+      where id = $1::uuid and coalesce(source_listing_id, '') = $3
       returning id
 "#;
 
+/// Undo a claim: the listing gets back the source it had.
 const RELEASE_SQL: &str = r#"
       update public.marketplace_user_listings
-      set source_listing_id = '', updated_at = now()
+      set source_listing_id = $3, updated_at = now()
       where id = $1::uuid and source_listing_id = $2
       returning id
 "#;
@@ -541,14 +553,16 @@ pub async fn push_unlisted(
     limit: i64,
     on_cardtrader: &HashSet<String>,
 ) -> Value {
-    let mut out = json!({ "candidates": 0, "pushed": 0, "failed": 0, "inDoubt": 0, "skipped": 0, "alreadyOnCardTrader": 0, "errorItems": [] });
+    let mut out = json!({ "candidates": 0, "pushed": 0, "failed": 0, "inDoubt": 0, "skipped": 0, "alreadyOnCardTrader": 0, "remaining": 0, "errorItems": [] });
     if limit <= 0 {
         return out;
     }
-    let rows = match db.write("pokemon", PUSH_CANDIDATES_SQL, &[json!(seller_uid), json!(IMPORT_SOURCE), json!(limit)]).await {
+    let rows = match db.write("pokemon", &push_candidates_sql(), &[json!(seller_uid), json!(IMPORT_SOURCE), json!(limit)]).await {
         Ok(rows) => rows,
         Err(error) if error.is_table_missing() => return out,
         Err(error) => {
+            // A database that cannot be read is a failed sync, never "nothing to list".
+            out["error"] = json!(error.message);
             note_error(&mut out, json!({ "reason": error.message }));
             return out;
         }
@@ -564,8 +578,9 @@ pub async fn push_unlisted(
             bump(&mut out, "alreadyOnCardTrader");
             continue;
         }
+        let read_source = clean_text_value(listing.get("source_listing_id").unwrap_or(&Value::Null), 160);
         let pending = pending_source(crate::time_util::now_ms());
-        match db.write("pokemon", CLAIM_SQL, &[json!(id), json!(pending)]).await {
+        match db.write("pokemon", CLAIM_SQL, &[json!(id), json!(pending), json!(read_source)]).await {
             Ok(claimed) if !claimed.is_empty() => {}
             Ok(_) => {
                 bump(&mut out, "skipped");
@@ -573,6 +588,7 @@ pub async fn push_unlisted(
             }
             Err(error) => {
                 bump(&mut out, "failed");
+                out["error"] = json!(error.message);
                 note_error(&mut out, json!({ "listingId": id, "reason": error.message }));
                 continue;
             }
@@ -605,7 +621,7 @@ pub async fn push_unlisted(
             }
             PushOutcome::Rejected(error) => {
                 // Nothing was created: free the claim for a later run.
-                let _ = db.write("pokemon", RELEASE_SQL, &[json!(id), json!(pending)]).await;
+                let _ = db.write("pokemon", RELEASE_SQL, &[json!(id), json!(pending), json!(read_source)]).await;
                 bump(&mut out, "failed");
                 note_error(&mut out, json!({
                     "listingId": id,
@@ -618,7 +634,25 @@ pub async fn push_unlisted(
             PushOutcome::InDoubt(_) => bump(&mut out, "inDoubt"),
         }
     }
+    // What the next runs still have to list (the duplicates check skips some).
+    if let Ok(rows) = db.write("pokemon", &push_remaining_sql(), &[json!(seller_uid), json!(IMPORT_SOURCE)]).await {
+        out["remaining"] = rows.first().and_then(|row| row.get("remaining")).cloned().unwrap_or(json!(0));
+    }
     out
+}
+
+/// Why the push pass must not run this time, if it must not. It writes to the
+/// seller's CardTrader account, so it needs an export the plan trusted (its
+/// facets are the duplicate check) and the shared reconcile lock (two runs
+/// at once read exports that miss each other's creates).
+pub fn push_gate(export_complete: bool, exclusive: bool) -> Option<&'static str> {
+    if !export_complete {
+        Some("incomplete_export")
+    } else if !exclusive {
+        Some("no_shared_lock")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -712,6 +746,23 @@ mod tests {
         assert_eq!(style(&["Box 1", "Box 2", "Shelf"]), "trailing_stack");
         assert_eq!(style(&["Shelf", "Drawer"]), "as_is");
         assert_eq!(style(&[]), "as_is");
+    }
+
+    #[test]
+    fn push_needs_a_trusted_export_and_the_shared_lock() {
+        assert_eq!(push_gate(true, true), None);
+        assert_eq!(push_gate(false, true), Some("incomplete_export"));
+        assert_eq!(push_gate(true, false), Some("no_shared_lock"));
+        assert_eq!(push_gate(false, false), Some("incomplete_export"));
+        assert_eq!(DEFAULT_PUSH_BATCH, 500);
+    }
+
+    #[test]
+    fn push_candidates_include_other_channel_sources() {
+        let sql = push_candidates_sql();
+        assert!(sql.contains("not like 'ct:%'"), "scan:<id> and empty sources are candidates");
+        assert!(sql.contains("limit $3"));
+        assert!(!push_remaining_sql().contains("limit"));
     }
 
     #[test]

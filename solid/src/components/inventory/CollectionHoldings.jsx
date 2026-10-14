@@ -2,9 +2,9 @@ import { createEffect, createMemo, createSignal, For, Show, untrack } from 'soli
 import {
   cancelListing,
   createListing,
+  fetchAllSellerListings,
   fetchOwnedCollection,
   fetchPriceCheck,
-  fetchSellerListings,
   imageSrc,
   removeCollectionItem,
   requestNftShipping,
@@ -215,7 +215,7 @@ export default function CollectionHoldings() {
       const token = await getBearer();
       const [owned, stock] = await Promise.all([
         fetchOwnedCollection(token),
-        seller ? fetchSellerListings(seller, token, { limit: 1000 }).catch(() => ({ listings: [] })) : { listings: [] },
+        seller ? fetchAllSellerListings(seller, token).catch(() => ({ listings: [] })) : { listings: [] },
       ]);
       setRows(Array.isArray(owned.items) ? owned.items : []);
       setListings(stock.listings || stock.items || []);

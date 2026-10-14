@@ -9,7 +9,7 @@ import { MIN_CARDTRADER_TOKEN_LENGTH, describeCardTraderToken } from '@market/ca
 import { DASHBOARD_HOME } from '@market/punchouts.js';
 import { getBearer } from '../../stores/auth.js';
 import CardTraderPowerToolsModal from './CardTraderPowerToolsModal.jsx';
-import { CT_LINK_DIRECTIONS, ctLinkDirection, ctLinkHealth, ctLinkOption, formatSyncSummary } from './cardtrader-link.js';
+import { CT_LINK_DIRECTIONS, ctLinkDirection, ctLinkHealth, ctLinkOption, formatSyncSummary, syncReason } from './cardtrader-link.js';
 import WipeAllInventory from './WipeAllInventory.jsx';
 
 /** Where a seller copies their CardTrader API token. */
@@ -114,7 +114,12 @@ export default function CardTraderConnectPanel(props) {
   function applySyncPayload(data) {
     const sync = data?.sync || null;
     if (sync && 'lastSyncAt' in sync) {
-      setSyncInfo({ lastSyncAt: sync.lastSyncAt, lastSyncOk: sync.lastSyncOk, lastSyncError: sync.lastSyncError });
+      setSyncInfo({
+        lastSyncAt: sync.lastSyncAt,
+        lastSyncOk: sync.lastSyncOk,
+        lastSyncIncomplete: sync.lastSyncIncomplete,
+        lastSyncError: sync.lastSyncError,
+      });
     }
     const summary = sync?.summary || data?.summary || null;
     if (summary) setSyncSummary(() => summary);
@@ -159,7 +164,10 @@ export default function CardTraderConnectPanel(props) {
           setBusy(false);
           const summary = data?.sync?.summary || data?.summary;
           if (data?.sync?.lastSyncOk === false || summary?.phase === 'failed') {
-            setError(data?.sync?.lastSyncError || 'CardTrader sync failed.');
+            setError(`CardTrader sync failed: ${syncReason(data?.sync?.lastSyncError) || 'try Sync now again'}.`);
+            setMessage('');
+          } else if (data?.sync?.lastSyncIncomplete === true) {
+            setError(`Sync incomplete — nothing was removed or listed on CardTrader. ${syncReason(data?.sync?.lastSyncError) || 'Try Sync now again.'}`);
             setMessage('');
           } else if (summary?.needsPowerToolsReview) {
             setSyncSummary(() => summary);
