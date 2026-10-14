@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, untrack } from 'solid-js';
-import { fetchAccountAddresses } from '@market/api.js';
-import { deliveryCountryFrom, preferredAddressCountry } from '@market/cart-rails-core.js';
+import { fetchAccountAddresses, fetchSellerSettings } from '@market/api.js';
+import { deliveryCountryFrom, preferredAddressCountry, profileCountryFrom } from '@market/cart-rails-core.js';
 import {
   activeShippingService,
   fetchLiveShipping,
@@ -16,20 +16,29 @@ import {
 import { getBearer, signedIn } from '../stores/auth.js';
 
 /**
- * React useDeliveryCountry (market/src/cart-rails.js): the default saved
- * address country once signed in, else the browser locale. Returns an
- * accessor of `{ country, saved }`.
+ * React useDeliveryCountry (market/src/cart-rails.js): the profile country,
+ * else the default saved address country once signed in, else the browser
+ * locale. Returns an accessor of `{ country, saved }`.
  */
 export function createDeliveryCountry() {
   const [fromAccount, setFromAccount] = createSignal('');
+  const [fromProfile, setFromProfile] = createSignal('');
   createEffect(signedIn, (on) => {
     if (!on) {
       setFromAccount('');
+      setFromProfile('');
       return undefined;
     }
     let cancelled = false;
-    getBearer()
-      .then((token) => (token ? fetchAccountAddresses(token, { reveal: false }) : null))
+    const token = getBearer();
+    token
+      .then((bearer) => (bearer ? fetchSellerSettings(bearer) : null))
+      .then((settings) => {
+        if (!cancelled) setFromProfile(profileCountryFrom(settings));
+      })
+      .catch(() => {});
+    token
+      .then((bearer) => (bearer ? fetchAccountAddresses(bearer, { reveal: false }) : null))
       .then((data) => {
         if (!cancelled) setFromAccount(preferredAddressCountry(data));
       })
@@ -38,7 +47,7 @@ export function createDeliveryCountry() {
       cancelled = true;
     };
   });
-  return createMemo(() => deliveryCountryFrom(fromAccount()));
+  return createMemo(() => deliveryCountryFrom(fromAccount(), fromProfile()));
 }
 
 /**
@@ -46,7 +55,7 @@ export function createDeliveryCountry() {
  * letter rates per ticked seller parcel, the seeded table until they land.
  * Inputs are accessors; returns accessors.
  */
-export function createLiveShipping({ groups, to, service, subtotalPkn = () => 0 }) {
+export function createLiveShipping({ groups, to, service, parcelPicks = () => ({}), subtotalPkn = () => 0 }) {
   const ticked = createMemo(() => tickedShippingGroups(groups()));
   const country = () => shippingIso(to());
   const seed = createMemo(() => seedShippingServices(ticked(), country()));
@@ -91,6 +100,7 @@ export function createLiveShipping({ groups, to, service, subtotalPkn = () => 0 
     services: services(),
     activeService: activeService(),
     allowUntracked: allowUntracked(),
+    parcelPicks: parcelPicks(),
   }));
   const estimates = createMemo(() => shippingEstimatesByKey(shipping()));
   return { services, shipping, estimates, status };

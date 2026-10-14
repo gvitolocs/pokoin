@@ -560,6 +560,19 @@ function CheckoutDesk() {
                                       <a href={option.href || '/flex'}>How Flex works</a>
                                     </Show>
                                   </em>
+                                  <Show when={!unavailable && option.parcels?.length > 1}>
+                                    <For each={option.parcels}>
+                                      {(parcel) => (
+                                        <em class="checkout-parcel-line">
+                                          {[
+                                            `${shipFromCountryName(parcel.fromCountry) || parcel.fromCountry} → ${shipFromCountryName(parcel.toCountry) || parcel.toCountry}`,
+                                            parcel.serviceName,
+                                            moneyFromEurCents(parcel.amountCents),
+                                          ].filter(Boolean).join(' · ')}
+                                        </em>
+                                      )}
+                                    </For>
+                                  </Show>
                                 </span>
                               </label>
                             );
@@ -762,13 +775,28 @@ function CheckoutDesk() {
                       <dt>Items</dt>
                       <dd>{moneyFromEurCents(q().itemsSubtotalCents || eurSubtotal())}</dd>
                     </div>
-                    <div>
-                      <dt>
-                        Shipping
-                        {q().shipments?.[0] ? ` · ${q().shipments[0].fromCountry} → ${q().shipments[0].toCountry}` : ''}
-                      </dt>
-                      <dd>{moneyFromEurCents(q().shippingTotalCents)}</dd>
-                    </div>
+                    <Show
+                      when={(q().shipments || []).length > 1}
+                      fallback={(
+                        <div>
+                          <dt>
+                            Shipping
+                            {q().shipments?.[0] ? ` · ${q().shipments[0].fromCountry} → ${q().shipments[0].toCountry}` : ''}
+                          </dt>
+                          <dd>{moneyFromEurCents(q().shippingTotalCents)}</dd>
+                        </div>
+                      )}
+                    >
+                      {/* One parcel per seller: each ships and is charged on its own lane. */}
+                      <For each={q().shipments}>
+                        {(shipment) => (
+                          <div>
+                            <dt>Shipping · {shipment.fromCountry} → {shipment.toCountry}</dt>
+                            <dd>{moneyFromEurCents(shipment.amountCents)}</dd>
+                          </div>
+                        )}
+                      </For>
+                    </Show>
                     <Show when={!allowUntracked()}>
                       <div>
                         <dt><InsuranceCheck /></dt>

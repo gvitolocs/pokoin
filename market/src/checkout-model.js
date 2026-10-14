@@ -6,6 +6,8 @@ import { countryFromLocale } from './pkn.js';
 import { SHIP_TO_COUNTRIES } from './ship-countries.js';
 import {
   isUntrackedService,
+  pokoinFlexOption,
+  previewShipment,
   previewShipmentCents,
   shippingServiceOptions,
 } from './shipping-quote.js';
@@ -106,19 +108,57 @@ export function checkoutSellerParcels(items, origins = {}) {
   return [...bySeller.values()];
 }
 
-/** Shipping services for the first parcel with a known origin (untracked only when allowed). */
+/**
+ * Tracked / untracked for the whole order, priced as checkout charges it: one
+ * parcel per seller, each on its own lane (seller country → buyer), summed.
+ * `parcels` lists each seller's share so the page can show them separately.
+ */
 export function checkoutShipOptions({ nft, sellerParcels, buyerCountry, allowUntracked }) {
   if (nft || !sellerParcels.length) return [];
-  for (const group of sellerParcels) {
-    if (!group.from) continue;
-    const options = shippingServiceOptions({
+  const lanes = sellerParcels.filter((group) => group.from);
+  if (!lanes.length) return [];
+  if (lanes.length === 1) {
+    const [group] = lanes;
+    return shippingServiceOptions({
       fromCountry: group.from,
       toCountry: buyerCountry,
       cardCount: group.count,
     }).filter((row) => allowUntracked || !isUntrackedService(row));
-    if (options.length) return options;
   }
-  return [];
+  const options = [];
+  for (const want of [true, false]) {
+    const parcels = lanes.map((group) => ({
+      sellerId: group.sellerId,
+      sellerName: group.sellerName,
+      from: group.from,
+      row: previewShipment({ fromCountry: group.from, toCountry: buyerCountry, cardCount: group.count, tracked: want }),
+    }));
+    // A seller lane with no rate at all: checkout cannot book this order.
+    if (parcels.some((parcel) => !parcel.row)) continue;
+    // Lanes without the asked kind answer with what they have (as the server does).
+    const id = parcels.some((parcel) => parcel.row.tracked) ? 'tracked' : 'untracked';
+    if (options.some((option) => option.id === id)) continue;
+    const option = {
+      id,
+      label: id === 'tracked' ? 'Tracked' : 'Untracked',
+      tracked: id === 'tracked',
+      amountCents: parcels.reduce((sum, parcel) => sum + parcel.row.amountCents, 0),
+      serviceName: `${parcels.length} parcels`,
+      parcels: parcels.map((parcel) => ({
+        sellerId: parcel.sellerId,
+        sellerName: parcel.sellerName,
+        fromCountry: parcel.row.fromCountry,
+        toCountry: parcel.row.toCountry,
+        serviceName: parcel.row.serviceName,
+        tracked: parcel.row.tracked,
+        amountCents: parcel.row.amountCents,
+      })),
+    };
+    if (allowUntracked || !isUntrackedService(option)) options.push(option);
+  }
+  if (!options.length) return [];
+  options.push(pokoinFlexOption());
+  return options;
 }
 
 /** Euro-cents shipping: the server quote, else the rate-table preview; null when a parcel has no rate. */

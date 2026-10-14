@@ -121,6 +121,7 @@ export default function Cart() {
     groups,
     to: country,
     service,
+    parcelPicks: () => cartShippingChoice().parcels || {},
     subtotalPkn: () => totals().selectedSubtotalPkn,
   });
   const nudge = createMemo(() => nudgeFromParcels(groups(), liveShip.shipping().parcels));
@@ -320,6 +321,7 @@ export default function Cart() {
               service={service()}
               onCountry={(code) => setCartShippingChoice({ country: code })}
               onService={(id) => setCartShippingChoice({ service: id })}
+              onParcelService={(key, id) => setCartShippingChoice({ parcel: { key, service: id } })}
               currency={buyerCurrency()}
               signedIn={signedIn()}
               availablePkn={availablePkn()}

@@ -13,6 +13,7 @@ import { cartTotals as modelTotals, patchLiveRows } from './cart-model.js';
 import {
   checkoutSellerKey,
   checkoutSellerParcels,
+  checkoutShipOptions,
   checkoutShippingPreviewCents,
   pknEligibleSubtotal,
   stripeSessionError,
@@ -55,7 +56,17 @@ test('select all leaves sold-out rows unticked; saved rows move back on top', ()
 test('shipping choice merge keeps identity when nothing changed', () => {
   const current = { country: 'DK', service: 'tracked' };
   assert.equal(mergeShippingChoice(current, { country: 'DK' }), current);
-  assert.deepEqual(mergeShippingChoice(current, { country: 'it' }), { country: 'IT', service: 'tracked' });
+  assert.deepEqual(mergeShippingChoice(current, { country: 'it' }), { country: 'IT', service: 'tracked', parcels: {} });
+});
+
+test('shipping choice keeps a service per seller parcel; a new country clears them', () => {
+  const start = { country: 'DK', service: '', parcels: {} };
+  const one = mergeShippingChoice(start, { parcel: { key: 'seller-a', service: 'untracked' } });
+  assert.deepEqual(one.parcels, { 'seller-a': 'untracked' });
+  const two = mergeShippingChoice(one, { parcel: { key: 'seller-b', service: 'packlink:22131' } });
+  assert.deepEqual(two.parcels, { 'seller-a': 'untracked', 'seller-b': 'packlink:22131' });
+  assert.equal(mergeShippingChoice(two, { parcel: { key: 'seller-a', service: 'untracked' } }), two);
+  assert.deepEqual(mergeShippingChoice(two, { country: 'IT' }).parcels, {});
 });
 
 test('patchLiveRows marks a vanished copy and keeps the array when nothing moved', () => {
@@ -122,4 +133,23 @@ test('removed note sits before the next row of that seller', () => {
   const groups = [{ key: 'g', rows: [row('a'), row('c')] }];
   const slot = removedNoteSlot({ row: row('b'), index: 1 }, groups, [row('a'), row('c')], () => 'g');
   assert.deepEqual(slot, { groupKey: 'g', beforeId: 'c' });
+});
+
+test('checkout prices every seller parcel on its own lane, not the first one only', () => {
+  const sellerParcels = [
+    { sellerId: 'a', sellerName: 'redshakkio', count: 1, from: 'IT' },
+    { sellerId: 'b', sellerName: 'givi', count: 1, from: 'DK' },
+  ];
+  const options = checkoutShipOptions({ nft: false, sellerParcels, buyerCountry: 'DK', allowUntracked: true });
+  const bookable = options.filter((row) => !row.unavailable);
+  assert.ok(bookable.length >= 1);
+  for (const option of bookable) {
+    assert.equal(option.parcels.length, 2);
+    assert.deepEqual(option.parcels.map((p) => p.fromCountry), ['IT', 'DK']);
+    assert.equal(option.amountCents, option.parcels[0].amountCents + option.parcels[1].amountCents);
+    const cents = checkoutShippingPreviewCents({
+      nft: false, itemCount: 2, quote: null, sellerParcels, buyerCountry: 'DK', tracked: option.tracked,
+    });
+    assert.equal(option.amountCents, cents);
+  }
 });
