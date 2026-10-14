@@ -12,7 +12,8 @@
  *   refreshes the row's date; a changed one is stored, kept, and announced to
  *   `subscribe` listeners and the read's `onUpdate`.
  * - A copy older than `maxStaleMs` waits for the network, and still answers
- *   when the network fails.
+ *   when the network fails. One the revalidation finds gone (404 / 410) is
+ *   dropped, so the next read shows the answer.
  * - A read that may show an old copy gives the store STORE_WAIT_MS (an open
  *   database answers in under 1 ms; opening it takes ~7 ms, creating it on a
  *   first visit ~70 ms) before asking the network too; one that may not asks
@@ -126,23 +127,50 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     return value;
   }
 
-  /** Ask the network again; resolves to the new value, or undefined when unchanged or failed. */
+  /** A copy that is gone (404 / 410) is not shown again: the next read asks the network. */
+  function forget(url) {
+    const row = memory.get(url);
+    if (row) {
+      memory.delete(url);
+      memoryChars -= row.text.length;
+    }
+    quietly(() => store.remove(url));
+  }
+
+  /**
+   * Ask the network again; resolves to the new value, or undefined when
+   * unchanged or failed. A read already asking the network (a route preload
+   * the view did not wait for) is this revalidation: it lands the answer itself.
+   */
   function revalidate(url) {
     let job = revalidating.get(url);
     if (!job) {
       const old = memory.get(url)?.text;
-      job = Promise.resolve()
-        .then(() => fetchText(url, { priority: 'low' }))
-        .then(({ text, etag }) => {
-          if (text === old) {
-            const row = memory.get(url);
-            if (row) row.savedAt = now();
-            quietly(() => store.confirm(url, now()));
-            return undefined;
-          }
-          return land(url, text, etag);
+      const running = inflight.get(url);
+      if (running) {
+        running.adopted = true;
+        running.readers += 1;
+      }
+      job = (running
+        ? running.promise.then(() => {
+          const row = memory.get(url);
+          return row && row.text !== old ? row.value : undefined;
         })
-        .catch(() => undefined)
+        : Promise.resolve()
+          .then(() => fetchText(url, { priority: 'low' }))
+          .then(({ text, etag }) => {
+            if (text === old) {
+              const row = memory.get(url);
+              if (row) row.savedAt = now();
+              quietly(() => store.confirm(url, now()));
+              return undefined;
+            }
+            return land(url, text, etag);
+          }))
+        .catch((err) => {
+          if (err?.status === 404 || err?.status === 410) forget(url);
+          return undefined;
+        })
         .finally(() => revalidating.delete(url));
       revalidating.set(url, job);
     }
@@ -264,13 +292,16 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
       // Prefetches wait for the store: they are not in a hurry, and a stored copy
       // saves a request. A read that only takes a copy younger than FRESH_MS asks
       // the network at once (the store still wins when it holds one, and still
-      // stands in when the network fails); the others give the store a head start.
+      // stands in when the network fails); the others give the store a head start,
+      // cut short when a request already in flight for this URL lands first.
+      const running = inflight.get(url)?.promise.then(() => SLOW, () => SLOW);
       const row = prefetch
         ? await pending
-        : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs)]);
-      if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
+        : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs), running].filter(Boolean));
+      // A read in flight (the route preload) may have landed while the store was asked.
       const raced = memory.get(url);
       if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);
+      if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
       const usable = fromRow(url, row, maxStaleMs);
       if (usable?.value) {
         remember(url, usable.text, usable.savedAt, usable.value);

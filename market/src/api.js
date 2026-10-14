@@ -797,7 +797,9 @@ function acceptCardPage(cardId, data, { lang, persist }) {
  * `fresh` reads the network (the desk does when it painted from a peek).
  * `prefetch` warms the caches at low cost: a stored copy of any age is kept,
  * nothing goes to localStorage, and `signal` may abort it. `onUpdate` hears a
- * newer page when a stored copy shown first is revalidated.
+ * newer page when a stored copy shown first is revalidated. Such a read never
+ * waits on a plain one in flight (the route preload, which may not show an old
+ * copy): it takes the stored copy, and local-read joins that request.
  */
 export function fetchCard(cardId, {
   lang = 'en',
@@ -832,7 +834,7 @@ export function fetchCard(cardId, {
   if (!fresh && hit && (prefetch || cachedFresh(hit))) {
     return Promise.resolve(hit);
   }
-  if (!fresh && !prefetch && cardInflight.has(key)) {
+  if (!fresh && !prefetch && !onUpdate && cardInflight.has(key)) {
     return cardInflight.get(key);
   }
   const path = `/api/marketplace-card-page?${params}`;
@@ -852,8 +854,13 @@ export function fetchCard(cardId, {
         /* a mismatched revalidation keeps the page it has */
       }
     },
-  }).then((data) => markStored(acceptCardPage(cardId, data, { lang, persist }), url));
-  if (prefetch) {
+  }).then((data) => markStored(acceptCardPage(cardId, data, {
+    lang,
+    // localStorage keeps network copies only: an old stored one would get a new TTL.
+    persist: persist && localReader.fresh(url),
+  }), url));
+  // A plain read never adopts an onUpdate one: it may answer with a copy older than FRESH_MS.
+  if (prefetch || (onUpdate && !fresh)) {
     return pending;
   }
   const settled = pending.finally(() => { cardInflight.delete(key); });
@@ -1327,13 +1334,19 @@ export function peekArtist(slug, limit = 5000) {
   return artistPageCache.get(artistPageKey(slug, limit)) || null;
 }
 
+/**
+ * An artist's cards; `limit >= 1000` reads its list snapshot local-first.
+ * With `onUpdate` a stored snapshot of any age answers at once and the
+ * revalidated one arrives through it; like fetchCard, such a read neither
+ * adopts nor is adopted by a plain read in flight.
+ */
 export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, signal } = {}) {
   const key = artistPageKey(slug, limit);
   const hit = artistPageCache.get(key);
   if (hit && (prefetch || cachedFresh(hit))) {
     return Promise.resolve(hit);
   }
-  if (!prefetch && artistPageInflight.has(key)) {
+  if (!prefetch && !onUpdate && artistPageInflight.has(key)) {
     return artistPageInflight.get(key);
   }
   const params = new URLSearchParams({
@@ -1374,7 +1387,7 @@ export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, sig
   }
   const pending = fromSnapshot.then((mapped) => mapped
     || (prefetch ? null : getJsonC1(`/api/marketplace-artist-cards?${params}`).then(remember)));
-  if (prefetch) {
+  if (prefetch || onUpdate) {
     return pending;
   }
   const tracked = pending.finally(() => {

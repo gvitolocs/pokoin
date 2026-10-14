@@ -55,7 +55,8 @@ test('the artist album grid, its loading and its filters', () => {
   assert.doesNotMatch(artist, /if \(upward\) return/);
   assert.match(artist, /album-other-prints/);
   assert.match(artist, /fetchArtist\(slug, \{ limit: ARTIST_FIRST \}\)/);
-  assert.match(artist, /fetchArtist\(slug, \{ limit: 5000 \}\)/);
+  // A stored album paints at once; the revalidated one replaces it in place.
+  assert.match(artist, /fetchArtist\(slug, \{ limit: 5000, onUpdate: \(data\) => paintArtist\(data, \{ replace: true \}\) \}\)/);
   assert.match(artist, /peekArtist\(slug, 5000\)/);
   assert.match(artist, /restoredView/);
   assert.match(artist, /'singles'/);

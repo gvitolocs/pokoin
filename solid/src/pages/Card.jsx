@@ -323,7 +323,15 @@ function CardDesk(props) {
   refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
     if (!disposed) setOffersReady(true);
   });
-  fetchCard(cardId, { lang, slug: untrack(() => props.slug || ''), includeOffers: false, fresh: Boolean(cached) })
+  // Not painted from a peek: a stored copy of any age paints at once, and the
+  // revalidated page merges in place through showCard.
+  fetchCard(cardId, {
+    lang,
+    slug: untrack(() => props.slug || ''),
+    includeOffers: false,
+    fresh: Boolean(cached),
+    onUpdate: showCard,
+  })
     .then(showCard)
     .catch((err) => {
       if (disposed) return;
@@ -347,11 +355,12 @@ function CardDesk(props) {
     const stale = rememberStaleCardSales(cardId);
     setSalesSlices(stale?.slices ?? []);
   });
-  fetchVersionSet(cardId).then((data) => {
+  function showVersionSet(data) {
     if (disposed) return;
     const rows = rowsFrom(data?.printings);
     if (rows.length) setArtPrintings(rows);
-  }).catch(() => {
+  }
+  fetchVersionSet(cardId, { onUpdate: showVersionSet }).then(showVersionSet).catch(() => {
     /* Keep marketplace-card-page `versions` so 2–6 reprints still paint. */
   });
   if (cached) rememberNeighbors(cached.card, cached.neighbors);

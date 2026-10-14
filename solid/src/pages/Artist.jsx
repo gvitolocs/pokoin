@@ -264,7 +264,8 @@ function ArtistDesk(props) {
       .then((data) => paintArtist(data))
       .catch(() => {});
   }
-  fetchArtist(slug, { limit: 5000 })
+  // A stored album of any age paints at once; the revalidated one replaces it.
+  fetchArtist(slug, { limit: 5000, onUpdate: (data) => paintArtist(data, { replace: true }) })
     .then((data) => {
       paintArtist(data, { replace: true });
       if (!disposed) setRestPending(false);
