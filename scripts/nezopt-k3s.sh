@@ -4,7 +4,8 @@
 #
 #   scripts/nezopt-k3s.sh up             # start / create the k3s container
 #   scripts/nezopt-k3s.sh sync           # Pi Rust release (x86 build) + env + sitemaps → nezopt, restart pods if changed
-#   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml
+#   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml + pokoin-security.yaml
+#   scripts/nezopt-k3s.sh network        # Docker network, DB attachments, scan + Hermes bridges (idempotent)
 #   scripts/nezopt-k3s.sh secret         # only rebuild the env secret from the Pi Rust service
 #   scripts/nezopt-k3s.sh reindex        # one-off full Redis Search rebuild (first run / repair)
 #   scripts/nezopt-k3s.sh status         # nodes, pods, HPA, overflow health
@@ -35,8 +36,13 @@ WRITER_NET_IP=172.31.250.10
 TCGCSV_CONTAINER="${TCGCSV_CONTAINER:-tcgprices-postgres-15t}"
 TCGCSV_NET_IP=172.31.250.11
 K3S_NET_IP=172.31.250.20
-# Hermes (Poko chat): the host reaches it through oracle-poko-tunnel.service on
-# loopback :18789; pods reach that through this socat bridge (see hermes_bridge).
+# Host loopback services pods reach through socat bridges on $NET (see host_bridge):
+# Scan Connect → the pokoin-scanner GPU recognition worker on :8099, and
+# Hermes (Poko chat) → oracle-poko-tunnel.service on :18789.
+SCAN_BRIDGE_CONTAINER="${SCAN_BRIDGE_CONTAINER:-pokoin-scan-bridge}"
+SCAN_BRIDGE_IP=172.31.250.12
+SCAN_BRIDGE_PORT=18151
+SCAN_HOST_PORT=8099
 HERMES_BRIDGE_CONTAINER="${HERMES_BRIDGE_CONTAINER:-pokoin-hermes-bridge}"
 HERMES_BRIDGE_IP=172.31.250.13
 HERMES_PORT=18789
@@ -70,19 +76,27 @@ up() {
   say "k3s ready"
 }
 
-# UFW drops container → host traffic, so the bridge enters the host network
-# namespace per connection (same pattern as pokoin-scan-bridge on .12:18151).
-hermes_bridge() {
-  if docker inspect "$HERMES_BRIDGE_CONTAINER" >/dev/null 2>&1; then
-    [[ "$(docker inspect -f '{{.State.Running}}' "$HERMES_BRIDGE_CONTAINER")" == true ]] \
-      || docker start "$HERMES_BRIDGE_CONTAINER" >/dev/null
+# UFW drops container → host traffic, so each bridge is a privileged socat
+# container on $NET that enters the host network namespace per connection.
+# Idempotent: an existing bridge is only started if stopped, never recreated.
+#   host_bridge <container> <bridge ip> <listen port> <host loopback port>
+host_bridge() {
+  local name="$1" ip="$2" port="$3" host_port="$4"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    [[ "$(docker inspect -f '{{.State.Running}}' "$name")" == true ]] \
+      || docker start "$name" >/dev/null
     return 0
   fi
-  docker run -d --name "$HERMES_BRIDGE_CONTAINER" --restart unless-stopped --privileged --pid host \
-    --network "$NET" --ip "$HERMES_BRIDGE_IP" alpine:3.20 sh -c \
-    "apk add --no-cache socat >/dev/null && printf '%s\n' '#!/bin/sh' 'exec nsenter -t 1 -n socat STDIO TCP:127.0.0.1:$HERMES_PORT' > /bridge.sh && chmod +x /bridge.sh && exec socat TCP-LISTEN:$HERMES_PORT,fork,reuseaddr,bind=$HERMES_BRIDGE_IP EXEC:/bridge.sh" \
+  docker run -d --name "$name" --restart unless-stopped --privileged --pid host \
+    --network "$NET" --ip "$ip" alpine:3.20 sh -c \
+    "apk add --no-cache socat >/dev/null && printf '%s\n' '#!/bin/sh' 'exec nsenter -t 1 -n socat STDIO TCP:127.0.0.1:$host_port' > /bridge.sh && chmod +x /bridge.sh && exec socat TCP-LISTEN:$port,fork,reuseaddr,bind=$ip EXEC:/bridge.sh" \
     >/dev/null
 }
+
+# SCAN_PRIMARY_URL / SCAN_FALLBACK_URL in the manifest.
+scan_bridge() { host_bridge "$SCAN_BRIDGE_CONTAINER" "$SCAN_BRIDGE_IP" "$SCAN_BRIDGE_PORT" "$SCAN_HOST_PORT"; }
+# POKO_CHAT_URL / POKONTACT_SERVICE_URL, rewritten to this bridge by sync_secret.
+hermes_bridge() { host_bridge "$HERMES_BRIDGE_CONTAINER" "$HERMES_BRIDGE_IP" "$HERMES_PORT" "$HERMES_PORT"; }
 
 network() {
   docker network inspect "$NET" >/dev/null 2>&1 || docker network create --subnet "$NET_SUBNET" "$NET" >/dev/null
@@ -93,6 +107,7 @@ network() {
   if docker inspect "$TCGCSV_CONTAINER" >/dev/null 2>&1; then
     [[ " $attached " == *" $TCGCSV_CONTAINER "* ]] || docker network connect --ip "$TCGCSV_NET_IP" "$NET" "$TCGCSV_CONTAINER"
   fi
+  scan_bridge
   hermes_bridge
 }
 
@@ -278,7 +293,7 @@ install_timer() {
   local unit_dir="$HOME/.config/systemd/user"
   mkdir -p "$BASE/bin" "$unit_dir"
   install -m 0755 "$0" "$BASE/bin/nezopt-k3s.sh"
-  mkdir -p "$BASE/bin/infra/k3s" && cp "$MANIFEST" "$BASE/bin/infra/k3s/"
+  mkdir -p "$BASE/bin/infra/k3s" && cp "$MANIFEST" "$(dirname "$MANIFEST")/pokoin-security.yaml" "$BASE/bin/infra/k3s/"
   cat >"$unit_dir/pokoin-overflow-sync.service" <<UNIT
 [Unit]
 Description=Pokoin overflow: follow the Pi Rust release and env into k3s on nezopt

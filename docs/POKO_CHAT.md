@@ -76,6 +76,21 @@ public IP. The Pi reaches it through an SSH local forward:
 Do **not** point the Pi at `http://10.0.0.170:8789` (Oracle VCN private) or
 the public `92.5.153.117:8789` — both fail from pi-home.
 
+Overflow pods on nezopt (k3s, the Cloudflare LB `nez` origin) cannot use a
+loopback tunnel:
+
+- nezopt has its own forward: `oracle-poko-tunnel.service` (system unit),
+  host `127.0.0.1:18789` → peer1 `127.0.0.1:8789`
+- pods reach it through `pokoin-hermes-bridge` (socat on the Docker network
+  `pokoin-overflow`, `172.31.250.13:18789`)
+- `scripts/nezopt-k3s.sh` (`sync_secret`) rewrites the Pi's loopback
+  `POKO_CHAT_URL` / `POKONTACT_SERVICE_URL` to
+  `http://172.31.250.13:18789/api/poko`
+- the `pokoin-api` NetworkPolicy (`infra/k3s/pokoin-security.yaml`) allows
+  egress to `172.31.250.13:18789`
+
+Details: [NEZOPT_OVERFLOW.md](./NEZOPT_OVERFLOW.md#host-services-through-socat-bridges).
+
 URL resolve (same as CardVault `pokoin-assistant.js`):
 
 - if value already ends with `/chat` → use as-is
