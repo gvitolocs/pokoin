@@ -1894,7 +1894,7 @@ export function deskArtUrl(card) {
   return cdnFetchUrl(rasterSiblings(src, { full: true })[0] || '');
 }
 
-function preloadCardArt(card) {
+function preloadCardArt(card, priority = 'low') {
   const url = deskArtUrl(card);
   if (!url || preloadedArt.has(url)) {
     return;
@@ -1908,8 +1908,14 @@ function preloadCardArt(card) {
   }
   const img = new Image();
   img.decoding = 'async';
-  img.fetchPriority = 'low';
+  img.fetchPriority = priority;
   img.src = url;
+}
+
+/** The opening desk's hero scan, at high priority, as soon as its card page is in
+ * (before the desk chunk renders); the desk's <img> reuses this download. */
+export function preloadDeskArt(card) {
+  preloadCardArt(card, 'high');
 }
 
 /**

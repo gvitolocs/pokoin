@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { releaseHero } from '@market/hero-gate.js';
 import { isLandscapePrintName } from '@market/art-cut-landscape.js';
 import { getChatDock } from '@market/chat-dock-store.js';
 import { referenceForPeer, writeListingDrag } from '@market/chat-listing.js';
@@ -71,6 +72,9 @@ export default function DeskArtFrame(props) {
           alt={cardImageAlt(props.card)}
           fetchPriority="high"
           full
+          // Only a painted scan opens the gate: the first stub card can name a
+          // guessed file that fails at once, and failures wait for HERO_WAIT_MS.
+          onLoad={() => releaseHero()}
           onError={() => {
             console.warn('[pokoin:desk-art] hero failed', {
               cardId: props.card?.id,

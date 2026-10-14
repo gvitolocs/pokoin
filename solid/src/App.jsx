@@ -12,6 +12,7 @@ import WorkingOnIt from './components/WorkingOnIt.jsx';
 import { isBarePath } from './lib/bare-pages.js';
 import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
+import { afterHero } from '@market/hero-gate.js';
 import { warmLikelyRoutes } from './lib/route-warmup.js';
 import { setLinkNavigator } from './lib/yield-nav.js';
 import { reportClientError } from './lib/client-error.js';
@@ -74,11 +75,13 @@ export default function App(props) {
     // crawls and the API journal show where React is still referenced.
     const legacy = window.__POKOIN_REACT_LEGACY__;
     if (legacy) reportClientError(new Error(`[react-legacy] ${legacy} ${location.pathname}`));
-    warmAuthWhenIdle();
+    // On a card desk these wait for its hero scan (market/src/hero-gate.js).
+    const stopAuthWait = afterHero(warmAuthWhenIdle);
     const stopDeskSession = watchDeskSession(() => refreshAccount());
     const unsubscribe = subscribeOriginDown(() => setOriginDown(true));
     document.documentElement.classList.toggle('is-extension-desk', framed);
-    const cancelIdle = whenIdle(() => {
+    let cancelIdle = () => {};
+    const stopIdleWait = afterHero(() => { cancelIdle = whenIdle(() => {
       warmLikelyRoutes();
       chatDock.warm();
       startCartSync();
@@ -86,8 +89,10 @@ export default function App(props) {
         .then(({ watchReferralClaims }) => runWithOwner(owner, () => watchReferralClaims(location)))
         .catch(() => {});
       import('@market/google-reviews.js').then(({ showReviewsBadge }) => showReviewsBadge()).catch(() => {});
-    });
+    }); });
     return () => {
+      stopAuthWait();
+      stopIdleWait();
       stopDeskSession();
       unsubscribe();
       cancelIdle();

@@ -1,4 +1,5 @@
 import { noteCardView } from '@market/interest-profile.js';
+import { afterHero, holdForHero } from '@market/hero-gate.js';
 import {
   createEffect,
   createMemo,
@@ -288,7 +289,8 @@ function CardDesk(props) {
   function showCard(data) {
     if (disposed || !data?.card) return;
     const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
-    warmupNeighbors(neighborWindow, { lang });
+    // The next card's scan waits for this one's (market/src/hero-gate.js).
+    afterHero(() => warmupNeighbors(neighborWindow, { lang }));
     const current = untrack(page);
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
@@ -356,7 +358,7 @@ function CardDesk(props) {
   // card's own page loads, so fast clicking keeps finding neighbours.
   if (!cached) {
     const painted = untrack(page)?.neighbors;
-    if (painted?.prev?.length || painted?.next?.length) warmupNeighbors(painted, { lang });
+    if (painted?.prev?.length || painted?.next?.length) afterHero(() => warmupNeighbors(painted, { lang }));
   }
   const landedWithoutSlug = !untrack(() => props.slug);
   const knownPath = landedWithoutSlug
@@ -520,6 +522,10 @@ function CardDesk(props) {
   // hydrate that only adds fields does not re-run it.
   const fromPath = createMemo(() => card().canonicalPath || window.location.pathname);
   const art = createMemo(() => imageSrc(card(), 'hero'));
+  // A new hero closes the gate until DeskArtFrame reports it loaded or failed.
+  createEffect(art, (url) => {
+    if (url) holdForHero();
+  });
   const heroShade = () => albumShade(card());
   const rarityKind = () => storedRarityKind(card());
   const setName = createMemo(() => identity().set || '');
@@ -587,7 +593,8 @@ function CardDesk(props) {
   });
   createEffect(serverRelated, (rows) => {
     // Low priority, behind the desk scan; the tiles reuse these downloads.
-    if (rows.length) preloadRelatedThumbs(rows);
+    // Behind the desk scan: the thumbnails wait for it (market/src/hero-gate.js).
+    if (rows.length) afterHero(() => preloadRelatedThumbs(rows));
   });
   const related = createMemo(() => (serverRelated().length ? serverRelated() : pickRelatedCards(card(), [
     clipPrintings(),
