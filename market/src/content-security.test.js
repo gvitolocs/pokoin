@@ -25,6 +25,9 @@ test('landing and marketplace boot from same-origin files', () => {
   assert.equal(executableInlineScripts(market).length, 0);
   assert.match(landing, /src="home\/landing-boot\.js"/);
   assert.match(market, /src="%BASE_URL%card-url-boot\.js"/);
+  // Classic script ahead of the module entry, so it runs even when the entry chunk 404s.
+  assert.ok(market.indexOf('%BASE_URL%chunk-reload.js') > 0);
+  assert.ok(market.indexOf('%BASE_URL%chunk-reload.js') < market.indexOf('type="module"'));
   assert.equal(readFileSync(join(root, 'home/landing-boot.js'), 'utf8').includes('cookies-ok'), true);
   assert.equal(readFileSync(join(root, 'market/public/card-url-boot.js'), 'utf8').includes('marketplace-card-url'), true);
 });

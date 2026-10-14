@@ -27,8 +27,18 @@ function RoutePending() {
 }
 
 function RouteError(props) {
-  reportClientError(props.error, signedIn());
+  // A route chunk from an older release that this version no longer has:
+  // public/chunk-reload.js reloads once the file or a newer shell is live.
+  const updating = Boolean(window.__pokoinChunkReload?.(props.error));
+  if (!updating) reportClientError(props.error, signedIn());
   const detail = String(props.error?.message || props.error || '').slice(0, 200);
+  if (updating) {
+    return (
+      <div class="page desk" style={{ padding: '2.5rem 1.25rem', color: 'var(--muted)' }} role="status">
+        Loading the latest Pokoin…
+      </div>
+    );
+  }
   return (
     <div class="page desk" style={{ padding: '2.5rem 1.25rem' }} role="alert">
       <p>Something went wrong loading this page.</p>

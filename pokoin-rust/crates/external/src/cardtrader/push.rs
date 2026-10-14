@@ -172,7 +172,20 @@ pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient
         Ok(prepared) => prepared,
         Err(error) => return PushOutcome::Rejected(error),
     };
-    let payload = match ct.create_product(&token, body).await {
+    create_body(ct, &token, body).await
+}
+
+/// Create `listing` with a token the caller already holds (the reconcile's
+/// push pass). The caller has ruled out 1-Day Ready accounts.
+pub async fn create_with_token(ct: &CardTraderClient, token: &str, listing: &Value) -> PushOutcome {
+    match product_body(listing) {
+        Ok(body) => create_body(ct, token, body).await,
+        Err(error) => PushOutcome::Rejected(error),
+    }
+}
+
+async fn create_body(ct: &CardTraderClient, token: &str, body: Value) -> PushOutcome {
+    let payload = match ct.create_product(token, body).await {
         Ok(payload) => payload,
         Err(error) if crate::cardtrader::client::write_in_doubt(&error) => return PushOutcome::InDoubt(error),
         Err(error) => return PushOutcome::Rejected(error),

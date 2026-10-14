@@ -1,4 +1,4 @@
-# Chrome icons → React (`pokoin.com`)
+# Chrome icons → the Solid SPA (`pokoin.com`)
 
 Public chrome is this SPA. Android/iOS CardVault is a separate app on
 `app.pokoin.com`. App-only history and Flutter-web leftovers:
@@ -6,7 +6,7 @@ Public chrome is this SPA. Android/iOS CardVault is a separate app on
 
 | Host | Vercel project | What |
 | --- | --- | --- |
-| `https://pokoin.com` | `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`) | Landing + React market. Pokémon at `/`. Other TCGs at `/{slug}` |
+| `https://pokoin.com` | `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`) | Landing + Solid marketplace. Pokémon at `/`. Other TCGs at `/{slug}` |
 | `https://onepiece.pokoin.com` | same `web` | 301 → `https://pokoin.com/one-piece` |
 | `https://riftbound.pokoin.com` | same `web` | 301 → `https://pokoin.com/riftbound` |
 | `https://app.pokoin.com` | `pokoin-flutter` (`prj_nrmYJjDGMPh4fZVO7dexZ77BTPls`) | Flutter CardVault |
@@ -82,7 +82,7 @@ Action inventory: [pokoin-react-action-map.canvas.tsx](/home/nez/.cursor/project
 
 ## Icon map (market top bar)
 
-Source: `market/src/components/Chrome.jsx`. Routes: `market/src/punchouts.js`.
+Source: `solid/src/components/Chrome.jsx`. Routes: `market/src/punchouts.js`.
 Every control is a **same-origin** path on `pokoin.com`. Never
 `https://app.pokoin.com/…` for these icons.
 
@@ -117,7 +117,7 @@ writes the local cart and opens `/cart`.
 
 ## Header search (CardTrader-style rows)
 
-Source: `market/src/components/Chrome.jsx`, copy helpers in
+Source: `solid/src/components/Chrome.jsx`, copy helpers in
 `market/src/identity.js`. Dark gold theme — do **not** clone CardTrader’s
 white/blue skin.
 
@@ -284,7 +284,7 @@ still sit in the **last column**, not wrap under the title.
 Playwright:
 
 ```bash
-playwright-cli open http://127.0.0.1:5174/marketplace
+playwright-cli open http://127.0.0.1:5175/marketplace
 playwright-cli resize 1440 900   # desktop
 # type mimikyu; #suggest-691678 .suggest-art-cluster must share the first row y
 playwright-cli resize 393 852    # iPhone 16
@@ -345,5 +345,5 @@ credentialless desk iframe has the same rule: `publicApiUrl()` rewrites SPA
 403s without `cf_clearance`.
 
 Forum, Signal, Competitive, Wallet, Profile, and Cart on
-`https://pokoin.com/marketplace` are same-origin React routes. They must not
+`https://pokoin.com/marketplace` are same-origin SPA routes. They must not
 open `app.pokoin.com`.

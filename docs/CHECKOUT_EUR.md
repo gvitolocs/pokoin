@@ -8,7 +8,7 @@
 
 | Area | Finding |
 | --- | --- |
-| Cart storage | Browser `localStorage` key `pokoin.cartItems` ([`market/src/cart.jsx`](../market/src/cart.jsx)). Survives login; not server-synced. Cap 400 rows. |
+| Cart storage | Browser `localStorage` key `pokoin.cartItems` ([`solid/src/stores/cart.js`](../solid/src/stores/cart.js)). Survives login; not server-synced. Cap 400 rows. |
 | Multi-seller | **Allowed.** Each row has `sellerUid`, `listingId`, `qty`, `pricePkn`. No single-seller lock in checkout. |
 | Quantity | Per listing; capped by `stock` from the offer. One listing row can hold multiple units of that listing. |
 | Checkout API | `POST /api/marketplace-orders` — **site PKN escrow**. Flat `CHECKOUT_SHIPPING_PKN = 2000` remains on the **PKN path only**. |

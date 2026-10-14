@@ -7,11 +7,11 @@ confirmation. The integration is the Google "survey opt-in" module from
 
 ## Where it renders
 
-- `market/src/pages/Orders.jsx` — the Stripe return lands on
+- `solid/src/pages/Orders.jsx` — the Stripe return lands on
   `/orders?eur_session=…&order=<id>`. When that returned order shows up in the
   buyer's `bought` list and is physical (`fulfillmentMode !== 'nft_only'`), the
   effect calls `showReviewsOptIn`. Other rows never trigger the dialog.
-- `market/src/pages/Checkout.jsx` — the PKN path (`placePkn`) calls it right
+- `solid/src/pages/Checkout.jsx` — the PKN path (`placePkn`) calls it right
   after `setOrderId(id)` when the order is physical (`!nft`), so the dialog
   can appear even without a Stripe round trip.
 
@@ -73,7 +73,7 @@ Nothing here changes the CSP or `market/src/content-security.test.js`.
 
 ## Store badge (every page)
 
-`showReviewsBadge()` in `market/src/google-reviews.js`, called once from `market/src/main.jsx`, injects
+`showReviewsBadge()` in `market/src/google-reviews.js`, called once from `solid/src/App.jsx` (on idle), injects
 `<script id="merchantWidgetScript" defer src="https://www.gstatic.com/shopping/merchant/merchantwidget.js">`
 and on load calls `merchantwidget.start({ merchant_id: 5869935257, position: 'LEFT_BOTTOM' })`.
 Bottom-left because the chat button sits bottom-right; Google centres the widget on mobile.

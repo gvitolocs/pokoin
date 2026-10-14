@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the official Pokoin wordmark as standalone SVGs (no font, no bitmap).
 
-Mirrors the topbar markup in market/src/components/Chrome.jsx and the
+Mirrors the topbar markup in solid/src/components/Chrome.jsx and the
 .brand-word CSS in market/src/styles.css: Fredoka 700 "P", the pixel coin
 mascot as the first "o", "koın" with a yellow coin dot on the i, letter
 spacing -0.02em and a navy 0.07em drop shadow. Glyphs become paths and the

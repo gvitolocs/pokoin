@@ -18,7 +18,7 @@ CardVault app (Flutter) ──────────┘     api.pokoin.com
 
 | Client | Repo | Role |
 | --- | --- | --- |
-| **Pokoin Web** | `gvitolocs/pokoin` (this repo) | Website / React SPA |
+| **Pokoin Web** | `gvitolocs/pokoin` (this repo) | Website / Solid SPA |
 | **CardVault** | `gvitolocs/cardvault` | Android/iOS app client |
 | **Pokoin API** | **Shared backend** on Pi | Auth, marketplace BFFs, listings, recents, … |
 
@@ -111,7 +111,7 @@ Deploy note: the seller sync ships in the Rust release
 
 | URL | What |
 | --- | --- |
-| `GET /api/__contract` | React/Flutter identity, images, page BFFs, route families |
+| `GET /api/__contract` | Web/Flutter identity, images, page BFFs, route families |
 | `GET /healthz` | Pipeline: Postgres and Redis are required; Pi CDN is degraded. **503** if Postgres or Redis is down. Not a liveness ping (that is `/livez`). Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
 | `GET /api/__routes` | Every hosted handler + `family` |
 | `GET /api/__routes?group=1` | Same list grouped |
@@ -146,7 +146,7 @@ Bare calls without `game` / satellite Host / `x-pokoin-game` return **400** (no
 silent Pokemon default). Older app builds that only used Firestore
 `user_card_recent_views` are unaffected until they adopt this API.
 
-**React page BFFs (pokoin-web)**
+**Web page BFFs (pokoin-web)**
 
 | Page | API |
 | --- | --- |

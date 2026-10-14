@@ -223,12 +223,22 @@ impl DomainState {
 
     /// Enqueue the background CardTrader reconcile for a verified seller.
     pub async fn enqueue_cardtrader_sync(&self, uid: &str) -> crate::error::ApiResult<(bool, bool)> {
-        crate::cardtrader::async_sync::enqueue_with_stored_token(
+        self.enqueue_cardtrader_sync_with(uid, None).await
+    }
+
+    /// [`Self::enqueue_cardtrader_sync`] with Power Tools rows to place.
+    pub async fn enqueue_cardtrader_sync_with(
+        &self,
+        uid: &str,
+        power_tools_by_game: Option<crate::cardtrader::link::PowerToolsByGame>,
+    ) -> crate::error::ApiResult<(bool, bool)> {
+        crate::cardtrader::async_sync::enqueue_stored_with_power_tools(
             &self.sync_jobs,
             self.firestore.clone(),
             self.db.clone(),
             self.cardtrader.clone(),
             uid,
+            power_tools_by_game,
         )
         .await
     }
