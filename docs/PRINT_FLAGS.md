@@ -1,6 +1,6 @@
 # Print flags (JP / CN)
 
-React is live. **Flutter must copy this**, not invent a second mapping.
+The web SPA is live. **Flutter must copy this**, not invent a second mapping.
 
 Source of truth: `pokoin_pokemon_expansions.nationality` on Oracle
 (`pokoin-marketplace`). Do **not** regex the English set name in the client.
@@ -262,8 +262,8 @@ Both payloads now include `expansion.nationality` (lowercase string, may be
 
 | Client | Endpoint | Notes |
 | --- | --- | --- |
-| React set desk | `GET /api/marketplace-expansion-page?slug=` | `readExpansionBySlug` + `rowsForExpansions` |
-| React set index | same handler with no slug | `expansions[].nationality` |
+| Web set desk | `GET /api/marketplace-expansion-page?slug=` | `readExpansionBySlug` + `rowsForExpansions` |
+| Web set index | same handler with no slug | `expansions[].nationality` |
 | Search suggest | `GET /api/marketplace-suggest?q=` | `printing.nationality` via CardVault API `_expansion_nationality.js`. Popup 20-cap: western **tie-break** on equal Meili points (CardVault API `_suggest_western_priority.js`), not a weight change. Empty leftover nationality falls back to the expansion row (`SET_POOL` / `expansion.nationality`) so HeartGold Collection still shows jpko. |
 | Flutter collection | `GET /api/marketplace-expansions?slug=&includeCards=1` | `snapshotForExpansion` uses `rowsForExpansions` — same field. Prefer expansion-page long-term. |
 
@@ -271,7 +271,7 @@ Do not derive flags from `expansion.code` or `official_name` in the SPA.
 
 ---
 
-## React surfaces (done)
+## Web surfaces (done)
 
 | Surface | File | Placement | Class |
 | --- | --- | --- | --- |
@@ -300,7 +300,7 @@ BFF before the walk (Mega Evolution 30s timeout).
 
 ## Flutter port (CardVault)
 
-Do this in `gvitolocs/cardvault`, not this repo. Public pokoin.com stays React.
+Do this in `gvitolocs/cardvault`, not this repo. Public pokoin.com is the Solid SPA.
 
 ### 1. Model
 
@@ -317,7 +317,7 @@ factory MarketplaceExpansion.fromJson(Map<String, dynamic> json) {
 }
 ```
 
-### 2. Mapping (copy React)
+### 2. Mapping (copy the web)
 
 ```dart
 ({String code, String label})? printFlagFromNationality(String nationality) {
@@ -354,14 +354,14 @@ Korean print `flagSrc` is `ko.svg`.
 
 - Screen: `CollectionExpansionScreen`
 - Header widget: `_SelectedExpansionHeader` (back + `'$name · $count cards'`)
-- Put the circular flag **left of the set name**, same visual slot as React
+- Put the circular flag **left of the set name**, same visual slot as the web
   `h1.page-title`.
 - Pass `snapshot.expansion.nationality`. Do not call `_regionForExpansion(name)`.
 
 ### 4. Search suggest
 
 When Flutter grows a CardTrader-style suggest row, put the same flag **left
-of the illustration crop** on desktop (React `.suggest-art`). On phone, overlay
+of the illustration crop** on desktop (web `.suggest-art`). On phone, overlay
 it on that crop. Not on the mini full-card thumb. Printing field:
 `nationality` on `GET /api/marketplace-suggest`.
 

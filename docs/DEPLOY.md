@@ -37,7 +37,8 @@ Rollback: `wrangler versions deploy <previous version>@100% --name pokoin-web -y
 `origin/main` and must contain the commit production runs (Vercel deployment
 meta `gitCommitSha`, or `githubCommitSha` for older git builds). It builds a
 `git archive` of the commit plus an allowlist of gitignored inputs
-(`download/extension.zip`), runs `node --test market/src/*.test.js`, deploys
+(`download/extension.zip`), runs `node --test market/src/*.test.js` and the Solid
+tests (`cd solid && npm test`), deploys
 with `--meta gitCommitSha=…`, holds `/tmp/pokoin-web-deploy.lock`, checks that
 `pokoin.com` points at the new commit, and re-points `test.pokoin.com` at the
 same deployment (that alias can otherwise lag and serve an old review board). A production deployment
@@ -73,7 +74,7 @@ the zip is gitignored — another reason production builds run on nezopt.
 ```bash
 # on nezopt, in your worktree
 git fetch origin && git merge origin/main        # include everyone's work
-node --test market/src/*.test.js
+node --test market/src/*.test.js && (cd solid && npm test)
 git push origin HEAD:main
 scripts/deploy-web.sh                             # deploys HEAD
 ```

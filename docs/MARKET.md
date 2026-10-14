@@ -1,4 +1,4 @@
-# Pokoin.com React marketplace — pipeline and APIs
+# Pokoin.com marketplace (Solid) — pipeline and APIs
 
 Source of truth for the **public web**: this repo (`gvitolocs/pokoin`).
 Production is Vercel project `web`. Android/iOS CardVault is a separate app:
@@ -185,7 +185,7 @@ then Best Deal.
    **12** leftovers from `cheapest_homepage_cache_blueprint` (not 8). Same-name
    printings stay on that rail above, not a second related row.
 
-Click the scan to zoom (React lightbox). Do not navigate Home on art tap.
+Click the scan to zoom (lightbox). Do not navigate Home on art tap.
 Mount `<dialog>` only while zoom is on; **never** set `display` on a closed
 dialog.
 
@@ -322,7 +322,7 @@ bulk put` on the Free plan. `pokoin.com/card-images/*` stays on
 `pokoin-cdn-card-images`. Do not put shortlinks on a third-party REST host. Do not point
 `news.pokoin.com` at these rewrites. `app.pokoin.com` stays DNS-only.
 
-The React card page still `navigate(canonicalPath, { replace: true })` when a
+The card page still replaces the URL with the canonical path when a
 request reaches the SPA without a slug.
 
 ---
@@ -348,7 +348,7 @@ the detail hero. Zoom softness is the 500px source, not the codec. Ingest
 rounds only the cardboard crescents (3.175 mm circle); it must not punch the
 printed TRAINER / nameplate. Map: [CARD_ART.md](CARD_ART.md) Type D.
 
-Artist is React: `/marketplace/{lang}/artists/{slug}`. **More versions...** is
+Artist is an SPA page: `/marketplace/{lang}/artists/{slug}`. **More versions...** is
 `{canonicalPath}/versions` in this SPA. That page has **Rarity Lineup**
 (rarity pair in this set), then CLIP printings grouped by TCG era (Mega
 Evolution → Original; Platinum and Call of Legends are their own blocks).
@@ -421,7 +421,7 @@ A **printing** (SKU in the TCGPlayer *sense*, not a TCGPlayer id) is:
 3. Listings under that printing: **condition + seller + PKN price**.
 
 `includeSameAs` and `liveOffers` are **off** unless the client asks. `includeOffers`
-defaults **off** too: the React card shell paints identity + hero first, then
+defaults **off** too: the card shell paints identity + hero first, then
 `GET /api/marketplace-listings?cardId=&nativeOnly=1` fills the table. In-memory
 `listings-cache.js` treats an empty `[]` as a hit — after **List card**, the
 SPA invalidates that id and fetches `fresh` (`cache: no-store`) so a cached
@@ -1141,18 +1141,19 @@ env -u VERCEL_TOKEN vercel build --prod --yes
 env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
 ```
 
-`vercel.json` runs `scripts/build-web.sh` into `dist-web/` (landing + hashed
-`market/` assets). Do not deploy the GitHub tree as static files — that ships
-the Vite `src/main.jsx` shell and 404s `/marketplace`. `scripts/sync-market.sh`
+`vercel.json` runs `scripts/build-web.sh` into `dist-web/` (landing + the Solid
+build under `market/`, hashed chunks in `market/s/`). Do not deploy the GitHub tree
+as static files — that ships the unbuilt `solid/index.html` and 404s `/marketplace`. `scripts/sync-market.sh`
 copies into CardVault and is leftover; it is not production. See [APP.md](APP.md).
 
-Local Vite:
+Local Vite (Solid; in your own Paseo worktree):
 
 ```bash
-cd /home/nez/Projects/pokoin-web/market
+(cd market && npm install)
+cd solid
 npm install
 npm run dev
-# http://192.168.178.55:5174/marketplace
+# http://192.168.178.55:5175/marketplace
 # Vite proxies /api → api.pokoin.com, /chain → rpc.pokoin.com,
 # /cardscan/identify → cardscan.pokoin.com/identify (not the SPA).
 ```

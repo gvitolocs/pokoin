@@ -96,7 +96,7 @@ Prices” copy stays on `<title>` / `SeoHead` only.
 
 `pokoin.com/sitemap` is the human site map: a pan/zoom graph of every page
 template, catalog hub and card desk, with the same hubs as plain links
-underneath (`market/src/pages/SiteMap.jsx`). Its data is
+underneath (`solid/src/pages/SiteMap.jsx`). Its data is
 `market/public/data/site-map.json`, built on nezopt by
 `node scripts/build-site-map.mjs`. Page links come from the SPA source
 (routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
