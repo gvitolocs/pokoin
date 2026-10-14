@@ -142,7 +142,7 @@ fn sync_status_payload(status: Value, progress: &Value) -> Value {
     let phase = progress["phase"].clone();
     let processed = progress["processed"].clone();
     let total = progress["total"].clone();
-    let sync = match progress.get("row").filter(|row| row.is_object()) {
+    let mut sync = match progress.get("row").filter(|row| row.is_object()) {
         Some(row) => json!({
             "lastSyncAt": row["last_sync_at"],
             "lastSyncOk": row["last_sync_ok"],
@@ -164,6 +164,20 @@ fn sync_status_payload(status: Value, progress: &Value) -> Value {
             "summary": progress["summary"],
         }),
     };
+    // A job that failed on this instance, or a stored run nobody finished, is
+    // a failed sync even when its end could not be written.
+    let failure = progress["lastError"].as_str().map(str::to_string).or_else(|| {
+        (progress["stale"] == true).then(|| "The last CardTrader sync stopped before it finished.".to_string())
+    });
+    if let Some(message) = failure.filter(|_| !running) {
+        sync["lastSyncOk"] = json!(false);
+        sync["lastSyncError"] = json!(message);
+        sync["phase"] = json!("failed");
+        if sync["summary"].is_object() {
+            sync["summary"]["running"] = json!(false);
+            sync["summary"]["phase"] = json!("failed");
+        }
+    }
     json!({
         "ok": true,
         "status": status,
@@ -495,6 +509,19 @@ mod tests {
         let first = sync_status_payload(json!({"connected": true}), &json!({"row": null, "running": true, "phase": "starting", "processed": 0, "total": 0, "summary": {}}));
         assert_eq!(first["sync"]["running"], true);
         assert_eq!(first["phase"], "starting");
+
+        // The job failed here but its end was never stored (database down).
+        let mut failed = progress.clone();
+        failed["row"]["last_sync_summary"] = json!({"running": true, "phase": "starting"});
+        failed["lastError"] = json!("pool timed out while waiting for an open connection");
+        let payload = sync_status_payload(json!({"connected": true}), &failed);
+        assert_eq!(payload["sync"]["lastSyncOk"], false);
+        assert_eq!(payload["sync"]["lastSyncError"], "pool timed out while waiting for an open connection");
+        assert_eq!(payload["sync"]["summary"]["phase"], "failed");
+
+        let mut stale = progress.clone();
+        stale["stale"] = json!(true);
+        assert_eq!(sync_status_payload(json!({}), &stale)["sync"]["lastSyncOk"], false);
     }
 
     #[test]

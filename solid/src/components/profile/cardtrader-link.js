@@ -12,7 +12,7 @@ export const CT_LINK_DIRECTIONS = [
   {
     id: 'pokoin_to_ct',
     label: 'Pokoin → CardTrader',
-    hint: 'Cards you list on Pokoin are listed on CardTrader too, a batch every 10 minutes. CardTrader-only stock stays off Pokoin.',
+    hint: 'Every card you list on Pokoin is listed on CardTrader too, at each sync (about every 10 minutes). CardTrader-only stock stays off Pokoin.',
   },
   {
     id: 'both',
@@ -44,12 +44,35 @@ function ago(at, now) {
   return `${Math.round(hours / 24)} d ago`;
 }
 
+/** Why a sync stopped short, in the seller's words (server gate reason codes). */
+const SYNC_REASONS = {
+  export_failed: 'CardTrader did not send your inventory',
+  unparsed_export: 'CardTrader sent products Pokoin could not read',
+  mass_removal_guard: 'CardTrader\'s export was missing most of your linked cards',
+  incomplete_snapshot: 'CardTrader sent an incomplete inventory',
+  invalid_products: 'CardTrader sent an inventory Pokoin could not read',
+  incomplete_export: 'the CardTrader inventory was incomplete',
+  no_shared_lock: 'another sync may be running',
+  rate_limited: 'CardTrader asked Pokoin to slow down',
+  time_budget: 'this sync ran out of time',
+  per_run_cap: 'this sync reached its limit',
+};
+
+export function syncReason(code) {
+  const text = String(code || '').trim();
+  return SYNC_REASONS[text] || text;
+}
+
 /** One status line for the link: `{ tone: live | syncing | warn | idle, text }`. */
 export function ctLinkHealth({ syncing = false, sync = null, now = Date.now() } = {}) {
   if (syncing) return { tone: 'syncing', text: 'Syncing now' };
   if (sync?.lastSyncOk === false) {
-    const reason = String(sync.lastSyncError || '').trim();
+    const reason = syncReason(sync.lastSyncError);
     return { tone: 'warn', text: reason ? `Last check failed: ${reason}` : 'Last check failed' };
+  }
+  if (sync?.lastSyncIncomplete === true) {
+    const reason = syncReason(sync.lastSyncError);
+    return { tone: 'warn', text: `Last check incomplete${reason ? `: ${reason}` : ''} — nothing was removed or listed` };
   }
   const when = ago(sync?.lastSyncAt, now);
   if (when) return { tone: 'live', text: `Linked · checked ${when}` };
@@ -74,13 +97,19 @@ export function formatSyncSummary(summary) {
   const pushed = summary.pushedToCardTrader;
   const importing = summary.direction !== 'pokoin_to_ct';
   return [
-    `${count(summary.pokemonInventory || summary.inventory)} products checked`,
+    `${count(summary.pokemonInventory || summary.inventory)} on CardTrader`,
     importing ? `${count(summary.imported)} imported` : '',
     `${count(summary.matchedExisting)} linked`,
     `${count(summary.updated)} updated`,
     `${count(summary.removed)} removed`,
-    `${count(summary.unresolved)} unresolved`,
-    pushed ? `${count(pushed.pushed)} listed on CardTrader` : '',
+    count(summary.unresolved) ? `${count(summary.unresolved)} unresolved` : '',
+    pushed && !pushed.blocked ? `${count(pushed.pushed)} listed on CardTrader` : '',
+    pushed && count(pushed.remaining) ? `${count(pushed.remaining)} waiting to list` : '',
+    pushed && count(pushed.linkedToExisting) ? `${count(pushed.linkedToExisting)} matched to CardTrader products` : '',
     pushed && count(pushed.failed) ? `${count(pushed.failed)} refused by CardTrader` : '',
+    pushed?.blocked ? `listing on CardTrader paused: ${syncReason(pushed.blocked)}` : '',
+    pushed && count(pushed.remaining) && pushed.stoppedBy && pushed.stoppedBy !== 'done'
+      ? `the rest at the next sync (${syncReason(pushed.stoppedBy)})`
+      : '',
   ].filter(Boolean).join(' · ');
 }

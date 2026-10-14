@@ -685,10 +685,13 @@ pub struct ReconcileArgs<'a> {
     pub preview_games_only: bool,
     /// Which way new stock is copied; `None` reads the integration doc.
     pub direction: Option<crate::cardtrader::link::Direction>,
+    /// This run holds the shared reconcile lock (or runs where there is no
+    /// shared lock to take). Only then may it write to CardTrader.
+    pub exclusive: bool,
 }
 
 pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResult<Value> {
-    let ReconcileArgs { firestore, db, ct, uid, seller_name, token, one_day_ready, on_progress, power_tools_by_game, preview_games_only, direction } = args;
+    let ReconcileArgs { firestore, db, ct, uid, seller_name, token, one_day_ready, on_progress, power_tools_by_game, preview_games_only, direction, exclusive } = args;
     let emit = |partial: Value| {
         if let Some(callback) = &on_progress {
             callback(partial);
@@ -838,8 +841,15 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     // Pokoin → CardTrader: list what is only on Pokoin, after the plan linked
     // every Pokoin listing that already has a CardTrader twin.
     if direction.pushes() {
-        let on_cardtrader = crate::cardtrader::link::export_facets(products);
-        let pushed = crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::push_batch(), &on_cardtrader).await;
+        let pushed = match crate::cardtrader::link::push_gate(result["complete"] == true, exclusive) {
+            Some(reason) => json!({ "blocked": reason, "pushed": 0 }),
+            None => crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::PushBudget::from_env(), products).await,
+        };
+        if pushed.get("error").is_some_and(|error| !error.is_null()) {
+            result["summary"]["errors"].incr(1);
+            result["ok"] = json!(false);
+            result["error"] = pushed["error"].clone();
+        }
         result["summary"]["pushedToCardTrader"] = pushed;
         amended = true;
     }

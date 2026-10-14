@@ -3067,6 +3067,27 @@ export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0 }
   });
 }
 
+/**
+ * Every live listing of a seller, paging past the API's 1,000-row cap
+ * (a seller with 1,463 listings saw only the first 1,000). Rows are deduped by id.
+ */
+export async function fetchAllSellerListings(sellerUid, token, { pageSize = 1000, maxPages = 20 } = {}) {
+  const seen = new Set();
+  const all = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const data = await fetchSellerListings(sellerUid, token, { limit: pageSize, offset: page * pageSize });
+    const rows = data?.listings || data?.items || [];
+    for (const row of rows) {
+      const id = String(row?.id || row?.listingId || '');
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      all.push(row);
+    }
+    if (rows.length < pageSize) break;
+  }
+  return { listings: all };
+}
+
 /** Owned-card totals for the signed-in user. Uid comes from the bearer only. */
 /** Download seller stock as CSV (PowerTools / Cardmarket / CardTrader). */
 export async function exportStockCsv(format, token) {
