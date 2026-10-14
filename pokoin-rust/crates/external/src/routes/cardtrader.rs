@@ -6,10 +6,11 @@ use axum::http::{HeaderMap, Method, Uri};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
-use crate::cardtrader::{client, integration, sync, webhook, zero};
+use crate::cardtrader::{client, integration, link, sync, webhook, zero};
 use crate::cardtrader_live;
 use crate::cardtrader_listings;
 use crate::error::{clean_text, header_value, json_response, ApiError, ApiResult};
+use crate::powertools;
 use crate::routes::util::{body_json, query_first, query_pairs, require_token};
 use crate::state::DomainState;
 
@@ -120,30 +121,152 @@ pub async fn import_dry_run(
     Ok(json_response(200, summary))
 }
 
-/// `GET /api/cardtrader-sync` — last known sync state for the seller.
+/// `GET /api/cardtrader-sync` — connection, inventory link and last known
+/// sync state for the seller (the Node `cardtrader-sync.js` GET shape).
 pub async fn sync_status(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
-    let running = state.sync_jobs.is_running(&identity.uid).await;
-    let stored = sync::read_seller_sync(&state.db, &identity.uid).await?;
-    Ok(json_response(
-        200,
-        json!({
-            "running": running,
-            "sync": stored.unwrap_or(Value::Null),
-        }),
-    ))
+    let doc = integration::read_integration_doc(state.firestore.as_ref(), &identity.uid).await?;
+    let status = integration::safe_status_from_doc(&doc);
+    let progress = state.sync_jobs.progress(&state.db, &identity.uid).await?;
+    Ok(json_response(200, sync_status_payload(status, &progress)))
 }
 
-/// `POST /api/cardtrader-sync` — enqueue the background reconcile.
-pub async fn sync_start(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
+fn sync_status_payload(status: Value, progress: &Value) -> Value {
+    let running = progress["running"] == true;
+    let phase = progress["phase"].clone();
+    let processed = progress["processed"].clone();
+    let total = progress["total"].clone();
+    let sync = match progress.get("row").filter(|row| row.is_object()) {
+        Some(row) => json!({
+            "lastSyncAt": row["last_sync_at"],
+            "lastSyncOk": row["last_sync_ok"],
+            "lastSyncIncomplete": row["last_sync_incomplete"],
+            "lastSyncError": row["last_sync_error"],
+            "lastCompleteExportAt": row["last_complete_export_at"],
+            "lastExportProductCount": row["last_export_product_count"],
+            "summary": if row["last_sync_summary"].is_object() { row["last_sync_summary"].clone() } else { json!({}) },
+            "running": running,
+            "phase": phase,
+            "processed": processed,
+            "total": total,
+        }),
+        None => json!({
+            "running": running,
+            "phase": phase,
+            "processed": processed,
+            "total": total,
+            "summary": progress["summary"],
+        }),
+    };
+    json!({
+        "ok": true,
+        "status": status,
+        "running": running,
+        "phase": progress["phase"],
+        "processed": progress["processed"],
+        "total": progress["total"],
+        "sync": sync,
+    })
+}
+
+/// `POST /api/cardtrader-sync` — enqueue the background reconcile. The body
+/// may also carry:
+///
+/// - `direction` (`ct_to_pokoin` | `pokoin_to_ct` | `both`): store which way
+///   the inventory link copies new stock, then reconcile with it;
+/// - `previewGames: true`: the games in the CardTrader export (no write);
+/// - `powerToolsCsv` (`{ game: csv }`, with `stackSize`, `numberedInStack`,
+///   `locationParse`): Power Tools locations for the matched listings, or with
+///   `previewPowerTools: true` only what that import would do.
+pub async fn sync_start(
+    State(state): State<DomainState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
-    let (started, already_running) = state.enqueue_cardtrader_sync(&identity.uid).await?;
+    let payload = body_json(&body).await?;
+    let mut doc = integration::read_integration_doc(state.firestore.as_ref(), &identity.uid).await?;
+    if integration::safe_status_from_doc(&doc)["connected"] != true {
+        return Err(ApiError::bad_request("Connect CardTrader before syncing inventory.").with_code("cardtrader_not_connected"));
+    }
+
+    if let Some(raw) = payload.get("direction").filter(|value| !value.is_null()) {
+        let direction = link::Direction::parse(raw.as_str().unwrap_or_default()).ok_or_else(|| {
+            ApiError::bad_request("Choose CardTrader → Pokoin, Pokoin → CardTrader or both ways.")
+                .with_code("cardtrader_direction_invalid")
+        })?;
+        if direction.pushes() && integration::is_one_day_ready_integration(&doc) {
+            return Err(ApiError::conflict(
+                "CardTrader 1-Day Ready accounts are stocked by CardTrader: their cards can only come to Pokoin.",
+            )
+            .with_code("cardtrader_one_day_ready"));
+        }
+        link::store_direction(state.firestore.as_ref(), &identity.uid, direction).await?;
+        doc = integration::read_integration_doc(state.firestore.as_ref(), &identity.uid).await?;
+    }
+    let status = integration::safe_status_from_doc(&doc);
+
+    if payload["previewGames"] == true || payload["previewGamesOnly"] == true {
+        let token = state.require_cardtrader_token(&identity.uid).await?;
+        let export = state.cardtrader.fetch_products_export(&token).await?;
+        return Ok(json_response(
+            200,
+            json!({
+                "ok": true,
+                "connected": true,
+                "previewGamesOnly": true,
+                "games": powertools::games_from_cardtrader_products(&export.products),
+                "summary": {},
+                "status": status,
+            }),
+        ));
+    }
+
+    let import = link::parse_power_tools_body(&payload)?;
+    if payload["previewPowerTools"] == true {
+        let Some(import) = import else {
+            return Ok(json_response(
+                400,
+                json!({
+                    "ok": false,
+                    "error": "Upload at least one Power Tools CSV.",
+                    "samples": [], "overflows": [], "occupancy": [],
+                    "suggestedStackSize": 1, "locationDetection": Value::Null,
+                }),
+            ));
+        };
+        // Without the export the preview still shows how locations read.
+        let products = match state.require_cardtrader_token(&identity.uid).await {
+            Ok(token) => state.cardtrader.fetch_products_export(&token).await.map(|export| export.products).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let mut preview = link::power_tools_preview(&import, &products);
+        preview["connected"] = json!(true);
+        preview["status"] = status;
+        return Ok(json_response(200, preview));
+    }
+
+    let overflows = import.as_ref().map(|import| import.overflows.clone()).unwrap_or_default();
+    let power_tools = import.is_some();
+    let (started, already_running) = state
+        .enqueue_cardtrader_sync_with(&identity.uid, import.map(|import| import.by_game))
+        .await?;
     Ok(json_response(
         200,
         json!({
             "ok": true,
+            "connected": true,
+            "async": true,
             "started": started,
             "alreadyRunning": already_running,
+            "running": true,
+            "incomplete": true,
+            "destructiveSkipped": false,
+            "powerTools": power_tools,
+            "overflows": overflows,
+            "error": Value::Null,
+            "summary": { "running": true, "phase": "starting", "processed": 0, "total": 0, "overflows": overflows },
+            "status": status,
         }),
     ))
 }
@@ -344,6 +467,26 @@ fn secret_from(headers: &HeaderMap) -> String {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    #[test]
+    fn sync_status_carries_status_and_the_node_sync_shape() {
+        let status = json!({"connected": true, "inventorySync": {"direction": "both"}});
+        let progress = json!({
+            "row": {"last_sync_at": "2026-10-14T10:00:00Z", "last_sync_ok": true, "last_sync_incomplete": false,
+                    "last_sync_error": "", "last_sync_summary": {"imported": 3}, "last_complete_export_at": null,
+                    "last_export_product_count": 12},
+            "running": false, "phase": "done", "processed": 12, "total": 12, "summary": {"imported": 3},
+        });
+        let payload = sync_status_payload(status, &progress);
+        assert_eq!(payload["status"]["inventorySync"]["direction"], "both");
+        assert_eq!(payload["sync"]["lastSyncOk"], true);
+        assert_eq!(payload["sync"]["summary"]["imported"], 3);
+        assert_eq!(payload["running"], false);
+
+        let first = sync_status_payload(json!({"connected": true}), &json!({"row": null, "running": true, "phase": "starting", "processed": 0, "total": 0, "summary": {}}));
+        assert_eq!(first["sync"]["running"], true);
+        assert_eq!(first["phase"], "starting");
+    }
 
     #[test]
     fn secret_header_accepts_bearer_and_cron_header() {

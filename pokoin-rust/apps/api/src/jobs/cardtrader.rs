@@ -251,6 +251,7 @@ impl Backend for Native {
             on_progress: None,
             power_tools_by_game: None,
             preview_games_only: false,
+            direction: None,
         })
         .await?)
     }

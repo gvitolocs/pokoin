@@ -42,6 +42,7 @@ pub mod cardtrader {
     pub mod async_sync;
     pub mod client;
     pub mod integration;
+    pub mod link;
     pub mod push;
     pub mod sync;
     pub mod sync_core;

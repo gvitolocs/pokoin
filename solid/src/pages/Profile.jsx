@@ -12,6 +12,7 @@ import { sellerListCurrency } from '@market/seller-currency.js';
 import Avatar from '../components/Avatar.jsx';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/profile/CardTraderConnectPanel.jsx';
+import { ctLinkDirection, ctLinkOption } from '../components/profile/cardtrader-link.js';
 import DisplayNameEditor from '../components/profile/DisplayNameEditor.jsx';
 import SellerApiPanel from '../components/profile/SellerApiPanel.jsx';
 import { PknPayoutToggle, ShipFromCountrySelect, StripeConnectButton } from '../components/profile/SellerShippingSettings.jsx';
@@ -258,6 +259,7 @@ function ProfileDesk() {
   const listedCount = () => (tiles.listed() ? `${tiles.listed().listings}${tiles.listedCapped() ? '+' : ''}` : '—');
   const ctUser = () => cardTrader()?.metadata?.user?.username || cardTrader()?.metadata?.seller?.name || '';
   const ctOneDayReady = () => cardTrader()?.metadata?.oneDayReady === true || cardTrader()?.syncSummary?.mode === 'one_day_ready';
+  const ctLink = () => (ctOneDayReady() ? '1-Day Ready' : `inventory linked ${ctLinkOption(ctLinkDirection(cardTrader())).label}`);
   // Unknown after a failed load = the default (PKN on); the switch still saves.
   const acceptsPkn = () => (sellerSettings() ? sellerSettings().acceptsPkn !== false : (sellerSettingsFailed() ? true : null));
   const localCurrency = () => sellerListCurrency({ acceptsPkn: false, shipFromCountry: shipFromCountry() });
@@ -391,7 +393,7 @@ function ProfileDesk() {
               step={step().cardtrader}
               title="CardTrader"
               meta={cardTrader()?.connected
-                ? `Connected${ctUser() ? ` as ${ctUser()}` : ''}${ctOneDayReady() ? ' · 1-Day Ready' : ''}.`
+                ? `Connected${ctUser() ? ` as ${ctUser()}` : ''} · ${ctLink()}.`
                 : 'Optional — import your CardTrader stock and list there from Scan.'}
               open={ctOpen()}
               action={(

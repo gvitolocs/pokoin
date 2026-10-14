@@ -10,11 +10,12 @@ const LOCATION_MODES = [
 ];
 
 /**
- * After Sync: ask Power
- * Tools? → upload CSV per TCG → analyze → confirm mapping from their data.
+ * Import locations: upload a Power Tools CSV per TCG → analyze → confirm the
+ * mapping from their data → sync, which puts each matched CardTrader
+ * listing's box and stack on its Pokoin listing.
  */
 export default function CardTraderPowerToolsModal(props) {
-  const [step, setStep] = createSignal('ask'); // ask | upload | preview
+  const [step, setStep] = createSignal('upload'); // upload | preview
   const [files, setFiles] = createSignal({});
   const [stackSize, setStackSize] = createSignal(0); // 0 = use suggested after analyze
   const [numberedInStack, setNumberedInStack] = createSignal(false);
@@ -25,7 +26,7 @@ export default function CardTraderPowerToolsModal(props) {
 
   createEffect(() => Boolean(props.open), (open) => {
     if (open) return;
-    setStep('ask');
+    setStep('upload');
     setFiles({});
     setLocalError('');
     setNumberedInStack(false);
@@ -72,12 +73,6 @@ export default function CardTraderPowerToolsModal(props) {
     return rows.filter((row) => Number(row.count) > capacity);
   };
 
-  function chooseYes() {
-    setLocalError('');
-    setStep('upload');
-    props.onPreviewGames?.();
-  }
-
   function onFile(gameId, file) {
     if (!file) {
       setFiles((prev) => {
@@ -98,7 +93,7 @@ export default function CardTraderPowerToolsModal(props) {
   async function runAnalyze(options = syncOptions()) {
     setLocalError('');
     if (!uploadedIds().length) {
-      setLocalError('Upload at least one Power Tools CSV, or choose No.');
+      setLocalError('Upload at least one Power Tools CSV.');
       return false;
     }
     const ok = await props.onPreviewSample?.(options);
@@ -124,23 +119,12 @@ export default function CardTraderPowerToolsModal(props) {
     <Show when={props.open}>
       <div class="ct-pt-overlay" role="dialog" aria-modal="true" aria-labelledby="ct-pt-title">
         <div class="ct-pt-modal">
-          <h2 id="ct-pt-title">Sync CardTrader</h2>
+          <h2 id="ct-pt-title">Import locations from Power Tools</h2>
           <Switch>
-            <Match when={step() === 'ask'}>
-              <p class="page-lede">
-                Do you also use Power Tools for inventory? If yes, upload your Power Tools
-                stock CSV per TCG so Pokoin listings get the same box and stack.
-              </p>
-              <div class="ct-connect-actions">
-                <button type="button" class="btn btn-cardtrader" disabled={props.busy} onClick={chooseYes}>Yes — I use Power Tools</button>
-                <button type="button" class="btn" disabled={props.busy} onClick={() => props.onSkipPowerTools?.()}>No — sync CardTrader only</button>
-                <button type="button" class="btn ghost" disabled={props.busy} onClick={close}>Cancel</button>
-              </div>
-            </Match>
-
             <Match when={step() === 'upload'}>
               <p class="page-lede">
-                Upload a Power Tools CSV for each game you keep in Power Tools. We will read the
+                Upload the Power Tools stock CSV for each game you keep there. Each card it shares
+                with your CardTrader stock gets the same box and stack on Pokoin. We read the
                 location column from your file next — nothing is guessed before that.
               </p>
               <Show when={props.loadingGames}><p class="page-lede muted">Reading games from CardTrader…</p></Show>
@@ -183,7 +167,6 @@ export default function CardTraderPowerToolsModal(props) {
                 >
                   {props.previewBusy ? 'Reading CSV…' : 'Analyze CSV'}
                 </button>
-                <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => setStep('ask')}>Back</button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={close}>Cancel</button>
               </div>
             </Match>
@@ -192,7 +175,7 @@ export default function CardTraderPowerToolsModal(props) {
               <p class="page-lede">
                 From your CSV
                 {props.preview?.totalPowerToolsRows ? ` (${props.preview.totalPowerToolsRows} rows)` : ''}, we found how
-                locations are written. Confirm the mapping before the full import.
+                locations are written. Confirm the mapping before the import.
               </p>
 
               <Show when={examples().length} fallback={<p class="page-lede muted">No location values found in the uploaded CSV.</p>}>
@@ -324,7 +307,7 @@ export default function CardTraderPowerToolsModal(props) {
               <Show when={localError()}><p class="ct-connect-err">{localError()}</p></Show>
               <div class="ct-connect-actions">
                 <button type="button" class="btn btn-cardtrader" disabled={busyAll() || !props.preview?.samples?.length} onClick={confirmFull}>
-                  {props.busy ? 'Starting…' : 'Looks good — full import'}
+                  {props.busy ? 'Starting…' : 'Looks good — import locations'}
                 </button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => setStep('upload')}>Change CSV</button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={close}>Cancel</button>

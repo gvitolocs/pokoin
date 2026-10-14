@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::cardtrader::client::CardTraderClient;
 use crate::cardtrader::integration as ct_integration;
+use crate::cardtrader::link::PowerToolsByGame;
 use crate::cardtrader::sync::{read_seller_sync, record_seller_sync, reconcile_cardtrader_inventory, ReconcileArgs};
 use crate::db::DbPools;
 use crate::error::{clean_text, ApiResult};
@@ -69,6 +70,7 @@ impl SyncJobs {
 
     /// Start a background reconcile. Safe to call twice — the second call is
     /// a no-op. Returns (started, already_running).
+    #[allow(clippy::too_many_arguments)]
     pub async fn enqueue(
         self: &Arc<Self>,
         firestore: Arc<dyn FirestoreStore>,
@@ -78,6 +80,23 @@ impl SyncJobs {
         seller_name: String,
         token: Option<String>,
         one_day_ready: Option<bool>,
+    ) -> ApiResult<(bool, bool)> {
+        self.enqueue_with_power_tools(firestore, db, ct, uid, seller_name, token, one_day_ready, None).await
+    }
+
+    /// [`Self::enqueue`] carrying Power Tools rows whose locations the
+    /// reconcile writes onto the matched listings.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn enqueue_with_power_tools(
+        self: &Arc<Self>,
+        firestore: Arc<dyn FirestoreStore>,
+        db: DbPools,
+        ct: CardTraderClient,
+        uid: &str,
+        seller_name: String,
+        token: Option<String>,
+        one_day_ready: Option<bool>,
+        power_tools_by_game: Option<PowerToolsByGame>,
     ) -> ApiResult<(bool, bool)> {
         let seller_uid = clean_text(Some(uid), 160);
         if seller_uid.is_empty() {
@@ -119,8 +138,9 @@ impl SyncJobs {
                     token,
                     one_day_ready,
                     on_progress: None,
-                    power_tools_by_game: None,
+                    power_tools_by_game,
                     preview_games_only: false,
+                    direction: None,
                 })
                 .await
             }
@@ -182,8 +202,21 @@ pub async fn enqueue_with_stored_token(
     ct: CardTraderClient,
     uid: &str,
 ) -> ApiResult<(bool, bool)> {
+    enqueue_stored_with_power_tools(jobs, firestore, db, ct, uid, None).await
+}
+
+/// [`enqueue_with_stored_token`] carrying Power Tools rows (manual sync).
+pub async fn enqueue_stored_with_power_tools(
+    jobs: &Arc<SyncJobs>,
+    firestore: Arc<dyn FirestoreStore>,
+    db: DbPools,
+    ct: CardTraderClient,
+    uid: &str,
+    power_tools_by_game: Option<PowerToolsByGame>,
+) -> ApiResult<(bool, bool)> {
     let token = ct_integration::decrypt_integration_token(firestore.as_ref(), uid).await?;
-    jobs.enqueue(firestore, db, ct, uid, "Pokoin seller".into(), Some(token), None).await
+    jobs.enqueue_with_power_tools(firestore, db, ct, uid, "Pokoin seller".into(), Some(token), None, power_tools_by_game)
+        .await
 }
 
 #[cfg(test)]
