@@ -4110,7 +4110,18 @@ a.era-link:focus-visible {
   margin-top: auto;
 }
 
-.shop-terminal { grid-area: shop; }
+/* Vault (Pokoin's own stock) and Shop share the shop row half and half; narrower screens stack them, Vault first. */
+.shop-split {
+  grid-area: shop;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+.shop-split > .shop-panel { min-width: 0; }
+@media (max-width: 1100px) {
+  .shop-split { grid-template-columns: minmax(0, 1fr); }
+}
 
 .prod-layout {
   display: grid;

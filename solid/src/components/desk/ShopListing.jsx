@@ -246,10 +246,12 @@ export default function ShopListingRow(props) {
       <Show
         when={props.showCard}
         fallback={(
+          <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
           <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
             <a class="shop-seller" href={href()} onClick={(event) => event.stopPropagation()}>
               {seller()}
             </a>
+          </Show>
           </Show>
         )}
       >
@@ -310,7 +312,8 @@ export default function ShopListingRow(props) {
       </span>
       <Show when={!props.mine}>
         <span class="shop-row-actions">
-          <Show when={reference().sellerUid}>
+          {/* Vault rows (props.anonymous) never name or message the account behind them. */}
+          <Show when={reference().sellerUid && !props.anonymous}>
             <button
               type="button"
               class="shop-icon"
