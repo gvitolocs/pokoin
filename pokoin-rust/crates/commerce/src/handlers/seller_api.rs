@@ -8,6 +8,8 @@
 //! pkn_…`. One body `{ action, … }`: `connect`, `locations`, `webhook`,
 //! `listings`, `stock`, `list`, `sales`, `events`. The Card Rails path only
 //! accepts a `cardrails:stock` grant; the generic path accepts any grant.
+use std::collections::HashMap;
+
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -293,8 +295,83 @@ fn cardrails_settings(defaults: &Value) -> Value {
     })
 }
 
-fn tool_listing(row: &Value) -> Value {
+/// Exact-variant key into `cardtrader_sold_daily`: blueprint, condition,
+/// language, reverse, first edition. Never graded (a raw card is never a
+/// comp for a graded slab) and never mixed across any of these.
+type SoldVariantKey = (i64, String, String, bool, bool);
+
+/// Pokoin's own card id is twice the CardTrader blueprint id (the low bit
+/// marks the Card Rails/market variant split) — the same mapping the Poko
+/// market tools use (`poko-market.js`'s `card_id / 2`).
+fn blueprint_id_of(card_id: &Value) -> Option<i64> {
+    let id = match card_id {
+        Value::String(s) => s.parse::<i64>().ok(),
+        Value::Number(n) => n.as_i64(),
+        _ => None,
+    }?;
+    Some(id / 2)
+}
+
+const LAST_SOLD_WINDOW_DAYS: i32 = 30;
+
+/// The minimum confirmed Pokoin sale price (EUR cents) for each exact
+/// card version/printing a listing in `rows` is, over the last
+/// [`LAST_SOLD_WINDOW_DAYS`] days: `cardtrader_sold_daily` is Pokoin's own
+/// sanitized, per-day aggregate of confirmed sales (schema 042; see
+/// `docs/CARDTRADER_SELLER_SYNC.md` and the Poko market tools). A listing
+/// with no matching row in the window is left out of the map — never a
+/// guessed figure.
+async fn last_sold_minimums(state: &DomainState, rows: &[Value]) -> HashMap<SoldVariantKey, i64> {
+    let blueprint_ids: Vec<i64> = {
+        let mut ids: Vec<i64> = rows.iter().filter_map(|r| blueprint_id_of(&r["card_id"])).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    if blueprint_ids.is_empty() {
+        return HashMap::new();
+    }
+    let sold: Result<Vec<(i64, String, String, bool, bool, f64)>, _> = sqlx::query_as(
+        "select blueprint_id, condition, language, reverse, first_edition, min(min_pkn)::float8 \
+           from cardtrader_sold_daily \
+          where blueprint_id = any($1::bigint[]) and graded = false and sold_qty > 0 \
+            and observed_day >= current_date - $2::int \
+          group by blueprint_id, condition, language, reverse, first_edition",
+    )
+    .bind(&blueprint_ids)
+    .bind(LAST_SOLD_WINDOW_DAYS)
+    .fetch_all(state.read_db())
+    .await;
+    match sold {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|(_, _, _, _, _, min_pkn)| min_pkn.is_finite() && *min_pkn >= 0.0)
+            .map(|(blueprint_id, condition, language, reverse, first_edition, min_pkn)| {
+                let cents = (min_pkn / PKN_PER_EUR_CENT as f64).round() as i64;
+                ((blueprint_id, condition, language, reverse, first_edition), cents)
+            })
+            .collect(),
+        Err(err) => {
+            // Never fails the connector call over this: the field is just
+            // omitted, same as a printing with no sold data yet.
+            tracing::warn!(error = %err, "last-sold-minimum lookup failed for a cardrails listings page");
+            HashMap::new()
+        }
+    }
+}
+
+fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
+    let last_sold_min_eur_cents = blueprint_id_of(&row["card_id"]).and_then(|blueprint_id| {
+        let key = (
+            blueprint_id,
+            live::field(row, "condition", 20),
+            live::field(row, "language", 8),
+            row["reverse"] == true,
+            row["first_edition"] == true,
+        );
+        sold.get(&key).copied()
+    });
     json!({
         "listingId": row["id"],
         "cardId": row["card_id"],
@@ -313,6 +390,10 @@ fn tool_listing(row: &Value) -> Value {
         "foilState": row["foil_state"],
         "location": row["location"],
         "updatedAt": row["updated_at"],
+        // The minimum confirmed Pokoin sale price for this exact card
+        // version/printing over the last 30 days, in EUR cents; absent when
+        // Pokoin never sold a copy of it in that window.
+        "lastSoldMinEurCents": last_sold_min_eur_cents,
     })
 }
 
@@ -331,8 +412,9 @@ async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Va
     .fetch_all(state.write_db())
     .await?;
     let next = if rows.len() as i64 == limit { rows.last().map(|row| row["id"].clone()) } else { None };
+    let sold = last_sold_minimums(state, &rows).await;
     Ok(json!({
-        "listings": rows.iter().map(tool_listing).collect::<Vec<_>>(),
+        "listings": rows.iter().map(|row| tool_listing(row, &sold)).collect::<Vec<_>>(),
         "cursor": next.unwrap_or(Value::Null),
     }))
 }
@@ -378,7 +460,7 @@ async fn stock(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value
         return Err(ApiError::bad_request("targetQuantity must be between 0 and 99."));
     }
     let row = sqlx::query(
-        "select quantity_available, status from public.marketplace_user_listings where id = $1 and seller_uid = $2",
+        "select quantity_available, status, price_pkn::float8 AS price_pkn from public.marketplace_user_listings where id = $1 and seller_uid = $2",
     )
     .bind(uuid)
     .bind(&grant.seller_uid)
@@ -387,9 +469,10 @@ async fn stock(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value
     .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
     let current = i64::from(row.try_get::<i32, _>("quantity_available")?);
     let status: String = row.try_get("status")?;
-    let Some(patch) = stock_patch(current, &status, target as i64)? else {
+    let Some(mut patch) = stock_patch(current, &status, target as i64)? else {
         return Ok(json!({ "confirmed": true, "listingId": id, "quantity": current, "status": status, "changed": false }));
     };
+    if row.try_get::<f64, _>("price_pkn")? <= 0.0 && patch["status"] == "active" { patch["status"] = json!("paused"); }
     let listing = super::listings::update_listing(state, &seller_claims(grant), &uuid.to_string(), &patch).await?;
     let quantity = live::number(&listing["quantityAvailable"]);
     if !quantity.is_finite() {
@@ -419,12 +502,13 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
         if !currency.is_empty() && currency != "EUR" {
             return Err(ApiError::bad_request("Prices must be in EUR or PKN.").with_code("currency_unsupported"));
         }
-        (live::number(&item["price"]) * 100.0 * PKN_PER_EUR_CENT as f64).round()
+        (if item.get("priceEurCents").is_some() { live::number(&item["priceEurCents"]) } else { live::number(&item["price"]) * 100.0 } * PKN_PER_EUR_CENT as f64).round()
     };
-    if !price_pkn.is_finite() || price_pkn <= 0.0 {
+    let paused = item["status"] == "paused";
+    if !price_pkn.is_finite() || price_pkn < 0.0 || (price_pkn == 0.0 && !paused) {
         return Err(ApiError::bad_request("This item has no valid price."));
     }
-    let finish = live::first(item, &["finish", "printing"], 40).to_lowercase();
+    let finish = live::first(item, &["finish", "printing"], 40).to_lowercase().replace([' ', '-'], "_");
     let location = match &item["location"] {
         Value::String(label) => label.trim().to_string(),
         _ => live::first(item, &["locationLabel", "locationCode"], 64),
@@ -436,7 +520,11 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
         "condition": live::field(item, "condition", 20).to_uppercase(),
         "language": live::field(item, "language", 10).to_uppercase(),
         "reverse": finish == "reverse" || finish == "reverse_holo",
-        "firstEdition": finish == "first_edition",
+        "firstEdition": item["firstEdition"] == true || finish == "first_edition",
+        "foilState": if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else { "standard" },
+        "signed": item["signed"] == true, "altered": item["altered"] == true,
+        "status": if paused { "paused" } else { "active" },
+        "shippingAvailable": price_pkn > 0.0,
         "sellerName": seller_name,
         "sellerCountry": country,
         "location": location.chars().take(64).collect::<String>(),
@@ -447,6 +535,28 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
         body["marketplaceGame"] = json!(game);
     }
     Ok(body)
+}
+
+/// Quote new inventory with the same exact facets used for existing listings.
+async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
+    let items=body["items"].as_array().ok_or_else(||ApiError::bad_request("items is required"))?;
+    if items.len()>500 {return Err(ApiError::bad_request("At most 500 inventory items per quote"));}
+    let rows:Vec<Value>=items.iter().map(|item| {
+      let finish=live::first(item,&["printing","finish"],40).to_lowercase().replace([' ','-'],"_");
+      let condition=live::field(item,"condition",20).to_uppercase();
+      json!({"card_id":item["identity"]["publicId"],"condition":if condition=="PO" {"Poor"}else{condition.as_str()},
+        "language":live::field(item,"language",10).to_uppercase(),"reverse":finish=="reverse_holo"||finish=="reverse",
+        "first_edition":item["firstEdition"]==true})
+    }).collect();
+    let sold=last_sold_minimums(state,&rows).await;
+    let ids:Vec<i64>=rows.iter().filter_map(|r|blueprint_id_of(&r["card_id"])).collect();
+    let fallback:HashMap<i64,f64>=sqlx::query_as::<_,(i64,f64)>("SELECT blueprint_id,min(cheapest_price_pkn)::float8 FROM cheapest_homepage_cache_blueprint WHERE blueprint_id=ANY($1) AND provider='cardtrader' AND cheapest_price_pkn>0 GROUP BY blueprint_id").bind(&ids).fetch_all(state.read_db()).await.unwrap_or_default().into_iter().collect();
+    let prices:Vec<Value>=items.iter().zip(&rows).map(|(item,row)| {
+      let price=blueprint_id_of(&row["card_id"]).and_then(|id| sold.get(&(id,live::field(row,"condition",20),live::field(row,"language",10),row["reverse"]==true,row["first_edition"]==true))).copied();
+      let tile=blueprint_id_of(&row["card_id"]).and_then(|id|fallback.get(&id)).filter(|v|v.is_finite()&&**v>0.0).map(|v|(v/PKN_PER_EUR_CENT as f64).round()as i64);
+      json!({"itemId":item["id"],"publicId":row["card_id"],"minEurCents":price.or(tile),"priceSource":if price.is_some(){"sold_exact_30d"}else if tile.is_some(){"cardtrader_tile_minimum"}else{"unavailable"}})
+    }).collect();
+    Ok(json!({"prices":prices,"windowDays":LAST_SOLD_WINDOW_DAYS}))
 }
 
 /// Create a listing from a tool's item, at most once per idempotency key.
@@ -618,6 +728,7 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         "listings" => listings(state, &grant, &body).await?,
         "stock" => stock(state, &grant, &body).await?,
         "list" => list(state, &grant, &body).await?,
+        "sold-prices" => sold_prices(state,&body).await?,
         "sales" => events(state, &grant, &body, true).await?,
         "events" => events(state, &grant, &body, false).await?,
         _ => return Err(ApiError::bad_request("Unknown action.").with_code("seller_api/unknown-action")),
@@ -640,6 +751,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inventory_keeps_prices_printing_and_flags_without_publishing_unpriced_stock() {
+        let item=json!({"identity":{"publicId":"741592"},"quantity":1,"priceEurCents":19,
+          "language":"IT","condition":"SP","printing":"Reverse Holo","firstEdition":true,
+          "signed":true,"altered":true,"location":"box·3·41"});
+        let body=listing_body(&item,"seller","IT").unwrap();
+        assert_eq!(body["pricePkn"],38.0); assert_eq!(body["reverse"],true);
+        assert_eq!(body["firstEdition"],true); assert_eq!(body["signed"],true);
+        assert_eq!(body["altered"],true); assert_eq!(body["location"],"box·3·41");
+        let mut item=item;item["priceEurCents"]=json!(0);assert!(listing_body(&item,"seller","IT").is_err());
+        item["status"]=json!("paused");let body=listing_body(&item,"seller","IT").unwrap();
+        assert_eq!(body["pricePkn"],0.0);assert_eq!(body["status"],"paused");assert_eq!(body["shippingAvailable"],false);
+        item["priceEurCents"]=json!(-1);assert!(listing_body(&item,"seller","IT").is_err());
+    }
+
+
+    #[test]
     fn stock_patch_is_absolute_idempotent_and_revives_only_what_ran_out() {
         assert_eq!(stock_patch(3, "active", 3).unwrap(), None);
         assert_eq!(stock_patch(3, "active", 1).unwrap(), Some(json!({"quantityAvailable":1})));
@@ -650,6 +777,33 @@ mod tests {
         assert_eq!(stock_patch(4, "paused", 2).unwrap(), Some(json!({"quantityAvailable":2})));
         assert_eq!(stock_patch(0, "sold_out", 0).unwrap(), None);
         assert_eq!(stock_patch(1, "inactive", 1).unwrap_err().code.as_deref(), Some("listing_removed"));
+    }
+
+    #[test]
+    fn blueprint_id_halves_the_card_id_from_either_json_shape() {
+        assert_eq!(blueprint_id_of(&json!("798728")), Some(399364));
+        assert_eq!(blueprint_id_of(&json!(633412)), Some(316706));
+        assert_eq!(blueprint_id_of(&json!(null)), None);
+        assert_eq!(blueprint_id_of(&json!("not-a-number")), None);
+    }
+
+    #[test]
+    fn tool_listing_attaches_the_matching_last_sold_minimum_only() {
+        let row = json!({
+            "id": "l1", "card_id": "798728", "marketplace_game": "pokemon", "card_name": "Popplio",
+            "set_name": "Pitch Black", "collector_number": "018/084", "condition": "NM", "language": "EN",
+            "quantity_available": 1, "status": "active", "price_pkn": 38.0, "reverse": false,
+            "first_edition": false, "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
+        });
+        // Exact facet match: picked up.
+        let sold: HashMap<SoldVariantKey, i64> =
+            HashMap::from([((399364, "NM".to_string(), "EN".to_string(), false, false), 1250)]);
+        assert_eq!(tool_listing(&row, &sold)["lastSoldMinEurCents"], 1250);
+        // No row for this exact variant (e.g. only a reverse sold): omitted, not guessed.
+        let other: HashMap<SoldVariantKey, i64> =
+            HashMap::from([((399364, "NM".to_string(), "EN".to_string(), true, false), 1250)]);
+        assert_eq!(tool_listing(&row, &other)["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
     }
 
     #[test]
