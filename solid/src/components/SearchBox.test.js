@@ -9,7 +9,7 @@ const toggles = read('./SearchToggles.jsx');
 test('the header ranks locally from the first keystrokes; the network pool only hydrates', () => {
   assert.match(box, /Progressive network pool/);
   assert.match(box, /progressive: true/);
-  assert.match(box, /live\.paintCatalogGroups\(text, \{ printLang: rankPrint\(\), searchLang: searchLang\(\), kind: catalogTab\(\) \}\)/);
+  assert.match(box, /live\.paintCatalogGroups\(text, \{\s*printLang: rankPrint\(\), searchLang: searchLang\(\), kind: catalogTab\(\), limit,\s*\}\)/);
   assert.match(box, /suggestLiveReady/);
   assert.match(box, /fetchSearch,/);
   assert.match(box, /live\.catalogIntent\(text\)/);
