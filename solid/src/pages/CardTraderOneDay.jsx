@@ -170,7 +170,7 @@ function OneDayDesk() {
         <DeskPanel flush title={`CardTrader 1-DR · ${stockItems().length} card${stockItems().length === 1 ? '' : 's'}`}>
           <Show
             when={stockItems().length}
-            fallback={<p class="dr-stock-empty">No warehouse cards yet. Run Sync CardTrader in Settings.</p>}
+            fallback={<p class="dr-stock-empty">No warehouse cards yet. Press Sync now under CardTrader in Profile.</p>}
           >
             <div class="seller-listing-list" data-testid="cardtrader-1dr-all">
               <For each={stockItems()}>

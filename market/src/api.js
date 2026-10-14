@@ -996,18 +996,29 @@ export function claimReferral(token, code) {
   });
 }
 
-export function fetchCardTraderStatus(token) {
-  return getJson('/api/cardtrader-sync', {
+/** `{ status, running, phase, sync }`. An API without `status` on the sync read gets it from cardtrader-status. */
+export async function fetchCardTraderStatus(token) {
+  const readStatus = () => getJson('/api/cardtrader-status', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
     cache: 'no-store',
-  }).catch(() => getJson('/api/cardtrader-status', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: 'no-store',
-  }));
+  });
+  let data;
+  try {
+    data = await getJson('/api/cardtrader-sync', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
+  } catch (_) {
+    return { status: await readStatus() };
+  }
+  if (data && typeof data === 'object' && !data.status) {
+    return { ...data, status: await readStatus() };
+  }
+  return data;
 }
 
 export function connectCardTrader(token, cardTraderToken) {
@@ -1139,6 +1150,8 @@ export function syncCardTraderInventory(token, options = {}) {
   if (options.locationParse) body.locationParse = options.locationParse;
   if (options.previewPowerTools) body.previewPowerTools = true;
   if (options.priceMode) body.priceMode = options.priceMode;
+  // Inventory link: ct_to_pokoin | pokoin_to_ct | both (stored, then synced).
+  if (options.direction) body.direction = options.direction;
   return getJson('/api/cardtrader-sync', {
     method: 'POST',
     headers: {

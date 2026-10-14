@@ -56,6 +56,14 @@ pub fn safe_status_from_doc(doc: &FirestoreDoc) -> Value {
         "lastValidatedAt": data.get("lastValidatedAt").cloned().unwrap_or(Value::Null),
         "disconnectedAt": data.get("disconnectedAt").cloned().unwrap_or(Value::Null),
         "webhook": data.get("webhookRegistration").cloned().filter(|v| !v.is_null()).unwrap_or(Value::Null),
+        "inventorySync": if connected {
+            json!({
+                "direction": crate::cardtrader::link::direction_from_data(data).as_str(),
+                "updatedAt": data.pointer("/inventorySync/updatedAt").cloned().unwrap_or(Value::Null),
+            })
+        } else {
+            Value::Null
+        },
     })
 }
 
@@ -221,6 +229,10 @@ mod tests {
         assert_eq!(status["connected"], true);
         assert_eq!(status["metadata"]["user"]["username"], "sel");
         assert_eq!(status["provider"], "cardtrader");
+        assert_eq!(status["inventorySync"]["direction"], "ct_to_pokoin");
+        crate::cardtrader::link::store_direction(&firestore, "u1", crate::cardtrader::link::Direction::Both).await.unwrap();
+        let doc = read_integration_doc(&firestore, "u1").await.unwrap();
+        assert_eq!(safe_status_from_doc(&doc)["inventorySync"]["direction"], "both");
 
         // Token round trip through the AES envelope.
         assert_eq!(decrypt_integration_token(&firestore, "u1").await.unwrap(), "tok-value");
