@@ -200,7 +200,11 @@ test('the store head start ends when the request in flight for the URL lands fir
   const t = setup({
     storeDelayMs: 1500,
     storeWaitMs: 1000,
-    answers: { [URL_A]: () => new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); }) },
+    answers: {
+      [URL_A]: () => (release
+        ? { text: '{"v":2}' }
+        : new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); })),
+    },
   });
   t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
   const plain = t.reader.read(URL_A);
