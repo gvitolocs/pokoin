@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 use crate::game;
 
@@ -17,8 +17,6 @@ struct Inner {
     http: reqwest::Client,
     redis_url: Option<String>,
     redis: Mutex<Option<redis::aio::ConnectionManager>>,
-    game_pools: RwLock<HashMap<String, PgPool>>,
-    pool_max: u32,
 }
 
 /// A pool that connects on first use, so startup never blocks on Postgres.
@@ -38,7 +36,9 @@ fn env_first(names: &[&str]) -> Option<String> {
 }
 
 impl ApiState {
-    pub fn new(read: PgPool, write: PgPool, redis_url: Option<String>, pool_max: u32) -> Self {
+    /// `_pool_max` sized the old per-crate game pools; satellite games now
+    /// share `pokoin_db::satellite_pool` and its budget.
+    pub fn new(read: PgPool, write: PgPool, redis_url: Option<String>, _pool_max: u32) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .build()
@@ -50,8 +50,6 @@ impl ApiState {
                 http,
                 redis_url,
                 redis: Mutex::new(None),
-                game_pools: RwLock::new(HashMap::new()),
-                pool_max: pool_max.max(1),
             }),
         }
     }
@@ -68,7 +66,12 @@ impl ApiState {
             .ok_or_else(|| "MARKETPLACE_DATABASE_URL is not set".to_owned())?;
         let write_url = env_first(&["MARKETPLACE_WRITER_DATABASE_URL"]).unwrap_or_else(|| read_url.clone());
         let read = lazy_pool(&read_url, pool_max).map_err(|e| e.to_string())?;
-        let write = lazy_pool(&write_url, pool_max).map_err(|e| e.to_string())?;
+        // One pool when reads and writes share a database (overflow pods).
+        let write = if write_url == read_url {
+            read.clone()
+        } else {
+            lazy_pool(&write_url, pool_max).map_err(|e| e.to_string())?
+        };
         let redis_url = pokoin_config::Config::from_env().valkey_url;
         Ok(Self::new(read, write, redis_url, pool_max))
     }
@@ -126,15 +129,11 @@ impl ApiState {
         if game::is_pokemon_game(game_id) {
             return Some(self.read().clone());
         }
-        if let Some(pool) = self.inner.game_pools.read().await.get(game_id).cloned() {
-            return Some(pool);
-        }
         let url = game::database_url_for_game(game_id, &game::env_pairs());
         if url.trim().is_empty() {
             return None;
         }
-        let pool = lazy_pool(&url, self.inner.pool_max).ok()?;
-        let mut pools = self.inner.game_pools.write().await;
-        Some(pools.entry(game_id.to_owned()).or_insert(pool).clone())
+        // The process-wide satellite pool (small cap, short idle timeout).
+        pokoin_db::satellite_pool(&url).ok()
     }
 }

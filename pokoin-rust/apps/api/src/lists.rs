@@ -304,8 +304,8 @@ pub async fn build(app: Router, state: AppState, args: &[String]) -> anyhow::Res
         // Close this game's pool before the next game: every game database
         // lives on the one writer, shared with the API pods (max_connections).
         if game != "pokemon" {
-            if let Some(pool) = state.game_dbs.write().await.remove(game.as_str()) {
-                pool.close().await;
+            if let Some(url) = crate::catalog_api::game_db_url(game) {
+                pokoin_db::close_satellite(&url).await;
             }
         }
     }

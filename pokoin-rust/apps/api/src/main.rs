@@ -36,7 +36,6 @@ pub(crate) struct AppState {
     pub(crate) commerce: Arc<RwLock<Option<pokoin_commerce::DomainState>>>,
     pub(crate) db: Arc<RwLock<Option<PgPool>>>,
     pub(crate) http: reqwest::Client,
-    pub(crate) game_dbs: Arc<RwLock<std::collections::HashMap<String, PgPool>>>,
     pub(crate) redis: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     pub(crate) read_cache: Arc<read_cache::Coordinator>,
     pub(crate) requests: Arc<AtomicU64>,
@@ -178,7 +177,6 @@ fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
         config,
         commerce: Arc::new(RwLock::new(None)),
         db: Arc::new(RwLock::new(None)),
-        game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?,
@@ -288,6 +286,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         Some(pool) => (pool.size(), pool.num_idle() as u32),
         None => (0, 0),
     };
+    let (game_pools, game_size, game_idle) = pokoin_db::satellite_stats();
     Json(json!({
         "requests": state.requests.load(Ordering::Relaxed),
         "errors": state.errors.load(Ordering::Relaxed),
@@ -296,6 +295,10 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "dbPoolSize": pool_size,
         "dbPoolIdle": idle,
         "dbPoolMax": state.config.db_pool_max,
+        "gameDbPools": game_pools,
+        "gameDbPoolSize": game_size,
+        "gameDbPoolIdle": game_idle,
+        "gameDbPoolMax": pokoin_db::satellite_budget().max_connections,
     }))
 }
 
@@ -408,10 +411,15 @@ async fn build_full_router(state: AppState) -> Router {
         Some(read_url) => {
             let write_url = std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
                 .unwrap_or_else(|_| read_url.clone());
-            match (
-                lazy_pool(&read_url, pool_max),
-                lazy_pool(&write_url, pool_max),
-            ) {
+            // Where reads and writes share one database (the nezopt overflow
+            // pods), one pool serves both instead of two at the same address.
+            let shared = write_url.trim() == read_url.trim();
+            let read_pool = lazy_pool(&read_url, pool_max);
+            let write_pool = match (&read_pool, shared) {
+                (Ok(pool), true) => Ok(pool.clone()),
+                _ => lazy_pool(&write_url, pool_max),
+            };
+            match (read_pool, write_pool) {
                 (Ok(read_db), Ok(write_db)) => {
                     let commerce_state = pokoin_commerce::DomainState::with_pools(
                             pokoin_commerce::CommerceConfig::from_env(),
@@ -725,7 +733,6 @@ mod tests {
             config: Config::from_env(),
             db: Arc::new(RwLock::new(None)),
             http: reqwest::Client::new(),
-            game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             redis: Arc::new(RwLock::new(None)),
             read_cache: Arc::new(read_cache::Coordinator::default()),
             commerce: Arc::new(RwLock::new(None)),
