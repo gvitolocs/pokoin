@@ -1,26 +1,41 @@
 // Data behind the /cart page: live re-check of every cart row against its
 // card's listings (Amazon's "reflects each item's most recent price"), and
 // the rails — recently viewed, watchlist, Buy it again, more from sellers.
+// React hooks over the shared rules in cart-rails-core.js.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchAccountAddresses,
-  fetchCardTiles,
-  fetchListings,
-  fetchSellerByUsername,
-  peekRecentTile,
   readRecentCardIds,
   readWatchlistIds,
 } from './api.js';
 import { useAuth } from './auth.jsx';
 import { fetchRecommendations } from './cart-api.js';
-import { loadFirestore } from './firebase-client.js';
-import { buyAgainCards, isSelected, liveMessages } from './cart-model.js';
-import { sellerHandle } from './listing-meta.js';
-import { countryFromLocale } from './pkn.js';
+import { liveMessages } from './cart-model.js';
+import {
+  LIVE_WIDTH,
+  RECHECK_AFTER_MS,
+  RECOMMENDATIONS_DEBOUNCE_MS,
+  deliveryCountryFrom,
+  fetchBuyAgain,
+  fetchInspired,
+  fetchLiveEntry,
+  fetchShelfListings,
+  fetchTilesSafe,
+  inspiredNames,
+  liveCardIds,
+  mergeLiveNotes,
+  orderCardTiles,
+  preferredAddressCountry,
+  recommendationInputs,
+  runPool,
+  shelfSellers,
+  tileIds,
+  withoutIds,
+} from './cart-rails-core.js';
 import { syncRemoteRecentCardIds } from './recents.js';
-import { SHIP_TO_COUNTRIES } from './ship-countries.js';
-import { fetchSpeciesCards } from './species-cards.js';
+
+export { LIVE_LIMIT } from './cart-rails-core.js';
 
 /**
  * Amazon's "Deliver to …": the default saved address country (masked list,
@@ -38,34 +53,12 @@ export function useDeliveryCountry({ signedIn, getBearer }) {
       .then((token) => (token ? fetchAccountAddresses(token, { reveal: false }) : null))
       .then((data) => {
         if (cancelled) return;
-        const list = Array.isArray(data?.addresses) ? data.addresses : [];
-        const preferred = list.find((row) => row.isDefault) || list[0];
-        setFromAccount(String(preferred?.countryCode || '').toUpperCase());
+        setFromAccount(preferredAddressCountry(data));
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [signedIn, getBearer]);
-  if (fromAccount) return { country: fromAccount, saved: true };
-  const locale = countryFromLocale();
-  const known = SHIP_TO_COUNTRIES.some((row) => row.code === locale);
-  return { country: known ? locale : 'DK', saved: false };
-}
-
-/** Listings per card for the re-check; fewer rows back means the whole book. */
-export const LIVE_LIMIT = 200;
-const LIVE_WIDTH = 4;
-const RECHECK_AFTER_MS = 2 * 60 * 1000;
-
-async function runPool(list, width, fn) {
-  let cursor = 0;
-  async function worker() {
-    while (cursor < list.length) {
-      const item = list[cursor];
-      cursor += 1;
-      await fn(item);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(width, list.length) }, () => worker()));
+  return deliveryCountryFrom(fromAccount);
 }
 
 /**
@@ -93,9 +86,7 @@ export function useCartLive({ items, saved, applyLive, excludeSellerUid = '' }) 
     return () => { mounted.current = false; };
   }, []);
 
-  const ids = useMemo(() => [...new Set(
-    [...(items || []), ...(saved || [])].map((row) => String(row.cardId || '')).filter(Boolean),
-  )].slice(0, 80), [items, saved]);
+  const ids = useMemo(() => liveCardIds(items, saved), [items, saved]);
   const key = ids.join(',');
 
   useEffect(() => {
@@ -105,28 +96,18 @@ export function useCartLive({ items, saved, applyLive, excludeSellerUid = '' }) 
     lastCheck.current = Date.now();
     setChecking((n) => n + todo.length);
     void runPool(todo, LIVE_WIDTH, async (id) => {
-      let data = null;
-      try {
-        data = await fetchListings(id, { limit: LIVE_LIMIT, fresh: true });
-      } catch (_) {
-        data = null;
-      }
+      const entry = await fetchLiveEntry(id);
       if (!mounted.current) return;
       setChecking((n) => Math.max(0, n - 1));
-      if (!data) {
+      if (!entry) {
         asked.current.delete(id);
         return;
       }
-      const listings = Array.isArray(data.listings) ? data.listings : [];
-      const entry = { listings, complete: listings.length < LIVE_LIMIT, at: Date.now() };
       const rows = itemsRef.current.filter((row) => String(row.cardId) === id);
       const notes = liveMessages(rows, entry, { excludeSellerUid });
       setLive((current) => ({ ...current, [id]: entry }));
       if (notes.length) {
-        setMessages((current) => [
-          ...current.filter((note) => !notes.some((next) => next.id === note.id)),
-          ...notes,
-        ]);
+        setMessages((current) => mergeLiveNotes(current, notes));
       }
       applyRef.current(id, entry, { excludeSellerUid });
     });
@@ -158,18 +139,12 @@ export function useCartLive({ items, saved, applyLive, excludeSellerUid = '' }) 
   };
 }
 
-function named(card) {
-  return Boolean(card && String(card.name || '').trim());
-}
-
 /**
- * Catalogue tiles for card ids, in that order. The tile API only knows part
- * of the catalogue, so a miss falls back to this browser's recent-tile cache
- * and then to `fallback` rows ({ id, name, canonicalPath }) — a name is
- * enough for CardArt to find the catalogue scan.
+ * Catalogue tiles for card ids, in that order (orderCardTiles: tile API, then
+ * this browser's recent-tile cache, then `fallback` rows).
  */
 export function useCardTiles(ids, fallback = null) {
-  const wanted = useMemo(() => (ids || []).map(String).filter(Boolean).slice(0, 24), [ids]);
+  const wanted = useMemo(() => tileIds(ids), [ids]);
   const key = wanted.join(',');
   const fallbackRef = useRef(fallback);
   fallbackRef.current = fallback;
@@ -180,18 +155,10 @@ export function useCardTiles(ids, fallback = null) {
       return undefined;
     }
     let cancelled = false;
-    const settle = (cards) => {
+    fetchTilesSafe(wanted).then((cards) => {
       if (cancelled) return;
-      const byId = new Map((cards || []).map((card) => [String(card.id), card]));
-      const spare = new Map((fallbackRef.current || []).map((card) => [String(card.id), card]));
-      const ordered = wanted
-        .map((id) => [byId.get(id), peekRecentTile(id), spare.get(id)].find(named))
-        .filter(Boolean);
-      // Ids the tile endpoint rewrote (provisional → public) still show up.
-      const extra = (cards || []).filter((card) => named(card) && !wanted.includes(String(card.id)));
-      setState({ key, cards: [...ordered, ...extra] });
-    };
-    fetchCardTiles(wanted).then(settle, () => settle([]));
+      setState({ key, cards: orderCardTiles(wanted, cards, fallbackRef.current) });
+    });
     return () => { cancelled = true; };
     // `wanted` is captured through `key`.
   }, [key]);
@@ -228,14 +195,9 @@ export function useBuyAgain(uid) {
       return undefined;
     }
     let cancelled = false;
-    loadFirestore()
-      .then(({ firestore, collection, getDocs, query, where }) => (
-        getDocs(query(collection(firestore, 'orders'), where('uid', '==', uid)))
-      ))
-      .then((snap) => {
-        if (cancelled) return;
-        const orders = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setState({ uid, cards: buyAgainCards(orders) });
+    fetchBuyAgain(uid)
+      .then((cards) => {
+        if (!cancelled) setState({ uid, cards });
       })
       .catch(() => {
         if (!cancelled) setState({ uid, cards: [] });
@@ -250,38 +212,16 @@ export function useBuyAgain(uid) {
  * in a parcel you are paying shipping for anyway. Biggest parcels first.
  */
 export function useSellerShelves(groups, { max = 2, perSeller = 24 } = {}) {
-  const sellers = useMemo(() => {
-    const out = [];
-    const seen = new Set();
-    const ranked = [...(groups || [])].sort((a, b) => b.subtotalPkn - a.subtotalPkn);
-    for (const group of ranked) {
-      const handle = sellerHandle({
-        sellerUsername: group.sellerUsername,
-        sellerName: group.sellerName,
-      });
-      const lower = handle.toLowerCase();
-      if (!handle || seen.has(lower)) continue;
-      seen.add(lower);
-      out.push({ key: group.key, handle, sellerUid: group.sellerUid });
-      if (out.length >= max) break;
-    }
-    return out;
-  }, [groups, max]);
+  const sellers = useMemo(() => shelfSellers(groups, max), [groups, max]);
   const key = sellers.map((row) => row.handle).join(',');
   const [shelves, setShelves] = useState({});
   useEffect(() => {
     let cancelled = false;
     for (const seller of sellers) {
       if (shelves[seller.handle]) continue;
-      fetchSellerByUsername(seller.handle, { limit: perSeller })
-        .then((data) => {
-          if (cancelled) return;
-          const listings = Array.isArray(data?.listings) ? data.listings : [];
-          setShelves((current) => ({ ...current, [seller.handle]: listings }));
-        })
-        .catch(() => {
-          if (!cancelled) setShelves((current) => ({ ...current, [seller.handle]: [] }));
-        });
+      fetchShelfListings(seller.handle, perSeller).then((listings) => {
+        if (!cancelled) setShelves((current) => ({ ...current, [seller.handle]: listings }));
+      });
     }
     return () => { cancelled = true; };
     // Re-run only when the set of sellers changes.
@@ -294,15 +234,7 @@ export function useSellerShelves(groups, { max = 2, perSeller = 24 } = {}) {
  * Pokémon you looked at, interleaved, minus what you already saw or carry.
  */
 export function useInspired(cards, { exclude = [], perName = 12 } = {}) {
-  const names = useMemo(() => {
-    const out = [];
-    for (const card of cards || []) {
-      const name = String(card?.name || '').trim();
-      if (name && !out.some((seen) => seen.toLowerCase() === name.toLowerCase())) out.push(name);
-      if (out.length >= 2) break;
-    }
-    return out;
-  }, [cards]);
+  const names = useMemo(() => inspiredNames(cards), [cards]);
   const key = names.join('|');
   const [state, setState] = useState({ key: '', cards: [] });
   useEffect(() => {
@@ -311,29 +243,15 @@ export function useInspired(cards, { exclude = [], perName = 12 } = {}) {
       return undefined;
     }
     let cancelled = false;
-    Promise.all(names.map((name) => fetchSpeciesCards(name, { limit: perName }).catch(() => [])))
-      .then((lists) => {
-        if (cancelled) return;
-        const seen = new Set();
-        const merged = [];
-        for (let at = 0; at < perName; at += 1) {
-          for (const list of lists) {
-            const card = list[at];
-            const id = String(card?.id || card?.card_id || '');
-            if (!id || seen.has(id) || !named(card)) continue;
-            seen.add(id);
-            merged.push(card);
-          }
-        }
-        setState({ key, cards: merged });
-      });
+    fetchInspired(names, perName).then((merged) => {
+      if (!cancelled) setState({ key, cards: merged });
+    });
     return () => { cancelled = true; };
     // `names` is captured through `key`.
   }, [key, perName]);
-  const skip = new Set((exclude || []).map(String));
   return {
     names,
-    cards: (state.key === key ? state.cards : []).filter((card) => !skip.has(String(card.id))),
+    cards: withoutIds(state.key === key ? state.cards : [], exclude),
   };
 }
 
@@ -345,15 +263,10 @@ export function useInspired(cards, { exclude = [], perName = 12 } = {}) {
  */
 export function useRecommendations({ items, recentIds, watchIds }) {
   const { signedIn, getBearer } = useAuth();
-  const cart = useMemo(() => [...new Set((items || []).map((row) => String(row.cardId || '')).filter(Boolean))], [items]);
-  const sellers = useMemo(() => [...new Set((items || [])
-    .filter(isSelected)
-    .map((row) => String(row.sellerUid || ''))
-    .filter(Boolean))], [items]);
-  const listings = useMemo(() => (items || []).map((row) => String(row.listingId || '')).filter(Boolean), [items]);
-  const key = [cart.join(','), sellers.join(','), (recentIds || []).slice(0, 24).join(','), (watchIds || []).slice(0, 24).join(','), signedIn ? 'in' : 'out'].join('|');
-  const inputs = useRef({});
-  inputs.current = { cart, sellers, listings, recentIds, watchIds };
+  const latest = recommendationInputs({ items, recentIds, watchIds, signedIn });
+  const { key } = latest;
+  const inputs = useRef(latest);
+  inputs.current = latest;
   const [state, setState] = useState({ key: '', status: 'loading', rails: [], personalized: false });
 
   useEffect(() => {
@@ -390,7 +303,7 @@ export function useRecommendations({ items, recentIds, watchIds }) {
           ? current
           : { key, status: 'failed', rails: [], personalized: false }));
       }
-    }, 350);
+    }, RECOMMENDATIONS_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();

@@ -60,3 +60,105 @@ test('price sort puts the cheapest reverse first', () => {
   const desc = filterSellerBook(rows, { reverse: true, sort: 'price-desc' });
   assert.equal(desc.rows[0].id, '3');
 });
+
+// --- the indexed filter against the plain filter-then-sort it replaced -------
+
+function plainFilter(listings, filters = {}) {
+  const codes = {
+    NM: ['NM', 'M'], M: ['NM', 'M'], SP: ['SP', 'LP'], LP: ['SP', 'LP'], MP: ['MP'], PL: ['PL', 'HP'], HP: ['PL', 'HP'],
+    POOR: ['PO', 'POOR', 'D', 'DMG'], PO: ['PO', 'POOR', 'D', 'DMG'], D: ['PO', 'POOR', 'D', 'DMG'], DMG: ['PO', 'POOR', 'D', 'DMG'],
+  }[String(filters.condition || '').trim().toUpperCase()] || null;
+  const q = String(filters.q || '').trim().toLowerCase();
+  const language = String(filters.language || '').trim().toUpperCase();
+  const time = (value) => { const ms = new Date(value || 0).getTime(); return Number.isFinite(ms) ? ms : 0; };
+  const out = listings.filter((row) => {
+    if (q && !`${row.cardName || ''} ${row.setName || ''} ${row.collectorNumber || ''}`.toLowerCase().includes(q)) return false;
+    if (codes && !codes.includes(String(row.condition || '').trim().toUpperCase())) return false;
+    if (language && !String(row.language || '').trim().toUpperCase().startsWith(language)) return false;
+    if (filters.reverse && row.reverse !== true) return false;
+    if (filters.firstEdition && row.firstEdition !== true) return false;
+    if (filters.rarity === 'common' && !(String(row.rarity || '').toLowerCase().includes('common') && !String(row.rarity || '').toLowerCase().includes('uncommon'))) return false;
+    return true;
+  });
+  out.sort((a, b) => {
+    const pa = Number.isFinite(Number(a.pricePkn)) ? Number(a.pricePkn) : Number.POSITIVE_INFINITY;
+    const pb = Number.isFinite(Number(b.pricePkn)) ? Number(b.pricePkn) : Number.POSITIVE_INFINITY;
+    const updated = time(b.updatedAt) - time(a.updatedAt);
+    const created = time(b.createdAt) - time(a.createdAt);
+    switch (String(filters.sort || '').toLowerCase()) {
+      case 'price-desc': return (pb - pa) || updated || created;
+      case 'qty': return ((Number(b.quantityAvailable) || 0) - (Number(a.quantityAvailable) || 0)) || (pa - pb) || updated;
+      case 'name': return String(a.cardName || '').toLowerCase().localeCompare(String(b.cardName || '').toLowerCase()) || (pa - pb);
+      default: return (pa - pb) || updated || created;
+    }
+  });
+  return out;
+}
+
+function bigBook(size) {
+  let seed = 7;
+  const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const names = ['Pikachu', 'charizard ex', 'Éevee', 'Mew', 'mewtwo', 'Zapdos', 'Gengar', 'Umbreon VMAX'];
+  return Array.from({ length: size }, (_, index) => ({
+    id: String(index),
+    cardName: `${names[next(names.length)]} ${next(40)}`,
+    setName: ['Base', 'Jungle', 'Fossil'][next(3)],
+    collectorNumber: String(next(200)),
+    condition: ['NM', 'LP', 'MP', 'PO', 'sp ', ''][next(6)],
+    language: ['EN', 'IT', 'JP', 'en'][next(4)],
+    reverse: next(5) === 0,
+    firstEdition: next(9) === 0,
+    rarity: ['Common', 'Uncommon', 'Rare', null][next(4)],
+    foilState: 'standard',
+    pricePkn: next(50) === 0 ? null : next(30) * 10,
+    quantityAvailable: 1 + next(3),
+    updatedAt: `2026-10-${String(1 + next(9)).padStart(2, '0')}T00:00:00.000Z`,
+    createdAt: `2026-09-${String(1 + next(9)).padStart(2, '0')}T00:00:00.000Z`,
+  }));
+}
+
+test('the indexed book gives the same rows in the same order as filtering then sorting', () => {
+  const book = bigBook(3000);
+  const cases = [
+    {}, { sort: 'price-desc' }, { sort: 'qty' }, { sort: 'name' }, { sort: 'nonsense' },
+    { condition: 'NM', sort: 'price-desc' }, { condition: 'lp' }, { language: 'en', sort: 'name' },
+    { reverse: true, sort: 'qty' }, { firstEdition: true }, { q: ' PIKA ', sort: 'price-desc' },
+    { rarity: 'common', language: 'IT', sort: 'price-asc' }, { q: 'no such card' },
+  ];
+  for (const filters of cases) {
+    const expected = plainFilter(book, filters);
+    const actual = filterSellerBook(book, filters);
+    assert.deepEqual(actual.rows.map((row) => row.id), expected.map((row) => row.id), JSON.stringify(filters));
+    assert.equal(actual.unique, expected.length);
+    assert.equal(actual.copies, expected.reduce((sum, row) => sum + row.quantityAvailable, 0));
+  }
+  // The result is the caller's to slice; the book itself is never reordered.
+  assert.equal(book[0].id, '0');
+  assert.notEqual(filterSellerBook(book, {}).rows, filterSellerBook(book, {}).rows);
+});
+
+test('a book is indexed and sorted once, however many filter clicks follow', () => {
+  const book = bigBook(2000);
+  const sort = Array.prototype.sort;
+  let sorts = 0;
+  Array.prototype.sort = function counted(...args) {
+    if (this.length === book.length) sorts += 1;
+    return sort.apply(this, args);
+  };
+  try {
+    for (const condition of ['NM', 'LP', 'MP', 'PO', '']) {
+      for (const language of ['EN', 'IT', '']) filterSellerBook(book, { condition, language, sort: 'price-desc' });
+    }
+    assert.equal(sorts, 1, 'fifteen clicks in one order sort the book once');
+    filterSellerBook(book, { sort: 'name' });
+    filterSellerBook(book, { sort: 'name', reverse: true });
+    assert.equal(sorts, 2, 'a new order sorts it once more');
+  } finally {
+    Array.prototype.sort = sort;
+  }
+});
+
+test('anything that is not a book filters to nothing', () => {
+  assert.deepEqual(filterSellerBook(null, { reverse: true }), { rows: [], unique: 0, copies: 0 });
+  assert.deepEqual(filterSellerBook(undefined), { rows: [], unique: 0, copies: 0 });
+});

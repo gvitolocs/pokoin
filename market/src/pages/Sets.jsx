@@ -1,24 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchExpansions } from '../api.js';
+import { satelliteGroups } from '../browse-hubs.js';
 import { game, isPokemonGame } from '../game.js';
 import { ERA_CHIPS, groupExpansions, headingHref } from '../set-logos.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid from '../components/SetGuideGrid.jsx';
-
-function satelliteGroups(expansions, query = '') {
-  const needle = String(query || '').trim().toLowerCase();
-  const rows = (expansions || [])
-    .filter((row) => {
-      if (!needle) return true;
-      const blob = `${row.name || ''} ${row.slug || ''}`.toLowerCase();
-      return blob.includes(needle);
-    })
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en'));
-  return rows.length ? [['Sets', rows]] : [];
-}
 
 export default function Sets() {
   const site = game();

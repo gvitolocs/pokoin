@@ -30,3 +30,4 @@ export const PROTECTION_PILLARS = [
     link: { href: contactMailto(), label: CONTACT_EMAIL },
   },
 ];
+

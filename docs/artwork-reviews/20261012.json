@@ -1,0 +1,2832 @@
+{
+  "schema": 1,
+  "reviewed_all_pairs": true,
+  "reviewer": "Codex visual inspection; Giuseppe confirms shared-artwork associations",
+  "source_audit_sha256": "f45cf5352ed7cd8ee413b6bffaa4dc7b0684c729e2073763e4a13262a8c8df2b",
+  "review_sheet_count": 12,
+  "pairs": [
+    {
+      "index": 0,
+      "a": "v776528",
+      "b": "v776536",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776528",
+        "776536"
+      ],
+      "image_hashes": [
+        "c9a855ee059556a5738200836b619fdb78c8abff9bed36be85238a643895ba51",
+        "28cf344a499885306f7906b4cc26db1a0b3e7ef2c7fc907ba7e42cb52d3cf489"
+      ]
+    },
+    {
+      "index": 1,
+      "a": "v776446",
+      "b": "v776452",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776446",
+        "776452"
+      ],
+      "image_hashes": [
+        "a633f91f2a070eacb8665ccdf3fed95cdca2b9b56fa2e15080d1dbf68647e42b",
+        "e356b42050e28c3cbfba6181ca5249ebcde952d0ce2b190b59d91fbaa48cce9c"
+      ]
+    },
+    {
+      "index": 2,
+      "a": "v824982",
+      "b": "v824984",
+      "decision": "reject",
+      "reason": "wrong_top_bottom_reference",
+      "public_ids": [
+        "824982",
+        "824984"
+      ],
+      "image_hashes": [
+        "161aedeef540e1018bab12ef9b863e80af59cde34d9d6340b321f013199a894c",
+        "161aedeef540e1018bab12ef9b863e80af59cde34d9d6340b321f013199a894c"
+      ]
+    },
+    {
+      "index": 3,
+      "a": "v776696",
+      "b": "v776698",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776696",
+        "776698"
+      ],
+      "image_hashes": [
+        "b5a4aba8b28e12b4b8347a1c8a7a60a76f17dbf48c5e6b850b12ad0ad0ba6e58",
+        "dca0ba53bdc1a26fe5ea59e8b0e678d1980229d8004ed3eeba71c488a6d0dccc"
+      ]
+    },
+    {
+      "index": 4,
+      "a": "v776530",
+      "b": "v776536",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776530",
+        "776536"
+      ],
+      "image_hashes": [
+        "6ec09a1e83497458c11811df1c1b5987403bb494e3174315cef496f9003b0c22",
+        "28cf344a499885306f7906b4cc26db1a0b3e7ef2c7fc907ba7e42cb52d3cf489"
+      ]
+    },
+    {
+      "index": 5,
+      "a": "v776486",
+      "b": "v776488",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776486",
+        "776488"
+      ],
+      "image_hashes": [
+        "cfb98db3a2bd3f62823441e50a5d81bdf791bfb2a7dd1bdfaadeaa421a499705",
+        "0c48957403c5571c2ab609313d40be5946dfee9c974b972e073d3766ac80230a"
+      ]
+    },
+    {
+      "index": 6,
+      "a": "v776472",
+      "b": "v776480",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776472",
+        "776480"
+      ],
+      "image_hashes": [
+        "e4aeb9035dad753d5ce70ded08ec65cd9b869b94de8223dab4c4b659dc66f631",
+        "628f15e030fb62d27ce833a04dd53672c1fda6f31b1d62f94d4e633b3744a826"
+      ]
+    },
+    {
+      "index": 7,
+      "a": "v776444",
+      "b": "v776446",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776444",
+        "776446"
+      ],
+      "image_hashes": [
+        "de37522769bf880d0b969fa5e25f3d98d895e951e84e00bfe6551ed0def869ac",
+        "a633f91f2a070eacb8665ccdf3fed95cdca2b9b56fa2e15080d1dbf68647e42b"
+      ]
+    },
+    {
+      "index": 8,
+      "a": "v776432",
+      "b": "v776438",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776432",
+        "776438"
+      ],
+      "image_hashes": [
+        "379ee17733b99570dafcfc7767071b62931e913fa26367a5dbb89eb0ac7a1323",
+        "2bb80079323885a881c4b91e3f8a7aeb0e40148b7a9f564277418e0d1a1e5bb4"
+      ]
+    },
+    {
+      "index": 9,
+      "a": "v776348",
+      "b": "v776354",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776348",
+        "776354"
+      ],
+      "image_hashes": [
+        "7ded4bf20ef8a0dc098b75565842c822c925ef30bfbe9b025933f7c86e0b6801",
+        "2df04cc5493a4f99261d38756b48b111265e15ace5bbfa613f1204df4777360f"
+      ]
+    },
+    {
+      "index": 10,
+      "a": "v776724",
+      "b": "v776726",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776724",
+        "776726"
+      ],
+      "image_hashes": [
+        "5182a4c20b6939a5c94e38b6e4a777d4a13f40136be87a1d308f459bb15a0c3e",
+        "ea23c2ba2dc19b326ed28da6ad92c3bbc928bbc67ecc86f7c8e93cb77b69aa84"
+      ]
+    },
+    {
+      "index": 11,
+      "a": "v776346",
+      "b": "v776354",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776346",
+        "776354"
+      ],
+      "image_hashes": [
+        "77da2b963435b318c2c8e60805f127ed00093ae68947efeaba69e59fb1acec3f",
+        "2df04cc5493a4f99261d38756b48b111265e15ace5bbfa613f1204df4777360f"
+      ]
+    },
+    {
+      "index": 12,
+      "a": "v776528",
+      "b": "v776530",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776528",
+        "776530"
+      ],
+      "image_hashes": [
+        "c9a855ee059556a5738200836b619fdb78c8abff9bed36be85238a643895ba51",
+        "6ec09a1e83497458c11811df1c1b5987403bb494e3174315cef496f9003b0c22"
+      ]
+    },
+    {
+      "index": 13,
+      "a": "v776444",
+      "b": "v776452",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776444",
+        "776452"
+      ],
+      "image_hashes": [
+        "de37522769bf880d0b969fa5e25f3d98d895e951e84e00bfe6551ed0def869ac",
+        "e356b42050e28c3cbfba6181ca5249ebcde952d0ce2b190b59d91fbaa48cce9c"
+      ]
+    },
+    {
+      "index": 14,
+      "a": "v776430",
+      "b": "v776438",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776430",
+        "776438"
+      ],
+      "image_hashes": [
+        "370dac82f215e651374235ffde49e9d2018bd5f42bc0e56eae65c19eeb83e590",
+        "2bb80079323885a881c4b91e3f8a7aeb0e40148b7a9f564277418e0d1a1e5bb4"
+      ]
+    },
+    {
+      "index": 15,
+      "a": "v776402",
+      "b": "v776404",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776402",
+        "776404"
+      ],
+      "image_hashes": [
+        "34b6ac0a1089db43b9ba09d0ffed59003e28eb76a897376270ae7133ab63a867",
+        "3a2b016c6cbebcc9fd15799745d3b878efb25445d13e92887f4d1dede876a9f0"
+      ]
+    },
+    {
+      "index": 16,
+      "a": "v637860",
+      "b": "v637866",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "637860",
+        "637866"
+      ],
+      "image_hashes": [
+        "96cdc1958305ca6ebdaf217b4a0c466c55cc7c2ad993b883bead0bbb95307ec9",
+        "e4c1bfde66beec40b2645362f515cedf7f60bb0ab90537a78d8b87ce9a8c25cf"
+      ]
+    },
+    {
+      "index": 17,
+      "a": "v776698",
+      "b": "v776704",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776698",
+        "776704"
+      ],
+      "image_hashes": [
+        "dca0ba53bdc1a26fe5ea59e8b0e678d1980229d8004ed3eeba71c488a6d0dccc",
+        "417e8153b01fffea160da68c4800f1eaca8c672aaeb3855fc1902798c4f9b7d8"
+      ]
+    },
+    {
+      "index": 18,
+      "a": "v776430",
+      "b": "v776432",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776430",
+        "776432"
+      ],
+      "image_hashes": [
+        "370dac82f215e651374235ffde49e9d2018bd5f42bc0e56eae65c19eeb83e590",
+        "379ee17733b99570dafcfc7767071b62931e913fa26367a5dbb89eb0ac7a1323"
+      ]
+    },
+    {
+      "index": 19,
+      "a": "v776402",
+      "b": "v776410",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776402",
+        "776410"
+      ],
+      "image_hashes": [
+        "34b6ac0a1089db43b9ba09d0ffed59003e28eb76a897376270ae7133ab63a867",
+        "13fe203877e66b7a52af295c6d19d1d49ced1cdd46eb635712643f0632c7e795"
+      ]
+    },
+    {
+      "index": 20,
+      "a": "v776388",
+      "b": "v776390",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776388",
+        "776390"
+      ],
+      "image_hashes": [
+        "8f10cfdcdbc88c5b582909e7698832b2bbc54833157cd85c6c8ec185d00c78b4",
+        "e96072328c8a6087c61e2e5cd5a6897f1cf420be5a305bc22150efd72f4e515f"
+      ]
+    },
+    {
+      "index": 21,
+      "a": "v776346",
+      "b": "v776348",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776346",
+        "776348"
+      ],
+      "image_hashes": [
+        "77da2b963435b318c2c8e60805f127ed00093ae68947efeaba69e59fb1acec3f",
+        "7ded4bf20ef8a0dc098b75565842c822c925ef30bfbe9b025933f7c86e0b6801"
+      ]
+    },
+    {
+      "index": 22,
+      "a": "v776710",
+      "b": "v776718",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776710",
+        "776718"
+      ],
+      "image_hashes": [
+        "7597d11cee9cc2e5cab53c1602cb7daca43a1d1443982664f27cdd8f9975fab3",
+        "95d4612691e2e610084fe8e7fd5788e0b948818424b8a45350fc0286d2d7ff5b"
+      ]
+    },
+    {
+      "index": 23,
+      "a": "v776458",
+      "b": "v776460",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776458",
+        "776460"
+      ],
+      "image_hashes": [
+        "d72b23c29c499e80dd3efcc4807dbb282fb687c47e934c5dd072b5c6a07a3aeb",
+        "89766ab405588766978463117672a5850c902b336dcd9a8ad00b38ea35448e4f"
+      ]
+    },
+    {
+      "index": 24,
+      "a": "v776710",
+      "b": "v776712",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776710",
+        "776712"
+      ],
+      "image_hashes": [
+        "7597d11cee9cc2e5cab53c1602cb7daca43a1d1443982664f27cdd8f9975fab3",
+        "d482453c4d5072664c0be28605fc4e3498da4eb543a6b3c697326ef7e13bd808"
+      ]
+    },
+    {
+      "index": 25,
+      "a": "v776404",
+      "b": "v776410",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776404",
+        "776410"
+      ],
+      "image_hashes": [
+        "3a2b016c6cbebcc9fd15799745d3b878efb25445d13e92887f4d1dede876a9f0",
+        "13fe203877e66b7a52af295c6d19d1d49ced1cdd46eb635712643f0632c7e795"
+      ]
+    },
+    {
+      "index": 26,
+      "a": "v776712",
+      "b": "v776718",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776712",
+        "776718"
+      ],
+      "image_hashes": [
+        "d482453c4d5072664c0be28605fc4e3498da4eb543a6b3c697326ef7e13bd808",
+        "95d4612691e2e610084fe8e7fd5788e0b948818424b8a45350fc0286d2d7ff5b"
+      ]
+    },
+    {
+      "index": 27,
+      "a": "v776474",
+      "b": "v776480",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776474",
+        "776480"
+      ],
+      "image_hashes": [
+        "84c2eafbdf913e557b26a574533aa5a277db48ffac867f6f5957075bcc594521",
+        "628f15e030fb62d27ce833a04dd53672c1fda6f31b1d62f94d4e633b3744a826"
+      ]
+    },
+    {
+      "index": 28,
+      "a": "v776696",
+      "b": "v776704",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776696",
+        "776704"
+      ],
+      "image_hashes": [
+        "b5a4aba8b28e12b4b8347a1c8a7a60a76f17dbf48c5e6b850b12ad0ad0ba6e58",
+        "417e8153b01fffea160da68c4800f1eaca8c672aaeb3855fc1902798c4f9b7d8"
+      ]
+    },
+    {
+      "index": 29,
+      "a": "v776488",
+      "b": "v776494",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776488",
+        "776494"
+      ],
+      "image_hashes": [
+        "0c48957403c5571c2ab609313d40be5946dfee9c974b972e073d3766ac80230a",
+        "27adff4f4ccd8acc1ee3f1c9bfc21853de68b4db6886e7e665595e39f0504d3e"
+      ]
+    },
+    {
+      "index": 30,
+      "a": "v776584",
+      "b": "v776586",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776584",
+        "776586"
+      ],
+      "image_hashes": [
+        "2a1ebfb567e6490c527cae1bcc73f4c1d21dd97379e49ed81c332737c0723ff3",
+        "5d014614f7971fb58af3b2264fcb12d04c2158856092631ef9a8f6f01e137502"
+      ]
+    },
+    {
+      "index": 31,
+      "a": "v776486",
+      "b": "v776494",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776486",
+        "776494"
+      ],
+      "image_hashes": [
+        "cfb98db3a2bd3f62823441e50a5d81bdf791bfb2a7dd1bdfaadeaa421a499705",
+        "27adff4f4ccd8acc1ee3f1c9bfc21853de68b4db6886e7e665595e39f0504d3e"
+      ]
+    },
+    {
+      "index": 32,
+      "a": "v776472",
+      "b": "v776474",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776472",
+        "776474"
+      ],
+      "image_hashes": [
+        "e4aeb9035dad753d5ce70ded08ec65cd9b869b94de8223dab4c4b659dc66f631",
+        "84c2eafbdf913e557b26a574533aa5a277db48ffac867f6f5957075bcc594521"
+      ]
+    },
+    {
+      "index": 33,
+      "a": "v776460",
+      "b": "v776466",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776460",
+        "776466"
+      ],
+      "image_hashes": [
+        "89766ab405588766978463117672a5850c902b336dcd9a8ad00b38ea35448e4f",
+        "1ebd823444aae06700d3b2ab9e660b29f1899ef3ca09ac396b6676e4c27c6353"
+      ]
+    },
+    {
+      "index": 34,
+      "a": "v776584",
+      "b": "v776592",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776584",
+        "776592"
+      ],
+      "image_hashes": [
+        "2a1ebfb567e6490c527cae1bcc73f4c1d21dd97379e49ed81c332737c0723ff3",
+        "71677c8526a87b88fd8f4eac23dc3928c66b508937087a67282acf805ac1fda0"
+      ]
+    },
+    {
+      "index": 35,
+      "a": "v776726",
+      "b": "v776732",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776726",
+        "776732"
+      ],
+      "image_hashes": [
+        "ea23c2ba2dc19b326ed28da6ad92c3bbc928bbc67ecc86f7c8e93cb77b69aa84",
+        "f5a25b4f3e989c935afc2029c56eacd65ff9800d54e880a4d675f8500ed0ed5c"
+      ]
+    },
+    {
+      "index": 36,
+      "a": "v776458",
+      "b": "v776466",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776458",
+        "776466"
+      ],
+      "image_hashes": [
+        "d72b23c29c499e80dd3efcc4807dbb282fb687c47e934c5dd072b5c6a07a3aeb",
+        "1ebd823444aae06700d3b2ab9e660b29f1899ef3ca09ac396b6676e4c27c6353"
+      ]
+    },
+    {
+      "index": 37,
+      "a": "v776724",
+      "b": "v776732",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776724",
+        "776732"
+      ],
+      "image_hashes": [
+        "5182a4c20b6939a5c94e38b6e4a777d4a13f40136be87a1d308f459bb15a0c3e",
+        "f5a25b4f3e989c935afc2029c56eacd65ff9800d54e880a4d675f8500ed0ed5c"
+      ]
+    },
+    {
+      "index": 38,
+      "a": "v776586",
+      "b": "v776592",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776586",
+        "776592"
+      ],
+      "image_hashes": [
+        "5d014614f7971fb58af3b2264fcb12d04c2158856092631ef9a8f6f01e137502",
+        "71677c8526a87b88fd8f4eac23dc3928c66b508937087a67282acf805ac1fda0"
+      ]
+    },
+    {
+      "index": 39,
+      "a": "v776388",
+      "b": "v776396",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776388",
+        "776396"
+      ],
+      "image_hashes": [
+        "8f10cfdcdbc88c5b582909e7698832b2bbc54833157cd85c6c8ec185d00c78b4",
+        "a91834c547b754240324fe440523ea062648a74c9d505dd8ddcea3228d38d54e"
+      ]
+    },
+    {
+      "index": 40,
+      "a": "v221996",
+      "b": "v243624",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "221996",
+        "243624"
+      ],
+      "image_hashes": [
+        "306ab00fbca655ff8ced8bd072f26846d77ab31dc57fb91ab4e9b9ba34e6e62b",
+        "182ee71b239318f2b3361978d85a5d06f9427938190b877f210a8ee7a09d23a8"
+      ]
+    },
+    {
+      "index": 41,
+      "a": "v776390",
+      "b": "v776396",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776390",
+        "776396"
+      ],
+      "image_hashes": [
+        "e96072328c8a6087c61e2e5cd5a6897f1cf420be5a305bc22150efd72f4e515f",
+        "a91834c547b754240324fe440523ea062648a74c9d505dd8ddcea3228d38d54e"
+      ]
+    },
+    {
+      "index": 42,
+      "a": "v749618",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749618",
+        "749630"
+      ],
+      "image_hashes": [
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 43,
+      "a": "v637858",
+      "b": "v637866",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "637858",
+        "637866"
+      ],
+      "image_hashes": [
+        "7acf414dc9bfa4958b87944409e3b6e4abcbe7d34b4d3ec3d27354596d3c6ae9",
+        "e4c1bfde66beec40b2645362f515cedf7f60bb0ab90537a78d8b87ce9a8c25cf"
+      ]
+    },
+    {
+      "index": 44,
+      "a": "v637858",
+      "b": "v637860",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "637858",
+        "637860"
+      ],
+      "image_hashes": [
+        "7acf414dc9bfa4958b87944409e3b6e4abcbe7d34b4d3ec3d27354596d3c6ae9",
+        "96cdc1958305ca6ebdaf217b4a0c466c55cc7c2ad993b883bead0bbb95307ec9"
+      ]
+    },
+    {
+      "index": 45,
+      "a": "v749618",
+      "b": "v749620",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749618",
+        "749620"
+      ],
+      "image_hashes": [
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659",
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d"
+      ]
+    },
+    {
+      "index": 46,
+      "a": "v749620",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749620",
+        "749630"
+      ],
+      "image_hashes": [
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 47,
+      "a": "v279656",
+      "b": "v450394",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "279656",
+        "450394"
+      ],
+      "image_hashes": [
+        "20a37ba512c8b9d50dc7c70e460e331eea13d4773de05b85f2b7659179fb431d",
+        "1f6276a21655d657e4455a9ef1cc681588741532387e9cd6f137540fb1f41209"
+      ]
+    },
+    {
+      "index": 48,
+      "a": "v279654",
+      "b": "v450386",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "279654",
+        "450386"
+      ],
+      "image_hashes": [
+        "f300b32d5cfd828e73abd159bb458674e488bb45f163b2e760a3170730836ed7",
+        "c9bbcb57551928e77b29891b919bb323cc86f52b3a82f53446267447cbaf69e7"
+      ]
+    },
+    {
+      "index": 49,
+      "a": "v749612",
+      "b": "v749620",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749612",
+        "749620"
+      ],
+      "image_hashes": [
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a",
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d"
+      ]
+    },
+    {
+      "index": 50,
+      "a": "v749612",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749612",
+        "749630"
+      ],
+      "image_hashes": [
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 51,
+      "a": "v282898",
+      "b": "v450382",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "282898",
+        "450382"
+      ],
+      "image_hashes": [
+        "69255331b9fddc6c327adc9c53b6d3430a5504b038c1e1002bc715a50ea5889d",
+        "a558d2aa3e4a1aa7b6c22dbc2f323e0ff5eeefc7d20a43c942391482db3c8c34"
+      ]
+    },
+    {
+      "index": 52,
+      "a": "v749612",
+      "b": "v749618",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749612",
+        "749618"
+      ],
+      "image_hashes": [
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a",
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659"
+      ]
+    },
+    {
+      "index": 53,
+      "a": "v481792",
+      "b": "v622988",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "481792",
+        "622988"
+      ],
+      "image_hashes": [
+        "7bb76d06c53eb848e4d32c918e2475f8a0fefd0f6ef0e6be3b5adeccfbf2ab2c",
+        "e6398ad5dba64b58eae6f4fd48c872cc7cb1a948f4403a38d5dd714d7567d5cb"
+      ]
+    },
+    {
+      "index": 54,
+      "a": "v282900",
+      "b": "v310696",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "282900",
+        "310696"
+      ],
+      "image_hashes": [
+        "82fb1b5e56749f06972777e50599353426d1c0053073b3f50a9234af6a0c2d41",
+        "afd09b99746537df01634cd8fc2f4413ee91d9343369dfea2a4f566b1c0643d5"
+      ]
+    },
+    {
+      "index": 55,
+      "a": "v812002",
+      "b": "v812008",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812002",
+        "812008"
+      ],
+      "image_hashes": [
+        "933d67209b12e91225e9379a9dd330db73574880e508d7fa79fd6e8fb5bb3bcf",
+        "ff0b286840362a4135e1d586ca2a773b5eabc0b17df33ce06a69dd14dcd54c85"
+      ]
+    },
+    {
+      "index": 56,
+      "a": "v811986",
+      "b": "v811994",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811986",
+        "811994"
+      ],
+      "image_hashes": [
+        "f39209c1cccb22b282e91811f0702cecb5323f2cf3b8b16ad261d582d44d1a0d",
+        "cd9c345cf514e0fee599af8f3b3d372201e2bd5a82f557da572ec3812a6efc38"
+      ]
+    },
+    {
+      "index": 57,
+      "a": "v276948",
+      "b": "v277410",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "276948",
+        "277410"
+      ],
+      "image_hashes": [
+        "353220efd30806ab85e74e0569a88e45210a7d46e9b92c97450c5113c4b56950",
+        "aebc89ef8403db8b96cbbcb57c9fedfa7d1c85435c501aa4046f7d2d915f510a"
+      ]
+    },
+    {
+      "index": 58,
+      "a": "v812000",
+      "b": "v812002",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812000",
+        "812002"
+      ],
+      "image_hashes": [
+        "eed9ab9d42ef3b99bb10926aa632db0e729761099f425f42cc51c2fdfd0c0f79",
+        "933d67209b12e91225e9379a9dd330db73574880e508d7fa79fd6e8fb5bb3bcf"
+      ]
+    },
+    {
+      "index": 59,
+      "a": "v239360",
+      "b": "v239762",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "239360",
+        "239762"
+      ],
+      "image_hashes": [
+        "7eed61750b7b6b11b8c0c1b1578ac9b55db73efe211df5e509e3956334fa9d31",
+        "7e5c0329222df25f25244bda9f42b272eb64b7c0749c5c9208e9f8bfb2e66d11"
+      ]
+    },
+    {
+      "index": 60,
+      "a": "v749612",
+      "b": "v749622",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749612",
+        "749622"
+      ],
+      "image_hashes": [
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a",
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb"
+      ]
+    },
+    {
+      "index": 61,
+      "a": "v811988",
+      "b": "v811994",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811988",
+        "811994"
+      ],
+      "image_hashes": [
+        "6cff5b8412a0dcf6c6eba25cc8fe22697673cc870bfd2513a1a3a8083021f759",
+        "cd9c345cf514e0fee599af8f3b3d372201e2bd5a82f557da572ec3812a6efc38"
+      ]
+    },
+    {
+      "index": 62,
+      "a": "v475206",
+      "b": "v649476",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "475206",
+        "649476"
+      ],
+      "image_hashes": [
+        "f7c9e5975c5a76e73460bf27e40695c9aa884cdded9eaa1760244d8621ed2208",
+        "d83af72df791119de46ff5488d277fab6ab7755b17d9ecd7794e2db922b5d072"
+      ]
+    },
+    {
+      "index": 63,
+      "a": "v749618",
+      "b": "v749622",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749618",
+        "749622"
+      ],
+      "image_hashes": [
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659",
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb"
+      ]
+    },
+    {
+      "index": 64,
+      "a": "v749622",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749622",
+        "749630"
+      ],
+      "image_hashes": [
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 65,
+      "a": "v811986",
+      "b": "v811988",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811986",
+        "811988"
+      ],
+      "image_hashes": [
+        "f39209c1cccb22b282e91811f0702cecb5323f2cf3b8b16ad261d582d44d1a0d",
+        "6cff5b8412a0dcf6c6eba25cc8fe22697673cc870bfd2513a1a3a8083021f759"
+      ]
+    },
+    {
+      "index": 66,
+      "a": "v749620",
+      "b": "v749622",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749620",
+        "749622"
+      ],
+      "image_hashes": [
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d",
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb"
+      ]
+    },
+    {
+      "index": 67,
+      "a": "v239552",
+      "b": "v665064",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "239552",
+        "665064"
+      ],
+      "image_hashes": [
+        "c52470f3916f479b613e0c6908e9a390d50f33d8805a7ef063c7c11be0c7af03",
+        "53ed9fecbebf084c0c65d738a4f564bc080d632bd982ac4cd43318b6a958f2b3"
+      ]
+    },
+    {
+      "index": 68,
+      "a": "v812000",
+      "b": "v812008",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812000",
+        "812008"
+      ],
+      "image_hashes": [
+        "eed9ab9d42ef3b99bb10926aa632db0e729761099f425f42cc51c2fdfd0c0f79",
+        "ff0b286840362a4135e1d586ca2a773b5eabc0b17df33ce06a69dd14dcd54c85"
+      ]
+    },
+    {
+      "index": 69,
+      "a": "v249084",
+      "b": "v665072",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "249084",
+        "665072"
+      ],
+      "image_hashes": [
+        "9266b540a21d5de96be26efd49ac319c357752302c7a213a8c4fb7a937041cdf",
+        "e36a781cc68cdc19fd1a5f5f4a84737004673aa6882fece9e6457139cadf5e27"
+      ]
+    },
+    {
+      "index": 70,
+      "a": "v252184",
+      "b": "v665074",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "252184",
+        "665074"
+      ],
+      "image_hashes": [
+        "abe28b897df2057c3bd366e8a27880bdbded56959a34041570e1884f1ae030af",
+        "e684df967755ce16322c61984cacce2987fc4025c0f0ddb2b4844cbb1ea32077"
+      ]
+    },
+    {
+      "index": 71,
+      "a": "v288020",
+      "b": "v586978",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "288020",
+        "586978"
+      ],
+      "image_hashes": [
+        "df02d50a8a1e8424aa3dcd550bf8443ceec6b1956ca5d24376da5b28a77c0385",
+        "c3bc9d4e8c9a5b1a682f5f0524367411b9ee6eda11eb5cd4e3cd13050437ec57"
+      ]
+    },
+    {
+      "index": 72,
+      "a": "v720400",
+      "b": "v720612",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720400",
+        "720612"
+      ],
+      "image_hashes": [
+        "cf1b1fefe8f0419d18fa29aff2f52ea056f921f99d6d99c5fd74f3ed4c3f958b",
+        "968fb4125b215d2ce931285841999abdd90459be6b3012527ecba5156f08b33f"
+      ]
+    },
+    {
+      "index": 73,
+      "a": "v635300",
+      "b": "v749610",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749610"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24"
+      ]
+    },
+    {
+      "index": 74,
+      "a": "v260662",
+      "b": "v287864",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "260662",
+        "287864"
+      ],
+      "image_hashes": [
+        "72b2000729b25f9620f6bf943b0a89253d9a62f50acd133ae30cdfb816d0bd77",
+        "129f8aec0859f90ee92ed1338ea895f9100456547e0b7980498868defe1a0312"
+      ]
+    },
+    {
+      "index": 75,
+      "a": "v589528",
+      "b": "v596888",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "589528",
+        "596888"
+      ],
+      "image_hashes": [
+        "fc6cdd453ce585ed53ecc4d2bb15b5c1bb8936284d75e3bc65f7be4fa0d1c09a",
+        "95e36b340bb7ba595cb120cfe476fb5e99aa252393ceff3c112be49c379dafec"
+      ]
+    },
+    {
+      "index": 76,
+      "a": "v622092",
+      "b": "v694376",
+      "decision": "reject",
+      "reason": "mislabeled_zubat_reference",
+      "public_ids": [
+        "622092",
+        "694376"
+      ],
+      "image_hashes": [
+        "28670da9ee533de4a1d29cb5971eb0402fe83934244dd4f708435d4848255eb4",
+        "b6365d1f46511c0b711b50f83d0f416865e770f77dd3f8e350664ad7a42cf366"
+      ]
+    },
+    {
+      "index": 77,
+      "a": "v812002",
+      "b": "v812006",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812002",
+        "812006"
+      ],
+      "image_hashes": [
+        "933d67209b12e91225e9379a9dd330db73574880e508d7fa79fd6e8fb5bb3bcf",
+        "8e592f9d32fbe17bd66969c7c092c0bfd816205b84f3adbffd77dde6af2d5fee"
+      ]
+    },
+    {
+      "index": 78,
+      "a": "v287792",
+      "b": "v516048",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "287792",
+        "516048"
+      ],
+      "image_hashes": [
+        "fc5a752dc67d26be5ff4b89bb83015b6c78a6cd5f56ff321b3c6d41507e9eef0",
+        "fc7de16fa53568d5abf5f52a4f881ba91e414f1ba3547d43e015132f99a2e4f2"
+      ]
+    },
+    {
+      "index": 79,
+      "a": "v265154",
+      "b": "v265186",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "265154",
+        "265186"
+      ],
+      "image_hashes": [
+        "17181d1ae287fbd6ee2b404e2f89e0c764c6dfcbc65daca302f37af93edff42a",
+        "33c80a4ebeb25e3816c0878b0286c630eaecd2c42ffb86076c624f8072eb65f3"
+      ]
+    },
+    {
+      "index": 80,
+      "a": "v812006",
+      "b": "v812008",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812006",
+        "812008"
+      ],
+      "image_hashes": [
+        "8e592f9d32fbe17bd66969c7c092c0bfd816205b84f3adbffd77dde6af2d5fee",
+        "ff0b286840362a4135e1d586ca2a773b5eabc0b17df33ce06a69dd14dcd54c85"
+      ]
+    },
+    {
+      "index": 81,
+      "a": "v749610",
+      "b": "v749612",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749610",
+        "749612"
+      ],
+      "image_hashes": [
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24",
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a"
+      ]
+    },
+    {
+      "index": 82,
+      "a": "v221136",
+      "b": "v631272",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "221136",
+        "631526"
+      ],
+      "image_hashes": [
+        "a7db4975fd66b682a947eafd9acb425c90b4118c2863eda01d6fdf999f00f7ea",
+        "b9234a821068f7e8dd82735a8f99c90d455e854e189b1ce36a7cac810f03e85a"
+      ]
+    },
+    {
+      "index": 83,
+      "a": "v749610",
+      "b": "v749620",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749610",
+        "749620"
+      ],
+      "image_hashes": [
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24",
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d"
+      ]
+    },
+    {
+      "index": 84,
+      "a": "v749610",
+      "b": "v749622",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749610",
+        "749622"
+      ],
+      "image_hashes": [
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24",
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb"
+      ]
+    },
+    {
+      "index": 85,
+      "a": "v236580",
+      "b": "v629618",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "236580",
+        "661576"
+      ],
+      "image_hashes": [
+        "89a88296455a3e28dac5229d58c9d0a7d3a83e932ff596138281f21b209a549a",
+        "4b814a60cdbea70c5620cef45007703d437e8b84fe946a2632484dddf2410fa9"
+      ]
+    },
+    {
+      "index": 86,
+      "a": "v238522",
+      "b": "v665740",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "238522",
+        "665740"
+      ],
+      "image_hashes": [
+        "6af5b8a2d21ae36b92790ae0e366a9b92cab83d46c9ea51736d3e51792fc088a",
+        "33931b8b6ffc31ededd2f02d81d8acaeedcacde36dfe0147b58249139c97ea38"
+      ]
+    },
+    {
+      "index": 87,
+      "a": "v478966",
+      "b": "v504294",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "478966",
+        "504294"
+      ],
+      "image_hashes": [
+        "64adde3e430e8452c8e147a16b9175f866e0b0b72703f318f62ace66d09da196",
+        "267843a7b7dd280a64e2033159e035069c30fe474c759e7241cdce6dba9a7cec"
+      ]
+    },
+    {
+      "index": 88,
+      "a": "v812000",
+      "b": "v812006",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "812000",
+        "812006"
+      ],
+      "image_hashes": [
+        "eed9ab9d42ef3b99bb10926aa632db0e729761099f425f42cc51c2fdfd0c0f79",
+        "8e592f9d32fbe17bd66969c7c092c0bfd816205b84f3adbffd77dde6af2d5fee"
+      ]
+    },
+    {
+      "index": 89,
+      "a": "v749610",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749610",
+        "749630"
+      ],
+      "image_hashes": [
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 90,
+      "a": "v635300",
+      "b": "v749612",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749612"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "766a021cf8351b46f756aa8254cf99d4c5abc1da56e97522590f755b9210e92a"
+      ]
+    },
+    {
+      "index": 91,
+      "a": "v749610",
+      "b": "v749618",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "749610",
+        "749618"
+      ],
+      "image_hashes": [
+        "8d708835023299d4f98a4ed86e11acf2656530c60267e2204d60a4385b03ae24",
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659"
+      ]
+    },
+    {
+      "index": 92,
+      "a": "v720434",
+      "b": "v720436",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720434",
+        "720436"
+      ],
+      "image_hashes": [
+        "5261577d7f4a062090a162cbfc7b71bb581858f663b4ba3a495d27bcfa814e0e",
+        "4581ee83877d2cbd4aeadecb4cd3dad88659cd200fdce9cbf9a78e0d31130e87"
+      ]
+    },
+    {
+      "index": 93,
+      "a": "v243624",
+      "b": "v275314",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "243624",
+        "275314"
+      ],
+      "image_hashes": [
+        "182ee71b239318f2b3361978d85a5d06f9427938190b877f210a8ee7a09d23a8",
+        "4cef39d72226ff23efa600a076d205a9499a645a0fac3a9e43c4843ae2e9d4b8"
+      ]
+    },
+    {
+      "index": 94,
+      "a": "v644128",
+      "b": "v646266",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "644128",
+        "646266"
+      ],
+      "image_hashes": [
+        "bdf6f82f474636047c898ce2dce23a207a297a9261a21baebac1f9ef8e2d7312",
+        "ea4a1281c00d872d5928a8592de474ece6dd3c360175d942e4a9350563112ee5"
+      ]
+    },
+    {
+      "index": 95,
+      "a": "v221996",
+      "b": "v275314",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "221996",
+        "275314"
+      ],
+      "image_hashes": [
+        "306ab00fbca655ff8ced8bd072f26846d77ab31dc57fb91ab4e9b9ba34e6e62b",
+        "4cef39d72226ff23efa600a076d205a9499a645a0fac3a9e43c4843ae2e9d4b8"
+      ]
+    },
+    {
+      "index": 96,
+      "a": "v635300",
+      "b": "v749620",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749620"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "a44c47af02b0c2731bdb37c7f302001844c8674e704d1d747647500444ff8f8d"
+      ]
+    },
+    {
+      "index": 97,
+      "a": "v334432",
+      "b": "v401476",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "334432",
+        "401476"
+      ],
+      "image_hashes": [
+        "983907f58ed1e6334d92c2c78b7c72be59d6b06df806d25c6be632cc3f3fd183",
+        "e652509ea32a83a270142982dc6c06828ed60e9f5104f8e73208397e30b5e7fd"
+      ]
+    },
+    {
+      "index": 98,
+      "a": "v244742",
+      "b": "v245410",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "244742",
+        "245410"
+      ],
+      "image_hashes": [
+        "67d0048cd3e7cf8f3abd7668ef64af3a2d287f5a969da1970702692b0df17ce8",
+        "2686c5ea43b3dda49ac681939bab250c618c15b00d636df6d8957a5dde70900d"
+      ]
+    },
+    {
+      "index": 99,
+      "a": "v635300",
+      "b": "v749630",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749630"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "ff289ef06f119406a343eb555ddd37907e81556c3322d5a664ed0535b5353211"
+      ]
+    },
+    {
+      "index": 100,
+      "a": "v635300",
+      "b": "v749618",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749618"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "72348713a84af47f05591ef4bbc5a671a1a0d8213b076be50bc77ae64ef0d659"
+      ]
+    },
+    {
+      "index": 101,
+      "a": "v720380",
+      "b": "v720592",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720380",
+        "720592"
+      ],
+      "image_hashes": [
+        "67d66945037da4f0a29fc79151caf9b5a61d4e69c5fb2888fb677bbdca4cae48",
+        "b708bc855492e8aba7e662e08af34d4c5c6b4f9d2d3eb77a0c74c97685ef69c4"
+      ]
+    },
+    {
+      "index": 102,
+      "a": "v332780",
+      "b": "v467708",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "332780",
+        "467708"
+      ],
+      "image_hashes": [
+        "81d6b72dbea31be6161d2400603f3645316ca58d68d1d8f5b90595a634c57dd2",
+        "7045b780a80f833f030fbd62bcc3614aaa8bc8382cb62667bf584ea49c2d6eeb"
+      ]
+    },
+    {
+      "index": 103,
+      "a": "v720430",
+      "b": "v720642",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720430",
+        "720642"
+      ],
+      "image_hashes": [
+        "9fd4cd4a33c742702df816890433c9da7c63f181e17fa11176a0004e9f2e29ab",
+        "c983538077788537f5f29f921a044c3b699492f65dade5aadf3f4fd173bddca6"
+      ]
+    },
+    {
+      "index": 104,
+      "a": "v659240",
+      "b": "v667902",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "659240",
+        "667902"
+      ],
+      "image_hashes": [
+        "7d301e76f3ffaf539cc213e8214be4a1c82ef340732950df1435a53b06679614",
+        "2cc8288f8aced50391e7151d094951d2389a8400e7711cc9ea76ff6350e332b5"
+      ]
+    },
+    {
+      "index": 105,
+      "a": "v222000",
+      "b": "v243710",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "222000",
+        "243710"
+      ],
+      "image_hashes": [
+        "3175b5f7c00822188115721afd8e9e69b07eb38fa71273a680db9fbf5ab4848e",
+        "95c3a5d08b92ae90f14d3c5698b68184b72e783738f0dee41a51be5a2710e12a"
+      ]
+    },
+    {
+      "index": 106,
+      "a": "v225550",
+      "b": "v746720",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "225550",
+        "746720"
+      ],
+      "image_hashes": [
+        "e5b62ca9432f278aae318536152e17da39134bbd28f4c088ae9f9ca0962752bc",
+        "2d29f8f418413cf0074014e02bafdd3339ba8af727e2cf2040c328b78c7b10ac"
+      ]
+    },
+    {
+      "index": 107,
+      "a": "v226144",
+      "b": "v746490",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "226144",
+        "746490"
+      ],
+      "image_hashes": [
+        "c8f32ca29f2fd808279bced510f3b240ff0d727c99497350c47bc08fa5dceb08",
+        "08f6fee28c12dc3786b8ff780e09a865cd15538dad3cfb6f3e7ca790eb7e9765"
+      ]
+    },
+    {
+      "index": 108,
+      "a": "v260658",
+      "b": "v586978",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "260658",
+        "586978"
+      ],
+      "image_hashes": [
+        "8d3bf895041dd02e782974116ce22a34848309846098e3c300bf28f1d54b9f54",
+        "c3bc9d4e8c9a5b1a682f5f0524367411b9ee6eda11eb5cd4e3cd13050437ec57"
+      ]
+    },
+    {
+      "index": 109,
+      "a": "v249356",
+      "b": "v569800",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "249356",
+        "569800"
+      ],
+      "image_hashes": [
+        "37e273b82fefe523dd25dd9e31e1be9b4ee6be7329e25550f233a05c1b218de1",
+        "196cea38db8257f97266c295fabc7903d8bcd4de8735e1d5fad13fadb9477f39"
+      ]
+    },
+    {
+      "index": 110,
+      "a": "v720370",
+      "b": "v720582",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720370",
+        "720582"
+      ],
+      "image_hashes": [
+        "ffec4f01a5b5de9d229dfba2c20ab38abc85321f72c62f10e419b4130158531a",
+        "ee67c5d2642832dbc85e73b673b797d5ef57bee4c58d35b6afabbcc6ff1c6d74"
+      ]
+    },
+    {
+      "index": 111,
+      "a": "v600632",
+      "b": "v612582",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "600632",
+        "612582"
+      ],
+      "image_hashes": [
+        "9659ec3c94089dad21b7c9756aa8fff92cfac57a0731893f44b89009a7913424",
+        "75dba5d045a2fe1562319111db97e12b899d4f9c1e21938bd879f04e268b5d14"
+      ]
+    },
+    {
+      "index": 112,
+      "a": "v550254",
+      "b": "v758430",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "550254",
+        "758430"
+      ],
+      "image_hashes": [
+        "02664a075ad58bc37685adc91dbc29a891bf46241c05565b3f9015ff80a68f85",
+        "17e1883ff7c98e92f0324be87661767fa9bcce575d1285444f112ae20c77f508"
+      ]
+    },
+    {
+      "index": 113,
+      "a": "v249340",
+      "b": "v569768",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "249340",
+        "569768"
+      ],
+      "image_hashes": [
+        "f89c7f96fb5228aa101635ecc547d7e6076260cdeb09b285adb809b32f27d071",
+        "9745f9d093d1e76ba00ad7e73709d97eead14aeb1a1f7d96b2423f838d614c4d"
+      ]
+    },
+    {
+      "index": 114,
+      "a": "v550070",
+      "b": "v758422",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "550070",
+        "758422"
+      ],
+      "image_hashes": [
+        "16cd5d0e7136c040470e8ef0cfcbc56dd580ad70355301bea994aed4307954df",
+        "165b1076dc554fedf8f90ead6cd5c670324b0b5dec6146c9fdc13f2df5093629"
+      ]
+    },
+    {
+      "index": 115,
+      "a": "v720414",
+      "b": "v720626",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720414",
+        "720626"
+      ],
+      "image_hashes": [
+        "c55ca947f1624d1f29bbeb7b2b6761808ba9fb5e9c4522dfbe834872fe4241ae",
+        "8c203ab3158887444f912ddb3a09216120e88a37996e9d0afb25f72130bb8ebd"
+      ]
+    },
+    {
+      "index": 116,
+      "a": "v479042",
+      "b": "v758488",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "479042",
+        "758488"
+      ],
+      "image_hashes": [
+        "1295319d3efc562f3c13454a4965432ae76018200094a0ffce80bd6fce7f76af",
+        "a2532af46a53fe1ffdc7942ab5fc692f9845c580b9ebe00c27fd20f72d165a45"
+      ]
+    },
+    {
+      "index": 117,
+      "a": "v491120",
+      "b": "v497658",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "491120",
+        "497658"
+      ],
+      "image_hashes": [
+        "098ea6f444ca9d2ac825ff839ce60c5d2e4d662a77d54534d800c4f5ee4c7bb7",
+        "de9f2a3d452abd26ba6db2c3da07175e8fdd834722be75c802daebd410bfef3e"
+      ]
+    },
+    {
+      "index": 118,
+      "a": "v644132",
+      "b": "v667976",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "644132",
+        "667976"
+      ],
+      "image_hashes": [
+        "fbaceb535c90a8288614e0b30f7c8a6b6ad175f2e280897852446394838f9cb4",
+        "443eda0dd6a1964e72b971e5c57a22eff0369d078c14cc92f9509bbd270d7c5c"
+      ]
+    },
+    {
+      "index": 119,
+      "a": "v659244",
+      "b": "v667896",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "659244",
+        "667896"
+      ],
+      "image_hashes": [
+        "2f48d35b0925879a9470205a34e506143ebd1792447f22b685c8d96cba63a221",
+        "100127dd0bf0a7c49f03f5d1ed1e655871fa41cacd6b68cf98691add019d12d8"
+      ]
+    },
+    {
+      "index": 120,
+      "a": "v221998",
+      "b": "v243682",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "221998",
+        "243682"
+      ],
+      "image_hashes": [
+        "f60485298a450bb4b365dc14b0d5f753a7d8a2db0d8c74b94058df8c4a299f67",
+        "24f38fa73f2d66d0c7e80765a3d22b77d03cea8e31297d57efc409086aefd092"
+      ]
+    },
+    {
+      "index": 121,
+      "a": "v572862",
+      "b": "v758396",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "572862",
+        "758396"
+      ],
+      "image_hashes": [
+        "2bb4d44eda3fb3931f4c38f446b61b9a1381a703d9f5e94e7bee705e04693474",
+        "b719ac7c467ed95a762ca1228507645d27b9b7d5689e73be5763321c149d0872"
+      ]
+    },
+    {
+      "index": 122,
+      "a": "v653384",
+      "b": "v815724",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "653384",
+        "815724"
+      ],
+      "image_hashes": [
+        "8d453b64727be6e46f85d92eaa63167588de4eca9390688da1c0a74e472bf80b",
+        "cf8cfa31cffa540e812c4230868bd7ea5bf52bfe5a58c07e0f0612aa916b8980"
+      ]
+    },
+    {
+      "index": 123,
+      "a": "v261484",
+      "b": "v493518",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "261484",
+        "493518"
+      ],
+      "image_hashes": [
+        "349c55ff45b44d4a27ea823647d96a0258d27511cf7b91e4c97125269f86c289",
+        "8627244a85149d5b03e40c9e4ae5a6e5ee1c62d13f71f2ca648cf8d13c849998"
+      ]
+    },
+    {
+      "index": 124,
+      "a": "v720366",
+      "b": "v720578",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720366",
+        "720578"
+      ],
+      "image_hashes": [
+        "4f9d56cc66b5c831278cf6fd1fd9fe1c579496ffe2c58720e96a9edd3a88f7fa",
+        "f57bce386d20ab30ae458497796e18e52588dcf7eeb867ffeb6041aeef595fad"
+      ]
+    },
+    {
+      "index": 125,
+      "a": "v720368",
+      "b": "v720580",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720368",
+        "720580"
+      ],
+      "image_hashes": [
+        "77140371fe36ce1f00ef253021d2843a9fc350fcddfea116ef7f549d259989c3",
+        "e7ea0a1ca9973df0de55b251eacdc0e3613de09be7b3a5e4c840accf9df277e9"
+      ]
+    },
+    {
+      "index": 126,
+      "a": "v776402",
+      "b": "v776408",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776402",
+        "776408"
+      ],
+      "image_hashes": [
+        "34b6ac0a1089db43b9ba09d0ffed59003e28eb76a897376270ae7133ab63a867",
+        "758d7b1ba2fc61dc54ce7e0ea5804005a9db31d334e43a78a0de23dd158586e0"
+      ]
+    },
+    {
+      "index": 127,
+      "a": "v776404",
+      "b": "v776408",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776404",
+        "776408"
+      ],
+      "image_hashes": [
+        "3a2b016c6cbebcc9fd15799745d3b878efb25445d13e92887f4d1dede876a9f0",
+        "758d7b1ba2fc61dc54ce7e0ea5804005a9db31d334e43a78a0de23dd158586e0"
+      ]
+    },
+    {
+      "index": 128,
+      "a": "v728656",
+      "b": "v734394",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "728656",
+        "734394"
+      ],
+      "image_hashes": [
+        "7f36d970c40c5a16ed4afd458fdc4657108d6c61580c0206d2f3408e34be7d08",
+        "04a7b3f4f0fb29e7c38c30e00b6e7b5fb0c31ecc5fc87f7102c4334f5e07fe52"
+      ]
+    },
+    {
+      "index": 129,
+      "a": "v776408",
+      "b": "v776410",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776408",
+        "776410"
+      ],
+      "image_hashes": [
+        "758d7b1ba2fc61dc54ce7e0ea5804005a9db31d334e43a78a0de23dd158586e0",
+        "13fe203877e66b7a52af295c6d19d1d49ced1cdd46eb635712643f0632c7e795"
+      ]
+    },
+    {
+      "index": 130,
+      "a": "v720388",
+      "b": "v720600",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720388",
+        "720600"
+      ],
+      "image_hashes": [
+        "a8ee898f29e402234d81c8094068612a790cf17ac83281958e73d94bb6d6a99d",
+        "a7438822e2a59cfb7b724d3d1681239e67b17ae3716bc31406f3e9ee3e9257b8"
+      ]
+    },
+    {
+      "index": 131,
+      "a": "v290948",
+      "b": "v450380",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "290948",
+        "450380"
+      ],
+      "image_hashes": [
+        "cd5758098f4bf9d82b29682155eb7f2379a632653a38b0ec7ad539aba826b93d",
+        "9c6f8b0ff33e5c0e92a29d6c612f860afe2feb310c35bf0355148e1532a7ea0c"
+      ]
+    },
+    {
+      "index": 132,
+      "a": "v502470",
+      "b": "v759898",
+      "decision": "reject",
+      "reason": "mislabeled_charmander_reference",
+      "public_ids": [
+        "502470",
+        "759898"
+      ],
+      "image_hashes": [
+        "5a2e8252769102082ffee3441b1de9ac3e9fccb6045784bae29b51e5256be30e",
+        "22d1b3a2091066c91c3df29cfe8fdb855a17e05a04c6d1da33cc58d12654cf36"
+      ]
+    },
+    {
+      "index": 133,
+      "a": "v261076",
+      "b": "v746424",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "261076",
+        "746424"
+      ],
+      "image_hashes": [
+        "936cf472e6bdbb7023013fd4e6f63a59af2f43d5197aec1c7038bd8f0706e984",
+        "20581321de08045f53c670a6c2091728d1403c6b8f5605f47daf91de91d90da7"
+      ]
+    },
+    {
+      "index": 134,
+      "a": "v635300",
+      "b": "v749622",
+      "decision": "reject",
+      "reason": "no_illustration",
+      "public_ids": [
+        "635300",
+        "749622"
+      ],
+      "image_hashes": [
+        "ca6ee4ee8491b8ac0f89d5c6e91fa7b78ff3af9027597386ad2aa78b42fb578b",
+        "e6f7efb5b23896f1f8634d65e7be5168be804cd3a64673475c25649fd804f3fb"
+      ]
+    },
+    {
+      "index": 135,
+      "a": "v413178",
+      "b": "v467876",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "413178",
+        "467876"
+      ],
+      "image_hashes": [
+        "238f63796d4ccc0a933ef8e6d86b54ec1211d29e0d9c4c6611c6498d81dd8988",
+        "ecb866ea5a0e52bacafff75257266f8e5021f1622714ed8e043187d89ee3e080"
+      ]
+    },
+    {
+      "index": 136,
+      "a": "v471406",
+      "b": "v758142",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "471406",
+        "758142"
+      ],
+      "image_hashes": [
+        "a4aefe9d7c3a5f867b7cf8dd20f6cfa7b60c594087013c8c8cbf7de8a6075153",
+        "ebfd9213dc6fd6cc3adc57b950e1e2eea3defc9cbb4091af79dbc282ecb2b61c"
+      ]
+    },
+    {
+      "index": 137,
+      "a": "v475184",
+      "b": "v758154",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "475184",
+        "758154"
+      ],
+      "image_hashes": [
+        "e9aacf0d2daa42fe3bdcc802b59c487e47cff608f7084d72ef6ddd077502931f",
+        "d953181a9810d3a6f8e02b053d20fa1d933af16062f0c4fe5d08b673e8b77903"
+      ]
+    },
+    {
+      "index": 138,
+      "a": "v522636",
+      "b": "v758246",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "522636",
+        "758246"
+      ],
+      "image_hashes": [
+        "622828809f9a7d96d95f2b9eb6f7d68d25b99503f9bbc787ea4e9e9aeb46e39f",
+        "b297a8a931abd4fdb5f81c373b464765dfe304f582d24403f6b193ba67897016"
+      ]
+    },
+    {
+      "index": 139,
+      "a": "v600636",
+      "b": "v612550",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "600636",
+        "612550"
+      ],
+      "image_hashes": [
+        "a21d4ce0f86f74a4405171786181f4c6c815162752d999ea92e34c514c5952e1",
+        "b5974c6ec726743abc797ff68e65e41b65391291779fde87b8a8f0b378fcfd80"
+      ]
+    },
+    {
+      "index": 140,
+      "a": "v425528",
+      "b": "v467720",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "425528",
+        "467720"
+      ],
+      "image_hashes": [
+        "d287ee81851cea05b63f7f309783e6035fb03fe3f76c70e148349355d23204e3",
+        "cfeca660bf16294e5c33801bbc32c78f599985e312941583a9d1017a52ea7694"
+      ]
+    },
+    {
+      "index": 141,
+      "a": "v260658",
+      "b": "v288020",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "260658",
+        "288020"
+      ],
+      "image_hashes": [
+        "8d3bf895041dd02e782974116ce22a34848309846098e3c300bf28f1d54b9f54",
+        "df02d50a8a1e8424aa3dcd550bf8443ceec6b1956ca5d24376da5b28a77c0385"
+      ]
+    },
+    {
+      "index": 142,
+      "a": "v258712",
+      "b": "v449608",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "258712",
+        "449608"
+      ],
+      "image_hashes": [
+        "991673eb0405b3a5f04463cc81b8df0256ccc265df0ec38ca37f843354140f43",
+        "71947862a024c1745978bd901a3b904b8f9771db0cace69d850fa29774d7e812"
+      ]
+    },
+    {
+      "index": 143,
+      "a": "v720424",
+      "b": "v720636",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720424",
+        "720636"
+      ],
+      "image_hashes": [
+        "c6227ba629bcb6cda2a5a53724f2fb4689f4ec2a01b6ff0ffed9d2418b2b2a01",
+        "984936e8a8a0a83b8c20af520307f2954ed5237cf0bb16eb1bfd839f85cdd60b"
+      ]
+    },
+    {
+      "index": 144,
+      "a": "v720362",
+      "b": "v720574",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720362",
+        "720574"
+      ],
+      "image_hashes": [
+        "f84d2814dabc08d56b8bc2f420f0e1e817817df57cfe8402c2e6b7cae6a5e5ea",
+        "1d051c79111c010d2afc71c59d8176cb96aafd8d069bd27202a77273fa07904e"
+      ]
+    },
+    {
+      "index": 145,
+      "a": "v622632",
+      "b": "v663512",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "622632",
+        "663512"
+      ],
+      "image_hashes": [
+        "ba1ece26cd43c66cb5d47faf40bbdab74d5c4cf3a7b98ca9dfeea38461d6d33b",
+        "394a2d9063ec416224789c0bcd025e3d3b254934ac346f6867dedae1ff074c0a"
+      ]
+    },
+    {
+      "index": 146,
+      "a": "v720670",
+      "b": "v720694",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720670",
+        "720694"
+      ],
+      "image_hashes": [
+        "34c4b2c9cd5352fa6de9bb746f0c633828846fd9e8f96c96150fab7db4db4f0f",
+        "e0237821b21ac5744597ba4d73f343cb438dec598c43c2136da8f8ac80e95f05"
+      ]
+    },
+    {
+      "index": 147,
+      "a": "v720390",
+      "b": "v720602",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720390",
+        "720602"
+      ],
+      "image_hashes": [
+        "638111fe7c6ac8fbabb7fe3d156a2775576aea6fcda43110a9c94ef78015e802",
+        "a21f254090c8a28d2d3f7339b97a843619ecf6cbc9a7c5dbd693ba08284d7080"
+      ]
+    },
+    {
+      "index": 148,
+      "a": "v254516",
+      "b": "v254752",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "254516",
+        "254752"
+      ],
+      "image_hashes": [
+        "4aa3e1c215a29452bbc61df845fe832522058ef01e3fe714a4e63ab2f2bb955b",
+        "d6ca36de220793b0674a7afa07d55f1f7beccdcbc7be011b9f2bb8bc85352364"
+      ]
+    },
+    {
+      "index": 149,
+      "a": "v776436",
+      "b": "v776438",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776436",
+        "776438"
+      ],
+      "image_hashes": [
+        "77fb98ac332def5dfcd57342ffc5bdf62860f69f4191e70d3d3deb92b477947d",
+        "2bb80079323885a881c4b91e3f8a7aeb0e40148b7a9f564277418e0d1a1e5bb4"
+      ]
+    },
+    {
+      "index": 150,
+      "a": "v776432",
+      "b": "v776436",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776432",
+        "776436"
+      ],
+      "image_hashes": [
+        "379ee17733b99570dafcfc7767071b62931e913fa26367a5dbb89eb0ac7a1323",
+        "77fb98ac332def5dfcd57342ffc5bdf62860f69f4191e70d3d3deb92b477947d"
+      ]
+    },
+    {
+      "index": 151,
+      "a": "v776430",
+      "b": "v776436",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "776430",
+        "776436"
+      ],
+      "image_hashes": [
+        "370dac82f215e651374235ffde49e9d2018bd5f42bc0e56eae65c19eeb83e590",
+        "77fb98ac332def5dfcd57342ffc5bdf62860f69f4191e70d3d3deb92b477947d"
+      ]
+    },
+    {
+      "index": 152,
+      "a": "v720372",
+      "b": "v720584",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720372",
+        "720584"
+      ],
+      "image_hashes": [
+        "1a54dcb6c61d67e0d476640859fef38c43075a5df5d1df29b9a56e8adb07dadd",
+        "3b94539e2683ba1aebe1529c8937bd75ba8b751579cd843969b4e51bdb89d4cc"
+      ]
+    },
+    {
+      "index": 153,
+      "a": "v226480",
+      "b": "v746842",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "226480",
+        "746842"
+      ],
+      "image_hashes": [
+        "9b4c8b65bb7d27d02c05142d01076b92566c88a77869948f309aa968ee7c4cef",
+        "1257d9e3ff6e2c6fdcf75862123be106f3459632414e385ea42fa8b3907355e6"
+      ]
+    },
+    {
+      "index": 154,
+      "a": "v653390",
+      "b": "v668004",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "653390",
+        "668004"
+      ],
+      "image_hashes": [
+        "11a03be65b1f69e8dc2fbff0f10a5d341f14a3e57d02a6d59ab57142861e9a19",
+        "380e8af57af4da11e9962360ecf58426769c12990d8f9992a8488332ab862eaf"
+      ]
+    },
+    {
+      "index": 155,
+      "a": "v659272",
+      "b": "v667998",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "659272",
+        "667998"
+      ],
+      "image_hashes": [
+        "dd5bc60c10341a71b72acb4c041da82922d7a490d2ae7c85be910fef860f699a",
+        "a5c37f78d15725f6d182483a5696da7fba3c446cf89b8e0b27d172756ef3771b"
+      ]
+    },
+    {
+      "index": 156,
+      "a": "v226182",
+      "b": "v746510",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "226182",
+        "746510"
+      ],
+      "image_hashes": [
+        "d744f5eac3747a7b7493f607a341dc584e5689056353fdfcefbcab1b88c4d608",
+        "8612b5f87a7a09178f0fe51eea9e0f9a4dc4d43504c0a1e5f9a79ef0101019ee"
+      ]
+    },
+    {
+      "index": 157,
+      "a": "v756094",
+      "b": "v780036",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "756094",
+        "780036"
+      ],
+      "image_hashes": [
+        "bce01ea1ecfe864c97b69bd92aa4d90b2623cd0a0114a6b7cbe6b29ccbdd20ab",
+        "ca22908640d6e595bd9399b41893a5d92616dfcd52cf35b915793799cd52b2e3"
+      ]
+    },
+    {
+      "index": 158,
+      "a": "v425406",
+      "b": "v759884",
+      "decision": "reject",
+      "reason": "mislabeled_charizard_reference",
+      "public_ids": [
+        "425406",
+        "759884"
+      ],
+      "image_hashes": [
+        "23bd34f46558281fce5c86169f60d7b70df2d0759e57de4ea10bd68df7a46562",
+        "e689f50478b01e7308409bcef0f20316e1e16d56868e62920a9d9a6c551be51d"
+      ]
+    },
+    {
+      "index": 159,
+      "a": "v631320",
+      "b": "v758342",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "631320",
+        "758342"
+      ],
+      "image_hashes": [
+        "dece98d33a679fca0b4514cee994907ae60afdee20d9d9a7b956347770da082d",
+        "6181b5acd5fce0f12630306aaff21a450a9347ef4921f385d88b52a4347b2aa4"
+      ]
+    },
+    {
+      "index": 160,
+      "a": "v241088",
+      "b": "v279986",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "241088",
+        "279986"
+      ],
+      "image_hashes": [
+        "75331677f95d799764800965170bd947b9674b365049584a40c1b44921a432ed",
+        "6c1d03f354e765e6389c274cb50af4393e7be135267bc1dd7cecb7a65d2032b2"
+      ]
+    },
+    {
+      "index": 161,
+      "a": "v572936",
+      "b": "v575698",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "572936",
+        "575698"
+      ],
+      "image_hashes": [
+        "e308fd7cb6f7aceea3b69b1c7e59b68525fb565850e4bb90755086c9c738c78c",
+        "a4e5d10dd2a8aba60c6b4ae0853bf7072d4262ab2e58e7dab7ae35c86d4b0818"
+      ]
+    },
+    {
+      "index": 162,
+      "a": "v811986",
+      "b": "v811992",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811986",
+        "811992"
+      ],
+      "image_hashes": [
+        "f39209c1cccb22b282e91811f0702cecb5323f2cf3b8b16ad261d582d44d1a0d",
+        "2a772b47f0b1133db68c1f97ad7c12efe7d0b456633be2b79b85e2745398af6e"
+      ]
+    },
+    {
+      "index": 163,
+      "a": "v720422",
+      "b": "v720634",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720422",
+        "720634"
+      ],
+      "image_hashes": [
+        "c0c552220bf39932d52820d88d22a6cf3a3dc09b489ac7368bce97b76cf0cba6",
+        "57e45afcd3eaba512ec377fc8cc8408ae48cb39092a358b74bdfa85dfd946914"
+      ]
+    },
+    {
+      "index": 164,
+      "a": "v531098",
+      "b": "v662630",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "531098",
+        "662630"
+      ],
+      "image_hashes": [
+        "cc71c23d3767bfa9453e4bb6ffb2a06d7d435257744bd1efceb0f1a120d4216a",
+        "e9f67e95b19b99ed92458dd044ac09eb92fd6add87b9895afc5cff56f8858712"
+      ]
+    },
+    {
+      "index": 165,
+      "a": "v230212",
+      "b": "v230220",
+      "decision": "reject",
+      "reason": "different_energy_background",
+      "public_ids": [
+        "230212",
+        "230220"
+      ],
+      "image_hashes": [
+        "febae9d630c459a683431da0ac4f48eebd583e16fde43147607e9956ba9fa65a",
+        "1e68b791bb3f48214c5055b7c633446d8088fddaded5dbbb0fe8ac6235ccfd7a"
+      ]
+    },
+    {
+      "index": 166,
+      "a": "v252064",
+      "b": "v810304",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "252064",
+        "810304"
+      ],
+      "image_hashes": [
+        "889bf70b78bfdc2c4ebfb46dd512489adcad0175dc8d8d4f5760e07f1a1d0aaf",
+        "df2f79c3eb81f49a7233743e72ed08bc90eef2456b0afb3b8f95470124499220"
+      ]
+    },
+    {
+      "index": 167,
+      "a": "v550174",
+      "b": "v758398",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "550174",
+        "758398"
+      ],
+      "image_hashes": [
+        "ca2faa86013bfee11c9a8e9778937e09a007c05acaec7ee6d9d54d8cb2f3d978",
+        "6fa1d31809f0b261cf0b38c26a4462db0edcd4f3ba78f4d107156ca2ba4cc3e2"
+      ]
+    },
+    {
+      "index": 168,
+      "a": "v720426",
+      "b": "v720638",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720426",
+        "720638"
+      ],
+      "image_hashes": [
+        "a378f82fbc567d7b3369e31cddc425cc818021f884ddbfc006c652afcf7383e1",
+        "8389f2f446350719235c8208d780b821a1c543d69b23736539e6146d5f3f3f41"
+      ]
+    },
+    {
+      "index": 169,
+      "a": "v550024",
+      "b": "v758386",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "550024",
+        "758386"
+      ],
+      "image_hashes": [
+        "09151dcbf1136d06b38d5dc5da1f4e2f50bbf270c564f09a0db77e74237462c6",
+        "01def283344c67cbf64c6e6eafa0df4fe411fc5e6d73a64e657ff01989cf44f0"
+      ]
+    },
+    {
+      "index": 170,
+      "a": "v811986",
+      "b": "v811990",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811986",
+        "811990"
+      ],
+      "image_hashes": [
+        "f39209c1cccb22b282e91811f0702cecb5323f2cf3b8b16ad261d582d44d1a0d",
+        "6daa9360f4584a0c158a87da027664ca34ec166e6150656e806ec8a41cf2611f"
+      ]
+    },
+    {
+      "index": 171,
+      "a": "v238046",
+      "b": "v642758",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "238046",
+        "642758"
+      ],
+      "image_hashes": [
+        "499097718de0f5e1666ada46675778e20bc7c66307cb029c18124980f156e90a",
+        "a7554a647b182d1cd28cbf553d44b16d9987c6b84a02df1cc1e2935e5692f62a"
+      ]
+    },
+    {
+      "index": 172,
+      "a": "v261456",
+      "b": "v746694",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "261456",
+        "746694"
+      ],
+      "image_hashes": [
+        "2981616acc3b68b6eb37bdb108cc8a567efa21bced3cf68384a4ba85730947b0",
+        "028d1e559544d1ff31a3e058c2d22cc7cdaeaba276344d2023a11c1ccfe1afac"
+      ]
+    },
+    {
+      "index": 173,
+      "a": "v522602",
+      "b": "v758238",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "522602",
+        "758238"
+      ],
+      "image_hashes": [
+        "e2e0d23b3b16845a6e54ee5d576248c60433c95eca83835708e6b890666b7a99",
+        "9244a4105228d7f6b9db4c85bce179d72f59dec1e94ab1fc288abde3e6d73a8a"
+      ]
+    },
+    {
+      "index": 174,
+      "a": "v649470",
+      "b": "v667888",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "649470",
+        "667888"
+      ],
+      "image_hashes": [
+        "f2dc0bed42a7a708fea8051859fb4e73d66ac9b3fa15ee409f6e169c2d01e775",
+        "45a9de088d57d1fb7de9026b89841adef5b5f879b637a31a7d5e7b4759066db2"
+      ]
+    },
+    {
+      "index": 175,
+      "a": "v249190",
+      "b": "v626010",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "249190",
+        "626010"
+      ],
+      "image_hashes": [
+        "40e7b849913243f94178b54ea30a2e16076896c0a185c1d77ecf61a8eef5190b",
+        "28923ff8abd2c9134caff836c15dd1977706193b2494e7c0e02881d7ce7ec56c"
+      ]
+    },
+    {
+      "index": 176,
+      "a": "v644126",
+      "b": "v667874",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "644126",
+        "667874"
+      ],
+      "image_hashes": [
+        "23bf04f36248cf91dcac840c47910d6dfb83a671b6201db604f7cb61b65458aa",
+        "1bd0fa26969148dc111f2a2cc624d7b62bba43ab02ed8034bbe25eb364ba576f"
+      ]
+    },
+    {
+      "index": 177,
+      "a": "v811992",
+      "b": "v811994",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "811992",
+        "811994"
+      ],
+      "image_hashes": [
+        "2a772b47f0b1133db68c1f97ad7c12efe7d0b456633be2b79b85e2745398af6e",
+        "cd9c345cf514e0fee599af8f3b3d372201e2bd5a82f557da572ec3812a6efc38"
+      ]
+    },
+    {
+      "index": 178,
+      "a": "v307976",
+      "b": "v467732",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "307976",
+        "467732"
+      ],
+      "image_hashes": [
+        "83da7b963c843abcb405f2bad6638acc8ac11aeb3e66ee790220848c032ab352",
+        "a92edfd2d48feb0904e0a5613e5e93dc5d00f56ac0bd6fe7600dfc38c0577819"
+      ]
+    },
+    {
+      "index": 179,
+      "a": "v720416",
+      "b": "v720628",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720416",
+        "720628"
+      ],
+      "image_hashes": [
+        "38aa08c1f19a2650363c8f36d1c1b62af896610e0bec0d814ff848f1c51935a6",
+        "28c6988f9cac93827adc12b92523cd2a587861f7b7014c6ca8d021d6fb8ac892"
+      ]
+    },
+    {
+      "index": 180,
+      "a": "v720394",
+      "b": "v720606",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "720394",
+        "720606"
+      ],
+      "image_hashes": [
+        "9401e13c6cbab660aaaf7564c50672dba215bc3e531ddd7a2f8cbfa34783095b",
+        "bca404fc0df65e8406c68865822121eda2060684cf198d3d427837bccd0cff58"
+      ]
+    },
+    {
+      "index": 181,
+      "a": "v225558",
+      "b": "v746742",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "225558",
+        "746742"
+      ],
+      "image_hashes": [
+        "8eb0d692ce37b4cfba60ebb3fa33b2ca3a9a5e26204ddc43b777313266ab35b6",
+        "2b2b60e266a782a9d1db7eb931dd443def5723e1073864b5211c195a20bfc684"
+      ]
+    },
+    {
+      "index": 182,
+      "a": "v257104",
+      "b": "v746718",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "257104",
+        "746718"
+      ],
+      "image_hashes": [
+        "fd5b52da116fa36a8880deae69b9ac714deaccf7e2820a3a086317c2d44dca64",
+        "5f5eea529eb8b5d23196ad1d016f41cb0827e880b4bde76cc402a33433b4a2af"
+      ]
+    },
+    {
+      "index": 183,
+      "a": "v550252",
+      "b": "v758428",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "550252",
+        "758428"
+      ],
+      "image_hashes": [
+        "9c4fce909487d13fcafc063dbe1b40f1bcc15f6258fb402516cdb78adc4f3714",
+        "f3f819c53457b4f62014ddde8d27937fd4c385134ba5bbebb8490992539fb96f"
+      ]
+    },
+    {
+      "index": 184,
+      "a": "v813496",
+      "b": "v824840",
+      "decision": "approve",
+      "reason": "visually_same_illustration_distinct_printings",
+      "public_ids": [
+        "813496",
+        "824840"
+      ],
+      "image_hashes": [
+        "138a1980c618bdd27f8460d65ff8f798de5284c1f39bd015ec905d5b4154725b",
+        "94e27930f6ddb606584784914cd5eb4d3db3ef4ba30101938c8e6421e4383df5"
+      ]
+    },
+    {
+      "index": 185,
+      "a": "v824982",
+      "b": "v260108",
+      "public_ids": [
+        "824982",
+        "260108"
+      ],
+      "decision": "approve",
+      "reason": "visually_verified_legend_corresponding_half_original_reference",
+      "image_hashes": [
+        "161aedeef540e1018bab12ef9b863e80af59cde34d9d6340b321f013199a894c",
+        "d55cf0b5361cd432c45c1cf328b766cd8f22fffe7f33aef4d07f23132512d562"
+      ],
+      "evidence": "legend-original-reference.jpg; retain original half embeddings; composite reprint references quarantined"
+    },
+    {
+      "index": 186,
+      "a": "v824984",
+      "b": "v260110",
+      "public_ids": [
+        "824984",
+        "260110"
+      ],
+      "decision": "approve",
+      "reason": "visually_verified_legend_corresponding_half_original_reference",
+      "image_hashes": [
+        "161aedeef540e1018bab12ef9b863e80af59cde34d9d6340b321f013199a894c",
+        "d6a5dceade108e16efc53796e2223ef9ac155815a32d3eb3528b9a46d080193d"
+      ],
+      "evidence": "legend-original-reference.jpg; retain original half embeddings; composite reprint references quarantined"
+    },
+    {
+      "index": 187,
+      "a": "v293014",
+      "b": "v260108",
+      "public_ids": [
+        "293014",
+        "260108"
+      ],
+      "decision": "approve",
+      "reason": "visually_verified_legend_corresponding_half_original_reference",
+      "image_hashes": [
+        "6be32d22fa1f6236a7e2afc67a6d66aa87e9d0ad3c869285612a5bd6c2dd390a",
+        "d55cf0b5361cd432c45c1cf328b766cd8f22fffe7f33aef4d07f23132512d562"
+      ],
+      "evidence": "legend-original-reference.jpg; retain original half embeddings; composite reprint references quarantined"
+    }
+  ]
+}

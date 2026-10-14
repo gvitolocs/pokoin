@@ -14,26 +14,20 @@ import {
   routeServices,
 } from '../flex-savings.js';
 import { resolveFlexDefaultCountries } from '../flex-user-country.js';
+import {
+  FLEX_PLACEHOLDER_STORES,
+  FLEX_STEPS,
+  FLEX_TABLE_SIZES,
+  fetchFlexStores,
+  flexServiceChoices,
+} from '../flex-content.js';
 import { shipFromCountryName } from '../ship-countries.js';
 import '../flex.css';
 import { brandSrc } from '../brand-assets.js';
 
-/** Fallback until GET /api/pokoin-partner?action=directory is live with real shops. */
-const PLACEHOLDER_STORES = [
-  { id: 'milan-ace', name: 'Ace Hobby', city: 'Milan', country: 'Italy', role: 'drop-off + pick-up' },
-  { id: 'berlin-deck', name: 'Deck & Dice', city: 'Berlin', country: 'Germany', role: 'drop-off + pick-up' },
-  { id: 'lisbon-cardforge', name: 'Cardforge', city: 'Lisbon', country: 'Portugal', role: 'drop-off + pick-up' },
-  { id: 'copenhagen-tabletop', name: 'Tabletop North', city: 'Copenhagen', country: 'Denmark', role: 'pick-up' },
-];
-
-const STEPS = [
-  { art: 'step-pack', title: 'Pack it yourself', text: 'Cards go in a Flex box — a sturdy shell, padded inside — instead of a random mailer.' },
-  { art: 'step-drop', title: 'Drop at a partner', text: 'A partner shop scans your pack. It does not repack anything, it only loads it.' },
-  { art: 'step-bag', title: 'One shared bag', text: 'Your pack rides with everyone else’s in one ~20 kg Pokoin bag to the sorting center.' },
-  { art: 'step-collect', title: 'Collect with a code', text: 'The buyer picks it up at a partner shop with a QR code, or it continues home.' },
-];
-
-const TABLE_SIZES = [4, 20, 50];
+const PLACEHOLDER_STORES = FLEX_PLACEHOLDER_STORES;
+const STEPS = FLEX_STEPS;
+const TABLE_SIZES = FLEX_TABLE_SIZES;
 
 /** Plain names: flag emoji render as boxes on Windows and many Linux fonts. */
 function country(code) {
@@ -85,10 +79,7 @@ function Calculator() {
   const services = routeReady
     ? routeServices({ from, to, cards: perSeller })
     : [];
-  const serviceChoices = [true, false]
-    .map((wantTracked) => services.find((row) => row.tracked === wantTracked))
-    .filter(Boolean)
-    .sort((a, b) => a.cents - b.cents);
+  const serviceChoices = flexServiceChoices(services);
   const effectiveTracked = tracked != null
     ? tracked
     : (serviceChoices[0]?.tracked ?? true);
@@ -369,13 +360,9 @@ export default function Flex() {
   useEffect(() => {
     document.title = 'Pokoin Flex · Ship together, pay less · Pokoin';
     let cancelled = false;
-    fetch('/api/pokoin-partner?action=directory')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (cancelled || !Array.isArray(body?.stores) || !body.stores.length) return;
-        setStores(body.stores);
-      })
-      .catch(() => { /* keep placeholders */ });
+    fetchFlexStores().then((list) => {
+      if (!cancelled && list) setStores(list);
+    });
     return () => { cancelled = true; };
   }, []);
 

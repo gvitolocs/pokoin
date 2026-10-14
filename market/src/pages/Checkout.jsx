@@ -13,29 +13,40 @@ import {
 } from '../api.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
-import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
+import { useCart } from '../cart.jsx';
+import {
+  ADDRESS_FIELDS,
+  CHECKOUT_SHIPPING_PKN,
+  GIFT_NOTE,
+  MISSING_LISTING_ERROR,
+  addressFieldRequired,
+  checkoutCartPayload as cartPayload,
+  checkoutSellerKey,
+  checkoutSellerParcels,
+  checkoutShipOptions,
+  checkoutShippingPreviewCents,
+  emptyAddressDraft,
+  orderLineSnapshot as snapshot,
+  pknEligibleSubtotal,
+  selectedAddressCountry,
+  stripeSessionError,
+} from '../checkout-model.js';
 import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '../google-reviews.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatFiatFromPkn, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, formatFiatFromPkn, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
 import { readInsurance, readPknDiscount, writeInsurance } from '../shipping-choice.js';
 import {
   cheapestServiceId,
   eurCentsFromPkn,
-  isUntrackedService,
   pknFromEurCents,
-  previewShipmentCents,
-  shippingServiceOptions,
   untrackedAllowed,
 } from '../shipping-quote.js';
 import ArtworkZoom from '../components/ArtworkZoom.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
-
-/** "This order contains a gift" in the cart pre-fills the note to the sellers. */
-const GIFT_NOTE = 'This order is a gift: please leave prices and receipts out of the parcel.';
 
 function FeeTip({ label, children }) {
   return (
@@ -44,60 +55,6 @@ function FeeTip({ label, children }) {
       <span className="fee-tip-pop" role="tooltip">{children}</span>
     </span>
   );
-}
-
-function snapshot(row, fulfillmentMode, notes) {
-  const qty = Number(row.qty) || 1;
-  const unit = Number(row.pricePkn) || 0;
-  return {
-    listingId: row.listingId,
-    sellerUid: row.sellerUid,
-    sellerName: row.sellerName,
-    quantity: qty,
-    unitPricePkn: unit,
-    totalPricePkn: unit * qty,
-    condition: row.condition,
-    language: row.language,
-    reserveAvailable: Boolean(row.reserveAvailable),
-    nftAvailable: Boolean(row.nftAvailable),
-    fulfillmentMode,
-    card: row.card || { id: row.cardId, name: row.name },
-    ...(notes ? { buyerNotes: notes } : {}),
-  };
-}
-
-function cartPayload(items) {
-  return items.map((row) => ({
-    listingId: row.listingId,
-    sellerUid: row.sellerUid,
-    sellerName: row.sellerName,
-    qty: Number(row.qty) || 1,
-    quantity: Number(row.qty) || 1,
-    pricePkn: Number(row.pricePkn) || 0,
-    unitPricePkn: Number(row.pricePkn) || 0,
-    cardId: row.cardId,
-    name: row.name,
-    card: row.card || { id: row.cardId, name: row.name },
-  }));
-}
-
-function emptyAddressDraft(preferred = '') {
-  const localeCountry = SHIP_TO_COUNTRIES.some((row) => row.code === preferred) ? preferred : countryFromLocale();
-  const known = SHIP_TO_COUNTRIES.some((row) => row.code === localeCountry);
-  return {
-    fullName: '',
-    addressLine1: '',
-    addressLine2: '',
-    postalCode: '',
-    city: '',
-    countryCode: known ? localeCountry : 'DK',
-    phoneNumber: '',
-  };
-}
-
-function selectedAddressCountry(addresses, addressId) {
-  const row = (addresses || []).find((item) => item.id === addressId);
-  return String(row?.countryCode || '').trim().toUpperCase();
 }
 
 export default function Checkout() {
@@ -150,67 +107,25 @@ export default function Checkout() {
   ).toUpperCase();
   const shippingTracked = shippingService !== 'untracked';
 
-  const sellerParcels = useMemo(() => {
-    const origins = quote?.sellerOrigins || {};
-    const bySeller = new Map();
-    for (const row of items) {
-      const sid = String(row.sellerUid || '');
-      const fromProfile = String(origins[sid] || '').toUpperCase();
-      const list = bySeller.get(sid) || {
-        sellerId: sid,
-        sellerName: row.sellerName || '',
-        count: 0,
-        from: fromProfile || String(row.sellerCountry || '').toUpperCase(),
-      };
-      list.count += Number(row.qty) || 0;
-      list.from = list.from || fromProfile || String(row.sellerCountry || '').toUpperCase();
-      list.sellerName = list.sellerName || row.sellerName || '';
-      bySeller.set(sid, list);
-    }
-    return [...bySeller.values()];
-  }, [items, quote?.sellerOrigins]);
+  const sellerParcels = useMemo(
+    () => checkoutSellerParcels(items, quote?.sellerOrigins || {}),
+    [items, quote?.sellerOrigins],
+  );
 
   const allowUntracked = untrackedAllowed(eurCentsFromPkn(subtotalPkn));
-  const shipOptions = useMemo(() => {
-    if (nft || !sellerParcels.length) return [];
-    for (const group of sellerParcels) {
-      if (!group.from) continue;
-      const options = shippingServiceOptions({
-        fromCountry: group.from,
-        toCountry: buyerCountry,
-        cardCount: group.count,
-      }).filter((row) => allowUntracked || !isUntrackedService(row));
-      if (options.length) return options;
-    }
-    return [];
-  }, [nft, sellerParcels, buyerCountry, allowUntracked]);
+  const shipOptions = useMemo(
+    () => checkoutShipOptions({ nft, sellerParcels, buyerCountry, allowUntracked }),
+    [nft, sellerParcels, buyerCountry, allowUntracked],
+  );
 
-  const shippingPreviewCents = useMemo(() => {
-    if (nft || !items.length) return 0;
-    if (quote && Number.isFinite(Number(quote.shippingTotalCents))) {
-      return Number(quote.shippingTotalCents);
-    }
-    let total = 0;
-    let missing = false;
-    for (const group of sellerParcels) {
-      if (!group.from) {
-        missing = true;
-        break;
-      }
-      const cents = previewShipmentCents({
-        fromCountry: group.from,
-        toCountry: buyerCountry,
-        cardCount: group.count,
-        tracked: shippingTracked,
-      });
-      if (cents == null) {
-        missing = true;
-        break;
-      }
-      total += cents;
-    }
-    return missing ? null : total;
-  }, [nft, items.length, sellerParcels, buyerCountry, shippingTracked, quote]);
+  const shippingPreviewCents = useMemo(() => checkoutShippingPreviewCents({
+    nft,
+    itemCount: items.length,
+    quote,
+    sellerParcels,
+    buyerCountry,
+    tracked: shippingTracked,
+  }), [nft, items.length, sellerParcels, buyerCountry, shippingTracked, quote]);
 
   const shippingPkn = nft
     ? 0
@@ -228,11 +143,7 @@ export default function Checkout() {
   // PKN balance as a discount: only lines from sellers who accept PKN count,
   // the card charge keeps a 50-cent floor. The session create applies the
   // authoritative number server-side; this is the same math for the preview.
-  const pknEligiblePkn = items.reduce((sum, row) => (
-    pknRefused.some((row2) => row2.uid === row.sellerUid)
-      ? sum
-      : sum + Math.max(0, Number(row.pricePkn) || 0) * Math.max(0, Number(row.qty) || 0)
-  ), 0);
+  const pknEligiblePkn = pknEligibleSubtotal(items, pknRefused);
   // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: pokoin-rust/crates/commerce/src/domain/money.rs).
   // Opt-in: nothing is discounted until the buyer ticks the voucher box.
   const voucher = pknBalanceVoucher({
@@ -333,7 +244,7 @@ export default function Checkout() {
     return () => { cancelled = true; };
   }, [signedIn, nft, getBearer]);
 
-  const sellerKey = [...new Set(items.map((row) => String(row.sellerUid || '')).filter(Boolean))].sort().join(',');
+  const sellerKey = checkoutSellerKey(items);
   useEffect(() => {
     if (!signedIn || !sellerKey) {
       setPknRefused([]);
@@ -407,7 +318,7 @@ export default function Checkout() {
 
   async function placePkn() {
     if (missingListing) {
-      setError('A cart row is missing listingId. Add the offer from Shop again.');
+      setError(MISSING_LISTING_ERROR);
       return;
     }
     setBusy(true);
@@ -454,7 +365,7 @@ export default function Checkout() {
 
   async function placeStripe() {
     if (missingListing) {
-      setError('A cart row is missing listingId. Add the offer from Shop again.');
+      setError(MISSING_LISTING_ERROR);
       return;
     }
     if (!addressId) {
@@ -487,10 +398,7 @@ export default function Checkout() {
       markCheckoutPending(items.map((row) => row.id));
       window.location.assign(data.checkoutUrl);
     } catch (err) {
-      const code = err?.body?.code;
-      setError(code === 'price_mismatch' || err?.status === 409
-        ? `${err.message} Refresh the card in your cart and try again — nothing was charged.`
-        : (err.message || 'Could not open Stripe.'));
+      setError(stripeSessionError(err));
       setBusy(false);
     }
   }
@@ -736,20 +644,13 @@ export default function Checkout() {
               {showAddressForm || !addresses.length ? (
                 <form className="sell-form" onSubmit={saveAddress}>
                   <p className="page-lede">Add shipping address</p>
-                  {[
-                    ['fullName', 'Full name'],
-                    ['addressLine1', 'Address line 1'],
-                    ['addressLine2', 'Address line 2 (optional)'],
-                    ['postalCode', 'Postal code'],
-                    ['city', 'City'],
-                    ['phoneNumber', 'Phone (optional)'],
-                  ].map(([key, label]) => (
+                  {ADDRESS_FIELDS.map(([key, label]) => (
                     <label className="sell-field" key={key}>
                       {label}
                       <input
                         value={draft[key]}
                         onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
-                        required={key !== 'addressLine2' && key !== 'phoneNumber'}
+                        required={addressFieldRequired(key)}
                         maxLength={180}
                       />
                     </label>
@@ -989,7 +890,7 @@ export default function Checkout() {
             {!canPayStripe && payMethod === 'stripe' && !nft && !addressId ? (
               <p className="page-lede">Save a shipping address to pay with Stripe.</p>
             ) : null}
-            {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}
+            {missingListing ? <Alert>{MISSING_LISTING_ERROR}</Alert> : null}
             {nft && pknBlocked ? (
               <Alert>{pknRefusedNames} {pknRefused.length === 1 ? 'accepts' : 'accept'} card payments only, and NFT checkout is paid in PKN. Remove their cards or check out the physical cards by card.</Alert>
             ) : null}

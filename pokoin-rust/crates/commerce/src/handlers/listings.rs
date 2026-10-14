@@ -593,10 +593,13 @@ fn create_values(
         txt("location", 64, ""),
         json!(body["altered"] == true),
         json!(game),
+        txt("status",20,"active"),
     ])
 }
-const CREATE_SQL:&str="insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, seller_reputation_label, condition, language, price_pkn, quantity_available, signed, reverse, first_edition, foil_state, variant_state, sealed, graded, grading_company, grade, certification_id, shipping_available, reserve_available, nft_available, seller_comment, source, source_listing_id, card_name, card_image_url, set_name, collector_number, location, altered, marketplace_game) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) returning *";
-async fn create_listing(
+const CREATE_SQL:&str="insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, seller_reputation_label, condition, language, price_pkn, quantity_available, signed, reverse, first_edition, foil_state, variant_state, sealed, graded, grading_company, grade, certification_id, shipping_available, reserve_available, nft_available, seller_comment, source, source_listing_id, card_name, card_image_url, set_name, collector_number, location, altered, marketplace_game, status) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) returning *";
+fn valid_inventory_price(price:f64,status:&str)->bool { price.is_finite() && price >= 0.0 && (price > 0.0 || status == "paused") }
+
+pub(crate) async fn create_listing(
     state: &DomainState,
     claims: &crate::Claims,
     body: &Value,
@@ -608,8 +611,10 @@ async fn create_listing(
     if card.is_empty() {
         return Err(ApiError::bad_request("Missing card id."));
     }
-    if !price.is_finite() || price <= 0.0 {
-        return Err(ApiError::bad_request("Enter a valid PKN price."));
+    let status=live::field(body,"status",20);
+    if !status.is_empty() && status != "active" && status != "paused" { return Err(ApiError::bad_request("Invalid initial listing status.")); }
+    if !valid_inventory_price(price, &status) {
+        return Err(ApiError::bad_request("Enter a valid PKN price, or pause unpriced inventory."));
     }
     if !qty.is_finite() || qty.fract() != 0.0 || !(1.0..=99.0).contains(&qty) {
         return Err(ApiError::bad_request("Quantity must be between 1 and 99."));
@@ -828,7 +833,7 @@ pub async fn marketplace_listings_patch(
     }
     out
 }
-async fn update_listing(
+pub(crate) async fn update_listing(
     state: &DomainState,
     claims: &crate::Claims,
     id: &str,
@@ -1020,7 +1025,7 @@ async fn load_seller_listings(
                 .ok()
                 .flatten()
                 .unwrap_or_default(),
-            price_pkn: row.try_get::<f64, _>("price_pkn").unwrap_or(0.0),
+            price_pkn: pokoin_api_common::pg::number_f64(row, "price_pkn").unwrap_or(0.0),
             quantity: row.try_get::<i32, _>("quantity_available").unwrap_or(0) as i64,
             signed: row
                 .try_get::<Option<bool>, _>("signed")
@@ -1755,7 +1760,8 @@ mod parity_tests {
     #[test]
     fn create_plan_retains_optional_grading_metadata_and_catalog_fallback() {
         let v=create_values(&json!({"cardId":"22","sellerCountry":"de","pricePkn":"200","quantityAvailable":"1","gradingCompany":"PSA","grade":"10","certificationId":"abc"}),"u1","pokemon",&json!({"name":"Espurr","image_url":"image","expansion_name":"Set","expansion_number":"1/99"})).unwrap();
-        assert_eq!(v.len(), 32);
+        assert_eq!(v.len(), 33);
+        assert_eq!(v[32],"active");
         assert_eq!(v[3], "DE");
         assert_eq!(v[16], "PSA");
         assert_eq!(v[17], "10");
@@ -1805,5 +1811,15 @@ mod parity_tests {
             collection_signature(&json!({"n":"Mr. Mime","s":"Base Set"}), "n", "s", "c"),
             ""
         );
+    }
+}
+
+#[cfg(test)]
+mod inventory_price_tests {
+    use super::*;
+    #[test] fn unpriced_stock_is_only_valid_when_paused() {
+        assert!(valid_inventory_price(0.0,"paused"));assert!(valid_inventory_price(1.0,"active"));
+        assert!(!valid_inventory_price(0.0,"active"));assert!(!valid_inventory_price(0.0,""));
+        assert!(!valid_inventory_price(-1.0,"paused"));assert!(!valid_inventory_price(f64::NAN,"paused"));
     }
 }

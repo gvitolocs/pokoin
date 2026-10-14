@@ -227,7 +227,8 @@ async function refreshC1Dictionary() {
 function getJsonLocal(path, options = {}) {
   const url = publicApiUrl(withGameQuery(path));
   if (!localStorable(url) || options.method || options.body || options.headers || options.cache) {
-    return getJson(path, options);
+    // Not stored, but a `format=c1` answer still decodes to the default JSON.
+    return getJson(path, options).then((payload) => (isC1(payload) ? decodeC1(payload, c1Dictionary) : payload));
   }
   return localReader.read(url, options).catch(async (err) => {
     if (!(err instanceof C1Error) || !(await refreshC1Dictionary())) throw err;
@@ -241,31 +242,25 @@ export function subscribeLocal(path, fn) {
 }
 
 /**
- * Routes read as c1 (docs/rust-migration/COMPACT_ENCODING.md). Since #318 the
- * edge sends c1 as application/json, so Cloudflare brotlis it. Measured
- * 2026-10-11 against api.pokoin.com, brotli bytes JSON → c1: search-page
- * 6.2 → 3.7 KB, card-versions name pool 103 → 65 KB, artist-cards 24 → 17 KB,
- * expansion-page index 24.3 → 18.1 KB and set page 27.3 → 11.1 KB; decode no
- * slower than JSON.parse. Not card-page (no c1 form) or version-set (+3%).
+ * On. The API sends c1 as `application/json`, so the edge compresses it like
+ * any JSON: measured 2026-10-12 after brotli, search-page 6.2 → 3.6 KB, a set
+ * desk 9.8 → 4.8 KB, the expansion index 24.3 → 18.1 KB, with the same
+ * decode time as `JSON.parse` of the plain body and identical data.
+ * (It was off while c1 went out as `application/vnd.pokoin.c1+json`, which
+ * Cloudflare does not compress.)
  */
-const C1_READS = new Set([
-  'marketplace-search-page',
-  'marketplace-card-versions',
-  'marketplace-artist-cards',
-  'marketplace-expansion-page',
-]);
+const C1_READS = true;
 
 /**
- * Read a catalogue route in the compact `c1` encoding where C1_READS says it
- * wins, decoded back to exactly the default JSON, so callers do not change.
+ * Read a catalogue route in the compact `c1` encoding (C1_READS), decoded
+ * back to exactly the default JSON, so callers do not change.
  * `?format=c1` rather than the Accept header: the URL is the cache key at the
  * edge. Safe either way: a plain JSON answer passes through, and a document
  * this build cannot decode (even after a dictionary refresh) is read again as
  * JSON. Decoded rows share interned objects: treat them as read-only.
  */
 export async function getJsonC1(path, options = {}) {
-  const route = path.slice(path.indexOf('/api/') + 5).split(/[?#]/)[0];
-  if (!C1_READS.has(route)) {
+  if (!C1_READS) {
     return getJsonLocal(path, options);
   }
   try {
@@ -470,7 +465,7 @@ export function fetchSuggest(query, {
   if (match === 'all') {
     params.set('match', 'all');
   }
-  return getJson(`/api/marketplace-suggest?${params}`, { signal });
+  return getJsonC1(`/api/marketplace-suggest?${params}`, { signal });
 }
 
 const SEARCH_WARMUP_TTL_MS = 5 * 60 * 1000;
@@ -1026,6 +1021,28 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+/** The seller's live API tokens (Card Rails and other inventory apps). */
+export function fetchSellerApiGrants(token) {
+  return getJson('/api/seller-api-grants', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** `{ action: 'create' | 'revoke' | 'webhook' | 'test', … }` on the seller's API tokens. */
+export function sellerApiGrantAction(token, body) {
+  return getJson('/api/seller-api-grants', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
 /** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
 export function fetchCardTraderZero(token) {
   return getJson('/api/cardtrader-zero', {
@@ -1079,6 +1096,18 @@ export function askPoko(bearer, message, sessionId) {
 
 export function pokoConnectAction(bearer, body) {
   return getJson('/api/poko-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Sign in with Pokoin for Card Rails: mint the one-time code (/connect/cardrails consent tap). */
+export function cardRailsAuthorize(bearer, body) {
+  return getJson('/api/cardrails-authorize', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2933,6 +2962,9 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else if (book) {
     params.set('book', '1');
+    // A whole shop as columns against the bundled dictionary: about a tenth
+    // of the JSON. An answer this build cannot decode counts as no book.
+    params.set('format', 'c1v2');
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else {
     params.set('limit', String(limit));
@@ -2947,9 +2979,10 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   }
   if (marketplaceGame) params.set('game', String(marketplaceGame));
-  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
-    book || fresh ? data : rememberSellerListings(handle, data, opts)
-  ));
+  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => {
+    if (book) return isC1(data) ? decodeC1(data) : data;
+    return fresh ? data : rememberSellerListings(handle, data, opts);
+  });
   if (book || fresh) return run();
   const key = sellerCacheKey(handle, opts);
   const pending = sellerShopInflight.get(key);

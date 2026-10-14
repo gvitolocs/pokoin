@@ -6,16 +6,20 @@ import { gameBasename } from '@market/game.js';
 import { peekHandoffCard } from './lib/card-handoff.js';
 import { localPreload, prefetchAfterDesk } from './lib/local-preload.js';
 import Home from './pages/Home.jsx';
-import NotMigrated from './pages/NotMigrated.jsx';
+import UnknownPath from './pages/UnknownPath.jsx';
 import RedirectTo from './pages/RedirectTo.jsx';
 import { preloadSearch } from './lib/search-preload.js';
+import accountRoutes from './routes/account.js';
+import commerceRoutes from './routes/commerce.js';
+import browseRoutes from './routes/browse.js';
+import toolsRoutes from './routes/tools.js';
 
 const Search = lazy(() => import('./pages/Search.jsx'));
 
 /**
- * Migrated routes only. Every other URL renders NotMigrated, which hands the
- * page to the React UI (same URL) once the boot switch exists; see
- * docs/frontend-perf/PLAN.md "Coexistence". Home stays eager — it is the
+ * Every page of the site (market/src/App.jsx routes, ported group by group in
+ * routes/*.js). Any other URL renders UnknownPath: a numeric short link opens
+ * its card, the rest goes to the marketplace. Home stays eager — it is the
  * landing; every other page is its own chunk.
  *
  * Preloading (lib/local-prefetch.js): intent (hover 60 ms / focus / touchstart)
@@ -53,7 +57,11 @@ export const Router = createRouter({
     { path: '/marketplace/:lang/cards/:cardId/:slug/versions', component: Versions },
     { path: '/marketplace/:lang/cards/:cardId/versions', component: Versions },
     { path: '/marketplace/:lang/cards/:cardId/:slug?', component: Card, preload: preloadCard },
-    { path: '*404', component: NotMigrated },
+    ...accountRoutes,
+    ...commerceRoutes,
+    ...browseRoutes,
+    ...toolsRoutes,
+    { path: '*404', component: UnknownPath },
   ],
 });
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { bootScript, buildShell, canaryPercent, cspHash, entryTags } from './build-ui-shell.mjs';
+import { bootScript, buildShell, cspHash, entryTags, gameSlugs, routePath } from './build-ui-shell.mjs';
 
 const REACT = `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <script src="/market/card-url-boot.js"></script>
@@ -44,7 +44,7 @@ function boot(script, { path = '/marketplace', search = '', local = {}, session 
     document: { write: (html) => written.push(html) },
   });
   runInContext(script, context);
-  return { ui: window.__POKOIN_UI__, written: written.join(''), local: localStorage.data, session: sessionStorage.data, switched: window.__POKOIN_UI_SWITCH__ };
+  return { ui: window.__POKOIN_UI__, legacy: window.__POKOIN_REACT_LEGACY__, written: written.join(''), local: localStorage.data, session: sessionStorage.data, switched: window.__POKOIN_UI_SWITCH__ };
 }
 
 test('entryTags removes exactly the Vite entry tags and remembers where they were', () => {
@@ -63,44 +63,38 @@ test('the shell keeps card-url-boot before the switch, and the CSP hash covers t
   assert.ok(!shell.script.includes('</script>'), 'inline script must not contain </script>');
 });
 
-test('default is React; ?ui=solid on an owned route picks Solid and sticks', () => {
+test('every page boots Solid: owned or not, framed or not, under a game basename', () => {
+  const { script } = buildShell(REACT, SOLID, { owned: OWNED, games: ['one-piece'] });
+  for (const opts of [{}, { path: '/marketplace/en/cards/123/pikachu' }, { framed: true }, { path: '/one-piece/marketplace' }, { path: '/cart' }]) {
+    const run = boot(script, opts);
+    assert.equal(run.ui, 'solid', JSON.stringify(opts));
+    assert.ok(run.written.includes('/market/s/index-S.js') && run.written.includes('suggest-engine-S.js'));
+    assert.ok(!run.written.includes('index-R.js'), 'React entry tags are never written');
+    assert.equal(run.switched, 1);
+  }
+  assert.ok(!script.includes('index-R.js'), 'React entry is not even in the page');
+  assert.equal(boot(script).legacy, undefined, 'a plain owned page reports nothing');
+});
+
+test('whatever used to pick React is reported once as react-legacy, then cleared', () => {
   const { script } = buildShell(REACT, SOLID, { owned: OWNED });
-  const plain = boot(script);
-  assert.equal(plain.ui, 'react');
-  assert.ok(plain.written.includes('/market/assets/index-R.js') && !plain.written.includes('index-S.js'));
-  assert.equal(plain.switched, 1);
-  const opted = boot(script, { search: '?ui=solid' });
-  assert.equal(opted.ui, 'solid');
-  assert.ok(opted.written.includes('/market/s/index-S.js') && opted.written.includes('suggest-engine-S.js'));
-  assert.equal(opted.local['pokoin.ui'], 'solid');
-  assert.equal(boot(script, { local: { 'pokoin.ui': 'solid' }, path: '/marketplace/en/cards/123/pikachu' }).ui, 'solid');
+  assert.equal(boot(script, { search: '?ui=react' }).legacy, 'ui=react');
+  const handed = boot(script, { session: { 'pokoin.ui.once': 'react' } });
+  assert.equal(handed.legacy, 'handoff:react');
+  assert.equal(handed.session['pokoin.ui.once'], undefined);
+  for (const pref of ['react', 'react-auto']) {
+    const run = boot(script, { local: { 'pokoin.ui': pref } });
+    assert.equal(run.ui, 'solid');
+    assert.equal(run.legacy, `pref:${pref}`);
+    assert.equal(run.local['pokoin.ui'], undefined, 'the stored preference is cleared');
+  }
+  const solidPref = boot(script, { local: { 'pokoin.ui': 'solid-auto' } });
+  assert.equal(solidPref.legacy, undefined);
+  assert.equal(solidPref.local['pokoin.ui'], undefined);
+  assert.equal(boot(script, { path: '/cart' }).legacy, 'unowned');
 });
 
-test('Solid is never chosen for routes it does not own, in frames, or right after a handoff', () => {
-  const { script } = buildShell(REACT, SOLID, { owned: OWNED });
-  const local = { 'pokoin.ui': 'solid' };
-  assert.equal(boot(script, { local, path: '/cart' }).ui, 'react');
-  assert.equal(boot(script, { local, framed: true }).ui, 'react');
-  const handed = boot(script, { local, session: { 'pokoin.ui.once': 'react' } });
-  assert.equal(handed.ui, 'react');
-  assert.equal(handed.session['pokoin.ui.once'], undefined, 'the handoff flag is one-shot');
-  assert.equal(boot(script, { local, search: '?ui=react' }).ui, 'react');
-});
-
-test('canary samples once; at 0% sampled visitors go back to React, explicit opt-ins stay', () => {
-  const tags = { react: '<r>', solid: '<s>' };
-  const canary = bootScript({ owned: OWNED, canary: 10, tags });
-  const sampled = boot(canary, { random: 0.05 });
-  assert.equal(sampled.ui, 'solid');
-  assert.equal(sampled.local['pokoin.ui'], 'solid-auto');
-  assert.equal(boot(canary, { random: 0.5 }).local['pokoin.ui'], 'react-auto');
-  const off = bootScript({ owned: OWNED, canary: 0, tags });
-  assert.equal(boot(off, { local: { 'pokoin.ui': 'solid-auto' } }).ui, 'react');
-  assert.equal(boot(off, { local: { 'pokoin.ui': 'solid' } }).ui, 'solid');
-  assert.equal(boot(off).local['pokoin.ui'], undefined, 'no sampling at 0%');
-});
-
-test('storage failures fall back to React and still write the tags', () => {
+test('storage failures still boot Solid', () => {
   const { script } = buildShell(REACT, SOLID, { owned: OWNED });
   const written = [];
   const window = {};
@@ -108,24 +102,16 @@ test('storage failures fall back to React and still write the tags', () => {
   window.top = window;
   runInContext(script, createContext({
     window,
-    location: { pathname: '/marketplace', search: '?ui=solid' },
+    location: { pathname: '/marketplace', search: '?ui=react' },
     URLSearchParams,
     get localStorage() { throw new Error('blocked'); },
     sessionStorage: { getItem() { throw new Error('blocked'); } },
     Math,
     document: { write: (html) => written.push(html) },
   }));
-  assert.equal(window.__POKOIN_UI__, 'react');
-  assert.ok(written.join('').includes('index-R.js'));
-});
-
-test('canary comes from the committed config unless the env overrides it', () => {
-  assert.equal(canaryPercent(undefined, 5), 5);
-  assert.equal(canaryPercent('', 5), 5);
-  assert.equal(canaryPercent('0', 5), 0);
-  assert.equal(canaryPercent('250', 0), 100);
-  assert.equal(canaryPercent(undefined, undefined), 0);
-  assert.equal(canaryPercent('-3', 1), 0);
+  assert.equal(window.__POKOIN_UI__, 'solid');
+  assert.equal(window.__POKOIN_REACT_LEGACY__, 'ui=react');
+  assert.ok(written.join('').includes('index-S.js'));
 });
 
 test('owned routes cover the Solid pages and nothing React still serves', () => {
@@ -140,19 +126,81 @@ test('owned routes cover the Solid pages and nothing React still serves', () => 
     '/marketplace/en/cards/806390/card-mega-rayquaza-ex-gold-secret-rare-113-076-storm-emeralda',
     '/marketplace/zht/cards/806390/versions',
     '/marketplace/it/cards/806390/some-slug/versions',
-  ]) assert.ok(owns(pathname), pathname);
-  for (const pathname of [
-    '/',
-    '/cart',
-    '/checkout',
-    '/orders',
-    '/profile',
+    '/marketplace/eras',
     '/marketplace/eras/ex',
     '/marketplace/sets',
+    '/marketplace/sets/base-set/',
+    '/marketplace/en/artists',
     '/marketplace/en/artists/mitsuhiro-arita',
     '/marketplace/en/users/seller',
+    '/marketplace/en/pokemon/pikachu',
+    '/marketplace/en/rarities',
+    '/marketplace/jp/languages/japanese',
+    '/marketplace/en/guides/grading',
+    '/marketplace/explore',
+    '/marketplace/watchlist',
+    '/favorites',
+    '/product',
+    '/product/graded',
+    '/marketplace/competitive',
+    '/marketplace/competitive/decks/abc',
+    '/marketplace/competitive/decklists/123',
+    '/marketplace/competitive/tournaments',
+    '/docs',
+    '/privacy/',
+    '/health',
+    '/sitemap',
+    '/tests',
+    '/sanitize/',
+    '/ocr/artists',
+    '/poko/archive',
+    '/jumbos',
+    '/admin',
+    '/marketplace/admin/edit',
+    '/scan',
+    '/cardscan/',
+    '/inventory/scan',
+    '/dashboard/scan',
+    '/inventory/sync-review',
+    '/forum',
+    '/forum/category/general',
+    '/forum/topic/abc123/',
+    '/about',
+    '/careers',
+  ]) assert.ok(owns(pathname), pathname);
+  for (const pathname of [
+    '/cart', '/checkout', '/orders', '/bought', '/buy', '/sales', '/wallet', '/exchange', '/swap', '/nft',
+    '/flex', '/shipping', '/protection', '/marketplace/signal', '/auth', '/extension/auth-bridge', '/profile',
+    '/dashboard', '/stock', '/messages', '/messages/poko', '/associate', '/mypokoin', '/mypokoin/collection',
+    '/mypokoin/location/box1', '/inventory', '/collection', '/marketplace/portfolio', '/marketplace/portfolio/abc',
+    '/invite', '/join/code', '/ambassador', '/ambassadorprogram', '/email-preferences', '/marketplace/en/users/seller',
+  ]) assert.ok(owns(pathname), pathname);
+  // Nothing React routes is left; these are unknown paths (Solid's catch-all).
+  for (const pathname of [
+    '/',
+    '/marketplace/en/users',
+    '/marketplace/competitive/decklists',
     '/marketplace/search/extra',
     '/marketplace/en/cards/806390/slug/other',
-    '/cyberpunk/marketplace',
+    '/ocr/artists/x',
+    '/forum/topic',
+    '/scan/extra',
+    '/dash-preview',
   ]) assert.ok(!owns(pathname), pathname);
+});
+
+test('other games route under their basename like the Pokemon site', async () => {
+  const games = await gameSlugs(new URL('..', import.meta.url).pathname);
+  assert.ok(games.includes('one-piece') && games.includes('magic') && !games.includes(''));
+  assert.equal(routePath('/one-piece/marketplace', games), '/marketplace');
+  assert.equal(routePath('/one-piece', games), '/');
+  assert.equal(routePath('/one-piece-fan/marketplace', games), '/one-piece-fan/marketplace');
+  assert.equal(routePath('/marketplace/sets', games), '/marketplace/sets');
+  const tags = { solid: '<s>' };
+  const script = bootScript({ owned: OWNED, games, tags });
+  assert.equal(boot(script, { path: '/one-piece/marketplace' }).legacy, undefined);
+  assert.equal(boot(script, { path: '/magic/marketplace/en/cards/12/x' }).legacy, undefined);
+  assert.equal(boot(script, { path: '/one-piece' }).legacy, 'unowned');
+  assert.equal(boot(script, { path: '/unknown-game/marketplace' }).legacy, 'unowned');
+  assert.equal(boot(bootScript({ owned: OWNED, tags }), { path: '/one-piece/marketplace' }).legacy, 'unowned');
 });

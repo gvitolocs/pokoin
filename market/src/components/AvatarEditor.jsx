@@ -4,7 +4,8 @@ import 'react-easy-crop/react-easy-crop.css';
 import Avatar from './Avatar.jsx';
 import { useAuth } from '../auth.jsx';
 import { removeProfilePicture, uploadProfilePicture } from '../api.js';
-import { AVATAR_ACCEPT, nextRotation, prepareAvatarSource, renderAvatar } from '../avatar.js';
+import { AVATAR_ACCEPT, nextRotation } from '../avatar.js';
+import { prepareAvatarSource, renderAvatar } from '../avatar-render.js';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;

@@ -11,6 +11,7 @@ import {
   reconcileRow,
   sellerKeyOf,
 } from '../cart-model.js';
+import { buyAgainFallback, removedNoteSlot, rowCardStub } from '../basket-format.js';
 import { nudgeFromParcels } from '../cart-shipping.js';
 import {
   useBuyAgain,
@@ -124,11 +125,7 @@ export default function Cart() {
   const again = useBuyAgain(fallback ? uid : '');
   const againIds = useMemo(() => again.cards.map((row) => row.cardId), [again.cards]);
   // Paid cards the tile API does not know still show from the order's name.
-  const againFallback = useMemo(() => again.cards.map((row) => ({
-    id: row.cardId,
-    name: row.name,
-    canonicalPath: `/marketplace/en/cards/${row.cardId}`,
-  })), [again.cards]);
+  const againFallback = useMemo(() => buyAgainFallback(again.cards), [again.cards]);
   const againTiles = useCardTiles(againIds, againFallback);
   const inspired = useInspired(fallback ? recent.cards : NONE, {
     exclude: [...recentIds, ...items.map((row) => row.cardId)],
@@ -179,27 +176,16 @@ export default function Cart() {
 
   function swap(row, offer) {
     live.dismissRow(row.id);
-    cart.replaceItem(row.id, cartItemFromOffer({
-      id: row.cardId,
-      name: row.name,
-      canonicalPath: row.href,
-      imageUrl: row.image,
-      set: row.setName,
-    }, offer));
+    cart.replaceItem(row.id, cartItemFromOffer(rowCardStub(row), offer));
   }
 
   const railEmpty = !items.length && !recentItems.length;
   // The "… was removed" note sits where the deleted line was, like Amazon's:
   // before the first later row of the same seller, else at that seller's end.
-  const removedSlot = useMemo(() => {
-    if (!removed || removed.all) return null;
-    const key = sellerKeyOf(removed.row);
-    const group = groups.find((row) => row.key === key);
-    if (!group) return null;
-    const index = new Map(items.map((row, at) => [row.id, at]));
-    const before = group.rows.find((row) => index.get(row.id) >= removed.index);
-    return { groupKey: key, beforeId: before?.id || '' };
-  }, [removed, groups, items]);
+  const removedSlot = useMemo(
+    () => removedNoteSlot(removed, groups, items, sellerKeyOf),
+    [removed, groups, items],
+  );
 
   const bottomRails = serverRails
     ? recs.rails.filter((rail) => rail.id !== 'recent')

@@ -57,8 +57,9 @@ async fn limit_hits(
         .bind(window_start(now_ms, limit.window_ms))
         .fetch_optional(&mut *conn)
         .await?;
+    // `hits` is integer: try_get::<i64> read it as 0 and no limit ever tripped.
     Ok(row
-        .and_then(|row| row.try_get::<i64, _>("hits").ok())
+        .and_then(|row| pokoin_api_common::pg::number_i64(&row, "hits"))
         .unwrap_or(0))
 }
 
@@ -78,7 +79,7 @@ async fn limit_increment(
     .bind(window_start(now_ms, limit.window_ms))
     .fetch_one(&mut *conn)
     .await?;
-    Ok(row.try_get::<i64, _>("hits").unwrap_or(0))
+    Ok(pokoin_api_common::pg::number_i64(&row, "hits").unwrap_or(0))
 }
 
 async fn enforce_limit(
@@ -538,7 +539,7 @@ pub async fn claim_pairing(
                   or ($1 <> '' and $2 = '' and pin = $1)
                   or ($1 = '' and $2 <> '' and qr_secret = $2)
                 )
-              returning session_id",
+              returning session_id::text as session_id",
         )
         .bind(&code)
         .bind(&secret)
@@ -705,12 +706,34 @@ pub async fn read_batch_snapshot(db: &DbPools, seller_uid: &str, batch_id: &str)
         .bind(batch_id)
         .fetch_all(&pool)
         .await?;
-    let items: Vec<Value> = items.iter().map(row_value).collect();
+    let items: Vec<Value> = items.iter().map(|row| rules::item_view(&row_value(row))).collect();
+    let now_ms = crate::time_util::now_ms();
+    let session = latest_session(db, batch_id)
+        .await?
+        .map(|row| rules::session_view(&row, now_ms))
+        .unwrap_or(Value::Null);
     Ok(json!({
         "batch": rules::batch_view(&batch),
         "items": items,
-        "cursor": batch.get("item_seq").and_then(Value::as_i64).unwrap_or(0),
+        "session": session,
+        "serverTime": now_ms,
+        "cursor": rules::row_i64(&batch, "item_seq").unwrap_or(0),
     }))
+}
+
+/// `batchForStream`: the seller's batch row, without its items.
+pub async fn batch_for_stream(db: &DbPools, seller_uid: &str, batch_id: &str) -> ApiResult<Value> {
+    if !rules::is_uuid(batch_id) {
+        return Err(ApiError::not_found("Batch not found."));
+    }
+    let pool = writer(db).await?;
+    sqlx::query("select * from public.scan_batches where id = $1::uuid and seller_uid = $2")
+        .bind(batch_id)
+        .bind(seller_uid)
+        .fetch_optional(&pool)
+        .await?
+        .map(|row| row_value(&row))
+        .ok_or_else(|| ApiError::not_found("Batch not found."))
 }
 
 /// Items changed after `cursor` (stream replay).
@@ -724,7 +747,7 @@ pub async fn items_after(db: &DbPools, batch_id: &str, cursor: i64, limit: i64) 
     .bind(limit.clamp(1, 500))
     .fetch_all(&pool)
     .await?;
-    Ok(Value::Array(rows.iter().map(row_value).collect()))
+    Ok(Value::Array(rows.iter().map(|row| rules::item_view(&row_value(row))).collect()))
 }
 
 /// `latestSession` for a batch (stream header).
@@ -787,8 +810,8 @@ pub async fn bump_batch(
     .fetch_one(&mut *conn)
     .await?;
     Ok((
-        row.try_get::<i64, _>("item_seq").unwrap_or(0),
-        row.try_get::<i64, _>("item_position").unwrap_or(0),
+        pokoin_api_common::pg::number_i64(&row, "item_seq").unwrap_or(0),
+        pokoin_api_common::pg::number_i64(&row, "item_position").unwrap_or(0),
     ))
 }
 
@@ -1053,7 +1076,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
             _ => {}
         }
     }
-    let last_event_id = sqlx::query("select id from public.scan_items where batch_id = $1::uuid order by position desc limit 1")
+    let last_event_id = sqlx::query("select id::text as id from public.scan_items where batch_id = $1::uuid order by position desc limit 1")
         .bind(&batch_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -1783,7 +1806,7 @@ pub async fn submit_batch(
                    collector_number = excluded.collector_number, location = excluded.location, altered = excluded.altered,
                    status = 'inactive', updated_at = now()
                  where public.marketplace_user_listings.status = 'inactive'
-                 returning id, status",
+                 returning id::text as id, status",
             )
             .bind(row.get("card_id").and_then(Value::as_str).unwrap_or_default())
             .bind(seller_uid)
@@ -1817,7 +1840,7 @@ pub async fn submit_batch(
                 ),
                 None => {
                     let existing = sqlx::query(
-                        "select id, status from public.marketplace_user_listings
+                        "select id::text as id, status from public.marketplace_user_listings
                           where source = 'pokoin_scan_batch' and source_listing_id = $1",
                     )
                     .bind(&source_listing_id)

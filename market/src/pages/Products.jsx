@@ -1,63 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fetchGradedCards, fetchSearch } from '../api.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
-
-const PRODUCTS = {
-  box: {
-    title: 'Booster boxes',
-    query: 'booster box',
-    productType: 'booster_box',
-    unit: 'products',
-    lede: 'Marketplace search for booster boxes.',
-  },
-  pack: {
-    title: 'Booster packs',
-    query: 'booster',
-    productType: 'booster_pack',
-    unit: 'products',
-    lede: 'Marketplace search for booster packs.',
-  },
-  graded: {
-    title: 'Graded cards',
-    mode: 'graded',
-    unit: 'cards',
-    lede: 'PSA, BGS, CGC, and other slabbed listings from sellers on Pokoin.',
-  },
-  jumbo: {
-    title: 'Jumbo cards',
-    query: 'jumbo oversized',
-    productType: 'jumbo',
-    unit: 'cards',
-    lede: 'Oversized jumbo printings — their own product type, across every era.',
-  },
-  nft: {
-    title: 'NFT',
-    query: 'nft',
-    productType: '',
-    unit: 'products',
-    lede: 'Live NFT catalog search. Owned holdings and shipping requests live on MyPokoin → Collection after nft_only checkout.',
-  },
-};
-
-function loadAisle(spec, { offset = 0, limit = 48 } = {}) {
-  if (spec.mode === 'graded') {
-    return fetchGradedCards({ limit });
-  }
-  return fetchSearch({
-    query: spec.query,
-    productType: spec.productType,
-    offset,
-    limit,
-  });
-}
+import { PRODUCT_AISLES as PRODUCTS, aisleEmptyLede, loadAisle, productAisle } from '../product-aisles.js';
 
 export default function Products() {
   const { kind = 'box' } = useParams();
-  const spec = PRODUCTS[kind] || PRODUCTS.box;
+  const spec = productAisle(kind);
   const [cards, setCards] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
@@ -96,9 +47,7 @@ export default function Products() {
     setHasMore(Boolean(data.hasMore));
   }
 
-  const emptyLede = kind === 'graded'
-    ? 'No active PSA / BGS / CGC listings yet. List a graded card from inventory or Scan Connect.'
-    : 'Try another product type or search from the bar.';
+  const emptyLede = aisleEmptyLede(kind);
 
   return (
     <div className="page desk">

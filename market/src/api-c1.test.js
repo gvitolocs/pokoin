@@ -1,40 +1,54 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { C1Error } from './compact.js';
+import { C1_DICTIONARY, C1Error, decodeC1, isC1 } from './compact.js';
+import { localStorable } from './local-read.js';
 
-// api.js imports browser-only modules; run its actual c1 reader with injected I/O.
+// api.js imports browser-only modules; run its actual c1 reader and local
+// router with injected I/O.
 const source = readFileSync(new URL('./api.js', import.meta.url), 'utf8');
-const start = source.indexOf('export async function getJsonC1(');
-const end = source.indexOf('\nfunction isViteDev()', start);
-assert.ok(start >= 0 && end > start, 'the c1 reader is present');
-const readerSource = source.slice(start, end).replace('export async function', 'async function');
-const routes = source.match(/const C1_READS = new Set\(\[([^\]]*)\]\)/);
-assert.ok(routes, 'C1_READS lists its routes');
-const C1_READS = new Set([...routes[1].matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]));
 
-function reader(getJsonLocal) {
-  return new Function('getJsonLocal', 'C1Error', 'C1_READS', `${readerSource}\nreturn getJsonC1;`)(getJsonLocal, C1Error, C1_READS);
+function slice(from, to) {
+  const start = source.indexOf(from);
+  const end = source.indexOf(to, start);
+  assert.ok(start >= 0 && end > start, `${from} is present`);
+  return source.slice(start, end).replace(/^export (async )?function/, (m, a) => `${a || ''}function`);
 }
 
-test('c1 is read only on the routes where it measured smaller after brotli', () => {
-  assert.deepEqual([...C1_READS].sort(), [
-    'marketplace-artist-cards',
-    'marketplace-card-versions',
-    'marketplace-expansion-page',
-    'marketplace-search-page',
-  ]);
-});
+const readerSource = slice('export async function getJsonC1(', '\nfunction isViteDev()');
+const localSource = slice('function getJsonLocal(', '\n/** Run `fn(value)`');
 
-test('other routes keep plain JSON', async () => {
+function reader(getJsonLocal, enabled = true) {
+  return new Function('getJsonLocal', 'C1Error', 'C1_READS', `${readerSource}\nreturn getJsonC1;`)(getJsonLocal, C1Error, enabled);
+}
+
+function localRouter({ getJson, read, refresh = async () => false }) {
+  const deps = {
+    publicApiUrl: (path) => `https://api.pokoin.com${path}`,
+    withGameQuery: (path) => path,
+    localStorable,
+    getJson,
+    isC1,
+    decodeC1,
+    c1Dictionary: C1_DICTIONARY,
+    localReader: { read },
+    C1Error,
+    refreshC1Dictionary: refresh,
+  };
+  return new Function(...Object.keys(deps), `${localSource}\nreturn getJsonLocal;`)(...Object.values(deps));
+}
+
+const C1_DOC = { c1: 1, b: { cards: [{ id: '7' }], total: 1 } };
+
+test('c1 reads are on, and a reader with them off asks for plain JSON', async () => {
+  assert.match(source, /const C1_READS = true;/);
   const asked = [];
   const getJsonC1 = reader(async (path) => {
     asked.push(path);
     return { ok: true };
-  });
-  await getJsonC1('/api/marketplace-version-set?cardId=1');
-  await getJsonC1('/api/marketplace-card-page?cardId=1&lang=en');
-  assert.deepEqual(asked, ['/api/marketplace-version-set?cardId=1', '/api/marketplace-card-page?cardId=1&lang=en']);
+  }, false);
+  await getJsonC1('/api/marketplace-search-page?q=mew');
+  assert.deepEqual(asked, ['/api/marketplace-search-page?q=mew']);
 });
 
 test('getJsonC1 asks for format=c1 and passes the options through', async () => {
@@ -72,9 +86,51 @@ test('getJsonC1 lets request failures surface like getJson', async () => {
   assert.equal(asked.length, 1);
 });
 
-test('a c1 document still decodes to exactly the default JSON (decoder contract)', async () => {
-  const { decodeC1, isC1 } = await import('./compact.js');
-  const doc = { c1: 1, b: { cards: [{ id: '7' }], total: 1 } };
-  assert.equal(isC1(doc), true);
-  assert.deepEqual(decodeC1(doc), { cards: [{ id: '7' }], total: 1 });
+test('a c1 answer from a route that is not stored still decodes to the default JSON', async () => {
+  const getJsonLocal = localRouter({
+    getJson: async () => C1_DOC,
+    read: () => assert.fail('search pages are never stored'),
+  });
+  assert.deepEqual(await getJsonLocal('/api/marketplace-search-page?query=mew&format=c1'), { cards: [{ id: '7' }], total: 1 });
+  const plain = { cards: [] };
+  const passthrough = localRouter({ getJson: async () => plain, read: () => assert.fail('not stored') });
+  assert.equal(await passthrough('/api/marketplace-suggest?q=m&format=c1'), plain);
+});
+
+test('stored routes go through the local reader; personal or option-bearing reads never do', async () => {
+  const reads = [];
+  const gets = [];
+  const getJsonLocal = localRouter({
+    getJson: async (path) => { gets.push(path); return {}; },
+    read: async (url, options) => { reads.push([url, options.prefetch]); return { ok: true }; },
+  });
+  await getJsonLocal('/api/marketplace-list?kind=set&key=x&format=c1v2', { prefetch: true });
+  await getJsonLocal('/api/marketplace-card-page?cardId=1&lang=en');
+  await getJsonLocal('/api/marketplace-card-page?cardId=1&includeOffers=1');
+  await getJsonLocal('/api/marketplace-listings?cardId=1');
+  await getJsonLocal('/api/marketplace-version-set?cardId=1', { headers: { Authorization: 'Bearer x' } });
+  assert.deepEqual(reads, [
+    ['https://api.pokoin.com/api/marketplace-list?kind=set&key=x&format=c1v2', true],
+    ['https://api.pokoin.com/api/marketplace-card-page?cardId=1&lang=en', undefined],
+  ]);
+  assert.deepEqual(gets, [
+    '/api/marketplace-card-page?cardId=1&includeOffers=1',
+    '/api/marketplace-listings?cardId=1',
+    '/api/marketplace-version-set?cardId=1',
+  ]);
+});
+
+test('a stored read that hits an unknown dictionary code retries fresh once a newer dictionary is adopted', async () => {
+  const reads = [];
+  const getJsonLocal = localRouter({
+    getJson: async () => assert.fail('stored route'),
+    read: async (url, options) => {
+      reads.push(options.fresh === true);
+      if (reads.length === 1) throw new C1Error('dictionary games has no code 99');
+      return { ok: true };
+    },
+    refresh: async () => true,
+  });
+  assert.deepEqual(await getJsonLocal('/api/marketplace-list?kind=set&key=x&format=c1v2'), { ok: true });
+  assert.deepEqual(reads, [false, true]);
 });
