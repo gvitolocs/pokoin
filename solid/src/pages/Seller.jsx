@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Repeat, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Repeat, Show, untrack } from 'solid-js';
 import { useNavigate, useParams, useSearchParams } from '@solidjs/router';
 import { fetchSellerShop } from '@market/api.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
@@ -29,8 +29,9 @@ import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 
 /** A changed shop's new book is built behind the request: how often and how soon to ask again. */
-const BOOK_RETRIES = 3;
-const BOOK_RETRY_MS = 2500;
+// A tab that comes back after this long asks for the book again (one stored,
+// compact read); an unchanged shop answers the same book.
+const BOOK_REVISIT_MS = 60_000;
 
 function ShopToggle(props) {
   return (
@@ -70,10 +71,11 @@ function SkeletonRows() {
 }
 
 /**
- * Public seller shop. The first page comes from
- * a small paged query (or the listings cache) while the whole book downloads
- * beside it; every filter / sort / page then runs locally on the book. A fresh
- * stamp check refetches the book when the seller's listings changed.
+ * Public seller shop: one request. The whole book (stored compact on the API,
+ * ~250 ms) paints the shop and every filter / sort / page runs locally on it;
+ * the listings cache paints first on a revisit. Server pages are only the
+ * fallback when the book is unavailable. A tab that comes back after a minute
+ * asks for the book again.
  * Not ported yet: the rubber-band multi-select of shop rows (rows drag
  * themselves).
  */
@@ -111,7 +113,8 @@ function SellerShop(props) {
   });
   const [loading, setLoading] = createSignal(!seeded);
   const [book, setBook] = createSignal(null);
-  const [bookPhase, setBookPhase] = createSignal('idle');
+  // The book is asked for on mount, so pages wait for it from the first run.
+  const [bookPhase, setBookPhase] = createSignal('loading');
   const [pageSettled, setPageSettled] = createSignal(Boolean(seeded));
   // Plain mirrors (React refs): read by requests that start before a flush.
   let sellerUidNow = untrack(hintedUid) || seeded?.seller?.uid || known?.uid || '';
@@ -179,55 +182,39 @@ function SellerShop(props) {
     };
   });
 
-  // Fresh stamp: refetch the book when the seller's listings moved. The
-  // server answers with the book it has while it builds the new one behind
-  // the request, so an unchanged book is asked for again a little later,
-  // a few times, instead of being painted or fetched in a loop.
-  createEffect(
-    () => [book(), filters()],
-    ([current]) => {
-      if (!current?.seller?.uid) return undefined;
-      let cancelled = false;
-      let timer = 0;
-      let retries = 0;
-      const check = () => {
-        fetchSellerShop(handle, { fresh: true, sellerUid: current.seller.uid, game: selectedGame })
-          .then((stamp) => {
-            const next = String(stamp?.maxUpdatedAt || '');
-            const prev = String(current.maxUpdatedAt || '');
-            if (cancelled || !next || next === prev) return null;
-            return fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: current.seller.uid });
-          })
-          .then((data) => {
-            if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
-            if (String(data.maxUpdatedAt || '') === String(current.maxUpdatedAt || '')) {
-              // Still the book on screen: the new one is being built.
-              if (retries < BOOK_RETRIES) {
-                retries += 1;
-                timer = setTimeout(check, BOOK_RETRY_MS);
-              }
-              return;
-            }
-            setBook(() => data);
-            putSeller((value) => sellerFromPayload(data, handle, data.listings[0], value));
-          })
-          .catch(() => {});
-      };
-      timer = setTimeout(check, 250);
-      return () => {
-        cancelled = true;
-        clearTimeout(timer);
-      };
-    },
-  );
+  // Revisit: a tab hidden for a minute asks for the book again when it comes
+  // back (the old fresh=1 stamp check ran the full paged query, ~2 s, after
+  // every filter change and never found a stamp).
+  onSettled(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      const current = untrack(book);
+      if (!current || !hiddenAt || Date.now() - hiddenAt < BOOK_REVISIT_MS) return;
+      hiddenAt = 0;
+      fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
+        .then((data) => {
+          if (!data?.book || !Array.isArray(data.listings)) return;
+          if (String(data.maxUpdatedAt || '') === String(current.maxUpdatedAt || '')) return;
+          setBook(() => data);
+          putSeller((value) => sellerFromPayload(data, handle, data.listings[0], value));
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  });
 
-  // Server pages until the book is in. A filter click while the book is
-  // downloading waits for it instead of asking again.
+  // Server pages only when the book is unavailable: while it downloads the
+  // page shows the listings cache or the skeleton, not a second (slow) query.
   createEffect(
     () => ({ book: book(), bookPhase: bookPhase(), page: page(), ...filters() }),
     (input) => {
       const narrow = sellerFiltersNarrow(input);
-      if (input.book || (input.bookPhase === 'loading' && narrow)) {
+      if (input.book || input.bookPhase === 'loading') {
         setPageSettled(true);
         return undefined;
       }
