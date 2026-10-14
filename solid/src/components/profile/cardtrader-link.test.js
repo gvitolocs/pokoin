@@ -21,11 +21,13 @@ test('link health reads the last sync', () => {
 test('summary names CardTrader pushes and drops imports for Pokoin → CardTrader', () => {
   const line = formatSyncSummary({
     direction: 'pokoin_to_ct', inventory: 12, imported: 0, matchedExisting: 2,
-    pushedToCardTrader: { pushed: 5, failed: 1, remaining: 1051, alreadyOnCardTrader: 3 },
+    pushedToCardTrader: { pushed: 5, failed: 1, remaining: 1051, linkedToExisting: 3, stoppedBy: 'rate_limited' },
   });
   assert.match(line, /^12 on CardTrader/);
   assert.doesNotMatch(line, /imported/);
-  assert.match(line, /5 listed on CardTrader · 1051 waiting to list · 3 already on CardTrader · 1 refused by CardTrader/);
+  assert.match(line, /5 listed on CardTrader · 1051 waiting to list · 3 matched to CardTrader products · 1 refused by CardTrader/);
+  assert.match(line, /the rest at the next sync \(CardTrader asked Pokoin to slow down\)/);
+  assert.doesNotMatch(formatSyncSummary({ inventory: 9, pushedToCardTrader: { pushed: 9, remaining: 0, stoppedBy: 'done' } }), /next sync/);
   assert.match(formatSyncSummary({ inventory: 3, imported: 3 }), /3 imported/);
   assert.doesNotMatch(formatSyncSummary({ inventory: 3 }), /unresolved/);
 });

@@ -843,10 +843,7 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     if direction.pushes() {
         let pushed = match crate::cardtrader::link::push_gate(result["complete"] == true, exclusive) {
             Some(reason) => json!({ "blocked": reason, "pushed": 0 }),
-            None => {
-                let on_cardtrader = crate::cardtrader::link::export_facets(products);
-                crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::push_batch(), &on_cardtrader).await
-            }
+            None => crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::PushBudget::from_env(), products).await,
         };
         if pushed.get("error").is_some_and(|error| !error.is_null()) {
             result["summary"]["errors"].incr(1);

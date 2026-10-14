@@ -12,7 +12,7 @@ export const CT_LINK_DIRECTIONS = [
   {
     id: 'pokoin_to_ct',
     label: 'Pokoin → CardTrader',
-    hint: 'Cards you list on Pokoin are listed on CardTrader too, up to 500 every 10 minutes. CardTrader-only stock stays off Pokoin.',
+    hint: 'Every card you list on Pokoin is listed on CardTrader too, at each sync (about every 10 minutes). CardTrader-only stock stays off Pokoin.',
   },
   {
     id: 'both',
@@ -53,6 +53,9 @@ const SYNC_REASONS = {
   invalid_products: 'CardTrader sent an inventory Pokoin could not read',
   incomplete_export: 'the CardTrader inventory was incomplete',
   no_shared_lock: 'another sync may be running',
+  rate_limited: 'CardTrader asked Pokoin to slow down',
+  time_budget: 'this sync ran out of time',
+  per_run_cap: 'this sync reached its limit',
 };
 
 export function syncReason(code) {
@@ -102,8 +105,11 @@ export function formatSyncSummary(summary) {
     count(summary.unresolved) ? `${count(summary.unresolved)} unresolved` : '',
     pushed && !pushed.blocked ? `${count(pushed.pushed)} listed on CardTrader` : '',
     pushed && count(pushed.remaining) ? `${count(pushed.remaining)} waiting to list` : '',
-    pushed && count(pushed.alreadyOnCardTrader) ? `${count(pushed.alreadyOnCardTrader)} already on CardTrader` : '',
+    pushed && count(pushed.linkedToExisting) ? `${count(pushed.linkedToExisting)} matched to CardTrader products` : '',
     pushed && count(pushed.failed) ? `${count(pushed.failed)} refused by CardTrader` : '',
     pushed?.blocked ? `listing on CardTrader paused: ${syncReason(pushed.blocked)}` : '',
+    pushed && count(pushed.remaining) && pushed.stoppedBy && pushed.stoppedBy !== 'done'
+      ? `the rest at the next sync (${syncReason(pushed.stoppedBy)})`
+      : '',
   ].filter(Boolean).join(' · ');
 }
