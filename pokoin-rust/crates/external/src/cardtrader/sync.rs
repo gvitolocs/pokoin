@@ -599,6 +599,50 @@ pub async fn hide_imported_cardtrader_listings(db: &DbPools, seller_uid: &str, k
     Ok(rows.len() as i64)
 }
 
+/// Unlink cleanup: imported CardTrader stock leaves Pokoin for good.
+/// Deletes the imported listing rows (CardTrader-imported 1-DR and synced
+/// stock — they are CardTrader's, re-imported on reconnect) and the 1-DR
+/// asset mirror. `sold_out` rows stay: they are the seller's sales history
+/// and feed sold comps. Returns (deleted listings, deleted 1-DR assets).
+pub async fn delete_imported_cardtrader_stock(db: &DbPools, seller_uid: &str) -> ApiResult<(i64, i64)> {
+    let listings = db
+        .write(
+            "pokemon",
+            "delete from public.marketplace_user_listings
+              where seller_uid = $1
+                and source = $2
+                and source_listing_id like 'ct:%'
+                and status <> 'sold_out'
+              returning card_id",
+            &[json!(seller_uid), json!(SOURCE_IMPORT)],
+        )
+        .await?;
+    let assets = db
+        .write(
+            "pokemon",
+            "delete from public.marketplace_cardtrader_1dr_assets where seller_uid = $1",
+            &[json!(seller_uid)],
+        )
+        .await?;
+    let _ = db
+        .write(
+            "pokemon",
+            "delete from public.marketplace_cardtrader_product_links where seller_uid = $1 and origin = 'import'",
+            &[json!(seller_uid)],
+        )
+        .await;
+    let mut seen = std::collections::HashSet::new();
+    for row in &listings {
+        let card_id = clean_text_value(row.get("card_id").unwrap_or(&Value::Null), 80);
+        if !card_id.is_empty() && seen.insert(card_id.clone()) {
+            let _ = db
+                .write("pokemon", "select public.refresh_marketplace_blueprint_price_summary($1)", &[json!(card_id)])
+                .await;
+        }
+    }
+    Ok((listings.len() as i64, assets.len() as i64))
+}
+
 pub async fn read_one_day_ready_assets(db: &DbPools, seller_uid: &str, limit: i64) -> ApiResult<Vec<Value>> {
     let bounded = limit.clamp(1, 2000);
     match db.query("pokemon", READ_1DR_ASSETS_SQL, &[json!(seller_uid), json!(bounded)]).await {
