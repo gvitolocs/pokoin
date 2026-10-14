@@ -94,13 +94,26 @@ test('a miss reads the network once, stores the text, then answers from memory',
   assert.equal(t.reader.peek(URL_A), a);
 });
 
-test('a stored copy younger than FRESH_MS answers without the network', async () => {
-  const t = setup();
+test('a stored copy younger than FRESH_MS answers, and the request that raced it is dropped', async () => {
+  const t = setup({
+    answers: {
+      [URL_A]: (init) => new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      }),
+    },
+  });
   t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - 1000 });
   assert.deepEqual(await t.reader.read(URL_A), { v: 1 });
   await flush();
-  assert.equal(t.fetched.length, 0);
+  assert.equal(t.fetched.length, 1);
+  assert.equal(t.fetched[0].init.signal.aborted, true);
   assert.equal(t.reader.fresh(URL_A), true);
+  // An onUpdate read gives the store its head start instead: no request at all.
+  const u = setup();
+  u.stored.set(URL_A, { body: '{"v":1}', savedAt: u.now() - 1000 });
+  assert.deepEqual(await u.reader.read(URL_A, { onUpdate: () => {} }), { v: 1 });
+  await flush();
+  assert.equal(u.fetched.length, 0);
 });
 
 test('stale-while-revalidate: an old copy answers at once, an unchanged body only refreshes its date', async () => {
@@ -273,4 +286,29 @@ test('a prefetch waits for a slow store instead of asking the network', async ()
   t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() });
   assert.deepEqual(await t.reader.read(URL_A, { prefetch: true }), { v: 1 });
   assert.equal(t.fetched.length, 0);
+});
+
+test('only reads that may show an old copy give the store a head start', async () => {
+  let release;
+  const t = setup({
+    storeDelayMs: 5,
+    answers: { [URL_A]: () => new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); }) },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const read = t.reader.read(URL_A, { maxStaleMs: FRESH_MS * 20 });
+  await flush();
+  assert.equal(t.fetched.length, 0, 'a read that may show an old copy waits for the store first');
+  assert.deepEqual(await read, { v: 1 });
+  release?.();
+
+  const fresh = setup({ storeDelayMs: 50, answers: { [URL_A]: '{"v":2}' } });
+  fresh.stored.set(URL_A, { body: '{"v":1}', savedAt: fresh.now() - 1000 });
+  const raced = fresh.reader.read(URL_A);
+  await flush();
+  assert.equal(fresh.fetched.length, 1, 'a fresh-only read asks the network before the store answers');
+  assert.deepEqual(await raced, { v: 2 });
+
+  const stale = setup({ storeDelayMs: 5, answers: { [URL_A]: '{"v":3}' } });
+  stale.stored.set(URL_A, { body: '{"v":1}', savedAt: stale.now() - FRESH_MS * 2 });
+  assert.deepEqual(await stale.reader.read(URL_A), { v: 3 });
 });

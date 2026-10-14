@@ -13,9 +13,10 @@
  *   `subscribe` listeners and the read's `onUpdate`.
  * - A copy older than `maxStaleMs` waits for the network, and still answers
  *   when the network fails.
- * - The store gets STORE_WAIT_MS to answer (an open database answers in
- *   under 1 ms; opening it takes ~7 ms, creating it on a first visit ~70 ms);
- *   after that the network is asked too and the first usable answer wins.
+ * - A read that may show an old copy gives the store STORE_WAIT_MS (an open
+ *   database answers in under 1 ms; opening it takes ~7 ms, creating it on a
+ *   first visit ~70 ms) before asking the network too; one that may not asks
+ *   the network at once. Either way the first usable answer wins.
  * - Prefetch reads (`prefetch: true`) take a stored copy of any age without
  *   asking the network again (the view revalidates when it opens), and can be
  *   aborted by their `signal` until a real read joins the same request.
@@ -161,7 +162,7 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     let job = inflight.get(url);
     if (!job) {
       const controller = new AbortController();
-      job = { adopted: !prefetch, controller };
+      job = { adopted: !prefetch, controller, readers: 0 };
       job.promise = Promise.resolve()
         .then(() => fetchText(url, { signal: controller.signal, priority }))
         .then(({ text, etag }) => land(url, text, etag))
@@ -170,6 +171,7 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     } else if (!prefetch) {
       job.adopted = true;
     }
+    job.readers += 1;
     if (prefetch && signal) {
       signal.addEventListener('abort', () => {
         if (!job.adopted) job.controller.abort();
@@ -215,6 +217,9 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
       if (!usable?.value || memory.has(url)) throw new Error('no stored copy');
       remember(url, usable.text, usable.savedAt, usable.value);
       shownText = usable.text;
+      // A copy this fresh needs no revalidation: drop the request if it is ours alone.
+      const job = inflight.get(url);
+      if (now() - usable.savedAt <= FRESH_MS && job?.readers === 1) job.controller.abort();
       return usable.value;
     });
     if (options.onUpdate) {
@@ -256,8 +261,13 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     }
     if (!fresh && !hit) {
       const pending = quietly(() => store.get(url));
-      // Prefetches wait for the store: they are not in a hurry, and a stored copy saves a request.
-      const row = prefetch ? await pending : await Promise.race([pending, wait(storeWaitMs)]);
+      // Prefetches wait for the store: they are not in a hurry, and a stored copy
+      // saves a request. A read that only takes a copy younger than FRESH_MS asks
+      // the network at once (the store still wins when it holds one, and still
+      // stands in when the network fails); the others give the store a head start.
+      const row = prefetch
+        ? await pending
+        : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs)]);
       if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
       const raced = memory.get(url);
       if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);
