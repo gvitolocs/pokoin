@@ -432,8 +432,7 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
 /// The seller's live and sold-out listings, keyset-paged by id.
 async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
     let cursor = uuid::Uuid::parse_str(&text_field(body, &["cursor"], 80)).ok();
-    let limit = live::number(&body["limit"]);
-    let limit = if limit.is_finite() { (limit as i64).clamp(1, 500) } else { 200 };
+    let limit = listings_limit(&body["limit"]);
     let rows: Vec<Value> = sqlx::query_scalar(
         "select to_jsonb(l) from public.marketplace_user_listings l where seller_uid = $1 \
          and status in ('active', 'paused', 'sold_out') and ($2::uuid is null or id > $2) order by id limit $3",
@@ -1156,5 +1155,25 @@ mod tests {
         assert!(only_pokoin(&json!({"channel":"pokoin"})).is_ok());
         assert_eq!(only_pokoin(&json!({"channel":"cardmarket"})).unwrap_err().code.as_deref(), Some("cardmarket_unlinked"));
         assert!(only_pokoin(&json!({"channel":"ebay"})).is_err());
+    }
+}
+
+/// Page size for `listings`: absent, null or non-numeric means the documented default of 200.
+fn listings_limit(value: &Value) -> i64 {
+    if value.is_null() { return 200; }
+    let limit = live::number(value);
+    if limit.is_finite() && limit > 0.0 { (limit as i64).clamp(1, 500) } else { 200 }
+}
+
+#[cfg(test)]
+mod listings_limit_tests {
+    use super::*;
+    #[test]
+    fn a_missing_limit_pages_two_hundred_listings() {
+        assert_eq!(listings_limit(&Value::Null), 200);
+        assert_eq!(listings_limit(&json!("x")), 200);
+        assert_eq!(listings_limit(&json!(0)), 200);
+        assert_eq!(listings_limit(&json!(50)), 50);
+        assert_eq!(listings_limit(&json!(9999)), 500);
     }
 }
