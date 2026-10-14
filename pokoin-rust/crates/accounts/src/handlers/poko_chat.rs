@@ -11,6 +11,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -41,6 +42,25 @@ const EVENTS: &str = "events";
 const CHAT_RATE_LIMIT: i64 = 20;
 const CHAT_RATE_WINDOW_SECONDS: u64 = 60;
 const IDENTIFY_PATH: &str = "/identify?catalog=pokemon_generic&multi=1&live=0&top_k=3";
+
+/// Same budgets as the Node BFF: photo download 8 s, primary scan worker 12 s,
+/// fallback worker 25 s. The shared transport's 4 s default is for the
+/// accounts hot path and cut every photo search short.
+const PHOTO_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
+const SCAN_PRIMARY_TIMEOUT: Duration = Duration::from_secs(12);
+const SCAN_FALLBACK_TIMEOUT: Duration = Duration::from_secs(25);
+/// Hermes plans with an LLM and calls market tools: a plain reply takes ~15 s.
+const POKO_CHAT_TIMEOUT_DEFAULT_MS: u64 = 90_000;
+
+/// `POKO_CHAT_TIMEOUT_MS` (default 90 s, as in the Node BFF), kept between 5 s
+/// and 95 s so Cloudflare's 100 s proxy limit still sees our fallback reply.
+fn poko_chat_timeout(raw: Option<&str>) -> Duration {
+    let millis = raw
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|millis| *millis > 0)
+        .unwrap_or(POKO_CHAT_TIMEOUT_DEFAULT_MS);
+    Duration::from_millis(millis.clamp(5_000, 95_000))
+}
 
 fn scan_primary() -> String {
     std::env::var("SCAN_PRIMARY_URL")
@@ -289,7 +309,7 @@ async fn identify_one_photo(
     let transport = state.transport().clone();
     let image = match send_with_retry(
         &transport,
-        HttpRequest::new("GET", url.to_string()),
+        HttpRequest::new("GET", url.to_string()).timeout(PHOTO_FETCH_TIMEOUT),
         RetryPolicy::none(),
     )
     .await
@@ -304,12 +324,13 @@ async fn identify_one_photo(
     if bytes[0] != 0xff || bytes[1] != 0xd8 {
         return Vec::new();
     }
-    for base in [primary, fallback] {
+    for (base, timeout) in [(primary, SCAN_PRIMARY_TIMEOUT), (fallback, SCAN_FALLBACK_TIMEOUT)] {
         if base.is_empty() {
             continue;
         }
         let boundary = format!("----pokoin{}", new_document_id());
         let request = HttpRequest::new("POST", format!("{base}{IDENTIFY_PATH}"))
+            .timeout(timeout)
             .header(
                 "Content-Type",
                 format!("multipart/form-data; boundary={boundary}"),
@@ -443,6 +464,9 @@ async fn hermes_reply(
     });
     let request = HttpRequest::new("POST", url)
         .header("authorization", format!("Bearer {token}"))
+        .timeout(poko_chat_timeout(
+            std::env::var("POKO_CHAT_TIMEOUT_MS").ok().as_deref(),
+        ))
         .json(&payload)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let response = state
@@ -798,5 +822,15 @@ mod tests {
             IDENTIFY_PATH,
             "/identify?catalog=pokemon_generic&multi=1&live=0&top_k=3"
         );
+    }
+
+    #[test]
+    fn hermes_gets_the_node_bff_timeout_budget() {
+        assert_eq!(poko_chat_timeout(None), Duration::from_secs(90));
+        assert_eq!(poko_chat_timeout(Some("45000")), Duration::from_secs(45));
+        assert_eq!(poko_chat_timeout(Some("100")), Duration::from_secs(5));
+        assert_eq!(poko_chat_timeout(Some("600000")), Duration::from_secs(95));
+        assert_eq!(poko_chat_timeout(Some("junk")), Duration::from_secs(90));
+        assert_eq!(poko_chat_timeout(Some("0")), Duration::from_secs(90));
     }
 }
