@@ -13,6 +13,9 @@
  *   `subscribe` listeners and the read's `onUpdate`.
  * - A copy older than `maxStaleMs` waits for the network, and still answers
  *   when the network fails.
+ * - The store gets STORE_WAIT_MS to answer (an open database answers in
+ *   under 1 ms; opening it takes ~7 ms, creating it on a first visit ~70 ms);
+ *   after that the network is asked too and the first usable answer wins.
  * - Prefetch reads (`prefetch: true`) take a stored copy of any age without
  *   asking the network again (the view revalidates when it opens), and can be
  *   aborted by their `signal` until a real read joins the same request.
@@ -24,6 +27,10 @@
 export const FRESH_MS = 30_000;
 /** Shown before the network answers only when the view takes `onUpdate`. */
 export const MAX_STALE_MS = 3 * 24 * 60 * 60 * 1000;
+/** How long a read waits for the store before asking the network as well. */
+const STORE_WAIT_MS = 25;
+const SLOW = Symbol('slow store');
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms, SLOW));
 const MEMORY_ROWS = 64;
 const MEMORY_CHARS = 12 * 1024 * 1024;
 
@@ -69,7 +76,7 @@ function abortError() {
  * @param {{get, put, confirm, remove}} io.store  every method may fail; failures are misses
  * @param {(text: string) => any} io.decode  response text to the value callers see
  */
-export function createLocalReader({ fetchText, store, decode, now = Date.now }) {
+export function createLocalReader({ fetchText, store, decode, now = Date.now, storeWaitMs = STORE_WAIT_MS }) {
   const memory = new Map();
   let memoryChars = 0;
   const inflight = new Map();
@@ -183,6 +190,51 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now }) 
     });
   }
 
+  /** A stored row as a value to show (`value`), a stand-in for failures (`stale`), or null. */
+  function fromRow(url, row, maxStaleMs) {
+    if (!row || typeof row.body !== 'string') return null;
+    const decoded = tryDecode(row.body);
+    if (!decoded) {
+      quietly(() => store.remove(url));
+      return null;
+    }
+    if (now() - row.savedAt > maxStaleMs) return { stale: { text: row.body, savedAt: row.savedAt } };
+    return { value: decoded.value, text: row.body, savedAt: row.savedAt };
+  }
+
+  /**
+   * The store did not answer within storeWaitMs (opening, or being created on
+   * a first visit): the network is asked too, and the first usable answer
+   * wins. A stored copy that wins is revalidated by that same request.
+   */
+  function raceStore(url, options, pending, maxStaleMs) {
+    const net = network(url, options, null);
+    let shownText;
+    const local = pending.then((row) => {
+      const usable = fromRow(url, row, maxStaleMs);
+      if (!usable?.value || memory.has(url)) throw new Error('no stored copy');
+      remember(url, usable.text, usable.savedAt, usable.value);
+      shownText = usable.text;
+      return usable.value;
+    });
+    if (options.onUpdate) {
+      net.then((value) => {
+        if (shownText !== undefined && memory.get(url)?.text !== shownText) options.onUpdate(value);
+      }, () => {});
+    }
+    return Promise.any([local, net]).catch(async () => {
+      try {
+        return await net;
+      } catch (err) {
+        const answered = err?.status >= 400 && err.status < 500;
+        const stale = answered || err?.name === 'AbortError' ? null : fromRow(url, await pending, Infinity);
+        if (!stale?.value) throw err;
+        remember(url, stale.text, stale.savedAt, stale.value);
+        return stale.value;
+      }
+    });
+  }
+
   /**
    * The value for `url`. `fresh` skips memory and store (the answer is still
    * stored). `maxStaleMs` (default FRESH_MS, or MAX_STALE_MS with `onUpdate`
@@ -203,20 +255,18 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now }) 
       fallback = hit;
     }
     if (!fresh && !hit) {
-      const row = await quietly(() => store.get(url));
+      const pending = quietly(() => store.get(url));
+      // Prefetches wait for the store: they are not in a hurry, and a stored copy saves a request.
+      const row = prefetch ? await pending : await Promise.race([pending, wait(storeWaitMs)]);
+      if (row === SLOW) return raceStore(url, options, pending, maxStaleMs);
       const raced = memory.get(url);
       if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);
-      if (row && typeof row.body === 'string') {
-        const decoded = tryDecode(row.body);
-        if (!decoded) {
-          quietly(() => store.remove(url));
-        } else if (now() - row.savedAt <= maxStaleMs) {
-          remember(url, row.body, row.savedAt, decoded.value);
-          return serve(url, memory.get(url), onUpdate, prefetch);
-        } else {
-          fallback = { text: row.body, savedAt: row.savedAt };
-        }
+      const usable = fromRow(url, row, maxStaleMs);
+      if (usable?.value) {
+        remember(url, usable.text, usable.savedAt, usable.value);
+        return serve(url, memory.get(url), onUpdate, prefetch);
       }
+      fallback = usable?.stale || null;
     }
     return network(url, options, fallback);
   }

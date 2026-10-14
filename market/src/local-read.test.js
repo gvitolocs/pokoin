@@ -4,7 +4,7 @@ import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './loca
 
 const URL_A = 'https://api.pokoin.com/api/marketplace-list?kind=set&key=surging-sparks&format=c1v2';
 
-function setup({ rows = {}, answers = {} } = {}) {
+function setup({ rows = {}, answers = {}, storeDelayMs = 0 } = {}) {
   let clock = 1_000_000_000;
   const fetched = [];
   const puts = [];
@@ -15,7 +15,10 @@ function setup({ rows = {}, answers = {} } = {}) {
     now: () => clock,
     decode: (text) => JSON.parse(text),
     store: {
-      get: async (url) => stored.get(url) || null,
+      get: async (url) => {
+        if (storeDelayMs) await new Promise((resolve) => setTimeout(resolve, storeDelayMs));
+        return stored.get(url) || null;
+      },
       put: async (url, body, etag, savedAt) => {
         puts.push(url);
         stored.set(url, { body, savedAt });
@@ -237,4 +240,37 @@ test('a prefetch takes any stored copy without asking the network: the view reva
   // The page's own read (no onUpdate) then waits for the network.
   assert.deepEqual(await t.reader.read(URL_A), { v: 2 });
   assert.equal(t.fetched.length, 1);
+});
+
+test('a slow store does not hold up the network: the first usable answer wins', async () => {
+  // Store slower than the network: the network answers.
+  const slow = setup({ storeDelayMs: 120, answers: { [URL_A]: '{"v":2}' } });
+  slow.stored.set(URL_A, { body: '{"v":1}', savedAt: slow.now() });
+  const started = Date.now();
+  assert.deepEqual(await slow.reader.read(URL_A), { v: 2 });
+  assert.ok(Date.now() - started < 110, 'answered before the store did');
+
+  // Network slower than the store: the stored copy answers, the request revalidates it.
+  const updates = [];
+  const t = setup({
+    storeDelayMs: 40,
+    answers: { [URL_A]: () => new Promise((resolve) => setTimeout(() => resolve({ text: '{"v":3}' }), 150)) },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  assert.deepEqual(await t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) }), { v: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.deepEqual(updates, [{ v: 3 }]);
+  assert.equal(t.fetched.length, 1);
+
+  // Both late and the network fails: an old copy still stands in.
+  const down = setup({ storeDelayMs: 40, answers: { [URL_A]: Object.assign(new Error('down'), { status: 530 }) } });
+  down.stored.set(URL_A, { body: '{"v":1}', savedAt: down.now() - MAX_STALE_MS * 2 });
+  assert.deepEqual(await down.reader.read(URL_A), { v: 1 });
+});
+
+test('a prefetch waits for a slow store instead of asking the network', async () => {
+  const t = setup({ storeDelayMs: 60, answers: { [URL_A]: '{"v":2}' } });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() });
+  assert.deepEqual(await t.reader.read(URL_A, { prefetch: true }), { v: 1 });
+  assert.equal(t.fetched.length, 0);
 });
