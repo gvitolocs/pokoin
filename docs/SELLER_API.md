@@ -97,8 +97,8 @@ Rules worth knowing:
   answers `changed: false`. An unlisted listing disappears from `listings` and
   can no longer be updated — only re-listed by creating it again.
 - **`externalKey`** on every `listings` entry (and in `update`'s `listing`) is
-  `cardrails:` + the `idempotencyKey` of the `list` call that created the
-  listing on this grant — the tool's own item id. It is null for listings the
+  the `idempotencyKey` of the `list` call that created the listing on this
+  grant, verbatim (Card Rails sends `cardrails:<item id>`). It is null for listings the
   tool did not create, so a tool can match its inventory against Pokoin
   without keeping its own crosswalk.
 - **`lastSoldMinEurCents`** is the lowest confirmed Pokoin sale price for

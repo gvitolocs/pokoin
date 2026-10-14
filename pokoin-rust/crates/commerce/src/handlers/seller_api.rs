@@ -362,7 +362,7 @@ async fn last_sold_minimums(state: &DomainState, rows: &[Value]) -> HashMap<Sold
 }
 
 /// This grant's `list` idempotency keys for the given listings: the tool's
-/// own item ids, reported back as `externalKey: "cardrails:<key>"`.
+/// own item ids, reported back verbatim as `externalKey` (Card Rails sends `cardrails:<item id>`).
 async fn external_keys(state: &DomainState, grant: uuid::Uuid, listing_ids: &[uuid::Uuid]) -> HashMap<String, String> {
     if listing_ids.is_empty() {
         return HashMap::new();
@@ -425,7 +425,7 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
         "lastSoldMinEurCents": last_sold_min_eur_cents,
         // The tool item this listing was created from (`list`'s
         // idempotency key on this grant); null when Pokoin did not make it.
-        "externalKey": external.get(&live::field(row, "id", 80)).map(|key| json!(format!("cardrails:{key}"))).unwrap_or(Value::Null),
+        "externalKey": external.get(&live::field(row, "id", 80)).map(|key| json!(key)).unwrap_or(Value::Null),
     })
 }
 
@@ -1026,7 +1026,7 @@ mod tests {
             "first_edition": false, "signed": true, "altered": false,
             "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
         });
-        let external: HashMap<String, String> = HashMap::from([("l1".to_string(), "cr_9".to_string())]);
+        let external: HashMap<String, String> = HashMap::from([("l1".to_string(), "cardrails:cr_9".to_string())]);
         let listing = tool_listing(&row, &HashMap::new(), &external);
         assert_eq!(listing["externalKey"], "cardrails:cr_9");
         assert_eq!(listing["signed"], true);

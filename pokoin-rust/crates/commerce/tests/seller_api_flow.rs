@@ -289,10 +289,10 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
 
     // --- list a card, at most once per key ----------------------------------
     let item = json!({"id":"cr_1","identity":{"game":"pokemon","name":"Sylveon","setName":"Verified expansion","number":"017/100","art":"https://cdn.pokoin.com/verified.jpg","publicId":"555001"},"language":"EN","condition":"NM","finish":"standard","quantity":2,"price":3.5,"currency":"EUR","location":"BIN-09"});
-    let (status, listed) = connector(&app, &token, json!({"action":"list","channel":"pokoin","item":item,"idempotencyKey":"list:cr_1"})).await;
+    let (status, listed) = connector(&app, &token, json!({"action":"list","channel":"pokoin","item":item.clone(),"idempotencyKey":"list:cr_1"})).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert_eq!((listed["confirmed"].clone(), listed["created"].clone(), listed["stockMode"].clone()), (json!(true), json!(true), json!("absolute")));
-    let (_, relisted) = connector(&app, &token, json!({"action":"list","channel":"pokoin","item":item,"idempotencyKey":"list:cr_1"})).await;
+    let (_, relisted) = connector(&app, &token, json!({"action":"list","channel":"pokoin","item":item.clone(),"idempotencyKey":"list:cr_1"})).await;
     assert_eq!((relisted["listingId"].clone(), relisted["created"].clone()), (listed["listingId"].clone(), json!(false)));
     assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where seller_uid = 'seller-1'").await, 2);
     let row: (String, i32, String, String, f64) = sqlx::query_as(
@@ -463,17 +463,25 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // --- every listing names its tool item ----------------------------------
-    let (_, page) = connector(&app, &token, json!({"action":"listings"})).await;
+    // This section lists its own item so it does not depend on what the
+    // earlier steps left visible: a bare `listings` call answers one page
+    // (a missing limit reads as 1 today), so the page is read with an
+    // explicit limit and a real tool walks the cursor.
+    let ext = json!({"action":"list","channel":"pokoin","item":item.clone(),"idempotencyKey":"cardrails:cr_ext"});
+    let (status, saved) = connector(&app, &token, ext).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["created"], json!(true));
+    let (_, page) = connector(&app, &token, json!({"action":"listings","limit":500})).await;
     let entries = page["listings"].as_array().unwrap();
-    let relisted = entries.iter().find(|l| l["listingId"] == listed["listingId"]).expect("the listed card");
-    assert_eq!(relisted["externalKey"], "cardrails:list:cr_1");
+    let relisted = entries.iter().find(|l| l["listingId"] == saved["listingId"]).expect("the listed card");
+    assert_eq!(relisted["externalKey"], "cardrails:cr_ext");
     assert_eq!(relisted["signed"], false);
     assert_eq!(relisted["altered"], false);
     // The update response carries the same external key and the flags.
     let cr_id = uuid::Uuid::parse_str(relisted["listingId"].as_str().unwrap()).unwrap();
     let (_, moved) = connector(&app, &token, update(json!({"location":"BIN-12"}), &cr_id)).await;
     assert_eq!(moved["changed"], true, "{moved}");
-    assert_eq!(moved["listing"]["externalKey"], "cardrails:list:cr_1");
+    assert_eq!(moved["listing"]["externalKey"], "cardrails:cr_ext");
     assert!(moved["listing"]["signed"].is_boolean() && moved["listing"]["altered"].is_boolean());
 
     // --- test webhook and revoke --------------------------------------------
