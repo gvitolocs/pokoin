@@ -8,6 +8,7 @@ description = "Native Rust port of the Pokoin external-integrations API domain (
 [dependencies]
 pokoin-sort = { path = "../sort" }
 pokoin-api-common = { path = "../api-common" }
+pokoin-db = { path = "../db" }
 unicode-normalization = "0.1"
 anyhow = "1"
 axum = { version = "0.8", features = ["json", "multipart"] }

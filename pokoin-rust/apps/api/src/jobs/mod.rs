@@ -56,12 +56,16 @@ async fn pool(url: &str) -> Result<PgPool> {
         .context("marketplace database connect failed")
 }
 async fn writer_pool(read: &PgPool) -> Result<PgPool> {
+    let read_url = std::env::var("MARKETPLACE_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .unwrap_or_default();
     match std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
     {
-        Some(url) => pool(&url).await,
-        None => Ok(read.clone()),
+        // The overflow points both URLs at the writer: one pool, not two.
+        Some(url) if url.trim() != read_url.trim() => pool(&url).await,
+        _ => Ok(read.clone()),
     }
 }
 fn accounts_firestore() -> Result<pokoin_accounts::firestore::Firestore> {

@@ -10,6 +10,7 @@ description = "Native Rust Pokoin accounts/auth/social/collection domain (Fireba
 # inheritance here so the coordinator can add it to any workspace.
 [dependencies]
 pokoin-sort = { path = "../sort" }
+pokoin-db = { path = "../db" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "original-uri"] }
 serde = { version = "1", features = ["derive"] }

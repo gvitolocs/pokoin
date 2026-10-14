@@ -34,6 +34,36 @@ The Cloudflare Load Balancer also sends about 10% of `api.pokoin.com` to the nez
 
 A handler panic answers `500` and logs `handler panicked` with its method and path. On SIGTERM every listener stops accepting and gets at most 10 s to finish in-flight requests (open streams included), then the process exits; the unit's `TimeoutStopSec` is 20 s. A stop that never logs `shutdown` and ends in SIGKILL means the process was stuck before the signal arrived.
 
+## Postgres connection budget
+
+The nezopt writer (`pokoin-marketplace-postgres-15t`) has `max_connections` 120 and also hosts all 24 satellite game databases (`pokoin_magic`, `pokoin_one_piece`, …). Every client shares that limit: the Pi, the k3s overflow pods and CronJobs, host scripts, and `docker exec psql`. On 2026-10-14 between 21:10 and 21:18 UTC it refused 1193 connections ("too many clients already"). Idle per-game pools of 4 connections each had piled up: 91 from nezopt itself (192.168.178.55 is nezopt's LAN IP; the Pi is .46), held by ad hoc SSH sessions, plus 27 idle overflow connections.
+
+How the API sizes its pools:
+
+| Pool | Cap per process | Env |
+| --- | --- | --- |
+| Catalog (`state.db`, the read URL) | 16 | `POKOIN_RUST_DB_POOL_MAX` |
+| Domain read + write (api-common), commerce read + write | 12 each; read and write become one pool when the URLs are equal | `POKOIN_RUST_DOMAIN_DB_POOL_MAX` |
+| Accounts read model + Card Rails writer | 4 + 2 | fixed |
+| **Each satellite game database** | **2**, idle-closed after **45 s**, recycled after 30 min | `POKOIN_RUST_GAME_DB_POOL_MAX` (clamped 1–4), `POKOIN_RUST_GAME_DB_IDLE_SECS` (clamped 5–300) |
+
+Startup: the catalog pool (`pokoin_db::pool`) connects eagerly with a 3 s acquire timeout (it was 200 ms, too short for TLS verify-full + SCRAM; sqlx retries "too many clients" every 10–40 ms inside that window). `warm_dependencies` gives it 5 s and retries with backoff: 2 s doubling to 30 s, ±25 % jitter. On 2026-10-14 one new overflow pod logged about 95 `phase=postgres` "pool timed out" retries against the full writer; a healthy rollout opens about 16 connections per new pod. `/readyz` is unchanged.
+
+Satellite pools come from `pokoin_db::satellite_pool(url)`, one pool per database URL for the whole process. Catalog, api-common, commerce, accounts and external all share it; before this, each of those crates kept its own pool, so one process could reach about 44 connections per game. Batch jobs close a game's pool with `pokoin_db::close_satellite` once that game is done. `GET /metrics` reports `gameDbPools`, `gameDbPoolSize`, `gameDbPoolIdle` and `gameDbPoolMax`. The admin ingest (`external/src/game_ingest.rs`) still opens its own pool per run, with 4–20 connections, and closes it afterwards.
+
+Ceilings on the writer (sums of caps, not typical use):
+
+| Client | Writer ceiling | Notes |
+| --- | --- | --- |
+| Pi `pokoin-rust-api` | 26 (12 + 12 + 2 writer pools) | Reads and satellite databases use the Pi standby, so 0 on the writer. Typical: 3. |
+| Overflow pod | 18 + 1 per satellite game in use | Every URL is the writer. Env in `infra/k3s/pokoin-overflow.yaml`: 6 / 3 / game 1 / idle 30 s. |
+| Overflow, HPA 2–4 pods | 36–72 + satellites | The overflow's share. Raising `maxReplicas` spends this budget. |
+| `build-lists-*` CronJob | 13 + 1 satellite at a time | 3 / 2 / game 1. They run at different minutes. |
+| `search-delta`, `search-reindex` | 2 | Fixed job pools in `jobs/mod.rs` (the writer pool reuses the read pool when the URLs are equal). Explicit caps in the manifest so they never inherit 16/12 from the secret. |
+| Host scripts, `docker exec psql`, ad hoc SSH sessions | unbudgeted | On 2026-10-14, the 91 idle connections from 192.168.178.55 belonged to commands in three SSH sessions from the Mac (opened 20:54:59, 21:00:44, 21:02:27). All three ended at 21:18:39, the same second those connections reset. |
+
+At HPA 4 with two list jobs running, the ceilings add up to about 124, so the limit is still reachable in the worst case. If the overflow has to grow, put PgBouncer in front of the writer (transaction pooling) or raise `max_connections`; don't raise the per-pod caps. To see who holds connections: `docker exec pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d postgres -c "select client_addr, datname, state, count(*) from pg_stat_activity where backend_type='client backend' group by 1,2,3 order by 4 desc"`. `log_connections` is on, so `docker logs` shows who opened each connection.
+
 ## Code map
 
 - `pokoin-rust/apps/api`: the binary. HTTP server by default, `job <name>` for the timers. System routes (`/livez`, `/readyz`, `/healthz`, `/api/__contract`, `/api/__routes`) are in `src/system.rs`.

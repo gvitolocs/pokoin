@@ -1743,6 +1743,7 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "k256",
+ "pokoin-db",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",
@@ -1852,6 +1853,7 @@ dependencies = [
  "hex",
  "pokoin-accounts",
  "pokoin-config",
+ "pokoin-db",
  "redis",
  "regex",
  "reqwest",
@@ -1983,6 +1985,7 @@ dependencies = [
  "k256",
  "pokoin-accounts",
  "pokoin-api-common",
+ "pokoin-db",
  "pokoin-external",
  "rand 0.8.8",
  "redis",
@@ -2012,6 +2015,7 @@ name = "pokoin-db"
 version = "0.1.0"
 dependencies = [
  "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -2053,6 +2057,7 @@ dependencies = [
  "jsonwebtoken",
  "percent-encoding",
  "pokoin-api-common",
+ "pokoin-db",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",

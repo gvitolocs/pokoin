@@ -45,13 +45,13 @@ pub fn failure(error:&sqlx::Error)->Response {
 }
 pub async fn game_pool(state:&AppState,game:&str)->Option<PgPool>{
  if game=="pokemon"{return state.db.read().await.clone()}
- if let Some(pool)=state.game_dbs.read().await.get(game).cloned(){return Some(pool)}
- let env_name=format!("{}_MARKETPLACE_DATABASE_URL",game.to_ascii_uppercase().replace('-',
- "_"));
- let url=std::env::var(&env_name).ok().filter(|s|!s.trim().is_empty())?;
- let pool=sqlx::postgres::PgPoolOptions::new().max_connections(state.config.db_pool_max).acquire_timeout(std::time::Duration::from_secs(3)).connect_lazy(&url).ok()?;
- let mut map=state.game_dbs.write().await;
- Some(map.entry(game.to_owned()).or_insert(pool).clone())
+ // One small process-wide pool per satellite database (pokoin_db budget).
+ pokoin_db::satellite_pool(&game_db_url(game)?).ok()
+}
+/// `<GAME>_MARKETPLACE_DATABASE_URL` for a satellite game.
+pub fn game_db_url(game:&str)->Option<String>{
+ let env_name=format!("{}_MARKETPLACE_DATABASE_URL",game.to_ascii_uppercase().replace('-',"_"));
+ std::env::var(&env_name).ok().filter(|s|!s.trim().is_empty())
 }
 // JSON projections tolerate satellite catalogs without Pokemon-only columns.
 // Price preference is explicit and deterministic: cheapest provider wins.

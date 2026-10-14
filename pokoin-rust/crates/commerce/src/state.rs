@@ -3,7 +3,6 @@
 //! `DomainState` is cheap to clone (one `Arc`) and is what `router()` takes, so
 //! the root agent can mount the commerce routes next to the search routes.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,9 +38,6 @@ pub struct Inner {
     /// Firestore owns balances, ledger, users, orders, addresses and the
     /// crypto/wPKN request documents. State is never migrated to SQL.
     pub firestore: Option<FirestoreClient>,
-    /// Lazily created per-game satellite pools, keyed by game id. `None` means
-    /// the game's database URL is not configured in this deployment.
-    pub game_pools: tokio::sync::RwLock<HashMap<String, Option<GamePools>>>,
     /// CardTrader integration boundary; the integrations crate supplies the
     /// implementation. Defaults to [`crate::cardtrader::UnavailableCardTrader`].
     pub cardtrader: Arc<dyn crate::cardtrader::CardTraderPort>,
@@ -95,7 +91,6 @@ impl DomainState {
                 chain,
                 prices,
                 firestore,
-                game_pools: tokio::sync::RwLock::new(HashMap::new()),
                 cardtrader: Arc::new(crate::cardtrader::UnavailableCardTrader),
             }),
         }
@@ -135,7 +130,6 @@ impl DomainState {
                 chain,
                 prices,
                 firestore,
-                game_pools: tokio::sync::RwLock::new(HashMap::new()),
                 cardtrader: Arc::new(crate::cardtrader::UnavailableCardTrader),
             }),
         }
@@ -254,33 +248,17 @@ impl DomainState {
         if !crate::game::is_satellite(game) {
             return None;
         }
-        if let Some(cached) = self.inner.game_pools.read().await.get(game) {
-            return cached.clone();
-        }
         let url = std::env::var(crate::game::game_db_env(game)?)
             .ok()
             .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let pools = url.map(|url| {
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(4)
-                .acquire_timeout(Duration::from_millis(500))
-                .connect_lazy(&url);
-            match pool {
-                Ok(pool) => Some(GamePools {
-                    read: pool.clone(),
-                    write: pool,
-                }),
-                Err(_) => None,
-            }
-        });
-        let pools = pools.flatten();
-        self.inner
-            .game_pools
-            .write()
-            .await
-            .insert(game.to_string(), pools.clone());
-        pools
+            .filter(|value| !value.is_empty())?;
+        // The process-wide satellite pool (pokoin_db budget), shared with the
+        // catalog/accounts/external routes for the same database.
+        let pool = pokoin_db::satellite_pool(&url).ok()?;
+        Some(GamePools {
+            read: pool.clone(),
+            write: pool,
+        })
     }
 
     /// Firestore-shaped error for a catalog that is not mounted here.
@@ -463,8 +441,14 @@ mod tests {
         // Lazily created: the pool exists without dialing the database.
         assert!(!pools.read.is_closed());
         assert!(!pools.write.is_closed());
-        // Cached on the second call.
-        assert!(state.game_pools("riftbound").await.is_some());
+        // The process-wide satellite pool: small cap, and the same pool again.
+        assert_eq!(
+            pools.read.options().get_max_connections(),
+            pokoin_db::satellite_budget().max_connections
+        );
+        let again = state.game_pools("riftbound").await.expect("riftbound pools");
+        pools.read.close().await;
+        assert!(again.read.is_closed(), "one shared pool per database");
         std::env::remove_var("RIFTBOUND_MARKETPLACE_DATABASE_URL");
     }
 

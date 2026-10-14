@@ -228,11 +228,19 @@ spec:
           value: '1'
         - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
           value: '1'
+        # Every URL here (reads, writes, all satellite games) is the one nezopt
+        # writer (max_connections 120). Per pod: catalog 6 + domain 3 (read and
+        # write share it) + commerce 3 + accounts 4+2 = 18, plus at most one
+        # connection per satellite game in use, idle-closed after 30 s.
+        # At HPA maxReplicas 4 that is 72; see docs/RUST_RUNTIME.md.
         - name: POKOIN_RUST_DB_POOL_MAX
-          value: '8'
-        # Domain pools per game database; every game database shares one writer.
+          value: '6'
         - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
-          value: '4'
+          value: '3'
+        - name: POKOIN_RUST_GAME_DB_POOL_MAX
+          value: '1'
+        - name: POKOIN_RUST_GAME_DB_IDLE_SECS
+          value: '30'
         - name: MEILI_HOST
           value: http://meili.pokoin-overflow.svc.cluster.local:7700
         - name: REDIS_HOST
@@ -444,6 +452,15 @@ spec:
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -526,6 +543,15 @@ spec:
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -650,6 +676,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -902,6 +930,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -1026,6 +1056,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -1150,6 +1182,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -1274,6 +1308,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -1398,6 +1434,8 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
