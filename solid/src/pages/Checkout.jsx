@@ -12,6 +12,7 @@ import {
   saveAccountAddress,
 } from '@market/api.js';
 import { brandSrc } from '@market/brand-assets.js';
+import { game, publicGamePath } from '@market/game.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '@market/buyer-protection.js';
 import { looseCardReference, writeListingDrag } from '@market/chat-listing.js';
 import { checkoutFees, pknBalanceVoucher } from '@market/checkout-fees.js';
@@ -471,7 +472,7 @@ function CheckoutDesk() {
                 {(row) => (
                   <article class="bag-row summary">
                     <a
-                      href={row.href || '/marketplace'}
+                      href={publicGamePath(row.href || '/marketplace', game().id) || row.href || '/marketplace'}
                       class="bag-art"
                       draggable="true"
                       onDragStart={(event) => writeListingDrag(event, looseCardReference({

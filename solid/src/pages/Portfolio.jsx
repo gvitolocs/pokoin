@@ -311,7 +311,7 @@ function HoldingDetail(props) {
                 </p>
                 <p class="muted">Pokoin PKN. Catalog art from cdn.pokoin.com. Not USD. Not a CardTrader leftover image.</p>
                 <p class="comp-subnav">
-                  <a href={row().canonicalPath || cardHref(row())}>Open card desk</a>
+                  <a href={cardHref(row())}>Open card desk</a>
                   <a href="/marketplace/portfolio">All holdings</a>
                 </p>
               </div>

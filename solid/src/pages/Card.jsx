@@ -64,6 +64,7 @@ import {
 } from '@market/art-shade.js';
 import {
   canonicalTarget,
+  cleanPath,
   canUseNativeShare,
   catalogPrintings,
   CONDITIONS,
@@ -283,8 +284,12 @@ function CardDesk(props) {
   }
 
   function replaceToCanonical(path) {
-    const next = canonicalTarget(path, untrack(() => location.pathname));
-    if (next) navigate(next, { replace: true, scroll: false });
+    const here = untrack(() => location.pathname);
+    const next = canonicalTarget(path, here);
+    if (!next) return;
+    const prefixed = publicGamePath(next, game().id) || next;
+    if (cleanPath(prefixed) === cleanPath(here)) return;
+    navigate(prefixed, { replace: true, scroll: false });
   }
 
   function showCard(data) {

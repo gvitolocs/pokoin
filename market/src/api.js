@@ -21,7 +21,7 @@ import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsM
 export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
-import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
+import { withGameQuery, isPokemonGame, gameRequestHeaders, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
@@ -2069,10 +2069,11 @@ export function postEvent({ cardId, eventType, metadata = {} }) {
 export function cardHref(card) {
   const id = realPublicCardId(card?.id || card?.card_id || '');
   const path = rewriteCanonicalCardPath(card?.canonicalPath || card?.canonical_path, id, getSearchLang());
+  const gameId = game().id;
   if (path) {
-    return path;
+    return publicGamePath(path, gameId) || path;
   }
-  return '/marketplace';
+  return publicGamePath('/marketplace', gameId) || '/marketplace';
 }
 
 export function publicCardId(card) {
