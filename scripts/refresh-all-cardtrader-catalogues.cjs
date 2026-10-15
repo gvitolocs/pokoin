@@ -61,7 +61,7 @@ async function project(pool,target,categories){
 async function main(){
  const admin=poolFor('pokoin_marketplace'), games=await api.get('/games'), categories=await api.get('/categories');
  const dbs=(await admin.query("select datname from pg_database where datname like 'pokoin_%' order by (datname='pokoin_marketplace') desc,datname")).rows;
- const report={skipped:[],startedAt:new Date().toISOString(),apply,games:[],errors:[]};
+ const report={skipped:[],startedAt:new Date().toISOString(),apply,games:[],errors:[],deferred:[]};
  const only=process.argv.find(a=>a.startsWith('--database='))?.split('=')[1];
  for(const {datname:db} of dbs){
   if(only&&db!==only)continue;
@@ -82,6 +82,19 @@ async function main(){
    console.log(new Date().toISOString(),'AUDIT',db,game.name);
    let dry=await importer.run(options,{pool,target,api});
    for(let retry=0;dry.counts.failedExpansions&&retry<2;retry++){for(const p of dry.expansionProgress.filter(p=>p.error))cache.delete('/blueprints/export'+JSON.stringify({expansion_id:p.expansion_id}));dry=await importer.run(options,{pool,target,api});}
+   if(dry.counts.failedExpansions){
+    // CardTrader often cannot export an expansion on the day it appears; the next run fetches it again.
+    // Defer only expansions this game has no blueprints for yet; a failing known expansion still fails the game.
+    const failed=dry.expansionProgress.filter(p=>p.error);
+    const known=new Set((await pool.query('select distinct expansion_id from '+schema+'.'+table+' where expansion_id = any($1::bigint[])',[failed.map(p=>Number(p.expansion_id))])).rows.map(r=>Number(r.expansion_id)));
+    if(failed.length&&failed.every(p=>!known.has(Number(p.expansion_id)))){
+     for(const p of failed)cache.set('/blueprints/export'+JSON.stringify({expansion_id:p.expansion_id}),Promise.resolve([]));
+     const expansions=failed.map(p=>({id:p.expansion_id,name:p.expansion_name,error:p.error}));
+     report.deferred.push({database:db,expansions});
+     console.log(new Date().toISOString(),'DEFER',db,JSON.stringify(expansions));
+     dry=await importer.run(options,{pool,target,api});
+    }
+   }
    if(dry.counts.failedExpansions)throw Error('Unfetched expansions: '+dry.counts.failedExpansions);
    fs.writeFileSync(path.join(root,db+'-dry.json'),JSON.stringify(dry,null,2));
    if(dry.blockers?.length||dry.errors?.length)throw Error('Dry-run errors '+JSON.stringify(dry.errors||dry.blockers));

@@ -8,9 +8,10 @@ def load(name):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 bridge=load("cardtrader-fetch-bridge");scan=load("cardtrader-scan-fetch")
 class Response:
+    def __init__(self,body=b"{}"):self.body=body
     def __enter__(self):return self
     def __exit__(self,*args):pass
-    def read(self,*args):return b"{}"
+    def read(self,*args):return self.body
 class RateLimitTest(unittest.TestCase):
     def check_delay(self,headers,expected):
         for m in (bridge,scan):
@@ -42,5 +43,23 @@ class RateLimitTest(unittest.TestCase):
             bridge.fetch({"id":7,"path":"/marketplace/products","params":{"expansion_id":4690}})
         self.assertIn("401",json.loads(output.getvalue())["error"])
         self.assertEqual(request.call_count,1);gate.backoff.assert_not_called()
+    def test_listing_book_is_forwarded_unparsed_on_one_line(self):
+        gate=MagicMock();output=io.StringIO()
+        body=b'{"1":[{"id":5,"name":"A\\nB"}],\r\n "2":[]}\n'
+        with patch.object(bridge,"token","test"),patch.object(bridge,"gate",gate),patch.object(bridge.urllib.request,"urlopen",return_value=Response(body)),patch.object(bridge.json,"load",side_effect=AssertionError("parsed on Oracle")),contextlib.redirect_stdout(output):
+            bridge.fetch({"id":3,"path":"/marketplace/products","params":{"expansion_id":4690}})
+        self.assertEqual(output.getvalue().count("\n"),1)
+        self.assertEqual(json.loads(output.getvalue()),{"id":3,"data":{"1":[{"id":5,"name":"A\nB"}],"2":[]}})
+    def test_listing_book_that_is_not_an_object_is_retried_then_reported(self):
+        gate=MagicMock();output=io.StringIO()
+        with patch.object(bridge,"token","test"),patch.object(bridge,"gate",gate),patch.object(bridge.urllib.request,"urlopen",side_effect=lambda *a,**k:Response(b"[1,2]")) as request,patch.object(bridge.time,"sleep"),contextlib.redirect_stdout(output):
+            bridge.fetch({"id":4,"path":"/marketplace/products","params":{"expansion_id":4690}})
+        self.assertIn("Expected listing book",json.loads(output.getvalue())["error"])
+        self.assertEqual(request.call_count,6)
+    def test_catalogue_paths_are_still_parsed_and_unwrapped(self):
+        gate=MagicMock();output=io.StringIO()
+        with patch.object(bridge,"token","test"),patch.object(bridge,"gate",gate),patch.object(bridge.urllib.request,"urlopen",return_value=Response(b'{"array":[{"id":1}]}')),contextlib.redirect_stdout(output):
+            bridge.fetch({"id":5,"path":"/expansions","params":{}})
+        self.assertEqual(json.loads(output.getvalue()),{"id":5,"data":[{"id":1}]})
 if __name__=="__main__":unittest.main()
 
