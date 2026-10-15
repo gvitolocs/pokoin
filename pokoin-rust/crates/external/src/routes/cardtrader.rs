@@ -245,6 +245,18 @@ pub async fn sync_start(
     // CSV parsing (up to the 10 MB body) is synchronous CPU work: keep it off
     // the API's few async workers.
     let preview_power_tools = payload["previewPowerTools"] == true;
+    let (payload, game_detection) = crate::powertools_games::resolve_body(&state.db, payload).await?;
+    // Unknown IDs must be reviewed instead of silently dropping locations on import.
+    let recognized_only = payload["powerToolsRecognizedOnly"] == true;
+    if !preview_power_tools
+        && game_detection["unresolvedCount"].as_u64().unwrap_or(0) > 0
+        && !recognized_only
+    {
+        return Err(ApiError::bad_request(
+            "Some rows have no unique catalog game. Review them in the preview, upload per-game CSVs for the rest, or import recognized rows only.",
+        )
+        .with_code("powertools_game_unresolved"));
+    }
     let import = blocking(move || link::parse_power_tools_body(&payload)).await??;
     if preview_power_tools {
         let Some(import) = import else {
@@ -255,6 +267,7 @@ pub async fn sync_start(
                     "error": "Upload at least one Power Tools CSV.",
                     "samples": [], "overflows": [], "occupancy": [],
                     "suggestedStackSize": 1, "locationDetection": Value::Null,
+                    "gameDetection": game_detection,
                 }),
             ));
         };
@@ -264,6 +277,7 @@ pub async fn sync_start(
             Err(_) => Vec::new(),
         };
         let mut preview = blocking(move || link::power_tools_preview(&import, &products)).await?;
+        preview["gameDetection"] = game_detection;
         preview["connected"] = json!(true);
         preview["status"] = status;
         return Ok(json_response(200, preview));

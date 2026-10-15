@@ -209,7 +209,7 @@ pub fn parse_power_tools_body(body: &Value) -> ApiResult<Option<PowerToolsImport
         let rows: Vec<PowerToolsRow> = records
             .iter()
             .map(pt::power_tools_row)
-            .filter(|row| !row.name.is_empty())
+            .filter(|row| !row.name.is_empty() && row.quantity > 0)
             .collect();
         locations.extend(rows.iter().map(|row| row.location.clone()));
         if !rows.is_empty() {
@@ -277,15 +277,19 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
     let mut games: Vec<&String> = import.by_game.keys().collect();
     games.sort();
     let mut samples: Vec<Value> = Vec::new();
+    const MAX_SAMPLES: usize = 9;
+    // One game keeps the old three examples; a mixed file shows each game.
+    let per_game = if games.len() > 1 { 2 } else { 3 };
     for game in games {
-        if samples.len() >= 3 {
+        if samples.len() >= MAX_SAMPLES {
             break;
         }
         let rows = &import.by_game[game];
         let game_products = by_game_products.get(game.as_str()).map(Vec::as_slice).unwrap_or(&[]);
         let paired = pt::reconcile_power_tools_with_cardtrader(game_products, rows.clone());
-        for (product, row) in paired.matched.iter().take(3) {
-            if samples.len() >= 3 {
+        let mut added = 0usize;
+        for (product, row) in paired.matched.iter() {
+            if samples.len() >= MAX_SAMPLES || added >= per_game {
                 break;
             }
             samples.push(json!({
@@ -298,8 +302,12 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
                 "location": row.location,
                 "matched": true,
             }));
+            added += 1;
         }
-        for row in rows.iter().take(3usize.saturating_sub(samples.len())) {
+        for row in rows.iter() {
+            if samples.len() >= MAX_SAMPLES || added >= per_game {
+                break;
+            }
             samples.push(json!({
                 "game": game,
                 "name": row.name,
@@ -311,6 +319,7 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
                 "matched": false,
                 "note": if game_products.is_empty() { "CardTrader export unavailable for match preview" } else { "No CardTrader twin yet" },
             }));
+            added += 1;
         }
     }
     json!({
@@ -844,6 +853,16 @@ mod tests {
         assert_eq!(confirmed.location_parse, "as_is");
         assert_eq!(confirmed.overflows.len(), 1);
         assert_eq!(confirmed.overflows[0]["game"], "pokemon");
+    }
+
+    #[test]
+    fn power_tools_body_skips_zero_quantity_rows() {
+        let csv = "name,set,cn,condition,language,quantity,price,location\n\
+            Pikachu,Base Set,58/102,NM,English,0,2.50,Binder A\n\
+            Charmander,Base Set,46/102,LP,English,2,1.00,Binder B\n";
+        let import = parse_power_tools_body(&json!({"powerToolsCsv": {"pokemon": csv}})).unwrap().unwrap();
+        assert_eq!(import.total_rows(), 1);
+        assert_eq!(import.by_game["pokemon"][0].name, "Charmander");
     }
 
     fn product(id: &str, name: &str, collector: &str) -> NormalizedProduct {

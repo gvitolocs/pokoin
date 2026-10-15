@@ -1157,6 +1157,7 @@ export function syncCardTraderInventory(token, options = {}) {
   if (options.numberedInStack === true) body.numberedInStack = true;
   if (options.locationParse) body.locationParse = options.locationParse;
   if (options.previewPowerTools) body.previewPowerTools = true;
+  if (options.powerToolsRecognizedOnly === true) body.powerToolsRecognizedOnly = true;
   if (options.priceMode) body.priceMode = options.priceMode;
   // Inventory link: ct_to_pokoin | pokoin_to_ct | both (stored, then synced).
   if (options.direction) body.direction = options.direction;

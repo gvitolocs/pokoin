@@ -1478,6 +1478,23 @@
   margin: 0;
 }
 
+.ct-pt-all-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.ct-pt-filename {
+  font-size: 0.9rem;
+  color: var(--g7);
+  max-width: min(100%, 22rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ct-pt-inline {
   display: grid;
   gap: 0.3rem;
