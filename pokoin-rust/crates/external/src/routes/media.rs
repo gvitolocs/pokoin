@@ -141,6 +141,8 @@ pub async fn upload_profile_picture(
     let identity = require_token(&state, &headers).await?;
     let payload = crate::routes::util::body_json(&body).await?;
     let (source, _content_type) = crate::r2::decode_image_base64(&payload, MAX_AVATAR_SOURCE_BYTES)?;
+    // Header-only size check before anything else touches the upload.
+    pokoin_media::probe(&source, pokoin_media::AVATAR).map_err(|error| media_error(error, pokoin_media::AVATAR))?;
     let Some(client) = state.r2_profile_pictures.as_ref() else {
         return Err(ApiError::new(
             500,
@@ -148,7 +150,7 @@ pub async fn upload_profile_picture(
         )
         .with_code("r2_not_configured"));
     };
-    let avatar = avatar_webp(&source)?;
+    let avatar = avatar_webp(source).await?;
     let key = format!("profile-pictures/{}/{}.webp", identity.uid, uuid::Uuid::new_v4());
     let bucket = client.bucket.clone();
     let status = client
@@ -292,7 +294,7 @@ pub async fn cache_google_profile_picture(
         .with_code("r2_not_configured"));
     };
     let source = download_google_image(&source_url).await?;
-    let avatar = avatar_webp(&source)?;
+    let avatar = avatar_webp(source).await?;
     let bucket = client.bucket.clone();
     let status = client
         .put_object(&bucket, &storage_path, "image/webp", avatar, "public, max-age=31536000, immutable")
@@ -346,15 +348,27 @@ pub fn is_google_avatar_url(value: &str) -> bool {
     }
 }
 
+/// One client for the avatar fetch: no redirects, so an allowed Google host
+/// can never bounce the request to another origin.
+fn google_avatar_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 async fn download_google_image(url: &str) -> ApiResult<Vec<u8>> {
-    let response = reqwest::Client::new()
+    let mut response = google_avatar_client()
         .get(url)
         .header(
             "accept",
             "image/avif,image/webp,image/png,image/jpeg,image/*",
         )
         .header("user-agent", "pokoin-google-avatar-cache/1.0")
-        .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
         .map_err(|_| ApiError::upstream("Google profile picture download failed."))?;
@@ -362,18 +376,27 @@ async fn download_google_image(url: &str) -> ApiResult<Vec<u8>> {
         return Err(ApiError::upstream("Google profile picture download failed."));
     }
     if let Some(length) = response.content_length() {
-        if length as usize > MAX_AVATAR_SOURCE_BYTES {
+        if length > MAX_AVATAR_SOURCE_BYTES as u64 {
             return Err(ApiError::bad_request("Google profile picture is too large."));
         }
     }
-    let bytes = response
-        .bytes()
+    // Stream with a running cap: a missing or lying Content-Length cannot make
+    // us buffer more than the source limit.
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|_| ApiError::upstream("Google profile picture download failed."))?;
-    if bytes.is_empty() || bytes.len() > MAX_AVATAR_SOURCE_BYTES {
+        .map_err(|_| ApiError::upstream("Google profile picture download failed."))?
+    {
+        if bytes.len() + chunk.len() > MAX_AVATAR_SOURCE_BYTES {
+            return Err(ApiError::bad_request("Google profile picture is too large."));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if bytes.is_empty() {
         return Err(ApiError::bad_request("Google profile picture is too large."));
     }
-    Ok(bytes.to_vec())
+    Ok(bytes)
 }
 
 /// `POST /api/forum-upload-media` — 1600px-inside WebP into R2 forum bucket,
@@ -398,7 +421,7 @@ pub async fn forum_upload_media(
         )
         .with_code("r2_not_configured"));
     };
-    let (media, width, height) = forum_webp(&source)?;
+    let (media, width, height) = forum_webp(source).await?;
     let byte_size = media.len();
     let key = format!("forum-media/{}/{}.webp", identity.uid, uuid::Uuid::new_v4());
     let bucket = client.bucket.clone();
@@ -458,36 +481,39 @@ const MAX_FORUM_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 /// 256x256 centre-cover avatar as WebP. The reference uses sharp's lossy WebP
 /// q88; the `image` crate only exposes lossless WebP, so bytes differ while the
 /// storage path (`profile-pictures/<uid>/<uuid>.webp`) and content type match.
-fn avatar_webp(source: &[u8]) -> ApiResult<Vec<u8>> {
-    use image::ImageEncoder;
-    let decoded = image::load_from_memory(source)
-        .map_err(|_| ApiError::bad_request("Unsupported image format."))?;
-    let resized = decoded.resize_to_fill(256, 256, image::imageops::FilterType::Lanczos3);
-    let rgba = resized.to_rgba8();
-    let mut out = Vec::new();
-    image::codecs::webp::WebPEncoder::new_lossless(&mut out)
-        .write_image(rgba.as_raw(), 256, 256, image::ExtendedColorType::Rgba8)
-        .map_err(|_| ApiError::new(500, "Avatar encoding failed."))?;
-    Ok(out)
+/// Runs on the bounded blocking pool (`pokoin_media::transform`).
+async fn avatar_webp(source: Vec<u8>) -> ApiResult<Vec<u8>> {
+    let fit = pokoin_media::Fit::Cover { width: 256, height: 256 };
+    pokoin_media::transform(source, pokoin_media::AVATAR, fit)
+        .await
+        .map(|encoded| encoded.bytes)
+        .map_err(|error| media_error(error, pokoin_media::AVATAR))
 }
 
 /// Forum media: resize inside 1600 without enlargement, lossless WebP.
-fn forum_webp(source: &[u8]) -> ApiResult<(Vec<u8>, Option<i64>, Option<i64>)> {
-    use image::ImageEncoder;
-    let decoded = image::load_from_memory(source)
-        .map_err(|_| ApiError::bad_request("Unsupported image format."))?;
-    let resized = if decoded.width() > 1600 || decoded.height() > 1600 {
-        decoded.resize(1600, 1600, image::imageops::FilterType::Lanczos3)
-    } else {
-        decoded
-    };
-    let (width, height) = (resized.width(), resized.height());
-    let rgba = resized.to_rgba8();
-    let mut out = Vec::new();
-    image::codecs::webp::WebPEncoder::new_lossless(&mut out)
-        .write_image(rgba.as_raw(), width, height, image::ExtendedColorType::Rgba8)
-        .map_err(|_| ApiError::new(500, "Forum media encoding failed."))?;
-    Ok((out, Some(width as i64), Some(height as i64)))
+async fn forum_webp(source: Vec<u8>) -> ApiResult<(Vec<u8>, Option<i64>, Option<i64>)> {
+    let encoded = pokoin_media::transform(source, pokoin_media::FORUM, pokoin_media::Fit::Inside { max: 1600 })
+        .await
+        .map_err(|error| media_error(error, pokoin_media::FORUM))?;
+    Ok((encoded.bytes, Some(encoded.width as i64), Some(encoded.height as i64)))
+}
+
+fn media_error(error: pokoin_media::TransformError, policy: pokoin_media::Policy) -> ApiError {
+    use pokoin_media::TransformError;
+    match error {
+        TransformError::TooLarge { .. } => ApiError::new(
+            413,
+            format!(
+                "Image is too large. Use an image up to {}x{} pixels.",
+                policy.max_width, policy.max_height
+            ),
+        )
+        .with_code("image_too_large"),
+        TransformError::Unsupported => ApiError::bad_request("Unsupported image format."),
+        TransformError::Busy => ApiError::new(503, "Image processing is busy. Try again in a moment.")
+            .with_code("image_busy"),
+        TransformError::Failed(_) => ApiError::new(500, "Image encoding failed."),
+    }
 }
 
 /// `assertPublicAvatarUrl` — the stored URL must be publicly readable.
@@ -529,32 +555,66 @@ mod tests {
         assert!(parse_photo_key("other/chat/uid12345/0123456789ab.jpg").is_none());
     }
 
-    #[test]
-    fn avatar_is_a_256_webp_container() {
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::new(width, height))
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    #[tokio::test]
+    async fn avatar_is_a_256_webp_container() {
         // 1x1 PNG -> 256x256 lossless WebP (RIFF....WEBP).
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
         use base64::engine::general_purpose::STANDARD as B64;
         use base64::Engine;
         let source = B64.decode(png).unwrap();
-        let webp = avatar_webp(&source).unwrap();
+        let webp = avatar_webp(source).await.unwrap();
         assert_eq!(&webp[..4], b"RIFF");
         assert_eq!(&webp[8..12], b"WEBP");
         // Decoding back proves the encoder produced a real image, not a header.
         let decoded = image::load_from_memory(&webp).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (256, 256));
-        assert!(avatar_webp(b"not an image").is_err());
+        assert_eq!(avatar_webp(b"not an image".to_vec()).await.unwrap_err().status, 400);
+        // Over 4096 on one side: 413 from the header, before decoding.
+        let error = avatar_webp(png_bytes(5000, 1)).await.unwrap_err();
+        assert_eq!(error.status, 413);
+        assert_eq!(error.code.as_deref(), Some("image_too_large"));
     }
 
-    #[test]
-    fn forum_media_transform_and_uuid() {
+    #[tokio::test]
+    async fn oversized_avatar_upload_is_413_before_storage() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use base64::Engine;
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-uid12345".parse().unwrap());
+        let body = serde_json::to_vec(&json!({
+            "imageBase64": format!("data:image/png;base64,{}", B64.encode(png_bytes(4097, 2))),
+        }))
+        .unwrap();
+        // for_test has no R2 bucket: the 413 proves the size check runs first.
+        let error = upload_profile_picture(
+            State(crate::state::DomainState::for_test()),
+            headers,
+            axum::body::Bytes::from(body),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, 413);
+    }
+
+    #[tokio::test]
+    async fn forum_media_transform_and_uuid() {
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
         use base64::engine::general_purpose::STANDARD as B64;
         use base64::Engine;
         let source = B64.decode(png).unwrap();
-        let (webp, width, height) = forum_webp(&source).unwrap();
+        let (webp, width, height) = forum_webp(source).await.unwrap();
         assert_eq!(&webp[..4], b"RIFF");
         assert_eq!(&webp[8..12], b"WEBP");
         assert_eq!((width, height), (Some(1), Some(1)));
+        assert_eq!(forum_webp(png_bytes(8001, 1)).await.unwrap_err().status, 413);
         assert!(clean_uuid("9f8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d").is_some());
         assert!(clean_uuid("nope").is_none());
     }

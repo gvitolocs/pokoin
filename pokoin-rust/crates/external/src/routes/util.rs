@@ -17,6 +17,27 @@ pub async fn require_token(state: &DomainState, headers: &HeaderMap) -> ApiResul
     state.verifier.verify(Some(authorization.as_str())).await
 }
 
+/// Rate-limit identity of the caller: the trusted `x-pokoin-client-ip` the
+/// security layer stamped, IPv6 folded to its /64.
+pub fn client_rate_identity(headers: &HeaderMap) -> String {
+    pokoin_api_common::limits::ip_rate_identity(&crate::error::xff_client_ip(headers))
+}
+
+/// Best-effort fixed window: the origin Redis through api-common when the
+/// shared runtime is wired, the in-process window otherwise. Never fails.
+pub async fn limit_best_effort(
+    state: &DomainState,
+    scope: &str,
+    identity: &str,
+    limit: i64,
+    window_seconds: i64,
+) -> pokoin_api_common::limits::Verdict {
+    match &state.api {
+        Some(api) => pokoin_api_common::limits::limit_best_effort(api, scope, identity, limit, window_seconds).await,
+        None => pokoin_api_common::limits::limit_local(scope, identity, limit, window_seconds),
+    }
+}
+
 /// Parsed JSON body; an empty body is `{}` so "no required fields" handlers work.
 pub async fn body_json(body: &Bytes) -> ApiResult<Value> {
     if body.is_empty() {

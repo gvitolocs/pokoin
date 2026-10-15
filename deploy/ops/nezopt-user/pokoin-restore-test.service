@@ -1,0 +1,15 @@
+[Unit]
+Description=Monthly restore tests: newest pg_dump (row counts) and wal-g PITR, in throwaway containers on mybook
+After=network-online.target docker.service
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/pokoin/backup.env
+ExecStartPre=-%h/.local/bin/pokoin-ops hc-ping --unit %n start
+ExecStart=%h/.local/bin/pokoin-ops backup verify
+ExecStart=%h/.local/bin/pokoin-ops backup pitr-test
+ExecStartPost=-%h/.local/bin/pokoin-ops hc-ping --unit %n
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=16h

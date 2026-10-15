@@ -1129,7 +1129,7 @@ pub async fn marketplace_seller_settings_get(
         let mut refusing = Vec::new();
         for uid in sellers.split(',').take(50) {
             let uid = uid.trim();
-            if uid.is_empty() {
+            if crate::firestore::validate_document_id(uid).is_err() {
                 continue;
             }
             let user = store::read_user(firestore, uid).await?;

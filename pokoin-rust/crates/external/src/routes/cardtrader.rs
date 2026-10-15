@@ -403,19 +403,62 @@ pub async fn blueprint_listings(
     }
 }
 
+/// Upstream budget for the unauthenticated live route, per caller IP (/64 for
+/// IPv6) and per origin. Only cache misses count: hits never reach CardTrader.
+const LIVE_PER_IP_LIMIT: i64 = 30;
+const LIVE_GLOBAL_LIMIT: i64 = 300;
+const LIVE_WINDOW_SECONDS: i64 = 60;
+
+fn live_rate_limited(retry_after_sec: u64) -> ApiError {
+    let mut error = ApiError::new(429, "Too many live CardTrader lookups. Try again shortly.")
+        .with_code("rate_limited");
+    error.retry_after_sec = Some(retry_after_sec);
+    error
+}
+
+/// The public route's gate before an upstream CardTrader call: per-IP budget,
+/// then the catalog check (unknown ids never reach CardTrader), then the
+/// origin-wide budget that protects the shared CardTrader token.
+async fn guard_live_upstream(
+    state: &DomainState,
+    client: &str,
+    game: &str,
+    blueprint_id: &str,
+) -> ApiResult<()> {
+    use crate::routes::util::limit_best_effort;
+    let per_ip = limit_best_effort(state, "ct-live-ip", client, LIVE_PER_IP_LIMIT, LIVE_WINDOW_SECONDS).await;
+    if !per_ip.allowed {
+        return Err(live_rate_limited(per_ip.retry_after_sec));
+    }
+    if !cardtrader_live::blueprint_exists(&state.db, game, blueprint_id).await? {
+        return Err(ApiError::not_found("Unknown CardTrader blueprint.").with_code("unknown_blueprint"));
+    }
+    let global = limit_best_effort(state, "ct-live-global", "origin", LIVE_GLOBAL_LIMIT, LIVE_WINDOW_SECONDS).await;
+    if !global.allowed {
+        return Err(live_rate_limited(global.retry_after_sec));
+    }
+    Ok(())
+}
+
 /// `GET /api/cardtrader-live-listings` — live on-demand CardTrader listings.
 pub async fn live_listings(
     State(state): State<DomainState>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> ApiResult<Response> {
     let request = cardtrader_live::parse_request(&query_pairs(&uri))?;
-    let game = query_first(&uri, "game").unwrap_or_else(|| "pokemon".to_string());
-    let payload = cardtrader_live::read_live_listings(
+    let game = crate::db::normalize_game(&query_first(&uri, "game").unwrap_or_else(|| "pokemon".to_string()));
+    let client = crate::routes::util::client_rate_identity(&headers);
+    let payload = cardtrader_live::read_live_listings_guarded(
         &state.db,
         &state.cardtrader,
         state.redis.as_ref(),
         &request,
         &game,
+        |blueprint_id| {
+            let (state, client, game) = (&state, &client, &game);
+            async move { guard_live_upstream(state, client, game, &blueprint_id).await }
+        },
     )
     .await?;
     let mut response = json_response(200, payload);
@@ -504,6 +547,107 @@ fn secret_from(headers: &HeaderMap) -> String {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    /// A fake CardTrader that counts `/marketplace/products` calls.
+    async fn fake_cardtrader() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/marketplace/products",
+            axum::routing::get(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}"), hits)
+    }
+
+    fn live_state(base: String) -> DomainState {
+        // Only this module's tests read the global token; nothing asserts it unset.
+        std::env::set_var("CARDTRADER_AUTH_TOKEN", "test-ct-token");
+        let mut state = DomainState::for_test();
+        state.cardtrader = client::CardTraderClient::with_base(base);
+        state
+    }
+
+    fn from_ip(ip: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-pokoin-client-ip", HeaderValue::from_str(ip).unwrap());
+        headers
+    }
+
+    fn live_uri(query: &str) -> Uri {
+        format!("/api/cardtrader-live-listings?{query}").parse().unwrap()
+    }
+
+    #[tokio::test]
+    async fn live_listings_reject_unknown_blueprints_without_calling_cardtrader() {
+        use std::sync::atomic::Ordering;
+        let (base, hits) = fake_cardtrader().await;
+        let state = live_state(base);
+        cardtrader_live::remember_blueprint("pokemon", 990_001, false);
+        for query in ["blueprintId=990001", "cardId=990001", "blueprintId=990001&limit=7&lang=en"] {
+            let error = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.status, 404, "{query}");
+            assert_eq!(error.code.as_deref(), Some("unknown_blueprint"));
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "no upstream call for an unknown id");
+        // An unlisted language is a 400 before any lookup at all.
+        let error = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri("blueprintId=990001&lang=xx"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 400);
+
+        cardtrader_live::remember_blueprint("pokemon", 990_002, true);
+        let response = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri("blueprintId=990002"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        // The second read is a cache hit: no upstream call and no budget spent.
+        live_listings(State(state), from_ip("198.51.100.10"), live_uri("blueprintId=990002")).await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn live_listings_per_ip_limit_trips_before_cardtrader() {
+        use std::sync::atomic::Ordering;
+        let (base, hits) = fake_cardtrader().await;
+        let state = live_state(base);
+        // Two addresses in one IPv6 /64 share a budget.
+        let ips = ["2001:db8:77:1::1", "2001:db8:77:1::2"];
+        for n in 0..LIVE_PER_IP_LIMIT {
+            let id = 991_000 + n;
+            cardtrader_live::remember_blueprint("pokemon", id, true);
+            let ip = ips[n as usize % 2];
+            live_listings(State(state.clone()), from_ip(ip), live_uri(&format!("blueprintId={id}")))
+                .await
+                .unwrap();
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize);
+        cardtrader_live::remember_blueprint("pokemon", 991_900, true);
+        let error = live_listings(State(state.clone()), from_ip(ips[0]), live_uri("blueprintId=991900"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 429);
+        assert_eq!(error.code.as_deref(), Some("rate_limited"));
+        assert_eq!(error.retry_after_sec, Some(LIVE_WINDOW_SECONDS as u64));
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize, "the 429 never reached CardTrader");
+        // Another client keeps its own budget.
+        live_listings(State(state), from_ip("2001:db8:77:2::1"), live_uri("blueprintId=991900")).await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize + 1);
+    }
 
     #[test]
     fn sync_status_carries_status_and_the_node_sync_shape() {

@@ -54,7 +54,9 @@ pub async fn handle(s:&DomainState,h:&HeaderMap,u:&Uri,m:&Method,b:&Value)->ApiR
  service_guard()?;if m==Method::OPTIONS{return Ok((204,Value::Null,Some("GET, POST, OPTIONS")));}
  let path=u.path().strip_prefix("/api/ingest/").filter(|s|!s.is_empty()).map(str::to_string);let raw=path.or_else(||query_first(u,"game")).filter(|s|!s.is_empty()).unwrap_or_else(||text(&b["game"]));
  let service=||{let n=env("POKOIN_API_SERVICE_NAME");if n.is_empty(){"cardtrader-game-ingest-api".to_string()}else{n}};
- if raw.is_empty(){if m!=Method::GET{return Ok((405,json!({"error":"Method not allowed."}),Some("GET")));}pin("")?;let scope=scoped();let rows=games().into_iter().filter(|g|scope.as_ref().is_none_or(|s|g["id"]==s.as_str())).map(|g|public_game(&g)).collect::<Vec<_>>();return Ok((200,json!({"ok":true,"service":service(),"writer":"nezopt-15t","pokemon":"pi","count":rows.len(),"games":rows}),None));}
+ if raw.is_empty(){if m!=Method::GET{return Ok((405,json!({"error":"Method not allowed."}),Some("GET")));}
+ // The game list names databases, env vars and ports: ingest operators only.
+ authorize(h)?;pin("")?;let scope=scoped();let rows=games().into_iter().filter(|g|scope.as_ref().is_none_or(|s|g["id"]==s.as_str())).map(|g|public_game(&g)).collect::<Vec<_>>();return Ok((200,json!({"ok":true,"service":service(),"writer":"nezopt-15t","pokemon":"pi","count":rows.len(),"games":rows}),None));}
  if m!=Method::GET&&m!=Method::POST{return Ok((405,json!({"error":"Method not allowed."}),Some("GET, POST, OPTIONS")));}
  if m==Method::GET&&pokemon(&raw){return Err(coded(404,"Pokemon ingest stays on the Pi public API (api.pokoin.com). This ingest API writes non-Pokemon catalogs to nezopt 15T.","POKEMON_STAYS_ON_PI"));}
  authorize(h)?;if pokemon(&raw){return Err(coded(404,"Pokemon ingest stays on the Pi public API (api.pokoin.com). This ingest API writes non-Pokemon catalogs to nezopt 15T.","POKEMON_STAYS_ON_PI"));}
@@ -65,6 +67,15 @@ pub async fn handle(s:&DomainState,h:&HeaderMap,u:&Uri,m:&Method,b:&Value)->ApiR
 #[cfg(test)]mod tests{use super::*;
 #[test]fn live_targets_and_aliases(){assert_eq!(games().len(),24);assert_eq!(game("Yu-Gi-Oh!").unwrap()["id"],"yugioh");assert_eq!(game("op").unwrap()["databaseUrlEnv"],"ONE_PIECE_MARKETPLACE_DATABASE_URL");assert!(pokemon("pokémon"));assert!(game("pokemon").is_none());}
 #[test]fn apply_is_bounded(){assert_eq!(bounded_apply(&options(&json!({"apply":true})),&json!({})).unwrap_err().code.as_deref(),Some("INGEST_APPLY_BOUNDED"));assert!(bounded_apply(&options(&json!({"apply":true,"streamAll":true})),&json!({"confirm":"stream-all"})).is_ok());assert!(options(&json!({})).discover);assert_eq!(options(&json!({"expansionIds":[2]})).limit,Some(500));}
+#[tokio::test]async fn game_list_needs_the_ingest_secret(){
+ // Only this test sets the ingest secret; the listing names databases and env vars.
+ std::env::set_var("CARDTRADER_INGEST_SECRET","ingest-test-secret");
+ let s=DomainState::for_test();let u:Uri="/api/cardtrader-game-ingest".parse().unwrap();
+ let e=handle(&s,&HeaderMap::new(),&u,&Method::GET,&Value::Null).await.unwrap_err();assert_eq!(e.status,401);
+ let mut h=HeaderMap::new();h.insert("authorization","Bearer wrong".parse().unwrap());
+ let e=handle(&s,&h,&u,&Method::GET,&Value::Null).await.unwrap_err();assert_eq!(e.status,401);
+ h.insert("authorization","Bearer ingest-test-secret".parse().unwrap());
+ let (status,body,_)=handle(&s,&h,&u,&Method::GET,&Value::Null).await.unwrap();assert_eq!(status,200);assert_eq!(body["count"],24);}
 #[test]fn row_and_schema_preserve_source(){let r=row(&json!({"id":1,"name":"x","game_id":15,"tcg_player_id":9,"image_url":"https://a/fallbacks/card_uploader/b.jpg"}),&json!({"id":2,"name":"Set"}));assert_eq!(r["expansion_id"],2);assert_eq!(r["tcg_player_ids"],json!([9]));assert!(r["image_url"].is_null());assert!(schema(&game("op").unwrap()).contains("\"marketplace_one_piece\".\"cardtrader_blueprints\""));assert_eq!(sample(&[r])[0]["expansion_name"],"Set");}
 /// Migration 123 is generated from `ingest_schemas.json`; `POKOIN_BLESS=1 cargo test -p pokoin-external migration_123` rewrites it.
 #[test]fn migration_123_matches_ingest_schemas(){let path=concat!(env!("CARGO_MANIFEST_DIR"),"/../../../scripts/sql/123_satellite_ingest_schemas.sql");let want=migration_123();if std::env::var("POKOIN_BLESS").as_deref()==Ok("1"){std::fs::write(path,&want).unwrap();}assert_eq!(std::fs::read_to_string(path).unwrap_or_default(),want,"run POKOIN_BLESS=1 cargo test -p pokoin-external migration_123");}

@@ -28,6 +28,7 @@ members = [
   "crates/catalog-api",
   "crates/api-common",
   "crates/sort",
+  "crates/media",
   "crates/ctbook",
 ]
 

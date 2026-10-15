@@ -1800,6 +1800,7 @@ dependencies = [
  "jsonwebtoken",
  "k256",
  "pokoin-db",
+ "pokoin-media",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",
@@ -2114,6 +2115,8 @@ dependencies = [
  "percent-encoding",
  "pokoin-api-common",
  "pokoin-db",
+ "pokoin-external",
+ "pokoin-media",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",
@@ -2163,6 +2166,14 @@ version = "0.1.0"
 dependencies = [
  "pokoin-cache",
  "serde_json",
+]
+
+[[package]]
+name = "pokoin-media"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "tokio",
 ]
 
 [[package]]
