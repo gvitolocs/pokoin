@@ -2267,6 +2267,59 @@ h1, h2 { margin: 0 0 0.85rem; }
   min-height: 3rem;
 }
 
+/* Lit buttons: light from above instead of one flat shadow. A gentle
+   top-to-bottom gradient, then four shadows: a 1px highlight on the top edge,
+   a darker inset line along the bottom, a tight contact shadow where the button
+   meets the page, and a soft glow in the button's own colour. Pressing flips the
+   gradient, drops the highlight and sinks the button one pixel. */
+.btn:not(.ghost):not(.stripe):not(:disabled),
+.more:not(:disabled),
+.shop-icon.is-cart:not(.is-added) {
+  background: linear-gradient(#ffe36b, #f2c21f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -2px 0 rgb(0 0 0 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(255 211 61 / 0.55);
+  transition: box-shadow 0.12s ease, translate 0.12s ease, filter 0.12s ease;
+}
+.btn.stripe:not(:disabled),
+.btn.stripe:hover:not(:disabled) {
+  background: linear-gradient(#7c75ff, #5851e0);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(99 91 255 / 0.6);
+  transition: box-shadow 0.12s ease, translate 0.12s ease, filter 0.12s ease;
+}
+.shop-icon.is-cart.is-added {
+  background: linear-gradient(#6ff0c8, #2fcf9f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -2px 0 rgb(0 0 0 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(62 224 176 / 0.5);
+}
+.btn:not(.ghost):not(:disabled):hover,
+.more:not(:disabled):hover,
+.shop-icon.is-cart:hover { filter: brightness(1.05); }
+.btn:not(.ghost):not(.stripe):not(:disabled):active,
+.more:not(:disabled):active,
+.shop-icon.is-cart:not(.is-added):active {
+  translate: 0 1px;
+  background: linear-gradient(#f2c21f, #ffe36b);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.28);
+}
+.btn.stripe:not(:disabled):active {
+  translate: 0 1px;
+  background: linear-gradient(#5851e0, #7c75ff);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .more, .shop-icon.is-cart { transition: none; }
+}
+
 .signin-link {
   color: var(--yellow);
   font-weight: 800;
