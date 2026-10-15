@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   catalogSeo,
   handleMarketplaceHubOgRequest,
+  hubRedirectPath,
   hubSeo,
   parseCatalogPath,
   parseHubPath,
@@ -69,22 +70,85 @@ test('catalog paths cover marketplace home, sets, eras, and artists', () => {
   assert.match(artists, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/artists"/);
 });
 
-test('Googlebot set page is prerendered HTML when the expansion API fails', async () => {
+const GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+
+async function withFetch(impl, fn) {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => new Response('nope', { status: 500 });
-  try {
-    const response = await handleMarketplaceHubOgRequest(new Request(
-      'https://pokoin.com/marketplace/sets/151',
-      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } },
-    ));
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('x-pokoin-og-cache'), 'miss');
-    const html = await response.text();
-    assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/sets\/151"/);
-    assert.match(html, /"@type":"CollectionPage"/);
-  } finally {
-    globalThis.fetch = original;
+  globalThis.fetch = impl;
+  try { return await fn(); } finally { globalThis.fetch = original; }
+}
+
+function bot(path) {
+  return handleMarketplaceHubOgRequest(new Request(`https://pokoin.com${path}`, { headers: { 'user-agent': GOOGLEBOT } }));
+}
+
+test('Googlebot hub gets a retryable 503 (not a thin page) when the API fails', async () => {
+  await withFetch(async () => new Response('nope', { status: 500 }), async () => {
+    for (const path of ['/marketplace/sets/151', '/marketplace/sets', '/marketplace/en/artists/ken-sugimori', '/marketplace/en/pokemon/charizard']) {
+      const response = await bot(path);
+      assert.equal(response.status, 503, path);
+      assert.equal(response.headers.get('retry-after'), '300');
+      assert.equal(response.headers.get('x-robots-tag'), 'noindex');
+    }
+  });
+});
+
+test('unknown set, era, artist and species hubs are hard 404s for Googlebot', async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('expansion-page')) return new Response('{"error":"Expansion not found."}', { status: 404 });
+    if (u.includes('artist-cards')) return new Response('{"artist":null,"profile":null,"cards":[]}', { status: 200 });
+    return new Response('{"cards":[]}', { status: 200 });
+  }, async () => {
+    for (const path of ['/marketplace/sets/zzz', '/marketplace/eras/zzz', '/marketplace/en/artists/zzz-nobody', '/marketplace/en/pokemon/zzznomon']) {
+      const response = await bot(path);
+      assert.equal(response.status, 404, path);
+      assert.equal(response.headers.get('x-robots-tag'), 'noindex');
+    }
+  });
+});
+
+test('duplicate hub URL forms 301 Googlebot to the canonical locale', async () => {
+  assert.equal(hubRedirectPath('/marketplace/artists/ken-sugimori'), '/marketplace/en/artists/ken-sugimori');
+  assert.equal(hubRedirectPath('/marketplace/it/artists/ken-sugimori'), '/marketplace/en/artists/ken-sugimori');
+  assert.equal(hubRedirectPath('/marketplace/pokemon/charizard'), '/marketplace/en/pokemon/charizard');
+  assert.equal(hubRedirectPath('/marketplace/en/sets/adv-promos'), '/marketplace/sets/adv-promos');
+  assert.equal(hubRedirectPath('/marketplace/en/eras/xy'), '/marketplace/eras/xy');
+  assert.equal(hubRedirectPath('/one-piece/marketplace/artists/oda'), '/one-piece/marketplace/en/artists/oda');
+  for (const keep of ['/marketplace/en/artists/ken-sugimori', '/marketplace/sets/adv-promos', '/marketplace/en/pokemon/charizard', '/marketplace/en/cards/1/x', '/marketplace']) {
+    assert.equal(hubRedirectPath(keep), '', keep);
   }
+  const response = await bot('/marketplace/it/artists/ken-sugimori');
+  assert.equal(response.status, 301);
+  assert.equal(response.headers.get('location'), 'https://pokoin.com/marketplace/en/artists/ken-sugimori');
+  const browser = await handleMarketplaceHubOgRequest(new Request('https://pokoin.com/marketplace/it/artists/ken-sugimori', { headers: { 'user-agent': 'Mozilla/5.0 Chrome/141' } }));
+  assert.equal(browser, null);
+});
+
+test('set and artist hubs publish the first card scan as og:image and JSON-LD image', async () => {
+  await withFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('expansion-page')) {
+      return new Response(JSON.stringify({ expansion: { name: 'ADV Promos' }, cards: [
+        { id: '673804', name: 'Darkness Energy', heroImageUrl: '/card-images/673804_darkness-energy.jpg', canonicalPath: '/marketplace/en/cards/673804/x' },
+      ] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ artist: { name: 'Ken Sugimori' }, cards: [
+      { card_id: '278398', name: 'Bulbasaur', image_url: 'https://cdn.pokoin.com/139199_bulbasaur.jpg' },
+    ] }), { status: 200 });
+  }, async () => {
+    const set = await (await bot('/marketplace/sets/adv-promos')).text();
+    assert.match(set, /og:image" content="https:\/\/cdn\.pokoin\.com\/336902_darkness-energy\.jpg"/);
+    assert.match(set, /"image":"https:\/\/cdn\.pokoin\.com\/336902_darkness-energy\.jpg"/);
+    const artist = await bot('/marketplace/en/artists/ken-sugimori');
+    assert.equal(artist.status, 200);
+    const html = await artist.text();
+    assert.match(html, /og:image" content="https:\/\/cdn\.pokoin\.com\/139199_bulbasaur\.jpg"/);
+    assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/artists\/ken-sugimori"/);
+  });
+  const hub = renderHubOgHtml({ language: 'en', kind: 'pokemon', slug: 'charizard' },
+    [{ id: '239000', name: 'Charizard', heroImageUrl: 'https://cdn.pokoin.com/2_charizard.jpg' }]);
+  assert.match(hub, /og:image" content="https:\/\/cdn\.pokoin\.com\/\d+_charizard\.jpg"/);
 });
 
 test('hub HTML carries CollectionPage JSON-LD and Pokoin attribution', () => {

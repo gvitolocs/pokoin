@@ -5,6 +5,9 @@ import { TCG_ERA_ORDER, tcgEraYears } from '../market/src/tcg-eras.js';
 import {
   API_ORIGIN,
   OG_CACHE_TTL_SEC,
+  cardOgImageUrl,
+  crawlerNotFound,
+  crawlerUnavailable,
   OG_CACHE_VERSION,
   isLinkPreviewBot,
   isSearchEngineBot,
@@ -27,6 +30,61 @@ function gameTitle(gameId) {
 
 const HUB_RE =
   /^\/marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/(pokemon|rarities|languages|guides)(?:\/([^/?#]+))?\/?$/i;
+
+/** First card scan as an absolute, crawlable CDN URL (og:image / JSON-LD). */
+export function hubImageFromCards(cards = []) {
+  for (const row of cards || []) {
+    const id = row?.id || row?.card_id || '';
+    const image = cardOgImageUrl(
+      row?.heroImageUrl || row?.imageUrl || row?.gridImageUrl || row?.image_url || row?.cdn_image_url || '',
+      id,
+    );
+    if (image) return image;
+  }
+  return '';
+}
+
+function imageMetaHtml(image, alt) {
+  if (!image) return '';
+  const src = escapeHtml(image);
+  return `\n  <meta property="og:image" content="${src}" />\n  <meta property="og:image:alt" content="${escapeHtml(alt)}" />\n  <meta name="twitter:card" content="summary_large_image" />\n  <meta name="twitter:image" content="${src}" />`;
+}
+
+/**
+ * Crawler 301 for duplicate hub URLs that otherwise served the empty SPA shell
+ * or a self-canonical copy: locale-less species/rarity/language/guide/artist
+ * hubs, non-en locales (the sitemap only lists en), and locale-prefixed
+ * sets/eras (canonical has no locale). Returns the canonical path or ''.
+ */
+export function hubRedirectPath(pathname) {
+  let path = String(pathname || '').split(/[?#]/)[0];
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  const parts = path.split('/').filter(Boolean);
+  const prefix = parts[0] && SLUG_TO_GAME[parts[0]] ? `/${parts.shift()}` : '';
+  if (parts[0] !== 'marketplace' || parts.length < 2) return '';
+  const rest = parts.slice(1);
+  const enKinds = new Set(['pokemon', 'rarities', 'languages', 'guides', 'artists']);
+  if (enKinds.has(rest[0]) && rest.length <= 2) {
+    return `${prefix}/marketplace/en/${rest.map((x) => x.toLowerCase()).join('/')}`;
+  }
+  if (LANG_RE.test(rest[0]) && rest.length >= 2 && rest.length <= 3) {
+    const kind = rest[1].toLowerCase();
+    if (kind === 'sets' || kind === 'eras') {
+      return `${prefix}/marketplace/${rest.slice(1).join('/')}`;
+    }
+    if (enKinds.has(kind) && rest[0].toLowerCase() !== 'en') {
+      return `${prefix}/marketplace/en/${rest.slice(1).join('/')}`;
+    }
+  }
+  return '';
+}
+
+function crawlerRedirect(location) {
+  return new Response(null, {
+    status: 301,
+    headers: { location, 'cache-control': 'public, max-age=3600' },
+  });
+}
 
 function escapeHtml(value) {
   return String(value || '')
@@ -105,7 +163,7 @@ export function hubSeo(parsed) {
   };
 }
 
-export function renderHubOgHtml(parsed, cards = []) {
+export function renderHubOgHtml(parsed, cards = [], image = hubImageFromCards(cards)) {
   const seo = hubSeo(parsed);
   const title = escapeHtml(seo.title);
   const heading = escapeHtml(seo.heading);
@@ -125,13 +183,15 @@ export function renderHubOgHtml(parsed, cards = []) {
   <meta name="description" content="${description}" />
   <link rel="canonical" href="https://pokoin.com${path}" />
   <meta property="og:title" content="${title}" />
-  <meta property="og:url" content="https://pokoin.com${path}" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <meta property="og:url" content="https://pokoin.com${path}" />${imageMetaHtml(image, seo.heading)}
   <script type="application/ld+json">${JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
     name: seo.title,
     description: seo.description,
-    url: `https://pokoin.com${path}`,
+    url: `https://pokoin.com${seo.path}`,
+    ...(image ? { image } : {}),
     isPartOf: { '@type': 'WebSite', name: 'Pokoin', url: 'https://pokoin.com' },
     dateModified: utcSnapshotDate(),
   }).replace(/</g, '\\u003c')}</script>
@@ -161,7 +221,9 @@ async function fetchHubCards(parsed) {
     headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
   });
   if (!response.ok) {
-    return [];
+    const error = new Error(`hub-search ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   const data = await response.json();
   return data.cards || [];
@@ -271,7 +333,7 @@ export function catalogSeo(parsed, { name = '' } = {}) {
   };
 }
 
-export function renderCatalogOgHtml(seo, links = []) {
+export function renderCatalogOgHtml(seo, links = [], image = '') {
   const title = escapeHtml(seo.title);
   const heading = escapeHtml(seo.heading);
   const description = escapeHtml(seo.description);
@@ -279,7 +341,7 @@ export function renderCatalogOgHtml(seo, links = []) {
   const type = seo.type === 'WebPage' ? 'WebPage' : 'CollectionPage';
   const robots = seo.robots
     ? `\n  <meta name="robots" content="${escapeHtml(seo.robots)}" />`
-    : '\n  <meta name="robots" content="index, follow" />';
+    : '\n  <meta name="robots" content="index, follow, max-image-preview:large" />';
   const items = (links || []).slice(0, 24).map((row) => {
     const href = escapeHtml(row.href || row.canonicalPath || '');
     const name = escapeHtml(row.name || '');
@@ -294,13 +356,14 @@ export function renderCatalogOgHtml(seo, links = []) {
   <meta name="description" content="${description}" />
   <link rel="canonical" href="https://pokoin.com${path}" />${robots}
   <meta property="og:title" content="${title}" />
-  <meta property="og:url" content="https://pokoin.com${path}" />
+  <meta property="og:url" content="https://pokoin.com${path}" />${imageMetaHtml(image, seo.heading)}
   <script type="application/ld+json">${JSON.stringify({
     '@context': 'https://schema.org',
     '@type': type,
     name: seo.title,
     description: seo.description,
     url: `https://pokoin.com${seo.path}`,
+    ...(image ? { image } : {}),
     isPartOf: { '@type': 'WebSite', name: 'Pokoin', url: 'https://pokoin.com' },
     dateModified: utcSnapshotDate(),
   }).replace(/</g, '\\u003c')}</script>
@@ -325,6 +388,27 @@ async function fetchCatalogExtras(parsed) {
       })),
     };
   }
+  if (parsed.kind === 'artists' && parsed.slug) {
+    const params = new URLSearchParams({ slug: parsed.slug, limit: '12' });
+    if (parsed.game) params.set('game', parsed.game);
+    const response = await fetch(`${API_ORIGIN}/api/marketplace-artist-cards?${params}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
+    });
+    if (response.status === 404) return { name: '', links: [], notFound: true };
+    if (!response.ok) throw new Error(`artist-cards ${response.status}`);
+    const data = await response.json();
+    if (!data?.artist) return { name: '', links: [], notFound: true };
+    const cards = (data.cards || []).slice(0, 12);
+    return {
+      name: data.artist.name || '',
+      image: hubImageFromCards(cards),
+      links: cards.map((row) => ({
+        name: row.name || '',
+        href: row.canonical_path || row.canonicalPath
+          || (row.card_id || row.id ? `/marketplace/en/cards/${row.card_id || row.id}` : ''),
+      })),
+    };
+  }
   if (parsed.kind !== 'sets') return { name: '', links: [] };
   const params = new URLSearchParams();
   if (parsed.game) params.set('game', parsed.game);
@@ -338,15 +422,18 @@ async function fetchCatalogExtras(parsed) {
   const response = await fetch(`${API_ORIGIN}/api/marketplace-expansion-page?${params}`, {
     headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
   });
-  if (!response.ok) return { name: '', links: [] };
+  if (parsed.slug && response.status === 404) return { name: '', links: [], notFound: true };
+  if (!response.ok) throw new Error(`expansion-page ${response.status}`);
   const data = await response.json();
   if (parsed.slug) {
+    if (!data?.expansion) return { name: '', links: [], notFound: true };
     const name = data.expansion?.name || '';
-    const links = (data.cards || []).slice(0, 12).map((row) => ({
+    const cards = (data.cards || []).slice(0, 12);
+    const links = cards.map((row) => ({
       name: row.name || '',
       href: row.canonical_path || row.canonicalPath || '',
     }));
-    return { name, links };
+    return { name, links, image: hubImageFromCards(cards) };
   }
   return {
     name: '',
@@ -378,14 +465,20 @@ async function handleCatalogOg(request, env, ctx, parsed) {
       /* miss */
     }
   }
+  if (parsed.kind === 'eras' && parsed.slug
+      && !TCG_ERA_ORDER.some((era) => eraId(era) === parsed.slug)) {
+    return crawlerNotFound();
+  }
   let extras = { name: '', links: [] };
   try {
     extras = await fetchCatalogExtras(parsed);
   } catch (_) {
-    extras = { name: '', links: [] };
+    // Never cache or index a thin fallback for a real hub: Google retries a 503.
+    return crawlerUnavailable();
   }
+  if (extras?.notFound) return crawlerNotFound();
   const seo = catalogSeo(parsed, { name: extras.name });
-  const html = renderCatalogOgHtml(seo, extras.links);
+  const html = renderCatalogOgHtml(seo, extras.links, extras.image || '');
   const response = new Response(html, {
     status: 200,
     headers: {
@@ -419,6 +512,10 @@ async function handleHubOg(request, env, ctx) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return null;
   }
+  if (isSearchEngineBot(userAgent) && !force) {
+    const target = hubRedirectPath(url.pathname);
+    if (target) return crawlerRedirect(`${siteOriginFromHost(url.hostname)}${target}`);
+  }
   const catalog = parseCatalogPath(url.pathname);
   if (catalog && (isSearchEngineBot(userAgent) || force)) {
     return handleCatalogOg(request, env, ctx, catalog);
@@ -449,7 +546,10 @@ async function handleHubOg(request, env, ctx) {
   try {
     cards = await fetchHubCards(parsed);
   } catch (_) {
-    cards = [];
+    return crawlerUnavailable();
+  }
+  if (parsed.slug && (parsed.kind === 'pokemon' || parsed.kind === 'rarities') && !cards.length) {
+    return crawlerNotFound();
   }
   const html = renderHubOgHtml(parsed, cards);
   const response = new Response(html, {
@@ -458,11 +558,11 @@ async function handleHubOg(request, env, ctx) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': `public, max-age=300, s-maxage=${OG_CACHE_TTL_SEC}`,
       'x-pokoin-og-cache': 'miss',
-      'x-robots-tag': 'index, follow',
+      'x-robots-tag': 'index, follow, max-image-preview:large',
     },
   });
   if (cache && ctx?.waitUntil) {
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
   }
   return response;
 }

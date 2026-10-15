@@ -147,3 +147,9 @@ CardTrader cache and every active Pokoin listing, read live at build time.
 - A card URL never serves the generic SPA shell to a search bot. API failure returns 503 + Retry-After (Google retries); an unknown id returns 404. Identical canonical-less shells were being clustered as duplicates ("Google chose different canonical") and carried no card image.
 - `/marketplace/cards/:id/...` (no locale) 301s crawlers to the canonical `/marketplace/en/cards/...` URL.
 - The crawler <img> no longer declares 630x880; CDN scans are ~500x703.
+
+## Hub URLs for crawlers (2026-10-15)
+
+- Set/era/artist/species/rarity hubs: API failure returns 503 + Retry-After + noindex (was a cached, indexable thin page). Unknown set/era/artist/species/rarity returns 404 + noindex (was 200, self-canonical soft 404).
+- Crawlers get a 301 to the canonical form: locale-less or non-en species/rarity/language/guide/artist hubs go to /marketplace/en/..., and locale-prefixed sets/eras go to /marketplace/sets|eras/....
+- Set, artist and species hubs publish the first card scan as og:image and JSON-LD image.
