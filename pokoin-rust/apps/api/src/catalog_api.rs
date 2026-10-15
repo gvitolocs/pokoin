@@ -180,7 +180,13 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"")};
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
  use pokoin_api_common::stages::{timed,SQL};
- let primary=match timed(SQL,cards(&pool,&[id],&game)).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
+ let primary=match timed(SQL,cards(&pool,&[id],&game)).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>{
+  let mut body=json!({"error":"Card not found.","cardId":id.to_string()});
+  // A game-less link to another TCG's card: name its catalog so the desk can
+  // move to /{slug}/marketplace/... instead of "Card market not found."
+  if game=="pokemon"{if let Some(owner)=owning_satellite(id).await{body["ownerGame"]=json!(owner)}}
+  return response(StatusCode::NOT_FOUND,body,"")
+ }},Err(e)=>return failure(&e)};
  let name=text(&primary,&["name"]);let set=text(&primary,&["set_name"]);
  let version=text(&primary,&["version"]);
  // `related` rides along: one primary-key read of the prebuilt neighbours.
@@ -247,6 +253,38 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
   "related":related
  }),"public, max-age=10, s-maxage=30, stale-while-revalidate=60")
 }
+/// The one satellite catalog holding a public id the Pokemon catalog lacks.
+/// Every satellite id is even (CardTrader blueprint x2, or the 200000000+
+/// synthetic range shared by several games), so odd ids skip the probes and
+/// an id found in two catalogs names none. Answers (misses too) are cached.
+async fn owning_satellite(id:i64)->Option<&'static str>{
+ use std::{sync::{Mutex,OnceLock},time::{Duration,Instant}};
+ type Owners=HashMap<i64,(Instant,Option<&'static str>)>;
+ static OWNERS:OnceLock<Mutex<Owners>>=OnceLock::new();
+ const TTL:Duration=Duration::from_secs(600);
+ if id%2!=0{return None}
+ let owners=OWNERS.get_or_init(||Mutex::new(HashMap::new()));
+ if let Some((at,owner))=owners.lock().unwrap_or_else(|p|p.into_inner()).get(&id).copied(){if at.elapsed()<TTL{return owner}}
+ let mut probes=tokio::task::JoinSet::new();
+ for (game,_) in pokoin_commerce::game::SATELLITE_GAMES{
+  let Some(pool)=game_db_url(game).and_then(|url|pokoin_db::satellite_pool(&url).ok()) else{continue};
+  probes.spawn(async move{
+   sqlx::query_scalar::<_,bool>("select exists(select 1 from public.marketplace_search_candidates where card_id=$1)")
+   .bind(id).fetch_one(&pool).await.ok().filter(|hit|*hit).map(|_|game)
+  });
+ }
+ let collect=async{let mut hits=vec![];while let Some(r)=probes.join_next().await{if let Ok(Some(game))=r{hits.push(game)}}hits};
+ // A slow catalog leaves this 404 plain and uncached rather than holding it.
+ let hits=tokio::time::timeout(Duration::from_millis(1500),collect).await.ok()?;
+ let owner=unique_owner(&hits);
+ let mut map=owners.lock().unwrap_or_else(|p|p.into_inner());
+ if map.len()>=8192{map.retain(|_,(at,_)|at.elapsed()<TTL)}
+ if map.len()<8192{map.insert(id,(Instant::now(),owner));}
+ owner
+}
+fn unique_owner(hits:&[&'static str])->Option<&'static str>{
+ match hits{[only]=>Some(*only),_=>None}
+}
 async fn name_set_ids(pool:&PgPool,name:&str,set:&str,cap:i64)->Result<Vec<i64>,sqlx::Error>{
  sqlx::query_scalar("select card_id from public.marketplace_search_candidates where item_kind='single' and product_type='card' and name=$1 and set_name=$2 and coalesce(cdn_image_url,image_url) is not null order by card_id desc limit $3")
  .bind(name).bind(set).bind(cap).fetch_all(pool).await
@@ -277,6 +315,13 @@ async fn neighbors(pool:&PgPool,set:&str,id:i64,radius:i64)->Result<Vec<(i64,i64
  use super::*;
  use serde_json::json;
  #[test]fn unsafe_and_partial_ids_are_rejected(){for s in ["","0","-1","12abc","1.0","9007199254740992"]{assert_eq!(positive_id(s),None)}assert_eq!(positive_id("693360"),Some(693360))}
+ #[test]fn only_one_holding_catalog_names_the_owner(){
+  assert_eq!(unique_owner(&["digimon"]),Some("digimon"));
+  assert_eq!(unique_owner(&[]),None);
+  // 200000000+ synthetic ids repeat across games: never guess between them.
+  assert_eq!(unique_owner(&["weiss_schwarz","final_fantasy"]),None);
+ }
+ #[tokio::test]async fn odd_ids_never_probe_a_catalog(){assert_eq!(owning_satellite(834951).await,None)}
  #[test]fn non_pokemon_cards_take_cache_prices(){
   let mut rows=vec![json!({"card_id":"822658","ct_id":"9001","name":"Sol Ring"})];
   apply_cache_prices(&mut rows,&[json!({
