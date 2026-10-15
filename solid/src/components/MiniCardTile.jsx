@@ -3,6 +3,7 @@ import { looseCardReference, writeListingDrag } from '@market/chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import { goMarket } from '@market/punchouts.js';
 import ThumbZoom from './ThumbZoom.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
  * One card in a dashboard miniature sheet:
@@ -55,7 +56,7 @@ export default function MiniCardTile(props) {
     >
       <a
         class="seller-listing-tile"
-        href={props.href}
+        href={gameHref(props.href)}
         title={label()}
         aria-label={name()}
         draggable="true"

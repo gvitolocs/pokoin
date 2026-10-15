@@ -3,6 +3,7 @@ import { useLocation } from '@solidjs/router';
 import { COMP_NAV, FLAG, SPRITE, competitiveData } from '@market/competitive.js';
 import CardArt from './CardArt.jsx';
 import { PageHead } from './Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 /** Head and section tabs shared by the competitive pages. */
 export default function CompetitiveNav() {
@@ -22,7 +23,7 @@ export default function CompetitiveNav() {
       <nav class="comp-tabs" aria-label="Competitive">
         <For each={COMP_NAV}>
           {(row) => (
-            <a class={{ on: row.match(location.pathname) }} href={row.to}>{row.label}</a>
+            <a class={{ on: row.match(location.pathname) }} href={gameHref(row.to)}>{row.label}</a>
           )}
         </For>
       </nav>

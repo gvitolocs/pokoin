@@ -174,6 +174,23 @@ export function publicGamePath(path, gameId) {
   return `${apply(raw.slice(0, cut))}${raw.slice(cut)}`;
 }
 
+/** First path segments the router serves per game; account and site pages live on the apex. */
+const GAME_SCOPED_SEGMENTS = new Set(['marketplace', 'product']);
+
+/**
+ * Href for a plain <a> on the current site. Router paths are unprefixed and the
+ * router base only applies to navigate(): a raw `/marketplace/...` href on
+ * /riftbound left the game (the click and a new tab both opened it as a Pokémon
+ * page). Under a game basename, marketplace and product paths get the slug;
+ * everything else (apex pages, other origins, mailto, #hash) is returned as is.
+ */
+export function gameHref(href, base = gameBasename()) {
+  if (!base || typeof href !== 'string' || href[0] !== '/' || href[1] === '/') return href;
+  if (href === base || href.startsWith(`${base}/`)) return href;
+  const segment = href.split(/[/?#]/)[1] || '';
+  return GAME_SCOPED_SEGMENTS.has(segment) ? `${base}${href}` : href;
+}
+
 const SCAN_GAME_KEY = 'pokoin.scanGame';
 
 /** Optional desk override (dashboard host has no game subdomain). */

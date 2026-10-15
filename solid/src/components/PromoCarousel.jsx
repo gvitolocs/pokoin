@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '@market/api.js';
-import { game, isPokemonGame } from '@market/game.js';
+import { game, gameHref, isPokemonGame } from '@market/game.js';
 import { PROMO_BANNERS, promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '@market/promo-banners.js';
 import { FAN_POOL, fillFan, pickFan } from '@market/promo-fan.js';
 import { Action, track } from '@market/track.js';
@@ -40,7 +40,7 @@ function PromoFanCard(props) {
     <Show when={art()}>
       <a
         class={['promo-card', `is-${props.role}`, { 'is-ready': ready(), 'is-wide': wide() }]}
-        href={cardHref(props.card)}
+        href={gameHref(cardHref(props.card))}
         aria-label={props.card.name}
         onPointerEnter={(event) => {
           handOffCard(props.card);
@@ -299,7 +299,7 @@ export default function PromoCarousel() {
                     <p class="promo-lede">{slide.lede}</p>
                     <a
                       class="btn"
-                      href={`/marketplace/sets/${slide.slug}`}
+                      href={gameHref(`/marketplace/sets/${slide.slug}`)}
                       onPointerEnter={() => prefetchExpansionPage(slide.slug)}
                       onClick={() => track(Action.clickBanner, untrack(fanCards)[0] || { id: slide.slug, name: slide.title })}
                     >

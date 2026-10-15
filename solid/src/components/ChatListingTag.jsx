@@ -20,6 +20,7 @@ import { endTrayDrag, startTrayDrag } from '@market/tray-drag.js';
 import ChatBundle from './ChatBundle.jsx';
 import QtyStepper from './QtyStepper.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
+import { gameHref } from '@market/game.js';
 
 function unique(list) {
   const out = [];
@@ -177,7 +178,7 @@ function CardTag(props) {
         when={row().path}
         fallback={<span class="chat-tag-body" role="img" aria-label={label()}>{image()}</span>}
       >
-        <a href={row().path} aria-label={label()} draggable="false" onClick={(event) => event.stopPropagation()}>{image()}</a>
+        <a href={gameHref(row().path)} aria-label={label()} draggable="false" onClick={(event) => event.stopPropagation()}>{image()}</a>
       </Show>
       <CardQuantity row={row()} draft={draft()} onQty={props.onQty} />
       <Show when={props.onRemove}>
