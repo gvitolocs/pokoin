@@ -1,7 +1,6 @@
 import { createSignal, onSettled, Show } from 'solid-js';
 import { fetchCardTraderStatus } from '@market/api.js';
 import { defaultInventoryTargets, inventoryTargetsLabel } from '@market/inventory-targets.js';
-import { fiatFromPkn, formatPknNumber } from '@market/pkn.js';
 import { getBearer, signedIn } from '../../stores/auth.js';
 
 /**
@@ -70,9 +69,6 @@ export default function InventoryTargets(props) {
   const verb = () => (mode() === 'list' ? 'List' : 'Add');
   const label = () => (mode() === 'list' ? 'List on' : 'Add to');
   const showTargets = () => intent() !== 'collection';
-  const eur = () => (showTargets() && targets().cardtrader && props.pricePkn != null
-    ? fiatFromPkn(props.pricePkn, 'EUR')
-    : null);
   const actionLabel = () => (props.busy
     ? (props.busyLabel || 'Working…')
     : inventoryTargetsLabel(props.counts || { cards: 1 }, { intent: intent(), targets: targets(), verb: verb() }));
@@ -112,11 +108,6 @@ export default function InventoryTargets(props) {
           </Show>
           <Show when={!connected() && statusReady() && !oneDayReady()}>
             <a class="inventory-targets-hint" href="/profile">Connect in Profile</a>
-          </Show>
-          <Show when={eur() != null}>
-            <span class="inventory-targets-eur">
-              ≈ €{formatPknNumber(eur(), { maximumFractionDigits: 2 })} on CardTrader
-            </span>
           </Show>
         </div>
       </Show>
