@@ -55,26 +55,18 @@ pub fn identity_hash(identity: &str) -> String {
     hex::encode(Sha256::digest(identity.as_bytes()))[..32].to_owned()
 }
 
-/// Rate-limit identity for a client IP: IPv4 (and v4-mapped v6) as-is, IPv6
-/// by its /64 — one host owns a whole /64, so per-address keys are free to
-/// rotate. Unparseable input is kept verbatim (bounded).
+/// Rate-limit identity for a client IP (IPv6 folded to its /64). Thin alias of
+/// [`pokoin_accounts::rate_limit::rate_identity`], which every bucket builder
+/// applies anyway; kept for callers that log or compare the identity.
 pub fn ip_rate_identity(ip: &str) -> String {
-    let text = ip.trim();
-    match text.parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V4(v4)) => v4.to_string(),
-        Ok(std::net::IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
-            Some(v4) => v4.to_string(),
-            None => {
-                let s = v6.segments();
-                format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
-            }
-        },
-        Err(_) => text.chars().take(64).collect(),
-    }
+    pokoin_accounts::rate_limit::rate_identity(ip.trim()).into_owned()
 }
 
+/// Bucket key; IP identities fold to their /64 here, so no limiter caller has
+/// to remember it.
 pub fn rate_limit_bucket(scope: &str, identity: &str) -> String {
-    format!("pokoin:rl:v1:{}:{}", clean_scope(scope), identity_hash(identity))
+    let identity = pokoin_accounts::rate_limit::rate_identity(identity);
+    format!("pokoin:rl:v1:{}:{}", clean_scope(scope), identity_hash(&identity))
 }
 
 fn sampled(map: &'static OnceLock<Mutex<HashMap<String, Instant>>>, stamp: String) -> bool {
@@ -310,6 +302,16 @@ mod tests {
         assert_eq!(ip_rate_identity("2001:db8:1:2:ffff:ffff:ffff:ffff"), a);
         assert_ne!(ip_rate_identity("2001:db8:1:3::1"), a);
         assert_eq!(ip_rate_identity(" not-an-ip "), "not-an-ip");
+        // The bucket folds a raw IPv6 identity itself: limit_global and
+        // limit_best_effort callers that pass the bare address are covered.
+        assert_eq!(
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6::1"),
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6:dead:beef:0:1")
+        );
+        assert_ne!(
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6::1"),
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:7::1")
+        );
     }
 
     #[test]
