@@ -182,6 +182,45 @@ fn unsupported_path_is_rejected_without_a_request() {
 }
 
 #[test]
+fn zstd_books_come_as_a_frame_and_plain_requests_still_get_lines() {
+    let body = b"{\"1\":[{\"id\":5,\"name\":\"A\\nB\"}],\r\n \"2\":[]}\n".to_vec();
+    let server = serve(vec![("200 OK", "", body.clone()), ("200 OK", "", body)]);
+    let dir = std::env::temp_dir().join(format!("ct-bridge-zstd-{}-{}", std::process::id(), rand_suffix()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pokoin-cardtrader-bridge"))
+        .env("POKOIN_CT_API_BASE", &server.base)
+        .env("POKOIN_CT_TOKEN", "test-token")
+        .env("POKOIN_CT_COOLDOWN_FILE", dir.join("cooldown.json"))
+        .env("POKOIN_CT_WORKERS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let mut stdin = child.stdin.take().unwrap();
+        let mut zstd_request = book_request(1);
+        zstd_request["encoding"] = json!("zstd");
+        writeln!(stdin, "{zstd_request}").unwrap();
+        writeln!(stdin, "{}", book_request(2)).unwrap();
+    }
+    let mut out = Vec::new();
+    child.stdout.take().unwrap().read_to_end(&mut out).unwrap();
+    assert!(child.wait().unwrap().success());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let newline = out.iter().position(|&byte| byte == b'\n').unwrap();
+    let header: Value = serde_json::from_slice(&out[..newline]).unwrap();
+    assert_eq!(header["id"], 1);
+    assert_eq!(header["encoding"], "zstd");
+    let len = header["bytes"].as_u64().unwrap() as usize;
+    let frame = &out[newline + 1..newline + 1 + len];
+    let book: Value = serde_json::from_slice(&zstd::stream::decode_all(frame).unwrap()).unwrap();
+    assert_eq!(book, json!({"1": [{"id": 5, "name": "A\nB"}], "2": []}));
+    let rest: Value = serde_json::from_slice(out[newline + 1 + len..].strip_suffix(b"\n").unwrap()).unwrap();
+    assert_eq!(rest, json!({"id": 2, "data": {"1": [{"id": 5, "name": "A\nB"}], "2": []}}));
+}
+
+#[test]
 fn several_books_in_flight_each_get_one_whole_line() {
     let big = format!("{{\"7\":[{}]}}", vec![r#"{"id":1,"name":"x"}"#; 20_000].join(","));
     let server = serve(

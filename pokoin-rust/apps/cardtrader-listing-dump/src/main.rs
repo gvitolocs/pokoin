@@ -15,7 +15,10 @@
 //!   latency, the ssh transfer and the encoding overlap instead of adding up;
 //!   the bridge's gate still spaces listing requests 1.05 s apart;
 //! - the bridge is the Rust `pokoin-cardtrader-bridge` on Oracle
-//!   (`POKOIN_CT_BRIDGE_CMD`, run through `sh -c`).
+//!   (`POKOIN_CT_BRIDGE_CMD`, run through `sh -c`), asked for zstd frames
+//!   (`POKOIN_CT_ENCODING=none` turns that off): the Oracle → nezopt link
+//!   moves ~4-5 MB/s and books compress ~27x. Plain line replies (the Python
+//!   bridge) are still understood.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Write};
@@ -204,6 +207,51 @@ fn reply_head(line: &[u8]) -> Option<(usize, bool)> {
     }
 }
 
+/// One bridge reply as a JSON line: a plain line as it is, a zstd frame
+/// (`{"id":N,"encoding":"zstd","bytes":L}` + L bytes) decoded back to
+/// `{"id":N,"data":<book>}`. `None` at the end of the stream.
+fn read_reply(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::new();
+    if reader.read_until(b'\n', &mut line)? == 0 {
+        return Ok(None);
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if reply_head(&line).is_some() || line.len() > 512 {
+        return Ok(Some(line));
+    }
+    let Ok(header) = serde_json::from_slice::<Value>(&line) else {
+        return Ok(Some(line));
+    };
+    let (Some(id), Some(encoding), Some(len)) = (
+        header.get("id").cloned(),
+        header.get("encoding").and_then(Value::as_str),
+        header.get("bytes").and_then(Value::as_u64),
+    ) else {
+        return Ok(Some(line));
+    };
+    let mut frame = vec![0u8; len as usize];
+    std::io::Read::read_exact(reader, &mut frame)?;
+    let decoded = match encoding {
+        "zstd" => zstd::stream::decode_all(&frame[..]).map_err(|error| error.to_string()),
+        other => Err(format!("unknown encoding {other}")),
+    };
+    drop(frame);
+    Ok(Some(match decoded {
+        Ok(raw) => {
+            let mut out = Vec::with_capacity(raw.len() + 32);
+            out.extend_from_slice(format!("{{\"id\":{id},\"data\":").as_bytes());
+            out.extend_from_slice(&raw);
+            out.push(b'}');
+            out
+        }
+        Err(error) => json!({"id": id, "error": format!("ZstdError: {error}")})
+            .to_string()
+            .into_bytes(),
+    }))
+}
+
 /// Parse one book reply and store it as `.ctb`.
 fn store(line: Vec<u8>, dest: &Path, quality: u32) -> Result<ctbook::Counts, String> {
     let message: Value = serde_json::from_slice(&line).map_err(|_| UNREADABLE.to_string())?;
@@ -311,6 +359,7 @@ fn run() -> Result<i32, String> {
     let in_flight_max = env_usize("POKOIN_DUMP_INFLIGHT", 3).max(1);
     let encoders = env_usize("POKOIN_DUMP_ENCODERS", 3).max(1);
     let quality = env_usize("POKOIN_DUMP_QUALITY", 9) as u32;
+    let zstd_frames = std::env::var("POKOIN_CT_ENCODING").map(|value| value != "none").unwrap_or(true);
     let deadline = Instant::now() + Duration::from_secs_f64(max_seconds.max(0.0));
     let give_up = deadline + Duration::from_secs_f64(grace_seconds.max(0.0));
 
@@ -373,19 +422,15 @@ fn run() -> Result<i32, String> {
         std::thread::spawn(move || {
             let mut reader = BufReader::with_capacity(1 << 20, bridge_out);
             loop {
-                let mut line = Vec::new();
-                match reader.read_until(b'\n', &mut line) {
-                    Ok(0) | Err(_) => {
-                        let _ = events.send(Event::Eof);
-                        return;
-                    }
-                    Ok(_) => {
-                        if line.last() == Some(&b'\n') {
-                            line.pop();
-                        }
+                match read_reply(&mut reader) {
+                    Ok(Some(line)) => {
                         if events.send(Event::Line(line)).is_err() {
                             return;
                         }
+                    }
+                    Ok(None) | Err(_) => {
+                        let _ = events.send(Event::Eof);
+                        return;
                     }
                 }
             }
@@ -429,7 +474,10 @@ fn run() -> Result<i32, String> {
             }
             pending.pop_front();
             let e = &wanted[index];
-            let request = json!({"id": index + 1, "path": "/marketplace/products", "params": {"expansion_id": e.id}});
+            let mut request = json!({"id": index + 1, "path": "/marketplace/products", "params": {"expansion_id": e.id}});
+            if zstd_frames {
+                request["encoding"] = "zstd".into();
+            }
             if writeln!(bridge_in, "{request}").and_then(|()| bridge_in.flush()).is_err() {
                 status.push_error(e.error(UNREADABLE));
                 status.write();
@@ -595,6 +643,26 @@ fn quarantine(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replies_are_plain_lines_or_zstd_frames() {
+        let book = br#"{"1":[{"id":5}]}"#;
+        let frame = zstd::stream::encode_all(&book[..], 3).unwrap();
+        let mut stream = Vec::new();
+        stream.extend_from_slice(format!("{{\"id\":2,\"encoding\":\"zstd\",\"bytes\":{}}}\n", frame.len()).as_bytes());
+        stream.extend_from_slice(&frame);
+        stream.extend_from_slice(b"{\"id\":3,\"error\":\"HTTPError: HTTP Error 500\"}\n");
+        stream.extend_from_slice(b"{\"id\":4,\"encoding\":\"zstd\",\"bytes\":3}\nabc");
+        stream.extend_from_slice(b"{\"id\":5,\"data\":{}}\n");
+        let mut reader = std::io::Cursor::new(stream);
+        assert_eq!(read_reply(&mut reader).unwrap().unwrap(), br#"{"id":2,"data":{"1":[{"id":5}]}}"#);
+        assert_eq!(read_reply(&mut reader).unwrap().unwrap(), br#"{"id":3,"error":"HTTPError: HTTP Error 500"}"#);
+        let broken: Value = serde_json::from_slice(&read_reply(&mut reader).unwrap().unwrap()).unwrap();
+        assert_eq!(broken["id"], 4);
+        assert!(broken["error"].as_str().unwrap().starts_with("ZstdError"));
+        assert_eq!(read_reply(&mut reader).unwrap().unwrap(), br#"{"id":5,"data":{}}"#);
+        assert_eq!(read_reply(&mut reader).unwrap(), None);
+    }
 
     #[test]
     fn reply_head_reads_id_and_kind_without_parsing() {

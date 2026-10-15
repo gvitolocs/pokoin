@@ -11,6 +11,13 @@
 //! newlines). Each book is streamed to an already-unlinked temp file, checked,
 //! then streamed out, so memory stays flat however large the book is.
 //!
+//! Opt-in compression: a book request with `"encoding":"zstd"` is compressed
+//! on the fly (zstd level 3, ~27x on a 32 MB book in ~0.5 s here) and answered
+//! as a frame, the header line `{"id":<id>,"encoding":"zstd","bytes":<n>}`
+//! followed by exactly `n` bytes. The Oracle → nezopt link moves ~4-5 MB/s, so
+//! this removes most of the transfer time. The Python bridge ignores the field
+//! and answers plain lines; callers handle both.
+//!
 //! Requests start through one shared gate: 1.05 s apart for listing books,
 //! 0.3 s for catalogue paths, and every process of the pipeline honours the
 //! cooldown file a 403/429 writes (5 min, or the server's longer
@@ -255,6 +262,31 @@ enum Reply {
     Data(Value),
     /// The listing book, CR/LF removed, in an unlinked temp file.
     Book(File),
+    /// The same, zstd-compressed, with its byte length.
+    Zstd(File, u64),
+}
+
+/// Where a book is written: plain, or through a zstd encoder.
+enum Sink {
+    Plain(BufWriter<File>),
+    Zstd(zstd::stream::write::Encoder<'static, BufWriter<File>>),
+}
+
+impl Sink {
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        match self {
+            Sink::Plain(writer) => writer.write_all(bytes),
+            Sink::Zstd(writer) => writer.write_all(bytes),
+        }
+    }
+
+    fn finish(self) -> std::io::Result<File> {
+        let writer = match self {
+            Sink::Plain(writer) => writer,
+            Sink::Zstd(encoder) => encoder.finish()?,
+        };
+        writer.into_inner().map_err(|error| error.into_error())
+    }
 }
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -275,11 +307,18 @@ fn temp_file() -> std::io::Result<File> {
     Ok(file)
 }
 
-/// Stream a listing book into a temp file without CR/LF; it must start with `{`
-/// (ignoring whitespace in the first 64 bytes, as the Python bridge checks).
-fn store_book(mut body: impl Read) -> Result<File, Failure> {
-    let file = temp_file().map_err(|error| Failure::Retry(format!("OSError: {error}")))?;
-    let mut writer = BufWriter::with_capacity(1 << 16, file);
+/// Stream a listing book into a temp file without CR/LF, zstd-compressed when
+/// asked; it must start with `{` (ignoring whitespace in the first 64 bytes, as
+/// the Python bridge checks).
+fn store_book(mut body: impl Read, compress: bool) -> Result<Reply, Failure> {
+    let os = |error: std::io::Error| Failure::Retry(format!("OSError: {error}"));
+    let file = temp_file().map_err(os)?;
+    let buffered = BufWriter::with_capacity(1 << 16, file);
+    let mut writer = if compress {
+        Sink::Zstd(zstd::stream::write::Encoder::new(buffered, 3).map_err(os)?)
+    } else {
+        Sink::Plain(buffered)
+    };
     let mut head: Vec<u8> = Vec::with_capacity(64);
     let mut buffer = vec![0u8; 1 << 16];
     loop {
@@ -312,12 +351,10 @@ fn store_book(mut body: impl Read) -> Result<File, Failure> {
     if first != Some(&b'{') {
         return Err(Failure::Retry("ValueError: Expected listing book".into()));
     }
-    let mut file = writer
-        .into_inner()
-        .map_err(|error| Failure::Retry(format!("OSError: {error}")))?;
-    file.seek(SeekFrom::Start(0))
-        .map_err(|error| Failure::Retry(format!("OSError: {error}")))?;
-    Ok(file)
+    let mut file = writer.finish().map_err(os)?;
+    let len = file.stream_position().map_err(os)?;
+    file.seek(SeekFrom::Start(0)).map_err(os)?;
+    Ok(if compress { Reply::Zstd(file, len) } else { Reply::Book(file) })
 }
 
 fn take_head(head: &mut Vec<u8>, bytes: &[u8]) {
@@ -335,7 +372,7 @@ struct Bridge {
 }
 
 impl Bridge {
-    fn attempt(&self, path: &str, url: &str) -> Result<Reply, Failure> {
+    fn attempt(&self, path: &str, url: &str, compress: bool) -> Result<Reply, Failure> {
         let response = self
             .agent
             .get(url)
@@ -356,7 +393,7 @@ impl Bridge {
             Err(ureq::Error::Transport(error)) => return Err(Failure::Retry(format!("URLError: {error}"))),
         };
         if path == BOOK_PATH {
-            return store_book(response.into_reader()).map(Reply::Book);
+            return store_book(response.into_reader(), compress);
         }
         let mut data: Value = serde_json::from_reader(BufReader::new(response.into_reader()))
             .map_err(|error| Failure::Retry(format!("JSONDecodeError: {error}")))?;
@@ -382,10 +419,11 @@ impl Bridge {
         let empty = serde_json::Map::new();
         let params = request.get("params").and_then(Value::as_object).unwrap_or(&empty);
         let url = format!("{}{}?{}", self.base, path, urlencode(params));
+        let compress = request.get("encoding").and_then(Value::as_str) == Some("zstd");
         let mut attempt = 0u32;
         loop {
             self.gate.wait(if path == BOOK_PATH { 1.05 } else { 0.3 });
-            match self.attempt(path, &url) {
+            match self.attempt(path, &url, compress) {
                 Ok(reply) => return Ok(reply),
                 Err(Failure::Fatal(message)) => return Err(message),
                 Err(Failure::RateLimited(status, retry_after)) => {
@@ -413,6 +451,14 @@ impl Bridge {
                 write!(out, "{{\"id\":{id},\"data\":")?;
                 std::io::copy(&mut BufReader::with_capacity(1 << 16, file), &mut *out)?;
                 out.write_all(b"}\n")
+            })(),
+            Ok(Reply::Zstd(file, len)) => (|| {
+                writeln!(out, "{}", json!({"id": id, "encoding": "zstd", "bytes": len}))?;
+                let copied = std::io::copy(&mut BufReader::with_capacity(1 << 16, file), &mut *out)?;
+                if copied != len {
+                    return Err(std::io::Error::other("short zstd frame"));
+                }
+                Ok(())
             })(),
         };
         // The reader on nezopt is gone: nothing useful left to do.
@@ -504,16 +550,31 @@ mod tests {
         assert_eq!(parse_http_date("soon"), None);
     }
 
+    const BOOK: &[u8] = b"  {\"1\":[{\"id\":5,\"name\":\"A\\nB\"}],\r\n \"2\":[]}\n";
+    const STORED: &str = "  {\"1\":[{\"id\":5,\"name\":\"A\\nB\"}], \"2\":[]}";
+
     #[test]
     fn book_is_stored_on_one_line_and_checked() {
-        let mut file = match store_book(&b"  {\"1\":[{\"id\":5,\"name\":\"A\\nB\"}],\r\n \"2\":[]}\n"[..]) {
-            Ok(file) => file,
-            Err(_) => panic!("valid book rejected"),
+        let Ok(Reply::Book(mut file)) = store_book(BOOK, false) else {
+            panic!("valid book rejected");
         };
         let mut text = String::new();
         file.read_to_string(&mut text).unwrap();
-        assert_eq!(text, "  {\"1\":[{\"id\":5,\"name\":\"A\\nB\"}], \"2\":[]}");
-        assert!(matches!(store_book(&b"[1,2]"[..]), Err(Failure::Retry(message)) if message.contains("Expected listing book")));
-        assert!(matches!(store_book(&b""[..]), Err(Failure::Retry(_))));
+        assert_eq!(text, STORED);
+        for compress in [false, true] {
+            assert!(matches!(store_book(&b"[1,2]"[..], compress), Err(Failure::Retry(message)) if message.contains("Expected listing book")));
+            assert!(matches!(store_book(&b""[..], compress), Err(Failure::Retry(_))));
+        }
+    }
+
+    #[test]
+    fn zstd_book_decodes_to_the_same_line() {
+        let Ok(Reply::Zstd(mut file, len)) = store_book(BOOK, true) else {
+            panic!("valid book rejected");
+        };
+        let mut compressed = Vec::new();
+        file.read_to_end(&mut compressed).unwrap();
+        assert_eq!(compressed.len() as u64, len);
+        assert_eq!(zstd::stream::decode_all(&compressed[..]).unwrap(), STORED.as_bytes());
     }
 }

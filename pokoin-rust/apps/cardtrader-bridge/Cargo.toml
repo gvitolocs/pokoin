@@ -14,3 +14,4 @@ path = "src/main.rs"
 libc = "0.2"
 serde_json = { workspace = true }
 ureq = { version = "2", default-features = false, features = ["tls"] }
+zstd = { version = "0.13", default-features = false }
