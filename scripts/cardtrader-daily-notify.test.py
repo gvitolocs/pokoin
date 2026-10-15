@@ -160,6 +160,8 @@ class DailySummaryTest(unittest.TestCase):
         for executable, content in {
             "node": '#!/bin/bash\nif [[ "$1" == *refresh-all-cardtrader-catalogues* ]]; then exit "$CATALOG_EXIT"; fi\nexit 0\n',
             "python3": '#!/bin/bash\nif [[ "$1" == *cardtrader-daily-notify* ]]; then exit 1; fi\nexit 0\n',
+            "dump": "#!/bin/bash\nexit 0\n",
+            "prices": "#!/bin/bash\nexit 0\n",
         }.items():
             path = bin_dir / executable
             path.write_text(content)
@@ -167,7 +169,9 @@ class DailySummaryTest(unittest.TestCase):
         for import_exit in [0, 1]:
             with self.subTest(import_exit=import_exit):
                 env = {**os.environ, "PATH": str(bin_dir) + ":" + os.environ["PATH"],
-                       "POKOIN_CATALOG_RUN_ROOT": str(self.root), "CATALOG_EXIT": str(import_exit)}
+                       "POKOIN_CATALOG_RUN_ROOT": str(self.root), "CATALOG_EXIT": str(import_exit),
+                       "POKOIN_CT_DUMP_BIN": str(bin_dir / "dump"),
+                       "POKOIN_CT_PRICE_BIN": str(bin_dir / "prices")}
                 result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, import_exit)
                 self.assertIn("import result is unchanged", result.stderr)
