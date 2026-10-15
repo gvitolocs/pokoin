@@ -1,5 +1,5 @@
 //! Exact decimal amounts for EUR and PKN. Prices stay as ratios so
-//! `eur / rate + 200` does not drift through binary floats.
+//! `eur / rate` does not drift through binary floats.
 
 use std::cmp::Ordering;
 
@@ -56,13 +56,6 @@ impl Rat {
         )
     }
 
-    pub fn add_int(self, value: i128) -> Option<Self> {
-        Self::new(
-            self.num.checked_add(value.checked_mul(self.den)?)?,
-            self.den,
-        )
-    }
-
     pub fn is_positive(self) -> bool {
         self.num > 0
     }
@@ -90,7 +83,7 @@ pub fn checkout_rate(raw: Option<&str>) -> Rat {
 }
 
 pub fn price_to_pkn(eur: Rat, rate: Rat) -> Option<Rat> {
-    eur.quotient(rate)?.add_int(200)
+    eur.quotient(rate)
 }
 
 pub fn parse_rat(raw: &str) -> Option<Rat> {

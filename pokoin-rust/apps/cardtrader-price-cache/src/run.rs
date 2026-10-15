@@ -300,15 +300,31 @@ async fn marketplace_pool(
     Ok(market.clone().expect("just inserted"))
 }
 
-fn cache_row(winner: &Winner, cards: &HashMap<i64, String>, snapshot_at: &str) -> CacheRow {
-    let pokoin_card_id = if winner.provider == Provider::Native {
-        winner.blueprint_id.to_string()
-    } else {
-        cards
-            .get(&winner.blueprint_id)
-            .cloned()
-            .unwrap_or_else(|| winner.blueprint_id.to_string())
-    };
+pub fn pokoin_card_id_for_winner(
+    blueprint_id: i64,
+    provider: Provider,
+    cards: &HashMap<i64, String>,
+) -> String {
+    match provider {
+        Provider::Native => public_card_id_from_blueprint(blueprint_id),
+        Provider::CardTrader => cards
+            .get(&blueprint_id)
+            .map(|text| text.trim())
+            .filter(|text| !text.is_empty())
+            .map(|text| text.to_string())
+            .unwrap_or_else(|| public_card_id_from_blueprint(blueprint_id)),
+    }
+}
+
+fn public_card_id_from_blueprint(blueprint_id: i64) -> String {
+    blueprint_id
+        .checked_mul(2)
+        .map(|id| id.to_string())
+        .unwrap_or_default()
+}
+
+pub fn cache_row(winner: &Winner, cards: &HashMap<i64, String>, snapshot_at: &str) -> CacheRow {
+    let pokoin_card_id = pokoin_card_id_for_winner(winner.blueprint_id, winner.provider, cards);
     CacheRow {
         provider: winner.provider.as_str(),
         blueprint_id: winner.blueprint_id,
@@ -331,11 +347,7 @@ fn cache_row(winner: &Winner, cards: &HashMap<i64, String>, snapshot_at: &str) -
 
 fn sample_lines(slug: &str, winners: &[Winner], cards: &HashMap<i64, String>) -> Vec<String> {
     winners.iter().take(5).map(|winner| {
-        let card = if winner.provider == Provider::Native {
-            winner.blueprint_id.to_string()
-        } else {
-            cards.get(&winner.blueprint_id).cloned().unwrap_or_else(|| winner.blueprint_id.to_string())
-        };
+        let card = pokoin_card_id_for_winner(winner.blueprint_id, winner.provider, cards);
         let eur = winner.price_eur.map(format_rat).unwrap_or_else(|| "-".to_string());
         format!(
             "{slug} sample blueprint={} provider={} pkn={} eur={eur} listings={} qty={} listing={} shipping={} card={card}",

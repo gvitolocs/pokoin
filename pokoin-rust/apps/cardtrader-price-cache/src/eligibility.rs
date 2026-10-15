@@ -38,15 +38,15 @@ fn ready_pattern() -> &'static Regex {
     })
 }
 
-/// `zero` when a Zero flag is true, `one_day_ready` when the name matches, otherwise not eligible.
+/// Label: `one_day_ready` when the name matches (even with Zero flags), else `zero`, else not eligible.
 pub fn shipping_mode(product: &Value) -> Option<&'static str> {
+    if is_one_day_ready(&ready_text(product)) {
+        return Some("one_day_ready");
+    }
     if flag_is_true_at(raw_flag(product, "can_sell_via_hub"))
         || flag_is_true_at(raw_flag(product, "can_sell_sealed_with_ct_zero"))
     {
         return Some("zero");
-    }
-    if is_one_day_ready(&ready_text(product)) {
-        return Some("one_day_ready");
     }
     None
 }

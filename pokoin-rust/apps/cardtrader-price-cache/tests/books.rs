@@ -71,23 +71,23 @@ fn reads_ctb1_ctb2_and_gzip_books_one_expansion_at_a_time() {
     assert_eq!(winners.len(), 4);
     assert_eq!(winners[0].blueprint_id, 10);
     assert_eq!(winners[0].listing_id, "1");
-    assert_eq!(format_rat(winners[0].price_pkn), "1200");
+    assert_eq!(format_rat(winners[0].price_pkn), "1000");
     assert_eq!(winners[0].country, "DE");
 
     assert_eq!(winners[1].blueprint_id, 20);
     assert_eq!(winners[1].provider, Provider::CardTrader);
     assert_eq!(winners[1].shipping_mode, "one_day_ready");
     assert_eq!(winners[1].quantity_sum, 3);
-    assert_eq!(format_rat(winners[1].price_pkn), "600");
+    assert_eq!(format_rat(winners[1].price_pkn), "400");
     assert_eq!(winners[1].country, "IT");
 
     assert_eq!(winners[2].blueprint_id, 30);
     assert_eq!(winners[2].listing_count, 1);
     assert_eq!(winners[2].quantity_sum, 4);
-    assert_eq!(format_rat(winners[2].price_pkn), "500");
+    assert_eq!(format_rat(winners[2].price_pkn), "300");
 
     assert_eq!(winners[3].listing_id, "8");
-    assert_eq!(format_rat(winners[3].price_pkn), "400");
+    assert_eq!(format_rat(winners[3].price_pkn), "200");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

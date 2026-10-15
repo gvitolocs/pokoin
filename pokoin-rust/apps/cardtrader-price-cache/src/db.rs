@@ -154,12 +154,9 @@ pub async fn native_offers(pool: &PgPool, slug: &str) -> Result<Vec<Offer>, sqlx
     let mut offers = Vec::with_capacity(rows.len());
     for row in rows {
         let card_id: String = row.try_get("card_id")?;
-        let Ok(blueprint_id) = card_id.parse::<i64>() else {
+        let Some(blueprint_id) = native_blueprint_id(&card_id) else {
             continue;
         };
-        if blueprint_id <= 0 {
-            continue;
-        }
         let price_text: String = row.try_get("price_pkn")?;
         let Some(price_pkn) = parse_rat(&price_text).filter(|price| price.is_positive()) else {
             continue;
@@ -353,6 +350,15 @@ async fn insert_winners(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// Public `card_id` is blueprint × 2; only even positive ids map to a blueprint.
+pub fn native_blueprint_id(card_id: &str) -> Option<i64> {
+    let id = card_id.trim().parse::<i64>().ok()?;
+    if id <= 0 || id % 2 != 0 {
+        return None;
+    }
+    id.checked_div(2)
 }
 
 pub fn redact(text: &str, secret: &str) -> String {
