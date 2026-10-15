@@ -70,6 +70,7 @@ import {
   noteOriginDown,
   isTunnelHtml,
 } from './working-page.js';
+import { isGatewayStatus, retriesRequest, withGatewayRetry } from './api-retry.js';
 
 export { readRecentCardIds, rememberCardId, peekRecentTile, homepageDerivativeUrl, preferFullImage, rasterSiblings, fetchCardTiles, attachRecentsToHome, isPublicRailsVector, publicIdFromScanHit };
 
@@ -103,8 +104,19 @@ function readIdList(key) {
   }
 }
 
-/** One API request with the SPA's headers: the body text, and its ETag when CORS exposes it. */
-async function fetchApiText(url, options = {}, path = url) {
+/**
+ * One API request with the SPA's headers: the body text, and its ETag when CORS
+ * exposes it. A gateway failure (the load balancer picked a down origin) is
+ * retried for reads and for writes that pass `retry: true`; see api-retry.js.
+ */
+function fetchApiText(url, options = {}, path = url) {
+  return withGatewayRetry(() => fetchApiTextOnce(url, options, path), {
+    retry: retriesRequest(options),
+    signal: options.signal,
+  });
+}
+
+async function fetchApiTextOnce(url, options = {}, path = url) {
   let response;
   try {
     response = await fetch(url, {
@@ -123,6 +135,7 @@ async function fetchApiText(url, options = {}, path = url) {
     if (isApiRequestPath(path) && isNetworkError(err)) {
       const error = new Error('The network request failed.');
       error.cause = err;
+      error.gatewayFailure = true;
       throw error;
     }
     throw err;
@@ -135,15 +148,18 @@ async function fetchApiText(url, options = {}, path = url) {
     } catch (_) {
       body = {};
     }
+    const gatewayFailure = isApiRequestPath(path) && isGatewayStatus(response.status);
     if (isOriginDownError({ message: body.error || body.message || '' }, response.status, raw) || isTunnelHtml(raw)) {
       const error = new Error('The network request failed.');
       error.status = response.status;
       error.body = body;
+      error.gatewayFailure = gatewayFailure;
       throw error;
     }
     const error = new Error(body.error || body.message || body.detail || `Request failed (${response.status})`);
     error.status = response.status;
     error.body = body;
+    error.gatewayFailure = gatewayFailure;
     throw error;
   }
   return { text: await response.text(), etag: response.headers.get('etag') || '' };
@@ -1114,8 +1130,10 @@ export function askPoko(bearer, message, sessionId) {
 }
 
 export function pokoConnectAction(bearer, body) {
+  // Status, a fresh link code and unlink are all safe to send twice.
   return getJson('/api/poko-connect', {
     method: 'POST',
+    retry: true,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
@@ -2277,8 +2295,10 @@ export function fetchPknRefusingSellers(sellerUids, token) {
 }
 
 export function saveSellerSettings(body, token) {
+  // Sets fields to the given values, so a repeat is harmless.
   return getJson('/api/marketplace-seller-settings', {
     method: 'POST',
+    retry: true,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
