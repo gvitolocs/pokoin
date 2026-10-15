@@ -526,6 +526,7 @@ export default function CardTraderConnectPanel(props) {
         }}
         onPreviewGames={onPreviewGames}
         onPreviewSample={onPreviewPowerToolsSample}
+        onClearPreview={() => setPtPreview(null)}
         onConfirmWithCsv={(opts) => runSync(opts)}
       />
     </div>
