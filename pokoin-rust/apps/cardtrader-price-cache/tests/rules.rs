@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use cardtrader_price_cache::{
-    checkout_rate, eligible_cardtrader, flag_is_true, format_rat, is_one_day_ready, parse_rat,
-    price_to_pkn, rank, Offer, Provider,
+    cache_row, checkout_rate, eligible_cardtrader, flag_is_true, format_rat, is_one_day_ready,
+    native_blueprint_id, parse_rat, pokoin_card_id_for_winner, price_to_pkn, rank, shipping_mode,
+    Offer, Provider, Winner,
 };
 use serde_json::{json, Value};
 
@@ -55,12 +58,53 @@ fn one_day_ready_matcher() {
 }
 
 #[test]
-fn pkn_conversion_uses_the_checkout_rate_and_markup() {
-    assert_eq!(pkn("1", None), "400");
-    assert_eq!(pkn("4", Some("0.01")), "600");
-    assert_eq!(pkn("1", Some("0")), "400");
-    assert_eq!(pkn("1", Some("nope")), "400");
-    assert_eq!(pkn("1.5", Some("0.005")), "500");
+fn pkn_conversion_uses_checkout_rate_without_markup() {
+    assert_eq!(pkn("1", None), "200");
+    assert_eq!(pkn("30.40", None), "6080");
+    assert_eq!(pkn("0.11", None), "22");
+    assert_eq!(pkn("4", Some("0.01")), "400");
+    assert_eq!(pkn("1", Some("0")), "200");
+    assert_eq!(pkn("1", Some("nope")), "200");
+    assert_eq!(pkn("1.5", Some("0.005")), "300");
+}
+
+#[test]
+fn shipping_mode_labels_match_the_database_function() {
+    let hub_and_ready = json!({
+        "user": {
+            "can_sell_via_hub": true,
+            "username": "Card Republic 1-Day Ready"
+        }
+    });
+    assert_eq!(shipping_mode(&hub_and_ready), Some("one_day_ready"));
+    assert!(
+        eligible_cardtrader(
+            &json!({
+                "id": 1,
+                "quantity": 1,
+                "price_cents": 100,
+                "price_currency": "EUR",
+                "user": {
+                    "can_sell_via_hub": true,
+                    "username": "Card Republic 1-Day Ready"
+                }
+            }),
+            "100",
+            rate()
+        )
+        .unwrap()
+        .shipping_mode
+            == "one_day_ready"
+    );
+
+    let zero_only = json!({"user": {"can_sell_via_hub": true}});
+    assert_eq!(shipping_mode(&zero_only), Some("zero"));
+
+    let ready_only = json!({"user": {"username": "Shop 1-Day Ready"}});
+    assert_eq!(shipping_mode(&ready_only), Some("one_day_ready"));
+
+    let neither = json!({"user": {"username": "Regular Shop"}});
+    assert_eq!(shipping_mode(&neither), None);
 }
 
 #[test]
@@ -70,7 +114,7 @@ fn eur_quantity_and_price_filters() {
     assert_eq!(ok.listing_id, "1");
     assert_eq!(ok.quantity, 2);
     assert_eq!(format_rat(ok.price_eur.unwrap()), "1");
-    assert_eq!(format_rat(ok.price_pkn), "400");
+    assert_eq!(format_rat(ok.price_pkn), "200");
     assert_eq!(ok.shipping_mode, "zero");
     assert_eq!(ok.country, "IT");
 
@@ -99,7 +143,7 @@ fn eur_quantity_and_price_filters() {
     });
     let row = eligible_cardtrader(&plain, "100", ready).unwrap();
     assert_eq!(format_rat(row.price_eur.unwrap()), "3");
-    assert_eq!(format_rat(row.price_pkn), "800");
+    assert_eq!(format_rat(row.price_pkn), "600");
 
     let cents_object = json!({
         "id": 5,
@@ -156,9 +200,9 @@ fn eur_quantity_and_price_filters() {
     let row = eligible_cardtrader(&named, "55", ready).unwrap();
     assert_eq!(row.blueprint_id, 55);
     assert_eq!(row.shipping_mode, "one_day_ready");
-    assert_eq!(format_rat(row.price_pkn), "450");
+    assert_eq!(format_rat(row.price_pkn), "250");
 
-    let zero_beats_name = json!({
+    let ready_beats_zero = json!({
         "id": 10,
         "quantity": 1,
         "price_cents": 100,
@@ -166,11 +210,56 @@ fn eur_quantity_and_price_filters() {
         "user": {"can_sell_via_hub": true, "country_code": "ES"}
     });
     assert_eq!(
-        eligible_cardtrader(&zero_beats_name, "100", ready)
+        eligible_cardtrader(&ready_beats_zero, "100", ready)
             .unwrap()
             .shipping_mode,
-        "zero"
+        "one_day_ready"
     );
+}
+
+#[test]
+fn native_blueprint_id_maps_even_public_card_ids() {
+    assert_eq!(native_blueprint_id("822658"), Some(411329));
+    assert_eq!(native_blueprint_id("822657"), None);
+    assert_eq!(native_blueprint_id("0"), None);
+    assert_eq!(native_blueprint_id("-4"), None);
+    assert_eq!(native_blueprint_id("abc"), None);
+}
+
+#[test]
+fn pokoin_card_id_fallback_matches_blueprint_times_two() {
+    let cards = HashMap::new();
+    assert_eq!(
+        pokoin_card_id_for_winner(411329, Provider::CardTrader, &cards),
+        "822658"
+    );
+    assert_eq!(
+        pokoin_card_id_for_winner(411329, Provider::Native, &cards),
+        "822658"
+    );
+
+    let mut with_candidate = HashMap::new();
+    with_candidate.insert(100_i64, "999".to_string());
+    assert_eq!(
+        pokoin_card_id_for_winner(100, Provider::CardTrader, &with_candidate),
+        "999"
+    );
+
+    let winner = Winner {
+        blueprint_id: 50,
+        provider: Provider::Native,
+        price_pkn: parse_rat("10").unwrap(),
+        price_eur: None,
+        listing_id: "n1".to_string(),
+        product_id: "n1".to_string(),
+        listing_count: 1,
+        quantity_sum: 1,
+        country: String::new(),
+        shipping_mode: "pokoin_native",
+        source_snapshot_at: None,
+    };
+    let row = cache_row(&winner, &cards, "2026-10-15T00:00:00Z");
+    assert_eq!(row.pokoin_card_id, "100");
 }
 
 fn hub_product(quantity: Value, cents: Value, currency: &str) -> Value {

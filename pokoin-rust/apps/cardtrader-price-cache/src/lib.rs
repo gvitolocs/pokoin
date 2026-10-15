@@ -12,8 +12,8 @@ mod rank;
 mod run;
 
 pub use books::{ingest_books, read_listing_book, Ingest};
-pub use db::{ensure_schema, write_cache, CacheRow, BATCH};
+pub use db::{ensure_schema, native_blueprint_id, write_cache, CacheRow, BATCH};
 pub use eligibility::{eligible_cardtrader, flag_is_true, is_one_day_ready, shipping_mode};
 pub use money::{checkout_rate, format_rat, parse_rat, price_to_pkn, Rat};
 pub use rank::{rank, Offer, Provider, Winner};
-pub use run::run;
+pub use run::{cache_row, pokoin_card_id_for_winner, run};

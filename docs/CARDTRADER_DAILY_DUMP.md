@@ -86,12 +86,16 @@ and counted.
 
 A CardTrader offer is eligible when the seller is Zero (`can_sell_via_hub` or
 `can_sell_sealed_with_ct_zero`) or the name matches 1-day ready, quantity is a
-positive integer, and the price is a positive EUR amount. PKN is
-`eur / PKN_CHECKOUT_USDT_PRICE + 200` (the rate defaults to 0.005, so €1 is
-400 PKN). The cheapest PKN wins; a Pokoin native listing wins a tie, then the
-listing id. Counts are the winning provider's rows. Native listings are the
-active shippable rows in `pokoin_marketplace.marketplace_user_listings` for
-that game slug.
+positive integer, and the price is a positive EUR amount. The stored
+`shipping_mode` label prefers 1-day ready when the name matches, otherwise
+`zero` when a Zero flag is set. PKN is `eur / PKN_CHECKOUT_USDT_PRICE` (the
+rate defaults to 0.005, so €1 is 200 PKN). The cheapest PKN wins; a Pokoin
+native listing wins a tie, then the listing id. Counts are the winning
+provider's rows. Native listings are the active shippable rows in
+`pokoin_marketplace.marketplace_user_listings` for that game slug; listing
+`card_id` is the public Pokoin id (blueprint × 2), so even ids compete on
+`card_id / 2`. `pokoin_card_id` on each cache row is the search-candidate
+`card_id` when present, otherwise `blueprint_id * 2`.
 
 `--dry-run` computes the same winners and only reads the databases.
 `--game <slug>` limits the run (`pokemon` for CardTrader game 5). The run
