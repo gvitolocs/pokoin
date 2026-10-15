@@ -413,8 +413,15 @@ test('card page 500 does not probe other games and does not throw', async () => 
       'https://pokoin.com/marketplace/en/cards/815746/slug',
       { headers: { 'user-agent': GOOGLEBOT } },
     ));
-    assert.equal(response, null);
+    // Googlebot gets a retryable 503, never the canonical-less SPA shell.
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '300');
     assert.equal(calls, 1);
+    const social = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746/slug',
+      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; Discordbot/2.0)' } },
+    ));
+    assert.equal(social, null);
     const resolved = await fetchCardPageForOg('815746', 'en', '', { probe: false }).catch((error) => error);
     assert.match(String(resolved.message || ''), /card-page 500/);
   });
@@ -464,7 +471,40 @@ test('wrong API response is rejected before crawler redirect or cache storage', 
       'https://pokoin.com/marketplace/en/cards/806390/rayquaza',
       { headers: { 'user-agent': GOOGLEBOT } },
     ));
-    assert.equal(response, null);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('location'), null);
     assert.equal(calls, 1);
   });
+});
+
+test('locale-less card URL 301s Googlebot to the canonical en card', async () => {
+  assert.deepEqual(parseCardPath('/marketplace/cards/543028/card-charizard'), { language: 'en', cardId: '543028', game: '' });
+  await withFetch(async () => new Response(JSON.stringify({
+    game: 'pokemon',
+    card: { id: '543028', name: 'Charizard' },
+    seo: { canonicalPath: '/marketplace/en/cards/543028/card-charizard-054-adv-p-adv-promos' },
+  }), { status: 200 }), async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/cards/543028/card-charizard-054-adv-p-adv-promos',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response.status, 301);
+    assert.equal(response.headers.get('location'), 'https://pokoin.com/marketplace/en/cards/543028/card-charizard-054-adv-p-adv-promos');
+  });
+});
+
+test('unknown card id is a hard 404 for Googlebot, not a soft-404 shell', async () => {
+  await withFetch(async () => new Response('{}', { status: 404 }), async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/1/nope',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('x-robots-tag'), 'noindex');
+  });
+});
+
+test('crawler img does not declare dimensions the scan does not have', () => {
+  const html = renderCardOgHtml({ title: 'Charizard', name: 'Charizard', cardId: '543028', path: '/marketplace/en/cards/543028/x', image: 'https://cdn.pokoin.com/271514_charizard.jpg' });
+  assert.match(html, /<img src="https:\/\/cdn\.pokoin\.com\/271514_charizard\.jpg" alt="[^"]*" \/>/);
 });

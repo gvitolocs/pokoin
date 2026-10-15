@@ -141,3 +141,9 @@ Phones (≤720px): the header is one compact block (title and counts on one line
 modes full width, compare fields two per row); panels are a bottom sheet that
 peeks at 42% and expands from its grip; legend and zoom hide under the sheet. Market prices take the cheaper of the
 CardTrader cache and every active Pokoin listing, read live at build time.
+
+## Card URLs for crawlers (2026-10-15)
+
+- A card URL never serves the generic SPA shell to a search bot. API failure returns 503 + Retry-After (Google retries); an unknown id returns 404. Identical canonical-less shells were being clustered as duplicates ("Google chose different canonical") and carried no card image.
+- `/marketplace/cards/:id/...` (no locale) 301s crawlers to the canonical `/marketplace/en/cards/...` URL.
+- The crawler <img> no longer declares 630x880; CDN scans are ~500x703.

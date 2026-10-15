@@ -18,7 +18,7 @@ export { realPublicCardId } from './public-card-id.js';
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
 /** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
-export const OG_CACHE_VERSION = 'v12';
+export const OG_CACHE_VERSION = 'v13';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -34,7 +34,7 @@ const SEARCH_BOT_RE =
   /Googlebot|Google-InspectionTool|Storebot-Google|AdsBot-Google|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
 
 const CARD_PATH_RE =
-  /^\/(?:([a-z0-9-]+)\/)?marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
+  /^\/(?:([a-z0-9-]+)\/)?marketplace\/(?:([a-z]{2}(?:-[a-z]{2})?)\/)?cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
 
 const GAME_SLUGS = {
   'one-piece': 'one_piece',
@@ -106,7 +106,9 @@ export function parseCardPath(pathname) {
     return null;
   }
   return {
-    language: match[2].toLowerCase(),
+    // `/marketplace/cards/:id` (no locale) used to fall through to the empty SPA
+    // shell with no canonical; crawlers now get a 301 to the en card.
+    language: (match[2] || 'en').toLowerCase(),
     cardId: realPublicCardId(match[3]),
     game: slug ? GAME_SLUGS[slug] : '',
   };
@@ -338,7 +340,7 @@ export function renderCardOgHtml(payload) {
     ? `\n  <meta property="og:image" content="${image}" />\n  <meta property="og:image:secure_url" content="${image}" />\n  <meta property="og:image:type" content="${imageType}" />\n  <meta property="og:image:alt" content="${imageAlt}" />\n  <meta name="twitter:image" content="${image}" />`
     : '';
   const figure = image
-    ? `\n  <img src="${image}" alt="${imageAlt}" width="630" height="880" />`
+    ? `\n  <img src="${image}" alt="${imageAlt}" />`
     : '';
   const crumbs = [
     `<a href="${hrefFor('/marketplace')}">Marketplace</a>`,
@@ -396,6 +398,31 @@ export function renderCardOgHtml(payload) {
 <body>${extra}
 </body>
 </html>`;
+}
+
+/** Temporary API failure for a search bot: retry later, keep the indexed copy. */
+export function crawlerUnavailable() {
+  return new Response('Card temporarily unavailable', {
+    status: 503,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+      'retry-after': '300',
+      'x-robots-tag': 'noindex',
+    },
+  });
+}
+
+/** Unknown card id for a search bot: a real 404, not a soft-404 SPA shell. */
+export function crawlerNotFound() {
+  return new Response('Card not found', {
+    status: 404,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+      'x-robots-tag': 'noindex',
+    },
+  });
 }
 
 function redirectToCanonical(location, canonicalPath = '') {
@@ -554,9 +581,12 @@ async function handleCardOg(request, env, ctx) {
   try {
     resolved = await fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: search });
   } catch (_) {
-    return null;
+    // A search bot must never get the generic SPA shell (200, no canonical, no
+    // image) for a card URL: Google clusters those identical shells as
+    // duplicates and loses the card image. 503 makes it retry later.
+    return search ? crawlerUnavailable() : null;
   }
-  if (!resolved?.page) return null;
+  if (!resolved?.page) return search ? crawlerNotFound() : null;
 
   const decisionSeed = payloadFor(resolved.page, parsed, resolved.game, site, {
     includeDescription: search,
