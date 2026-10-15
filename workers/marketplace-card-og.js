@@ -106,12 +106,42 @@ export function parseCardPath(pathname) {
     return null;
   }
   return {
-    // `/marketplace/cards/:id` (no locale) used to fall through to the empty SPA
-    // shell with no canonical; crawlers now get a 301 to the en card.
     language: (match[2] || 'en').toLowerCase(),
     cardId: realPublicCardId(match[3]),
     game: slug ? GAME_SLUGS[slug] : '',
   };
+}
+
+/**
+ * `/marketplace/cards/:id/:slug` (no locale) → `/marketplace/en/cards/:id/:slug`.
+ * Same path rewrite the `_redirects` rule intends. Empty when the path is not
+ * that shape (id-only, `/versions`, a locale already present).
+ */
+export function languageLessCardRedirectPath(pathname) {
+  const path = String(pathname || '').split(/[?#]/)[0];
+  const match = path.match(/^\/(?:([a-z0-9-]+)\/)?marketplace\/cards\/(\d+)\/([^/?#]+)\/?$/i);
+  if (!match) return '';
+  const gameSlug = match[1] ? match[1].toLowerCase() : '';
+  if (gameSlug && !GAME_SLUGS[gameSlug]) return '';
+  const prefix = gameSlug ? `/${gameSlug}` : '';
+  return `${prefix}/marketplace/en/cards/${match[2]}/${match[3]}`;
+}
+
+/** True for `/[game/]marketplace/cards...` with no locale segment. */
+function languageLessCardsTree(pathname) {
+  let path = String(pathname || '').split(/[?#]/)[0];
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  const parts = path.split('/').filter(Boolean);
+  if (parts[0] && GAME_SLUGS[String(parts[0]).toLowerCase()]) parts.shift();
+  return parts[0] === 'marketplace' && String(parts[1] || '').toLowerCase() === 'cards';
+}
+
+/** Absolute redirect on the request host, query string kept. */
+export function redirectLocation(url, pathname) {
+  const location = new URL(url);
+  location.pathname = pathname;
+  location.hash = '';
+  return location.toString();
 }
 
 const SATELLITE_GAME_IDS = [...new Set(Object.values(GAME_SLUGS))];
@@ -534,23 +564,29 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
 
 async function handleCardOg(request, env, ctx) {
   const url = new URL(request.url);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  // Language-less printing URLs 301 for every client. Workers Static Assets
+  // served the SPA shell here, so the `_redirects` rule never ran.
+  const bareCard = languageLessCardRedirectPath(url.pathname);
+  if (bareCard) return redirectToCanonical(redirectLocation(url, bareCard), bareCard);
+  if (languageLessCardsTree(url.pathname)) return null;
+
   const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
   const userAgent = request.headers.get('user-agent');
-  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
   const parsed = parseCardRequest(url.pathname);
   if (!parsed) return null;
 
   const bot = isLinkPreviewBot(userAgent, force);
   const search = isSearchEngineBot(userAgent) && !force;
+  // Browsers resolve identity through the shared API. YandexBot is a search
+  // crawler but not in the link-preview list, so the search flag must admit
+  // it. Preview bots stay on the social path and never take 503/404.
+  if (!bot && !search) return null;
   const site = siteOriginFromHost(url.hostname);
   const hintedGame = parsed.game || apiGameFromHost(url.hostname);
   const cache = globalThis.caches?.default;
   const currency = currencyFromSearch(url.search) || (search ? 'EUR' : '');
   const listingId = String(url.searchParams.get('listing') || '').replace(/[^\w-]/g, '').slice(0, 80);
-
-  // Browser desks resolve identity and canonical links through the shared API.
-  // Never redirect them from a Worker cache populated by another API response.
-  if (!bot) return null;
 
   const cacheKey = new Request(
     `${site}/__og/${OG_CACHE_VERSION}/card/${hintedGame || 'lookup'}/${parsed.language}/${parsed.cardId}/${parsed.versions ? 'versions' : 'card'}/${search ? 'search' : 'social'}/${currency || 'none'}/${listingId || 'card'}${normalizeSitePath(url.pathname)}`,

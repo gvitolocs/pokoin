@@ -11,9 +11,26 @@ import {
   OG_CACHE_VERSION,
   isLinkPreviewBot,
   isSearchEngineBot,
+  redirectLocation,
   siteOriginFromHost,
   utcSnapshotDate,
 } from './marketplace-card-og.js';
+
+/** Artist and catalog lookups must not stall the edge; one artist call took ~13s. */
+export const HUB_API_TIMEOUT_MS = 4000;
+
+async function fetchHubApi(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HUB_API_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const SLUG_TO_GAME = Object.fromEntries(
   Object.values(GAMES).filter((game) => game.slug).map((game) => [game.slug, game.id]),
@@ -50,29 +67,49 @@ function imageMetaHtml(image, alt) {
   return `\n  <meta property="og:image" content="${src}" />\n  <meta property="og:image:alt" content="${escapeHtml(alt)}" />\n  <meta name="twitter:card" content="summary_large_image" />\n  <meta name="twitter:image" content="${src}" />`;
 }
 
-/**
- * Crawler 301 for duplicate hub URLs that otherwise served the empty SPA shell
- * or a self-canonical copy: locale-less species/rarity/language/guide/artist
- * hubs, non-en locales (the sitemap only lists en), and locale-prefixed
- * sets/eras (canonical has no locale). Returns the canonical path or ''.
- */
-export function hubRedirectPath(pathname) {
+const EN_HUB_KINDS = new Set(['pokemon', 'rarities', 'languages', 'guides', 'artists']);
+
+function marketplaceParts(pathname) {
   let path = String(pathname || '').split(/[?#]/)[0];
   if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
   const parts = path.split('/').filter(Boolean);
   const prefix = parts[0] && SLUG_TO_GAME[parts[0]] ? `/${parts.shift()}` : '';
+  return { prefix, parts };
+}
+
+/**
+ * Language-less species/rarity/language/guide/artist hubs. Every client 301s;
+ * `_redirects` already intended this, but Workers Static Assets served the shell.
+ * Returns the canonical path or ''.
+ */
+export function languageLessHubRedirectPath(pathname) {
+  const { prefix, parts } = marketplaceParts(pathname);
   if (parts[0] !== 'marketplace' || parts.length < 2) return '';
   const rest = parts.slice(1);
-  const enKinds = new Set(['pokemon', 'rarities', 'languages', 'guides', 'artists']);
-  if (enKinds.has(rest[0]) && rest.length <= 2) {
-    return `${prefix}/marketplace/en/${rest.map((x) => x.toLowerCase()).join('/')}`;
+  if (EN_HUB_KINDS.has(rest[0]) && rest.length <= 2) {
+    return `${prefix}/marketplace/en/${rest.map((part) => part.toLowerCase()).join('/')}`;
   }
+  return '';
+}
+
+/**
+ * Crawler 301 for duplicate hub URLs that otherwise served the empty SPA shell
+ * or a self-canonical copy: locale-less hubs (also redirected for every client),
+ * non-en locales (the sitemap only lists en), and locale-prefixed sets/eras
+ * (canonical has no locale). Returns the canonical path or ''.
+ */
+export function hubRedirectPath(pathname) {
+  const bare = languageLessHubRedirectPath(pathname);
+  if (bare) return bare;
+  const { prefix, parts } = marketplaceParts(pathname);
+  if (parts[0] !== 'marketplace' || parts.length < 2) return '';
+  const rest = parts.slice(1);
   if (LANG_RE.test(rest[0]) && rest.length >= 2 && rest.length <= 3) {
     const kind = rest[1].toLowerCase();
     if (kind === 'sets' || kind === 'eras') {
       return `${prefix}/marketplace/${rest.slice(1).join('/')}`;
     }
-    if (enKinds.has(kind) && rest[0].toLowerCase() !== 'en') {
+    if (EN_HUB_KINDS.has(kind) && rest[0].toLowerCase() !== 'en') {
       return `${prefix}/marketplace/en/${rest.slice(1).join('/')}`;
     }
   }
@@ -217,9 +254,7 @@ async function fetchHubCards(parsed) {
     includeFacets: '0',
     productType: 'card',
   });
-  const response = await fetch(`${API_ORIGIN}/api/marketplace-search-page?${params}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
-  });
+  const response = await fetchHubApi(`${API_ORIGIN}/api/marketplace-search-page?${params}`);
   if (!response.ok) {
     const error = new Error(`hub-search ${response.status}`);
     error.status = response.status;
@@ -391,9 +426,7 @@ async function fetchCatalogExtras(parsed) {
   if (parsed.kind === 'artists' && parsed.slug) {
     const params = new URLSearchParams({ slug: parsed.slug, limit: '12' });
     if (parsed.game) params.set('game', parsed.game);
-    const response = await fetch(`${API_ORIGIN}/api/marketplace-artist-cards?${params}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
-    });
+    const response = await fetchHubApi(`${API_ORIGIN}/api/marketplace-artist-cards?${params}`);
     if (response.status === 404) return { name: '', links: [], notFound: true };
     if (!response.ok) throw new Error(`artist-cards ${response.status}`);
     const data = await response.json();
@@ -419,9 +452,7 @@ async function fetchCatalogExtras(parsed) {
   } else {
     params.set('limit', '24');
   }
-  const response = await fetch(`${API_ORIGIN}/api/marketplace-expansion-page?${params}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
-  });
+  const response = await fetchHubApi(`${API_ORIGIN}/api/marketplace-expansion-page?${params}`);
   if (parsed.slug && response.status === 404) return { name: '', links: [], notFound: true };
   if (!response.ok) throw new Error(`expansion-page ${response.status}`);
   const data = await response.json();
@@ -447,6 +478,7 @@ async function fetchCatalogExtras(parsed) {
 async function handleCatalogOg(request, env, ctx, parsed) {
   const url = new URL(request.url);
   const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
+  const searchBot = isSearchEngineBot(request.headers.get('user-agent'));
   const site = siteOriginFromHost(url.hostname);
   const cache = globalThis.caches?.default;
   const cacheKey = new Request(
@@ -465,18 +497,26 @@ async function handleCatalogOg(request, env, ctx, parsed) {
       /* miss */
     }
   }
-  if (parsed.kind === 'eras' && parsed.slug
+  if (searchBot && parsed.kind === 'eras' && parsed.slug
       && !TCG_ERA_ORDER.some((era) => eraId(era) === parsed.slug)) {
     return crawlerNotFound();
   }
   let extras = { name: '', links: [] };
+  let lookupFailed = false;
   try {
     extras = await fetchCatalogExtras(parsed);
   } catch (_) {
-    // Never cache or index a thin fallback for a real hub: Google retries a 503.
-    return crawlerUnavailable();
+    // A search crawler must not cache a thin page. ?og=1 on a browser keeps
+    // the previous 200 fallback; preview bots never reach this handler.
+    if (searchBot) return crawlerUnavailable();
+    lookupFailed = true;
+    extras = { name: '', links: [] };
   }
-  if (extras?.notFound) return crawlerNotFound();
+  if (extras?.notFound) {
+    if (searchBot) return crawlerNotFound();
+    lookupFailed = true;
+    extras = { name: '', links: [] };
+  }
   const seo = catalogSeo(parsed, { name: extras.name });
   const html = renderCatalogOgHtml(seo, extras.links, extras.image || '');
   const response = new Response(html, {
@@ -488,7 +528,7 @@ async function handleCatalogOg(request, env, ctx, parsed) {
       'x-robots-tag': seo.robots || 'index, follow',
     },
   });
-  if (cache?.put && ctx?.waitUntil) {
+  if (cache?.put && ctx?.waitUntil && !lookupFailed) {
     ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
   }
   return response;
@@ -504,17 +544,20 @@ export async function handleMarketplaceHubOgRequest(request, env, ctx) {
 
 async function handleHubOg(request, env, ctx) {
   const url = new URL(request.url);
-  const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
-  const userAgent = request.headers.get('user-agent');
-  if (!isLinkPreviewBot(userAgent, force)) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
     return null;
   }
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
+  const bareHub = languageLessHubRedirectPath(url.pathname);
+  if (bareHub) return crawlerRedirect(redirectLocation(url, bareHub));
+  const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
+  const userAgent = request.headers.get('user-agent');
+  // Search crawlers missing from the link-preview list (YandexBot) still enter.
+  if (!isLinkPreviewBot(userAgent, force) && !isSearchEngineBot(userAgent)) {
     return null;
   }
   if (isSearchEngineBot(userAgent) && !force) {
     const target = hubRedirectPath(url.pathname);
-    if (target) return crawlerRedirect(`${siteOriginFromHost(url.hostname)}${target}`);
+    if (target) return crawlerRedirect(`${siteOriginFromHost(url.hostname)}${target}${url.search}`);
   }
   const catalog = parseCatalogPath(url.pathname);
   if (catalog && (isSearchEngineBot(userAgent) || force)) {
@@ -525,6 +568,7 @@ async function handleHubOg(request, env, ctx) {
     return null;
   }
   const search = isSearchEngineBot(userAgent) || force;
+  const searchBot = isSearchEngineBot(userAgent);
   if (!search) {
     return null;
   }
@@ -543,14 +587,16 @@ async function handleHubOg(request, env, ctx) {
     }
   }
   let cards = [];
+  let lookupFailed = false;
   try {
     cards = await fetchHubCards(parsed);
   } catch (_) {
-    return crawlerUnavailable();
+    if (searchBot) return crawlerUnavailable();
+    lookupFailed = true;
+    cards = [];
   }
-  if (parsed.slug && (parsed.kind === 'pokemon' || parsed.kind === 'rarities') && !cards.length) {
-    return crawlerNotFound();
-  }
+  const unknownHub = Boolean(parsed.slug) && (parsed.kind === 'pokemon' || parsed.kind === 'rarities') && !cards.length;
+  if (searchBot && unknownHub) return crawlerNotFound();
   const html = renderHubOgHtml(parsed, cards);
   const response = new Response(html, {
     status: 200,
@@ -561,7 +607,7 @@ async function handleHubOg(request, env, ctx) {
       'x-robots-tag': 'index, follow, max-image-preview:large',
     },
   });
-  if (cache && ctx?.waitUntil) {
+  if (cache && ctx?.waitUntil && !lookupFailed && !unknownHub) {
     ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
   }
   return response;

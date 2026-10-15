@@ -508,3 +508,57 @@ test('crawler img does not declare dimensions the scan does not have', () => {
   const html = renderCardOgHtml({ title: 'Charizard', name: 'Charizard', cardId: '543028', path: '/marketplace/en/cards/543028/x', image: 'https://cdn.pokoin.com/271514_charizard.jpg' });
   assert.match(html, /<img src="https:\/\/cdn\.pokoin\.com\/271514_charizard\.jpg" alt="[^"]*" \/>/);
 });
+
+test('language-less card id/slug 301s every client and keeps the query string', async () => {
+  const hops = [
+    ['Mozilla/5.0 Chrome/141', 'https://pokoin.com/marketplace/cards/543028/card-charizard?listing=9', 'https://pokoin.com/marketplace/en/cards/543028/card-charizard?listing=9'],
+    ['Discordbot/2.0', 'https://www.pokoin.com/marketplace/cards/543028/card-charizard/', 'https://www.pokoin.com/marketplace/en/cards/543028/card-charizard'],
+    ['Twitterbot/1.0', 'https://pokoin.com/one-piece/marketplace/cards/598560/luffy?x=1', 'https://pokoin.com/one-piece/marketplace/en/cards/598560/luffy?x=1'],
+    ['Slackbot-LinkExpanding 1.0', 'https://pokoin.com/marketplace/cards/543028/card-charizard', 'https://pokoin.com/marketplace/en/cards/543028/card-charizard'],
+    ['facebookexternalhit/1.1', 'https://pokoin.com/marketplace/cards/543028/card-charizard', 'https://pokoin.com/marketplace/en/cards/543028/card-charizard'],
+    [GOOGLEBOT, 'https://pokoin.com/marketplace/cards/543028/card-charizard-054-adv-p-adv-promos', 'https://pokoin.com/marketplace/en/cards/543028/card-charizard-054-adv-p-adv-promos'],
+    ['Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)', 'https://pokoin.com/marketplace/cards/543028/card-charizard', 'https://pokoin.com/marketplace/en/cards/543028/card-charizard'],
+  ];
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    throw new Error('language-less redirect must not look up the card');
+  }, async () => {
+    for (const [ua, from, to] of hops) {
+      const response = await handleMarketplaceCardOgRequest(new Request(from, { headers: { 'user-agent': ua } }));
+      assert.equal(response?.status, 301, from);
+      assert.equal(response.headers.get('location'), to, from);
+    }
+    const posted = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/cards/543028/card-charizard',
+      { method: 'POST', headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(posted, null);
+    for (const path of ['/marketplace/cards/543028', '/marketplace/cards/543028/slug/versions']) {
+      for (const ua of ['Mozilla/5.0 Chrome/141', 'Discordbot/2.0', GOOGLEBOT, 'Mozilla/5.0 (compatible; YandexBot/3.0)']) {
+        const response = await handleMarketplaceCardOgRequest(new Request(`https://pokoin.com${path}`, { headers: { 'user-agent': ua } }));
+        assert.equal(response, null, `${ua} ${path}`);
+      }
+    }
+    assert.equal(calls, 0);
+  });
+});
+
+test('YandexBot is a search crawler: card lookup failure is 503, preview bots stay on the shell', async () => {
+  await withFetch(async () => new Response('nope', { status: 500 }), async () => {
+    const yandex = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746/slug',
+      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)' } },
+    ));
+    assert.equal(yandex.status, 503);
+    assert.equal(yandex.headers.get('retry-after'), '300');
+    assert.equal(yandex.headers.get('x-robots-tag'), 'noindex');
+    for (const ua of ['Discordbot/2.0', 'Twitterbot/1.0', 'Slackbot-LinkExpanding 1.0', 'facebookexternalhit/1.1', 'Mozilla/5.0 Chrome/141']) {
+      const response = await handleMarketplaceCardOgRequest(new Request(
+        'https://pokoin.com/marketplace/en/cards/815746/slug',
+        { headers: { 'user-agent': ua } },
+      ));
+      assert.equal(response, null, ua);
+    }
+  });
+});

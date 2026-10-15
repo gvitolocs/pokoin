@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import {
+  HUB_API_TIMEOUT_MS,
   catalogSeo,
   handleMarketplaceHubOgRequest,
   hubRedirectPath,
   hubSeo,
+  languageLessHubRedirectPath,
   parseCatalogPath,
   parseHubPath,
   renderCatalogOgHtml,
@@ -149,6 +152,201 @@ test('set and artist hubs publish the first card scan as og:image and JSON-LD im
   const hub = renderHubOgHtml({ language: 'en', kind: 'pokemon', slug: 'charizard' },
     [{ id: '239000', name: 'Charizard', heroImageUrl: 'https://cdn.pokoin.com/2_charizard.jpg' }]);
   assert.match(hub, /og:image" content="https:\/\/cdn\.pokoin\.com\/\d+_charizard\.jpg"/);
+});
+
+const PREVIEW_UAS = ['Discordbot/2.0', 'Twitterbot/1.0', 'Slackbot-LinkExpanding 1.0', 'facebookexternalhit/1.1'];
+const CHROME = 'Mozilla/5.0 Chrome/141';
+
+function request(path, ua, method = 'GET') {
+  return handleMarketplaceHubOgRequest(new Request(`https://pokoin.com${path}`, {
+    method,
+    headers: { 'user-agent': ua },
+  }));
+}
+
+test('language-less hubs 301 every client and leave other marketplace routes alone', async () => {
+  assert.equal(languageLessHubRedirectPath('/marketplace/pokemon/charizard'), '/marketplace/en/pokemon/charizard');
+  assert.equal(languageLessHubRedirectPath('/marketplace/it/artists/ken-sugimori'), '');
+  assert.equal(languageLessHubRedirectPath('/marketplace/en/sets/adv-promos'), '');
+  assert.equal(languageLessHubRedirectPath('/marketplace/sets/151'), '');
+  assert.equal(languageLessHubRedirectPath('/one-piece/marketplace/en/pokemon/luffy'), '');
+
+  const hops = [
+    ['/marketplace/pokemon/charizard?ref=1', '/marketplace/en/pokemon/charizard?ref=1'],
+    ['/marketplace/rarities/illustration-rare', '/marketplace/en/rarities/illustration-rare'],
+    ['/marketplace/languages/a', '/marketplace/en/languages/a'],
+    ['/marketplace/guides/a/', '/marketplace/en/guides/a'],
+    ['/marketplace/artists', '/marketplace/en/artists'],
+    ['/one-piece/marketplace/artists/oda?x=1', '/one-piece/marketplace/en/artists/oda?x=1'],
+  ];
+  for (const ua of [CHROME, ...PREVIEW_UAS, GOOGLEBOT, 'Mozilla/5.0 (compatible; YandexBot/3.0)']) {
+    for (const [path, dest] of hops) {
+      const response = await request(path, ua);
+      assert.equal(response?.status, 301, `${ua} ${path}`);
+      assert.equal(response.headers.get('location'), `https://pokoin.com${dest}`, `${ua} ${path}`);
+    }
+  }
+  const www = await handleMarketplaceHubOgRequest(new Request(
+    'https://www.pokoin.com/marketplace/pokemon/a?ref=1',
+    { headers: { 'user-agent': CHROME } },
+  ));
+  assert.equal(www.status, 301);
+  assert.equal(www.headers.get('location'), 'https://www.pokoin.com/marketplace/en/pokemon/a?ref=1');
+  const posted = await request('/marketplace/pokemon/a', GOOGLEBOT, 'POST');
+  assert.equal(posted, null);
+
+  for (const path of [
+    '/marketplace',
+    '/marketplace/sets/151',
+    '/marketplace/eras/xy',
+    '/marketplace/en/pokemon/charizard',
+    '/marketplace/en/cards/1/x',
+    '/marketplace/pokemon/a/extra',
+    '/one-piece/marketplace/sets/romance-dawn',
+    '/one-piece/marketplace/en/pokemon/luffy',
+    '/one-piece/marketplace/en/sets/romance-dawn',
+  ]) {
+    assert.equal(await request(path, CHROME), null, path);
+    for (const ua of PREVIEW_UAS) assert.equal(await request(path, ua), null, `${ua} ${path}`);
+  }
+
+  const prefixedSets = await bot('/marketplace/en/sets/adv-promos?ref=1');
+  assert.equal(prefixedSets.status, 301);
+  assert.equal(prefixedSets.headers.get('location'), 'https://pokoin.com/marketplace/sets/adv-promos?ref=1');
+  assert.equal(await request('/marketplace/en/sets/adv-promos?ref=1', CHROME), null);
+  assert.equal(await request('/marketplace/en/sets/adv-promos', 'Discordbot/2.0'), null);
+  assert.equal(await request('/marketplace/it/artists/ken-sugimori', 'Discordbot/2.0'), null);
+  const era = await bot('/marketplace/en/eras/xy');
+  assert.equal(era.status, 301);
+  assert.equal(era.headers.get('location'), 'https://pokoin.com/marketplace/eras/xy');
+  const home = await bot('/marketplace');
+  assert.equal(home.status, 200);
+  const xy = await bot('/marketplace/eras/xy');
+  assert.equal(xy.status, 200);
+  assert.equal(xy.headers.get('location'), null);
+});
+
+test('language-less hub paths run the worker ahead of the asset shell', () => {
+  const raw = fs.readFileSync(new URL('../wrangler.pokoin-web.jsonc', import.meta.url), 'utf8');
+  const rules = JSON.parse(raw.replace(/\/\/.*$/mg, '')).assets.run_worker_first;
+  for (const rule of [
+    '/marketplace/pokemon', '/marketplace/pokemon/*',
+    '/marketplace/rarities', '/marketplace/rarities/*',
+    '/marketplace/languages', '/marketplace/languages/*',
+    '/marketplace/guides', '/marketplace/guides/*',
+    '/marketplace/artists', '/marketplace/artists/*',
+    '/marketplace/cards/*',
+    '/marketplace', '/marketplace/sets', '/marketplace/sets/*',
+    '/marketplace/eras', '/marketplace/eras/*',
+    '/marketplace/*/cards', '/marketplace/*/cards/*',
+    '/*/marketplace/*/cards', '/*/marketplace/*/cards/*',
+  ]) {
+    assert.ok(rules.includes(rule), rule);
+  }
+});
+
+test('preview bots and ?og=1 browsers do not take hub 503/404; search crawlers do', async () => {
+  const puts = [];
+  const previous = globalThis.caches;
+  globalThis.caches = {
+    default: {
+      async match() { return null; },
+      async put(_key, response) { puts.push(response.status); },
+    },
+  };
+  const ctx = { async waitUntil(work) { await work; } };
+  try {
+    await withFetch(async () => new Response('nope', { status: 500 }), async () => {
+      for (const ua of [GOOGLEBOT, 'bingbot/2.0', 'DuckDuckBot/1.0', 'Mozilla/5.0 (compatible; YandexBot/3.0)', 'Applebot/0.1']) {
+        const response = await handleMarketplaceHubOgRequest(new Request(
+          'https://pokoin.com/marketplace/sets/151',
+          { headers: { 'user-agent': ua } },
+        ), {}, ctx);
+        assert.equal(response.status, 503, ua);
+        assert.equal(response.headers.get('retry-after'), '300', ua);
+        assert.equal(response.headers.get('cache-control'), 'no-store', ua);
+      }
+      for (const ua of PREVIEW_UAS) {
+        assert.equal(await request('/marketplace/sets/151', ua), null, ua);
+        assert.equal(await request('/marketplace/en/pokemon/charizard', ua), null, ua);
+      }
+      const preview = await handleMarketplaceHubOgRequest(new Request(
+        'https://pokoin.com/marketplace/sets/151?og=1',
+        { headers: { 'user-agent': CHROME } },
+      ), {}, ctx);
+      assert.equal(preview.status, 200);
+      assert.equal(preview.headers.get('retry-after'), null);
+      const forcedDiscord = await handleMarketplaceHubOgRequest(new Request(
+        'https://pokoin.com/marketplace/en/artists/zzz?bot=1',
+        { headers: { 'user-agent': 'Discordbot/2.0' } },
+      ), {}, ctx);
+      assert.equal(forcedDiscord.status, 200);
+    });
+    await withFetch(async () => new Response('{"error":"Expansion not found."}', { status: 404 }), async () => {
+      const browser = await handleMarketplaceHubOgRequest(new Request(
+        'https://pokoin.com/marketplace/sets/zzz?og=1',
+        { headers: { 'user-agent': CHROME } },
+      ), {}, ctx);
+      assert.equal(browser.status, 200);
+      const crawler = await bot('/marketplace/sets/zzz');
+      assert.equal(crawler.status, 404);
+      assert.equal(crawler.headers.get('x-robots-tag'), 'noindex');
+      assert.equal(await request('/marketplace/sets/zzz', 'Discordbot/2.0'), null);
+    });
+    assert.deepEqual(puts, []);
+  } finally {
+    globalThis.caches = previous;
+  }
+});
+
+test('hub API abort and a hung artist lookup are crawler 503s', async () => {
+  assert.equal(HUB_API_TIMEOUT_MS, 4000);
+  await withFetch(async () => {
+    const error = new Error('The operation was aborted');
+    error.name = 'AbortError';
+    throw error;
+  }, async () => {
+    for (const path of ['/marketplace/en/artists/ken-sugimori', '/marketplace/sets/151', '/marketplace/en/pokemon/charizard']) {
+      const response = await bot(path);
+      assert.equal(response.status, 503, path);
+      assert.equal(response.headers.get('retry-after'), '300', path);
+      assert.equal(response.headers.get('x-robots-tag'), 'noindex', path);
+      assert.equal(response.headers.get('cache-control'), 'no-store', path);
+    }
+    assert.equal(await request('/marketplace/en/artists/ken-sugimori', 'Discordbot/2.0'), null);
+    assert.equal(await request('/marketplace/sets/151', CHROME), null);
+  });
+
+  const previous = globalThis.caches;
+  const puts = [];
+  globalThis.caches = {
+    default: {
+      async match() { return null; },
+      async put(_key, response) { puts.push(response.status); },
+    },
+  };
+  try {
+    await withFetch((_url, init) => new Promise((resolve, reject) => {
+      const fail = () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      const signal = init?.signal;
+      if (!signal) return;
+      if (signal.aborted) fail();
+      else signal.addEventListener('abort', fail, { once: true });
+    }), async () => {
+      assert.equal(await request('/marketplace/en/artists/ken-sugimori', CHROME), null);
+      const response = await bot('/marketplace/en/artists/ken-sugimori');
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('retry-after'), '300');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.deepEqual(puts, []);
+    });
+  } finally {
+    globalThis.caches = previous;
+  }
 });
 
 test('hub HTML carries CollectionPage JSON-LD and Pokoin attribution', () => {
