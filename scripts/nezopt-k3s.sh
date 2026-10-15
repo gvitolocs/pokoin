@@ -219,6 +219,8 @@ build_release() {
   fi
   git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$src" fetch -q origin
   git -C "$src" checkout -q --detach --force "$commit"
+  # The pods keep the current release when this refuses; a full / evicts them.
+  bash "$(dirname "${BASH_SOURCE[0]}")/require-free-space.sh" "${POKOIN_K3S_MIN_FREE_GB:-30}" "$BASE"
   say "cargo build pokoin-api ${commit:0:12} (x86_64)"
   ( # shellcheck disable=SC1091
     source "$HOME/.cargo/env"
