@@ -301,20 +301,41 @@ pub fn game_selected_outside_url(uri: &Uri, headers: &HeaderMap) -> bool {
 
 // ---- route limits ----------------------------------------------------------------
 
+/// Which limiter class counts a route.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LimitClass {
+    /// `limit_global`: Postgres writer first, fail-closed. Signup/abuse-critical routes.
+    Global,
+    /// `limit_best_effort`: origin Redis (local fallback), fail-open, no writer
+    /// round trip. Expensive proxies whose cost is the upstream, not the count.
+    BestEffort,
+}
+
 struct RouteLimit {
     method: Method,
     path: &'static str,
     scope: &'static str,
     limit: i64,
     window_seconds: i64,
+    class: LimitClass,
 }
 
-fn route_limits() -> [RouteLimit; 3] {
+fn route_limits() -> [RouteLimit; 7] {
+    use LimitClass::{BestEffort, Global};
     [
-        RouteLimit { method: Method::POST, path: "/api/register-email", scope: "register-email-ip", limit: 10, window_seconds: 3600 },
-        RouteLimit { method: Method::POST, path: "/api/verify-email-signup", scope: "verify-signup-ip", limit: 30, window_seconds: 3600 },
-        RouteLimit { method: Method::POST, path: "/api/pokoin-assistant", scope: "pokoin-assistant-ip", limit: 20, window_seconds: 60 },
+        RouteLimit { method: Method::POST, path: "/api/register-email", scope: "register-email-ip", limit: 10, window_seconds: 3600, class: Global },
+        RouteLimit { method: Method::POST, path: "/api/verify-email-signup", scope: "verify-signup-ip", limit: 30, window_seconds: 3600, class: Global },
+        RouteLimit { method: Method::POST, path: "/api/pokoin-assistant", scope: "pokoin-assistant-ip", limit: 20, window_seconds: 60, class: Global },
+        // Recognition proxies: each call is GPU/CPU work on a scan worker.
+        RouteLimit { method: Method::POST, path: "/api/scan/identify", scope: "scan-identify-ip", limit: 120, window_seconds: 60, class: BestEffort },
+        RouteLimit { method: Method::POST, path: "/api/scan/identify-album", scope: "scan-identify-album-ip", limit: 30, window_seconds: 60, class: BestEffort },
+        RouteLimit { method: Method::GET, path: "/api/scan/print", scope: "scan-print-ip", limit: 240, window_seconds: 60, class: BestEffort },
+        RouteLimit { method: Method::GET, path: "/api/scan/catalogs", scope: "scan-catalogs-ip", limit: 60, window_seconds: 60, class: BestEffort },
     ]
+}
+
+fn route_limit(method: &Method, pathname: &str) -> Option<RouteLimit> {
+    route_limits().into_iter().find(|e| e.method == *method && e.path == pathname)
 }
 
 /// The request-security middleware (`prepareRequest` + `enforceRouteLimits` + the
@@ -335,8 +356,12 @@ pub async fn security_layer(api: ApiState, mut req: Request, next: Next) -> Resp
     if pathname.len() > 1 && pathname.ends_with('/') {
         pathname.pop();
     }
-    if let Some(entry) = route_limits().into_iter().find(|e| e.method == *req.method() && e.path == pathname) {
-        let verdict = limits::limit_global(&api, entry.scope, &ip, entry.limit, entry.window_seconds).await;
+    if let Some(entry) = route_limit(req.method(), &pathname) {
+        let identity = limits::ip_rate_identity(&ip);
+        let verdict = match entry.class {
+            LimitClass::Global => limits::limit_global(&api, entry.scope, &identity, entry.limit, entry.window_seconds).await,
+            LimitClass::BestEffort => limits::limit_best_effort(&api, entry.scope, &identity, entry.limit, entry.window_seconds).await,
+        };
         if !verdict.allowed || verdict.backend == "error" {
             let retry = if verdict.retry_after_sec > 0 { verdict.retry_after_sec } else { entry.window_seconds as u64 };
             let mut response = Response::new(Body::from(json!({"error": "Too many requests. Try again later.", "code": "rate_limited"}).to_string()));
@@ -392,6 +417,24 @@ mod tests {
         merge_cors(&mut resp, &h(&[("origin", "https://pokoin.com")]));
         assert_eq!(resp["access-control-allow-origin"], "https://pokoin.com");
         assert_eq!(resp["vary"], "Origin, Accept-Encoding");
+    }
+
+    #[test]
+    fn scan_proxies_are_route_limited_without_the_writer() {
+        for (method, path) in [
+            (Method::POST, "/api/scan/identify"),
+            (Method::POST, "/api/scan/identify-album"),
+            (Method::GET, "/api/scan/print"),
+            (Method::GET, "/api/scan/catalogs"),
+        ] {
+            let entry = route_limit(&method, path).unwrap_or_else(|| panic!("{path} has a route limit"));
+            assert_eq!(entry.class, LimitClass::BestEffort, "{path}");
+            assert!(entry.limit > 0 && entry.window_seconds > 0);
+        }
+        // Signup stays on the fail-closed global store; health stays unlimited.
+        assert_eq!(route_limit(&Method::POST, "/api/register-email").unwrap().class, LimitClass::Global);
+        assert!(route_limit(&Method::GET, "/api/scan/health").is_none());
+        assert!(route_limit(&Method::GET, "/api/scan/identify").is_none());
     }
 
     #[test]

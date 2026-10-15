@@ -1045,6 +1045,83 @@ async fn forum_upload_media_needs_a_topic_or_post() {
     );
 }
 
+fn png_base64(width: u32, height: u32) -> String {
+    use base64::Engine;
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(image::RgbaImage::new(width, height))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    base64::engine::general_purpose::STANDARD.encode(png)
+}
+
+#[tokio::test]
+async fn forum_upload_media_rejects_oversized_dimensions_before_storage() {
+    let transport = ScriptedTransport::new();
+    let app = router(test_state(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/forum-upload-media",
+        Some(&token),
+        Some(serde_json::json!({
+            "topicId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "imageBase64": format!("data:image/png;base64,{}", png_base64(8001, 1)),
+        })),
+    )
+    .await;
+    // The test state has no R2 media store: 413 proves the header check ran first.
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["code"], "image_too_large");
+}
+
+/// Allows the first `allow` checks, then denies; records the scopes seen.
+struct CountingLimiter {
+    allow: usize,
+    seen: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait::async_trait]
+impl pokoin_accounts::rate_limit::RateLimiter for CountingLimiter {
+    async fn check(
+        &self,
+        request: pokoin_accounts::rate_limit::RateLimitRequest<'_>,
+    ) -> pokoin_accounts::rate_limit::RateLimitVerdict {
+        let mut seen = self.seen.lock().unwrap();
+        seen.push((request.scope.to_string(), request.identity.to_string()));
+        if seen.len() <= self.allow {
+            pokoin_accounts::rate_limit::RateLimitVerdict::allowed()
+        } else {
+            pokoin_accounts::rate_limit::RateLimitVerdict::denied(600)
+        }
+    }
+}
+
+#[tokio::test]
+async fn forum_upload_media_is_rate_limited_per_uid() {
+    let transport = ScriptedTransport::new();
+    let limiter = Arc::new(CountingLimiter { allow: 2, seen: Default::default() });
+    let app = router(test_state(&transport).with_limiter(limiter.clone()));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let upload = serde_json::json!({
+        "topicId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+        "imageBase64": png_base64(2, 2),
+    });
+    for _ in 0..2 {
+        let (status, _, _) =
+            call(&app, "POST", "/api/forum-upload-media", Some(&token), Some(upload.clone())).await;
+        assert_ne!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+    let (status, body, _) =
+        call(&app, "POST", "/api/forum-upload-media", Some(&token), Some(upload)).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["retryAfterSec"], 600);
+    let seen = limiter.seen.lock().unwrap().clone();
+    assert!(seen.iter().all(|(scope, uid)| scope == "forum-media" && uid == "user-1"));
+}
+
 #[tokio::test]
 async fn the_wrong_method_is_rejected_with_an_allow_header() {
     // axum answers 405 for a method a route does not declare.
@@ -2235,6 +2312,28 @@ async fn marketplace_associate_refuses_a_non_associate_with_the_404_body_shape()
         body,
         serde_json::json!({ "error": "Marketplace database is not configured." })
     );
+}
+
+#[tokio::test]
+async fn marketplace_associate_ignores_an_unverified_email() {
+    let transport = ScriptedTransport::new();
+    // The roster pool points at a closed port: reaching it is a 500, so a 403
+    // proves the unverified email never matched (or even queried) a roster row.
+    let app = router(test_state_with_db(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let mut claims = id_token_claims("user-1", "associate@pokoin.com", now);
+    claims["email_verified"] = serde_json::json!(false);
+    claims["firebase"]["sign_in_provider"] = serde_json::json!("google.com");
+    let token = sign_id_token(claims.clone());
+    let (status, body, _) = call(&app, "GET", "/api/marketplace-associate", Some(&token), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body={body}");
+    assert_eq!(body, serde_json::json!({ "error": "Not a Pokoin associate.", "associate": null }));
+
+    // The same address, verified, does reach the roster lookup.
+    claims["email_verified"] = serde_json::json!(true);
+    let token = sign_id_token(claims);
+    let (status, body, _) = call(&app, "GET", "/api/marketplace-associate", Some(&token), None).await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "body={body}");
 }
 
 #[tokio::test]

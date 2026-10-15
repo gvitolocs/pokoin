@@ -512,7 +512,10 @@ pub async fn claim_pairing(
         String::new()
     };
 
-    let ip_bucket = format!("pairfail:ip:{ip}");
+    // Per-IP pairing buckets key on the /64 for IPv6: a PIN guesser must not
+    // get a fresh budget per address.
+    let ip_key = pokoin_api_common::limits::ip_rate_identity(ip);
+    let ip_bucket = format!("pairfail:ip:{ip_key}");
     let global_bucket = "pairfail:global".to_string();
     if limit_hits(&mut tx, &global_bucket, rules::LIMIT_PAIR_FAIL_GLOBAL, now_ms).await?
         >= rules::LIMIT_PAIR_FAIL_GLOBAL.max
@@ -524,7 +527,7 @@ pub async fn claim_pairing(
     {
         return Err(too_many(rules::LIMIT_PAIR_FAIL_PER_IP, now_ms));
     }
-    let tries = limit_increment(&mut tx, &format!("pairtry:ip:{ip}"), rules::LIMIT_PAIR_TRY_PER_IP, now_ms).await?;
+    let tries = limit_increment(&mut tx, &format!("pairtry:ip:{ip_key}"), rules::LIMIT_PAIR_TRY_PER_IP, now_ms).await?;
     if tries > rules::LIMIT_PAIR_TRY_PER_IP.max {
         return Err(too_many(rules::LIMIT_PAIR_TRY_PER_IP, now_ms));
     }
