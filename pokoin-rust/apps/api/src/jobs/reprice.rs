@@ -130,13 +130,14 @@ pub(super) async fn run(options: &Options) -> Result<()> {
         .db
         .query(
             "pokemon",
-            "select card_id::text as card_id, ct_id::bigint as ct_id from public.marketplace_search_candidates where card_id = any($1::bigint[]) and ct_id is not null",
+            "select card_id::text as card_id, ct_id::text as ct_id from public.marketplace_search_candidates where card_id = any($1::bigint[]) and ct_id is not null",
             &[json!(card_ids)],
         )
         .await?;
     let ct_by_card: HashMap<String, i64> = mapping
         .iter()
-        .filter_map(|row| Some((row["card_id"].as_str()?.to_string(), row["ct_id"].as_i64()?)))
+        // int8 cells arrive as strings from the shared row decoder.
+        .filter_map(|row| Some((row["card_id"].as_str()?.to_string(), row["ct_id"].as_str()?.trim().parse::<i64>().ok()?)))
         .collect();
     let mut ct_ids: Vec<i64> = ct_by_card.values().copied().collect();
     ct_ids.sort_unstable();
