@@ -18,8 +18,25 @@ use crate::error::{ApiError, ApiResult};
 pub struct DecodedToken {
     pub uid: String,
     pub email: Option<String>,
+    /// `email_verified`, or the `pok_email_verified` custom claim that
+    /// verify-email-signup sets after the code check.
+    pub email_verified: bool,
     pub name: Option<String>,
     pub picture: Option<String>,
+}
+
+impl DecodedToken {
+    /// The lowercased email only when the token proves the user owns it. Any
+    /// check that grants access by email must use this, never `email`.
+    pub fn verified_email(&self) -> Option<String> {
+        if !self.email_verified {
+            return None;
+        }
+        self.email
+            .as_deref()
+            .map(|email| email.trim().to_ascii_lowercase())
+            .filter(|email| !email.is_empty())
+    }
 }
 
 pub const JWKS_URL: &str =
@@ -34,6 +51,25 @@ pub struct FirebaseJwksVerifier {
     project_id: String,
     http: reqwest::Client,
     keys: RwLock<HashMap<String, Value>>,
+    /// Last refetch an unknown `kid` triggered: random kids must not turn every
+    /// request into a Google round trip.
+    last_unknown_kid_fetch: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+/// At most one unknown-`kid` JWKS refetch per this interval.
+pub const UNKNOWN_KID_REFETCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// True (and the stamp moved to now) when an unknown-`kid` refetch may run.
+fn take_refetch_slot(last: &std::sync::Mutex<Option<std::time::Instant>>) -> bool {
+    let mut last = last.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = std::time::Instant::now();
+    match *last {
+        Some(at) if now.duration_since(at) < UNKNOWN_KID_REFETCH_INTERVAL => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
+    }
 }
 
 impl FirebaseJwksVerifier {
@@ -45,6 +81,7 @@ impl FirebaseJwksVerifier {
                 .build()
                 .expect("reqwest client"),
             keys: RwLock::new(HashMap::new()),
+            last_unknown_kid_fetch: std::sync::Mutex::new(None),
         }
     }
 
@@ -74,8 +111,12 @@ impl FirebaseJwksVerifier {
         let kid = header.kid.ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
         {
             let keys = self.keys.read().await;
-            if !keys.contains_key(&kid) {
-                drop(keys);
+            // An empty map is the first load; an unknown kid refetches at most
+            // once per UNKNOWN_KID_REFETCH_INTERVAL (Google rotates keys daily).
+            let refetch = keys.is_empty()
+                || (!keys.contains_key(&kid) && take_refetch_slot(&self.last_unknown_kid_fetch));
+            drop(keys);
+            if refetch {
                 let fresh = self.load_keys().await?;
                 *self.keys.write().await = fresh;
             }
@@ -100,7 +141,14 @@ impl FirebaseJwksVerifier {
             .ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?
             .to_string();
         let pick = |key: &str| claims.get(key).and_then(Value::as_str).map(str::to_string);
-        Ok(DecodedToken { uid, email: pick("email"), name: pick("name"), picture: pick("picture") })
+        let flag = |key: &str| claims.get(key).and_then(Value::as_bool) == Some(true);
+        Ok(DecodedToken {
+            uid,
+            email: pick("email"),
+            email_verified: flag("email_verified") || flag("pok_email_verified"),
+            name: pick("name"),
+            picture: pick("picture"),
+        })
     }
 }
 
@@ -126,26 +174,36 @@ impl TokenVerifier for FirebaseJwksVerifier {
     }
 }
 
-/// Test verifier: any "Bearer test-<uid>" (or configured map) decodes.
+/// Test verifier: any "Bearer test-<uid>" decodes. `uid_email` emails are
+/// verified, `unverified_uid_email` ones are not. Compiled only for tests and
+/// the `test-util` feature, so no production build can accept a forged token.
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Clone, Default)]
 pub struct StaticVerifier {
     pub uid_email: Arc<HashMap<String, String>>,
+    pub unverified_uid_email: Arc<HashMap<String, String>>,
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl TokenVerifier for StaticVerifier {
     fn verify<'a>(&'a self, authorization: Option<&'a str>) -> futures_util::future::BoxFuture<'a, ApiResult<DecodedToken>> {
         let header = authorization.unwrap_or_default().to_string();
         let map = self.uid_email.clone();
+        let unverified = self.unverified_uid_email.clone();
         Box::pin(async move {
             let token = header.strip_prefix("Bearer ").unwrap_or_default().trim().to_string();
             if token.is_empty() {
                 return Err(ApiError::new(401, "Missing Pokoin bearer token.").with_code("auth/missing-token"));
             }
             let uid = token.strip_prefix("test-").unwrap_or(&token).to_string();
-            let email = map.get(&uid).cloned();
+            let (email, email_verified) = match map.get(&uid) {
+                Some(email) => (Some(email.clone()), true),
+                None => (unverified.get(&uid).cloned(), false),
+            };
             Ok(DecodedToken {
                 uid,
                 email,
+                email_verified,
                 name: None,
                 picture: None,
             })
@@ -723,5 +781,47 @@ mod tests {
         assert_eq!(decoded.uid, "user1");
         let err = runtime.block_on(verifier.verify(None)).unwrap_err();
         assert_eq!(err.status, 401);
+    }
+
+    #[test]
+    fn verified_email_requires_the_verified_claim() {
+        let mut token = DecodedToken {
+            uid: "u".into(),
+            email: Some(" Admin@Example.com ".into()),
+            email_verified: false,
+            name: None,
+            picture: None,
+        };
+        assert_eq!(token.verified_email(), None);
+        token.email_verified = true;
+        assert_eq!(token.verified_email().as_deref(), Some("admin@example.com"));
+        token.email = Some("  ".into());
+        assert_eq!(token.verified_email(), None);
+    }
+
+    #[test]
+    fn unknown_kid_refetch_is_throttled() {
+        let last = std::sync::Mutex::new(None);
+        assert!(take_refetch_slot(&last), "the first unknown kid refetches");
+        assert!(!take_refetch_slot(&last), "a second one inside the interval does not");
+        *last.lock().unwrap() = Some(std::time::Instant::now() - UNKNOWN_KID_REFETCH_INTERVAL);
+        assert!(take_refetch_slot(&last), "after the interval it may refetch again");
+    }
+
+    #[tokio::test]
+    async fn unknown_kid_tokens_do_not_hammer_google() {
+        // A verifier with keys loaded, then a burst of tokens with random kids:
+        // only the first may refetch, the rest fail on the cached map.
+        let verifier = FirebaseJwksVerifier::new("proj".into());
+        verifier.keys.write().await.insert("known".into(), json!({"kid": "known"}));
+        *verifier.last_unknown_kid_fetch.lock().unwrap() = Some(std::time::Instant::now());
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"random-kid","typ":"JWT"}"#);
+        let token = format!("{header}.e30.c2ln");
+        for _ in 0..20 {
+            let error = verifier.decode(&token).await.unwrap_err();
+            assert_eq!(error.status, 401);
+        }
+        // No refetch happened: the cached map is untouched.
+        assert_eq!(verifier.keys.read().await.len(), 1);
     }
 }

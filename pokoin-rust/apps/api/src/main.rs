@@ -479,7 +479,7 @@ async fn build_full_router(state: AppState) -> Router {
                     };
                     *state.commerce.write().await = Some(commerce_state.clone());
                     let commerce = pokoin_commerce::router(commerce_state);
-                    let external = match build_external_router(&read_db, &write_db) {
+                    let external = match build_external_router(&read_db, &write_db, api_state.as_ref().ok().cloned()) {
                         Ok(router) => router,
                         Err(error) => {
                             tracing::error!(domain = "external", %error, "domain disabled");
@@ -586,7 +586,11 @@ fn lazy_pool(url: &str, max: u32) -> anyhow::Result<PgPool> {
         .map_err(Into::into)
 }
 
-fn build_external_router(read_db: &PgPool, write_db: &PgPool) -> anyhow::Result<Router> {
+fn build_external_router(
+    read_db: &PgPool,
+    write_db: &PgPool,
+    api: Option<pokoin_api_common::ApiState>,
+) -> anyhow::Result<Router> {
     use pokoin_external::firebase::{
         FirebaseJwksVerifier, FirestoreRest, FirestoreStore, TokenVerifier,
     };
@@ -597,12 +601,16 @@ fn build_external_router(read_db: &PgPool, write_db: &PgPool) -> anyhow::Result<
     let firestore = FirestoreRest::from_env()
         .ok_or_else(|| anyhow::anyhow!("Firebase Admin credentials are not configured"))?;
     let db = pokoin_external::db::DbPools::lazy(read_db.clone(), write_db.clone());
-    let state = pokoin_external::DomainState::new(
+    let mut state = pokoin_external::DomainState::new(
         Arc::new(firestore) as Arc<dyn FirestoreStore>,
         Arc::new(FirebaseJwksVerifier::new(project_id)) as Arc<dyn TokenVerifier>,
         db,
         None,
     );
+    // Route limits (live CardTrader listings) count in the origin Redis.
+    if let Some(api) = api {
+        state = state.with_api_state(api);
+    }
     Ok(pokoin_external::router(state))
 }
 
