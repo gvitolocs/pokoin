@@ -37,6 +37,14 @@ artwork_result=0
 dump_result=0
 wait "$dump_pid" || dump_result=$?
 (( dump_result == 0 )) || result=1
+# Price the books this run actually stored. A dump that stopped at its deadline
+# still has a price cache: only fetched expansions are in scope.
+prices_result=0
+PRICE_BIN="${POKOIN_CT_PRICE_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-price-cache}"
+if [[ -x "$PRICE_BIN" ]]; then
+  "$PRICE_BIN" || prices_result=$?
+fi
+(( prices_result == 0 )) || result=1
 # Delivery is best effort; the notifier queues failures for later retry.
 python3 scripts/cardtrader-daily-notify.py \
   --run-root "$POKOIN_CATALOG_RUN_ROOT" --started-at "$run_started_at" \
@@ -44,5 +52,6 @@ python3 scripts/cardtrader-daily-notify.py \
   --stage-result "catalog=$catalog_result" --stage-result "pictures=$pictures_result" \
   --stage-result "picture-sync=$picture_sync_result" --stage-result "artwork=$artwork_result" \
   --stage-result "dump=$dump_result" \
+  --stage-result "prices=$prices_result" \
   || echo "CardTrader notification pending; import result is unchanged." >&2
 exit "$result"

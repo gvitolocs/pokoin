@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import { fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '@market/api.js';
+import { cardHref, fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '@market/api.js';
 import { bundleOf, tagKey } from '@market/chat-listing.js';
 import { fetchSpeciesCards } from '@market/species-cards.js';
 import { endTrayDrag, startTrayDrag } from '@market/tray-drag.js';
@@ -107,7 +107,10 @@ export default function ChatBundle(props) {
             {(card) => {
               const id = cardId(card);
               const src = cardImage(card);
-              const href = card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : props.row?.path || '/marketplace');
+              const href = cardHref({
+                ...card,
+                canonicalPath: card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : props.row?.path || ''),
+              });
               return (
                 <a
                   href={href}

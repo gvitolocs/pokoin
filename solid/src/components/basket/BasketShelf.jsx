@@ -13,6 +13,7 @@ import {
   toggleWatchlist,
 } from '@market/api.js';
 import { listingStub, offerStub, tileStub } from '@market/basket-format.js';
+import { game, publicGamePath } from '@market/game.js';
 import { cartImageFor } from '@market/cart-image.js';
 import { carouselPage } from '@market/cart-model.js';
 import { pickCartOffer } from '@market/cart-offer.js';
@@ -228,12 +229,12 @@ export function ListingCard(props) {
   const done = () => Boolean(props.inCart) || added();
   return (
     <div class="bk-pcard">
-      <a class="bk-pcard-pic" href={stub().canonicalPath}>
+      <a class="bk-pcard-pic" href={cardHref(stub())}>
         <Show when={image()} fallback={<span class="bk-pic-ph" />}>
           <CardArt src={homepageDerivativeUrl(image()) || image()} alt={stub().name} loading="lazy" />
         </Show>
       </a>
-      <a class="bk-pcard-title" href={stub().canonicalPath}>{stub().name}</a>
+      <a class="bk-pcard-title" href={cardHref(stub())}>{stub().name}</a>
       <span class="bk-pcard-id">
         {printingIdentity({ id: stub().id, set: offer().setName, number: offer().collectorNumber, imageUrl: image() }).tileLine}
       </span>
@@ -421,7 +422,7 @@ export function ThumbShelf(props) {
 function SavedCard(props) {
   const row = () => props.row;
   const [watching, setWatching] = createSignal(untrack(() => readWatchlistIds().includes(String(props.row.cardId))));
-  const href = () => row().href || '/marketplace';
+  const href = () => publicGamePath(row().href || '/marketplace', game().id) || row().href || '/marketplace';
   const language = () => listingLanguageFlag(row().language);
   const seller = () => publicShopSellerLabel(row()) || row().sellerName || 'Pokoin';
   const watchable = () => /^\d+$/.test(String(row().cardId || ''));

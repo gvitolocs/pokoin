@@ -12,6 +12,7 @@ import {
   shareCartRow,
 } from '@market/basket-format.js';
 import { brandSrc } from '@market/brand-assets.js';
+import { game, publicGamePath } from '@market/game.js';
 import { isSelected, priceDrop } from '@market/cart-model.js';
 import { listingStock } from '@market/cart-qty.js';
 import { looseCardReference, writeListingDrag } from '@market/chat-listing.js';
@@ -163,7 +164,7 @@ export function BasketRow(props) {
   const selected = () => isSelected(row()) && !gone();
   const qty = () => Math.max(1, Math.trunc(Number(row().qty) || 1));
   const drop = () => priceDrop(row());
-  const href = () => row().href || '/marketplace';
+  const href = () => publicGamePath(row().href || '/marketplace', game().id) || row().href || '/marketplace';
   const seller = () => basketSellerOf(row());
   const sellerLink = () => sellerHref(row());
   const countryName = () => sellerCountryLabel(row().sellerCountry);

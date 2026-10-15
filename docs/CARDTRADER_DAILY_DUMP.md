@@ -10,6 +10,7 @@ into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 | Where | What |
 |---|---|
 | nezopt | `pokoin-cardtrader-listing-dump` (`pokoin-rust/apps/cardtrader-listing-dump`): order, resume, deadline, status, storage |
+| nezopt | `pokoin-cardtrader-price-cache` (`pokoin-rust/apps/cardtrader-price-cache`): those books → each game's price cache |
 | Oracle `pokoin-marketplace` | `pokoin-cardtrader-bridge` (`pokoin-rust/apps/cardtrader-bridge`): CardTrader GETs; the token never leaves Oracle |
 | both | `ctbook` (`pokoin-rust/crates/ctbook`): the `.ctb` book format and a CLI |
 
@@ -68,6 +69,33 @@ Converting stored `.json.gz` books: `ctbook convert --delete --jobs 4 <folder>/*
 writes each `.ctb` with that folder's `sellers.jsonl`, reads it back from disk,
 compares it byte for byte with the original, and only then deletes the
 `.json.gz`; a mismatch keeps the original.
+
+## Prices
+
+After the dump, `run-all-cardtrader-daily.sh` runs `pokoin-cardtrader-price-cache`
+when that binary is installed (`POKOIN_CT_PRICE_BIN` overrides the path). It
+runs even if the dump stopped at its deadline: scope is only the expansions
+whose book decoded, minus `listing-dump-status.json` `errors`.
+
+For each game it creates `public.cardtrader_blueprint_listing_cache` and
+`public.cheapest_homepage_cache_blueprint` if they are missing (a no-op on
+Pokémon, where they already exist), then upserts one winner per in-scope
+blueprint and deletes stale `cardtrader` / `pokoin_native` rows in that scope.
+Rows outside the scope are left alone. A book that does not decode is skipped
+and counted.
+
+A CardTrader offer is eligible when the seller is Zero (`can_sell_via_hub` or
+`can_sell_sealed_with_ct_zero`) or the name matches 1-day ready, quantity is a
+positive integer, and the price is a positive EUR amount. PKN is
+`eur / PKN_CHECKOUT_USDT_PRICE + 200` (the rate defaults to 0.005, so €1 is
+400 PKN). The cheapest PKN wins; a Pokoin native listing wins a tie, then the
+listing id. Counts are the winning provider's rows. Native listings are the
+active shippable rows in `pokoin_marketplace.marketplace_user_listings` for
+that game slug.
+
+`--dry-run` computes the same winners and only reads the databases.
+`--game <slug>` limits the run (`pokemon` for CardTrader game 5). The run
+writes `<root>/price-cache-status.json`.
 
 ## Deploy
 

@@ -19,10 +19,10 @@ git -C "$REPO" diff --quiet HEAD -- || die "tracked changes must be committed be
 
 TARGET="${CARGO_TARGET_DIR:-$REPO/pokoin-rust/target}"
 ( cd "$REPO/pokoin-rust" && cargo build --release --locked \
-    -p cardtrader-listing-dump -p cardtrader-bridge -p ctbook )
+    -p cardtrader-listing-dump -p cardtrader-bridge -p ctbook -p cardtrader-price-cache )
 RELEASE="$BASE/releases/${COMMIT:0:12}"
 mkdir -p "$RELEASE"
-for bin in pokoin-cardtrader-listing-dump pokoin-cardtrader-bridge ctbook; do
+for bin in pokoin-cardtrader-listing-dump pokoin-cardtrader-bridge ctbook pokoin-cardtrader-price-cache; do
   install -m 0755 "$TARGET/release/$bin" "$RELEASE/$bin"
 done
 newest=$(objdump -T "$RELEASE/pokoin-cardtrader-bridge" | grep -o 'GLIBC_2\.[0-9]*' | sed 's/GLIBC_2\.//' | sort -n | tail -1)
