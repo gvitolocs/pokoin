@@ -67,7 +67,7 @@ fn listed_bulk_sql() -> String {
     format!(
         "select blueprint_id, observed_day as dump_day,
             (refreshed_at at time zone 'utc')::date as day,
-            min_price_pkn as lowest_ask_pkn, listing_count, listed_quantity, seller_count, refreshed_at
+            min_price_pkn::float8 as lowest_ask_pkn, listing_count, listed_quantity, seller_count, refreshed_at
           from public.cardtrader_blueprint_daily_analytics
           where blueprint_id = any($1::bigint[])
             and observed_day between $2::text::date - 1 and $3::text::date
@@ -172,7 +172,7 @@ pub fn pro_floor_sql() -> String {
            {LANGUAGE_KEY_SQL} as language_key,
            coalesce(properties->>'pokemon_reverse', '') = 'true' as reverse,
            (coalesce(properties->>'first_edition', '') = 'true' or coalesce(properties->>'pokemon_first_edition', '') = 'true') as first_edition,
-           min(public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency)) as min_pkn,
+           min(public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency))::float8 as min_pkn,
            count(*)::int as offers
          from public.cardtrader_market_listing_snapshots as offer
          where coalesce(blueprint_id, cardtrader_blueprint_id) = any($1::bigint[])
@@ -208,7 +208,7 @@ pub async fn pro_floors(db: &DbPools, ct_ids: &[i64], exclude_ct_sellers: &[Stri
             "language": row.get("language_key").and_then(Value::as_str).unwrap_or(""),
             "reverse": row.get("reverse") == Some(&Value::Bool(true)),
             "firstEdition": row.get("first_edition") == Some(&Value::Bool(true)),
-            "minPkn": row.get("min_pkn").and_then(Value::as_f64).unwrap_or(0.0),
+            "minPkn": number(row.get("min_pkn")).unwrap_or(0.0),
             "offers": row.get("offers").and_then(Value::as_i64).unwrap_or(0),
         });
         if let Some(list) = groups.entry(ct_id).or_insert_with(|| json!([])).as_array_mut() {
@@ -248,7 +248,7 @@ pub fn pick_matched_ct(
             }
         });
     for group in groups {
-        let Some(min_pkn) = group.get("minPkn").and_then(Value::as_f64) else {
+        let Some(min_pkn) = number(group.get("minPkn")) else {
             continue;
         };
         if !(min_pkn > 0.0) {
@@ -300,7 +300,7 @@ pub fn cardtrader_source(rows: &[Value], status: Option<&str>) -> Value {
             json!({
                 "day": day(row.get("day").unwrap_or(&Value::Null)),
                 "dumpDay": day(row.get("dump_day").unwrap_or(&Value::Null)),
-                "lowestAskPkn": row.get("lowest_ask_pkn").and_then(Value::as_f64).unwrap_or(0.0),
+                "lowestAskPkn": number(row.get("lowest_ask_pkn")).unwrap_or(0.0),
                 "listingCount": count(row.get("listing_count").unwrap_or(&Value::Null)),
                 "listedQuantity": count(row.get("listed_quantity").unwrap_or(&Value::Null)),
                 "sellerCount": count(row.get("seller_count").unwrap_or(&Value::Null)),
@@ -320,6 +320,18 @@ pub fn cardtrader_source(rows: &[Value], status: Option<&str>) -> Value {
         "languageSpecific": false,
         "days": days,
     })
+}
+
+/// A price cell as `f64`. The shared row decoder returns `numeric` and `int8`
+/// as strings (the Node shape), so `as_f64` alone read every `numeric` price
+/// as missing: CardTrader and Pokoin comps were always empty in production.
+fn number(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite())
 }
 
 fn text_of(value: &Value) -> String {
@@ -379,7 +391,7 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
     };
 
     let pokoin_sql = "
-        select card_id, min(price_pkn) as min_pkn
+        select card_id, min(price_pkn)::float8 as min_pkn
         from public.marketplace_user_listings
         where card_id = any($1::text[])
           and status = 'active'
@@ -427,12 +439,12 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
         let pokoin_cheapest = pokoin_rows
             .iter()
             .find(|row| row.get("card_id").map(text_of).as_deref() == Some(item.card_id.as_str()))
-            .and_then(|row| row.get("min_pkn").and_then(Value::as_f64));
+            .and_then(|row| number(row.get("min_pkn")));
         let sold_median = ct_id.as_ref().and_then(|ct_id| {
             sold_rows
                 .iter()
                 .find(|row| row.get("blueprint_id").map(text_of).as_deref() == Some(ct_id.as_str()))
-                .and_then(|row| row.get("sold_median_pkn").and_then(Value::as_f64))
+                .and_then(|row| number(row.get("sold_median_pkn")))
         });
         let listed_days: Vec<Value> = ct_id
             .as_ref()
@@ -519,6 +531,18 @@ mod tests {
         assert_eq!(cheapest, Some(5.0));
         assert_eq!(matched, None);
         assert_eq!(pick_matched_ct(&[], "NM", "EN", false, false), (None, None));
+    }
+
+    #[test]
+    fn numeric_cells_decoded_as_strings_still_price() {
+        assert_eq!(number(Some(&json!("38.0000000000000000"))), Some(38.0));
+        assert_eq!(number(Some(&json!(22.5))), Some(22.5));
+        assert_eq!(number(Some(&json!("x"))), None);
+        assert_eq!(number(None), None);
+        // Groups built from string cells match like numeric ones.
+        let groups = vec![json!({"condition": "NM", "language": "IT", "minPkn": "22.0000"})];
+        assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, false).1, Some(22.0));
+        assert!(pro_floor_sql().contains("::float8 as min_pkn"));
     }
 
     #[test]
