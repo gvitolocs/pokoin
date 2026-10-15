@@ -4,6 +4,7 @@ members = [
   "apps/api",
   "apps/cardtrader-bridge",
   "apps/cardtrader-listing-dump",
+  "apps/cardtrader-price-cache",
   "crates/config",
   "crates/db",
   "crates/cache",
