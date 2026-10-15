@@ -77,6 +77,10 @@ if (( ! skip_tests )); then
 fi
 
 bash "$root/scripts/require-free-space.sh" "${POKOIN_MIN_FREE_GB:-60}" "$DEPLOY"
+# nezopt has no system cross gcc; the user-local toolchain sets linker, CC and AR for aarch64.
+cross_env="${POKOIN_AARCH64_CROSS_ENV:-$HOME/.local/share/aarch64-cross/env.sh}"
+# shellcheck disable=SC1090
+[[ -f "$cross_env" ]] && source "$cross_env"
 echo "build-pokoin-rust-release: cargo build --release $ARCH $SHORT (target $ARM)"
 POKOIN_BUILD_COMMIT="$COMMIT" POKOIN_BUILD_DIRTY=false CARGO_TARGET_DIR="$ARM" \
   nice -n 10 cargo build --release --locked --target "$ARCH" -p pokoin-api
