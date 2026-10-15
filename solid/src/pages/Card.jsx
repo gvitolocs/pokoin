@@ -87,6 +87,7 @@ import {
   rarityVersions,
   versionOptionLabel,
 } from '@market/card-versions.js';
+import { ownerGameLocation } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
@@ -336,6 +337,14 @@ function CardDesk(props) {
     .catch((err) => {
       if (disposed) return;
       if (err.status === 404) {
+        // Another TCG's card behind a game-less link: reload under its slug
+        // (the router basename changes), never "Card market not found."
+        const { pathname, search, hash } = window.location;
+        const moved = ownerGameLocation(err, { gameId: game().id, pathname, search, hash });
+        if (moved) {
+          window.location.replace(moved);
+          return;
+        }
         setPage(null);
         setError(err.message || 'Card not found.');
         return;

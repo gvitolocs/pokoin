@@ -537,7 +537,9 @@ card-page query (no tiles overlay). Artist is denormalized on
 it so in-app navigation first-paints the subtitle. The payload is stored by public card id
 (`pokoin.cardPage.v1.`) so a reload paints them before the hop. That BFF is
 often ~3s on the Frankfurt micro and can stall like expansion-page; a hang
-must **not** become “Card market not found.” Only a real 404 clears the stub.
+must **not** become “Card market not found.” Only a real 404 clears the stub,
+and a Pokémon 404 carrying `ownerGame` reloads the desk under that TCG's slug
+instead ([RUST_RUNTIME.md](RUST_RUNTIME.md) “Catalog identity and caching”).
 Suggest passes `state: { card }` so typeahead already has art.
 
 Live marketplace API/CDN is the **Raspberry Pi**

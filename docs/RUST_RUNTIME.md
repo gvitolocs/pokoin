@@ -123,6 +123,10 @@ Catalog responses bind the public Pokoin id, game and canonical URL to the reque
 
 The SPA retires card-page v1 and home-vector v3 cache keys and validates stored/received card identities. Authentication, carts and unrelated local data are preserved.
 
+Card-page `canonicalPath` is game-less for every catalog (`/marketplace/en/cards/834950/…`); the desk adds the game slug with `publicGamePath`. Both identity checks (`apps/api/src/card_identity.rs` and `market/src/card-response.js`) accept a game-less path or the requested game's own prefix and reject any other game's prefix. Requiring the prefix in the SPA left every non-Pokémon desk on its URL-slug stub (no name, scan or data).
+
+A Pokémon card-page miss probes the satellite catalogs for the id (even ids only, cached for 10 minutes, 1.5 s budget) and adds `ownerGame` to the 404 body when exactly one catalog holds it; the 200000000+ synthetic ids repeat across games and never name an owner. The desk then reloads the same URL under that game's slug, so game-less links to another TCG's card (`pokoin.com/marketplace/en/cards/834950/…`) open the Digimon desk instead of "Card market not found."
+
 ## Release safety
 
 Deploy only the clean exact origin/main commit. Build with POKOIN_BUILD_COMMIT set to its full SHA and POKOIN_BUILD_DIRTY=false after confirming the source is clean. The Pi installer checks the binary's embedded commit and digest, preserves configured service bindings and traffic routing, and requires matching release plus Postgres/Redis readiness. A failed readiness check restores the prior binary, environment and systemd unit.
