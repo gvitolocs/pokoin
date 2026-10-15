@@ -9,7 +9,14 @@ result=0
 catalog_result=0
 node scripts/refresh-all-cardtrader-catalogues.cjs --apply || catalog_result=$?
 (( catalog_result == 0 )) || result=1
-python3 scripts/dump-all-cardtrader-listings.py &
+# Listing books: the Rust dump (docs/CARDTRADER_DAILY_DUMP.md) once installed,
+# else the Python one. Both write listing-dump-status.json for the notifier.
+DUMP_BIN="${POKOIN_CT_DUMP_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-listing-dump}"
+if [[ -x "$DUMP_BIN" ]]; then
+  "$DUMP_BIN" &
+else
+  python3 scripts/dump-all-cardtrader-listings.py &
+fi
 dump_pid=$!
 # GPU stages hold a VRAM lease (/home/nez/bin/gpu-lease): an unguarded GPU job
 # racing a Qwen load panicked amdgpu on 2026-10-06. They queue (up to 4 h) and

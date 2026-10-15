@@ -1,0 +1,16 @@
+[package]
+name = "cardtrader-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Runs on the 1 GB Oracle VM (pokoin-marketplace); keep it small: std threads,
+# blocking HTTP, no async runtime.
+[[bin]]
+name = "pokoin-cardtrader-bridge"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde_json = { workspace = true }
+ureq = { version = "2", default-features = false, features = ["tls"] }

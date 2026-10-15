@@ -1,0 +1,18 @@
+[package]
+name = "cardtrader-listing-dump"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Daily raw CardTrader listing books on nezopt (see scripts/run-all-cardtrader-daily.sh).
+[[bin]]
+name = "pokoin-cardtrader-listing-dump"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ctbook = { path = "../../crates/ctbook" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+flate2 = "1"
