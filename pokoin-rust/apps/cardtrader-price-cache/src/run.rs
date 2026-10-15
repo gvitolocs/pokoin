@@ -217,11 +217,6 @@ async fn prepare_and_write(
     market: &mut Option<PgPool>,
     report: &mut Value,
 ) -> Result<(), String> {
-    if !dry_run {
-        db::ensure_schema(pool)
-            .await
-            .map_err(|error| db::redact(&error.to_string(), password))?;
-    }
     let expansions: Vec<i64> = ingest.expansions.iter().copied().collect();
     let scope = db::scope_ids(pool, &game.schema, &game.table, &expansions)
         .await
@@ -525,18 +520,19 @@ fn error_expansions(status: &Value) -> HashSet<i64> {
 }
 
 fn credentials() -> Result<(String, String), String> {
-    let from_env = match (
-        std::env::var("POSTGRES_USER"),
-        std::env::var("POSTGRES_PASSWORD"),
-    ) {
-        (Ok(user), Ok(password)) if !user.is_empty() && !password.is_empty() => {
-            Some((user, password))
+    // The job's own login first (pokoin_jobs, docs/SECURITY_HARDENING.md): the
+    // daily unit's other steps read POSTGRES_USER and stay on their own login.
+    for (user_var, password_var) in [
+        ("POKOIN_PRICE_CACHE_PG_USER", "POKOIN_PRICE_CACHE_PG_PASSWORD"),
+        ("POSTGRES_USER", "POSTGRES_PASSWORD"),
+    ] {
+        if let (Ok(user), Ok(password)) = (std::env::var(user_var), std::env::var(password_var)) {
+            if !user.is_empty() && !password.is_empty() {
+                return Ok((user, password));
+            }
         }
-        _ => None,
-    };
-    if let Some(pair) = from_env {
-        return Ok(pair);
     }
+    eprintln!("price-cache: POKOIN_PRICE_CACHE_PG_USER unset, using the container superuser");
     let output = std::process::Command::new("docker")
         .args([
             "inspect",

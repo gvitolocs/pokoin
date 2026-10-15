@@ -460,7 +460,7 @@ async fn write_flutter_debug_log(
     .bind(&input.event_name)
     .bind(&input.category)
     .bind(input.payload.to_string())
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(map_db_error)?;
     let id: Option<i64> = row.try_get("id").unwrap_or(None);

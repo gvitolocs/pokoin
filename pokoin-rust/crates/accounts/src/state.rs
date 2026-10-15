@@ -280,6 +280,16 @@ impl DomainState {
         })
     }
 
+    /// The marketplace writer (`MARKETPLACE_WRITER_DATABASE_URL`) for every SQL
+    /// write: the read pool is the Pi hot standby, and its role may only
+    /// SELECT. Without a writer URL the read pool is the one writable database.
+    pub fn marketplace_writer_db(&self) -> crate::error::Result<MarketplaceDb> {
+        match self.inner.marketplace_writer_db.clone() {
+            Some(db) => Ok(db),
+            None => self.marketplace_db(),
+        }
+    }
+
     /// The Card Rails one-time code store: an injected store (tests), else the
     /// Postgres store over the writer pool (`MARKETPLACE_WRITER_DATABASE_URL`).
     /// Both the insert and the consume go to the writer — the codes are read
@@ -293,10 +303,7 @@ impl DomainState {
         if let Some(store) = self.inner.cardrails_store.as_ref() {
             return Ok(store.clone());
         }
-        let db = match self.inner.marketplace_writer_db.clone() {
-            Some(db) => db,
-            None => self.marketplace_db()?,
-        };
+        let db = self.marketplace_writer_db()?;
         Ok(Arc::new(
             crate::domain::cardrails::PostgresCardRailsCodeStore::new(db),
         ))

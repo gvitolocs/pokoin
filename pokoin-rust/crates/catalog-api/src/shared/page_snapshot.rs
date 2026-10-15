@@ -24,20 +24,6 @@ use sqlx::PgPool;
 
 pub const TABLE: &str = "marketplace_page_snapshots";
 
-pub const DDL: &str = "
-create table if not exists public.marketplace_page_snapshots (
-  kind text not null,
-  key text not null,
-  head text not null,
-  rows text[] not null,
-  c1 bytea,
-  version text not null,
-  built_at timestamptz not null default now(),
-  checked_at timestamptz not null default now(),
-  primary key (kind, key)
-);
-";
-
 pub const SET: &str = "set";
 pub const ARTIST: &str = "artist";
 pub const VERSION: &str = "version";

@@ -11,7 +11,8 @@
 --             that rebuilds a book stores null and the next builder run fills it
 --
 -- Apply on the nezopt writer before deploying the API; the Pi replica
--- receives it by replication. The builder also applies it. Idempotent.
+-- receives it by replication. Idempotent. The builder no longer applies it
+-- itself (2026-10-15): its role has no DDL rights.
 alter table public.marketplace_seller_books add column if not exists username text;
 alter table public.marketplace_seller_books add column if not exists version text;
 alter table public.marketplace_seller_books add column if not exists br bytea;
