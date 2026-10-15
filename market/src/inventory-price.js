@@ -12,12 +12,27 @@ function finishFlags(row) {
   return `${reverse ? 'R' : ''}${firstEdition ? 'F' : ''}`;
 }
 
+/**
+ * A listing's condition as the pricer's CardTrader condition key: Pokoin's
+ * LP / HP / PO are CardTrader's SP / PL / Poor (server: `condition_key`).
+ */
+export function pricerCondition(raw) {
+  const value = String(raw || '').trim().toUpperCase();
+  if (!value) return '';
+  if (['M', 'MT', 'MINT', 'NM', 'NEAR MINT'].includes(value)) return 'NM';
+  if (['SP', 'LP', 'EX', 'EXCELLENT', 'SLIGHTLY PLAYED', 'LIGHTLY PLAYED'].includes(value)) return 'SP';
+  if (['MP', 'GD', 'GOOD', 'MODERATELY PLAYED'].includes(value)) return 'MP';
+  if (['PL', 'HP', 'PLD', 'PLAYED', 'HEAVILY PLAYED'].includes(value)) return 'PL';
+  if (['PO', 'POOR', 'DMG', 'DAMAGED'].includes(value)) return 'Poor';
+  return value;
+}
+
 /** One price-check item: card, condition, language and finishes. */
 export function priceCheckItem(row) {
   const flags = finishFlags(row);
   return {
     cardId: String(row?.cardId || row?.card_id || row?.blueprintId || ''),
-    condition: String(row?.condition || 'NM').toUpperCase(),
+    condition: pricerCondition(row?.condition || 'NM'),
     language: String(row?.language || '').toUpperCase(),
     reverse: flags.includes('R'),
     firstEdition: flags.includes('F'),

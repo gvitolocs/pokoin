@@ -86,6 +86,23 @@ pub struct PriceItem {
     pub first_edition: bool,
 }
 
+/// A listing's condition as the pricer's CardTrader condition key. Pokoin
+/// stores NM, LP, SP, MP, HP, PL, PO and Poor; CardTrader groups are NM, SP
+/// (Slightly Played), MP, PL (Played) and Poor. Before this, LP, HP and PO
+/// matched no group and were priced from offers of any condition. The web
+/// mirrors it in `pricerCondition` (market/src/inventory-price.js).
+pub fn condition_key(raw: &str) -> String {
+    match raw.trim().to_uppercase().as_str() {
+        "" => String::new(),
+        "M" | "MT" | "MINT" | "NM" | "NEAR MINT" => "NM".into(),
+        "SP" | "LP" | "EX" | "EXCELLENT" | "SLIGHTLY PLAYED" | "LIGHTLY PLAYED" => "SP".into(),
+        "MP" | "GD" | "GOOD" | "MODERATELY PLAYED" => "MP".into(),
+        "PL" | "HP" | "PLD" | "PLAYED" | "HEAVILY PLAYED" => "PL".into(),
+        "PO" | "POOR" | "DMG" | "DAMAGED" => "Poor".into(),
+        other => other.to_string(),
+    }
+}
+
 /// The key a comp is returned under besides the bare card id:
 /// `card:CONDITION:LANGUAGE:FLAGS` (flags `R` reverse, `F` first edition), so
 /// a plain and a reverse copy of one card never share a comp. The web builds
@@ -114,7 +131,7 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
         }
         let mut parts = piece.split(':');
         let raw_id = parts.next().unwrap_or("").trim();
-        let condition = parts.next().unwrap_or("").trim().to_uppercase();
+        let condition = condition_key(parts.next().unwrap_or(""));
         let language = parts.next().unwrap_or("").trim().to_uppercase();
         let flags = parts.next().unwrap_or("").trim().to_uppercase();
         let card_id = raw_id.trim_start_matches('0').to_string();
@@ -476,6 +493,10 @@ mod tests {
         assert!(flagged[0].reverse && !flagged[0].first_edition);
         assert!(flagged[1].reverse && flagged[1].first_edition);
         assert_eq!(price_check_key(&flagged[1]), "633380:NM:IT:RF");
+        // Pokoin's LP / HP / PO are CardTrader's SP / PL / Poor.
+        let pokoin = parse_items("1:LP:EN,2:HP:EN,3:PO:EN,4:poor:EN,5:MINT:EN");
+        let keys: Vec<&str> = pokoin.iter().map(|item| item.condition.as_str()).collect();
+        assert_eq!(keys, ["SP", "PL", "Poor", "Poor", "NM"]);
         assert_eq!(price_check_key(&items[1]), "713648:::");
     }
 

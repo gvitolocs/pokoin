@@ -27,6 +27,9 @@ test('a reverse or first-edition copy reads its own comp', () => {
   };
   assert.equal(priceCheckKey({ cardId: '824942', condition: 'nm', language: 'en', foilState: 'reverse' }), '824942:NM:EN:R');
   assert.equal(priceCheckKey({ card_id: '824942', condition: 'NM', language: 'EN', first_edition: true }), '824942:NM:EN:F');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'LP', language: 'IT' }), '1:SP:IT:');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'HP', language: 'IT' }), '1:PL:IT:');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'PO', language: 'IT' }), '1:Poor:IT:');
   assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN', reverse: true }, 'cardtrader').value, 590);
   assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN' }, 'cardtrader').value, 64);
 });
