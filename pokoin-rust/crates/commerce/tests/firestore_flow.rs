@@ -428,11 +428,31 @@ impl TokenVerifier for AnyToken {
 }
 
 async fn state_harness() -> (DomainState, FirestoreClient) {
+    state_harness_with(|_| {}).await
+}
+
+/// A 32-byte address key, the same shape ADDRESS_ENCRYPTION_KEY accepts.
+fn test_address_key() -> String {
+    "11".repeat(32)
+}
+
+/// The harness with the address key in its config. Tests never set the
+/// process env: `CommerceConfig::default()` reads it, so a parallel test's
+/// `remove_var` raced another test's harness ("ADDRESS_ENCRYPTION_KEY is
+/// not configured").
+async fn address_state_harness() -> (DomainState, FirestoreClient) {
+    state_harness_with(|config| config.address_encryption_key = Some(test_address_key())).await
+}
+
+async fn state_harness_with(
+    configure: impl FnOnce(&mut CommerceConfig),
+) -> (DomainState, FirestoreClient) {
     let (base, _store) = start_mock_firestore().await;
     let http = reqwest::Client::new();
     let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");
     let mut config = CommerceConfig::default();
     config.pokoin_treasury_username = "pokoin".into();
+    configure(&mut config);
     // Short acquire timeout: the harness has no Postgres, so SQL paths must
     // fail fast instead of waiting on the driver default.
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -1855,9 +1875,7 @@ async fn releasing_a_missing_order_reports_missing() {
 
 #[tokio::test]
 async fn the_checkout_snapshot_is_encrypted_with_the_source_address_id() {
-    // A 32-byte address key, the same shape ADDRESS_ENCRYPTION_KEY accepts.
-    std::env::set_var("ADDRESS_ENCRYPTION_KEY", "11".repeat(32));
-    let (state, firestore) = state_harness().await;
+    let (state, firestore) = address_state_harness().await;
     let envelope = pokoin_commerce::domain::address::encrypt_address_payload(
         &pokoin_commerce::domain::address::AddressFields {
             full_name: "Alice Buyer".into(),
@@ -1866,7 +1884,7 @@ async fn the_checkout_snapshot_is_encrypted_with_the_source_address_id() {
             city: "Roma".into(),
             ..Default::default()
         },
-        Some(&"11".repeat(32)),
+        Some(&test_address_key()),
     )
     .unwrap();
     firestore
@@ -1905,27 +1923,23 @@ async fn the_checkout_snapshot_is_encrypted_with_the_source_address_id() {
     assert_eq!(decrypted["city"], json!("Roma"));
     assert_eq!(decrypted["countryCode"], json!("IT"));
     assert_eq!(decrypted["sourceAddressId"], json!("addr-1"));
-    std::env::remove_var("ADDRESS_ENCRYPTION_KEY");
 }
 
 #[tokio::test]
 async fn an_unknown_shipping_address_is_not_found() {
-    std::env::set_var("ADDRESS_ENCRYPTION_KEY", "11".repeat(32));
-    let (state, _firestore) = state_harness().await;
+    let (state, _firestore) = address_state_harness().await;
     let error =
         pokoin_commerce::handlers::orders::shipping_address_snapshot(&state, "buyer-1", "missing")
             .await
             .unwrap_err();
     assert_eq!(error.status.as_u16(), 404);
-    std::env::remove_var("ADDRESS_ENCRYPTION_KEY");
 }
 
 #[tokio::test]
 async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
     use pokoin_commerce::handlers::orders::shipping_address_snapshot as build_snapshot;
     let _ = build_snapshot;
-    std::env::set_var("ADDRESS_ENCRYPTION_KEY", "11".repeat(32));
-    let (state, firestore) = state_harness().await;
+    let (state, firestore) = address_state_harness().await;
     let envelope = pokoin_commerce::domain::address::encrypt_address_payload(
         &pokoin_commerce::domain::address::AddressFields {
             full_name: "Alice Buyer".into(),
@@ -1934,7 +1948,7 @@ async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
             city: "Roma".into(),
             ..Default::default()
         },
-        Some(&"11".repeat(32)),
+        Some(&test_address_key()),
     )
     .unwrap();
     firestore
@@ -1989,7 +2003,6 @@ async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
     )
     .expect("decrypt");
     assert_eq!(revealed, json!(null));
-    std::env::remove_var("ADDRESS_ENCRYPTION_KEY");
 }
 
 #[tokio::test]
