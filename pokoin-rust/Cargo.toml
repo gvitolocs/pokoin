@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
   "apps/api",
+  "apps/cardtrader-bridge",
+  "apps/cardtrader-listing-dump",
   "crates/config",
   "crates/db",
   "crates/cache",
@@ -25,6 +27,7 @@ members = [
   "crates/catalog-api",
   "crates/api-common",
   "crates/sort",
+  "crates/ctbook",
 ]
 
 [workspace.package]
