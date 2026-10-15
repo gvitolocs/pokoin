@@ -34,6 +34,20 @@ use pokoin_commerce::{store, FixedClock};
 #[derive(Clone, Default)]
 struct MockStore {
     documents: Arc<Mutex<HashMap<String, Value>>>,
+    /// One commit at a time, so a create-only precondition is atomic.
+    commit_lock: Arc<Mutex<()>>,
+    /// Faults consumed by the next commits, in order.
+    faults: Arc<Mutex<Vec<CommitFault>>>,
+    /// Document keys written by each applied commit.
+    commits: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CommitFault {
+    /// Firestore contention: nothing is written, `ABORTED` is returned.
+    Abort,
+    /// The commit is applied but the client sees a 503.
+    LoseResponse,
 }
 
 impl MockStore {
@@ -55,6 +69,18 @@ impl MockStore {
     }
     fn delete(&self, path: &str) {
         self.documents.lock().unwrap().remove(path);
+    }
+    fn fail_next_commit(&self, fault: CommitFault) {
+        self.faults.lock().unwrap().push(fault);
+    }
+    fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.documents
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect()
     }
     fn all(&self) -> Vec<(String, Value)> {
         self.documents
@@ -137,11 +163,51 @@ fn apply_mask(current: &mut Value, patch: &Value, mask: &[String]) {
 }
 
 async fn mock_commit(State(state): State<MockStore>, Json(body): Json<Value>) -> Response {
+    let _commit = state.commit_lock.lock().unwrap();
     let writes = body
         .get("writes")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let fault = {
+        let mut faults = state.faults.lock().unwrap();
+        (!faults.is_empty()).then(|| faults.remove(0))
+    };
+    if matches!(fault, Some(CommitFault::Abort)) {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": { "status": "ABORTED" } })),
+        )
+            .into_response();
+    }
+    // Preconditions are checked before any write: a commit is all or nothing.
+    for write in &writes {
+        if write.pointer("/currentDocument/exists") == Some(&json!(false)) {
+            let path = write
+                .pointer("/update/name")
+                .and_then(Value::as_str)
+                .map(strip_prefix)
+                .unwrap_or_default();
+            if state.get(&path).is_some() {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({ "error": { "status": "ALREADY_EXISTS" } })),
+                )
+                    .into_response();
+            }
+        }
+    }
+    let written: Vec<String> = writes
+        .iter()
+        .filter_map(|write| {
+            write
+                .pointer("/update/name")
+                .or_else(|| write.get("delete"))
+                .and_then(Value::as_str)
+                .map(strip_prefix)
+        })
+        .collect();
+    state.commits.lock().unwrap().push(written);
     for write in writes {
         if let Some(delete) = write.get("delete").and_then(Value::as_str) {
             state.delete(&strip_prefix(delete));
@@ -205,6 +271,13 @@ async fn mock_commit(State(state): State<MockStore>, Json(body): Json<Value>) ->
         } else {
             state.upsert(&path, decoded, false);
         }
+    }
+    if matches!(fault, Some(CommitFault::LoseResponse)) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "status": "UNAVAILABLE" } })),
+        )
+            .into_response();
     }
     Json(json!({ "writeResults": [] })).into_response()
 }
@@ -447,7 +520,14 @@ async fn address_state_harness() -> (DomainState, FirestoreClient) {
 async fn state_harness_with(
     configure: impl FnOnce(&mut CommerceConfig),
 ) -> (DomainState, FirestoreClient) {
-    let (base, _store) = start_mock_firestore().await;
+    let (state, firestore, _store) = state_harness_with_store(configure).await;
+    (state, firestore)
+}
+
+async fn state_harness_with_store(
+    configure: impl FnOnce(&mut CommerceConfig),
+) -> (DomainState, FirestoreClient, MockStore) {
+    let (base, store) = start_mock_firestore().await;
     let http = reqwest::Client::new();
     let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");
     let mut config = CommerceConfig::default();
@@ -468,7 +548,7 @@ async fn state_harness_with(
         Some(firestore.clone()),
     )
     .with_clock(Arc::new(FixedClock(1_700_000_000_000)));
-    (state, firestore)
+    (state, firestore, store)
 }
 
 async fn harness() -> (Router, FirestoreClient) {
@@ -946,7 +1026,7 @@ async fn seller_transfers_wait_for_a_ready_connect_account() {
 
     // The order stays in escrow with the pending seller recorded.
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-eur-1"))
+        .get_document(&firestore.document_path("orders", "order-eur-1").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1036,7 +1116,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
     assert_eq!(result["before"], json!(3));
     assert_eq!(result["after"], json!(2));
     let row = firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-1"))
+        .get_document(&firestore.document_path("user_card_collections", "row-1").unwrap())
         .await
         .unwrap()
         .expect("row");
@@ -1052,7 +1132,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
         .expect("decrement");
     assert_eq!(result["deleted"], json!(true));
     assert!(firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-1"))
+        .get_document(&firestore.document_path("user_card_collections", "row-1").unwrap())
         .await
         .unwrap()
         .is_none());
@@ -1094,7 +1174,7 @@ async fn a_sale_key_decrements_the_ownership_row_once() {
     let second = decrement_seller_ownership_for_sale(&state, &other).await.expect("second sale");
     assert_eq!(second["after"], json!(1));
     let row = firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-k"))
+        .get_document(&firestore.document_path("user_card_collections", "row-k").unwrap())
         .await
         .unwrap()
         .expect("row");
@@ -1134,7 +1214,7 @@ async fn nft_ownership_rows_are_never_decremented() {
     assert_eq!(result["skipped"], json!(true));
     assert_eq!(
         firestore
-            .get_document(&firestore.document_path("user_card_collections", "nft-row"))
+            .get_document(&firestore.document_path("user_card_collections", "nft-row").unwrap())
             .await
             .unwrap()
             .expect("still there")["quantity"],
@@ -1193,7 +1273,7 @@ async fn connect_state_lives_on_the_firestore_user_document() {
     // rather than inventing an account — but it must have read Firestore first.
     assert!(status.is_server_error(), "{status} {payload}");
     let user = firestore
-        .get_document(&firestore.document_path("users", "buyer-1"))
+        .get_document(&firestore.document_path("users", "buyer-1").unwrap())
         .await
         .unwrap()
         .expect("user");
@@ -1313,7 +1393,7 @@ async fn seller_sale_notifications_claim_the_real_firestore_marker() {
         .get_document(&firestore.document_path(
             notify::NOTIFICATION_COLLECTION,
             &notify::notification_marker_id("order-notify", "seller-1"),
-        ))
+        ).unwrap())
         .await
         .unwrap()
         .expect("marker");
@@ -1550,7 +1630,7 @@ async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
     assert!(calls.contains(&"buy:l1".to_string()), "{calls:?}");
 
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-ct"))
+        .get_document(&firestore.document_path("orders", "order-ct").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1580,7 +1660,7 @@ async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
     );
     // The ownership row was decremented to zero and deleted.
     assert!(firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-ct"))
+        .get_document(&firestore.document_path("user_card_collections", "row-ct").unwrap())
         .await
         .unwrap()
         .is_none());
@@ -1606,7 +1686,7 @@ async fn an_unconfigured_cardtrader_leaves_the_steps_open() {
     assert!(!port.calls().is_empty());
 
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-ct"))
+        .get_document(&firestore.document_path("orders", "order-ct").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1714,7 +1794,7 @@ async fn releasing_an_expired_order_cancels_it_and_returns_the_held_discount_onc
 
     // The order is cancelled (not merely expired) with the inventory released.
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-release"))
+        .get_document(&firestore.document_path("orders", "order-release").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1779,7 +1859,7 @@ async fn a_paid_order_is_never_released() {
     .expect("release");
     assert_eq!(result["outcome"], json!("not_releasable"));
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-release"))
+        .get_document(&firestore.document_path("orders", "order-release").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1817,7 +1897,7 @@ async fn a_failed_async_payment_may_also_release_a_processing_order() {
         assert_eq!(error.code.as_deref(), Some("order_stock_restore_failed"));
     }
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-release"))
+        .get_document(&firestore.document_path("orders", "order-release").unwrap())
         .await
         .unwrap()
         .expect("order");
@@ -1986,7 +2066,7 @@ async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
     let decrypted = pokoin_commerce::handlers::orders::decrypt_shipping_snapshot(
         &state,
         &firestore
-            .get_document(&firestore.document_path("orders", "order-reveal"))
+            .get_document(&firestore.document_path("orders", "order-reveal").unwrap())
             .await
             .unwrap()
             .expect("order")["shippingAddressSnapshotEncrypted"],
@@ -2031,7 +2111,7 @@ async fn paid_order_without_reserved_stock_flags_conflict_without_faking_fulfilm
         paid_eur_order_with_port(CardTraderOutcome::Applied { detail: json!({}) }).await;
     firestore
         .set_document(
-            &firestore.document_path("orders", "order-ct"),
+            &firestore.document_path("orders", "order-ct").unwrap(),
             &json!({"inventory":{"state":"released"}}),
         )
         .await
@@ -2042,7 +2122,7 @@ async fn paid_order_without_reserved_stock_flags_conflict_without_faking_fulfilm
     assert_eq!(result["conflict"], true);
     assert!(port.calls().is_empty());
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-ct"))
+        .get_document(&firestore.document_path("orders", "order-ct").unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -2074,10 +2154,328 @@ async fn unconfigured_cardtrader_result_retries_and_never_becomes_done() {
     assert_eq!(second["done"], false);
     assert!(port.calls().len() > calls);
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-ct"))
+        .get_document(&firestore.document_path("orders", "order-ct").unwrap())
         .await
         .unwrap()
         .unwrap();
     assert_eq!(order["fulfillment"]["state"], "partial");
     assert_eq!(order["fulfillment"]["ownershipDone"], json!(["l1"]));
+}
+
+// ---------------------------------------------------------------------------
+// Money-safety regressions (2026-10-15 audit)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn address_ids_that_walk_out_of_the_users_addresses_are_400_and_touch_nothing() {
+    let (state, firestore, _store) = state_harness_with_store(|_| {}).await;
+    let app = pokoin_commerce::router(state);
+    store::apply(&firestore, &LedgerOp::mint("buyer-1", 1_000, "account_top_up"))
+        .await
+        .unwrap();
+
+    for uri in [
+        "/api/account-addresses?id=../../../balances/buyer-1",
+        "/api/account-addresses?id=%2e%2e%2f%2e%2e%2f%2e%2e%2fbalances%2fbuyer-1",
+        "/api/account-addresses?id=%252e%252e%252fbalances",
+        "/api/account-addresses?id=a/b",
+        "/api/account-addresses?id=..",
+    ] {
+        let (status, body) = call(&app, "DELETE", uri, None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+    }
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/api/account-addresses",
+        Some(json!({ "id": "../../../balances/buyer-1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "PUT",
+        "/api/account-addresses?id=../../../balances/buyer-1",
+        Some(json!({ "countryCode": "IT" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/marketplace-checkout-quote",
+        Some(json!({ "items": [{ "listingId": "x" }], "shippingAddressId": "../../../balances/buyer-1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // The balance document is untouched, and a well-formed id still reaches
+    // Firestore (the mock answers a delete of a missing document with 200).
+    assert_eq!(
+        store::balance(&firestore, "buyer-1").await.unwrap().available_pkn,
+        1_000
+    );
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/api/account-addresses?id=0b0e7a3e-1c2d-4f5a-9b8c-7d6e5f4a3b2c",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn racing_replays_of_one_key_move_money_once() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("u1", 1_000, "account_top_up"))
+        .await
+        .unwrap();
+    let op = LedgerOp::transfer("u1", "u2", 100, "account_transfer_sent").with_idempotency("race:1");
+    let outcomes = futures_util::future::join_all(
+        (0..8).map(|_| store::apply(&firestore, &op)),
+    )
+    .await;
+    let applied = outcomes
+        .iter()
+        .filter(|outcome| outcome.as_ref().expect("apply").applied)
+        .count();
+    assert_eq!(applied, 1);
+    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 900);
+    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 100);
+    // mint (1 entry) + one transfer (2 entries)
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+    // Every replay reports the committed balances.
+    for outcome in outcomes {
+        assert_eq!(outcome.unwrap().from_available, 900);
+    }
+}
+
+#[tokio::test]
+async fn the_idempotency_marker_commits_with_the_balances() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    let op = LedgerOp::mint("u1", 50, "account_top_up").with_idempotency("marker:1");
+    assert!(store::apply(&firestore, &op).await.unwrap().applied);
+    let marker = format!("commerce_idempotency/{}", store::idempotency_doc_id("marker:1"));
+    let commits = mock.commits.lock().unwrap().clone();
+    assert_eq!(commits.len(), 1);
+    assert!(commits[0].contains(&marker), "{commits:?}");
+    assert!(commits[0].contains(&"balances/u1".to_string()));
+
+    // A key whose marker already exists moves nothing.
+    let replay = store::apply(&firestore, &op).await.unwrap();
+    assert!(!replay.applied);
+    assert_eq!(replay.to_available, 50);
+    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 50);
+    assert_eq!(mock.commits.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_lost_commit_response_is_never_applied_twice() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    // With a key: the landed marker is ours, so the call reports applied.
+    mock.fail_next_commit(CommitFault::LoseResponse);
+    let op = LedgerOp::mint("u1", 70, "account_top_up").with_idempotency("lost:1");
+    let outcome = store::apply(&firestore, &op).await.expect("recovered from the marker");
+    assert!(outcome.applied);
+    assert_eq!(outcome.to_available, 70);
+    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 70);
+
+    // Without a key: the error surfaces, and the body is not re-run.
+    mock.fail_next_commit(CommitFault::LoseResponse);
+    let op = LedgerOp::mint("u2", 30, "account_top_up");
+    assert!(store::apply(&firestore, &op).await.is_err());
+    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 30);
+}
+
+#[tokio::test]
+async fn an_aborted_commit_is_retried_once() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    mock.fail_next_commit(CommitFault::Abort);
+    let op = LedgerOp::mint("u1", 40, "account_top_up").with_idempotency("abort:1");
+    assert!(store::apply(&firestore, &op).await.unwrap().applied);
+    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 40);
+    assert_eq!(mock.commits.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_multi_leg_payment_is_all_or_nothing() {
+    let (_, firestore, _mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("buyer", 100, "account_top_up"))
+        .await
+        .unwrap();
+    let legs = |amount: i64| {
+        vec![
+            LedgerOp::transfer("buyer", "s1", amount, "marketplace_order_sale"),
+            LedgerOp::transfer("buyer", "s2", amount, "marketplace_order_sale"),
+        ]
+    };
+    // 60 + 60 > 100: the first leg alone would fit, but nothing moves.
+    let error = store::apply_all(&firestore, &legs(60), Some("pay:1")).await.unwrap_err();
+    assert!(matches!(error, pokoin_commerce::error::StoreError::Insufficient));
+    assert_eq!(store::balance(&firestore, "s1").await.unwrap().available_pkn, 0);
+    assert_eq!(store::balance(&firestore, "buyer").await.unwrap().available_pkn, 100);
+
+    let outcome = store::apply_all(&firestore, &legs(50), Some("pay:2")).await.unwrap();
+    assert!(outcome.applied);
+    assert_eq!(outcome.from_available, 0);
+    assert_eq!(store::balance(&firestore, "s1").await.unwrap().available_pkn, 50);
+    assert_eq!(store::balance(&firestore, "s2").await.unwrap().available_pkn, 50);
+    let replay = store::apply_all(&firestore, &legs(50), Some("pay:2")).await.unwrap();
+    assert!(!replay.applied);
+    assert_eq!(store::balance(&firestore, "s2").await.unwrap().available_pkn, 50);
+}
+
+#[tokio::test]
+async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
+    // The harness has no Postgres: reaching the listing decrement would be a
+    // 5xx, so a 400 proves the balance is checked first.
+    let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
+    firestore
+        .set_document(
+            &firestore.document_path("usernames", "pokoin").unwrap(),
+            &json!({ "uid": "treasury-1" }),
+        )
+        .await
+        .unwrap();
+    store::apply(&firestore, &LedgerOp::mint("buyer-1", 10, "account_top_up"))
+        .await
+        .unwrap();
+    let app = pokoin_commerce::router(state);
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/marketplace-orders",
+        Some(json!({
+            "clientOrderId": "c1",
+            "items": [{
+                "listingId": "0b0e7a3e-1c2d-4f5a-9b8c-7d6e5f4a3b2c",
+                "quantity": 1,
+                "sellerUid": "seller-1",
+                "unitPricePkn": 500,
+            }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 10);
+}
+
+#[tokio::test]
+async fn a_top_up_hash_is_claimed_before_it_mints_and_credits_one_account() {
+    let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
+    let hash = format!("0x{}", "ab".repeat(32));
+    let top_up = |uid: &'static str, hash: String| {
+        let state = state.clone();
+        async move {
+            pokoin_commerce::handlers::wallet::credit_verified_top_up(
+                &state, uid, &hash, "0xfrom", 50.0, false,
+            )
+            .await
+        }
+    };
+    assert!(top_up("u1", hash.clone()).await.unwrap());
+    assert!(!top_up("u1", hash.clone()).await.unwrap());
+    let error = top_up("u2", hash.clone()).await.unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 50);
+    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 0);
+    let deposit = firestore
+        .get_document(&firestore.document_path("native_pkn_deposits", &hash).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(deposit["status"], json!("credited"));
+
+    // A claim interrupted before its mint is finished by the owner's retry…
+    let interrupted = format!("0x{}", "cd".repeat(32));
+    firestore
+        .set_document(
+            &firestore.document_path("native_pkn_deposits", &interrupted).unwrap(),
+            &json!({ "uid": "u3", "purpose": "account_top_up", "status": "claiming" }),
+        )
+        .await
+        .unwrap();
+    assert!(top_up("u3", interrupted.clone()).await.unwrap());
+    assert_eq!(store::balance(&firestore, "u3").await.unwrap().available_pkn, 50);
+    // …but a legacy (or crypto-sale) deposit for the same account never mints.
+    let legacy = format!("0x{}", "ef".repeat(32));
+    firestore
+        .set_document(
+            &firestore.document_path("native_pkn_deposits", &legacy).unwrap(),
+            &json!({ "uid": "u4", "purpose": "crypto_pkn_sale" }),
+        )
+        .await
+        .unwrap();
+    assert!(!top_up("u4", legacy).await.unwrap());
+    assert_eq!(store::balance(&firestore, "u4").await.unwrap().available_pkn, 0);
+}
+
+#[tokio::test]
+async fn a_failed_stripe_event_releases_its_claim_so_the_retry_runs() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+    let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
+    let claim_path = firestore
+        .document_path(
+            "commerce_idempotency",
+            &store::idempotency_doc_id("stripe_event:evt_1"),
+        )
+        .unwrap();
+    let event = |pkn: &str| {
+        json!({
+            "id": "evt_1",
+            "type": "checkout.session.completed",
+            "data": { "object": {
+                "id": "cs_test_1",
+                "metadata": { "uid": "buyer-1", "pknAmount": pkn, "fiatCents": "500" },
+            } },
+        })
+    };
+    // The handler fails (bad metadata): the claim is gone, nothing minted.
+    assert!(process_verified_event(&state, &event("0")).await.is_err());
+    assert!(firestore.get_document(&claim_path).await.unwrap().is_none());
+
+    // Stripe's retry runs the handler and marks the claim done.
+    assert!(process_verified_event(&state, &event("1000")).await.is_ok());
+    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 1_000);
+    let claim = firestore.get_document(&claim_path).await.unwrap().unwrap();
+    assert_eq!(claim["done"], json!(true));
+
+    // A later duplicate is acknowledged and mints nothing.
+    let response = process_verified_event(&state, &event("1000")).await.unwrap();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["duplicate"], json!(true));
+    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 1_000);
+}
+
+#[tokio::test]
+async fn an_abandoned_stripe_claim_is_handled_again() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+    let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
+    let key = "stripe_event:evt_2";
+    // A worker claimed the event 20 minutes ago and died before handling it.
+    firestore
+        .set_document(
+            &firestore
+                .document_path("commerce_idempotency", &store::idempotency_doc_id(key))
+                .unwrap(),
+            &json!({
+                "key": key,
+                "createdAt": (chrono::Utc::now() - chrono::Duration::minutes(20))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            }),
+        )
+        .await
+        .unwrap();
+    let event = json!({
+        "id": "evt_2",
+        "type": "checkout.session.completed",
+        "data": { "object": {
+            "id": "cs_test_2",
+            "metadata": { "uid": "buyer-2", "pknAmount": "500", "fiatCents": "500" },
+        } },
+    });
+    assert!(process_verified_event(&state, &event).await.is_ok());
+    assert_eq!(store::balance(&firestore, "buyer-2").await.unwrap().available_pkn, 500);
 }

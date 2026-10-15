@@ -449,7 +449,7 @@ async fn verify_nft(
     }
     let fs = state.firestore()?;
     let doc = fs
-        .get_document(&fs.document_path("user_card_collections", &item))
+        .get_document(&fs.document_path("user_card_collections", &item)?)
         .await?;
     let data = doc.clone().unwrap_or_else(|| json!({}));
     let owned = live::first(&data, &["cardId", "blueprintId"], 80);

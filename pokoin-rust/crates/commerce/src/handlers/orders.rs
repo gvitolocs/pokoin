@@ -13,7 +13,7 @@ use sqlx::Row;
 use super::{private_json, public_json, text_field};
 use crate::auth::Claims;
 use crate::domain::money;
-use crate::error::ApiError;
+use crate::error::{ApiError, StoreError};
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
@@ -418,47 +418,107 @@ pub async fn marketplace_orders_post(
     } else {
         Some(format!("order:{}:{}", claims.uid, idempotency_key))
     };
-    if let Some(key) = &idem {
-        if let Some(existing) = store::idempotency_result(state.firestore()?, key).await? {
-            return Ok(private_json(existing));
+
+    // Each seller gets their subtotal minus commission; commission → treasury.
+    let totals = seller_totals(&items);
+    let mut commission_pkn = 0i64;
+    let mut seller_nets: Vec<(String, i64)> = Vec::new();
+    for (seller_uid, subtotal) in &totals {
+        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
+        commission_pkn += commission;
+        seller_nets.push((seller_uid.clone(), subtotal - commission));
+    }
+
+    // The replay check, the buyer balance and the treasury account are read
+    // together (no added round trip), and an underfunded buyer is refused
+    // before any stock is taken.
+    let firestore = state.firestore()?;
+    let replay = async {
+        match &idem {
+            Some(key) => store::idempotency_result(firestore, key).await.map_err(ApiError::from),
+            None => Ok(None),
         }
+    };
+    let buyer_balance = async {
+        store::balance(firestore, &claims.uid)
+            .await
+            .map_err(ApiError::from)
+    };
+    let treasury = async {
+        if commission_pkn > 0 {
+            treasury_uid(&state, &state.config().pokoin_treasury_username)
+                .await
+                .map(Some)
+        } else {
+            Ok(None)
+        }
+    };
+    let (existing, buyer_balance, treasury) = tokio::try_join!(replay, buyer_balance, treasury)?;
+    if let Some(existing) = existing {
+        return Ok(private_json(existing));
+    }
+    if buyer_balance.available_pkn < total_pkn {
+        return Err(StoreError::Insufficient.into());
     }
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, None).await?;
-    drop(decremented);
 
-    // Credit each seller their subtotal minus commission; commission → treasury.
-    let totals = seller_totals(&items);
-    let mut commission_pkn = 0i64;
-    for (seller_uid, subtotal) in &totals {
-        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
-        commission_pkn += commission;
-        let net = subtotal - commission;
-        if net > 0 {
-            let op = LedgerOp::transfer(&claims.uid, seller_uid, net, "marketplace_order_sale")
+    // Every PKN leg is one Firestore transaction with one idempotency marker
+    // (keyed on clientOrderId): all sellers and the treasury are paid, or
+    // nobody is and the stock goes back.
+    let mut ops: Vec<LedgerOp> = seller_nets
+        .iter()
+        .filter(|(_, net)| *net > 0)
+        .map(|(seller_uid, net)| {
+            LedgerOp::transfer(&claims.uid, seller_uid, *net, "marketplace_order_sale")
                 .with_ref(&order_id)
-                .with_meta(json!({ "orderId": order_id }));
-            store::apply(state.firestore()?, &op)
-                .await
-                .map_err(|error| ApiError::from(error))?;
-        }
+                .with_meta(json!({ "orderId": order_id }))
+        })
+        .collect();
+    if let Some(treasury) = &treasury {
+        ops.push(
+            LedgerOp::transfer(
+                &claims.uid,
+                treasury,
+                commission_pkn,
+                "marketplace_order_commission",
+            )
+            .with_ref(&order_id),
+        );
     }
-    if commission_pkn > 0 {
-        let treasury = treasury_uid(&state, &state.config().pokoin_treasury_username).await?;
-        let op = LedgerOp::transfer(
-            &claims.uid,
-            &treasury,
-            commission_pkn,
-            "marketplace_order_commission",
-        )
-        .with_ref(&order_id);
-        store::apply(state.firestore()?, &op).await?;
+    let payment_key = match &idem {
+        Some(key) => format!("{key}:payment"),
+        None => format!("order_payment:{order_id}"),
+    };
+    let paid = if ops.is_empty() {
+        Ok(true)
+    } else {
+        store::apply_all(firestore, &ops, Some(&payment_key))
+            .await
+            .map(|outcome| outcome.applied)
+    };
+    match paid {
+        Ok(true) => {}
+        Ok(false) => {
+            // A concurrent request with this clientOrderId already paid.
+            rollback_decrements(&state, &decremented, None).await;
+            if let Some(key) = &idem {
+                if let Some(existing) = store::idempotency_result(firestore, key).await? {
+                    return Ok(private_json(existing));
+                }
+            }
+            return Err(ApiError::conflict("This order is already being processed.")
+                .with_code("order_in_progress"));
+        }
+        Err(error) => {
+            rollback_decrements(&state, &decremented, None).await;
+            return Err(error.into());
+        }
     }
 
     // Native sold rows for the desk (no buyer identity) in `marketplace_sales`,
     // using the Node doc-id scheme `{orderId}__{listingId}`.
-    let firestore = state.firestore()?;
     let sale_rows = crate::domain::order_refund::sale_docs_from_order(
         &order_id,
         &json!({
@@ -484,12 +544,10 @@ pub async fn marketplace_orders_post(
             object.insert("updatedAt".into(), json!(store::now_iso()));
         }
         crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
-        let _ = firestore
-            .set_document(
-                &firestore.document_path(store::SALES_COLLECTION, &row.id),
-                &data,
-            )
-            .await;
+        // Paid already: a bad sale-row id must not fail the response.
+        if let Ok(path) = firestore.document_path(store::SALES_COLLECTION, &row.id) {
+            let _ = firestore.set_document(&path, &data).await;
+        }
     }
     let sold: Vec<Value> = sale_rows.iter().map(|row| row.data.clone()).collect();
     crate::seller_api::log_order_paid(&state, &order_id, &sold).await;
@@ -524,12 +582,9 @@ pub async fn marketplace_orders_post(
         "createdAt": store::now_iso(),
         "paidAt": store::now_iso(),
     });
-    let _ = firestore
-        .set_document(
-            &firestore.document_path(store::ORDERS, &order_id),
-            &order_document,
-        )
-        .await;
+    if let Ok(path) = firestore.document_path(store::ORDERS, &order_id) {
+        let _ = firestore.set_document(&path, &order_document).await;
+    }
 
     if let Some(key) = &idem {
         let _ =
@@ -599,13 +654,15 @@ fn order_id_of(body: &Value) -> Result<String, ApiError> {
     if order_id.is_empty() {
         return Err(ApiError::bad_request("Missing order id."));
     }
+    crate::firestore::validate_client_id(&order_id)
+        .map_err(|_| ApiError::bad_request("Invalid order id."))?;
     Ok(order_id)
 }
 
 async fn load_order(state: &DomainState, order_id: &str) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
     firestore
-        .get_document(&firestore.document_path(store::ORDERS, order_id))
+        .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
         .ok_or_else(|| ApiError::not_found("Order not found."))
 }
@@ -652,7 +709,7 @@ async fn patch_order(state: &DomainState, order_id: &str, patch: Value) -> Resul
         object.insert("updatedAt".into(), json!(store::now_iso()));
     }
     firestore
-        .set_document(&firestore.document_path(store::ORDERS, order_id), &patch)
+        .set_document(&firestore.document_path(store::ORDERS, order_id)?, &patch)
         .await?;
     load_order(state, order_id).await
 }
@@ -897,7 +954,7 @@ pub async fn release_eur_reservation(
     extra_releasable: &[&str],
 ) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let mut claimed = None;
     for attempt in 0..5 {
         let transaction = firestore.begin_transaction().await?;
@@ -1195,7 +1252,7 @@ pub const CARDTRADER_STEPS: [&str; 2] = ["cardtrader_sync", "cardtrader_buy"];
 /// handed to their workers and reported as pending.
 pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let mut claimed = None;
     // Lease is claimed using a real transaction read, shared with webhook workers.
     for attempt in 0..5 {
@@ -1467,7 +1524,7 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
             data["soldAt"] = json!(state.now_iso());
             data["updatedAt"] = json!(state.now_iso());
             crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
-            let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id);
+            let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id)?;
             if firestore.set_document(&sale_path, &data).await.is_err() {
                 failed = true;
             }
@@ -1762,7 +1819,7 @@ pub async fn decrement_seller_ownership_for_sale(
     // A `scan:` source is looked up by its FULL id (`scan:{id}` is the doc id).
     if refunds::scan_ownership_doc_id(&line.source_listing_id).is_some() {
         let doc_key = line.source_listing_id.trim().to_string();
-        let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_key);
+        let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_key)?;
         if let Some(row) = firestore.get_document(&path).await? {
             if refunds::ownership_row_is_decrementable(&row, &line.seller_uid) {
                 found = Some((doc_key, row));
@@ -1799,7 +1856,7 @@ pub async fn decrement_seller_ownership_for_sale(
     }
     let current = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
     let next = refunds::ownership_quantity_after_sale(current, line.quantity);
-    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_id);
+    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_id)?;
     if next <= 0 {
         firestore.delete_document(&path).await?;
         return Ok(json!({
@@ -1825,7 +1882,7 @@ pub async fn decrement_seller_ownership_for_sale(
 async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc_id: &str) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id);
+    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id)?;
     for attempt in 0..5 {
         let transaction = firestore.begin_transaction().await?;
         let row = match firestore.get_document_in_transaction(&path, &transaction).await {
@@ -1914,7 +1971,7 @@ pub async fn send_seller_sale_notifications_for_paid_order(
     use crate::domain::notify;
     let firestore = state.firestore()?;
     let Some(order) = firestore
-        .get_document(&firestore.document_path(store::ORDERS, order_id))
+        .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
     else {
         return Ok(json!({
@@ -1962,7 +2019,7 @@ pub async fn send_seller_sale_notifications_for_paid_order(
             }
         };
         let marker_id = notify::notification_marker_id(order_id, &seller_uid);
-        let marker_path = firestore.document_path(notify::NOTIFICATION_COLLECTION, &marker_id);
+        let marker_path = firestore.document_path(notify::NOTIFICATION_COLLECTION, &marker_id)?;
 
         // Claim the marker in a transaction so a retry cannot email twice.
         let claimed = {
@@ -2092,7 +2149,7 @@ pub async fn release_seller_transfers(
 ) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let order = firestore
         .get_document(&path)
         .await?
@@ -2310,7 +2367,7 @@ async fn order_nft_shipping_request(
     for collection_item_id in &collection_item_ids {
         let item = firestore
             .get_document(
-                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id),
+                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id)?,
             )
             .await?;
         let item = item.ok_or_else(|| {
@@ -2365,7 +2422,7 @@ async fn order_nft_shipping_request(
             .await?;
         firestore
             .set_document(
-                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id),
+                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id)?,
                 &json!({
                     "physicalShippingStatus": "requested",
                     "physicalShippingRequestId": request_id,
@@ -2717,7 +2774,7 @@ async fn void_native_sales(
         };
         let _ = firestore
             .update_document(
-                &firestore.document_path(store::SALES_COLLECTION, id),
+                &firestore.document_path(store::SALES_COLLECTION, id)?,
                 &json!({ "voided": true, "voidReason": "seller_refunded" }),
                 Some(&["voided", "voidReason"]),
             )
@@ -2780,7 +2837,7 @@ pub async fn shipping_address_snapshot(
     address_id: &str,
 ) -> Result<(String, Value), ApiError> {
     let firestore = state.firestore()?;
-    let address_path = firestore.nested_path((store::USERS, uid), "shipping_addresses", address_id);
+    let address_path = firestore.nested_path((store::USERS, uid), "shipping_addresses", address_id)?;
     let address_doc = firestore
         .get_document(&address_path)
         .await?
@@ -2853,6 +2910,8 @@ pub async fn create_order_checkout_session(
             ApiError::bad_request("shippingAddressId required.").with_code("address_required")
         );
     }
+    crate::firestore::validate_client_id(&address_id)
+        .map_err(|_| ApiError::bad_request("Invalid shipping address id."))?;
     let (to_country, shipping_address_snapshot) =
         shipping_address_snapshot(&state, &claims.uid, &address_id).await?;
 
@@ -3052,7 +3111,7 @@ pub async fn create_order_checkout_session(
     state
         .firestore()?
         .set_document(
-            &state.firestore()?.document_path(store::ORDERS, &order_id),
+            &state.firestore()?.document_path(store::ORDERS, &order_id)?,
             &order_document,
         )
         .await?;

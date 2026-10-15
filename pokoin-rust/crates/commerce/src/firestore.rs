@@ -176,15 +176,26 @@ impl FirestoreClient {
         &self.account.project_id
     }
 
-    pub fn document_path(&self, collection: &str, id: &str) -> String {
-        format!("{}/{collection}/{id}", self.base)
+    /// REST URL of `{collection}/{id}`. The id is checked first: it is pasted
+    /// into the URL, so `../balances/{uid}` would otherwise reach any document.
+    pub fn document_path(&self, collection: &str, id: &str) -> Result<String, StoreError> {
+        validate_document_id(id)?;
+        Ok(format!("{}/{collection}/{id}", self.base))
     }
 
-    pub fn nested_path(&self, parent: (&str, &str), collection: &str, id: &str) -> String {
-        format!(
+    /// REST URL of `{parent.0}/{parent.1}/{collection}/{id}` (both ids checked).
+    pub fn nested_path(
+        &self,
+        parent: (&str, &str),
+        collection: &str,
+        id: &str,
+    ) -> Result<String, StoreError> {
+        validate_document_id(parent.1)?;
+        validate_document_id(id)?;
+        Ok(format!(
             "{}/{}/{}/{collection}/{id}",
             self.base, parent.0, parent.1
-        )
+        ))
     }
 
     pub fn collection_url(&self, collection: &str) -> String {
@@ -273,10 +284,24 @@ impl FirestoreClient {
         path: &str,
         transaction: &str,
     ) -> Result<Option<Value>, StoreError> {
+        let mut documents = self
+            .get_documents_in_transaction(&[path.to_string()], transaction)
+            .await?;
+        Ok(documents.pop().flatten())
+    }
+
+    /// Read several documents inside an open transaction in ONE `batchGet`;
+    /// the result is in `paths` order (`None` for a missing document).
+    pub async fn get_documents_in_transaction(
+        &self,
+        paths: &[String],
+        transaction: &str,
+    ) -> Result<Vec<Option<Value>>, StoreError> {
+        let names: Vec<String> = paths.iter().map(|path| resource_name(path)).collect();
         let url = format!("{}/../documents:batchGet", self.base);
         let request = self.authorized(self.http.post(&url)).await?;
         let response = request
-            .json(&json!({ "documents": [resource_name(path)], "transaction": transaction }))
+            .json(&json!({ "documents": names, "transaction": transaction }))
             .timeout(Duration::from_secs(10))
             .send()
             .await
@@ -291,14 +316,19 @@ impl FirestoreClient {
                 "Firestore read failed ({status}): {body}"
             )));
         }
+        // batchGet does not promise request order: match on the document key.
+        let mut out: Vec<Option<Value>> = vec![None; names.len()];
         let empty = Vec::new();
-        let entries = body.as_array().unwrap_or(&empty);
-        for entry in entries {
-            if let Some(found) = entry.get("found") {
-                return Ok(Some(document_to_value(found)));
+        for entry in body.as_array().unwrap_or(&empty) {
+            let Some(found) = entry.get("found") else {
+                continue;
+            };
+            let key = document_key(found.get("name").and_then(Value::as_str).unwrap_or_default());
+            if let Some(index) = names.iter().position(|name| document_key(name) == key) {
+                out[index] = Some(document_to_value(found));
             }
         }
-        Ok(None)
+        Ok(out)
     }
 
     /// `list_documents` (whole collection, optional page size).
@@ -362,9 +392,12 @@ impl FirestoreClient {
 
     /// Create a document (`createDocument`), failing on an existing id.
     pub async fn create_document(&self, collection: &str, id: &str, value: &Value) -> Result<Value, StoreError> {
-        let url = format!("{}?documentId={id}", self.collection_url(collection));
-        let request = self.authorized(self.http.post(&url)).await?;
+        validate_document_id(id)?;
+        let request = self
+            .authorized(self.http.post(self.collection_url(collection)))
+            .await?;
         let response = request
+            .query(&[("documentId", id)])
             .json(&json!({ "fields": value_to_fields(value) }))
             .timeout(Duration::from_secs(10))
             .send()
@@ -393,9 +426,11 @@ impl FirestoreClient {
         id: &str,
         value: &Value,
     ) -> Result<Value, StoreError> {
-        let url = format!("{parent}/{collection}?documentId={id}");
+        validate_document_id(id)?;
+        let url = format!("{parent}/{collection}");
         let request = self.authorized(self.http.post(&url)).await?;
         let response = request
+            .query(&[("documentId", id)])
             .json(&json!({ "fields": value_to_fields(value) }))
             .timeout(Duration::from_secs(10))
             .send()
@@ -538,34 +573,54 @@ impl FirestoreClient {
     }
 
     /// Commit a set of writes (optionally inside a transaction).
+    ///
+    /// A failed `currentDocument` precondition (a `Create` of an existing
+    /// document) is [`StoreError::Conflict`].
     pub async fn commit(
         &self,
         transaction: Option<&str>,
         writes: &[FirestoreWrite],
     ) -> Result<Value, StoreError> {
+        self.commit_attempt(transaction, writes)
+            .await
+            .map_err(CommitFailure::into_error)
+    }
+
+    async fn commit_attempt(
+        &self,
+        transaction: Option<&str>,
+        writes: &[FirestoreWrite],
+    ) -> Result<Value, CommitFailure> {
         let url = format!("{}/../documents:commit", self.base);
         let body = commit_body(transaction, writes);
-        let request = self.authorized(self.http.post(&url)).await?;
+        let request = self
+            .authorized(self.http.post(&url))
+            .await
+            .map_err(CommitFailure::Failed)?;
         let response = request
             .json(&body)
             .timeout(Duration::from_secs(15))
             .send()
             .await
-            .map_err(|error| StoreError::Cache(format!("Firestore commit failed: {error}")))?;
+            .map_err(|error| {
+                CommitFailure::Failed(StoreError::Cache(format!("Firestore commit failed: {error}")))
+            })?;
         let status = response.status();
-        let payload: Value = response
-            .json()
-            .await
-            .map_err(|error| StoreError::Cache(format!("Firestore commit failed: {error}")))?;
+        let payload: Value = response.json().await.map_err(|error| {
+            CommitFailure::Failed(StoreError::Cache(format!("Firestore commit failed: {error}")))
+        })?;
         if !status.is_success() {
-            return Err(StoreError::Cache(format!(
-                "Firestore commit failed ({status}): {payload}"
-            )));
+            return Err(classify_commit_error(status, &payload));
         }
         Ok(payload)
     }
 
-    /// Run a read-then-write transaction with one retry on a Firestore abort.
+    /// Run a read-then-write transaction.
+    ///
+    /// Only a Firestore `ABORTED` commit (contention: nothing was written) is
+    /// retried, once. A timeout or transport error may hide a commit that did
+    /// land, so it is returned instead of re-running `body` against balances
+    /// that already moved. A body that returns no writes rolls back.
     pub async fn run_transaction<F>(&self, mut body: F) -> Result<Value, StoreError>
     where
         F: FnMut(String) -> futures_util::future::BoxFuture<'static, Result<Vec<FirestoreWrite>, StoreError>>,
@@ -579,16 +634,99 @@ impl FirestoreClient {
                     return Err(error);
                 }
             };
-            match self.commit(Some(&transaction), &writes).await {
+            if writes.is_empty() {
+                self.rollback(&transaction).await;
+                return Ok(json!({}));
+            }
+            match self.commit_attempt(Some(&transaction), &writes).await {
                 Ok(result) => return Ok(result),
-                Err(error) if attempt == 0 => {
+                Err(CommitFailure::Aborted(error)) if attempt == 0 => {
                     tracing::warn!(%error, "Firestore transaction aborted; retrying once");
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(failure) => return Err(failure.into_error()),
             }
         }
         Err(StoreError::Cache("Firestore transaction retry exhausted".into()))
+    }
+}
+
+/// Why a commit failed: only `Aborted` is safe to retry.
+#[derive(Debug)]
+enum CommitFailure {
+    Aborted(StoreError),
+    Failed(StoreError),
+}
+
+impl CommitFailure {
+    fn into_error(self) -> StoreError {
+        match self {
+            Self::Aborted(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
+fn classify_commit_error(status: reqwest::StatusCode, payload: &Value) -> CommitFailure {
+    let code = payload
+        .pointer("/error/status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match code {
+        "ABORTED" => CommitFailure::Aborted(StoreError::Cache(format!(
+            "Firestore transaction aborted ({status}): {payload}"
+        ))),
+        "ALREADY_EXISTS" | "FAILED_PRECONDITION" => CommitFailure::Failed(StoreError::Conflict(
+            format!("Firestore commit precondition failed ({status}): {payload}"),
+        )),
+        _ => CommitFailure::Failed(StoreError::Cache(format!(
+            "Firestore commit failed ({status}): {payload}"
+        ))),
+    }
+}
+
+/// Longest document id accepted (the real ids are far shorter).
+pub const MAX_DOCUMENT_ID_LEN: usize = 512;
+
+/// Reject a document id that would change the Firestore path it is pasted
+/// into: `/` and `\` split segments, `.`/`..` (also `%2e%2e`) are resolved by
+/// the URL parser, `?`/`#` end the path, and `__name__` ids are reserved.
+/// Spaces, Unicode, `:`, `.` and `'` stay valid: usernames and `scan:` ids
+/// use them.
+pub fn validate_document_id(id: &str) -> Result<(), StoreError> {
+    let invalid = id.is_empty()
+        || id.len() > MAX_DOCUMENT_ID_LEN
+        || id == "."
+        || id == ".."
+        || (id.len() >= 4 && id.starts_with("__") && id.ends_with("__"))
+        || id
+            .chars()
+            .any(|c| matches!(c, '/' | '\\' | '%' | '?' | '#') || c.is_control());
+    if invalid {
+        Err(StoreError::Invalid("Invalid document id.".into()))
+    } else {
+        Ok(())
+    }
+}
+
+/// Strict check for ids a client sends back (addresses, orders, requests,
+/// quotes): those are uuids, Firestore auto ids or `req_{uid}_{token}` keys.
+pub fn validate_client_id(id: &str) -> Result<(), StoreError> {
+    let valid = (1..=256).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(StoreError::Invalid("Invalid id.".into()))
+    }
+}
+
+/// `collection/id/...` part of a resource name or REST URL.
+fn document_key(name: &str) -> &str {
+    match name.find("/documents/") {
+        Some(at) => &name[at + "/documents/".len()..],
+        None => name.trim_start_matches('/'),
     }
 }
 
@@ -1100,14 +1238,96 @@ mod tests {
             "https://example.test/v1/projects/p/databases/(default)/documents",
         );
         assert_eq!(
-            client.document_path("balances", "uid-1"),
+            client.document_path("balances", "uid-1").unwrap(),
             "https://example.test/v1/projects/p/databases/(default)/documents/balances/uid-1"
         );
         assert_eq!(
-            client.nested_path(("users", "uid-1"), "shipping_addresses", "addr-1"),
+            client.nested_path(("users", "uid-1"), "shipping_addresses", "addr-1").unwrap(),
             "https://example.test/v1/projects/p/databases/(default)/documents/users/uid-1/shipping_addresses/addr-1"
         );
         assert_eq!(client.project_id(), "pokoin-test");
+    }
+
+    #[test]
+    fn document_ids_that_change_the_path_are_rejected() {
+        let client = FirestoreClient::with_base(
+            reqwest::Client::new(),
+            account(),
+            "https://example.test/v1/projects/p/databases/(default)/documents",
+        );
+        for id in [
+            "",
+            ".",
+            "..",
+            "../../../balances/victim",
+            "..%2F..%2Fbalances%2Fvictim",
+            "%2e%2e",
+            "%2E%2E",
+            ".%2e",
+            "a/b",
+            "/balances",
+            "a\\..\\b",
+            "a?updateMask.fieldPaths=x",
+            "a#frag",
+            "line\nbreak",
+            "__name__",
+        ] {
+            assert!(
+                matches!(client.document_path("orders", id), Err(StoreError::Invalid(_))),
+                "document_path accepted {id:?}"
+            );
+            assert!(
+                client.nested_path(("users", "uid-1"), "shipping_addresses", id).is_err(),
+                "nested_path accepted {id:?}"
+            );
+            assert!(
+                client.nested_path(("users", id), "shipping_addresses", "addr-1").is_err(),
+                "nested_path accepted parent {id:?}"
+            );
+        }
+        // Real ids keep working: uuids, Firebase uids, idempotency hashes,
+        // tx hashes, `scan:` ownership ids and usernames with spaces/Unicode.
+        for id in [
+            "0b0e7a3e-1c2d-4f5a-9b8c-7d6e5f4a3b2c",
+            "Xq3kT9zL1mN0pR7sV2wY4aB6cD8e",
+            "idem_00112233445566778899aabbccddeeff",
+            "0x5c1f0e0d9b6a4c3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e",
+            "scan:abc123",
+            "red shakkio",
+            "zoë.o'neil",
+            "cs_test_a1B2c3",
+        ] {
+            assert!(client.document_path("x", id).is_ok(), "rejected {id:?}");
+        }
+    }
+
+    #[test]
+    fn client_ids_are_strict() {
+        for id in ["0b0e7a3e-1c2d-4f5a-9b8c-7d6e5f4a3b2c", "req_uid1_tok1", "AbC09"] {
+            assert!(validate_client_id(id).is_ok(), "rejected {id:?}");
+        }
+        for id in ["", "..", "a.b", "a/b", "%2e%2e", "a b", "scan:x", &"a".repeat(257)] {
+            assert!(validate_client_id(id).is_err(), "accepted {id:?}");
+        }
+    }
+
+    #[test]
+    fn commit_errors_classify_aborts_and_preconditions() {
+        let aborted = classify_commit_error(
+            reqwest::StatusCode::CONFLICT,
+            &json!({ "error": { "status": "ABORTED" } }),
+        );
+        assert!(matches!(aborted, CommitFailure::Aborted(_)));
+        let exists = classify_commit_error(
+            reqwest::StatusCode::CONFLICT,
+            &json!({ "error": { "status": "ALREADY_EXISTS" } }),
+        );
+        assert!(matches!(exists, CommitFailure::Failed(StoreError::Conflict(_))));
+        let other = classify_commit_error(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            &json!({ "error": { "status": "UNAVAILABLE" } }),
+        );
+        assert!(matches!(other, CommitFailure::Failed(StoreError::Cache(_))));
     }
 
     #[test]
