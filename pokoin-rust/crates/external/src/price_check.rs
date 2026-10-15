@@ -191,16 +191,21 @@ pub fn pro_floor_sql() -> String {
     )
 }
 
+/// Blueprints per pro-floor query. A whole shop at once (~1,000 blueprints,
+/// ~300k offers) ran past the Pi replica's 30 s statement timeout.
+pub const PRO_FLOOR_CHUNK: usize = 60;
+
 /// Pro-floor groups per CardTrader blueprint id: `{condition, language,
 /// reverse, firstEdition, minPkn, offers}`.
 pub async fn pro_floors(db: &DbPools, ct_ids: &[i64], exclude_ct_sellers: &[String]) -> ApiResult<Map<String, Value>> {
     let mut groups: Map<String, Value> = Map::new();
-    if ct_ids.is_empty() {
-        return Ok(groups);
+    let mut rows = Vec::new();
+    for chunk in ct_ids.chunks(PRO_FLOOR_CHUNK) {
+        rows.extend(
+            db.query("pokemon", &pro_floor_sql(), &[json!(chunk), json!(exclude_ct_sellers)])
+                .await?,
+        );
     }
-    let rows = db
-        .query("pokemon", &pro_floor_sql(), &[json!(ct_ids), json!(exclude_ct_sellers)])
-        .await?;
     for row in &rows {
         let ct_id = row.get("ct_id").map(text_of).unwrap_or_default();
         let group = json!({
@@ -543,6 +548,7 @@ mod tests {
         let groups = vec![json!({"condition": "NM", "language": "IT", "minPkn": "22.0000"})];
         assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, false).1, Some(22.0));
         assert!(pro_floor_sql().contains("::float8 as min_pkn"));
+        assert!(PRO_FLOOR_CHUNK <= 100, "one query stays well inside the replica's 30 s statement timeout");
     }
 
     #[test]
