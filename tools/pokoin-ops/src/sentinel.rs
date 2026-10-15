@@ -359,13 +359,19 @@ pub fn eval_slots(rows: &[Vec<String>], warn_gb: u64) -> Result<Vec<Finding>> {
     Ok(out)
 }
 
+/// A Postgres boolean as psql prints it: `t`/`f` for a bare bool, `true`/`false`
+/// once the query casts it with `::text` (as the replica and archiver queries do).
+fn pg_true(cell: &str) -> bool {
+    matches!(cell, "t" | "true")
+}
+
 /// Row: in_recovery, wal receiver status, replay delay seconds.
 pub fn eval_replica(row: &[String], lag_max: f64) -> Result<Vec<Finding>> {
     if row.len() < 3 {
         return Err(anyhow!("short replica row {row:?}"));
     }
     let mut out = Vec::new();
-    out.push(if row[0] == "t" {
+    out.push(if pg_true(&row[0]) {
         Finding::new("replica.recovery", Sev::Ok, "in recovery", 1)
     } else {
         Finding::new("replica.recovery", Sev::Crit, "the Pi replica is no longer in recovery (promoted?)", 1)
@@ -395,7 +401,7 @@ pub fn eval_archiver(row: &[String], ready: Option<(usize, u64)>, max_age_s: u64
     if row[0] == "off" {
         return Ok(vec![]);
     }
-    let mut out = vec![if row[4] == "t" {
+    let mut out = vec![if pg_true(&row[4]) {
         Finding::new("archiver.failing", Sev::Crit, format!("archive_command is failing (last failed {}, {} failures total)", row[3], row[2]), 2)
     } else {
         Finding::new("archiver.failing", Sev::Ok, format!("{} archived", row[1]), 2)
@@ -736,6 +742,13 @@ mod tests {
         assert_eq!(rep[1].sev, Sev::Crit);
         let rep = eval_replica(&r(&["f", "none", "0"]), 60.0).unwrap();
         assert_eq!(rep[0].sev, Sev::Crit);
+        // The live queries cast with ::text, so Postgres answers true/false, not t/f.
+        let rep = eval_replica(&r(&["true", "streaming", "0"]), 60.0).unwrap();
+        assert!(rep.iter().all(|f| f.sev == Sev::Ok));
+        let rep = eval_replica(&r(&["false", "streaming", "0"]), 60.0).unwrap();
+        assert_eq!(rep[0].sev, Sev::Crit);
+        assert_eq!(eval_archiver(&r(&["always", "10", "1", "0000000100000095000000AA", "true"]), None, 900).unwrap()[0].sev, Sev::Crit);
+        assert_eq!(eval_archiver(&r(&["always", "10", "1", "x", "false"]), None, 900).unwrap()[0].sev, Sev::Ok);
 
         assert!(eval_archiver(&r(&["off", "0", "0", "", "f"]), Some((50, 9999)), 900).unwrap().is_empty());
         assert_eq!(eval_archiver(&r(&["always", "10", "1", "0000000100000095000000AA", "t"]), None, 900).unwrap()[0].sev, Sev::Crit);
