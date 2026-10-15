@@ -8,8 +8,10 @@
 //!
 //! Differences:
 //! - books are stored as `<game>-<expansion>.ctb` (crates/ctbook: lossless
-//!   columnar JSON + brotli, ~5x smaller than the old `.json.gz`); a resumed
-//!   run still counts `.json.gz` books the Python dump left behind;
+//!   columnar JSON + brotli, ~5x smaller than the old `.json.gz`), with the
+//!   night's sellers (`user` objects) once in `listing-books/sellers.jsonl`
+//!   instead of in every book (another ~16% smaller); a resumed run still
+//!   counts `.json.gz` books the Python dump left behind;
 //! - up to `POKOIN_DUMP_INFLIGHT` (3) requests are in flight and books are
 //!   parsed and encoded on `POKOIN_DUMP_ENCODERS` (3) threads, so CardTrader's
 //!   latency, the ssh transfer and the encoding overlap instead of adding up;
@@ -24,7 +26,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
@@ -253,7 +255,7 @@ fn read_reply(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
 }
 
 /// Parse one book reply and store it as `.ctb`.
-fn store(line: Vec<u8>, dest: &Path, quality: u32) -> Result<ctbook::Counts, String> {
+fn store(line: Vec<u8>, dest: &Path, quality: u32, sellers: &RwLock<ctbook::Sellers>) -> Result<ctbook::Counts, String> {
     let message: Value = serde_json::from_slice(&line).map_err(|_| UNREADABLE.to_string())?;
     drop(line);
     let Value::Object(mut message) = message else {
@@ -269,7 +271,8 @@ fn store(line: Vec<u8>, dest: &Path, quality: u32) -> Result<ctbook::Counts, Str
     if !data.is_object() {
         return Err("ValueError: Expected listing book".into());
     }
-    let file = ctbook::write(&data, quality).map_err(|error| format!("ctbook: {error}"))?;
+    // The sellers the book references are synced to disk before the book is renamed into place.
+    let file = ctbook::write_with_sellers(&data, quality, sellers).map_err(|error| format!("ctbook: {error}"))?;
     ctbook::write_atomic(dest, &file).map_err(|error| format!("OSError: {error}"))?;
     Ok(ctbook::counts(&data))
 }
@@ -317,6 +320,9 @@ fn run() -> Result<i32, String> {
     }));
     let out = root.join("listing-books");
     std::fs::create_dir_all(&out).map_err(|error| format!("{}: {error}", out.display()))?;
+    let sellers = Arc::new(RwLock::new(
+        ctbook::Sellers::open(&out.join(ctbook::SELLERS_FILE)).map_err(|error| error.to_string())?,
+    ));
 
     let mut targets = Vec::new();
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&root)
@@ -374,7 +380,7 @@ fn run() -> Result<i32, String> {
     report.insert("maxSeconds".into(), json!(max_seconds));
     report.insert("newPrintingExpansions".into(), priority.len().into());
     report.insert("newPrintingExpansionsCompleted".into(), 0.into());
-    report.insert("bookFormat".into(), "ctb1".into());
+    report.insert("bookFormat".into(), "ctb2".into());
     report.insert("inFlight".into(), in_flight_max.into());
     let mut status = Status {
         path: root.join("listing-dump-status.json"),
@@ -441,12 +447,13 @@ fn run() -> Result<i32, String> {
     for _ in 0..encoders {
         let job_inbox = Arc::clone(&job_inbox);
         let events = events.clone();
+        let sellers = Arc::clone(&sellers);
         std::thread::spawn(move || loop {
             let job = match job_inbox.lock().unwrap().recv() {
                 Ok(job) => job,
                 Err(_) => return,
             };
-            let result = store(job.line, &job.dest, quality);
+            let result = store(job.line, &job.dest, quality, &sellers);
             if events.send(Event::Stored { index: job.index, result }).is_err() {
                 return;
             }
@@ -617,6 +624,10 @@ fn run() -> Result<i32, String> {
     }
     drop(bridge_in);
     stop_bridge(bridge, Duration::from_secs(if stopped { 30 } else { 180 }));
+    status.report.insert(
+        "sellerRecords".into(),
+        sellers.read().map(|sellers| sellers.len()).unwrap_or(0).into(),
+    );
     status.report.insert("finishedAt".into(), now_iso().into());
     status.write();
     // 75 (EX_TEMPFAIL) = stopped at the deadline; 1 = errors; 0 = every book collected.

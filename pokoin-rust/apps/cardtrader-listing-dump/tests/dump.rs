@@ -107,7 +107,35 @@ impl Drop for Run {
 }
 
 fn read_ctb(path: &Path) -> Value {
-    ctbook::read(&std::fs::read(path).unwrap()).unwrap()
+    let bytes = std::fs::read(path).unwrap();
+    if ctbook::read_header(&bytes).unwrap().needs_sellers {
+        let sellers = ctbook::Sellers::load(&path.parent().unwrap().join(ctbook::SELLERS_FILE)).unwrap();
+        ctbook::read_with_sellers(&bytes, &sellers).unwrap()
+    } else {
+        ctbook::read(&bytes).unwrap()
+    }
+}
+
+#[test]
+fn sellers_go_to_one_dictionary_per_night() {
+    let run = Run::new("sellers");
+    let shop = json!({"id": 7, "username": "shop", "user_type": "pro"});
+    let books = json!({
+        "101": {"book": {"1": [{"id": 1, "user": shop}, {"id": 2, "user": {"id": 8, "username": "b"}}]}},
+        "102": {"book": {"2": [{"id": 3, "user": shop}]}},
+        "201": {"book": {"3": [{"id": 4, "user": null}]}}
+    });
+    let (code, status, _) = run.run(books.clone(), &[]);
+    assert_eq!(code, 0, "{status}");
+    assert_eq!(status["bookFormat"], "ctb2");
+    assert_eq!(status["sellerRecords"], 2, "the shared seller is stored once");
+    let dictionary = std::fs::read_to_string(run.books().join(ctbook::SELLERS_FILE)).unwrap();
+    assert_eq!(dictionary.lines().count(), 2);
+    for (file, id) in [("1-101.ctb", "101"), ("1-102.ctb", "102"), ("5-201.ctb", "201")] {
+        assert_eq!(read_ctb(&run.books().join(file)), books[id]["book"], "{file}");
+    }
+    let bytes = std::fs::read(run.books().join("1-102.ctb")).unwrap();
+    assert!(ctbook::read(&bytes).is_err(), "a book with sellers needs the dictionary");
 }
 
 #[test]
