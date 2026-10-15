@@ -537,7 +537,6 @@ export default function ListingForm(props) {
             disabled={!ready() || (!signedIn() && ready())}
             busy={saving()}
             busyLabel="Listing…"
-            pricePkn={listedPkn()}
             onSubmit={(targets) => {
               if (!signedIn()) {
                 navigate(authFrom(props.fromPath));

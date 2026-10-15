@@ -1564,12 +1564,6 @@
   text-decoration: none;
 }
 
-.inventory-targets-eur {
-  font-size: 0.72rem;
-  color: var(--muted);
-  width: 100%;
-}
-
 /* Desk list form: targets sit on their own row so chips never crush. */
 .sell-targets-row {
   display: flex;
