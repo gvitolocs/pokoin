@@ -4114,11 +4114,23 @@ a.era-link:focus-visible {
 .shop-split {
   grid-area: shop;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 1rem;
   min-width: 0;
 }
 .shop-split > .shop-panel { min-width: 0; }
+/* The Vault is tighter than the Shop: no seller column, the fields close together. */
+.vault-panel .shop-row .shop-seller { display: none; }
+@media (min-width: 721px) {
+  .shop-panel.vault-panel .shop-row:not(.is-profile) {
+    grid-template-columns: auto minmax(4.5rem, auto) minmax(1.5rem, auto) 1fr;
+    column-gap: 0.85rem;
+  }
+  .shop-panel.vault-panel .shop-row:not(.is-profile) .shop-row-actions,
+  .shop-panel.vault-panel .shop-row:not(.is-profile) .shop-owner-actions {
+    grid-column: 4;
+  }
+}
 @media (max-width: 1100px) {
   .shop-split { grid-template-columns: minmax(0, 1fr); }
 }
