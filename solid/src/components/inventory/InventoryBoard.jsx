@@ -12,7 +12,7 @@ import {
   sortInventoryRows,
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
-import { inventoryMarketLabel, inventoryMarketValue } from '@market/inventory-price.js';
+import { inventoryMarketLabel, inventoryMarketValue, priceCheckItem } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import { getBearer } from '../../stores/auth.js';
 import RowThumb from './RowThumb.jsx';
@@ -142,11 +142,7 @@ export default function InventoryBoard(props) {
         pricesKey = '';
         return undefined;
       }
-      const items = input.rows.slice(0, 100).map((row) => ({
-        cardId: String(row?.cardId || row?.card_id || ''),
-        condition: String(row?.condition || 'NM').toUpperCase(),
-        language: String(row?.language || '').toUpperCase(),
-      })).filter((item) => /^\d+$/.test(item.cardId));
+      const items = input.rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
       if (!items.length) return undefined;
       const key = `${input.source}|${items.map((item) => item.cardId).join(',')}`;
       if (pricesKey === key) return undefined;

@@ -82,9 +82,45 @@ pub struct PriceItem {
     pub card_id: String,
     pub condition: String,
     pub language: String,
+    pub reverse: bool,
+    pub first_edition: bool,
 }
 
-/// `parseItems` — `"633380:NM:IT,713648"` → items (≤ 100, de-duped).
+/// A listing's condition as the pricer's CardTrader condition key. Pokoin
+/// stores NM, LP, SP, MP, HP, PL, PO and Poor; CardTrader groups are NM, SP
+/// (Slightly Played), MP, PL (Played) and Poor. Before this, LP, HP and PO
+/// matched no group and were priced from offers of any condition. The web
+/// mirrors it in `pricerCondition` (market/src/inventory-price.js).
+pub fn condition_key(raw: &str) -> String {
+    match raw.trim().to_uppercase().as_str() {
+        "" => String::new(),
+        "M" | "MT" | "MINT" | "NM" | "NEAR MINT" => "NM".into(),
+        "SP" | "LP" | "EX" | "EXCELLENT" | "SLIGHTLY PLAYED" | "LIGHTLY PLAYED" => "SP".into(),
+        "MP" | "GD" | "GOOD" | "MODERATELY PLAYED" => "MP".into(),
+        "PL" | "HP" | "PLD" | "PLAYED" | "HEAVILY PLAYED" => "PL".into(),
+        "PO" | "POOR" | "DMG" | "DAMAGED" => "Poor".into(),
+        other => other.to_string(),
+    }
+}
+
+/// The key a comp is returned under besides the bare card id:
+/// `card:CONDITION:LANGUAGE:FLAGS` (flags `R` reverse, `F` first edition), so
+/// a plain and a reverse copy of one card never share a comp. The web builds
+/// the same key (`priceCheckKey` in market/src/inventory-price.js).
+pub fn price_check_key(item: &PriceItem) -> String {
+    format!(
+        "{}:{}:{}:{}{}",
+        item.card_id,
+        item.condition,
+        item.language,
+        if item.reverse { "R" } else { "" },
+        if item.first_edition { "F" } else { "" },
+    )
+}
+
+/// `parseItems` — `"633380:NM:IT,713648,633380:NM:IT:RF"` → items (≤ 100,
+/// de-duped). The optional fourth part holds finish flags: `R` reverse holo,
+/// `F` first edition.
 pub fn parse_items(raw: &str) -> Vec<PriceItem> {
     let mut items = Vec::new();
     let mut seen: Vec<String> = Vec::new();
@@ -95,8 +131,9 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
         }
         let mut parts = piece.split(':');
         let raw_id = parts.next().unwrap_or("").trim();
-        let condition = parts.next().unwrap_or("").trim().to_uppercase();
+        let condition = condition_key(parts.next().unwrap_or(""));
         let language = parts.next().unwrap_or("").trim().to_uppercase();
+        let flags = parts.next().unwrap_or("").trim().to_uppercase();
         let card_id = raw_id.trim_start_matches('0').to_string();
         let valid = !card_id.is_empty()
             && card_id.len() <= 18
@@ -107,7 +144,13 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
             continue;
         }
         seen.push(upper);
-        items.push(PriceItem { card_id, condition, language });
+        items.push(PriceItem {
+            card_id,
+            condition,
+            language,
+            reverse: flags.contains('R'),
+            first_edition: flags.contains('F'),
+        });
         if items.len() >= MAX_ITEMS {
             break;
         }
@@ -115,8 +158,75 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
     items
 }
 
-/// `pickMatchedCt` — cheapest group overall + cheapest matching group.
-pub fn pick_matched_ct(groups: &[Value], condition: &str, language: &str) -> (Option<f64>, Option<f64>) {
+/// Pokoin's CardTrader reference price: the cheapest current offer from a
+/// professional (`pro`) CardTrader seller of the same printing, grouped by
+/// condition, language, reverse and first edition. Private sellers' one-off
+/// asks, offers of sellers on vacation and offers no dump saw for 3 days do
+/// not count. `$2` lists CardTrader seller ids to leave out (a seller's own
+/// offers when pricing that seller).
+pub fn pro_floor_sql() -> String {
+    format!(
+        "select
+           coalesce(blueprint_id, cardtrader_blueprint_id) as ct_id,
+           {CONDITION_KEY_SQL} as condition_key,
+           {LANGUAGE_KEY_SQL} as language_key,
+           coalesce(properties->>'pokemon_reverse', '') = 'true' as reverse,
+           (coalesce(properties->>'first_edition', '') = 'true' or coalesce(properties->>'pokemon_first_edition', '') = 'true') as first_edition,
+           min(public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency)) as min_pkn,
+           count(*)::int as offers
+         from public.cardtrader_market_listing_snapshots as offer
+         where coalesce(blueprint_id, cardtrader_blueprint_id) = any($1::bigint[])
+           and quantity > 0
+           and seller_type = 'pro'
+           and last_seen_at >= now() - interval '3 days'
+           and not (coalesce(seller_account_id, '') = any($2::text[]))
+           and not exists (
+             select 1 from public.cardtrader_seller_vacation as vacation
+             where vacation.provider = 'cardtrader'
+               and vacation.seller_account_id = offer.seller_account_id
+               and vacation.on_vacation
+           )
+           and public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency) > 0
+         group by 1, 2, 3, 4, 5"
+    )
+}
+
+/// Pro-floor groups per CardTrader blueprint id: `{condition, language,
+/// reverse, firstEdition, minPkn, offers}`.
+pub async fn pro_floors(db: &DbPools, ct_ids: &[i64], exclude_ct_sellers: &[String]) -> ApiResult<Map<String, Value>> {
+    let mut groups: Map<String, Value> = Map::new();
+    if ct_ids.is_empty() {
+        return Ok(groups);
+    }
+    let rows = db
+        .query("pokemon", &pro_floor_sql(), &[json!(ct_ids), json!(exclude_ct_sellers)])
+        .await?;
+    for row in &rows {
+        let ct_id = row.get("ct_id").map(text_of).unwrap_or_default();
+        let group = json!({
+            "condition": row.get("condition_key").and_then(Value::as_str).unwrap_or(""),
+            "language": row.get("language_key").and_then(Value::as_str).unwrap_or(""),
+            "reverse": row.get("reverse") == Some(&Value::Bool(true)),
+            "firstEdition": row.get("first_edition") == Some(&Value::Bool(true)),
+            "minPkn": row.get("min_pkn").and_then(Value::as_f64).unwrap_or(0.0),
+            "offers": row.get("offers").and_then(Value::as_i64).unwrap_or(0),
+        });
+        if let Some(list) = groups.entry(ct_id).or_insert_with(|| json!([])).as_array_mut() {
+            list.push(group);
+        }
+    }
+    Ok(groups)
+}
+
+/// `pickMatchedCt` — cheapest group overall + cheapest group of the same
+/// condition, language and finishes (reverse, first edition).
+pub fn pick_matched_ct(
+    groups: &[Value],
+    condition: &str,
+    language: &str,
+    reverse: bool,
+    first_edition: bool,
+) -> (Option<f64>, Option<f64>) {
     if groups.is_empty() {
         return (None, None);
     }
@@ -159,7 +269,9 @@ pub fn pick_matched_ct(groups: &[Value], condition: &str, language: &str) -> (Op
             .as_ref()
             .map(|set| set.iter().any(|entry| *entry == group_language) || group_language == language.to_lowercase())
             .unwrap_or(true);
-        if cond_ok && lang_ok && min_pkn < matched {
+        let finish_ok = (group.get("reverse") == Some(&Value::Bool(true))) == reverse
+            && (group.get("firstEdition") == Some(&Value::Bool(true))) == first_edition;
+        if cond_ok && lang_ok && finish_ok && min_pkn < matched {
             matched = min_pkn;
         }
     }
@@ -279,19 +391,9 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
         .query("pokemon", pokoin_sql, &[json!(ids), json!(exclude_seller_uid)])
         .await?;
 
-    let ct_sql = format!(
-        "select
-           coalesce(blueprint_id, cardtrader_blueprint_id) as ct_id,
-           {CONDITION_KEY_SQL} as condition_key,
-           {LANGUAGE_KEY_SQL} as language_key,
-           min(public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency)) as min_pkn
-         from public.cardtrader_market_listing_snapshots
-         where coalesce(blueprint_id, cardtrader_blueprint_id) = any($1::bigint[])
-           and quantity > 0
-           and public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency) > 0
-         group by 1, 2, 3"
-    );
-    let ct_rows = db.query("pokemon", &ct_sql, &[json!(ct_ids)]).await?;
+    // Professional sellers only, same finishes: private one-off asks made
+    // every comp look too cheap.
+    let ct_groups = pro_floors(db, &ct_ids, &[]).await?;
 
     let sold_sql = "
         select blueprint_id,
@@ -309,20 +411,6 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
         .await
         .unwrap_or_default();
 
-    let mut ct_groups: Map<String, Value> = Map::new();
-    for row in &ct_rows {
-        let ct_id = row.get("ct_id").map(text_of).unwrap_or_default();
-        let group = json!({
-            "condition": row.get("condition_key").and_then(Value::as_str).unwrap_or(""),
-            "language": row.get("language_key").and_then(Value::as_str).unwrap_or(""),
-            "minPkn": row.get("min_pkn").and_then(Value::as_f64).unwrap_or(0.0),
-        });
-        let entry = ct_groups.entry(ct_id).or_insert_with(|| json!([]));
-        if let Some(list) = entry.as_array_mut() {
-            list.push(group);
-        }
-    }
-
     let mut prices = Map::new();
     for item in items {
         let ct_id = blueprint_by_card
@@ -335,7 +423,7 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let (ct_cheapest, ct_matched) = pick_matched_ct(&groups, &item.condition, &item.language);
+        let (ct_cheapest, ct_matched) = pick_matched_ct(&groups, &item.condition, &item.language, item.reverse, item.first_edition);
         let pokoin_cheapest = pokoin_rows
             .iter()
             .find(|row| row.get("card_id").map(text_of).as_deref() == Some(item.card_id.as_str()))
@@ -356,18 +444,18 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
                     .collect()
             })
             .unwrap_or_default();
-        prices.insert(
-            item.card_id.clone(),
-            json!({
+        let comp = json!({
                 "pokoinCheapestPkn": pokoin_cheapest,
                 "ctCheapestPkn": ct_cheapest,
                 "ctMatchedPkn": ct_matched,
+                "ctBasis": "pro",
                 "soldMedianPkn": sold_median,
                 "cardtraderListed": cardtrader_source(&listed_days, None),
                 "tcgplayer": [],
                 "tcgplayerStatus": "unconfigured",
-            }),
-        );
+            });
+        prices.insert(price_check_key(item), comp.clone());
+        prices.insert(item.card_id.clone(), comp);
     }
     Ok(Value::Object(prices))
 }
@@ -400,6 +488,16 @@ mod tests {
         assert_eq!(items[1].condition, "");
         // leading zeros are stripped; de-dup keys the raw chunk
         assert_eq!(items[2].card_id, "713648");
+        assert!(!items[0].reverse && !items[0].first_edition);
+        let flagged = parse_items("633380:NM:IT:R,633380:NM:IT:RF");
+        assert!(flagged[0].reverse && !flagged[0].first_edition);
+        assert!(flagged[1].reverse && flagged[1].first_edition);
+        assert_eq!(price_check_key(&flagged[1]), "633380:NM:IT:RF");
+        // Pokoin's LP / HP / PO are CardTrader's SP / PL / Poor.
+        let pokoin = parse_items("1:LP:EN,2:HP:EN,3:PO:EN,4:poor:EN,5:MINT:EN");
+        let keys: Vec<&str> = pokoin.iter().map(|item| item.condition.as_str()).collect();
+        assert_eq!(keys, ["SP", "PL", "Poor", "Poor", "NM"]);
+        assert_eq!(price_check_key(&items[1]), "713648:::");
     }
 
     #[test]
@@ -408,19 +506,41 @@ mod tests {
             json!({"condition": "nm", "language": "english", "minPkn": 12.0}),
             json!({"condition": "sp", "language": "italian", "minPkn": 5.0}),
         ];
-        let (cheapest, matched) = pick_matched_ct(&groups, "NM", "EN");
+        let (cheapest, matched) = pick_matched_ct(&groups, "NM", "EN", false, false);
         assert_eq!(cheapest, Some(5.0));
         assert_eq!(matched, Some(12.0));
         // NM:IT matches neither group → no matched price, cheapest still reported
-        let (cheapest, matched) = pick_matched_ct(&groups, "NM", "IT");
+        let (cheapest, matched) = pick_matched_ct(&groups, "NM", "IT", false, false);
         assert_eq!(cheapest, Some(5.0));
         assert_eq!(matched, None);
-        let (_, matched) = pick_matched_ct(&groups, "SP", "IT");
+        let (_, matched) = pick_matched_ct(&groups, "SP", "IT", false, false);
         assert_eq!(matched, Some(5.0));
-        let (cheapest, matched) = pick_matched_ct(&groups, "", "");
+        let (cheapest, matched) = pick_matched_ct(&groups, "", "", false, false);
         assert_eq!(cheapest, Some(5.0));
         assert_eq!(matched, None);
-        assert_eq!(pick_matched_ct(&[], "NM", "EN"), (None, None));
+        assert_eq!(pick_matched_ct(&[], "NM", "EN", false, false), (None, None));
+    }
+
+    #[test]
+    fn matched_ct_needs_the_same_finishes() {
+        // The 2026-10-15 complaint: a reverse or first-edition listing was
+        // priced from the plain printing's cheapest offer.
+        let groups = vec![
+            json!({"condition": "NM", "language": "IT", "reverse": false, "firstEdition": false, "minPkn": 20.0}),
+            json!({"condition": "NM", "language": "IT", "reverse": true, "firstEdition": false, "minPkn": 60.0}),
+        ];
+        assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, false).1, Some(20.0));
+        assert_eq!(pick_matched_ct(&groups, "NM", "IT", true, false).1, Some(60.0));
+        assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, true).1, None);
+    }
+
+    #[test]
+    fn pro_floor_counts_only_current_professional_offers() {
+        let sql = pro_floor_sql();
+        assert!(sql.contains("seller_type = 'pro'"));
+        assert!(sql.contains("on_vacation"));
+        assert!(sql.contains("interval '3 days'"));
+        assert!(sql.contains("group by 1, 2, 3, 4, 5"), "condition, language, reverse and first edition are facets");
     }
 
     #[test]

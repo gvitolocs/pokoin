@@ -8,6 +8,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { liveInventoryListings, strategyMatchesListing } from '@market/inventory-listings.js';
+import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, getBearer } from '../../stores/auth.js';
 
@@ -136,18 +137,16 @@ export default function PricingStrategies(props) {
       const data = await fetchSellerListings(sellerUid(), token, { limit: 1000 });
       const rows = liveInventoryListings(data.listings || data.items || [])
         .filter((row) => strategyMatchesListing(strategy, row));
-      const items = rows.slice(0, 100).map((row) => ({
-        cardId: String(row?.cardId || row?.card_id || ''),
-        condition: String(row?.condition || 'NM').toUpperCase(),
-        language: String(row?.language || '').toUpperCase(),
-      })).filter((item) => /^\d+$/.test(item.cardId));
+      const items = rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
       const comps = items.length ? await fetchPriceCheck(items, token) : { prices: {} };
       const plan = rows.slice(0, 100).map((row) => {
         const cardId = String(row?.cardId || row?.card_id || '');
-        const comp = comps.prices?.[cardId] || {};
+        const comp = comps.prices?.[priceCheckKey(row)] || comps.prices?.[cardId] || {};
+        // CardTrader: the cheapest professional seller with the same
+        // condition, language and finish, or no target at all.
         const compPkn = strategy.source === 'pokoin'
           ? (comp.pokoinCheapestPkn ?? comp.soldMedianPkn ?? null)
-          : (comp.ctMatchedPkn ?? comp.ctCheapestPkn ?? null);
+          : (comp.ctMatchedPkn ?? null);
         const current = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
         const target = targetFor(compPkn, strategy);
         return { row, current, compPkn, target };

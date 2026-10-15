@@ -2,6 +2,7 @@
 mod cardtrader;
 mod eur;
 mod referral;
+mod reprice;
 mod search;
 
 use anyhow::{bail, Context, Result};
@@ -12,6 +13,12 @@ use std::time::Duration;
 struct Options {
     dry_run: bool,
     since: Option<String>,
+    /// `--seller=<uid>`: the one seller a seller job works on.
+    seller: Option<String>,
+    /// `--apply`: a job that is a dry run by default writes.
+    apply: bool,
+    /// `--csv=<path>`: where a job writes its CSV report.
+    csv: Option<String>,
 }
 impl Options {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
@@ -25,6 +32,15 @@ impl Options {
                     options.since = Some(since.to_string());
                 }
             }
+            if arg == "--apply" {
+                options.apply = true;
+            }
+            if let Some(seller) = arg.strip_prefix("--seller=").filter(|v| !v.trim().is_empty()) {
+                options.seller.get_or_insert_with(|| seller.trim().to_string());
+            }
+            if let Some(path) = arg.strip_prefix("--csv=").filter(|v| !v.trim().is_empty()) {
+                options.csv.get_or_insert_with(|| path.trim().to_string());
+            }
         }
         options
     }
@@ -36,6 +52,7 @@ pub async fn run(name: &str) -> Result<()> {
         "eur-orders-sweep" => eur::run(&options).await,
         "referral-reconcile" => referral::run(&options).await,
         "cardtrader-seller-reconcile" => cardtrader::run(&options).await,
+        "cardtrader-pro-floor-reprice" => reprice::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
@@ -100,6 +117,14 @@ fn clipped(value: &str, max: usize) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn seller_job_flags() {
+        let options = Options::parse(["--seller=u1".into(), "--apply".into(), "--csv=/tmp/x.csv".into(), "--seller=u2".into()]);
+        assert_eq!(options.seller.as_deref(), Some("u1"));
+        assert!(options.apply && !options.dry_run);
+        assert_eq!(options.csv.as_deref(), Some("/tmp/x.csv"));
+        assert_eq!(Options::parse(["--seller=".into()]).seller, None);
+    }
+    #[test]
     fn timer_flags_keep_first_since_and_dry_run() {
         assert_eq!(
             Options::parse([
@@ -111,7 +136,8 @@ mod tests {
             ]),
             Options {
                 dry_run: true,
-                since: Some("a".into())
+                since: Some("a".into()),
+                ..Default::default()
             }
         );
     }
