@@ -746,8 +746,7 @@ async fn order_confirm_delivery(
                 .collect()
         })
         .unwrap_or_default();
-    let is_eur = order.get("currency").and_then(Value::as_str) == Some("EUR")
-        || order.get("paymentMethod").and_then(Value::as_str) == Some("stripe");
+    let is_eur = crate::domain::order_refund::is_eur_order(&order);
     let releases = if is_eur {
         // Separate Charges and Transfers: delivery releases each seller's share.
         release_seller_transfers(state, &order_id).await?
@@ -2959,177 +2958,257 @@ pub async fn create_order_checkout_session(
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, Some(&order_id)).await?;
-
-    // Optional PKN balance discount: debit it once and hold the PKN.
-    let discount_pkn = body
-        .get("pknDiscount")
-        .and_then(Value::as_f64)
-        .map(|value| value.trunc() as i64)
-        .unwrap_or(0);
-    let mut discount_eur_cents = 0i64;
+    // Everything after the stock is taken runs in one fallible block: on any
+    // error the held stock and a locked discount go back (same idempotency key
+    // as the expiry release, so a later release cannot repeat the refund).
     let mut held_discount_pkn = 0i64;
-    if discount_pkn > 0 {
-        let balance = store::balance(state.firestore()?, &claims.uid).await?;
-        let eligible: Vec<String> = Vec::new();
-        let quote_items: Vec<store::LedgerOp> = Vec::new();
-        drop(quote_items);
-        let plan = money::pkn_balance_discount(
-            balance.available_pkn,
-            &items
-                .iter()
-                .map(|item| money::QuoteItem {
-                    seller_uid: item.seller_uid.clone(),
-                    quantity: item.quantity,
-                    unit_price_pkn: item.unit_price_pkn as f64,
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>(),
-            &eligible,
-            quote.grand_total_cents,
-        );
-        if plan.discount_pkn > 0 {
-            let op = LedgerOp::lock(&claims.uid, plan.discount_pkn, "order_discount_held")
-                .with_ref(&order_id)
-                .with_meta(json!({ "orderId": order_id }));
-            store::apply(state.firestore()?, &op).await?;
-            discount_eur_cents = plan.discount_eur_cents;
-            held_discount_pkn = plan.discount_pkn;
+    let outcome: Result<Response, ApiError> = async {
+
+        // Optional PKN balance discount: debit it once and hold the PKN.
+        let discount_pkn = body
+            .get("pknDiscount")
+            .and_then(Value::as_f64)
+            .map(|value| value.trunc() as i64)
+            .unwrap_or(0);
+        let mut discount_eur_cents = 0i64;
+        if discount_pkn > 0 {
+            let balance = store::balance(state.firestore()?, &claims.uid).await?;
+            let eligible: Vec<String> = Vec::new();
+            let quote_items: Vec<store::LedgerOp> = Vec::new();
+            drop(quote_items);
+            let plan = money::pkn_balance_discount(
+                balance.available_pkn,
+                &items
+                    .iter()
+                    .map(|item| money::QuoteItem {
+                        seller_uid: item.seller_uid.clone(),
+                        quantity: item.quantity,
+                        unit_price_pkn: item.unit_price_pkn as f64,
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>(),
+                &eligible,
+                quote.grand_total_cents,
+            );
+            if plan.discount_pkn > 0 {
+                let op = LedgerOp::lock(&claims.uid, plan.discount_pkn, "order_discount_held")
+                    .with_ref(&order_id)
+                    .with_idempotency(format!("order_discount_held:{order_id}"))
+                    .with_meta(json!({ "orderId": order_id }));
+                store::apply(state.firestore()?, &op).await?;
+                discount_eur_cents = plan.discount_eur_cents;
+                held_discount_pkn = plan.discount_pkn;
+            }
+        }
+
+        let charge_cents = quote.grand_total_cents - discount_eur_cents;
+        if charge_cents < 50 {
+            return Err(ApiError::bad_request(
+                "The card charge must be at least 50 cents.",
+            ));
+        }
+
+        let site = state
+            .config()
+            .public_site_url
+            .trim_end_matches('/')
+            .to_string();
+        let form: Vec<(String, String)> = vec![
+            ("mode".into(), "payment".into()),
+            (
+                "expires_at".into(),
+                (state.now_ms() / 1000 + 31 * 60).to_string(),
+            ),
+            (
+                "success_url".into(),
+                format!("{site}/orders/{order_id}?status=success"),
+            ),
+            ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
+            ("line_items[0][quantity]".into(), "1".into()),
+            ("line_items[0][price_data][currency]".into(), "eur".into()),
+            (
+                "line_items[0][price_data][unit_amount]".into(),
+                charge_cents.to_string(),
+            ),
+            (
+                "line_items[0][price_data][product_name]".into(),
+                format!("Pokoin order {order_id}"),
+            ),
+            ("metadata[kind]".into(), "marketplace_order_eur".into()),
+            ("metadata[pokoinOrderId]".into(), order_id.clone()),
+            ("metadata[pokoinUid]".into(), claims.uid.clone()),
+            (
+                "metadata[discountPkn]".into(),
+                held_discount_pkn.to_string(),
+            ),
+        ];
+
+        let session = stripe.create_checkout_session(form).await?;
+        let session_id = session
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let url = session
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+
+        let order_document = json!({
+            "uid": claims.uid,
+            "buyerUid": claims.uid,
+            "channel": "eur",
+            "currency": "EUR",
+            "paymentMethod": "stripe",
+            "paymentStatus": "pending_stripe",
+            "status": "pending",
+            "fulfillmentMode": "physical",
+            "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
+            "totalEURCents": quote.grand_total_cents,
+            "shippingEURCents": quote.shipping_total_cents,
+            "pknDiscount": {
+                "pkn": held_discount_pkn,
+                "eurCents": discount_eur_cents,
+                "state": if held_discount_pkn > 0 { "held" } else { "none" },
+            },
+            "inventory": {
+                "state": "reserved",
+                "reservedAt": state.now_iso(),
+                "expiresAt": chrono::DateTime::from_timestamp_millis(state.now_ms() + 31*60*1000).map(|d|d.to_rfc3339()),
+                "lines": decremented.iter().map(|line|json!({
+                    "listingId":line.listing_id,"quantity":line.quantity,"cardId":line.card_id,"sellerUid":line.seller_uid,
+                    "sourceListingId":line.source_listing_id,"source":line.source,"remainingQuantity":line.remaining_quantity,
+                    "unitPricePkn":line.unit_price_pkn,"external":false
+                })).collect::<Vec<_>>()
+            },
+            "fulfillment": { "state": "pending", "steps": {} },
+            "items": eur_order_items(&items),
+            "shipments": eur_order_shipments(&quote.shipments),
+            "shippingAddressId": address_id,
+            "shippingAddressSnapshotEncrypted": shipping_address_snapshot,
+            "shippingAddressCountryCode": to_country,
+            "stripeCheckoutSessionId": session_id,
+            "createdAt": store::now_iso(),
+            "updatedAt": store::now_iso(),
+        });
+        state
+            .firestore()?
+            .set_document(
+                &state.firestore()?.document_path(store::ORDERS, &order_id)?,
+                &order_document,
+            )
+            .await?;
+
+        Ok(private_json(json!({
+            "orderId": order_id,
+            "id": session_id,
+            "url": url,
+            "totalEURCents": charge_cents,
+            "shippingEURCents": quote.shipping_total_cents,
+            "discountPkn": discount_pkn,
+            "discountEurCents": discount_eur_cents,
+        })))
+    }
+    .await;
+    match outcome {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            rollback_decrements(&state, &decremented, Some(&order_id)).await;
+            if held_discount_pkn > 0 {
+                let op = LedgerOp::unlock(&claims.uid, held_discount_pkn, "order_discount_released", true)
+                    .with_ref(&order_id)
+                    .with_idempotency(format!("order_discount_release:{order_id}"))
+                    .with_meta(json!({ "orderId": order_id, "reason": "checkout_failed" }));
+                if let Err(release) = store::apply(state.firestore()?, &op).await {
+                    tracing::error!(%release, order_id, "could not release the held PKN discount");
+                }
+            }
+            Err(error)
         }
     }
+}
 
-    let charge_cents = quote.grand_total_cents - discount_eur_cents;
-    if charge_cents < 50 {
-        rollback_decrements(&state, &decremented, Some(&order_id)).await;
-        return Err(ApiError::bad_request(
-            "The card charge must be at least 50 cents.",
-        ));
-    }
-
-    let site = state
-        .config()
-        .public_site_url
-        .trim_end_matches('/')
-        .to_string();
-    let form: Vec<(String, String)> = vec![
-        ("mode".into(), "payment".into()),
-        (
-            "expires_at".into(),
-            (state.now_ms() / 1000 + 31 * 60).to_string(),
-        ),
-        (
-            "success_url".into(),
-            format!("{site}/orders/{order_id}?status=success"),
-        ),
-        ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
-        ("line_items[0][quantity]".into(), "1".into()),
-        ("line_items[0][price_data][currency]".into(), "eur".into()),
-        (
-            "line_items[0][price_data][unit_amount]".into(),
-            charge_cents.to_string(),
-        ),
-        (
-            "line_items[0][price_data][product_name]".into(),
-            format!("Pokoin order {order_id}"),
-        ),
-        ("metadata[kind]".into(), "marketplace_order_eur".into()),
-        ("metadata[pokoinOrderId]".into(), order_id.clone()),
-        ("metadata[pokoinUid]".into(), claims.uid.clone()),
-        (
-            "metadata[discountPkn]".into(),
-            held_discount_pkn.to_string(),
-        ),
-    ];
-
-    let session = stripe.create_checkout_session(form).await?;
-    let session_id = session
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let url = session
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-
-    let order_document = json!({
-        "buyerUid": claims.uid,
-        "channel": "eur",
-        "paymentStatus": "pending_stripe",
-        "status": "pending",
-        "fulfillmentMode": "physical",
-        "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
-        "totalEURCents": quote.grand_total_cents,
-        "shippingEURCents": quote.shipping_total_cents,
-        "pknDiscount": {
-            "pkn": held_discount_pkn,
-            "eurCents": discount_eur_cents,
-            "state": if held_discount_pkn > 0 { "held" } else { "none" },
-        },
-        "inventory": {
-            "state": "reserved",
-            "reservedAt": state.now_iso(),
-            "expiresAt": chrono::DateTime::from_timestamp_millis(state.now_ms() + 31*60*1000).map(|d|d.to_rfc3339()),
-            "lines": decremented.iter().map(|line|json!({
-                "listingId":line.listing_id,"quantity":line.quantity,"cardId":line.card_id,"sellerUid":line.seller_uid,
-                "sourceListingId":line.source_listing_id,"source":line.source,"remainingQuantity":line.remaining_quantity,
-                "unitPricePkn":line.unit_price_pkn,"external":false
-            })).collect::<Vec<_>>()
-        },
-        "fulfillment": { "state": "pending", "steps": {} },
-        "items": items
-            .iter()
-            .map(|item| {
-                json!({
-                    "listingId": item.listing_id,
-                    "quantity": item.quantity,
-                    "sellerUid": item.seller_uid,
-                    "unitPricePkn": item.unit_price_pkn,
-                    "cardId": item.card_id,
-                })
+/// Order lines as the Node EUR writer stores them (`unitPriceEURCents` too).
+fn eur_order_items(items: &[OrderItem]) -> Vec<Value> {
+    items
+        .iter()
+        .map(|item| {
+            json!({
+                "listingId": item.listing_id,
+                "quantity": item.quantity,
+                "sellerUid": item.seller_uid,
+                "unitPricePkn": item.unit_price_pkn,
+                "unitPriceEURCents": money::eur_cents_from_pkn(item.unit_price_pkn as f64),
+                "totalPricePkn": item.unit_price_pkn * item.quantity,
+                "cardId": item.card_id,
+                "fulfillmentMode": "physical",
             })
-            .collect::<Vec<_>>(),
-        "shipments": quote
-            .shipments
-            .iter()
-            .map(|shipment| {
-                json!({
-                    "sellerId": shipment.seller_id,
-                    "sellerTransferCents": shipment.amount_cents,
-                    "amountCents": shipment.amount_cents,
-                    "tracked": shipment.tracked,
-                })
-            })
-            .collect::<Vec<_>>(),
-        "shippingAddressId": address_id,
-        "shippingAddressSnapshotEncrypted": shipping_address_snapshot,
-        "shippingAddressCountryCode": to_country,
-        "stripeCheckoutSessionId": session_id,
-        "createdAt": store::now_iso(),
-        "updatedAt": store::now_iso(),
-    });
-    state
-        .firestore()?
-        .set_document(
-            &state.firestore()?.document_path(store::ORDERS, &order_id)?,
-            &order_document,
-        )
-        .await?;
+        })
+        .collect()
+}
 
-    Ok(private_json(json!({
-        "orderId": order_id,
-        "id": session_id,
-        "url": url,
-        "totalEURCents": charge_cents,
-        "shippingEURCents": quote.shipping_total_cents,
-        "discountPkn": discount_pkn,
-        "discountEurCents": discount_eur_cents,
-    })))
+/// Per-seller parcels. Seller settlement is items − commission + their
+/// shipping (`create-order-checkout-session.js`), not the shipping alone.
+fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> Vec<Value> {
+    shipments
+        .iter()
+        .map(|shipment| {
+            let items_net =
+                ((shipment.items_subtotal_cents as f64) * (1.0 - CHECKOUT_COMMISSION_RATE)).round() as i64;
+            json!({
+                "sellerId": shipment.seller_id,
+                "sellerName": shipment.seller_name,
+                "fromCountry": shipment.from_country,
+                "toCountry": shipment.to_country,
+                "cardCount": shipment.card_count,
+                "packageTier": shipment.package_tier,
+                "shippingRateId": shipment.rate_id,
+                "serviceName": shipment.service_name,
+                "itemsSubtotalCents": shipment.items_subtotal_cents,
+                "shippingAmountEURCents": shipment.amount_cents,
+                "sellerTransferCents": (items_net + shipment.amount_cents).max(0),
+                "amountCents": shipment.amount_cents,
+                "tracked": shipment.tracked,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eur_parcels_settle_items_minus_commission_plus_shipping() {
+        let shipment = crate::domain::shipping::ShipmentQuote {
+            seller_id: "s1".into(),
+            seller_name: "Seller".into(),
+            rate_id: "it-it-letter".into(),
+            from_country: "IT".into(),
+            to_country: "IT".into(),
+            card_count: 2,
+            package_tier: "letter".into(),
+            tracked: true,
+            estimated_weight_grams: 20,
+            carrier: "Poste".into(),
+            service_name: "Tracked".into(),
+            amount_cents: 450,
+            currency: "EUR".into(),
+            items_subtotal_cents: 1000,
+            item_count: 2,
+        };
+        let rows = eur_order_shipments(&[shipment]);
+        // round(1000 × 0.97) + 450, as the Node checkout writer settles it.
+        assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
+        assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
+        assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
+        // The refund share now has a non-zero EUR gross for this seller.
+        let order = json!({ "channel": "eur", "currency": "EUR", "shipments": rows, "items": [] });
+        let share = crate::domain::order_refund::seller_share(&order, "s1");
+        assert_eq!(share.currency, "EUR");
+        assert_eq!(share.gross, 1450);
+    }
 
     #[test]
     fn eur_release_plan_does_not_repeat_discount_and_preserves_inventory() {

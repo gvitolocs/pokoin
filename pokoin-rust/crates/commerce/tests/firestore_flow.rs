@@ -2479,3 +2479,52 @@ async fn an_abandoned_stripe_claim_is_handled_again() {
     assert!(process_verified_event(&state, &event).await.is_ok());
     assert_eq!(store::balance(&firestore, "buyer-2").await.unwrap().available_pkn, 500);
 }
+
+#[tokio::test]
+async fn confirming_a_channel_only_eur_order_releases_seller_transfers() {
+    // EUR orders the Rust checkout wrote before 2026-10-15 carry only
+    // `channel: "eur"`; they must still settle through Stripe Transfers.
+    let (state, firestore) = state_harness().await;
+    firestore
+        .create_document(
+            "orders",
+            "order-eur-channel",
+            &json!({
+                "buyerUid": "buyer-1",
+                "channel": "eur",
+                "paymentStatus": "paid",
+                "fulfillmentMode": "physical",
+                "shipments": [{ "sellerId": "seller-1", "sellerTransferCents": 1420 }],
+                "items": [{ "listingId": "l1", "sellerUid": "seller-1", "quantity": 1,
+                            "unitPricePkn": 100, "cardId": "1" }],
+                "createdAt": "2026-10-08T10:00:00.000Z",
+            }),
+        )
+        .await
+        .expect("order");
+    firestore
+        .create_document(
+            "users",
+            "seller-1",
+            &json!({ "username": "seller1", "stripeConnectStatus": "pending" }),
+        )
+        .await
+        .expect("seller profile");
+    let app = pokoin_commerce::router(state);
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/marketplace-orders",
+        Some(json!({ "action": "confirm-delivery", "orderId": "order-eur-channel" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The Stripe-transfer path ran (it records the pending seller and escrow).
+    assert_eq!(body["transfers"]["duplicate"], json!(false), "{body}");
+    let order = firestore
+        .get_document(&firestore.document_path("orders", "order-eur-channel").unwrap())
+        .await
+        .unwrap()
+        .expect("order");
+    assert_eq!(order["transfersPendingSellerIds"], json!(["seller-1"]));
+}
