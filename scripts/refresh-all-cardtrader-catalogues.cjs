@@ -8,7 +8,7 @@ const apply=process.argv.includes('--apply');
 const root=process.env.POKOIN_CATALOG_RUN_ROOT||'/home/nez/data/pokoin-catalog-refresh/'+new Date().toISOString().slice(0,10);
 fs.mkdirSync(root,{recursive:true});
 const env=Object.fromEntries(JSON.parse(cp.execFileSync('docker',['inspect','pokoin-marketplace-postgres-15t','--format','{{json .Config.Env}}'],{encoding:'utf8'})).map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}));
-const poolFor=db=>new Pool({host:'127.0.0.1',port:25432,user:env.POSTGRES_USER,password:env.POSTGRES_PASSWORD,database:db,max:4,connectionTimeoutMillis:15000,options:'-c statement_timeout=300000 -c lock_timeout=60000'});
+const poolFor=db=>new Pool({host:'127.0.0.1',port:25433,user:env.POSTGRES_USER,password:env.POSTGRES_PASSWORD,database:db,max:4,connectionTimeoutMillis:15000,options:'-c statement_timeout=300000 -c lock_timeout=60000'});
 const bridge=fs.readFileSync(path.join(__dirname,'cardtrader-fetch-bridge.py'),'utf8');
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const remote=cp.spawn('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=20','pokoin-marketplace','python3 -u -c '+quote(bridge)],{stdio:['pipe','pipe','inherit']});

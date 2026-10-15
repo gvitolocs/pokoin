@@ -132,5 +132,9 @@ def main():
             report["blocked"]="CardTrader scan origin returned 401/403/429; retry on the next scheduled run"
             break
     report["finishedAt"]=time.strftime("%FT%TZ",time.gmtime());(ROOT/"pictures-status.json").write_text(json.dumps(report,indent=2))
-    return bool(report["errors"] or any(g["failed"] for g in report["games"]))
+    # Per-item misses are mostly permanent (no source URL, CardTrader's own
+    # image under 400 px / 9 kB, 404) and stay counted in pictures-status.json;
+    # they used to fail the stage every night. Fail only on real errors or a
+    # CardTrader block (401/403/429).
+    return bool(report["errors"] or report.get("blocked"))
 if __name__=="__main__":raise SystemExit(main())
