@@ -38,7 +38,12 @@ report["newPrintingExpansionsCompleted"]=0
 for e in wanted:
     dest=OUT/(str(e["game_id"])+"-"+str(e["id"])+".json.gz")
     if not dest.exists():continue
-    with gzip.open(dest,"rt") as f:cached=json.load(f)
+    # A crash can leave a renamed but empty/truncated book (rename hit the
+    # disk, data did not): quarantine it so it is downloaded again.
+    try:
+        with gzip.open(dest,"rt") as f:cached=json.load(f)
+    except (OSError,EOFError,ValueError):
+        dest.replace(str(dest)+".corrupt");print("re-downloading corrupt book",dest.name,flush=True);continue
     report["blueprintsWithListings"]+=len(cached)
     report["listings"]+=sum(len(v) for v in cached.values() if isinstance(v,list))
     report["completed"]+=1;cached_books.add(e["id"])

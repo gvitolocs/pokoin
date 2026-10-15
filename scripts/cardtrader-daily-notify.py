@@ -129,7 +129,7 @@ def build_summary(root, started_at, exit_code, stages, analytics):
             lines.append("New expansions deferred to the next run (CardTrader export not ready): "
                          + "; ".join(parts) + ".")
     if status == "complete":
-        lines.append("Catalogue, pictures, artwork and search stages completed.")
+        lines.append("Catalogue, pictures and artwork stages completed.")
     lines.append("Daily prices are listing asks; inferred sold prices remain separate.")
     return {
         "source": "cardtrader", "status": status, "message": "\n".join(lines)[:3500],

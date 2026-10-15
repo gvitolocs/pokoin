@@ -11,18 +11,22 @@ node scripts/refresh-all-cardtrader-catalogues.cjs --apply || catalog_result=$?
 (( catalog_result == 0 )) || result=1
 python3 scripts/dump-all-cardtrader-listings.py &
 dump_pid=$!
+# GPU stages hold a VRAM lease (/home/nez/bin/gpu-lease): an unguarded GPU job
+# racing a Qwen load panicked amdgpu on 2026-10-06. They queue (up to 4 h) and
+# llama-server-qwen-watch yields Qwen while they wait.
+GPU_LEASE=(/home/nez/bin/gpu-lease run --mb "${CATALOG_GPU_MB:-4000}" --wait 14400)
 pictures_result=0
-/home/nez/Projects/ai-toolkit/venv/bin/python scripts/refresh-all-cardtrader-pictures.py || pictures_result=$?
+"${GPU_LEASE[@]}" --name catalog-pictures -- /home/nez/Projects/ai-toolkit/venv/bin/python scripts/refresh-all-cardtrader-pictures.py || pictures_result=$?
 (( pictures_result == 0 )) || result=1
 picture_sync_result=0
 python3 scripts/sync-catalog-pictures.py || picture_sync_result=$?
 (( picture_sync_result == 0 )) || result=1
 artwork_result=0
-/home/nez/Projects/ai-toolkit/venv/bin/python scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
+"${GPU_LEASE[@]}" --name catalog-artwork -- /home/nez/Projects/ai-toolkit/venv/bin/python scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
 (( artwork_result == 0 )) || result=1
-search_result=0
-node scripts/sync-refreshed-catalogue-search.cjs || search_result=$?
-(( search_result == 0 )) || result=1
+# Search stage removed 2026-10-06: it fed Meilisearch on pi-home, retired on
+# 2026-10-03 (_pipeline_health.js retired: ['meili', 'valkey']); every run since
+# failed with ConnectionRefused. sync-refreshed-catalogue-search.cjs is unused.
 dump_result=0
 wait "$dump_pid" || dump_result=$?
 (( dump_result == 0 )) || result=1
@@ -32,6 +36,6 @@ python3 scripts/cardtrader-daily-notify.py \
   --exit-code "$result" \
   --stage-result "catalog=$catalog_result" --stage-result "pictures=$pictures_result" \
   --stage-result "picture-sync=$picture_sync_result" --stage-result "artwork=$artwork_result" \
-  --stage-result "search=$search_result" --stage-result "dump=$dump_result" \
+  --stage-result "dump=$dump_result" \
   || echo "CardTrader notification pending; import result is unchanged." >&2
 exit "$result"
