@@ -1,7 +1,8 @@
 -- List snapshots: set and artist desks are fixed catalog data, built (with
 -- prices applied) by `pokoin-api job build-lists` (k3s CronJobs on nezopt) and
--- served by GET /api/marketplace-list as plain JSON or c1. The job creates
--- these tables in every game database itself; this file documents them.
+-- served by GET /api/marketplace-list as plain JSON or c1. Apply to every game
+-- database (pokoin_marketplace and each pokoin_<game>) as pokoin_migrator, then
+-- 121; the job runs no DDL (since 2026-10-15).
 create table if not exists public.marketplace_list_snapshots (
   kind text not null,
   key text not null,

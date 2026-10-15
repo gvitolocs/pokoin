@@ -392,24 +392,6 @@ impl SellerDirectory for FirestoreDirectory<'_> {
     }
 }
 
-/// Migrations 116 and 119, applied only when 119's columns are missing:
-/// `alter table … add column if not exists` takes an access-exclusive lock
-/// even when the column exists, and the Pi's replica replays that lock.
-async fn ensure_schema(db: &sqlx::PgPool) -> Result<(), sqlx::Error> {
-    let ready: bool = sqlx::query_scalar(
-        "select count(*) = 3 from information_schema.columns
-          where table_schema = 'public' and table_name = 'marketplace_seller_books'
-            and column_name in ('username', 'version', 'br')",
-    )
-    .fetch_one(db)
-    .await?;
-    if !ready {
-        sqlx::raw_sql(include_str!("../../../../../scripts/sql/116_marketplace_seller_books.sql")).execute(db).await?;
-        sqlx::raw_sql(include_str!("../../../../../scripts/sql/119_seller_book_snapshots.sql")).execute(db).await?;
-    }
-    Ok(())
-}
-
 /// What a snapshot builder run did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Built {
@@ -465,10 +447,8 @@ pub async fn build_all(
     dry_run: bool,
 ) -> Result<Built, ApiError> {
     const GAME: &str = "pokemon";
+    // Table: migrations 116 and 119 (applied by the migrator, never here).
     let db = state.write_db();
-    if !dry_run {
-        ensure_schema(db).await?;
-    }
     let shops: Vec<Shop> = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>, bool, Option<String>)>(
         "select seller_uid, max(updated_at),
                 bool_or(status = 'active' and quantity_available > 0),

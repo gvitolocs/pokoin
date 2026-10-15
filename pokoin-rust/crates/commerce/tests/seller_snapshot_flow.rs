@@ -149,7 +149,10 @@ async fn the_builder_writes_snapshots_and_fresh_reports_their_stamp() {
     let count: i64 = sqlx::query_scalar("select count(*) from public.marketplace_seller_books").fetch_one(&pool).await.unwrap();
     assert_eq!(count, 1, "stored with the 116 statement");
 
-    // --- the builder: applies 119, writes the copy, the handle and the header
+    // --- migration 119 (the migrator applies it; the builder runs no DDL) ----
+    sqlx::raw_sql(MIGRATION_119).execute(&pool).await.expect("migration 119");
+
+    // --- the builder: writes the copy, the handle and the header ------------
     let built = seller_book::build_all(&state, &Directory, reversed, None, false, false).await.unwrap();
     assert_eq!((built.sellers, built.built, built.failed), (2, 1, 0), "{built:?}: u2 has no handle");
     let row = stored(&pool).await.unwrap();

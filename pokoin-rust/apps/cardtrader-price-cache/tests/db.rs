@@ -1,4 +1,6 @@
-use cardtrader_price_cache::{ensure_schema, write_cache, CacheRow, BATCH};
+use cardtrader_price_cache::{write_cache, CacheRow, BATCH};
+
+const MIGRATION_122: &str = include_str!("../../../../scripts/sql/122_cardtrader_listing_cache.sql");
 
 #[tokio::test]
 async fn schema_is_idempotent_and_rewrite_deletes_only_in_scope_rows() {
@@ -14,8 +16,10 @@ async fn schema_is_idempotent_and_rewrite_deletes_only_in_scope_rows() {
         .connect(url.trim())
         .await
         .expect("connect");
-    ensure_schema(&pool).await.expect("schema");
-    ensure_schema(&pool).await.expect("schema again");
+    // Migration 122 is idempotent: applying it twice must succeed.
+    for _ in 0..2 {
+        sqlx::raw_sql(MIGRATION_122).execute(&pool).await.expect("migration 122");
+    }
 
     // Synthetic ids, far above CardTrader blueprint ids, so a scratch database is the only place they land.
     let outside = BASE + 900_000;

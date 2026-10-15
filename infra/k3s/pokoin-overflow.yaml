@@ -1,6 +1,7 @@
 # pokoin-overflow on nezopt k3s — exported from the LIVE cluster 2026-10-07 (kubectl diff = empty).
 # Security objects (ServiceAccounts, PDBs, NetworkPolicies, cloudflared) live in pokoin-security.yaml.
-# Secrets (pokoin-api-env, pokoin-api-nez-tunnel, pokoin-pg-ca) are created by scripts, never committed.
+# Secrets (pokoin-api-env for the API pods, pokoin-jobs-env for the CronJobs, pokoin-api-nez-tunnel,
+# pokoin-pg-ca) are created by scripts (nezopt-k3s.sh sync), never committed.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -445,7 +446,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: REDIS_HOST
               value: redis.pokoin-overflow.svc.cluster.local
             - name: REDIS_PORT
@@ -463,7 +464,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: search-delta
             resources:
@@ -536,7 +537,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: REDIS_HOST
               value: redis.pokoin-overflow.svc.cluster.local
             - name: REDIS_PORT
@@ -554,7 +555,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: search-reindex
             resources:
@@ -642,12 +643,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -680,7 +681,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-sets
             resources:
@@ -772,12 +773,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -808,7 +809,7 @@ spec:
               value: '2'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-sellers
             resources:
@@ -896,12 +897,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -934,7 +935,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-artists
             resources:
@@ -1022,12 +1023,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1060,7 +1061,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-versions
             resources:
@@ -1148,12 +1149,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1186,7 +1187,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-related
             resources:
@@ -1274,12 +1275,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1312,7 +1313,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-related-delta
             resources:
@@ -1400,12 +1401,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1438,7 +1439,7 @@ spec:
               value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-medians
             resources:

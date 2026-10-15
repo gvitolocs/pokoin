@@ -47,33 +47,6 @@ static DICTIONARY: LazyLock<SharedDictionary> =
 /// a new dictionary reaches them without a new URL.
 const DICTIONARY_CACHE: &str = "public, max-age=86400";
 
-const DDL: &str = "
-create table if not exists public.marketplace_list_snapshots (
-  kind text not null,
-  key text not null,
-  body text not null,
-  c1 bytea not null,
-  card_count integer not null default 0,
-  version text not null,
-  built_at timestamptz not null default now(),
-  primary key (kind, key)
-);
--- c1 format 2 (template columns) and brotli-11 copies served as-is.
-alter table public.marketplace_list_snapshots add column if not exists c1v2 bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_json bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_c1 bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_c1v2 bytea;
--- RFC 9842 dcb of c1v2 against the shared dictionary `dcb_dict` (its id).
-alter table public.marketplace_list_snapshots add column if not exists dcb_c1v2 bytea;
-alter table public.marketplace_list_snapshots add column if not exists dcb_dict text;
-create table if not exists public.marketplace_card_daily_median (
-  card_id bigint primary key,
-  last_day date,
-  last_median_pkn numeric not null,
-  refreshed_at timestamptz not null default now()
-);
-";
-
 const KINDS: [&str; 4] = ["set", "artist", "name", "seller"];
 /// Static between builds; the builder runs every 15 min (sets) / hourly (artists).
 const LIST_CACHE: &str = "public, max-age=120, s-maxage=900, stale-while-revalidate=86400";
@@ -404,9 +377,11 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             tracing::warn!(%game, "build-lists: no database");
             return Ok(());
         };
-        if !o.dry_run {
-            sqlx::raw_sql(DDL).execute(&pool).await?;
-            sqlx::raw_sql(page_snapshot::DDL).execute(&pool).await?;
+        // Every write below goes through this pool, so the job's URLs must be the
+        // writer (k3s CronJobs, role pokoin_jobs), never the Pi standby. Tables:
+        // migrations 112, 114 and 121 on every game database; no DDL here.
+        if !o.dry_run && sqlx::query_scalar::<_, bool>("select pg_is_in_recovery()").fetch_one(&pool).await? {
+            anyhow::bail!("build-lists writes: the {game} database URL is a read-only standby, not the writer");
         }
         if o.kinds.iter().any(|k| k == "median") && game == "pokemon" {
             let n = build_medians(&pool).await?;

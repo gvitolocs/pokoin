@@ -270,7 +270,8 @@ async fn load_personal_for_chat(
             .map(|values| crate::domain::personal_context::clean_cart_items(Some(&Json::Array(values.to_vec())))),
         desk: crate::domain::personal_context::clean_desk(Some(page_context)),
     };
-    match build_personal_context(&db, firestore.as_ref(), uid, &overlay, true).await {
+    let writer = state.marketplace_writer_db().ok();
+    match build_personal_context(&db, firestore.as_ref(), uid, &overlay, writer.as_ref()).await {
         Ok(personal) => {
             let intent = format_personal_intent(&personal);
             (Some(personal), intent)
