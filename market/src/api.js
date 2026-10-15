@@ -1,3 +1,4 @@
+import { priceCheckKey } from './inventory-price.js';
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { C1_DICTIONARY, C1Error, decodeC1, isC1 } from './compact.js';
 import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './local-read.js';
@@ -3098,8 +3099,8 @@ export function deletePricingStrategy(id, token) {
 export async function fetchPriceCheck(items, token) {
   const params = new URLSearchParams({
     items: (items || []).slice(0, 100).map((item) => (
-      item.condition || item.language
-        ? `${item.cardId}:${item.condition || ''}:${item.language || ''}`
+      item.condition || item.language || item.reverse || item.firstEdition
+        ? priceCheckKey(item)
         : String(item.cardId || item)
     )).join(','),
   });

@@ -10,6 +10,7 @@ import {
   requestNftShipping,
 } from '@market/api.js';
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
+import { priceCheckItem } from '@market/inventory-price.js';
 import CardArt from '../CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
 import { accountProfile } from '../../stores/account.js';
@@ -279,11 +280,7 @@ export default function CollectionHoldings() {
       let cancelled = false;
       (async () => {
         try {
-          const items = holdings.map((holding) => ({
-            cardId: String(holding.cardId || holding.blueprintId || ''),
-            condition: String(holding.condition || 'NM').toUpperCase(),
-            language: String(holding.language || '').toUpperCase(),
-          })).filter((item) => /^\d+$/.test(item.cardId));
+          const items = holdings.map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
           if (!items.length) return;
           const token = await getBearer();
           const data = await fetchPriceCheck(items.slice(0, 100), token);
