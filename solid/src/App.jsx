@@ -4,6 +4,7 @@ import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
 import { gameBasename } from '@market/game.js';
 import { isGamePrivatePath } from '@market/game-private-path.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
+import { warmRecentsRail } from '@market/recents-rail.js';
 import { isDashboardHost } from '@market/scan-api.js';
 import { subscribeOriginDown } from '@market/working-page.js';
 import Chrome from './components/Chrome.jsx';
@@ -77,8 +78,10 @@ export default function App(props) {
 
   const owner = getOwner();
   // Firebase Auth after the first paint; buyer currency once a session exists.
-  // Idle: the chat dock, invite-code claims, the account cart sync and the
-  // Google reviews badge — none of them is on the first paint.
+  // Idle: the chat dock, invite-code claims, the account cart sync, the
+  // Recently seen rail (market/src/recents-rail.js: ready before the
+  // marketplace opens) and the Google reviews badge — none of them is on the
+  // first paint.
   onSettled(() => {
     // React legacy tripwire (lib/react-legacy.js): the entry names whatever
     // would once have picked the React UI; report it so the console, test
@@ -95,6 +98,7 @@ export default function App(props) {
       warmLikelyRoutes();
       chatDock.warm();
       startCartSync();
+      void warmRecentsRail({ account: signedIn() });
       import('./lib/referral-claim.js')
         .then(({ watchReferralClaims }) => runWithOwner(owner, () => watchReferralClaims(location)))
         .catch(() => {});
