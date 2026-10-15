@@ -43,15 +43,31 @@ script uses the Python dump when `/home/nez/pokoin-cardtrader/current` is missin
   `stoppedAtDeadline` (or `abandonedExpansionId`) and exit 75.
 - `listing-dump-status.json`: the Python fields (`completed`, `listings`,
   `errors`, `newPrintingExpansions…`, `finishedAt`, …) plus `bookFormat`
-  (`ctb1`) and `inFlight`. Exit 1 when any book failed, 0 when all were stored.
+  (`ctb2`), `inFlight` and `sellerRecords`. Exit 1 when any book failed, 0 when
+  all were stored.
+
+## Sellers
+
+The same few thousand sellers appear in every book of a night. Each listing's
+`user` object is stored once per night in `listing-books/sellers.jsonl`
+(append-only, one compact JSON record per line, line number = reference) and
+the book keeps only the reference (header `CTB2`). Every distinct record is
+kept, so it stays lossless. Keep `sellers.jsonl` with the books: a `CTB2` book
+does not decode without it. About 16% smaller books and 44% less encode CPU.
 
 ## `.ctb` books
 
-Lossless: `ctbook decode <file>.ctb` prints exactly the JSON CardTrader sent.
-Header `CTB1` + blueprint count + listing count + payload length, then brotli
-(q9) of a columnar document (see `crates/ctbook/src/lib.rs`). About 5x smaller
-than the old gzip JSON. `ctbook stats <book.json.gz>…` measures sizes, timings
-and the round trip.
+Lossless: `ctbook decode <file>.ctb` prints exactly the JSON CardTrader sent
+(it reads `sellers.jsonl` from the same folder). Header `CTB1`/`CTB2` +
+blueprint count + listing count + payload length, then brotli (q9) of a
+columnar document (see `crates/ctbook/src/lib.rs`). About 5x smaller than the
+old gzip JSON. `ctbook stats <book.json.gz>…` measures sizes, timings and the
+round trip.
+
+Converting stored `.json.gz` books: `ctbook convert --delete --jobs 4 <folder>/*.json.gz`
+writes each `.ctb` with that folder's `sellers.jsonl`, reads it back from disk,
+compares it byte for byte with the original, and only then deletes the
+`.json.gz`; a mismatch keeps the original.
 
 ## Deploy
 
