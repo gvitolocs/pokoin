@@ -27,11 +27,15 @@ fn number_value(value: Option<&Value>, fallback: f64) -> f64 {
     }
 }
 
-/// `isEurOrder`: EUR currency or a Stripe payment method.
+/// `isEurOrder`: EUR currency, a Stripe payment method, or the EUR channel
+/// (the Rust EUR checkout wrote only `channel: "eur"` before 2026-10-15).
 pub fn is_eur_order(order: &Value) -> bool {
     let currency = clean_text(order.get("currency"), 40);
     let method = clean_text(order.get("paymentMethod"), 40);
-    currency == "EUR" || method == "stripe"
+    let channel = clean_text(order.get("channel"), 40);
+    currency.eq_ignore_ascii_case("EUR")
+        || method.eq_ignore_ascii_case("stripe")
+        || channel.eq_ignore_ascii_case("eur")
 }
 
 /// `orderIsSold`.
@@ -487,7 +491,9 @@ mod tests {
     fn eur_detection_matches_the_reference() {
         assert!(is_eur_order(&json!({ "currency": "EUR" })));
         assert!(is_eur_order(&json!({ "paymentMethod": "stripe" })));
+        assert!(is_eur_order(&json!({ "channel": "eur" })));
         assert!(!is_eur_order(&json!({ "currency": "PKN" })));
+        assert!(!is_eur_order(&json!({ "channel": "pkn" })));
         assert!(!is_eur_order(&json!({})));
     }
 

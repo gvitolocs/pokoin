@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::{private_json, text_field};
 use crate::auth::Claims;
 use crate::domain::money_request as mr;
-use crate::error::ApiError;
+use crate::error::{ApiError, StoreError};
 use crate::firestore::StructuredQuery;
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
@@ -187,7 +187,9 @@ pub async fn top_up_account_balance(
     })))
 }
 
-async fn credit_verified_top_up(
+/// Credit an on-chain top-up that the chain client already verified for
+/// `uid`: claim the funding hash, then mint once.
+pub async fn credit_verified_top_up(
     state: &DomainState,
     uid: &str,
     funding_hash: &str,
@@ -200,18 +202,45 @@ async fn credit_verified_top_up(
         return Err(ApiError::bad_request("Enter a whole PKN amount greater than zero."));
     }
     let firestore = state.firestore()?;
-    // A funding hash belongs to exactly one account.
-    if let Some(existing) = firestore
-        .get_document(&firestore.document_path(store::NATIVE_DEPOSITS, funding_hash))
-        .await?
+    // A funding hash belongs to exactly one account: claim it (create-only)
+    // BEFORE minting, so two accounts racing on one hash cannot both be paid.
+    // The claim stays `claiming` until the mint lands; an interrupted claim
+    // is finished by the owner's retry (the mint is idempotent on the hash).
+    let deposit_path = firestore.document_path(store::NATIVE_DEPOSITS, funding_hash)?;
+    let claim = json!({
+        "uid": uid,
+        "txHash": funding_hash,
+        "fromAddress": from_address,
+        "amountPkn": amount,
+        "purpose": "account_top_up",
+        "status": "claiming",
+        "reconciled": reconciled,
+        "createdAt": store::now_iso(),
+    });
+    match firestore
+        .create_document(store::NATIVE_DEPOSITS, funding_hash, &claim)
+        .await
     {
-        let owner = existing.get("uid").and_then(Value::as_str).unwrap_or_default();
-        if owner == uid {
-            return Ok(false);
+        Ok(_) => {}
+        Err(StoreError::Conflict(_)) => {
+            let existing = firestore
+                .get_document(&deposit_path)
+                .await?
+                .unwrap_or_else(|| json!({}));
+            let owner = existing.get("uid").and_then(Value::as_str).unwrap_or_default();
+            if owner != uid {
+                return Err(ApiError::conflict(
+                    "This top-up transaction was already used by another account.",
+                ));
+            }
+            // Already credited (or used for something else): nothing to do.
+            if existing.get("status").and_then(Value::as_str) != Some("claiming")
+                || existing.get("purpose").and_then(Value::as_str) != Some("account_top_up")
+            {
+                return Ok(false);
+            }
         }
-        return Err(ApiError::conflict(
-            "This top-up transaction was already used by another account.",
-        ));
+        Err(other) => return Err(other.into()),
     }
 
     let op = LedgerOp::mint(uid, amount, "account_top_up")
@@ -223,33 +252,15 @@ async fn credit_verified_top_up(
             "reconciled": reconciled,
         }));
     let outcome = store::apply(firestore, &op).await?;
-    if outcome.applied {
-        let document = json!({
-            "uid": uid,
-            "txHash": funding_hash,
-            "fromAddress": from_address,
-            "amountPkn": amount,
-            "purpose": "account_top_up",
-            "reconciled": reconciled,
-            "createdAt": store::now_iso(),
-        });
-        if reconciled {
-            firestore
-                .set_document(
-                    &firestore.document_path(store::NATIVE_DEPOSITS, funding_hash),
-                    &document,
-                )
-                .await?;
-        } else {
-            match firestore
-                .create_document(store::NATIVE_DEPOSITS, funding_hash, &document)
-                .await
-            {
-                Ok(_) | Err(crate::error::StoreError::Conflict(_)) => {}
-                Err(other) => return Err(other.into()),
-            }
-        }
-    }
+    // Best effort: a stale `claiming` only makes the owner's retry replay
+    // the (idempotent) mint.
+    let _ = firestore
+        .update_document(
+            &deposit_path,
+            &json!({ "status": "credited", "creditedAt": store::now_iso() }),
+            Some(&["status", "creditedAt"]),
+        )
+        .await;
     Ok(outcome.applied)
 }
 
@@ -401,7 +412,7 @@ pub async fn request_pkn_withdraw(
         .set_document(
             &state
                 .firestore()?
-                .document_path(store::WITHDRAW_REQUESTS, &request_id),
+                .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
             &request,
         )
         .await;
@@ -425,7 +436,7 @@ pub async fn request_pkn_withdraw(
                     .set_document(
                         &state
                             .firestore()?
-                            .document_path(store::WITHDRAW_REQUESTS, &request_id),
+                            .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
                         &request,
                     )
                     .await;
@@ -443,7 +454,7 @@ pub async fn request_pkn_withdraw(
                     .set_document(
                         &state
                             .firestore()?
-                            .document_path(store::WITHDRAW_REQUESTS, &request_id),
+                            .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
                         &request,
                     )
                     .await;
@@ -463,7 +474,7 @@ pub async fn request_pkn_withdraw(
                 .set_document(
                     &state
                         .firestore()?
-                        .document_path(store::WITHDRAW_REQUESTS, &request_id),
+                        .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
                     &request,
                 )
                 .await;
@@ -696,7 +707,7 @@ pub async fn money_request_post(
                 };
                 let _ = firestore
                     .update_document(
-                        &firestore.document_path(store::NOTIFICATIONS, id),
+                        &firestore.document_path(store::NOTIFICATIONS, id)?,
                         &json!({ "read": true, "readAt": store::now_iso() }),
                         Some(&["read", "readAt"]),
                     )
@@ -740,7 +751,7 @@ async fn push_notification(
 async fn load_request(state: &DomainState, request_id: &str) -> Result<Option<Value>, ApiError> {
     let firestore = state.firestore()?;
     Ok(firestore
-        .get_document(&firestore.document_path(store::MONEY_REQUESTS, request_id))
+        .get_document(&firestore.document_path(store::MONEY_REQUESTS, request_id)?)
         .await?)
 }
 
@@ -769,7 +780,7 @@ async fn money_request_create(
     };
     let firestore = state.firestore()?;
     if firestore
-        .get_document(&firestore.document_path(store::MONEY_REQUESTS, &request_id))
+        .get_document(&firestore.document_path(store::MONEY_REQUESTS, &request_id)?)
         .await?
         .is_some()
     {
@@ -792,7 +803,7 @@ async fn money_request_create(
     });
     firestore
         .set_document(
-            &firestore.document_path(store::MONEY_REQUESTS, &request_id),
+            &firestore.document_path(store::MONEY_REQUESTS, &request_id)?,
             &document,
         )
         .await?;
@@ -821,6 +832,8 @@ async fn money_request_pay(
     if request_id.is_empty() {
         return Err(ApiError::bad_request("Missing request id."));
     }
+    crate::firestore::validate_client_id(&request_id)
+        .map_err(|_| ApiError::bad_request("Invalid request id."))?;
     let request = load_request(state, &request_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Request not found."))?;
@@ -884,7 +897,7 @@ async fn money_request_pay(
         .set_document(
             &state
                 .firestore()?
-                .document_path(store::MONEY_REQUESTS, &request_id),
+                .document_path(store::MONEY_REQUESTS, &request_id)?,
             &json!({
                 "status": mr::STATUS_PAID,
                 "paidAt": store::now_iso(),
@@ -919,6 +932,8 @@ async fn money_request_resolve(
     if request_id.is_empty() {
         return Err(ApiError::bad_request("Missing request id."));
     }
+    crate::firestore::validate_client_id(&request_id)
+        .map_err(|_| ApiError::bad_request("Invalid request id."))?;
     let request = load_request(state, &request_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Request not found."))?;
@@ -964,7 +979,7 @@ async fn money_request_resolve(
         .set_document(
             &state
                 .firestore()?
-                .document_path(store::MONEY_REQUESTS, &request_id),
+                .document_path(store::MONEY_REQUESTS, &request_id)?,
             &json!({ "status": new_status, "resolvedAt": store::now_iso() }),
         )
         .await?;

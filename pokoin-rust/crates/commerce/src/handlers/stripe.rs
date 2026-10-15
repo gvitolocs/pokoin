@@ -83,7 +83,7 @@ pub async fn handle_completed_checkout(
     });
     let _ = firestore
         .set_document(
-            &firestore.document_path(store::PKN_PURCHASES, &session_id),
+            &firestore.document_path(store::PKN_PURCHASES, &session_id)?,
             &purchase,
         )
         .await;
@@ -247,23 +247,78 @@ async fn stripe_webhook_inner(
 
     let event: Value = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("Webhook Error: invalid JSON payload."))?;
+    process_verified_event(&state, &event).await
+}
+
+/// Handle a Stripe event whose signature was already verified.
+pub async fn process_verified_event(state: &DomainState, event: &Value) -> Result<Response, ApiError> {
     let event_id = event.get("id").and_then(Value::as_str).unwrap_or_default();
     let event_type = event.get("type").and_then(Value::as_str).unwrap_or_default();
 
-    // Idempotency: Stripe retries the same event id.
-    if !event_id.is_empty() {
-        let claimed = store::claim_idempotency(
-            state.firestore()?,
-            &format!("stripe_event:{event_id}"),
-            None,
-            &json!({ "type": event_type }),
-        )
-        .await?;
-        if !claimed {
+    // Idempotency: Stripe retries the same event id. The claim is released
+    // when handling fails, so Stripe's retry runs the handler again (every
+    // handler below is idempotent), and marked `done` when it succeeds. A
+    // claim left neither done nor released (the process died mid-handling)
+    // is treated as abandoned after STALE_EVENT_CLAIM_MS.
+    let claim_key = (!event_id.is_empty()).then(|| format!("stripe_event:{event_id}"));
+    if let Some(key) = &claim_key {
+        let firestore = state.firestore()?;
+        let claimed =
+            store::claim_idempotency(firestore, key, None, &json!({ "type": event_type })).await?;
+        if !claimed && !event_claim_is_stale(firestore, key, chrono::Utc::now().timestamp_millis()).await? {
             return Ok(Json(json!({ "received": true, "duplicate": true })).into_response());
         }
     }
 
+    match handle_event(state, event_type, event).await {
+        Ok(()) => {
+            if let Some(key) = &claim_key {
+                let _ = store::update_idempotency(
+                    state.firestore()?,
+                    key,
+                    &json!({ "done": true, "doneAt": store::now_iso() }),
+                )
+                .await;
+            }
+            Ok(Json(json!({ "received": true })).into_response())
+        }
+        Err(error) => {
+            if let Some(key) = &claim_key {
+                if let Err(release) = store::release_idempotency(state.firestore()?, key).await {
+                    tracing::error!(%release, event_id, "could not release the Stripe event claim");
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+/// A claim older than this that never reached `done` belongs to a worker
+/// that died mid-handling; the event is handled again.
+const STALE_EVENT_CLAIM_MS: i64 = 10 * 60 * 1000;
+
+async fn event_claim_is_stale(
+    firestore: &crate::firestore::FirestoreClient,
+    key: &str,
+    now_ms: i64,
+) -> Result<bool, ApiError> {
+    let Some(record) = store::idempotency_result(firestore, key).await? else {
+        // Released between our claim attempt and this read: handle it.
+        return Ok(true);
+    };
+    if record.get("done").and_then(Value::as_bool) == Some(true) {
+        return Ok(false);
+    }
+    let created_ms = record
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
+        .map(|time| time.timestamp_millis())
+        .unwrap_or(now_ms);
+    Ok(now_ms - created_ms > STALE_EVENT_CLAIM_MS)
+}
+
+async fn handle_event(state: &DomainState, event_type: &str, event: &Value) -> Result<(), ApiError> {
     if event_type == "checkout.session.completed" || event_type == "checkout.session.async_payment_succeeded" {
         let session = event
             .get("data")
@@ -285,9 +340,9 @@ async fn stripe_webhook_inner(
             if order_id.is_empty() {
                 return Err(ApiError::bad_request("Order id missing from the Stripe session."));
             }
-            handle_marketplace_order_paid(&state, &order_id, &session).await?;
+            handle_marketplace_order_paid(state, &order_id, &session).await?;
         } else {
-            handle_completed_checkout(&state, &session).await?;
+            handle_completed_checkout(state, &session).await?;
         }
     } else if event_type == "checkout.session.expired" || event_type == "checkout.session.async_payment_failed" {
         let session = event
@@ -317,14 +372,14 @@ async fn stripe_webhook_inner(
                     ("expired", "expired", &[])
                 };
                 let _ = super::orders::release_eur_reservation(
-                    &state, &order_id, reason, status, extra,
+                    state, &order_id, reason, status, extra,
                 )
                 .await?;
             }
         }
     }
 
-    Ok(Json(json!({ "received": true })).into_response())
+    Ok(())
 }
 
 /// Mark a EUR order paid, consume the PKN discount and commit the stock hold.
@@ -335,7 +390,7 @@ pub(crate) async fn handle_marketplace_order_paid(
 ) -> Result<(), ApiError> {
     let firestore = state.firestore()?;
     let order = firestore
-        .get_document(&firestore.document_path(store::ORDERS, order_id))
+        .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
         .ok_or_else(|| ApiError::not_found(format!("Order {order_id} not found for Stripe session.")))?;
     let buyer_uid = order
@@ -359,7 +414,7 @@ pub(crate) async fn handle_marketplace_order_paid(
         if payment_status == "pending_stripe" {
             let _ = firestore
                 .update_document(
-                    &firestore.document_path(store::ORDERS, order_id),
+                    &firestore.document_path(store::ORDERS, order_id)?,
                     &json!({ "paymentStatus": "processing", "updatedAt": store::now_iso() }),
                     Some(&["paymentStatus", "updatedAt"]),
                 )
@@ -399,7 +454,8 @@ pub(crate) async fn handle_marketplace_order_paid(
             "order_discount_consumed",
             false,
         )
-        .with_ref(order_id);
+        .with_ref(order_id)
+        .with_idempotency(format!("order_discount_consumed:{order_id}"));
         let _ = store::apply(firestore, &op).await;
     }
 
@@ -424,7 +480,7 @@ pub(crate) async fn handle_marketplace_order_paid(
         }
     }
     firestore
-        .set_document(&firestore.document_path(store::ORDERS, order_id), &patch)
+        .set_document(&firestore.document_path(store::ORDERS, order_id)?, &patch)
         .await?;
 
     // Commit the stock hold, write the Sold-on-Pokoin rows and queue the seller
@@ -473,7 +529,7 @@ pub async fn stripe_connect_onboard_get(
     let (status, ready) = connect_status(&account);
     firestore
         .update_document(
-            &firestore.document_path(store::USERS, &claims.uid),
+            &firestore.document_path(store::USERS, &claims.uid)?,
             &json!({
                 "stripeConnectAccountId": account_id,
                 "stripeConnectStatus": status,
@@ -497,7 +553,7 @@ pub async fn stripe_connect_onboard_post(
 ) -> Result<Response, ApiError> {
     let stripe = state.stripe()?;
     let firestore = state.firestore()?;
-    let user_path = firestore.document_path(store::USERS, &claims.uid);
+    let user_path = firestore.document_path(store::USERS, &claims.uid)?;
     let profile = store::read_user(firestore, &claims.uid).await?;
     let mut account_id = profile
         .get("stripeConnectAccountId")
