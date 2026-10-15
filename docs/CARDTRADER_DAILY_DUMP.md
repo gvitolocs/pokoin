@@ -29,6 +29,12 @@ script uses the Python dump when `/home/nez/pokoin-cardtrader/current` is missin
   stops the run with `blocked` in the status.
 - The bridge streams each book to an unlinked temp file and then out, so its
   memory stays flat on the 1 GB VM.
+- Wire compression: the dump asks for `"encoding":"zstd"`; the bridge
+  compresses each book on the fly (level 3, a 32 MB book becomes ~1.2 MB in
+  ~0.5 s) and answers `{"id":N,"encoding":"zstd","bytes":L}` + L bytes. The
+  Oracle → nezopt link only moves ~4-5 MB/s, so this removes most of the
+  transfer time. `POKOIN_CT_ENCODING=none` turns it off; plain line replies
+  (the Python bridge) are always understood.
 - Resume: books already in the folder (`.ctb`, or `.json.gz` from the Python
   dump) are counted and skipped; a truncated or unreadable one is renamed
   `.corrupt` and fetched again.
