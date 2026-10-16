@@ -43,10 +43,25 @@ function rise(node, dy) {
   animation.oncancel = settle;
 }
 
+/** Translate already applied to a row, or 0 when it cannot be read (node tests). */
+function currentTranslateY(node) {
+  try {
+    if (typeof getComputedStyle !== 'function' || typeof DOMMatrixReadOnly !== 'function') return 0;
+    const transform = getComputedStyle(node)?.transform;
+    if (!transform || transform === 'none') return 0;
+    const y = new DOMMatrixReadOnly(transform).m42;
+    return Number.isFinite(y) ? y : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
- * Rows keep their card id; a row that ranks higher slides up into its new
- * slot. A keystroke cancels that row's in-flight slide and starts from where
- * it is, so rapid typing does not queue animations.
+ * Rows keep their card id; a row whose layout slot moves up slides from where
+ * it is on screen. The slot is the position without the running translate, so
+ * a later paint for the same term does not cancel a rise that has not moved.
+ * A keystroke that does move the slot cancels the in-flight slide and starts
+ * again from the row's current visual position.
  * First paint does not animate (empty previous map).
  *
  * Framework-free: call `update(root)` after every list render (React
@@ -60,23 +75,42 @@ export function createSuggestFlip() {
       prev = new Map();
       return;
     }
-    const animate = prev.size > 0 && !reducedMotion();
-    const next = new Map();
+    const rootRect = root.getBoundingClientRect?.();
+    const rootTop = rootRect?.top || 0;
+    const scroll = root.scrollTop || 0;
+    // Read every slot before writing: measuring after rise() would include
+    // the transform this update is about to apply.
+    const measured = [];
     root.querySelectorAll('[data-suggest-id]').forEach((node) => {
       const id = node.getAttribute('data-suggest-id');
       if (!id) return;
-      const top = node.getBoundingClientRect().top;
-      next.set(id, top);
-      if (!animate) return;
+      const visual = node.getBoundingClientRect().top - rootTop + scroll;
+      const slot = visual - currentTranslateY(node);
+      measured.push({ node, id, visual, slot });
+    });
+    const animate = prev.size > 0 && !reducedMotion();
+    const next = new Map();
+    for (const { node, id, visual, slot } of measured) {
+      next.set(id, slot);
+      if (!animate) continue;
       const was = prev.get(id);
-      const dy = was === undefined ? null : rowMotion(was, top);
-      if (dy != null) {
-        rise(node, dy);
-      } else if (was === undefined || top - was >= 1) {
-        // New or dropped: straight to its slot, no leftover slide.
+      if (was === undefined) {
+        stop(node);
+        continue;
+      }
+      if (Math.abs(slot - was) < 1) continue;
+      if (slot < was) {
+        // `visual - slot` is where the row is drawn relative to its new slot,
+        // including an in-flight translate. A fresh rise has no transform, so
+        // that offset is 0 and the distance is the slot change itself.
+        const offset = visual - slot;
+        const from = offset >= 1 ? offset : (was - slot);
+        if (from >= 1) rise(node, from);
+        else stop(node);
+      } else {
         stop(node);
       }
-    });
+    }
     prev = next;
   }
 
