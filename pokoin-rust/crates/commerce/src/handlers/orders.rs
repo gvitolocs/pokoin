@@ -3202,6 +3202,7 @@ mod tests {
             card_count: 2,
             package_tier: "letter".into(),
             tracked: true,
+            requested_tracked: true,
             estimated_weight_grams: 20,
             carrier: "Poste".into(),
             service_name: "Tracked".into(),
@@ -3215,6 +3216,7 @@ mod tests {
         assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
         assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
         assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
+        assert_eq!(rows[0]["serviceId"], json!("tracked"));
         // The refund share now has a non-zero EUR gross for this seller.
         let order = json!({ "channel": "eur", "currency": "EUR", "shipments": rows, "items": [] });
         let share = crate::domain::order_refund::seller_share(&order, "s1");
