@@ -9,10 +9,15 @@ use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use serde_json::json;
+use serde_json::{json, Value as Json};
 
-use crate::domain::collection::{list_owned_collection, remove_owned_collection_item};
+use crate::domain::collection::{
+    list_owned_collection, live_listings_from_rows, merge_live_listings,
+    remove_owned_collection_item, LiveListings, OwnedCollection, LIVE_LISTINGS_LINKED_SQL,
+    LIVE_LISTINGS_SQL,
+};
 use crate::error::{ApiError, Result};
+use crate::sql::{MarketplaceDb, SqlError, SqlParam};
 use crate::state::DomainState;
 
 use super::{json_cached, number_field, parse_body, require_claims, string_field};
@@ -86,12 +91,52 @@ pub async fn marketplace_collection_summary(
 async fn collection_summary_inner(state: &DomainState, headers: &HeaderMap) -> Result<Response> {
     let claims = require_claims(state, headers).await?;
     let firestore = state.firestore()?;
-    let listed = list_owned_collection(&firestore, &claims.uid).await?;
-    Ok(json_cached(
-        StatusCode::OK,
-        listed.to_summary_json(),
-        "private, no-store",
-    ))
+    let uid = claims.uid;
+    // No read pool: the summary stays the collection sum, with `listed: null`.
+    let Ok(db) = state.marketplace_db() else {
+        let owned = list_owned_collection(&firestore, &uid).await?;
+        return Ok(json_cached(
+            StatusCode::OK,
+            owned.to_summary_json(),
+            "private, no-store",
+        ));
+    };
+
+    let params = [SqlParam::Text(uid.clone())];
+    let (owned, totals) = tokio::join!(
+        list_owned_collection(&firestore, &uid),
+        db.query_json(LIVE_LISTINGS_SQL, &params),
+    );
+    let owned = owned?;
+    let body = match read_live_listings(&db, &uid, &owned, totals).await {
+        Ok(live) => merge_live_listings(&owned, &live),
+        Err(error) => {
+            tracing::warn!(%error, "collection summary live listings failed");
+            owned.to_summary_json()
+        }
+    };
+    Ok(json_cached(StatusCode::OK, body, "private, no-store"))
+}
+
+/// First query's totals, then the linked-id query when a collection doc names one.
+async fn read_live_listings(
+    db: &MarketplaceDb,
+    uid: &str,
+    owned: &OwnedCollection,
+    totals: std::result::Result<Vec<Json>, SqlError>,
+) -> std::result::Result<LiveListings, SqlError> {
+    let totals = totals?;
+    let ids = owned.referenced_listing_ids();
+    let linked = if ids.is_empty() {
+        Vec::new()
+    } else {
+        db.query_json(
+            LIVE_LISTINGS_LINKED_SQL,
+            &[SqlParam::Text(uid.to_string()), SqlParam::TextArray(ids)],
+        )
+        .await?
+    };
+    Ok(live_listings_from_rows(&totals, &linked))
 }
 
 /// The Node error mapping: a 401 is always phrased the same way, and a 404 or
