@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value as Json};
 
 use crate::http::{HttpRequest, TransportError};
 
+use super::memory::HonchoConfig;
 use super::sanitize;
 use super::tools::{openai_tools, ModelToolCall};
 use super::BrainDeps;
@@ -87,6 +88,7 @@ pub struct BrainConfig {
     pub max_tool_rounds: u32,
     pub guard_url: Option<String>,
     pub guard_model: Option<String>,
+    pub memory: HonchoConfig,
 }
 
 impl BrainConfig {
@@ -116,6 +118,7 @@ impl BrainConfig {
                 .unwrap_or(DEFAULT_MAX_ROUNDS),
             guard_url,
             guard_model,
+            memory: HonchoConfig::from_lookup(lookup),
         }
     }
 }

@@ -5,6 +5,7 @@
 //! decides whether the website chat uses this path; any error falls back to Hermes.
 
 mod cards;
+mod memory;
 mod prompt;
 mod providers;
 mod safety;
@@ -16,6 +17,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value as Json};
 
+pub use memory::HonchoConfig;
 pub use providers::{brain_enabled, parse_mode, BrainConfig, BrainMode, Provider, ProviderHealth};
 pub use tools::{MarketToolRunner, ToolRunner};
 
@@ -39,6 +41,10 @@ pub struct BrainInput {
     pub display_name: String,
     pub user_id: String,
     pub session_id: String,
+    /// Already-safe Honcho peer id. `None` or empty uses `safe_id("poko_user", user_id)`.
+    pub memory_peer_id: Option<String>,
+    /// Already-safe Honcho session id. `None` or empty uses `safe_id("poko_session", session_id or user_id)`.
+    pub memory_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +102,7 @@ const NO_TOOLS_RETRY_SYSTEM: &str =
 pub async fn reply(deps: &BrainDeps, input: BrainInput) -> Result<BrainReply, BrainError> {
     let started = Instant::now();
     if safety::chat_blocked(&input.user_id, &input.user_message) {
+        log_memory(0, 0);
         return Ok(finished(
             started,
             safety::ABUSE_REPLY,
@@ -108,6 +115,7 @@ pub async fn reply(deps: &BrainDeps, input: BrainInput) -> Result<BrainReply, Br
         ));
     }
     if safety::input_unsafe(deps, &input.user_message).await {
+        log_memory(0, 0);
         return Ok(finished(
             started,
             safety::GUARD_INPUT_REPLY,
@@ -120,7 +128,23 @@ pub async fn reply(deps: &BrainDeps, input: BrainInput) -> Result<BrainReply, Br
         ));
     }
 
-    let mut messages = base_messages(&input);
+    let (peer_id, honcho_session) = memory::resolve_memory_ids(
+        &input.user_id,
+        &input.session_id,
+        input.memory_peer_id.as_deref(),
+        input.memory_session_id.as_deref(),
+    );
+    let memory_read = memory::load(
+        &deps.transport,
+        &deps.config.memory,
+        &peer_id,
+        &honcho_session,
+        &input.user_message,
+    )
+    .await;
+    log_memory(memory_read.elapsed_ms, memory_read.chars);
+
+    let mut messages = base_messages(&input, &memory_read.block);
     let mut logs: Vec<ToolCallLog> = Vec::new();
     let mut payloads: Vec<Json> = Vec::new();
     let mut rounds = 0u32;
@@ -181,6 +205,16 @@ pub async fn reply(deps: &BrainDeps, input: BrainInput) -> Result<BrainReply, Br
     } else {
         cards::from_results(&payloads, &text)
     };
+    memory::spawn_remember(
+        deps.transport.clone(),
+        deps.config.memory.clone(),
+        memory::RememberTurn {
+            peer_id,
+            session_id: honcho_session,
+            user_text: input.user_message.clone(),
+            assistant_text: text.clone(),
+        },
+    );
     Ok(finished(
         started,
         &text,
@@ -216,7 +250,11 @@ fn finished(
     }
 }
 
-fn base_messages(input: &BrainInput) -> Vec<Json> {
+fn log_memory(memory_ms: u64, memory_chars: u64) {
+    tracing::info!(memory_ms, memory_chars, "poko-brain memory");
+}
+
+fn base_messages(input: &BrainInput, memory_block: &str) -> Vec<Json> {
     let mut messages = vec![json!({
         "role": "system",
         "content": prompt::system_prompt(&input.game),
@@ -234,6 +272,13 @@ fn base_messages(input: &BrainInput) -> Vec<Json> {
         messages.push(json!({
             "role": "system",
             "content": blocks.join("\n\n"),
+        }));
+    }
+    let memory_block = memory_block.trim();
+    if !memory_block.is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": memory_block,
         }));
     }
     for turn in bound_history(&input.history) {

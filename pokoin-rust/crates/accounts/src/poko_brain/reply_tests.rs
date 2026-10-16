@@ -7,6 +7,7 @@ use serde_json::{json, Value as Json};
 
 use crate::http::{HttpRequest, HttpResponse, HttpTransport, SharedTransport, TransportError};
 
+use super::memory::HonchoConfig;
 use super::providers::{BrainConfig, Provider, ProviderHealth};
 use super::safety::{GUARD_INPUT_REPLY, GUARD_OUTPUT_REPLY};
 use super::tools::ToolRunner;
@@ -40,6 +41,7 @@ fn config(providers: Vec<Provider>) -> BrainConfig {
         max_tool_rounds: 3,
         guard_url: None,
         guard_model: None,
+        memory: HonchoConfig::disabled(),
     }
 }
 
@@ -55,6 +57,8 @@ fn input(message: &str) -> BrainInput {
         display_name: "Ash".into(),
         user_id: format!("user-{}", message.len()),
         session_id: "session".into(),
+        memory_peer_id: None,
+        memory_session_id: None,
     }
 }
 

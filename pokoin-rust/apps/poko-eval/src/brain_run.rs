@@ -28,6 +28,8 @@ pub async fn run_brain(ctx: &BrainContext, question: &Question) -> RunRecord {
         display_name: String::new(),
         user_id: "poko-eval".to_string(),
         session_id: format!("poko-eval-{}", question.id),
+        memory_peer_id: None,
+        memory_session_id: None,
     };
     match poko_brain::reply(ctx.deps.as_ref(), input).await {
         Ok(reply) => RunRecord {
