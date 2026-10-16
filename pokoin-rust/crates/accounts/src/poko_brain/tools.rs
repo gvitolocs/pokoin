@@ -18,7 +18,20 @@ use super::BrainDeps;
 
 const TOOL_RESULT_CHARS: usize = 6_000;
 const ROUND_RESULT_CHARS: usize = 16_000;
-const TOOL_TIMEOUT: Duration = Duration::from_secs(8);
+/// Per-tool limit. `top_sellers` takes 8-9 s on the Pi replica, so the default is 15 s.
+const DEFAULT_TOOL_TIMEOUT_MS: u64 = 15_000;
+
+/// `POKO_BRAIN_TOOL_TIMEOUT_MS`, 1000-30000; anything else uses the default.
+pub(crate) fn parse_tool_timeout(raw: Option<&str>) -> Duration {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|ms| (1_000..=30_000).contains(ms))
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(DEFAULT_TOOL_TIMEOUT_MS))
+}
+
+fn tool_timeout() -> Duration {
+    parse_tool_timeout(std::env::var("POKO_BRAIN_TOOL_TIMEOUT_MS").ok().as_deref())
+}
 
 /// One tool call the model asked for, after its arguments parsed as JSON.
 #[derive(Debug, Clone)]
@@ -122,14 +135,14 @@ pub(crate) async fn run_round(
     calls: &[ModelToolCall],
 ) -> Vec<ExecutedTool> {
     let mut set = JoinSet::new();
+    let timeout = tool_timeout();
     for (index, call) in calls.iter().cloned().enumerate() {
         let runner: Arc<dyn ToolRunner> = Arc::clone(&deps.tools);
         let game = game.to_string();
         set.spawn(async move {
             let started = std::time::Instant::now();
             let outcome =
-                tokio::time::timeout(TOOL_TIMEOUT, runner.run(&call.name, &call.arguments, &game))
-                    .await;
+                tokio::time::timeout(timeout, runner.run(&call.name, &call.arguments, &game)).await;
             let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             let (body, ok) = match outcome {
                 Ok(body) => {
@@ -404,6 +417,31 @@ fn tool(name: &str, description: &str, fields: &[(&str, &str, &str)]) -> Json {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tool_timeout_parses_and_clamps() {
+        use std::time::Duration;
+        assert_eq!(
+            super::parse_tool_timeout(None),
+            Duration::from_millis(15_000)
+        );
+        assert_eq!(
+            super::parse_tool_timeout(Some(" 12000 ")),
+            Duration::from_millis(12_000)
+        );
+        assert_eq!(
+            super::parse_tool_timeout(Some("500")),
+            Duration::from_millis(15_000)
+        );
+        assert_eq!(
+            super::parse_tool_timeout(Some("90000")),
+            Duration::from_millis(15_000)
+        );
+        assert_eq!(
+            super::parse_tool_timeout(Some("abc")),
+            Duration::from_millis(15_000)
+        );
+    }
+
     use super::*;
 
     #[test]

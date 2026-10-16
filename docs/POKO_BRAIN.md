@@ -11,7 +11,7 @@ Hermes stays available. Any brain error, or an empty reply, uses the existing He
 3. The abuse screen runs on the user message. A hit returns `I can't help with that.` and does not call a model. The same user stays blocked for the life of the process.
 4. If `POKO_GUARD_URL` and `POKO_GUARD_MODEL` are both set, a Qwen3Guard-Gen style check runs on the user message (3s). `Safety: Unsafe` is a short refusal and skips the main model. Transport errors and other failures are logged and ignored.
 5. The model sees one system prompt, one extra system message with the handler's context blocks (market directive, personal intent, photo and card context, the reply-cards line), the last 10 chat events (oldest first, at most 6,000 characters), and the user message.
-6. Tool calls in one round run together. Each tool has 8 seconds. A failure or a timeout is `{"ok":false,"error":...}` for the model. Each result is capped at 6,000 characters and a round at 16,000.
+6. Tool calls in one round run together. Each tool has `POKO_BRAIN_TOOL_TIMEOUT_MS` (default 15000, 1000-30000; `top_sellers` takes 8-9 s on the Pi replica). A failure or a timeout is `{"ok":false,"error":...}` for the model. Each result is capped at 6,000 characters and a round at 16,000.
 7. After the last allowed tool round, one more call uses `tool_choice: "none"` so the model has to answer.
 8. The reply is sanitized (tool markup including DeepSeek DSML, raw tool names, markdown headings and emphasis). If the model leaks tool-call syntax into text on the forced final call, the brain retries once on the same provider without the `tools` field and a short system reminder; if that still fails, it tries the next provider the same way. A reply that still contains tool markup is an error (Hermes fallback). The output guard, when configured, can replace it. Reply cards (at most 6) come from tool results, deduped by card id, in mention order when the reply names them. The handler still runs `attach_reply_cards`.
 
@@ -40,6 +40,7 @@ The per-call timeout is `POKO_BRAIN_CALL_TIMEOUT_MS` (default 15000) and is also
 | `POKO_BRAIN_LOCAL_EXTRA` | none | JSON object merged into the local request body, for example `{"chat_template_kwargs":{"enable_thinking":false}}`. |
 | `POKO_BRAIN_CALL_TIMEOUT_MS` | `15000` | Timeout for one model call. `0` or junk uses the default. |
 | `POKO_BRAIN_BUDGET_MS` | `40000` | Budget for the whole brain turn. `0` or junk uses the default. |
+| `POKO_BRAIN_TOOL_TIMEOUT_MS` | `15000` | Per-tool limit in ms (1000-30000). |
 | `POKO_BRAIN_MAX_TOOL_ROUNDS` | `3` | Tool rounds before the forced `tool_choice: none` call. |
 | `POKO_GUARD_URL` | none | OpenAI-compatible base for the guard. Both this and the model must be set. |
 | `POKO_GUARD_MODEL` | none | Guard model name, for a Qwen3Guard-Gen style endpoint. |
