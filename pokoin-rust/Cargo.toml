@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/api",
   "apps/poko-eval",
+  "apps/poko-bot",
   "apps/cardtrader-bridge",
   "apps/cardtrader-listing-dump",
   "apps/cardtrader-price-cache",
