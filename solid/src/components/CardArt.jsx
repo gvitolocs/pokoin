@@ -86,6 +86,7 @@ export default function CardArt(props) {
   const figureMask = createMemo(() => props.figureMask
     ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : ''));
   const [showFigure, setShowFigure] = createSignal(false);
+  const [figurePhase, setFigurePhase] = createSignal('in');
   const [figureHit, setFigureHit] = createSignal(null);
   const figureOriginStyle = createMemo(() => {
     const mask = figureMask();
@@ -104,7 +105,23 @@ export default function CardArt(props) {
   onSettled(() => {
     const node = img?.closest('.tile');
     if (!node || !figureMask()) return undefined;
-    const on = () => {
+    // CSS exit is 200ms. The margin lets the scale land on the painting
+    // before the layers unmount.
+    const exitMs = 230;
+    let exitTimer = 0;
+    let exitGen = 0;
+    const reducedMotion = () => {
+      try {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      } catch {
+        return false;
+      }
+    };
+    const enter = () => {
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      exitTimer = 0;
+      setFigurePhase('in');
       setShowFigure(true);
       const mask = figureMask();
       loadFigureBox(cdnFetchUrl(mask)).then((box) => {
@@ -112,16 +129,38 @@ export default function CardArt(props) {
         setFigureHit({ mask, box });
       });
     };
-    const off = () => setShowFigure(false);
-    node.addEventListener('pointerenter', on);
-    node.addEventListener('pointerleave', off);
-    node.addEventListener('focusin', on);
-    node.addEventListener('focusout', off);
+    const leave = () => {
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      exitTimer = 0;
+      if (reducedMotion()) {
+        setShowFigure(false);
+        return;
+      }
+      const gen = exitGen;
+      setFigurePhase('out');
+      exitTimer = window.setTimeout(() => {
+        exitTimer = 0;
+        if (gen !== exitGen) return;
+        setShowFigure(false);
+      }, exitMs);
+    };
+    const onFocusOut = (event) => {
+      const next = event.relatedTarget;
+      if (next && node.contains(next)) return;
+      leave();
+    };
+    node.addEventListener('pointerenter', enter);
+    node.addEventListener('pointerleave', leave);
+    node.addEventListener('focusin', enter);
+    node.addEventListener('focusout', onFocusOut);
     return () => {
-      node.removeEventListener('pointerenter', on);
-      node.removeEventListener('pointerleave', off);
-      node.removeEventListener('focusin', on);
-      node.removeEventListener('focusout', off);
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      node.removeEventListener('pointerenter', enter);
+      node.removeEventListener('pointerleave', leave);
+      node.removeEventListener('focusin', enter);
+      node.removeEventListener('focusout', onFocusOut);
     };
   });
 
@@ -178,6 +217,7 @@ export default function CardArt(props) {
           <Show when={figureMask() && showFigure()}>
             <img
               class="art-figure-layer art-figure-shadow"
+              data-figure={figurePhase()}
               src={cdnFetchUrl(figureMask())}
               alt=""
               aria-hidden="true"
@@ -187,6 +227,7 @@ export default function CardArt(props) {
             />
             <img
               class="art-figure-layer art-figure-hover"
+              data-figure={figurePhase()}
               src={current()}
               alt=""
               aria-hidden="true"

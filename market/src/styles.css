@@ -2969,20 +2969,42 @@ html.is-card-banding * {
     calc(var(--figure-cy, calc(var(--art-top) + var(--art-height) * 0.5)) * 100%);
 }
 
-@keyframes album-figure-pop {
-  from { scale: 1; }
-  to { scale: 1.08; }
+/* Enter: the cut-out is already pixel-aligned, so scale 1 / opacity 1 is
+ * invisible, then it grows from its own centre. */
+@keyframes album-figure-in {
+  from { scale: 1; opacity: 1; }
+  to { scale: 1.08; opacity: 1; }
 }
 
-@keyframes album-figure-shadow-pop {
+/* Exit: shrink back onto the painting, then fade only in the last 20%
+ * so the aligned frame does not pop away. Scale eases across the whole
+ * 200ms; the 80% stop holds opacity. */
+@keyframes album-figure-out {
+  from {
+    scale: 1.08;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+  80% {
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  to { scale: 1; opacity: 0; }
+}
+
+@keyframes album-figure-shadow-in {
   from { scale: 1; translate: 0 0; opacity: 0; }
-  to { scale: 1.08; translate: 0 4px; opacity: 0.62; }
+  to { scale: 1.08; translate: 0 6px; opacity: 0.62; }
 }
 
-/* Hundreds of promoted blur layers made scrolling back up flicker. */
-.tile.tile-album:not(:hover):not(:focus-within) .art-cut img.art-figure-layer {
-  content-visibility: hidden;
+@keyframes album-figure-shadow-out {
+  from { scale: 1.08; translate: 0 6px; opacity: 0.62; }
+  to { scale: 1; translate: 0 0; opacity: 0; }
 }
+
+/* Layers exist only while entering or leaving, so they are not kept in
+ * the DOM for the scroll-back flicker the old content-visibility rule
+ * was hiding. */
 
 .tile.tile-album .art-cut img.art-figure-hover {
   z-index: 3;
@@ -2996,9 +3018,8 @@ html.is-card-banding * {
   mask-position: center;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-  /* Layers mount already hovered, so a transform transition never plays.
-   * The grow is an animation of scale. Leaving :hover drops that rule and
-   * the silhouette cuts out instantly. */
+  /* data-figure drives the grow and the shrink. A transform transition
+   * never runs: the layers mount already in phase "in". */
 }
 
 /* The mask WebP itself is a solid, transparent-background silhouette. Use
@@ -3009,31 +3030,46 @@ html.is-card-banding * {
   filter: brightness(0) blur(9px) !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-hover,
-.tile.tile-album:focus-within .art-cut img.art-figure-hover {
+.tile.tile-album .art-cut img.art-figure-hover[data-figure="in"] {
   opacity: 1;
   scale: 1.08;
-  animation: album-figure-pop 0.16s ease-out both !important;
+  animation: album-figure-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-shadow,
-.tile.tile-album:focus-within .art-cut img.art-figure-shadow {
+.tile.tile-album .art-cut img.art-figure-hover[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  animation: album-figure-out 0.2s both !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+}
+
+.tile.tile-album .art-cut img.art-figure-shadow[data-figure="in"] {
   opacity: 0.62;
   scale: 1.08;
-  translate: 0 4px;
-  animation: album-figure-shadow-pop 0.16s ease-out both !important;
+  translate: 0 6px;
+  animation: album-figure-shadow-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: brightness(0) blur(9px) !important;
 }
 
-/* Focus follows the silhouette: softly defocus the painting beneath the
- * zoomed Pokemon. Only tiles that actually carry a figure layer blur, and
- * the unhover exit stays instant because the base transition rules above
- * win again once this rule stops matching. */
-.tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-.tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+.tile.tile-album .art-cut img.art-figure-shadow[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  translate: 0 0;
+  animation: album-figure-shadow-out 0.2s cubic-bezier(0.4, 0, 1, 1) both !important;
+  filter: brightness(0) blur(9px) !important;
+}
+
+/* Defocus follows the phase, not :hover, so the painting eases back while
+ * the cut-out is still on its way out. */
+.tile.tile-album:has(img.art-figure-hover[data-figure="in"]) .art-cut img:not(.art-figure-layer) {
   filter: blur(2px) saturate(1.05) !important;
-  transition: filter 0.18s ease-out !important;
+  transition: filter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.tile.tile-album:has(img.art-figure-hover[data-figure="out"]) .art-cut img:not(.art-figure-layer) {
+  filter: none !important;
+  transition: filter 0.2s cubic-bezier(0.4, 0, 1, 1) !important;
 }
 
 /* Chrome object-view-box crops the base scan into the element itself. Keep
@@ -8826,18 +8862,33 @@ dialog.zoom:not([open]) {
   box-shadow: 0 0 0 3px rgb(255 211 61 / 0.75);
 }
 
-.artwork-test-card:focus .art-cut img.art-figure-hover {
+.artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="in"] {
   opacity: 1;
   scale: 1.08;
-  animation: album-figure-pop 0.16s ease-out both !important;
+  animation: album-figure-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
 }
 
-.artwork-test-card:focus .art-cut img.art-figure-shadow {
+.artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  animation: album-figure-out 0.2s both !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="in"] {
   opacity: 0.62;
   scale: 1.08;
-  translate: 0 4px;
-  animation: album-figure-shadow-pop 0.16s ease-out both !important;
+  translate: 0 6px;
+  animation: album-figure-shadow-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
+  filter: brightness(0) blur(9px) !important;
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  translate: 0 0;
+  animation: album-figure-shadow-out 0.2s cubic-bezier(0.4, 0, 1, 1) both !important;
   filter: brightness(0) blur(9px) !important;
 }
 
@@ -11623,17 +11674,17 @@ html:has(.wallet-page) .brand span {
 
 
 /* Album hover pop-out: the silhouette grows from its own centre and may
- * leave the frame. Only where object-view-box crops the base painting
- * inside its own box (Chrome/Edge). The painting keeps its rounded clip
- * and the top fade; the tile, art box, and crop box stop clipping and
- * drop the crop mask so the figure and its shadow can overflow. The
- * figure layers are absolute; min-height: 0 keeps the grid tracks put,
- * because a grid item that stops clipping gets a content-based minimum
- * (a hovered full art grew from 435px to 537px). Safari positions the
- * painting with negative offsets and stays in-frame. */
+ * leave the frame. Keyed on the figure layer itself, not :hover, so the
+ * tile stays unclipped for the whole exit. Only where object-view-box
+ * crops the base painting inside its own box (Chrome/Edge). The painting
+ * keeps its rounded clip and the top fade; the tile, art box, and crop
+ * box stop clipping and drop the crop mask. The figure layers are
+ * absolute; min-height: 0 keeps the grid tracks put, because a grid item
+ * that stops clipping gets a content-based minimum (a hovered full art
+ * grew from 435px to 537px). Safari positions the painting with negative
+ * offsets and stays in-frame. */
 @supports (object-view-box: none) {
-  .tile.tile-album:has(img.art-figure-hover):hover,
-  .tile.tile-album:has(img.art-figure-hover):focus-within {
+  .tile.tile-album:has(img.art-figure-hover) {
     position: relative;
     z-index: 6;
     overflow: visible;
@@ -11641,43 +11692,46 @@ html:has(.wallet-page) .brand span {
     min-height: 0;
   }
 
-  .tile-pile-wrap:has(img.art-figure-hover):hover,
-  .tile-pile-wrap:has(img.art-figure-hover):focus-within {
+  .tile-pile-wrap:has(img.art-figure-hover) {
     position: relative;
     z-index: 6;
   }
 
-  .tile.tile-album:has(img.art-figure-hover):hover .tile-art,
-  .tile.tile-album:has(img.art-figure-hover):hover .art-cut,
-  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-art,
-  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut {
+  .tile.tile-album:has(img.art-figure-hover) .tile-art,
+  .tile.tile-album:has(img.art-figure-hover) .art-cut {
     overflow: visible;
   }
 
-  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):hover .art-cut,
-  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):focus-within .art-cut {
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover) .art-cut {
     -webkit-mask-image: none;
     mask-image: none;
   }
 
-  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover) .art-cut img:not(.art-figure-layer) {
     clip-path: inset(0 round 14px);
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
     mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
   }
 
-  .tile.tile-album:has(img.art-figure-hover):hover .tile-meta,
-  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-meta {
+  .tile.tile-album:has(img.art-figure-hover) .tile-meta {
     z-index: 4;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile.tile-album:hover .art-cut img.art-figure-layer,
-  .tile.tile-album:focus-within .art-cut img.art-figure-layer,
-  .tile.tile-album .art-cut img.art-figure-layer {
+  .tile.tile-album .art-cut img.art-figure-hover[data-figure="in"],
+  .tile.tile-album .art-cut img.art-figure-hover[data-figure="out"],
+  .tile.tile-album .art-cut img.art-figure-shadow[data-figure="in"],
+  .tile.tile-album .art-cut img.art-figure-shadow[data-figure="out"],
+  .artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="in"],
+  .artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="out"],
+  .artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="in"],
+  .artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="out"] {
     animation: none !important;
+  }
+
+  .tile.tile-album:has(img.art-figure-hover[data-figure]) .art-cut img:not(.art-figure-layer) {
+    transition: none !important;
   }
 }
 

@@ -37,6 +37,8 @@ test('album tiles are photos of the leftover illustration, not hover-scaled card
   assert.match(cardArt, /--art-figure-mask/);
   assert.match(cardArt, /loadFigureBox/);
   assert.match(cardArt, /--figure-cx/);
+  assert.match(cardArt, /data-figure/);
+  assert.match(cardArt, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)/);
 });
 
 test('artwork piles span two rows when tall and extend the selection on modified clicks', () => {

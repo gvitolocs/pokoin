@@ -196,7 +196,11 @@ test('artist album tiles are photos of the leftover illustration, not hover-scal
     css,
     /\.tile\.tile-album \.art-cut img\.art-figure-layer \{[^}]*var\(--figure-cy, calc\(var\(--art-top\) \+ var\(--art-height\) \* 0\.5\)\)/,
   );
-  assert.match(css, /@keyframes album-figure-pop \{[\s\S]*?to \{[^}]*scale:\s*1\.08/);
+  assert.match(css, /@keyframes album-figure-in \{[\s\S]*?to \{[^}]*scale:\s*1\.08/);
+  assert.match(css, /@keyframes album-figure-out \{[\s\S]*?scale:\s*1\.08[\s\S]*?opacity:\s*0/);
+  assert.match(css, /img\.art-figure-hover\[data-figure="in"\] \{[^}]*animation:[^;]*0\.22s/);
+  assert.match(css, /img\.art-figure-hover\[data-figure="out"\] \{[^}]*animation:[^;]*0\.2s/);
+  assert.match(css, /img\.art-figure-shadow\[data-figure="in"\] \{[^}]*translate:\s*0 6px/);
   assert.doesNotMatch(css, /art-figure-hover[^}]*translateY\(-3%\)/);
   assert.doesNotMatch(css, /art-figure-shadow[^}]*translateY\(-3%\)/);
   assert.doesNotMatch(css, /art-figure-hover[^}]*scale\(1\.18\)/);
@@ -213,16 +217,16 @@ test('artist album tiles are photos of the leftover illustration, not hover-scal
   );
   assert.match(
     css,
-    /\.tile\.tile-album:not\(\.is-landscape\):not\(\.tile-item\):has\(img\.art-figure-hover\):hover \.art-cut,[\s\S]*?mask-image:\s*none/,
+    /\.tile\.tile-album:not\(\.is-landscape\):not\(\.tile-item\):has\(img\.art-figure-hover\) \.art-cut \{[^}]*mask-image:\s*none/,
   );
   // Unclipped grid items get a content-based min height; the pop-out must not grow the track.
   assert.match(
     css,
-    /\.tile\.tile-album:has\(img\.art-figure-hover\):focus-within \{[^}]*overflow:\s*visible;[^}]*min-height:\s*0/,
+    /\.tile\.tile-album:has\(img\.art-figure-hover\) \{[^}]*overflow:\s*visible;[^}]*min-height:\s*0/,
   );
   assert.match(
     css,
-    /@media \(prefers-reduced-motion: reduce\) \{\s*\.tile\.tile-album:hover \.art-cut img\.art-figure-layer,[\s\S]*?\.tile\.tile-album \.art-cut img\.art-figure-layer \{[^}]*animation:\s*none !important/,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.tile\.tile-album \.art-cut img\.art-figure-hover\[data-figure="in"\],[\s\S]*?animation:\s*none !important/,
   );
   assert.match(css, /mask-image:\s*var\(--art-figure-mask\)/);
   assert.match(css, /img\.art-figure-shadow \{[^}]*brightness\(0\) blur\(9px\)/);
