@@ -332,7 +332,7 @@ async fn update_expansion_symbol(state: &RouteState, body: &Value) -> Result<Val
     .bind(&symbol_object_key)
     .bind(&logo_url)
     .bind(&logo_object_key)
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(db_error)?;
 

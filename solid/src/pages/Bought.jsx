@@ -1,6 +1,6 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
 import { cancelEurOrder, confirmMarketplaceDelivery, reportMarketplaceProblem } from '@market/api.js';
-import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '@market/buyer-protection.js';
 import {
   ORDER_CLOCK_MS,
   orderFlags,
@@ -18,12 +18,14 @@ import {
   holdMinutesLeft,
   orderStatus,
 } from '@market/order-status.js';
-import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import RowThumb from '../components/inventory/RowThumb.jsx';
 import RequireSignIn from '../components/RequireSignIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { authUser, getBearer } from '../stores/auth.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewBought } from './mypokoin-preview-fixture.js';
 
-function BoughtDesk() {
+function BoughtDesk(props) {
   const uid = () => String(authUser()?.uid || '');
   const [rows, setRows] = createSignal(null);
   const [error, setError] = createSignal('');
@@ -31,7 +33,14 @@ function BoughtDesk() {
   const [now, setNow] = createSignal(Date.now());
   const [archived, setArchived] = createSignal(false);
 
-  createEffect(uid, (id) => {
+  createEffect(
+    () => (props.preview ? 'preview' : uid()),
+    (id) => {
+    if (id === 'preview') {
+      setRows(previewBought());
+      setError('');
+      return undefined;
+    }
     if (!id) {
       setRows(null);
       return undefined;
@@ -66,12 +75,21 @@ function BoughtDesk() {
   const shown = createMemo(() => filterOrdersByArchive(rows() || [], archived()));
 
   return (
-    <div class="page desk">
-      <PageHead kicker="Account" title="Buy history" lede={`${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}>
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
+        title="Buy history"
+        lede="Orders you paid for as a buyer."
+        metrics={rows() ? [
+          { value: rows().length, label: 'Purchases' },
+          { value: shown().length, label: archived() ? 'Archived' : 'Live' },
+        ] : []}
+      >
         <a class="btn ghost" href="/protection">Buyer protection</a>
         <a class="btn ghost" href="/cart">Cart</a>
-      </PageHead>
-      <StockNav />
+      </StockNav>
       <Alert>{error()}</Alert>
       <Show when={rows() == null && !error()}>
         <DeskPanel title="Purchases"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
@@ -114,12 +132,26 @@ function BoughtDesk() {
                 const resumable = () => canResumePayment(row, now());
                 return (
                   <article class="thread order-row">
+                    <Show when={row.items?.[0]}>
+                      {(item) => (
+                        <RowThumb row={{
+                          cardId: item().cardId || item().card?.id,
+                          cardName: item().cardName || item().card?.name,
+                          cardImageUrl: item().imageUrl || item().card?.imageUrl || '',
+                        }} />
+                      )}
+                    </Show>
                     <span class="thread-main">
                       <strong class="thread-title">
                         {orderItemsTitle(row)}
                         {' '}
                         <span class={`pill order-pill is-${status().tone}`}>{status().label}</span>
                       </strong>
+                      <Show when={row.items?.[0]?.setName || row.items?.[0]?.collectorNumber}>
+                        <span class="thread-meta">
+                          {[row.items[0].setName, row.items[0].collectorNumber ? `#${row.items[0].collectorNumber}` : ''].filter(Boolean).join(' · ')}
+                        </span>
+                      </Show>
                       <span class="thread-meta">
                         Bought
                         {step() ? ` · ${step()}` : ''}
@@ -194,12 +226,20 @@ function BoughtDesk() {
 
 /** /bought: the signed-in buyer's purchases. */
 export default function Bought() {
+  const [params] = useSearchParams();
   onSettled(() => {
     document.title = 'Buy history · Pokoin';
   });
   return (
-    <RequireSignIn>
-      <BoughtDesk />
-    </RequireSignIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <RequireSignIn>
+          <BoughtDesk />
+        </RequireSignIn>
+      )}
+    >
+      <BoughtDesk preview />
+    </Show>
   );
 }

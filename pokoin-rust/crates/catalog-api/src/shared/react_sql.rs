@@ -730,10 +730,13 @@ pub async fn read_cheapest_map(
         .collect();
     let blueprints = unique_positive(blueprint_ids.iter().copied());
     let mut map = CheapestMap::default();
-    if !is_pokemon || (public_ids.is_empty() && blueprints.is_empty()) {
+    // The flag stays so callers that also gate Pokémon-only reads keep one
+    // argument. The cache itself is per database, so every game is read.
+    let _ = is_pokemon;
+    if public_ids.is_empty() && blueprints.is_empty() {
         return map;
     }
-    // Multigame DBs omit cheapest cache: any failure resolves to empty maps.
+    // A missing relation or any other failure resolves to empty maps.
     let sql = "
         select
           pokoin_card_id,
@@ -1107,6 +1110,34 @@ pub async fn read_visual_themes(
         }
     }
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn non_pokemon_cache_rows_stamp_a_price() {
+        let rows = vec![json!({"card_id": "822658", "ct_id": "9001", "name": "Sol Ring"})];
+        let cheapest = cheapest_map_from_rows(&[json!({
+            "pokoin_card_id": "822658",
+            "blueprint_id": 9001,
+            "cheapest_price_pkn": 1200,
+            "eligible_listing_count": 3,
+            "eligible_quantity": 5,
+            "provider": "cardtrader",
+        })]);
+        let out = apply_canonical_and_cheapest(&rows, &HashMap::new(), &cheapest);
+        assert_eq!(out[0]["lowest_price_pkn"], json!(1200));
+        assert_eq!(out[0]["has_cardtrader_listing"], json!(true));
+        assert_eq!(out[0]["listed_quantity"], json!(5));
+        assert!(
+            cheapest.by_card_id.contains_key("822658"),
+            "a non-pokemon public id is a cache key"
+        );
+    }
 }
 
 /// `[...new Set(ids)].filter(Number.isSafeInteger && > 0)`, insertion order.

@@ -5,9 +5,13 @@
 //! State is never migrated: the wallet documents keep their real field names
 //! (`availablePkn`, `lockedPkn`, `updatedAt`) and the ledger keeps
 //! `{ uid, type, amountPkn, ... }`. Every movement is one Firestore
-//! transaction: read the balance documents, compute the delta, then commit the
-//! balance writes, the ledger entries and the idempotency marker together. A
-//! replayed key returns the recorded result instead of moving money twice.
+//! transaction: read the idempotency marker and the balance documents (one
+//! batchGet), compute the delta, then commit the balance writes, the ledger
+//! entries and the marker (create-only) together. A replayed key returns the
+//! recorded result instead of moving money twice; two racing callers cannot
+//! both commit because only one marker create can succeed.
+
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
@@ -184,7 +188,7 @@ pub fn now_iso() -> String {
 
 /// Read a wallet balance (a missing document is a zero balance).
 pub async fn balance(fs: &FirestoreClient, uid: &str) -> Result<FirestoreBalance, StoreError> {
-    let document = fs.get_document(&fs.document_path(BALANCES, uid)).await?;
+    let document = fs.get_document(&fs.document_path(BALANCES, uid)?).await?;
     Ok(document
         .as_ref()
         .map(FirestoreBalance::from_document)
@@ -232,104 +236,166 @@ pub fn ledger_entry_document(
 
 /// Apply one ledger operation atomically on Firestore.
 pub async fn apply(fs: &FirestoreClient, op: &LedgerOp) -> Result<LedgerOutcome, StoreError> {
-    if op.amount <= 0 && op.mode != MoveMode::RecordOnly {
+    apply_all(fs, std::slice::from_ref(op), op.idem_key.as_deref()).await
+}
+
+/// What the transaction body saw on its last attempt.
+enum TxSeen {
+    /// The idempotency marker already existed: nothing was written.
+    Replayed(Value),
+    /// Balances after every op, committed together with the marker.
+    Applied(Vec<(String, FirestoreBalance)>),
+}
+
+/// Apply several ledger operations as ONE Firestore transaction (all or
+/// nothing), guarded by one idempotency key. The outcome's balances are those
+/// of `ops[0]`'s parties. Each op's own `idem_key` is ignored here.
+pub async fn apply_all(
+    fs: &FirestoreClient,
+    ops: &[LedgerOp],
+    idem_key: Option<&str>,
+) -> Result<LedgerOutcome, StoreError> {
+    let Some(first) = ops.first() else {
+        return Err(StoreError::Invalid("No ledger operation.".into()));
+    };
+    if ops
+        .iter()
+        .any(|op| op.amount <= 0 && op.mode != MoveMode::RecordOnly)
+    {
         return Err(StoreError::Invalid(
             "Enter a whole PKN amount greater than zero.".into(),
         ));
     }
+    let idem_key = idem_key.filter(|key| !key.is_empty()).map(str::to_string);
 
-    if let Some(key) = &op.idem_key {
-        if let Some(existing) = idempotency_result(fs, key).await? {
-            return Ok(outcome_from_record(&existing));
-        }
-    }
-
-    let from_uid = op.from_uid.clone().filter(|uid| !uid.is_empty());
-    let to_uid = op.to_uid.clone().filter(|uid| !uid.is_empty());
     let mut uids: Vec<String> = Vec::new();
-    for uid in [from_uid.as_ref(), to_uid.as_ref()].into_iter().flatten() {
-        if !uids.contains(uid) {
-            uids.push(uid.clone());
+    for op in ops {
+        for uid in [op.from_uid.as_ref(), op.to_uid.as_ref()].into_iter().flatten() {
+            if !uid.is_empty() && !uids.contains(uid) {
+                uids.push(uid.clone());
+            }
         }
     }
     uids.sort();
-    if uids.len() > MAX_WRITES_PER_COMMIT / 2 {
+    if uids.len() + 2 * ops.len() + 1 > MAX_WRITES_PER_COMMIT {
         return Err(StoreError::Invalid(
             "Too many parties in one ledger op.".into(),
         ));
     }
 
+    // Tags this call's marker, so a commit whose response was lost still
+    // reads back as applied by us rather than as someone else's replay.
+    let apply_id = uuid::Uuid::new_v4().to_string();
+    let seen: Arc<Mutex<Option<TxSeen>>> = Arc::new(Mutex::new(None));
     let client_for_tx = fs.clone();
-    let op_for_tx = op.clone();
+    let ops_for_tx = ops.to_vec();
     let uids_for_tx = uids.clone();
+    let key_for_tx = idem_key.clone();
+    let apply_id_for_tx = apply_id.clone();
+    let seen_for_tx = seen.clone();
     let result = fs
         .run_transaction(move |transaction| {
             let client = client_for_tx.clone();
-            let op = op_for_tx.clone();
+            let ops = ops_for_tx.clone();
             let uids = uids_for_tx.clone();
+            let key = key_for_tx.clone();
+            let apply_id = apply_id_for_tx.clone();
+            let seen = seen_for_tx.clone();
             Box::pin(async move {
-                let mut balances: Vec<(String, FirestoreBalance)> = Vec::new();
+                *seen.lock().unwrap() = None;
+                let mut paths = Vec::with_capacity(uids.len() + 1);
                 for uid in &uids {
-                    let path = client.document_path(BALANCES, uid);
-                    let document = client
-                        .get_document_in_transaction(&path, &transaction)
-                        .await?;
-                    balances.push((
-                        uid.clone(),
-                        document
-                            .as_ref()
-                            .map(FirestoreBalance::from_document)
-                            .unwrap_or_default(),
-                    ));
+                    paths.push(client.document_path(BALANCES, uid)?);
                 }
-                apply_mode(&mut balances, &op)?;
-                Ok(build_writes(&client, &uids, &balances, &op))
+                let marker_path = match &key {
+                    Some(key) => Some(client.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?),
+                    None => None,
+                };
+                if let Some(path) = &marker_path {
+                    paths.push(path.clone());
+                }
+                let mut documents = client
+                    .get_documents_in_transaction(&paths, &transaction)
+                    .await?;
+                if marker_path.is_some() {
+                    if let Some(record) = documents.pop().flatten() {
+                        *seen.lock().unwrap() = Some(TxSeen::Replayed(merged_record(record)));
+                        return Ok(Vec::new());
+                    }
+                }
+                let mut balances: Vec<(String, FirestoreBalance)> = uids
+                    .iter()
+                    .zip(documents.iter())
+                    .map(|(uid, document)| {
+                        (
+                            uid.clone(),
+                            document
+                                .as_ref()
+                                .map(FirestoreBalance::from_document)
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .collect();
+                for op in &ops {
+                    apply_mode(&mut balances, op)?;
+                }
+                let mut writes = build_writes(&client, &uids, &balances, &ops)?;
+                if let (Some(path), Some(key)) = (marker_path, key) {
+                    let (from_available, to_available) = party_balances(&balances, &ops[0]);
+                    writes.push(FirestoreWrite::Create {
+                        path,
+                        value: json!({
+                            "key": key,
+                            "applyId": apply_id,
+                            "fromAvailable": from_available,
+                            "toAvailable": to_available,
+                            "applied": true,
+                            "createdAt": now_iso(),
+                        }),
+                    });
+                }
+                *seen.lock().unwrap() = Some(TxSeen::Applied(balances));
+                Ok(writes)
             })
         })
         .await;
 
+    let seen = seen.lock().unwrap().take();
     match result {
-        Ok(_) => {
-            // Read back the committed balances for the response.
-            let mut from_available = 0;
-            let mut to_available = 0;
-            for uid in &uids {
-                let new_balance = balance(fs, uid).await?;
-                if Some(uid) == from_uid.as_ref() {
-                    from_available = new_balance.available_pkn;
-                }
-                if Some(uid) == to_uid.as_ref() {
-                    to_available = new_balance.available_pkn;
-                }
+        Ok(_) => match seen {
+            Some(TxSeen::Replayed(record)) => Ok(outcome_from_record(&record, &apply_id)),
+            Some(TxSeen::Applied(balances)) => {
+                let (from_available, to_available) = party_balances(&balances, first);
+                Ok(LedgerOutcome {
+                    applied: true,
+                    from_available,
+                    to_available,
+                    ledger_ids: Vec::new(),
+                })
             }
-            if let Some(key) = &op.idem_key {
-                let _ = record_idempotency(
-                    fs,
-                    json!({
-                        "key": key,
-                        "fromAvailable": from_available,
-                        "toAvailable": to_available,
-                        "applied": true,
-                    }),
-                )
-                .await;
-            }
-            Ok(LedgerOutcome {
-                applied: true,
-                from_available,
-                to_available,
-                ledger_ids: Vec::new(),
-            })
-        }
+            None => Err(StoreError::Cache("Ledger transaction returned no result.".into())),
+        },
         Err(error) => {
-            if let Some(key) = &op.idem_key {
+            // A racing caller committed the marker first (precondition
+            // failure), or our own commit landed but its response was lost.
+            if let Some(key) = &idem_key {
                 if let Some(record) = idempotency_result(fs, key).await? {
-                    return Ok(outcome_from_record(&record));
+                    return Ok(outcome_from_record(&record, &apply_id));
                 }
             }
             Err(error)
         }
     }
+}
+
+/// `(from.availablePkn, to.availablePkn)` for one op's parties.
+fn party_balances(balances: &[(String, FirestoreBalance)], op: &LedgerOp) -> (i64, i64) {
+    let available = |uid: Option<&String>| {
+        uid.and_then(|uid| balances.iter().find(|(candidate, _)| candidate == uid))
+            .map(|(_, balance)| balance.available_pkn)
+            .unwrap_or(0)
+    };
+    (available(op.from_uid.as_ref()), available(op.to_uid.as_ref()))
 }
 
 fn apply_mode(
@@ -406,8 +472,8 @@ fn build_writes(
     client: &FirestoreClient,
     uids: &[String],
     balances: &[(String, FirestoreBalance)],
-    op: &LedgerOp,
-) -> Vec<FirestoreWrite> {
+    ops: &[LedgerOp],
+) -> Result<Vec<FirestoreWrite>, StoreError> {
     let created_at = now_iso();
     let mut writes: Vec<FirestoreWrite> = Vec::new();
     for (uid, balance) in balances {
@@ -415,7 +481,7 @@ fn build_writes(
             continue;
         }
         writes.push(FirestoreWrite::Set {
-            path: client.document_path(BALANCES, uid),
+            path: client.document_path(BALANCES, uid)?,
             value: balance_document(
                 balance.available_pkn.max(0),
                 balance.locked_pkn.max(0),
@@ -424,68 +490,71 @@ fn build_writes(
         });
     }
 
-    let from_uid = op.from_uid.clone().filter(|uid| !uid.is_empty());
-    let to_uid = op.to_uid.clone().filter(|uid| !uid.is_empty());
-    let push_entry = |writes: &mut Vec<FirestoreWrite>, uid: &str, kind: &str, amount: i64, counterparty: Option<&str>| {
-        let id = uuid::Uuid::new_v4().to_string();
-        writes.push(FirestoreWrite::Set {
-            path: client.document_path(LEDGER_ENTRIES, &id),
-            value: ledger_entry_document(
-                uid,
-                kind,
-                amount,
-                counterparty,
-                op.counterparty_username.as_deref(),
-                op.ref_id.as_deref(),
-                &op.meta,
-                &created_at,
-            ),
-        });
-    };
+    for op in ops {
+        let from_uid = op.from_uid.clone().filter(|uid| !uid.is_empty());
+        let to_uid = op.to_uid.clone().filter(|uid| !uid.is_empty());
+        let mut push_entry = |uid: &str, kind: &str, amount: i64, counterparty: Option<&str>| {
+            let id = uuid::Uuid::new_v4().to_string();
+            writes.push(FirestoreWrite::Set {
+                path: client.document_path(LEDGER_ENTRIES, &id)?,
+                value: ledger_entry_document(
+                    uid,
+                    kind,
+                    amount,
+                    counterparty,
+                    op.counterparty_username.as_deref(),
+                    op.ref_id.as_deref(),
+                    &op.meta,
+                    &created_at,
+                ),
+            });
+            Ok::<(), StoreError>(())
+        };
 
-    match op.mode {
-        MoveMode::Transfer => {
-            if let (Some(from), Some(to)) = (from_uid.as_ref(), to_uid.as_ref()) {
-                push_entry(&mut writes, from, &op.reason, -op.amount, Some(to));
-                push_entry(
-                    &mut writes,
-                    to,
-                    op.receive_reason.as_deref().unwrap_or(&op.reason),
-                    op.amount,
-                    Some(from),
-                );
+        match op.mode {
+            MoveMode::Transfer => {
+                if let (Some(from), Some(to)) = (from_uid.as_ref(), to_uid.as_ref()) {
+                    push_entry(from, &op.reason, -op.amount, Some(to))?;
+                    push_entry(
+                        to,
+                        op.receive_reason.as_deref().unwrap_or(&op.reason),
+                        op.amount,
+                        Some(from),
+                    )?;
+                }
             }
-        }
-        MoveMode::Mint => {
-            if let Some(to) = to_uid.as_ref() {
-                push_entry(&mut writes, to, &op.reason, op.amount, op.counterparty.as_deref());
+            MoveMode::Mint => {
+                if let Some(to) = to_uid.as_ref() {
+                    push_entry(to, &op.reason, op.amount, op.counterparty.as_deref())?;
+                }
             }
-        }
-        MoveMode::Burn | MoveMode::Lock => {
-            if let Some(from) = from_uid.as_ref() {
-                push_entry(&mut writes, from, &op.reason, -op.amount, op.counterparty.as_deref());
+            MoveMode::Burn | MoveMode::Lock => {
+                if let Some(from) = from_uid.as_ref() {
+                    push_entry(from, &op.reason, -op.amount, op.counterparty.as_deref())?;
+                }
             }
-        }
-        // `withdraw_paid` / `wpkn_exchange_pkn_paid_out` record the settled
-        // amount as a positive figure, matching the Node writers.
-        MoveMode::UnlockBurn | MoveMode::UnlockRelease => {
-            if let Some(from) = from_uid.as_ref() {
-                push_entry(&mut writes, from, &op.reason, op.amount, op.counterparty.as_deref());
+            // `withdraw_paid` / `wpkn_exchange_pkn_paid_out` record the settled
+            // amount as a positive figure, matching the Node writers.
+            MoveMode::UnlockBurn | MoveMode::UnlockRelease => {
+                if let Some(from) = from_uid.as_ref() {
+                    push_entry(from, &op.reason, op.amount, op.counterparty.as_deref())?;
+                }
             }
-        }
-        MoveMode::RecordOnly => {
-            let uid = from_uid.or_else(|| to_uid.clone()).unwrap_or_default();
-            if !uid.is_empty() {
-                push_entry(&mut writes, &uid, &op.reason, op.amount, op.counterparty.as_deref());
+            MoveMode::RecordOnly => {
+                let uid = from_uid.or_else(|| to_uid.clone()).unwrap_or_default();
+                if !uid.is_empty() {
+                    push_entry(&uid, &op.reason, op.amount, op.counterparty.as_deref())?;
+                }
             }
         }
     }
-    writes
+    Ok(writes)
 }
 
-fn outcome_from_record(record: &Value) -> LedgerOutcome {
+/// Outcome of a recorded marker; `applied` only when it is this call's own.
+fn outcome_from_record(record: &Value, apply_id: &str) -> LedgerOutcome {
     LedgerOutcome {
-        applied: false,
+        applied: record.get("applyId").and_then(Value::as_str) == Some(apply_id),
         from_available: record
             .get("fromAvailable")
             .and_then(Value::as_i64)
@@ -506,7 +575,7 @@ pub async fn record_idempotency(fs: &FirestoreClient, record: Value) -> Result<(
         return Ok(());
     }
     let id = idempotency_doc_id(&key);
-    let path = fs.document_path(IDEMPOTENCY, &id);
+    let path = fs.document_path(IDEMPOTENCY, &id)?;
     if fs.get_document(&path).await?.is_some() {
         return Ok(());
     }
@@ -549,22 +618,40 @@ pub async fn idempotency_result(
     key: &str,
 ) -> Result<Option<Value>, StoreError> {
     let id = idempotency_doc_id(key);
-    let document = fs.get_document(&fs.document_path(IDEMPOTENCY, &id)).await?;
-    Ok(document.map(|mut document| {
-        if let Some(result) = document.get("result").cloned() {
-            if !result.is_null() {
-                // Merge the recorded result with the wrapper so both
-                // `fromAvailable` (ledger) and `result` (orders) callers work.
-                if let (Some(target), Some(extra)) = (document.as_object_mut(), result.as_object())
-                {
-                    for (key, value) in extra {
-                        target.entry(key.clone()).or_insert_with(|| value.clone());
-                    }
-                }
+    let document = fs.get_document(&fs.document_path(IDEMPOTENCY, &id)?).await?;
+    Ok(document.map(merged_record))
+}
+
+/// Merge the recorded `result` into the wrapper so both `fromAvailable`
+/// (ledger) and `result` (orders) callers work.
+fn merged_record(mut document: Value) -> Value {
+    if let Some(result) = document.get("result").cloned() {
+        if let (Some(target), Some(extra)) = (document.as_object_mut(), result.as_object()) {
+            for (key, value) in extra {
+                target.entry(key.clone()).or_insert_with(|| value.clone());
             }
         }
-        document
-    }))
+    }
+    document
+}
+
+/// Drop an idempotency claim so the work it guarded can run again (a
+/// handler that failed after claiming).
+pub async fn release_idempotency(fs: &FirestoreClient, key: &str) -> Result<(), StoreError> {
+    let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
+    fs.delete_document(&path).await?;
+    Ok(())
+}
+
+/// Merge fields into an existing idempotency claim (e.g. `done: true`).
+pub async fn update_idempotency(
+    fs: &FirestoreClient,
+    key: &str,
+    fields: &Value,
+) -> Result<(), StoreError> {
+    let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
+    fs.set_document(&path, fields).await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +681,7 @@ pub fn username_doc_id(username: &str) -> String {
 /// Read `users/{uid}` as a plain object (empty when missing).
 pub async fn read_user(fs: &FirestoreClient, uid: &str) -> Result<Value, StoreError> {
     Ok(fs
-        .get_document(&fs.document_path(USERS, uid))
+        .get_document(&fs.document_path(USERS, uid)?)
         .await?
         .unwrap_or_else(|| json!({})))
 }
@@ -605,7 +692,7 @@ pub async fn write_user(fs: &FirestoreClient, uid: &str, fields: Value) -> Resul
     if let Some(object) = payload.as_object_mut() {
         object.insert("updatedAt".into(), json!(now_iso()));
     }
-    fs.set_document(&fs.document_path(USERS, uid), &payload)
+    fs.set_document(&fs.document_path(USERS, uid)?, &payload)
         .await?;
     Ok(())
 }
@@ -616,10 +703,10 @@ pub async fn uid_for_username(
     username: &str,
 ) -> Result<Option<String>, StoreError> {
     let clean = username_doc_id(username);
-    if clean.is_empty() {
+    if crate::firestore::validate_document_id(&clean).is_err() {
         return Ok(None);
     }
-    if let Some(document) = fs.get_document(&fs.document_path(USERNAMES, &clean)).await? {
+    if let Some(document) = fs.get_document(&fs.document_path(USERNAMES, &clean)?).await? {
         let uid = document
             .get("uid")
             .and_then(Value::as_str)
@@ -802,7 +889,7 @@ mod tests {
         let state = balances(&[("a", 250, 0), ("b", 350, 0)]);
         let mut op = LedgerOp::transfer("a", "b", 250, "account_transfer_sent");
         op.receive_reason = Some("account_transfer_received".into());
-        let writes = build_writes(&client, &uids, &state, &op);
+        let writes = build_writes(&client, &uids, &state, std::slice::from_ref(&op)).unwrap();
         assert_eq!(writes.len(), 4);
         let ledger: Vec<Value> = writes
             .iter()

@@ -538,7 +538,7 @@ button, input, select { font: inherit; color: inherit; }
   background: #4a4852;
 }
 
-.suggest-group + .suggest-group {
+.suggest-list > li.is-group-start {
   border-top: 1px solid rgb(255 255 255 / 0.06);
 }
 
@@ -559,7 +559,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .suggest-row.is-shaded {
   background: var(--suggest-shade);
-  transition: background-color 160ms ease;
+  transition: background-color 220ms ease;
 }
 
 .suggest-row.is-shaded:hover,
@@ -1241,6 +1241,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   font-weight: 750;
 }
 
+.tile-cta,
 .nav-preview .nav-scan {
   display: flex;
   flex-direction: column;
@@ -1254,6 +1255,33 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   color: #17120a;
   text-align: center;
   text-decoration: none;
+}
+
+.tile-cta {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.profile-mypokoin .tile-cta {
+  width: 8.5rem;
+}
+
+.tile-cta svg {
+  width: 4.5rem;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.tile-cta strong {
+  margin: 0;
+  color: inherit;
+  font-weight: 750;
+}
+
+.tile-cta:hover,
+.tile-cta:focus-visible {
+  background: #ffe276;
+  box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
 .icon-nav .nav-preview .nav-scan {
@@ -2267,6 +2295,59 @@ h1, h2 { margin: 0 0 0.85rem; }
   min-height: 3rem;
 }
 
+/* Lit buttons: light from above instead of one flat shadow. A gentle
+   top-to-bottom gradient, then four shadows: a 1px highlight on the top edge,
+   a darker inset line along the bottom, a tight contact shadow where the button
+   meets the page, and a soft glow in the button's own colour. Pressing flips the
+   gradient, drops the highlight and sinks the button one pixel. */
+.btn:not(.ghost):not(.stripe):not(.btn-stripe):not(.btn-cardtrader):not(.btn-telegram):not(:disabled),
+.more:not(:disabled),
+.shop-icon.is-cart:not(.is-added) {
+  background: linear-gradient(#ffe36b, #f2c21f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -2px 0 rgb(0 0 0 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(255 211 61 / 0.55);
+  transition: box-shadow 0.12s ease, translate 0.12s ease, filter 0.12s ease;
+}
+.btn.stripe:not(:disabled),
+.btn.stripe:hover:not(:disabled) {
+  background: linear-gradient(#7c75ff, #5851e0);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(99 91 255 / 0.6);
+  transition: box-shadow 0.12s ease, translate 0.12s ease, filter 0.12s ease;
+}
+.shop-icon.is-cart.is-added {
+  background: linear-gradient(#6ff0c8, #2fcf9f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -2px 0 rgb(0 0 0 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(62 224 176 / 0.5);
+}
+.btn:not(.ghost):not(:disabled):hover,
+.more:not(:disabled):hover,
+.shop-icon.is-cart:hover { filter: brightness(1.05); }
+.btn:not(.ghost):not(.stripe):not(.btn-stripe):not(.btn-cardtrader):not(.btn-telegram):not(:disabled):active,
+.more:not(:disabled):active,
+.shop-icon.is-cart:not(.is-added):active {
+  translate: 0 1px;
+  background: linear-gradient(#f2c21f, #ffe36b);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.28);
+}
+.btn.stripe:not(:disabled):active {
+  translate: 0 1px;
+  background: linear-gradient(#5851e0, #7c75ff);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .more, .shop-icon.is-cart { transition: none; }
+}
+
 .signin-link {
   color: var(--yellow);
   font-weight: 800;
@@ -2402,6 +2483,28 @@ h1, h2 { margin: 0 0 0.85rem; }
 .grid.is-list {
   grid-template-columns: 1fr;
   gap: 0.45rem;
+}
+
+.grid.search-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1.1rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.grid.search-grid > * {
+  min-width: 0;
+}
+
+.grid.search-grid.is-list {
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+@media (min-width: 721px) and (max-width: 1099px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .version-tile {
@@ -2854,18 +2957,54 @@ html.is-card-banding * {
 }
 
 /* Keep the painting still and enlarge only SAM's transparent Pokemon
- * silhouette. The grounding rectangle is never rendered. This duplicate
- * uses the cached card image; the tiny WebP is only its alpha mask. */
+ * silhouette, growing from the figure's own centre. The grounding
+ * rectangle is never rendered. This duplicate uses the cached card image;
+ * the tiny WebP is only its alpha mask. --figure-cx/cy are card fractions
+ * of that centre; until the alpha box loads, the origin is the crop centre. */
 .tile.tile-album .art-cut img.art-figure-layer {
   pointer-events: none;
   opacity: 0;
-  transform-origin: 50% 50%;
+  transform-origin:
+    calc(var(--figure-cx, calc(var(--art-left) + var(--art-width) * 0.5)) * 100%)
+    calc(var(--figure-cy, calc(var(--art-top) + var(--art-height) * 0.5)) * 100%);
 }
 
-/* Hundreds of promoted blur layers made scrolling back up flicker. */
-.tile.tile-album:not(:hover):not(:focus-within) .art-cut img.art-figure-layer {
-  content-visibility: hidden;
+/* Enter: the cut-out is already pixel-aligned, so scale 1 / opacity 1 is
+ * invisible, then it grows from its own centre. */
+@keyframes album-figure-in {
+  from { scale: 1; opacity: 1; }
+  to { scale: 1.08; opacity: 1; }
 }
+
+/* Exit: shrink back onto the painting, then fade only in the last 20%
+ * so the aligned frame does not pop away. Scale eases across the whole
+ * 200ms; the 80% stop holds opacity. */
+@keyframes album-figure-out {
+  from {
+    scale: 1.08;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+  80% {
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  to { scale: 1; opacity: 0; }
+}
+
+@keyframes album-figure-shadow-in {
+  from { scale: 1; translate: 0 0; opacity: 0; }
+  to { scale: 1.08; translate: 0 6px; opacity: 0.62; }
+}
+
+@keyframes album-figure-shadow-out {
+  from { scale: 1.08; translate: 0 6px; opacity: 0.62; }
+  to { scale: 1; translate: 0 0; opacity: 0; }
+}
+
+/* Layers exist only while entering or leaving, so they are not kept in
+ * the DOM for the scroll-back flicker the old content-visibility rule
+ * was hiding. */
 
 .tile.tile-album .art-cut img.art-figure-hover {
   z-index: 3;
@@ -2879,10 +3018,8 @@ html.is-card-banding * {
   mask-position: center;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-  /* No opacity transition here on purpose: the base state is the unhover
-   * destination, so the silhouette must cut out instantly when the pointer
-   * leaves. The fade-in lives on the :hover/:focus rules only. */
-  transition: transform 0.14s ease-out !important;
+  /* data-figure drives the grow and the shrink. A transform transition
+   * never runs: the layers mount already in phase "in". */
 }
 
 /* The mask WebP itself is a solid, transparent-background silhouette. Use
@@ -2891,36 +3028,54 @@ html.is-card-banding * {
 .tile.tile-album .art-cut img.art-figure-shadow {
   z-index: 2;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-hover {
+.tile.tile-album .art-cut img.art-figure-hover[data-figure="in"] {
   opacity: 1;
-  transform: scale(1.12) !important;
+  scale: 1.08;
+  animation: album-figure-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-shadow {
+.tile.tile-album .art-cut img.art-figure-hover[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  animation: album-figure-out 0.2s both !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+}
+
+.tile.tile-album .art-cut img.art-figure-shadow[data-figure="in"] {
   opacity: 0.62;
-  transform: translateY(7px) scale(1.12) !important;
+  scale: 1.08;
+  translate: 0 6px;
+  animation: album-figure-shadow-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
-/* Focus follows the silhouette: softly defocus the painting beneath the
- * zoomed Pokemon. Only tiles that actually carry a figure layer blur, and
- * the unhover exit stays instant because the base transition rules above
- * win again once this rule stops matching. */
-.tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-.tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+.tile.tile-album .art-cut img.art-figure-shadow[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  translate: 0 0;
+  animation: album-figure-shadow-out 0.2s cubic-bezier(0.4, 0, 1, 1) both !important;
+  filter: brightness(0) blur(9px) !important;
+}
+
+/* Defocus follows the phase, not :hover, so the painting eases back while
+ * the cut-out is still on its way out. */
+.tile.tile-album:has(img.art-figure-hover[data-figure="in"]) .art-cut img:not(.art-figure-layer) {
   filter: blur(2px) saturate(1.05) !important;
-  transition: filter 0.18s ease-out !important;
+  transition: filter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.tile.tile-album:has(img.art-figure-hover[data-figure="out"]) .art-cut img:not(.art-figure-layer) {
+  filter: none !important;
+  transition: filter 0.2s cubic-bezier(0.4, 0, 1, 1) !important;
 }
 
 /* Chrome object-view-box crops the base scan into the element itself. Keep
  * the masked duplicate as a full-card-sized layer so its full-card alpha map
- * stays pixel-aligned before the album container clips it. */
+ * stays pixel-aligned with the painting. Hover may let that layer leave
+ * the frame; the resting crop does not. */
 @property --album-figure-w {
   syntax: "<length>";
   inherits: false;
@@ -2942,9 +3097,9 @@ html.is-card-banding * {
   }
 
   /* Full-art cells are a row-gap taller than the bleed window, and the
-   * painting uses object-fit: cover from the top. A width-fit silhouette
-   * sat above that Pokémon and the 1.12 scale (from the full-card center)
-   * shoved the tile. Cover the same window and grow from its center. */
+   * painting uses object-fit: cover from the top. The silhouette is the
+   * same full-card box, aligned to that cover crop. Hover origin is the
+   * shared --figure-cx / --figure-cy on .art-figure-layer. */
   .tile-album.tile-tall .art-cut {
     container-type: size;
   }
@@ -2967,9 +3122,6 @@ html.is-card-banding * {
       - var(--art-left) * var(--album-figure-w)
     );
     top: calc(-1 * var(--art-top) * var(--album-figure-w) / var(--card-ratio));
-    transform-origin:
-      calc((var(--art-left) + var(--art-width) / 2) * 100%)
-      calc((var(--art-top) + var(--art-height) * 0.36) * 100%);
   }
 }
 
@@ -8033,10 +8185,18 @@ dialog.zoom:not([open]) {
     font-size: clamp(1.7rem, 8vw, 2.25rem);
   }
   .foot-grid { grid-template-columns: 1fr 1fr; }
+  .grid.search-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* iPhone 16 is 393×852 CSS px. Phone-only; desktop/tablet >480px unchanged. */
 @media (max-width: 480px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
   .topbar {
     padding-top: env(safe-area-inset-top);
   }
@@ -8702,18 +8862,34 @@ dialog.zoom:not([open]) {
   box-shadow: 0 0 0 3px rgb(255 211 61 / 0.75);
 }
 
-.artwork-test-card:focus .art-cut img.art-figure-hover {
+.artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="in"] {
   opacity: 1;
-  transform: scale(1.12) !important;
+  scale: 1.08;
+  animation: album-figure-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
-.artwork-test-card:focus .art-cut img.art-figure-shadow {
+.artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  animation: album-figure-out 0.2s both !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="in"] {
   opacity: 0.62;
-  transform: translateY(7px) scale(1.12) !important;
+  scale: 1.08;
+  translate: 0 6px;
+  animation: album-figure-shadow-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="out"] {
+  opacity: 0;
+  scale: 1;
+  translate: 0 0;
+  animation: album-figure-shadow-out 0.2s cubic-bezier(0.4, 0, 1, 1) both !important;
+  filter: brightness(0) blur(9px) !important;
 }
 
 .artwork-hover-hint {
@@ -11497,76 +11673,65 @@ html:has(.wallet-page) .brand span {
 }
 
 
-/* Album hover pop-out: the zoomed Pokémon silhouette leaves the frame.
- * Only where object-view-box crops the base painting inside its own box
- * (Chrome/Edge): the painting keeps a rounded clip of its own, and the tile,
- * art box and crop box stop clipping so just the masked figure and its shadow
- * overflow. Safari positions the painting with negative offsets, so it keeps
- * the in-frame zoom. */
+/* Album hover pop-out: the silhouette grows from its own centre and may
+ * leave the frame. Keyed on the figure layer itself, not :hover, so the
+ * tile stays unclipped for the whole exit. Only where object-view-box
+ * crops the base painting inside its own box (Chrome/Edge). The painting
+ * keeps its rounded clip and the top fade; the tile, art box, and crop
+ * box stop clipping and drop the crop mask. The figure layers are
+ * absolute; min-height: 0 keeps the grid tracks put, because a grid item
+ * that stops clipping gets a content-based minimum (a hovered full art
+ * grew from 435px to 537px). Safari positions the painting with negative
+ * offsets and stays in-frame. */
 @supports (object-view-box: none) {
-  .tile.tile-album:has(img.art-figure-hover):hover,
-  .tile.tile-album:has(img.art-figure-hover):focus-within {
+  .tile.tile-album:has(img.art-figure-hover) {
     position: relative;
     z-index: 6;
     overflow: visible;
     contain: none;
+    min-height: 0;
   }
 
-  .tile-pile-wrap:has(img.art-figure-hover):hover,
-  .tile-pile-wrap:has(img.art-figure-hover):focus-within {
+  .tile-pile-wrap:has(img.art-figure-hover) {
     position: relative;
     z-index: 6;
   }
 
-  .tile.tile-album:has(img.art-figure-hover):hover .tile-art,
-  .tile.tile-album:has(img.art-figure-hover):hover .art-cut,
-  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-art,
-  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut {
+  .tile.tile-album:has(img.art-figure-hover) .tile-art,
+  .tile.tile-album:has(img.art-figure-hover) .art-cut {
     overflow: visible;
   }
 
-  .tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover) .art-cut {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover) .art-cut img:not(.art-figure-layer) {
     clip-path: inset(0 round 14px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
+    mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
   }
 
-  .tile.tile-album:hover .art-cut img.art-figure-hover {
-    transform: translateY(-3%) scale(1.18) !important;
+  .tile.tile-album:has(img.art-figure-hover) .tile-meta {
+    z-index: 4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile.tile-album .art-cut img.art-figure-hover[data-figure="in"],
+  .tile.tile-album .art-cut img.art-figure-hover[data-figure="out"],
+  .tile.tile-album .art-cut img.art-figure-shadow[data-figure="in"],
+  .tile.tile-album .art-cut img.art-figure-shadow[data-figure="out"],
+  .artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="in"],
+  .artwork-test-card:focus .art-cut img.art-figure-hover[data-figure="out"],
+  .artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="in"],
+  .artwork-test-card:focus .art-cut img.art-figure-shadow[data-figure="out"] {
+    animation: none !important;
   }
 
-  .tile.tile-album:hover .art-cut img.art-figure-shadow {
-    transform: translateY(5%) scale(1.18) !important;
-  }
-
-  /* Full art already fills two rows. The pop-out (overflow visible + a
-   * lift) grows the grid track and parks the silhouette above the Pokémon. */
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within {
-    z-index: 0;
-    overflow: hidden;
-    contain: paint;
-  }
-
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .tile-art,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .tile-art,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut {
-    overflow: hidden;
-  }
-
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
-    clip-path: none;
-  }
-
-  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-hover,
-  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-hover {
-    transform: scale(1.12) !important;
-  }
-
-  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-shadow,
-  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-shadow {
-    transform: translateY(7px) scale(1.12) !important;
+  .tile.tile-album:has(img.art-figure-hover[data-figure]) .art-cut img:not(.art-figure-layer) {
+    transition: none !important;
   }
 }
 

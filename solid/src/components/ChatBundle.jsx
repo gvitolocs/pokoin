@@ -1,20 +1,21 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
 import { fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '@market/api.js';
-import { bundleOf, tagKey } from '@market/chat-listing.js';
+import { bundleOf, resolveTagGame, tagKey } from '@market/chat-listing.js';
 import { fetchSpeciesCards } from '@market/species-cards.js';
 import { endTrayDrag, startTrayDrag } from '@market/tray-drag.js';
+import { publicGamePath } from '@market/game.js';
 
 function cardId(card) {
   return String(card?.id || card?.card_id || '');
 }
 
-function cardImage(card) {
+function cardImage(card, gameId) {
   return card?.homepageImageUrl
     || card?.gridImageUrl
     || card?.imageUrl
     || card?.image_url
     || card?.cdn_image_url
-    || imageSrc(card, 'grid')
+    || imageSrc(card, 'grid', gameId)
     || '';
 }
 
@@ -41,20 +42,21 @@ async function sellerCardIds(username) {
 /** A whole artist / Pokémon / set dropped into a chat. */
 export default function ChatBundle(props) {
   const bundle = () => bundleOf(props.row);
+  const tagGame = () => resolveTagGame(props.row, { defaultGame: props.defaultGame });
   const [cards, setCards] = createSignal([]);
   const [listed, setListed] = createSignal(new Set());
   const [ready, setReady] = createSignal(false);
 
   createEffect(
-    () => [bundle()?.kind, bundle()?.slug, props.peer?.username],
-    ([kind, slug, handle]) => {
+    () => [bundle()?.kind, bundle()?.slug, props.peer?.username, tagGame()],
+    ([kind, slug, handle, gameId]) => {
       if (!slug) return undefined;
       let live = true;
       const cardsPromise = kind === 'artist'
-        ? fetchArtist(slug, { limit: 240 }).then((data) => data?.cards || [])
+        ? fetchArtist(slug, { limit: 240, game: gameId }).then((data) => data?.cards || [])
         : kind === 'species'
-          ? fetchSpeciesCards(slug)
-          : fetchExpansionCards({ slug }).then((data) => data?.cards || []);
+          ? fetchSpeciesCards(slug, { game: gameId })
+          : fetchExpansionCards({ slug, game: gameId }).then((data) => data?.cards || []);
       cardsPromise.then((rows) => {
         if (live) setCards(rows);
       }).catch(() => {});
@@ -106,8 +108,8 @@ export default function ChatBundle(props) {
           <For each={cards()}>
             {(card) => {
               const id = cardId(card);
-              const src = cardImage(card);
-              const href = card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : props.row?.path || '/marketplace');
+              const src = cardImage(card, tagGame());
+              const href = publicGamePath(card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : props.row?.path || ''), tagGame());
               return (
                 <a
                   href={href}

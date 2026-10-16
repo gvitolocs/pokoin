@@ -13,7 +13,7 @@ use sqlx::Row;
 use super::{private_json, public_json, text_field};
 use crate::auth::Claims;
 use crate::domain::money;
-use crate::error::ApiError;
+use crate::error::{ApiError, StoreError};
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
@@ -418,47 +418,107 @@ pub async fn marketplace_orders_post(
     } else {
         Some(format!("order:{}:{}", claims.uid, idempotency_key))
     };
-    if let Some(key) = &idem {
-        if let Some(existing) = store::idempotency_result(state.firestore()?, key).await? {
-            return Ok(private_json(existing));
+
+    // Each seller gets their subtotal minus commission; commission → treasury.
+    let totals = seller_totals(&items);
+    let mut commission_pkn = 0i64;
+    let mut seller_nets: Vec<(String, i64)> = Vec::new();
+    for (seller_uid, subtotal) in &totals {
+        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
+        commission_pkn += commission;
+        seller_nets.push((seller_uid.clone(), subtotal - commission));
+    }
+
+    // The replay check, the buyer balance and the treasury account are read
+    // together (no added round trip), and an underfunded buyer is refused
+    // before any stock is taken.
+    let firestore = state.firestore()?;
+    let replay = async {
+        match &idem {
+            Some(key) => store::idempotency_result(firestore, key).await.map_err(ApiError::from),
+            None => Ok(None),
         }
+    };
+    let buyer_balance = async {
+        store::balance(firestore, &claims.uid)
+            .await
+            .map_err(ApiError::from)
+    };
+    let treasury = async {
+        if commission_pkn > 0 {
+            treasury_uid(&state, &state.config().pokoin_treasury_username)
+                .await
+                .map(Some)
+        } else {
+            Ok(None)
+        }
+    };
+    let (existing, buyer_balance, treasury) = tokio::try_join!(replay, buyer_balance, treasury)?;
+    if let Some(existing) = existing {
+        return Ok(private_json(existing));
+    }
+    if buyer_balance.available_pkn < total_pkn {
+        return Err(StoreError::Insufficient.into());
     }
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, None).await?;
-    drop(decremented);
 
-    // Credit each seller their subtotal minus commission; commission → treasury.
-    let totals = seller_totals(&items);
-    let mut commission_pkn = 0i64;
-    for (seller_uid, subtotal) in &totals {
-        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
-        commission_pkn += commission;
-        let net = subtotal - commission;
-        if net > 0 {
-            let op = LedgerOp::transfer(&claims.uid, seller_uid, net, "marketplace_order_sale")
+    // Every PKN leg is one Firestore transaction with one idempotency marker
+    // (keyed on clientOrderId): all sellers and the treasury are paid, or
+    // nobody is and the stock goes back.
+    let mut ops: Vec<LedgerOp> = seller_nets
+        .iter()
+        .filter(|(_, net)| *net > 0)
+        .map(|(seller_uid, net)| {
+            LedgerOp::transfer(&claims.uid, seller_uid, *net, "marketplace_order_sale")
                 .with_ref(&order_id)
-                .with_meta(json!({ "orderId": order_id }));
-            store::apply(state.firestore()?, &op)
-                .await
-                .map_err(|error| ApiError::from(error))?;
-        }
+                .with_meta(json!({ "orderId": order_id }))
+        })
+        .collect();
+    if let Some(treasury) = &treasury {
+        ops.push(
+            LedgerOp::transfer(
+                &claims.uid,
+                treasury,
+                commission_pkn,
+                "marketplace_order_commission",
+            )
+            .with_ref(&order_id),
+        );
     }
-    if commission_pkn > 0 {
-        let treasury = treasury_uid(&state, &state.config().pokoin_treasury_username).await?;
-        let op = LedgerOp::transfer(
-            &claims.uid,
-            &treasury,
-            commission_pkn,
-            "marketplace_order_commission",
-        )
-        .with_ref(&order_id);
-        store::apply(state.firestore()?, &op).await?;
+    let payment_key = match &idem {
+        Some(key) => format!("{key}:payment"),
+        None => format!("order_payment:{order_id}"),
+    };
+    let paid = if ops.is_empty() {
+        Ok(true)
+    } else {
+        store::apply_all(firestore, &ops, Some(&payment_key))
+            .await
+            .map(|outcome| outcome.applied)
+    };
+    match paid {
+        Ok(true) => {}
+        Ok(false) => {
+            // A concurrent request with this clientOrderId already paid.
+            rollback_decrements(&state, &decremented, None).await;
+            if let Some(key) = &idem {
+                if let Some(existing) = store::idempotency_result(firestore, key).await? {
+                    return Ok(private_json(existing));
+                }
+            }
+            return Err(ApiError::conflict("This order is already being processed.")
+                .with_code("order_in_progress"));
+        }
+        Err(error) => {
+            rollback_decrements(&state, &decremented, None).await;
+            return Err(error.into());
+        }
     }
 
     // Native sold rows for the desk (no buyer identity) in `marketplace_sales`,
     // using the Node doc-id scheme `{orderId}__{listingId}`.
-    let firestore = state.firestore()?;
     let sale_rows = crate::domain::order_refund::sale_docs_from_order(
         &order_id,
         &json!({
@@ -484,12 +544,10 @@ pub async fn marketplace_orders_post(
             object.insert("updatedAt".into(), json!(store::now_iso()));
         }
         crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
-        let _ = firestore
-            .set_document(
-                &firestore.document_path(store::SALES_COLLECTION, &row.id),
-                &data,
-            )
-            .await;
+        // Paid already: a bad sale-row id must not fail the response.
+        if let Ok(path) = firestore.document_path(store::SALES_COLLECTION, &row.id) {
+            let _ = firestore.set_document(&path, &data).await;
+        }
     }
     let sold: Vec<Value> = sale_rows.iter().map(|row| row.data.clone()).collect();
     crate::seller_api::log_order_paid(&state, &order_id, &sold).await;
@@ -524,12 +582,9 @@ pub async fn marketplace_orders_post(
         "createdAt": store::now_iso(),
         "paidAt": store::now_iso(),
     });
-    let _ = firestore
-        .set_document(
-            &firestore.document_path(store::ORDERS, &order_id),
-            &order_document,
-        )
-        .await;
+    if let Ok(path) = firestore.document_path(store::ORDERS, &order_id) {
+        let _ = firestore.set_document(&path, &order_document).await;
+    }
 
     if let Some(key) = &idem {
         let _ =
@@ -599,13 +654,15 @@ fn order_id_of(body: &Value) -> Result<String, ApiError> {
     if order_id.is_empty() {
         return Err(ApiError::bad_request("Missing order id."));
     }
+    crate::firestore::validate_client_id(&order_id)
+        .map_err(|_| ApiError::bad_request("Invalid order id."))?;
     Ok(order_id)
 }
 
 async fn load_order(state: &DomainState, order_id: &str) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
     firestore
-        .get_document(&firestore.document_path(store::ORDERS, order_id))
+        .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
         .ok_or_else(|| ApiError::not_found("Order not found."))
 }
@@ -652,7 +709,7 @@ async fn patch_order(state: &DomainState, order_id: &str, patch: Value) -> Resul
         object.insert("updatedAt".into(), json!(store::now_iso()));
     }
     firestore
-        .set_document(&firestore.document_path(store::ORDERS, order_id), &patch)
+        .set_document(&firestore.document_path(store::ORDERS, order_id)?, &patch)
         .await?;
     load_order(state, order_id).await
 }
@@ -689,8 +746,7 @@ async fn order_confirm_delivery(
                 .collect()
         })
         .unwrap_or_default();
-    let is_eur = order.get("currency").and_then(Value::as_str) == Some("EUR")
-        || order.get("paymentMethod").and_then(Value::as_str) == Some("stripe");
+    let is_eur = crate::domain::order_refund::is_eur_order(&order);
     let releases = if is_eur {
         // Separate Charges and Transfers: delivery releases each seller's share.
         release_seller_transfers(state, &order_id).await?
@@ -897,7 +953,7 @@ pub async fn release_eur_reservation(
     extra_releasable: &[&str],
 ) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let mut claimed = None;
     for attempt in 0..5 {
         let transaction = firestore.begin_transaction().await?;
@@ -1195,7 +1251,7 @@ pub const CARDTRADER_STEPS: [&str; 2] = ["cardtrader_sync", "cardtrader_buy"];
 /// handed to their workers and reported as pending.
 pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let mut claimed = None;
     // Lease is claimed using a real transaction read, shared with webhook workers.
     for attempt in 0..5 {
@@ -1467,7 +1523,7 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
             data["soldAt"] = json!(state.now_iso());
             data["updatedAt"] = json!(state.now_iso());
             crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
-            let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id);
+            let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id)?;
             if firestore.set_document(&sale_path, &data).await.is_err() {
                 failed = true;
             }
@@ -1762,7 +1818,7 @@ pub async fn decrement_seller_ownership_for_sale(
     // A `scan:` source is looked up by its FULL id (`scan:{id}` is the doc id).
     if refunds::scan_ownership_doc_id(&line.source_listing_id).is_some() {
         let doc_key = line.source_listing_id.trim().to_string();
-        let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_key);
+        let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_key)?;
         if let Some(row) = firestore.get_document(&path).await? {
             if refunds::ownership_row_is_decrementable(&row, &line.seller_uid) {
                 found = Some((doc_key, row));
@@ -1799,7 +1855,7 @@ pub async fn decrement_seller_ownership_for_sale(
     }
     let current = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
     let next = refunds::ownership_quantity_after_sale(current, line.quantity);
-    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_id);
+    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_id)?;
     if next <= 0 {
         firestore.delete_document(&path).await?;
         return Ok(json!({
@@ -1825,7 +1881,7 @@ pub async fn decrement_seller_ownership_for_sale(
 async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc_id: &str) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id);
+    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id)?;
     for attempt in 0..5 {
         let transaction = firestore.begin_transaction().await?;
         let row = match firestore.get_document_in_transaction(&path, &transaction).await {
@@ -1914,7 +1970,7 @@ pub async fn send_seller_sale_notifications_for_paid_order(
     use crate::domain::notify;
     let firestore = state.firestore()?;
     let Some(order) = firestore
-        .get_document(&firestore.document_path(store::ORDERS, order_id))
+        .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
     else {
         return Ok(json!({
@@ -1962,7 +2018,7 @@ pub async fn send_seller_sale_notifications_for_paid_order(
             }
         };
         let marker_id = notify::notification_marker_id(order_id, &seller_uid);
-        let marker_path = firestore.document_path(notify::NOTIFICATION_COLLECTION, &marker_id);
+        let marker_path = firestore.document_path(notify::NOTIFICATION_COLLECTION, &marker_id)?;
 
         // Claim the marker in a transaction so a retry cannot email twice.
         let claimed = {
@@ -2092,7 +2148,7 @@ pub async fn release_seller_transfers(
 ) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id);
+    let path = firestore.document_path(store::ORDERS, order_id)?;
     let order = firestore
         .get_document(&path)
         .await?
@@ -2310,7 +2366,7 @@ async fn order_nft_shipping_request(
     for collection_item_id in &collection_item_ids {
         let item = firestore
             .get_document(
-                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id),
+                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id)?,
             )
             .await?;
         let item = item.ok_or_else(|| {
@@ -2365,7 +2421,7 @@ async fn order_nft_shipping_request(
             .await?;
         firestore
             .set_document(
-                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id),
+                &firestore.document_path(store::USER_CARD_COLLECTIONS, collection_item_id)?,
                 &json!({
                     "physicalShippingStatus": "requested",
                     "physicalShippingRequestId": request_id,
@@ -2717,7 +2773,7 @@ async fn void_native_sales(
         };
         let _ = firestore
             .update_document(
-                &firestore.document_path(store::SALES_COLLECTION, id),
+                &firestore.document_path(store::SALES_COLLECTION, id)?,
                 &json!({ "voided": true, "voidReason": "seller_refunded" }),
                 Some(&["voided", "voidReason"]),
             )
@@ -2780,7 +2836,7 @@ pub async fn shipping_address_snapshot(
     address_id: &str,
 ) -> Result<(String, Value), ApiError> {
     let firestore = state.firestore()?;
-    let address_path = firestore.nested_path((store::USERS, uid), "shipping_addresses", address_id);
+    let address_path = firestore.nested_path((store::USERS, uid), "shipping_addresses", address_id)?;
     let address_doc = firestore
         .get_document(&address_path)
         .await?
@@ -2853,6 +2909,8 @@ pub async fn create_order_checkout_session(
             ApiError::bad_request("shippingAddressId required.").with_code("address_required")
         );
     }
+    crate::firestore::validate_client_id(&address_id)
+        .map_err(|_| ApiError::bad_request("Invalid shipping address id."))?;
     let (to_country, shipping_address_snapshot) =
         shipping_address_snapshot(&state, &claims.uid, &address_id).await?;
 
@@ -2900,177 +2958,257 @@ pub async fn create_order_checkout_session(
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, Some(&order_id)).await?;
-
-    // Optional PKN balance discount: debit it once and hold the PKN.
-    let discount_pkn = body
-        .get("pknDiscount")
-        .and_then(Value::as_f64)
-        .map(|value| value.trunc() as i64)
-        .unwrap_or(0);
-    let mut discount_eur_cents = 0i64;
+    // Everything after the stock is taken runs in one fallible block: on any
+    // error the held stock and a locked discount go back (same idempotency key
+    // as the expiry release, so a later release cannot repeat the refund).
     let mut held_discount_pkn = 0i64;
-    if discount_pkn > 0 {
-        let balance = store::balance(state.firestore()?, &claims.uid).await?;
-        let eligible: Vec<String> = Vec::new();
-        let quote_items: Vec<store::LedgerOp> = Vec::new();
-        drop(quote_items);
-        let plan = money::pkn_balance_discount(
-            balance.available_pkn,
-            &items
-                .iter()
-                .map(|item| money::QuoteItem {
-                    seller_uid: item.seller_uid.clone(),
-                    quantity: item.quantity,
-                    unit_price_pkn: item.unit_price_pkn as f64,
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>(),
-            &eligible,
-            quote.grand_total_cents,
-        );
-        if plan.discount_pkn > 0 {
-            let op = LedgerOp::lock(&claims.uid, plan.discount_pkn, "order_discount_held")
-                .with_ref(&order_id)
-                .with_meta(json!({ "orderId": order_id }));
-            store::apply(state.firestore()?, &op).await?;
-            discount_eur_cents = plan.discount_eur_cents;
-            held_discount_pkn = plan.discount_pkn;
+    let outcome: Result<Response, ApiError> = async {
+
+        // Optional PKN balance discount: debit it once and hold the PKN.
+        let discount_pkn = body
+            .get("pknDiscount")
+            .and_then(Value::as_f64)
+            .map(|value| value.trunc() as i64)
+            .unwrap_or(0);
+        let mut discount_eur_cents = 0i64;
+        if discount_pkn > 0 {
+            let balance = store::balance(state.firestore()?, &claims.uid).await?;
+            let eligible: Vec<String> = Vec::new();
+            let quote_items: Vec<store::LedgerOp> = Vec::new();
+            drop(quote_items);
+            let plan = money::pkn_balance_discount(
+                balance.available_pkn,
+                &items
+                    .iter()
+                    .map(|item| money::QuoteItem {
+                        seller_uid: item.seller_uid.clone(),
+                        quantity: item.quantity,
+                        unit_price_pkn: item.unit_price_pkn as f64,
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>(),
+                &eligible,
+                quote.grand_total_cents,
+            );
+            if plan.discount_pkn > 0 {
+                let op = LedgerOp::lock(&claims.uid, plan.discount_pkn, "order_discount_held")
+                    .with_ref(&order_id)
+                    .with_idempotency(format!("order_discount_held:{order_id}"))
+                    .with_meta(json!({ "orderId": order_id }));
+                store::apply(state.firestore()?, &op).await?;
+                discount_eur_cents = plan.discount_eur_cents;
+                held_discount_pkn = plan.discount_pkn;
+            }
+        }
+
+        let charge_cents = quote.grand_total_cents - discount_eur_cents;
+        if charge_cents < 50 {
+            return Err(ApiError::bad_request(
+                "The card charge must be at least 50 cents.",
+            ));
+        }
+
+        let site = state
+            .config()
+            .public_site_url
+            .trim_end_matches('/')
+            .to_string();
+        let form: Vec<(String, String)> = vec![
+            ("mode".into(), "payment".into()),
+            (
+                "expires_at".into(),
+                (state.now_ms() / 1000 + 31 * 60).to_string(),
+            ),
+            (
+                "success_url".into(),
+                format!("{site}/orders/{order_id}?status=success"),
+            ),
+            ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
+            ("line_items[0][quantity]".into(), "1".into()),
+            ("line_items[0][price_data][currency]".into(), "eur".into()),
+            (
+                "line_items[0][price_data][unit_amount]".into(),
+                charge_cents.to_string(),
+            ),
+            (
+                "line_items[0][price_data][product_name]".into(),
+                format!("Pokoin order {order_id}"),
+            ),
+            ("metadata[kind]".into(), "marketplace_order_eur".into()),
+            ("metadata[pokoinOrderId]".into(), order_id.clone()),
+            ("metadata[pokoinUid]".into(), claims.uid.clone()),
+            (
+                "metadata[discountPkn]".into(),
+                held_discount_pkn.to_string(),
+            ),
+        ];
+
+        let session = stripe.create_checkout_session(form).await?;
+        let session_id = session
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let url = session
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+
+        let order_document = json!({
+            "uid": claims.uid,
+            "buyerUid": claims.uid,
+            "channel": "eur",
+            "currency": "EUR",
+            "paymentMethod": "stripe",
+            "paymentStatus": "pending_stripe",
+            "status": "pending",
+            "fulfillmentMode": "physical",
+            "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
+            "totalEURCents": quote.grand_total_cents,
+            "shippingEURCents": quote.shipping_total_cents,
+            "pknDiscount": {
+                "pkn": held_discount_pkn,
+                "eurCents": discount_eur_cents,
+                "state": if held_discount_pkn > 0 { "held" } else { "none" },
+            },
+            "inventory": {
+                "state": "reserved",
+                "reservedAt": state.now_iso(),
+                "expiresAt": chrono::DateTime::from_timestamp_millis(state.now_ms() + 31*60*1000).map(|d|d.to_rfc3339()),
+                "lines": decremented.iter().map(|line|json!({
+                    "listingId":line.listing_id,"quantity":line.quantity,"cardId":line.card_id,"sellerUid":line.seller_uid,
+                    "sourceListingId":line.source_listing_id,"source":line.source,"remainingQuantity":line.remaining_quantity,
+                    "unitPricePkn":line.unit_price_pkn,"external":false
+                })).collect::<Vec<_>>()
+            },
+            "fulfillment": { "state": "pending", "steps": {} },
+            "items": eur_order_items(&items),
+            "shipments": eur_order_shipments(&quote.shipments),
+            "shippingAddressId": address_id,
+            "shippingAddressSnapshotEncrypted": shipping_address_snapshot,
+            "shippingAddressCountryCode": to_country,
+            "stripeCheckoutSessionId": session_id,
+            "createdAt": store::now_iso(),
+            "updatedAt": store::now_iso(),
+        });
+        state
+            .firestore()?
+            .set_document(
+                &state.firestore()?.document_path(store::ORDERS, &order_id)?,
+                &order_document,
+            )
+            .await?;
+
+        Ok(private_json(json!({
+            "orderId": order_id,
+            "id": session_id,
+            "url": url,
+            "totalEURCents": charge_cents,
+            "shippingEURCents": quote.shipping_total_cents,
+            "discountPkn": discount_pkn,
+            "discountEurCents": discount_eur_cents,
+        })))
+    }
+    .await;
+    match outcome {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            rollback_decrements(&state, &decremented, Some(&order_id)).await;
+            if held_discount_pkn > 0 {
+                let op = LedgerOp::unlock(&claims.uid, held_discount_pkn, "order_discount_released", true)
+                    .with_ref(&order_id)
+                    .with_idempotency(format!("order_discount_release:{order_id}"))
+                    .with_meta(json!({ "orderId": order_id, "reason": "checkout_failed" }));
+                if let Err(release) = store::apply(state.firestore()?, &op).await {
+                    tracing::error!(%release, order_id, "could not release the held PKN discount");
+                }
+            }
+            Err(error)
         }
     }
+}
 
-    let charge_cents = quote.grand_total_cents - discount_eur_cents;
-    if charge_cents < 50 {
-        rollback_decrements(&state, &decremented, Some(&order_id)).await;
-        return Err(ApiError::bad_request(
-            "The card charge must be at least 50 cents.",
-        ));
-    }
-
-    let site = state
-        .config()
-        .public_site_url
-        .trim_end_matches('/')
-        .to_string();
-    let form: Vec<(String, String)> = vec![
-        ("mode".into(), "payment".into()),
-        (
-            "expires_at".into(),
-            (state.now_ms() / 1000 + 31 * 60).to_string(),
-        ),
-        (
-            "success_url".into(),
-            format!("{site}/orders/{order_id}?status=success"),
-        ),
-        ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
-        ("line_items[0][quantity]".into(), "1".into()),
-        ("line_items[0][price_data][currency]".into(), "eur".into()),
-        (
-            "line_items[0][price_data][unit_amount]".into(),
-            charge_cents.to_string(),
-        ),
-        (
-            "line_items[0][price_data][product_name]".into(),
-            format!("Pokoin order {order_id}"),
-        ),
-        ("metadata[kind]".into(), "marketplace_order_eur".into()),
-        ("metadata[pokoinOrderId]".into(), order_id.clone()),
-        ("metadata[pokoinUid]".into(), claims.uid.clone()),
-        (
-            "metadata[discountPkn]".into(),
-            held_discount_pkn.to_string(),
-        ),
-    ];
-
-    let session = stripe.create_checkout_session(form).await?;
-    let session_id = session
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let url = session
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-
-    let order_document = json!({
-        "buyerUid": claims.uid,
-        "channel": "eur",
-        "paymentStatus": "pending_stripe",
-        "status": "pending",
-        "fulfillmentMode": "physical",
-        "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
-        "totalEURCents": quote.grand_total_cents,
-        "shippingEURCents": quote.shipping_total_cents,
-        "pknDiscount": {
-            "pkn": held_discount_pkn,
-            "eurCents": discount_eur_cents,
-            "state": if held_discount_pkn > 0 { "held" } else { "none" },
-        },
-        "inventory": {
-            "state": "reserved",
-            "reservedAt": state.now_iso(),
-            "expiresAt": chrono::DateTime::from_timestamp_millis(state.now_ms() + 31*60*1000).map(|d|d.to_rfc3339()),
-            "lines": decremented.iter().map(|line|json!({
-                "listingId":line.listing_id,"quantity":line.quantity,"cardId":line.card_id,"sellerUid":line.seller_uid,
-                "sourceListingId":line.source_listing_id,"source":line.source,"remainingQuantity":line.remaining_quantity,
-                "unitPricePkn":line.unit_price_pkn,"external":false
-            })).collect::<Vec<_>>()
-        },
-        "fulfillment": { "state": "pending", "steps": {} },
-        "items": items
-            .iter()
-            .map(|item| {
-                json!({
-                    "listingId": item.listing_id,
-                    "quantity": item.quantity,
-                    "sellerUid": item.seller_uid,
-                    "unitPricePkn": item.unit_price_pkn,
-                    "cardId": item.card_id,
-                })
+/// Order lines as the Node EUR writer stores them (`unitPriceEURCents` too).
+fn eur_order_items(items: &[OrderItem]) -> Vec<Value> {
+    items
+        .iter()
+        .map(|item| {
+            json!({
+                "listingId": item.listing_id,
+                "quantity": item.quantity,
+                "sellerUid": item.seller_uid,
+                "unitPricePkn": item.unit_price_pkn,
+                "unitPriceEURCents": money::eur_cents_from_pkn(item.unit_price_pkn as f64),
+                "totalPricePkn": item.unit_price_pkn * item.quantity,
+                "cardId": item.card_id,
+                "fulfillmentMode": "physical",
             })
-            .collect::<Vec<_>>(),
-        "shipments": quote
-            .shipments
-            .iter()
-            .map(|shipment| {
-                json!({
-                    "sellerId": shipment.seller_id,
-                    "sellerTransferCents": shipment.amount_cents,
-                    "amountCents": shipment.amount_cents,
-                    "tracked": shipment.tracked,
-                })
-            })
-            .collect::<Vec<_>>(),
-        "shippingAddressId": address_id,
-        "shippingAddressSnapshotEncrypted": shipping_address_snapshot,
-        "shippingAddressCountryCode": to_country,
-        "stripeCheckoutSessionId": session_id,
-        "createdAt": store::now_iso(),
-        "updatedAt": store::now_iso(),
-    });
-    state
-        .firestore()?
-        .set_document(
-            &state.firestore()?.document_path(store::ORDERS, &order_id),
-            &order_document,
-        )
-        .await?;
+        })
+        .collect()
+}
 
-    Ok(private_json(json!({
-        "orderId": order_id,
-        "id": session_id,
-        "url": url,
-        "totalEURCents": charge_cents,
-        "shippingEURCents": quote.shipping_total_cents,
-        "discountPkn": discount_pkn,
-        "discountEurCents": discount_eur_cents,
-    })))
+/// Per-seller parcels. Seller settlement is items − commission + their
+/// shipping (`create-order-checkout-session.js`), not the shipping alone.
+fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> Vec<Value> {
+    shipments
+        .iter()
+        .map(|shipment| {
+            let items_net =
+                ((shipment.items_subtotal_cents as f64) * (1.0 - CHECKOUT_COMMISSION_RATE)).round() as i64;
+            json!({
+                "sellerId": shipment.seller_id,
+                "sellerName": shipment.seller_name,
+                "fromCountry": shipment.from_country,
+                "toCountry": shipment.to_country,
+                "cardCount": shipment.card_count,
+                "packageTier": shipment.package_tier,
+                "shippingRateId": shipment.rate_id,
+                "serviceName": shipment.service_name,
+                "itemsSubtotalCents": shipment.items_subtotal_cents,
+                "shippingAmountEURCents": shipment.amount_cents,
+                "sellerTransferCents": (items_net + shipment.amount_cents).max(0),
+                "amountCents": shipment.amount_cents,
+                "tracked": shipment.tracked,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eur_parcels_settle_items_minus_commission_plus_shipping() {
+        let shipment = crate::domain::shipping::ShipmentQuote {
+            seller_id: "s1".into(),
+            seller_name: "Seller".into(),
+            rate_id: "it-it-letter".into(),
+            from_country: "IT".into(),
+            to_country: "IT".into(),
+            card_count: 2,
+            package_tier: "letter".into(),
+            tracked: true,
+            estimated_weight_grams: 20,
+            carrier: "Poste".into(),
+            service_name: "Tracked".into(),
+            amount_cents: 450,
+            currency: "EUR".into(),
+            items_subtotal_cents: 1000,
+            item_count: 2,
+        };
+        let rows = eur_order_shipments(&[shipment]);
+        // round(1000 × 0.97) + 450, as the Node checkout writer settles it.
+        assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
+        assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
+        assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
+        // The refund share now has a non-zero EUR gross for this seller.
+        let order = json!({ "channel": "eur", "currency": "EUR", "shipments": rows, "items": [] });
+        let share = crate::domain::order_refund::seller_share(&order, "s1");
+        assert_eq!(share.currency, "EUR");
+        assert_eq!(share.gross, 1450);
+    }
 
     #[test]
     fn eur_release_plan_does_not_repeat_discount_and_preserves_inventory() {

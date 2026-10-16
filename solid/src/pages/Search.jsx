@@ -1,9 +1,10 @@
 import { createEffect, createMemo, createSignal, createStore, For, Match, reconcile, Repeat, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { fetchSearch, fetchSellerSearchWithAssociates } from '@market/api.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
-import { isPokemonGame } from '@market/game.js';
+import { gameHref, isPokemonGame } from '@market/game.js';
 import { sellerHref } from '@market/listing-meta.js';
 import { filterSearchCards, searchRarity, searchSet, uniqueSearchOptions } from '@market/search-filters.js';
 import { takeHotSearchPage } from '@market/search-hot.js';
@@ -89,7 +90,7 @@ function Alert(props) {
  */
 export default function Search() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const pokemon = isPokemonGame();
   const params = createMemo(() => new URLSearchParams(location.search));
   const typedQuery = createMemo(() => (params().get('q') || params().get('query') || '').trim());
@@ -600,7 +601,7 @@ export default function Search() {
       <Alert>{error()}</Alert>
       <Switch
         fallback={(
-          <CardSelectGrid class="grid">
+          <CardSelectGrid class="grid search-grid">
             <Show when={!loading()} fallback={<Repeat count={24}>{() => <SkeletonTile />}</Repeat>}>
               <For each={shown()} keyed={(card) => card.id}>
                 {(card, index) => <CardTile card={card()} rank={index()} />}
@@ -614,7 +615,7 @@ export default function Search() {
             when={loading() || results.sellers.length || error()}
             fallback={(
               <EmptyDesk title={emptyTitle()} lede={emptyLede()}>
-                <a class="btn" href={marketUrl('/marketplace')}>Browse marketplace</a>
+                <a class="btn" href={gameHref(marketUrl('/marketplace'))}>Browse marketplace</a>
               </EmptyDesk>
             )}
           >
@@ -622,7 +623,7 @@ export default function Search() {
               <For each={results.sellers}>
                 {(seller) => (
                   <li>
-                    <a class="seller-result" href={marketUrl(sellerHref({ sellerName: seller.username }))}>
+                    <a class="seller-result" href={gameHref(marketUrl(sellerHref({ sellerName: seller.username })))}>
                       <span class="suggest-user-mark" aria-hidden="true">{seller.name.slice(0, 1).toUpperCase()}</span>
                       <span>
                         <strong>{seller.name}</strong>
@@ -644,7 +645,7 @@ export default function Search() {
         </Match>
         <Match when={!loading() && !results.cards.length && !error()}>
           <EmptyDesk title={emptyTitle()} lede={emptyLede()}>
-            <a class="btn" href={marketUrl('/marketplace')}>Browse marketplace</a>
+            <a class="btn" href={gameHref(marketUrl('/marketplace'))}>Browse marketplace</a>
           </EmptyDesk>
         </Match>
         <Match when={!loading() && results.cards.length && !shown().length}>

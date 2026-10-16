@@ -1,5 +1,5 @@
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
-import { withGameQuery, gameRequestHeaders } from './game.js';
+import { withGameQuery, withGameQueryFor, gameRequestHeaders, gameRequestHeadersFor } from './game.js';
 import { applyTilePrice, tilePricePkn } from './pkn.js';
 import { expandProvisionalCardIds, normalizeRecentCardIds, realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 import { isSetDeskCard } from './search-filters.js';
@@ -138,9 +138,13 @@ function railFromResponse(row) {
   };
 }
 
-async function fetchJsonRail(url) {
-  const response = await fetch(publicApiUrl(url), {
-    headers: { Accept: 'application/json' },
+async function fetchJsonRail(url, gameId) {
+  const scoped = gameId ? withGameQueryFor(url, gameId) : url;
+  const response = await fetch(publicApiUrl(scoped), {
+    headers: {
+      Accept: 'application/json',
+      ...(gameId ? gameRequestHeadersFor(gameId) : {}),
+    },
   });
   if (!response.ok) {
     const raw = await response.text().catch(() => '');
@@ -152,11 +156,11 @@ async function fetchJsonRail(url) {
   return railFromResponse(await response.json());
 }
 
-export async function fetchRail(id) {
+export async function fetchRail(id, gameId) {
   if (!id) {
     return null;
   }
-  return fetchJsonRail(`/api/marketplace-rails?id=${encodeURIComponent(id)}`);
+  return fetchJsonRail(`/api/marketplace-rails?id=${encodeURIComponent(id)}`, gameId);
 }
 
 /** One homepage carousel via its dedicated Rust API, with Node ?id= fallback. */
@@ -227,16 +231,17 @@ function staleStampsFirst(cards) {
 }
 
 /** `priority: 'low'` for background refreshes (the Recently seen warm-up). */
-export async function fetchCardTiles(ids, { priority } = {}) {
+export async function fetchCardTiles(ids, { game: gameId, priority } = {}) {
   const wanted = expandProvisionalCardIds(normalizeRecentCardIds(ids, 24), 48);
   if (!wanted.length) {
     return [];
   }
+  const path = `/api/marketplace-card-tiles?ids=${wanted.join(',')}`;
   try {
-    const response = await fetch(publicApiUrl(withGameQuery(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`)), {
+    const response = await fetch(publicApiUrl(gameId ? withGameQueryFor(path, gameId) : withGameQuery(path)), {
       headers: {
         Accept: 'application/json',
-        ...gameRequestHeaders(),
+        ...(gameId ? gameRequestHeadersFor(gameId) : gameRequestHeaders()),
       },
       ...(priority ? { priority } : {}),
     });
@@ -334,8 +339,8 @@ export function sliceExpansionRail(cards, { limit = 48, offset = 0, cardCount = 
   return { cards: rows, hasMore, offset: start, limit: size };
 }
 
-export async function fetchExpansionFromLists({ slug = '', limit = 48, offset = 0 } = {}) {
-  const rail = await fetchRail(setRailId(slug));
+export async function fetchExpansionFromLists({ slug = '', limit = 48, offset = 0, game: gameId } = {}) {
+  const rail = await fetchRail(setRailId(slug), gameId);
   if (!rail?.cards?.length) {
     return null;
   }

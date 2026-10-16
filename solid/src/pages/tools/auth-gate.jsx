@@ -1,5 +1,5 @@
 import { createEffect, Match, Switch } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../../lib/game-navigate.js';
 import { authFrom } from '@market/punchouts.js';
 import { SessionWait } from '../../components/Desk.jsx';
 import { authReady, signedIn } from '../../stores/auth.js';
@@ -10,7 +10,7 @@ import { authReady, signedIn } from '../../stores/auth.js';
  * sign-in URL (ScanDesk links /auth?from= directly, without authFrom).
  */
 export function RequireSignIn(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   createEffect(
     () => authReady() && !signedIn(),
     (out) => {

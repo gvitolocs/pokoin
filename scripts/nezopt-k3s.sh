@@ -6,7 +6,7 @@
 #   scripts/nezopt-k3s.sh sync           # Pi Rust release (x86 build) + env + sitemaps → nezopt, restart pods if changed
 #   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml + pokoin-security.yaml
 #   scripts/nezopt-k3s.sh network        # Docker network, DB attachments, scan + Hermes bridges (idempotent)
-#   scripts/nezopt-k3s.sh secret         # only rebuild the env secret from the Pi Rust service
+#   scripts/nezopt-k3s.sh secret         # only rebuild the env secrets (pods, CronJobs) from the Pi Rust service
 #   scripts/nezopt-k3s.sh reindex        # one-off full Redis Search rebuild (first run / repair)
 #   scripts/nezopt-k3s.sh status         # nodes, pods, HPA, overflow health
 #   scripts/nezopt-k3s.sh install        # user timer: `sync` every 5 min (follows Pi API deploys)
@@ -27,6 +27,8 @@ PI_UNIT="${PI_RUST_UNIT:-pokoin-rust-api}"
 # Builds come from this repository's objects (a detached worktree, never a checkout someone works in).
 REPO="${POKOIN_REPO:-$HOME/Projects/pokoin-web}"
 NS=pokoin-overflow
+# Least-privilege role passwords (<role>.pw, mode 600); see docs/SECURITY_HARDENING.md.
+PG_ROLES_DIR="${POKOIN_PG_ROLES_DIR:-$HOME/secrets/pokoin-pg-roles}"
 # UFW drops container → host traffic, so pods reach the writer Postgres
 # container directly on a user-defined Docker network with fixed addresses.
 NET=pokoin-overflow
@@ -197,11 +199,51 @@ for key in ("POKO_CHAT_URL", "POKONTACT_SERVICE_URL"):
     parts = urlsplit(raw)
     if raw and (parts.hostname or "") in {"127.0.0.1", "localhost", "::1"}:
         data[key] = base64.b64encode(urlunsplit(parts._replace(netloc=sys.argv[3])).encode()).decode()
-print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-                  "metadata": {"name": "pokoin-api-env", "namespace": "pokoin-overflow"},
-                  "data": data}))
-' "$WRITER_NET_IP" "$TCGCSV_NET_IP" "$HERMES_BRIDGE_IP:$HERMES_PORT" | kc apply -f - >/dev/null
-  say "secret pokoin-api-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
+# Least-privilege roles (docs/SECURITY_HARDENING.md): every URL here reaches the
+# nezopt writer, so pods log in as pokoin_api_write (reads and writes, one pool)
+# and the CronJobs (secret pokoin-jobs-env) as pokoin_jobs. The read URLs of the Pi
+# URLs carry pokoin_api_read, which the writer rejects. Without the password
+# files both secrets keep the login of the Pi, as before.
+from pathlib import Path
+from urllib.parse import quote
+
+def role_password(name):
+    path = Path(sys.argv[4]) / f"{name}.pw"
+    return path.read_text().strip() if path.is_file() else ""
+
+def writer_keys(table):
+    return [k for k in table if k != "TCGCSV_DATABASE_URL"
+            and "MARKETPLACE" in k and k.endswith("DATABASE_URL")]
+
+def with_login(value, user, password):
+    parts = urlsplit(value)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit(parts._replace(netloc=f"{quote(user, safe="")}:{quote(password, safe="")}@{host}"))
+
+def logins(table, user):
+    password = role_password(user)
+    out = dict(table)
+    if password:
+        for key in writer_keys(out):
+            out[key] = base64.b64encode(with_login(base64.b64decode(out[key]).decode(), user, password).encode()).decode()
+    return out
+
+api = logins(data, "pokoin_api_write")
+jobs = logins(data, "pokoin_jobs")
+for name, table in (("pokoin_api_write", api), ("pokoin_jobs", jobs)):
+    for key in writer_keys(table):
+        if urlsplit(base64.b64decode(table[key]).decode()).username == "pokoin_api_read":
+            sys.exit(f"{key} logs in as pokoin_api_read, which the writer rejects: "
+                     f"create {sys.argv[4]}/{name}.pw first")
+
+def secret(name, table):
+    return {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+            "metadata": {"name": name, "namespace": "pokoin-overflow"}, "data": table}
+
+print(json.dumps({"apiVersion": "v1", "kind": "List",
+                  "items": [secret("pokoin-api-env", api), secret("pokoin-jobs-env", jobs)]}))
+' "$WRITER_NET_IP" "$TCGCSV_NET_IP" "$HERMES_BRIDGE_IP:$HERMES_PORT" "$PG_ROLES_DIR" | kc apply -f - >/dev/null
+  say "secrets pokoin-api-env and pokoin-jobs-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
 }
 
 # The Pi runs the aarch64 build of one commit; pods run the x86_64 build of the
@@ -219,6 +261,8 @@ build_release() {
   fi
   git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$src" fetch -q origin
   git -C "$src" checkout -q --detach --force "$commit"
+  # The pods keep the current release when this refuses; a full / evicts them.
+  bash "$(dirname "${BASH_SOURCE[0]}")/require-free-space.sh" "${POKOIN_K3S_MIN_FREE_GB:-30}" "$BASE"
   say "cargo build pokoin-api ${commit:0:12} (x86_64)"
   ( # shellcheck disable=SC1091
     source "$HOME/.cargo/env"

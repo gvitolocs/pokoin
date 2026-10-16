@@ -63,6 +63,8 @@ function load(target, signal, intent) {
 
 const queue = createPrefetchQueue({ load, idle, blocked });
 
+// Router base is '' — the slug is stripped only for matching. Catalogue hrefs
+// are still prefixed, so peel the live game prefix before classifying them.
 const targetOf = (url) => linkTarget(url.pathname, { base: gameBasename(), cardId: realPublicCardId });
 
 let scanTimers = [];

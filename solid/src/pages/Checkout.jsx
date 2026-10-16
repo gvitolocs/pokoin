@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate, useSearchParams } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cancelEurOrder,
   createMarketplaceOrder,
@@ -12,6 +13,7 @@ import {
   saveAccountAddress,
 } from '@market/api.js';
 import { brandSrc } from '@market/brand-assets.js';
+import { game, publicGamePath } from '@market/game.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '@market/buyer-protection.js';
 import { looseCardReference, writeListingDrag } from '@market/chat-listing.js';
 import { checkoutFees, pknBalanceVoucher } from '@market/checkout-fees.js';
@@ -89,7 +91,7 @@ function InsuranceCheck(props) {
 }
 
 function CheckoutDesk() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
   // Only the ticked cart rows check out; unticked ones stay in the cart.
@@ -471,7 +473,7 @@ function CheckoutDesk() {
                 {(row) => (
                   <article class="bag-row summary">
                     <a
-                      href={row.href || '/marketplace'}
+                      href={publicGamePath(row.href || '/marketplace', game().id) || row.href || '/marketplace'}
                       class="bag-art"
                       draggable="true"
                       onDragStart={(event) => writeListingDrag(event, looseCardReference({

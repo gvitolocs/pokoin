@@ -21,7 +21,7 @@ import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsM
 export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
-import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
+import { withGameQuery, withGameQueryFor, isPokemonGame, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
@@ -70,6 +70,7 @@ import {
   noteOriginDown,
   isTunnelHtml,
 } from './working-page.js';
+import { isGatewayStatus, retriesRequest, withGatewayRetry } from './api-retry.js';
 
 export { readRecentCardIds, rememberCardId, peekRecentTile, homepageDerivativeUrl, preferFullImage, rasterSiblings, fetchCardTiles, attachRecentsToHome, isPublicRailsVector, publicIdFromScanHit };
 
@@ -103,14 +104,26 @@ function readIdList(key) {
   }
 }
 
-/** One API request with the SPA's headers: the body text, and its ETag when CORS exposes it. */
-async function fetchApiText(url, options = {}, path = url) {
+/**
+ * One API request with the SPA's headers: the body text, and its ETag when CORS
+ * exposes it. A gateway failure (the load balancer picked a down origin) is
+ * retried for reads and for writes that pass `retry: true`; see api-retry.js.
+ */
+function fetchApiText(url, options = {}, path = url) {
+  return withGatewayRetry(() => fetchApiTextOnce(url, options, path), {
+    retry: retriesRequest(options),
+    signal: options.signal,
+  });
+}
+
+async function fetchApiTextOnce(url, options = {}, path = url) {
   let response;
   try {
+    const catalogGame = options.game || catalogGameFromUrl(url);
     response = await fetch(url, {
       headers: {
         Accept: 'application/json',
-        ...gameRequestHeaders(),
+        ...(catalogGame ? gameRequestHeadersFor(catalogGame) : gameRequestHeaders()),
         ...(options.headers || {}),
       },
       method: options.method || 'GET',
@@ -123,6 +136,7 @@ async function fetchApiText(url, options = {}, path = url) {
     if (isApiRequestPath(path) && isNetworkError(err)) {
       const error = new Error('The network request failed.');
       error.cause = err;
+      error.gatewayFailure = true;
       throw error;
     }
     throw err;
@@ -135,15 +149,18 @@ async function fetchApiText(url, options = {}, path = url) {
     } catch (_) {
       body = {};
     }
+    const gatewayFailure = isApiRequestPath(path) && isGatewayStatus(response.status);
     if (isOriginDownError({ message: body.error || body.message || '' }, response.status, raw) || isTunnelHtml(raw)) {
       const error = new Error('The network request failed.');
       error.status = response.status;
       error.body = body;
+      error.gatewayFailure = gatewayFailure;
       throw error;
     }
     const error = new Error(body.error || body.message || body.detail || `Request failed (${response.status})`);
     error.status = response.status;
     error.body = body;
+    error.gatewayFailure = gatewayFailure;
     throw error;
   }
   return { text: await response.text(), etag: response.headers.get('etag') || '' };
@@ -161,7 +178,7 @@ function parseApiText(raw) {
 }
 
 export async function getJson(path, options = {}) {
-  const { text } = await fetchApiText(publicApiUrl(withGameQuery(path)), options, path);
+  const { text } = await fetchApiText(localUrl(path, options.game), options, path);
   return parseApiText(text);
 }
 
@@ -226,7 +243,7 @@ async function refreshC1Dictionary() {
  * headers or cache mode, is a plain getJson.
  */
 function getJsonLocal(path, options = {}) {
-  const url = publicApiUrl(withGameQuery(path));
+  const url = localUrl(path, options.game);
   if (!localStorable(url) || options.method || options.body || options.headers || options.cache) {
     // Not stored, but a `format=c1` answer still decodes to the default JSON.
     return getJson(path, options).then((payload) => (isC1(payload) ? decodeC1(payload, c1Dictionary) : payload));
@@ -335,6 +352,7 @@ export function fetchSearch({
   lang,
   printLang,
   signal,
+  game: gameId,
 } = {}) {
   const params = new URLSearchParams({
     query: query || '',
@@ -356,7 +374,10 @@ export function fetchSearch({
   // nationality and unknown is not western/japanese/chinese. The page filters
   // the unfiltered window with rowPrintBucket (search-print.js).
   void printLang;
-  return getJsonC1(`/api/marketplace-search-page?${params}`, { signal });
+  return getJsonC1(`/api/marketplace-search-page?${params}`, {
+    signal,
+    ...(gameId ? { game: gameId } : {}),
+  });
 }
 
 /** Live graded native listings only — not a Meili text search for "graded". */
@@ -521,8 +542,8 @@ export function warmupSearchBar({ engine = true } = {}) {
 const cardCache = new Map();
 const cardInflight = new Map();
 
-function cardCacheKey(cardId, lang = 'en') {
-  return `${game().id}:${String(lang || 'en')}:${String(cardId)}`;
+function cardCacheKey(cardId, lang = 'en', gameId = game().id) {
+  return `${String(gameId || game().id)}:${String(lang || 'en')}:${String(cardId)}`;
 }
 
 function rememberMap(map, key, value, max) {
@@ -769,13 +790,14 @@ function staleLimit({ onUpdate, prefetch } = {}) {
   return onUpdate || prefetch ? MAX_STALE_MS : FRESH_MS;
 }
 
-function localUrl(path) {
-  return publicApiUrl(withGameQuery(path));
+function localUrl(path, gameId) {
+  return publicApiUrl(gameId ? withGameQueryFor(path, gameId) : withGameQuery(path));
 }
 
 /** A card-page payload into the desk caches: arrows, memory, and (desk reads) the sync localStorage copy. */
-function acceptCardPage(cardId, data, { lang, persist }) {
-  assertCardPageIdentity(cardId, data, { gameId: game().id });
+function acceptCardPage(cardId, data, { lang, persist, gameId }) {
+  const catalogGame = gameId || game().id;
+  assertCardPageIdentity(cardId, data, { gameId: catalogGame });
   // Every card page (prefetches included) widens the arrow cache.
   if (hasNeighborArrows(data?.neighbors)) {
     rememberNeighbors(data.card || { id: cardId }, data.neighbors);
@@ -787,9 +809,9 @@ function acceptCardPage(cardId, data, { lang, persist }) {
       next = { ...data, neighbors: peeked };
     }
   }
-  rememberMap(cardCache, cardCacheKey(cardId, lang), next, 24);
+  rememberMap(cardCache, cardCacheKey(cardId, lang, catalogGame), next, 24);
   if (persist) {
-    rememberStoredCardPage(cardId, next, { lang });
+    rememberStoredCardPage(cardId, next, { lang, gameId: catalogGame });
   }
   return next;
 }
@@ -811,8 +833,11 @@ export function fetchCard(cardId, {
   signal,
   priority,
   onUpdate,
+  game: gameId,
 } = {}) {
-  const key = cardCacheKey(cardId, lang);
+  const catalogGame = gameId || game().id;
+  const key = cardCacheKey(cardId, lang, catalogGame);
+  const scoped = gameId ? { game: gameId } : {};
   const params = new URLSearchParams({ cardId: String(cardId) });
   if (lang) {
     params.set('lang', lang);
@@ -823,8 +848,8 @@ export function fetchCard(cardId, {
   if (includeOffers) {
     params.set('includeOffers', '1');
     // Live offers: never cached or stored.
-    return getJson(`/api/marketplace-card-page?${params}`).then((data) => {
-      assertCardPageIdentity(cardId, data, { gameId: game().id });
+    return getJson(`/api/marketplace-card-page?${params}`, scoped).then((data) => {
+      assertCardPageIdentity(cardId, data, { gameId: catalogGame });
       if (hasNeighborArrows(data?.neighbors)) {
         rememberNeighbors(data.card || { id: cardId }, data.neighbors);
       }
@@ -839,9 +864,10 @@ export function fetchCard(cardId, {
     return cardInflight.get(key);
   }
   const path = `/api/marketplace-card-page?${params}`;
-  const url = localUrl(path);
+  const url = localUrl(path, gameId);
   const persist = !prefetch;
   const pending = getJsonLocal(path, {
+    ...scoped,
     fresh,
     prefetch,
     signal,
@@ -849,7 +875,7 @@ export function fetchCard(cardId, {
     maxStaleMs: staleLimit({ onUpdate, prefetch }),
     onUpdate: (data) => {
       try {
-        const next = acceptCardPage(cardId, data, { lang, persist });
+        const next = acceptCardPage(cardId, data, { lang, persist, gameId: catalogGame });
         onUpdate?.(next);
       } catch (_) {
         /* a mismatched revalidation keeps the page it has */
@@ -857,6 +883,7 @@ export function fetchCard(cardId, {
     },
   }).then((data) => markStored(acceptCardPage(cardId, data, {
     lang,
+    gameId: catalogGame,
     // localStorage keeps network copies only: an old stored one would get a new TTL.
     persist: persist && localReader.fresh(url),
   }), url));
@@ -1114,8 +1141,10 @@ export function askPoko(bearer, message, sessionId) {
 }
 
 export function pokoConnectAction(bearer, body) {
+  // Status, a fresh link code and unlink are all safe to send twice.
   return getJson('/api/poko-connect', {
     method: 'POST',
+    retry: true,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
@@ -1157,6 +1186,7 @@ export function syncCardTraderInventory(token, options = {}) {
   if (options.numberedInStack === true) body.numberedInStack = true;
   if (options.locationParse) body.locationParse = options.locationParse;
   if (options.previewPowerTools) body.previewPowerTools = true;
+  if (options.powerToolsRecognizedOnly === true) body.powerToolsRecognizedOnly = true;
   if (options.priceMode) body.priceMode = options.priceMode;
   // Inventory link: ct_to_pokoin | pokoin_to_ct | both (stored, then synced).
   if (options.direction) body.direction = options.direction;
@@ -1327,8 +1357,10 @@ const artistPageCache = new Map();
 const artistPageInflight = new Map();
 let artistSummariesCache = null;
 
-function artistPageKey(slug, limit) {
-  return `${String(slug || '').trim().toLowerCase()}:${Number(limit) || 0}`;
+function artistPageKey(slug, limit, gameId = '') {
+  const base = `${String(slug || '').trim().toLowerCase()}:${Number(limit) || 0}`;
+  const id = String(gameId || '').trim();
+  return id ? `${id}:${base}` : base;
 }
 
 export function peekArtist(slug, limit = 5000) {
@@ -1341,8 +1373,9 @@ export function peekArtist(slug, limit = 5000) {
  * revalidated one arrives through it; like fetchCard, such a read neither
  * adopts nor is adopted by a plain read in flight.
  */
-export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, signal } = {}) {
-  const key = artistPageKey(slug, limit);
+export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, signal, game: gameId } = {}) {
+  const key = artistPageKey(slug, limit, gameId);
+  const scoped = gameId ? { game: gameId } : {};
   const hit = artistPageCache.get(key);
   if (hit && (prefetch || cachedFresh(hit))) {
     return Promise.resolve(hit);
@@ -1373,6 +1406,7 @@ export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, sig
   // The whole artist (no cap) comes from its snapshot; the live route is the fallback.
   const fromSnapshot = limit >= 1000
     ? fetchListSnapshot('artist', slug, {
+      ...scoped,
       prefetch,
       signal,
       maxStaleMs: staleLimit({ onUpdate, prefetch }),
@@ -1380,14 +1414,14 @@ export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, sig
         if (snapshot?.cards?.length) onUpdate?.(remember(snapshot));
       },
     }).then((snapshot) => (snapshot?.cards?.length
-      ? markStored(remember(snapshot), localUrl(listSnapshotPath('artist', slug)))
+      ? markStored(remember(snapshot), localUrl(listSnapshotPath('artist', slug), gameId))
       : null))
     : Promise.resolve(null);
   if (limit >= 5000) {
     params.set('limit', '20000');
   }
   const pending = fromSnapshot.then((mapped) => mapped
-    || (prefetch ? null : getJsonC1(`/api/marketplace-artist-cards?${params}`).then(remember)));
+    || (prefetch ? null : getJsonC1(`/api/marketplace-artist-cards?${params}`, { signal, ...scoped }).then(remember)));
   if (prefetch || onUpdate) {
     return pending;
   }
@@ -1473,8 +1507,10 @@ const expansionInflight = new Map();
  */
 export const EXPANSION_PAGE = 400;
 
-function expansionCacheKey({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
-  return JSON.stringify({ slug, expansionName, limit: Number(limit), offset: Number(offset) });
+function expansionCacheKey({ slug = '', expansionName = '', limit = 48, offset = 0, game: gameId = '' } = {}) {
+  const identity = { slug, expansionName, limit: Number(limit), offset: Number(offset) };
+  if (gameId) identity.game = gameId;
+  return JSON.stringify(identity);
 }
 
 export function peekExpansion(opts = {}) {
@@ -1723,11 +1759,11 @@ export function primeListDictionary(doc = typeof document === 'undefined' ? null
  * revalidated snapshot reaches `onUpdate`; `prefetch` only warms the cache.
  */
 export function fetchExpansion(opts = {}) {
-  const { slug = '', expansionName = '', limit = 48, offset = 0, onUpdate, prefetch = false, signal } = opts;
+  const { slug = '', expansionName = '', limit = 48, offset = 0, onUpdate, prefetch = false, signal, game: gameId } = opts;
   if (offset !== 0 || !slug) {
     return fetchExpansionLive(opts);
   }
-  const key = expansionCacheKey({ slug, expansionName, limit, offset });
+  const key = expansionCacheKey({ slug, expansionName, limit, offset, ...(gameId ? { game: gameId } : {}) });
   const hit = expansionCache.get(key);
   if (hit && (prefetch || cachedFresh(hit))) {
     return Promise.resolve(hit);
@@ -1735,6 +1771,7 @@ export function fetchExpansion(opts = {}) {
   if (!prefetch && expansionInflight.has(key)) {
     return expansionInflight.get(key);
   }
+  const scoped = gameId ? { game: gameId } : {};
   const toPage = (snapshot) => {
     const page = snapshot?.cards?.length ? mapExpansionCards(snapshot) : null;
     if (!page?.cards?.length) {
@@ -1745,6 +1782,7 @@ export function fetchExpansion(opts = {}) {
     return data;
   };
   const pending = fetchListSnapshot('set', slug, {
+    ...scoped,
     prefetch,
     signal,
     maxStaleMs: staleLimit(opts),
@@ -1768,7 +1806,7 @@ export function fetchExpansion(opts = {}) {
   return pending;
 }
 
-function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset = 0, onUpdate } = {}) {
+function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset = 0, onUpdate, game: gameId } = {}) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
@@ -1780,7 +1818,7 @@ function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset 
   if (expansionName) {
     params.set('expansionName', expansionName);
   }
-  const key = expansionCacheKey({ slug, expansionName, limit, offset });
+  const key = expansionCacheKey({ slug, expansionName, limit, offset, ...(gameId ? { game: gameId } : {}) });
   if (offset === 0 && expansionCache.has(key)) {
     return Promise.resolve(expansionCache.get(key));
   }
@@ -1800,12 +1838,15 @@ function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset 
     return expansionInflight.get(key);
   }
   const fromLists = slug
-    ? fetchExpansionFromLists({ slug, limit, offset }).catch(() => null)
+    ? fetchExpansionFromLists({ slug, limit, offset, ...(gameId ? { game: gameId } : {}) }).catch(() => null)
     : Promise.resolve(null);
   const pageSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(6000)
     : undefined;
-  const fromPage = getJsonC1(`/api/marketplace-expansion-page?${params}`, { signal: pageSignal }).catch(() => null);
+  const fromPage = getJsonC1(`/api/marketplace-expansion-page?${params}`, {
+    signal: pageSignal,
+    ...(gameId ? { game: gameId } : {}),
+  }).catch(() => null);
   const pending = fromLists.then(async (cached) => {
     // Rail / first SQL page is metadata only. The set desk waits for
     // fetchExpansionCards (hasMore false) before painting tiles.
@@ -2068,17 +2109,18 @@ export function postEvent({ cardId, eventType, metadata = {} }) {
 export function cardHref(card) {
   const id = realPublicCardId(card?.id || card?.card_id || '');
   const path = rewriteCanonicalCardPath(card?.canonicalPath || card?.canonical_path, id, getSearchLang());
+  const gameId = game().id;
   if (path) {
-    return path;
+    return publicGamePath(path, gameId) || path;
   }
-  return '/marketplace';
+  return publicGamePath('/marketplace', gameId) || '/marketplace';
 }
 
 export function publicCardId(card) {
   return realPublicCardId(String(card?.id || card?.card_id || ''));
 }
 
-export function imageSrc(card, kind = 'grid') {
+export function imageSrc(card, kind = 'grid', gameId) {
   if (kind === 'hero') {
     return ownCatalogImage(card, preferFullImage(
       card?.heroImageUrl
@@ -2089,12 +2131,12 @@ export function imageSrc(card, kind = 'grid') {
       || card?.tileImageUrl
       || card?.homepageImageUrl
       || card?.homepage_image_url,
-    ));
+    ), gameId);
   }
   if (kind === 'suggest') {
     const full = ownCatalogImage(card, preferFullImage(
       card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl || card?.image,
-    ));
+    ), gameId);
     const advertised = card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || '';
     if (advertised && leftoverKeyMatchesCard(advertised, publicCardId(card)) && homepageMatchesCatalog(advertised, full || advertised)) {
       return homepageDerivativeUrl(advertised);
@@ -2112,7 +2154,7 @@ export function imageSrc(card, kind = 'grid') {
     || card?.imageUrl
     || card?.cdn_image_url
     || card?.image_url,
-  ));
+  ), gameId);
   const advertised = card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || '';
   if (advertised && leftoverKeyMatchesCard(advertised, publicCardId(card)) && homepageMatchesCatalog(advertised, full || advertised)) {
     return homepageDerivativeUrl(advertised);
@@ -2275,8 +2317,10 @@ export function fetchPknRefusingSellers(sellerUids, token) {
 }
 
 export function saveSellerSettings(body, token) {
+  // Sets fields to the given values, so a repeat is harmless.
   return getJson('/api/marketplace-seller-settings', {
     method: 'POST',
+    retry: true,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,

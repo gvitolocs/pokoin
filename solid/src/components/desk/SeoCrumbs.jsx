@@ -1,4 +1,5 @@
 import { For, Show } from 'solid-js';
+import { gameHref } from '@market/game.js';
 
 /** Breadcrumb trail. */
 export default function SeoCrumbs(props) {
@@ -13,7 +14,7 @@ export default function SeoCrumbs(props) {
               <span>
                 <Show when={index()}><span class="sep">/</span></Show>
                 <Show when={!last() && item.href} fallback={<span class={last() ? 'here' : undefined}>{item.name}</span>}>
-                  <a href={item.href}>{item.name}</a>
+                  <a href={gameHref(item.href)}>{item.name}</a>
                 </Show>
               </span>
             );

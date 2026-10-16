@@ -16,6 +16,14 @@ Cloudflare LB ─┬─ pi  (0.9) → Pi tunnel → Rust edge 127.0.0.1:18079 �
 ```
 
 The Pi does not forward to nezopt any more; the load balancer splits traffic.
+It picks an origin per request (`random` steering), CORS preflights included,
+and the 60 s `/readyz` monitor does not notice a pod crash loop of a few
+minutes. While nezopt is down, its share of requests gets a 502 from its tunnel:
+a failed preflight makes the browser `fetch` throw, which the SPA showed as
+"The network request failed." (Profile Poko link code and seller setup,
+2026-10-15). `market/src/api-retry.js` now retries such gateway failures
+(network error, 502, Cloudflare 52x/530) twice: reads always, writes only with
+`retry: true`. That hides a flapping origin from the page; it does not fix it.
 Writes, webhooks and checkout can land on either origin: both write to the
 nezopt writer Postgres. Runtime details: [RUST_RUNTIME.md](RUST_RUNTIME.md).
 

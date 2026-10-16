@@ -5,6 +5,7 @@ import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 const AISLES = Object.entries(PRODUCT_AISLES);
 
@@ -59,7 +60,7 @@ function Aisle(props) {
       <nav class="comp-tabs" aria-label="Product types">
         <For each={AISLES}>
           {([id, row]) => (
-            <a class={kind === id ? 'on' : undefined} href={`/product/${id}`}>{row.title}</a>
+            <a class={kind === id ? 'on' : undefined} href={gameHref(`/product/${id}`)}>{row.title}</a>
           )}
         </For>
       </nav>
@@ -80,7 +81,7 @@ function Aisle(props) {
         when={loading() || list.cards.length || error()}
         fallback={(
           <EmptyDesk title="Nothing in this aisle" lede={aisleEmptyLede(kind)}>
-            <a class="btn" href="/marketplace">Shop</a>
+            <a class="btn" href={gameHref('/marketplace')}>Shop</a>
           </EmptyDesk>
         )}
       >

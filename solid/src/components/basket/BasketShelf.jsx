@@ -13,6 +13,7 @@ import {
   toggleWatchlist,
 } from '@market/api.js';
 import { listingStub, offerStub, tileStub } from '@market/basket-format.js';
+import { game, publicGamePath } from '@market/game.js';
 import { cartImageFor } from '@market/cart-image.js';
 import { carouselPage } from '@market/cart-model.js';
 import { pickCartOffer } from '@market/cart-offer.js';
@@ -33,6 +34,7 @@ import { addCartItem } from '../../stores/cart.js';
 import AuthLink from '../AuthLink.jsx';
 import CardArt from '../CardArt.jsx';
 import { BigPrice } from './Basket.jsx';
+import { gameHref } from '@market/game.js';
 
 /** React `<Link to={href} state={{ card }} onClick={rememberCardId}>`: hand the tile to the desk. */
 function openCard(card) {
@@ -159,7 +161,7 @@ export function AddCardButton(props) {
 
 function ViewCardLink(props) {
   return (
-    <a class="bk-btn-o is-small bk-view" href={props.href} onClick={() => openCard(props.card)}>
+    <a class="bk-btn-o is-small bk-view" href={gameHref(props.href)} onClick={() => openCard(props.card)}>
       View card
     </a>
   );
@@ -174,10 +176,10 @@ export function TileCard(props) {
   const name = () => displayName(card());
   return (
     <div class="bk-pcard">
-      <a class="bk-pcard-pic" href={href()} onClick={() => openCard(card())}>
+      <a class="bk-pcard-pic" href={gameHref(href())} onClick={() => openCard(card())}>
         <CardArt src={imageSrc(card(), 'grid')} alt={name()} loading="lazy" />
       </a>
-      <a class="bk-pcard-title" href={href()} onClick={() => openCard(card())}>
+      <a class="bk-pcard-title" href={gameHref(href())} onClick={() => openCard(card())}>
         {name()}
       </a>
       <Show when={identity().tileLine}><span class="bk-pcard-id">{identity().tileLine}</span></Show>
@@ -228,12 +230,12 @@ export function ListingCard(props) {
   const done = () => Boolean(props.inCart) || added();
   return (
     <div class="bk-pcard">
-      <a class="bk-pcard-pic" href={stub().canonicalPath}>
+      <a class="bk-pcard-pic" href={cardHref(stub())}>
         <Show when={image()} fallback={<span class="bk-pic-ph" />}>
           <CardArt src={homepageDerivativeUrl(image()) || image()} alt={stub().name} loading="lazy" />
         </Show>
       </a>
-      <a class="bk-pcard-title" href={stub().canonicalPath}>{stub().name}</a>
+      <a class="bk-pcard-title" href={cardHref(stub())}>{stub().name}</a>
       <span class="bk-pcard-id">
         {printingIdentity({ id: stub().id, set: offer().setName, number: offer().collectorNumber, imageUrl: image() }).tileLine}
       </span>
@@ -308,10 +310,10 @@ export function RecCard(props) {
   const fallbackPrice = () => tilePricePkn(card());
   return (
     <div class="bk-pcard">
-      <a class="bk-pcard-pic" href={href()} onClick={() => openCard(card())}>
+      <a class="bk-pcard-pic" href={gameHref(href())} onClick={() => openCard(card())}>
         <CardArt src={imageSrc(card(), 'grid')} alt={name()} loading="lazy" />
       </a>
-      <a class="bk-pcard-title" href={href()} onClick={() => openCard(card())}>
+      <a class="bk-pcard-title" href={gameHref(href())} onClick={() => openCard(card())}>
         {name()}
       </a>
       <Show when={identity().tileLine}><span class="bk-pcard-id">{identity().tileLine}</span></Show>
@@ -377,11 +379,11 @@ export function RecentList(props) {
             const name = displayName(card);
             return (
               <div class={['bk-r-item', { 'is-unavailable': unavailable }]}>
-                <a class="bk-r-pic" href={href} onClick={() => openCard(card)}>
+                <a class="bk-r-pic" href={gameHref(href)} onClick={() => openCard(card)}>
                   <CardArt src={imageSrc(card, 'grid')} alt="" loading="lazy" />
                 </a>
                 <div class="bk-r-det">
-                  <a class="bk-r-title" href={href} onClick={() => openCard(card)}>{name}</a>
+                  <a class="bk-r-title" href={gameHref(href)} onClick={() => openCard(card)}>{name}</a>
                   <Show when={identity.tileLine}><span class="bk-r-id">{identity.tileLine}</span></Show>
                   <Show when={unavailable}><span class="bk-unavailable">Currently unavailable</span></Show>
                   <Show when={price > 0} fallback={unavailable ? null : <span class="bk-oos">No copies listed</span>}>
@@ -408,7 +410,7 @@ export function ThumbShelf(props) {
       <Shelf title={props.title} extra={props.extra} class="is-thumbs">
         <For each={props.cards}>
           {(card) => (
-            <a class="bk-thumb" href={cardHref(card)} title={displayName(card)} onClick={() => handOffCard(card)}>
+            <a class="bk-thumb" href={gameHref(cardHref(card))} title={displayName(card)} onClick={() => handOffCard(card)}>
               <CardArt src={imageSrc(card, 'grid')} alt={displayName(card)} loading="lazy" />
             </a>
           )}
@@ -421,19 +423,19 @@ export function ThumbShelf(props) {
 function SavedCard(props) {
   const row = () => props.row;
   const [watching, setWatching] = createSignal(untrack(() => readWatchlistIds().includes(String(props.row.cardId))));
-  const href = () => row().href || '/marketplace';
+  const href = () => publicGamePath(row().href || '/marketplace', game().id) || row().href || '/marketplace';
   const language = () => listingLanguageFlag(row().language);
   const seller = () => publicShopSellerLabel(row()) || row().sellerName || 'Pokoin';
   const watchable = () => /^\d+$/.test(String(row().cardId || ''));
   return (
     <div class="bk-saved">
-      <a class="bk-saved-pic" href={href()}>
+      <a class="bk-saved-pic" href={gameHref(href())}>
         <Show when={row().image} fallback={<span class="bk-pic-ph" />}>
           <CardArt src={homepageDerivativeUrl(row().image) || row().image} alt={row().name} loading="lazy" />
         </Show>
       </a>
       <div class="bk-saved-det">
-        <a class="bk-saved-title" href={href()}>{row().name}</a>
+        <a class="bk-saved-title" href={gameHref(href())}>{row().name}</a>
         <BigPrice pricePkn={row().pricePkn} sellerAcceptsPkn={row().sellerAcceptsPkn !== false} size="md" />
         <div class={row().unavailable ? 'bk-stock is-gone' : 'bk-stock'}>
           {row().unavailable ? 'Currently unavailable' : 'Listed'}
@@ -459,7 +461,7 @@ function SavedCard(props) {
               {watching() ? 'On your watchlist' : 'Add to watchlist'}
             </button>
           </Show>
-          <a class="bk-link" href={href()}>Compare offers</a>
+          <a class="bk-link" href={gameHref(href())}>Compare offers</a>
         </div>
       </div>
     </div>

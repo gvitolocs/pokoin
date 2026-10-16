@@ -1,0 +1,18 @@
+[Unit]
+Description=Weekly wal-g base backup of the Pi standby (never the writer)
+After=network-online.target docker.service
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pokoin/walg.env
+ExecStartPre=-/usr/local/bin/pokoin-ops hc-ping --unit %n start
+ExecStart=/usr/local/bin/wal-g backup-push /srv/pokoin/postgres/pgdata
+# Three weekly fulls and the WAL between them: at least 14 days of PITR.
+ExecStartPost=/usr/local/bin/wal-g delete retain FULL 3 --confirm
+ExecStartPost=-/usr/local/bin/pokoin-ops hc-ping --unit %n
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=100%
+MemoryMax=700M
+TimeoutStartSec=8h

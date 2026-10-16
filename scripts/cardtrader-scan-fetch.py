@@ -74,6 +74,9 @@ def main():
     request=json.load(sys.stdin)
     out=pathlib.Path(request["out"]);out.mkdir(parents=True,exist_ok=True)
     jobs=request["jobs"];halt=threading.Event();gate=CooldownGate()
+    # Pokemon keeps 400 px (CardTrader has larger scans); satellite games send
+    # a lower floor because CardTrader only has 240-350 px scans for new sets.
+    min_width=int(request.get("minWidth",400))
     def fetch_image(url):
         attempt=0
         while True:
@@ -107,7 +110,7 @@ def main():
                 if data is None:
                     attempts.append({"url":url,"status":"not_image"});continue
                 size=dimensions(data)
-                if not size or size==(186,260) or size[0]<400 or len(data)<=9000:
+                if not size or size==(186,260) or size[0]<min_width or len(data)<=9000:
                     attempts.append({"url":url,"status":"undersized" if size else "unrecognized_image","dimensions":size,"bytes":len(data)});continue
                 dest=out/key;dest.parent.mkdir(parents=True,exist_ok=True)
                 part=dest.with_name(dest.name+".part");part.write_bytes(data);part.replace(dest)

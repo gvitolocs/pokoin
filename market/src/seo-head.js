@@ -1,4 +1,16 @@
+import { gameBasename, gameHref } from './game.js';
 import { crawlableCardImage } from './google-commerce.js';
+
+/**
+ * Absolute canonical URL. Pages pass router paths (`/marketplace/sets/x`); on a
+ * game site they get the game's slug, or the canonical names the Pokémon page
+ * with the same path (a 404 for satellite sets) and crawlers index that.
+ */
+export function canonicalUrl(canonical, { origin, pathname, base = gameBasename(pathname) } = {}) {
+  if (!canonical) return `${origin}${pathname}`;
+  if (canonical.startsWith('http')) return canonical;
+  return `${origin}${gameHref(canonical, base)}`;
+}
 
 function upsertMeta(selector, attrs, content) {
   if (typeof document === 'undefined') {
@@ -83,9 +95,7 @@ export function applySeoHead({
     noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large',
   );
   const origin = window.location.origin;
-  const url = canonical
-    ? (canonical.startsWith('http') ? canonical : `${origin}${canonical}`)
-    : `${origin}${window.location.pathname}`;
+  const url = canonicalUrl(canonical, { origin, pathname: window.location.pathname });
   upsertLink('canonical', url);
   upsertMeta('meta[property="og:title"]', { property: 'og:title' }, title || '');
   upsertMeta('meta[property="og:description"]', { property: 'og:description' }, description || '');

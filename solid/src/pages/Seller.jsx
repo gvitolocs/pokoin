@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Repeat, Show, untrack } from 'solid-js';
-import { useNavigate, useParams, useSearchParams } from '@solidjs/router';
+import { useParams, useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { fetchSellerShop, fetchSellerSnapshot } from '@market/api.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
@@ -21,6 +22,8 @@ import {
   sellerFreshAction,
   sellerFromPayload,
   sellerOfferRow,
+  sellerShopEmptyCopy,
+  sellerShopErrorState,
 } from '@market/seller-shop.js';
 import Avatar from '../components/Avatar.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
@@ -87,7 +90,7 @@ function SkeletonRows() {
 function SellerShop(props) {
   const handle = untrack(() => props.handle);
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => props.lang || getSearchLang();
   const hintedUid = () => String(searchParams.sellerUid || '').trim();
   const selectedGame = game().apiGame;
@@ -103,7 +106,7 @@ function SellerShop(props) {
     username: handle,
     displayName: handle,
   });
-  const [error, setError] = createSignal('');
+  const [error, setError] = createSignal(null);
   const [query, setQuery] = createSignal('');
   const [condition, setCondition] = createSignal('');
   const [language, setLanguage] = createSignal('');
@@ -292,7 +295,7 @@ function SellerShop(props) {
           setTotal(Number(data.total ?? rows.length) || 0);
           setUnique(Number(data.unique ?? data.uniqueCards ?? rows.length) || 0);
           setCopies(data.copies == null ? null : (Number(data.copies) || 0));
-          setError('');
+          setError(null);
           setLoading(false);
           setPageSettled(true);
         })
@@ -307,7 +310,7 @@ function SellerShop(props) {
           setTotal(0);
           setUnique(0);
           setCopies(0);
-          setError(err.message || 'Seller not found.');
+          setError(sellerShopErrorState(err));
           setLoading(false);
         });
       return () => {
@@ -343,7 +346,19 @@ function SellerShop(props) {
   const safePage = () => Math.min(Math.max(1, page()), totalPages());
   const startIdx = () => (productCount() ? (safePage() - 1) * PAGE_SIZE + 1 : 0);
   const endIdx = () => Math.min(safePage() * PAGE_SIZE, productCount());
-  const notFound = () => shown() && !shown().length && error() && productCount() === 0 && !busy();
+  const deskFailure = () => {
+    const failure = error();
+    if (!failure || busy() || productCount() !== 0) return null;
+    const rows = shown();
+    if (!rows || rows.length) return null;
+    return failure;
+  };
+  const emptyShop = createMemo(() => sellerShopEmptyCopy({
+    gameName: game().name,
+    displayName: display(),
+    pokemon: selectedGame === 'pokemon',
+    narrowed: filtersNarrow(),
+  }));
 
   // Your own shop is managed in MyPokoin, not bought from.
   const isOwnShop = () => {
@@ -355,7 +370,7 @@ function SellerShop(props) {
     );
   };
   createEffect(
-    () => !notFound() && isOwnShop(),
+    () => !deskFailure() && isOwnShop(),
     (own) => {
       if (own) navigate('/mypokoin', { replace: true });
     },
@@ -366,10 +381,12 @@ function SellerShop(props) {
 
   return (
     <Show
-      when={!notFound()}
+      when={!deskFailure()}
       fallback={(
-        <EmptyDesk title="Seller not found" lede={error()}>
-          <p class="status">Usernames match live native listings.</p>
+        <EmptyDesk title={deskFailure()?.title} lede={deskFailure()?.lede}>
+          <Show when={deskFailure()?.kind === 'not_found'}>
+            <p class="status">Usernames match live native listings.</p>
+          </Show>
         </EmptyDesk>
       )}
     >
@@ -417,7 +434,7 @@ function SellerShop(props) {
             <Metric value={shown() == null ? '…' : uniqueItems()} label="Unique items" />
           </MetricGrid>
 
-          <Alert message={error() && shown()?.length ? error() : ''} />
+          <Alert message={shown()?.length && error()?.lede ? error().lede : ''} />
 
           <section class="panel shop-panel shop-terminal seller-shop-panel">
             <header class="panel-head shop-head">
@@ -489,7 +506,7 @@ function SellerShop(props) {
                 when={shown().length}
                 fallback={(
                   <Show when={!busy()}>
-                    <EmptyDesk title="No listings" lede={`${display()} has no live asks for these filters.`} />
+                    <EmptyDesk title={emptyShop().title} lede={emptyShop().lede} />
                   </Show>
                 )}
               >

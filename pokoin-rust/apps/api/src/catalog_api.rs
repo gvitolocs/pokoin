@@ -63,43 +63,70 @@ pub async fn cards(pool:&PgPool,ids:&[i64],game:&str)->Result<Vec<Value>,sqlx::E
  left join lateral (select canonical_path from public.marketplace_card_urls where card_id=c.card_id and language='en' order by canonical_path limit 1) u on true
  where c.card_id=any($1::bigint[])"#).bind(ids).fetch_all(pool).await?;
  let mut rows=rows.into_iter().map(|r|r.0).collect::<Vec<_>>();
- if game=="pokemon"{
-  let ct_ids=rows.iter().filter_map(|r|positive_id(&text(r,&["ct_id"]))).collect::<Vec<_>>();
-  let public_ids=ids.iter().map(i64::to_string).collect::<Vec<_>>();
+ // The pool is already this game's database. Every game reads its own cache;
+ // a database without the view is "no prices", not a failed request.
+ let ct_ids=rows.iter().filter_map(|r|positive_id(&text(r,&["ct_id"]))).collect::<Vec<_>>();
+ let public_ids=ids.iter().map(i64::to_string).collect::<Vec<_>>();
+ let prices=if game=="pokemon"{
   let (prices,shades,themes)=tokio::join!(
-   sqlx::query_scalar::<_,sqlx::types::Json<Value>>(r#"select to_jsonb(p) from public.cheapest_homepage_cache_blueprint p
-    where provider in ('cardtrader','pokoin_native') and cheapest_price_pkn>0 and eligible_listing_count>0
-    and (blueprint_id=any($1::bigint[]) or pokoin_card_id=any($2::text[]))
-    order by cheapest_price_pkn,provider"#).bind(&ct_ids).bind(&public_ids).fetch_all(pool),
+   cache_prices(pool,&ct_ids,&public_ids),
    optional_rows(pool,"marketplace_leftover_art_shades","select to_jsonb(s) from public.marketplace_leftover_art_shades s where ct_id=any($1::bigint[])",&ct_ids),
    optional_rows(pool,"marketplace_leftover_visual_themes","select to_jsonb(t) from public.marketplace_leftover_visual_themes t where ct_id=any($1::bigint[])",&ct_ids)
   );
-  let mut by_public=HashMap::new();let mut by_ct=HashMap::new();
-  for r in prices?{let r=r.0;
-   let public=text(&r,&["pokoin_card_id"]);let ct=text(&r,&["blueprint_id"]);
-   if !public.is_empty(){by_public.entry(public).or_insert_with(||r.clone());}
-   if !ct.is_empty(){by_ct.entry(ct).or_insert(r);}
-  }
   let shades:HashMap<_,_>=shades?.into_iter().map(|r|(text(&r,&["ct_id"]),r)).collect();
   let themes:HashMap<_,_>=themes?.into_iter().map(|r|(text(&r,&["ct_id"]),r)).collect();
   for row in &mut rows{
-   let id=text(row,&["card_id"]);let ct=text(row,&["ct_id"]);
-   if let Some(price)=by_public.get(&id).or_else(||by_ct.get(&ct)){
-    let stock=number(price,&["eligible_quantity","eligible_listing_count"]);
-    let has_ct=text(price,&["provider"])=="cardtrader";
-    row["lowest_price_pkn"]=price["cheapest_price_pkn"].clone();row["listed_quantity"]=json!(stock);
-    row["has_cardtrader_listing"]=json!(has_ct);
-    row["cardtrader_eligible_listing_count"]=json!(if has_ct{stock}else{0.});
-   }
+   let ct=text(row,&["ct_id"]);
    if let Some(shade)=shades.get(&ct){
     row["art_shade"]=shade["shade"].clone();
     row["current_artwork_identity"]=json!(text(shade,&["artwork_identity"]));
    }
    row["visual_theme_row"]=themes.get(&ct).cloned().unwrap_or(Value::Null);
   }
- }
+  prices?
+ }else{
+  cache_prices(pool,&ct_ids,&public_ids).await?
+ };
+ apply_cache_prices(&mut rows,&prices);
  let mut by_id:HashMap<i64,Value>=rows.into_iter().filter_map(|r|Some((positive_id(&text(&r,&["card_id"]))?,r))).collect();
  Ok(ids.iter().filter_map(|id|by_id.remove(id)).collect())
+}
+/// CardTrader / native ask from `cheapest_homepage_cache_blueprint`. SQLSTATE
+/// 42P01 (relation missing) is an empty price list, same as [`optional_rows`].
+async fn cache_prices(pool:&PgPool,ct_ids:&[i64],public_ids:&[String])->Result<Vec<Value>,sqlx::Error>{
+ if ct_ids.is_empty() && public_ids.is_empty(){return Ok(vec![])}
+ match sqlx::query_scalar::<_,sqlx::types::Json<Value>>(r#"select to_jsonb(p) from public.cheapest_homepage_cache_blueprint p
+  where provider in ('cardtrader','pokoin_native') and cheapest_price_pkn>0 and eligible_listing_count>0
+  and (blueprint_id=any($1::bigint[]) or pokoin_card_id=any($2::text[]))
+  order by cheapest_price_pkn,provider"#).bind(ct_ids).bind(public_ids).fetch_all(pool).await {
+  Ok(rows)=>Ok(rows.into_iter().map(|r|r.0).collect()),
+  Err(error) if missing_relation(&error)=>Ok(vec![]),
+  Err(error)=>Err(error),
+ }
+}
+fn missing_relation(error:&sqlx::Error)->bool{
+ error.as_database_error().is_some_and(|e|e.code().as_deref()==Some("42P01"))
+}
+/// Stamp the cheapest cache row onto each card. First row wins (the query is
+/// ordered by price). The game is irrelevant: the rows already came from that
+/// game's database.
+pub(crate) fn apply_cache_prices(rows:&mut [Value],prices:&[Value]){
+ let mut by_public=HashMap::new();let mut by_ct=HashMap::new();
+ for r in prices{
+  let public=text(r,&["pokoin_card_id"]);let ct=text(r,&["blueprint_id"]);
+  if !public.is_empty(){by_public.entry(public).or_insert_with(||r.clone());}
+  if !ct.is_empty(){by_ct.entry(ct).or_insert_with(||r.clone());}
+ }
+ for row in rows{
+  let id=text(row,&["card_id"]);let ct=text(row,&["ct_id"]);
+  if let Some(price)=by_public.get(&id).or_else(||by_ct.get(&ct)){
+   let stock=number(price,&["eligible_quantity","eligible_listing_count"]);
+   let has_ct=text(price,&["provider"])=="cardtrader";
+   row["lowest_price_pkn"]=price["cheapest_price_pkn"].clone();row["listed_quantity"]=json!(stock);
+   row["has_cardtrader_listing"]=json!(has_ct);
+   row["cardtrader_eligible_listing_count"]=json!(if has_ct{stock}else{0.});
+  }
+ }
 }
 async fn optional_rows(pool:&PgPool,table:&str,sql:&str,ids:&[i64])->Result<Vec<Value>,sqlx::Error>{
  use std::{sync::{Mutex,OnceLock},time::{Duration,Instant}};
@@ -153,7 +180,13 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"")};
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
  use pokoin_api_common::stages::{timed,SQL};
- let primary=match timed(SQL,cards(&pool,&[id],&game)).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
+ let primary=match timed(SQL,cards(&pool,&[id],&game)).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>{
+  let mut body=json!({"error":"Card not found.","cardId":id.to_string()});
+  // A game-less link to another TCG's card: name its catalog so the desk can
+  // move to /{slug}/marketplace/... instead of "Card market not found."
+  if game=="pokemon"{if let Some(owner)=owning_satellite(id).await{body["ownerGame"]=json!(owner)}}
+  return response(StatusCode::NOT_FOUND,body,"")
+ }},Err(e)=>return failure(&e)};
  let name=text(&primary,&["name"]);let set=text(&primary,&["set_name"]);
  let version=text(&primary,&["version"]);
  // `related` rides along: one primary-key read of the prebuilt neighbours.
@@ -220,6 +253,38 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
   "related":related
  }),"public, max-age=10, s-maxage=30, stale-while-revalidate=60")
 }
+/// The one satellite catalog holding a public id the Pokemon catalog lacks.
+/// Every satellite id is even (CardTrader blueprint x2, or the 200000000+
+/// synthetic range shared by several games), so odd ids skip the probes and
+/// an id found in two catalogs names none. Answers (misses too) are cached.
+async fn owning_satellite(id:i64)->Option<&'static str>{
+ use std::{sync::{Mutex,OnceLock},time::{Duration,Instant}};
+ type Owners=HashMap<i64,(Instant,Option<&'static str>)>;
+ static OWNERS:OnceLock<Mutex<Owners>>=OnceLock::new();
+ const TTL:Duration=Duration::from_secs(600);
+ if id%2!=0{return None}
+ let owners=OWNERS.get_or_init(||Mutex::new(HashMap::new()));
+ if let Some((at,owner))=owners.lock().unwrap_or_else(|p|p.into_inner()).get(&id).copied(){if at.elapsed()<TTL{return owner}}
+ let mut probes=tokio::task::JoinSet::new();
+ for (game,_) in pokoin_commerce::game::SATELLITE_GAMES{
+  let Some(pool)=game_db_url(game).and_then(|url|pokoin_db::satellite_pool(&url).ok()) else{continue};
+  probes.spawn(async move{
+   sqlx::query_scalar::<_,bool>("select exists(select 1 from public.marketplace_search_candidates where card_id=$1)")
+   .bind(id).fetch_one(&pool).await.ok().filter(|hit|*hit).map(|_|game)
+  });
+ }
+ let collect=async{let mut hits=vec![];while let Some(r)=probes.join_next().await{if let Ok(Some(game))=r{hits.push(game)}}hits};
+ // A slow catalog leaves this 404 plain and uncached rather than holding it.
+ let hits=tokio::time::timeout(Duration::from_millis(1500),collect).await.ok()?;
+ let owner=unique_owner(&hits);
+ let mut map=owners.lock().unwrap_or_else(|p|p.into_inner());
+ if map.len()>=8192{map.retain(|_,(at,_)|at.elapsed()<TTL)}
+ if map.len()<8192{map.insert(id,(Instant::now(),owner));}
+ owner
+}
+fn unique_owner(hits:&[&'static str])->Option<&'static str>{
+ match hits{[only]=>Some(*only),_=>None}
+}
 async fn name_set_ids(pool:&PgPool,name:&str,set:&str,cap:i64)->Result<Vec<i64>,sqlx::Error>{
  sqlx::query_scalar("select card_id from public.marketplace_search_candidates where item_kind='single' and product_type='card' and name=$1 and set_name=$2 and coalesce(cdn_image_url,image_url) is not null order by card_id desc limit $3")
  .bind(name).bind(set).bind(cap).fetch_all(pool).await
@@ -248,7 +313,29 @@ async fn neighbors(pool:&PgPool,set:&str,id:i64,radius:i64)->Result<Vec<(i64,i64
 }
 #[cfg(test)] mod tests {
  use super::*;
+ use serde_json::json;
  #[test]fn unsafe_and_partial_ids_are_rejected(){for s in ["","0","-1","12abc","1.0","9007199254740992"]{assert_eq!(positive_id(s),None)}assert_eq!(positive_id("693360"),Some(693360))}
+ #[test]fn only_one_holding_catalog_names_the_owner(){
+  assert_eq!(unique_owner(&["digimon"]),Some("digimon"));
+  assert_eq!(unique_owner(&[]),None);
+  // 200000000+ synthetic ids repeat across games: never guess between them.
+  assert_eq!(unique_owner(&["weiss_schwarz","final_fantasy"]),None);
+ }
+ #[tokio::test]async fn odd_ids_never_probe_a_catalog(){assert_eq!(owning_satellite(834951).await,None)}
+ #[test]fn non_pokemon_cards_take_cache_prices(){
+  let mut rows=vec![json!({"card_id":"822658","ct_id":"9001","name":"Sol Ring"})];
+  apply_cache_prices(&mut rows,&[json!({
+   "pokoin_card_id":"822658","blueprint_id":"9001",
+   "cheapest_price_pkn":88,"eligible_listing_count":2,"eligible_quantity":4,"provider":"cardtrader"
+  })]);
+  assert_eq!(rows[0]["lowest_price_pkn"],json!(88));
+  assert_eq!(rows[0]["has_cardtrader_listing"],json!(true));
+  assert_eq!(rows[0]["listed_quantity"],json!(4.0));
+  let card=pokoin_catalog::react_record(&rows[0]);
+  assert_eq!(card["price"],json!(88.0));
+  assert_eq!(card["hasCardTraderListing"],json!(true));
+  assert_eq!(card["inStock"],json!(true));
+ }
 }
 
 pub async fn localize(pool:&PgPool,rows:&mut [Value],lang:&str,game:&str)->Result<(),sqlx::Error>{

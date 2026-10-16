@@ -5,6 +5,7 @@ import { resolveExpansionNationality } from '@market/expansion-print.js';
 import { flagSrc, printFlagFromNationality } from '@market/locale.js';
 import { expansionCode, expansionLogoSrc } from '@market/set-logos.js';
 import ExpansionMark from './ExpansionMark.jsx';
+import { gameHref } from '@market/game.js';
 
 /** Wordmark, or the circular expansion mark when there is none or it fails to load. */
 function SetGuideLogo(props) {
@@ -39,7 +40,7 @@ function SetGuideCard(props) {
   return (
     <a
       class="set-guide-card"
-      href={`/marketplace/sets/${slug()}`}
+      href={gameHref(`/marketplace/sets/${slug()}`)}
       draggable="true"
       onDragStart={(event) => {
         writeListingDrag(event, bundleReference({

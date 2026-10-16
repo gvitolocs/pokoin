@@ -1,0 +1,27 @@
+[package]
+name = "cardtrader-price-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Nightly CardTrader price cache for every game (see docs/CARDTRADER_DAILY_DUMP.md).
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pokoin-cardtrader-price-cache"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ctbook = { path = "../../crates/ctbook" }
+regex = "1"
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+ctbook = { path = "../../crates/ctbook" }
+flate2 = "1"
+sqlx = { workspace = true }
+tokio = { workspace = true }

@@ -55,8 +55,18 @@ pub fn identity_hash(identity: &str) -> String {
     hex::encode(Sha256::digest(identity.as_bytes()))[..32].to_owned()
 }
 
+/// Rate-limit identity for a client IP (IPv6 folded to its /64). Thin alias of
+/// [`pokoin_accounts::rate_limit::rate_identity`], which every bucket builder
+/// applies anyway; kept for callers that log or compare the identity.
+pub fn ip_rate_identity(ip: &str) -> String {
+    pokoin_accounts::rate_limit::rate_identity(ip.trim()).into_owned()
+}
+
+/// Bucket key; IP identities fold to their /64 here, so no limiter caller has
+/// to remember it.
 pub fn rate_limit_bucket(scope: &str, identity: &str) -> String {
-    format!("pokoin:rl:v1:{}:{}", clean_scope(scope), identity_hash(identity))
+    let identity = pokoin_accounts::rate_limit::rate_identity(identity);
+    format!("pokoin:rl:v1:{}:{}", clean_scope(scope), identity_hash(&identity))
 }
 
 fn sampled(map: &'static OnceLock<Mutex<HashMap<String, Instant>>>, stamp: String) -> bool {
@@ -137,6 +147,19 @@ async fn redis_incr_window(api: &ApiState, key: &str, window: u64) -> Option<i64
 
 fn clamp(limit: i64, window_seconds: i64) -> (i64, u64) {
     (limit.max(1), window_seconds.max(1) as u64)
+}
+
+/// In-process fixed window only (the `limit_best_effort` fallback), for
+/// crates that run without an [`ApiState`] (tests, degraded boots).
+pub fn limit_local(scope: &str, identity: &str, limit: i64, window_seconds: i64) -> Verdict {
+    let bucket = rate_limit_bucket(scope, identity);
+    let (max, window) = clamp(limit, window_seconds);
+    let count = local_consume(&bucket, window);
+    let allowed = count <= max;
+    if !allowed {
+        note_rejection(scope, "local");
+    }
+    Verdict { allowed, backend: "local", count: Some(count), retry_after_sec: if allowed { 0 } else { window } }
 }
 
 /// `limitBestEffort({ scope, identity, limit, windowSeconds })` — never fails.
@@ -268,6 +291,39 @@ mod tests {
         // sha256("1.2.3.4") prefix
         assert_eq!(identity_hash("1.2.3.4"), "6694f83c9f476da31f5df6bcc520034e");
         assert_eq!(rate_limit_bucket("poko-chat", "1.2.3.4"), "pokoin:rl:v1:poko-chat:6694f83c9f476da31f5df6bcc520034e");
+    }
+
+    #[test]
+    fn ipv6_clients_share_their_64() {
+        assert_eq!(ip_rate_identity("203.0.113.9"), "203.0.113.9");
+        assert_eq!(ip_rate_identity("::ffff:203.0.113.9"), "203.0.113.9");
+        let a = ip_rate_identity("2001:db8:1:2:aaaa::1");
+        assert_eq!(a, "2001:db8:1:2::/64");
+        assert_eq!(ip_rate_identity("2001:db8:1:2:ffff:ffff:ffff:ffff"), a);
+        assert_ne!(ip_rate_identity("2001:db8:1:3::1"), a);
+        assert_eq!(ip_rate_identity(" not-an-ip "), "not-an-ip");
+        // The bucket folds a raw IPv6 identity itself: limit_global and
+        // limit_best_effort callers that pass the bare address are covered.
+        assert_eq!(
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6::1"),
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6:dead:beef:0:1")
+        );
+        assert_ne!(
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:6::1"),
+            rate_limit_bucket("pokoin-assistant-ip", "2001:db8:5:7::1")
+        );
+    }
+
+    #[test]
+    fn local_limiter_trips_after_the_limit() {
+        let scope = format!("test-local-{}", now_ms());
+        assert!(limit_local(&scope, "ip", 2, 60).allowed);
+        assert!(limit_local(&scope, "ip", 2, 60).allowed);
+        let third = limit_local(&scope, "ip", 2, 60);
+        assert!(!third.allowed);
+        assert_eq!(third.retry_after_sec, 60);
+        // Other identities have their own window.
+        assert!(limit_local(&scope, "other", 2, 60).allowed);
     }
 
     #[test]

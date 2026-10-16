@@ -147,7 +147,8 @@ export function refreshRecentTiles({ gameId, force = false, now = Date.now(), de
     const stale = force || now - recentRailRefreshedAt(resolved) > RECENT_RAIL_FRESH_MS;
     const wanted = stale ? ids : ids.filter((id) => !named.has(id));
     if (!wanted.length) return false;
-    const tiles = await fetchTiles(wanted, { priority: 'low' }).catch(() => []);
+    // Pinned to this game: a TCG switch mid-flight must not read the other catalogue.
+    const tiles = await fetchTiles(wanted, { priority: 'low', game: resolved }).catch(() => []);
     if (!tiles?.length) return false;
     const priced = await fillPrices(tiles).catch(() => tiles);
     const stored = new Map(before.map((tile) => [String(tile.id), tile]));

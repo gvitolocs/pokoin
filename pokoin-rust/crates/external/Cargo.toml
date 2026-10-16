@@ -9,6 +9,7 @@ description = "Native Rust port of the Pokoin external-integrations API domain (
 pokoin-sort = { path = "../sort" }
 pokoin-api-common = { path = "../api-common" }
 pokoin-db = { path = "../db" }
+pokoin-media = { path = "../media" }
 unicode-normalization = "0.1"
 anyhow = "1"
 axum = { version = "0.8", features = ["json", "multipart"] }
@@ -38,6 +39,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 percent-encoding = "2"
 url = "2"
 
+[features]
+# Test seams (`StaticVerifier`, `DomainState::for_test`). Never enabled by a
+# production build; the crate's own tests turn it on through the dev-dependency.
+test-util = []
+
 [dev-dependencies]
+pokoin-external = { path = ".", features = ["test-util"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 

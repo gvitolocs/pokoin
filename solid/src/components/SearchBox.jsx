@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cardFromAutocomplete,
   cardHref,
@@ -24,7 +25,7 @@ import {
 } from '@market/art-shade.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { compactQuery } from '@market/compact-query.js';
-import { isPokemonGame } from '@market/game.js';
+import { isPokemonGame, stripGamePrefix } from '@market/game.js';
 import { clipSuggestCollector, printingIdentity, suggestCardName, suggestTranslatedLine } from '@market/identity.js';
 import { sellerHref } from '@market/listing-meta.js';
 import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/locale.js';
@@ -36,7 +37,14 @@ import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
 import { createSuggestFlip } from '@market/suggest-flip.js';
-import { withGroupKeys } from '@market/suggest-group-keys.js';
+import { SUGGEST_REPAINT_MS, createRepaintGate } from '@market/suggest-repaint.js';
+import {
+  SUGGEST_ROTATE_HEAD,
+  SUGGEST_ROTATE_POOL,
+  nextRotateState,
+  rotateTail,
+  suggestRotateEnabled,
+} from '@market/suggest-rotate.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '@market/suggest-hover.js';
 import { SUGGEST_THUMB_EAGER, SUGGEST_THUMB_HIGH, collectPrintingThumbUrls, preloadSuggestThumbs } from '@market/suggest-images.js';
 import { fitSuggestTitles } from '@market/suggest-title-fit.js';
@@ -126,30 +134,56 @@ function suggestThumbSrc(printing) {
   return thumbOf(card);
 }
 
-function flattenPrintings(groups) {
+function flattenSuggestRows(groups) {
   const rows = [];
+  const seen = new Set();
+  let prevGroup = null;
   (groups || []).forEach((group) => {
     (group.printings || []).forEach((printing) => {
       if (!printing || typeof printing !== 'object') return;
       const card = cardOf(printing);
       if (!card.id) return;
-      rows.push({ card, printing, group, optionId: `suggest-${card.id}` });
+      const key = String(card.id);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const groupName = group.name;
+      rows.push({
+        key,
+        printing,
+        card,
+        group,
+        groupName,
+        groupStart: rows.length > 0 && group !== prevGroup,
+        optionId: `suggest-${card.id}`,
+      });
+      prevGroup = group;
     });
   });
   return rows;
 }
 
+/** Dividers follow the groups that are actually next to each other after a rotation. */
+function withGroupStarts(rows) {
+  let prevGroup = null;
+  return rows.map((row, index) => {
+    const groupStart = index > 0 && row.group !== prevGroup;
+    prevGroup = row.group;
+    if (row.groupStart === groupStart) return row;
+    return { ...row, groupStart };
+  });
+}
+
 /**
  * Header search + typeahead. The input
  * repaints on every keystroke on its own; the ranking, network paging and
- * catalog hydration run on `term`, committed after that paint. Rows are keyed
- * by card id, so a re-rank moves and patches existing rows (FLIP) instead of
- * rebuilding the list.
+ * catalog hydration run on `term`, committed after that paint. Rows are one
+ * flat list keyed by card id, so a printing that changes group stays the same
+ * `<li>` (FLIP slides it) instead of remounting inside a new group.
  */
 export default function SearchBox(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
-  const pokemon = isPokemonGame();
+  const pokemon = () => isPokemonGame();
   const [query, setQuery] = createSignal('');
   const [term, setTerm] = createSignal('');
   const [open, setOpen] = createSignal(false);
@@ -181,12 +215,12 @@ export default function SearchBox(props) {
   const [interestTick, setInterestTick] = createSignal(0);
   const interest = createMemo(() => {
     interestTick();
-    if (!pokemon) return null;
+    if (!pokemon()) return null;
     return buildInterestProfile(readInterestEvents('pokemon'), { print: printLang(), eraOf: engine()?.matchTcgEra || null });
   });
   const predicted = createMemo(() => {
     const text = term().trim();
-    if (!pokemon || !text || searchTab() === 'users' || liveReady(text)) return null;
+    if (!pokemon() || !text || searchTab() === 'users' || liveReady(text)) return null;
     return predictInterest(text, interest());
   });
   const searchTerm = () => predicted()?.text || term();
@@ -223,7 +257,7 @@ export default function SearchBox(props) {
 
   // /marketplace/search?q= keeps the box in sync with the results page.
   createEffect(() => [location.pathname, location.search], ([pathname, search]) => {
-    if (pathname !== '/marketplace/search') return;
+    if (stripGamePrefix(pathname) !== '/marketplace/search') return;
     const params = new URLSearchParams(search);
     const q = params.get('q');
     if (q) {
@@ -234,8 +268,8 @@ export default function SearchBox(props) {
   });
 
   // Language / print-family / tab change refreshes the typed query's universe at once.
-  createEffect(() => [searchLang(), printLang(), searchTab()], ([lang, print, tab]) => {
-    if (!pokemon || tab === 'users') return;
+  createEffect(() => [searchLang(), printLang(), searchTab(), pokemon()], ([lang, print, tab, isPokemon]) => {
+    if (!isPokemon || tab === 'users') return;
     const typed = untrack(term).trim();
     // Network-only until the engine is loaded on search intent (no engine eval on mount).
     warmupSearchUniverse({
@@ -248,7 +282,7 @@ export default function SearchBox(props) {
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon && searchTab() !== 'users'],
+    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon() && searchTab() !== 'users'],
     ([live, typed, lang, print, kind, enabled]) => {
       if (!live || !enabled) {
         setProgressivePending(false);
@@ -271,6 +305,12 @@ export default function SearchBox(props) {
       }
       const controller = new AbortController();
       let stopped = false;
+      // One gate per generation: the first page repaints now, later pages of
+      // this same search share a trailing repaint.
+      const repaint = createRepaintGate({
+        delay: SUGGEST_REPAINT_MS,
+        bump: () => setEpoch((value) => value + 1),
+      });
       setProgressivePending(true);
       (async () => {
         for (const lookup of live.catalogRecall(text)) {
@@ -302,7 +342,7 @@ export default function SearchBox(props) {
             fetched += incoming;
             chunks += 1;
             offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
-            setEpoch((value) => value + 1);
+            repaint.page();
             const exhaustive = page?.exhaustive === true || incoming < size;
             if (exhaustive || incoming === 0) break;
             if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
@@ -311,11 +351,15 @@ export default function SearchBox(props) {
           }
         }
       })().finally(() => {
-        if (!stopped && pool.generation === generation) setProgressivePending(false);
+        if (!stopped && pool.generation === generation) {
+          repaint.flush();
+          setProgressivePending(false);
+        }
       });
       return () => {
         stopped = true;
         controller.abort();
+        repaint.dispose();
       };
     },
   );
@@ -323,8 +367,8 @@ export default function SearchBox(props) {
   // Catalog hydration (name / artist / set printings the local resolver points
   // at), and the satellite-game suggest path (no local catalog).
   createEffect(
-    () => [engine(), searchTerm().trim(), searchLang(), rankPrint(), searchTab()],
-    ([live, text, lang, , tab]) => {
+    () => [engine(), searchTerm().trim(), searchLang(), rankPrint(), searchTab(), pokemon()],
+    ([live, text, lang, , tab, isPokemon]) => {
       if (!text) {
         setOtherPending(false);
         setOtherGroups([]);
@@ -332,7 +376,7 @@ export default function SearchBox(props) {
         return undefined;
       }
       const ready = liveReady(text);
-      if (pokemon) {
+      if (isPokemon) {
         if (!ready) {
           setOtherGroups([]);
           setHitCount(0);
@@ -443,8 +487,8 @@ export default function SearchBox(props) {
   // page (and its recall lookups) for a prefix nobody would open; the count
   // shows the suggest estimate until the real one lands, and Enter prefetches
   // on its own (goSearch).
-  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
-    if (!isOpen || !pokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
+  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon()], ([isOpen, text, tab, lang, print, isPokemon]) => {
+    if (!isOpen || !isPokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
       prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
@@ -464,7 +508,7 @@ export default function SearchBox(props) {
   });
 
   const visibleGroups = createMemo(() => {
-    if (!pokemon) return otherGroups();
+    if (!pokemon()) return otherGroups();
     const live = engine();
     const text = searchTerm();
     if (!live || !live.suggestLiveReady(text) || searchTab() === 'users') return [];
@@ -477,34 +521,70 @@ export default function SearchBox(props) {
     });
     return personalPopup(paint, text, interest(), { eraOf: live.matchTcgEra });
   });
-  const flat = createMemo(() => flattenPrintings(visibleGroups()));
-  // Groups keyed by name: a re-rank inside a group keeps its rows mounted.
-  const keyedGroups = createMemo(() => withGroupKeys(visibleGroups()));
+  // Read once: the default is off, so a mount with the flag closed never
+  // builds the deeper pool or advances a rotate step.
+  const rotateOn = suggestRotateEnabled();
+  let rotateState = { term: '', headKey: '', step: 0 };
+  let rotatePreload = [];
+  const flat = createMemo(() => {
+    rotatePreload = [];
+    const head = flattenSuggestRows(visibleGroups());
+    if (!rotateOn || !pokemon() || searchTab() === 'users') return withGroupStarts(head);
+    const live = engine();
+    const text = searchTerm();
+    if (!live || !live.suggestLiveReady(text)) return withGroupStarts(head);
+    const paint = (limit) => live.paintCatalogGroups(text, {
+      printLang: rankPrint(), searchLang: searchLang(), kind: catalogTab(), limit,
+    });
+    const deep = flattenSuggestRows(personalPopup(paint, text, interest(), {
+      eraOf: live.matchTcgEra,
+      limit: SUGGEST_ROTATE_POOL,
+      pool: SUGGEST_ROTATE_POOL,
+    }));
+    const seen = new Set(head.map((row) => row.key));
+    const ranked = head.slice();
+    for (const row of deep) {
+      if (ranked.length >= SUGGEST_ROTATE_POOL) break;
+      if (seen.has(row.key)) continue;
+      seen.add(row.key);
+      ranked.push(row);
+    }
+    const headKey = ranked.slice(0, SUGGEST_ROTATE_HEAD).map((row) => row.key).join('|');
+    rotateState = nextRotateState(rotateState, { term: text.trim(), headKey });
+    // Step 0 is today's head, even when the deeper pool is longer than 20.
+    const shown = rotateState.step === 0 ? head : rotateTail(ranked, { step: rotateState.step });
+    const shownKeys = new Set(shown.map((row) => row.key));
+    rotatePreload = rotateTail(ranked, { step: rotateState.step + 1 }).filter((row) => !shownKeys.has(row.key));
+    return withGroupStarts(shown);
+  });
   // The one frame where `term` trails the input also reads as pending, never as "no match".
-  const suggestPending = () => (pokemon && searchTab() !== 'users'
+  const suggestPending = () => (pokemon() && searchTab() !== 'users'
     ? progressivePending() || !engine() || term() !== query() || rankPrint() !== printLang()
     : otherPending() || term() !== query());
-  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon || visibleGroups().length > 0 || suggestPending());
+  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon() || visibleGroups().length > 0 || suggestPending());
   const activeOption = () => (activeIndex() >= 0 ? flat()[activeIndex()] : null);
   const suggestIds = () => (open() ? flat().map((row) => String(row.card.id)).join('|') : '');
 
   // Thumbs + per-card shade buckets for the rows on screen.
-  createEffect(visibleGroups, (groups) => {
-    if (!groups.length) return;
-    preloadSuggestThumbs(collectPrintingThumbUrls(groups, suggestThumbSrc), { first: true });
+  // Rotation may also warm the next tail page; it never preloads the whole pool.
+  createEffect(flat, (rows) => {
+    if (!rows.length) return;
+    const preloadRows = rotatePreload.length ? rows.concat(rotatePreload) : rows;
+    preloadSuggestThumbs(
+      collectPrintingThumbUrls([{ printings: preloadRows.map((row) => row.printing) }], suggestThumbSrc),
+      { first: true },
+    );
     const live = engine();
-    for (const group of groups) {
-      for (const printing of group.printings || []) {
-        const card = cardOf(printing);
-        if (!card.id || (live && live.isLiveStub(card))) continue;
-        rememberDeskIdentity(card);
-        const shade = albumShade(card);
-        if (shade) {
-          rememberCardBucket(card.id, shade);
-          continue;
-        }
-        warmCardBucket(card.id, thumbOf(card));
+    for (const row of rows) {
+      const card = row.card;
+      if (!card.id || (live && live.isLiveStub(card))) continue;
+      rememberDeskIdentity(card);
+      const shade = albumShade(card);
+      if (shade) {
+        rememberCardBucket(card.id, shade);
+        continue;
       }
+      warmCardBucket(card.id, thumbOf(card));
     }
   });
 
@@ -680,7 +760,7 @@ export default function SearchBox(props) {
           aria-autocomplete="list"
           aria-busy={ariaBool(suggestVisible() && suggestPending())}
         />
-        <Show when={pokemon}><PrintLangToggle /></Show>
+        <Show when={pokemon()}><PrintLangToggle /></Show>
         <button class="sr-only" type="submit">Search</button>
       </div>
       <Show when={suggestVisible()}>
@@ -690,7 +770,7 @@ export default function SearchBox(props) {
           ref={(node) => { panel = node; }}
           onMouseLeave={() => setPointerHoverId(null)}
         >
-          <Show when={pokemon}>
+          <Show when={pokemon()}>
             <SearchTabs value={searchTab()} onChange={(tab) => { setSearchTab(tab); setActiveIndex(-1); }} ariaLabel="Search type" />
           </Show>
           <Show
@@ -739,7 +819,7 @@ export default function SearchBox(props) {
             </Show>
             <ul class="suggest-list" role="listbox" aria-label="Card suggestions" ref={(node) => { list = node; }}>
               <Show
-                when={visibleGroups().length}
+                when={flat().length}
                 fallback={(
                   <li class="suggest-empty">
                     {suggestPending()
@@ -750,27 +830,20 @@ export default function SearchBox(props) {
                   </li>
                 )}
               >
-                <For each={keyedGroups()} keyed={(group) => group.key}>
-                  {(group) => (
-                    <li class="suggest-group">
-                      <ul>
-                        <For each={group().printings || []} keyed={(printing) => String(printing?.id || printing?.card_id || '')}>
-                          {(printing) => (
-                            <SuggestRow
-                              pokemon={pokemon}
-                              printing={printing()}
-                              groupName={group().name}
-                              flat={flat()}
-                              activeId={activeOption()?.optionId}
-                              shadeTick={shadeTick()}
-                              live={engine()}
-                              onHover={setPointerHoverId}
-                              onPick={pick}
-                            />
-                          )}
-                        </For>
-                      </ul>
-                    </li>
+                <For each={flat()} keyed={(row) => row.key}>
+                  {(row, index) => (
+                    <SuggestRow
+                      pokemon={pokemon()}
+                      printing={row().printing}
+                      groupName={row().groupName}
+                      groupStart={row().groupStart}
+                      index={index()}
+                      activeId={activeOption()?.optionId}
+                      shadeTick={shadeTick()}
+                      live={engine()}
+                      onHover={setPointerHoverId}
+                      onPick={pick}
+                    />
                   )}
                 </For>
               </Show>
@@ -823,6 +896,8 @@ function SuggestRow(props) {
   const printFlag = createMemo(() => {
     const bucket = rowPrintBucket(card());
     return printFlagFromNationality(bucket === 'unknown' ? '' : bucket);
+  }, {
+    equals: (prev, next) => prev?.code === next?.code && prev?.label === next?.label,
   });
   const live = createMemo(() => Boolean(props.live && (props.live.isLiveStub(card()) || props.live.isLiveStub(props.printing))));
   const rowTheme = createMemo(() => {
@@ -833,15 +908,15 @@ function SuggestRow(props) {
     if (delta) return { kind: 'delta', shade: delta.surface, raised: delta.surfaceRaised };
     return special;
   });
-  const rowIndex = createMemo(() => props.flat.findIndex((row) => row.optionId === optionId()));
-  const thumbLoading = () => (rowIndex() >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined);
-  const thumbPriority = () => (rowIndex() < SUGGEST_THUMB_HIGH ? 'high' : 'low');
+  const thumbLoading = () => (props.index >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined);
+  const thumbPriority = () => (props.index < SUGGEST_THUMB_HIGH ? 'high' : 'low');
   const choose = () => {
-    if (!live()) props.onPick(card(), rowIndex());
+    if (!live()) props.onPick(card(), props.index);
   };
   return (
     <Show when={card().id}>
       <li
+        class={{ 'is-group-start': props.groupStart }}
         data-suggest-id={card().id}
         role="option"
         id={optionId()}

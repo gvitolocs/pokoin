@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { GAMES, gameIconSrc, gameSiteHref, publicGamePath, tcgBrandName } from './game.js';
+import { GAMES, gameHref, gameIconSrc, gameSiteHref, publicGamePath, tcgBrandName } from './game.js';
 
 test('structured-data brand and public path follow the game', () => {
   assert.equal(tcgBrandName('pokemon'), 'Pokémon TCG');
@@ -34,6 +34,23 @@ test('structured-data brand and public path follow the game', () => {
     publicGamePath('/marketplace/en/cards/795832/student', 'star_wars'),
     '/star-wars/marketplace/en/cards/795832/student',
   );
+});
+
+test('plain hrefs keep marketplace and product links on the game site', () => {
+  const card = '/marketplace/en/cards/831818/alternate-art-seraphine-not-alone-138a-radiance';
+  assert.equal(gameHref(card, '/riftbound'), '/riftbound' + card);
+  assert.equal(gameHref('/marketplace/sets/radiance?lang=en#top', '/riftbound'), '/riftbound/marketplace/sets/radiance?lang=en#top');
+  assert.equal(gameHref('/marketplace', '/one-piece'), '/one-piece/marketplace');
+  assert.equal(gameHref('/marketplace?q=luffy', '/one-piece'), '/one-piece/marketplace?q=luffy');
+  assert.equal(gameHref('/product/graded', '/magic'), '/magic/product/graded');
+  // Already prefixed, Pokémon apex, apex-only pages, other origins: unchanged.
+  assert.equal(gameHref('/riftbound' + card, '/riftbound'), '/riftbound' + card);
+  assert.equal(gameHref(card, ''), card);
+  for (const href of ['/cart', '/wallet', '/auth?from=%2Fmarketplace', '/marketplaces', '//cdn.pokoin.com/marketplace/x.jpg',
+    'https://pokoin.com/marketplace', 'mailto:contact@pokoin.com', '#shop', '']) {
+    assert.equal(gameHref(href, '/riftbound'), href, href);
+  }
+  assert.equal(gameHref(undefined, '/riftbound'), undefined);
 });
 
 test('the game picker sends each TCG to its own site', () => {

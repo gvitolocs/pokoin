@@ -116,7 +116,7 @@ test('a stale stored rail refetches every tile, prices unlisted ones and marks i
     },
   });
   assert.equal(changed, true);
-  assert.deepEqual(asked, [[['1', '2'], { priority: 'low' }]]);
+  assert.deepEqual(asked, [[['1', '2'], { priority: 'low', game: 'pokemon' }]]);
   assert.deepEqual(readRecentTiles('pokemon').map((row) => row.price), [120, 210]);
   assert.equal(recentRailRefreshedAt('pokemon'), now);
 });

@@ -15,13 +15,21 @@ test('Recently seen repaints keep the painted order and tiles', () => {
   assert.doesNotMatch(loaders, /localExtras\(/);
   assert.match(loaders, /noteRecents\(next\)/);
   // The account sync is the shared, throttled one and appends instead of replacing.
-  assert.match(home, /syncRecentAccount\(\)/);
+  assert.match(home, /syncRecentAccount\(\{ gameId \}\)/);
   assert.doesNotMatch(home, /syncRemoteRecentCardIds/);
 });
 
+test('a TCG switch reseeds the rail for that game', () => {
+  // applySeed commits the new game's seed; commit resets the painted order and tiles.
+  assert.match(home, /function commit\(next\) \{\n {4}payload = next;\n {4}noteRecents\(next\);/);
+  assert.match(home, /commit\(next\.payload\);/);
+  // Rail writes are scoped to the game the loader started for.
+  assert.match(home, /rememberRecentTiles\(priced, gameId\)/);
+});
+
 test('the marketplace refreshes the stored rail behind its first paint', () => {
-  assert.match(home, /async function refreshRailQuietly\(\) \{\n {4}await refreshRecentTiles\(\);/);
-  assert.match(home, /storeRail\(\);\n {6}loadedAt = Date\.now\(\);\n {6}await refreshRailQuietly\(\);/);
+  assert.match(home, /async function refreshRailQuietly\(gen, gameId\) \{\n {4}await refreshRecentTiles\(\{ gameId \}\);\n {4}if \(stale\(gen\) \|\| !payload\) return;/);
+  assert.match(home, /storeRail\(gameId\);\n {6}loadedAt = Date\.now\(\);\n {6}await refreshRailQuietly\(gen, gameId\);/);
   // Prices found on the page go into the stored copy only where it has none.
   assert.match(home, /tilePricePkn\(stored\.get\(String\(card\.id\)\)\) == null/);
   // A failed recent is forgotten by id; ids cut by the cap are not.

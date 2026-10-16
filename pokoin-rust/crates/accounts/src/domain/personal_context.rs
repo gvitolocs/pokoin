@@ -458,13 +458,14 @@ pub fn overlay_from_body(body: &Json) -> Overlay {
     }
 }
 
-/// `buildPersonalContext(...)`.
+/// `buildPersonalContext(...)`. Reads go to `db`; the overlay is persisted to
+/// `persist_to` (the writer) when given.
 pub async fn build_personal_context(
     db: &MarketplaceDb,
     firestore: Option<&Firestore>,
     uid: &str,
     overlay: &Overlay,
-    persist_overlay: bool,
+    persist_to: Option<&MarketplaceDb>,
 ) -> Result<Json> {
     let user_id = clean_text(uid, 160);
     if user_id.is_empty() {
@@ -482,11 +483,11 @@ pub async fn build_personal_context(
         .unwrap_or_else(|| stored.cart.clone());
     let desk = overlay.desk.clone().or_else(|| stored.desk.clone());
 
-    if persist_overlay
-        && (overlay.watchlist_ids.is_some() || overlay.cart.is_some() || overlay.desk.is_some())
-    {
+    if let Some(writer) = persist_to.filter(|_| {
+        overlay.watchlist_ids.is_some() || overlay.cart.is_some() || overlay.desk.is_some()
+    }) {
         // A missing snapshot table (pre-migration) must not fail the turn.
-        if let Err(error) = write_snapshot(db, &user_id, &watchlist_ids, &cart, desk.as_ref()).await
+        if let Err(error) = write_snapshot(writer, &user_id, &watchlist_ids, &cart, desk.as_ref()).await
         {
             let tolerated = error
                 .message()

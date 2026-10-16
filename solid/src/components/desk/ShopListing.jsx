@@ -19,6 +19,7 @@ import { deskDragReference, registerShop, unregisterShop } from '../../lib/selec
 import { buyerParts } from '../../stores/buyer.js';
 import { ThumbZoom } from '../ArtworkZoom.jsx';
 import PriceStack from '../PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
  * Shop rows wrapper. The select band
@@ -248,7 +249,7 @@ export default function ShopListingRow(props) {
         fallback={(
           <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
           <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
-            <a class="shop-seller" href={href()} onClick={(event) => event.stopPropagation()}>
+            <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
               {seller()}
             </a>
           </Show>
@@ -256,7 +257,7 @@ export default function ShopListingRow(props) {
         )}
       >
         <Show when={cardPath()} fallback={<span class="shop-card">{cardFace()}</span>}>
-          <a class="shop-card" href={cardPath()} onClick={(event) => event.stopPropagation()}>
+          <a class="shop-card" href={gameHref(cardPath())} onClick={(event) => event.stopPropagation()}>
             {cardFace()}
           </a>
         </Show>

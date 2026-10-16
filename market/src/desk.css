@@ -626,33 +626,51 @@
   align-items: center;
 }
 
-.ct-connect-form .btn-stripe {
+.ct-connect-form .btn.btn-stripe {
   margin-top: 0;
 }
 
 /* CardTrader brand blue + Stripe purple for profile connect actions. */
-.btn-cardtrader {
+.btn.btn-cardtrader {
   border: 0;
   background: #4db8e8;
   color: #0b1c26;
+  box-shadow: none;
 }
 
-.btn-cardtrader:hover:not(:disabled),
-.btn-cardtrader:focus-visible:not(:disabled) {
+.btn.btn-cardtrader:hover:not(:disabled),
+.btn.btn-cardtrader:focus-visible:not(:disabled) {
   background: #6ac6ee;
   color: #0b1c26;
+  box-shadow: none;
 }
 
-.btn-stripe {
+.btn.btn-cardtrader:not(:disabled):active {
+  background: #3aa8dc;
+  color: #0b1c26;
+  box-shadow: none;
+  translate: 0 1px;
+}
+
+.btn.btn-stripe {
   border: 0;
   background: #635bff;
   color: #fff;
+  box-shadow: none;
 }
 
-.btn-stripe:hover:not(:disabled),
-.btn-stripe:focus-visible:not(:disabled) {
+.btn.btn-stripe:hover:not(:disabled),
+.btn.btn-stripe:focus-visible:not(:disabled) {
   background: #7a73ff;
   color: #fff;
+  box-shadow: none;
+}
+
+.btn.btn-stripe:not(:disabled):active {
+  background: #5851e0;
+  color: #fff;
+  box-shadow: none;
+  translate: 0 1px;
 }
 
 .btn-telegram {
@@ -1476,6 +1494,23 @@
 
 .ct-pt-file {
   margin: 0;
+}
+
+.ct-pt-all-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.ct-pt-filename {
+  font-size: 0.9rem;
+  color: var(--g7);
+  max-width: min(100%, 22rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ct-pt-inline {
@@ -3818,6 +3853,11 @@
   padding-bottom: 8px;
 }
 
+.mypokoin .ps-defaults .ps-field.ps-check {
+  align-self: start;
+  padding-bottom: 0;
+}
+
 .ps-actions {
   display: flex;
   gap: 8px;
@@ -3961,3 +4001,491 @@
   gap: 8px;
   margin-bottom: 12px;
 }
+
+/* MyPokoin shell: header, metric cards, and the pill tab bar. Scoped so other desks stay put. */
+.mypokoin {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.page.mypokoin {
+  overflow-x: clip;
+}
+
+.mypokoin .mypokoin-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.25rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+}
+
+.mypokoin .mypokoin-copy {
+  min-width: 0;
+}
+
+.mypokoin .mypokoin-copy .page-lede {
+  max-width: 42rem;
+}
+
+.mypokoin .mypokoin-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.mypokoin .mypokoin-metric {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0.95rem 1rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  background: #0f0e13;
+}
+
+.mypokoin .mypokoin-metric strong {
+  font-size: clamp(1.35rem, 2.5vw, 1.85rem);
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mypokoin .mypokoin-metric span,
+.mypokoin .mypokoin-metric small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.mypokoin .stock-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 1.2rem;
+  padding: 0.28rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: #0f0e13;
+}
+
+.mypokoin .stock-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.mypokoin .stock-nav a {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  gap: 0.4rem;
+  border-color: transparent;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.mypokoin .stock-nav a.on {
+  border-color: #ffe074;
+  background: var(--yellow);
+  color: #17120a;
+}
+
+.mypokoin .stock-nav a:hover:not(.on),
+.mypokoin .stock-nav a:focus-visible:not(.on) {
+  border-color: transparent;
+  background: rgb(255 211 61 / 0.1);
+  color: var(--text);
+}
+
+.mypokoin .stock-nav-icon {
+  flex: 0 0 auto;
+}
+
+.mypokoin .collection-split {
+  align-items: stretch;
+}
+
+.mypokoin .collection-column {
+  min-width: 0;
+  border-radius: 18px;
+}
+
+.mypokoin .collection-column.is-over {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+  background: rgb(255 211 61 / 0.05);
+}
+
+.mypokoin .collection-tile-grid {
+  grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
+}
+
+.mypokoin .collection-tile {
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  background: #0f0e13;
+  cursor: default;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.mypokoin .collection-tile.is-draggable {
+  cursor: grab;
+}
+
+.mypokoin .collection-tile:hover {
+  transform: translateY(-3px);
+  border-color: rgb(255 211 61 / 0.45);
+}
+
+html.is-pointer-dragging .mypokoin .collection-tile:hover {
+  transform: none;
+}
+
+.mypokoin .collection-tile-art {
+  border-radius: 12px;
+}
+
+span.collection-tile-art.scan-letter {
+  display: grid;
+  place-items: center;
+  background: #17131f;
+  color: var(--yellow);
+  font-size: 1.6rem;
+  font-weight: 750;
+}
+
+.mypokoin .collection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.mypokoin .facet-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: #17131f;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mypokoin .collection-move {
+  width: 100%;
+  justify-content: center;
+}
+
+.mypokoin .collection-tile-price {
+  font-size: 1rem;
+  letter-spacing: -0.03em;
+}
+
+.profile-mypokoin {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.profile-shop-link {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.profile-shop-link:hover,
+.profile-shop-link:focus-visible {
+  color: var(--yellow);
+}
+
+.pokoin-drag-ghost {
+  position: fixed;
+  z-index: 80;
+  width: 4.75rem;
+  aspect-ratio: 63 / 88;
+  pointer-events: none;
+  transform: translate(-40%, -72%);
+  border: 1px solid #ffe074;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #17131f;
+  box-shadow: 0 16px 36px rgb(0 0 0 / 0.5);
+}
+
+.pokoin-drag-ghost img,
+.pokoin-drag-ghost-letter {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pokoin-drag-ghost-letter {
+  display: grid;
+  place-items: center;
+  color: var(--yellow);
+  font-size: 1.4rem;
+  font-weight: 750;
+}
+
+html.is-pointer-dragging,
+html.is-pointer-dragging body {
+  user-select: none;
+}
+
+@media (max-width: 800px) {
+  .mypokoin .collection-split {
+    grid-template-columns: 1fr;
+  }
+
+  .mypokoin .collection-tile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .mypokoin .mypokoin-head {
+    align-items: flex-start;
+  }
+
+  .mypokoin .mypokoin-metrics,
+  .mypokoin .inv-summary,
+  .mypokoin .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .mypokoin .mypokoin-metric,
+  .mypokoin .inv-stat,
+  .mypokoin .metric {
+    gap: 0.12rem;
+    padding: 0.45rem 0.6rem 0.4rem;
+    border-radius: 12px;
+  }
+
+  .mypokoin .mypokoin-metric strong,
+  .mypokoin .metric-value {
+    font-size: 1.05rem;
+  }
+
+  .mypokoin .inv-stat strong {
+    font-size: 16px;
+  }
+
+  .profile-mypokoin {
+    align-items: flex-start;
+  }
+
+  .profile-page .tile-cta {
+    width: 6.25rem;
+    padding: 0.5rem;
+  }
+
+  .profile-page .tile-cta svg {
+    width: 3.15rem;
+  }
+
+  .page.profile-page {
+    overflow-x: clip;
+  }
+
+  .mypokoin .mypokoin-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .mypokoin .inv-head {
+    display: none;
+  }
+
+  .mypokoin .inv-table {
+    background: transparent;
+    border: 0;
+    overflow: visible;
+  }
+
+  .mypokoin .inv-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 0 0 8px;
+    border: 1px solid var(--g5);
+    border-radius: 16px;
+    background: #0f0e13;
+  }
+
+  .mypokoin .inv-card {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .mypokoin .inv-price,
+  .mypokoin .inv-qty,
+  .mypokoin .inv-mkt {
+    margin-left: auto;
+  }
+
+  .mypokoin .export-preview {
+    display: block;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .mypokoin .export-preview thead {
+    display: none;
+  }
+
+  .mypokoin .export-preview tbody,
+  .mypokoin .export-preview tr,
+  .mypokoin .export-preview td,
+  .mypokoin .export-preview th {
+    display: block;
+    width: auto;
+  }
+
+  .mypokoin .export-preview tr {
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--g5);
+    border-radius: 16px;
+    background: #0f0e13;
+  }
+
+  .mypokoin .mypokoin-panel-head {
+    align-items: stretch;
+  }
+
+  .mypokoin .mypokoin-panel-head .btn {
+    align-self: flex-start;
+  }
+}
+
+.mypokoin .seller-preview-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 211 61 / 0.35);
+  background: rgb(255 211 61 / 0.08);
+  color: var(--yellow);
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.mypokoin .mypokoin-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.mypokoin .mypokoin-panel-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.mypokoin .mypokoin-help {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.mypokoin .mypokoin-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mypokoin .mypokoin-card {
+  padding: 16px;
+  border: 1px solid var(--g5);
+  border-radius: 18px;
+  background: #0f0e13;
+}
+
+.mypokoin .mypokoin-card.is-danger {
+  margin-top: 8px;
+  border-color: rgb(255 120 96 / 0.45);
+  background: rgb(255 80 60 / 0.06);
+}
+
+.mypokoin .mypokoin-card .ps-defaults {
+  margin-top: 12px;
+}
+
+.mypokoin .inv-layout {
+  display: inline-flex;
+  border: 1px solid var(--g4);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mypokoin .inv-layout button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.mypokoin .inv-layout button.on {
+  background: var(--yellow);
+  color: #14121c;
+}
+
+@media (max-width: 720px) {
+  .mypokoin .inv-layout { max-width: 100%; }
+  .mypokoin .inv-layout button { padding: 8px 10px; font-size: 12px; }
+}
+
+.mypokoin .inv-price,
+.mypokoin .inv-qty,
+.mypokoin .inv-mkt,
+.mypokoin .collection-tile-price {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mypokoin .order-row .inv-thumb,
+.mypokoin .sale-row .sale-thumb {
+  flex: none;
+}
+
+.mypokoin .mypokoin-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.mypokoin .desk-panel,
+.mypokoin .inv-board {
+  border-radius: 18px;
+}
+
+.mypokoin .inv-rail {
+  align-items: center;
+}
+

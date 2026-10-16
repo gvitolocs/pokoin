@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::cardtrader::async_sync::SyncJobs;
 use crate::cardtrader::client::CardTraderClient;
 use crate::db::DbPools;
-use crate::firebase::{FirestoreStore, StaticVerifier, TokenVerifier};
+use crate::firebase::{FirestoreStore, TokenVerifier};
 use crate::powertools::PowerToolsClient;
 use crate::r2::R2Client;
 use crate::redis::RedisCache;
@@ -100,6 +100,9 @@ pub struct DomainState {
     /// Accounts-owned Firestore collection writer used by scan submit.
     pub scan_ownership: Arc<dyn crate::scan_store::ScanOwnership>,
     pub config: Arc<DomainConfig>,
+    /// Shared runtime for the api-common limiters (origin Redis). `None` keeps
+    /// route limits in-process only.
+    pub api: Option<pokoin_api_common::ApiState>,
 }
 
 impl DomainState {
@@ -126,6 +129,7 @@ impl DomainState {
             r2_forum_media: R2Client::from_env("R2_FORUM_MEDIA_BUCKET"),
             scan_ownership: Arc::new(crate::scan_store::UnconfiguredOwnership),
             config: Arc::new(DomainConfig::from_env()),
+            api: None,
         }
     }
 
@@ -162,6 +166,7 @@ impl DomainState {
             r2_forum_media: R2Client::from_env("R2_FORUM_MEDIA_BUCKET"),
             scan_ownership: Arc::new(crate::scan_store::UnconfiguredOwnership),
             config: Arc::new(DomainConfig::from_env()),
+            api: None,
         })
     }
 
@@ -181,10 +186,17 @@ impl DomainState {
     }
 
     /// Deterministic state for route/db-less tests: in-memory Firestore,
-    /// `Bearer test-<uid>` tokens, no pools, no workers.
+    /// `Bearer test-<uid>` tokens, no pools, no workers. Test builds only.
+    #[cfg(any(test, feature = "test-util"))]
     pub fn for_test() -> Self {
+        Self::for_test_with_verifier(crate::firebase::StaticVerifier::default())
+    }
+
+    /// [`Self::for_test`] with a configured test verifier (emails, verified or not).
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn for_test_with_verifier(verifier: crate::firebase::StaticVerifier) -> Self {
         let firestore: Arc<dyn FirestoreStore> = Arc::new(crate::firebase::MemoryFirestore::new());
-        let verifier: Arc<dyn TokenVerifier> = Arc::new(StaticVerifier::default());
+        let verifier: Arc<dyn TokenVerifier> = Arc::new(verifier);
         let db = DbPools::disconnected();
         let sync_jobs = Arc::new(SyncJobs::new(None));
         Self {
@@ -205,7 +217,14 @@ impl DomainState {
                 game_ingest_secret: Some("test-game".to_string()),
                 webhook_base_url: "https://api.pokoin.com".to_string(),
             }),
+            api: None,
         }
+    }
+
+    /// Count route limits in the shared api-common store (origin Redis).
+    pub fn with_api_state(mut self, api: pokoin_api_common::ApiState) -> Self {
+        self.api = Some(api);
+        self
     }
 
     /// `cardTraderWebhookUrlForUid` using the configured base.

@@ -2,6 +2,7 @@ import { createEffect, For, Repeat, Show } from 'solid-js';
 import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardSelectGrid from './CardSelectGrid.jsx';
 import CardTile from './CardTile.jsx';
+import { gameHref } from '@market/game.js';
 
 export function SkeletonTile(props) {
   return (
@@ -52,7 +53,7 @@ export default function Carousel(props) {
             <h2>{props.title}</h2>
             <Show when={props.subtitle}><p>{props.subtitle}</p></Show>
           </div>
-          <Show when={props.href}><a class="see-all" href={props.href}>See more →</a></Show>
+          <Show when={props.href}><a class="see-all" href={gameHref(props.href)}>See more →</a></Show>
         </div>
         <div class="rail-wrap">
           <button class="rail-prev" type="button" onClick={() => stepRail(scroller, -1)} aria-label="Previous">

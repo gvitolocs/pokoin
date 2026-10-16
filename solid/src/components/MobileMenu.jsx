@@ -4,6 +4,7 @@ import { accountHeading } from '@market/auth-session.js';
 import { catalogLinks } from '@market/catalog-links.js';
 import { authAnchorRel, marketUrl } from '@market/punchouts.js';
 import Avatar from './Avatar.jsx';
+import { gameHref } from '@market/game.js';
 
 // Phone drawer behind the burger:
 // account card, four quick actions, then grouped lists (Shop / Catalog /
@@ -45,12 +46,13 @@ function Glyph(props) {
 function MenuLink(props) {
   const target = () => props.href || (props.to ? marketUrl(props.to) : '');
   const external = () => Boolean(props.href) || String(target()).startsWith('http');
+  const prefixed = () => gameHref(target());
   const rel = () => [props.rel, authAnchorRel(props.to || props.href)].filter(Boolean).join(' ') || undefined;
-  const link = useLinkState(() => (external() ? '' : target()), { end: untrack(() => props.to === '/marketplace') });
+  const link = useLinkState(() => (external() ? '' : prefixed()), { end: untrack(() => props.to === '/marketplace') });
   return (
     <a
       class={[props.class, { 'is-active': !external() && link.active() }]}
-      href={target()}
+      href={prefixed()}
       rel={rel()}
       target={props.href ? '_self' : undefined}
       onClick={() => props.onClick?.()}

@@ -98,8 +98,9 @@ Prices” copy stays on `<title>` / `SeoHead` only.
 template, catalog hub and card desk, with the same hubs as plain links
 underneath (`solid/src/pages/SiteMap.jsx`). Its data is
 `market/public/data/site-map.json`, built on nezopt by
-`node scripts/build-site-map.mjs`. Page links come from the SPA source
-(routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
+`node scripts/build-site-map.mjs`. Page links come from the Solid app
+(`solid/src/router.js` and the route modules it imports, `<A>` / `<AppLink>`
+`href` and `to`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
 come from a read-only SELECT against the 15T marketplace Postgres and the
 public expansion list. It is not part of the Vercel build, so rerun it and
 commit the JSON when routes or the catalog change. `?focus=set:base-set`
@@ -108,10 +109,14 @@ commit the JSON when routes or the catalog change. `?focus=set:base-set`
 Weekly refresh: `pokoin-site-map-refresh.timer` (systemd user unit on nezopt,
 Mondays 04:30 UTC) runs `scripts/refresh-site-map.sh` inside its own Paseo
 worktree (`~/.paseo/worktrees/2n15xc8c/site-map-refresh`, used by nothing
-else). It checks out `origin/main`, rebuilds the JSON, and only when the map
-changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
-leaves the file alone when only the date would change, so quiet weeks deploy
-nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.
+else). It checks out `origin/main`, rebuilds `site-map.json` and
+`site-map-images.json`, and only when either file changed commits both, pushes
+to `main`, uploads with `scripts/publish-web.sh`, smoke-checks the version
+preview (`/`, `/marketplace`, `/sitemap`, `/market/data/site-map.json`), then
+promotes that version. A failed preview check leaves the version unpromoted and
+the unit fails (OnFailure alert). The builder leaves the files alone when only
+the date would change, so quiet weeks publish nothing. Log:
+`journalctl --user -u pokoin-site-map-refresh`.
 
 Site map v2: **Market** view colours card stars by the cheapest listed PKN
 (`cheapest_homepage_cache_blueprint`, quintile ramp, snapshot date in the
@@ -141,3 +146,19 @@ Phones (≤720px): the header is one compact block (title and counts on one line
 modes full width, compare fields two per row); panels are a bottom sheet that
 peeks at 42% and expands from its grip; legend and zoom hide under the sheet. Market prices take the cheaper of the
 CardTrader cache and every active Pokoin listing, read live at build time.
+
+## Card URLs for crawlers (2026-10-15)
+
+- A card URL never serves the generic SPA shell to a search bot. API failure returns 503 + Retry-After (Google retries); an unknown id returns 404. Identical canonical-less shells were being clustered as duplicates ("Google chose different canonical") and carried no card image.
+- `/marketplace/cards/:id/:slug` (no locale) 301s every client to `/marketplace/en/cards/:id/:slug`. Other `/marketplace/cards/*` shapes still fall through to the SPA shell.
+- The crawler <img> no longer declares 630x880; CDN scans are ~500x703.
+
+## Hub URLs for crawlers (2026-10-15)
+
+- Set/era/artist/species/rarity hubs: API failure returns 503 + Retry-After + noindex (was a cached, indexable thin page). Unknown set/era/artist/species/rarity returns 404 + noindex (was 200, self-canonical soft 404).
+- Crawlers get a 301 to the canonical form: non-en species/rarity/language/guide/artist hubs go to /marketplace/en/..., and locale-prefixed sets/eras go to /marketplace/sets|eras/.... Language-less hubs 301 for every client.
+- Set, artist and species hubs publish the first card scan as og:image and JSON-LD image.
+
+## Language-less marketplace URLs (2026-10-15)
+
+Workers Static Assets served the SPA shell for `/marketplace/pokemon`, `/marketplace/rarities`, `/marketplace/languages`, `/marketplace/guides`, `/marketplace/artists`, and `/marketplace/cards/:id/:slug`, so the `_redirects` 301 never ran. Those paths are in `run_worker_first` now, and the worker 301s every client to the `/marketplace/en/...` form, keeping the query string and any game prefix. The `_redirects` rules stay.

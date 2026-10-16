@@ -297,7 +297,7 @@ pub async fn enrich_sellers(state: &DomainState, rows: &mut [Value]) {
     let cache = state.profile_cache();
     let results=futures_util::future::join_all(uids.into_iter().map(|uid|{let cache=&cache;async move{
         if let Some(c)=cache {if let Some(raw)=c.get(&seller_cache::seller_profile_key(&uid)).await {if let Ok(v)=serde_json::from_str::<Value>(&raw){if v.is_object()&&(!v["displayName"].is_null()||!v["username"].is_null()||v["acceptsPkn"].is_boolean()){return Ok::<_,ApiError>((uid,Some(v)));}}}}
-        let fs=state.firestore()?;let doc=fs.get_document(&fs.document_path("users",&uid)).await?;let profile=doc.map(|d|json!({"displayName":field(&d,"displayName",120),"username":first(&d,&["username","usernameLower"],120),"acceptsPkn":d["acceptsPkn"]!=false}));
+        let fs=state.firestore()?;let doc=fs.get_document(&fs.document_path("users",&uid)?).await?;let profile=doc.map(|d|json!({"displayName":field(&d,"displayName",120),"username":first(&d,&["username","usernameLower"],120),"acceptsPkn":d["acceptsPkn"]!=false}));
         if let (Some(c),Some(p))=(cache,&profile){c.set_ex(&seller_cache::seller_profile_key(&uid),&p.to_string(),seller_cache::PUBLIC_PROFILE_TTL_SEC).await;}Ok((uid,profile))
     }})).await;
     let Ok(results) = results.into_iter().collect::<Result<Vec<_>, _>>() else {
@@ -374,7 +374,7 @@ pub async fn seller_profile(
     if uid.is_empty() {
         let fs = state.firestore()?;
         let doc = fs
-            .get_document(&fs.document_path("usernames", &clean))
+            .get_document(&fs.document_path("usernames", &clean)?)
             .await?
             .unwrap_or_else(|| json!({}));
         uid = field(&doc, "uid", 160);

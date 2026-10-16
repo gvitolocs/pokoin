@@ -91,7 +91,9 @@ pub(crate) async fn authorize_flutter_debug_request(
 ) -> Result<DebugUser, Response> {
     let configured = configured_debug_token();
     let supplied = request_debug_token(headers);
-    if !configured.is_empty() && supplied == configured {
+    if !configured.is_empty()
+        && pokoin_accounts::handlers::poko::timing_safe_equal_text(&supplied, &configured)
+    {
         return Ok(DebugUser {
             uid: "debug-token".to_owned(),
             email: String::new(),
@@ -458,7 +460,7 @@ async fn write_flutter_debug_log(
     .bind(&input.event_name)
     .bind(&input.category)
     .bind(input.payload.to_string())
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(map_db_error)?;
     let id: Option<i64> = row.try_get("id").unwrap_or(None);
