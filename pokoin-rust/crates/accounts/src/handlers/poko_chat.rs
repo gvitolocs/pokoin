@@ -65,7 +65,7 @@ fn poko_chat_timeout(raw: Option<&str>) -> Duration {
     Duration::from_millis(millis.clamp(5_000, 95_000))
 }
 
-fn scan_primary() -> String {
+pub(crate) fn scan_primary() -> String {
     std::env::var("SCAN_PRIMARY_URL")
         .ok()
         .map(|value| value.trim().to_string())
@@ -73,7 +73,7 @@ fn scan_primary() -> String {
         .unwrap_or_else(|| "http://127.0.0.1:18151".to_string())
 }
 
-fn scan_fallback() -> String {
+pub(crate) fn scan_fallback() -> String {
     std::env::var("SCAN_FALLBACK_URL")
         .ok()
         .map(|value| value.trim().to_string())
@@ -258,7 +258,7 @@ fn iso_ms(millis: i64) -> String {
 }
 
 /// `loadPersonalForChat(uid, pageContext)` — best effort.
-async fn load_personal_for_chat(
+pub(crate) async fn load_personal_for_chat(
     state: &DomainState,
     uid: &str,
     page_context: &Json,
@@ -318,7 +318,7 @@ fn multipart_body(boundary: &str, bytes: &[u8]) -> Vec<u8> {
 }
 
 /// YOLO + Milo on every box of one JPEG photo (primary worker, then fallback).
-async fn identify_photo_bytes(
+pub(crate) async fn identify_photo_bytes(
     state: &DomainState,
     bytes: Vec<u8>,
     primary: &str,
@@ -468,7 +468,10 @@ fn context_blocks(
 }
 
 /// Last 10 user/assistant events, oldest first. The brain trims them to 6,000 chars.
-async fn recent_history(firestore: &Firestore, uid: &str) -> Vec<crate::poko_brain::Turn> {
+pub(crate) async fn recent_history(
+    firestore: &Firestore,
+    uid: &str,
+) -> Vec<crate::poko_brain::Turn> {
     let documents = match read_event_page(firestore, uid, "").await {
         Ok((documents, _)) => documents,
         Err(error) => {

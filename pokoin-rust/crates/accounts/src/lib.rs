@@ -102,6 +102,7 @@ pub const PORTED_ROUTES: &[&str] = &[
     "POST /api/poko-bets",
     "GET /api/poko-chat",
     "POST /api/poko-chat",
+    "POST /api/poko-bot-chat",
     "GET /api/chat",
     "POST /api/chat",
     "GET /api/pokoin-partner",
@@ -256,6 +257,11 @@ pub fn router(state: DomainState) -> Router {
                 .fallback(handlers::poko_chat::poko_chat_other),
         )
         .route(
+            "/api/poko-bot-chat",
+            post(handlers::poko_bot_chat::poko_bot_chat)
+                .fallback(handlers::poko_bot_chat::poko_bot_chat_other),
+        )
+        .route(
             "/api/poko-bets",
             post(handlers::poko_bets::poko_bets)
                 .fallback(handlers::poko_bets::poko_bets_other),
@@ -296,9 +302,9 @@ mod tests {
 
     #[test]
     fn every_assigned_route_is_accounted_for() {
-        // 41 ported + 0 unported = the 41 (method, path) pairs assigned to this
+        // 42 ported + 0 unported = the 42 (method, path) pairs assigned to this
         // worker; 9 more belong to the external photos/R2/social assistant worker.
-        assert_eq!(PORTED_ROUTES.len(), 41);
+        assert_eq!(PORTED_ROUTES.len(), 42);
         assert_eq!(UNPORTED_ROUTES.len(), 0);
         assert_eq!(EXTERNAL_ROUTES.len(), 9);
     }

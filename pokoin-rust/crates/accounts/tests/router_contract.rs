@@ -2962,6 +2962,118 @@ async fn poko_chat_falls_back_truthfully_when_the_assistant_is_unreachable() {
 }
 
 // ---------------------------------------------------------------------------
+// poko-bot-chat
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn poko_bot_chat_requires_the_service_token_and_a_valid_turn() {
+    let _guard = SERVICE_TOKEN_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
+
+    let transport = ScriptedTransport::new();
+    let app = router(test_state(&transport));
+
+    let (status, body, headers) = call(&app, "GET", "/api/poko-bot-chat", None, None).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(body, serde_json::json!({ "error": "Method not allowed." }));
+    assert_eq!(headers["allow"], "POST");
+
+    let turn = serde_json::json!({
+        "platform": "telegram",
+        "userKey": "telegram:1",
+        "message": "hi",
+    });
+    let (status, body, _) = call(&app, "POST", "/api/poko-bot-chat", None, Some(turn.clone())).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "ok": false,
+            "error": "poko-bot-chat not configured: POKO_MARKET_SERVICE_TOKEN missing"
+        })
+    );
+
+    std::env::set_var("POKO_MARKET_SERVICE_TOKEN", "s3cret");
+    let (status, body, _) =
+        call(&app, "POST", "/api/poko-bot-chat", Some("wrong-token"), Some(turn.clone())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body, serde_json::json!({ "ok": false, "error": "unauthorized" }));
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "irc",
+            "userKey": "irc:1",
+            "message": "hi",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        serde_json::json!({ "ok": false, "error": "platform must be telegram or discord" })
+    );
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "telegram",
+            "userKey": "telegram:1",
+            "message": "  ",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        serde_json::json!({ "ok": false, "error": "message or images required" })
+    );
+
+    // Providers are unreachable from this harness (no keys, or the scripted
+    // transport answers chat completions with 599). The bot must see 502 and
+    // fall back itself — this route does not invent a reply.
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "telegram",
+            "scope": "group",
+            "userKey": "telegram:1",
+            "firebaseUid": "should-not-load",
+            "message": "hi",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "body={body}");
+    assert_eq!(body["ok"], serde_json::json!(false));
+    assert_eq!(body["error"], serde_json::json!("brain_failed"));
+    assert!(
+        matches!(body["detail"].as_str(), Some("providers") | Some("budget") | Some("empty")),
+        "body={body}"
+    );
+    assert!(
+        transport.requests_to(":runQuery").is_empty(),
+        "a group turn must not read website messages"
+    );
+    assert!(
+        transport.requests_to(":commit").is_empty(),
+        "poko-bot-chat does not persist"
+    );
+
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
+}
+
+// ---------------------------------------------------------------------------
 // marketplace-portfolio
 // ---------------------------------------------------------------------------
 
