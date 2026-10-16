@@ -600,7 +600,7 @@ export default function Search() {
       <Alert>{error()}</Alert>
       <Switch
         fallback={(
-          <CardSelectGrid class="grid">
+          <CardSelectGrid class="grid search-grid">
             <Show when={!loading()} fallback={<Repeat count={24}>{() => <SkeletonTile />}</Repeat>}>
               <For each={shown()} keyed={(card) => card.id}>
                 {(card, index) => <CardTile card={card()} rank={index()} />}
