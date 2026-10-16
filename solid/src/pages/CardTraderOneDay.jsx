@@ -4,7 +4,7 @@ import { inventoryListingHref } from '@market/inventory-listings.js';
 import { formatOrderMoney } from '@market/order-status.js';
 import '@market/seller-home.css';
 import '@market/one-day.css';
-import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import MiniCardTile from '../components/MiniCardTile.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
@@ -105,17 +105,31 @@ function OneDayDesk() {
   const stockItems = () => (Array.isArray(assets()?.items) ? assets().items : []);
 
   return (
-    <div class="page desk">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk mypokoin">
+      <StockNav
         title="CardTrader 1-DR"
-        lede="CardTrader warehouses this stock and sells it. These sales are not a Zero shipment you pick and send. Each one also lands in Sold history with the CardTrader 1-DR tag."
+        lede="Warehouse stock CardTrader sells for you. These are not a Zero shipment."
+        metrics={oneDayReady() && sales() ? [
+          { value: warehouseCards(), label: 'Cards at CardTrader' },
+          { value: sales().totals?.pending?.units || 0, label: 'Waiting at CardTrader' },
+          { value: sales().totals?.pending?.cents ? formatOrderMoney(sales().totals.pending.cents, 'EUR') : '—', label: 'Waiting value' },
+          { value: sales().cardtrader?.username || '—', label: 'CardTrader seller' },
+        ] : []}
       >
         <button class="btn ghost" type="button" onClick={load} disabled={loading() || notConnected()}>
           {loading() ? 'Refreshing…' : 'Refresh'}
         </button>
-      </PageHead>
-      <StockNav />
+        <Show when={oneDayReady() && sales()}>
+          <button
+            type="button"
+            class="btn ghost"
+            aria-expanded={String(showStock())}
+            onClick={() => setShowStock((open) => !open)}
+          >
+            {showStock() ? 'Hide cards' : 'View all cards'}
+          </button>
+        </Show>
+      </StockNav>
       <Alert>{error()}</Alert>
 
       <Show when={notConnected()}>
@@ -128,31 +142,6 @@ function OneDayDesk() {
         <EmptyDesk title="This account is not 1-Day Ready" lede="CardTrader Zero shipments stay on their own tab. A 1-Day Ready token puts warehouse sales here.">
           <a class="btn" href="/mypokoin/zero">CardTrader Zero</a>
         </EmptyDesk>
-      </Show>
-
-      <Show when={oneDayReady() && sales()}>
-        <MetricGrid>
-          <button
-            type="button"
-            class={['metric', 'dr-stock-open', { 'is-open': showStock() }]}
-            onClick={() => setShowStock((open) => !open)}
-            aria-expanded={String(showStock())}
-          >
-            <strong class="metric-value">{warehouseCards()}</strong>
-            <span class="metric-label">Cards at CardTrader</span>
-            <span class="metric-hint">{showStock() ? 'Hide cards' : 'View all cards'}</span>
-          </button>
-          <Metric
-            value={sales().totals?.pending?.units || 0}
-            label="Waiting at CardTrader"
-            hint={`${sales().pending?.orderCount || 0} 1-DR sale${sales().pending?.orderCount === 1 ? '' : 's'}`}
-          />
-          <Metric
-            value={sales().totals?.pending?.cents ? formatOrderMoney(sales().totals.pending.cents, 'EUR') : '—'}
-            label="Waiting value"
-          />
-          <Metric value={sales().cardtrader?.username || '—'} label="CardTrader seller" />
-        </MetricGrid>
       </Show>
 
       <Show when={!sales() && !error() && !notConnected()}>

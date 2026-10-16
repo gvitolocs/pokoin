@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   ensureUsername,
   formatPknNumber,
@@ -751,7 +752,7 @@ const ACTIONS = [
 
 /** /wallet: site balance + PokoinPoS, activity and the money sheets. */
 export default function Wallet() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   const uid = () => (signedIn() ? String(accountProfile()?.uid || authUser()?.uid || authSession()?.uid || '') : '');
   const address = walletAddress;

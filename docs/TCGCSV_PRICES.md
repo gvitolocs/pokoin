@@ -30,6 +30,10 @@ The initial run created 270,359 explicit links across 25 inspected databases;
 16 games have matched quotes. Catalogs without IDs remain unmapped and their
 original price rows remain in the separate source store. No fuzzy identity
 matching, fabricated condition prices or synthetic sales are introduced.
+Pokémon printings CardTrader leaves unlinked are filled by the Rust
+set + collector-number + name matcher, tagged `match_source = 'pokoin-matcher'`
+(99.9% agreement with CardTrader on a blind holdout); see
+[TCGPLAYER_MATCH.md](TCGPLAYER_MATCH.md).
 
 Validation: six API/helper tests, compiled inventory JSX, real read-only latest
 and historical database queries for Mew (2 variants, 1,858 observations), and

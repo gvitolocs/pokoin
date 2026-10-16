@@ -190,21 +190,43 @@ test('artist album tiles are photos of the leftover illustration, not hover-scal
   assert.match(css, /transform:\s*none !important/);
   assert.match(
     css,
-    /\.tile\.tile-album\.tile-tall:hover \.art-cut img\.art-figure-hover,[\s\S]*?transform:\s*scale\(1\.12\) !important/,
+    /\.tile\.tile-album \.art-cut img\.art-figure-layer \{[^}]*transform-origin:[\s\S]*?var\(--figure-cx, calc\(var\(--art-left\) \+ var\(--art-width\) \* 0\.5\)\)/,
   );
-  assert.doesNotMatch(
+  assert.match(
     css,
-    /\.tile\.tile-album\.tile-tall:hover \.art-cut img\.art-figure-hover,[\s\S]*?translateY\(-3%\)/,
+    /\.tile\.tile-album \.art-cut img\.art-figure-layer \{[^}]*var\(--figure-cy, calc\(var\(--art-top\) \+ var\(--art-height\) \* 0\.5\)\)/,
   );
+  assert.match(css, /@keyframes album-figure-in \{[\s\S]*?to \{[^}]*scale:\s*1\.08/);
+  assert.match(css, /@keyframes album-figure-out \{[\s\S]*?scale:\s*1\.08[\s\S]*?opacity:\s*0/);
+  assert.match(css, /img\.art-figure-hover\[data-figure="in"\] \{[^}]*animation:[^;]*0\.22s/);
+  assert.match(css, /img\.art-figure-hover\[data-figure="out"\] \{[^}]*animation:[^;]*0\.2s/);
+  assert.match(css, /img\.art-figure-shadow\[data-figure="in"\] \{[^}]*translate:\s*0 6px/);
+  assert.doesNotMatch(css, /art-figure-hover[^}]*translateY\(-3%\)/);
+  assert.doesNotMatch(css, /art-figure-shadow[^}]*translateY\(-3%\)/);
+  assert.doesNotMatch(css, /art-figure-hover[^}]*scale\(1\.18\)/);
+  assert.doesNotMatch(css, /art-figure-shadow[^}]*scale\(1\.18\)/);
   assert.match(css, /@property --album-figure-w/);
   assert.match(css, /\.tile-album\.tile-tall \.art-cut \{[^}]*container-type:\s*size/);
   assert.match(
     css,
     /\.tile\.tile-album\.tile-tall \.tile-art \.art-cut img\.art-figure-layer,[\s\S]*?--album-figure-w:\s*max\(/,
   );
+  assert.doesNotMatch(
+    css,
+    /\.tile\.tile-album\.tile-tall \.tile-art \.art-cut img\.art-figure-layer[\s\S]{0,800}?var\(--art-height\) \* 0\.36/,
+  );
   assert.match(
     css,
-    /\.tile\.tile-album\.tile-tall \.tile-art \.art-cut img\.art-figure-layer,[\s\S]*?transform-origin:[\s\S]*?var\(--art-height\) \* 0\.36/,
+    /\.tile\.tile-album:not\(\.is-landscape\):not\(\.tile-item\):has\(img\.art-figure-hover\) \.art-cut \{[^}]*mask-image:\s*none/,
+  );
+  // Unclipped grid items get a content-based min height; the pop-out must not grow the track.
+  assert.match(
+    css,
+    /\.tile\.tile-album:has\(img\.art-figure-hover\) \{[^}]*overflow:\s*visible;[^}]*min-height:\s*0/,
+  );
+  assert.match(
+    css,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.tile\.tile-album \.art-cut img\.art-figure-hover\[data-figure="in"\],[\s\S]*?animation:\s*none !important/,
   );
   assert.match(css, /mask-image:\s*var\(--art-figure-mask\)/);
   assert.match(css, /img\.art-figure-shadow \{[^}]*brightness\(0\) blur\(9px\)/);

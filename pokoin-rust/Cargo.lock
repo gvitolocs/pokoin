@@ -1784,6 +1784,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "poko-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pokoin-accounts",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pokoin-accounts"
 version = "0.1.0"
 dependencies = [
@@ -3166,6 +3178,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "tcgplayer-match"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]

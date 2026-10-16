@@ -11,7 +11,8 @@ import {
   updateListing,
 } from '@market/api.js';
 import { GAMES } from '@market/game.js';
-import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -236,16 +237,14 @@ function SyncReviewDesk() {
   }
 
   return (
-    <div class="page desk">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk mypokoin">
+      <StockNav
         title="CardTrader ↔ Power Tools"
-        lede="Cards only on CardTrader or only in Power Tools after the last sync. Set a stock location, list them, or remove Pokoin listings."
+        lede="Cards only on CardTrader or only in Power Tools."
       >
         <a class="btn ghost" href="/mypokoin">MyPokoin</a>
         <a class="btn ghost" href="/profile">Profile</a>
-      </PageHead>
-      <StockNav />
+      </StockNav>
       <Alert>{error()}</Alert>
       <Show when={message()}><p class="ct-connect-ok">{message()}</p></Show>
 
@@ -260,6 +259,7 @@ function SyncReviewDesk() {
         )}
       >
         <DeskPanel title="Summary">
+          <p class="mypokoin-help">Cards that exist on only one side. Save a location or list the Power Tools row.</p>
           <p class="page-lede">
             Matched {Number(reconcile().matched || 0)}
             {' · '}
@@ -281,6 +281,7 @@ function SyncReviewDesk() {
                 const listing = () => listingForCtProduct(row.ctProductId);
                 return (
                   <article class="thread order-row">
+                    <RowThumb row={{ cardId: row.cardId, cardName: row.name, cardImageUrl: row.imageUrl || '' }} />
                     <span class="thread-main">
                       <strong class="thread-title">{row.name || row.ctProductId}</strong>
                       <span class="thread-meta">
@@ -338,6 +339,7 @@ function SyncReviewDesk() {
                 const key = ptRowKey(row, index);
                 return (
                   <article class="thread order-row">
+                    <RowThumb row={{ cardId: row.cardId, cardName: row.name, cardImageUrl: row.imageUrl || '' }} />
                     <span class="thread-main">
                       <strong class="thread-title">{row.name || 'Card'}</strong>
                       <span class="thread-meta">

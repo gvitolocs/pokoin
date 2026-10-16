@@ -10,7 +10,8 @@ import {
   Show,
   untrack,
 } from 'solid-js';
-import { useLocation, useNavigate, useParams } from '@solidjs/router';
+import { useLocation, useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cardFromCatalogRow,
   cardHref,
@@ -68,7 +69,7 @@ function TileGrid(props) {
 export default function Versions() {
   const params = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => params.lang || 'en';
   const cardId = () => realPublicCardId(params.cardId);
   const pageKey = createMemo(() => `${lang()}:${cardId()}:${params.slug || ''}`);
@@ -285,7 +286,7 @@ function VersionsPage(props) {
         </Show>
         <Show when={showRarity()}>
           <section class="versions-section" id="versions">
-            <h2>Others from the expansion</h2>
+            <h2>{setName() ? `From ${setName()}` : 'Same expansion'}</h2>
             <TileGrid rows={view.versions} cardId={cardId} />
           </section>
         </Show>

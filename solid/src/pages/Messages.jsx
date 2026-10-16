@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useNavigate, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { searchRecipientUsernames } from '@market/api.js';
 import {
   listConversations,
@@ -60,7 +61,7 @@ function SignInGate() {
 const USERNAME = /^[a-z0-9]{3,32}$/;
 
 function NewConversation(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [query, setQuery] = createSignal('');
   const [rows, setRows] = createSignal([]);
   const clean = () => query().trim().toLowerCase();
@@ -292,15 +293,19 @@ export function Conversation() {
 }
 
 function cardPayload(row) {
+  const path = String(row?.path || row?.canonicalPath || row?.href || '');
+  const gameId = String(row?.game || '').trim();
   return {
     cardId: String(row?.cardId || row?.id || ''),
     name: String(row?.cardName || row?.name || ''),
     setName: String(row?.setName || row?.set || ''),
     condition: String(row?.condition || ''),
     language: String(row?.language || ''),
-    canonicalPath: String(row?.canonicalPath || row?.href || ''),
+    canonicalPath: path,
+    path,
     imageUrl: String(row?.imageUrl || row?.cardImageUrl || ''),
     cardName: String(row?.cardName || row?.name || ''),
+    ...(gameId ? { game: gameId } : {}),
   };
 }
 
@@ -317,7 +322,7 @@ function readPendingCard() {
 }
 
 function PokoConversation() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [text, setText] = createSignal('');
   const [cards, setCards] = createSignal(readPendingCard());
   const [photos, setPhotos] = createSignal([]);
@@ -454,7 +459,7 @@ function PokoConversation() {
                   <Show when={tagsOf(event()).length}>
                     <span class="chat-tags">
                       <For each={tagsOf(event())}>
-                        {(row) => <ChatListingTag row={row} peer={{ username: POKO_PEER }} me={me()} />}
+                        {(row) => <ChatListingTag row={row} peer={{ username: POKO_PEER }} me={me()} defaultGame="pokemon" />}
                       </For>
                     </span>
                   </Show>
@@ -474,6 +479,7 @@ function PokoConversation() {
                       trayId={messagesTrayId(POKO_PEER)}
                       peer={{ username: POKO_PEER }}
                       me={me()}
+                      defaultGame="pokemon"
                       onRemove={() => setCards((current) => current.filter((_, i) => i !== index()))}
                     />
                   )}
@@ -522,7 +528,7 @@ function PokoConversation() {
 
 function HumanConversation(props) {
   const peer = props.peer;
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [text, setText] = createSignal('');
   const [photos, setPhotos] = createSignal([]);
   const [moneyMode, setMoneyMode] = createSignal('');
