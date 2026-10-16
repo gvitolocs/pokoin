@@ -278,19 +278,21 @@ async fn a_tool_round_then_an_answer_is_two_calls() {
             Ok(chat_tools(&[(
                 "call_quote",
                 "card_quote",
-                json!({"query": "Lugia", "cardId": "42"}),
+                json!({"query": "Lugia", "cardId": "420042"}),
             )]))
         } else {
             let body = request_json(request);
             let messages = body["messages"].as_array().unwrap();
             assert!(messages.iter().any(|message| message["role"] == "tool"));
-            Ok(chat_text("Lugia's asking price is 1200 PKN."))
+            Ok(chat_text(
+                "Lugia's asking price is 1200 PKN.\n\n[[cards: 420042]]",
+            ))
         }
     });
     let tools = RecordingTools::new(json!({
         "ok": true,
         "card": {
-            "cardId": "42",
+            "cardId": "420042",
             "name": "Lugia",
             "setName": "Neo Genesis",
             "cardNumber": "9/111",
@@ -314,10 +316,10 @@ async fn a_tool_round_then_an_answer_is_two_calls() {
     assert_eq!(ran.len(), 1);
     assert_eq!(ran[0].0, "card_quote");
     assert_eq!(ran[0].1["query"], json!("Lugia"));
-    assert_eq!(ran[0].1["cardId"], json!("42"));
+    assert_eq!(ran[0].1["cardId"], json!("420042"));
     assert_eq!(ran[0].2, "pokemon");
     assert!(brain.tool_calls[0].ok);
-    assert_eq!(brain.cards[0]["cardId"], json!("42"));
+    assert_eq!(brain.cards[0]["cardId"], json!("420042"));
     assert!(brain.reply.contains("1200 PKN"));
 }
 
