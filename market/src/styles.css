@@ -559,7 +559,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .suggest-row.is-shaded {
   background: var(--suggest-shade);
-  transition: background-color 160ms ease;
+  transition: background-color 220ms ease;
 }
 
 .suggest-row.is-shaded:hover,
@@ -1241,6 +1241,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   font-weight: 750;
 }
 
+.tile-cta,
 .nav-preview .nav-scan {
   display: flex;
   flex-direction: column;
@@ -1254,6 +1255,33 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   color: #17120a;
   text-align: center;
   text-decoration: none;
+}
+
+.tile-cta {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.profile-mypokoin .tile-cta {
+  width: 8.5rem;
+}
+
+.tile-cta svg {
+  width: 4.5rem;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.tile-cta strong {
+  margin: 0;
+  color: inherit;
+  font-weight: 750;
+}
+
+.tile-cta:hover,
+.tile-cta:focus-visible {
+  background: #ffe276;
+  box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
 .icon-nav .nav-preview .nav-scan {

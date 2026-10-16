@@ -128,7 +128,7 @@ export function DashboardPreview() {
           </svg>
         </Show>
       </div>
-      <a class="nav-scan" href={DASHBOARD_SCAN} aria-label="Scan cards">
+      <a class="nav-scan tile-cta" href={DASHBOARD_SCAN} aria-label="Scan cards">
         <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
           <rect x="1" y="1" width="70" height="98" rx="7" fill="#17131f" stroke="#6f5414" stroke-width="2" />
           <rect x="7" y="7" width="58" height="86" rx="4" fill="none" stroke="#ffd33d" stroke-width="2" />

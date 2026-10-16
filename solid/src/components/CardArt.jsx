@@ -110,6 +110,7 @@ export default function CardArt(props) {
       alt={props.alt || ''}
       width="630"
       height="880"
+      draggable="false"
       onClick={(event) => props.onClick?.(event)}
     />
   );
