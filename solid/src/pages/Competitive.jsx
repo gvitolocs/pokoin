@@ -10,10 +10,11 @@ import {
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
 import { DeskPanel } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 function EventRow(props) {
   return (
-    <a class="event-row" href={`/marketplace/competitive/tournaments/${props.event.id}`}>
+    <a class="event-row" href={gameHref(`/marketplace/competitive/tournaments/${props.event.id}`)}>
       <span>
         <strong>{props.event.name}</strong>
         <small>
@@ -30,7 +31,7 @@ function EventRow(props) {
 
 function EventPanel(props) {
   return (
-    <DeskPanel flush title={props.title} extra={<a class="see-all" href={props.href}>{props.more}</a>}>
+    <DeskPanel flush title={props.title} extra={<a class="see-all" href={gameHref(props.href)}>{props.more}</a>}>
       <div class="event-list">
         <For each={props.events}>{(event) => <EventRow event={event} />}</For>
       </div>
@@ -51,7 +52,7 @@ export default function Competitive() {
       <section>
         <div class="carousel-head">
           <h2>Top decks ({data.format})</h2>
-          <a class="see-all" href="/marketplace/competitive/decks">All decks</a>
+          <a class="see-all" href={gameHref('/marketplace/competitive/decks')}>All decks</a>
         </div>
         <div class="comp-leaders">
           <For each={featured}>
@@ -59,13 +60,13 @@ export default function Competitive() {
               const label = `Featured · ${deck.featured.place} ${deck.featured.event} — ${deck.featured.player}`;
               return (
                 <article class="comp-leader">
-                  <a href={`/marketplace/competitive/decks/${deck.id}`}>
+                  <a href={gameHref(`/marketplace/competitive/decks/${deck.id}`)}>
                     <CardArt src={scanUrl(deck.set, deck.num)} alt={deck.name} />
                     <strong>{index() + 1}. {deck.short}</strong>
                     <em>{deck.share.toFixed(2)}%</em>
                   </a>
                   <Show when={listById(deck.featured.list)} fallback={<span class="comp-feat">{label}</span>}>
-                    <a class="comp-feat" href={`/marketplace/competitive/decklists/${deck.featured.list}`}>{label}</a>
+                    <a class="comp-feat" href={gameHref(`/marketplace/competitive/decklists/${deck.featured.list}`)}>{label}</a>
                   </Show>
                 </article>
               );

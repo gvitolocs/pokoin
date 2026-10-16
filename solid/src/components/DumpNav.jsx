@@ -1,5 +1,6 @@
 import { For } from 'solid-js';
 import { useLocation } from '@solidjs/router';
+import { gameHref } from '@market/game.js';
 
 const LINKS = [
   { to: '/marketplace/explore', label: 'Explore', match: (path) => path.startsWith('/marketplace/explore') },
@@ -12,7 +13,7 @@ export default function DumpNav() {
   return (
     <nav class="comp-tabs" aria-label="Market holdings">
       <For each={LINKS}>
-        {(row) => <a class={row.match(location.pathname) ? 'on' : undefined} href={row.to}>{row.label}</a>}
+        {(row) => <a class={row.match(location.pathname) ? 'on' : undefined} href={gameHref(row.to)}>{row.label}</a>}
       </For>
     </nav>
   );
