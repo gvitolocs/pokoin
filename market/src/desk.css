@@ -626,33 +626,51 @@
   align-items: center;
 }
 
-.ct-connect-form .btn-stripe {
+.ct-connect-form .btn.btn-stripe {
   margin-top: 0;
 }
 
 /* CardTrader brand blue + Stripe purple for profile connect actions. */
-.btn-cardtrader {
+.btn.btn-cardtrader {
   border: 0;
   background: #4db8e8;
   color: #0b1c26;
+  box-shadow: none;
 }
 
-.btn-cardtrader:hover:not(:disabled),
-.btn-cardtrader:focus-visible:not(:disabled) {
+.btn.btn-cardtrader:hover:not(:disabled),
+.btn.btn-cardtrader:focus-visible:not(:disabled) {
   background: #6ac6ee;
   color: #0b1c26;
+  box-shadow: none;
 }
 
-.btn-stripe {
+.btn.btn-cardtrader:not(:disabled):active {
+  background: #3aa8dc;
+  color: #0b1c26;
+  box-shadow: none;
+  translate: 0 1px;
+}
+
+.btn.btn-stripe {
   border: 0;
   background: #635bff;
   color: #fff;
+  box-shadow: none;
 }
 
-.btn-stripe:hover:not(:disabled),
-.btn-stripe:focus-visible:not(:disabled) {
+.btn.btn-stripe:hover:not(:disabled),
+.btn.btn-stripe:focus-visible:not(:disabled) {
   background: #7a73ff;
   color: #fff;
+  box-shadow: none;
+}
+
+.btn.btn-stripe:not(:disabled):active {
+  background: #5851e0;
+  color: #fff;
+  box-shadow: none;
+  translate: 0 1px;
 }
 
 .btn-telegram {
