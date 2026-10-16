@@ -20,6 +20,10 @@ test('checkout does not claim the card is charged in EUR', () => {
 });
 
 test('checkout keeps the buyer\'s own shipping pick over the default', () => {
-  assert.match(src, /if \(!picked \|\| !selectable\.some\(/);
-  assert.match(src, /setShippingPicked\(true\);\s*setShippingService\(option\.id\);/);
+  // Cart parcel picks seed checkout; a pick here is that parcel's service
+  // (checkoutParcelShipping falls back to the default only without a pick).
+  assert.match(src, /createSignal\(untrack\(\(\) => \(\{ \.\.\.\(cartShippingChoice\(\)\.parcels \|\| \{\}\) \}\)\)\)/);
+  assert.match(src, /picks: parcelPicks\(\)/);
+  assert.match(src, /setParcelPicks\(\(current\) => \(\{ \.\.\.current, \[sellerId\]: serviceId \}\)\)/);
+  assert.match(src, /pickParcelService\(parcel\.sellerId, option\.id, \{ orderWide: true \}\)/);
 });
