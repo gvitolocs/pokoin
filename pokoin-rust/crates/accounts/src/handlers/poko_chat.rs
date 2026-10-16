@@ -858,7 +858,14 @@ async fn poko_chat_inner(
                 .cloned()
                 .collect();
             let mut candidates = from_photo;
-            if hermes_cards.is_empty() {
+            if brain_metadata.is_some() {
+                // Brain cards are only the ids on its [[cards:]] line; use the
+                // rows attach_reply_cards resolved for them (full cards, same
+                // order) and keep the brain's small cap.
+                let mut resolved = attached_cards;
+                resolved.truncate(4);
+                candidates.extend(resolved);
+            } else if hermes_cards.is_empty() {
                 candidates.extend(attached_cards);
             } else {
                 candidates.extend(hermes_cards);
