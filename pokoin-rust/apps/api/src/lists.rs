@@ -53,11 +53,10 @@ const LIST_CACHE: &str = "public, max-age=120, s-maxage=900, stale-while-revalid
 /// A shop moves with every sale: rebuilt within minutes of a change, and the
 /// page checks the live stamp after painting, so the edge keeps a minute.
 const SELLER_CACHE: &str = "public, max-age=30, s-maxage=60, stale-while-revalidate=86400";
-/// A `dcb` body is never stored by a shared cache: Cloudflare's dictionary
-/// passthrough does not key its cache on `Available-Dictionary` (tested
-/// 2026-10-10: one cached `dcb` body was replayed to `br`, gzip and identity
-/// clients).
-const LIST_CACHE_DCB: &str = "private, max-age=120";
+/// A `dict=` URL that did not earn `dcb`. `s-maxage=0` is not stored by the
+/// edge micro-cache. `private` is not used: a private 200 marks the whole
+/// `/api/marketplace-list` pathname uncacheable for five minutes (edge.rs).
+const LIST_CACHE_DICT_FALLBACK: &str = "public, max-age=120, s-maxage=0";
 /// The SPA's set-desk page size; a set is complete when a page comes back short.
 const SET_PAGE: usize = 400;
 const ARTIST_LIMIT: usize = 20_000;
@@ -89,8 +88,11 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     };
     let wanted = catalog_api::wanted(&headers, &uri);
     let brotli = accepts_coding(&headers, "br");
-    // dcb needs the browser to hold our dictionary: it says so with its hash.
+    // `dcb` only when `?dict=` is the current id. The plain URL never emits it:
+    // Cloudflare keys on the URL, not on `Available-Dictionary`.
     let dictionary = &*DICTIONARY;
+    let dictionary_id = dictionary.id();
+    let dict_query = q.first("dict").map(str::trim);
     let dcb_ready = accepts_coding(&headers, "dcb")
         && headers
             .get("available-dictionary")
@@ -119,12 +121,10 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
                 (true, _, _) => ("c1", c1, br_c1),
                 _ => ("json", body.into_bytes(), br_json),
             };
-            let dcb = (format == "c1v2" && dcb_ready && dcb_dict.as_deref() == Some(dictionary.id().as_str()))
-                .then_some(dcb_c1v2)
-                .flatten();
-            // dcb when the browser holds our dictionary, else a brotli-11 copy
-            // served as-is (Cloudflare passes origin encodings through; its own
-            // on-the-fly level is far lower).
+            let dcb = list_wants_dcb(format, dict_query, dcb_ready, dcb_dict.as_deref(), &dictionary_id).then_some(dcb_c1v2).flatten();
+            // dcb when this URL and the browser both name our dictionary, else
+            // a brotli-11 copy served as-is (Cloudflare passes origin encodings
+            // through; its own on-the-fly level is far lower).
             let (bytes, coding) = match (dcb, compressed) {
                 (Some(dcb), _) => (dcb, Some("dcb")),
                 (None, Some(br)) if brotli => (br, Some("br")),
@@ -133,7 +133,7 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
             let tag = format!("\"{version}-{format}{}\"", coding.map(|c| format!("-{c}")).unwrap_or_default());
             // application/json, not the c1 media type: Cloudflare only
             // brotli-compresses known types. The payload marks itself c1.
-            let cache = list_cache(&kind, coding);
+            let cache = list_cache(&kind, coding, dict_query.is_some());
             let mut response = crate::suggest::cors(StatusCode::OK, Some(cache.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
             let h = response.headers_mut();
             h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding, Available-Dictionary"));
@@ -145,7 +145,7 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
             }
             // Where a c1v2 client fetches the shared dictionary (once).
             if wanted.templates() && has_v2 {
-                if let Ok(v) = HeaderValue::from_str(&dictionary.id()) {
+                if let Ok(v) = HeaderValue::from_str(&dictionary_id) {
                     h.insert("x-pokoin-dictionary", v);
                 }
                 h.insert(
@@ -165,12 +165,34 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     }
 }
 
-fn list_cache(kind: &str, coding: Option<&str>) -> &'static str {
-    match (coding, kind) {
-        (Some("dcb"), _) => LIST_CACHE_DCB,
-        (_, "seller") => SELLER_CACHE,
-        _ => LIST_CACHE,
+/// `dcb` only for a c1v2 `dict=<current id>` request whose `Available-Dictionary`
+/// matches and whose snapshot was compressed with that same id.
+fn list_wants_dcb(format: &str, dict_query: Option<&str>, dcb_ready: bool, row_dict: Option<&str>, current_id: &str) -> bool {
+    format == "c1v2" && dict_query == Some(current_id) && dcb_ready && row_dict == Some(current_id)
+}
+
+/// Cloudflare Cache Rule expression (Free plan). Bypass `/api/marketplace-list`
+/// when `dict` is set unless it is the current id, `Available-Dictionary` is
+/// this dictionary's structured-field hash, and `Accept-Encoding` contains `dcb`.
+/// A request with no `dict` argument does not match, so the plain `br` URL stays cached.
+fn dcb_bypass_rule(id: &str, available_dictionary: &str) -> String {
+    format!(
+        "(http.request.uri.path eq \"/api/marketplace-list\" and http.request.uri.args[\"dict\"][0] ne \"\" and not (http.request.uri.args[\"dict\"][0] eq \"{id}\" and http.request.headers[\"available-dictionary\"][0] eq \"{available_dictionary}\" and lower(http.request.headers[\"accept-encoding\"][0]) contains \"dcb\"))"
+    )
+}
+
+fn list_cache(kind: &str, coding: Option<&str>, dict_query: bool) -> &'static str {
+    if coding == Some("dcb") {
+        return LIST_CACHE;
     }
+    // Any `dict=` value that did not earn dcb, including a stale id.
+    if dict_query {
+        return LIST_CACHE_DICT_FALLBACK;
+    }
+    if kind == "seller" {
+        return SELLER_CACHE;
+    }
+    LIST_CACHE
 }
 
 /// A seller book older than this is not served: the builder refreshes every
@@ -1071,11 +1093,28 @@ mod tests {
     #[test]
     fn seller_lists_are_kept_a_minute_at_the_edge() {
         assert!(KINDS.contains(&"seller"));
-        assert_eq!(list_cache("seller", Some("br")), SELLER_CACHE);
-        assert_eq!(list_cache("seller", None), SELLER_CACHE);
+        assert_eq!(list_cache("seller", Some("br"), false), SELLER_CACHE);
+        assert_eq!(list_cache("seller", None, false), SELLER_CACHE);
         assert!(SELLER_CACHE.starts_with("public,") && SELLER_CACHE.contains("s-maxage=60") && SELLER_CACHE.contains("stale-while-revalidate=86400"));
-        assert_eq!(list_cache("set", Some("br")), LIST_CACHE);
-        assert_eq!(list_cache("set", Some("dcb")), LIST_CACHE_DCB);
+        assert_eq!(list_cache("set", Some("br"), false), LIST_CACHE);
+        assert_eq!(list_cache("set", Some("dcb"), true), LIST_CACHE);
+        assert_eq!(list_cache("set", Some("br"), true), LIST_CACHE_DICT_FALLBACK);
+        assert_eq!(list_cache("set", None, true), LIST_CACHE_DICT_FALLBACK);
+        assert_eq!(LIST_CACHE_DICT_FALLBACK, "public, max-age=120, s-maxage=0");
+    }
+
+    #[test]
+    fn dcb_is_only_for_the_current_dict_url() {
+        let id = DICTIONARY.id();
+        assert!(list_wants_dcb("c1v2", Some(&id), true, Some(&id), &id));
+        assert!(!list_wants_dcb("c1v2", None, true, Some(&id), &id), "plain url");
+        assert!(!list_wants_dcb("c1v2", Some("other"), true, Some(&id), &id));
+        assert!(!list_wants_dcb("c1v2", Some(""), true, Some(&id), &id));
+        assert!(!list_wants_dcb("c1v2", Some(&id), false, Some(&id), &id), "headers");
+        assert!(!list_wants_dcb("c1v2", Some(&id), true, Some("stale"), &id), "row");
+        assert!(!list_wants_dcb("c1v2", Some(&id), true, None, &id));
+        assert!(!list_wants_dcb("c1", Some(&id), true, Some(&id), &id));
+        assert!(!list_wants_dcb("json", Some(&id), true, Some(&id), &id));
     }
 
     #[test]
@@ -1105,6 +1144,31 @@ mod dcb_tests {
         assert_eq!(DICTIONARY.decompress(&dcb).expect("decode"), c1v2);
         assert!(dcb.len() < brotli11(&c1v2).len() + 36);
         assert_eq!(DICTIONARY.id(), "d30efab9dda40a4b");
+    }
+
+    #[test]
+    fn the_bypass_rule_and_spa_id_match_the_shipped_dictionary() {
+        let id = DICTIONARY.id();
+        let available = DICTIONARY.available_dictionary();
+        let rule = dcb_bypass_rule(&id, &available);
+        eprintln!("dcb bypass rule: {rule}");
+        let doc = include_str!("../../../../docs/rust-migration/COMPACT_ENCODING.md");
+        assert!(doc.contains(&rule), "COMPACT_ENCODING.md is missing the generated bypass rule:\n{rule}");
+        assert!(doc.contains(&available), "{available}");
+        let js = include_str!("../../../../market/src/api.js");
+        assert!(js.contains(&format!("export const LIST_DICTIONARY_ID = '{id}';")), "{id}");
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/assets")).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if name.starts_with("c1-shared-") && name.ends_with(".dict") {
+                names.push(name);
+            }
+        }
+        assert_eq!(names, vec![format!("c1-shared-{id}.dict")]);
+        let raw = std::fs::read(format!("{}/assets/{}", env!("CARGO_MANIFEST_DIR"), names[0])).unwrap();
+        let recomputed = SharedDictionary::new(raw);
+        assert_eq!(recomputed.id(), id);
+        assert_eq!(recomputed.available_dictionary(), available);
     }
 }
 

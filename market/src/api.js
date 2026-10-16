@@ -1672,10 +1672,48 @@ function mergeExpansionPayload(base, page) {
   };
 }
 
-/** The URL of a prebuilt list snapshot, or '' without a key. */
-export function listSnapshotPath(kind, key) {
+/** The URL of a prebuilt list snapshot, or '' without a key.
+ * `dictId` appends `&dict=` for set, artist and name. Seller books have no
+ * dcb copy, so a dict id on `kind=seller` is ignored. */
+export function listSnapshotPath(kind, key, dictId = '') {
   const k = String(key || '').trim().toLowerCase();
-  return k ? `/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2` : '';
+  if (!k) return '';
+  const path = `/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2`;
+  if (!dictId || kind === 'seller') return path;
+  return `${path}&dict=${encodeURIComponent(dictId)}`;
+}
+
+function compressionDictionarySupported(doc) {
+  try {
+    return Boolean(doc?.createElement?.('link')?.relList?.supports?.('compression-dictionary'));
+  } catch (_) {
+    return false;
+  }
+}
+
+/** The list URLs to try, dictionary URL first. Flag off, or a browser without
+ * compression-dictionary, is exactly today's plain c1v2 URL. */
+export function listSnapshotUrls(kind, key, options = {}) {
+  const plain = listSnapshotPath(kind, key);
+  if (!plain) return [];
+  const enabled = options.enabled ?? LIST_DICTIONARY_ENABLED;
+  const dictId = options.dictId ?? LIST_DICTIONARY_ID;
+  if (!enabled || kind === 'seller' || !dictId) return [plain];
+  const supported = options.supported ?? compressionDictionarySupported(typeof document === 'undefined' ? null : document);
+  if (!supported) return [plain];
+  return [listSnapshotPath(kind, key, dictId), plain];
+}
+
+/** First URL that resolves. An abort does not fall through. */
+export async function readSnapshotUrls(urls, read) {
+  for (let i = 0; i < urls.length; i += 1) {
+    try {
+      return await read(urls[i]);
+    } catch (err) {
+      if (err?.name === 'AbortError' || i + 1 >= urls.length) throw err;
+    }
+  }
+  return null;
 }
 
 /**
@@ -1684,13 +1722,15 @@ export function listSnapshotPath(kind, key) {
  * c1 format 2 (template columns; a snapshot built before format 2 answers c1),
  * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
+ * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that
+ * fetch fails, once more without it.
  */
 export function fetchListSnapshot(kind, key, options = {}) {
-  const path = listSnapshotPath(kind, key);
-  if (!path) {
+  const urls = listSnapshotUrls(kind, key);
+  if (!urls.length) {
     return Promise.resolve(null);
   }
-  return getJsonLocal(path, options)
+  return readSnapshotUrls(urls, (url) => getJsonLocal(url, options))
     .then((payload) => {
       primeListDictionary();
       return payload;
@@ -1731,14 +1771,18 @@ export function fetchSellerSnapshot(handle, { version = '', ...options } = {}) {
 
 let listDictionaryPrimed = false;
 
-/** Off while Cloudflare cannot cache `dcb` per dictionary: its passthrough mode
- * replays one cached `dcb` body to every client, so the zone setting stays
- * disabled and the edge never forwards `dcb` (docs/rust-migration/COMPACT_ENCODING.md). */
+/** Off until the zone Bypass rule is in place and `shared_dictionary_mode` is
+ * `passthrough` (docs/rust-migration/COMPACT_ENCODING.md). Flag off keeps
+ * today's plain `format=c1v2` URLs. */
 export const LIST_DICTIONARY_ENABLED = false;
 
+/** First 8 bytes of the SHA-256 of `pokoin-rust/apps/api/assets/c1-shared-<id>.dict`, hex.
+ * The Rust test `the_bypass_rule_and_spa_id_match_the_shipped_dictionary` asserts this literal. */
+export const LIST_DICTIONARY_ID = 'd30efab9dda40a4b';
+
 /** Once per page: let browsers with RFC 9842 shared dictionaries (Chromium
- * 130+) fetch the c1v2 list dictionary at idle. Later list snapshots then come
- * back as `Content-Encoding: dcb`, decoded natively. Others skip it. */
+ * 130+) fetch the c1v2 list dictionary at idle. Later `&dict=` list snapshots
+ * can come back as `Content-Encoding: dcb`, decoded natively. Others skip it. */
 export function primeListDictionary(doc = typeof document === 'undefined' ? null : document, enabled = LIST_DICTIONARY_ENABLED) {
   if (!enabled || listDictionaryPrimed || !doc?.head) {
     return false;
