@@ -2501,22 +2501,9 @@ h1, h2 { margin: 0 0 0.85rem; }
   gap: 0.45rem;
 }
 
-@media (max-width: 1099px) and (min-width: 721px) {
+@media (min-width: 721px) and (max-width: 1099px) {
   .grid.search-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) and (min-width: 481px) {
-  .grid.search-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 480px) {
-  .grid.search-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.65rem;
   }
 }
 
@@ -8149,10 +8136,18 @@ dialog.zoom:not([open]) {
     font-size: clamp(1.7rem, 8vw, 2.25rem);
   }
   .foot-grid { grid-template-columns: 1fr 1fr; }
+  .grid.search-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* iPhone 16 is 393×852 CSS px. Phone-only; desktop/tablet >480px unchanged. */
 @media (max-width: 480px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
   .topbar {
     padding-top: env(safe-area-inset-top);
   }

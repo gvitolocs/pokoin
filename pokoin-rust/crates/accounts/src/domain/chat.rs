@@ -201,7 +201,7 @@ pub fn clean_listing(raw: &Json) -> Option<Json> {
         .and_then(Json::as_str)
         .unwrap_or("")
         .to_string();
-    Some(json!({
+    let mut listing = json!({
         "kind": if raw.get("kind").and_then(Json::as_str) == Some("card") { "card" } else { "listing" },
         "listingId": raw.get("listingId").and_then(Json::as_str).unwrap_or("").chars().take(80).collect::<String>(),
         "cardId": raw.get("cardId").and_then(Json::as_str).unwrap_or("").chars().take(40).collect::<String>(),
@@ -220,7 +220,25 @@ pub fn clean_listing(raw: &Json) -> Option<Json> {
             .filter(|value| value.is_finite() && *value >= 1.0)
             .map(|value| (value.trunc() as i64).min(99))
             .unwrap_or(1),
-    }))
+    });
+    // Missing game stays absent so the client keeps using the open page.
+    if let Some(game) = kept_listing_game(raw) {
+        listing
+            .as_object_mut()
+            .expect("listing")
+            .insert("game".to_string(), Json::String(game));
+    }
+    Some(listing)
+}
+
+/// A known catalog id on a user-to-user tag. Unknown values are dropped.
+fn kept_listing_game(raw: &Json) -> Option<String> {
+    let text = raw.get("game").and_then(Json::as_str).unwrap_or("").trim();
+    if text.is_empty() {
+        return None;
+    }
+    let id = crate::domain::marketplace_game::normalize_ingest_game(text);
+    if id.is_empty() { None } else { Some(id) }
 }
 
 pub fn clean_listings(value: Option<&Json>) -> Vec<Json> {
@@ -671,6 +689,11 @@ mod tests {
         assert_eq!(clean["path"], json!(""));
         assert_eq!(clean["pricePkn"], json!(0));
         assert_eq!(clean["qty"], json!(1));
+        assert!(clean.get("game").is_none());
+        let kept = clean_listing(&json!({ "cardName": "Nami", "game": "one-piece" })).unwrap();
+        assert_eq!(kept["game"], json!("one_piece"));
+        let unknown = clean_listing(&json!({ "cardName": "Nami", "game": "not-a-game" })).unwrap();
+        assert!(unknown.get("game").is_none());
     }
 
     #[test]

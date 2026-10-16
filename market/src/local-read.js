@@ -186,13 +186,13 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
     return row.value;
   }
 
-  function network(url, { prefetch, signal, priority = prefetch ? 'low' : undefined }, fallback) {
+  function network(url, { prefetch, signal, priority = prefetch ? 'low' : undefined, game } = {}, fallback) {
     let job = inflight.get(url);
     if (!job) {
       const controller = new AbortController();
       job = { adopted: !prefetch, controller, readers: 0 };
       job.promise = Promise.resolve()
-        .then(() => fetchText(url, { signal: controller.signal, priority }))
+        .then(() => fetchText(url, { signal: controller.signal, priority, ...(game ? { game } : {}) }))
         .then(({ text, etag }) => land(url, text, etag))
         .finally(() => inflight.delete(url));
       inflight.set(url, job);
