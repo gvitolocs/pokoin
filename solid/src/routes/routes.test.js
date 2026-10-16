@@ -22,6 +22,12 @@ function routes() {
 const sample = (route) => route.replace(/:lang\b/, 'en').replace(/:\w+\??/g, 'x');
 const BOARDS = /^\/(tests|sanitize|espurr|ocr|artwork|jumbos|poko)(\/|$)/;
 
+test('the router matches a stripped game slug and does not freeze a base', () => {
+  const router = read('../router.js');
+  assert.match(router, /transformUrl:\s*stripGamePrefix/);
+  assert.doesNotMatch(router, /base:\s*gameBasename\(/);
+});
+
 test('the route table is what the old React App served', () => {
   const paths = routes().map((row) => row.path);
   assert.ok(paths.length >= 90, `${paths.length} routes`);

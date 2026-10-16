@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cardFromAutocomplete,
   cardHref,
@@ -24,7 +25,7 @@ import {
 } from '@market/art-shade.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { compactQuery } from '@market/compact-query.js';
-import { isPokemonGame } from '@market/game.js';
+import { isPokemonGame, stripGamePrefix } from '@market/game.js';
 import { clipSuggestCollector, printingIdentity, suggestCardName, suggestTranslatedLine } from '@market/identity.js';
 import { sellerHref } from '@market/listing-meta.js';
 import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/locale.js';
@@ -147,9 +148,9 @@ function flattenPrintings(groups) {
  * rebuilding the list.
  */
 export default function SearchBox(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
-  const pokemon = isPokemonGame();
+  const pokemon = () => isPokemonGame();
   const [query, setQuery] = createSignal('');
   const [term, setTerm] = createSignal('');
   const [open, setOpen] = createSignal(false);
@@ -181,12 +182,12 @@ export default function SearchBox(props) {
   const [interestTick, setInterestTick] = createSignal(0);
   const interest = createMemo(() => {
     interestTick();
-    if (!pokemon) return null;
+    if (!pokemon()) return null;
     return buildInterestProfile(readInterestEvents('pokemon'), { print: printLang(), eraOf: engine()?.matchTcgEra || null });
   });
   const predicted = createMemo(() => {
     const text = term().trim();
-    if (!pokemon || !text || searchTab() === 'users' || liveReady(text)) return null;
+    if (!pokemon() || !text || searchTab() === 'users' || liveReady(text)) return null;
     return predictInterest(text, interest());
   });
   const searchTerm = () => predicted()?.text || term();
@@ -223,7 +224,7 @@ export default function SearchBox(props) {
 
   // /marketplace/search?q= keeps the box in sync with the results page.
   createEffect(() => [location.pathname, location.search], ([pathname, search]) => {
-    if (pathname !== '/marketplace/search') return;
+    if (stripGamePrefix(pathname) !== '/marketplace/search') return;
     const params = new URLSearchParams(search);
     const q = params.get('q');
     if (q) {
@@ -234,8 +235,8 @@ export default function SearchBox(props) {
   });
 
   // Language / print-family / tab change refreshes the typed query's universe at once.
-  createEffect(() => [searchLang(), printLang(), searchTab()], ([lang, print, tab]) => {
-    if (!pokemon || tab === 'users') return;
+  createEffect(() => [searchLang(), printLang(), searchTab(), pokemon()], ([lang, print, tab, isPokemon]) => {
+    if (!isPokemon || tab === 'users') return;
     const typed = untrack(term).trim();
     // Network-only until the engine is loaded on search intent (no engine eval on mount).
     warmupSearchUniverse({
@@ -248,7 +249,7 @@ export default function SearchBox(props) {
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon && searchTab() !== 'users'],
+    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon() && searchTab() !== 'users'],
     ([live, typed, lang, print, kind, enabled]) => {
       if (!live || !enabled) {
         setProgressivePending(false);
@@ -323,8 +324,8 @@ export default function SearchBox(props) {
   // Catalog hydration (name / artist / set printings the local resolver points
   // at), and the satellite-game suggest path (no local catalog).
   createEffect(
-    () => [engine(), searchTerm().trim(), searchLang(), rankPrint(), searchTab()],
-    ([live, text, lang, , tab]) => {
+    () => [engine(), searchTerm().trim(), searchLang(), rankPrint(), searchTab(), pokemon()],
+    ([live, text, lang, , tab, isPokemon]) => {
       if (!text) {
         setOtherPending(false);
         setOtherGroups([]);
@@ -332,7 +333,7 @@ export default function SearchBox(props) {
         return undefined;
       }
       const ready = liveReady(text);
-      if (pokemon) {
+      if (isPokemon) {
         if (!ready) {
           setOtherGroups([]);
           setHitCount(0);
@@ -443,8 +444,8 @@ export default function SearchBox(props) {
   // page (and its recall lookups) for a prefix nobody would open; the count
   // shows the suggest estimate until the real one lands, and Enter prefetches
   // on its own (goSearch).
-  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
-    if (!isOpen || !pokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
+  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon()], ([isOpen, text, tab, lang, print, isPokemon]) => {
+    if (!isOpen || !isPokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
       prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
@@ -464,7 +465,7 @@ export default function SearchBox(props) {
   });
 
   const visibleGroups = createMemo(() => {
-    if (!pokemon) return otherGroups();
+    if (!pokemon()) return otherGroups();
     const live = engine();
     const text = searchTerm();
     if (!live || !live.suggestLiveReady(text) || searchTab() === 'users') return [];
@@ -481,10 +482,10 @@ export default function SearchBox(props) {
   // Groups keyed by name: a re-rank inside a group keeps its rows mounted.
   const keyedGroups = createMemo(() => withGroupKeys(visibleGroups()));
   // The one frame where `term` trails the input also reads as pending, never as "no match".
-  const suggestPending = () => (pokemon && searchTab() !== 'users'
+  const suggestPending = () => (pokemon() && searchTab() !== 'users'
     ? progressivePending() || !engine() || term() !== query() || rankPrint() !== printLang()
     : otherPending() || term() !== query());
-  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon || visibleGroups().length > 0 || suggestPending());
+  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon() || visibleGroups().length > 0 || suggestPending());
   const activeOption = () => (activeIndex() >= 0 ? flat()[activeIndex()] : null);
   const suggestIds = () => (open() ? flat().map((row) => String(row.card.id)).join('|') : '');
 
@@ -680,7 +681,7 @@ export default function SearchBox(props) {
           aria-autocomplete="list"
           aria-busy={ariaBool(suggestVisible() && suggestPending())}
         />
-        <Show when={pokemon}><PrintLangToggle /></Show>
+        <Show when={pokemon()}><PrintLangToggle /></Show>
         <button class="sr-only" type="submit">Search</button>
       </div>
       <Show when={suggestVisible()}>
@@ -690,7 +691,7 @@ export default function SearchBox(props) {
           ref={(node) => { panel = node; }}
           onMouseLeave={() => setPointerHoverId(null)}
         >
-          <Show when={pokemon}>
+          <Show when={pokemon()}>
             <SearchTabs value={searchTab()} onChange={(tab) => { setSearchTab(tab); setActiveIndex(-1); }} ariaLabel="Search type" />
           </Show>
           <Show
@@ -757,7 +758,7 @@ export default function SearchBox(props) {
                         <For each={group().printings || []} keyed={(printing) => String(printing?.id || printing?.card_id || '')}>
                           {(printing) => (
                             <SuggestRow
-                              pokemon={pokemon}
+                              pokemon={pokemon()}
                               printing={printing()}
                               groupName={group().name}
                               flat={flat()}

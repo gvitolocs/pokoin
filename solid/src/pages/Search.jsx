@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, createStore, For, Match, reconcile, Repeat, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { fetchSearch, fetchSellerSearchWithAssociates } from '@market/api.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
@@ -89,7 +90,7 @@ function Alert(props) {
  */
 export default function Search() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const pokemon = isPokemonGame();
   const params = createMemo(() => new URLSearchParams(location.search));
   const typedQuery = createMemo(() => (params().get('q') || params().get('query') || '').trim());

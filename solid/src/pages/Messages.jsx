@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useNavigate, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { searchRecipientUsernames } from '@market/api.js';
 import {
   listConversations,
@@ -60,7 +61,7 @@ function SignInGate() {
 const USERNAME = /^[a-z0-9]{3,32}$/;
 
 function NewConversation(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [query, setQuery] = createSignal('');
   const [rows, setRows] = createSignal([]);
   const clean = () => query().trim().toLowerCase();
@@ -321,7 +322,7 @@ function readPendingCard() {
 }
 
 function PokoConversation() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [text, setText] = createSignal('');
   const [cards, setCards] = createSignal(readPendingCard());
   const [photos, setPhotos] = createSignal([]);
@@ -527,7 +528,7 @@ function PokoConversation() {
 
 function HumanConversation(props) {
   const peer = props.peer;
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [text, setText] = createSignal('');
   const [photos, setPhotos] = createSignal([]);
   const [moneyMode, setMoneyMode] = createSignal('');

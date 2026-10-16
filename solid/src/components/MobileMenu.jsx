@@ -46,12 +46,13 @@ function Glyph(props) {
 function MenuLink(props) {
   const target = () => props.href || (props.to ? marketUrl(props.to) : '');
   const external = () => Boolean(props.href) || String(target()).startsWith('http');
+  const prefixed = () => gameHref(target());
   const rel = () => [props.rel, authAnchorRel(props.to || props.href)].filter(Boolean).join(' ') || undefined;
-  const link = useLinkState(() => (external() ? '' : target()), { end: untrack(() => props.to === '/marketplace') });
+  const link = useLinkState(() => (external() ? '' : prefixed()), { end: untrack(() => props.to === '/marketplace') });
   return (
     <a
       class={[props.class, { 'is-active': !external() && link.active() }]}
-      href={gameHref(target())}
+      href={prefixed()}
       rel={rel()}
       target={props.href ? '_self' : undefined}
       onClick={() => props.onClick?.()}

@@ -103,16 +103,83 @@ function hostName() {
   return String(window.location.hostname || '').toLowerCase();
 }
 
+/**
+ * Optional pathname reader. Null uses `window.location.pathname` (React, node
+ * tests, and any page that never opts in). The Solid app sets this to the
+ * router location so `game()` and the helpers below track in-app navigations.
+ */
+let pathSource = null;
+
+/** `fn` returns the current pathname. Pass null (or a non-function) to unset. */
+export function setGamePathSource(fn) {
+  pathSource = typeof fn === 'function' ? fn : null;
+}
+
 function currentPath() {
+  if (pathSource) {
+    try {
+      const fromSource = pathSource();
+      if (fromSource != null) return String(fromSource);
+    } catch (_) {
+      // A reader that throws falls through to the document URL.
+    }
+  }
   if (typeof window === 'undefined' || !window.location) {
     return '';
   }
   return String(window.location.pathname || '');
 }
 
-function gameIdFromPath(pathname = '') {
+export function gameIdFromPath(pathname = '') {
   const slug = String(pathname || '').split('/').filter(Boolean)[0] || '';
   return SLUG_TO_ID[slug] || '';
+}
+
+/**
+ * Path the router matches. A leading known game slug is removed
+ * (`/one-piece/marketplace/x` → `/marketplace/x`); Pokémon and unknown first
+ * segments stay as they are.
+ */
+export function stripGamePrefix(pathname = '') {
+  const raw = String(pathname || '');
+  const parts = raw.split('/');
+  if (!SLUG_TO_ID[parts[1] || '']) return raw;
+  const rest = parts.slice(2);
+  return rest.length ? `/${rest.join('/')}` : '/';
+}
+
+/** True for `/marketplace` and `/<known-slug>/marketplace`, with or without a trailing slash. */
+export function isMarketplaceHomePath(pathname = '') {
+  const path = String(pathname || '').split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+  if (path === '/marketplace') return true;
+  const parts = path.split('/').filter(Boolean);
+  return parts.length === 2 && Boolean(SLUG_TO_ID[parts[0]]) && parts[1] === 'marketplace';
+}
+
+/**
+ * Different game, and the target is not that game's marketplace home.
+ * Those navigations stay a full document load. Same-game links and a
+ * cross-game landing on the marketplace home stay in the app.
+ */
+function gameIds(fromPath, toPath) {
+  const target = String(toPath || '').split(/[?#]/)[0];
+  return {
+    target,
+    fromId: gameIdFromPath(fromPath) || 'pokemon',
+    toId: gameIdFromPath(target) || 'pokemon',
+  };
+}
+
+/** Another game's marketplace home: stay in the app, and do not re-prefix the path. */
+export function isCrossGameHome(fromPath, toPath) {
+  const { target, fromId, toId } = gameIds(fromPath, toPath);
+  return fromId !== toId && isMarketplaceHomePath(target);
+}
+
+export function gameSwitchReloads(fromPath, toPath) {
+  const { target, fromId, toId } = gameIds(fromPath, toPath);
+  if (fromId === toId) return false;
+  return !isMarketplaceHomePath(target);
 }
 
 /** React Router basename. Empty on the Pokemon apex. */
@@ -121,7 +188,7 @@ export function gameBasename(pathname = currentPath()) {
   return SLUG_TO_ID[slug] ? `/${slug}` : '';
 }
 
-/** Full site path for a game's marketplace. Reloads so the basename changes. */
+/** Marketplace home path for a game. Pokémon stays unprefixed. */
 export function gamePublicPath(gameId) {
   const row = GAMES[gameId] || GAMES.pokemon;
   if (!row.slug) return '/marketplace';
@@ -248,11 +315,28 @@ export function game(hostname = hostName()) {
   return GAMES[gameIdFromHost(hostname)] || GAMES.pokemon;
 }
 
+/** Path half of `gameSiteHref` (no origin). Seller desks keep the handle. */
+export function gameSitePath(id, pathname = currentPath()) {
+  return `${gamePublicPath(id || 'pokemon')}${sellerDeskRest(pathname)}`;
+}
+
 /** Where the header game picker sends the browser. Seller desks keep the handle. */
 export function gameSiteHref(id, pathname = currentPath()) {
-  const base = gamePublicPath(id || 'pokemon');
-  const seller = sellerDeskRest(pathname);
-  return `https://pokoin.com${base}${seller}`;
+  return `https://pokoin.com${gameSitePath(id, pathname)}`;
+}
+
+/**
+ * Header preview of another game's marketplace home. Same-origin path on
+ * pokoin.com and local dev (the in-app router can claim it); absolute on the
+ * dashboard host and anywhere else.
+ */
+export function gamePreviewHref(id, hostname = hostName()) {
+  const path = gamePublicPath(id);
+  const host = String(hostname || '').toLowerCase();
+  const local = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost');
+  const apex = host === 'pokoin.com' || host === 'www.pokoin.com';
+  if (local || apex) return path;
+  return `https://pokoin.com${path}`;
 }
 
 /** `/en/users/handle…` when the path is a public seller desk; else empty. */
