@@ -364,7 +364,7 @@ async fn require_card(db: &MarketplaceDb, params: &Json) -> Result<Required> {
         let rows = query_rows(
             db,
             "select card_id, ct_id, name, set_name, artist, item_kind \
-               from marketplace_search_candidates where card_id = $1 limit 1",
+               from marketplace_search_candidates where card_id = $1::bigint limit 1",
             &[SqlParam::Text(card_id)],
         )
         .await?;
@@ -1630,7 +1630,7 @@ async fn market_snapshot(deps: &MarketDeps, params: &Json) -> Result<Json> {
         "select w.card_id, w.sold_qty_7d, w.listed_now, w.sell_through, \
                 w.median_sold_eur, w.sold_value_eur_7d, s.name, s.set_name, s.artist \
            from marketplace_card_weights w \
-           left join marketplace_search_candidates s on s.card_id = w.card_id \
+           left join marketplace_search_candidates s on s.card_id::text = w.card_id \
           where w.sold_qty_7d > 0 order by w.sold_qty_7d desc limit $1",
         &[SqlParam::Int(limit)],
     )
@@ -2036,7 +2036,7 @@ async fn top_sellers(deps: &MarketDeps, params: &Json) -> Result<Json> {
            join marketplace_search_candidates s on s.ct_id = sold.blueprint_id and s.item_kind = 'single' \
            left join asks on asks.blueprint_id = sold.blueprint_id \
           where sold.median_pkn >= $3 \
-            and ($4::numeric is null or sold.median_pkn <= $4) \
+            and ($4::float8 is null or sold.median_pkn <= $4::float8) \
             and {} \
             and ($6::text is null \
                  or lower(split_part(s.card_number, ' | ', 1)) = lower($6) \
@@ -2467,7 +2467,7 @@ async fn artist_cards(deps: &MarketDeps, params: &Json) -> Result<Json> {
     if artist_input.is_empty() && !card_id.is_empty() && card_id.bytes().all(|byte| byte.is_ascii_digit()) {
         let rows = query_rows(
             &deps.db,
-            "select artist, name, set_name from marketplace_search_candidates where card_id = $1 limit 1",
+            "select artist, name, set_name from marketplace_search_candidates where card_id = $1::bigint limit 1",
             &[SqlParam::Text(card_id.clone())],
         )
         .await?;
@@ -2869,7 +2869,7 @@ fn tool_names() -> &'static [&'static str] {
     &TOOLS
 }
 
-async fn run_tool(deps: &MarketDeps, tool: &str, params: &Json) -> Result<Json> {
+pub(crate) async fn run_tool(deps: &MarketDeps, tool: &str, params: &Json) -> Result<Json> {
     match tool {
         "resolve_card" => resolve_card(&deps.db, params).await,
         "card_quote" => card_quote(deps, params).await,
@@ -2900,7 +2900,7 @@ pub fn status_for_tool(status: &str) -> StatusCode {
 }
 
 /// The TCGplayer history pool, created lazily and only when configured.
-fn tcg_pool() -> Option<MarketplaceDb> {
+pub(crate) fn tcg_pool() -> Option<MarketplaceDb> {
     static POOL: OnceLock<Option<MarketplaceDb>> = OnceLock::new();
     POOL.get_or_init(|| {
         let url = std::env::var("TCGCSV_DATABASE_URL")
