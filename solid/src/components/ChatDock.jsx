@@ -536,7 +536,7 @@ export default function ChatDock() {
                       event.target.value = '';
                       addPhotoFiles(files);
                     }}
-                    disabled={sending() || photos().length >= MAX_CHAT_PHOTOS}
+                    disabled={busy() || photos().length >= MAX_CHAT_PHOTOS}
                   />
                 </label>
                 <label class="sr-only" for="chat-dock-input">Message</label>
