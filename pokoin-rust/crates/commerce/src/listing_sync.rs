@@ -3,9 +3,10 @@ use crate::listing_live::{field, first, json_number, number};
 use crate::{error::ApiError, state::DomainState};
 use pokoin_external::{
     cardtrader::{
-        client::CardTraderClient,
-        integration,
+        client::{self as ct_client, CardTraderClient},
+        integration, link,
         push::{self as ct_push, PushOutcome},
+        sync_core::parse_ct_product_id,
     },
     firebase::{FirestoreRest, FirestoreStore},
 };
@@ -235,7 +236,7 @@ pub fn event(row: &Value, extra: &Value, now: i64) -> Option<Value> {
         mutation
     };
     Some(
-        json!({"type":"listing.changed","aggregateId":id,"idempotencyKey":format!("listing.changed:{id}:{stamp}"),"payload":{"cardId":first(row,&["cardId","card_id"],80),"game":game,"sellerUid":seller,"listingId":id,"quantityAvailable":row.get("quantityAvailable").or_else(||row.get("quantity_available")).cloned().unwrap_or(Value::Null),"status":field(row,"status",20),"mutation":mutation,"merchantListing":merchant_snapshot(row),"wantsCardtrader":extra["wantsCardtrader"]==true,"destroyCardtrader":extra["destroyCardtrader"]==true,"sourceListingId":if field(extra,"sourceListingId",160).is_empty(){first(row,&["sourceListingId","source_listing_id"],160)}else{field(extra,"sourceListingId",160)},"listing":extra.get("cardtraderListing").cloned().unwrap_or(Value::Null),"steps":{}}}),
+        json!({"type":"listing.changed","aggregateId":id,"idempotencyKey":format!("listing.changed:{id}:{stamp}"),"payload":{"cardId":first(row,&["cardId","card_id"],80),"game":game,"sellerUid":seller,"listingId":id,"quantityAvailable":row.get("quantityAvailable").or_else(||row.get("quantity_available")).cloned().unwrap_or(Value::Null),"status":field(row,"status",20),"mutation":mutation,"merchantListing":merchant_snapshot(row),"wantsCardtrader":extra["wantsCardtrader"]==true,"destroyCardtrader":extra["destroyCardtrader"]==true,"sourceListingId":if field(extra,"sourceListingId",160).is_empty(){first(row,&["sourceListingId","source_listing_id"],160)}else{field(extra,"sourceListingId",160)},"listing":extra.get("cardtraderListing").cloned().unwrap_or(Value::Null),"cardtraderEdit":extra.get("cardtraderEdit").cloned().unwrap_or(Value::Null),"steps":{}}}),
     )
 }
 fn is_missing_table(error: &sqlx::Error) -> bool {
@@ -487,6 +488,169 @@ async fn push_cardtrader(state: &DomainState, event_id: i64, seller: &str, paylo
     }
 }
 
+/// What a seller's edit of a CardTrader-linked listing changes on its product:
+/// `{"productId", "pricePkn"?, "quantityDelta"?}`. `before` is the row as it
+/// was under the update's row lock, `after` the row the update wrote. `None`
+/// when nothing goes to CardTrader: not linked (or its push still pending),
+/// the link itself changed, the listing went off sale (its destroy covers
+/// that), or neither price nor quantity moved.
+///
+/// Quantity goes as the change, never the new total: CardTrader stock is the
+/// seller's, and an absolute write would undo a CardTrader sale or restock
+/// that Pokoin has not seen yet (docs/CARDTRADER_SELLER_SYNC.md).
+pub fn cardtrader_edit(before: &Value, after: &Value) -> Option<Value> {
+    let source = field(before, "source_listing_id", 160);
+    let product = parse_ct_product_id(&source);
+    if product.is_empty() || field(after, "source_listing_id", 160) != source {
+        return None;
+    }
+    let qty = number(&after["quantity_available"]);
+    if ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0) {
+        return None;
+    }
+    let mut edit = json!({ "productId": product });
+    let price = number(&after["price_pkn"]);
+    if price.is_finite() && price > 0.0 && price != number(&before["price_pkn"]) {
+        edit["pricePkn"] = json_number(price);
+    }
+    let delta = qty - number(&before["quantity_available"]);
+    if delta.is_finite() && delta != 0.0 {
+        edit["quantityDelta"] = json!(delta as i64);
+    }
+    (edit.get("pricePkn").is_some() || edit.get("quantityDelta").is_some()).then_some(edit)
+}
+
+/// What one CardTrader write of an edit did.
+#[derive(Debug)]
+pub enum EditOutcome {
+    Applied,
+    /// CardTrader no longer has the product (404).
+    Gone,
+    /// Answered and refused (another 4xx, a rejected token): nothing changed.
+    Refused(pokoin_external::ApiError),
+    /// No answer, or a 5xx: it may have been applied.
+    InDoubt(pokoin_external::ApiError),
+}
+
+impl EditOutcome {
+    pub fn of(result: Result<Value, pokoin_external::ApiError>) -> Self {
+        let gone = format!("{}404", ct_client::HTTP_ERROR_PREFIX);
+        match result {
+            Ok(_) => Self::Applied,
+            Err(e) if e.code.as_deref() == Some(gone.as_str()) => Self::Gone,
+            Err(e) if ct_client::write_in_doubt(&e) => Self::InDoubt(e),
+            Err(e) => Self::Refused(e),
+        }
+    }
+
+    /// The `steps` label; refusals and doubts are logged (no token, no body).
+    fn settle(self, write: &str, seller: &str, product: &str) -> &'static str {
+        let (label, error) = match &self {
+            Self::Applied => return "updated",
+            Self::Gone => return "gone",
+            Self::Refused(e) => ("refused", e),
+            Self::InDoubt(e) => ("in_doubt", e),
+        };
+        tracing::warn!(msg = "cardtrader_edit_not_applied", write, seller, product, outcome = label, error = %error.message);
+        label
+    }
+}
+
+/// Outbox step markers written to the event row as they happen, so a retry,
+/// or a second worker whose lease expired, sees them even when the attempt
+/// that wrote them failed afterwards.
+#[async_trait::async_trait]
+pub trait StepMarks: Send + Sync {
+    /// Set `steps.<step>` only while it is unset. False: it was already set.
+    async fn claim(&self, step: &str, value: &str) -> Result<bool, ApiError>;
+    async fn mark(&self, step: &str, value: &str) -> Result<(), ApiError>;
+}
+
+const MARK_STEP_SQL: &str = "update public.marketplace_outbox set payload = jsonb_set(payload, '{steps}', coalesce(payload->'steps', '{}'::jsonb) || jsonb_build_object($2::text, $3::text)) where id = $1";
+const CLAIM_STEP_SQL: &str = "update public.marketplace_outbox set payload = jsonb_set(payload, '{steps}', coalesce(payload->'steps', '{}'::jsonb) || jsonb_build_object($2::text, $3::text)) where id = $1 and coalesce(payload->'steps'->$2::text, 'null'::jsonb) = 'null'::jsonb returning id";
+
+struct OutboxMarks<'a> {
+    db: &'a sqlx::PgPool,
+    id: i64,
+}
+
+#[async_trait::async_trait]
+impl StepMarks for OutboxMarks<'_> {
+    async fn claim(&self, step: &str, value: &str) -> Result<bool, ApiError> {
+        let claimed = sqlx::query_scalar::<_, i64>(CLAIM_STEP_SQL)
+            .bind(self.id)
+            .bind(step)
+            .bind(value)
+            .fetch_optional(self.db)
+            .await?;
+        Ok(claimed.is_some())
+    }
+    async fn mark(&self, step: &str, value: &str) -> Result<(), ApiError> {
+        sqlx::query(MARK_STEP_SQL).bind(self.id).bind(step).bind(value).execute(self.db).await?;
+        Ok(())
+    }
+}
+
+/// `steps.cardtraderQuantity` while its increment is out. An attempt that
+/// finds it never sends again: the increment is not idempotent.
+pub const SENDING: &str = "sending";
+
+/// Send a seller's edit (`payload.cardtraderEdit`) to the linked CardTrader
+/// product, when the seller chose `pokoin_to_ct` or `both`:
+///
+/// - price: `PUT /products/:id {"price"}`, the push's EUR conversion. It is
+///   absolute, so a write in doubt is an error the outbox retries.
+/// - quantity: `POST /products/:id/increment` with the change, the way a
+///   Pokoin sale takes stock off. Claimed on the event row first; a write in
+///   doubt is never sent again (`in_doubt`): sending it twice would add or
+///   take stock the seller does not have. The reconcile then copies
+///   CardTrader's quantity onto the listing.
+///
+/// A 404 (`gone`) or another refusal (`refused`) is final: retrying cannot
+/// change CardTrader's answer, and the reconcile settles the listing.
+pub async fn edit_cardtrader(
+    fs: &dyn FirestoreStore,
+    ct: &CardTraderClient,
+    marks: &dyn StepMarks,
+    seller: &str,
+    payload: &mut Value,
+) -> Result<(), ApiError> {
+    let edit = payload["cardtraderEdit"].clone();
+    let product = field(&edit, "productId", 80);
+    let doc = integration::read_integration_doc(fs, seller).await.map_err(external_error)?;
+    if let Some(reason) = link::edit_skip_reason(&doc) {
+        payload["steps"]["cardtraderEdit"] = json!(reason);
+        return Ok(());
+    }
+    let token = integration::token_from_doc(&doc).map_err(external_error)?;
+    if edit.get("pricePkn").is_some() && payload["steps"]["cardtraderPrice"].is_null() {
+        let label = match ct_push::price_body(number(&edit["pricePkn"])) {
+            None => "invalid_price",
+            Some(body) => match EditOutcome::of(ct.update_product(&token, &product, body).await) {
+                EditOutcome::InDoubt(e) => return Err(external_error(e)),
+                outcome => outcome.settle("price", seller, &product),
+            },
+        };
+        payload["steps"]["cardtraderPrice"] = json!(label);
+    }
+    let delta = edit["quantityDelta"].as_i64().unwrap_or(0);
+    let sent = field(&payload["steps"], "cardtraderQuantity", 40);
+    if delta != 0 && (sent.is_empty() || sent == SENDING) {
+        let label = if sent == SENDING || !marks.claim("cardtraderQuantity", SENDING).await? {
+            // An earlier attempt sent it and never learned the answer, or
+            // another worker is sending it now.
+            "in_doubt"
+        } else {
+            payload["steps"]["cardtraderQuantity"] = json!(SENDING);
+            EditOutcome::of(ct.increment_product(&token, &product, delta).await).settle("quantity", seller, &product)
+        };
+        marks.mark("cardtraderQuantity", label).await?;
+        payload["steps"]["cardtraderQuantity"] = json!(label);
+    }
+    payload["steps"]["cardtraderEdit"] = json!("done");
+    Ok(())
+}
+
 pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value) -> Result<(), ApiError> {
     let card = field(payload, "cardId", 80);
     let game = field(payload, "game", 40);
@@ -542,6 +706,16 @@ pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value
             payload["steps"]["cardtrader"] = json!("already_linked");
         }
     }
+    // A listing taken off sale loses its product below instead.
+    if payload["cardtraderEdit"].is_object()
+        && payload["steps"]["cardtraderEdit"].is_null()
+        && payload["destroyCardtrader"] != true
+    {
+        let fs = FirestoreRest::from_env()
+            .ok_or_else(|| ApiError::internal("Firebase Admin credentials are not configured."))?;
+        let marks = OutboxMarks { db: state.write_db(), id: event_id };
+        edit_cardtrader(&fs, &CardTraderClient::new(), &marks, &seller, payload).await?;
+    }
     if payload["destroyCardtrader"] == true
         && !field(payload, "sourceListingId", 160).is_empty()
         && payload["steps"]["destroyed"] != true
@@ -592,7 +766,11 @@ pub async fn drain_once(state: &DomainState) -> Result<bool, ApiError> {
                 // CLAIM_SQL never picks it again (Node logged the same line).
                 tracing::warn!(msg = "pokoin_sync_dead_letter", id, attempts, error = %e.message);
             }
-            sqlx::query("update public.marketplace_outbox set last_error = $2, payload = coalesce($3::jsonb, payload) where id = $1").bind(id).bind(e.message.chars().take(500).collect::<String>()).bind(row.try_get::<Value,_>("payload")?).execute(state.write_db()).await?;
+            // Keep the steps this attempt finished: steps are marked only after
+            // they took effect, and writing the claimed payload back would
+            // erase a marker written mid-attempt (`steps.cardtraderQuantity`),
+            // letting the retry send a CardTrader increment twice.
+            sqlx::query("update public.marketplace_outbox set last_error = $2, payload = coalesce($3::jsonb, payload) where id = $1").bind(id).bind(e.message.chars().take(500).collect::<String>()).bind(&payload).execute(state.write_db()).await?;
             Ok(false)
         }
     }
@@ -684,6 +862,10 @@ mod tests {
         assert_eq!(e["payload"]["steps"], json!({}));
         assert_eq!(e["payload"]["listing"]["cardId"], "22");
         assert_eq!(e["payload"]["merchantListing"]["quantityAvailable"], 2);
+        assert!(e["payload"]["cardtraderEdit"].is_null());
+        let edit = json!({"productId": "444", "quantityDelta": 2});
+        let e = event(&json!({"id":"l1","updated_at":"t2"}), &json!({"cardtraderEdit": edit.clone()}), 1).unwrap();
+        assert_eq!(e["payload"]["cardtraderEdit"], edit);
         assert!(event(&json!({}), &json!({}), 0).is_none());
     }
     #[test]
@@ -748,6 +930,200 @@ mod tests {
         assert_eq!(err.status.as_u16(), 409);
         assert!(err.message.contains("1-Day Ready"));
     }
+    /// Tests that set CARDTRADER_TOKEN_ENCRYPTION_KEY and put it back: one at
+    /// a time, or one removes it while another decrypts.
+    static TOKEN_KEY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn edits_of_linked_listings_send_the_price_and_the_quantity_change() {
+        let before = json!({"source_listing_id": "ct:444", "price_pkn": 200, "quantity_available": 3, "status": "active"});
+        let after = |patch: Value| {
+            let mut row = before.clone();
+            row.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+            row
+        };
+        assert_eq!(cardtrader_edit(&before, &after(json!({"price_pkn": 300}))), Some(json!({"productId": "444", "pricePkn": 300})));
+        assert_eq!(cardtrader_edit(&before, &after(json!({"quantity_available": 5}))), Some(json!({"productId": "444", "quantityDelta": 2})));
+        assert_eq!(cardtrader_edit(&before, &after(json!({"quantity_available": 1}))), Some(json!({"productId": "444", "quantityDelta": -2})));
+        assert_eq!(
+            cardtrader_edit(&before, &after(json!({"price_pkn": 250.5, "quantity_available": 4}))),
+            Some(json!({"productId": "444", "pricePkn": 250.5, "quantityDelta": 1}))
+        );
+        // A paused listing keeps its CardTrader product, so it keeps it current.
+        assert!(cardtrader_edit(&before, &after(json!({"status": "paused", "price_pkn": 300}))).is_some());
+        // Nothing CardTrader shows changed (a location, a comment).
+        assert_eq!(cardtrader_edit(&before, &after(json!({"location": "Binder A"}))), None);
+        // Off sale: the destroy takes the product off instead.
+        assert_eq!(cardtrader_edit(&before, &after(json!({"status": "inactive", "quantity_available": 0}))), None);
+        assert_eq!(cardtrader_edit(&before, &after(json!({"status": "sold_out", "price_pkn": 300}))), None);
+        assert_eq!(cardtrader_edit(&before, &after(json!({"status": "paused", "quantity_available": 0}))), None);
+        // Not linked, a push still in flight, or the link itself edited.
+        for source in ["", "ct:pending:41", "pokoin:abc"] {
+            let unlinked = json!({"source_listing_id": source, "price_pkn": 200, "quantity_available": 3, "status": "active"});
+            let mut edited = unlinked.clone();
+            edited["price_pkn"] = json!(300);
+            assert_eq!(cardtrader_edit(&unlinked, &edited), None, "{source}");
+        }
+        assert_eq!(cardtrader_edit(&before, &after(json!({"source_listing_id": "ct:555", "price_pkn": 300}))), None);
+        assert_eq!(cardtrader_edit(&json!({}), &after(json!({"price_pkn": 300}))), None);
+    }
+
+    #[test]
+    fn edit_outcomes_tell_final_answers_from_writes_in_doubt() {
+        let error = |status: u16, code: &str| pokoin_external::ApiError::new(502, format!("HTTP {status}")).with_code(code);
+        assert!(matches!(EditOutcome::of(Ok(json!({}))), EditOutcome::Applied));
+        assert!(matches!(EditOutcome::of(Err(error(404, "cardtrader_http_404"))), EditOutcome::Gone));
+        assert!(matches!(EditOutcome::of(Err(error(422, "cardtrader_http_422"))), EditOutcome::Refused(_)));
+        assert!(matches!(EditOutcome::of(Err(error(400, "cardtrader_token_rejected"))), EditOutcome::Refused(_)));
+        assert!(matches!(EditOutcome::of(Err(error(503, "cardtrader_http_503"))), EditOutcome::InDoubt(_)));
+        assert!(matches!(EditOutcome::of(Err(error(0, "cardtrader_transport"))), EditOutcome::InDoubt(_)));
+        assert!(CLAIM_STEP_SQL.starts_with(MARK_STEP_SQL) && CLAIM_STEP_SQL.contains("'null'::jsonb returning id"));
+    }
+
+    /// The outbox row's markers, in memory.
+    #[derive(Default)]
+    struct MemoryMarks(std::sync::Mutex<serde_json::Map<String, Value>>);
+
+    #[async_trait::async_trait]
+    impl StepMarks for MemoryMarks {
+        async fn claim(&self, step: &str, value: &str) -> Result<bool, ApiError> {
+            let mut steps = self.0.lock().unwrap();
+            if steps.get(step).is_some_and(|v| !v.is_null()) {
+                return Ok(false);
+            }
+            steps.insert(step.into(), json!(value));
+            Ok(true)
+        }
+        async fn mark(&self, step: &str, value: &str) -> Result<(), ApiError> {
+            self.0.lock().unwrap().insert(step.into(), json!(value));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn edit_step_retries_the_price_but_never_resends_a_quantity_change() {
+        use axum::{extract::{Path, State}, http::StatusCode, routing::{post, put}, Json, Router};
+        use std::sync::Arc;
+        type Calls = Arc<std::sync::Mutex<Vec<String>>>;
+        // CardTrader stand-in: the product id picks the answer.
+        fn answer(id: &str) -> (StatusCode, Json<Value>) {
+            match id {
+                "503" => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({}))),
+                "404" => (StatusCode::NOT_FOUND, Json(json!({}))),
+                "422" => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": "quantity"}))),
+                _ => (StatusCode::OK, Json(json!({"resource": {"id": id}}))),
+            }
+        }
+        let calls: Calls = Arc::default();
+        let app = Router::new()
+            .route(
+                "/products/{id}",
+                put(|State(calls): State<Calls>, Path(id): Path<String>, headers: axum::http::HeaderMap, Json(body): Json<Value>| async move {
+                    assert_eq!(headers["authorization"], "Bearer test-edit-token-0123456789");
+                    calls.lock().unwrap().push(format!("put:{id}:{body}"));
+                    answer(&id)
+                }),
+            )
+            .route(
+                "/products/{id}/increment",
+                post(|State(calls): State<Calls>, Path(id): Path<String>, Json(body): Json<Value>| async move {
+                    calls.lock().unwrap().push(format!("increment:{id}:{}", body["delta_quantity"]));
+                    answer(&id)
+                }),
+            )
+            .with_state(calls.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let _key = TOKEN_KEY.lock().await;
+        let prior = std::env::var("CARDTRADER_TOKEN_ENCRYPTION_KEY").ok();
+        std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", KEY);
+        let fs = pokoin_external::firebase::MemoryFirestore::new();
+        let token = pokoin_external::crypto::encrypt_secret("test-edit-token-0123456789", Some(KEY));
+        for (uid, extra) in [
+            ("default", json!({})),
+            ("both", json!({"inventorySync": {"direction": "both"}})),
+            ("push", json!({"inventorySync": {"direction": "pokoin_to_ct"}})),
+            ("oneday", json!({"inventorySync": {"direction": "both"}, "metadata": {"oneDayReady": true}})),
+        ] {
+            let mut doc = json!({"enabled": true, "encryptedToken": token});
+            doc.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            fs.seed("seller_integrations", &integration::integration_doc_id(uid), doc).await;
+        }
+        let ct = CardTraderClient::with_base(format!("http://{address}"));
+        let payload = |product: &str, edit: Value| {
+            let mut edit = edit;
+            edit["productId"] = json!(product);
+            json!({"cardtraderEdit": edit, "steps": {}})
+        };
+        let taken = || std::mem::take(&mut *calls.lock().unwrap());
+
+        // CardTrader → Pokoin and 1-Day Ready sellers: nothing is sent.
+        for (uid, reason) in [("default", "ct_to_pokoin"), ("oneday", "one_day_ready"), ("nobody", "not_connected")] {
+            let mut p = payload("7", json!({"pricePkn": 300, "quantityDelta": 2}));
+            edit_cardtrader(&fs, &ct, &MemoryMarks::default(), uid, &mut p).await.unwrap();
+            assert_eq!(p["steps"]["cardtraderEdit"], reason);
+        }
+        assert!(taken().is_empty());
+
+        // Price at the push's EUR rate, quantity as the change.
+        let marks = MemoryMarks::default();
+        let mut p = payload("7", json!({"pricePkn": 300, "quantityDelta": 2}));
+        edit_cardtrader(&fs, &ct, &marks, "both", &mut p).await.unwrap();
+        assert_eq!(taken(), vec![r#"put:7:{"price":1.5}"#.to_string(), "increment:7:2".into()]);
+        assert_eq!(p["steps"], json!({"cardtraderPrice": "updated", "cardtraderQuantity": "updated", "cardtraderEdit": "done"}));
+        assert_eq!(marks.0.lock().unwrap()["cardtraderQuantity"], "updated");
+
+        // A price write in doubt is an error the outbox retries (PUT is absolute).
+        let mut p = payload("503", json!({"pricePkn": 300}));
+        assert!(edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "push", &mut p).await.is_err());
+        assert!(p["steps"]["cardtraderPrice"].is_null() && p["steps"]["cardtraderEdit"].is_null());
+        assert_eq!(taken().len(), 1);
+
+        // An increment in doubt is never sent again.
+        let marks = MemoryMarks::default();
+        let mut p = payload("503", json!({"quantityDelta": -1}));
+        edit_cardtrader(&fs, &ct, &marks, "push", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderQuantity"], "in_doubt");
+        assert_eq!(taken(), vec!["increment:503:-1".to_string()]);
+        // Retried after a crash mid-increment: the row still says `sending`.
+        let mut p = payload("7", json!({"quantityDelta": -1}));
+        p["steps"]["cardtraderQuantity"] = json!(SENDING);
+        edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "push", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderQuantity"], "in_doubt");
+        // Another worker (lease expired under it) holds the claim.
+        let held = MemoryMarks::default();
+        held.0.lock().unwrap().insert("cardtraderQuantity".into(), json!(SENDING));
+        let mut p = payload("7", json!({"quantityDelta": 3}));
+        edit_cardtrader(&fs, &ct, &held, "push", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderQuantity"], "in_doubt");
+        // Done steps are skipped on a retry.
+        let mut p = payload("7", json!({"pricePkn": 300, "quantityDelta": 3}));
+        p["steps"] = json!({"cardtraderPrice": "updated", "cardtraderQuantity": "updated"});
+        edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "push", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderEdit"], "done");
+        assert!(taken().is_empty(), "nothing sent twice");
+
+        // CardTrader's own answers are final.
+        let mut p = payload("404", json!({"pricePkn": 300, "quantityDelta": 1}));
+        edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "both", &mut p).await.unwrap();
+        assert_eq!((p["steps"]["cardtraderPrice"].as_str(), p["steps"]["cardtraderQuantity"].as_str()), (Some("gone"), Some("gone")));
+        let mut p = payload("422", json!({"quantityDelta": -5}));
+        edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "both", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderQuantity"], "refused");
+        let mut p = payload("7", json!({"pricePkn": 0.5}));
+        edit_cardtrader(&fs, &ct, &MemoryMarks::default(), "both", &mut p).await.unwrap();
+        assert_eq!(p["steps"]["cardtraderPrice"], "invalid_price");
+        assert_eq!(taken().len(), 3);
+
+        server.abort();
+        match prior {
+            Some(v) => std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", v),
+            None => std::env::remove_var("CARDTRADER_TOKEN_ENCRYPTION_KEY"),
+        }
+    }
+
     #[tokio::test]
     async fn native_cardtrader_push_decrypts_and_sends_real_product() {
         use axum::{extract::State, routing::post, Json, Router};
@@ -770,7 +1146,8 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let key = KEY;
+        let _key = TOKEN_KEY.lock().await;
         let prior = std::env::var("CARDTRADER_TOKEN_ENCRYPTION_KEY").ok();
         std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", key);
         let fs = pokoin_external::firebase::MemoryFirestore::new();

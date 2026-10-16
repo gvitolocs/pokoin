@@ -34,9 +34,11 @@ status carries it as `inventorySync`). Code: `pokoin-rust/crates/external/src/ca
 | `pokoin_to_ct` | no (counted as `notImported`) | yes |
 | `both` | yes | yes |
 
-Linked rows stay in sync both ways in every direction (webhook + reconcile for
-CardTrader sales, `increment -n` for Pokoin sales). 1-Day Ready accounts are
-always CardTrader → Pokoin (`409 cardtrader_one_day_ready` for the others).
+Linked rows stay in sync both ways on a sale in every direction (webhook +
+reconcile for CardTrader sales, `increment -n` for Pokoin sales). A seller's
+price or quantity **edit** on Pokoin reaches CardTrader only in `pokoin_to_ct`
+and `both` (next section). 1-Day Ready accounts are always CardTrader → Pokoin
+(`409 cardtrader_one_day_ready` for the others).
 
 The push runs after the plan applied its links, in the same periodic job and
 manual sync, and only when the export passed the plan's gate and the run holds
@@ -65,6 +67,57 @@ second, and it stops at the first CardTrader 429 (`stoppedBy`). `remaining`
 counts what the next run picks up. A database error while pushing fails the
 sync instead of reporting nothing to list.
 Results land in the sync summary as `pushedToCardTrader`.
+
+## Pokoin edits of linked listings (2026-10-14)
+
+In `pokoin_to_ct` and `both`, a price or quantity edit of a `ct:<product_id>`
+listing on Pokoin reaches its CardTrader product. Every edit path goes through
+`update_listing` (`pokoin-rust/crates/commerce/src/handlers/listings.rs`): the
+seller desk, the MyPokoin board, and Seller API `update` / `stock`. In
+`ct_to_pokoin` CardTrader stays the source of truth: the edit stays on Pokoin
+and the reconcile copies CardTrader's quantity back. 1-Day Ready accounts never
+get a write.
+
+- `update_listing` measures the edit against the row as it was under its row
+  lock (not the replica) and puts `cardtraderEdit: {productId, pricePkn?,
+  quantityDelta?}` on the `listing.changed` event. A listing taken off sale
+  (inactive, sold out, quantity 0) gets the existing destroy instead. An edit
+  of the link itself, or of a listing whose push is still `ct:pending:*`,
+  sends nothing. Sales, webhook and reconcile writes never carry an edit, so
+  nothing echoes back to CardTrader.
+- The outbox step (`listing_sync::edit_cardtrader`) reads
+  `seller_integrations/{uid}__cardtrader` and sends:
+  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push
+    (200 PKN = €1, to the cent). It is absolute, so a write in doubt (no answer,
+    a 5xx) is retried by the outbox.
+  - **quantity**: `POST /products/:id/increment` with the change
+    (`delta_quantity: new − old`), never the new total: the same rule as a
+    Pokoin sale (see "Never written back"). Example: CardTrader and Pokoin
+    both at 3, one copy sells on CardTrader, and before Pokoin hears of it the
+    seller edits Pokoin from 3 to 5. The increment leaves CardTrader at 4. An
+    absolute write of 5 would put the sold copy back on sale.
+- The increment is not idempotent. Before sending it, the step claims
+  `steps.cardtraderQuantity = "sending"` on the event row (compare-and-set).
+  An attempt that finds `sending` (a crash or a lost answer earlier, or a
+  second worker) never sends again and records `in_doubt`. So a write in doubt
+  can lose the edit (the next reconcile copies CardTrader's quantity back,
+  where the seller sees it) but never applies it twice.
+- `gone` (404) and `refused` (another 4xx, a rejected token) are final;
+  retrying cannot change CardTrader's answer, and the reconcile settles the
+  listing.
+- Step labels on the event: `steps.cardtraderPrice` / `cardtraderQuantity` =
+  `updated` | `gone` | `refused` | `in_doubt` (`invalid_price` when the price
+  converts to less than a cent); `steps.cardtraderEdit` = `done` or why it was
+  skipped (`ct_to_pokoin`, `one_day_ready`, `not_connected`). Failures log
+  `cardtrader_edit_not_applied`.
+- A failed outbox attempt keeps the steps it finished. It used to write the
+  claimed payload back, which would also have erased the `sending` claim.
+- A reconcile whose export was taken before the increment landed may lower a
+  raised quantity back for one run (rows written after the export may only go
+  down); the next run raises it again.
+- Not covered: price changes made on CardTrader are not copied to Pokoin (the
+  reconcile copies quantity only), and `POST /api/marketplace-listings?action=decrement`
+  does not reach CardTrader.
 
 ## Power Tools location import
 
@@ -216,7 +269,9 @@ token they gave us.
   exactly the sold quantity off CardTrader with `POST /products/:id/increment`
   (`delta_quantity: -n`), never an absolute quantity, so stock the seller
   changed on CardTrader is not overwritten; if CardTrader refuses (already
-  gone), nothing else is touched. Other marketplaces are never touched.
+  gone), nothing else is touched. A seller's Pokoin quantity edit (push
+  directions only) goes the same way, as `delta_quantity: new − old`; only the
+  price is written as a value. Other marketplaces are never touched.
 - Webhook `order.destroy` restocks like a cancellation.
 - **Disconnect** wipes the token and secret, so Pokoin can no longer see
   CardTrader sales. `cardtrader-disconnect` therefore takes the

@@ -15,6 +15,8 @@
 //! * NFT rows are never removed here and never decremented for a paid sale.
 //! * A doc owned by someone else answers 404, so item ids never leak.
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::{json, Map, Value as Json};
 
 use crate::error::{ApiError, Result};
@@ -23,6 +25,21 @@ use crate::firestore::{DocData, Document, Firestore, Query, Value};
 pub const COLLECTION: &str = "user_card_collections";
 pub const SOURCE_SCAN: &str = "pokoin_scan_batch";
 pub const SOURCE_IMPORT: &str = "pokoin_collection_import";
+
+/// Live listing totals for one seller: row count, copies, and listed PKN.
+pub const LIVE_LISTINGS_SQL: &str = "\
+select count(*)::bigint as listings, \
+       coalesce(sum(quantity_available), 0)::bigint as copies, \
+       coalesce(floor(sum(price_pkn * quantity_available)), 0)::bigint as listed_pkn \
+from public.marketplace_user_listings \
+where seller_uid = $1 and status in ('active', 'paused') and quantity_available > 0";
+
+/// Live listings whose id a collection doc names (`listingId` / `sourceListingId`).
+pub const LIVE_LISTINGS_LINKED_SQL: &str = "\
+select id::text as id, quantity_available::bigint as quantity \
+from public.marketplace_user_listings \
+where seller_uid = $1 and status in ('active', 'paused') and quantity_available > 0 \
+  and id::text = any($2)";
 
 /// `scanOwnershipDocId`: `{id}` or `scan:{id}`.
 pub fn scan_ownership_doc_id(scan_item_id: &str) -> Result<String> {
@@ -176,6 +193,14 @@ pub fn public_collection_item(id: &str, document: &Document) -> Json {
     })
 }
 
+/// One collection doc, kept so the summary can avoid counting a live listing twice.
+#[derive(Debug, Clone)]
+struct OwnedDoc {
+    quantity: i64,
+    nft: bool,
+    listing_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct OwnedCollection {
     pub uid: String,
@@ -186,6 +211,19 @@ pub struct OwnedCollection {
     pub nft_items: i64,
     pub physical_owned: i64,
     pub nft_owned: i64,
+    docs: Vec<OwnedDoc>,
+}
+
+/// Live `marketplace_user_listings` totals for the summary merge.
+///
+/// `linked` holds only live listings whose id a collection doc references,
+/// mapped to that row's `quantity_available`.
+#[derive(Debug, Clone, Default)]
+pub struct LiveListings {
+    pub listings: i64,
+    pub copies: i64,
+    pub listed_pkn: i64,
+    pub linked: HashMap<String, i64>,
 }
 
 impl OwnedCollection {
@@ -201,17 +239,159 @@ impl OwnedCollection {
         })
     }
 
-    /// The `/api/marketplace-collection-summary` body.
+    /// Summary when live listings are unknown: the collection sum, plus
+    /// `collectionOwned` and `"listed": null`.
     pub fn to_summary_json(&self) -> Json {
+        self.summary_json(self.cards_owned, self.physical_owned, self.nft_owned, Json::Null)
+    }
+
+    /// Listing ids named on collection docs. Empty when the linked-id query can be skipped.
+    pub fn referenced_listing_ids(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut ids = Vec::new();
+        for doc in &self.docs {
+            for id in &doc.listing_ids {
+                if seen.insert(id.clone()) {
+                    ids.push(id.clone());
+                }
+            }
+        }
+        ids
+    }
+
+    fn summary_json(&self, cards_owned: i64, physical_owned: i64, nft_owned: i64, listed: Json) -> Json {
         json!({
             "uid": self.uid,
-            "cardsOwned": self.cards_owned,
+            "cardsOwned": cards_owned,
             "items": self.item_count,
             "physicalItems": self.physical_items,
             "nftItems": self.nft_items,
-            "physicalOwned": self.physical_owned,
-            "nftOwned": self.nft_owned,
+            "physicalOwned": physical_owned,
+            "nftOwned": nft_owned,
+            "collectionOwned": self.cards_owned,
+            "listed": listed,
         })
+    }
+}
+
+/// `listingId` and `sourceListingId`, trimmed, with empties dropped.
+fn linked_listing_ids(document: &Document) -> Vec<String> {
+    let mut ids = Vec::new();
+    for key in ["listingId", "sourceListingId"] {
+        let id = doc_string(document, key).trim().to_string();
+        if id.is_empty() || ids.iter().any(|existing| existing == &id) {
+            continue;
+        }
+        ids.push(id);
+    }
+    ids
+}
+
+/// Summary body once live listings are known.
+///
+/// A collection doc is linked when `listingId` or `sourceListingId` is the
+/// `id::text` of one of this seller's live listings. Linked copies are counted
+/// through the listing; a listing named by several docs counts once.
+pub fn merge_live_listings(collection: &OwnedCollection, live: &LiveListings) -> Json {
+    let mut unlinked_physical = 0i64;
+    let mut unlinked_nft = 0i64;
+    let mut nft_listing_ids = HashSet::new();
+    for doc in &collection.docs {
+        let mut linked = false;
+        for id in &doc.listing_ids {
+            if !live.linked.contains_key(id) {
+                continue;
+            }
+            linked = true;
+            if doc.nft {
+                nft_listing_ids.insert(id.clone());
+            }
+        }
+        if linked {
+            continue;
+        }
+        if doc.nft {
+            unlinked_nft += doc.quantity;
+        } else {
+            unlinked_physical += doc.quantity;
+        }
+    }
+    let nft_copies = nft_listing_ids
+        .iter()
+        .map(|id| live.linked.get(id).copied().unwrap_or(0))
+        .sum::<i64>();
+    let cards_owned = live.copies + unlinked_physical + unlinked_nft;
+    let nft_owned = unlinked_nft + nft_copies;
+    let physical_owned = unlinked_physical + live.copies - nft_copies;
+    collection.summary_json(
+        cards_owned,
+        physical_owned,
+        nft_owned,
+        json!({
+            "listings": live.listings,
+            "copies": live.copies,
+            "listedPkn": live.listed_pkn,
+        }),
+    )
+}
+
+/// Totals and per-listing quantities from `query_json`.
+///
+/// BIGINT comes back as a JSON number; NUMERIC text and integer strings are
+/// accepted too. Fractional values floor.
+pub fn live_listings_from_rows(totals: &[Json], linked_rows: &[Json]) -> LiveListings {
+    let totals = totals.first();
+    let mut linked = HashMap::new();
+    for row in linked_rows {
+        let id = json_id(row.get("id"));
+        if id.is_empty() {
+            continue;
+        }
+        linked.insert(id, json_i64(row.get("quantity")));
+    }
+    LiveListings {
+        listings: json_i64(totals.and_then(|row| row.get("listings"))),
+        copies: json_i64(totals.and_then(|row| row.get("copies"))),
+        listed_pkn: json_i64(totals.and_then(|row| row.get("listed_pkn"))),
+        linked,
+    }
+}
+
+fn json_i64(value: Option<&Json>) -> i64 {
+    let Some(value) = value else {
+        return 0;
+    };
+    if let Some(number) = value.as_i64() {
+        return number;
+    }
+    if let Some(number) = value.as_u64().and_then(|number| i64::try_from(number).ok()) {
+        return number;
+    }
+    if let Some(number) = value.as_f64() {
+        return floor_f64(number);
+    }
+    let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) else {
+        return 0;
+    };
+    if let Ok(number) = text.parse::<i64>() {
+        return number;
+    }
+    text.parse::<f64>().map(floor_f64).unwrap_or(0)
+}
+
+fn floor_f64(number: f64) -> i64 {
+    if number.is_finite() {
+        number.floor() as i64
+    } else {
+        0
+    }
+}
+
+fn json_id(value: Option<&Json>) -> String {
+    match value {
+        Some(Json::String(text)) => text.trim().to_string(),
+        Some(Json::Number(number)) => number.to_string(),
+        _ => String::new(),
     }
 }
 
@@ -240,14 +420,20 @@ pub async fn list_owned_collection(firestore: &Firestore, uid: &str) -> Result<O
             .and_then(Json::as_i64)
             .unwrap_or(0)
             .max(0);
+        let nft = is_nft_document(&document);
         result.cards_owned += quantity;
-        if is_nft_document(&document) {
+        if nft {
             result.nft_items += 1;
             result.nft_owned += quantity;
         } else {
             result.physical_items += 1;
             result.physical_owned += quantity;
         }
+        result.docs.push(OwnedDoc {
+            quantity,
+            nft,
+            listing_ids: linked_listing_ids(&document),
+        });
         result.items.push(item);
     }
     result.item_count = result.items.len() as i64;
@@ -691,6 +877,7 @@ mod tests {
             nft_items: 0,
             physical_owned: 3,
             nft_owned: 0,
+            ..OwnedCollection::default()
         };
         let full = collection.to_json();
         assert_eq!(full["cardsOwned"], json!(3));
@@ -702,6 +889,182 @@ mod tests {
         assert_eq!(summary["physicalOwned"], json!(3));
         assert_eq!(summary["nftOwned"], json!(0));
         assert!(summary.get("itemCount").is_none());
+    }
+
+    fn owned_doc(quantity: i64, nft: bool, ids: &[&str]) -> OwnedDoc {
+        OwnedDoc {
+            quantity,
+            nft,
+            listing_ids: ids.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+
+    fn owned_from(docs: Vec<OwnedDoc>) -> OwnedCollection {
+        let mut collection = OwnedCollection {
+            uid: "u1".into(),
+            ..OwnedCollection::default()
+        };
+        for doc in &docs {
+            collection.cards_owned += doc.quantity;
+            collection.item_count += 1;
+            if doc.nft {
+                collection.nft_items += 1;
+                collection.nft_owned += doc.quantity;
+            } else {
+                collection.physical_items += 1;
+                collection.physical_owned += doc.quantity;
+            }
+        }
+        collection.docs = docs;
+        collection
+    }
+
+    fn live(listings: i64, copies: i64, listed_pkn: i64, linked: &[(&str, i64)]) -> LiveListings {
+        LiveListings {
+            listings,
+            copies,
+            listed_pkn,
+            linked: linked
+                .iter()
+                .map(|(id, quantity)| ((*id).to_string(), *quantity))
+                .collect(),
+        }
+    }
+
+    fn assert_owned_splits(body: &Json) {
+        let cards = body["cardsOwned"].as_i64().unwrap();
+        let physical = body["physicalOwned"].as_i64().unwrap();
+        let nft = body["nftOwned"].as_i64().unwrap();
+        assert_eq!(cards, physical + nft, "{body}");
+    }
+
+    #[test]
+    fn merge_counts_unlinked_docs_and_live_copies() {
+        let collection = owned_from(vec![
+            owned_doc(4, false, &["L1"]),
+            owned_doc(2, false, &[]),
+        ]);
+        let body = merge_live_listings(&collection, &live(3, 10, 100, &[("L1", 5)]));
+        assert_eq!(body["cardsOwned"], json!(12));
+        assert_eq!(body["physicalOwned"], json!(12));
+        assert_eq!(body["nftOwned"], json!(0));
+        assert_eq!(body["items"], json!(2));
+        assert_eq!(body["physicalItems"], json!(2));
+        assert_eq!(body["nftItems"], json!(0));
+        assert_eq!(body["collectionOwned"], json!(6));
+        assert_eq!(body["listed"]["listings"], json!(3));
+        assert_eq!(body["listed"]["copies"], json!(10));
+        assert_eq!(body["listed"]["listedPkn"], json!(100));
+        assert_eq!(body["uid"], json!("u1"));
+        assert_owned_splits(&body);
+    }
+
+    #[test]
+    fn merge_counts_a_listing_linked_by_two_docs_once() {
+        let collection = owned_from(vec![
+            owned_doc(1, false, &["L1"]),
+            owned_doc(9, false, &["L1"]),
+        ]);
+        let body = merge_live_listings(&collection, &live(1, 4, 20, &[("L1", 4)]));
+        assert_eq!(body["cardsOwned"], json!(4));
+        assert_eq!(body["physicalOwned"], json!(4));
+        assert_eq!(body["nftOwned"], json!(0));
+        assert_eq!(body["collectionOwned"], json!(10));
+        assert_owned_splits(&body);
+    }
+
+    #[test]
+    fn merge_puts_an_nft_linked_listing_on_nft_owned() {
+        let collection = owned_from(vec![owned_doc(1, true, &["N1"]), owned_doc(3, false, &[])]);
+        let body = merge_live_listings(&collection, &live(2, 8, 50, &[("N1", 5)]));
+        assert_eq!(body["cardsOwned"], json!(11));
+        assert_eq!(body["nftOwned"], json!(5));
+        assert_eq!(body["physicalOwned"], json!(6));
+        assert_eq!(body["collectionOwned"], json!(4));
+        assert_eq!(body["nftItems"], json!(1));
+        assert_eq!(body["physicalItems"], json!(1));
+        assert_owned_splits(&body);
+
+        let shared = owned_from(vec![owned_doc(1, true, &["N1"]), owned_doc(2, true, &["N1"])]);
+        let body = merge_live_listings(&shared, &live(1, 5, 10, &[("N1", 5)]));
+        assert_eq!(body["cardsOwned"], json!(5));
+        assert_eq!(body["nftOwned"], json!(5));
+        assert_eq!(body["physicalOwned"], json!(0));
+        assert_owned_splits(&body);
+    }
+
+    #[test]
+    fn merge_counts_a_doc_whose_listing_is_not_live() {
+        let collection = owned_from(vec![owned_doc(7, false, &["gone"])]);
+        let body = merge_live_listings(&collection, &live(1, 2, 9, &[]));
+        assert_eq!(body["cardsOwned"], json!(9));
+        assert_eq!(body["physicalOwned"], json!(9));
+        assert_eq!(body["nftOwned"], json!(0));
+        assert_eq!(body["collectionOwned"], json!(7));
+        assert_owned_splits(&body);
+    }
+
+    #[test]
+    fn merge_with_no_collection_docs_is_the_live_copies() {
+        let collection = OwnedCollection {
+            uid: "u1".into(),
+            ..OwnedCollection::default()
+        };
+        let body = merge_live_listings(&collection, &live(5, 9, 40, &[]));
+        assert_eq!(body["cardsOwned"], json!(9));
+        assert_eq!(body["physicalOwned"], json!(9));
+        assert_eq!(body["nftOwned"], json!(0));
+        assert_eq!(body["items"], json!(0));
+        assert_eq!(body["physicalItems"], json!(0));
+        assert_eq!(body["nftItems"], json!(0));
+        assert_eq!(body["collectionOwned"], json!(0));
+        assert_eq!(body["listed"]["listings"], json!(5));
+        assert_eq!(body["listed"]["copies"], json!(9));
+        assert_eq!(body["listed"]["listedPkn"], json!(40));
+        assert_owned_splits(&body);
+    }
+
+    #[test]
+    fn summary_without_live_listings_keeps_the_collection_sum() {
+        let collection = OwnedCollection {
+            uid: "u1".into(),
+            cards_owned: 3,
+            item_count: 2,
+            physical_items: 1,
+            nft_items: 1,
+            physical_owned: 2,
+            nft_owned: 1,
+            ..OwnedCollection::default()
+        };
+        let summary = collection.to_summary_json();
+        assert_eq!(summary["cardsOwned"], json!(3));
+        assert_eq!(summary["collectionOwned"], json!(3));
+        assert_eq!(summary["physicalOwned"], json!(2));
+        assert_eq!(summary["nftOwned"], json!(1));
+        assert_eq!(summary["items"], json!(2));
+        assert_eq!(summary["physicalItems"], json!(1));
+        assert_eq!(summary["nftItems"], json!(1));
+        assert!(summary["listed"].is_null());
+        assert!(summary.get("itemCount").is_none());
+    }
+
+    #[test]
+    fn live_listing_rows_accept_numbers_and_numeric_strings() {
+        let totals = vec![json!({
+            "listings": "3",
+            "copies": 10,
+            "listed_pkn": "18.9"
+        })];
+        let linked = vec![
+            json!({ "id": "9", "quantity": "4" }),
+            json!({ "id": 12, "quantity": 2.2 }),
+        ];
+        let live = live_listings_from_rows(&totals, &linked);
+        assert_eq!(live.listings, 3);
+        assert_eq!(live.copies, 10);
+        assert_eq!(live.listed_pkn, 18);
+        assert_eq!(live.linked.get("9"), Some(&4));
+        assert_eq!(live.linked.get("12"), Some(&2));
     }
 
 }

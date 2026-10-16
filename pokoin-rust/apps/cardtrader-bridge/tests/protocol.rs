@@ -2,9 +2,10 @@
 //! `scripts/cardtrader-rate-limit.test.py`, plus concurrent books.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -13,45 +14,103 @@ struct Server {
     seen: Arc<Mutex<Vec<String>>>,
 }
 
-/// Serve `responses` in order (one per connection): (status line, extra headers, body).
+#[derive(Clone)]
+struct Route {
+    status: &'static str,
+    headers: &'static str,
+    body: Vec<u8>,
+    delay: Duration,
+}
+
+/// Answers `(status, extra headers, body)` in connection order, one response per connection.
+/// For single-request tests; concurrent paths use [`serve_routes`].
 fn serve(responses: Vec<(&'static str, &'static str, Vec<u8>)>) -> Server {
+    let responses = Arc::new(Mutex::new(responses.into_iter()));
+    listen(move |_| {
+        responses.lock().unwrap().next().map(|(status, headers, body)| Route {
+            status,
+            headers,
+            body,
+            delay: Duration::ZERO,
+        })
+    })
+}
+
+/// Answers by the request path (suffix after `/api/v2`, query stripped). An unmatched path is 404.
+fn serve_routes(routes: Vec<(&'static str, Route)>) -> Server {
+    let routes = Arc::new(routes);
+    listen(move |request_line| {
+        let path = request_path(request_line);
+        let key = path.strip_prefix("/api/v2").unwrap_or(path);
+        Some(
+            routes
+                .iter()
+                .find(|(suffix, _)| *suffix == key)
+                .map(|(_, route)| route.clone())
+                .unwrap_or(Route {
+                    status: "404 Not Found",
+                    headers: "",
+                    body: Vec::new(),
+                    delay: Duration::ZERO,
+                }),
+        )
+    })
+}
+
+fn listen(pick: impl Fn(&str) -> Option<Route> + Send + Sync + 'static) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}/api/v2", listener.local_addr().unwrap());
     let seen = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&seen);
-    let responses = Arc::new(Mutex::new(responses.into_iter()));
+    let pick = Arc::new(pick);
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
             let log = Arc::clone(&log);
-            let responses = Arc::clone(&responses);
+            let pick = Arc::clone(&pick);
             std::thread::spawn(move || {
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let mut request_line = String::new();
-                reader.read_line(&mut request_line).unwrap();
-                let mut auth = String::new();
-                loop {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).unwrap();
-                    if line.to_ascii_lowercase().starts_with("authorization:") {
-                        auth = line.trim().to_string();
-                    }
-                    if line == "\r\n" || line.is_empty() {
-                        break;
-                    }
-                }
+                let (request_line, auth) = read_request(&mut stream);
                 log.lock().unwrap().push(format!("{} | {auth}", request_line.trim()));
-                let Some((status, headers, body)) = responses.lock().unwrap().next() else { return };
-                let head = format!(
-                    "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                let _ = stream.write_all(head.as_bytes());
-                let _ = stream.write_all(&body);
+                let Some(route) = pick(request_line.trim()) else { return };
+                if !route.delay.is_zero() {
+                    std::thread::sleep(route.delay);
+                }
+                write_response(&mut stream, route.status, route.headers, &route.body);
             });
         }
     });
     Server { base, seen }
+}
+
+fn read_request(stream: &mut TcpStream) -> (String, String) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).unwrap();
+    let mut auth = String::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line.to_ascii_lowercase().starts_with("authorization:") {
+            auth = line.trim().to_string();
+        }
+        if line == "\r\n" || line.is_empty() {
+            break;
+        }
+    }
+    (request_line, auth)
+}
+
+fn request_path(request_line: &str) -> &str {
+    request_line.split_whitespace().nth(1).unwrap_or("").split('?').next().unwrap_or("")
+}
+
+fn write_response(stream: &mut TcpStream, status: &str, headers: &str, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(body);
 }
 
 /// Run the bridge with `requests` on stdin; return its stdout lines and the cooldown file.
@@ -152,11 +211,15 @@ fn listing_book_that_is_not_an_object_is_retried_then_reported() {
     assert_eq!(server.seen.lock().unwrap().len(), 6);
 }
 
+fn catalogue_route(body: &'static [u8], delay: Duration) -> Route {
+    Route { status: "200 OK", headers: "", body: body.to_vec(), delay }
+}
+
 #[test]
 fn catalogue_paths_are_parsed_and_unwrapped() {
-    let server = serve(vec![
-        ("200 OK", "", br#"{"array":[{"id":1}]}"#.to_vec()),
-        ("200 OK", "", br#"[{"id":2}]"#.to_vec()),
+    let server = serve_routes(vec![
+        ("/expansions", catalogue_route(br#"{"array":[{"id":1}]}"#, Duration::ZERO)),
+        ("/games", catalogue_route(br#"[{"id":2}]"#, Duration::ZERO)),
     ]);
     let (mut lines, _) = run(
         &server,
@@ -171,6 +234,31 @@ fn catalogue_paths_are_parsed_and_unwrapped() {
         lines,
         vec![json!({"id": "a", "data": [{"id": 1}]}), json!({"id": "b", "data": [{"id": 2}]})]
     );
+}
+
+#[test]
+fn catalogue_replies_follow_their_request_not_completion_order() {
+    // The ordered mock paired by arrival, which is what flaked on 2026-10-16.
+    let server = serve_routes(vec![
+        ("/expansions", catalogue_route(br#"{"array":[{"id":1}]}"#, Duration::from_millis(1500))),
+        ("/games", catalogue_route(br#"[{"id":2}]"#, Duration::ZERO)),
+    ]);
+    let (lines, _) = run(
+        &server,
+        &[
+            json!({"id": "a", "path": "/expansions", "params": {}}),
+            json!({"id": "b", "path": "/games"}),
+        ],
+        "0.1",
+    );
+    assert_eq!(
+        lines,
+        vec![json!({"id": "b", "data": [{"id": 2}]}), json!({"id": "a", "data": [{"id": 1}]})]
+    );
+    let seen = server.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.iter().filter(|line| line.contains("/expansions")).count(), 1);
+    assert_eq!(seen.iter().filter(|line| line.contains("/games")).count(), 1);
 }
 
 #[test]

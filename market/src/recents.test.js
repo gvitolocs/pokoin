@@ -162,3 +162,59 @@ test('forgetLocalCardId removes a wrong-game id from scoped history', () => {
   assert.deepEqual(readRecentCardIds('riftbound'), ['723286']);
   assert.equal(peekRecentTile('816620', 'riftbound'), null);
 });
+
+test('every card opened reaches the account, oldest first, even two within 250 ms', async () => {
+  const { setBearerProvider } = await import('./auth-bearer.js');
+  const { rememberCardId, resetRecentWritesForTests } = await import('./recents.js');
+  clearRecentTileMemory();
+  resetRecentWritesForTests();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  const posted = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init = {}) => {
+    posted.push([init.method, JSON.parse(init.body || '{}').cardId]);
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  setBearerProvider(async () => 'token');
+  try {
+    rememberCardId('504094', 'pokemon');
+    rememberCardId('790994', 'pokemon');
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.deepEqual(posted, [['POST', '504094'], ['POST', '790994']]);
+  } finally {
+    globalThis.fetch = realFetch;
+    setBearerProvider(null);
+    resetRecentWritesForTests();
+  }
+});
+
+test('an account sync keeps the cards whose write is still on its way', async () => {
+  const { setBearerProvider } = await import('./auth-bearer.js');
+  const { rememberCardId, resetRecentWritesForTests, syncRemoteRecentCardIds } = await import('./recents.js');
+  clearRecentTileMemory();
+  resetRecentWritesForTests();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init = {}) => {
+    if ((init.method || 'GET') === 'GET') {
+      return { ok: true, status: 200, json: async () => ({ cardIds: ['111', '222'] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  setBearerProvider(async () => 'token');
+  try {
+    rememberCardId('333', 'pokemon');
+    // The account answers before this device's POST went out: 333 stays first.
+    assert.deepEqual(await syncRemoteRecentCardIds('pokemon'), ['333', '111', '222']);
+    assert.deepEqual(readRecentCardIds('pokemon'), ['333', '111', '222']);
+    // Once sent, the account's list is authoritative again.
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.deepEqual(await syncRemoteRecentCardIds('pokemon'), ['111', '222']);
+  } finally {
+    globalThis.fetch = realFetch;
+    setBearerProvider(null);
+    resetRecentWritesForTests();
+  }
+});
