@@ -144,3 +144,28 @@ available PKN, only lines from sellers whose profile does not say
 - The session locks the same amount (`order_discount_held`), charges
   `chargeCents`, stores `pknDiscount` on the order and answers `chargeCents` and
   `pknDiscount`. The webhook's expected charge is `totalEURCents − pknDiscount.eurCents`.
+
+### Local checkout end to end (Stripe test mode)
+
+`pokoin-rust/crates/commerce/examples/checkout_e2e.rs` runs the real commerce
+router on `127.0.0.1:8790` against the Firestore emulator (project
+`demo-pokoin-e2e`), a throwaway Postgres and Stripe TEST mode. It refuses a live
+Stripe key and anything not on localhost, and seeds one buyer (1000 PKN), two
+sellers (Italy, Denmark) and a two-parcel cart on every start.
+
+```sh
+docker run -d --name pokoin-checkout-e2e-pg -e POSTGRES_USER=e2e -e POSTGRES_PASSWORD=e2e \
+  -e POSTGRES_DB=e2e -p 127.0.0.1:55432:5432 postgres:17-alpine
+java -jar ~/.cache/firebase/emulators/cloud-firestore-emulator-v1.22.0.jar --host 127.0.0.1 --port 8086 &
+set -a; . ~/.config/pokoin/stripe-test.env; set +a   # STRIPE_SECRET_KEY=sk_test_...
+POKOIN_LISTING_SYNC_WORKER=0 POKOIN_SYNC_CONSUMER=0 \
+  cargo run -p pokoin-commerce --example checkout_e2e
+cd solid && VITE_POKOIN_API_ORIGIN=http://127.0.0.1:5199 POKOIN_API_PROXY=http://127.0.0.1:8790 \
+  npx vite --host 127.0.0.1 --port 5199 --strictPort
+```
+
+In the browser on `http://127.0.0.1:5199`, sign in as the seeded buyer with the
+cookie `pokoin.auth.token={"token":"e2e-buyer-token-not-a-firebase-jwt","uid":"e2e-buyer","expiresAt":<ms>}`
+and `localStorage['pokoin.auth.session']={"uid":"e2e-buyer","signedIn":true}`, then
+use `/cart` → `/checkout` and pay with Stripe's test card `4242 4242 4242 4242`.
+`VITE_POKOIN_API_ORIGIN` only works under `vite dev`; production builds ignore it.
