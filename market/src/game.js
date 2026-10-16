@@ -285,24 +285,48 @@ export function apiGameParam(hostname = hostName()) {
   return id === 'pokemon' ? '' : id;
 }
 
-/** Append ?game= for non-Pokemon marketplace API calls. */
-export function withGameQuery(path, hostname = hostName()) {
-  const apiGame = apiGameParam(hostname);
-  if (!apiGame) {
-    return path;
-  }
+/** Normalized catalog id (`pokemon`, `one_piece`, …), or '' when `value` is blank or unknown. */
+export function knownGameId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw === 'pokemon' || raw === 'poke' || raw === 'default') return 'pokemon';
+  if (GAMES[raw]) return GAMES[raw].id;
+  return SLUG_TO_ID[raw] || '';
+}
+
+const CATALOG_API_PREFIXES = ['/api/marketplace', '/api/cardtrader-redirect', '/api/cardmarket-redirect', '/api/tcgplayer-redirect'];
+
+function isCatalogApiPath(path) {
   const text = String(path || '');
-  if (!text.startsWith('/api/marketplace') && !text.startsWith('/api/cardtrader-redirect') && !text.startsWith('/api/cardmarket-redirect') && !text.startsWith('/api/tcgplayer-redirect')) {
-    return text;
-  }
+  return CATALOG_API_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+function appendApiGame(path, apiGame) {
+  if (!apiGame) return path;
+  const text = String(path || '');
+  if (!isCatalogApiPath(text)) return text;
   const hashIndex = text.indexOf('#');
   const hash = hashIndex >= 0 ? text.slice(hashIndex) : '';
   const withoutHash = hashIndex >= 0 ? text.slice(0, hashIndex) : text;
+  if (/[?&]game=/.test(withoutHash)) return text;
   const join = withoutHash.includes('?') ? '&' : '?';
-  if (/[?&]game=/.test(withoutHash)) {
-    return text;
-  }
   return `${withoutHash}${join}game=${encodeURIComponent(apiGame)}${hash}`;
+}
+
+/** Append ?game= for non-Pokemon marketplace API calls. */
+export function withGameQuery(path, hostname = hostName()) {
+  return appendApiGame(path, apiGameParam(hostname));
+}
+
+/**
+ * Same as `withGameQuery`, but for an explicit catalog id. Pokémon stays
+ * unscoped (no `?game=`), even when the open page is another TCG.
+ */
+export function withGameQueryFor(path, gameId) {
+  const id = knownGameId(gameId);
+  if (!id) return withGameQuery(path);
+  const apiGame = id === 'pokemon' ? '' : (GAMES[id].apiGame || '');
+  return appendApiGame(path, apiGame);
 }
 
 /** Headers for satellite marketplace API calls (defense when query is stripped). */
@@ -315,6 +339,44 @@ export function gameRequestHeaders(hostname = hostName()) {
     'x-pokoin-game': apiGame,
     'x-pokoin-host': String(hostname || hostName() || '').toLowerCase(),
   };
+}
+
+/** `x-pokoin-game` for an explicit catalog. Pokémon sends no game header. */
+export function gameRequestHeadersFor(gameId, hostname = hostName()) {
+  const id = knownGameId(gameId);
+  if (!id) return gameRequestHeaders(hostname);
+  if (id === 'pokemon') return {};
+  return {
+    'x-pokoin-game': GAMES[id].apiGame || id,
+    'x-pokoin-host': String(hostname || hostName() || '').toLowerCase(),
+  };
+}
+
+/**
+ * Catalog game locked by a request URL. A marketplace URL with no `game`
+ * query is the Pokémon key (satellites always carry `?game=`). '' when `url`
+ * is not a catalog route.
+ */
+export function catalogGameFromUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''), 'https://api.pokoin.com');
+    if (!isCatalogApiPath(parsed.pathname)) return '';
+    if (!parsed.searchParams.has('game')) return 'pokemon';
+    return knownGameId(parsed.searchParams.get('game')) || 'pokemon';
+  } catch {
+    return '';
+  }
+}
+
+/** `/card-images/` prefix for a catalog. Empty for Pokémon. Omitted id uses the page. */
+export function catalogImagePrefix(gameId) {
+  if (gameId == null || String(gameId).trim() === '') {
+    const slug = game().slug || '';
+    return slug ? `${slug}/` : '';
+  }
+  const id = knownGameId(gameId);
+  const slug = id ? (GAMES[id].slug || '') : (game().slug || '');
+  return slug ? `${slug}/` : '';
 }
 
 export function gameIconSrc(gameOrId) {

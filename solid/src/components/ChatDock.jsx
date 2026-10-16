@@ -459,7 +459,7 @@ export default function ChatDock() {
                   <Show when={(event().listings || event().cards || []).length}>
                     <span class="chat-tags">
                       <For each={event().listings || event().cards || []}>
-                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} />}
+                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} defaultGame={poko() ? 'pokemon' : ''} />}
                       </For>
                     </span>
                   </Show>
@@ -511,6 +511,7 @@ export default function ChatDock() {
                         onQty={setChatTagQty}
                         peer={peerRef()}
                         me={me()}
+                        defaultGame={poko() ? 'pokemon' : ''}
                       />
                     )}
                   </For>
