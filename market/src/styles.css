@@ -2485,6 +2485,41 @@ h1, h2 { margin: 0 0 0.85rem; }
   gap: 0.45rem;
 }
 
+.grid.search-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1.1rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.grid.search-grid > * {
+  min-width: 0;
+}
+
+.grid.search-grid.is-list {
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+@media (max-width: 1099px) and (min-width: 721px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) and (min-width: 481px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .grid.search-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+}
+
 .version-tile {
   position: relative;
 }
