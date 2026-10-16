@@ -118,7 +118,30 @@ pub fn clean_images(raw: Option<&Json>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `cleanPageContext(raw, cards, images)`.
+/// The card id in a card desk path (`/marketplace/en/cards/250366/slug`).
+fn desk_path_card_id(path: &str) -> Option<&str> {
+    let (_, after) = path.split_once("/cards/")?;
+    let digits = after
+        .find(|ch: char| !ch.is_ascii_digit())
+        .map_or(after, |end| &after[..end]);
+    (!digits.is_empty()).then_some(digits)
+}
+
+/// The page path, unless it is a card desk whose card is not attached: a
+/// removed chip must not reach Poko through the URL either.
+fn attached_page_path(path: &str, cards: &[Json]) -> String {
+    match desk_path_card_id(path) {
+        Some(id) if !cards.iter().any(|card| field_str(card, &["cardId"]) == id) => path
+            .split_once("/cards/")
+            .map(|(prefix, _)| prefix.to_string())
+            .unwrap_or_default(),
+        _ => path.to_string(),
+    }
+}
+
+/// `cleanPageContext(raw, cards, images)`. The desk card is the first
+/// attached card only: the card the user is viewing is context only when the
+/// client sent it as an attachment, never from `deskCard*` fields or the path.
 pub fn clean_page_context(
     raw: Option<&Json>,
     cards: &[Json],
@@ -144,36 +167,13 @@ pub fn clean_page_context(
             raw_channel
         }
     };
-    let desk_card_id = {
-        let raw = clean_text(&field_str(src, &["deskCardId"]), 40);
-        if raw.is_empty() {
-            field_str(&desk, &["cardId"])
-        } else {
-            raw
-        }
-    };
-    let desk_card_name = {
-        let raw = clean_text(&field_str(src, &["deskCardName"]), 120);
-        if raw.is_empty() {
-            field_str(&desk, &["name"])
-        } else {
-            raw
-        }
-    };
-    let desk_set_name = {
-        let raw = clean_text(&field_str(src, &["deskSetName"]), 120);
-        if raw.is_empty() {
-            field_str(&desk, &["setName"])
-        } else {
-            raw
-        }
-    };
+    let path = attached_page_path(&clean_text(&field_str(src, &["path"]), 300), cards);
     json!({
         "channel": channel,
-        "path": clean_text(&field_str(src, &["path"]), 300),
-        "deskCardId": desk_card_id,
-        "deskCardName": desk_card_name,
-        "deskSetName": desk_set_name,
+        "path": path,
+        "deskCardId": field_str(&desk, &["cardId"]),
+        "deskCardName": field_str(&desk, &["name"]),
+        "deskSetName": field_str(&desk, &["setName"]),
         "watchlistIds": watchlist.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
         "cart": cart,
         "attachedCards": cards,
@@ -1037,7 +1037,48 @@ mod tests {
     }
 
     #[test]
-    fn page_context_falls_back_to_the_attached_desk_card() {
+    fn page_context_without_an_attached_card_names_no_card() {
+        // The user removed the page chip: desk fields and the card path the
+        // client still sends must not reach Poko.
+        let context = clean_page_context(
+            Some(&json!({
+                "path": "/marketplace/en/cards/250366/card-foongus-12-135-plasma-storm",
+                "deskCardId": "250366", "deskCardName": "Foongus", "deskSetName": "Plasma Storm"
+            })),
+            &[],
+            &[],
+        );
+        assert_eq!(context["deskCardId"], json!(""));
+        assert_eq!(context["deskCardName"], json!(""));
+        assert_eq!(context["deskSetName"], json!(""));
+        assert_eq!(context["path"], json!("/marketplace/en"));
+        assert_eq!(market_first_directive(&[], &context, &[]), "");
+        assert!(!context.to_string().contains("250366"));
+
+        // Another card attached on that page: still no page card.
+        let other = vec![json!({ "cardId": "7", "name": "Pikachu" })];
+        let context = clean_page_context(
+            Some(&json!({ "path": "/marketplace/en/cards/250366/card-foongus" })),
+            &other,
+            &[],
+        );
+        assert_eq!(context["path"], json!("/marketplace/en"));
+        assert_eq!(context["deskCardId"], json!("7"));
+
+        // The page chip attached: the desk path stays.
+        let chip = vec![json!({ "cardId": "250366", "name": "Foongus" })];
+        let context = clean_page_context(
+            Some(&json!({ "path": "/marketplace/en/cards/250366/card-foongus" })),
+            &chip,
+            &[],
+        );
+        assert_eq!(context["path"], json!("/marketplace/en/cards/250366/card-foongus"));
+        assert_eq!(context["deskCardId"], json!("250366"));
+        assert!(market_first_directive(&chip, &context, &[]).contains("cardId=250366"));
+    }
+
+    #[test]
+    fn page_context_desk_is_the_attached_card() {
         let cards = vec![json!({
             "cardId": "7", "name": "Pikachu", "setName": "Base"
         })];
@@ -1048,7 +1089,7 @@ mod tests {
         assert_eq!(context["deskSetName"], json!("Base"));
         assert_eq!(context["attachedCards"].as_array().unwrap().len(), 1);
 
-        // An explicit page context wins over the attached card.
+        // Client desk fields never override the attached card.
         let context = clean_page_context(
             Some(&json!({
                 "channel": " discord ", "path": "/marketplace",
@@ -1059,8 +1100,10 @@ mod tests {
             &[],
         );
         assert_eq!(context["channel"], json!("discord"));
-        assert_eq!(context["deskCardId"], json!("9"));
-        assert_eq!(context["deskCardName"], json!("Eevee"));
+        assert_eq!(context["deskCardId"], json!("7"));
+        assert_eq!(context["deskCardName"], json!("Pikachu"));
+        assert_eq!(context["deskSetName"], json!("Base"));
+        assert_eq!(context["path"], json!("/marketplace"));
         assert_eq!(context["watchlistIds"], json!(["1", "2"]));
         assert_eq!(context["cart"].as_array().unwrap().len(), 1);
         // A non-object page context is treated as empty.
