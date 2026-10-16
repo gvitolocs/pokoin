@@ -184,6 +184,14 @@ fn presets() -> &'static [Preset] {
     ]
 }
 
+/// Request-body defaults per provider when `POKO_BRAIN_<NAME>_EXTRA` is unset.
+fn default_extra(name: &str) -> Option<Json> {
+    match name {
+        "deepseek" => Some(serde_json::json!({ "thinking": { "type": "disabled" } })),
+        _ => None,
+    }
+}
+
 fn providers_from(lookup: &impl Fn(&str) -> Option<String>) -> Vec<Provider> {
     let order =
         non_empty(lookup("POKO_BRAIN_PROVIDERS")).unwrap_or_else(|| DEFAULT_ORDER.to_string());
@@ -212,15 +220,18 @@ fn providers_from(lookup: &impl Fn(&str) -> Option<String>) -> Vec<Provider> {
         if api_key.is_none() && !preset.key_optional {
             continue;
         }
-        let extra = if name == "local" {
-            non_empty(lookup("POKO_BRAIN_LOCAL_EXTRA")).and_then(|raw| {
+        // POKO_BRAIN_<NAME>_EXTRA (a JSON object) is merged into that provider's
+        // request body. DeepSeek Flash thinks by default and can spend the whole
+        // max_tokens on reasoning, returning an empty answer (2026-10-16), so its
+        // default turns thinking off.
+        let extra_env = format!("POKO_BRAIN_{}_EXTRA", name.to_ascii_uppercase());
+        let extra = non_empty(lookup(&extra_env))
+            .and_then(|raw| {
                 serde_json::from_str::<Json>(&raw)
                     .ok()
                     .filter(|value| value.is_object())
             })
-        } else {
-            None
-        };
+            .or_else(|| default_extra(&name));
         providers.push(Provider {
             name,
             base_url,
@@ -718,6 +729,35 @@ mod tests {
         assert_eq!(config.max_tool_rounds, 3);
         assert_eq!(config.call_timeout, Duration::from_millis(15_000));
         assert_eq!(config.budget, Duration::from_millis(40_000));
+    }
+
+    #[test]
+    fn deepseek_turns_thinking_off_by_default() {
+        let lookup = |key: &str| match key {
+            "POKO_BRAIN_PROVIDERS" => Some("deepseek".to_string()),
+            "DEEPSEEK_API_KEY" => Some("k".to_string()),
+            _ => None,
+        };
+        let providers = providers_from(&lookup);
+        assert_eq!(
+            providers[0].extra.as_ref().unwrap()["thinking"]["type"],
+            "disabled"
+        );
+    }
+
+    #[test]
+    fn deepseek_extra_can_be_overridden() {
+        let lookup = |key: &str| match key {
+            "POKO_BRAIN_PROVIDERS" => Some("deepseek".to_string()),
+            "DEEPSEEK_API_KEY" => Some("k".to_string()),
+            "POKO_BRAIN_DEEPSEEK_EXTRA" => Some(r#"{"thinking":{"type":"enabled"}}"#.to_string()),
+            _ => None,
+        };
+        let providers = providers_from(&lookup);
+        assert_eq!(
+            providers[0].extra.as_ref().unwrap()["thinking"]["type"],
+            "enabled"
+        );
     }
 
     #[test]
