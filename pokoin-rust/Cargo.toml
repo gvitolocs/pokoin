@@ -8,6 +8,7 @@ members = [
   "apps/cardtrader-listing-dump",
   "apps/cardtrader-price-cache",
   "apps/tcgplayer-match",
+  "apps/cardmarket-catalog",
   "crates/config",
   "crates/db",
   "crates/cache",

@@ -45,10 +45,15 @@ pub fn candidate_urls(row:&Value,locale:&str)->Vec<String>{
  urls.push(name_only);unique(urls)
 }
 fn unique_keep_empty(rows:Vec<String>)->Vec<String>{let mut v=vec![];for r in rows {if !v.contains(&r){v.push(r)}}v}
+/// Games whose Cardmarket product names have no collector number.
+const NAME_ONLY_SEARCH_GAMES:[&str;1]=["battle_spirits_saga"];
 pub fn search_fallback(row:&Value,locale:&str,game:&str)->String{
  let locale=if rx(r"^[a-z]{2}$").is_match(locale){locale}else{"en"};let path=table()["games"][game].as_str().unwrap_or("Pokemon");
  let name=text(row,"name");let name=if game=="pokemon" {let n=rx(r"(?i)\b(mega|ex|gx|vmax|vstar|lv\.?\s*x|break|prime)\b").replace_all(&ascii_marks(&name)," ").into_owned();rx(r"[^\p{L}\p{N}]+").replace_all(&n," ").split_whitespace().find(|s|s.len()>1).unwrap_or("").to_lowercase()} else {name.trim().to_owned()};
  let number=["expansion_number","card_number","number"].iter().map(|k|text(row,k)).find(|s|!s.is_empty()).unwrap_or_default();let number=number.trim();let number=if game!="pokemon"&&!number.contains('|')&&!rx(r"^\d+[A-Za-z]?\s*/\s*\d+").is_match(number){number.to_owned()}else{let right=number.split_once('|').filter(|(left,right)|!left.is_empty()&&!right.trim().is_empty()).map(|(_,r)|r.trim()).unwrap_or(number);right.split('/').next().unwrap_or("").trim().to_owned()};
+ // Battle Spirits Saga product names on Cardmarket never carry the card number,
+ // so a name + number search finds nothing; search the name alone.
+ let number=if NAME_ONLY_SEARCH_GAMES.contains(&game){String::new()}else{number};
  let search=[name,number].into_iter().filter(|s|!s.is_empty()).collect::<Vec<_>>().join(" ");
  let base=if game=="pokemon"{format!("https://www.cardmarket.com/{locale}/Pokemon/Products/Singles")}else{format!("https://www.cardmarket.com/{locale}/{path}/Products/Search")};
  let mut serializer=url::form_urlencoded::Serializer::new(String::new());if game=="pokemon"{serializer.append_pair("searchMode","v2").append_pair("idCategory","51").append_pair("idExpansion","0");}serializer.append_pair("searchString",&search);if game=="pokemon"{serializer.append_pair("idRarity","0").append_pair("perSite","30");}format!("{base}?{}",serializer.finish())
@@ -76,5 +81,6 @@ pub async fn resolve(db:&DbPools,game:&str,id:&str,hint:&str,locale:&str)->ApiRe
  if target.is_empty(){return Err(ApiError::not_found("No Cardmarket URL candidate found."))}Ok(target)
 }
 #[cfg(test)]mod tests{use super::*;
+ #[test]fn battle_spirits_saga_searches_the_name_only(){let row=json!({"name":"Air Sniper Breeze","expansion_number":"BSS02-070"});assert_eq!(search_fallback(&row,"en","battle_spirits_saga"),"https://www.cardmarket.com/en/BattleSpiritsSaga/Products/Search?searchString=Air+Sniper+Breeze");}
  #[test]fn golden_contracts_from_live_node(){let cases:Vec<Value>=serde_json::from_str(include_str!("fixtures/cardmarket/contracts.json")).unwrap();for c in cases{let r=&c["row"];let game=c["game"].as_str().unwrap();assert_eq!(card_name_slug(&text(r,"name")),c["slug"]);assert_eq!(normalized_collector_number(&text(r,"expansion_number")),c["collector"]);assert_eq!(json!(candidate_urls(r,"it")),c["candidates"]);assert_eq!(search_fallback(r,"it",game),c["search"]);assert_eq!(can_generate_direct(r),c["direct"]);assert_eq!(is_misprint(r),c["misprint"]);}}
 }
