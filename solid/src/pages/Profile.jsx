@@ -271,11 +271,11 @@ function ProfileDesk() {
       ? 'Buyers can pay you with site PKN or by card.'
       : `Card payments only — your prices show in ${localCurrency()}.${stripeStatus()?.ready ? '' : ' Connect Stripe to get paid.'}`);
   const stripeMeta = () => (stripeStatus()?.ready
-    ? 'Payouts ready for EUR sales.'
+    ? 'Payouts ready for card sales.'
     : step().stripe.started
       ? 'Onboarding started — finish it on Stripe.'
       : shipFromCountry()
-        ? 'Connect Stripe to receive EUR sales.'
+        ? 'Connect Stripe to get paid for card sales.'
         : 'Choose a ship-from country first.');
 
   async function signOutEverywhere() {
@@ -362,7 +362,7 @@ function ProfileDesk() {
             <SetupRow
               step={step().country}
               title="Ship-from country"
-              meta={shipFromCountry() ? 'Used on your listings and for EUR shipping rates.' : 'Required before your first physical listing.'}
+              meta={shipFromCountry() ? 'Used on your listings and for shipping rates.' : 'Required before your first physical listing.'}
               action={(
                 <ShipFromCountrySelect
                   value={shipFromCountry() || ''}
@@ -406,7 +406,7 @@ function ProfileDesk() {
               action={(
                 <button
                   type="button"
-                  class={cardTrader()?.connected || ctOpen() ? 'btn ghost' : 'btn btn-cardtrader'}
+                  class="btn btn-cardtrader"
                   aria-expanded={String(ctOpen())}
                   onClick={() => {
                     // Connect sends the seller to CardTrader for their API token
