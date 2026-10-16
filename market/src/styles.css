@@ -2957,12 +2957,26 @@ html.is-card-banding * {
 }
 
 /* Keep the painting still and enlarge only SAM's transparent Pokemon
- * silhouette. The grounding rectangle is never rendered. This duplicate
- * uses the cached card image; the tiny WebP is only its alpha mask. */
+ * silhouette, growing from the figure's own centre. The grounding
+ * rectangle is never rendered. This duplicate uses the cached card image;
+ * the tiny WebP is only its alpha mask. --figure-cx/cy are card fractions
+ * of that centre; until the alpha box loads, the origin is the crop centre. */
 .tile.tile-album .art-cut img.art-figure-layer {
   pointer-events: none;
   opacity: 0;
-  transform-origin: 50% 50%;
+  transform-origin:
+    calc(var(--figure-cx, calc(var(--art-left) + var(--art-width) * 0.5)) * 100%)
+    calc(var(--figure-cy, calc(var(--art-top) + var(--art-height) * 0.5)) * 100%);
+}
+
+@keyframes album-figure-pop {
+  from { scale: 1; }
+  to { scale: 1.08; }
+}
+
+@keyframes album-figure-shadow-pop {
+  from { scale: 1; translate: 0 0; opacity: 0; }
+  to { scale: 1.08; translate: 0 4px; opacity: 0.62; }
 }
 
 /* Hundreds of promoted blur layers made scrolling back up flicker. */
@@ -2982,10 +2996,9 @@ html.is-card-banding * {
   mask-position: center;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-  /* No opacity transition here on purpose: the base state is the unhover
-   * destination, so the silhouette must cut out instantly when the pointer
-   * leaves. The fade-in lives on the :hover/:focus rules only. */
-  transition: transform 0.14s ease-out !important;
+  /* Layers mount already hovered, so a transform transition never plays.
+   * The grow is an animation of scale. Leaving :hover drops that rule and
+   * the silhouette cuts out instantly. */
 }
 
 /* The mask WebP itself is a solid, transparent-background silhouette. Use
@@ -2994,21 +3007,23 @@ html.is-card-banding * {
 .tile.tile-album .art-cut img.art-figure-shadow {
   z-index: 2;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-hover {
+.tile.tile-album:hover .art-cut img.art-figure-hover,
+.tile.tile-album:focus-within .art-cut img.art-figure-hover {
   opacity: 1;
-  transform: scale(1.12) !important;
+  scale: 1.08;
+  animation: album-figure-pop 0.16s ease-out both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
-.tile.tile-album:hover .art-cut img.art-figure-shadow {
+.tile.tile-album:hover .art-cut img.art-figure-shadow,
+.tile.tile-album:focus-within .art-cut img.art-figure-shadow {
   opacity: 0.62;
-  transform: translateY(7px) scale(1.12) !important;
+  scale: 1.08;
+  translate: 0 4px;
+  animation: album-figure-shadow-pop 0.16s ease-out both !important;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
 /* Focus follows the silhouette: softly defocus the painting beneath the
@@ -3023,7 +3038,8 @@ html.is-card-banding * {
 
 /* Chrome object-view-box crops the base scan into the element itself. Keep
  * the masked duplicate as a full-card-sized layer so its full-card alpha map
- * stays pixel-aligned before the album container clips it. */
+ * stays pixel-aligned with the painting. Hover may let that layer leave
+ * the frame; the resting crop does not. */
 @property --album-figure-w {
   syntax: "<length>";
   inherits: false;
@@ -3045,9 +3061,9 @@ html.is-card-banding * {
   }
 
   /* Full-art cells are a row-gap taller than the bleed window, and the
-   * painting uses object-fit: cover from the top. A width-fit silhouette
-   * sat above that Pokémon and the 1.12 scale (from the full-card center)
-   * shoved the tile. Cover the same window and grow from its center. */
+   * painting uses object-fit: cover from the top. The silhouette is the
+   * same full-card box, aligned to that cover crop. Hover origin is the
+   * shared --figure-cx / --figure-cy on .art-figure-layer. */
   .tile-album.tile-tall .art-cut {
     container-type: size;
   }
@@ -3070,9 +3086,6 @@ html.is-card-banding * {
       - var(--art-left) * var(--album-figure-w)
     );
     top: calc(-1 * var(--art-top) * var(--album-figure-w) / var(--card-ratio));
-    transform-origin:
-      calc((var(--art-left) + var(--art-width) / 2) * 100%)
-      calc((var(--art-top) + var(--art-height) * 0.36) * 100%);
   }
 }
 
@@ -8815,16 +8828,17 @@ dialog.zoom:not([open]) {
 
 .artwork-test-card:focus .art-cut img.art-figure-hover {
   opacity: 1;
-  transform: scale(1.12) !important;
+  scale: 1.08;
+  animation: album-figure-pop 0.16s ease-out both !important;
   filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
 .artwork-test-card:focus .art-cut img.art-figure-shadow {
   opacity: 0.62;
-  transform: translateY(7px) scale(1.12) !important;
+  scale: 1.08;
+  translate: 0 4px;
+  animation: album-figure-shadow-pop 0.16s ease-out both !important;
   filter: brightness(0) blur(9px) !important;
-  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
 }
 
 .artwork-hover-hint {
@@ -11608,12 +11622,15 @@ html:has(.wallet-page) .brand span {
 }
 
 
-/* Album hover pop-out: the zoomed Pokémon silhouette leaves the frame.
- * Only where object-view-box crops the base painting inside its own box
- * (Chrome/Edge): the painting keeps a rounded clip of its own, and the tile,
- * art box and crop box stop clipping so just the masked figure and its shadow
- * overflow. Safari positions the painting with negative offsets, so it keeps
- * the in-frame zoom. */
+/* Album hover pop-out: the silhouette grows from its own centre and may
+ * leave the frame. Only where object-view-box crops the base painting
+ * inside its own box (Chrome/Edge). The painting keeps its rounded clip
+ * and the top fade; the tile, art box, and crop box stop clipping and
+ * drop the crop mask so the figure and its shadow can overflow. The
+ * figure layers are absolute; min-height: 0 keeps the grid tracks put,
+ * because a grid item that stops clipping gets a content-based minimum
+ * (a hovered full art grew from 435px to 537px). Safari positions the
+ * painting with negative offsets and stays in-frame. */
 @supports (object-view-box: none) {
   .tile.tile-album:has(img.art-figure-hover):hover,
   .tile.tile-album:has(img.art-figure-hover):focus-within {
@@ -11621,6 +11638,7 @@ html:has(.wallet-page) .brand span {
     z-index: 6;
     overflow: visible;
     contain: none;
+    min-height: 0;
   }
 
   .tile-pile-wrap:has(img.art-figure-hover):hover,
@@ -11636,48 +11654,30 @@ html:has(.wallet-page) .brand span {
     overflow: visible;
   }
 
-  .tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):hover .art-cut,
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):focus-within .art-cut {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+  .tile.tile-album:not(.is-landscape):not(.tile-item):has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
     clip-path: inset(0 round 14px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
+    mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
   }
 
-  .tile.tile-album:hover .art-cut img.art-figure-hover {
-    transform: translateY(-3%) scale(1.18) !important;
+  .tile.tile-album:has(img.art-figure-hover):hover .tile-meta,
+  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-meta {
+    z-index: 4;
   }
+}
 
-  .tile.tile-album:hover .art-cut img.art-figure-shadow {
-    transform: translateY(5%) scale(1.18) !important;
-  }
-
-  /* Full art already fills two rows. The pop-out (overflow visible + a
-   * lift) grows the grid track and parks the silhouette above the Pokémon. */
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within {
-    z-index: 0;
-    overflow: hidden;
-    contain: paint;
-  }
-
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .tile-art,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .tile-art,
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut {
-    overflow: hidden;
-  }
-
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
-  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
-    clip-path: none;
-  }
-
-  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-hover,
-  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-hover {
-    transform: scale(1.12) !important;
-  }
-
-  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-shadow,
-  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-shadow {
-    transform: translateY(7px) scale(1.12) !important;
+@media (prefers-reduced-motion: reduce) {
+  .tile.tile-album:hover .art-cut img.art-figure-layer,
+  .tile.tile-album:focus-within .art-cut img.art-figure-layer,
+  .tile.tile-album .art-cut img.art-figure-layer {
+    animation: none !important;
   }
 }
 

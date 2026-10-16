@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js';
-import { artCutVars } from '@market/art-cut.js';
-import { artworkFigureMaskSrc } from '@market/art-figure-mask.js';
+import { artCutFor, artCutVars } from '@market/art-cut.js';
+import { artworkFigureMaskSrc, figureOrigin, loadFigureBox } from '@market/art-figure-mask.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
 import { heroOpen, onHeroGate } from '@market/hero-gate.js';
@@ -86,10 +86,32 @@ export default function CardArt(props) {
   const figureMask = createMemo(() => props.figureMask
     ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : ''));
   const [showFigure, setShowFigure] = createSignal(false);
+  const [figureHit, setFigureHit] = createSignal(null);
+  const figureOriginStyle = createMemo(() => {
+    const mask = figureMask();
+    const hit = figureHit();
+    if (!hit || hit.mask !== mask || !hit.box) return {};
+    const origin = figureOrigin(hit.box, artCutFor(props.card, props.cutSurface));
+    return {
+      '--figure-cx': String(origin.x),
+      '--figure-cy': String(origin.y),
+    };
+  });
+  const figureHoverStyle = createMemo(() => ({
+    '--art-figure-mask': `url("${cdnFetchUrl(figureMask())}")`,
+    ...figureOriginStyle(),
+  }));
   onSettled(() => {
     const node = img?.closest('.tile');
     if (!node || !figureMask()) return undefined;
-    const on = () => setShowFigure(true);
+    const on = () => {
+      setShowFigure(true);
+      const mask = figureMask();
+      loadFigureBox(cdnFetchUrl(mask)).then((box) => {
+        if (figureMask() !== mask) return;
+        setFigureHit({ mask, box });
+      });
+    };
     const off = () => setShowFigure(false);
     node.addEventListener('pointerenter', on);
     node.addEventListener('pointerleave', off);
@@ -161,6 +183,7 @@ export default function CardArt(props) {
               aria-hidden="true"
               loading="lazy"
               decoding="async"
+              style={figureOriginStyle()}
             />
             <img
               class="art-figure-layer art-figure-hover"
@@ -169,7 +192,7 @@ export default function CardArt(props) {
               aria-hidden="true"
               loading="lazy"
               decoding="async"
-              style={{ '--art-figure-mask': `url("${cdnFetchUrl(figureMask())}")` }}
+              style={figureHoverStyle()}
             />
           </Show>
         </span>
