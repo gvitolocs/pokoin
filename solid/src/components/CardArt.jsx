@@ -27,7 +27,10 @@ function logCardArt(event, detail) {
  * changes on a fallback — nothing else re-renders.
  */
 export default function CardArt(props) {
-  const urls = createMemo(() => rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl).filter(Boolean));
+  const urls = createMemo(
+    () => rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl).filter(Boolean),
+    { equals: (a, b) => a.length === b.length && a.every((u, i) => u === b[i]) },
+  );
   // Writable derived state: both reset whenever the sibling list changes.
   const [index, setIndex] = createSignal(() => (urls(), 0));
   const [dead, setDead] = createSignal(() => (urls(), false));
