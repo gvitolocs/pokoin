@@ -78,6 +78,12 @@ pub fn clean_cards(raw: Option<&Json>) -> Vec<Json> {
             .or_else(|| row.get("minAsk"))
             .and_then(Json::as_f64)
             .unwrap_or(0.0);
+        // Poko replies are Pokémon. A valid attached game (a card dragged in
+        // from another catalog) is kept; a missing or unknown one is Pokémon.
+        let game = crate::domain::marketplace_game::normalize_game(&clean_text(
+            &field_str(row, &["game"]),
+            40,
+        ));
         out.push(json!({
             "kind": "card",
             "cardId": card_id,
@@ -90,6 +96,7 @@ pub fn clean_cards(raw: Option<&Json>) -> Vec<Json> {
             "path": path,
             "imageUrl": clean_text(&field_str(row, &["imageUrl", "cardImageUrl"]), 500),
             "pricePkn": num(price),
+            "game": game,
         }));
     }
     out
@@ -851,6 +858,7 @@ pub fn card_row(row: &Json) -> Json {
         "name": name,
         "setName": row_text(row, "set_name"),
         "source": "poko",
+        "game": "pokemon",
     })
 }
 
@@ -992,7 +1000,15 @@ mod tests {
         assert_eq!(cards[0]["cardName"], json!("Pikachu"));
         assert_eq!(cards[0]["path"], json!("/marketplace/en/cards/12345"));
         assert_eq!(cards[0]["pricePkn"], json!(12.5));
+        assert_eq!(cards[0]["game"], json!("pokemon"));
         assert_eq!(cards[1]["cardId"], json!("99"));
+        assert_eq!(cards[1]["game"], json!("pokemon"));
+        let kept = clean_cards(Some(&json!([
+            { "cardId": "7", "name": "Nami", "game": "one-piece" },
+            { "cardId": "8", "name": "Bolt", "game": "not-a-game" }
+        ])));
+        assert_eq!(kept[0]["game"], json!("one_piece"));
+        assert_eq!(kept[1]["game"], json!("pokemon"));
         // A card with neither id nor name is dropped.
         assert!(clean_cards(None).is_empty());
         // The 12-card cap.
@@ -1322,6 +1338,7 @@ mod tests {
         assert_eq!(card["name"], json!("Pikachu"));
         assert_eq!(card["setName"], json!("Base"));
         assert_eq!(card["source"], json!("poko"));
+        assert_eq!(card["game"], json!("pokemon"));
     }
 
     #[test]

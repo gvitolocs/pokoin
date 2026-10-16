@@ -292,15 +292,19 @@ export function Conversation() {
 }
 
 function cardPayload(row) {
+  const path = String(row?.path || row?.canonicalPath || row?.href || '');
+  const gameId = String(row?.game || '').trim();
   return {
     cardId: String(row?.cardId || row?.id || ''),
     name: String(row?.cardName || row?.name || ''),
     setName: String(row?.setName || row?.set || ''),
     condition: String(row?.condition || ''),
     language: String(row?.language || ''),
-    canonicalPath: String(row?.canonicalPath || row?.href || ''),
+    canonicalPath: path,
+    path,
     imageUrl: String(row?.imageUrl || row?.cardImageUrl || ''),
     cardName: String(row?.cardName || row?.name || ''),
+    ...(gameId ? { game: gameId } : {}),
   };
 }
 
@@ -454,7 +458,7 @@ function PokoConversation() {
                   <Show when={tagsOf(event()).length}>
                     <span class="chat-tags">
                       <For each={tagsOf(event())}>
-                        {(row) => <ChatListingTag row={row} peer={{ username: POKO_PEER }} me={me()} />}
+                        {(row) => <ChatListingTag row={row} peer={{ username: POKO_PEER }} me={me()} defaultGame="pokemon" />}
                       </For>
                     </span>
                   </Show>
@@ -474,6 +478,7 @@ function PokoConversation() {
                       trayId={messagesTrayId(POKO_PEER)}
                       peer={{ username: POKO_PEER }}
                       me={me()}
+                      defaultGame="pokemon"
                       onRemove={() => setCards((current) => current.filter((_, i) => i !== index()))}
                     />
                   )}
