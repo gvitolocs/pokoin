@@ -311,6 +311,9 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
             Err(error.into())
         }
     };
+    if state.game_pools(game).await.is_none() {
+        return Ok(false);
+    }
     let mut tx = state.write_db().begin().await?;
     let locked: bool = sqlx::query_scalar("select pg_try_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("seller-book:{}:{game}", seller.uid))
@@ -319,10 +322,8 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
     if !locked {
         return Ok(false);
     }
-    let Some(pools) = state.game_pools(game).await else {
-        return Ok(false);
-    };
-    let stamp = seller_activity_stamp(&pools.read, &seller.uid)
+    // Listings are the main database, unfiltered by game, same text as the book.
+    let stamp = seller_activity_stamp(state.write_db(), &seller.uid)
         .await
         .map_err(|error| crate::game::catalog_error(game, error))?;
     let stored = sqlx::query("select stamp, profile, seller from public.marketplace_seller_books where seller_uid = $1 and game = $2")
@@ -345,7 +346,7 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
         }
     }
     let header = header.unwrap_or_default();
-    let (built_stamp, body, listings) = build_book_with(state, seller, &header, game, compact()).await?;
+    let (built_stamp, body, listings) = build_book_with(state, state.write_db(), seller, &header, game, compact()).await?;
     let br = match how.compress {
         Some(compress) => {
             let bytes = body.clone();
@@ -402,13 +403,21 @@ pub struct Built {
     pub removed: u64,
 }
 
-/// A seller as the builder finds them: their stamp, whether they list
-/// anything, and their latest listing name (the handle fallback).
+/// A seller as the builder finds them: their stamp (every game), whether they
+/// have an active row in this game, whether they have any row in this game,
+/// and their latest listing name (the handle fallback).
 struct Shop {
     uid: String,
     stamp: String,
     listed: bool,
+    in_game: bool,
     name: String,
+}
+
+/// Visit a seller who lists in this game or already has its book. Cleanup keeps
+/// a book only when the seller still has a listing row in this game.
+fn shop_plan(listed: bool, in_game: bool, stored: bool) -> (bool, bool) {
+    (listed || stored, in_game)
 }
 
 /// A stored book as the builder compares it.
@@ -432,41 +441,60 @@ pub fn needs_build(stored: Option<&StoredBook>, stamp: &str, profile: &str, user
 }
 
 /// The snapshot builder (`pokoin-api job build-lists --kind=seller`, k3s
-/// CronJob `build-lists-sellers` on nezopt, against the writer): every seller
-/// with an active listing gets a current Pokémon book, its brotli-11 copy and
-/// its shop header. A seller whose book is current costs one cached profile
-/// read; the stamps of every seller are one grouped index scan. A book whose
-/// seller has no listing row left is removed. `only` limits the run to one
-/// handle; `dry_run` reports what it would build.
+/// CronJob `build-lists-sellers` on nezopt, against the writer) builds one
+/// game's books: every seller with an active listing in that game gets a
+/// current book, its brotli-11 copy and its shop header. Listings are the
+/// main database's `marketplace_user_listings` rows tagged with the game;
+/// books are stored there too. A seller whose book is current costs one
+/// cached profile read; the stamps of every seller are one grouped index
+/// scan. A book whose seller has no listing row left in this game is removed,
+/// and that cleanup only touches this game. `only` limits the run to one
+/// handle; `dry_run` reports what it would build. No database for the game
+/// builds nothing.
 pub async fn build_all(
     state: &DomainState,
     directory: &dyn SellerDirectory,
+    game: &str,
     compress: fn(&[u8]) -> Vec<u8>,
     only: Option<&str>,
     force: bool,
     dry_run: bool,
 ) -> Result<Built, ApiError> {
-    const GAME: &str = "pokemon";
-    // Table: migrations 116 and 119 (applied by the migrator, never here).
+    // Listings and books are the main database. `marketplace_game` tags the
+    // row (null or '' is Pokémon). Migrations 116 and 119 are applied by the
+    // migrator, never here.
+    if state.game_pools(game).await.is_none() {
+        return Ok(Built::default());
+    }
     let db = state.write_db();
-    let shops: Vec<Shop> = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>, bool, Option<String>)>(
+    let rows = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>, bool, bool, Option<String>)>(
         "select seller_uid, max(updated_at),
-                bool_or(status = 'active' and quantity_available > 0),
+                bool_or(coalesce(nullif(marketplace_game, ''), 'pokemon') = $1
+                        and status = 'active' and quantity_available > 0),
+                bool_or(coalesce(nullif(marketplace_game, ''), 'pokemon') = $1),
                 (array_agg(seller_name order by updated_at desc nulls last))[1]
            from public.marketplace_user_listings
           where seller_uid is not null and btrim(seller_uid) <> ''
           group by seller_uid",
     )
+    .bind(game)
     .fetch_all(db)
-    .await?
-    .into_iter()
-    .map(|(uid, max, listed, name)| Shop { uid, stamp: stamp_text(max), listed, name: name.unwrap_or_default() })
-    .collect();
+    .await?;
+    let shops: Vec<Shop> = rows
+        .into_iter()
+        .map(|(uid, max, listed, in_game, name)| Shop {
+            uid,
+            stamp: stamp_text(max),
+            listed,
+            in_game,
+            name: name.unwrap_or_default(),
+        })
+        .collect();
     let stored: HashMap<String, StoredBook> = sqlx::query_as::<_, (String, String, String, Option<String>, bool, bool)>(
         "select seller_uid, stamp, profile, username, br is not null, built_at > now() - interval '1 day'
            from public.marketplace_seller_books where game = $1",
     )
-    .bind(GAME)
+    .bind(game)
     .fetch_all(db)
     .await?
     .into_iter()
@@ -475,7 +503,7 @@ pub async fn build_all(
     })
     .collect();
     let mut done = Built::default();
-    for shop in shops.iter().filter(|shop| shop.listed || stored.contains_key(&shop.uid)) {
+    for shop in shops.iter().filter(|shop| shop_plan(shop.listed, shop.in_game, stored.contains_key(&shop.uid)).0) {
         done.sellers += 1;
         let seller = match directory.seller(&shop.uid, &shop.name).await {
             Ok(Some(seller)) => seller,
@@ -504,7 +532,7 @@ pub async fn build_all(
             continue;
         }
         let how = Rebuild { compress: Some(compress), header: Some(directory.header(&shop.uid).await), force: true };
-        match rebuild_with(state, &seller, GAME, &how).await {
+        match rebuild_with(state, &seller, game, &how).await {
             Ok(true) => {
                 done.built += 1;
                 tracing::info!(seller = %username, stamp = %shop.stamp, "seller book built");
@@ -517,12 +545,19 @@ pub async fn build_all(
         }
     }
     if only.is_none() && !dry_run {
-        let uids: Vec<&str> = shops.iter().map(|shop| shop.uid.as_str()).collect();
-        done.removed = sqlx::query("delete from public.marketplace_seller_books where not (seller_uid = any($1::text[]))")
-            .bind(&uids)
-            .execute(db)
-            .await?
-            .rows_affected();
+        let uids: Vec<&str> = shops
+            .iter()
+            .filter(|shop| shop_plan(shop.listed, shop.in_game, stored.contains_key(&shop.uid)).1)
+            .map(|shop| shop.uid.as_str())
+            .collect();
+        done.removed = sqlx::query(
+            "delete from public.marketplace_seller_books where game = $2 and not (seller_uid = any($1::text[]))",
+        )
+        .bind(&uids)
+        .bind(game)
+        .execute(db)
+        .await?
+        .rows_affected();
     }
     Ok(done)
 }
@@ -569,10 +604,10 @@ pub async fn sweep_once(state: &DomainState) -> Result<usize, sqlx::Error> {
         let Some(seller) = seller_from(&row.try_get::<Value, _>("seller")?) else {
             continue;
         };
-        let Some(pools) = state.game_pools(&game).await else {
+        if state.game_pools(&game).await.is_none() {
             continue;
-        };
-        let Ok(stamp) = seller_activity_stamp(&pools.read, &seller.uid).await else {
+        }
+        let Ok(stamp) = seller_activity_stamp(state.read_db(), &seller.uid).await else {
             continue;
         };
         if stamp != stored {
@@ -659,6 +694,14 @@ mod tests {
 
     fn book_like(book: &StoredBook) -> StoredBook {
         StoredBook { stamp: book.stamp.clone(), profile: book.profile.clone(), username: book.username.clone(), compressed: book.compressed, recent: book.recent }
+    }
+
+    #[test]
+    fn a_shop_is_visited_when_listed_or_stored_and_kept_only_with_a_row_in_the_game() {
+        assert_eq!(shop_plan(true, true, false), (true, true));
+        assert_eq!(shop_plan(false, false, true), (true, false), "a stored book with no row in this game is removed");
+        assert_eq!(shop_plan(false, true, false), (false, true), "an inactive row is kept and not rebuilt");
+        assert_eq!(shop_plan(false, false, false), (false, false));
     }
 
     #[test]

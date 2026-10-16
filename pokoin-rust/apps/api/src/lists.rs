@@ -408,14 +408,14 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             let n = build_versions(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, versions = n, "build-lists versions");
         }
-        if o.kinds.iter().any(|k| k == "seller") && game == "pokemon" {
+        if o.kinds.iter().any(|k| k == "seller") {
             let Some(commerce) = state.commerce.read().await.clone() else {
                 anyhow::bail!("seller books need the commerce domain (MARKETPLACE_DATABASE_URL)");
             };
             let started = std::time::Instant::now();
             use pokoin_commerce::handlers::seller_book;
             let directory = seller_book::FirestoreDirectory(&commerce);
-            let built = seller_book::build_all(&commerce, &directory, brotli11, o.key.as_deref(), o.force, o.dry_run)
+            let built = seller_book::build_all(&commerce, &directory, game, brotli11, o.key.as_deref(), o.force, o.dry_run)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.message))?;
             tracing::info!(
