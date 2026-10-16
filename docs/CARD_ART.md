@@ -89,7 +89,7 @@ webp. `cut={true}` wraps the **same** `src` in `.art-cut` (no extra fetch).
 
 ## Type A — `CardTile` (`.tile`)
 
-**Component:** `market/src/components/CardTile.jsx`  
+**Component:** `solid/src/components/CardTile.jsx`  
 **Look:** padded full-card JPEG/webp (`.tile-art` padding on **every** side —
 never `padding-bottom: 0`, or the grey `.tile-meta` sits on the bottom
 border), name, `printingIdentity().tileLine`,

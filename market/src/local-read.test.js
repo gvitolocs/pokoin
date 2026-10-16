@@ -4,7 +4,7 @@ import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './loca
 
 const URL_A = 'https://api.pokoin.com/api/marketplace-list?kind=set&key=surging-sparks&format=c1v2';
 
-function setup({ rows = {}, answers = {}, storeDelayMs = 0 } = {}) {
+function setup({ rows = {}, answers = {}, storeDelayMs = 0, storeWaitMs } = {}) {
   let clock = 1_000_000_000;
   const fetched = [];
   const puts = [];
@@ -13,6 +13,7 @@ function setup({ rows = {}, answers = {}, storeDelayMs = 0 } = {}) {
   const stored = new Map(Object.entries(rows));
   const reader = createLocalReader({
     now: () => clock,
+    storeWaitMs,
     decode: (text) => JSON.parse(text),
     store: {
       get: async (url) => {
@@ -144,6 +145,98 @@ test('stale-while-revalidate: a changed body is stored and reaches onUpdate and 
   assert.equal(t.stored.get(URL_A).body, '{"v":2}');
   assert.deepEqual(t.reader.peek(URL_A), { v: 2 });
   unsubscribe();
+});
+
+test('an onUpdate read shows the stored copy beside a plain read in flight, and joins that request', async () => {
+  for (const [answer, expected] of [['{"v":2}', [{ v: 2 }]], ['{"v":1}', []]]) {
+    let release;
+    const t = setup({
+      answers: { [URL_A]: () => new Promise((resolve) => { release = () => resolve({ text: answer }); }) },
+    });
+    t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+    // A route preload: may not show the old copy, so it waits for the network.
+    const plain = t.reader.read(URL_A);
+    await flush();
+    assert.equal(t.fetched.length, 1);
+    const updates = [];
+    assert.deepEqual(await t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) }), { v: 1 });
+    assert.equal(t.fetched.length, 1, 'the revalidation is the request already in flight');
+    release();
+    assert.deepEqual(await plain, JSON.parse(answer));
+    await flush();
+    assert.deepEqual(updates, expected);
+    assert.equal(t.fetched.length, 1);
+  }
+});
+
+test('a slow store does not send a second request when the read in flight landed meanwhile', async () => {
+  let release;
+  const t = setup({
+    storeDelayMs: 60,
+    answers: {
+      [URL_A]: () => (release
+        ? { text: '{"v":2}' }
+        : new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); })),
+    },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const plain = t.reader.read(URL_A);
+  await flush();
+  const updates = [];
+  // The desk mounts while the preload is still out; the preload lands before
+  // the store answers (busy main thread, cold database).
+  const desk = t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) });
+  release();
+  assert.deepEqual(await plain, { v: 2 });
+  assert.deepEqual(await desk, { v: 2 });
+  assert.equal(t.fetched.length, 1);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(t.fetched.length, 1);
+  assert.deepEqual(updates, []);
+});
+
+test('the store head start ends when the request in flight for the URL lands first', async () => {
+  let release;
+  const t = setup({
+    storeDelayMs: 1500,
+    storeWaitMs: 1000,
+    answers: {
+      [URL_A]: () => (release
+        ? { text: '{"v":2}' }
+        : new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); })),
+    },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const plain = t.reader.read(URL_A);
+  await flush();
+  const started = performance.now();
+  const desk = t.reader.read(URL_A, { onUpdate: () => {} });
+  setTimeout(() => release(), 10);
+  assert.deepEqual(await desk, { v: 2 });
+  assert.ok(performance.now() - started < 500, 'answered by the landing, not after the 1 s head start');
+  assert.deepEqual(await plain, { v: 2 });
+  assert.equal(t.fetched.length, 1);
+});
+
+test('a revalidation that finds the copy gone drops it: the next read shows the 404', async () => {
+  const t = setup();
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const updates = [];
+  assert.deepEqual(await t.reader.read(URL_A, { onUpdate: (v) => updates.push(v) }), { v: 1 });
+  await flush();
+  await flush();
+  assert.deepEqual(updates, []);
+  assert.deepEqual(t.removed, [URL_A]);
+  assert.equal(t.reader.peek(URL_A), undefined);
+  await assert.rejects(t.reader.read(URL_A, { onUpdate: () => {} }), (err) => err.status === 404);
+  // Any other failure keeps the copy.
+  const down = setup({ answers: { [URL_A]: Object.assign(new Error('Bad gateway'), { status: 502 }) } });
+  down.stored.set(URL_A, { body: '{"v":1}', savedAt: down.now() - FRESH_MS * 10 });
+  assert.deepEqual(await down.reader.read(URL_A, { onUpdate: () => {} }), { v: 1 });
+  await flush();
+  await flush();
+  assert.deepEqual(down.removed, []);
+  assert.deepEqual(down.reader.peek(URL_A), { v: 1 });
 });
 
 test('without onUpdate an old copy waits for the network, and stands in only when it fails', async () => {

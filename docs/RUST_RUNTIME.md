@@ -34,6 +34,36 @@ The Cloudflare Load Balancer also sends about 10% of `api.pokoin.com` to the nez
 
 A handler panic answers `500` and logs `handler panicked` with its method and path. On SIGTERM every listener stops accepting and gets at most 10 s to finish in-flight requests (open streams included), then the process exits; the unit's `TimeoutStopSec` is 20 s. A stop that never logs `shutdown` and ends in SIGKILL means the process was stuck before the signal arrived.
 
+## Postgres connection budget
+
+The nezopt writer (`pokoin-marketplace-postgres-15t`) has `max_connections` 120 and also hosts all 24 satellite game databases (`pokoin_magic`, `pokoin_one_piece`, …). Every client shares that limit: the Pi, the k3s overflow pods and CronJobs, host scripts, and `docker exec psql`. On 2026-10-14 between 21:10 and 21:18 UTC it refused 1193 connections ("too many clients already"). Idle per-game pools of 4 connections each had piled up: 91 from nezopt itself (192.168.178.55 is nezopt's LAN IP; the Pi is .46), held by ad hoc SSH sessions, plus 27 idle overflow connections.
+
+How the API sizes its pools:
+
+| Pool | Cap per process | Env |
+| --- | --- | --- |
+| Catalog (`state.db`, the read URL) | 16 | `POKOIN_RUST_DB_POOL_MAX` |
+| Domain read + write (api-common), commerce read + write | 12 each; read and write become one pool when the URLs are equal | `POKOIN_RUST_DOMAIN_DB_POOL_MAX` |
+| Accounts read model + Card Rails writer | 4 + 2 | fixed |
+| **Each satellite game database** | **2**, idle-closed after **45 s**, recycled after 30 min | `POKOIN_RUST_GAME_DB_POOL_MAX` (clamped 1–4), `POKOIN_RUST_GAME_DB_IDLE_SECS` (clamped 5–300) |
+
+Startup: the catalog pool (`pokoin_db::pool`) connects eagerly with a 3 s acquire timeout (it was 200 ms, too short for TLS verify-full + SCRAM; sqlx retries "too many clients" every 10–40 ms inside that window). `warm_dependencies` gives it 5 s and retries with backoff: 2 s doubling to 30 s, ±25 % jitter. On 2026-10-14 one new overflow pod logged about 95 `phase=postgres` "pool timed out" retries against the full writer; a healthy rollout opens about 16 connections per new pod. `/readyz` is unchanged.
+
+Satellite pools come from `pokoin_db::satellite_pool(url)`, one pool per database URL for the whole process. Catalog, api-common, commerce, accounts and external all share it; before this, each of those crates kept its own pool, so one process could reach about 44 connections per game. Batch jobs close a game's pool with `pokoin_db::close_satellite` once that game is done. `GET /metrics` reports `gameDbPools`, `gameDbPoolSize`, `gameDbPoolIdle` and `gameDbPoolMax`. The admin ingest (`external/src/game_ingest.rs`) still opens its own pool per run, with 4–20 connections, and closes it afterwards.
+
+Ceilings on the writer (sums of caps, not typical use):
+
+| Client | Writer ceiling | Notes |
+| --- | --- | --- |
+| Pi `pokoin-rust-api` | 26 (12 + 12 + 2 writer pools) | Reads and satellite databases use the Pi standby, so 0 on the writer. Typical: 3. |
+| Overflow pod | 18 + 1 per satellite game in use | Every URL is the writer. Env in `infra/k3s/pokoin-overflow.yaml`: 6 / 3 / game 1 / idle 30 s. |
+| Overflow, HPA 2–4 pods | 36–72 + satellites | The overflow's share. Raising `maxReplicas` spends this budget. |
+| `build-lists-*` CronJob | 13 + 1 satellite at a time | 3 / 2 / game 1. They run at different minutes. |
+| `search-delta`, `search-reindex` | 2 | Fixed job pools in `jobs/mod.rs` (the writer pool reuses the read pool when the URLs are equal). Explicit caps in the manifest so they never inherit 16/12 from the secret. |
+| Host scripts, `docker exec psql`, ad hoc SSH sessions | unbudgeted | On 2026-10-14, the 91 idle connections from 192.168.178.55 belonged to commands in three SSH sessions from the Mac (opened 20:54:59, 21:00:44, 21:02:27). All three ended at 21:18:39, the same second those connections reset. |
+
+At HPA 4 with two list jobs running, the ceilings add up to about 124, so the limit is still reachable in the worst case. If the overflow has to grow, put PgBouncer in front of the writer (transaction pooling) or raise `max_connections`; don't raise the per-pod caps. To see who holds connections: `docker exec pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d postgres -c "select client_addr, datname, state, count(*) from pg_stat_activity where backend_type='client backend' group by 1,2,3 order by 4 desc"`. `log_connections` is on, so `docker logs` shows who opened each connection.
+
 ## Code map
 
 - `pokoin-rust/apps/api`: the binary. HTTP server by default, `job <name>` for the timers. System routes (`/livez`, `/readyz`, `/healthz`, `/api/__contract`, `/api/__routes`) are in `src/system.rs`.
@@ -42,9 +72,18 @@ A handler panic answers `500` and logs `handler panicked` with its method and pa
 
 ## Deploy
 
-1. Merge to `main` and push. Build the clean aarch64 artifact from the exact `origin/main` commit: `cargo build --release --target aarch64-unknown-linux-gnu -p pokoin-api` in `pokoin-rust/` with `POKOIN_BUILD_COMMIT=<full sha>` and `POKOIN_BUILD_DIRTY=false` (the linker is set in `pokoin-rust/.cargo/config.toml`).
-2. `scripts/deploy-pokoin-rust.sh`. It refuses anything but the clean `origin/main` checkout, copies the binary and `deploy/systemd/pokoin-rust-api.service`, and runs `scripts/install-pokoin-rust.py` on the Pi.
+1. Merge to `main` and push. On nezopt, run `scripts/build-pokoin-rust-release.sh` (default `origin/main`; pass a sha to pin it). It checks out that commit into the one fixed release checkout `~/pokoin-deploy/rust-release`, runs `cargo test --workspace` there, builds the aarch64 artifact (`cargo build --release --target aarch64-unknown-linux-gnu -p pokoin-api` with `POKOIN_BUILD_COMMIT=<full sha>` and `POKOIN_BUILD_DIRTY=false`; the linker is set in `pokoin-rust/.cargo/config.toml`) and copies it to `pokoin-rust/target/aarch64-unknown-linux-gnu/release/pokoin-api` in that checkout.
+2. `cd ~/pokoin-deploy/rust-release && scripts/deploy-pokoin-rust.sh`. It refuses anything but the clean `origin/main` checkout, copies the binary and `deploy/systemd/pokoin-rust-api.service`, and runs `scripts/install-pokoin-rust.py` on the Pi.
 3. The installer checks the binary's embedded commit and digest, keeps the existing env settings, swaps the `current` symlink, restarts the unit and waits for health. A failed readiness check restores the previous binary, env file and unit. The prior release stays at `/srv/pokoin/rust/previous`; backups go to `/srv/pokoin/rust/rollbacks/`.
+
+### Build disk on nezopt
+
+nezopt's `/` (1.8 TB) also holds the production Postgres writer and the k3s overflow. Below ~25 GB free, kubelet reports DiskPressure and evicts every `pokoin-overflow` pod: API, cloudflared and list builders (2026-10-14 22:32–22:45 UTC). A `pokoin-rust` workspace debug build writes up to ~26 GB, and a fresh deploy checkout per commit (`~/pokoin-deploy/rust-<sha>`) used to write that every time. Several of them plus agents' builds drained 40 GB in ten minutes (2026-10-15 06:10 UTC). Rules:
+
+- Deploy builds share two cargo targets: `~/pokoin-deploy/target-x86` for the x86_64 test gate and `~/pokoin-deploy/target-aarch64` for the Pi release. `build-pokoin-rust-release.sh` sets `CARGO_TARGET_DIR` for both, holds `~/pokoin-deploy/.rust-release.lock` so only one release build runs at a time, and runs the gate with `CARGO_INCREMENTAL=0`. It always builds in the same checkout path: cargo keys workspace crates by their source path, so one `rust-<sha>` checkout per commit would rebuild the workspace and pile up its artifacts even in a shared target. A shared target over 40 GB (`POKOIN_DEPLOY_TARGET_MAX_GB`) is wiped before the build. Override the paths with `POKOIN_DEPLOY_DIR`, `POKOIN_DEPLOY_TARGET_X86` and `POKOIN_DEPLOY_TARGET_AARCH64`.
+- Don't create `~/pokoin-deploy/rust-<sha>` checkouts with their own `target/`, and never `cp -r` a target dir to seed one. To build by hand, point `CARGO_TARGET_DIR` at one of the shared targets.
+- `scripts/require-free-space.sh [GB] [path]` exits 1 when less than `GB` (default `POKOIN_MIN_FREE_GB`, else 60) is free. `build-pokoin-rust-release.sh` and `build-pokoin-rust.sh` refuse to start under 60 GB. `nezopt-k3s.sh sync` refuses its overflow release build under 30 GB (`POKOIN_K3S_MIN_FREE_GB`); the pods keep the current release. Run the guard before any `cargo test --workspace` in an agent worktree too: `bash scripts/require-free-space.sh && cargo test --workspace`.
+- When an agent worktree's branch is merged, delete its `pokoin-rust/target` (8–16 GB each).
 
 Timer or job-unit changes are installed with `scripts/cutover-pi-rust.sh` (it copies `deploy/systemd/pokoin-rust-job@.service`, the job timers and the watchdog).
 
@@ -66,6 +105,14 @@ The slow public desks answer from `marketplace_page_snapshots` (migration `scrip
 
 `related` is a nearest-neighbour index: for every single, the 12 best cards by the SPA's `scoreRelated` weights plus same CLIP artwork, Pokédex ±2 (evolution-line proxy), era, release proximity and print language, ties broken by listed availability and popularity. Rows are list-snapshot tile rows (`cardFromCatalogRow`). Contract: `related` is an array of at most 12 tile rows, best first; absent or empty means the client uses its own picker.
 
+### Seller shops
+
+`GET /api/marketplace-list?kind=seller&key=<username>&format=c1v2` serves a stored seller book (`marketplace_seller_books`, migrations `116` and `119`, `crates/commerce/src/handlers/seller_book.rs`): the whole active singles book of one shop, no row cap, c1v2. One primary-key read by `(game, username)`; no profile lookup, no stamp query, no encoding on the request. The k3s CronJob `build-lists-sellers` (`job build-lists --kind=seller`, every 2 min, against the nezopt writer) covers every configured game (listings tagged with that game in the main database; books stored there too). It writes each book's brotli-11 copy (`br`), its `version` (the ETag) and its header (photo, ship-from country), and skips a seller whose stamp (`max(updated_at)`) and profile have not moved. Answers are `public, max-age=30, s-maxage=60, stale-while-revalidate=86400`, `br` when stored; a book older than 2 days (builder stopped) answers 404 and the page uses `marketplace-seller-shop?book=1`.
+
+`GET /api/marketplace-seller-shop?sellerUsername=…&fresh=1[&sellerUid=…]` answers `{maxUpdatedAt, book: {stamp, version}}` (public for 10 s): the page paints from the snapshot, then refetches only when the shop moved — `…&v=<version>` when a newer book is stored, else it asks again while the book is rebuilt.
+
+Builders: the Pi never builds seller books (`scripts/install-pokoin-rust.py` pins `POKOIN_SELLER_BOOK_WORKER=0`); the overflow pods' sweep (every 30 s) and the listing outbox rebuild changed books on nezopt within seconds, without `br`, and the CronJob adds it on its next run. Cart and checkout verify every price live; a snapshot price is display only.
+
 `marketplace-native-sales` answers `sales: []` from an in-memory set of card ids that have any Sold-on-Pokoin row (`crates/commerce/src/sales_index.rs`, Firestore delta every 30 s, full reload every 6 h) instead of one Firestore query per desk.
 
 Every public cacheable `GET /api/*` 200 carries a strong `ETag` and answers `304` to `If-None-Match`; every response carries `Server-Timing` (`sql`, `ser`, `build`, `src`, `total`, plus `edge` at the edge listener).
@@ -75,6 +122,10 @@ Every public cacheable `GET /api/*` 200 carries a strong `ETag` and answers `304
 Catalog responses bind the public Pokoin id, game and canonical URL to the request. Browser card pages resolve identity through the shared API; the legacy OG Worker no longer resolves or redirects browser desks from its canonical cache. Provider blueprint ids are used only for provider joins. The native read cache isolates query case, facets, optional sections, limits, language, game, catalog generation and release. A Redis generation-read failure bypasses caching. Catalog identity mismatches are rejected before persistence and logged without private request data.
 
 The SPA retires card-page v1 and home-vector v3 cache keys and validates stored/received card identities. Authentication, carts and unrelated local data are preserved.
+
+Card-page `canonicalPath` is game-less for every catalog (`/marketplace/en/cards/834950/…`); the desk adds the game slug with `publicGamePath`. Both identity checks (`apps/api/src/card_identity.rs` and `market/src/card-response.js`) accept a game-less path or the requested game's own prefix and reject any other game's prefix. Requiring the prefix in the SPA left every non-Pokémon desk on its URL-slug stub (no name, scan or data).
+
+A Pokémon card-page miss probes the satellite catalogs for the id (even ids only, cached for 10 minutes, 1.5 s budget) and adds `ownerGame` to the 404 body when exactly one catalog holds it; the 200000000+ synthetic ids repeat across games and never name an owner. The desk then reloads the same URL under that game's slug, so game-less links to another TCG's card (`pokoin.com/marketplace/en/cards/834950/…`) open the Digimon desk instead of "Card market not found."
 
 ## Release safety
 

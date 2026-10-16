@@ -35,6 +35,10 @@ test('album tiles are photos of the leftover illustration, not hover-scaled card
   assert.match(cardArt, /class="art-figure-layer art-figure-hover"/);
   assert.match(cardArt, /class="art-figure-layer art-figure-shadow"/);
   assert.match(cardArt, /--art-figure-mask/);
+  assert.match(cardArt, /loadFigureBox/);
+  assert.match(cardArt, /--figure-cx/);
+  assert.match(cardArt, /data-figure/);
+  assert.match(cardArt, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)/);
 });
 
 test('artwork piles span two rows when tall and extend the selection on modified clicks', () => {
@@ -55,7 +59,8 @@ test('the artist album grid, its loading and its filters', () => {
   assert.doesNotMatch(artist, /if \(upward\) return/);
   assert.match(artist, /album-other-prints/);
   assert.match(artist, /fetchArtist\(slug, \{ limit: ARTIST_FIRST \}\)/);
-  assert.match(artist, /fetchArtist\(slug, \{ limit: 5000 \}\)/);
+  // A stored album paints at once; the revalidated one replaces it in place.
+  assert.match(artist, /fetchArtist\(slug, \{ limit: 5000, onUpdate: \(data\) => paintArtist\(data, \{ replace: true \}\) \}\)/);
   assert.match(artist, /peekArtist\(slug, 5000\)/);
   assert.match(artist, /restoredView/);
   assert.match(artist, /'singles'/);

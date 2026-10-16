@@ -9,12 +9,16 @@ m=importlib.util.module_from_spec(spec);sys.modules["satellite"]=m;spec.loader.e
 # Each fetch owns its remote directory and returns explicit failure reasons.
 FETCH_RESULTS={}
 FETCH_BLOCKED=False
+# CardTrader only has 240-350 px scans for many new satellite cards (Digimon,
+# Vanguard, Yu-Gi-Oh); a small real scan beats the missing-card placeholder.
+SATELLITE_MIN_WIDTH=int(os.environ.get("POKOIN_SATELLITE_MIN_SCAN_WIDTH","240"))
+MIN_WIDTH=400
 def oracle_fetch(jobs):
     global FETCH_RESULTS,FETCH_BLOCKED
     remote="/tmp/pokoin-catalog-scans-"+uuid.uuid4().hex
     source=pathlib.Path(__file__).with_name("cardtrader-scan-fetch.py").read_text()
     proc=subprocess.run(["ssh","-o","BatchMode=yes","-o","ConnectTimeout=20","pokoin-marketplace","python3 -u -c "+shlex.quote(source)],
-        input=json.dumps({"out":remote,"jobs":jobs}),text=True,capture_output=True,timeout=3600)
+        input=json.dumps({"out":remote,"jobs":jobs,"minWidth":MIN_WIDTH}),text=True,capture_output=True,timeout=3600)
     if proc.returncode:raise RuntimeError("Oracle scan worker failed: "+proc.stderr[-500:])
     report=json.loads(proc.stdout);FETCH_RESULTS=report["results"];FETCH_BLOCKED=report["blocked"]
     RAW=ROOT/"raw-scans";RAW.mkdir(parents=True,exist_ok=True)
@@ -85,6 +89,9 @@ AND (b.blueprint->'image' IS DISTINCT FROM fresh.image OR b.cardtrader_image_url
     return rows
 def run(t):
     db=db_for(t);prefix=t["cdnKeyPrefix"];failed={};saved=0
+    global MIN_WIDTH
+    MIN_WIDTH=400 if t["cardtraderGameId"]==5 else SATELLITE_MIN_WIDTH
+    m.helper().MIN_SCAN_WIDTH=MIN_WIDTH
     m.log("PICTURES "+db)
     # A bounded pass avoids retrying inaccessible scans indefinitely.
     data=psql(db,f"""COPY (SELECT id::text ct_id,expansion_id,name,coalesce(cardtrader_image_url,image_url) image_url,blueprint->'image'->>'url' full_url,blueprint->'image'->'show'->>'url' show_url FROM {raw_table(t)} WHERE nullif(cdn_image_url,'') IS NULL ORDER BY id) TO STDOUT WITH CSV HEADER""")
@@ -132,5 +139,9 @@ def main():
             report["blocked"]="CardTrader scan origin returned 401/403/429; retry on the next scheduled run"
             break
     report["finishedAt"]=time.strftime("%FT%TZ",time.gmtime());(ROOT/"pictures-status.json").write_text(json.dumps(report,indent=2))
-    return bool(report["errors"] or any(g["failed"] for g in report["games"]))
+    # Per-item misses are mostly permanent (no source URL, CardTrader's own
+    # image under 400 px / 9 kB, 404) and stay counted in pictures-status.json;
+    # they used to fail the stage every night. Fail only on real errors or a
+    # CardTrader block (401/403/429).
+    return bool(report["errors"] or report.get("blocked"))
 if __name__=="__main__":raise SystemExit(main())

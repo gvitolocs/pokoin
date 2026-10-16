@@ -24,8 +24,8 @@ test('inventory first page survives a late uid and retries a stalled load', () =
 });
 
 test('holdings are the MyPokoin Collection tab, which loads holdings only', () => {
-  assert.match(nav, /\{ to: '\/mypokoin\/collection', label: 'Collection', end: true \}/);
-  assert.match(src, /<Show when=\{tab\(\)\.collectionTab\}><CollectionHoldings \/><\/Show>/);
+  assert.match(nav, /\{ to: '\/mypokoin\/collection', label: 'Collection', end: true/);
+  assert.match(src, /<Show when=\{tab\(\)\.collectionTab\}><CollectionHoldings/);
   // No listings or pricer round trip on the Collection tab.
   assert.match(src, /if \(!uid \|\| collectionTab\) return undefined;/);
   assert.match(src, /\(\) => signedIn\(\) && !tab\(\)\.importTab && !tab\(\)\.collectionTab,/);

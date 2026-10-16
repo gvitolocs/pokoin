@@ -41,16 +41,31 @@ and `both` (next section). 1-Day Ready accounts are always CardTrader → Pokoin
 (`409 cardtrader_one_day_ready` for the others).
 
 The push runs after the plan applied its links, in the same periodic job and
-manual sync, at most `CARDTRADER_PUSH_BATCH` (default 100) listings per run:
-active Pokémon listings with stock, no `source_listing_id` and not a CardTrader
-import. Each is claimed with the outbox's compare-and-set (`'' →
-ct:pending:link-<ms>`), created with `user_data_field = pokoin:<listing id>`,
-then linked over the claim (`origin = 'push'` product link). A refused create
-releases the claim (the listing goes to the back of the queue); an in-doubt
-create keeps it and the next reconcile links the product by its
-`user_data_field`. A listing whose exact card + facets are already in the
-CardTrader export is skipped (`alreadyOnCardTrader`): the plan links a twin
-only when it is the single match, so pushing the rest would sell it twice.
+manual sync, and only when the export passed the plan's gate and the run holds
+the shared Redis reconcile lock (`blocked`: `incomplete_export` /
+`no_shared_lock`; on 2026-10-14 21:15 UTC two syncs of one seller ran at once,
+each reading an export without the other's creates). Candidates are active
+Pokémon listings with stock whose `source_listing_id` is not `ct:…` (empty, or
+another channel's id such as `scan:<item>`), never CardTrader imports. Each is:
+
+- **linked** (`linkedToExisting`) when the same card + facets is on CardTrader
+  as a product no listing holds: no duplicate is created;
+- otherwise **created** as its own product. CardTrader accepts several products
+  of the same card from one seller (one seller's 12,923 linked products cover
+  12,792 facets), so a second copy is a second product. Until 2026-10-15 such a
+  copy was skipped and, keeping its old `updated_at`, stayed first in the queue:
+  76 of every 100 candidates, ~24 listed per run.
+
+Creates are claimed with the outbox's compare-and-set (`<source read> →
+ct:pending:link-<ms>`), sent with `user_data_field = pokoin:<listing id>`, then
+linked over the claim (`origin = 'push'`). A refused create puts the old source
+back; an in-doubt create keeps the claim and the next reconcile links it by its
+`user_data_field`. A run pages through candidates (never one it already tried)
+until none is left or its budget is spent: `CARDTRADER_PUSH_PER_RUN` (2,000),
+`CARDTRADER_PUSH_SECONDS` (480, inside the 15-minute lock), at most 5 creates a
+second, and it stops at the first CardTrader 429 (`stoppedBy`). `remaining`
+counts what the next run picks up. A database error while pushing fails the
+sync instead of reporting nothing to list.
 Results land in the sync summary as `pushedToCardTrader`.
 
 ## Pokoin edits of linked listings (2026-10-14)
@@ -152,6 +167,13 @@ uses `flock` to prevent overlap and runs the native job
 3. reconciles the complete export.
 
 Unchanged product links are not rewritten, keeping frequent safety runs cheap.
+A listing can carry a `ct:<product>` source that another channel set (Card
+Rails' own CardTrader push) with no `marketplace_cardtrader_product_links` row:
+the webhook still finds it by source, but the first reconcile that sees its
+product in the export records the row (`origin = 'match'`, summary
+`linksRecorded`), so link counts and settled removals include it. On
+2026-10-14 2 of PeppeV's 1,463 linked listings had no row; both products were
+in his export, so they were never stale.
 A linked listing an earlier run already settled (sold out at zero, its link
 `missing_from_ct`) is not removed again, and seller orders are fetched only
 when a product newly left the export. The export is parsed while it downloads

@@ -1,16 +1,16 @@
 # CardVault (Android / iOS) — not pokoin.com
 
-This file is **app-only**. Public `https://pokoin.com` is the React SPA in
+This file is **app-only**. Public `https://pokoin.com` is the Solid SPA in
 this repo. Do not use the notes below as the production web pipeline.
 
 | Host | What |
 | --- | --- |
-| `https://pokoin.com` | Landing + React market. Docs: [LANDING.md](LANDING.md), [MARKET.md](MARKET.md), [CHROME.md](CHROME.md). |
+| `https://pokoin.com` | Landing + Solid marketplace. Docs: [LANDING.md](LANDING.md), [MARKET.md](MARKET.md), [CHROME.md](CHROME.md). |
 | `https://app.pokoin.com` | Flutter CardVault (Vercel project `pokoin-flutter`). Android, iOS, and leftover Flutter web. |
 
 Repo: [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault)
 (`pokemon_card_vault/`). Firebase project `pokoin` is shared with the public
-web (`market/src/auth.jsx` uses the same `DefaultFirebaseOptions.web` keys).
+web (`solid/src/stores/auth.js` uses the same `DefaultFirebaseOptions.web` keys).
 
 Identity that both clients must keep: public `card_id` = leftover CardTrader
 blueprint (`ct_id`) × 2. Never put `ct_id` in a URL. **Old Milo** gallery
@@ -26,9 +26,9 @@ different catalog; do not copy that into Pokoin scan docs. Web map:
 ## What still belongs in the app
 
 Store binaries, camera/OCR hardware bridges, extension in-app WebViews, and
-any Flutter-only admin/debug screens that have not been copied to React.
+any Flutter-only admin/debug screens that have not been copied to the web SPA.
 The **public** chrome (marketplace, wallet, cart, forum, scan, buy, admin
-expansion logos) is React on pokoin.com. Chrome-extension Cardmarket auth is
+expansion logos) is the Solid SPA on pokoin.com. Chrome-extension Cardmarket auth is
 `https://pokoin.com/extension/auth-bridge` in this SPA (`extension-auth-bridge.js`),
 not `app.pokoin.com`.
 
@@ -84,14 +84,15 @@ These URLs 404 on pokoin.com until they are copied into this repo:
 | --- | --- |
 | `/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf` | `web/audit/…` |
 | `/favicon.ico`, `/pokoin-512.png` | `web/` |
-| OG image `/pokoin-project-banner-1360x430.png` | `web/` |
 | `/bootstrap-peers.json` | Join-only host:port for nodes. Not linked from the landing. |
+
+The landing share image (og:image / twitter:image) is `home/pokoin-share-1200x630.png`, served at `/home/pokoin-share-1200x630.png`; never put share assets under a `/poko…` root path, a Cloudflare redirect rule catches it.
 
 ---
 
 ## App APIs that the web already calls
 
-Same Oracle origin `https://api.pokoin.com`. React uses GET page BFFs; do not
+Same Oracle origin `https://api.pokoin.com`. The web SPA uses GET page BFFs; do not
 POST for page data. Flutter `POST /api/marketplace-autocomplete` is the old searchbar (prefix-only,
 needs a remake) — the web uses `GET /api/marketplace-suggest` plus SPA
 `suggest-rank.js` (set-code tokens like `hgss energy` peel to HeartGold
@@ -109,7 +110,7 @@ expansion aliases stay off typeahead search-on).
 Canonical ranking notes for Meili: CardVault
 `pokemon_card_vault/docs/marketplace-search-ranking.md`.
 
-JP/CN print flags (React live, Flutter next): [PRINT_FLAGS.md](PRINT_FLAGS.md).
+JP/CN print flags (web live, Flutter next): [PRINT_FLAGS.md](PRINT_FLAGS.md).
 Flutter set analog is `CollectionExpansionScreen` /
 `_SelectedExpansionHeader` in `lib/screens/collection_screen.dart`. Use
 `expansion.nationality` from the BFF; do not keep `_regionForExpansion()`

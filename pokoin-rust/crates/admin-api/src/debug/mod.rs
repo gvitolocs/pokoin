@@ -2,11 +2,11 @@
 //! `api/marketplace-image-log.js`, `api/flutter-debug-logs.js`,
 //! `api/cardmarket-scrape-observation.js`).
 //!
-//! Pool discipline follows `_marketplace_db.js` exactly: every call the Node
-//! code makes through `marketplaceQuery` runs on `state.api.read()` and every
-//! `marketplaceWriteQuery` runs on `state.api.write()` — including the
-//! `create table if not exists` guards, which the Node handlers also run
-//! through `marketplaceQuery`.
+//! Pool discipline: reads run on `state.api.read()` (the Pi hot standby, a
+//! SELECT-only role) and every write, including the INSERTs/UPSERTs the Node
+//! handlers sent through `marketplaceQuery`, runs on `state.api.write()`. The
+//! Node `create table if not exists` guards are migration
+//! `scripts/sql/120_admin_debug_tables.sql`; no route runs DDL.
 
 pub mod cm_candidates;
 pub mod debug_artists;

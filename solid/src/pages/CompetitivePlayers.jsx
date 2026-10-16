@@ -3,6 +3,7 @@ import { useParams } from '@solidjs/router';
 import { competitiveData, money, playerById, tournamentById } from '@market/competitive.js';
 import CompetitiveNav, { Flag, NotInSnapshot } from '../components/CompetitiveNav.jsx';
 import { DeskPanel } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 const RANKS = [
   ['points', 'Points'],
@@ -50,7 +51,7 @@ function PlayersList() {
                   <tr>
                     <td>{index() + 1}</td>
                     <td>
-                      <a href={`/marketplace/competitive/players/${player.id}`}>
+                      <a href={gameHref(`/marketplace/competitive/players/${player.id}`)}>
                         <Flag cc={player.flag} />
                         {player.name}
                       </a>
@@ -84,7 +85,7 @@ function PlayerDetail(props) {
     <div class="page desk comp-page">
       <CompetitiveNav />
       <nav class="crumbs">
-        <a href="/marketplace/competitive/players">Rankings</a>
+        <a href={gameHref('/marketplace/competitive/players')}>Rankings</a>
         <span>/</span>
         <span>{player.name}</span>
       </nav>
@@ -115,11 +116,11 @@ function PlayerDetail(props) {
                     <tr>
                       <td>{row.place}</td>
                       <td>
-                        <a href={`/marketplace/competitive/tournaments/${row.tid}`}>{tournamentById(row.tid)?.name || row.tid}</a>
+                        <a href={gameHref(`/marketplace/competitive/tournaments/${row.tid}`)}>{tournamentById(row.tid)?.name || row.tid}</a>
                       </td>
                       <td>
                         <Show when={row.list} fallback="—">
-                          <a href={`/marketplace/competitive/decklists/${row.list}`}>List {row.list}</a>
+                          <a href={gameHref(`/marketplace/competitive/decklists/${row.list}`)}>List {row.list}</a>
                         </Show>
                       </td>
                     </tr>

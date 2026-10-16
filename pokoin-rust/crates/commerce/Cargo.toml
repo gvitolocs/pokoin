@@ -4,10 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# The daily headline-price export (PKP2): read-only, file + .sha256 out.
+[[bin]]
+name = "price-export"
+path = "src/bin/price_export.rs"
+
 [dependencies]
 pokoin-accounts = { path = "../accounts" }
 unicode-normalization = "0.1"
 pokoin-api-common = { path = "../api-common" }
+pokoin-db = { path = "../db" }
 pokoin-external = { path = "../external" }
 anyhow = { workspace = true }
 axum = { workspace = true }

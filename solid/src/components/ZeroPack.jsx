@@ -1,8 +1,11 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
+import ScanImage from './ScanImage.jsx';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import { formatOrderMoney } from '@market/order-status.js';
 import { pickingOrdersMatch } from '@market/zero-pick.js';
 import '@market/zero-pack.css';
+import { createPointerDrag } from '../lib/pointer-drag.js';
 import { DeskPanel } from './Desk.jsx';
 
 const PICKED_KEY = 'pokoin.ctZero.picked.';
@@ -54,6 +57,13 @@ function powerToolsLine(pt) {
   return parts.length ? `Power Tools: ${parts.join(' · ')}` : '';
 }
 
+function lineImage(item) {
+  return homepageDerivativeUrl(ownCatalogImage(
+    { id: item?.cardId, name: item?.name || '' },
+    preferFullImage(item?.imageUrl || ''),
+  ));
+}
+
 /**
  * One pack line. Without `onMove` it is a
  * read-only line (the "waiting for the next merge" list): no drag, no button.
@@ -65,85 +75,115 @@ export function ZeroLine(props) {
   const where = () => [item().expansion, item().collectorNumber ? `#${item().collectorNumber}` : ''].filter(Boolean).join(' · ');
   const pt = () => powerToolsLine(item().powerTools);
   const ptPlace = () => (Number(item().powerTools?.position) > 0 ? `PT ${item().powerTools.position}` : '');
+  const price = () => (item().lineCents != null ? formatOrderMoney(item().lineCents, item().currency) : '');
+  const src = () => lineImage(item());
+  const interactive = () => Boolean(props.onMove);
   return (
-    <div
-      class={['thread', 'zero-line', { 'is-picked': Boolean(props.picked) }]}
-      draggable={props.onMove ? 'true' : undefined}
-      onDragStart={(event) => props.onDragStart?.(event, item().itemId)}
+    <article
+      class={['zero-card', { 'is-picked': Boolean(props.picked), 'is-draggable': interactive() }]}
+      draggable="false"
+      onPointerDown={(event) => {
+        if (!interactive()) return;
+        props.onPointerDown?.(event, {
+          itemId: item().itemId,
+          image: src(),
+          label: item().name || '',
+        });
+      }}
+      onPointerMove={props.onPointerMove}
+      onPointerUp={props.onPointerUp}
+      onPointerCancel={props.onPointerCancel}
     >
-      <Show when={props.place != null}>
-        <span class="zero-place" title="Place in this pack, by location">{props.place}</span>
-      </Show>
-      <span class={['zero-loc', { 'is-empty': !location() }]} title={fromPowerTools() ? 'Location from Power Tools' : 'MyPokoin location'}>
-        {location() || 'No location'}
-        <Show when={fromPowerTools()}><small> PT</small></Show>
-      </span>
-      <span class="thread-main">
+      <div
+        class="zero-card-art"
+        onClick={() => {
+          if (!interactive() || props.consumeClick?.()) return;
+          props.onMove(item().itemId, !props.picked);
+        }}
+      >
+        <ScanImage
+          src={src()}
+          label={item().name}
+          letterClass="zero-card-fallback"
+          width="126"
+          height="176"
+        />
+        <span class={['zero-loc', { 'is-empty': !location() }]} title={fromPowerTools() ? 'Location from Power Tools' : 'MyPokoin location'}>
+          {location() || 'No location'}
+          <Show when={fromPowerTools()}><small> PT</small></Show>
+        </span>
+        <Show when={props.place != null}>
+          <span class="zero-place" title="Place in this pack, by location">{props.place}</span>
+        </Show>
+        <Show when={item().quantity > 1}><span class="zero-qty">×{item().quantity}</span></Show>
+        <Show when={props.picked}>
+          <span class="zero-card-check" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="36" height="36">
+              <path d="M5 12.5 10 17l9-10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+        </Show>
+      </div>
+      <div class="zero-card-body">
         <strong class="thread-title">
           <Show when={item().cardId} fallback={item().name}>
-            <a href={inventoryListingHref(item())}>{item().name}</a>
+            <a href={inventoryListingHref(item())} draggable="false">{item().name}</a>
           </Show>
-          <Show when={item().quantity > 1}><span class="zero-qty"> ×{item().quantity}</span></Show>
         </strong>
-        <span class="thread-meta">
-          {[where(), facets(item()), item().lineCents != null ? formatOrderMoney(item().lineCents, item().currency) : '', ptPlace()]
-            .filter(Boolean)
-            .join(' · ')}
-          <Show when={pt()}><span class="zero-pt"> · {pt()}</span></Show>
-        </span>
-      </span>
-      <Show when={props.onMove}>
+        <Show when={where()}><span class="thread-meta">{where()}</span></Show>
+        <Show when={facets(item())}><span class="thread-meta">{facets(item())}</span></Show>
+        <Show when={price()}><span class="zero-card-price">{price()}</span></Show>
+        <Show when={ptPlace()}><span class="thread-meta">{ptPlace()}</span></Show>
+        <Show when={pt()}><span class="zero-pt">{pt()}</span></Show>
+      </div>
+      <Show when={interactive()}>
         <button
           class="btn ghost zero-move"
           type="button"
           draggable="false"
-          onMouseDown={(event) => event.stopPropagation()}
           onClick={() => props.onMove(item().itemId, !props.picked)}
         >
-          {props.picked ? 'Pick' : 'Picked'}
+          <Show when={props.picked} fallback={<><span class="zero-move-full">Mark picked</span><span class="zero-move-short">Picked</span></>}>
+            Undo
+          </Show>
         </button>
       </Show>
-    </div>
+    </article>
   );
 }
 
 function DropRow(props) {
-  const [over, setOver] = createSignal(false);
   return (
-    <DeskPanel flush title={props.title} extra={<span class="zero-progress">{props.hint}</span>}>
-      <div
-        class={['thread-list', 'zero-drop', { 'is-over': over() }]}
-        onDragOver={(event) => { event.preventDefault(); setOver(true); }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setOver(false);
-          const itemId = event.dataTransfer.getData('text/plain');
-          if (itemId) props.onDropTo(itemId);
-        }}
-      >
-        <For
-          each={props.items}
-          fallback={<p class="zero-drop-empty">{props.picked ? 'Drag a card down, or click Picked.' : 'Nothing left to pick.'}</p>}
-        >
-          {(item) => (
-            <ZeroLine
-              item={item}
-              place={props.places.get(item.itemId)}
-              picked={props.picked}
-              onMove={props.onMove}
-              onDragStart={(event, itemId) => {
-                event.dataTransfer.setData('text/plain', itemId);
-                event.dataTransfer.effectAllowed = 'move';
-              }}
-            />
-          )}
-        </For>
-      </div>
-    </DeskPanel>
+    <div
+      class={['zero-column', { 'is-over': props.over }]}
+      data-drop-zone={props.zone}
+      ref={(element) => props.setZone?.(props.zone, element)}
+    >
+      <DeskPanel flush title={props.title} extra={<span class="zero-progress">{props.hint}</span>}>
+        <div class="zero-grid">
+          <For
+            each={props.items}
+            fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing left to pick.' : 'Drag a card down, or click Mark picked.'}</p>}
+          >
+            {(item) => (
+              <ZeroLine
+                item={item}
+                place={props.places.get(item.itemId)}
+                picked={props.picked}
+                onMove={props.onMove}
+                onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
+                onPointerMove={props.onPointerMove}
+                onPointerUp={props.onPointerUp}
+                onPointerCancel={props.onPointerCancel}
+                consumeClick={props.consumeClick}
+              />
+            )}
+          </For>
+        </div>
+      </DeskPanel>
+    </div>
   );
 }
-
 
 /** One weekly Zero shipment in picking order, with Pick / Picked drop rows. */
 export function ShipmentPanel(props) {
@@ -158,6 +198,7 @@ export function ShipmentPanel(props) {
   const open = () => order().items.filter((item) => !picked().has(item.itemId));
   const doneItems = () => order().items.filter((item) => picked().has(item.itemId));
   const match = () => (props.powerTools?.ok ? pickingOrdersMatch(order().items) : { comparable: false, equal: false });
+  const hot = (zone) => pointer.view().phase === 'dragging' && pointer.view().over === zone;
 
   function move(itemId, toPicked) {
     const next = new Set(picked());
@@ -166,6 +207,13 @@ export function ShipmentPanel(props) {
     writePicked(order().orderId, next);
     setPicked(next);
   }
+
+  const pointer = createPointerDrag({
+    onMove(action) {
+      if (!action?.payload?.itemId || action.from === action.to) return;
+      move(action.payload.itemId, action.to === 'picked');
+    },
+  });
 
   const title = () => [
     `Shipment ${order().code || order().orderId}`,
@@ -193,18 +241,32 @@ export function ShipmentPanel(props) {
         hint={`${open().length} still to pick · location order`}
         items={open()}
         picked={false}
+        zone="pick"
+        over={hot('pick')}
         places={places()}
         onMove={move}
-        onDropTo={(itemId) => move(itemId, false)}
+        setZone={pointer.setZone}
+        onPointerDown={pointer.onPointerDown}
+        onPointerMove={pointer.onPointerMove}
+        onPointerUp={pointer.onPointerUp}
+        onPointerCancel={pointer.onPointerCancel}
+        consumeClick={pointer.consumeClick}
       />
       <DropRow
         title="Picked"
         hint={`${doneItems().length} picked`}
         items={doneItems()}
         picked
+        zone="picked"
+        over={hot('picked')}
         places={places()}
         onMove={move}
-        onDropTo={(itemId) => move(itemId, true)}
+        setZone={pointer.setZone}
+        onPointerDown={pointer.onPointerDown}
+        onPointerMove={pointer.onPointerMove}
+        onPointerUp={pointer.onPointerUp}
+        onPointerCancel={pointer.onPointerCancel}
+        consumeClick={pointer.consumeClick}
       />
     </div>
   );

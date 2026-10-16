@@ -16,11 +16,12 @@ PowerTools stores the physical slot in the **`location`** string (no separate Po
 
 ### CardTrader sync popup
 
-1. Upload Power Tools CSV(s) per TCG — no location guesses yet.
-2. **Analyze CSV** — the API reads the seller’s location column, detects the style
+1. Upload **one all-games** Power Tools stock export (default), or **separate CSVs per TCG** if you prefer manual control. The native export has no `game` column; Pokoin assigns each row from catalog **Cardmarket product ids** (`cardmarketId`). Rows with quantity **0** are skipped for locations (they do not create phantom boxes).
+2. **Analyze CSV** — preview lists detected games, skipped zero rows, and any **unresolved** rows (unknown or ambiguous ids). Unresolved lines are never silently dropped into Pokémon or another default game. When the id is missing from every catalog, Pokoin may match an **exact unique expansion name** from the CSV `set` column — never set code alone, and never when the name exists in more than one game.
+3. **Analyze CSV** (continued) — the API reads the seller’s location column, detects the style
    (`as_is` / trailing stack index / already `box·stack`), and proposes cards-per-stack
    from how many rows share each box·stack.
-3. Confirm mapping using **examples from that CSV**, then full import.
+4. Confirm mapping using **examples from that CSV**, then import. If some rows stay unresolved, switch to per-game uploads or use **import recognized rows only** (unresolved lines stay out of the location overlay; this does not create stock or CardTrader listings).
 
 | Mode | Behaviour |
 | --- | --- |

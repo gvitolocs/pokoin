@@ -25,7 +25,7 @@ use crate::cardtrader::client::CardTraderClient;
 use crate::cardtrader::integration::{integration_doc_id, COLLECTION};
 use crate::cardtrader::push::{self, PushOutcome};
 use crate::cardtrader::sync::upsert_product_link;
-use crate::cardtrader::sync_core::{facet_key, facet_key_of_row, marketplace_game_for_product, public_card_id_from_blueprint, NormalizedProduct};
+use crate::cardtrader::sync_core::{ct_source_listing_id, facet_key, facet_key_of_row, marketplace_game_for_product, public_card_id_from_blueprint, NormalizedProduct};
 use crate::db::DbPools;
 use crate::error::{clean_text, clean_text_value, ApiError, ApiResult};
 use crate::firebase::{FirestoreDoc, FirestoreStore};
@@ -229,7 +229,7 @@ pub fn parse_power_tools_body(body: &Value) -> ApiResult<Option<PowerToolsImport
         let rows: Vec<PowerToolsRow> = records
             .iter()
             .map(pt::power_tools_row)
-            .filter(|row| !row.name.is_empty())
+            .filter(|row| !row.name.is_empty() && row.quantity > 0)
             .collect();
         locations.extend(rows.iter().map(|row| row.location.clone()));
         if !rows.is_empty() {
@@ -297,15 +297,19 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
     let mut games: Vec<&String> = import.by_game.keys().collect();
     games.sort();
     let mut samples: Vec<Value> = Vec::new();
+    const MAX_SAMPLES: usize = 9;
+    // One game keeps the old three examples; a mixed file shows each game.
+    let per_game = if games.len() > 1 { 2 } else { 3 };
     for game in games {
-        if samples.len() >= 3 {
+        if samples.len() >= MAX_SAMPLES {
             break;
         }
         let rows = &import.by_game[game];
         let game_products = by_game_products.get(game.as_str()).map(Vec::as_slice).unwrap_or(&[]);
         let paired = pt::reconcile_power_tools_with_cardtrader(game_products, rows.clone());
-        for (product, row) in paired.matched.iter().take(3) {
-            if samples.len() >= 3 {
+        let mut added = 0usize;
+        for (product, row) in paired.matched.iter() {
+            if samples.len() >= MAX_SAMPLES || added >= per_game {
                 break;
             }
             samples.push(json!({
@@ -318,8 +322,12 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
                 "location": row.location,
                 "matched": true,
             }));
+            added += 1;
         }
-        for row in rows.iter().take(3usize.saturating_sub(samples.len())) {
+        for row in rows.iter() {
+            if samples.len() >= MAX_SAMPLES || added >= per_game {
+                break;
+            }
             samples.push(json!({
                 "game": game,
                 "name": row.name,
@@ -331,6 +339,7 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
                 "matched": false,
                 "note": if game_products.is_empty() { "CardTrader export unavailable for match preview" } else { "No CardTrader twin yet" },
             }));
+            added += 1;
         }
     }
     json!({
@@ -455,54 +464,97 @@ pub async fn apply_power_tools_locations(db: &DbPools, seller_uid: &str, locatio
 
 // --------------------------------------------------- Pokoin → CardTrader push
 
-/// Listings pushed per reconcile run unless `CARDTRADER_PUSH_BATCH` says otherwise.
-pub const DEFAULT_PUSH_BATCH: i64 = 100;
+/// Most listings one run lists on CardTrader (`CARDTRADER_PUSH_PER_RUN`).
+pub const DEFAULT_PUSH_PER_RUN: i64 = 2000;
+/// Seconds one run may spend creating products (`CARDTRADER_PUSH_SECONDS`):
+/// with the export and plan it stays inside the 15-minute reconcile lock.
+pub const DEFAULT_PUSH_SECONDS: i64 = 480;
+/// Candidates read per query.
+const PUSH_PAGE: i64 = 200;
+/// At most five creates a second, well under CardTrader's request limits.
+const PUSH_MIN_INTERVAL_MS: u64 = 200;
 
-pub fn push_batch() -> i64 {
-    std::env::var("CARDTRADER_PUSH_BATCH")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<i64>().ok())
-        .unwrap_or(DEFAULT_PUSH_BATCH)
-        .clamp(0, 500)
+/// How much one run may push.
+#[derive(Clone, Copy, Debug)]
+pub struct PushBudget {
+    pub per_run: i64,
+    pub seconds: i64,
+}
+
+impl PushBudget {
+    pub fn from_env() -> Self {
+        let read = |key: &str, default: i64, max: i64| {
+            std::env::var(key)
+                .ok()
+                .and_then(|raw| raw.trim().parse::<i64>().ok())
+                .unwrap_or(default)
+                .clamp(0, max)
+        };
+        Self {
+            per_run: read("CARDTRADER_PUSH_PER_RUN", DEFAULT_PUSH_PER_RUN, 10_000),
+            seconds: read("CARDTRADER_PUSH_SECONDS", DEFAULT_PUSH_SECONDS, 600),
+        }
+    }
 }
 
 /// Active Pokémon listings with stock and no CardTrader product yet, never
-/// CardTrader's own imports. Oldest change first, so a listing CardTrader
-/// refused (released with a fresh `updated_at`) waits behind the others.
-const PUSH_CANDIDATES_SQL: &str = r#"
-      select to_jsonb(listing) as listing
+/// CardTrader's own imports. "No CardTrader product" is any source that is not
+/// `ct:…`: empty, or another channel's id such as a Scan Connect item
+/// (`scan:<id>`), which Scan's own CardTrader push also replaces.
+const PUSH_CANDIDATES_WHERE: &str = r#"
       from public.marketplace_user_listings as listing
       where listing.seller_uid = $1
         and listing.status = 'active'
         and listing.quantity_available > 0
-        and coalesce(listing.source_listing_id, '') = ''
+        and coalesce(listing.source_listing_id, '') not like 'ct:%'
         and coalesce(listing.source, '') <> $2
         and coalesce(nullif(listing.marketplace_game, ''), 'pokemon') = 'pokemon'
         and listing.card_id ~ '^[0-9]+$'
-      order by listing.updated_at asc, listing.id
-      limit $3
+"#;
+
+/// A page of candidates, never one this run already tried (`$4`): a listing
+/// CardTrader refused goes back to its old source and must not come round
+/// again in the same run.
+fn push_candidates_sql() -> String {
+    format!(
+        "select to_jsonb(listing) as listing {PUSH_CANDIDATES_WHERE} and not (listing.id::text = any($4::text[])) order by listing.updated_at asc, listing.id limit $3"
+    )
+}
+
+fn push_remaining_sql() -> String {
+    format!("select count(*)::bigint as remaining {PUSH_CANDIDATES_WHERE}")
+}
+
+/// Every CardTrader source a listing of the seller holds, any status.
+const LINKED_SOURCES_SQL: &str = r#"
+      select source_listing_id from public.marketplace_user_listings
+      where seller_uid = $1 and source_listing_id like 'ct:%'
 "#;
 
 /// Same compare-and-set as the outbox push: only one writer moves a listing
-/// from no source to `ct:pending:…`, so a listing is never created twice.
+/// from the source it was read with to `ct:pending:…`, so a listing is never
+/// created twice.
 const CLAIM_SQL: &str = r#"
       update public.marketplace_user_listings
       set source_listing_id = $2, updated_at = now()
-      where id = $1::uuid and coalesce(source_listing_id, '') = ''
+      where id = $1::uuid and coalesce(source_listing_id, '') = $3
       returning id
 "#;
 
+/// Undo a claim: the listing gets back the source it had.
 const RELEASE_SQL: &str = r#"
       update public.marketplace_user_listings
-      set source_listing_id = '', updated_at = now()
+      set source_listing_id = $3, updated_at = now()
       where id = $1::uuid and source_listing_id = $2
       returning id
 "#;
 
+/// Link a listing to a product over the source it was read with (a claim, or
+/// its old source when it takes over an unclaimed CardTrader twin).
 const LINK_SQL: &str = r#"
       update public.marketplace_user_listings
       set source_listing_id = $2, updated_at = now()
-      where id = $1::uuid and source_listing_id = $3
+      where id = $1::uuid and coalesce(source_listing_id, '') = $3
       returning id, status, quantity_available, card_id
 "#;
 
@@ -528,117 +580,250 @@ fn bump(out: &mut Value, key: &str) {
     out[key] = json!(out[key].as_i64().unwrap_or(0) + 1);
 }
 
-/// Facet keys (card, condition, language, finishes) of every product in a
-/// CardTrader export.
-pub fn export_facets(products: &[NormalizedProduct]) -> HashSet<String> {
-    products
-        .iter()
-        .filter_map(|product| {
-            let card_id = public_card_id_from_blueprint(&product.blueprint_id)?;
-            Some(facet_key(
-                &card_id,
-                product.condition,
-                product.language,
-                product.reverse,
-                product.first_edition,
-                product.signed,
-                product.altered,
-                product.graded,
-            ))
-        })
-        .collect()
+fn product_facet(product: &NormalizedProduct) -> Option<String> {
+    let card_id = public_card_id_from_blueprint(&product.blueprint_id)?;
+    Some(facet_key(
+        &card_id,
+        product.condition,
+        product.language,
+        product.reverse,
+        product.first_edition,
+        product.signed,
+        product.altered,
+        product.graded,
+    ))
 }
 
-/// List up to `limit` Pokoin-only listings on CardTrader and link them. A
-/// listing whose exact card is already in the CardTrader export
-/// (`on_cardtrader`) is left alone: the plan links a twin only when it is the
-/// single match, so pushing the others would sell that card twice there.
+/// CardTrader products no Pokoin listing holds yet, by facet key (card,
+/// condition, language, finishes). Such a product is a candidate's twin.
+#[derive(Debug, Default)]
+pub struct Twins {
+    by_facet: HashMap<String, Vec<String>>,
+}
+
+impl Twins {
+    pub fn new(products: &[NormalizedProduct], linked_sources: &HashSet<String>) -> Self {
+        let mut by_facet: HashMap<String, Vec<String>> = HashMap::new();
+        for product in products {
+            if product.id.is_empty() || linked_sources.contains(&ct_source_listing_id(&product.id)) {
+                continue;
+            }
+            if let Some(facet) = product_facet(product) {
+                by_facet.entry(facet).or_default().push(product.id.clone());
+            }
+        }
+        Self { by_facet }
+    }
+
+    /// Hand out each unclaimed twin once.
+    fn take(&mut self, facet: &str) -> Option<String> {
+        let ids = self.by_facet.get_mut(facet)?;
+        if ids.is_empty() {
+            None
+        } else {
+            Some(ids.remove(0))
+        }
+    }
+}
+
+/// What the push does with one candidate.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PushStep {
+    /// The same card is on CardTrader with no listing: link it, create nothing.
+    Link(String),
+    /// Create its own product. CardTrader takes several products of the same
+    /// card from one seller (on 2026-10-14 one seller's 12,923 linked products
+    /// covered 12,792 facets), so a second copy is a second product.
+    Create,
+}
+
+pub fn push_step(twins: &mut Twins, listing: &Value) -> PushStep {
+    match twins.take(&facet_key_of_row(listing)) {
+        Some(product_id) => PushStep::Link(product_id),
+        None => PushStep::Create,
+    }
+}
+
+fn rate_limited(error: &ApiError) -> bool {
+    error.code.as_deref() == Some(format!("{}429", crate::cardtrader::client::HTTP_ERROR_PREFIX).as_str())
+}
+
+/// List every Pokoin-only listing on CardTrader and link it, page after page,
+/// until none is left or the run's budget (count, time, a CardTrader 429) is
+/// spent; the next run carries on. Every candidate is linked, created, put
+/// back with a fresh `updated_at`, or left in doubt under a pending source, so
+/// none can hold up the queue.
 pub async fn push_unlisted(
     db: &DbPools,
     ct: &CardTraderClient,
     token: &str,
     seller_uid: &str,
-    limit: i64,
-    on_cardtrader: &HashSet<String>,
+    budget: PushBudget,
+    export: &[NormalizedProduct],
 ) -> Value {
-    let mut out = json!({ "candidates": 0, "pushed": 0, "failed": 0, "inDoubt": 0, "skipped": 0, "alreadyOnCardTrader": 0, "errorItems": [] });
-    if limit <= 0 {
+    let mut out = json!({
+        "candidates": 0, "pushed": 0, "linkedToExisting": 0, "failed": 0, "inDoubt": 0,
+        "skipped": 0, "remaining": 0, "stoppedBy": "done", "errorItems": [],
+    });
+    if budget.per_run <= 0 {
+        out["stoppedBy"] = json!("per_run_cap");
         return out;
     }
-    let rows = match db.write("pokemon", PUSH_CANDIDATES_SQL, &[json!(seller_uid), json!(IMPORT_SOURCE), json!(limit)]).await {
-        Ok(rows) => rows,
+    let linked_sources: HashSet<String> = match db.write("pokemon", LINKED_SOURCES_SQL, &[json!(seller_uid)]).await {
+        Ok(rows) => rows
+            .iter()
+            .map(|row| clean_text_value(row.get("source_listing_id").unwrap_or(&Value::Null), 160))
+            .collect(),
         Err(error) if error.is_table_missing() => return out,
         Err(error) => {
+            out["error"] = json!(error.message);
             note_error(&mut out, json!({ "reason": error.message }));
             return out;
         }
     };
-    out["candidates"] = json!(rows.len());
-    for row in rows {
-        let listing = row.get("listing").cloned().unwrap_or(Value::Null);
-        let id = clean_text_value(listing.get("id").unwrap_or(&Value::Null), 80);
-        if id.is_empty() {
-            continue;
+    let mut twins = Twins::new(export, &linked_sources);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(budget.seconds.max(0) as u64);
+    let mut attempted: Vec<String> = Vec::new();
+    'pages: loop {
+        let room = budget.per_run - attempted.len() as i64;
+        if room <= 0 {
+            out["stoppedBy"] = json!("per_run_cap");
+            break;
         }
-        if on_cardtrader.contains(&facet_key_of_row(&listing)) {
-            bump(&mut out, "alreadyOnCardTrader");
-            continue;
-        }
-        let pending = pending_source(crate::time_util::now_ms());
-        match db.write("pokemon", CLAIM_SQL, &[json!(id), json!(pending)]).await {
-            Ok(claimed) if !claimed.is_empty() => {}
-            Ok(_) => {
-                bump(&mut out, "skipped");
-                continue;
-            }
+        let params = [json!(seller_uid), json!(IMPORT_SOURCE), json!(room.min(PUSH_PAGE)), json!(attempted)];
+        let rows = match db.write("pokemon", &push_candidates_sql(), &params).await {
+            Ok(rows) => rows,
+            Err(error) if error.is_table_missing() => break,
             Err(error) => {
-                bump(&mut out, "failed");
-                note_error(&mut out, json!({ "listingId": id, "reason": error.message }));
+                // A database that cannot be read is a failed sync, never "nothing to list".
+                out["error"] = json!(error.message);
+                note_error(&mut out, json!({ "reason": error.message }));
+                break;
+            }
+        };
+        if rows.is_empty() {
+            break;
+        }
+        for row in rows {
+            if std::time::Instant::now() >= deadline {
+                out["stoppedBy"] = json!("time_budget");
+                break 'pages;
+            }
+            let listing = row.get("listing").cloned().unwrap_or(Value::Null);
+            let id = clean_text_value(listing.get("id").unwrap_or(&Value::Null), 80);
+            if id.is_empty() {
                 continue;
             }
-        }
-        match push::create_with_token(ct, token, &listing).await {
-            PushOutcome::Created(pushed) => {
-                let product_id = clean_text_value(pushed.get("productId").unwrap_or(&Value::Null), 80);
-                let source = clean_text_value(pushed.get("sourceListingId").unwrap_or(&Value::Null), 160);
-                let linked = db
-                    .write("pokemon", LINK_SQL, &[json!(id), json!(source), json!(pending)])
-                    .await
-                    .ok()
-                    .and_then(|rows| rows.into_iter().next());
-                let Some(linked) = linked else {
-                    // The claim is gone (listing deleted meanwhile): take the
-                    // product back off CardTrader rather than leave it unlinked.
-                    let _ = ct.destroy_product(token, &product_id).await;
+            attempted.push(id.clone());
+            bump(&mut out, "candidates");
+            let read_source = clean_text_value(listing.get("source_listing_id").unwrap_or(&Value::Null), 160);
+            if let PushStep::Link(product_id) = push_step(&mut twins, &listing) {
+                let source = ct_source_listing_id(&product_id);
+                match db.write("pokemon", LINK_SQL, &[json!(id), json!(source), json!(read_source)]).await {
+                    Ok(rows) if !rows.is_empty() => {
+                        let card_id = clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80);
+                        let blueprint = push::blueprint(&card_id).map(|n| n.to_string()).unwrap_or_default();
+                        let quantity = listing.get("quantity_available").and_then(Value::as_i64).unwrap_or(0);
+                        let _ = upsert_product_link(db, seller_uid, &product_id, &id, &blueprint, quantity, "match", false).await;
+                        bump(&mut out, "linkedToExisting");
+                    }
+                    Ok(_) => bump(&mut out, "skipped"),
+                    Err(error) => {
+                        bump(&mut out, "failed");
+                        out["error"] = json!(error.message);
+                        note_error(&mut out, json!({ "listingId": id, "reason": error.message }));
+                    }
+                }
+                continue;
+            }
+            let pending = pending_source(crate::time_util::now_ms());
+            match db.write("pokemon", CLAIM_SQL, &[json!(id), json!(pending), json!(read_source)]).await {
+                Ok(claimed) if !claimed.is_empty() => {}
+                Ok(_) => {
                     bump(&mut out, "skipped");
                     continue;
-                };
-                let card_id = clean_text_value(linked.get("card_id").unwrap_or(&Value::Null), 80);
-                let blueprint = push::blueprint(&card_id).map(|n| n.to_string()).unwrap_or_default();
-                let quantity = linked.get("quantity_available").and_then(Value::as_i64).unwrap_or(0);
-                let _ = upsert_product_link(db, seller_uid, &product_id, &id, &blueprint, quantity, "push", false).await;
-                if push::off_sale(&clean_text_value(linked.get("status").unwrap_or(&Value::Null), 20)) {
-                    // Went off sale while CardTrader created it.
-                    let _ = ct.destroy_product(token, &product_id).await;
                 }
-                bump(&mut out, "pushed");
+                Err(error) => {
+                    bump(&mut out, "failed");
+                    out["error"] = json!(error.message);
+                    note_error(&mut out, json!({ "listingId": id, "reason": error.message }));
+                    continue;
+                }
             }
-            PushOutcome::Rejected(error) => {
-                // Nothing was created: free the claim for a later run.
-                let _ = db.write("pokemon", RELEASE_SQL, &[json!(id), json!(pending)]).await;
-                bump(&mut out, "failed");
-                note_error(&mut out, json!({
-                    "listingId": id,
-                    "cardId": clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80),
-                    "reason": error.message,
-                }));
+            let started = std::time::Instant::now();
+            match push::create_with_token(ct, token, &listing).await {
+                PushOutcome::Created(pushed) => {
+                    let product_id = clean_text_value(pushed.get("productId").unwrap_or(&Value::Null), 80);
+                    let source = clean_text_value(pushed.get("sourceListingId").unwrap_or(&Value::Null), 160);
+                    let linked = db
+                        .write("pokemon", LINK_SQL, &[json!(id), json!(source), json!(pending)])
+                        .await
+                        .ok()
+                        .and_then(|rows| rows.into_iter().next());
+                    match linked {
+                        None => {
+                            // The claim is gone (listing deleted meanwhile): take the
+                            // product back off CardTrader rather than leave it unlinked.
+                            let _ = ct.destroy_product(token, &product_id).await;
+                            bump(&mut out, "skipped");
+                        }
+                        Some(linked) => {
+                            let card_id = clean_text_value(linked.get("card_id").unwrap_or(&Value::Null), 80);
+                            let blueprint = push::blueprint(&card_id).map(|n| n.to_string()).unwrap_or_default();
+                            let quantity = linked.get("quantity_available").and_then(Value::as_i64).unwrap_or(0);
+                            let _ = upsert_product_link(db, seller_uid, &product_id, &id, &blueprint, quantity, "push", false).await;
+                            if push::off_sale(&clean_text_value(linked.get("status").unwrap_or(&Value::Null), 20)) {
+                                // Went off sale while CardTrader created it.
+                                let _ = ct.destroy_product(token, &product_id).await;
+                            }
+                            bump(&mut out, "pushed");
+                        }
+                    }
+                }
+                PushOutcome::Rejected(error) => {
+                    // Nothing was created: free the claim for a later run.
+                    let _ = db.write("pokemon", RELEASE_SQL, &[json!(id), json!(pending), json!(read_source)]).await;
+                    if rate_limited(&error) {
+                        out["stoppedBy"] = json!("rate_limited");
+                        break 'pages;
+                    }
+                    bump(&mut out, "failed");
+                    note_error(&mut out, json!({
+                        "listingId": id,
+                        "cardId": clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80),
+                        "reason": error.message,
+                    }));
+                }
+                // The product may exist: keep the claim; the next reconcile links
+                // it by `user_data_field` and nothing pushes it again.
+                PushOutcome::InDoubt(_) => bump(&mut out, "inDoubt"),
             }
-            // The product may exist: keep the claim; the next reconcile links
-            // it by `user_data_field` and nothing pushes it again.
-            PushOutcome::InDoubt(_) => bump(&mut out, "inDoubt"),
+            let spent = started.elapsed();
+            let floor = std::time::Duration::from_millis(PUSH_MIN_INTERVAL_MS);
+            if spent < floor {
+                tokio::time::sleep(floor - spent).await;
+            }
         }
     }
+    // What the next runs still have to list.
+    if let Ok(rows) = db.write("pokemon", &push_remaining_sql(), &[json!(seller_uid), json!(IMPORT_SOURCE)]).await {
+        out["remaining"] = rows.first().and_then(|row| row.get("remaining")).cloned().unwrap_or(json!(0));
+    }
     out
+}
+
+/// Why the push pass must not run this time, if it must not. It writes to the
+/// seller's CardTrader account, so it needs an export the plan trusted (its
+/// facets are the duplicate check) and the shared reconcile lock (two runs
+/// at once read exports that miss each other's creates).
+pub fn push_gate(export_complete: bool, exclusive: bool) -> Option<&'static str> {
+    if !export_complete {
+        Some("incomplete_export")
+    } else if !exclusive {
+        Some("no_shared_lock")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -704,6 +889,16 @@ mod tests {
         assert_eq!(confirmed.overflows[0]["game"], "pokemon");
     }
 
+    #[test]
+    fn power_tools_body_skips_zero_quantity_rows() {
+        let csv = "name,set,cn,condition,language,quantity,price,location\n\
+            Pikachu,Base Set,58/102,NM,English,0,2.50,Binder A\n\
+            Charmander,Base Set,46/102,LP,English,2,1.00,Binder B\n";
+        let import = parse_power_tools_body(&json!({"powerToolsCsv": {"pokemon": csv}})).unwrap().unwrap();
+        assert_eq!(import.total_rows(), 1);
+        assert_eq!(import.by_game["pokemon"][0].name, "Charmander");
+    }
+
     fn product(id: &str, name: &str, collector: &str) -> NormalizedProduct {
         crate::cardtrader::sync_core::normalize_product(&json!({
             "id": id.parse::<i64>().unwrap(), "blueprint_id": 100, "game_id": 5, "quantity": 1,
@@ -731,12 +926,26 @@ mod tests {
     }
 
     #[test]
-    fn export_facets_match_listing_rows() {
-        let facets = export_facets(&[product("11", "Pikachu", "58/102")]);
-        let card_id = public_card_id_from_blueprint("100").unwrap();
-        assert!(facets.contains(&facet_key_of_row(&json!({"card_id": card_id, "condition": "NM", "language": "EN"}))));
-        assert!(!facets.contains(&facet_key_of_row(&json!({"card_id": card_id, "condition": "LP", "language": "EN"}))));
-        assert!(!facets.contains(&facet_key_of_row(&json!({"card_id": card_id, "condition": "NM", "language": "EN", "reverse": true}))));
+    fn a_second_copy_gets_its_own_product_and_a_twin_is_linked() {
+        // CardTrader: 11 (Pikachu NM EN) is linked, 12 is the same card with no
+        // listing, 13 is another card (blueprint 101) with no listing.
+        let mewtwo = crate::cardtrader::sync_core::normalize_product(&json!({
+            "id": 13, "blueprint_id": 101, "game_id": 5, "quantity": 1, "name_en": "Mewtwo", "price_cents": 250,
+            "properties_hash": { "condition": "Near Mint", "pokemon_language": "en" },
+        }));
+        let products = vec![product("11", "Pikachu", "58/102"), product("12", "Pikachu", "58/102"), mewtwo];
+        let linked: HashSet<String> = ["ct:11".to_string()].into_iter().collect();
+        let mut twins = Twins::new(&products, &linked);
+        let row = |blueprint: &str, condition: &str| {
+            json!({"card_id": public_card_id_from_blueprint(blueprint).unwrap(), "condition": condition, "language": "EN"})
+        };
+        // The 2026-10-14 regression: 76 of 100 candidates matched a linked
+        // product, were skipped, and stayed first in the queue every run.
+        assert_eq!(push_step(&mut twins, &row("100", "NM")), PushStep::Link("12".into()), "an unclaimed twin is linked, not duplicated");
+        assert_eq!(push_step(&mut twins, &row("100", "NM")), PushStep::Create, "a further copy gets its own product, never a skip");
+        assert_eq!(push_step(&mut twins, &row("100", "LP")), PushStep::Create);
+        assert_eq!(push_step(&mut twins, &row("101", "NM")), PushStep::Link("13".into()));
+        assert_eq!(push_step(&mut twins, &row("101", "NM")), PushStep::Create, "each twin is handed out once");
     }
 
     #[test]
@@ -746,6 +955,25 @@ mod tests {
         assert_eq!(style(&["Box 1", "Box 2", "Shelf"]), "trailing_stack");
         assert_eq!(style(&["Shelf", "Drawer"]), "as_is");
         assert_eq!(style(&[]), "as_is");
+    }
+
+    #[test]
+    fn push_needs_a_trusted_export_and_the_shared_lock() {
+        assert_eq!(push_gate(true, true), None);
+        assert_eq!(push_gate(false, true), Some("incomplete_export"));
+        assert_eq!(push_gate(true, false), Some("no_shared_lock"));
+        assert_eq!(push_gate(false, false), Some("incomplete_export"));
+        assert!(DEFAULT_PUSH_PER_RUN >= 1500, "a 1,463-listing shop fits in one run");
+        assert!(DEFAULT_PUSH_SECONDS * 1000 / PUSH_MIN_INTERVAL_MS as i64 >= 2000, "the time budget allows the per-run cap");
+    }
+
+    #[test]
+    fn push_candidates_include_other_channel_sources() {
+        let sql = push_candidates_sql();
+        assert!(sql.contains("not like 'ct:%'"), "scan:<id> and empty sources are candidates");
+        assert!(sql.contains("limit $3"));
+        assert!(sql.contains("any($4::text[])"), "rows this run tried never come round again");
+        assert!(!push_remaining_sql().contains("limit"));
     }
 
     #[test]

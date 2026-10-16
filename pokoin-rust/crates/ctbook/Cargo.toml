@@ -1,0 +1,18 @@
+[package]
+name = "ctbook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ctbook"
+path = "src/main.rs"
+
+[dependencies]
+brotli = "8"
+flate2 = "1"
+itoa = "1"
+serde_json = { workspace = true }

@@ -96,6 +96,11 @@ def build_summary(root, started_at, exit_code, stages, analytics):
                      f"{len(listing.get('errors', [])) if isinstance(listing.get('errors'), list) else 'unknown'} errors.")
     else:
         lines.append("Raw listing dump completion is unverified (missing, incomplete or stale report).")
+    if listing.get("stoppedAtDeadline") is True:
+        seconds = listing.get("maxSeconds")
+        limit = (f"{round(seconds / 3600, 1)} h "
+                 if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds > 0 else "")
+        lines.append(f"Raw listing dump stopped at its {limit}deadline after {completed}/{total} expansions.")
     state = analytics.get("state", "unknown")
     if state in ("fresh", "stale"):
         label = "fresh" if state == "fresh" else "not refreshed during this run"
@@ -112,8 +117,19 @@ def build_summary(root, started_at, exit_code, stages, analytics):
     if isinstance(errors, list) and errors:
         games = sorted({str(row.get("database", "unknown game")) for row in errors if isinstance(row, dict)})
         lines.append("Catalogue failures: " + ", ".join(games) + ".")
+    deferred = catalog.get("deferred")
+    if isinstance(deferred, list) and deferred:
+        parts = []
+        for row in deferred:
+            if not isinstance(row, dict):
+                continue
+            ids = [str(item.get("id")) for item in row.get("expansions", []) if isinstance(item, dict)]
+            parts.append(f"{row.get('database', 'unknown game')} {', '.join(ids)}")
+        if parts:
+            lines.append("New expansions deferred to the next run (CardTrader export not ready): "
+                         + "; ".join(parts) + ".")
     if status == "complete":
-        lines.append("Catalogue, pictures, artwork and search stages completed.")
+        lines.append("Catalogue, pictures and artwork stages completed.")
     lines.append("Daily prices are listing asks; inferred sold prices remain separate.")
     return {
         "source": "cardtrader", "status": status, "message": "\n".join(lines)[:3500],

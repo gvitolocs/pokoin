@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Daily raw listing books for all live CardTrader games; no inferred sales."""
-import gzip,json,os,pathlib,shlex,subprocess,time
+import gzip,json,os,pathlib,select,shlex,subprocess,time
 ROOT=pathlib.Path(os.environ.get("POKOIN_CATALOG_RUN_ROOT","/home/nez/data/pokoin-catalog-refresh/"+time.strftime("%Y-%m-%d",time.gmtime())))
 OUT=ROOT/"listing-books";OUT.mkdir(parents=True,exist_ok=True)
 source=pathlib.Path(__file__).with_name("cardtrader-fetch-bridge.py").read_text()
@@ -21,6 +21,16 @@ wanted.sort(key=lambda e:(int(e["id"]) not in priority,int(e["game_id"])!=5,int(
 if os.environ.get("POKOIN_DUMP_LIMIT"): wanted=wanted[:int(os.environ["POKOIN_DUMP_LIMIT"])]
 priority.intersection_update(int(e["id"]) for e in wanted)
 report={"startedAt":time.strftime("%FT%TZ",time.gmtime()),"totalExpansions":len(wanted),"completed":0,"blueprintsWithListings":0,"listings":0,"errors":[],"games":sorted(games)}
+# Stop cleanly before systemd's 12 h TimeoutStartSec: the catalogue stage takes ~20 min before this script starts.
+MAX_SECONDS=float(os.environ.get("POKOIN_DUMP_MAX_SECONDS","36000"))
+GRACE_SECONDS=float(os.environ.get("POKOIN_DUMP_INFLIGHT_GRACE_SECONDS","1800"))
+deadline=time.monotonic()+MAX_SECONDS
+report["maxSeconds"]=MAX_SECONDS
+def read_reply(limit):
+    """One bridge reply line, or None if nothing arrives before `limit` (time.monotonic seconds)."""
+    remaining=limit-time.monotonic()
+    if remaining<=0 or not select.select([process.stdout],[],[],remaining)[0]:return None
+    return process.stdout.readline()
 cached_books=set()
 report["newPrintingExpansions"]=len(priority)
 report["newPrintingExpansionsCompleted"]=0
@@ -28,22 +38,43 @@ report["newPrintingExpansionsCompleted"]=0
 for e in wanted:
     dest=OUT/(str(e["game_id"])+"-"+str(e["id"])+".json.gz")
     if not dest.exists():continue
-    with gzip.open(dest,"rt") as f:cached=json.load(f)
+    # A crash can leave a renamed but empty/truncated book (rename hit the
+    # disk, data did not): quarantine it so it is downloaded again.
+    try:
+        with gzip.open(dest,"rt") as f:cached=json.load(f)
+    except (OSError,EOFError,ValueError):
+        dest.replace(str(dest)+".corrupt");print("re-downloading corrupt book",dest.name,flush=True);continue
     report["blueprintsWithListings"]+=len(cached)
     report["listings"]+=sum(len(v) for v in cached.values() if isinstance(v,list))
     report["completed"]+=1;cached_books.add(e["id"])
     if int(e["id"]) in priority:report["newPrintingExpansionsCompleted"]+=1
 (ROOT/"listing-dump-status.json").write_text(json.dumps(report,indent=2))
+stopped=False
 try:
     for index,e in enumerate(wanted,1):
         dest=OUT/(str(e["game_id"])+"-"+str(e["id"])+".json.gz")
         if e["id"] in cached_books:continue
+        if time.monotonic()>=deadline:
+            stopped=True;break
         process.stdin.write(json.dumps({"id":index,"path":"/marketplace/products","params":{"expansion_id":e["id"]}})+"\n");process.stdin.flush()
-        message=json.loads(process.stdout.readline())
+        try:
+            line=read_reply(deadline+GRACE_SECONDS)
+            if line is None:
+                report["abandonedExpansionId"]=e["id"];stopped=True;break
+            message=json.loads(line)
+        except ValueError:
+            # Empty line = the bridge exited; anything else = a broken reply. Either way the protocol is out of sync.
+            report["errors"].append({"expansionId":e["id"],"gameId":e["game_id"],"error":"Bridge closed or sent an unreadable reply"})
+            (ROOT/"listing-dump-status.json").write_text(json.dumps(report,indent=2))
+            break
+        data=message.get("data")
+        if not message.get("error"):
+            # The bridge forwards the book unparsed, so the shape is checked here.
+            if isinstance(data,dict) and "array" in data:data=data["array"]
+            if not isinstance(data,dict):message={"error":"ValueError: Expected listing book"}
         if message.get("error"):
             report["errors"].append({"expansionId":e["id"],"gameId":e["game_id"],"error":message["error"]})
         else:
-            data=message["data"]
             count=sum(len(rows) for rows in data.values() if isinstance(rows,list))
             with gzip.open(str(dest)+".part","wt",compresslevel=3) as out:json.dump(data,out,separators=(",",":"))
             pathlib.Path(str(dest)+".part").replace(dest)
@@ -54,7 +85,13 @@ try:
             report["blocked"]="CardTrader listing endpoint refused by Cloudflare; retaining collected books and retrying at the next scheduled run"
             break
         if index%25==0:print(time.strftime("%FT%TZ",time.gmtime()),"daily listing books",report["completed"],"/",len(wanted),"listings",report["listings"],flush=True)
+    if stopped:
+        report["stoppedAtDeadline"]=True
+        print(time.strftime("%FT%TZ",time.gmtime()),"daily listing books stopped at the",round(MAX_SECONDS/3600,1),"h deadline:",report["completed"],"/",len(wanted),flush=True)
 finally:
-    process.stdin.close();process.wait(timeout=180)
+    process.stdin.close()
+    try:process.wait(timeout=30 if stopped else 180)
+    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=30)
 report["finishedAt"]=time.strftime("%FT%TZ",time.gmtime());(ROOT/"listing-dump-status.json").write_text(json.dumps(report,indent=2))
-raise SystemExit(bool(report["errors"]))
+# 75 (EX_TEMPFAIL) = stopped at the deadline; 1 = errors; 0 = every book collected.
+raise SystemExit(75 if report.get("stoppedAtDeadline") else 1 if report["errors"] else 0)

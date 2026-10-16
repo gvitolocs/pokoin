@@ -88,65 +88,6 @@ pub(crate) fn user_label(user: &DebugUser) -> String {
     clean_text_value(&Value::String(label), 240)
 }
 
-/// `ensureClassificationOverrideTable()` — the Node handler runs these guards
-/// through `marketplaceQuery` (or the read-pool transaction client).
-const OVERRIDE_TABLE_SQL: &str = r#"
-    create table if not exists public.marketplace_blueprint_classification_overrides (
-      blueprint_id bigint primary key references public.cardtrader_pokemon_blueprints(id) on delete cascade,
-      item_kind text not null default 'single' check (item_kind in ('single', 'product')),
-      product_type text not null default 'card',
-      source text not null default '',
-      reason text not null default '',
-      debug_uid text not null default '',
-      debug_email text not null default '',
-      debug_username text not null default '',
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
-    )
-  "#;
-
-const OVERRIDE_TABLE_INDEX_SQL: &str = r#"
-    create index if not exists marketplace_blueprint_classification_overrides_source_idx
-      on public.marketplace_blueprint_classification_overrides (source, updated_at desc)
-  "#;
-
-const SKIP_TABLE_SQL: &str = r#"
-    create table if not exists public.marketplace_artist_debug_skips (
-      id bigserial primary key,
-      blueprint_id bigint not null references public.cardtrader_pokemon_blueprints(id) on delete cascade,
-      debug_uid text not null default '',
-      debug_email text not null default '',
-      debug_username text not null default '',
-      reason text not null default '',
-      skipped_at timestamptz not null default now()
-    )
-  "#;
-
-const SKIP_TABLE_INDEX_SQL: &str = r#"
-    create index if not exists marketplace_artist_debug_skips_recent_idx
-      on public.marketplace_artist_debug_skips (blueprint_id, debug_uid, debug_email, skipped_at desc)
-  "#;
-
-async fn ensure_classification_override_table(state: &RouteState) -> Result<(), sqlx::Error> {
-    sqlx::query(OVERRIDE_TABLE_SQL)
-        .execute(state.api.read())
-        .await?;
-    sqlx::query(OVERRIDE_TABLE_INDEX_SQL)
-        .execute(state.api.read())
-        .await?;
-    Ok(())
-}
-
-async fn ensure_artist_debug_skip_table(state: &RouteState) -> Result<(), sqlx::Error> {
-    sqlx::query(SKIP_TABLE_SQL)
-        .execute(state.api.read())
-        .await?;
-    sqlx::query(SKIP_TABLE_INDEX_SQL)
-        .execute(state.api.read())
-        .await?;
-    Ok(())
-}
-
 /// `fetchNextArtistCandidate(user)` main query (verbatim).
 const NEXT_CANDIDATE_SQL: &str = r#"
     with unresolved as (
@@ -591,12 +532,6 @@ async fn fetch_next_artist_candidate(
     state: &RouteState,
     user: &DebugUser,
 ) -> Result<Value, HandlerError> {
-    ensure_classification_override_table(state)
-        .await
-        .map_err(db_error)?;
-    ensure_artist_debug_skip_table(state)
-        .await
-        .map_err(db_error)?;
     let row = sqlx::query(NEXT_CANDIDATE_SQL)
         .bind(truncate_utf16(user.uid.trim(), 160))
         .bind(truncate_utf16(user.email.trim(), 240))
@@ -656,9 +591,6 @@ async fn load_candidate_for_manual_action(
     state: &RouteState,
     blueprint_id: i64,
 ) -> Result<Value, HandlerError> {
-    ensure_classification_override_table(state)
-        .await
-        .map_err(db_error)?;
     let row = sqlx::query(LOAD_CANDIDATE_SQL)
         .bind(blueprint_id)
         .fetch_optional(state.api.read())
@@ -889,7 +821,7 @@ async fn save_manual_artist(
     .bind(&source_card_id)
     .bind(&match_reason)
     .bind(raw_metadata.to_string())
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(db_error)?;
 
@@ -949,15 +881,7 @@ async fn classify_blueprint(
         "card".to_owned()
     };
 
-    let mut tx = state.api.read().begin().await.map_err(db_error)?;
-    sqlx::query(OVERRIDE_TABLE_SQL)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
-    sqlx::query(OVERRIDE_TABLE_INDEX_SQL)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+    let mut tx = state.api.write().begin().await.map_err(db_error)?;
 
     let existing = sqlx::query(
         r#"
@@ -1282,9 +1206,6 @@ async fn skip_candidate(
             "Blueprint is required.",
         ));
     }
-    ensure_artist_debug_skip_table(state)
-        .await
-        .map_err(db_error)?;
     let reason = {
         let raw = value_get(body, "reason");
         if raw.is_null() {
@@ -1314,7 +1235,7 @@ async fn skip_candidate(
     .bind(truncate_utf16(user.email.trim(), 240))
     .bind(truncate_utf16(user.username.trim(), 120))
     .bind(&reason)
-    .execute(state.api.read())
+    .execute(state.api.write())
     .await
     .map_err(db_error)?;
     Ok(json!({

@@ -37,6 +37,8 @@ pub mod handlers;
 pub mod listing_live;
 pub mod listing_sync;
 pub mod ports;
+/// Read-only daily bulk export of headline prices (the PKP2 camera dictionary).
+pub mod price_export;
 /// In-memory set of card ids with a Sold-on-Pokoin row (native-sales fast path).
 pub mod sales_index;
 /// Redis read-through cache for public seller profile fields.

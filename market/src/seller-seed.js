@@ -84,7 +84,7 @@ export function resetSellerIdentityForTests() {
 
 /**
  * Personal thread only. The chat already has the display name and photo;
- * start the first shop page so the profile opens on those hundred cards.
+ * prefetch the shop snapshot so the profile opens on the whole book.
  */
 export function warmSellerFromChat({
   username,
@@ -98,8 +98,9 @@ export function warmSellerFromChat({
   rememberSellerIdentity(handle, { uid, username: handle, displayName, photoUrl });
   const opts = sellerShopSeedOpts({ game });
   if (peekSellerListings(handle, opts)) return;
+  // The shop snapshot, into the local store: the profile opens on the whole book.
   import('./api.js')
-    .then(({ fetchSellerShop }) => fetchSellerShop(handle, { ...opts, sellerUid: uid }))
+    .then(({ fetchSellerSnapshot }) => fetchSellerSnapshot(handle, { prefetch: true }))
     .catch(() => {});
 }
 

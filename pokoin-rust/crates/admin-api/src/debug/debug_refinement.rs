@@ -78,73 +78,6 @@ pub(crate) fn clean_string_array(value: &Value) -> Vec<String> {
     }
 }
 
-/// `ensureRefinementLogTable()` — the Node handler runs these guards through
-/// `marketplaceQuery`, i.e. the read pool.
-async fn ensure_refinement_log_table(state: &RouteState) -> Result<(), Response> {
-    for statement in [
-        r#"
-    create table if not exists public.marketplace_cm_refinement_log (
-      id bigserial primary key,
-      blueprint_id bigint not null references public.cardtrader_pokemon_blueprints(id) on delete cascade,
-      cardmarket_locale text not null default 'en',
-      pasted_cardmarket_url text not null,
-      candidate_cardmarket_url text not null default '',
-      card_name text not null default '',
-      expansion_name text not null default '',
-      collector_number text not null default '',
-      cardmarket_ids text[] not null default '{}',
-      status text not null default 'pending' check (
-        status in ('pending', 'implemented', 'rejected')
-      ),
-      debug_uid text not null default '',
-      debug_email text not null default '',
-      debug_username text not null default '',
-      notes text not null default '',
-      created_at timestamptz not null default now(),
-      implemented_at timestamptz
-    )
-  "#,
-        r#"
-    create index if not exists marketplace_cm_refinement_log_blueprint_idx
-      on public.marketplace_cm_refinement_log (blueprint_id, status, created_at desc)
-  "#,
-        r#"
-    create index if not exists marketplace_cm_refinement_log_status_idx
-      on public.marketplace_cm_refinement_log (status, created_at desc)
-  "#,
-        r#"
-    create table if not exists public.marketplace_cm_verified_links (
-      blueprint_id bigint not null references public.cardtrader_pokemon_blueprints(id) on delete cascade,
-      cardmarket_locale text not null default 'en',
-      cardmarket_url text not null,
-      cardmarket_product_slug text not null default '',
-      card_name text not null default '',
-      expansion_name text not null default '',
-      collector_number text not null default '',
-      source text not null default '',
-      confidence text not null default 'verified' check (
-        confidence in ('verified', 'manual')
-      ),
-      notes text not null default '',
-      verified_at timestamptz not null default now(),
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      primary key (blueprint_id, cardmarket_locale)
-    )
-  "#,
-        r#"
-    create unique index if not exists marketplace_cm_verified_links_url_idx
-      on public.marketplace_cm_verified_links (cardmarket_url)
-  "#,
-    ] {
-        sqlx::query(statement)
-            .execute(state.api.read())
-            .await
-            .map_err(|error| internal_error(&db_error_message(&error)))?;
-    }
-    Ok(())
-}
-
 /// `randomRows(limit, locale)`.
 async fn random_rows(
     state: &RouteState,
@@ -305,7 +238,6 @@ async fn save_refinement_log(
             json!({ "error": "Paste a valid Cardmarket singles URL for this blueprint." }),
         ));
     }
-    ensure_refinement_log_table(state).await?;
     let candidate = clean_text_value(value_get(body, "candidateCardmarketUrl"), 600);
     let card_name = clean_text_value(value_get(body, "cardName"), 240);
     let expansion_name = clean_text_value(value_get(body, "expansionName"), 240);
@@ -344,7 +276,7 @@ async fn save_refinement_log(
     .bind(truncate_utf16(user.email.trim(), 240))
     .bind(truncate_utf16(user.username.trim(), 120))
     .bind(&notes)
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(|error| internal_error(&db_error_message(&error)))?;
 
@@ -396,7 +328,7 @@ async fn save_refinement_log(
     .bind(&expansion_name)
     .bind(&collector_number)
     .bind(format!("Auto-promoted from refinement log {log_id}."))
-    .execute(state.api.read())
+    .execute(state.api.write())
     .await
     .map_err(|error| internal_error(&db_error_message(&error)))?;
 
@@ -421,7 +353,6 @@ async fn confirm_current_url(
             json!({ "error": "A valid current Cardmarket singles URL is required." }),
         ));
     }
-    ensure_refinement_log_table(state).await?;
     let slug = cardmarket_url
         .split('/')
         .filter(|part| !part.is_empty())
@@ -480,7 +411,7 @@ async fn confirm_current_url(
     .bind(format!(
         "Confirmed already OK by {confirmed_by} from debug refinement."
     ))
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(|error| internal_error(&db_error_message(&error)))?;
 

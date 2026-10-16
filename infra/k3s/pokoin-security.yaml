@@ -224,6 +224,12 @@ spec:
     - ipBlock:
         cidr: 172.31.250.12/32
   - ports:
+    - port: 18789
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 172.31.250.13/32
+  - ports:
     - port: 443
       protocol: TCP
     to:

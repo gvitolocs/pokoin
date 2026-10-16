@@ -120,7 +120,23 @@ function startCardUrlBoot() {
   // building the page again.
   fetch(API_ORIGIN + plan.pageUrl, {
     headers: plan.headers
+  }).then(function (res) {
+    return res.ok ? res.json() : null;
+  }).then(function (data) {
+    preloadDeskHero(data && data.card && data.card.deskArtUrl);
   }).catch(function () {});
+}
+
+// The desk hero scan, ~2 s before the entry chunk could name it. The card
+// page computes the exact URL the desk <img> requests (api.js deskArtUrl),
+// so the <img> reuses this download.
+function preloadDeskHero(url) {
+  if (typeof url !== "string" || !/^https:\/\/cdn\.pokoin\.com\//.test(url) || typeof Image !== "function") return;
+  var img = new Image();
+  img.fetchPriority = "high";
+  img.decoding = "async";
+  img.src = url;
+  window.__pokoinDeskHero = img;
 }
 
 if (typeof location !== "undefined" && typeof fetch === "function") {

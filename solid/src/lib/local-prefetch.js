@@ -5,12 +5,14 @@ import {
   fetchArtist,
   fetchCard,
   fetchExpansion,
+  fetchSellerSnapshot,
   fetchVersionSet,
   prefetchCardDesk,
   setSlug,
 } from '@market/api.js';
 import { realPublicCardId } from '@market/card-stub.js';
 import { gameBasename } from '@market/game.js';
+import { afterHero } from '@market/hero-gate.js';
 import { relatedFromPage } from '@market/related-cards.js';
 import { peekHandoffCard } from './card-handoff.js';
 import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-queue.js';
@@ -20,8 +22,8 @@ import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-que
  * (market/src/local-read.js), so the click paints from memory.
  *
  * - Intent: the router's own delegated intent listener (pointer resting
- *   60 ms, touchstart, focus) is the only one; for card desks, version, set
- *   and artist pages it warms the route code and queues the page data here.
+ *   60 ms, touchstart, focus) is the only one; for card desks, version, set,
+ *   artist and seller pages it warms the route code and queues the page data here.
  * - Viewport: after each navigation, the first few visible card / set tiles.
  * - Desk: once a card desk loads, its related cards and its set.
  * Loads run at idle with `priority: 'low'`, at most 4 at once, newest intent
@@ -52,6 +54,8 @@ function load(target, signal, intent) {
       ]);
     case 'set':
       return fetchExpansion({ slug: target.slug, limit: EXPANSION_PAGE, offset: 0, prefetch: true, signal });
+    case 'seller':
+      return fetchSellerSnapshot(target.handle, { prefetch: true, signal });
     default:
       return fetchArtist(target.slug, { limit: 5000, prefetch: true, signal });
   }
@@ -59,6 +63,8 @@ function load(target, signal, intent) {
 
 const queue = createPrefetchQueue({ load, idle, blocked });
 
+// Router base is '' — the slug is stripped only for matching. Catalogue hrefs
+// are still prefixed, so peel the live game prefix before classifying them.
 const targetOf = (url) => linkTarget(url.pathname, { base: gameBasename(), cardId: realPublicCardId });
 
 let scanTimers = [];
@@ -92,7 +98,7 @@ function scanViewport() {
 /** Tiles render after their data: look once soon after a navigation and once more later. */
 function scanSoon() {
   scanTimers.forEach(clearTimeout);
-  scanTimers = [800, 2500].map((ms) => setTimeout(() => idle(scanViewport), ms));
+  scanTimers = [800, 2500].map((ms) => setTimeout(() => afterHero(() => idle(scanViewport)), ms));
 }
 
 /**

@@ -2,7 +2,7 @@ import { fetchSearch } from './api.js';
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 
 /** Every printing of this Pokémon name, up to the cart bundle cap. */
-export async function fetchSpeciesCards(name, { limit = 400 } = {}) {
+export async function fetchSpeciesCards(name, { limit = 400, game: gameId } = {}) {
   const query = exactNameQuery(name);
   const wanted = String(name || '').trim();
   if (!query || !wanted) return [];
@@ -16,6 +16,7 @@ export async function fetchSpeciesCards(name, { limit = 400 } = {}) {
       offset,
       limit: 48,
       productType: 'card',
+      ...(gameId ? { game: gameId } : {}),
     });
     const raw = data?.cards || [];
     for (const row of filterExactNameRows(raw, wanted)) {

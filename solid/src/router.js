@@ -1,8 +1,9 @@
 import { lazy } from 'solid-js';
 import { createRouter } from '@solidjs/router';
-import { fetchCard, warmupCard } from '@market/api.js';
+import { fetchCard, preloadDeskArt, warmupCard } from '@market/api.js';
 import { realPublicCardId } from '@market/card-stub.js';
-import { gameBasename } from '@market/game.js';
+import { stripGamePrefix } from '@market/game.js';
+import { afterHero } from '@market/hero-gate.js';
 import { peekHandoffCard } from './lib/card-handoff.js';
 import { localPreload, prefetchAfterDesk } from './lib/local-preload.js';
 import Home from './pages/Home.jsx';
@@ -44,11 +45,19 @@ function preloadCard({ params, intent }) {
     warmupCard(peekHandoffCard(id) || { id }, { lang, listings: true });
     return;
   }
-  fetchCard(id, { lang, slug: params.slug || '' }).then((page) => prefetchAfterDesk(page, { lang })).catch(() => {});
+  fetchCard(id, { lang, slug: params.slug || '' }).then((page) => {
+    // The hero starts with the card page, not after the desk chunk renders;
+    // the desk's related prefetch waits for it.
+    preloadDeskArt(page?.card);
+    afterHero(() => prefetchAfterDesk(page, { lang }));
+  }).catch(() => {});
 }
 
 export const Router = createRouter({
-  base: gameBasename(),
+  // No frozen base: a game slug stays in the real URL (and in location.pathname)
+  // but matching and route preloads see it stripped, so /marketplace and
+  // /one-piece/marketplace are the same route and the page shell stays mounted.
+  transformUrl: stripGamePrefix,
   preloadLinks: localPreload(),
   routes: [
     { path: '/', component: RedirectTo, info: { to: '/marketplace' } },

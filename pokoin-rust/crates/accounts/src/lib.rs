@@ -46,6 +46,7 @@ pub mod firestore;
 pub mod handlers;
 pub mod http;
 pub mod identity;
+pub mod poko_brain;
 pub mod r2;
 pub mod rate_limit;
 pub mod sql;

@@ -8,6 +8,7 @@ import {
   tournamentById,
 } from '@market/competitive.js';
 import CompetitiveNav, { NotInSnapshot } from '../components/CompetitiveNav.jsx';
+import { gameHref } from '@market/game.js';
 
 function Column(props) {
   const count = () => (props.rows || []).reduce((sum, [qty]) => sum + Number(qty || 0), 0);
@@ -19,7 +20,7 @@ function Column(props) {
           <div>
             <span class="qty">{qty}</span>
             {' '}
-            <a href={cardHrefForName(name)}>{name}</a>
+            <a href={gameHref(cardHrefForName(name))}>{name}</a>
           </div>
         )}
       </For>
@@ -38,9 +39,9 @@ function Decklist(props) {
     <div class="page desk comp-page">
       <CompetitiveNav />
       <nav class="crumbs">
-        <a href="/marketplace/competitive/decks">Decks</a>
+        <a href={gameHref('/marketplace/competitive/decks')}>Decks</a>
         <span>/</span>
-        <a href={`/marketplace/competitive/decks/${list.deck}`}>{deck?.name || 'Deck'}</a>
+        <a href={gameHref(`/marketplace/competitive/decks/${list.deck}`)}>{deck?.name || 'Deck'}</a>
         <span>/</span>
         <span>List {list.id}</span>
       </nav>
@@ -49,9 +50,9 @@ function Decklist(props) {
         <p class="muted">
           {list.place}{placeSuffix(list.place)}
           {' · '}
-          <a href={`/marketplace/competitive/players/${list.playerId}`}>{list.player}</a>
+          <a href={gameHref(`/marketplace/competitive/players/${list.playerId}`)}>{list.player}</a>
           {' · '}
-          <a href={`/marketplace/competitive/tournaments/${list.event}`}>{event?.name || list.event}</a>
+          <a href={gameHref(`/marketplace/competitive/tournaments/${list.event}`)}>{event?.name || list.event}</a>
         </p>
       </header>
       <div class="decklist-main">

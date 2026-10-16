@@ -1,4 +1,5 @@
 import { noteCardView } from '@market/interest-profile.js';
+import { afterHero, holdForHero } from '@market/hero-gate.js';
 import {
   createEffect,
   createMemo,
@@ -13,13 +14,15 @@ import {
   Switch,
   untrack,
 } from 'solid-js';
-import { useLocation, useNavigate, useParams } from '@solidjs/router';
+import { useLocation, useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   artistHref,
   artistSlug,
   cancelListing,
   cardFromCatalogRow,
   cardHref,
+  deskArtUrl,
   dropListing,
   fetchArtistSummaries,
   fetchCanonicalPath,
@@ -29,7 +32,6 @@ import {
   fetchListings,
   fetchPrintNationality,
   fetchVersionSet,
-  imageSrc,
   invalidateListings,
   mergeCreatedListing,
   neighborsOrPeek,
@@ -63,6 +65,7 @@ import {
 } from '@market/art-shade.js';
 import {
   canonicalTarget,
+  cleanPath,
   canUseNativeShare,
   catalogPrintings,
   CONDITIONS,
@@ -86,10 +89,11 @@ import {
   rarityVersions,
   versionOptionLabel,
 } from '@market/card-versions.js';
+import { ownerGameLocation } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
-import { game, publicGamePath } from '@market/game.js';
+import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
 import { sellLanguages } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
@@ -123,6 +127,7 @@ import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
+import { splitVaultOffers } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
 import SoldPriceGraph from '../components/desk/SoldPriceGraph.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
@@ -165,7 +170,7 @@ function offerCopies(rows) {
 export default function Card() {
   const params = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => params.lang || 'en';
   const cardId = () => realPublicCardId(params.cardId);
   const deskKey = createMemo(() => `${lang()}:${cardId()}`);
@@ -207,7 +212,7 @@ function CardDesk(props) {
   const cardId = untrack(() => String(props.cardId));
   const lang = untrack(() => props.lang);
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const pinnedCurrency = () => currencyFromSearch(location.search);
 
   // First paint: URL stub + recent tile + remembered identity + the clicked tile.
@@ -281,14 +286,19 @@ function CardDesk(props) {
   }
 
   function replaceToCanonical(path) {
-    const next = canonicalTarget(path, untrack(() => location.pathname));
-    if (next) navigate(next, { replace: true, scroll: false });
+    const here = untrack(() => location.pathname);
+    const next = canonicalTarget(path, here);
+    if (!next) return;
+    const prefixed = publicGamePath(next, game().id) || next;
+    if (cleanPath(prefixed) === cleanPath(here)) return;
+    navigate(prefixed, { replace: true, scroll: false });
   }
 
   function showCard(data) {
     if (disposed || !data?.card) return;
     const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
-    warmupNeighbors(neighborWindow, { lang });
+    // The next card's scan waits for this one's (market/src/hero-gate.js).
+    afterHero(() => warmupNeighbors(neighborWindow, { lang }));
     const current = untrack(page);
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
@@ -320,11 +330,27 @@ function CardDesk(props) {
   refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
     if (!disposed) setOffersReady(true);
   });
-  fetchCard(cardId, { lang, slug: untrack(() => props.slug || ''), includeOffers: false, fresh: Boolean(cached) })
+  // Not painted from a peek: a stored copy of any age paints at once, and the
+  // revalidated page merges in place through showCard.
+  fetchCard(cardId, {
+    lang,
+    slug: untrack(() => props.slug || ''),
+    includeOffers: false,
+    fresh: Boolean(cached),
+    onUpdate: showCard,
+  })
     .then(showCard)
     .catch((err) => {
       if (disposed) return;
       if (err.status === 404) {
+        // Another TCG's card behind a game-less link: reload under its slug
+        // (the router basename changes), never "Card market not found."
+        const { pathname, search, hash } = window.location;
+        const moved = ownerGameLocation(err, { gameId: game().id, pathname, search, hash });
+        if (moved) {
+          window.location.replace(moved);
+          return;
+        }
         setPage(null);
         setError(err.message || 'Card not found.');
         return;
@@ -344,11 +370,12 @@ function CardDesk(props) {
     const stale = rememberStaleCardSales(cardId);
     setSalesSlices(stale?.slices ?? []);
   });
-  fetchVersionSet(cardId).then((data) => {
+  function showVersionSet(data) {
     if (disposed) return;
     const rows = rowsFrom(data?.printings);
     if (rows.length) setArtPrintings(rows);
-  }).catch(() => {
+  }
+  fetchVersionSet(cardId, { onUpdate: showVersionSet }).then(showVersionSet).catch(() => {
     /* Keep marketplace-card-page `versions` so 2–6 reprints still paint. */
   });
   if (cached) rememberNeighbors(cached.card, cached.neighbors);
@@ -356,7 +383,7 @@ function CardDesk(props) {
   // card's own page loads, so fast clicking keeps finding neighbours.
   if (!cached) {
     const painted = untrack(page)?.neighbors;
-    if (painted?.prev?.length || painted?.next?.length) warmupNeighbors(painted, { lang });
+    if (painted?.prev?.length || painted?.next?.length) afterHero(() => warmupNeighbors(painted, { lang }));
   }
   const landedWithoutSlug = !untrack(() => props.slug);
   const knownPath = landedWithoutSlug
@@ -519,7 +546,13 @@ function CardDesk(props) {
   // Strings children key their own work on (hero <img>, links) are memos, so a
   // hydrate that only adds fields does not re-run it.
   const fromPath = createMemo(() => card().canonicalPath || window.location.pathname);
-  const art = createMemo(() => imageSrc(card(), 'hero'));
+  // The exact URL the boot script and the router preloaded (card.deskArtUrl
+  // from the card page), so this <img> reuses that download.
+  const art = createMemo(() => deskArtUrl(card()));
+  // A new hero closes the gate until DeskArtFrame reports it loaded or failed.
+  createEffect(art, (url) => {
+    if (url) holdForHero();
+  });
   const heroShade = () => albumShade(card());
   const rarityKind = () => storedRarityKind(card());
   const setName = createMemo(() => identity().set || '');
@@ -587,7 +620,8 @@ function CardDesk(props) {
   });
   createEffect(serverRelated, (rows) => {
     // Low priority, behind the desk scan; the tiles reuse these downloads.
-    if (rows.length) preloadRelatedThumbs(rows);
+    // Behind the desk scan: the thumbnails wait for it (market/src/hero-gate.js).
+    if (rows.length) afterHero(() => preloadRelatedThumbs(rows));
   });
   const related = createMemo(() => (serverRelated().length ? serverRelated() : pickRelatedCards(card(), [
     clipPrintings(),
@@ -653,6 +687,8 @@ function CardDesk(props) {
     });
     return sortOffers(filtered, offerSort());
   });
+  // The Vault (Pokoin's own stock) gets its own panel; the Shop lists everyone else.
+  const split = createMemo(() => splitVaultOffers(offers()));
   const mineIds = createMemo(() => {
     const uid = String(authUser()?.uid || '');
     if (!uid) return [];
@@ -780,7 +816,7 @@ function CardDesk(props) {
       <Match when={error() && !page()?.card}>
         <div class="status error">
           <p>Card market not found.</p>
-          <a href="/marketplace">Back to marketplace</a>
+          <a href={gameHref('/marketplace')}>Back to marketplace</a>
         </div>
       </Match>
       <Match when={!page()?.card && !stubCard()}>{skeleton()}</Match>
@@ -844,7 +880,7 @@ function CardDesk(props) {
                 <p class="asset-sub">
                   <Show when={setName()}>
                     <a
-                      href={setHref()}
+                      href={gameHref(setHref())}
                       draggable="true"
                       onClick={() => track(Action.clickSet, card())}
                       onPointerDown={() => preloadDragImage(setLogo())}
@@ -871,7 +907,7 @@ function CardDesk(props) {
                     {' · '}
                     <Show when={artistPath()} fallback={<span>{artist()}</span>}>
                       <a
-                        href={artistPath()}
+                        href={gameHref(artistPath())}
                         draggable="true"
                         onClick={() => track(Action.clickArtist, card())}
                         onPointerDown={() => preloadDragImage(artistCover())}
@@ -916,7 +952,7 @@ function CardDesk(props) {
                     >
                       <a
                         class="art-nav"
-                        href={cardHref(prevNav())}
+                        href={gameHref(cardHref(prevNav()))}
                         aria-label="Previous card in set"
                         onPointerEnter={() => warm(prevNav())}
                         onClick={() => {
@@ -954,7 +990,7 @@ function CardDesk(props) {
                     >
                       <a
                         class="art-nav"
-                        href={cardHref(nextNav())}
+                        href={gameHref(cardHref(nextNav()))}
                         aria-label="Next card in set"
                         onPointerEnter={() => warm(nextNav())}
                         onClick={() => {
@@ -984,7 +1020,7 @@ function CardDesk(props) {
                                   fallback={(
                                     <a
                                       class="set-shortcut"
-                                      href={cardHref(row)}
+                                      href={gameHref(cardHref(row))}
                                       title={label}
                                       aria-label={label}
                                       onPointerEnter={() => warm(row)}
@@ -1007,7 +1043,7 @@ function CardDesk(props) {
                         </div>
                       </Show>
                       <Show when={showMoreVersions()}>
-                        <a class={['more-versions', { 'is-solo': !setShortcuts().length }]} href={versionsHref(card(), lang)}>
+                        <a class={['more-versions', { 'is-solo': !setShortcuts().length }]} href={gameHref(versionsHref(card(), lang))}>
                           More versions...
                         </a>
                       </Show>
@@ -1075,7 +1111,7 @@ function CardDesk(props) {
                         when={sellerHref(dealPick(), lang)}
                         fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
                       >
-                        <a href={sellerHref(dealPick(), lang)}>{publicListingSellerName(dealPick()) || 'seller'}</a>
+                        <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
                       </Show>
                     </p>
                   </Show>
@@ -1152,6 +1188,41 @@ function CardDesk(props) {
                 </section>
               </div>
 
+              <div class="shop-split">
+              <section class="panel shop-panel vault-panel">
+                <header class="panel-head shop-head">
+                  <h2>Vault</h2>
+                </header>
+                <Show
+                  when={split().vault.length}
+                  fallback={(
+                    <div class="empty-shop">
+                      <p class="status">{offersReady() ? 'Nothing in the Vault' : ' '}</p>
+                    </div>
+                  )}
+                >
+                  <ShopList offers={split().vault} deskCard={card()}>
+                    <For each={split().vault}>
+                      {(offer) => (
+                        <ShopListingRow
+                          offer={offer}
+                          anonymous
+                          card={card()}
+                          mine={mineIds().includes(offer.id)}
+                          selected={listingSelected().has(listingSelectId(offer))}
+                          dragOffers={shopDragOffers(split().vault, listingSelected(), offer)}
+                          listingBusy={listingBusy()}
+                          editing={editingOffer()?.id === offer.id}
+                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
+                          onInspect={openZoom}
+                          onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
+                          onCancel={() => cancelMine([offer.id])}
+                        />
+                      )}
+                    </For>
+                  </ShopList>
+                </Show>
+              </section>
               <section class="panel shop-panel shop-terminal">
                 <header class="panel-head shop-head">
                   <h2>Shop</h2>
@@ -1190,22 +1261,22 @@ function CardDesk(props) {
                 </header>
                 <Show when={shopError()}><p class="sell-msg error">{shopError()}</p></Show>
                 <Show
-                  when={offers().length}
+                  when={split().shop.length}
                   fallback={(
                     <div class="empty-shop">
                       <p class="status">{offersReady() ? 'No items found' : ' '}</p>
                     </div>
                   )}
                 >
-                  <ShopList offers={offers()} deskCard={card()}>
-                    <For each={offers()}>
+                  <ShopList offers={split().shop} deskCard={card()}>
+                    <For each={split().shop}>
                       {(offer) => (
                         <ShopListingRow
                           offer={offer}
                           card={card()}
                           mine={mineIds().includes(offer.id)}
                           selected={listingSelected().has(listingSelectId(offer))}
-                          dragOffers={shopDragOffers(offers(), listingSelected(), offer)}
+                          dragOffers={shopDragOffers(split().shop, listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
                           onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
@@ -1218,6 +1289,7 @@ function CardDesk(props) {
                   </ShopList>
                 </Show>
               </section>
+              </div>
             </div>
 
             <Show when={later()}>
@@ -1237,7 +1309,7 @@ function CardDesk(props) {
                       {(hub, index) => (
                         <span>
                           {index() ? ' · ' : ''}
-                          <a href={hub.href}>{hub.name}</a>
+                          <a href={gameHref(hub.href)}>{hub.name}</a>
                         </span>
                       )}
                     </For>

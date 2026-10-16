@@ -18,8 +18,8 @@ a rectangle; Qwen boxes are only SAM prompts and never reach the UI.
 
 The SPA resolves the URL in `market/src/art-figure-mask.js`
 (`FIGURE_MASK_REV` cache-busts, currently `sam21-1`) and consumes it in
-`market/src/components/CardArt.jsx` as the album-cut hover layer. The review
-page is `market/src/pages/ArtworkHover.jsx`.
+`solid/src/components/CardArt.jsx` as the album-cut hover layer. The review
+page is `solid/src/pages/ArtworkHover.jsx`.
 
 ## The artifact problem (2026-09-16)
 
@@ -104,8 +104,8 @@ must survive) and stays a QA `holes` fail on purpose.
 
 ### Where to see before / after
 
-- **Test board**: `/artwork` on the market dev server (`npm run dev` in
-  `market/`, vite on `127.0.0.1:4179`) — "Hole and speck cleanup" section
+- **Test board**: `/artwork` on the Solid dev server (`npm run dev` in
+  `solid/`) — "Hole and speck cleanup" section
   renders each card twice, wearing the raw production mask vs the cleaned
   one, with alpha previews under each pair. `CardArt` takes a `figureMask`
   override prop for this; production cards still resolve

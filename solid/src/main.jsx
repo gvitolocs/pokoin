@@ -6,6 +6,11 @@ import App from './App.jsx';
 import { installYieldingLinks } from './lib/yield-nav.js';
 import { installReactLegacyTripwire } from './lib/react-legacy.js';
 import { installScanOrientation } from '@market/scan-orientation.js';
+import { holdIfDeskPath } from '@market/hero-gate.js';
+
+// A card desk load: its hero scan goes first; thumbnails, prefetches and idle
+// extras wait for it (market/src/hero-gate.js).
+holdIfDeskPath(window.location.pathname);
 
 // Numeric short links (/806390, /marketplace/806390/slug) open the card.
 const shortLink = window.location.pathname.match(/^\/(?:marketplace\/)?(\d+)(?:\/[^/]+)?$/);

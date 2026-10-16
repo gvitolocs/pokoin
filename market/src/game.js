@@ -103,16 +103,83 @@ function hostName() {
   return String(window.location.hostname || '').toLowerCase();
 }
 
+/**
+ * Optional pathname reader. Null uses `window.location.pathname` (React, node
+ * tests, and any page that never opts in). The Solid app sets this to the
+ * router location so `game()` and the helpers below track in-app navigations.
+ */
+let pathSource = null;
+
+/** `fn` returns the current pathname. Pass null (or a non-function) to unset. */
+export function setGamePathSource(fn) {
+  pathSource = typeof fn === 'function' ? fn : null;
+}
+
 function currentPath() {
+  if (pathSource) {
+    try {
+      const fromSource = pathSource();
+      if (fromSource != null) return String(fromSource);
+    } catch (_) {
+      // A reader that throws falls through to the document URL.
+    }
+  }
   if (typeof window === 'undefined' || !window.location) {
     return '';
   }
   return String(window.location.pathname || '');
 }
 
-function gameIdFromPath(pathname = '') {
+export function gameIdFromPath(pathname = '') {
   const slug = String(pathname || '').split('/').filter(Boolean)[0] || '';
   return SLUG_TO_ID[slug] || '';
+}
+
+/**
+ * Path the router matches. A leading known game slug is removed
+ * (`/one-piece/marketplace/x` → `/marketplace/x`); Pokémon and unknown first
+ * segments stay as they are.
+ */
+export function stripGamePrefix(pathname = '') {
+  const raw = String(pathname || '');
+  const parts = raw.split('/');
+  if (!SLUG_TO_ID[parts[1] || '']) return raw;
+  const rest = parts.slice(2);
+  return rest.length ? `/${rest.join('/')}` : '/';
+}
+
+/** True for `/marketplace` and `/<known-slug>/marketplace`, with or without a trailing slash. */
+export function isMarketplaceHomePath(pathname = '') {
+  const path = String(pathname || '').split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+  if (path === '/marketplace') return true;
+  const parts = path.split('/').filter(Boolean);
+  return parts.length === 2 && Boolean(SLUG_TO_ID[parts[0]]) && parts[1] === 'marketplace';
+}
+
+/**
+ * Different game, and the target is not that game's marketplace home.
+ * Those navigations stay a full document load. Same-game links and a
+ * cross-game landing on the marketplace home stay in the app.
+ */
+function gameIds(fromPath, toPath) {
+  const target = String(toPath || '').split(/[?#]/)[0];
+  return {
+    target,
+    fromId: gameIdFromPath(fromPath) || 'pokemon',
+    toId: gameIdFromPath(target) || 'pokemon',
+  };
+}
+
+/** Another game's marketplace home: stay in the app, and do not re-prefix the path. */
+export function isCrossGameHome(fromPath, toPath) {
+  const { target, fromId, toId } = gameIds(fromPath, toPath);
+  return fromId !== toId && isMarketplaceHomePath(target);
+}
+
+export function gameSwitchReloads(fromPath, toPath) {
+  const { target, fromId, toId } = gameIds(fromPath, toPath);
+  if (fromId === toId) return false;
+  return !isMarketplaceHomePath(target);
 }
 
 /** React Router basename. Empty on the Pokemon apex. */
@@ -121,7 +188,7 @@ export function gameBasename(pathname = currentPath()) {
   return SLUG_TO_ID[slug] ? `/${slug}` : '';
 }
 
-/** Full site path for a game's marketplace. Reloads so the basename changes. */
+/** Marketplace home path for a game. Pokémon stays unprefixed. */
 export function gamePublicPath(gameId) {
   const row = GAMES[gameId] || GAMES.pokemon;
   if (!row.slug) return '/marketplace';
@@ -172,6 +239,23 @@ export function publicGamePath(path, gameId) {
   if (queryIndex >= 0) cut = Math.min(cut, queryIndex);
   if (hashIndex >= 0) cut = Math.min(cut, hashIndex);
   return `${apply(raw.slice(0, cut))}${raw.slice(cut)}`;
+}
+
+/** First path segments the router serves per game; account and site pages live on the apex. */
+const GAME_SCOPED_SEGMENTS = new Set(['marketplace', 'product']);
+
+/**
+ * Href for a plain <a> on the current site. Router paths are unprefixed and the
+ * router base only applies to navigate(): a raw `/marketplace/...` href on
+ * /riftbound left the game (the click and a new tab both opened it as a Pokémon
+ * page). Under a game basename, marketplace and product paths get the slug;
+ * everything else (apex pages, other origins, mailto, #hash) is returned as is.
+ */
+export function gameHref(href, base = gameBasename()) {
+  if (!base || typeof href !== 'string' || href[0] !== '/' || href[1] === '/') return href;
+  if (href === base || href.startsWith(`${base}/`)) return href;
+  const segment = href.split(/[/?#]/)[1] || '';
+  return GAME_SCOPED_SEGMENTS.has(segment) ? `${base}${href}` : href;
 }
 
 const SCAN_GAME_KEY = 'pokoin.scanGame';
@@ -231,11 +315,28 @@ export function game(hostname = hostName()) {
   return GAMES[gameIdFromHost(hostname)] || GAMES.pokemon;
 }
 
+/** Path half of `gameSiteHref` (no origin). Seller desks keep the handle. */
+export function gameSitePath(id, pathname = currentPath()) {
+  return `${gamePublicPath(id || 'pokemon')}${sellerDeskRest(pathname)}`;
+}
+
 /** Where the header game picker sends the browser. Seller desks keep the handle. */
 export function gameSiteHref(id, pathname = currentPath()) {
-  const base = gamePublicPath(id || 'pokemon');
-  const seller = sellerDeskRest(pathname);
-  return `https://pokoin.com${base}${seller}`;
+  return `https://pokoin.com${gameSitePath(id, pathname)}`;
+}
+
+/**
+ * Header preview of another game's marketplace home. Same-origin path on
+ * pokoin.com and local dev (the in-app router can claim it); absolute on the
+ * dashboard host and anywhere else.
+ */
+export function gamePreviewHref(id, hostname = hostName()) {
+  const path = gamePublicPath(id);
+  const host = String(hostname || '').toLowerCase();
+  const local = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.localhost');
+  const apex = host === 'pokoin.com' || host === 'www.pokoin.com';
+  if (local || apex) return path;
+  return `https://pokoin.com${path}`;
 }
 
 /** `/en/users/handle…` when the path is a public seller desk; else empty. */
@@ -268,24 +369,48 @@ export function apiGameParam(hostname = hostName()) {
   return id === 'pokemon' ? '' : id;
 }
 
-/** Append ?game= for non-Pokemon marketplace API calls. */
-export function withGameQuery(path, hostname = hostName()) {
-  const apiGame = apiGameParam(hostname);
-  if (!apiGame) {
-    return path;
-  }
+/** Normalized catalog id (`pokemon`, `one_piece`, …), or '' when `value` is blank or unknown. */
+export function knownGameId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw === 'pokemon' || raw === 'poke' || raw === 'default') return 'pokemon';
+  if (GAMES[raw]) return GAMES[raw].id;
+  return SLUG_TO_ID[raw] || '';
+}
+
+const CATALOG_API_PREFIXES = ['/api/marketplace', '/api/cardtrader-redirect', '/api/cardmarket-redirect', '/api/tcgplayer-redirect'];
+
+function isCatalogApiPath(path) {
   const text = String(path || '');
-  if (!text.startsWith('/api/marketplace') && !text.startsWith('/api/cardtrader-redirect') && !text.startsWith('/api/cardmarket-redirect') && !text.startsWith('/api/tcgplayer-redirect')) {
-    return text;
-  }
+  return CATALOG_API_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+function appendApiGame(path, apiGame) {
+  if (!apiGame) return path;
+  const text = String(path || '');
+  if (!isCatalogApiPath(text)) return text;
   const hashIndex = text.indexOf('#');
   const hash = hashIndex >= 0 ? text.slice(hashIndex) : '';
   const withoutHash = hashIndex >= 0 ? text.slice(0, hashIndex) : text;
+  if (/[?&]game=/.test(withoutHash)) return text;
   const join = withoutHash.includes('?') ? '&' : '?';
-  if (/[?&]game=/.test(withoutHash)) {
-    return text;
-  }
   return `${withoutHash}${join}game=${encodeURIComponent(apiGame)}${hash}`;
+}
+
+/** Append ?game= for non-Pokemon marketplace API calls. */
+export function withGameQuery(path, hostname = hostName()) {
+  return appendApiGame(path, apiGameParam(hostname));
+}
+
+/**
+ * Same as `withGameQuery`, but for an explicit catalog id. Pokémon stays
+ * unscoped (no `?game=`), even when the open page is another TCG.
+ */
+export function withGameQueryFor(path, gameId) {
+  const id = knownGameId(gameId);
+  if (!id) return withGameQuery(path);
+  const apiGame = id === 'pokemon' ? '' : (GAMES[id].apiGame || '');
+  return appendApiGame(path, apiGame);
 }
 
 /** Headers for satellite marketplace API calls (defense when query is stripped). */
@@ -298,6 +423,44 @@ export function gameRequestHeaders(hostname = hostName()) {
     'x-pokoin-game': apiGame,
     'x-pokoin-host': String(hostname || hostName() || '').toLowerCase(),
   };
+}
+
+/** `x-pokoin-game` for an explicit catalog. Pokémon sends no game header. */
+export function gameRequestHeadersFor(gameId, hostname = hostName()) {
+  const id = knownGameId(gameId);
+  if (!id) return gameRequestHeaders(hostname);
+  if (id === 'pokemon') return {};
+  return {
+    'x-pokoin-game': GAMES[id].apiGame || id,
+    'x-pokoin-host': String(hostname || hostName() || '').toLowerCase(),
+  };
+}
+
+/**
+ * Catalog game locked by a request URL. A marketplace URL with no `game`
+ * query is the Pokémon key (satellites always carry `?game=`). '' when `url`
+ * is not a catalog route.
+ */
+export function catalogGameFromUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''), 'https://api.pokoin.com');
+    if (!isCatalogApiPath(parsed.pathname)) return '';
+    if (!parsed.searchParams.has('game')) return 'pokemon';
+    return knownGameId(parsed.searchParams.get('game')) || 'pokemon';
+  } catch {
+    return '';
+  }
+}
+
+/** `/card-images/` prefix for a catalog. Empty for Pokémon. Omitted id uses the page. */
+export function catalogImagePrefix(gameId) {
+  if (gameId == null || String(gameId).trim() === '') {
+    const slug = game().slug || '';
+    return slug ? `${slug}/` : '';
+  }
+  const id = knownGameId(gameId);
+  const slug = id ? (GAMES[id].slug || '') : (game().slug || '');
+  return slug ? `${slug}/` : '';
 }
 
 export function gameIconSrc(gameOrId) {

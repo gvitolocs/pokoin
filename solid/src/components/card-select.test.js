@@ -51,9 +51,12 @@ test('the desk scan joins the selection and drags the pile it is part of', () =>
 test('desk and seller shop lists register their offers and read the listing selection', () => {
   assert.match(shop, /registerShop\(shop\)/);
   assert.match(shop, /unregisterShop\(\)/);
-  assert.match(card, /<ShopList offers=\{offers\(\)\} deskCard=\{card\(\)\}>/);
+  // The desk splits its offers into the Vault and the Shop list; both register and drag.
+  for (const list of ['vault', 'shop']) {
+    assert.match(card, new RegExp(`<ShopList offers=\\{split\\(\\)\\.${list}\\} deskCard=\\{card\\(\\)\\}>`));
+    assert.match(card, new RegExp(`dragOffers=\\{shopDragOffers\\(split\\(\\)\\.${list}, listingSelected\\(\\), offer\\)\\}`));
+  }
   assert.match(card, /selected=\{listingSelected\(\)\.has\(listingSelectId\(offer\)\)\}/);
-  assert.match(card, /dragOffers=\{shopDragOffers\(offers\(\), listingSelected\(\), offer\)\}/);
   assert.match(seller, /<ShopList class="seller-shop-list" offers=\{shownOffers\(\)\}>/);
   assert.match(seller, /selected=\{listingSelected\(\)\.has\(listingSelectId\(row\(\)\.enriched\)\)\}/);
 });

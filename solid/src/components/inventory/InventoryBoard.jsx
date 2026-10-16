@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
-import { fetchPriceCheck } from '@market/api.js';
+import { fetchPriceCheck, imageSrc } from '@market/api.js';
 import {
   filterInventoryRows,
   groupInventoryStacks,
@@ -12,8 +12,9 @@ import {
   sortInventoryRows,
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
-import { inventoryMarketLabel, inventoryMarketValue } from '@market/inventory-price.js';
+import { inventoryMarketLabel, inventoryMarketValue, priceCheckItem } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
+import ScanImage from '../ScanImage.jsx';
 import { getBearer } from '../../stores/auth.js';
 import RowThumb from './RowThumb.jsx';
 
@@ -40,14 +41,31 @@ const SORT_LABELS = {
   name: 'Name A → Z',
 };
 
-const VIEWS = [['table', 'Table'], ['stacks', 'Stacks'], ['titles', 'Titles']];
+const BOARD_MODES = [['table', 'Table'], ['stacks', 'Stacks'], ['titles', 'Titles'], ['grid', 'Grid']];
 
-function readView() {
+/** One mode from the two older keys. Grid only applied when the table view was on. */
+function readBoardMode() {
+  let view = 'table';
+  let layout = 'list';
   try {
-    return localStorage.getItem('pokoin.invView') || 'table';
-  } catch (_) {
-    return 'table';
-  }
+    const stored = localStorage.getItem('pokoin.invView');
+    if (stored === 'stacks' || stored === 'titles' || stored === 'table' || stored === 'grid') view = stored;
+    if (localStorage.getItem('pokoin.invLayout') === 'grid') layout = 'grid';
+  } catch (_) { /* private mode */ }
+  if (view === 'grid' || (layout === 'grid' && view === 'table')) return 'grid';
+  return view;
+}
+
+function writeBoardMode(next) {
+  try {
+    if (next === 'grid') {
+      localStorage.setItem('pokoin.invLayout', 'grid');
+      localStorage.setItem('pokoin.invView', 'table');
+    } else {
+      localStorage.setItem('pokoin.invLayout', 'list');
+      localStorage.setItem('pokoin.invView', next);
+    }
+  } catch (_) { /* private mode */ }
 }
 
 const qty = (row) => Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
@@ -97,6 +115,28 @@ function CondChip(props) {
  * Storage-box link inside a table row anchor. Its own component, so the
  * nested anchor is inserted into the row after parsing, as React did.
  */
+function ListingTile(props) {
+  const row = () => props.row;
+  const setName = () => String(row()?.setName || row()?.set_name || '').trim();
+  const collector = () => String(row()?.collectorNumber || row()?.collector_number || '').trim();
+  const src = () => imageSrc({
+    id: row()?.cardId || row()?.card_id,
+    imageUrl: row()?.cardImageUrl || row()?.card_image_url || '',
+    heroImageUrl: row()?.cardImageUrl || row()?.card_image_url || '',
+  }, 'hero');
+  return (
+    <a class="collection-tile" href={inventoryListingHref(row())} draggable="false">
+      <ScanImage class="collection-tile-art" letterClass="collection-tile-art scan-letter" src={src()} label={row()?.cardName || row()?.name || 'Listing'} alt={row()?.cardName || 'Listing'} />
+      <span class="collection-tile-body">
+        <strong class="thread-title">{row()?.cardName || row()?.name || 'Listing'}</strong>
+        <span class="thread-meta">{[setName(), collector() ? `#${collector()}` : ''].filter(Boolean).join(' · ')}</span>
+        <span class="collection-tile-price">{props.formatPrice(row()?.pricePkn ?? row()?.price_pkn)}</span>
+        <RowStatus status={row()?.status} />
+      </span>
+    </a>
+  );
+}
+
 function LocLink(props) {
   const box = () => listingBox(props.loc) || props.loc;
   return (
@@ -117,7 +157,11 @@ export default function InventoryBoard(props) {
   const [condition, setCondition] = createSignal('');
   const [language, setLanguage] = createSignal('');
   const [sort, setSort] = createSignal('price-down');
-  const [viewMode, setViewMode] = createSignal(readView());
+  const [mode, setMode] = createSignal(readBoardMode());
+  function chooseMode(next) {
+    setMode(next);
+    writeBoardMode(next);
+  }
   // React useState(defaultSource): the first value only.
   const [pricerSource, setPricerSource] = createSignal(props.defaultSource || '');
   const pricerOn = () => Boolean(pricerSource()) || Boolean(props.autoMarketColumn);
@@ -142,11 +186,7 @@ export default function InventoryBoard(props) {
         pricesKey = '';
         return undefined;
       }
-      const items = input.rows.slice(0, 100).map((row) => ({
-        cardId: String(row?.cardId || row?.card_id || ''),
-        condition: String(row?.condition || 'NM').toUpperCase(),
-        language: String(row?.language || '').toUpperCase(),
-      })).filter((item) => /^\d+$/.test(item.cardId));
+      const items = input.rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
       if (!items.length) return undefined;
       const key = `${input.source}|${items.map((item) => item.cardId).join(',')}`;
       if (pricesKey === key) return undefined;
@@ -174,12 +214,21 @@ export default function InventoryBoard(props) {
 
   return (
     <section class="inv-board" aria-label="My listings">
-      <div class="inv-summary">
-        <StatTile value={summary().listings.toLocaleString('en-US')} label="Live listings" />
-        <StatTile value={summary().cards.toLocaleString('en-US')} label="Cards in stock" />
-        <StatTile value={props.formatPrice(summary().listedPkn)} label="Total asking" tone="gold" />
-        <StatTile value={pausedCount().toLocaleString('en-US')} label="Paused" />
+      <div class="mypokoin-panel-head">
+        <div>
+          <h2>Live listings</h2>
+          <p class="mypokoin-help">Search the book, then open a card to edit the ask.</p>
+        </div>
+        <a class="btn" href="/inventory/scan">Scan cards</a>
       </div>
+      <Show when={props.showSummary !== false}>
+        <div class="inv-summary">
+          <StatTile value={summary().listings.toLocaleString('en-US')} label="Live listings" />
+          <StatTile value={summary().cards.toLocaleString('en-US')} label="Cards in stock" />
+          <StatTile value={props.formatPrice(summary().listedPkn)} label="Total asking" tone="gold" />
+          <StatTile value={pausedCount().toLocaleString('en-US')} label="Paused" />
+        </div>
+      </Show>
 
       <div class="inv-rail">
         <input
@@ -190,6 +239,15 @@ export default function InventoryBoard(props) {
           onInput={(event) => setQuery(event.target.value)}
           aria-label="Search listings"
         />
+        <div class="inv-layout" role="group" aria-label="Listing view">
+          <For each={BOARD_MODES}>
+            {([id, label]) => (
+              <button type="button" class={{ on: mode() === id }} aria-pressed={mode() === id} onClick={() => chooseMode(id)}>
+                {label}
+              </button>
+            )}
+          </For>
+        </div>
         <div class="inv-chips" role="group" aria-label="Status filter">
           <For each={STATUS_CHIPS}>
             {(chip) => (
@@ -232,25 +290,8 @@ export default function InventoryBoard(props) {
         </span>
       </div>
 
-      <div class="inv-views" role="group" aria-label="View">
-        <For each={VIEWS}>
-          {([id, label]) => (
-            <button
-              type="button"
-              class={['inv-chip', { on: viewMode() === id }]}
-              onClick={() => {
-                setViewMode(id);
-                try { localStorage.setItem('pokoin.invView', id); } catch (_) { /* private mode */ }
-              }}
-            >
-              {label}
-            </button>
-          )}
-        </For>
-      </div>
-
       <Switch>
-        <Match when={viewMode() === 'stacks'}>
+        <Match when={mode() === 'stacks'}>
           <div class="loc-list">
             <For each={groupInventoryStacks(view())}>
               {(stack) => (
@@ -294,7 +335,7 @@ export default function InventoryBoard(props) {
             </For>
           </div>
         </Match>
-        <Match when={viewMode() === 'titles'}>
+        <Match when={mode() === 'titles'}>
           <div class="loc-list">
             <For each={groupInventoryTitles(view())}>
               {(group) => (
@@ -346,6 +387,13 @@ export default function InventoryBoard(props) {
               )}
             </For>
           </div>
+        </Match>
+        <Match when={mode() === 'grid'}>
+          <Show when={view().length} fallback={<p class="inv-empty">No listings match the current filters.</p>}>
+            <div class="collection-tile-grid inv-grid">
+              <For each={view()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} />}</For>
+            </div>
+          </Show>
         </Match>
         <Match when={true}>
           <div class={['inv-table', { 'has-mkt': pricerOn() }]}>

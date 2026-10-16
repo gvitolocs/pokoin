@@ -15,10 +15,11 @@ const CARD = new RegExp(`^/marketplace/${LANG}/cards/([^/]+)(?:/([^/]+))?/?$`);
 const VERSIONS = new RegExp(`^/marketplace/${LANG}/cards/([^/]+)(?:/([^/]+))?/versions/?$`);
 const SET = /^\/marketplace\/sets\/([^/]+)\/?$/;
 const ARTIST = new RegExp(`^/marketplace/${LANG}/artists/([^/]+)/?$`);
+const SELLER = new RegExp(`^/marketplace/${LANG}/users/([^/]+)/?$`);
 
 /**
  * The data behind a link path: `{ kind, key, ... }` for a card desk, version
- * page, set page or artist page, else null. `base` is the game basename;
+ * page, set page, artist page or seller shop, else null. `base` is the game basename;
  * `cardId` maps a URL card id to the public id (provisional stamps).
  */
 export function linkTarget(pathname, { base = '', cardId = (id) => id } = {}) {
@@ -34,6 +35,8 @@ export function linkTarget(pathname, { base = '', cardId = (id) => id } = {}) {
   if (m) return { kind: 'set', key: `set:${m[1]}`, slug: decodeURIComponent(m[1]) };
   m = path.match(ARTIST);
   if (m) return { kind: 'artist', key: `artist:${m[2]}`, slug: decodeURIComponent(m[2]) };
+  m = path.match(SELLER);
+  if (m) return { kind: 'seller', key: `seller:${m[2].toLowerCase()}`, handle: decodeURIComponent(m[2]) };
   return null;
 }
 

@@ -12,6 +12,11 @@
 //!
 //! A missing snapshot answers 404 `{"missing":true}` and the SPA falls back to
 //! the live routes, so a new set is never blank.
+//!
+//! `kind=seller` (key: the lowercase shop handle) is a stored seller book
+//! (`marketplace_seller_books`, commerce `seller_book.rs`): a whole shop in
+//! c1v2, served as stored, with the brotli-11 copy `--kind=seller` builds on
+//! nezopt. The page checks `marketplace-seller-shop?fresh=1` after painting.
 
 use std::sync::{Arc, LazyLock};
 
@@ -29,7 +34,7 @@ use tokio::{sync::Semaphore, task::JoinSet};
 use tower::ServiceExt;
 
 use crate::{catalog_api, related, AppState};
-use pokoin_api_common::compact;
+use pokoin_api_common::{compact, stages};
 use pokoin_catalog_api::shared::page_snapshot;
 use pokoin_shared_dictionary::SharedDictionary;
 
@@ -42,36 +47,12 @@ static DICTIONARY: LazyLock<SharedDictionary> =
 /// a new dictionary reaches them without a new URL.
 const DICTIONARY_CACHE: &str = "public, max-age=86400";
 
-const DDL: &str = "
-create table if not exists public.marketplace_list_snapshots (
-  kind text not null,
-  key text not null,
-  body text not null,
-  c1 bytea not null,
-  card_count integer not null default 0,
-  version text not null,
-  built_at timestamptz not null default now(),
-  primary key (kind, key)
-);
--- c1 format 2 (template columns) and brotli-11 copies served as-is.
-alter table public.marketplace_list_snapshots add column if not exists c1v2 bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_json bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_c1 bytea;
-alter table public.marketplace_list_snapshots add column if not exists br_c1v2 bytea;
--- RFC 9842 dcb of c1v2 against the shared dictionary `dcb_dict` (its id).
-alter table public.marketplace_list_snapshots add column if not exists dcb_c1v2 bytea;
-alter table public.marketplace_list_snapshots add column if not exists dcb_dict text;
-create table if not exists public.marketplace_card_daily_median (
-  card_id bigint primary key,
-  last_day date,
-  last_median_pkn numeric not null,
-  refreshed_at timestamptz not null default now()
-);
-";
-
-const KINDS: [&str; 3] = ["set", "artist", "name"];
+const KINDS: [&str; 4] = ["set", "artist", "name", "seller"];
 /// Static between builds; the builder runs every 15 min (sets) / hourly (artists).
 const LIST_CACHE: &str = "public, max-age=120, s-maxage=900, stale-while-revalidate=86400";
+/// A shop moves with every sale: rebuilt within minutes of a change, and the
+/// page checks the live stamp after painting, so the edge keeps a minute.
+const SELLER_CACHE: &str = "public, max-age=30, s-maxage=60, stale-while-revalidate=86400";
 /// A `dcb` body is never stored by a shared cache: Cloudflare's dictionary
 /// passthrough does not key its cache on `Available-Dictionary` (tested
 /// 2026-10-10: one cached `dcb` body was replayed to `br`, gzip and identity
@@ -94,12 +75,15 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     let q = pokoin_api_common::http::Query::from_uri(&uri);
     let kind = q.first("kind").unwrap_or("").trim().to_ascii_lowercase();
     if !KINDS.contains(&kind.as_str()) {
-        return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "kind must be set or artist."}), "no-store");
+        return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "kind must be set, artist, name or seller."}), "no-store");
     }
     let Some(key) = clean_key(q.first("key")) else {
         return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "key is required."}), "no-store");
     };
     let game = crate::suggest::game_from(&headers, q.first("game"));
+    if kind == "seller" {
+        return seller_list(&state, &headers, &uri, &key, &game).await;
+    }
     let Some(pool) = catalog_api::game_pool(&state, &game).await else {
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
     };
@@ -113,16 +97,20 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| dictionary.matches(value));
     type Row = (String, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<String>, String);
-    let row = sqlx::query_as::<_, Row>(
-        "select body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, version
-         from public.marketplace_list_snapshots where kind = $1 and key = $2",
+    let row = stages::timed(
+        stages::SQL,
+        sqlx::query_as::<_, Row>(
+            "select body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, version
+             from public.marketplace_list_snapshots where kind = $1 and key = $2",
+        )
+        .bind(&kind)
+        .bind(&key)
+        .fetch_optional(&pool),
     )
-    .bind(&kind)
-    .bind(&key)
-    .fetch_optional(&pool)
     .await;
     match row {
         Ok(Some((body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, version))) => {
+            stages::source("snapshot");
             // c1v2 only for clients that read template columns; a snapshot
             // built before format 2 falls back to c1.
             let has_v2 = c1v2.is_some();
@@ -145,7 +133,7 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
             let tag = format!("\"{version}-{format}{}\"", coding.map(|c| format!("-{c}")).unwrap_or_default());
             // application/json, not the c1 media type: Cloudflare only
             // brotli-compresses known types. The payload marks itself c1.
-            let cache = if coding == Some("dcb") { LIST_CACHE_DCB } else { LIST_CACHE };
+            let cache = list_cache(&kind, coding);
             let mut response = crate::suggest::cors(StatusCode::OK, Some(cache.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
             let h = response.headers_mut();
             h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding, Available-Dictionary"));
@@ -173,6 +161,73 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
         Ok(None) => missing(),
         // A game database the builder has not reached yet has no table.
         Err(error) if error.to_string().contains("marketplace_list_snapshots") => missing(),
+        Err(error) => catalog_api::failure(&error),
+    }
+}
+
+fn list_cache(kind: &str, coding: Option<&str>) -> &'static str {
+    match (coding, kind) {
+        (Some("dcb"), _) => LIST_CACHE_DCB,
+        (_, "seller") => SELLER_CACHE,
+        _ => LIST_CACHE,
+    }
+}
+
+/// A seller book older than this is not served: the builder refreshes every
+/// book daily, so an older one means it stopped, and the page falls back to
+/// `marketplace-seller-shop?book=1` (which rebuilds behind the request).
+const SELLER_MAX_AGE: &str = "2 days";
+
+/// `kind=seller&key=<handle>`: the stored seller book as stored, c1v2 only
+/// (the form every stored book has), brotli 11 when the builder has made it.
+/// One primary-key read: no profile lookup, no stamp query, no encoding.
+async fn seller_list(state: &AppState, headers: &HeaderMap, uri: &Uri, key: &str, game: &str) -> Response {
+    if !catalog_api::wanted(headers, uri).templates() {
+        return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "kind=seller is served as format=c1v2."}), "no-store");
+    }
+    // Seller books of every game live in the Pokémon marketplace database.
+    let Some(pool) = catalog_api::game_pool(state, "pokemon").await else {
+        return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
+    };
+    let row = stages::timed(
+        stages::SQL,
+        sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>, Option<String>)>(&format!(
+            "select body, br, version from public.marketplace_seller_books
+              where game = $1 and username = $2 and built_at > now() - interval '{SELLER_MAX_AGE}'
+              order by built_at desc limit 1"
+        ))
+        .bind(game)
+        .bind(key)
+        .fetch_optional(&pool),
+    )
+    .await;
+    match row {
+        Ok(Some((body, br, version))) => {
+            stages::source("snapshot");
+            let (bytes, coding) = match br {
+                Some(br) if accepts_coding(headers, "br") => (br, Some("br")),
+                _ => (body, None),
+            };
+            let mut response = crate::suggest::cors(StatusCode::OK, Some(SELLER_CACHE.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
+            let h = response.headers_mut();
+            h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding"));
+            h.insert("x-pokoin-format", HeaderValue::from_static("c1v2"));
+            h.insert(axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("x-pokoin-format"));
+            if let Some(coding) = coding {
+                h.insert(axum::http::header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+            }
+            // A book stored before migration 119 has no version: the
+            // conditional layer hashes the body instead.
+            if let Some(tag) = version.map(|v| format!("\"{v}-c1v2{}\"", coding.map(|c| format!("-{c}")).unwrap_or_default())) {
+                if let Ok(v) = HeaderValue::from_str(&tag) {
+                    h.insert(axum::http::header::ETAG, v);
+                }
+            }
+            response
+        }
+        Ok(None) => missing(),
+        // No table (116) or columns (119) yet on this database: not built.
+        Err(error) if error.as_database_error().and_then(|e| e.code()).is_some_and(|c| c == "42P01" || c == "42703") => missing(),
         Err(error) => catalog_api::failure(&error),
     }
 }
@@ -240,6 +295,8 @@ struct Options {
     key: Option<String>,
     /// Compute, but store nothing (timing a build against a read-only database).
     dry_run: bool,
+    /// Rebuild seller books that are current.
+    force: bool,
 }
 
 fn options(args: &[String]) -> Options {
@@ -253,10 +310,12 @@ fn options(args: &[String]) -> Options {
             o.key = clean_key(Some(v));
         } else if arg == "--dry-run" {
             o.dry_run = true;
+        } else if arg == "--force" {
+            o.force = true;
         }
     }
     if o.kinds.is_empty() {
-        o.kinds = vec!["median".into(), "set".into(), "artist".into(), "name".into(), "version".into(), "related".into()];
+        o.kinds = vec!["median".into(), "set".into(), "artist".into(), "name".into(), "version".into(), "related".into(), "seller".into()];
     }
     o
 }
@@ -292,7 +351,7 @@ fn enc(s: &str) -> &str {
     s
 }
 
-/// `pokoin-api job build-lists [--kind=median,set,artist,name,version,related,related-delta] [--game=pokemon,magic] [--key=slug] [--dry-run]`
+/// `pokoin-api job build-lists [--kind=median,set,artist,name,version,related,related-delta,seller] [--game=pokemon,magic] [--key=slug] [--dry-run] [--force]`
 pub async fn build(app: Router, state: AppState, args: &[String]) -> anyhow::Result<()> {
     let o = options(args);
     let games = if o.games.is_empty() { configured_games() } else { o.games.clone() };
@@ -304,8 +363,8 @@ pub async fn build(app: Router, state: AppState, args: &[String]) -> anyhow::Res
         // Close this game's pool before the next game: every game database
         // lives on the one writer, shared with the API pods (max_connections).
         if game != "pokemon" {
-            if let Some(pool) = state.game_dbs.write().await.remove(game.as_str()) {
-                pool.close().await;
+            if let Some(url) = crate::catalog_api::game_db_url(game) {
+                pokoin_db::close_satellite(&url).await;
             }
         }
     }
@@ -318,9 +377,11 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             tracing::warn!(%game, "build-lists: no database");
             return Ok(());
         };
-        if !o.dry_run {
-            sqlx::raw_sql(DDL).execute(&pool).await?;
-            sqlx::raw_sql(page_snapshot::DDL).execute(&pool).await?;
+        // Every write below goes through this pool, so the job's URLs must be the
+        // writer (k3s CronJobs, role pokoin_jobs), never the Pi standby. Tables:
+        // migrations 112, 114 and 121 on every game database; no DDL here.
+        if !o.dry_run && sqlx::query_scalar::<_, bool>("select pg_is_in_recovery()").fetch_one(&pool).await? {
+            anyhow::bail!("build-lists writes: the {game} database URL is a read-only standby, not the writer");
         }
         if o.kinds.iter().any(|k| k == "median") && game == "pokemon" {
             let n = build_medians(&pool).await?;
@@ -339,13 +400,30 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             let n = build_names(app, &pool, game).await?;
             tracing::info!(%game, names = n, "build-lists names");
         }
-        if o.kinds.iter().any(|k| k == "artist") && game == "pokemon" {
+        // Artist snapshots follow the route: a game without an artist catalog
+        // answers an empty index, so there is nothing to store for it.
+        if o.kinds.iter().any(|k| k == "artist") && pokoin_catalog_api::reads::artist_cards::has_artist_catalog(game) {
             let n = build_artists(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, artists = n, "build-lists artists");
         }
         if o.kinds.iter().any(|k| k == "version") && game == "pokemon" {
             let n = build_versions(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, versions = n, "build-lists versions");
+        }
+        if o.kinds.iter().any(|k| k == "seller") {
+            let Some(commerce) = state.commerce.read().await.clone() else {
+                anyhow::bail!("seller books need the commerce domain (MARKETPLACE_DATABASE_URL)");
+            };
+            let started = std::time::Instant::now();
+            use pokoin_commerce::handlers::seller_book;
+            let directory = seller_book::FirestoreDirectory(&commerce);
+            let built = seller_book::build_all(&commerce, &directory, game, brotli11, o.key.as_deref(), o.force, o.dry_run)
+                .await
+                .map_err(|error| anyhow::anyhow!(error.message))?;
+            tracing::info!(
+                %game, sellers = built.sellers, built = built.built, skipped = built.skipped, failed = built.failed,
+                removed = built.removed, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists sellers"
+            );
         }
         for (kind, delta) in [("related", false), ("related-delta", true)] {
             if o.kinds.iter().any(|k| k == kind) && game == "pokemon" {
@@ -958,8 +1036,9 @@ mod tests {
     #[test]
     fn options_default_to_every_kind() {
         let o = options(&["--game=magic".into(), "--key=Alpha".into()]);
-        assert_eq!(o.kinds, vec!["median", "set", "artist", "name", "version", "related"]);
+        assert_eq!(o.kinds, vec!["median", "set", "artist", "name", "version", "related", "seller"]);
         assert!(!o.dry_run && options(&["--dry-run".into()]).dry_run);
+        assert!(!o.force && options(&["--kind=seller".into(), "--force".into()]).force);
         assert_eq!(o.games, vec!["magic"]);
         assert_eq!(o.key.as_deref(), Some("alpha"));
     }
@@ -990,6 +1069,16 @@ mod tests {
     }
 
     #[test]
+    fn seller_lists_are_kept_a_minute_at_the_edge() {
+        assert!(KINDS.contains(&"seller"));
+        assert_eq!(list_cache("seller", Some("br")), SELLER_CACHE);
+        assert_eq!(list_cache("seller", None), SELLER_CACHE);
+        assert!(SELLER_CACHE.starts_with("public,") && SELLER_CACHE.contains("s-maxage=60") && SELLER_CACHE.contains("stale-while-revalidate=86400"));
+        assert_eq!(list_cache("set", Some("br")), LIST_CACHE);
+        assert_eq!(list_cache("set", Some("dcb")), LIST_CACHE_DCB);
+    }
+
+    #[test]
     fn median_fills_only_missing_prices() {
         assert!(tile_price_missing(&json!({"id": "1"})));
         assert!(tile_price_missing(&json!({"id": "1", "price": 0})));
@@ -1016,5 +1105,104 @@ mod dcb_tests {
         assert_eq!(DICTIONARY.decompress(&dcb).expect("decode"), c1v2);
         assert!(dcb.len() < brotli11(&c1v2).len() + 36);
         assert_eq!(DICTIONARY.id(), "d30efab9dda40a4b");
+    }
+}
+
+/// `kind=seller` against a throwaway database (its own, created and dropped):
+/// `POKOIN_TEST_DATABASE_URL=postgres://… cargo test -p pokoin-api seller_route`
+/// with a role that may create databases.
+#[cfg(test)]
+mod seller_route {
+    use super::*;
+    use axum::routing::get;
+
+    async fn scratch_database() -> Option<(PgPool, PgPool, String)> {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return None;
+        };
+        let admin = PgPool::connect(&url).await.expect("connect POKOIN_TEST_DATABASE_URL");
+        let name = format!("pokoin_seller_route_{}", std::process::id());
+        sqlx::query(&format!("drop database if exists {name}")).execute(&admin).await.unwrap();
+        sqlx::query(&format!("create database {name}")).execute(&admin).await.unwrap();
+        let (base, _) = url.rsplit_once('/').expect("database url");
+        let pool = PgPool::connect(&format!("{base}/{name}")).await.unwrap();
+        Some((admin, pool, name))
+    }
+
+    #[tokio::test]
+    async fn seller_route_serves_the_stored_book_public_compressed_and_validated() {
+        let Some((admin, pool, name)) = scratch_database().await else { return };
+        sqlx::raw_sql(include_str!("../../../../scripts/sql/116_marketplace_seller_books.sql")).execute(&pool).await.unwrap();
+        sqlx::raw_sql(include_str!("../../../../scripts/sql/119_seller_book_snapshots.sql")).execute(&pool).await.unwrap();
+        let doc = json!({"book": true, "maxUpdatedAt": "2026-10-14T10:00:00.000Z", "seller": {"username": "alice"},
+            "listings": (0..50).map(|i| json!({"id": format!("l{i}"), "cardName": "Pikachu", "pricePkn": 4.5, "quantityAvailable": 2})).collect::<Vec<_>>()});
+        let body = compact::encode::encode_to_vec_with(&doc, compact::encode::EncodeOptions { templates: true });
+        let br = brotli11(&body);
+        let insert = "insert into public.marketplace_seller_books (seller_uid, game, stamp, profile, seller, body, listings, username, version, br, built_at)
+                      values ($1, 'pokemon', 's', 'p', '{}', $2, 50, $3, $4, $5, now() - make_interval(days => $6))";
+        for (uid, username, version, br, days) in [("u1", "alice", Some("v1"), Some(br.clone()), 0), ("u2", "old", Some("v2"), None, 3), ("u3", "bare", None, None, 0)] {
+            sqlx::query(insert).bind(uid).bind(&body).bind(username).bind(version).bind(br).bind(days).execute(&pool).await.unwrap();
+        }
+
+        let state = crate::new_state(pokoin_config::Config::from_env(), std::time::Instant::now()).unwrap();
+        *state.db.write().await = Some(pool.clone());
+        let app = Router::new()
+            .route("/api/marketplace-list", get(list))
+            .with_state(state)
+            .layer(axum::middleware::from_fn(crate::http_cache::conditional));
+        let call = |path: &str, headers: &[(&str, &str)]| {
+            let mut req = Request::builder().uri(path.to_owned());
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            stages::scope(app.clone().oneshot(req.body(Body::empty()).unwrap()))
+        };
+        const ALICE: &str = "/api/marketplace-list?kind=seller&key=Alice&format=c1v2";
+
+        // One key read, brotli 11 as stored, the book's version as ETag.
+        let (response, timing) = call(ALICE, &[("accept-encoding", "gzip, br")]).await;
+        let response = response.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let h = response.headers().clone();
+        assert_eq!(h["content-encoding"], "br");
+        assert_eq!(h["x-pokoin-format"], "c1v2");
+        assert_eq!(h["cache-control"], SELLER_CACHE);
+        assert_eq!(h["etag"], "\"v1-c1v2-br\"");
+        assert!(timing.contains("sql;dur=") && timing.contains("src;desc=\"snapshot\""), "{timing}");
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 24).await.unwrap();
+        let mut plain = Vec::new();
+        brotli::BrotliDecompress(&mut &bytes[..], &mut plain).unwrap();
+        assert_eq!(compact::decode::decode(&serde_json::from_slice(&plain).unwrap()).unwrap(), doc);
+
+        // The browser revalidates: 304, no body.
+        let (again, _) = call(ALICE, &[("accept-encoding", "br"), ("if-none-match", "\"v1-c1v2-br\"")]).await;
+        assert_eq!(again.unwrap().status(), StatusCode::NOT_MODIFIED);
+
+        // No brotli in the request: the stored bytes, another ETag.
+        let (identity, _) = call(ALICE, &[]).await;
+        let identity = identity.unwrap();
+        assert!(identity.headers().get("content-encoding").is_none());
+        assert_eq!(identity.headers()["etag"], "\"v1-c1v2\"");
+        assert_eq!(axum::body::to_bytes(identity.into_body(), 1 << 24).await.unwrap(), body);
+
+        // A book stored before 119 has no version: the body hash validates it.
+        let (bare, _) = call("/api/marketplace-list?kind=seller&key=bare&format=c1v2", &[]).await;
+        let bare = bare.unwrap();
+        assert_eq!(bare.status(), StatusCode::OK);
+        assert_eq!(bare.headers()["etag"].to_str().unwrap(), crate::http_cache::etag_of(&body));
+
+        // Missing, stale (the builder stopped) and non-c1v2 asks.
+        for (path, status) in [
+            ("/api/marketplace-list?kind=seller&key=nobody&format=c1v2", StatusCode::NOT_FOUND),
+            ("/api/marketplace-list?kind=seller&key=old&format=c1v2", StatusCode::NOT_FOUND),
+            ("/api/marketplace-list?kind=seller&key=alice", StatusCode::BAD_REQUEST),
+        ] {
+            let (response, _) = call(path, &[]).await;
+            assert_eq!(response.unwrap().status(), status, "{path}");
+        }
+
+        pool.close().await;
+        sqlx::query(&format!("drop database if exists {name}")).execute(&admin).await.unwrap();
     }
 }

@@ -7,7 +7,6 @@ import {
   reportMarketplaceProblem,
   revealMarketplaceShipping,
 } from '@market/api.js';
-import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '@market/buyer-protection.js';
 import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '@market/google-reviews.js';
 import {
   ORDER_CLOCK_MS,
@@ -27,8 +26,9 @@ import {
   orderStatus,
   visibleOrders,
 } from '@market/order-status.js';
-import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import RequireSignIn from '../components/RequireSignIn.jsx';
+import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { authUser, getBearer } from '../stores/auth.js';
 import { settleCheckout } from '../stores/cart-actions.js';
@@ -139,14 +139,21 @@ function OrdersDesk(props) {
   }
 
   return (
-    <div class="page desk">
-      <PageHead kicker="Account" title="Orders" lede={`${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}>
+    <div class="page desk mypokoin">
+      <StockNav
+        title="Orders"
+        lede="Purchases and sales, with escrow still in progress."
+        metrics={bought() != null || sold() != null ? [
+          { value: (bought() || []).length, label: 'Purchases' },
+          { value: (sold() || []).length, label: 'Sales' },
+          { value: allRows().length, label: 'Orders' },
+        ] : []}
+      >
         <a class="btn ghost" href="/protection">Buyer protection</a>
         <a class="btn ghost" href="/bought">Buy history</a>
         <a class="btn ghost" href="/sales">Sold history</a>
         <a class="btn ghost" href="/cart">Cart</a>
-      </PageHead>
-      <StockNav />
+      </StockNav>
       <Alert>{error()}</Alert>
       <Show when={props.notice}><p class="desk-ok">{props.notice}</p></Show>
       <Show when={bought() == null && sold() == null && !error()}>
@@ -189,12 +196,26 @@ function OrdersDesk(props) {
                 const sellerNeedsShip = () => flags().seller && (flags().escrow || (flags().eur && flags().paid)) && !flags().shipped;
                 return (
                   <article class={['thread order-row', { 'is-focus': props.focusOrder === row.id }]}>
+                    <Show when={row.items?.[0]}>
+                      {(item) => (
+                        <RowThumb row={{
+                          cardId: item().cardId || item().card?.id,
+                          cardName: item().cardName || item().card?.name,
+                          cardImageUrl: item().imageUrl || item().card?.imageUrl || '',
+                        }} />
+                      )}
+                    </Show>
                     <span class="thread-main">
                       <strong class="thread-title">
                         {orderItemsTitle(row)}
                         {' '}
                         <span class={`pill order-pill is-${status().tone}`}>{status().label}</span>
                       </strong>
+                      <Show when={row.items?.[0]?.setName || row.items?.[0]?.collectorNumber}>
+                        <span class="thread-meta">
+                          {[row.items[0].setName, row.items[0].collectorNumber ? `#${row.items[0].collectorNumber}` : ''].filter(Boolean).join(' · ')}
+                        </span>
+                      </Show>
                       <span class="thread-meta">
                         {flags().buyer ? 'Bought' : 'Sold'}
                         {step() ? ` · ${step()}` : ''}

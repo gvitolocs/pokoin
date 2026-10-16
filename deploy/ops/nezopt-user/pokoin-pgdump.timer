@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly pg_dump of the Pi standby
+# 03:30 UTC: the quietest hour for the Pi API. The CardTrader nightly writes then, so
+# replay can cancel a long dump on the standby; the dump retries each database 3 times.
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+Unit=pokoin-pgdump.service
+
+[Install]
+WantedBy=timers.target

@@ -131,12 +131,18 @@ pub async fn sync_status(State(state): State<DomainState>, headers: HeaderMap) -
     Ok(json_response(200, sync_status_payload(status, &progress)))
 }
 
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> ApiResult<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| ApiError::new(500, "Power Tools CSV processing failed."))
+}
+
 fn sync_status_payload(status: Value, progress: &Value) -> Value {
     let running = progress["running"] == true;
     let phase = progress["phase"].clone();
     let processed = progress["processed"].clone();
     let total = progress["total"].clone();
-    let sync = match progress.get("row").filter(|row| row.is_object()) {
+    let mut sync = match progress.get("row").filter(|row| row.is_object()) {
         Some(row) => json!({
             "lastSyncAt": row["last_sync_at"],
             "lastSyncOk": row["last_sync_ok"],
@@ -158,6 +164,20 @@ fn sync_status_payload(status: Value, progress: &Value) -> Value {
             "summary": progress["summary"],
         }),
     };
+    // A job that failed on this instance, or a stored run nobody finished, is
+    // a failed sync even when its end could not be written.
+    let failure = progress["lastError"].as_str().map(str::to_string).or_else(|| {
+        (progress["stale"] == true).then(|| "The last CardTrader sync stopped before it finished.".to_string())
+    });
+    if let Some(message) = failure.filter(|_| !running) {
+        sync["lastSyncOk"] = json!(false);
+        sync["lastSyncError"] = json!(message);
+        sync["phase"] = json!("failed");
+        if sync["summary"].is_object() {
+            sync["summary"]["running"] = json!(false);
+            sync["summary"]["phase"] = json!("failed");
+        }
+    }
     json!({
         "ok": true,
         "status": status,
@@ -222,8 +242,23 @@ pub async fn sync_start(
         ));
     }
 
-    let import = link::parse_power_tools_body(&payload)?;
-    if payload["previewPowerTools"] == true {
+    // CSV parsing (up to the 10 MB body) is synchronous CPU work: keep it off
+    // the API's few async workers.
+    let preview_power_tools = payload["previewPowerTools"] == true;
+    let (payload, game_detection) = crate::powertools_games::resolve_body(&state.db, payload).await?;
+    // Unknown IDs must be reviewed instead of silently dropping locations on import.
+    let recognized_only = payload["powerToolsRecognizedOnly"] == true;
+    if !preview_power_tools
+        && game_detection["unresolvedCount"].as_u64().unwrap_or(0) > 0
+        && !recognized_only
+    {
+        return Err(ApiError::bad_request(
+            "Some rows have no unique catalog game. Review them in the preview, upload per-game CSVs for the rest, or import recognized rows only.",
+        )
+        .with_code("powertools_game_unresolved"));
+    }
+    let import = blocking(move || link::parse_power_tools_body(&payload)).await??;
+    if preview_power_tools {
         let Some(import) = import else {
             return Ok(json_response(
                 400,
@@ -232,6 +267,7 @@ pub async fn sync_start(
                     "error": "Upload at least one Power Tools CSV.",
                     "samples": [], "overflows": [], "occupancy": [],
                     "suggestedStackSize": 1, "locationDetection": Value::Null,
+                    "gameDetection": game_detection,
                 }),
             ));
         };
@@ -240,7 +276,8 @@ pub async fn sync_start(
             Ok(token) => state.cardtrader.fetch_products_export(&token).await.map(|export| export.products).unwrap_or_default(),
             Err(_) => Vec::new(),
         };
-        let mut preview = link::power_tools_preview(&import, &products);
+        let mut preview = blocking(move || link::power_tools_preview(&import, &products)).await?;
+        preview["gameDetection"] = game_detection;
         preview["connected"] = json!(true);
         preview["status"] = status;
         return Ok(json_response(200, preview));
@@ -366,19 +403,62 @@ pub async fn blueprint_listings(
     }
 }
 
+/// Upstream budget for the unauthenticated live route, per caller IP (/64 for
+/// IPv6) and per origin. Only cache misses count: hits never reach CardTrader.
+const LIVE_PER_IP_LIMIT: i64 = 30;
+const LIVE_GLOBAL_LIMIT: i64 = 300;
+const LIVE_WINDOW_SECONDS: i64 = 60;
+
+fn live_rate_limited(retry_after_sec: u64) -> ApiError {
+    let mut error = ApiError::new(429, "Too many live CardTrader lookups. Try again shortly.")
+        .with_code("rate_limited");
+    error.retry_after_sec = Some(retry_after_sec);
+    error
+}
+
+/// The public route's gate before an upstream CardTrader call: per-IP budget,
+/// then the catalog check (unknown ids never reach CardTrader), then the
+/// origin-wide budget that protects the shared CardTrader token.
+async fn guard_live_upstream(
+    state: &DomainState,
+    client: &str,
+    game: &str,
+    blueprint_id: &str,
+) -> ApiResult<()> {
+    use crate::routes::util::limit_best_effort;
+    let per_ip = limit_best_effort(state, "ct-live-ip", client, LIVE_PER_IP_LIMIT, LIVE_WINDOW_SECONDS).await;
+    if !per_ip.allowed {
+        return Err(live_rate_limited(per_ip.retry_after_sec));
+    }
+    if !cardtrader_live::blueprint_exists(&state.db, game, blueprint_id).await? {
+        return Err(ApiError::not_found("Unknown CardTrader blueprint.").with_code("unknown_blueprint"));
+    }
+    let global = limit_best_effort(state, "ct-live-global", "origin", LIVE_GLOBAL_LIMIT, LIVE_WINDOW_SECONDS).await;
+    if !global.allowed {
+        return Err(live_rate_limited(global.retry_after_sec));
+    }
+    Ok(())
+}
+
 /// `GET /api/cardtrader-live-listings` — live on-demand CardTrader listings.
 pub async fn live_listings(
     State(state): State<DomainState>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> ApiResult<Response> {
     let request = cardtrader_live::parse_request(&query_pairs(&uri))?;
-    let game = query_first(&uri, "game").unwrap_or_else(|| "pokemon".to_string());
-    let payload = cardtrader_live::read_live_listings(
+    let game = crate::db::normalize_game(&query_first(&uri, "game").unwrap_or_else(|| "pokemon".to_string()));
+    let client = crate::routes::util::client_rate_identity(&headers);
+    let payload = cardtrader_live::read_live_listings_guarded(
         &state.db,
         &state.cardtrader,
         state.redis.as_ref(),
         &request,
         &game,
+        |blueprint_id| {
+            let (state, client, game) = (&state, &client, &game);
+            async move { guard_live_upstream(state, client, game, &blueprint_id).await }
+        },
     )
     .await?;
     let mut response = json_response(200, payload);
@@ -468,6 +548,107 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
 
+    /// A fake CardTrader that counts `/marketplace/products` calls.
+    async fn fake_cardtrader() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/marketplace/products",
+            axum::routing::get(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}"), hits)
+    }
+
+    fn live_state(base: String) -> DomainState {
+        // Only this module's tests read the global token; nothing asserts it unset.
+        std::env::set_var("CARDTRADER_AUTH_TOKEN", "test-ct-token");
+        let mut state = DomainState::for_test();
+        state.cardtrader = client::CardTraderClient::with_base(base);
+        state
+    }
+
+    fn from_ip(ip: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-pokoin-client-ip", HeaderValue::from_str(ip).unwrap());
+        headers
+    }
+
+    fn live_uri(query: &str) -> Uri {
+        format!("/api/cardtrader-live-listings?{query}").parse().unwrap()
+    }
+
+    #[tokio::test]
+    async fn live_listings_reject_unknown_blueprints_without_calling_cardtrader() {
+        use std::sync::atomic::Ordering;
+        let (base, hits) = fake_cardtrader().await;
+        let state = live_state(base);
+        cardtrader_live::remember_blueprint("pokemon", 990_001, false);
+        for query in ["blueprintId=990001", "cardId=990001", "blueprintId=990001&limit=7&lang=en"] {
+            let error = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.status, 404, "{query}");
+            assert_eq!(error.code.as_deref(), Some("unknown_blueprint"));
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "no upstream call for an unknown id");
+        // An unlisted language is a 400 before any lookup at all.
+        let error = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri("blueprintId=990001&lang=xx"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 400);
+
+        cardtrader_live::remember_blueprint("pokemon", 990_002, true);
+        let response = live_listings(State(state.clone()), from_ip("198.51.100.10"), live_uri("blueprintId=990002"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        // The second read is a cache hit: no upstream call and no budget spent.
+        live_listings(State(state), from_ip("198.51.100.10"), live_uri("blueprintId=990002")).await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn live_listings_per_ip_limit_trips_before_cardtrader() {
+        use std::sync::atomic::Ordering;
+        let (base, hits) = fake_cardtrader().await;
+        let state = live_state(base);
+        // Two addresses in one IPv6 /64 share a budget.
+        let ips = ["2001:db8:77:1::1", "2001:db8:77:1::2"];
+        for n in 0..LIVE_PER_IP_LIMIT {
+            let id = 991_000 + n;
+            cardtrader_live::remember_blueprint("pokemon", id, true);
+            let ip = ips[n as usize % 2];
+            live_listings(State(state.clone()), from_ip(ip), live_uri(&format!("blueprintId={id}")))
+                .await
+                .unwrap();
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize);
+        cardtrader_live::remember_blueprint("pokemon", 991_900, true);
+        let error = live_listings(State(state.clone()), from_ip(ips[0]), live_uri("blueprintId=991900"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 429);
+        assert_eq!(error.code.as_deref(), Some("rate_limited"));
+        assert_eq!(error.retry_after_sec, Some(LIVE_WINDOW_SECONDS as u64));
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize, "the 429 never reached CardTrader");
+        // Another client keeps its own budget.
+        live_listings(State(state), from_ip("2001:db8:77:2::1"), live_uri("blueprintId=991900")).await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), LIVE_PER_IP_LIMIT as usize + 1);
+    }
+
     #[test]
     fn sync_status_carries_status_and_the_node_sync_shape() {
         let status = json!({"connected": true, "inventorySync": {"direction": "both"}});
@@ -486,6 +667,19 @@ mod tests {
         let first = sync_status_payload(json!({"connected": true}), &json!({"row": null, "running": true, "phase": "starting", "processed": 0, "total": 0, "summary": {}}));
         assert_eq!(first["sync"]["running"], true);
         assert_eq!(first["phase"], "starting");
+
+        // The job failed here but its end was never stored (database down).
+        let mut failed = progress.clone();
+        failed["row"]["last_sync_summary"] = json!({"running": true, "phase": "starting"});
+        failed["lastError"] = json!("pool timed out while waiting for an open connection");
+        let payload = sync_status_payload(json!({"connected": true}), &failed);
+        assert_eq!(payload["sync"]["lastSyncOk"], false);
+        assert_eq!(payload["sync"]["lastSyncError"], "pool timed out while waiting for an open connection");
+        assert_eq!(payload["sync"]["summary"]["phase"], "failed");
+
+        let mut stale = progress.clone();
+        stale["stale"] = json!(true);
+        assert_eq!(sync_status_payload(json!({}), &stale)["sync"]["lastSyncOk"], false);
     }
 
     #[test]

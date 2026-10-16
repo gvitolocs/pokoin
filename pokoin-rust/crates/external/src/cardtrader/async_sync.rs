@@ -24,12 +24,19 @@ const RECONCILE_LOCK_TTL_SEC: u64 = 15 * 60;
 
 pub struct SyncJobs {
     running: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// The error of each seller's last job on this instance that failed, kept
+    /// in memory because recording it may have failed with the database.
+    failures: Mutex<HashMap<String, String>>,
     redis: Option<RedisCache>,
 }
 
+/// A stored "running" sync older than this died without recording its end
+/// (the reconcile lock lives 15 minutes).
+const STALE_RUN_MS: i64 = 20 * 60 * 1000;
+
 impl SyncJobs {
     pub fn new(redis: Option<RedisCache>) -> Self {
-        Self { running: Mutex::new(HashMap::new()), redis }
+        Self { running: Mutex::new(HashMap::new()), failures: Mutex::new(HashMap::new()), redis }
     }
 
     pub async fn is_running(&self, uid: &str) -> bool {
@@ -113,6 +120,10 @@ impl SyncJobs {
             tracing::warn!(uid = %seller_uid, "cardtrader inventory sync already running on another instance");
             return Ok((false, true));
         };
+        // Without Redis there is no other instance to share a lock with; with
+        // Redis down the lock is only in-process, so CardTrader writes wait.
+        let exclusive = self.redis.is_none() || !lock_owner.is_empty();
+        self.failures.lock().await.remove(&seller_uid);
 
         let jobs = Arc::clone(self);
         let uid_for_task = seller_uid.clone();
@@ -141,10 +152,20 @@ impl SyncJobs {
                     power_tools_by_game,
                     preview_games_only: false,
                     direction: None,
+                    exclusive,
                 })
                 .await
             }
             .await;
+            let failure = match &result {
+                Err(error) => Some(error.message.clone()),
+                Ok(outcome) if outcome["ok"] == false => Some(crate::error::clean_text_value(outcome.get("error").unwrap_or(&Value::Null), 500)),
+                Ok(_) => None,
+            };
+            if let Some(message) = failure {
+                let message = if message.is_empty() { "CardTrader sync failed.".to_string() } else { message };
+                jobs.failures.lock().await.insert(uid_for_task.clone(), message);
+            }
             if let Err(error) = result {
                 tracing::error!(uid = %uid_for_task, "cardtrader inventory sync job failed: {}", error.message);
                 let _ = record_seller_sync(
@@ -176,13 +197,19 @@ impl SyncJobs {
             .filter(|v| v.is_object())
             .unwrap_or(json!({}));
         let live = self.is_running(&uid).await;
-        let flagged = summary.get("running") == Some(&Value::Bool(true));
+        let started_ms = row
+            .as_ref()
+            .and_then(|row| row.get("last_sync_at"))
+            .and_then(Value::as_str)
+            .and_then(crate::time_util::ms_from_iso);
+        let (flagged, stale) = run_flags(&summary, live, started_ms, crate::time_util::now_ms());
+        let last_error = if live { None } else { self.failures.lock().await.get(&uid).cloned() };
         let phase = summary
             .get("phase")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .filter(|s| !s.is_empty())
-            .or_else(|| if live { Some("running".into()) } else { None });
+            .filter(|s| !s.is_empty() && !stale)
+            .or_else(|| if live { Some("running".into()) } else if stale { Some("failed".into()) } else { None });
         Ok(json!({
             "row": row,
             "running": live || flagged,
@@ -190,7 +217,23 @@ impl SyncJobs {
             "processed": summary.get("processed").and_then(Value::as_i64).unwrap_or(0),
             "total": summary.get("total").and_then(Value::as_i64).unwrap_or(0),
             "summary": summary,
+            "stale": stale,
+            "lastError": last_error,
         }))
+    }
+}
+
+/// (`running` as stored and still believable, `stale`): a stored run that no
+/// instance finished within [`STALE_RUN_MS`] died (a restart, or the database
+/// failing under it) and is reported as failed, not polled forever.
+fn run_flags(summary: &Value, live: bool, started_ms: Option<i64>, now_ms: i64) -> (bool, bool) {
+    let stored = summary.get("running") == Some(&Value::Bool(true));
+    if !stored || live {
+        return (stored, false);
+    }
+    match started_ms {
+        Some(started) if now_ms - started > STALE_RUN_MS => (false, true),
+        _ => (true, false),
     }
 }
 
@@ -222,6 +265,16 @@ pub async fn enqueue_stored_with_power_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stored_run_nobody_finished_turns_stale() {
+        let running = json!({ "running": true, "phase": "starting" });
+        let now = 10_000_000_000i64;
+        assert_eq!(run_flags(&running, true, Some(0), now), (true, false), "a live job is never stale");
+        assert_eq!(run_flags(&running, false, Some(now - 60_000), now), (true, false), "another instance may run it");
+        assert_eq!(run_flags(&running, false, Some(now - STALE_RUN_MS - 1), now), (false, true));
+        assert_eq!(run_flags(&json!({ "running": false }), false, Some(0), now), (false, false));
+    }
 
     #[tokio::test]
     async fn enqueue_is_idempotent_per_seller() {

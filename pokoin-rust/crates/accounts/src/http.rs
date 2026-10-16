@@ -17,6 +17,8 @@ pub struct HttpRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    /// Per-request timeout; `None` keeps the transport's own (short) default.
+    pub timeout: Option<Duration>,
 }
 
 impl HttpRequest {
@@ -26,11 +28,19 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: Vec::new(),
+            timeout: None,
         }
     }
 
     pub fn header(mut self, key: &str, value: impl Into<String>) -> Self {
         self.headers.push((key.to_string(), value.into()));
+        self
+    }
+
+    /// Overrides the transport's default timeout for this request only (slow
+    /// upstreams such as the Poko assistant).
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 
@@ -111,7 +121,8 @@ pub trait HttpTransport: Send + Sync + 'static {
 }
 
 /// Production transport. Timeouts are short on purpose: the accounts paths are
-/// on the interactive hot path of the web app.
+/// on the interactive hot path of the web app. Slow upstreams set
+/// [`HttpRequest::timeout`] per request.
 #[derive(Clone)]
 pub struct ReqwestTransport {
     client: reqwest::Client,
@@ -139,6 +150,9 @@ impl HttpTransport for ReqwestTransport {
         let mut builder = self.client.request(method, &request.url);
         for (key, value) in &request.headers {
             builder = builder.header(key, value);
+        }
+        if let Some(timeout) = request.timeout {
+            builder = builder.timeout(timeout);
         }
         if !request.body.is_empty() {
             builder = builder.body(request.body.clone());
@@ -265,6 +279,14 @@ mod tests {
             .unwrap();
         assert_eq!(request.header_value("content-type"), Some("application/json"));
         assert_eq!(request.body, br#"{"a":1}"#);
+    }
+
+    #[test]
+    fn requests_keep_the_transport_timeout_unless_overridden() {
+        let plain = HttpRequest::new("GET", "https://example.com");
+        assert_eq!(plain.timeout, None);
+        let slow = plain.timeout(Duration::from_secs(90));
+        assert_eq!(slow.timeout, Some(Duration::from_secs(90)));
     }
 
     #[test]

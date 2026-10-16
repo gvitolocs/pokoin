@@ -1,0 +1,11 @@
+[Unit]
+Description=Pokoin sentinel (Pi) every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=pokoin-sentinel.service
+
+[Install]
+WantedBy=timers.target

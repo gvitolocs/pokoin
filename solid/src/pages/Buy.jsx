@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { createPknCheckout } from '@market/api.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { PKN_PACKAGE_RATE, PKN_PACKAGES, buyReturnPath, pknPackageAmount } from '@market/pkn-packages.js';
@@ -10,7 +11,7 @@ import { getBearer, signedIn } from '../stores/auth.js';
 
 /** /buy: fixed Stripe PKN packages, credited to site balance. */
 export default function Buy() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   const [selected, setSelected] = createSignal(PKN_PACKAGES[1]);
   const [busy, setBusy] = createSignal(false);

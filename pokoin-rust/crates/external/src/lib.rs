@@ -21,6 +21,7 @@ pub mod error;
 pub mod firebase;
 pub mod geo;
 pub mod powertools;
+pub mod powertools_games;
 pub mod price_check;
 pub mod pricing;
 pub mod r2;

@@ -7,18 +7,21 @@ rollout: [SCAN_CONNECT.md](SCAN_CONNECT.md#production-deployment).
 **Live host since 2026-10-04: Cloudflare Workers Static Assets** (`pokoin-web`,
 assets-only, see [WEB_HOST.md](WEB_HOST.md)). `scripts/deploy-web.sh` is the
 **Vercel rollback path only** — it does not publish the live site. Publish an exact
-`origin/main` commit like this (nezopt, login shell for `wrangler`):
+`origin/main` commit on nezopt with `scripts/publish-web.sh` (each step, and why the
+upload carries the previous releases' chunks:
+[WEB_HOST.md#deploying-2026-10-14](WEB_HOST.md#deploying-2026-10-14)):
 
 ```bash
-S=$(mktemp -d); git archive <origin/main sha> | tar -C "$S" -xf -; cd "$S"
-scripts/build-web.sh                                    # dist-web/
-node scripts/write-cloudflare-web-routing.mjs dist-web  # _redirects (≤100 rules) + _headers
-wrangler versions upload -c wrangler.pokoin-web.jsonc --message "main <sha>"   # no traffic yet
+scripts/publish-web.sh                         # git archive origin/main, build, carry chunks, upload (no traffic)
 # check the printed Version Preview URL (short links, /, /marketplace, app assets), then:
-wrangler versions deploy <version-id>@100% --name pokoin-web -y
+scripts/publish-web.sh --promote <version-id>  # wrangler versions deploy <id>@100%
 ```
 
-Rollback: `wrangler versions deploy <previous version>@100% --name pokoin-web -y`
+Do not run `wrangler versions upload` on a bare `build-web.sh` output: without
+`scripts/carry-web-release-chunks.mjs` the upload lacks the previous release's chunks,
+and pages blank for a minute or two after the deploy.
+
+Rollback: `scripts/publish-web.sh --promote <previous version>`
 (`wrangler deployments list --name pokoin-web` shows the history).
 
 ## The rule
@@ -37,7 +40,8 @@ Rollback: `wrangler versions deploy <previous version>@100% --name pokoin-web -y
 `origin/main` and must contain the commit production runs (Vercel deployment
 meta `gitCommitSha`, or `githubCommitSha` for older git builds). It builds a
 `git archive` of the commit plus an allowlist of gitignored inputs
-(`download/extension.zip`), runs `node --test market/src/*.test.js`, deploys
+(`download/extension.zip`), runs `node --test market/src/*.test.js` and the Solid
+tests (`cd solid && npm test`), deploys
 with `--meta gitCommitSha=…`, holds `/tmp/pokoin-web-deploy.lock`, checks that
 `pokoin.com` points at the new commit, and re-points `test.pokoin.com` at the
 same deployment (that alias can otherwise lag and serve an old review board). A production deployment
@@ -73,7 +77,7 @@ the zip is gitignored — another reason production builds run on nezopt.
 ```bash
 # on nezopt, in your worktree
 git fetch origin && git merge origin/main        # include everyone's work
-node --test market/src/*.test.js
+node --test market/src/*.test.js && (cd solid && npm test)
 git push origin HEAD:main
 scripts/deploy-web.sh                             # deploys HEAD
 ```

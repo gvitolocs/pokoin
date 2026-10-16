@@ -36,7 +36,6 @@ pub(crate) struct AppState {
     pub(crate) commerce: Arc<RwLock<Option<pokoin_commerce::DomainState>>>,
     pub(crate) db: Arc<RwLock<Option<PgPool>>>,
     pub(crate) http: reqwest::Client,
-    pub(crate) game_dbs: Arc<RwLock<std::collections::HashMap<String, PgPool>>>,
     pub(crate) redis: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     pub(crate) read_cache: Arc<read_cache::Coordinator>,
     pub(crate) requests: Arc<AtomicU64>,
@@ -178,7 +177,6 @@ fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
         config,
         commerce: Arc::new(RwLock::new(None)),
         db: Arc::new(RwLock::new(None)),
-        game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?,
@@ -215,12 +213,48 @@ fn elapsed_ms(booted: Instant) -> u64 {
     booted.elapsed().as_millis() as u64
 }
 
+/// Outer deadline for the startup Postgres connect; longer than the pool's
+/// own acquire timeout so sqlx reports the real error, not our timeout.
+const WARM_POSTGRES_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Startup retry delay: 2 s doubling to a 30 s cap, ±25 % jitter, so pods
+/// restarting together do not hammer a full database in lockstep.
+#[derive(Debug)]
+struct WarmBackoff {
+    next: Duration,
+}
+
+impl WarmBackoff {
+    const FIRST: Duration = Duration::from_secs(2);
+    const CAP: Duration = Duration::from_secs(30);
+
+    fn new() -> Self {
+        Self { next: Self::FIRST }
+    }
+
+    /// The delay to sleep now; `unit` in [0, 1) picks the jitter.
+    fn delay(&mut self, unit: f64) -> Duration {
+        let base = self.next;
+        self.next = (base * 2).min(Self::CAP);
+        base.mul_f64(0.75 + 0.5 * unit.clamp(0.0, 1.0))
+    }
+}
+
+/// A process-random value in [0, 1) without a rand dependency.
+fn jitter_unit() -> f64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
+}
+
 async fn warm_dependencies(state: AppState) {
+    let mut backoff = WarmBackoff::new();
     loop {
         if state.db.read().await.is_none() {
             if let Some(url) = state.config.database_url.clone() {
                 match tokio::time::timeout(
-                    Duration::from_secs(2),
+                    WARM_POSTGRES_TIMEOUT,
                     pokoin_db::pool(&url, state.config.db_pool_max),
                 )
                 .await
@@ -271,7 +305,7 @@ async fn warm_dependencies(state: AppState) {
             );
             break;
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(backoff.delay(jitter_unit())).await;
     }
 }
 
@@ -288,6 +322,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         Some(pool) => (pool.size(), pool.num_idle() as u32),
         None => (0, 0),
     };
+    let (game_pools, game_size, game_idle) = pokoin_db::satellite_stats();
     Json(json!({
         "requests": state.requests.load(Ordering::Relaxed),
         "errors": state.errors.load(Ordering::Relaxed),
@@ -296,6 +331,10 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "dbPoolSize": pool_size,
         "dbPoolIdle": idle,
         "dbPoolMax": state.config.db_pool_max,
+        "gameDbPools": game_pools,
+        "gameDbPoolSize": game_size,
+        "gameDbPoolIdle": game_idle,
+        "gameDbPoolMax": pokoin_db::satellite_budget().max_connections,
     }))
 }
 
@@ -408,10 +447,15 @@ async fn build_full_router(state: AppState) -> Router {
         Some(read_url) => {
             let write_url = std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
                 .unwrap_or_else(|_| read_url.clone());
-            match (
-                lazy_pool(&read_url, pool_max),
-                lazy_pool(&write_url, pool_max),
-            ) {
+            // Where reads and writes share one database (the nezopt overflow
+            // pods), one pool serves both instead of two at the same address.
+            let shared = write_url.trim() == read_url.trim();
+            let read_pool = lazy_pool(&read_url, pool_max);
+            let write_pool = match (&read_pool, shared) {
+                (Ok(pool), true) => Ok(pool.clone()),
+                _ => lazy_pool(&write_url, pool_max),
+            };
+            match (read_pool, write_pool) {
                 (Ok(read_db), Ok(write_db)) => {
                     let commerce_state = pokoin_commerce::DomainState::with_pools(
                             pokoin_commerce::CommerceConfig::from_env(),
@@ -435,7 +479,7 @@ async fn build_full_router(state: AppState) -> Router {
                     };
                     *state.commerce.write().await = Some(commerce_state.clone());
                     let commerce = pokoin_commerce::router(commerce_state);
-                    let external = match build_external_router(&read_db, &write_db) {
+                    let external = match build_external_router(&read_db, &write_db, api_state.as_ref().ok().cloned()) {
                         Ok(router) => router,
                         Err(error) => {
                             tracing::error!(domain = "external", %error, "domain disabled");
@@ -542,7 +586,11 @@ fn lazy_pool(url: &str, max: u32) -> anyhow::Result<PgPool> {
         .map_err(Into::into)
 }
 
-fn build_external_router(read_db: &PgPool, write_db: &PgPool) -> anyhow::Result<Router> {
+fn build_external_router(
+    read_db: &PgPool,
+    write_db: &PgPool,
+    api: Option<pokoin_api_common::ApiState>,
+) -> anyhow::Result<Router> {
     use pokoin_external::firebase::{
         FirebaseJwksVerifier, FirestoreRest, FirestoreStore, TokenVerifier,
     };
@@ -553,12 +601,16 @@ fn build_external_router(read_db: &PgPool, write_db: &PgPool) -> anyhow::Result<
     let firestore = FirestoreRest::from_env()
         .ok_or_else(|| anyhow::anyhow!("Firebase Admin credentials are not configured"))?;
     let db = pokoin_external::db::DbPools::lazy(read_db.clone(), write_db.clone());
-    let state = pokoin_external::DomainState::new(
+    let mut state = pokoin_external::DomainState::new(
         Arc::new(firestore) as Arc<dyn FirestoreStore>,
         Arc::new(FirebaseJwksVerifier::new(project_id)) as Arc<dyn TokenVerifier>,
         db,
         None,
     );
+    // Route limits (live CardTrader listings) count in the origin Redis.
+    if let Some(api) = api {
+        state = state.with_api_state(api);
+    }
     Ok(pokoin_external::router(state))
 }
 
@@ -678,6 +730,28 @@ mod tests {
         (addr, stop, servers)
     }
 
+    #[test]
+    fn warm_backoff_doubles_to_30s_with_25_percent_jitter() {
+        let mut backoff = WarmBackoff::new();
+        let mid: Vec<u64> = (0..7).map(|_| backoff.delay(0.5).as_secs()).collect();
+        assert_eq!(mid, [2, 4, 8, 16, 30, 30, 30]);
+        let mut low = WarmBackoff::new();
+        assert_eq!(low.delay(0.0), Duration::from_millis(1500));
+        let mut high = WarmBackoff::new();
+        assert_eq!(high.delay(1.0), Duration::from_millis(2500));
+        let mut capped = WarmBackoff::new();
+        for _ in 0..10 {
+            capped.delay(0.5);
+        }
+        assert_eq!(capped.delay(1.0), Duration::from_millis(37_500));
+        assert!((0..100).map(|_| jitter_unit()).all(|unit| (0.0..1.0).contains(&unit)));
+    }
+
+    #[test]
+    fn warm_deadline_outlasts_the_pool_acquire_timeout() {
+        assert!(WARM_POSTGRES_TIMEOUT > pokoin_db::POOL_ACQUIRE_TIMEOUT);
+    }
+
     #[tokio::test]
     async fn stop_drains_idle_connections_and_bounds_hung_requests() {
         let app = || {
@@ -725,7 +799,6 @@ mod tests {
             config: Config::from_env(),
             db: Arc::new(RwLock::new(None)),
             http: reqwest::Client::new(),
-            game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             redis: Arc::new(RwLock::new(None)),
             read_cache: Arc::new(read_cache::Coordinator::default()),
             commerce: Arc::new(RwLock::new(None)),

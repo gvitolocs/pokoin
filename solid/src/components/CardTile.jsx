@@ -13,6 +13,7 @@ import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
 import PriceStack from './PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
  * Grid / rail / list tile. A plain anchor:
@@ -67,7 +68,7 @@ export default function CardTile(props) {
             'is-selected': picked(),
           },
         ]}
-        href={cardHref(card())}
+        href={gameHref(cardHref(card()))}
         data-card-id={card().id}
         aria-selected={picked() ? 'true' : undefined}
         draggable="true"

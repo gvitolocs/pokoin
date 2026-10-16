@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inventoryMarketLabel, inventoryMarketValue } from './inventory-price.js';
+import { inventoryMarketLabel, inventoryMarketValue, priceCheckKey } from './inventory-price.js';
 
 const row = { cardId: '824942' };
 const daily = { days: [
@@ -8,20 +8,30 @@ const daily = { days: [
   { day: '2026-09-30', lowestAskPkn: 13128, sourceTimestamp: '2026-09-30T15:57:44Z' },
 ] };
 
-test('pricer keeps current condition/language match ahead of daily all-facet cheapest ask', () => {
+test('CardTrader price is only the professional seller with the same condition, language and finish', () => {
   const value = inventoryMarketValue({ 824942: { ctMatchedPkn: 14000, ctCheapestPkn: 11128, cardtraderListed: daily } }, row, 'cardtrader');
   assert.equal(value.value, 14000);
-  assert.match(value.title, /matching condition and language/);
-  assert.match(value.title, /2026-10-02: 11128 PKN/);
-  assert.match(value.title, /listing asks, not sold prices/);
+  assert.match(value.title, /professional CardTrader seller with the same condition, language and finish/);
+  assert.equal(inventoryMarketLabel(value), '14000 PKN');
 });
 
-test('daily dump fallback is dated and never presented as a facet-matched quote or sale', () => {
-  const value = inventoryMarketValue({ 824942: { cardtraderListed: daily } }, row, 'cardtrader');
-  assert.equal(value.value, 11128);
-  assert.match(value.title, /Latest stored daily cheapest/);
-  assert.match(value.title, /across conditions and languages/);
-  assert.equal(inventoryMarketLabel(value), '11128 PKN');
+test('no matching professional offer means no CardTrader price, never another facet or a private ask', () => {
+  assert.equal(inventoryMarketValue({ 824942: { ctCheapestPkn: 11128, cardtraderListed: daily } }, row, 'cardtrader'), null);
+});
+
+test('a reverse or first-edition copy reads its own comp', () => {
+  const prices = {
+    824942: { ctMatchedPkn: 64 },
+    '824942:NM:EN:': { ctMatchedPkn: 64 },
+    '824942:NM:EN:R': { ctMatchedPkn: 590 },
+  };
+  assert.equal(priceCheckKey({ cardId: '824942', condition: 'nm', language: 'en', foilState: 'reverse' }), '824942:NM:EN:R');
+  assert.equal(priceCheckKey({ card_id: '824942', condition: 'NM', language: 'EN', first_edition: true }), '824942:NM:EN:F');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'LP', language: 'IT' }), '1:SP:IT:');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'HP', language: 'IT' }), '1:PL:IT:');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'PO', language: 'IT' }), '1:Poor:IT:');
+  assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN', reverse: true }, 'cardtrader').value, 590);
+  assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN' }, 'cardtrader').value, 64);
 });
 
 test('TCGplayer variants retain USD and source timestamps without PKN conversion', () => {
