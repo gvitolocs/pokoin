@@ -37,6 +37,7 @@ import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
 import { createSuggestFlip } from '@market/suggest-flip.js';
+import { SUGGEST_REPAINT_MS, createRepaintGate } from '@market/suggest-repaint.js';
 import {
   SUGGEST_ROTATE_HEAD,
   SUGGEST_ROTATE_POOL,
@@ -304,6 +305,12 @@ export default function SearchBox(props) {
       }
       const controller = new AbortController();
       let stopped = false;
+      // One gate per generation: the first page repaints now, later pages of
+      // this same search share a trailing repaint.
+      const repaint = createRepaintGate({
+        delay: SUGGEST_REPAINT_MS,
+        bump: () => setEpoch((value) => value + 1),
+      });
       setProgressivePending(true);
       (async () => {
         for (const lookup of live.catalogRecall(text)) {
@@ -335,7 +342,7 @@ export default function SearchBox(props) {
             fetched += incoming;
             chunks += 1;
             offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
-            setEpoch((value) => value + 1);
+            repaint.page();
             const exhaustive = page?.exhaustive === true || incoming < size;
             if (exhaustive || incoming === 0) break;
             if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
@@ -344,11 +351,15 @@ export default function SearchBox(props) {
           }
         }
       })().finally(() => {
-        if (!stopped && pool.generation === generation) setProgressivePending(false);
+        if (!stopped && pool.generation === generation) {
+          repaint.flush();
+          setProgressivePending(false);
+        }
       });
       return () => {
         stopped = true;
         controller.abort();
+        repaint.dispose();
       };
     },
   );
