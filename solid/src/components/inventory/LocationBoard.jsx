@@ -29,6 +29,13 @@ export default function LocationBoard(props) {
 
   return (
     <section class="inv-board" aria-label={`Cards in ${box()}`}>
+      <div class="mypokoin-panel-head">
+        <div>
+          <h2>{box()}</h2>
+          <p class="mypokoin-help">Listings stored in this box, by stack and position.</p>
+        </div>
+        <a class="btn" href="/inventory/scan">Scan cards</a>
+      </div>
       <div class="inv-summary">
         <Show when={dividerCount() > 0}><div class="inv-stat"><strong>{dividerCount()}</strong><span>Stacks</span></div></Show>
         <div class="inv-stat"><strong>{postings()}</strong><span>Postings</span></div>
@@ -40,7 +47,7 @@ export default function LocationBoard(props) {
         <Show when={box() !== props.location}><span class="loc-box-alt"> (opened as {props.location})</span></Show>
       </p>
 
-      <Show when={stacks().length} fallback={<p class="inv-empty">Nothing stored in this box.</p>}>
+      <Show when={stacks().length} fallback={<div class="mypokoin-empty"><p class="inv-empty">Nothing stored in this box.</p><a class="btn" href="/inventory/scan">Scan cards</a></div>}>
         <div class="loc-list">
           <For each={stacks()}>
             {(stack) => (

@@ -13,7 +13,7 @@ import {
 } from '@market/spreadsheet-imports.js';
 import { FORMAT_LABEL, importPayload, previewSpreadsheet, SPREADSHEET_PAGE } from '@market/spreadsheet-rows.js';
 import '@market/sell-spreadsheet.css';
-import { Alert, DeskPanel, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel } from '../components/Desk.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { getBearer } from '../stores/auth.js';
@@ -153,15 +153,14 @@ function SpreadsheetDesk() {
   const turnPage = (step) => setSheet((current) => ({ ...current, page: current.page + step }));
 
   return (
-    <div class="page desk sell-sheet">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk sell-sheet mypokoin">
+      <StockNav
         title="Sell via spreadsheet"
-        lede="Upload a stock file or paste rows from Power Tools, CardTrader, Cardmarket, TCGPlayer, or your own sheet. Check the cards, then list them in one go."
+        lede="Upload a stock file, check the cards, then list them."
       />
-      <StockNav />
       <Alert>{error()}</Alert>
       <DeskPanel title="Upload">
+        <p class="mypokoin-help">Drop a stock file or paste rows. Nothing is listed until you confirm.</p>
         <div class="sell-sheet-drops">
           <button
             type="button"

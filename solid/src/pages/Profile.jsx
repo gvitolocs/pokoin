@@ -1,4 +1,5 @@
-import { children, createEffect, createSignal, For, lazy, Loading, Match, Show, Switch } from 'solid-js';
+import { children, createEffect, createSignal, For, lazy, Loading, Match, Show, Switch, untrack } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
 import { fetchCollectionSummary, fetchSellerListings } from '@market/api.js';
 import { accountHeading, accountLede } from '@market/auth-session.js';
 import { liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
@@ -20,6 +21,7 @@ import TelegramConnectPanel from '../components/profile/TelegramConnectPanel.jsx
 import UsernameEditor from '../components/profile/UsernameEditor.jsx';
 import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview-fixture.js';
 import { accountAdmin, accountProfile, accountSilver, availablePkn } from '../stores/account.js';
 import { authUid, authUser, getBearer } from '../stores/auth.js';
 import { publishSellerSettings, sellerSettings as loadedSellerSettings, sellerSettingsFailed } from '../stores/buyer.js';
@@ -315,7 +317,12 @@ function ProfileDesk() {
             </button>
           )}
         >
-          <Show when={shopHref()}><a class="btn ghost" href={shopHref()}>View shop</a></Show>
+          <div class="profile-mypokoin">
+            <MyPokoinTile />
+            <Show when={shopHref()}>
+              <a class="profile-shop-link" href={shopHref()}>View public shop</a>
+            </Show>
+          </div>
         </PageHead>
         <MetricGrid>
           <Metric value={tiles.owned() ?? '—'} label="Cards owned" />
@@ -541,12 +548,64 @@ function ProfileDesk() {
   );
 }
 
+function MyPokoinTile() {
+  return (
+    <a class="tile-cta" href="/mypokoin">
+      <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
+        <rect x="18" y="6" width="42" height="58" rx="5" fill="#17131f" stroke="#6f5414" stroke-width="2" />
+        <rect x="12" y="14" width="42" height="58" rx="5" fill="#17131f" stroke="#c9a227" stroke-width="2" />
+        <rect x="6" y="24" width="60" height="70" rx="7" fill="#17131f" stroke="#ffd33d" stroke-width="2" />
+        <path d="M36 24v70" fill="none" stroke="#6f5414" stroke-width="2" />
+        <circle cx="36" cy="58" r="11" fill="#211b2b" stroke="#ffd33d" stroke-width="2" />
+        <path d="M25 58h22" fill="none" stroke="#ffd33d" stroke-width="2.4" />
+        <circle cx="36" cy="58" r="3.5" fill="#17131f" stroke="#ffd33d" stroke-width="2" />
+        <circle cx="36" cy="58" r="1.4" fill="#ffd33d" />
+      </svg>
+      <strong>MyPokoin</strong>
+    </a>
+  );
+}
+
+/** Header only. Skips the signed-in desk so the gold tile can be checked without API calls. */
+function ProfilePreview() {
+  const shop = sellerHref({ sellerUsername: 'preview-seller' });
+  return (
+    <div class="page desk profile-page">
+      <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      <section class="profile-hero">
+        <PageHead
+          kicker="Account"
+          title="Preview Seller"
+          meta="@preview-seller"
+          lede="Your shop, listings, and payouts."
+          leading={<Avatar seed="preview-seller" name="Preview Seller" size={88} />}
+        >
+          <div class="profile-mypokoin">
+            <MyPokoinTile />
+            <a class="profile-shop-link" href={shop}>View public shop</a>
+          </div>
+        </PageHead>
+        <MetricGrid>
+          <Metric value="42" label="Cards owned" />
+          <Metric value="7" label="Live listings" />
+          <Metric value={formatPknNumber(12840)} label="Site PKN" />
+          <Metric value="3.50" label="Chain PKN" hint="No wallet linked" />
+        </MetricGrid>
+      </section>
+    </div>
+  );
+}
+
 /** /profile. The extension side panel frames it (D000040). */
 export default function Profile() {
   document.title = 'Profile · Pokoin';
+  const [params] = useSearchParams();
   return (
-    <SignedIn from="/profile">
-      <ProfileDesk />
-    </SignedIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={<SignedIn from="/profile"><ProfileDesk /></SignedIn>}
+    >
+      <ProfilePreview />
+    </Show>
   );
 }

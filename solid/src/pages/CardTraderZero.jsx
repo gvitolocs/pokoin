@@ -1,5 +1,5 @@
-import { createEffect, createSignal, For, Match, onSettled, Show, Switch } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { createEffect, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
+import { useNavigate, useSearchParams } from '@solidjs/router';
 import {
   connectPowerTools,
   disconnectPowerTools,
@@ -8,11 +8,17 @@ import {
   fetchPowerToolsStatus,
 } from '@market/api.js';
 import { formatOrderMoney } from '@market/order-status.js';
-import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { ShipmentPanel, ZeroLine } from '../components/ZeroPack.jsx';
 import { getBearer, signedIn } from '../stores/auth.js';
+import {
+  allowMypokoinPreview,
+  MYPOKOIN_PREVIEW_BANNER,
+  previewZero,
+  seedPreviewPicked,
+} from './mypokoin-preview-fixture.js';
 
 function PowerToolsPanel(props) {
   const [status, setStatus] = createSignal(null);
@@ -180,9 +186,10 @@ function PowerToolsPanel(props) {
   );
 }
 
-function ZeroDesk() {
+function ZeroDesk(props) {
+  if (props.preview) seedPreviewPicked();
   const navigate = useNavigate();
-  const [data, setData] = createSignal(null);
+  const [data, setData] = createSignal(props.preview ? previewZero() : null);
   const [error, setError] = createSignal('');
   const [notConnected, setNotConnected] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
@@ -205,7 +212,7 @@ function ZeroDesk() {
   }
 
   createEffect(signedIn, (on) => {
-    if (!on) return undefined;
+    if (props.preview || !on) return undefined;
     load();
     let cancelled = false;
     getBearer()
@@ -219,7 +226,7 @@ function ZeroDesk() {
     return () => { cancelled = true; };
   });
   createEffect(
-    () => data()?.oneDayReady === true,
+    () => !props.preview && data()?.oneDayReady === true,
     (ready) => {
       if (ready) navigate('/mypokoin/1dr', { replace: true });
     },
@@ -229,32 +236,31 @@ function ZeroDesk() {
   const pendingItems = () => data()?.pending?.items || [];
 
   return (
-    <div class="page desk">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
         title="CardTrader Zero"
-        lede="Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: location box, then stock number from smaller to bigger."
+        lede="Thursday's Zero pack, in picking order."
+        metrics={data() ? [
+          { value: totals().weekly.units, label: 'Cards to ship', hint: `${totals().weekly.lines} line${totals().weekly.lines === 1 ? '' : 's'}` },
+          { value: totals().weekly.cents ? formatOrderMoney(totals().weekly.cents, 'EUR') : '—', label: 'Shipment value' },
+          { value: totals().pending.units, label: 'Waiting for next merge', hint: `${data().pending.orderCount} Zero sale${data().pending.orderCount === 1 ? '' : 's'}` },
+          { value: data().cardtrader?.username || '—', label: 'CardTrader seller' },
+        ] : []}
       >
         <button class="btn ghost" type="button" onClick={load} disabled={loading() || notConnected()}>
           {loading() ? 'Refreshing…' : 'Refresh'}
         </button>
-      </PageHead>
-      <StockNav />
+      </StockNav>
+      <p class="mypokoin-help">Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: location box, then stock number from smaller to bigger.</p>
       <Alert>{error()}</Alert>
 
       <Show when={notConnected()}>
         <EmptyDesk title="Connect CardTrader first" lede="The Zero list comes from your CardTrader seller orders. Paste your CardTrader API token in Settings.">
           <a class="btn" href="/mypokoin/settings">Settings</a>
         </EmptyDesk>
-      </Show>
-
-      <Show when={data()}>
-        <MetricGrid>
-          <Metric value={totals().weekly.units} label="Cards to ship" hint={`${totals().weekly.lines} line${totals().weekly.lines === 1 ? '' : 's'}`} />
-          <Metric value={totals().weekly.cents ? formatOrderMoney(totals().weekly.cents, 'EUR') : '—'} label="Shipment value" />
-          <Metric value={totals().pending.units} label="Waiting for next merge" hint={`${data().pending.orderCount} Zero sale${data().pending.orderCount === 1 ? '' : 's'}`} />
-          <Metric value={data().cardtrader?.username || '—'} label="CardTrader seller" />
-        </MetricGrid>
       </Show>
 
       <Show when={!data() && !error() && !notConnected()}>
@@ -285,14 +291,14 @@ function ZeroDesk() {
           )}
         >
           <Show when={showPending()}>
-            <div class="thread-list">
+            <div class="zero-grid">
               <For each={pendingItems()}>{(item) => <ZeroLine item={item} />}</For>
             </div>
           </Show>
         </DeskPanel>
       </Show>
 
-      <Show when={!notConnected()}>
+      <Show when={!props.preview && !notConnected()}>
         <PowerToolsPanel overlay={data()?.powerTools} onSession={load} />
       </Show>
     </div>
@@ -302,9 +308,17 @@ function ZeroDesk() {
 /** /mypokoin/zero. 1-Day Ready accounts move to /mypokoin/1dr. */
 export default function CardTraderZero() {
   document.title = 'CardTrader Zero · Pokoin';
+  const [params] = useSearchParams();
   return (
-    <SignedIn from="/mypokoin/zero">
-      <ZeroDesk />
-    </SignedIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <SignedIn from="/mypokoin/zero">
+          <ZeroDesk />
+        </SignedIn>
+      )}
+    >
+      <ZeroDesk preview />
+    </Show>
   );
 }
