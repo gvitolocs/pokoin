@@ -84,8 +84,9 @@ These URLs 404 on pokoin.com until they are copied into this repo:
 | --- | --- |
 | `/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf` | `web/audit/…` |
 | `/favicon.ico`, `/pokoin-512.png` | `web/` |
-| OG image `/pokoin-project-banner-1360x430.png` | `web/` |
 | `/bootstrap-peers.json` | Join-only host:port for nodes. Not linked from the landing. |
+
+The landing share image (og:image / twitter:image) is `home/pokoin-share-1200x630.png`, served at `/home/pokoin-share-1200x630.png`; never put share assets under a `/poko…` root path, a Cloudflare redirect rule catches it.
 
 ---
 
