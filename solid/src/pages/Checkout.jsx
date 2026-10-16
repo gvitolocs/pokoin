@@ -23,8 +23,9 @@ import {
   GIFT_NOTE,
   MISSING_LISTING_ERROR,
   addressFieldRequired,
-  checkoutCartPayload,
+  checkoutChargeCents,
   checkoutParcelShipping,
+  checkoutRequestBody,
   checkoutSellerKey,
   checkoutSellerParcels,
   checkoutShipOptions,
@@ -275,14 +276,15 @@ function CheckoutDesk() {
   createEffect(
     () => {
       if (nft() || payMethod() !== 'stripe' || !items().length || missingListing() || !buyerCountry()) return null;
-      return {
-        items: checkoutCartPayload(items()),
-        ...(addressId() ? { shippingAddressId: addressId() } : { toCountry: buyerCountry() }),
-        shippingService: shippingTracked() ? 'tracked' : 'untracked',
-        shippingServices: shippingServices(),
-        tracked: shippingTracked(),
-        insurance: cartInsurance() && !nft() && !allowUntracked(),
-      };
+      // Ticking the balance box re-quotes: the server prices the discount.
+      return checkoutRequestBody({
+        items: items(),
+        addressId: addressId(),
+        toCountry: buyerCountry(),
+        services: shippingServices(),
+        insurance: insured(),
+        useBalance: cartUseBalance(),
+      });
     },
     (body) => {
       if (!body) {
@@ -398,15 +400,16 @@ function CheckoutDesk() {
       const token = await getBearer();
       const rows = items();
       // Server recalculates — never send client shipping cents.
+      // Same body as the quote the buyer is looking at: the session charges it.
       const data = await createOrderCheckoutSession({
         buyerEmail: authUser()?.email || '',
-        items: checkoutCartPayload(rows),
-        shippingAddressId: addressId(),
-        shippingService: shippingTracked() ? 'tracked' : 'untracked',
-        shippingServices: shippingServices(),
-        tracked: shippingTracked(),
-        insurance: insured() && !nft(),
-        usePknDiscount: pknDiscountPkn() >= 1,
+        ...checkoutRequestBody({
+          items: rows,
+          addressId: addressId(),
+          services: shippingServices(),
+          insurance: insured(),
+          useBalance: cartUseBalance(),
+        }),
       }, token);
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
@@ -424,7 +427,7 @@ function CheckoutDesk() {
   const selectedAddress = () => addresses().find((row) => row.id === addressId());
   const dueLabel = () => {
     if (payMethod() !== 'stripe') return formatPkn(fees().totalPkn);
-    if (quote()) return moneyFromEurCents(quote().grandTotalCents);
+    if (quote()) return moneyFromEurCents(checkoutChargeCents(quote()));
     if (shippingPreviewCents() != null) return moneyFromEurCents(eurSubtotal() + shippingPreviewCents());
     return `${moneyFromPkn(subtotalPkn())} + ship`;
   };
@@ -856,6 +859,32 @@ function CheckoutDesk() {
                       <dt>Total</dt>
                       <dd>{moneyFromEurCents(q().grandTotalCents)}</dd>
                     </div>
+                    {/* The server prices the balance discount; these are its numbers. */}
+                    <Show when={q().pknVoucher?.pkn >= 1}>
+                      <div>
+                        <dt>
+                          <label class="checkout-pkn-voucher">
+                            <input
+                              type="checkbox"
+                              checked={cartUseBalance()}
+                              onChange={(event) => setCartUseBalance(event.target.checked)}
+                            />
+                            {' '}Use my PKN balance as a discount
+                          </label>
+                        </dt>
+                        <dd>{q().pknVoucher.pkn} PKN = {moneyFromEurCents(q().pknVoucher.eurCents)}</dd>
+                      </div>
+                    </Show>
+                    <Show when={q().pknDiscount?.applied}>
+                      <div>
+                        <dt>PKN balance discount</dt>
+                        <dd>−{q().pknDiscount.pkn} PKN ({moneyFromEurCents(q().pknDiscount.eurCents)})</dd>
+                      </div>
+                      <div>
+                        <dt>Card charge</dt>
+                        <dd>{moneyFromEurCents(checkoutChargeCents(q()))}</dd>
+                      </div>
+                    </Show>
                   </dl>
                 )}
               </Match>

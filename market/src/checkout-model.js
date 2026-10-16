@@ -58,6 +58,42 @@ export function checkoutCartPayload(items) {
   }));
 }
 
+/**
+ * POST body for /api/marketplace-checkout-quote and the Stripe session: the
+ * server re-prices every line, each parcel's service and the balance
+ * discount. The buyer only opts in to the discount; no amount is sent.
+ */
+export function checkoutRequestBody({
+  items,
+  addressId = '',
+  toCountry = '',
+  services = {},
+  insurance = false,
+  useBalance = false,
+}) {
+  const tracked = Object.values(services || {}).every((id) => id !== 'untracked');
+  return {
+    items: checkoutCartPayload(items),
+    ...(addressId ? { shippingAddressId: addressId } : { toCountry }),
+    shippingService: tracked ? 'tracked' : 'untracked',
+    shippingServices: { ...(services || {}) },
+    tracked,
+    insurance: Boolean(insurance),
+    usePknDiscount: Boolean(useBalance),
+  };
+}
+
+/** What Stripe charges: the server's `chargeCents`, else the total less its discount. */
+export function checkoutChargeCents(quote) {
+  if (!quote) return null;
+  if (quote.chargeCents != null && Number.isFinite(Number(quote.chargeCents))) {
+    return Number(quote.chargeCents);
+  }
+  const total = Number(quote.grandTotalCents);
+  if (quote.grandTotalCents == null || !Number.isFinite(total)) return null;
+  return total - (Number(quote.pknDiscount?.eurCents) || 0);
+}
+
 export function emptyAddressDraft(preferred = '') {
   const localeCountry = SHIP_TO_COUNTRIES.some((row) => row.code === preferred) ? preferred : countryFromLocale();
   const known = SHIP_TO_COUNTRIES.some((row) => row.code === localeCountry);

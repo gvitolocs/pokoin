@@ -128,3 +128,19 @@ to both `POST /api/marketplace-checkout-quote` and
   stores `serviceId`, `rateId`, `carrier` and `serviceName` on each `shipments[]`
   row plus `insuranceEURCents`, and answers `checkoutUrl` (and `url`).
 - Quote shipments carry `serviceId`; the quote also returns `shippingServices`.
+
+## PKN balance discount on a card checkout (2026-10-16)
+
+The buyer only opts in: quote and session both take `usePknDiscount: true` (a
+legacy numeric `pknDiscount` > 0 is read as the same opt-in; its amount is
+ignored). The server prices the discount itself with one rule
+(`money::checkout_pkn_discount`): the buyer's Firestore `balances/{uid}`
+available PKN, only lines from sellers whose profile does not say
+`acceptsPkn: false`, 2 PKN per euro-cent, and a card charge never below 50 cents.
+
+- The quote answers `pknVoucher` (what the buyer could take), `pknDiscount`
+  (`applied` only when opted in), `pknRefusedSellers` and `chargeCents`
+  (= `grandTotalCents` − `pknDiscount.eurCents`). Checkout shows those numbers.
+- The session locks the same amount (`order_discount_held`), charges
+  `chargeCents`, stores `pknDiscount` on the order and answers `chargeCents` and
+  `pknDiscount`. The webhook's expected charge is `totalEURCents − pknDiscount.eurCents`.

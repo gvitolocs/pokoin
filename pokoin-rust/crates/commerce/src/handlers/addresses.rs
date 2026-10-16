@@ -444,8 +444,10 @@ pub async fn marketplace_checkout_quote(
     }
 
     let mut seller_origins: HashMap<String, String> = HashMap::new();
+    let mut seller_docs: Vec<(String, Value)> = Vec::new();
     for seller_id in &seller_ids {
         let seller = store::read_user(state.firestore()?, seller_id).await?;
+        seller_docs.push((seller_id.clone(), seller.clone()));
         let profile_country = crate::domain::country::normalize_country(
             seller
                 .get("shipFromCountry")
@@ -486,6 +488,20 @@ pub async fn marketplace_checkout_quote(
     let tracked = quote.tracked;
     let quote = shipping::guard_checkout_quote(quote, tracked, insurance)?;
 
+    // The balance discount is priced here exactly as the Stripe session prices
+    // it: the buyer's own balance, sellers that take PKN, the guarded total.
+    let refused = crate::domain::money::pkn_refused_sellers(
+        seller_docs.iter().map(|(uid, doc)| (uid.as_str(), doc)),
+    );
+    let balance = store::balance(state.firestore()?, &claims.uid).await?;
+    let discount = crate::domain::money::checkout_pkn_discount(
+        balance.available_pkn,
+        &shipping::json_items(&items),
+        &refused,
+        quote.grand_total_cents,
+        crate::domain::money::wants_pkn_discount(&body),
+    );
+
     Ok(private_json(json!({
         "shipments": quote.shipments.iter().map(|shipment| json!({
             "sellerId": shipment.seller_id,
@@ -516,6 +532,10 @@ pub async fn marketplace_checkout_quote(
             .map(|shipment| (shipment.seller_id.clone(), json!(shipment.service_id())))
             .collect::<serde_json::Map<String, Value>>(),
         "insuranceCents": quote.insurance_cents,
+        "pknVoucher": discount.voucher_json(),
+        "pknDiscount": discount.applied_json(),
+        "pknRefusedSellers": refused,
+        "chargeCents": discount.charge_cents(quote.grand_total_cents),
         "sellerOrigins": seller_origins,
         "shippingAddressId": if address_id.is_empty() { Value::Null } else { json!(address_id) },
         "toCountry": to_country,

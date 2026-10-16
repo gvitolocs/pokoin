@@ -421,7 +421,8 @@ impl ShipmentQuote {
     }
 }
 
-fn json_items(items: &[Value]) -> Vec<QuoteItem> {
+/// Cart rows as money lines (the balance-discount and subtotal maths).
+pub fn json_items(items: &[Value]) -> Vec<QuoteItem> {
     items
         .iter()
         .map(|row| QuoteItem {

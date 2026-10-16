@@ -3,8 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { groupBySeller } from './cart-model.js';
 import { mergeShippingChoice } from './cart-row-edits.js';
+import { pknBalanceVoucher } from './checkout-fees.js';
 import {
+  checkoutChargeCents,
   checkoutParcelShipping,
+  checkoutRequestBody,
   checkoutSellerParcels,
   checkoutShippingPreviewCents,
 } from './checkout-model.js';
@@ -106,4 +109,43 @@ test('the checkout preview table prices like the API rate table', () => {
   const rows = (catalog) => catalog.rates.map(fields).map((row) => JSON.stringify(row)).sort();
   assert.deepEqual(rows(spa), rows(api));
   assert.deepEqual(spa.tiers, api.tiers);
+});
+
+test('quote and session bodies carry the per-parcel services and only a discount opt-in', () => {
+  const services = { red: 'untracked', givi: 'tracked' };
+  const quoteBody = checkoutRequestBody({ items: cartRows, toCountry: 'DK', services, useBalance: true });
+  assert.deepEqual(quoteBody.shippingServices, services);
+  assert.equal(quoteBody.toCountry, 'DK');
+  assert.equal(quoteBody.tracked, false);
+  assert.equal(quoteBody.shippingService, 'untracked');
+  assert.equal(quoteBody.usePknDiscount, true);
+  assert.equal('pknDiscount' in quoteBody, false);
+  assert.deepEqual(quoteBody.items.map((row) => [row.sellerUid, row.quantity, row.unitPricePkn]), [['red', 1, 200], ['givi', 2, 400]]);
+
+  const sessionBody = checkoutRequestBody({ items: cartRows, addressId: 'addr1', toCountry: 'DK', services, insurance: true });
+  assert.equal(sessionBody.shippingAddressId, 'addr1');
+  assert.equal('toCountry' in sessionBody, false);
+  assert.equal(sessionBody.insurance, true);
+  assert.equal(sessionBody.usePknDiscount, false);
+  // Same pricing inputs as the quote, so the session charges what the quote showed.
+  const { shippingAddressId, toCountry, insurance, usePknDiscount, ...samePricing } = sessionBody;
+  const { shippingAddressId: _a, toCountry: _b, insurance: _c, usePknDiscount: _d, ...quotePricing } = quoteBody;
+  assert.deepEqual(samePricing, quotePricing);
+});
+
+test('the charge is the server charge, else the total less the server discount', () => {
+  assert.equal(checkoutChargeCents({ grandTotalCents: 2184, chargeCents: 1834 }), 1834);
+  assert.equal(checkoutChargeCents({ grandTotalCents: 2184, pknDiscount: { eurCents: 350, applied: true } }), 1834);
+  assert.equal(checkoutChargeCents({ grandTotalCents: 2184 }), 2184);
+  assert.equal(checkoutChargeCents({ grandTotalCents: 2184, chargeCents: null }), 2184);
+  assert.equal(checkoutChargeCents(null), null);
+  assert.equal(checkoutChargeCents({}), null);
+});
+
+test('the preview voucher follows the server rule: 2 PKN per cent, 50-cent card floor', () => {
+  // Same cases as money::checkout_pkn_discount in the Rust commerce crate.
+  assert.deepEqual(pknBalanceVoucher({ availablePkn: 10000, eligiblePkn: 800, chargeEurCents: 1830 }), { eurCents: 400, pkn: 800 });
+  assert.deepEqual(pknBalanceVoucher({ availablePkn: 10000, eligiblePkn: 1000, chargeEurCents: 300 }), { eurCents: 250, pkn: 500 });
+  assert.deepEqual(pknBalanceVoucher({ availablePkn: 700, eligiblePkn: 1000, chargeEurCents: 2184 }), { eurCents: 350, pkn: 700 });
+  assert.deepEqual(pknBalanceVoucher({ availablePkn: 401, eligiblePkn: 401, chargeEurCents: 10000 }), { eurCents: 200, pkn: 400 });
 });
