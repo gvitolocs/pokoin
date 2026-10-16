@@ -66,9 +66,12 @@ pub fn is_satellite(game: &str) -> bool {
 }
 
 /// A satellite catalog query that could not be served.
+///
+/// The client message names the game only. The database text stays in the log.
 pub fn catalog_error(game: &str, error: impl std::fmt::Display) -> crate::error::ApiError {
+    tracing::error!(game, %error, "marketplace catalog unavailable");
     crate::error::ApiError::unavailable(format!(
-        "The {game} marketplace catalog is unavailable: {error}"
+        "The {game} marketplace catalog is unavailable."
     ))
     .with_code("GAME_CATALOG_UNAVAILABLE")
 }
@@ -120,7 +123,8 @@ mod tests {
         assert_eq!(error.status.as_u16(), 503);
         assert_eq!(error.code.as_deref(), Some("GAME_CATALOG_UNAVAILABLE"));
         assert!(error.message.contains("magic"));
-        assert!(error.message.contains("connection refused"));
+        assert!(!error.message.contains("connection refused"));
+        assert_eq!(error.message, "The magic marketplace catalog is unavailable.");
     }
 
     #[test]

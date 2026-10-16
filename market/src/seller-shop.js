@@ -123,3 +123,42 @@ export function sellerOfferRow(offer, lang) {
   };
   return { cardId, enriched, cardStub };
 }
+
+/**
+ * What the shop shows when the seller request fails. The API message stays off
+ * the page: a missing username is "not found", and every other failure
+ * (5xx, gateway, network) is a temporary outage.
+ */
+export function sellerShopErrorState(err) {
+  if (Number(err?.status) === 404) {
+    return {
+      kind: 'not_found',
+      title: 'Seller not found',
+      lede: 'No Pokoin seller uses this username.',
+    };
+  }
+  return {
+    kind: 'unavailable',
+    title: 'Shop unavailable',
+    lede: 'This shop could not be loaded right now. Try again in a moment.',
+  };
+}
+
+/**
+ * Empty-shop copy. Narrowed filters keep the filter line. An unfiltered
+ * Pokémon shop says there are no live asks. An unfiltered satellite shop names
+ * the game (`gameName`, e.g. "One Piece").
+ */
+export function sellerShopEmptyCopy({ gameName = '', displayName = '', pokemon = false, narrowed = false } = {}) {
+  const name = displayName || '';
+  if (narrowed) {
+    return { title: 'No listings', lede: `${name} has no live asks for these filters.` };
+  }
+  if (pokemon) {
+    return { title: 'No listings', lede: `${name} has no live asks.` };
+  }
+  return {
+    title: `No ${gameName} listings yet`,
+    lede: `${name} has no ${gameName} listings yet.`,
+  };
+}

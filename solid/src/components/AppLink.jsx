@@ -11,12 +11,13 @@ import { gameHref } from '@market/game.js';
 export default function AppLink(props) {
   const href = () => marketUrl(props.to);
   const external = () => String(href()).startsWith('http');
+  const prefixed = () => gameHref(href());
   const rel = () => [props.rel, authAnchorRel(props.to)].filter(Boolean).join(' ') || undefined;
-  const link = useLinkState(() => (external() ? '' : href()));
+  const link = useLinkState(() => (external() ? '' : prefixed()));
   return (
     <a
       class={[props.class, { active: !external() && link.active() }]}
-      href={gameHref(href())}
+      href={prefixed()}
       title={props.title}
       aria-label={props['aria-label']}
       rel={rel()}

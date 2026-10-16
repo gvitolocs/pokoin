@@ -75,7 +75,7 @@ test('suggest thumbs preload into the LRU; the first rows load eagerly', () => {
 test('game and title language sit on the left of the search pill', () => {
   assert.match(box, /class="search-pill"[\s\S]*<div class="search-lead">[\s\S]*<GameSelect \/>[\s\S]*<LangToggle \/>/);
   assert.match(toggles, /export function PrintLangToggle[\s\S]*search-lens-mark[\s\S]*search-go-icon/);
-  assert.match(box, /<Show when=\{pokemon\}><PrintLangToggle \/><\/Show>/);
+  assert.match(box, /<Show when=\{pokemon\(\)\}><PrintLangToggle \/><\/Show>/);
   assert.match(box, /class="sr-only" type="submit"/);
   assert.equal(box.includes('search-submit'), false);
   assert.equal(/<\/form>\s*<LangToggle \/>/.test(box), false);
