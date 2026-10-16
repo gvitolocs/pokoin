@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
-import { GAMES, game, gameIconSrc, gameSiteHref, sellerDeskUsesGameOverride, setScanGameOverride } from '@market/game.js';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
+import { GAMES, game, gameIconSrc, gameSiteHref, gameSitePath, isMarketplaceHomePath, sellerDeskUsesGameOverride, setScanGameOverride } from '@market/game.js';
 import {
   PRINT_LANGS,
   SEARCH_LANGS,
@@ -13,6 +14,7 @@ import {
   setSearchLang,
 } from '@market/locale.js';
 import { dismissWhileOpen } from '../lib/dismiss.js';
+import { afterPaint } from '../lib/yield-nav.js';
 import { printLang, searchLang } from '../stores/locale.js';
 
 function Caret() {
@@ -33,7 +35,7 @@ function GlobeIcon(props) {
 
 /** Card title language (market Chrome.jsx LangToggle). The URL language wins. */
 export function LangToggle() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   const [open, setOpen] = createSignal(false);
   let box;
@@ -143,39 +145,47 @@ function GameIcon(props) {
 
 /** Game switcher (market Chrome.jsx GameSelect): another game is another host or path. */
 export function GameSelect() {
-  const current = game();
+  const navigate = useGameNavigate();
+  const location = useLocation();
+  const current = () => game();
   const [open, setOpen] = createSignal(false);
   let box;
   dismissWhileOpen(open, () => box, () => setOpen(false));
   function pick(id) {
     setOpen(false);
-    if (id === current.id) return;
-    if (sellerDeskUsesGameOverride(window.location.hostname, window.location.pathname)) {
+    if (id === current().id) return;
+    const pathname = location.pathname;
+    if (sellerDeskUsesGameOverride(window.location.hostname, pathname)) {
       setScanGameOverride(id);
       window.location.reload();
       return;
     }
-    window.location.assign(gameSiteHref(id, window.location.pathname));
+    const target = gameSitePath(id, pathname);
+    if (isMarketplaceHomePath(target)) {
+      afterPaint(() => navigate(target, { gamePath: true }));
+      return;
+    }
+    window.location.assign(gameSiteHref(id, pathname));
   }
   return (
     <div class="game-select" ref={(node) => { box = node; }}>
       <button
         type="button"
-        aria-label={`Game, ${current.name}`}
+        aria-label={`Game, ${current().name}`}
         aria-haspopup="listbox"
         aria-expanded={open() ? 'true' : 'false'}
-        title={current.name}
+        title={current().name}
         onClick={() => setOpen((value) => !value)}
       >
-        <GameIcon game={current} />
+        <GameIcon game={current()} />
         <Caret />
       </button>
       <Show when={open()}>
         <ul class="lang-menu game-menu" role="listbox" aria-label="Game">
           <For each={Object.values(GAMES)}>
             {(item) => (
-              <li role="option" aria-selected={(item.id === current.id) ? 'true' : 'false'}>
-                <button type="button" class={{ 'is-active': item.id === current.id }} onClick={() => pick(item.id)}>
+              <li role="option" aria-selected={(item.id === current().id) ? 'true' : 'false'}>
+                <button type="button" class={{ 'is-active': item.id === current().id }} onClick={() => pick(item.id)}>
                   <GameIcon game={item} />
                   <span>{item.name}</span>
                 </button>

@@ -66,7 +66,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   const [engine, setEngine] = createSignal(null);
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
-  const pokemon = isPokemonGame();
+  const pokemon = () => isPokemonGame();
   let current = '';
 
   onSettled(() => {
@@ -89,9 +89,9 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), String(query() || '').trim(), searchLang(), printLang()],
-    ([live, term, lang, print]) => {
-      if (!live || !pokemon) return undefined;
+    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon()],
+    ([live, term, lang, print, isPokemon]) => {
+      if (!live || !isPokemon) return undefined;
       pool ||= live.emptyPool();
       clock ||= live.createGenerationClock();
       const scope = live.buildScope({ lang, printLang: print, kind, game: 'pokemon', query: term });
@@ -149,12 +149,12 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   // Catalog hydration (name / artist / set printings the resolver points at),
   // and the satellite-game Meili suggest (no local catalog).
   createEffect(
-    () => [engine(), String(query() || '').trim(), searchLang(), printLang()],
-    ([live, term, lang, print]) => {
+    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon()],
+    ([live, term, lang, print, isPokemon]) => {
       current = term;
       if (!live || !term) return undefined;
       const ready = live.suggestLiveReady(term);
-      if (pokemon) {
+      if (isPokemon) {
         if (!ready) return undefined;
         const resolved = live.resolveSuggestQuery(term);
         const targets = [];

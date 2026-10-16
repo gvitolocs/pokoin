@@ -311,9 +311,6 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
             Err(error.into())
         }
     };
-    if state.game_pools(game).await.is_none() {
-        return Ok(false);
-    }
     let mut tx = state.write_db().begin().await?;
     let locked: bool = sqlx::query_scalar("select pg_try_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("seller-book:{}:{game}", seller.uid))
@@ -322,8 +319,12 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
     if !locked {
         return Ok(false);
     }
-    // Listings are the main database, unfiltered by game, same text as the book.
-    let stamp = seller_activity_stamp(state.write_db(), &seller.uid)
+    // Listings live on the main marketplace DB. The satellite pool is only the
+    // catalog, and a game that is not mounted has nothing to rebuild.
+    if state.game_pools(game).await.is_none() {
+        return Ok(false);
+    }
+    let stamp = seller_activity_stamp(state.read_db(), &seller.uid)
         .await
         .map_err(|error| crate::game::catalog_error(game, error))?;
     let stored = sqlx::query("select stamp, profile, seller from public.marketplace_seller_books where seller_uid = $1 and game = $2")
@@ -346,7 +347,7 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
         }
     }
     let header = header.unwrap_or_default();
-    let (built_stamp, body, listings) = build_book_with(state, state.write_db(), seller, &header, game, compact()).await?;
+    let (built_stamp, body, listings) = build_book_with(state, seller, &header, game, compact()).await?;
     let br = match how.compress {
         Some(compress) => {
             let bytes = body.clone();

@@ -26,6 +26,7 @@ function localRouter({ getJson, read, refresh = async () => false }) {
   const deps = {
     publicApiUrl: (path) => `https://api.pokoin.com${path}`,
     withGameQuery: (path) => path,
+    localUrl: (path) => `https://api.pokoin.com${path}`,
     localStorable,
     getJson,
     isC1,
