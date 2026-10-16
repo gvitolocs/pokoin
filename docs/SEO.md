@@ -98,8 +98,9 @@ Prices” copy stays on `<title>` / `SeoHead` only.
 template, catalog hub and card desk, with the same hubs as plain links
 underneath (`solid/src/pages/SiteMap.jsx`). Its data is
 `market/public/data/site-map.json`, built on nezopt by
-`node scripts/build-site-map.mjs`. Page links come from the SPA source
-(routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
+`node scripts/build-site-map.mjs`. Page links come from the Solid app
+(`solid/src/router.js` and the route modules it imports, `<A>` / `<AppLink>`
+`href` and `to`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
 come from a read-only SELECT against the 15T marketplace Postgres and the
 public expansion list. It is not part of the Vercel build, so rerun it and
 commit the JSON when routes or the catalog change. `?focus=set:base-set`
