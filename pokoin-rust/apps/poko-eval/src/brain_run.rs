@@ -22,7 +22,7 @@ pub async fn run_brain(ctx: &BrainContext, question: &Question) -> RunRecord {
         .collect();
     let input = BrainInput {
         user_message: question.message.clone(),
-        context_blocks: Vec::new(),
+        context_blocks: question.context.clone(),
         history,
         game: question.game_id().to_string(),
         display_name: String::new(),
