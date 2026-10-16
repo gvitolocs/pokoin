@@ -1,5 +1,6 @@
 import { createEffect, Show } from 'solid-js';
-import { useNavigate, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { brandSrc } from '@market/brand-assets.js';
 import { REFERRAL_CLAIM_WINDOW_DAYS, REFERRAL_REWARD_PKN, cleanReferralCode, rememberReferralCode } from '@market/referral.js';
 import '@market/referral.css';
@@ -9,7 +10,7 @@ import { authConfirmed, authUser, loadAuth } from '../stores/auth.js';
 /** pokoin.com/join/<username> — the landing an invite link opens. */
 export default function Join() {
   const params = useParams();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const code = () => cleanReferralCode(params.code);
   loadAuth().catch(() => {});
 

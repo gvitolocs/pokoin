@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { formatPknNumber } from '@market/api.js';
 import { catalogMenuLinks } from '@market/catalog-links.js';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
@@ -134,10 +135,10 @@ function SelectBandBox() {
  * cart tray, phone menu, footer, and the page-wide selection band.
  */
 export default function Chrome(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
-  const site = game();
-  const pokemon = isPokemonGame();
+  const site = () => game();
+  const pokemon = () => isPokemonGame();
   const extensionDesk = framedByChromeExtension();
   const [menu, setMenu] = createSignal(false);
   const [menuArmed, setMenuArmed] = createSignal(false);
@@ -149,7 +150,7 @@ export default function Chrome(props) {
   const showAvatar = () => Boolean(signedIn() && (profile()?.uid || authUser()?.uid));
   const desktopCount = () => desktopItems().length;
   const pknLabel = () => `${formatPknNumber(pknAmount())} PKN`;
-  const homeHref = marketUrl(site.homeHref || '/');
+  const homeHref = () => marketUrl(site().homeHref || '/');
   const signInTo = () => {
     const path = location.pathname.startsWith('/auth')
       ? (new URLSearchParams(location.search).get('from') || '/marketplace')
@@ -273,7 +274,7 @@ export default function Chrome(props) {
           >
             <span /><span /><span />
           </button>
-          <AppLink class="brand" to="/marketplace" aria-label={site.title}>
+          <AppLink class="brand" to="/marketplace" aria-label={site().title}>
             {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps the round badge. */}
             <img class="brand-badge" src="/home/logo.png" alt="" width="40" height="40" />
             <PokoinWordmark />
@@ -324,7 +325,7 @@ export default function Chrome(props) {
             <NavHover id="dashboard" pop={navPop()} setPop={setNavPop} preview="DashboardPreview">
               <AppLink to={DASHBOARD_HOME} aria-label="Dashboard"><Svg d={ICO.dashboard} /></AppLink>
             </NavHover>
-            <Show when={site.features?.competitive}>
+            <Show when={site().features?.competitive}>
               <AppLink class="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive"><Svg d={ICO.trophy} /></AppLink>
             </Show>
             <AppLink class="pkn-chip" to="/wallet" title="Wallet">{pknLabel()}</AppLink>
@@ -392,8 +393,8 @@ export default function Chrome(props) {
               open={menu() && menuArmed()}
               onClose={closeMenu}
               lang={searchLang()}
-              pokemon={pokemon}
-              competitive={Boolean(site.features?.competitive)}
+              pokemon={pokemon()}
+              competitive={Boolean(site().features?.competitive)}
               signedIn={signedIn()}
               admin={accountAdmin()}
               profile={profile()}
@@ -403,7 +404,7 @@ export default function Chrome(props) {
               cartCount={cartCount()}
               messagesUnread={messagesUnread()}
               signInTo={signInTo()}
-              homeHref={homeHref}
+              homeHref={homeHref()}
               paths={MENU_PATHS}
             />
           );

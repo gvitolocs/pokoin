@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Repeat, Show, untrack } from 'solid-js';
-import { useNavigate, useParams, useSearchParams } from '@solidjs/router';
+import { useParams, useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { fetchSellerShop, fetchSellerSnapshot } from '@market/api.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
@@ -87,7 +88,7 @@ function SkeletonRows() {
 function SellerShop(props) {
   const handle = untrack(() => props.handle);
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => props.lang || getSearchLang();
   const hintedUid = () => String(searchParams.sellerUid || '').trim();
   const selectedGame = game().apiGame;

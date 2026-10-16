@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useNavigate, useSearchParams } from '@solidjs/router';
+import { useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   connectPowerTools,
   disconnectPowerTools,
@@ -188,7 +189,7 @@ function PowerToolsPanel(props) {
 
 function ZeroDesk(props) {
   if (props.preview) seedPreviewPicked();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [data, setData] = createSignal(props.preview ? previewZero() : null);
   const [error, setError] = createSignal('');
   const [notConnected, setNotConnected] = createSignal(false);

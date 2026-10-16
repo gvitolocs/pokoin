@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, Match, Show, Switch } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { fetchExpansionSymbols, saveExpansionSymbol } from '@market/api.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, Thread } from '../components/Desk.jsx';
 import { accountAdmin } from '../stores/account.js';
@@ -18,7 +19,7 @@ function shapeRow(row) {
 
 function AdminDesk() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [rows, setRows] = createSignal([]);
   const [filter, setFilter] = createSignal('');
   const [query, setQuery] = createSignal('');
