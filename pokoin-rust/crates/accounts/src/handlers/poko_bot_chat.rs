@@ -4,6 +4,8 @@
 //! here. There is no Firebase session and no transcript write: the bot keeps
 //! its own history. Personal marketplace data is loaded only for a private
 //! `dm` whose `firebaseUid` the bot already resolved through `/api/poko-connect`.
+//! The bot sends Hermes-compatible Honcho ids (`memoryPeerId`, `memorySessionId`)
+//! so Telegram and Discord users keep the memories Hermes Poko built.
 
 use std::collections::HashSet;
 
@@ -26,6 +28,8 @@ const MESSAGE_CHARS: usize = 4_000;
 const USER_KEY_CHARS: usize = 80;
 const SESSION_CHARS: usize = 80;
 const DISPLAY_NAME_CHARS: usize = 80;
+const FIREBASE_UID_CHARS: usize = 128;
+const MEMORY_ID_CHARS: usize = 160;
 const HISTORY_TURNS: usize = 10;
 const HISTORY_TEXT_CHARS: usize = 2_000;
 const CONTEXT_BLOCKS: usize = 6;
@@ -60,6 +64,8 @@ struct BotChatRequest {
     context_blocks: Vec<String>,
     images: Vec<Vec<u8>>,
     game: String,
+    memory_peer_id: Option<String>,
+    memory_session_id: Option<String>,
 }
 
 /// `POST /api/poko-bot-chat`.
@@ -127,7 +133,7 @@ fn parse_request(body: &Json) -> Result<BotChatRequest, String> {
     if user_key.is_empty() || user_key.chars().count() > USER_KEY_CHARS {
         return Err("userKey must be 1-80 characters".to_string());
     }
-    let firebase_uid = clean_firebase_uid(body.get("firebaseUid"));
+    let firebase_uid = clean_id(body.get("firebaseUid"), FIREBASE_UID_CHARS);
     let session_raw = string_field(body, "sessionId").trim().to_string();
     let session_id = if session_raw.is_empty() {
         user_key.clone()
@@ -155,12 +161,15 @@ fn parse_request(body: &Json) -> Result<BotChatRequest, String> {
         context_blocks,
         images,
         game,
+        memory_peer_id: clean_id(body.get("memoryPeerId"), MEMORY_ID_CHARS),
+        memory_session_id: clean_id(body.get("memorySessionId"), MEMORY_ID_CHARS),
     })
 }
 
-fn clean_firebase_uid(value: Option<&Json>) -> Option<String> {
+/// A trimmed `[A-Za-z0-9_-]{1,max}` id, else `None`.
+fn clean_id(value: Option<&Json>, max: usize) -> Option<String> {
     let text = value.and_then(Json::as_str)?.trim();
-    if (1..=128).contains(&text.len())
+    if (1..=max).contains(&text.len())
         && text
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
@@ -451,6 +460,8 @@ async fn run_turn(state: &DomainState, request: BotChatRequest) -> Response {
             display_name: request.display_name.clone(),
             user_id,
             session_id: request.session_id.clone(),
+            memory_peer_id: request.memory_peer_id.clone(),
+            memory_session_id: request.memory_session_id.clone(),
         },
     )
     .await
@@ -544,6 +555,45 @@ mod tests {
             "userKey": "telegram:12345",
             "message": "hi",
         })
+    }
+
+    #[test]
+    fn memory_ids_keep_only_safe_honcho_ids() {
+        for id in [
+            "telegram_user_123",
+            "telegram_chat_-100123",
+            "discord_guild_user_1_2",
+            "poko_user_abcDEF-_9",
+        ] {
+            let mut body = base_message();
+            body["memoryPeerId"] = json!(format!(" {id} "));
+            body["memorySessionId"] = json!(id);
+            let request = parsed(body).unwrap();
+            assert_eq!(request.memory_peer_id.as_deref(), Some(id));
+            assert_eq!(request.memory_session_id.as_deref(), Some(id));
+        }
+        let absent = parsed(base_message()).unwrap();
+        assert_eq!(absent.memory_peer_id, None);
+        assert_eq!(absent.memory_session_id, None);
+        let too_long = "a".repeat(161);
+        for bad in [
+            json!(""),
+            json!("   "),
+            json!("a:b"),
+            json!("a b"),
+            json!(too_long),
+            json!(7),
+        ] {
+            let mut body = base_message();
+            body["memoryPeerId"] = bad.clone();
+            body["memorySessionId"] = bad;
+            let request = parsed(body).unwrap();
+            assert_eq!(request.memory_peer_id, None);
+            assert_eq!(request.memory_session_id, None);
+        }
+        let mut body = base_message();
+        body["memoryPeerId"] = json!("a".repeat(160));
+        assert!(parsed(body).unwrap().memory_peer_id.is_some());
     }
 
     #[test]
