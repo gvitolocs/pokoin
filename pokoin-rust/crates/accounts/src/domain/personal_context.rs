@@ -585,6 +585,19 @@ pub async fn build_personal_context(
     }))
 }
 
+/// A Poko chat turn has an open desk only when it attached that card: the
+/// stored snapshot desk (an earlier page) is dropped, so a removed chip is
+/// never read back as "Open desk". With a turn desk, `personal.desk` already
+/// is it (the overlay wins in `build_personal_context`).
+pub fn with_turn_desk(mut personal: Json, turn_desk: Option<&Json>) -> Json {
+    if turn_desk.is_none() {
+        if let Some(object) = personal.as_object_mut() {
+            object.insert("desk".into(), Json::Null);
+        }
+    }
+    personal
+}
+
 /// `formatPersonalIntent(personal)` — the compact planner block.
 pub fn format_personal_intent(personal: &Json) -> String {
     if !personal.is_object() {
@@ -822,6 +835,21 @@ mod tests {
                 .collect(),
         );
         assert_eq!(clean_cart_items(Some(&raw)).len(), CART_LIMIT);
+    }
+
+    #[test]
+    fn chat_turn_without_an_attached_card_has_no_open_desk() {
+        let personal = json!({
+            "desk": { "cardId": "250366", "name": "Foongus", "setName": "Plasma Storm" },
+            "recents": [], "watchlist": [], "cart": [],
+        });
+        assert!(format_personal_intent(&personal).contains("Open desk: Foongus"));
+        let chat = with_turn_desk(personal.clone(), None);
+        assert!(chat["desk"].is_null());
+        assert!(!format_personal_intent(&chat).contains("Foongus"));
+        let attached = json!({ "cardId": "250366", "name": "Foongus", "setName": "Plasma Storm" });
+        let chat = with_turn_desk(personal, Some(&attached));
+        assert!(format_personal_intent(&chat).contains("Open desk: Foongus (Plasma Storm) cardId=250366"));
     }
 
     #[test]

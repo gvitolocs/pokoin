@@ -10,7 +10,7 @@ import {
   pokoUserTurnKey,
   readPokoHistory,
   reconcilePokoEvents,
-  resolvePokoCards,
+  tagsToPokoCards,
   writePokoHistory,
 } from '@market/poko-chat.js';
 
@@ -147,7 +147,8 @@ export function createPokoThread({ uid, signedIn, getBearer, enabled, pathname }
 
   async function send({ message = '', tags = [], photos = [] } = {}) {
     const path = pathname();
-    const attached = resolvePokoCards({ tags, pathname: path });
+    // Only the cards in the composer count; the page being viewed is not context.
+    const attached = tagsToPokoCards(tags);
     const attachedImages = (photos || []).slice();
     if (busyNow || (!message.trim() && !attached.length && !attachedImages.length)) return null;
     busyNow = true;
