@@ -1,0 +1,20 @@
+[package]
+name = "poko-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "poko-eval"
+path = "src/main.rs"
+
+[dependencies]
+pokoin-accounts = { path = "../../crates/accounts" }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "sync"] }
+
+[lints.rust]
+unsafe_code = "forbid"

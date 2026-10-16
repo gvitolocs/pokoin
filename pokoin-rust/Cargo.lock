@@ -1784,6 +1784,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "poko-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pokoin-accounts",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pokoin-accounts"
 version = "0.1.0"
 dependencies = [
