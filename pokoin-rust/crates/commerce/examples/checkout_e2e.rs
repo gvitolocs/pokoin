@@ -61,65 +61,6 @@ impl TokenVerifier for E2eVerifier {
     }
 }
 
-/// The Firestore emulator rejects a `runQuery` whose body repeats `parent`
-/// ("Field parent already exists with a different value"); the commerce
-/// client sends the parent document in the body. This local shim forwards
-/// everything to the emulator and moves that `parent` into the URL path, the
-/// documented REST form, so subcollection queries (saved addresses) work.
-async fn firestore_shim(
-    axum::extract::State((http, emulator)): axum::extract::State<(reqwest::Client, String)>,
-    request: axum::extract::Request,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    let method = request.method().clone();
-    let path_query = request
-        .uri()
-        .path_and_query()
-        .map(|value| value.as_str().to_string())
-        .unwrap_or_default();
-    let auth = request
-        .headers()
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("Bearer owner")
-        .to_string();
-    let Ok(bytes) = axum::body::to_bytes(request.into_body(), 32 * 1024 * 1024).await else {
-        return (axum::http::StatusCode::BAD_REQUEST, "body").into_response();
-    };
-    let mut target = format!("http://{emulator}{path_query}");
-    let mut body = bytes.to_vec();
-    if path_query.ends_with(":runQuery") {
-        if let Ok(mut json) = serde_json::from_slice::<Value>(&bytes) {
-            if let Some(parent) = json
-                .as_object_mut()
-                .and_then(|object| object.remove("parent"))
-                .and_then(|value| value.as_str().map(str::to_string))
-            {
-                if let Some(at) = parent.find("/v1/") {
-                    target = format!("http://{emulator}{}:runQuery", &parent[at..]);
-                }
-            }
-            body = serde_json::to_vec(&json).unwrap_or_default();
-        }
-    }
-    let forwarded = http
-        .request(method, &target)
-        .header("authorization", auth)
-        .header("content-type", "application/json")
-        .body(body)
-        .send()
-        .await;
-    match forwarded {
-        Ok(response) => {
-            let status = axum::http::StatusCode::from_u16(response.status().as_u16())
-                .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
-            let bytes = response.bytes().await.unwrap_or_default();
-            (status, [("content-type", "application/json")], bytes).into_response()
-        }
-        Err(error) => (axum::http::StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
-    }
-}
-
 fn env(name: &str, fallback: &str) -> String {
     std::env::var(name)
         .ok()
@@ -287,19 +228,10 @@ async fn main() -> anyhow::Result<()> {
         fail("the emulator, the database and the listener must all be on localhost.");
     }
 
-    let http = reqwest::Client::new();
-    let shim_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let shim = shim_listener.local_addr()?;
-    let shim_app = axum::Router::new()
-        .fallback(firestore_shim)
-        .with_state((http.clone(), emulator.clone()));
-    tokio::spawn(async move {
-        let _ = axum::serve(shim_listener, shim_app).await;
-    });
     let firestore = FirestoreClient::with_static_token(
-        http,
+        reqwest::Client::new(),
         PROJECT,
-        format!("http://{shim}/v1/projects/{PROJECT}/databases/(default)/documents"),
+        format!("http://{emulator}/v1/projects/{PROJECT}/databases/(default)/documents"),
         "owner",
     );
     let pool = sqlx::postgres::PgPoolOptions::new()

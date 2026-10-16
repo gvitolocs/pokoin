@@ -169,3 +169,6 @@ cookie `pokoin.auth.token={"token":"e2e-buyer-token-not-a-firebase-jwt","uid":"e
 and `localStorage['pokoin.auth.session']={"uid":"e2e-buyer","signedIn":true}`, then
 use `/cart` → `/checkout` and pay with Stripe's test card `4242 4242 4242 4242`.
 `VITE_POKOIN_API_ORIGIN` only works under `vite dev`; production builds ignore it.
+
+With the emulator up, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8086 cargo test -p pokoin-commerce --test firestore_emulator`
+checks that sub-collection queries (saved addresses) put the parent in the `runQuery` URL path.
