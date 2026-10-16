@@ -1,0 +1,19 @@
+[package]
+name = "tcgplayer-match"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Pokoin public printing -> TCGplayer product crosswalk (see docs/TCGPLAYER_MATCH.md).
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pokoin-tcgplayer-match"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+unicode-normalization = "0.1"
