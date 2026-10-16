@@ -10,6 +10,7 @@ import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
  * Artist album tile for a same-artwork group: stacked sheets + count chip.
@@ -55,7 +56,7 @@ export function ArtistPileTile(props) {
             'is-landscape': landscape(),
             'is-selected': picked(),
           }]}
-          href={cardHref(rep())}
+          href={gameHref(cardHref(rep()))}
           data-card-id={rep().id}
           aria-selected={picked() ? 'true' : undefined}
           aria-label={`${rep().name}, ${props.group.cards.length} printings of the same artwork`}
@@ -152,7 +153,7 @@ export function ArtworkPileOverlay(props) {
                 >
                   <a
                     class="artwork-pile-frame"
-                    href={cardHref(card)}
+                    href={gameHref(cardHref(card))}
                     onClick={() => {
                       handOffCard(card);
                       rememberCardId(card);

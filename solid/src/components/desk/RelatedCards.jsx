@@ -2,6 +2,7 @@ import { createEffect, createMemo, createStore, For, reconcile, Show, untrack } 
 import { overlayCatalogTilePrices } from '@market/api.js';
 import CardSelectGrid from '../CardSelectGrid.jsx';
 import CardTile from '../CardTile.jsx';
+import { gameHref } from '@market/game.js';
 
 function idsOf(rows) {
   return (rows || []).map((row) => String(row?.id || '')).join('|');
@@ -55,7 +56,7 @@ export default function RelatedCards(props) {
         <header class="panel-head">
           <h2>Related cards</h2>
           <Show when={props.speciesHref && props.speciesName}>
-            <a href={props.speciesHref}>All {props.speciesName}</a>
+            <a href={gameHref(props.speciesHref)}>All {props.speciesName}</a>
           </Show>
         </header>
         <Show

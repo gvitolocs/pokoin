@@ -10,7 +10,8 @@ import {
   Show,
   untrack,
 } from 'solid-js';
-import { useLocation, useNavigate, useParams } from '@solidjs/router';
+import { useLocation, useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cardFromCatalogRow,
   cardHref,
@@ -23,7 +24,7 @@ import {
 import { realPublicCardId } from '@market/card-stub.js';
 import { isNameReprintCard, mergePrintingRows, printLangBadge, splitVersionPage } from '@market/card-versions.js';
 import { filterExactNameRows } from '@market/exact-name.js';
-import { game, publicGamePath } from '@market/game.js';
+import { game, gameHref, publicGamePath } from '@market/game.js';
 import { applyLastMedianPrices } from '@market/pkn.js';
 import { eraHref } from '@market/set-logos.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -68,7 +69,7 @@ function TileGrid(props) {
 export default function Versions() {
   const params = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => params.lang || 'en';
   const cardId = () => realPublicCardId(params.cardId);
   const pageKey = createMemo(() => `${lang()}:${cardId()}:${params.slug || ''}`);
@@ -234,7 +235,7 @@ function VersionsPage(props) {
     <>
       <SeoHead title="Versions" description="Card versions." canonical={publicGamePath(parentPath(), game().id)} noindex />
       <nav class="crumbs">
-        <a href="/marketplace">Marketplace</a>
+        <a href={gameHref('/marketplace')}>Marketplace</a>
         <span>/</span>
         <span>{slug || cardId}</span>
         <span>/</span>
@@ -257,10 +258,10 @@ function VersionsPage(props) {
           noindex
         />
         <nav class="crumbs">
-          <a href="/marketplace">Marketplace</a>
+          <a href={gameHref('/marketplace')}>Marketplace</a>
           <span>/</span>
           <Show when={current()} fallback={<span>{slug || cardId}</span>}>
-            <a href={cardHref(current())}>{current().name}</a>
+            <a href={gameHref(cardHref(current()))}>{current().name}</a>
           </Show>
           <span>/</span>
           <span>Versions</span>
@@ -285,7 +286,7 @@ function VersionsPage(props) {
         </Show>
         <Show when={showRarity()}>
           <section class="versions-section" id="versions">
-            <h2>Others from the expansion</h2>
+            <h2>{setName() ? `From ${setName()}` : 'Same expansion'}</h2>
             <TileGrid rows={view.versions} cardId={cardId} />
           </section>
         </Show>
@@ -293,7 +294,7 @@ function VersionsPage(props) {
           {(group) => (
             <section class="versions-section" id={group.id}>
               <h2>
-                <a class="era-link" href={eraHref(group.label)}>{group.label}</a>
+                <a class="era-link" href={gameHref(eraHref(group.label))}>{group.label}</a>
               </h2>
               <TileGrid rows={group.rows} cardId={cardId} flags />
             </section>

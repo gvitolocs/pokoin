@@ -98,8 +98,9 @@ Prices” copy stays on `<title>` / `SeoHead` only.
 template, catalog hub and card desk, with the same hubs as plain links
 underneath (`solid/src/pages/SiteMap.jsx`). Its data is
 `market/public/data/site-map.json`, built on nezopt by
-`node scripts/build-site-map.mjs`. Page links come from the SPA source
-(routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
+`node scripts/build-site-map.mjs`. Page links come from the Solid app
+(`solid/src/router.js` and the route modules it imports, `<A>` / `<AppLink>`
+`href` and `to`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
 come from a read-only SELECT against the 15T marketplace Postgres and the
 public expansion list. It is not part of the Vercel build, so rerun it and
 commit the JSON when routes or the catalog change. `?focus=set:base-set`
@@ -108,10 +109,14 @@ commit the JSON when routes or the catalog change. `?focus=set:base-set`
 Weekly refresh: `pokoin-site-map-refresh.timer` (systemd user unit on nezopt,
 Mondays 04:30 UTC) runs `scripts/refresh-site-map.sh` inside its own Paseo
 worktree (`~/.paseo/worktrees/2n15xc8c/site-map-refresh`, used by nothing
-else). It checks out `origin/main`, rebuilds the JSON, and only when the map
-changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
-leaves the file alone when only the date would change, so quiet weeks deploy
-nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.
+else). It checks out `origin/main`, rebuilds `site-map.json` and
+`site-map-images.json`, and only when either file changed commits both, pushes
+to `main`, uploads with `scripts/publish-web.sh`, smoke-checks the version
+preview (`/`, `/marketplace`, `/sitemap`, `/market/data/site-map.json`), then
+promotes that version. A failed preview check leaves the version unpromoted and
+the unit fails (OnFailure alert). The builder leaves the files alone when only
+the date would change, so quiet weeks publish nothing. Log:
+`journalctl --user -u pokoin-site-map-refresh`.
 
 Site map v2: **Market** view colours card stars by the cheapest listed PKN
 (`cheapest_homepage_cache_blueprint`, quintile ramp, snapshot date in the

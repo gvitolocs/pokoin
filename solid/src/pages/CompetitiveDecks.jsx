@@ -4,6 +4,7 @@ import { competitiveData, deckById, placeSuffix, scanUrl, tournamentById } from 
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav, { NotInSnapshot, Sprite } from '../components/CompetitiveNav.jsx';
 import { DeskPanel } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 function DecksList() {
   const data = competitiveData();
@@ -43,7 +44,7 @@ function DecksList() {
                     <td>{index() + 1}</td>
                     <td><Sprite deck={deck} /></td>
                     <td>
-                      <a href={`/marketplace/competitive/decks/${deck.id}`}>{deck.name}</a>
+                      <a href={gameHref(`/marketplace/competitive/decks/${deck.id}`)}>{deck.name}</a>
                     </td>
                     <td class="num">{deck.points}</td>
                     <td>
@@ -77,7 +78,7 @@ function DeckDetail(props) {
     <div class="page desk comp-page">
       <CompetitiveNav />
       <nav class="crumbs">
-        <a href="/marketplace/competitive/decks">Decks</a>
+        <a href={gameHref('/marketplace/competitive/decks')}>Decks</a>
         <span>/</span>
         <span>{deck.name}</span>
       </nav>
@@ -108,10 +109,10 @@ function DeckDetail(props) {
                     <tr>
                       <td>{row.place}</td>
                       <td>
-                        <a href={`/marketplace/competitive/players/${row.playerId}`}>{row.player}</a>
+                        <a href={gameHref(`/marketplace/competitive/players/${row.playerId}`)}>{row.player}</a>
                       </td>
                       <td>
-                        <a href={`/marketplace/competitive/tournaments/${row.tid}`}>{tournamentById(row.tid)?.name || row.tid}</a>
+                        <a href={gameHref(`/marketplace/competitive/tournaments/${row.tid}`)}>{tournamentById(row.tid)?.name || row.tid}</a>
                       </td>
                     </tr>
                   )}
@@ -137,7 +138,7 @@ function DeckDetail(props) {
                   {(row) => (
                     <tr>
                       <td>
-                        <a href={`/marketplace/competitive/decklists/${row.id}`}>{row.player}</a>
+                        <a href={gameHref(`/marketplace/competitive/decklists/${row.id}`)}>{row.player}</a>
                       </td>
                       <td>{tournamentById(row.event)?.name || ''} · {row.place}{placeSuffix(row.place)}</td>
                     </tr>

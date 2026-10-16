@@ -14,7 +14,8 @@ import {
   Switch,
   untrack,
 } from 'solid-js';
-import { useLocation, useNavigate, useParams } from '@solidjs/router';
+import { useLocation, useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   artistHref,
   artistSlug,
@@ -92,7 +93,7 @@ import { ownerGameLocation } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
-import { game, publicGamePath } from '@market/game.js';
+import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
 import { sellLanguages } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
@@ -169,7 +170,7 @@ function offerCopies(rows) {
 export default function Card() {
   const params = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => params.lang || 'en';
   const cardId = () => realPublicCardId(params.cardId);
   const deskKey = createMemo(() => `${lang()}:${cardId()}`);
@@ -211,7 +212,7 @@ function CardDesk(props) {
   const cardId = untrack(() => String(props.cardId));
   const lang = untrack(() => props.lang);
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const pinnedCurrency = () => currencyFromSearch(location.search);
 
   // First paint: URL stub + recent tile + remembered identity + the clicked tile.
@@ -815,7 +816,7 @@ function CardDesk(props) {
       <Match when={error() && !page()?.card}>
         <div class="status error">
           <p>Card market not found.</p>
-          <a href="/marketplace">Back to marketplace</a>
+          <a href={gameHref('/marketplace')}>Back to marketplace</a>
         </div>
       </Match>
       <Match when={!page()?.card && !stubCard()}>{skeleton()}</Match>
@@ -879,7 +880,7 @@ function CardDesk(props) {
                 <p class="asset-sub">
                   <Show when={setName()}>
                     <a
-                      href={setHref()}
+                      href={gameHref(setHref())}
                       draggable="true"
                       onClick={() => track(Action.clickSet, card())}
                       onPointerDown={() => preloadDragImage(setLogo())}
@@ -906,7 +907,7 @@ function CardDesk(props) {
                     {' · '}
                     <Show when={artistPath()} fallback={<span>{artist()}</span>}>
                       <a
-                        href={artistPath()}
+                        href={gameHref(artistPath())}
                         draggable="true"
                         onClick={() => track(Action.clickArtist, card())}
                         onPointerDown={() => preloadDragImage(artistCover())}
@@ -951,7 +952,7 @@ function CardDesk(props) {
                     >
                       <a
                         class="art-nav"
-                        href={cardHref(prevNav())}
+                        href={gameHref(cardHref(prevNav()))}
                         aria-label="Previous card in set"
                         onPointerEnter={() => warm(prevNav())}
                         onClick={() => {
@@ -989,7 +990,7 @@ function CardDesk(props) {
                     >
                       <a
                         class="art-nav"
-                        href={cardHref(nextNav())}
+                        href={gameHref(cardHref(nextNav()))}
                         aria-label="Next card in set"
                         onPointerEnter={() => warm(nextNav())}
                         onClick={() => {
@@ -1019,7 +1020,7 @@ function CardDesk(props) {
                                   fallback={(
                                     <a
                                       class="set-shortcut"
-                                      href={cardHref(row)}
+                                      href={gameHref(cardHref(row))}
                                       title={label}
                                       aria-label={label}
                                       onPointerEnter={() => warm(row)}
@@ -1042,7 +1043,7 @@ function CardDesk(props) {
                         </div>
                       </Show>
                       <Show when={showMoreVersions()}>
-                        <a class={['more-versions', { 'is-solo': !setShortcuts().length }]} href={versionsHref(card(), lang)}>
+                        <a class={['more-versions', { 'is-solo': !setShortcuts().length }]} href={gameHref(versionsHref(card(), lang))}>
                           More versions...
                         </a>
                       </Show>
@@ -1110,7 +1111,7 @@ function CardDesk(props) {
                         when={sellerHref(dealPick(), lang)}
                         fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
                       >
-                        <a href={sellerHref(dealPick(), lang)}>{publicListingSellerName(dealPick()) || 'seller'}</a>
+                        <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
                       </Show>
                     </p>
                   </Show>
@@ -1308,7 +1309,7 @@ function CardDesk(props) {
                       {(hub, index) => (
                         <span>
                           {index() ? ' · ' : ''}
-                          <a href={hub.href}>{hub.name}</a>
+                          <a href={gameHref(hub.href)}>{hub.name}</a>
                         </span>
                       )}
                     </For>

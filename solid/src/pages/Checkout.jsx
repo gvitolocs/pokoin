@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate, useSearchParams } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cancelEurOrder,
   createMarketplaceOrder,
@@ -90,7 +91,7 @@ function InsuranceCheck(props) {
 }
 
 function CheckoutDesk() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
   // Only the ticked cart rows check out; unticked ones stay in the cart.

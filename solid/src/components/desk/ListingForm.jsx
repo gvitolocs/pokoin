@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../../lib/game-navigate.js';
 import {
   cardHref,
   createListing,
@@ -93,7 +93,7 @@ function CameraIcon() {
  * that only gained fields (page hydrate) does not reset what the seller typed.
  */
 export default function ListingForm(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const gameId = currentGame().id;
   const foils = listingFoilOptions(gameId);
   const listChips = listingExtraChips(gameId);

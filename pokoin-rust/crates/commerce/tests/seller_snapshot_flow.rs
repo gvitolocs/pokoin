@@ -153,7 +153,7 @@ async fn the_builder_writes_snapshots_and_fresh_reports_their_stamp() {
     sqlx::raw_sql(MIGRATION_119).execute(&pool).await.expect("migration 119");
 
     // --- the builder: writes the copy, the handle and the header ------------
-    let built = seller_book::build_all(&state, &Directory, reversed, None, false, false).await.unwrap();
+    let built = seller_book::build_all(&state, &Directory, "pokemon", reversed, None, false, false).await.unwrap();
     assert_eq!((built.sellers, built.built, built.failed), (2, 1, 0), "{built:?}: u2 has no handle");
     let row = stored(&pool).await.unwrap();
     assert_eq!(row.stamp, stamp);
@@ -169,7 +169,7 @@ async fn the_builder_writes_snapshots_and_fresh_reports_their_stamp() {
     assert_eq!((book["unique"].as_i64(), book["copies"].as_i64()), (Some(2), Some(4)));
 
     // Nothing moved: the next run skips alice after one profile read.
-    let again = seller_book::build_all(&state, &Directory, reversed, None, false, false).await.unwrap();
+    let again = seller_book::build_all(&state, &Directory, "pokemon", reversed, None, false, false).await.unwrap();
     assert_eq!((again.built, again.skipped), (0, 1));
 
     // --- fresh=1: the live stamp equals the stored book's --------------------
@@ -202,14 +202,14 @@ async fn the_builder_writes_snapshots_and_fresh_reports_their_stamp() {
     assert_eq!(after["book"]["stamp"], after["maxUpdatedAt"]);
 
     // ...and the next builder run writes it.
-    let filled = seller_book::build_all(&state, &Directory, reversed, None, false, false).await.unwrap();
+    let filled = seller_book::build_all(&state, &Directory, "pokemon", reversed, None, false, false).await.unwrap();
     assert_eq!(filled.built, 1);
     let filled_row = stored(&pool).await.unwrap();
     assert_eq!(filled_row.br.as_deref(), Some(reversed(&filled_row.body).as_slice()));
 
     // --- a seller with no listing row left has no shop -----------------------
     sqlx::query("delete from public.marketplace_user_listings where seller_uid = 'u1'").execute(&pool).await.unwrap();
-    let gone = seller_book::build_all(&state, &Directory, reversed, None, false, false).await.unwrap();
+    let gone = seller_book::build_all(&state, &Directory, "pokemon", reversed, None, false, false).await.unwrap();
     assert_eq!(gone.removed, 1);
     assert!(stored(&pool).await.is_none());
     sqlx::raw_sql(MIGRATION_119).execute(&pool).await.expect("119 is idempotent");

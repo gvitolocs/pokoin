@@ -11,6 +11,7 @@ import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
+import { gameHref } from '@market/game.js';
 
 const dex = (n) => `#${String(n).padStart(4, '0')}`;
 
@@ -36,7 +37,7 @@ function PokemonIndex(props) {
               <For each={gen.rows}>
                 {(row) => (
                   <li>
-                    <a href={pokemonHref(row.slug, props.lang)}>
+                    <a href={gameHref(pokemonHref(row.slug, props.lang))}>
                       <span class="hub-dex">{dex(row.n)}</span>
                       {row.name}
                     </a>
@@ -125,7 +126,7 @@ export default function PokemonHub() {
             { name: 'Pokémon', href: `/marketplace/${lang()}/pokemon` },
           ]} />
           <EmptyDesk title="Unknown Pokémon" lede="Open the species index and pick a National Dex entry.">
-            <a class="btn" href={`/marketplace/${lang()}/pokemon`}>Pokémon</a>
+            <a class="btn" href={gameHref(`/marketplace/${lang()}/pokemon`)}>Pokémon</a>
           </EmptyDesk>
         </div>
       </Match>

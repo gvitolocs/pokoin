@@ -1,4 +1,5 @@
 import { cardStubFromRoute } from './card-stub.js';
+import { game, knownGameId } from './game.js';
 
 const CART_KEY = 'pokoin.cartItems';
 const WATCH_KEY = 'pokoin.watchlistIds';
@@ -216,14 +217,17 @@ export function pokoPreview(events = []) {
 }
 
 function toPokoCard(row = {}) {
+  const path = String(row?.canonicalPath || row?.canonical_path || row?.href || row?.path || '');
   return {
     cardId: String(row?.cardId || row?.id || row?.card_id || ''),
     name: String(row?.cardName || row?.name || ''),
     setName: String(row?.setName || row?.set || row?.set_name || ''),
     condition: String(row?.condition || ''),
     language: String(row?.language || ''),
-    canonicalPath: String(row?.canonicalPath || row?.canonical_path || row?.href || row?.path || ''),
+    canonicalPath: path,
+    path,
     imageUrl: String(row?.imageUrl || row?.cardImageUrl || row?.heroImageUrl || ''),
+    game: knownGameId(row?.game) || game().id,
   };
 }
 

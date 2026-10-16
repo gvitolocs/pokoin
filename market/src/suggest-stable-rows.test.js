@@ -72,3 +72,84 @@ test('same results repaint nothing; a rising row slides, the others do not', () 
   flip.update(fakeList([c, a, b, d]));
   assert.equal(d.animations.length, 0);
 });
+
+/** Read `node.translateY` the way a running WAAPI transform would. */
+function withTranslate(run) {
+  const prevStyle = globalThis.getComputedStyle;
+  const prevMatrix = globalThis.DOMMatrixReadOnly;
+  const hadMatrix = typeof prevMatrix === 'function';
+  globalThis.getComputedStyle = (node) => ({
+    transform: node?.translateY ? `matrix(1, 0, 0, 1, 0, ${node.translateY})` : 'none',
+  });
+  if (!hadMatrix) {
+    globalThis.DOMMatrixReadOnly = class {
+      constructor(transform) {
+        const body = String(transform).slice(String(transform).indexOf('(') + 1, String(transform).indexOf(')'));
+        const parts = body.split(',').map((part) => Number(part.trim()));
+        this.m42 = parts[5] || 0;
+      }
+    };
+  }
+  try {
+    run();
+  } finally {
+    if (prevStyle === undefined) delete globalThis.getComputedStyle;
+    else globalThis.getComputedStyle = prevStyle;
+    if (!hadMatrix) delete globalThis.DOMMatrixReadOnly;
+  }
+}
+
+test('a row mid-rise whose slot did not change is not re-animated', () => {
+  withTranslate(() => {
+    const row = fakeRow('239900', 532);
+    const flip = createSuggestFlip();
+    flip.update(fakeList([row]));
+    row.top = 0;
+    flip.update(fakeList([row]));
+    assert.equal(row.animations.length, 1);
+    assert.deepEqual(row.animations[0].keyframes[0], { transform: 'translateY(532px)' });
+    // Progressive paint: layout slot is still 0, but the slide's translate
+    // is in the visual rect. That must not cancel and replay the 532px rise.
+    row.translateY = 532;
+    row.top = 532;
+    flip.update(fakeList([row]));
+    flip.update(fakeList([row]));
+    assert.equal(row.animations.length, 1);
+    assert.equal(row.animations[0].cancelled, false);
+  });
+});
+
+test('an interrupted rise restarts from the current visual position, not the old slot', () => {
+  withTranslate(() => {
+    const row = fakeRow('a', 300);
+    const flip = createSuggestFlip();
+    flip.update(fakeList([row]));
+    row.top = 100;
+    flip.update(fakeList([row]));
+    assert.deepEqual(row.animations[0].keyframes[0], { transform: 'translateY(200px)' });
+    // Layout slot rises from 100 to 40 while translateY(80) is still applied,
+    // so the rect sits at 120. Restart from that visual offset (80), not from
+    // the old slot (100 - 40 = 60).
+    row.translateY = 80;
+    row.top = 120;
+    flip.update(fakeList([row]));
+    assert.equal(row.animations[0].cancelled, true);
+    assert.equal(row.animations.length, 2);
+    assert.deepEqual(row.animations[1].keyframes[0], { transform: 'translateY(80px)' });
+  });
+});
+
+test('scrolling the list is not row motion', () => {
+  const row = fakeRow('a', 100);
+  const flip = createSuggestFlip();
+  const root = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [row],
+  };
+  flip.update(root);
+  root.scrollTop = 40;
+  row.top = 60;
+  flip.update(root);
+  assert.equal(row.animations.length, 0);
+});

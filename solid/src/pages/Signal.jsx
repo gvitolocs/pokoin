@@ -1,6 +1,7 @@
 import { createSignal, onSettled, Show } from 'solid-js';
 import { fetchHome, fetchPortfolio, formatPkn } from '@market/api.js';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 /** /marketplace/signal: honest native-shop snapshot. */
 export default function Signal() {
@@ -35,7 +36,7 @@ export default function Signal() {
         title="Signal"
         lede="Honest snapshot. No fabricated 24h %. Asking is live native PKN, not completed sales."
       >
-        <a class="btn" href="/marketplace">Shop</a>
+        <a class="btn" href={gameHref('/marketplace')}>Shop</a>
       </PageHead>
       <Alert>{error()}</Alert>
       <MetricGrid>
@@ -48,8 +49,8 @@ export default function Signal() {
         <DeskPanel title="Native shop">
           <p class="page-lede">GET /api/marketplace-portfolio. Catalog + native PKN overlay. Empty asking stays — . Do not invent a 24h % from spread.</p>
           <div class="page-actions">
-            <a class="btn" href="/marketplace">Open marketplace</a>
-            <a class="btn ghost" href="/marketplace/watchlist">Watchlist</a>
+            <a class="btn" href={gameHref('/marketplace')}>Open marketplace</a>
+            <a class="btn ghost" href={gameHref('/marketplace/watchlist')}>Watchlist</a>
           </div>
         </DeskPanel>
         <DeskPanel title="Holdings">
@@ -59,8 +60,8 @@ export default function Signal() {
           >
             <p class="page-lede">Explore and Portfolio read the Pokoin catalog in PKN. Art is cdn.pokoin.com.</p>
             <div class="page-actions">
-              <a class="btn ghost" href="/marketplace/explore">Explore</a>
-              <a class="btn ghost" href="/marketplace/portfolio">Portfolio</a>
+              <a class="btn ghost" href={gameHref('/marketplace/explore')}>Explore</a>
+              <a class="btn ghost" href={gameHref('/marketplace/portfolio')}>Portfolio</a>
             </div>
           </Show>
         </DeskPanel>
