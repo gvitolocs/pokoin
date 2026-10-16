@@ -21,6 +21,11 @@ Steps with --apply:
   4. drop candidates whose raw row is gone, then
      refresh_cardmarket_marketplace_projections().
 
+Cardmarket ids: when `<cache>/raw/cardmarket-match.json` exists (written by
+`pokoin-cardmarket-catalog match`, pokoin-rust/apps/cardmarket-catalog), its
+`matches` set each row's card_market_ids and its `extras` (Cardmarket singles
+the source lacks, with TCGplayer pictures) are imported as rows of their own.
+
 Run with ~/.venvs/pokoin-catalog/bin/python (Pillow + requests).
 """
 
@@ -173,9 +178,38 @@ def build_rows(game: str, cards: list[dict], ids: dict[str, int]) -> list[dict]:
             },
             "cdn_object_key": f"{prefix}/{file_stem}.jpg",
             "homepage_object_key": f"{prefix}/{file_stem}_homepage.webp",
-            "card_market_ids": [],
+            "card_market_ids": list(card.get("card_market_ids") or []),
+            "tcg_player_ids": list(card.get("tcg_player_ids") or []) or None,
         })
     return rows
+
+
+def cardmarket_match(cache: Path) -> dict | None:
+    """`pokoin-cardmarket-catalog match` output: source_key → idProducts, and
+    the Cardmarket singles the source lacks as source cards."""
+    path = cache / "raw" / "cardmarket-match.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    extras = []
+    for extra in data.get("extras") or []:
+        extras.append({
+            "key": extra["key"],
+            "name": extra["name"],
+            "set_name": extra["set_name"],
+            "set_code": extra.get("set_code") or "",
+            "collector": extra.get("collector") or "",
+            "rarity": extra.get("rarity") or "",
+            "version": extra.get("version") or None,
+            "image_url": extra.get("image_url") or "",
+            "source": "cardmarket-productlist",
+            "source_url": extra.get("source_url") or "",
+            "language": "EN",
+            "attributes": {"cardmarket_expansion": extra.get("cardmarket_expansion")},
+            "card_market_ids": extra.get("card_market_ids") or [],
+            "tcg_player_ids": extra.get("tcg_player_ids") or [],
+        })
+    return {"path": path, "generated": data.get("generatedAt") or "", "ids": data.get("matches") or {}, "extras": extras}
 
 
 def wayback_rows(db: str, schema: str) -> list[dict]:
@@ -418,11 +452,12 @@ def upsert(db: str, schema: str, rows: list[dict]) -> None:
         + f"""
 insert into {schema}.cardmarket_products as p (
   id, name, version, category_id, image_url, cdn_image_url, cdn_object_key,
-  homepage_image_url, homepage_object_key, card_market_ids, editable_properties,
+  homepage_image_url, homepage_object_key, card_market_ids, tcg_player_ids, editable_properties,
   blueprint, expansion, cardmarket, imported_at)
 select (doc->>'id')::bigint, doc->>'name', doc->>'version', 1, doc->>'image_url',
   doc->>'cdn_image_url', doc->>'cdn_object_key', doc->>'homepage_image_url', doc->>'homepage_object_key',
-  coalesce(doc->'card_market_ids', '[]'::jsonb), '[]'::jsonb, doc->'blueprint', doc->'expansion',
+  coalesce(doc->'card_market_ids', '[]'::jsonb), nullif(doc->'tcg_player_ids', 'null'::jsonb), '[]'::jsonb,
+  doc->'blueprint', doc->'expansion',
   jsonb_build_object('cardmarket_product_ids', coalesce(doc->'card_market_ids', '[]'::jsonb)), now()
 from incoming
 on conflict (id) do update set
@@ -434,6 +469,7 @@ on conflict (id) do update set
   homepage_image_url = coalesce(excluded.homepage_image_url, p.homepage_image_url),
   homepage_object_key = coalesce(excluded.homepage_object_key, p.homepage_object_key),
   card_market_ids = excluded.card_market_ids,
+  tcg_player_ids = coalesce(excluded.tcg_player_ids, p.tcg_player_ids),
   blueprint = excluded.blueprint,
   expansion = excluded.expansion,
   cardmarket = excluded.cardmarket,
@@ -469,6 +505,10 @@ def main() -> int:
     cache.mkdir(parents=True, exist_ok=True)
 
     cards, complete = sources.fetch(game, cache)
+    cm_match = cardmarket_match(cache)
+    if cm_match:
+        known = {str(card["key"]) for card in cards}
+        cards = cards + [c for c in cm_match["extras"] if c["key"] not in known]
     if args.limit:
         cards = cards[: args.limit]
         complete = False  # a sample never supersedes the Wayback rows
@@ -480,12 +520,22 @@ def main() -> int:
         old = existing.get(row["blueprint"]["source_key"])
         if not old:
             continue
-        for cm_id in old.get("cm") or []:
+        # With a match file, it alone sets the Cardmarket ids (below).
+        for cm_id in [] if cm_match else old.get("cm") or []:
             if cm_id not in row["card_market_ids"]:
                 row["card_market_ids"].append(cm_id)
         for old_key, new_key in ((old.get("full"), row["cdn_object_key"]), (old.get("home"), row["homepage_object_key"])):
             if old_key and old_key != new_key:
                 renames.append((old_key, new_key))
+    if cm_match:
+        for row in rows:
+            key = row["blueprint"]["source_key"]
+            if row["blueprint"]["source"] != "cardmarket-productlist":
+                row["card_market_ids"] = [int(i) for i in cm_match["ids"].get(key) or []]
+        new = sum(1 for r in rows if r["blueprint"]["source"] == "cardmarket-productlist")
+        with_ids = sum(1 for r in rows if r["card_market_ids"])
+        log(f"{game}: Cardmarket match {cm_match['generated']}: {with_ids}/{len(rows)} rows with a Cardmarket id, "
+            f"{new} rows from Cardmarket singles the source lacks")
     if renames:
         log(f"{game}: {len(renames) // 2} cards change id; renaming their image files")
         rename_local_images(game, renames)
