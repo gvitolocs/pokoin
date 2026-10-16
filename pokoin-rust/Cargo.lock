@@ -3181,6 +3181,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tcgplayer-match"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
