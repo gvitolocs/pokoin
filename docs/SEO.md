@@ -108,10 +108,14 @@ commit the JSON when routes or the catalog change. `?focus=set:base-set`
 Weekly refresh: `pokoin-site-map-refresh.timer` (systemd user unit on nezopt,
 Mondays 04:30 UTC) runs `scripts/refresh-site-map.sh` inside its own Paseo
 worktree (`~/.paseo/worktrees/2n15xc8c/site-map-refresh`, used by nothing
-else). It checks out `origin/main`, rebuilds the JSON, and only when the map
-changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
-leaves the file alone when only the date would change, so quiet weeks deploy
-nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.
+else). It checks out `origin/main`, rebuilds `site-map.json` and
+`site-map-images.json`, and only when either file changed commits both, pushes
+to `main`, uploads with `scripts/publish-web.sh`, smoke-checks the version
+preview (`/`, `/marketplace`, `/sitemap`, `/market/data/site-map.json`), then
+promotes that version. A failed preview check leaves the version unpromoted and
+the unit fails (OnFailure alert). The builder leaves the files alone when only
+the date would change, so quiet weeks publish nothing. Log:
+`journalctl --user -u pokoin-site-map-refresh`.
 
 Site map v2: **Market** view colours card stars by the cheapest listed PKN
 (`cheapest_homepage_cache_blueprint`, quintile ramp, snapshot date in the
