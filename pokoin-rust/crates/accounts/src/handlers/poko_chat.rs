@@ -22,7 +22,9 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use serde_json::{json, Map, Value as Json};
 
-use crate::domain::personal_context::{build_personal_context, format_personal_intent, Overlay};
+use crate::domain::personal_context::{
+    build_personal_context, format_personal_intent, with_turn_desk, Overlay,
+};
 use crate::domain::poko_chat::{
     attach_reply_cards, cards_context, clean_cards, clean_client_turn_id, clean_images,
     clean_page_context, clean_text, images_context, market_first_directive,
@@ -290,6 +292,7 @@ pub(crate) async fn load_personal_for_chat(
     let writer = state.marketplace_writer_db().ok();
     match build_personal_context(&db, firestore.as_ref(), uid, &overlay, writer.as_ref()).await {
         Ok(personal) => {
+            let personal = with_turn_desk(personal, overlay.desk.as_ref());
             let intent = format_personal_intent(&personal);
             (Some(personal), intent)
         }
