@@ -23,5 +23,5 @@ test('stored copies paint at once and revalidated ones recompute the lineup in p
 test('era names are gold links to the era setlist', () => {
   assert.match(src, /class="era-link"/);
   assert.match(src, /eraHref\(group\.label\)/);
-  assert.match(src, /<h2>Same expansion<\/h2>/);
+  assert.match(src, /setName\(\) \? `From \$\{setName\(\)\}` : 'Same expansion'/);
 });

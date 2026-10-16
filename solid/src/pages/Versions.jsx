@@ -285,7 +285,7 @@ function VersionsPage(props) {
         </Show>
         <Show when={showRarity()}>
           <section class="versions-section" id="versions">
-            <h2>Same expansion</h2>
+            <h2>{setName() ? `From ${setName()}` : 'Same expansion'}</h2>
             <TileGrid rows={view.versions} cardId={cardId} />
           </section>
         </Show>
