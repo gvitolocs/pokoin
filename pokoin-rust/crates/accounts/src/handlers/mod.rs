@@ -11,6 +11,7 @@ pub mod partner;
 pub mod poko;
 pub mod portfolio;
 pub mod poko_bets;
+pub mod poko_bot_chat;
 pub mod poko_chat;
 pub mod poko_market;
 pub mod referral;
