@@ -1,5 +1,5 @@
 import { children, createEffect, createSignal, For, lazy, Loading, Match, Show, Switch } from 'solid-js';
-import { fetchCollectionSummary, fetchSellerListings } from '@market/api.js';
+import { fetchAllSellerListings, fetchCollectionSummary } from '@market/api.js';
 import { accountHeading, accountLede } from '@market/auth-session.js';
 import { liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { sellerHref } from '@market/listing-meta.js';
@@ -26,8 +26,6 @@ import { publishSellerSettings, sellerSettings as loadedSellerSettings, sellerSe
 
 // The cropper loads only when someone edits their photo.
 const AvatarEditor = lazy(() => import('../components/profile/AvatarEditor.jsx'));
-
-const LISTINGS_LIMIT = 200;
 
 const ICON = {
   watchlist: 'M12 21.35 10.55 20C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
@@ -89,13 +87,13 @@ function createWallet() {
 }
 
 /**
- * Cards owned + live listings, painted from the dashboard tile cache first.
- * `listedCapped` means the listing fetch hit its limit, so the count is a floor.
+ * Cards owned and live listings, painted from the dashboard tile cache first.
+ * The collection summary carries the exact live totals. The listings API is
+ * only the fallback when that summary has no `listed` or the request fails.
  */
 function createPortfolioTiles(uid) {
   const [owned, setOwned] = createSignal(null);
   const [listed, setListed] = createSignal(null);
-  const [listedCapped, setListedCapped] = createSignal(false);
 
   createEffect(uid, (id) => {
     if (!id) return undefined;
@@ -106,29 +104,33 @@ function createPortfolioTiles(uid) {
     setOwned(cached?.uniqueItems || cached?.ownedCards ? cached.ownedCards : null);
     setListed(() => (cached?.listed && !cached.listed.failed ? cached.listed : null));
     getBearer()
-      .then((token) => fetchCollectionSummary(token))
-      .then((data) => {
-        if (cancelled) return;
-        const next = portfolioTilesFromSummary(data);
-        writePortfolioTilesCache(id, next);
-        setOwned(next.ownedCards);
-      })
-      .catch(() => {});
-    getBearer()
-      .then((token) => fetchSellerListings(id, token, { limit: LISTINGS_LIMIT }))
-      .then((data) => {
-        if (cancelled) return;
-        const rows = data.listings || data.items || [];
-        const summary = summarizeLiveInventory(liveInventoryListings(rows));
-        writePortfolioTilesCache(id, { listed: summary });
-        setListed(() => summary);
-        setListedCapped(rows.length >= LISTINGS_LIMIT);
+      .then((token) => fetchCollectionSummary(token)
+        .then((data) => ({ token, data }))
+        .catch(() => ({ token, data: null })))
+      .then(({ token, data }) => {
+        if (cancelled) return undefined;
+        if (data) {
+          const next = portfolioTilesFromSummary(data);
+          writePortfolioTilesCache(id, next);
+          setOwned(next.ownedCards);
+          if (next.listed) {
+            setListed(() => next.listed);
+            return undefined;
+          }
+        }
+        return fetchAllSellerListings(id, token).then((payload) => {
+          if (cancelled) return;
+          const rows = payload.listings || payload.items || [];
+          const summary = summarizeLiveInventory(liveInventoryListings(rows));
+          writePortfolioTilesCache(id, { listed: summary });
+          setListed(() => summary);
+        });
       })
       .catch(() => {});
     return () => { cancelled = true; };
   });
 
-  return { owned, listed, listedCapped };
+  return { owned, listed };
 }
 
 /** Bought + sold orders, live — the same two queries as /orders. */
@@ -256,7 +258,7 @@ function ProfileDesk() {
   const setup = () => sellerSetupSteps({ shipFromCountry: shipFromCountry(), stripe: stripeStatus(), cardTrader: cardTrader() });
   const step = () => Object.fromEntries(setup().steps.map((row) => [row.key, row]));
   const activity = () => (orderRows() ? orderActivity(orderRows(), uid()) : null);
-  const listedCount = () => (tiles.listed() ? `${tiles.listed().listings}${tiles.listedCapped() ? '+' : ''}` : '—');
+  const listedCount = () => (tiles.listed() ? `${tiles.listed().listings}` : '—');
   const ctUser = () => cardTrader()?.metadata?.user?.username || cardTrader()?.metadata?.seller?.name || '';
   const ctOneDayReady = () => cardTrader()?.metadata?.oneDayReady === true || cardTrader()?.syncSummary?.mode === 'one_day_ready';
   const ctLink = () => (ctOneDayReady() ? '1-Day Ready' : `inventory linked ${ctLinkOption(ctLinkDirection(cardTrader())).label}`);

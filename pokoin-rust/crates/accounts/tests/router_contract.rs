@@ -652,6 +652,8 @@ async fn marketplace_collection_summary_returns_the_dashboard_shape() {
     assert_eq!(body["nftItems"], serde_json::json!(1));
     assert_eq!(body["physicalOwned"], serde_json::json!(2));
     assert_eq!(body["nftOwned"], serde_json::json!(1));
+    assert_eq!(body["collectionOwned"], serde_json::json!(3));
+    assert!(body["listed"].is_null());
 }
 
 #[tokio::test]
