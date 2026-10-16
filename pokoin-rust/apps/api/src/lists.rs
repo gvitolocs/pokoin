@@ -400,7 +400,9 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             let n = build_names(app, &pool, game).await?;
             tracing::info!(%game, names = n, "build-lists names");
         }
-        if o.kinds.iter().any(|k| k == "artist") && game == "pokemon" {
+        // Artist snapshots follow the route: a game without an artist catalog
+        // answers an empty index, so there is nothing to store for it.
+        if o.kinds.iter().any(|k| k == "artist") && pokoin_catalog_api::reads::artist_cards::has_artist_catalog(game) {
             let n = build_artists(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, artists = n, "build-lists artists");
         }
