@@ -21,6 +21,9 @@ pub struct Question {
     pub game: Option<String>,
     #[serde(default)]
     pub history: Vec<HistoryTurn>,
+    /// Extra context blocks for the brain (what the chat handler adds: the open card page, photo hits, ...).
+    #[serde(default)]
+    pub context: Vec<String>,
 }
 
 impl Question {
