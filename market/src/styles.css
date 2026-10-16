@@ -559,7 +559,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .suggest-row.is-shaded {
   background: var(--suggest-shade);
-  transition: background-color 160ms ease;
+  transition: background-color 220ms ease;
 }
 
 .suggest-row.is-shaded:hover,

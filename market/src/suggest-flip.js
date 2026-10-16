@@ -1,5 +1,5 @@
-// Slow enough to read as a row climbing the ranking (200 ms looked like a jump).
-export const MOVE_MS = 420;
+// Slow enough to read as a row climbing the ranking; still snappy off the line (200 ms looked like a jump).
+export const MOVE_MS = 620;
 const EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
