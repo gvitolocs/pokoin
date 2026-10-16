@@ -1,16 +1,25 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '@market/api.js';
-import { inventoryRowsForLocation, liveInventoryListings } from '@market/inventory-listings.js';
+import { inventoryRowsForLocation, liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { formatPknNumber } from '@market/pkn.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
 import '@market/export-preview.css';
-import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import CollectionHoldings from '../components/inventory/CollectionHoldings.jsx';
 import InventoryBoard from '../components/inventory/InventoryBoard.jsx';
 import LocationBoard from '../components/inventory/LocationBoard.jsx';
 import PricingStrategies, { PricerDefaults } from '../components/inventory/PricingStrategies.jsx';
+import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
+import {
+  allowMypokoinPreview,
+  MYPOKOIN_PREVIEW_BANNER,
+  previewListings,
+  previewPricer,
+  previewStrategies,
+} from './mypokoin-preview-fixture.js';
 import { accountProfile } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
@@ -96,7 +105,7 @@ function tabOf(pathname) {
   };
 }
 
-function InventoryDesk() {
+function InventoryDesk(props) {
   const location = useLocation();
   const tab = createMemo(() => tabOf(location.pathname), {
     equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab
@@ -104,13 +113,14 @@ function InventoryDesk() {
   });
   // PKN opt-out sellers read their prices in local currency.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
-  const [rows, setRows] = createSignal(null);
+  const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
   const [error, setError] = createSignal('');
   const [previewFormat, setPreviewFormat] = createSignal('powertools');
   const [preview, setPreview] = createSignal(null);
   const [previewBlob, setPreviewBlob] = createSignal(null);
   const [busy, setBusy] = createSignal('');
-  const [pricerDefaults, setPricerDefaults] = createSignal(null);
+  const [pricerDefaults, setPricerDefaults] = createSignal(props.preview ? previewPricer() : null);
+  const [collectionStats, setCollectionStats] = createSignal(null);
   // Bumped by reload() so a stale background top-up stops writing rows.
   let inventorySeq = 0;
 
@@ -161,6 +171,7 @@ function InventoryDesk() {
         ? `${locationName} · MyPokoin`
         : (importTab ? 'Export · MyPokoin' : 'MyPokoin · Pokoin');
       // The Collection tab loads holdings, not listings.
+      if (props.preview) return undefined;
       if (!uid || collectionTab) return undefined;
       let cancelled = false;
       let settled = false;
@@ -192,7 +203,7 @@ function InventoryDesk() {
   createEffect(
     () => signedIn() && !tab().importTab && !tab().collectionTab,
     (on) => {
-      if (!on) return undefined;
+      if (props.preview || !on) return undefined;
       let cancelled = false;
       getBearer()
         .then((token) => fetchPricingStrategies(token))
@@ -241,18 +252,47 @@ function InventoryDesk() {
 
   const onListings = () => !tab().importTab && !tab().settingsTab && !tab().collectionTab;
   const locationName = () => tab().locationName;
+  const metrics = () => {
+    if (tab().collectionTab) {
+      const stats = collectionStats();
+      if (!stats) return [];
+      return [
+        { value: stats.owned, label: 'Cards owned' },
+        { value: stats.held, label: 'Held back' },
+        { value: stats.listed, label: 'Listed' },
+      ];
+    }
+    const live = rows();
+    if (!onListings() || !live) return [];
+    const scoped = locationName() ? inventoryRowsForLocation(live, locationName()) : live;
+    const summary = summarizeLiveInventory(scoped);
+    const paused = scoped.filter((row) => String(row.status || '').toLowerCase() === 'paused').length;
+    return [
+      { value: summary.listings, label: 'Live listings' },
+      { value: summary.cards, label: 'Cards in stock' },
+      { value: `${formatPknNumber(summary.listedPkn)} PKN`, label: 'Total asking' },
+      { value: paused, label: 'Paused' },
+    ];
+  };
 
   return (
-    <div class="page desk">
-      <PageHead kicker="Seller" title="MyPokoin">
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
+        lede="Live listings, the cards you hold, and what you export."
+        metrics={metrics()}
+        forceActive={locationName() ? 'Listings' : ''}
+      >
         <a class="btn" href="/inventory/scan">Scan cards</a>
         <a class="btn ghost" href="/marketplace">List a card</a>
-      </PageHead>
-      <StockNav forceActive={locationName() ? 'Listings' : ''} />
+      </StockNav>
       <Alert>{error()}</Alert>
 
       <Show when={tab().importTab}>
         <DeskPanel title="Export stock">
+          <p class="mypokoin-help">Download the live book as CSV. The table below is the file you will save.</p>
           <div class="stock-csv-bar" role="group" aria-label="Export format">
             <For each={FORMATS}>
               {(row) => (
@@ -305,18 +345,68 @@ function InventoryDesk() {
         </DeskPanel>
       </Show>
 
-      <Show when={tab().collectionTab}><CollectionHoldings /></Show>
+      <Show when={tab().collectionTab}><CollectionHoldings preview={props.preview} onStats={setCollectionStats} /></Show>
 
       <Show when={!tab().importTab && !tab().collectionTab && rows() == null && !error()}>
         <DeskPanel title="Listings"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
       </Show>
       <Show when={tab().settingsTab}>
-        <DeskPanel title="Pricer defaults">
-          <PricerDefaults settings={pricerDefaults()} onSaved={(next) => setPricerDefaults(() => next)} />
-        </DeskPanel>
-        <DeskPanel title="Pricing strategies">
-          <PricingStrategies onApplied={() => reload().catch(() => {})} />
-        </DeskPanel>
+        <div class="mypokoin-settings">
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Shipping</h2>
+                <p class="mypokoin-help">Ship-from country is saved on your profile and copied onto every physical listing.</p>
+              </div>
+              <a class="btn" href="/profile">Edit shipping</a>
+            </div>
+          </section>
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Pricing defaults</h2>
+                <p class="mypokoin-help">Which market the listings board opens on.</p>
+              </div>
+            </div>
+            <PricerDefaults
+              preview={props.preview}
+              settings={pricerDefaults()}
+              onSaved={(next) => setPricerDefaults(() => next)}
+            />
+          </section>
+          <section class="mypokoin-card">
+            <PricingStrategies
+              preview={props.preview}
+              previewStrategies={previewStrategies()}
+              onApplied={() => reload().catch(() => {})}
+            />
+          </section>
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Connections</h2>
+                <p class="mypokoin-help">CardTrader and Power Tools stay linked from Profile. Zero picking uses the same seller.</p>
+              </div>
+              <a class="btn" href="/profile">Open Profile</a>
+            </div>
+          </section>
+          <section class="mypokoin-card is-danger">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Danger zone</h2>
+                <p class="mypokoin-help">Deletes every Pokoin listing. CardTrader stock stays until you sync again.</p>
+              </div>
+            </div>
+            <div class="danger-row">
+              <Show
+                when={!props.preview}
+                fallback={<button type="button" class="btn ghost" disabled>Delete all Pokoin listings</button>}
+              >
+                <WipeAllInventory onError={(message) => setError(message)} />
+              </Show>
+            </div>
+          </section>
+        </div>
       </Show>
       <Switch>
         <Match when={onListings() && rows() && !rows().length}>
@@ -337,7 +427,8 @@ function InventoryDesk() {
           <InventoryBoard
             rows={rows()}
             formatPrice={formatPrice}
-            defaultSource={pricerDefaults()?.defaultSource || ''}
+            showSummary={false}
+            defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
           />
         </Match>
@@ -347,15 +438,23 @@ function InventoryDesk() {
 }
 
 /**
- * Pokémon seller stock desk (market/src/pages/Inventory.jsx): /mypokoin and its
+ * Pokémon seller stock desk: /mypokoin and its
  * import / settings / collection / location tabs. Seller inventory lists only
  * active or paused rows with stock (liveInventoryListings, D00005R).
  */
 export default function Inventory() {
   const location = useLocation();
+  const [params] = useSearchParams();
   return (
-    <SignedIn from={untrack(() => location.pathname) || '/mypokoin'}>
-      <InventoryDesk />
-    </SignedIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <SignedIn from={untrack(() => location.pathname) || '/mypokoin'}>
+          <InventoryDesk />
+        </SignedIn>
+      )}
+    >
+      <InventoryDesk preview />
+    </Show>
   );
 }

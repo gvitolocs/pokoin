@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { formatPknNumber } from '@market/api.js';
 import { catalogMenuLinks } from '@market/catalog-links.js';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
@@ -20,7 +21,7 @@ import Avatar from './Avatar.jsx';
 import PokoinWordmark from './PokoinWordmark.jsx';
 import SearchBox from './SearchBox.jsx';
 
-/** Header icon paths (market/src/components/Chrome.jsx ICO); the phone menu's live in MobileMenu.jsx. */
+/** Header icon paths; the phone menu's live in MobileMenu.jsx. */
 const ICO = {
   storefront: 'M21.9 8.89l-1.05-4.37c-.22-.9-1-1.52-1.91-1.52H5.05c-.9 0-1.69.63-1.9 1.52L2.1 8.89c-.24 1.02-.02 2.06.62 2.88.08.11.19.19.28.29V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-6.94c.09-.09.2-.18.28-.28.64-.82.87-1.87.62-2.89zm-2.99-3.9l1.05 4.37c.1.42.01.84-.25 1.17-.14.18-.44.47-.94.47-.61 0-1.14-.49-1.21-1.14L16.98 5l1.93-.01zM13 5h1.96l.54 4.52c.05.39-.07.78-.33 1.07-.22.26-.54.41-.95.41-.67 0-1.22-.59-1.22-1.31V5zM8.49 9.52L9.04 5H11v4.69c0 .72-.55 1.31-1.29 1.31-.34 0-.65-.15-.89-.41-.25-.29-.38-.68-.33-1.07zm-4.45-.16L5.05 5h1.97l-.58 4.86c-.08.65-.6 1.14-1.21 1.14-.49 0-.8-.29-.93-.47-.27-.32-.36-.75-.26-1.17zM5 19v-6.03c.08.01.15.03.23.03.87 0 1.66-.36 2.24-.95.6.6 1.4.95 2.31.95.87 0 1.65-.36 2.23-.93.59.57 1.39.93 2.29.93.84 0 1.64-.35 2.24-.95.58.59 1.37.95 2.24.95.08 0 .15-.02.23-.03V19H5z',
   messages: 'M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z',
@@ -89,7 +90,7 @@ function NavHover(props) {
   );
 }
 
-/** Footer Catalog disclosure (market/src/components/CatalogHubs.jsx). */
+/** Footer Catalog disclosure. */
 function CatalogMenu(props) {
   return (
     <details class="foot-catalog">
@@ -128,16 +129,16 @@ function SelectBandBox() {
 }
 
 /**
- * Header, main and footer for every migrated route
- * (market/src/components/Chrome.jsx): brand, Desktop tray, search, icon nav
+ * Header, main and footer for every route:
+ * brand, Desktop tray, search, icon nav
  * with hover previews and the messages unread dot, PKN wallet chip, avatar,
  * cart tray, phone menu, footer, and the page-wide selection band.
  */
 export default function Chrome(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
-  const site = game();
-  const pokemon = isPokemonGame();
+  const site = () => game();
+  const pokemon = () => isPokemonGame();
   const extensionDesk = framedByChromeExtension();
   const [menu, setMenu] = createSignal(false);
   const [menuArmed, setMenuArmed] = createSignal(false);
@@ -149,7 +150,7 @@ export default function Chrome(props) {
   const showAvatar = () => Boolean(signedIn() && (profile()?.uid || authUser()?.uid));
   const desktopCount = () => desktopItems().length;
   const pknLabel = () => `${formatPknNumber(pknAmount())} PKN`;
-  const homeHref = marketUrl(site.homeHref || '/');
+  const homeHref = () => marketUrl(site().homeHref || '/');
   const signInTo = () => {
     const path = location.pathname.startsWith('/auth')
       ? (new URLSearchParams(location.search).get('from') || '/marketplace')
@@ -193,7 +194,7 @@ export default function Chrome(props) {
     };
   });
 
-  // Messages unread dot: same /api/chat list seam and refresh event as React.
+  // Messages unread dot: the /api/chat list seam the Messages page uses.
   createEffect(signedIn, (on) => {
     if (!on) {
       setMessagesUnread(0);
@@ -273,7 +274,7 @@ export default function Chrome(props) {
           >
             <span /><span /><span />
           </button>
-          <AppLink class="brand" to="/marketplace" aria-label={site.title}>
+          <AppLink class="brand" to="/marketplace" aria-label={site().title}>
             {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps the round badge. */}
             <img class="brand-badge" src="/home/logo.png" alt="" width="40" height="40" />
             <PokoinWordmark />
@@ -324,7 +325,7 @@ export default function Chrome(props) {
             <NavHover id="dashboard" pop={navPop()} setPop={setNavPop} preview="DashboardPreview">
               <AppLink to={DASHBOARD_HOME} aria-label="Dashboard"><Svg d={ICO.dashboard} /></AppLink>
             </NavHover>
-            <Show when={site.features?.competitive}>
+            <Show when={site().features?.competitive}>
               <AppLink class="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive"><Svg d={ICO.trophy} /></AppLink>
             </Show>
             <AppLink class="pkn-chip" to="/wallet" title="Wallet">{pknLabel()}</AppLink>
@@ -392,8 +393,8 @@ export default function Chrome(props) {
               open={menu() && menuArmed()}
               onClose={closeMenu}
               lang={searchLang()}
-              pokemon={pokemon}
-              competitive={Boolean(site.features?.competitive)}
+              pokemon={pokemon()}
+              competitive={Boolean(site().features?.competitive)}
               signedIn={signedIn()}
               admin={accountAdmin()}
               profile={profile()}
@@ -403,7 +404,7 @@ export default function Chrome(props) {
               cartCount={cartCount()}
               messagesUnread={messagesUnread()}
               signInTo={signInTo()}
-              homeHref={homeHref}
+              homeHref={homeHref()}
               paths={MENU_PATHS}
             />
           );

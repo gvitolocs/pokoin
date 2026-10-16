@@ -5,7 +5,7 @@ import AuthLink from '../components/AuthLink.jsx';
 import { authConfirmed, authUser, loadAuth } from '../stores/auth.js';
 
 /**
- * /extension/auth-bridge (market/src/pages/ExtensionAuthBridge.jsx): the
+ * /extension/auth-bridge: the
  * Chrome extension opens this bare page and listens for the Firebase ID
  * token this origin posts to itself (only a Firebase user, never a desk
  * session, can mint one).

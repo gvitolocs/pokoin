@@ -1,5 +1,5 @@
-import { Show } from 'solid-js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
+import ScanImage from '../ScanImage.jsx';
 
 /**
  * Listing thumbnail (InventoryBoard / LocationBoard RowThumb): rows may carry a
@@ -7,14 +7,19 @@ import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market
  */
 export default function RowThumb(props) {
   const src = () => homepageDerivativeUrl(ownCatalogImage(
-    { id: props.row?.cardId || props.row?.card_id },
+    { id: props.row?.cardId || props.row?.card_id, name: props.row?.cardName || props.row?.name || '' },
     preferFullImage(props.row?.cardImageUrl || props.row?.card_image_url || ''),
   ));
   const name = () => props.row?.cardName || props.row?.name || 'Listing';
   return (
-    <Show when={src()} fallback={<span class="inv-thumb is-empty" aria-hidden="true">{String(name()).slice(0, 1).toUpperCase()}</span>}>
-      <img class="inv-thumb" src={src()} alt="" loading="lazy" width="40" height="56" />
-    </Show>
+    <ScanImage
+      class="inv-thumb"
+      letterClass="inv-thumb is-empty"
+      src={src()}
+      label={name()}
+      width="40"
+      height="56"
+    />
   );
 }
 

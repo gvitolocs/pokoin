@@ -1,5 +1,6 @@
 import { createEffect, createSignal, Match, onSettled, Show, Switch, untrack } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { getJson } from '@market/api.js';
 import { googleAuthPopupFailed, isAuthFramed, topLevelLoginUrl } from '@market/auth-google.js';
 import {
@@ -47,12 +48,12 @@ const TITLES = {
 };
 
 /**
- * /auth (market/src/pages/Auth.jsx): email sign-in, email sign-up with a
+ * /auth: email sign-in, email sign-up with a
  * verification link, Google (popup, redirect, or a top-level tab when framed
  * by the extension side panel). This page loads firebase/auth itself.
  */
 export default function Auth() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   // The query is read once, as React's first render did.
   const search = untrack(() => location.search);

@@ -1,7 +1,14 @@
 [package]
 name = "pokoin-db"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Postgres pool construction and the shared satellite-game pool budget."
 
+# Direct dependency versions, no `workspace = true` inheritance:
+# pokoin-accounts depends on this and must compile standalone (see its Cargo.toml).
 [dependencies]
-sqlx = { workspace = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -26,7 +26,8 @@ use super::{
 };
 
 /// The roster/contributions lookup. Missing tables (before migration 093) must
-/// not break Invite & Earn, so `42P01` and `42703` are tolerated.
+/// not break Invite & Earn, so `42P01` and `42703` are tolerated. Callers pass
+/// `Claims::verified_email()`: an unverified address matches no roster row.
 async fn roster_and_contributions(
     state: &DomainState,
     email: &str,
@@ -219,7 +220,7 @@ async fn marketplace_referral_inner(
         )
         .await?;
         let mut payload =
-            referral_payload(state, &firestore, &claims.uid, &claims.email, now_ms).await?;
+            referral_payload(state, &firestore, &claims.uid, &claims.verified_email(), now_ms).await?;
         if let Some(object) = payload.as_object_mut() {
             object.insert("claim".into(), json!(claim.status));
         }
@@ -227,7 +228,7 @@ async fn marketplace_referral_inner(
     }
 
     let payload =
-        referral_payload(state, &firestore, &claims.uid, &claims.email, now_ms).await?;
+        referral_payload(state, &firestore, &claims.uid, &claims.verified_email(), now_ms).await?;
     Ok(referral_ok(state, payload))
 }
 

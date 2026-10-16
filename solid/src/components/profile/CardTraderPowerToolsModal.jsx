@@ -3,6 +3,14 @@ import { GAMES } from '@market/game.js';
 
 const GAME_LABEL = Object.fromEntries(Object.values(GAMES).map((game) => [game.id, game.name]));
 
+const UNRESOLVED_REASON = {
+  unknown_cardmarket_id: 'No catalog match for this Cardmarket id',
+  ambiguous_game: 'This Cardmarket id exists in more than one game catalog',
+  ambiguous_set_name: 'This set name exists in more than one game catalog',
+};
+
+const plural = (n, word) => `${n} ${word}${Number(n) === 1 ? '' : 's'}`;
+
 const LOCATION_MODES = [
   { id: 'as_is', label: 'Location is the box name', hint: 'Keep each CSV location as written (whole Power Tools box label).' },
   { id: 'trailing_stack', label: 'Last number is the stack index', hint: 'The trailing number is which divider, not how many cards are in it.' },
@@ -10,12 +18,16 @@ const LOCATION_MODES = [
 ];
 
 /**
- * After Sync (market/src/components/CardTraderPowerToolsModal.jsx): ask Power
- * Tools? → upload CSV per TCG → analyze → confirm mapping from their data.
+ * Import locations: upload a Power Tools CSV per TCG → analyze → confirm the
+ * mapping from their data → sync, which puts each matched CardTrader
+ * listing's box and stack on its Pokoin listing.
  */
 export default function CardTraderPowerToolsModal(props) {
-  const [step, setStep] = createSignal('ask'); // ask | upload | preview
+  const [step, setStep] = createSignal('upload'); // upload | preview
+  const [uploadMode, setUploadMode] = createSignal('all'); // all | per-game
   const [files, setFiles] = createSignal({});
+  const [fileNames, setFileNames] = createSignal({});
+  const [analyzeToken, setAnalyzeToken] = createSignal(0);
   const [stackSize, setStackSize] = createSignal(0); // 0 = use suggested after analyze
   const [numberedInStack, setNumberedInStack] = createSignal(false);
   const [locationParse, setLocationParse] = createSignal('auto');
@@ -23,16 +35,30 @@ export default function CardTraderPowerToolsModal(props) {
   const [stackSizeTouched, setStackSizeTouched] = createSignal(false);
   const [locationTouched, setLocationTouched] = createSignal(false);
 
+  function clearPreview() {
+    props.onClearPreview?.();
+  }
+
+  function invalidateUploadState() {
+    clearPreview();
+    setStep('upload');
+    setAnalyzeToken((n) => n + 1);
+  }
+
   createEffect(() => Boolean(props.open), (open) => {
     if (open) return;
-    setStep('ask');
+    setStep('upload');
+    setUploadMode('all');
     setFiles({});
+    setFileNames({});
     setLocalError('');
     setNumberedInStack(false);
     setLocationParse('auto');
     setStackSize(0);
     setStackSizeTouched(false);
     setLocationTouched(false);
+    setAnalyzeToken(0);
+    clearPreview();
   });
 
   // After analyze, adopt what the CSV actually contains unless the seller already chose.
@@ -54,9 +80,16 @@ export default function CardTraderPowerToolsModal(props) {
   );
 
   const gameRows = () => (Array.isArray(props.games) && props.games.length ? props.games : []);
+  const gameDetection = () => props.preview?.gameDetection || null;
   const examples = () => props.preview?.locationExamples || props.preview?.locationDetection?.locationExamples || [];
   const exampleHint = () => examples()[0] || '';
   const busyAll = () => Boolean(props.busy) || Boolean(props.previewBusy);
+  const unresolvedCount = () => Number(gameDetection()?.unresolvedCount) || 0;
+  const recognizedRowCount = () => {
+    const games = gameDetection()?.games;
+    if (!Array.isArray(games)) return null;
+    return games.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
+  };
 
   const syncOptions = createMemo(() => ({
     powerToolsCsv: files(),
@@ -72,10 +105,12 @@ export default function CardTraderPowerToolsModal(props) {
     return rows.filter((row) => Number(row.count) > capacity);
   };
 
-  function chooseYes() {
-    setLocalError('');
-    setStep('upload');
-    props.onPreviewGames?.();
+  function setMode(next) {
+    if (next === uploadMode()) return;
+    setUploadMode(next);
+    setFiles({});
+    setFileNames({});
+    invalidateUploadState();
   }
 
   function onFile(gameId, file) {
@@ -85,10 +120,20 @@ export default function CardTraderPowerToolsModal(props) {
         delete next[gameId];
         return next;
       });
+      setFileNames((prev) => {
+        const next = { ...prev };
+        delete next[gameId];
+        return next;
+      });
+      invalidateUploadState();
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setFiles((prev) => ({ ...prev, [gameId]: String(reader.result || '') }));
+    reader.onload = () => {
+      setFiles((prev) => ({ ...prev, [gameId]: String(reader.result || '') }));
+      setFileNames((prev) => ({ ...prev, [gameId]: file.name || 'upload.csv' }));
+      invalidateUploadState();
+    };
     reader.onerror = () => setLocalError('Could not read that CSV.');
     reader.readAsText(file);
   }
@@ -98,92 +143,154 @@ export default function CardTraderPowerToolsModal(props) {
   async function runAnalyze(options = syncOptions()) {
     setLocalError('');
     if (!uploadedIds().length) {
-      setLocalError('Upload at least one Power Tools CSV, or choose No.');
+      setLocalError(uploadMode() === 'all' ? 'Upload your all-games Power Tools CSV.' : 'Upload at least one Power Tools CSV.');
       return false;
     }
+    const token = analyzeToken() + 1;
+    setAnalyzeToken(token);
     const ok = await props.onPreviewSample?.(options);
+    if (analyzeToken() !== token) return false;
     if (ok !== false) setStep('preview');
     return ok !== false;
   }
 
   async function reAnalyzeWith(next) {
     setLocalError('');
+    const token = analyzeToken() + 1;
+    setAnalyzeToken(token);
     await props.onPreviewSample?.({ ...syncOptions(), ...next });
+    if (analyzeToken() !== token) return;
   }
 
   async function confirmFull() {
     setLocalError('');
     const capacity = stackSize() > 0 ? stackSize() : Number(props.preview?.suggestedStackSize) || 1;
     const parse = locationParse() === 'auto' ? (props.preview?.locationParse || 'as_is') : locationParse();
-    await props.onConfirmWithCsv?.({ ...syncOptions(), stackSize: capacity, locationParse: parse });
+    const payload = { ...syncOptions(), stackSize: capacity, locationParse: parse };
+    if (unresolvedCount() > 0) payload.powerToolsRecognizedOnly = true;
+    await props.onConfirmWithCsv?.(payload);
   }
 
   const close = () => props.onClose?.();
+
+  const canImport = () => {
+    if (!props.preview?.samples?.length && !recognizedRowCount()) return false;
+    if (unresolvedCount() > 0) return recognizedRowCount() > 0;
+    return Boolean(props.preview?.samples?.length);
+  };
 
   return (
     <Show when={props.open}>
       <div class="ct-pt-overlay" role="dialog" aria-modal="true" aria-labelledby="ct-pt-title">
         <div class="ct-pt-modal">
-          <h2 id="ct-pt-title">Sync CardTrader</h2>
+          <h2 id="ct-pt-title">Import locations from Power Tools</h2>
           <Switch>
-            <Match when={step() === 'ask'}>
-              <p class="page-lede">
-                Do you also use Power Tools for inventory? If yes, upload your Power Tools
-                stock CSV per TCG so Pokoin listings get the same box and stack.
-              </p>
-              <div class="ct-connect-actions">
-                <button type="button" class="btn btn-cardtrader" disabled={props.busy} onClick={chooseYes}>Yes — I use Power Tools</button>
-                <button type="button" class="btn" disabled={props.busy} onClick={() => props.onSkipPowerTools?.()}>No — sync CardTrader only</button>
-                <button type="button" class="btn ghost" disabled={props.busy} onClick={close}>Cancel</button>
-              </div>
-            </Match>
-
             <Match when={step() === 'upload'}>
               <p class="page-lede">
-                Upload a Power Tools CSV for each game you keep in Power Tools. We will read the
-                location column from your file next — nothing is guessed before that.
+                Upload your Power Tools stock export (one file for all games, or separate CSVs per TCG).
+                Each card that matches your CardTrader stock gets the same box and stack on Pokoin.
+                We read the location column from your file — nothing is guessed before you analyze.
               </p>
-              <Show when={props.loadingGames}><p class="page-lede muted">Reading games from CardTrader…</p></Show>
-              <Show when={!props.loadingGames && !gameRows().length}>
-                <p class="ct-connect-err">No supported TCG products in your CardTrader export.</p>
+
+              <fieldset class="ct-pt-fieldset">
+                <legend>CSV upload</legend>
+                <label class="ct-pt-radio">
+                  <input
+                    type="radio"
+                    name="ct-pt-upload-mode"
+                    checked={uploadMode() === 'all'}
+                    disabled={busyAll()}
+                    onChange={() => setMode('all')}
+                  />
+                  <span>
+                    <strong>One all-games file</strong>
+                    <span class="page-lede muted"> — Power Tools export with every TCG in one CSV (no game column).</span>
+                  </span>
+                </label>
+                <label class="ct-pt-radio">
+                  <input
+                    type="radio"
+                    name="ct-pt-upload-mode"
+                    checked={uploadMode() === 'per-game'}
+                    disabled={busyAll()}
+                    onChange={() => setMode('per-game')}
+                  />
+                  <span>
+                    <strong>Separate file per game</strong>
+                    <span class="page-lede muted"> — use when auto-detection cannot place some rows.</span>
+                  </span>
+                </label>
+              </fieldset>
+
+              <Show when={uploadMode() === 'all'}>
+                <div class="ct-pt-all-upload">
+                  <label class="ct-pt-file">
+                    <span class="btn ghost">{files().auto?.trim() ? 'Replace CSV' : 'Choose all-games CSV'}</span>
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      hidden
+                      disabled={busyAll()}
+                      aria-label="Power Tools all-games stock CSV"
+                      onChange={(event) => onFile('auto', event.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <Show when={fileNames().auto}>
+                    <span class="ct-pt-filename" title={fileNames().auto}>{fileNames().auto}</span>
+                    <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => onFile('auto', null)}>
+                      Remove
+                    </button>
+                  </Show>
+                </div>
               </Show>
-              <ul class="ct-pt-games">
-                <For each={gameRows()}>
-                  {(row) => {
-                    const hasFile = () => Boolean(files()[row.id]?.trim());
-                    return (
-                      <li>
-                        <div>
-                          <strong>{GAME_LABEL[row.id] || row.id}</strong>
-                          <span class="page-lede muted"> · {row.count} on CardTrader</span>
-                        </div>
-                        <label class="ct-pt-file">
-                          <span class="btn ghost">{hasFile() ? 'Replace CSV' : 'Upload CSV'}</span>
-                          <input
-                            type="file"
-                            accept=".csv,text/csv"
-                            hidden
-                            disabled={busyAll()}
-                            onChange={(event) => onFile(row.id, event.target.files?.[0] || null)}
-                          />
-                        </label>
-                        <Show when={hasFile()}><span class="ct-connect-ok">CSV ready</span></Show>
-                      </li>
-                    );
-                  }}
-                </For>
-              </ul>
+
+              <Show when={uploadMode() === 'per-game'}>
+                <Show when={props.loadingGames}><p class="page-lede muted">Reading games from CardTrader…</p></Show>
+                <Show when={!props.loadingGames && !gameRows().length}>
+                  <p class="ct-connect-err">No supported TCG products in your CardTrader export.</p>
+                </Show>
+                <ul class="ct-pt-games">
+                  <For each={gameRows()}>
+                    {(row) => {
+                      const hasFile = () => Boolean(files()[row.id]?.trim());
+                      return (
+                        <li>
+                          <div>
+                            <strong>{GAME_LABEL[row.id] || row.id}</strong>
+                            <span class="page-lede muted"> · {row.count} on CardTrader</span>
+                          </div>
+                          <label class="ct-pt-file">
+                            <span class="btn ghost">{hasFile() ? 'Replace CSV' : 'Upload CSV'}</span>
+                            <input
+                              type="file"
+                              accept=".csv,text/csv"
+                              hidden
+                              disabled={busyAll()}
+                              aria-label={`Power Tools CSV for ${GAME_LABEL[row.id] || row.id}`}
+                              onChange={(event) => onFile(row.id, event.target.files?.[0] || null)}
+                            />
+                          </label>
+                          <Show when={fileNames()[row.id]}>
+                            <span class="ct-pt-filename">{fileNames()[row.id]}</span>
+                          </Show>
+                          <Show when={hasFile()}><span class="ct-connect-ok">CSV ready</span></Show>
+                        </li>
+                      );
+                    }}
+                  </For>
+                </ul>
+              </Show>
+
               <Show when={localError()}><p class="ct-connect-err">{localError()}</p></Show>
               <div class="ct-connect-actions">
                 <button
                   type="button"
                   class="btn btn-cardtrader"
-                  disabled={busyAll() || props.loadingGames || !uploadedIds().length}
+                  disabled={busyAll() || (uploadMode() === 'per-game' && props.loadingGames) || !uploadedIds().length}
                   onClick={() => runAnalyze({ powerToolsCsv: files(), locationParse: 'auto', numberedInStack: false })}
                 >
                   {props.previewBusy ? 'Reading CSV…' : 'Analyze CSV'}
                 </button>
-                <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => setStep('ask')}>Back</button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={close}>Cancel</button>
               </div>
             </Match>
@@ -191,9 +298,56 @@ export default function CardTraderPowerToolsModal(props) {
             <Match when={step() === 'preview'}>
               <p class="page-lede">
                 From your CSV
-                {props.preview?.totalPowerToolsRows ? ` (${props.preview.totalPowerToolsRows} rows)` : ''}, we found how
-                locations are written. Confirm the mapping before the full import.
+                {props.preview?.totalPowerToolsRows ? ` (${props.preview.totalPowerToolsRows} rows with stock)` : ''}, we found how
+                locations are written. Confirm the mapping before the import.
               </p>
+
+              <Show when={gameDetection()}>
+                <div class="ct-pt-suggest">
+                  <p class="page-lede"><strong>Games detected</strong></p>
+                  <ul class="ct-pt-games">
+                    <For each={gameDetection().games || []}>
+                      {(row) => (
+                        <li>
+                          <strong>{GAME_LABEL[row.id] || row.id}</strong>
+                          <span class="page-lede muted">
+                            {' '}{plural(row.count, 'row')} · {plural(row.quantity, 'unit')}
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={Number(gameDetection().skippedZeroRows) > 0}>
+                    <p class="page-lede muted">
+                      Skipped {gameDetection().skippedZeroRows} zero-quantity rows (not used for locations).
+                    </p>
+                  </Show>
+                  <Show when={unresolvedCount() > 0}>
+                    <div class="ct-pt-warn">
+                      <strong>{unresolvedCount()} row{unresolvedCount() === 1 ? '' : 's'} could not be assigned to a game</strong>
+                      <p class="page-lede muted">
+                        They will not be imported unless you switch to per-game CSVs or import recognized rows only below.
+                        <Show when={(gameDetection().unresolved || []).length < unresolvedCount()}>
+                          {' '}Showing the first {(gameDetection().unresolved || []).length}.
+                        </Show>
+                      </p>
+                      <ul>
+                        <For each={gameDetection().unresolved || []}>
+                          {(row) => (
+                            <li>
+                              Line {row.line}: <code>{row.cardmarketId || '—'}</code>
+                              {row.name ? ` · ${row.name}` : ''}
+                              {row.set ? ` · ${row.set}` : ''}
+                              {' — '}
+                              {UNRESOLVED_REASON[row.reason] || row.reason}
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
 
               <Show when={examples().length} fallback={<p class="page-lede muted">No location values found in the uploaded CSV.</p>}>
                 <div class="ct-pt-suggest">
@@ -303,6 +457,9 @@ export default function CardTraderPowerToolsModal(props) {
                 <For each={props.preview?.samples || []}>
                   {(row) => (
                     <li>
+                      <Show when={row.game}>
+                        <span class="thread-meta">{GAME_LABEL[row.game] || row.game}</span>
+                      </Show>
                       <strong>{row.name || 'Card'}</strong>
                       <span class="thread-meta">
                         {row.condition} {row.language}
@@ -318,15 +475,21 @@ export default function CardTraderPowerToolsModal(props) {
                   )}
                 </For>
               </ul>
-              <Show when={!props.preview?.samples?.length}>
-                <p class="ct-connect-err">No sample rows — check the CSV and try again.</p>
+              <Show when={!props.preview?.samples?.length && !recognizedRowCount()}>
+                <p class="ct-connect-err">No rows with stock — check the CSV and try again.</p>
               </Show>
               <Show when={localError()}><p class="ct-connect-err">{localError()}</p></Show>
               <div class="ct-connect-actions">
-                <button type="button" class="btn btn-cardtrader" disabled={busyAll() || !props.preview?.samples?.length} onClick={confirmFull}>
-                  {props.busy ? 'Starting…' : 'Looks good — full import'}
+                <button type="button" class="btn btn-cardtrader" disabled={busyAll() || !canImport()} onClick={confirmFull}>
+                  {props.busy
+                    ? 'Starting…'
+                    : unresolvedCount() > 0
+                      ? `Import ${recognizedRowCount() || 0} recognized rows`
+                      : 'Looks good — import locations'}
                 </button>
-                <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => setStep('upload')}>Change CSV</button>
+                <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => { setStep('upload'); clearPreview(); }}>
+                  Change CSV
+                </button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={close}>Cancel</button>
               </div>
             </Match>

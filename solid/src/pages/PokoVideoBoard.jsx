@@ -95,8 +95,8 @@ const CLIP_GROUPS = [
   },
 ];
 
-/** Side-by-side review: Gemini Fenrir EN/IT 1-min auditions on Part 5 visuals
- * (market/src/pages/PokoVideoBoard.jsx). */
+/** Side-by-side review: Gemini Fenrir EN/IT 1-min auditions on Part 5 visuals.
+ * */
 export default function PokoVideoBoard() {
   usePageTitle('Poko · Voice auditions · test.pokoin.com');
 

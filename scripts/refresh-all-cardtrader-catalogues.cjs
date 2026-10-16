@@ -8,7 +8,7 @@ const apply=process.argv.includes('--apply');
 const root=process.env.POKOIN_CATALOG_RUN_ROOT||'/home/nez/data/pokoin-catalog-refresh/'+new Date().toISOString().slice(0,10);
 fs.mkdirSync(root,{recursive:true});
 const env=Object.fromEntries(JSON.parse(cp.execFileSync('docker',['inspect','pokoin-marketplace-postgres-15t','--format','{{json .Config.Env}}'],{encoding:'utf8'})).map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}));
-const poolFor=db=>new Pool({host:'127.0.0.1',port:25432,user:env.POSTGRES_USER,password:env.POSTGRES_PASSWORD,database:db,max:4,connectionTimeoutMillis:15000,options:'-c statement_timeout=300000 -c lock_timeout=60000'});
+const poolFor=db=>new Pool({host:'127.0.0.1',port:25433,user:env.POSTGRES_USER,password:env.POSTGRES_PASSWORD,database:db,max:4,connectionTimeoutMillis:15000,options:'-c statement_timeout=300000 -c lock_timeout=60000'});
 const bridge=fs.readFileSync(path.join(__dirname,'cardtrader-fetch-bridge.py'),'utf8');
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const remote=cp.spawn('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=20','pokoin-marketplace','python3 -u -c '+quote(bridge)],{stdio:['pipe','pipe','inherit']});
@@ -41,7 +41,6 @@ async function project(pool,target,categories){
   sql=insertOnly(await definition(pool,'refresh_marketplace_card_urls'),'marketplace_card_urls');
   sql=sql.replace('on sc.card_id = c.card_id','on sc.card_id = c.card_id WHERE NOT EXISTS (SELECT 1 FROM public.marketplace_card_urls old WHERE old.card_id=c.card_id)');
   console.log('PROJECT',sql.slice(0,65));await pool.query(sql);
-  await pool.query('select refresh_marketplace_set_catalog_counts()');
  }else{
   const def=await definition(pool,'refresh_multigame_marketplace_projections');
   let sql=def.split('execute format($sql$')[1]?.split('$sql$, qualified_raw)')[0];
@@ -57,11 +56,13 @@ async function project(pool,target,categories){
   urls=urls.replace(/;\s*$/,' on conflict (card_id) do nothing;');
   await pool.query(urls);
  }
+ // Every game: a set without a count row has no set page and is missing from the set index.
+ await pool.query('select refresh_marketplace_set_catalog_counts()');
 }
 async function main(){
  const admin=poolFor('pokoin_marketplace'), games=await api.get('/games'), categories=await api.get('/categories');
  const dbs=(await admin.query("select datname from pg_database where datname like 'pokoin_%' order by (datname='pokoin_marketplace') desc,datname")).rows;
- const report={skipped:[],startedAt:new Date().toISOString(),apply,games:[],errors:[]};
+ const report={skipped:[],startedAt:new Date().toISOString(),apply,games:[],errors:[],deferred:[]};
  const only=process.argv.find(a=>a.startsWith('--database='))?.split('=')[1];
  for(const {datname:db} of dbs){
   if(only&&db!==only)continue;
@@ -82,6 +83,19 @@ async function main(){
    console.log(new Date().toISOString(),'AUDIT',db,game.name);
    let dry=await importer.run(options,{pool,target,api});
    for(let retry=0;dry.counts.failedExpansions&&retry<2;retry++){for(const p of dry.expansionProgress.filter(p=>p.error))cache.delete('/blueprints/export'+JSON.stringify({expansion_id:p.expansion_id}));dry=await importer.run(options,{pool,target,api});}
+   if(dry.counts.failedExpansions){
+    // CardTrader often cannot export an expansion on the day it appears; the next run fetches it again.
+    // Defer only expansions this game has no blueprints for yet; a failing known expansion still fails the game.
+    const failed=dry.expansionProgress.filter(p=>p.error);
+    const known=new Set((await pool.query('select distinct expansion_id from '+schema+'.'+table+' where expansion_id = any($1::bigint[])',[failed.map(p=>Number(p.expansion_id))])).rows.map(r=>Number(r.expansion_id)));
+    if(failed.length&&failed.every(p=>!known.has(Number(p.expansion_id)))){
+     for(const p of failed)cache.set('/blueprints/export'+JSON.stringify({expansion_id:p.expansion_id}),Promise.resolve([]));
+     const expansions=failed.map(p=>({id:p.expansion_id,name:p.expansion_name,error:p.error}));
+     report.deferred.push({database:db,expansions});
+     console.log(new Date().toISOString(),'DEFER',db,JSON.stringify(expansions));
+     dry=await importer.run(options,{pool,target,api});
+    }
+   }
    if(dry.counts.failedExpansions)throw Error('Unfetched expansions: '+dry.counts.failedExpansions);
    fs.writeFileSync(path.join(root,db+'-dry.json'),JSON.stringify(dry,null,2));
    if(dry.blockers?.length||dry.errors?.length)throw Error('Dry-run errors '+JSON.stringify(dry.errors||dry.blockers));

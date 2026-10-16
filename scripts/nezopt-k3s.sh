@@ -4,8 +4,9 @@
 #
 #   scripts/nezopt-k3s.sh up             # start / create the k3s container
 #   scripts/nezopt-k3s.sh sync           # Pi Rust release (x86 build) + env + sitemaps → nezopt, restart pods if changed
-#   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml
-#   scripts/nezopt-k3s.sh secret         # only rebuild the env secret from the Pi Rust service
+#   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml + pokoin-security.yaml
+#   scripts/nezopt-k3s.sh network        # Docker network, DB attachments, scan + Hermes bridges (idempotent)
+#   scripts/nezopt-k3s.sh secret         # only rebuild the env secrets (pods, CronJobs) from the Pi Rust service
 #   scripts/nezopt-k3s.sh reindex        # one-off full Redis Search rebuild (first run / repair)
 #   scripts/nezopt-k3s.sh status         # nodes, pods, HPA, overflow health
 #   scripts/nezopt-k3s.sh install        # user timer: `sync` every 5 min (follows Pi API deploys)
@@ -26,6 +27,8 @@ PI_UNIT="${PI_RUST_UNIT:-pokoin-rust-api}"
 # Builds come from this repository's objects (a detached worktree, never a checkout someone works in).
 REPO="${POKOIN_REPO:-$HOME/Projects/pokoin-web}"
 NS=pokoin-overflow
+# Least-privilege role passwords (<role>.pw, mode 600); see docs/SECURITY_HARDENING.md.
+PG_ROLES_DIR="${POKOIN_PG_ROLES_DIR:-$HOME/secrets/pokoin-pg-roles}"
 # UFW drops container → host traffic, so pods reach the writer Postgres
 # container directly on a user-defined Docker network with fixed addresses.
 NET=pokoin-overflow
@@ -35,6 +38,16 @@ WRITER_NET_IP=172.31.250.10
 TCGCSV_CONTAINER="${TCGCSV_CONTAINER:-tcgprices-postgres-15t}"
 TCGCSV_NET_IP=172.31.250.11
 K3S_NET_IP=172.31.250.20
+# Host loopback services pods reach through socat bridges on $NET (see host_bridge):
+# Scan Connect → the pokoin-scanner GPU recognition worker on :8099, and
+# Hermes (Poko chat) → oracle-poko-tunnel.service on :18789.
+SCAN_BRIDGE_CONTAINER="${SCAN_BRIDGE_CONTAINER:-pokoin-scan-bridge}"
+SCAN_BRIDGE_IP=172.31.250.12
+SCAN_BRIDGE_PORT=18151
+SCAN_HOST_PORT=8099
+HERMES_BRIDGE_CONTAINER="${HERMES_BRIDGE_CONTAINER:-pokoin-hermes-bridge}"
+HERMES_BRIDGE_IP=172.31.250.13
+HERMES_PORT=18789
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$HERE/infra/k3s/pokoin-overflow.yaml"
 [[ -f "$MANIFEST" ]] || MANIFEST="$(cd "$HERE/.." && pwd)/infra/k3s/pokoin-overflow.yaml"
@@ -65,6 +78,28 @@ up() {
   say "k3s ready"
 }
 
+# UFW drops container → host traffic, so each bridge is a privileged socat
+# container on $NET that enters the host network namespace per connection.
+# Idempotent: an existing bridge is only started if stopped, never recreated.
+#   host_bridge <container> <bridge ip> <listen port> <host loopback port>
+host_bridge() {
+  local name="$1" ip="$2" port="$3" host_port="$4"
+  if docker inspect "$name" >/dev/null 2>&1; then
+    [[ "$(docker inspect -f '{{.State.Running}}' "$name")" == true ]] \
+      || docker start "$name" >/dev/null
+    return 0
+  fi
+  docker run -d --name "$name" --restart unless-stopped --privileged --pid host \
+    --network "$NET" --ip "$ip" alpine:3.20 sh -c \
+    "apk add --no-cache socat >/dev/null && printf '%s\n' '#!/bin/sh' 'exec nsenter -t 1 -n socat STDIO TCP:127.0.0.1:$host_port' > /bridge.sh && chmod +x /bridge.sh && exec socat TCP-LISTEN:$port,fork,reuseaddr,bind=$ip EXEC:/bridge.sh" \
+    >/dev/null
+}
+
+# SCAN_PRIMARY_URL / SCAN_FALLBACK_URL in the manifest.
+scan_bridge() { host_bridge "$SCAN_BRIDGE_CONTAINER" "$SCAN_BRIDGE_IP" "$SCAN_BRIDGE_PORT" "$SCAN_HOST_PORT"; }
+# POKO_CHAT_URL / POKONTACT_SERVICE_URL, rewritten to this bridge by sync_secret.
+hermes_bridge() { host_bridge "$HERMES_BRIDGE_CONTAINER" "$HERMES_BRIDGE_IP" "$HERMES_PORT" "$HERMES_PORT"; }
+
 network() {
   docker network inspect "$NET" >/dev/null 2>&1 || docker network create --subnet "$NET_SUBNET" "$NET" >/dev/null
   local attached
@@ -74,6 +109,8 @@ network() {
   if docker inspect "$TCGCSV_CONTAINER" >/dev/null 2>&1; then
     [[ " $attached " == *" $TCGCSV_CONTAINER "* ]] || docker network connect --ip "$TCGCSV_NET_IP" "$NET" "$TCGCSV_CONTAINER"
   fi
+  scan_bridge
+  hermes_bridge
 }
 
 # The running Pi Rust service's real environment (/proc/<pid>/environ: the
@@ -155,11 +192,58 @@ if quotes:
     netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
     data["TCGCSV_DATABASE_URL"] = base64.b64encode(
         urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
-print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-                  "metadata": {"name": "pokoin-api-env", "namespace": "pokoin-overflow"},
-                  "data": data}))
-' "$WRITER_NET_IP" "$TCGCSV_NET_IP" | kc apply -f - >/dev/null
-  say "secret pokoin-api-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
+# The Pi reaches Hermes through its own localhost SSH tunnel; overflow pods reach the
+# same Hermes through the hermes bridge on the overflow Docker network.
+for key in ("POKO_CHAT_URL", "POKONTACT_SERVICE_URL"):
+    raw = base64.b64decode(data.get(key, "")).decode()
+    parts = urlsplit(raw)
+    if raw and (parts.hostname or "") in {"127.0.0.1", "localhost", "::1"}:
+        data[key] = base64.b64encode(urlunsplit(parts._replace(netloc=sys.argv[3])).encode()).decode()
+# Least-privilege roles (docs/SECURITY_HARDENING.md): every URL here reaches the
+# nezopt writer, so pods log in as pokoin_api_write (reads and writes, one pool)
+# and the CronJobs (secret pokoin-jobs-env) as pokoin_jobs. The read URLs of the Pi
+# URLs carry pokoin_api_read, which the writer rejects. Without the password
+# files both secrets keep the login of the Pi, as before.
+from pathlib import Path
+from urllib.parse import quote
+
+def role_password(name):
+    path = Path(sys.argv[4]) / f"{name}.pw"
+    return path.read_text().strip() if path.is_file() else ""
+
+def writer_keys(table):
+    return [k for k in table if k != "TCGCSV_DATABASE_URL"
+            and "MARKETPLACE" in k and k.endswith("DATABASE_URL")]
+
+def with_login(value, user, password):
+    parts = urlsplit(value)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit(parts._replace(netloc=f"{quote(user, safe="")}:{quote(password, safe="")}@{host}"))
+
+def logins(table, user):
+    password = role_password(user)
+    out = dict(table)
+    if password:
+        for key in writer_keys(out):
+            out[key] = base64.b64encode(with_login(base64.b64decode(out[key]).decode(), user, password).encode()).decode()
+    return out
+
+api = logins(data, "pokoin_api_write")
+jobs = logins(data, "pokoin_jobs")
+for name, table in (("pokoin_api_write", api), ("pokoin_jobs", jobs)):
+    for key in writer_keys(table):
+        if urlsplit(base64.b64decode(table[key]).decode()).username == "pokoin_api_read":
+            sys.exit(f"{key} logs in as pokoin_api_read, which the writer rejects: "
+                     f"create {sys.argv[4]}/{name}.pw first")
+
+def secret(name, table):
+    return {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+            "metadata": {"name": name, "namespace": "pokoin-overflow"}, "data": table}
+
+print(json.dumps({"apiVersion": "v1", "kind": "List",
+                  "items": [secret("pokoin-api-env", api), secret("pokoin-jobs-env", jobs)]}))
+' "$WRITER_NET_IP" "$TCGCSV_NET_IP" "$HERMES_BRIDGE_IP:$HERMES_PORT" "$PG_ROLES_DIR" | kc apply -f - >/dev/null
+  say "secrets pokoin-api-env and pokoin-jobs-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
 }
 
 # The Pi runs the aarch64 build of one commit; pods run the x86_64 build of the
@@ -177,6 +261,8 @@ build_release() {
   fi
   git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$src" fetch -q origin
   git -C "$src" checkout -q --detach --force "$commit"
+  # The pods keep the current release when this refuses; a full / evicts them.
+  bash "$(dirname "${BASH_SOURCE[0]}")/require-free-space.sh" "${POKOIN_K3S_MIN_FREE_GB:-30}" "$BASE"
   say "cargo build pokoin-api ${commit:0:12} (x86_64)"
   ( # shellcheck disable=SC1091
     source "$HOME/.cargo/env"
@@ -251,7 +337,7 @@ install_timer() {
   local unit_dir="$HOME/.config/systemd/user"
   mkdir -p "$BASE/bin" "$unit_dir"
   install -m 0755 "$0" "$BASE/bin/nezopt-k3s.sh"
-  mkdir -p "$BASE/bin/infra/k3s" && cp "$MANIFEST" "$BASE/bin/infra/k3s/"
+  mkdir -p "$BASE/bin/infra/k3s" && cp "$MANIFEST" "$(dirname "$MANIFEST")/pokoin-security.yaml" "$BASE/bin/infra/k3s/"
   cat >"$unit_dir/pokoin-overflow-sync.service" <<UNIT
 [Unit]
 Description=Pokoin overflow: follow the Pi Rust release and env into k3s on nezopt

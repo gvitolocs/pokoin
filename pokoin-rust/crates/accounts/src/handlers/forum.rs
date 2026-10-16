@@ -16,6 +16,7 @@ use serde_json::{json, Map, Value as Json};
 use crate::error::{ApiError, Result};
 use crate::firestore::Firestore;
 use crate::r2::MediaStore;
+use crate::rate_limit::RateLimitRequest;
 use crate::state::DomainState;
 use crate::supabase::{encode_filter_value, SupabaseClient, PREFER_IGNORE_DUPLICATES, PREFER_REPRESENTATION};
 
@@ -60,6 +61,31 @@ const POST_SELECT: &str =
 const MEDIA_SELECT: &str =
     "id,topic_id,post_id,public_url,mime_type,byte_size,width,height,created_at";
 const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
+
+/// Per-uid write budgets (10-minute windows) for the forum writers.
+const TOPIC_LIMIT: i64 = 5;
+const POST_LIMIT: i64 = 30;
+const MEDIA_LIMIT: i64 = 20;
+const WRITE_WINDOW_SECONDS: u64 = 600;
+
+/// One forum write against the per-uid budget; 429 with `retryAfterSec` when spent.
+async fn limit_forum_write(state: &DomainState, scope: &str, uid: &str, limit: i64) -> Result<()> {
+    let verdict = state
+        .limiter()
+        .check(RateLimitRequest {
+            scope,
+            identity: uid,
+            limit,
+            window_seconds: WRITE_WINDOW_SECONDS,
+        })
+        .await;
+    if verdict.allowed {
+        return Ok(());
+    }
+    let retry_after = verdict.retry_after_sec.unwrap_or(WRITE_WINDOW_SECONDS);
+    Err(ApiError::too_many_requests("You are posting too fast. Try again in a few minutes.")
+        .with_field("retryAfterSec", json!(retry_after)))
+}
 
 /// `^[a-z0-9_-]{2,40}$`.
 pub fn clean_category_id(value: &str) -> String {
@@ -355,6 +381,7 @@ async fn forum_create_topic_inner(
             "Topic body must be at least 12 characters.",
         ));
     }
+    limit_forum_write(state, "forum-topic", &claims.uid, TOPIC_LIMIT).await?;
     let card_ids: Vec<i64> = body
         .get("cardIds")
         .and_then(Json::as_array)
@@ -462,6 +489,7 @@ async fn forum_create_post_inner(
     // Supabase is only needed once the request itself is valid, matching the
     // Node handlers (which captured it lazily inside `supabaseFetch`).
     let supabase = state.supabase()?;
+    limit_forum_write(state, "forum-post", &claims.uid, POST_LIMIT).await?;
 
     let topic_rows = supabase
         .get(
@@ -559,14 +587,19 @@ async fn forum_upload_media_inner(
         ));
     }
 
+    limit_forum_write(state, "forum-media", &claims.uid, MEDIA_LIMIT).await?;
+
     let encoded = strip_data_url_prefix(&image_base64);
     let source = decode_base64(encoded)
         .ok_or_else(|| ApiError::bad_request("Image must be smaller than 8 MB."))?;
     if source.is_empty() || source.len() > MAX_UPLOAD_BYTES {
         return Err(ApiError::bad_request("Image must be smaller than 8 MB."));
     }
+    // Header-only dimension check: an oversized image never reaches storage
+    // setup or the decoder.
+    pokoin_media::probe(&source, pokoin_media::FORUM).map_err(media_error)?;
 
-    let (media_bytes, width, height) = encode_forum_media(&source)?;
+    let (media_bytes, width, height) = encode_forum_media(source).await?;
     let media_id = uuid::Uuid::new_v4().to_string();
     let storage_path = format!("forum-media/{}/{media_id}.webp", claims.uid);
     let store = state
@@ -627,28 +660,38 @@ fn decode_base64(value: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
-/// Decode, auto-rotate, fit inside 1600x1600 without enlargement, re-encode.
+/// Decode, fit inside 1600x1600 without enlargement, re-encode — on the
+/// bounded blocking pool (`pokoin_media::transform`), never on a request worker.
 ///
 /// Node used `sharp(...).webp({ quality: 86 })` (lossy). The native encoder
 /// emits lossless WebP, so the bytes differ while the pixels and the stored
 /// metadata (`width`, `height`, `mime_type`) match. This is recorded as a
 /// fidelity note in the coverage ledger.
-pub fn encode_forum_media(source: &[u8]) -> Result<(Vec<u8>, Option<u32>, Option<u32>)> {
-    let decoded = image::load_from_memory(source)
-        .map_err(|_| ApiError::bad_request("Image must be smaller than 8 MB."))?;
-    let resized = if decoded.width() > 1600 || decoded.height() > 1600 {
-        decoded.resize(1600, 1600, image::imageops::FilterType::Lanczos3)
-    } else {
-        decoded
-    };
-    let width = resized.width();
-    let height = resized.height();
-    let mut out = Vec::new();
-    let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut out);
-    resized
-        .write_with_encoder(encoder)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    Ok((out, Some(width), Some(height)))
+pub async fn encode_forum_media(source: Vec<u8>) -> Result<(Vec<u8>, Option<u32>, Option<u32>)> {
+    let encoded = pokoin_media::transform(source, pokoin_media::FORUM, pokoin_media::Fit::Inside { max: 1600 })
+        .await
+        .map_err(media_error)?;
+    Ok((encoded.bytes, Some(encoded.width), Some(encoded.height)))
+}
+
+fn media_error(error: pokoin_media::TransformError) -> ApiError {
+    use pokoin_media::TransformError;
+    match error {
+        TransformError::TooLarge { .. } => ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Image is too large. Use an image up to {}x{} pixels.",
+                pokoin_media::FORUM.max_width,
+                pokoin_media::FORUM.max_height
+            ),
+        )
+        .with_code("image_too_large"),
+        // Node answered every undecodable upload with the size message.
+        TransformError::Unsupported => ApiError::bad_request("Image must be smaller than 8 MB."),
+        TransformError::Busy => ApiError::unavailable("Image processing is busy. Try again in a moment.")
+            .with_code("image_busy"),
+        TransformError::Failed(message) => ApiError::internal(message),
+    }
 }
 
 /// `OPTIONS` for the CORS-preflight routes.
@@ -734,8 +777,8 @@ mod tests {
         assert_eq!(decode_base64("AAA").unwrap(), vec![0, 0]);
     }
 
-    #[test]
-    fn webp_encoding_produces_a_real_webp() {
+    #[tokio::test]
+    async fn webp_encoding_produces_a_real_webp() {
         // A 2x2 red PNG, decoded, re-encoded and checked for the RIFF/WEBP magic.
         let mut png = Vec::new();
         let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
@@ -745,7 +788,7 @@ mod tests {
                 image::ImageFormat::Png,
             )
             .unwrap();
-        let (webp, width, height) = encode_forum_media(&png).unwrap();
+        let (webp, width, height) = encode_forum_media(png).await.unwrap();
         assert_eq!(&webp[..4], b"RIFF");
         assert_eq!(&webp[8..12], b"WEBP");
         assert_eq!(width, Some(2));

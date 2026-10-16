@@ -54,6 +54,7 @@ trait Backend {
         name: String,
         token: String,
         ready: Option<bool>,
+        exclusive: bool,
     ) -> Result<Value>;
 }
 async fn reconcile_all(backend: &mut impl Backend, dry_run: bool) -> Result<Value> {
@@ -86,6 +87,8 @@ async fn reconcile_all(backend: &mut impl Backend, dry_run: bool) -> Result<Valu
                     seller_name(integration),
                     token,
                     one_day_ready(integration),
+                    // A degraded lock (Redis down) is not shared: no CardTrader writes.
+                    !lock.owner.is_empty(),
                 )
                 .await?;
             let ok = sync["ok"] == true && sync["incomplete"] != true;
@@ -239,6 +242,7 @@ impl Backend for Native {
         name: String,
         token: String,
         ready: Option<bool>,
+        exclusive: bool,
     ) -> Result<Value> {
         Ok(reconcile_cardtrader_inventory(ReconcileArgs {
             firestore: self.state.firestore.as_ref(),
@@ -251,6 +255,8 @@ impl Backend for Native {
             on_progress: None,
             power_tools_by_game: None,
             preview_games_only: false,
+            direction: None,
+            exclusive,
         })
         .await?)
     }
@@ -320,10 +326,12 @@ mod tests {
             name: String,
             _: String,
             ready: Option<bool>,
+            exclusive: bool,
         ) -> Result<Value> {
             assert_eq!(uid, "u1");
             assert_eq!(name, "Seller");
             assert_eq!(ready, Some(false));
+            assert!(exclusive, "the mock lock has an owner");
             self.synced += 1;
             Ok(
                 json!({"ok":true,"incomplete":self.incomplete,"summary":{"removed":1,"updated":2,"inventory":3}}),

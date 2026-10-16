@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 pub mod card;
+pub mod desk_art;
 pub use card::react_record;
 use thiserror::Error;
 

@@ -9,17 +9,18 @@ import { cardImageAlt } from '@market/seo.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
 import { buyerParts } from '../stores/buyer.js';
+import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
 import PriceStack from './PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
- * Grid / rail / list tile (market/src/components/CardTile.jsx). A plain anchor:
+ * Grid / rail / list tile. A plain anchor:
  * the router claims the click and intent-preloads the desk chunk + data on
  * hover, focus or touchstart. Inside a CardSelectGrid, Ctrl/Cmd/Shift-click
  * selects instead of opening, and dragging a selected tile carries the whole
- * selection. Not ported yet: the list layout's ArtworkZoom, which falls back
- * to CardArt here.
+ * selection. The list layout (set desk list view) zooms the full scan on hover.
  */
 export default function CardTile(props) {
   const card = () => props.card;
@@ -67,7 +68,7 @@ export default function CardTile(props) {
             'is-selected': picked(),
           },
         ]}
-        href={cardHref(card())}
+        href={gameHref(cardHref(card()))}
         data-card-id={card().id}
         aria-selected={picked() ? 'true' : undefined}
         draggable="true"
@@ -88,16 +89,28 @@ export default function CardTile(props) {
       >
         <span class="tile-art">
           <Show when={art()} fallback={<span class="tile-ph" />}>
-            <CardArt
-              src={art()}
-              alt={cardImageAlt(card())}
-              cut={cut() && !landscape() && !item()}
-              cutSurface="album"
-              full={cut() || list()}
-              card={cut() ? card() : undefined}
-              loading={eager() ? 'eager' : 'lazy'}
-              fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
-            />
+            <Show
+              when={list()}
+              fallback={(
+                <CardArt
+                  src={art()}
+                  alt={cardImageAlt(card())}
+                  cut={cut() && !landscape() && !item()}
+                  cutSurface="album"
+                  full={cut()}
+                  card={cut() ? card() : undefined}
+                  loading={eager() ? 'eager' : 'lazy'}
+                  fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
+                />
+              )}
+            >
+              <ArtworkZoom
+                src={hero() || art()}
+                name={card().name}
+                set={card().set || card().expansion || ''}
+                alt={cardImageAlt(card())}
+              />
+            </Show>
           </Show>
         </span>
         <Show

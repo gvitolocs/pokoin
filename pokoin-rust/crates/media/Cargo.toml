@@ -1,0 +1,18 @@
+[package]
+name = "pokoin-media"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Bounded image transforms for upload routes: header-checked dimensions, decoder limits, and a small blocking pool off the request threads."
+
+# No `workspace = true` inheritance: pokoin-accounts depends on this and must
+# compile standalone (see its Cargo.toml).
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"

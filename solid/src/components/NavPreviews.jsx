@@ -3,7 +3,7 @@ import { fetchPortfolioHistory, formatPknNumber } from '@market/api.js';
 import { listConversations } from '@market/chat-client.js';
 import { openThread } from '@market/chat-dock-store.js';
 import { chatPersonName } from '@market/chat-format.js';
-import { GAMES, game, gameSiteHref } from '@market/game.js';
+import { GAMES, game, gamePreviewHref } from '@market/game.js';
 import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
 import { sparkline } from '@market/portfolio-sparkline.js';
 import { DASHBOARD_SCAN } from '@market/punchouts.js';
@@ -12,18 +12,17 @@ import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
 
 /**
- * Header hover cards (market/src/components/NavPreviews.jsx). One lazy
+ * Header hover cards. One lazy
  * chunk: Chrome imports it on the first hover / focus of a nav icon and
  * renders a preview only while its icon is hovered.
  */
 export function MarketPreview() {
-  const current = game().id;
-  const others = Object.values(GAMES).filter((row) => row.id !== current);
+  const others = () => Object.values(GAMES).filter((row) => row.id !== game().id);
   return (
     <div class="nav-preview" role="region" aria-label="Card games">
       <ul>
-        <For each={others}>
-          {(row) => <li><a href={gameSiteHref(row.id)} target="_self">{row.name}</a></li>}
+        <For each={others()}>
+          {(row) => <li><a href={gamePreviewHref(row.id)}>{row.name}</a></li>}
         </For>
       </ul>
     </div>
@@ -128,7 +127,7 @@ export function DashboardPreview() {
           </svg>
         </Show>
       </div>
-      <a class="nav-scan" href={DASHBOARD_SCAN} aria-label="Scan cards">
+      <a class="nav-scan tile-cta" href={DASHBOARD_SCAN} aria-label="Scan cards">
         <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
           <rect x="1" y="1" width="70" height="98" rx="7" fill="#17131f" stroke="#6f5414" stroke-width="2" />
           <rect x="7" y="7" width="58" height="86" rx="4" fill="none" stroke="#ffd33d" stroke-width="2" />

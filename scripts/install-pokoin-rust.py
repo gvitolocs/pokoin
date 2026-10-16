@@ -91,6 +91,9 @@ def install(args):
             values.setdefault(key, value)
     values["POKOIN_RUST_RELEASE"] = args.commit
     values["MARKETPLACE_SEARCH_ENGINE"] = "redis"
+    # Seller books are built on nezopt (k3s build-lists-sellers and the overflow
+    # pods' sweep), never on the Pi: its three workers serve the stored books.
+    values["POKOIN_SELLER_BOOK_WORKER"] = "0"
     destination = BASE / "releases" / f"pokoin-api-{args.commit[:12]}-aarch64"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != args.sha256:

@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal, For, Repeat, Show, untrack } from 'solid-js';
-import { useNavigate, useParams, useSearchParams } from '@solidjs/router';
-import { fetchSellerShop } from '@market/api.js';
+import { createEffect, createMemo, createSignal, For, onSettled, Repeat, Show, untrack } from 'solid-js';
+import { useParams, useSearchParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
+import { fetchSellerShop, fetchSellerSnapshot } from '@market/api.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { game } from '@market/game.js';
@@ -8,27 +9,35 @@ import { publicListingSellerName, sellerCountryFlag, sellerCountryShort, sellerH
 import { getSearchLang } from '@market/locale.js';
 import { rememberSellerIdentity, seedSellerListings, sellerIdentitySeed } from '@market/seller-seed.js';
 import { filterSellerBook } from '@market/seller-shop-filter.js';
+import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import {
   SELLER_CONDITION_FILTERS,
+  SELLER_FRESH_FIRST_MS,
+  SELLER_FRESH_RETRY_MS,
   SELLER_LANG_FILTERS,
   SELLER_PAGE_SIZE as PAGE_SIZE,
   SELLER_RARITY_FILTERS,
   isOneDayReady,
   sellerFiltersNarrow,
+  sellerFreshAction,
   sellerFromPayload,
   sellerOfferRow,
+  sellerShopEmptyCopy,
+  sellerShopErrorState,
 } from '@market/seller-shop.js';
 import Avatar from '../components/Avatar.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
+import { listingSelected } from '../lib/select-band.js';
 import { accountProfile } from '../stores/account.js';
 import { authUser, signedIn } from '../stores/auth.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 
-/** A changed shop's new book is built behind the request: how often and how soon to ask again. */
-const BOOK_RETRIES = 3;
-const BOOK_RETRY_MS = 2500;
+// A tab that comes back after this long asks fresh=1 whether the shop moved.
+const BOOK_REVISIT_MS = 60_000;
+
+const isBook = (data) => Boolean(data?.book && Array.isArray(data.listings));
 
 function ShopToggle(props) {
   return (
@@ -68,17 +77,20 @@ function SkeletonRows() {
 }
 
 /**
- * Public seller shop (market/src/pages/Seller.jsx). The first page comes from
- * a small paged query (or the listings cache) while the whole book downloads
- * beside it; every filter / sort / page then runs locally on the book. A fresh
- * stamp check refetches the book when the seller's listings changed.
+ * Public seller shop: one request. The shop snapshot (the stored book, c1v2 +
+ * brotli 11, edge-cached; local-first, so a revisit paints from the store)
+ * paints the shop and every filter / sort / page runs locally on it. Without a
+ * snapshot the live book route (`book=1`) answers, and server pages are the
+ * fallback when neither does. After painting, and when a tab comes back after
+ * a minute, `fresh=1` compares the shop's stamp with the book's: only a moved
+ * shop reads its book again.
  * Not ported yet: the rubber-band multi-select of shop rows (rows drag
  * themselves).
  */
 function SellerShop(props) {
   const handle = untrack(() => props.handle);
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => props.lang || getSearchLang();
   const hintedUid = () => String(searchParams.sellerUid || '').trim();
   const selectedGame = game().apiGame;
@@ -94,7 +106,7 @@ function SellerShop(props) {
     username: handle,
     displayName: handle,
   });
-  const [error, setError] = createSignal('');
+  const [error, setError] = createSignal(null);
   const [query, setQuery] = createSignal('');
   const [condition, setCondition] = createSignal('');
   const [language, setLanguage] = createSignal('');
@@ -109,7 +121,8 @@ function SellerShop(props) {
   });
   const [loading, setLoading] = createSignal(!seeded);
   const [book, setBook] = createSignal(null);
-  const [bookPhase, setBookPhase] = createSignal('idle');
+  // The book is asked for on mount, so pages wait for it from the first run.
+  const [bookPhase, setBookPhase] = createSignal('loading');
   const [pageSettled, setPageSettled] = createSignal(Boolean(seeded));
   // Plain mirrors (React refs): read by requests that start before a flush.
   let sellerUidNow = untrack(hintedUid) || seeded?.seller?.uid || known?.uid || '';
@@ -152,22 +165,41 @@ function SellerShop(props) {
     },
   );
 
-  // The whole book, asked for with the first page: it is what makes the
-  // filters instant, so it does not wait behind the page it replaces.
+  // Where the book came from: the snapshot, or the live book route.
+  let bookSource = 'snapshot';
+  let disposed = false;
+  function adopt(data) {
+    if (disposed) return;
+    setBook(() => data);
+    setBookPhase('ready');
+    putSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
+  }
+
+  // The whole book on mount: the snapshot (a stored copy paints at once and
+  // the network copy replaces it when it differs), else the live book route.
   createEffect(() => true, () => {
     let cancelled = false;
     setBook(null);
     setBookPhase('loading');
-    fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
+    fetchSellerSnapshot(handle, { onUpdate: (data) => !cancelled && isBook(data) && adopt(data) })
       .then((data) => {
-        if (cancelled) return;
-        if (!data?.book || !Array.isArray(data.listings)) {
+        if (cancelled) return null;
+        if (isBook(data)) {
+          adopt(data);
+          checkFresh(SELLER_FRESH_FIRST_MS);
+          return null;
+        }
+        bookSource = 'live';
+        return fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow });
+      })
+      .then((data) => {
+        if (cancelled || data === null) return;
+        if (!isBook(data)) {
           setBookPhase('server');
           return;
         }
-        setBook(() => data);
-        setBookPhase('ready');
-        putSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
+        adopt(data);
+        checkFresh(SELLER_FRESH_FIRST_MS);
       })
       .catch(() => {
         if (!cancelled) setBookPhase('server');
@@ -177,55 +209,64 @@ function SellerShop(props) {
     };
   });
 
-  // Fresh stamp: refetch the book when the seller's listings moved. The
-  // server answers with the book it has while it builds the new one behind
-  // the request, so an unchanged book is asked for again a little later,
-  // a few times, instead of being painted or fetched in a loop.
-  createEffect(
-    () => [book(), filters()],
-    ([current]) => {
-      if (!current?.seller?.uid) return undefined;
-      let cancelled = false;
-      let timer = 0;
-      let retries = 0;
-      const check = () => {
-        fetchSellerShop(handle, { fresh: true, sellerUid: current.seller.uid, game: selectedGame })
-          .then((stamp) => {
-            const next = String(stamp?.maxUpdatedAt || '');
-            const prev = String(current.maxUpdatedAt || '');
-            if (cancelled || !next || next === prev) return null;
-            return fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: current.seller.uid });
-          })
-          .then((data) => {
-            if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
-            if (String(data.maxUpdatedAt || '') === String(current.maxUpdatedAt || '')) {
-              // Still the book on screen: the new one is being built.
-              if (retries < BOOK_RETRIES) {
-                retries += 1;
-                timer = setTimeout(check, BOOK_RETRY_MS);
-              }
-              return;
-            }
-            setBook(() => data);
-            putSeller((value) => sellerFromPayload(data, handle, data.listings[0], value));
-          })
-          .catch(() => {});
-      };
-      timer = setTimeout(check, 250);
-      return () => {
-        cancelled = true;
-        clearTimeout(timer);
-      };
-    },
-  );
+  // Freshness: one cheap stamp read (fresh=1, edge-cached seconds). A moved
+  // shop reads the newer stored book by its version, or waits while it is
+  // built; an unchanged shop costs nothing more.
+  let freshTimer = 0;
+  let freshTries = 0;
+  function checkFresh(delay) {
+    clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => {
+      const current = untrack(book);
+      if (disposed || !current || document.visibilityState === 'hidden') return;
+      fetchSellerShop(handle, { fresh: true, sellerUid: current.seller?.uid || sellerUidNow, game: selectedGame })
+        .then((fresh) => {
+          const action = sellerFreshAction(current, fresh);
+          if (action === 'current') {
+            freshTries = 0;
+            return;
+          }
+          const next = bookSource === 'live'
+            ? fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidNow })
+            : action === 'refetch' ? fetchSellerSnapshot(handle, { version: fresh.book.version }) : Promise.resolve(null);
+          return next.then((data) => {
+            if (isBook(data) && String(data.maxUpdatedAt || '') !== String(current.maxUpdatedAt || '')) adopt(data);
+            const behind = sellerFreshAction(untrack(book), fresh) !== 'current';
+            if (behind && freshTries < SELLER_FRESH_RETRY_MS.length) checkFresh(SELLER_FRESH_RETRY_MS[freshTries++]);
+          });
+        })
+        .catch(() => {});
+    }, delay);
+  }
 
-  // Server pages until the book is in. A filter click while the book is
-  // downloading waits for it instead of asking again.
+  // Revisit: a tab hidden for a minute asks fresh=1 when it comes back.
+  onSettled(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (!untrack(book) || !hiddenAt || Date.now() - hiddenAt < BOOK_REVISIT_MS) return;
+      hiddenAt = 0;
+      freshTries = 0;
+      checkFresh(0);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      clearTimeout(freshTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  });
+
+  // Server pages only when the book is unavailable: while it downloads the
+  // page shows the listings cache or the skeleton, not a second (slow) query.
   createEffect(
     () => ({ book: book(), bookPhase: bookPhase(), page: page(), ...filters() }),
     (input) => {
       const narrow = sellerFiltersNarrow(input);
-      if (input.book || (input.bookPhase === 'loading' && narrow)) {
+      if (input.book || input.bookPhase === 'loading') {
         setPageSettled(true);
         return undefined;
       }
@@ -254,7 +295,7 @@ function SellerShop(props) {
           setTotal(Number(data.total ?? rows.length) || 0);
           setUnique(Number(data.unique ?? data.uniqueCards ?? rows.length) || 0);
           setCopies(data.copies == null ? null : (Number(data.copies) || 0));
-          setError('');
+          setError(null);
           setLoading(false);
           setPageSettled(true);
         })
@@ -269,7 +310,7 @@ function SellerShop(props) {
           setTotal(0);
           setUnique(0);
           setCopies(0);
-          setError(err.message || 'Seller not found.');
+          setError(sellerShopErrorState(err));
           setLoading(false);
         });
       return () => {
@@ -298,14 +339,26 @@ function SellerShop(props) {
   const display = () => seller().displayName || publicListingSellerName(sample(), handle);
   const tag = () => seller().username || sellerHandle(sample()) || handle;
   const showTag = () => tag() && tag().toLowerCase() !== String(display() || '').toLowerCase();
-  const country = () => sellerCountryFlag(sample()?.sellerCountry);
-  const countryShort = () => sellerCountryShort(sample()?.sellerCountry);
+  const country = () => sellerCountryFlag(seller().country || sample()?.sellerCountry);
+  const countryShort = () => sellerCountryShort(seller().country || sample()?.sellerCountry);
   const ready = () => Boolean((shown() || []).some(isOneDayReady));
   const totalPages = () => Math.max(1, Math.ceil(productCount() / PAGE_SIZE) || 1);
   const safePage = () => Math.min(Math.max(1, page()), totalPages());
   const startIdx = () => (productCount() ? (safePage() - 1) * PAGE_SIZE + 1 : 0);
   const endIdx = () => Math.min(safePage() * PAGE_SIZE, productCount());
-  const notFound = () => shown() && !shown().length && error() && productCount() === 0 && !busy();
+  const deskFailure = () => {
+    const failure = error();
+    if (!failure || busy() || productCount() !== 0) return null;
+    const rows = shown();
+    if (!rows || rows.length) return null;
+    return failure;
+  };
+  const emptyShop = createMemo(() => sellerShopEmptyCopy({
+    gameName: game().name,
+    displayName: display(),
+    pokemon: selectedGame === 'pokemon',
+    narrowed: filtersNarrow(),
+  }));
 
   // Your own shop is managed in MyPokoin, not bought from.
   const isOwnShop = () => {
@@ -317,20 +370,23 @@ function SellerShop(props) {
     );
   };
   createEffect(
-    () => !notFound() && isOwnShop(),
+    () => !deskFailure() && isOwnShop(),
     (own) => {
       if (own) navigate('/mypokoin', { replace: true });
     },
   );
 
   const rows = createMemo(() => (shown() || []).map((offer, index) => ({ offer, index, ...sellerOfferRow(offer, lang()) })));
+  const shownOffers = createMemo(() => rows().map((row) => row.enriched));
 
   return (
     <Show
-      when={!notFound()}
+      when={!deskFailure()}
       fallback={(
-        <EmptyDesk title="Seller not found" lede={error()}>
-          <p class="status">Usernames match live native listings.</p>
+        <EmptyDesk title={deskFailure()?.title} lede={deskFailure()?.lede}>
+          <Show when={deskFailure()?.kind === 'not_found'}>
+            <p class="status">Usernames match live native listings.</p>
+          </Show>
         </EmptyDesk>
       )}
     >
@@ -378,7 +434,7 @@ function SellerShop(props) {
             <Metric value={shown() == null ? '…' : uniqueItems()} label="Unique items" />
           </MetricGrid>
 
-          <Alert message={error() && shown()?.length ? error() : ''} />
+          <Alert message={shown()?.length && error()?.lede ? error().lede : ''} />
 
           <section class="panel shop-panel shop-terminal seller-shop-panel">
             <header class="panel-head shop-head">
@@ -450,18 +506,19 @@ function SellerShop(props) {
                 when={shown().length}
                 fallback={(
                   <Show when={!busy()}>
-                    <EmptyDesk title="No listings" lede={`${display()} has no live asks for these filters.`} />
+                    <EmptyDesk title={emptyShop().title} lede={emptyShop().lede} />
                   </Show>
                 )}
               >
-                <ShopList class="seller-shop-list">
+                <ShopList class="seller-shop-list" offers={shownOffers()}>
                   <For each={rows()} keyed={(row) => row.offer.id || `${row.cardId}-${row.index}`}>
                     {(row) => (
                       <ShopListingRow
                         offer={row().enriched}
                         card={row().cardStub}
                         showCard
-                        selected={false}
+                        selected={listingSelected().has(listingSelectId(row().enriched))}
+                        dragOffers={shopDragOffers(shownOffers(), listingSelected(), row().enriched)}
                         onCart={(qty) => {
                           const { offer, cardId, cardStub, enriched } = row();
                           if (!cardId || !offer.id) return;

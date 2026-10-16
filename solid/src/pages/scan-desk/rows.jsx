@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { fetchExactNameCards, imageSrc } from '@market/api.js';
+import { game, publicGamePath } from '@market/game.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { flagSrc } from '@market/locale.js';
@@ -206,7 +207,7 @@ function CandidateAlts(props) {
 const FLAG_FIELDS = ['firstEdition', 'signed', 'altered'];
 const FLAG_SHORT = { firstEdition: '1st', signed: 'S', altered: 'A' };
 
-/** One queue row (market/src/pages/ScanDesk.jsx QueueRow). `row` is the live row. */
+/** One queue row. `row` is the live row. */
 export function QueueRow(props) {
   const row = () => props.row;
   const stateLabel = () => {
@@ -258,7 +259,7 @@ export function QueueRow(props) {
               id: r.cardId,
               name: r.cardName,
               imageUrl: r.imageUrl || zoomSrc() || thumbArt().thumb,
-              canonicalPath: r.cardId ? `/marketplace/en/cards/${r.cardId}` : '',
+              canonicalPath: r.cardId ? (publicGamePath(`/marketplace/en/cards/${r.cardId}`, game().id) || `/marketplace/en/cards/${r.cardId}`) : '',
             }));
           }}
         >

@@ -2,7 +2,7 @@ import { onSettled } from 'solid-js';
 import { publicApiUrl } from '@market/extension-auth-bridge.js';
 import { WORKING_GIF_SRC, WORKING_MESSAGE } from '@market/working-page.js';
 
-/** The origin-down page (market/src/components/WorkingOnIt.jsx): polls /api/healthz and reloads once the API answers. */
+/** The origin-down page: polls /api/healthz and reloads once the API answers. */
 export default function WorkingOnIt() {
   onSettled(() => {
     document.title = `${WORKING_MESSAGE} · Pokoin`;

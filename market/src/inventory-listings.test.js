@@ -249,6 +249,20 @@ test('box stacks order by stack number then position, unnumbered last', () => {
   assert.equal(maxOccupiedStack(rows, 'other'), 9);
 });
 
+test('flat box positions are one box list; divider positions are stacks (LocationBoard)', () => {
+  const flat = Array.from({ length: 8 }, (_, n) => ({
+    id: String(n + 1),
+    cardId: '633460',
+    location: `box·${n === 7 ? '8-9' : n + 1}`,
+    quantityAvailable: n === 7 ? 2 : 1,
+  }));
+  const one = groupBoxStacks(flat, 'box');
+  assert.deepEqual(one.map((s) => [s.stack, s.postingCount, s.copies]), [[0, 8, 9]]);
+  assert.equal(one[0].postings.at(-1).slotPositionText, '8-9');
+  const dividers = groupBoxStacks(flat.map((row, n) => ({ ...row, location: `box·1·${n + 1}` })), 'box');
+  assert.deepEqual(dividers.map((s) => [s.stack, s.postingCount]), [[1, 8]]);
+});
+
 test('listingSlotEnd reads where a slot string ends', () => {
   assert.deepEqual(listingSlotEnd('box·7'), { box: 'box', stack: 7, position: null });
   assert.deepEqual(listingSlotEnd('box·7-9'), { box: 'box', stack: 9, position: null });

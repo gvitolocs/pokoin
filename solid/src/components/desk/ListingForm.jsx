@@ -1,9 +1,10 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../../lib/game-navigate.js';
 import {
   cardHref,
   createListing,
+  fetchPriceCheck,
   fetchSellerListings,
   formatPkn,
   formatPknNumber,
@@ -15,6 +16,7 @@ import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } f
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox, liveInventoryListings, recentBoxes } from '@market/inventory-listings.js';
+import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
 import { sellLanguages, versionRedirects } from '@market/listing-languages.js';
 import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
@@ -86,12 +88,12 @@ function CameraIcon() {
 }
 
 /**
- * "List your card" / "Edit listing" (market/src/pages/Card.jsx ListingForm).
+ * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
  */
 export default function ListingForm(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const gameId = currentGame().id;
   const foils = listingFoilOptions(gameId);
   const listChips = listingExtraChips(gameId);
@@ -207,8 +209,40 @@ export default function ListingForm(props) {
     reverse: foil() === 'reverse',
     firstEdition: chips().firstEd,
   }));
+
+  // The suggested price is the cheapest professional CardTrader seller of this
+  // printing with the same condition, language and finish; the sold graph
+  // only fills in when no such offer exists.
+  const [proFloorPkn, setProFloorPkn] = createSignal(null);
+  const floorItem = createMemo(() => priceCheckItem({
+    cardId: card().id,
+    condition: condition(),
+    language: language(),
+    reverse: foil() === 'reverse',
+    firstEdition: chips().firstEd === true,
+  }));
+  const floorKey = createMemo(() => (signedIn() && /^\d+$/.test(floorItem().cardId) ? priceCheckKey(floorItem()) : ''));
+  createEffect(floorKey, (key) => {
+    setProFloorPkn(null);
+    if (!key) return undefined;
+    const item = untrack(floorItem);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchPriceCheck([item], await getBearer());
+        const value = Number(data?.prices?.[key]?.ctMatchedPkn);
+        if (!cancelled) setProFloorPkn(Number.isFinite(value) && value > 0 ? value : null);
+      } catch (_) {
+        // The sold graph stays the suggestion.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
   const graphPrice = createMemo(() => {
-    const pkn = graphPkn();
+    const pkn = proFloorPkn() ?? graphPkn();
     if (!(pkn > 0)) return '';
     return currency() === 'PKN'
       ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
@@ -537,7 +571,6 @@ export default function ListingForm(props) {
             disabled={!ready() || (!signedIn() && ready())}
             busy={saving()}
             busyLabel="Listing…"
-            pricePkn={listedPkn()}
             onSubmit={(targets) => {
               if (!signedIn()) {
                 navigate(authFrom(props.fromPath));

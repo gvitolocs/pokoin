@@ -1,5 +1,6 @@
 import { createEffect, createSignal, Match, onSettled, Show, Switch } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { cardRailsAuthorize } from '@market/api.js';
 import {
   cardRailsAuthFrom,
@@ -29,7 +30,7 @@ export default function ConnectCardRails() {
   const [error, setError] = createSignal('');
   const [redirected, setRedirected] = createSignal(false);
   const [target, setTarget] = createSignal('');
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   document.title = 'Accedi a Card Rails · Pokoin';
   loadAuth().catch(() => {});
 

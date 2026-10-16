@@ -2,6 +2,10 @@
 resolver = "2"
 members = [
   "apps/api",
+  "apps/poko-eval",
+  "apps/cardtrader-bridge",
+  "apps/cardtrader-listing-dump",
+  "apps/cardtrader-price-cache",
   "crates/config",
   "crates/db",
   "crates/cache",
@@ -25,6 +29,8 @@ members = [
   "crates/catalog-api",
   "crates/api-common",
   "crates/sort",
+  "crates/media",
+  "crates/ctbook",
 ]
 
 [workspace.package]

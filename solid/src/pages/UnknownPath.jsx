@@ -1,5 +1,6 @@
 import { onSettled } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { gameBasename } from '@market/game.js';
 import { shortlinkCardPath } from '@market/shortlink.js';
 
@@ -10,7 +11,7 @@ import { shortlinkCardPath } from '@market/shortlink.js';
  */
 export default function UnknownPath() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   onSettled(() => {
     const path = location.pathname.slice(gameBasename().length) || '/';
     navigate(`${shortlinkCardPath(path) || '/marketplace'}`, { replace: true });

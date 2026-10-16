@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { GAMES, gameIconSrc, gameSiteHref, publicGamePath, tcgBrandName } from './game.js';
+import { GAMES, gameHref, gameIconSrc, gameSiteHref, publicGamePath, tcgBrandName } from './game.js';
 
 test('structured-data brand and public path follow the game', () => {
   assert.equal(tcgBrandName('pokemon'), 'Pokémon TCG');
@@ -34,6 +34,23 @@ test('structured-data brand and public path follow the game', () => {
     publicGamePath('/marketplace/en/cards/795832/student', 'star_wars'),
     '/star-wars/marketplace/en/cards/795832/student',
   );
+});
+
+test('plain hrefs keep marketplace and product links on the game site', () => {
+  const card = '/marketplace/en/cards/831818/alternate-art-seraphine-not-alone-138a-radiance';
+  assert.equal(gameHref(card, '/riftbound'), '/riftbound' + card);
+  assert.equal(gameHref('/marketplace/sets/radiance?lang=en#top', '/riftbound'), '/riftbound/marketplace/sets/radiance?lang=en#top');
+  assert.equal(gameHref('/marketplace', '/one-piece'), '/one-piece/marketplace');
+  assert.equal(gameHref('/marketplace?q=luffy', '/one-piece'), '/one-piece/marketplace?q=luffy');
+  assert.equal(gameHref('/product/graded', '/magic'), '/magic/product/graded');
+  // Already prefixed, Pokémon apex, apex-only pages, other origins: unchanged.
+  assert.equal(gameHref('/riftbound' + card, '/riftbound'), '/riftbound' + card);
+  assert.equal(gameHref(card, ''), card);
+  for (const href of ['/cart', '/wallet', '/auth?from=%2Fmarketplace', '/marketplaces', '//cdn.pokoin.com/marketplace/x.jpg',
+    'https://pokoin.com/marketplace', 'mailto:contact@pokoin.com', '#shop', '']) {
+    assert.equal(gameHref(href, '/riftbound'), href, href);
+  }
+  assert.equal(gameHref(undefined, '/riftbound'), undefined);
 });
 
 test('the game picker sends each TCG to its own site', () => {
@@ -69,28 +86,13 @@ test('game paths rewrite to the market SPA', () => {
   assert.ok(hit, '/one-piece/marketplace must rewrite to the market SPA');
 });
 
-test('satellite search ignores the Pokémon print chip (blank nationality)', () => {
+// The Era/Sets/Search/SearchBox side is guarded in solid/src/components/{Chrome,SearchBox}.test.js.
+test('satellite set icons stay off the Pokémon catalogs', () => {
   const root = path.dirname(fileURLToPath(import.meta.url));
-  const search = fs.readFileSync(path.join(root, 'pages/Search.jsx'), 'utf8');
-  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
-  assert.match(search, /activePrintLang = \(!isPokemonGame\(\) \|\| tab === 'users'\) \? 'all' : printLang/);
-  assert.match(search, /showPrint=\{isPokemonGame\(\)\}/);
-  assert.match(chrome, /fetchSuggest\(term, \{[^}]*printLang: 'all'/s);
-});
-
-test('satellite eras and set icons stay off the Pokémon catalogs', () => {
-  const root = path.dirname(fileURLToPath(import.meta.url));
-  const era = fs.readFileSync(path.join(root, 'pages/Era.jsx'), 'utf8');
   const logos = fs.readFileSync(path.join(root, 'set-logos.js'), 'utf8');
-  const sets = fs.readFileSync(path.join(root, 'pages/Sets.jsx'), 'utf8');
-  assert.match(era, /SatelliteEras/);
-  assert.match(era, /isPokemonGame/);
-  assert.match(era, /does not use Pokémon TCG blocks/);
   assert.match(logos, /satelliteExpansionPrefix/);
   assert.match(logos, /if \(!isPokemonGame\(hostname\)\) return ''/);
   assert.match(logos, /\/card-images\/\$\{slug\}\/expansions/);
-  assert.match(sets, /satelliteGroups/);
-  assert.match(sets, /pokemon \? \(/);
 });
 
 test('each marketplace game has a CardTrader-matching icon SVG', () => {
@@ -106,7 +108,4 @@ test('each marketplace game has a CardTrader-matching icon SVG', () => {
   }
   assert.match(gameIconSrc('pokemon'), /(?:^|\/)games\/pokemon\.svg$/);
   assert.match(gameIconSrc('riftbound'), /(?:^|\/)games\/riftbound\.svg$/);
-  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /gameIconSrc/);
-  assert.match(chrome, /className="game-icon"/);
 });

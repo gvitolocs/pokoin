@@ -5,7 +5,7 @@ import { suggestHoverAllowed } from '@market/suggest-hover.js';
 import CardArt from './CardArt.jsx';
 
 /**
- * CardTrader-style hover zoom (market/src/components/ThumbZoom.jsx): wrap a
+ * CardTrader-style hover zoom: wrap a
  * small thumbnail; on hover (fine pointer, desktop viewports) the full scan
  * floats beside the cursor in a fixed `.suggest-hover` portal. The scroll /
  * blur dismiss listeners exist only while the zoom is shown.

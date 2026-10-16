@@ -7,6 +7,7 @@ import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid, { SetGuideSkeleton } from '../components/SetGuideGrid.jsx';
+import { gameHref } from '@market/game.js';
 
 function LanguageIndex(props) {
   return (
@@ -25,7 +26,7 @@ function LanguageIndex(props) {
         <For each={LANGUAGE_HUBS}>
           {(row) => (
             <li>
-              <a href={languageHref(row.slug, props.lang)}>{row.name} print</a>
+              <a href={gameHref(languageHref(row.slug, props.lang))}>{row.name} print</a>
             </li>
           )}
         </For>
@@ -83,7 +84,7 @@ function LanguageSets(props) {
   );
 }
 
-/** /marketplace/:lang/languages(/:slug) (market/src/pages/LanguageHub.jsx). */
+/** /marketplace/:lang/languages(/:slug). */
 export default function LanguageHub() {
   const params = useParams();
   const lang = () => params.lang || 'en';
@@ -94,7 +95,7 @@ export default function LanguageHub() {
       <Match when={!hub()}>
         <div class="page desk hub-page">
           <EmptyDesk title="Unknown language" lede="Open the language index.">
-            <a class="btn" href={`/marketplace/${lang()}/languages`}>Languages</a>
+            <a class="btn" href={gameHref(`/marketplace/${lang()}/languages`)}>Languages</a>
           </EmptyDesk>
         </div>
       </Match>

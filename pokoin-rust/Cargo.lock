@@ -344,12 +344,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cardtrader-bridge"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "ureq",
+ "zstd",
+]
+
+[[package]]
+name = "cardtrader-listing-dump"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ctbook",
+ "flate2",
+ "serde_json",
+ "zstd",
+]
+
+[[package]]
+name = "cardtrader-price-cache"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ctbook",
+ "flate2",
+ "regex",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "cc"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -514,6 +550,16 @@ dependencies = [
  "generic-array",
  "rand_core 0.6.4",
  "typenum",
+]
+
+[[package]]
+name = "ctbook"
+version = "0.1.0"
+dependencies = [
+ "brotli",
+ "flate2",
+ "itoa",
+ "serde_json",
 ]
 
 [[package]]
@@ -1304,6 +1350,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1728,6 +1784,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "poko-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pokoin-accounts",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pokoin-accounts"
 version = "0.1.0"
 dependencies = [
@@ -1743,6 +1811,8 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "k256",
+ "pokoin-db",
+ "pokoin-media",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",
@@ -1852,6 +1922,7 @@ dependencies = [
  "hex",
  "pokoin-accounts",
  "pokoin-config",
+ "pokoin-db",
  "redis",
  "regex",
  "reqwest",
@@ -1920,9 +1991,11 @@ name = "pokoin-catalog"
 version = "0.1.0"
 dependencies = [
  "pokoin-search",
+ "regex",
  "serde_json",
  "thiserror",
  "unicode-segmentation",
+ "url",
 ]
 
 [[package]]
@@ -1981,6 +2054,7 @@ dependencies = [
  "k256",
  "pokoin-accounts",
  "pokoin-api-common",
+ "pokoin-db",
  "pokoin-external",
  "rand 0.8.8",
  "redis",
@@ -2010,6 +2084,7 @@ name = "pokoin-db"
 version = "0.1.0"
 dependencies = [
  "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -2051,6 +2126,9 @@ dependencies = [
  "jsonwebtoken",
  "percent-encoding",
  "pokoin-api-common",
+ "pokoin-db",
+ "pokoin-external",
+ "pokoin-media",
  "pokoin-sort",
  "rand 0.8.8",
  "redis",
@@ -2100,6 +2178,14 @@ version = "0.1.0"
 dependencies = [
  "pokoin-cache",
  "serde_json",
+]
+
+[[package]]
+name = "pokoin-media"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "tokio",
 ]
 
 [[package]]
@@ -2553,6 +2639,7 @@ version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -3435,6 +3522,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "once_cell",
+ "rustls",
+ "rustls-pki-types",
+ "url",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3972,6 +4074,34 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.1+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
 
 [[package]]
 name = "zune-core"

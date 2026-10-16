@@ -16,9 +16,8 @@ import {
 import { getBearer, signedIn } from '../stores/auth.js';
 
 /**
- * React useDeliveryCountry (market/src/cart-rails.js): the profile country,
- * else the default saved address country once signed in, else the browser
- * locale. Returns an accessor of `{ country, saved }`.
+ * The profile country, else the default saved address country once signed
+ * in, else the browser locale. Returns an accessor of `{ country, saved }`.
  */
 export function createDeliveryCountry() {
   const [fromAccount, setFromAccount] = createSignal('');
@@ -51,7 +50,7 @@ export function createDeliveryCountry() {
 }
 
 /**
- * React useLiveShipping (market/src/use-live-shipping.js): live Packlink +
+ * React useLiveShipping: live Packlink +
  * letter rates per ticked seller parcel, the seeded table until they land.
  * Inputs are accessors; returns accessors.
  */

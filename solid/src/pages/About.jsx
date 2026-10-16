@@ -27,7 +27,7 @@ function IconScan() {
   );
 }
 
-/** About page (market/src/pages/About.jsx). */
+/** About page. */
 export default function About() {
   usePageTitle('About · Pokoin');
 

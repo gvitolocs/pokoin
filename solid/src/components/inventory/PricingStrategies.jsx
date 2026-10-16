@@ -8,6 +8,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { liveInventoryListings, strategyMatchesListing } from '@market/inventory-listings.js';
+import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, getBearer } from '../../stores/auth.js';
 
@@ -74,7 +75,7 @@ function formatPknLite(value) {
 const sellerUid = () => authUid() || accountProfile()?.uid || '';
 
 /**
- * PowerTools-style pricing strategies (market/src/components/PricingStrategies.jsx):
+ * PowerTools-style pricing strategies:
  * any number of rules, applied to live inventory after a dry-run preview.
  */
 export default function PricingStrategies(props) {
@@ -90,14 +91,29 @@ export default function PricingStrategies(props) {
     setStrategies(data.strategies || []);
   }
 
+  createEffect(() => (props.preview ? 'preview' : ''), (on) => {
+    if (on) setStrategies(props.previewStrategies || []);
+  });
+
   createEffect(sellerUid, (uid) => {
-    if (!uid) return undefined;
+    if (props.preview || !uid) return undefined;
     let cancelled = false;
     load().catch((err) => !cancelled && setError(err.message || 'Could not load strategies.'));
     return () => { cancelled = true; };
   });
 
   async function persist(body) {
+    if (props.preview) {
+      const strategy = { ...body.strategy, id: body.strategy.id || `preview-${Date.now()}` };
+      setStrategies((current) => {
+        const list = current || [];
+        const index = list.findIndex((row) => row.id === strategy.id);
+        if (index >= 0) return list.map((row, i) => (i === index ? strategy : row));
+        return [...list, strategy];
+      });
+      setDraft(null);
+      return;
+    }
     setBusy('save');
     setError('');
     try {
@@ -113,6 +129,10 @@ export default function PricingStrategies(props) {
   }
 
   async function remove(id) {
+    if (props.preview) {
+      setStrategies((current) => (current || []).filter((row) => row.id !== id));
+      return;
+    }
     setBusy(id);
     setError('');
     try {
@@ -128,6 +148,10 @@ export default function PricingStrategies(props) {
 
   /** Dry-run: comps for matching rows, then the computed targets. */
   async function openApply(strategy) {
+    if (props.preview) {
+      setApplyState({ strategy, plan: [], done: true, progress: 0 });
+      return;
+    }
     setBusy(`apply-${strategy.id}`);
     setError('');
     setApplyState(null);
@@ -136,18 +160,16 @@ export default function PricingStrategies(props) {
       const data = await fetchSellerListings(sellerUid(), token, { limit: 1000 });
       const rows = liveInventoryListings(data.listings || data.items || [])
         .filter((row) => strategyMatchesListing(strategy, row));
-      const items = rows.slice(0, 100).map((row) => ({
-        cardId: String(row?.cardId || row?.card_id || ''),
-        condition: String(row?.condition || 'NM').toUpperCase(),
-        language: String(row?.language || '').toUpperCase(),
-      })).filter((item) => /^\d+$/.test(item.cardId));
+      const items = rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
       const comps = items.length ? await fetchPriceCheck(items, token) : { prices: {} };
       const plan = rows.slice(0, 100).map((row) => {
         const cardId = String(row?.cardId || row?.card_id || '');
-        const comp = comps.prices?.[cardId] || {};
+        const comp = comps.prices?.[priceCheckKey(row)] || comps.prices?.[cardId] || {};
+        // CardTrader: the cheapest professional seller with the same
+        // condition, language and finish, or no target at all.
         const compPkn = strategy.source === 'pokoin'
           ? (comp.pokoinCheapestPkn ?? comp.soldMedianPkn ?? null)
-          : (comp.ctMatchedPkn ?? comp.ctCheapestPkn ?? null);
+          : (comp.ctMatchedPkn ?? null);
         const current = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
         const target = targetFor(compPkn, strategy);
         return { row, current, compPkn, target };
@@ -161,6 +183,7 @@ export default function PricingStrategies(props) {
   }
 
   async function runApply() {
+    if (props.preview) return;
     const { plan } = applyState();
     setBusy('run');
     setError('');
@@ -187,12 +210,18 @@ export default function PricingStrategies(props) {
 
   return (
     <div class="ps-wrap">
+      <div class="mypokoin-panel-head">
+        <div>
+          <h2>Pricing strategies</h2>
+          <p class="mypokoin-help">Rules that reprice matching listings from a market source.</p>
+        </div>
+        <Show when={!draft()}>
+          <button type="button" class="btn" onClick={() => setDraft({ ...EMPTY_STRATEGY })}>New pricing strategy</button>
+        </Show>
+      </div>
       <Show when={error()}><p class="ct-connect-err" role="alert">{error()}</p></Show>
 
-      <Show
-        when={draft()}
-        fallback={<button type="button" class="btn" onClick={() => setDraft({ ...EMPTY_STRATEGY })}>New pricing strategy</button>}
-      >
+      <Show when={draft()}>
         {(editor) => (
           <div class="ps-editor" data-testid="strategy-editor">
             <h3>{editor().id ? 'Edit strategy' : 'New pricing strategy'}</h3>
@@ -364,6 +393,12 @@ export function PricerDefaults(props) {
   async function save(next) {
     setDraft(next);
     setSaved(false);
+    if (props.preview) {
+      props.onSaved?.(next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      return;
+    }
     const token = await getBearer();
     const data = await savePricingStrategies({ pricerSettings: next }, token);
     props.onSaved?.(data.pricerSettings || next);

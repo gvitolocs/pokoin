@@ -8,27 +8,6 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const market = path.join(root, 'market/src');
 
-test('shop listing line never adds to cart on row click — cart icon, buy-btn, or drag', () => {
-  const row = fs.readFileSync(path.join(market, 'components/ShopListing.jsx'), 'utf8');
-  assert.equal(row.includes('onBuy'), false);
-  assert.match(row, /onCart/);
-  assert.match(row, /Add to cart/);
-  assert.equal(row.includes('onClick={buy}'), false);
-  assert.match(row, /listingsReference/);
-  assert.match(row, /writeListingDrag/);
-
-  const shopList = fs.readFileSync(path.join(market, 'components/ShopList.jsx'), 'utf8');
-  assert.match(shopList, /useSelectBand/);
-  assert.match(shopList, /listingSelected/);
-
-  const card = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
-  assert.match(card, /onCart=\{\(qty\) => addItem/);
-  assert.match(card, /onInspect=\{\(\) =>/);
-  const seller = fs.readFileSync(path.join(market, 'pages/Seller.jsx'), 'utf8');
-  assert.match(seller, /onCart=\{\(qty\) =>/);
-  assert.match(row, /onInspect/);
-});
-
 test('desk title / set / artist stay out of shop marquee', () => {
   const marquee = fs.readFileSync(path.join(market, 'shop-marquee.js'), 'utf8');
   assert.match(marquee, /\.species-drag/);
@@ -36,46 +15,17 @@ test('desk title / set / artist stay out of shop marquee', () => {
   assert.match(marquee, /\.asset-sub/);
 });
 
-test('Chrome defers Cart/Desktop mount so title/set/artist HTML5 drag is not aborted', () => {
-  const chrome = fs.readFileSync(path.join(market, 'components/Chrome.jsx'), 'utf8');
+// The UI side of these gestures (shop rows, header trays, desk drags, select
+// band) is guarded in solid/src/components/{desk/ShopListing,trays,card-select}.test.js
+// and solid/src/pages/Card.test.js.
+test('desk title/set/artist drags open the trays through pokoin-card-drag; Desktop drops are shared', () => {
   const listing = fs.readFileSync(path.join(market, 'chat-listing.js'), 'utf8');
-  // Desk title/set/artist stopPropagation — trays open via pokoin-card-drag, deferred one frame.
   assert.match(listing, /pokoin-card-drag/);
-  assert.match(chrome, /pokoin-card-drag/);
-  assert.match(chrome, /requestAnimationFrame/);
-  assert.match(chrome, /setCardDrag\(true\)/);
-  const dragAt = chrome.indexOf("addEventListener('pokoin-card-drag'");
-  const rAFAt = chrome.indexOf('requestAnimationFrame', chrome.indexOf('function openDragTrays'));
-  const setCardAt = chrome.indexOf('setCardDrag(true)', chrome.indexOf('function openDragTrays'));
-  assert.ok(dragAt > 0 && rAFAt > 0 && setCardAt > rAFAt);
-  const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
-  assert.match(page, /className="species-drag"/);
-  assert.match(page, /kind: 'species'/);
-  assert.match(page, /kind: 'expansion'/);
-  assert.match(page, /kind: 'artist'/);
-  assert.match(page, /event\.stopPropagation\(\)/);
-  // The drop rules moved out of DesktopDrop.jsx so the Solid tray shares them.
   const desk = fs.readFileSync(path.join(market, 'desktop-drop-add.js'), 'utf8');
-  assert.match(fs.readFileSync(path.join(market, 'components/DesktopDrop.jsx'), 'utf8'), /addDesktopDrop/);
   assert.match(desk, /bundle\.kind === 'expansion'/);
   assert.match(desk, /expansion:\$\{bundle\.slug\}/);
   assert.doesNotMatch(desk, /fetchExpansionCards/);
 });
-
-test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {
-  const host = fs.readFileSync(path.join(market, 'select-band.jsx'), 'utf8');
-  assert.match(host, /\[data-card-id\]/);
-  assert.match(host, /marqueeStartAllowed/);
-  assert.match(host, /listingRects|shop-row/);
-  assert.match(host, /dragReference/);
-  assert.match(host, /mixedDeskDragReference|registerShop/);
-  const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
-  assert.match(page, /DeskArtFrame/);
-  assert.match(page, /embedded/);
-  assert.match(page, /dragReference/);
-  assert.match(page, /offers=\{offers\} deskCard=\{card\}/);
-});
-
 test('PlusCal GestureExclusivity model + TLC invariants', () => {
   const spec = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.tla'), 'utf8');
   assert.match(spec, /InvArtNeverArms/);

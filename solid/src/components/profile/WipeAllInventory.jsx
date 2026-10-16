@@ -4,7 +4,7 @@ import { getBearer } from '../../stores/auth.js';
 
 export const WIPE_CONFIRM = 'DELETE ALL LISTINGS';
 
-/** Confirm-gated wipe of every Pokoin listing across TCGs (market/src/components/WipeAllInventory.jsx). */
+/** Confirm-gated wipe of every Pokoin listing across TCGs. */
 export default function WipeAllInventory(props) {
   const [open, setOpen] = createSignal(false);
   const [confirm, setConfirm] = createSignal('');
@@ -21,7 +21,7 @@ export default function WipeAllInventory(props) {
       setConfirm('');
       const message = `Deleted ${Number(data?.listingsRemoved || 0)} listings`
         + (data?.linksRemoved ? ` · ${data.linksRemoved} CardTrader links` : '')
-        + '. Run Sync CardTrader on Profile to re-import.';
+        + '. Press Sync now under CardTrader in Profile to re-import.';
       props.onMessage?.(message);
       props.onWiped?.(data);
     } catch (err) {
@@ -54,8 +54,8 @@ export default function WipeAllInventory(props) {
           <p class="ct-wipe-warn">
             This permanently deletes every Pokoin listing for your account across all TCGs
             (Pokémon and others), including CardTrader links. Your CardTrader stock is not
-            deleted. Type <strong>{WIPE_CONFIRM}</strong> then confirm, then run Sync CardTrader
-            on Profile to re-import.
+            deleted. Type <strong>{WIPE_CONFIRM}</strong> then confirm, then press Sync now
+            under CardTrader in Profile to re-import.
           </p>
           <label class="ct-wipe-field">
             <span class="sr-only">Confirmation phrase</span>

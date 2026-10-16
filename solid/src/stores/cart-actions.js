@@ -30,7 +30,7 @@ import {
 import { cartItems, updateCart } from './cart.js';
 
 /**
- * The rest of React useCart() (market/src/cart.jsx) for the cart, checkout,
+ * Cart actions beyond stores/cart.js for the cart, checkout,
  * shipping and orders pages: row edits beyond add/qty/remove, the buyer's
  * shipping/insurance/balance choices and the Stripe checkout bookkeeping.
  * Kept out of stores/cart.js so the header's cart (first paint) stays small.

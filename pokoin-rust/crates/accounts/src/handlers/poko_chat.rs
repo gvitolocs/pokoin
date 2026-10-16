@@ -1,4 +1,7 @@
-//! `poko-chat` — the website Poko chat BFF (Hermes only).
+//! `poko-chat` — the website Poko chat BFF.
+//!
+//! `POKO_BRAIN_MODE=hermes` (the default) keeps the Hermes HTTP reply.
+//! `canary` and `rust` answer in-process and fall back to Hermes on any error.
 //!
 //! `POST /api/poko-chat { message, cards?, images?, sessionId?, pageContext? }`
 //! produces a reply through the Poko service, resolves the cards Poko names
@@ -11,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -18,6 +22,7 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use serde_json::{json, Map, Value as Json};
 
+use crate::domain::personal_context::{build_personal_context, format_personal_intent, Overlay};
 use crate::domain::poko_chat::{
     attach_reply_cards, cards_context, clean_cards, clean_client_turn_id, clean_images,
     clean_page_context, clean_text, images_context, market_first_directive,
@@ -25,7 +30,6 @@ use crate::domain::poko_chat::{
     without_open_cards, EVENT_PAGE, HERMES_UNAVAILABLE, HERMES_UNAVAILABLE_ERROR,
     REPLY_CARDS_DIRECTIVE,
 };
-use crate::domain::personal_context::{build_personal_context, format_personal_intent, Overlay};
 use crate::error::{ApiError, Result};
 use crate::firestore::{
     new_document_id, Direction, DocData, Firestore, Query as FirestoreQuery, Value,
@@ -41,6 +45,25 @@ const EVENTS: &str = "events";
 const CHAT_RATE_LIMIT: i64 = 20;
 const CHAT_RATE_WINDOW_SECONDS: u64 = 60;
 const IDENTIFY_PATH: &str = "/identify?catalog=pokemon_generic&multi=1&live=0&top_k=3";
+
+/// Same budgets as the Node BFF: photo download 8 s, primary scan worker 12 s,
+/// fallback worker 25 s. The shared transport's 4 s default is for the
+/// accounts hot path and cut every photo search short.
+const PHOTO_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
+const SCAN_PRIMARY_TIMEOUT: Duration = Duration::from_secs(12);
+const SCAN_FALLBACK_TIMEOUT: Duration = Duration::from_secs(25);
+/// Hermes plans with an LLM and calls market tools: a plain reply takes ~15 s.
+const POKO_CHAT_TIMEOUT_DEFAULT_MS: u64 = 90_000;
+
+/// `POKO_CHAT_TIMEOUT_MS` (default 90 s, as in the Node BFF), kept between 5 s
+/// and 95 s so Cloudflare's 100 s proxy limit still sees our fallback reply.
+fn poko_chat_timeout(raw: Option<&str>) -> Duration {
+    let millis = raw
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|millis| *millis > 0)
+        .unwrap_or(POKO_CHAT_TIMEOUT_DEFAULT_MS);
+    Duration::from_millis(millis.clamp(5_000, 95_000))
+}
 
 fn scan_primary() -> String {
     std::env::var("SCAN_PRIMARY_URL")
@@ -98,7 +121,10 @@ async fn read_event_page(
         .order_by("createdAt", Direction::Descending)
         .limit(EVENT_PAGE + 1);
     if !before_id.is_empty() {
-        let cursor = firestore.doc(format!("{collection}/{before_id}")).get().await?;
+        let cursor = firestore
+            .doc(format!("{collection}/{before_id}"))
+            .get()
+            .await?;
         if cursor.is_none() {
             return Ok((Vec::new(), false));
         }
@@ -129,6 +155,7 @@ pub async fn append_turn(
     user_at_ms: i64,
     reply_at_ms: i64,
     client_turn_id: &str,
+    metadata: Option<&Json>,
 ) -> Result<Vec<Json>> {
     let asked_at = user_at_ms;
     let answered_at = reply_at_ms.max(asked_at + 1);
@@ -156,7 +183,12 @@ pub async fn append_turn(
                 )
                 .set(
                     "images",
-                    Value::Array(images.iter().map(|url| Value::String(url.clone())).collect()),
+                    Value::Array(
+                        images
+                            .iter()
+                            .map(|url| Value::String(url.clone()))
+                            .collect(),
+                    ),
                 )
                 .string("turnId", turn_id.clone())
                 .string("clientTurnId", client_turn_id.to_string())
@@ -164,27 +196,28 @@ pub async fn append_turn(
             false,
         )?;
     writes.append(&mut user_writes);
+    let mut assistant_data = DocData::new()
+        .string("role", "assistant")
+        .string("text", reply.to_string())
+        .set(
+            "cards",
+            Value::Array(
+                clean_reply_cards
+                    .iter()
+                    .map(Value::from_plain_json)
+                    .collect(),
+            ),
+        )
+        .set("images", Value::Array(Vec::new()))
+        .string("source", source.to_string())
+        .string("turnId", turn_id.clone())
+        .timestamp("createdAt", answered_at);
+    if let Some(metadata) = metadata.filter(|value| value.is_object()) {
+        assistant_data = assistant_data.set("metadata", Value::from_plain_json(metadata));
+    }
     let mut assistant_writes = firestore
         .doc(format!("{CONVERSATIONS}/{uid}/{EVENTS}/{assistant_id}"))
-        .set_writes(
-            &DocData::new()
-                .string("role", "assistant")
-                .string("text", reply.to_string())
-                .set(
-                    "cards",
-                    Value::Array(
-                        clean_reply_cards
-                            .iter()
-                            .map(Value::from_plain_json)
-                            .collect(),
-                    ),
-                )
-                .set("images", Value::Array(Vec::new()))
-                .string("source", source.to_string())
-                .string("turnId", turn_id.clone())
-                .timestamp("createdAt", answered_at),
-            false,
-        )?;
+        .set_writes(&assistant_data, false)?;
     writes.append(&mut assistant_writes);
     firestore.commit_batch(writes).await?;
 
@@ -247,10 +280,15 @@ async fn load_personal_for_chat(
         cart: page_context
             .get("cart")
             .and_then(Json::as_array)
-            .map(|values| crate::domain::personal_context::clean_cart_items(Some(&Json::Array(values.to_vec())))),
+            .map(|values| {
+                crate::domain::personal_context::clean_cart_items(Some(&Json::Array(
+                    values.to_vec(),
+                )))
+            }),
         desk: crate::domain::personal_context::clean_desk(Some(page_context)),
     };
-    match build_personal_context(&db, firestore.as_ref(), uid, &overlay, true).await {
+    let writer = state.marketplace_writer_db().ok();
+    match build_personal_context(&db, firestore.as_ref(), uid, &overlay, writer.as_ref()).await {
         Ok(personal) => {
             let intent = format_personal_intent(&personal);
             (Some(personal), intent)
@@ -279,37 +317,30 @@ fn multipart_body(boundary: &str, bytes: &[u8]) -> Vec<u8> {
     body
 }
 
-/// `identifyOnePhoto(url, {primary, fallback})` — YOLO + Milo on every box.
-async fn identify_one_photo(
+/// YOLO + Milo on every box of one JPEG photo (primary worker, then fallback).
+async fn identify_photo_bytes(
     state: &DomainState,
-    url: &str,
+    bytes: Vec<u8>,
     primary: &str,
     fallback: &str,
 ) -> Vec<Json> {
     let transport = state.transport().clone();
-    let image = match send_with_retry(
-        &transport,
-        HttpRequest::new("GET", url.to_string()),
-        RetryPolicy::none(),
-    )
-    .await
-    {
-        Ok(response) if response.is_success() => response,
-        _ => return Vec::new(),
-    };
-    let bytes = image.body;
     if bytes.len() < 32 || bytes.len() > 4_000_000 {
         return Vec::new();
     }
     if bytes[0] != 0xff || bytes[1] != 0xd8 {
         return Vec::new();
     }
-    for base in [primary, fallback] {
+    for (base, timeout) in [
+        (primary, SCAN_PRIMARY_TIMEOUT),
+        (fallback, SCAN_FALLBACK_TIMEOUT),
+    ] {
         if base.is_empty() {
             continue;
         }
         let boundary = format!("----pokoin{}", new_document_id());
         let request = HttpRequest::new("POST", format!("{base}{IDENTIFY_PATH}"))
+            .timeout(timeout)
             .header(
                 "Content-Type",
                 format!("multipart/form-data; boundary={boundary}"),
@@ -323,9 +354,7 @@ async fn identify_one_photo(
         let Some(data) = response.json_value() else {
             continue;
         };
-        if !response.is_success()
-            || data.get("busy").and_then(Json::as_bool).unwrap_or(false)
-        {
+        if !response.is_success() || data.get("busy").and_then(Json::as_bool).unwrap_or(false) {
             continue;
         }
         let cards = photo_cards_from_identify(&data);
@@ -336,18 +365,62 @@ async fn identify_one_photo(
     Vec::new()
 }
 
-/// `identifyChatPhotos(urls)` — only our own R2 chat photos, at most four.
-async fn identify_chat_photos(state: &DomainState, urls: &[String]) -> Vec<Json> {
-    let own: Vec<String> = urls
-        .iter()
-        .filter(|url| crate::domain::poko_chat::is_user_photo_url(url))
-        .take(4)
-        .cloned()
-        .collect();
+/// `identifyOnePhoto(url, {primary, fallback})` — YOLO + Milo on every box.
+async fn identify_one_photo(
+    state: &DomainState,
+    url: &str,
+    primary: &str,
+    fallback: &str,
+) -> Vec<Json> {
+    let transport = state.transport().clone();
+    let image = match send_with_retry(
+        &transport,
+        HttpRequest::new("GET", url.to_string()).timeout(PHOTO_FETCH_TIMEOUT),
+        RetryPolicy::none(),
+    )
+    .await
+    {
+        Ok(response) if response.is_success() => response,
+        _ => return Vec::new(),
+    };
+    identify_photo_bytes(state, image.body, primary, fallback).await
+}
+
+/// `identifyChatPhotos(urls)` — at most four photos: the caller's own chat
+/// photos, read straight from storage (the /api/user-photos proxy needs the
+/// user's sign-in), and legacy public R2 photo URLs. Never another user's photo.
+async fn identify_chat_photos(state: &DomainState, urls: &[String], uid: &str) -> Vec<Json> {
     let mut found: Vec<Json> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for url in own {
-        let cards = identify_one_photo(state, &url, &scan_primary(), &scan_fallback()).await;
+    let mut used = 0;
+    for url in urls {
+        if used == 4 {
+            break;
+        }
+        let cards = if let Some(key) = crate::domain::poko_chat::own_chat_photo_key(url, uid) {
+            used += 1;
+            match state.photo_store() {
+                Some(store) => match store.get_object(&key).await {
+                    Ok(Some(bytes)) => {
+                        identify_photo_bytes(state, bytes, &scan_primary(), &scan_fallback()).await
+                    }
+                    Ok(None) => Vec::new(),
+                    Err(error) => {
+                        tracing::warn!(
+                            message = %error.message().chars().take(160).collect::<String>(),
+                            "poko-chat photo read failed"
+                        );
+                        Vec::new()
+                    }
+                },
+                None => Vec::new(),
+            }
+        } else if crate::domain::poko_chat::is_user_photo_url(url) {
+            used += 1;
+            identify_one_photo(state, url, &scan_primary(), &scan_fallback()).await
+        } else {
+            continue;
+        };
         for card in cards {
             let key = {
                 let id = card.get("cardId").and_then(Json::as_str).unwrap_or("");
@@ -372,6 +445,65 @@ async fn identify_chat_photos(state: &DomainState, urls: &[String]) -> Vec<Json>
         }
     }
     found
+}
+
+fn context_blocks(
+    cards: &[Json],
+    images: &[String],
+    photo_cards: &[Json],
+    page_context: &Json,
+    personal_intent: &str,
+) -> Vec<String> {
+    [
+        market_first_directive(cards, page_context, photo_cards),
+        personal_intent.to_string(),
+        photo_search_context(photo_cards),
+        cards_context(cards),
+        images_context(images),
+        REPLY_CARDS_DIRECTIVE.to_string(),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect()
+}
+
+/// Last 10 user/assistant events, oldest first. The brain trims them to 6,000 chars.
+async fn recent_history(firestore: &Firestore, uid: &str) -> Vec<crate::poko_brain::Turn> {
+    let documents = match read_event_page(firestore, uid, "").await {
+        Ok((documents, _)) => documents,
+        Err(error) => {
+            tracing::warn!(
+                message = %error.message().chars().take(160).collect::<String>(),
+                "poko-brain history skipped"
+            );
+            return Vec::new();
+        }
+    };
+    let mut turns = Vec::new();
+    for document in documents {
+        let plain = document.to_plain_json();
+        let role = plain.get("role").and_then(Json::as_str).unwrap_or("");
+        if role != "user" && role != "assistant" {
+            continue;
+        }
+        let text = plain
+            .get("text")
+            .and_then(Json::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+        turns.push(crate::poko_brain::Turn {
+            role: role.to_string(),
+            text,
+        });
+    }
+    if turns.len() > 10 {
+        turns = turns.split_off(turns.len() - 10);
+    }
+    turns
 }
 
 struct HermesReply {
@@ -443,6 +575,9 @@ async fn hermes_reply(
     });
     let request = HttpRequest::new("POST", url)
         .header("authorization", format!("Bearer {token}"))
+        .timeout(poko_chat_timeout(
+            std::env::var("POKO_CHAT_TIMEOUT_MS").ok().as_deref(),
+        ))
         .json(&payload)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let response = state
@@ -526,10 +661,7 @@ async fn poko_chat_inner(
         if action != "history" {
             return Err(ApiError::bad_request("Unknown action."));
         }
-        let before = clean_text(
-            query.get("before").map(String::as_str).unwrap_or(""),
-            80,
-        );
+        let before = clean_text(query.get("before").map(String::as_str).unwrap_or(""), 80);
         let (documents, has_more) = read_event_page(&firestore, &claims.uid, &before).await?;
         return Ok(json_with_cors(
             StatusCode::OK,
@@ -562,7 +694,7 @@ async fn poko_chat_inner(
     let photo_cards = if images.is_empty() {
         Vec::new()
     } else {
-        identify_chat_photos(state, &images).await
+        identify_chat_photos(state, &images, &claims.uid).await
     };
 
     // The prompt stands in for the user's turn when only attachments were sent.
@@ -573,7 +705,11 @@ async fn poko_chat_inner(
             "The attached photo was identified with multi-card search ({} printings). Quote Pokoin sold median, current asks, and liquidity for each one. Do not collapse the photo to a single card.",
             photo_cards.len()
         )
-    } else if let Some(name) = cards.first().and_then(|card| card.get("name")).and_then(Json::as_str) {
+    } else if let Some(name) = cards
+        .first()
+        .and_then(|card| card.get("name"))
+        .and_then(Json::as_str)
+    {
         let card_id = cards
             .first()
             .and_then(|card| card.get("cardId"))
@@ -587,7 +723,8 @@ async fn poko_chat_inner(
     } else if !images.is_empty() {
         "What can you tell me about the attached photo? Multi-card search found no printings; do not invent cards.".to_string()
     } else {
-        "Tell me about the attached card with Pokoin sold/ask/liquidity analytics first.".to_string()
+        "Tell me about the attached card with Pokoin sold/ask/liquidity analytics first."
+            .to_string()
     };
     let session_id = {
         let raw = clean_text(&string_field(&body, "sessionId"), 80);
@@ -603,38 +740,105 @@ async fn poko_chat_inner(
         message.clone()
     };
 
-    let (personal, personal_intent) = load_personal_for_chat(state, &claims.uid, &page_context).await;
+    let (personal, personal_intent) =
+        load_personal_for_chat(state, &claims.uid, &page_context).await;
+    let display_name = clean_text(
+        if claims.name.is_empty() {
+            &claims.email
+        } else {
+            &claims.name
+        },
+        80,
+    );
 
-    // Hermes first: a failure is a documented fallback, never a local script.
-    let (reply, mut reply_cards, source) = match hermes_reply(
-        state,
-        &prompt,
-        &cards,
-        &images,
-        &photo_cards,
-        &page_context,
-        &personal_intent,
-        personal.as_ref(),
-        &claims.uid,
-        &session_id,
-        &clean_text(
-            if claims.name.is_empty() {
-                &claims.email
-            } else {
-                &claims.name
+    let mode = crate::poko_brain::parse_mode(std::env::var("POKO_BRAIN_MODE").ok().as_deref());
+    let canary_uids = std::env::var("POKO_BRAIN_CANARY_UIDS").unwrap_or_default();
+    let mut brain_metadata: Option<Json> = None;
+    let mut from_brain: Option<HermesReply> = None;
+    if crate::poko_brain::brain_enabled(mode, &canary_uids, &claims.uid, &claims.email) {
+        let header_pairs: Vec<(String, String)> = headers
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|text| (name.as_str().to_string(), text.to_string()))
+            })
+            .collect();
+        let game = crate::domain::marketplace_game::parse_game_from_request(
+            &header_pairs,
+            body.get("game").and_then(Json::as_str),
+            None,
+        );
+        match crate::poko_brain::reply(
+            &crate::poko_brain::BrainDeps::production(state),
+            crate::poko_brain::BrainInput {
+                user_message: prompt.clone(),
+                context_blocks: context_blocks(
+                    &cards,
+                    &images,
+                    &photo_cards,
+                    &page_context,
+                    &personal_intent,
+                ),
+                history: recent_history(&firestore, &claims.uid).await,
+                game,
+                display_name: display_name.clone(),
+                user_id: claims.uid.clone(),
+                session_id: session_id.clone(),
             },
-            80,
-        ),
-    )
-    .await
-    {
+        )
+        .await
+        {
+            Ok(brain) if !brain.reply.trim().is_empty() => {
+                brain_metadata = Some(json!({
+                    "provider": brain.provider,
+                    "model": brain.model,
+                    "elapsedMs": brain.elapsed_ms,
+                }));
+                from_brain = Some(HermesReply {
+                    reply: brain.reply,
+                    cards: brain.cards,
+                });
+            }
+            Ok(_) => {
+                tracing::warn!("poko-brain returned an empty reply; falling back to hermes");
+            }
+            Err(error) => {
+                tracing::warn!(
+                    message = %error.to_string().chars().take(200).collect::<String>(),
+                    "poko-brain failed; falling back to hermes"
+                );
+            }
+        }
+    }
+
+    // Hermes when the brain is off, or when it failed. A failure is the
+    // documented fallback, never a local script.
+    let answered = if let Some(brain) = from_brain {
+        Ok(brain)
+    } else {
+        hermes_reply(
+            state,
+            &prompt,
+            &cards,
+            &images,
+            &photo_cards,
+            &page_context,
+            &personal_intent,
+            personal.as_ref(),
+            &claims.uid,
+            &session_id,
+            &display_name,
+        )
+        .await
+    };
+    let (reply, mut reply_cards, source) = match answered {
         Ok(hermes) => {
             let hermes_cards = hermes.cards.clone();
             // Hermes' own tool cards win; otherwise resolve the cards Poko names.
             let (text, attached_cards) = match state.marketplace_db() {
-                Ok(db) => {
-                    attach_reply_cards(&db, &hermes.reply, &hermes_cards).await
-                }
+                Ok(db) => attach_reply_cards(&db, &hermes.reply, &hermes_cards).await,
                 Err(_) => (hermes.reply.clone(), Vec::new()),
             };
             let reply = if text.is_empty() {
@@ -654,7 +858,14 @@ async fn poko_chat_inner(
                 .cloned()
                 .collect();
             let mut candidates = from_photo;
-            if hermes_cards.is_empty() {
+            if brain_metadata.is_some() {
+                // Brain cards are only the ids on its [[cards:]] line; use the
+                // rows attach_reply_cards resolved for them (full cards, same
+                // order) and keep the brain's small cap.
+                let mut resolved = attached_cards;
+                resolved.truncate(4);
+                candidates.extend(resolved);
+            } else if hermes_cards.is_empty() {
                 candidates.extend(attached_cards);
             } else {
                 candidates.extend(hermes_cards);
@@ -662,7 +873,12 @@ async fn poko_chat_inner(
             let mut kept =
                 without_open_cards(&candidates, &page_context, &cards, hermes.cards.is_empty());
             kept.truncate(8);
-            (reply, kept, "hermes".to_string())
+            let source = if brain_metadata.is_some() {
+                "poko-brain".to_string()
+            } else {
+                "hermes".to_string()
+            };
+            (reply, kept, source)
         }
         Err(error) => {
             tracing::warn!(
@@ -694,6 +910,7 @@ async fn poko_chat_inner(
         received_at_ms,
         state.clock().now().timestamp_millis(),
         &client_turn_id,
+        brain_metadata.as_ref(),
     )
     .await
     {
@@ -798,5 +1015,15 @@ mod tests {
             IDENTIFY_PATH,
             "/identify?catalog=pokemon_generic&multi=1&live=0&top_k=3"
         );
+    }
+
+    #[test]
+    fn hermes_gets_the_node_bff_timeout_budget() {
+        assert_eq!(poko_chat_timeout(None), Duration::from_secs(90));
+        assert_eq!(poko_chat_timeout(Some("45000")), Duration::from_secs(45));
+        assert_eq!(poko_chat_timeout(Some("100")), Duration::from_secs(5));
+        assert_eq!(poko_chat_timeout(Some("600000")), Duration::from_secs(95));
+        assert_eq!(poko_chat_timeout(Some("junk")), Duration::from_secs(90));
+        assert_eq!(poko_chat_timeout(Some("0")), Duration::from_secs(90));
     }
 }

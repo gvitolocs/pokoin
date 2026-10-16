@@ -4,7 +4,7 @@ import { getBearer } from '../../stores/auth.js';
 
 const BOT_USERNAME = 'pokoinpos_bot';
 
-/** Poko chat links (market/src/components/TelegramConnectPanel.jsx): one profile code connects Telegram or Discord. */
+/** Poko chat links: one profile code connects Telegram or Discord. */
 export default function TelegramConnectPanel(props) {
   const [status, setStatus] = createSignal(null);
   const [codeInfo, setCodeInfo] = createSignal(null);

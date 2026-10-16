@@ -425,7 +425,7 @@ async fn user_current_page_inner(
             raw
         }
     };
-    let db = state.marketplace_db()?;
+    let db = state.marketplace_writer_db()?;
     let rows = db
         .query_json(
             "insert into public.assistant_user_current_pages \

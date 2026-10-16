@@ -7,6 +7,7 @@ import CardArt from '../components/CardArt.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import DumpNav from '../components/DumpNav.jsx';
 import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
+import { gameHref } from '@market/game.js';
 
 const TYPES = [
   { value: 'all', label: 'All' },
@@ -19,7 +20,7 @@ function money(value) {
 }
 
 /**
- * /marketplace/explore (market/src/pages/Explore.jsx): the Pokoin catalog
+ * /marketplace/explore: the Pokoin catalog
  * dump in PKN with a filter rail. Back restores the filters and the shown
  * count (D00005C); the grid grows 48 at a time from a sentinel.
  */
@@ -231,7 +232,7 @@ export default function Explore() {
                 <For each={visible()}>
                   {(item) => (
                     <article class="explore-card">
-                      <a href={`/marketplace/portfolio/${item.id}`}>
+                      <a href={gameHref(`/marketplace/portfolio/${item.id}`)}>
                         <CardArt src={imageSrc(item, 'hero')} alt="" loading="lazy" />
                         <strong>{item.name}</strong>
                         <span class="muted">{[item.expansion, item.number].filter(Boolean).join(' · ')}</span>

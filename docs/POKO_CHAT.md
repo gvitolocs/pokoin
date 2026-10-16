@@ -60,7 +60,7 @@ the LLM, and may call `POST /api/poko-market` for sold/ask/liquidity tools
 | `POKONTACT_SERVICE_TOKEN` | Bearer Hermes accepts |
 | `POKO_CHAT_URL` | Optional override of the base / full chat URL |
 | `POKO_API_TOKEN` | Optional override of the bearer |
-| `POKO_CHAT_TIMEOUT_MS` | Optional (default 45000) |
+| `POKO_CHAT_TIMEOUT_MS` | Optional Hermes timeout (default 90000, kept within 5000–95000). Photo download / scan workers use 8 s / 12 s / 25 s; every other accounts call keeps the shared 4 s transport timeout. |
 
 ### Network (important)
 
@@ -75,6 +75,21 @@ public IP. The Pi reaches it through an SSH local forward:
 
 Do **not** point the Pi at `http://10.0.0.170:8789` (Oracle VCN private) or
 the public `92.5.153.117:8789` — both fail from pi-home.
+
+Overflow pods on nezopt (k3s, the Cloudflare LB `nez` origin) cannot use a
+loopback tunnel:
+
+- nezopt has its own forward: `oracle-poko-tunnel.service` (system unit),
+  host `127.0.0.1:18789` → peer1 `127.0.0.1:8789`
+- pods reach it through `pokoin-hermes-bridge` (socat on the Docker network
+  `pokoin-overflow`, `172.31.250.13:18789`)
+- `scripts/nezopt-k3s.sh` (`sync_secret`) rewrites the Pi's loopback
+  `POKO_CHAT_URL` / `POKONTACT_SERVICE_URL` to
+  `http://172.31.250.13:18789/api/poko`
+- the `pokoin-api` NetworkPolicy (`infra/k3s/pokoin-security.yaml`) allows
+  egress to `172.31.250.13:18789`
+
+Details: [NEZOPT_OVERFLOW.md](./NEZOPT_OVERFLOW.md#host-services-through-socat-bridges).
 
 URL resolve (same as CardVault `pokoin-assistant.js`):
 
@@ -111,6 +126,7 @@ ssh oracle-peer1 'systemctl restart hermes-poko.service'
   (↑ send, + photos, drag-drop card tags, mascot avatar).
 - Conversation title stays pinned at the top; Poko is otherwise a normal peer thread.
 - Attached cards → `cards[]`; photos → `images[]` (https URLs only).
+- Photo search (YOLO + Milo multi-card) reads the sender's own chat photos (`https://api.pokoin.com/api/user-photos/chat/<uid>/…`) straight from the R2 user-photos bucket; another user's photo or a listing photo is never read. Legacy public `*.r2.dev/user-photos/…` URLs are still fetched over HTTPS.
 
 ## Deploy
 

@@ -21,7 +21,7 @@ function cachedFor(uid) {
 }
 
 /**
- * The Poko assistant thread (market/src/use-poko-thread.js): cached history
+ * The Poko assistant thread: cached history
  * first, a 4 s poll while open that never races an in-flight send, an
  * optimistic user bubble reconciled with the server's echo, older pages near
  * the top. Options are accessors.

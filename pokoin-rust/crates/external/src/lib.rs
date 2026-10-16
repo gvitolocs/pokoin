@@ -21,6 +21,7 @@ pub mod error;
 pub mod firebase;
 pub mod geo;
 pub mod powertools;
+pub mod powertools_games;
 pub mod price_check;
 pub mod pricing;
 pub mod r2;
@@ -42,6 +43,7 @@ pub mod cardtrader {
     pub mod async_sync;
     pub mod client;
     pub mod integration;
+    pub mod link;
     pub mod push;
     pub mod sync;
     pub mod sync_core;

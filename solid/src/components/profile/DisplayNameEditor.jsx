@@ -13,7 +13,7 @@ function editableName(user, profile) {
   return heading;
 }
 
-/** Profile title (market/src/components/DisplayNameEditor.jsx): the display name with the same pencil as the @handle. */
+/** Profile title: the display name with the same pencil as the @handle. */
 export default function DisplayNameEditor(props) {
   const current = () => editableName(authUser() || null, accountProfile());
   const [editing, setEditing] = createSignal(false);

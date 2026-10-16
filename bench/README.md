@@ -1,11 +1,11 @@
 # Pokoin browser benchmark
 
 Repeatable Playwright + Chrome DevTools Protocol (CDP) benchmark for the Pokoin SPA
-(`market/`, served at `/marketplace`). It drives real user journeys in Chromium and records
+(the Solid app in `solid/`, served at `/marketplace`). It drives real user journeys in Chromium and records
 Web Vitals, Event Timing (INP), long tasks, CDP CPU/heap/DOM counters and network
 transfers. Every run is kept raw, and every metric gets a distribution summary. The same
-selectors work for any build with the same markup, including the Solid 2 port. They all
-live in [`config.mjs`](config.mjs).
+selectors work for any build with the same markup. They all live in
+[`config.mjs`](config.mjs).
 
 ## Setup
 
@@ -34,7 +34,7 @@ node compare.mjs results/before.json results/after.json > compare.md
 node compare.mjs before.json after.json --threshold 5 --fail-on-regression   # exit 2 on regression
 
 # Bundle sizes (+ sourcemap attribution when *.map exist)
-(cd ../market && npx vite build --sourcemap --outDir /tmp/pokoin-dist-maps --emptyOutDir)
+(cd ../solid && SOLID_SOURCEMAP=1 npx vite build --outDir /tmp/pokoin-dist-maps --emptyOutDir)
 node bundle.mjs /tmp/pokoin-dist-maps --top 40 --json /tmp/bundle.json
 
 # CPU profile while typing a query (writes a .cpuprofile, gitignored)

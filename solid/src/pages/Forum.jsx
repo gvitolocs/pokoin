@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
-import { useNavigate, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   createForumPost,
   createForumTopic,
@@ -88,10 +89,10 @@ function streamOf(topic, posts) {
   }, ...rows];
 }
 
-/** /forum, /forum/category/:categoryId, /forum/topic/:topicId (market/src/pages/Forum.jsx). */
+/** /forum, /forum/category/:categoryId, /forum/topic/:topicId. */
 export default function Forum() {
   const params = useParams();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [data, setData] = createSignal(null);
   const [error, setError] = createSignal('');
   const [title, setTitle] = createSignal('');

@@ -9,6 +9,7 @@ import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
+import { gameHref } from '@market/game.js';
 
 function RarityIndex(props) {
   return (
@@ -27,7 +28,7 @@ function RarityIndex(props) {
         <For each={RARITY_HUBS}>
           {(row) => (
             <li>
-              <a href={rarityHref(row.slug, props.lang)}>{row.name}</a>
+              <a href={gameHref(rarityHref(row.slug, props.lang))}>{row.name}</a>
             </li>
           )}
         </For>
@@ -95,7 +96,7 @@ function RarityCards(props) {
   );
 }
 
-/** /marketplace/:lang/rarities(/:slug) (market/src/pages/RarityHub.jsx). */
+/** /marketplace/:lang/rarities(/:slug). */
 export default function RarityHub() {
   const params = useParams();
   const lang = () => params.lang || 'en';
@@ -106,7 +107,7 @@ export default function RarityHub() {
       <Match when={!hub()}>
         <div class="page desk hub-page">
           <EmptyDesk title="Unknown rarity" lede="Open the rarity index.">
-            <a class="btn" href={`/marketplace/${lang()}/rarities`}>Rarities</a>
+            <a class="btn" href={gameHref(`/marketplace/${lang()}/rarities`)}>Rarities</a>
           </EmptyDesk>
         </div>
       </Match>

@@ -4,6 +4,7 @@ import { competitiveData, scanUrl } from '@market/competitive.js';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav, { NotInSnapshot } from '../components/CompetitiveNav.jsx';
 import { EmptyDesk } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 function CardsList() {
   const data = competitiveData();
@@ -40,7 +41,7 @@ function CardsList() {
         <div class="comp-card-grid">
           <For each={rows()}>
             {(card) => (
-              <a class="comp-card-tile" href={`/marketplace/competitive/cards/${card.id}`}>
+              <a class="comp-card-tile" href={gameHref(`/marketplace/competitive/cards/${card.id}`)}>
                 <CardArt src={scanUrl(card.set, card.num)} alt={card.name} />
                 <strong>{card.name}</strong>
                 <span class="muted">{card.set} {card.num} · {card.type}</span>
@@ -65,7 +66,7 @@ function CardDetail(props) {
     <div class="page desk comp-page">
       <CompetitiveNav />
       <nav class="crumbs">
-        <a href="/marketplace/competitive/cards">Cards</a>
+        <a href={gameHref('/marketplace/competitive/cards')}>Cards</a>
         <span>/</span>
         <span>{card.name}</span>
       </nav>
@@ -82,7 +83,7 @@ function CardDetail(props) {
             {card.rarity}
           </p>
           <p>
-            <a href={`/marketplace/search?q=${encodeURIComponent(card.name)}`}>Search marketplace</a>
+            <a href={gameHref(`/marketplace/search?q=${encodeURIComponent(card.name)}`)}>Search marketplace</a>
           </p>
           <h2>Used in archetypes</h2>
           <Show when={used.length} fallback={<p class="muted">No archetype usage in this snapshot.</p>}>
@@ -99,7 +100,7 @@ function CardDetail(props) {
                     {(deck) => (
                       <tr>
                         <td>
-                          <a href={`/marketplace/competitive/decks/${deck.id}`}>{deck.name}</a>
+                          <a href={gameHref(`/marketplace/competitive/decks/${deck.id}`)}>{deck.name}</a>
                         </td>
                         <td>{deck.share.toFixed(2)}%</td>
                       </tr>
@@ -120,7 +121,7 @@ function Missing() {
   return <NotInSnapshot>That card is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/cards[/:cardId] (market/src/pages/CompetitiveCards.jsx). */
+/** /marketplace/competitive/cards[/:cardId]. */
 export default function CompetitiveCards() {
   const params = useParams();
   const card = () => competitiveData().cards.find((row) => row.id === params.cardId) || null;

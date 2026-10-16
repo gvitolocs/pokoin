@@ -9,96 +9,30 @@ export function isPrefixedCatalog(value) {
   return /(?:^|\/)(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)\//i.test(String(value || ''));
 }
 
-import SMALL_SCAN_IDS from './data/small-scan-ctf1.js';
-import POKOIN_PLACEHOLDER_IDS from './data/pokoin-placeholder-leftovers.js';
+import CATALOG_IMAGE_CACHE from './data/catalog-image-cache.json' with { type: 'json' };
+import SMALL_SCAN_IDS from './data/small-scan-ctf1.json' with { type: 'json' };
+import POKOIN_PLACEHOLDER_IDS from './data/pokoin-placeholder-leftovers.json' with { type: 'json' };
 
-/** Object key only — `?v=ct1` is a cache buster, not the leftover filename. */
-export const CATALOG_IMAGE_CACHE = 'vv1';
-export const CHAOS_RISING_IMAGE_CACHE = 'cr2';
-export const WCD_2025_IMAGE_CACHE = 'wcd25';
-export const PLACEHOLDER_SCAN_CACHE = 'ph1';
-export const PLACEHOLDER_SCAN_CACHE_2 = 'ph2';
-export const POKOIN_PLACEHOLDER_CACHE = 'pkph1';
-export const BASE_SET_UNLIMITED_CACHE = 'bsu2';
-export const SMALL_SCAN_CACHE = 'ctf1';
-export const ODD_SCAN_CACHE = 'sv312';
-/** Team Up Charizard 014/181 (CT 397269) swapped off the pokemontcg.io digital onto CT's scan. */
-export const TEAM_UP_CHARIZARD_CACHE = 'ct397';
-/** Leftovers whose missing-card coin was replaced by a real scan; keyed by leftover ct_id. */
-const RESCAN_IDS = new Set([286866, 122705, 126934, 331755, 331756]);
-export const RESCAN_CACHE = 'rscan1';
-/**
- * 30th Celebration leftovers that were CardTrader WebP bytes behind a `.jpg` key
- * (Content-Type image/jpeg). Re-encoded to real JPEG on Pi; bust immutable CF.
- * Includes Eevee 116/128 (ct 406777 / public 813554).
- */
-const WEBP_AS_JPEG_IDS = new Set([
-  406703, 406711, 406749, 406763, 406774, 406777, 406800, 406805,
-]);
-export const WEBP_AS_JPEG_CACHE = 'wj1';
-/**
- * 30th Celebration Darkrai & Cresselia LEGEND halves reoriented to Pokoin
- * portrait (name bar left), matching Triumphant. Leftover + public ids.
- */
-const LEGEND_ORIENT_IDS = new Set([413222, 413224, 826444, 826448]);
-export const LEGEND_ORIENT_CACHE = 'leg1';
-const SMALL_SCAN_ID_SET = new Set(SMALL_SCAN_IDS.map(Number));
-const POKOIN_PLACEHOLDER_ID_SET = new Set(POKOIN_PLACEHOLDER_IDS.map(Number));
-/** 312×437 catalog thumbs replaced with CardTrader full (SV Magnemite cohort). */
-const ODD_SCAN_ID_SET = new Set([241617, 241904, 241905, 241906]);
+const ID_LISTS = {
+  'small-scan-ctf1': SMALL_SCAN_IDS,
+  'pokoin-placeholder-leftovers': POKOIN_PLACEHOLDER_IDS,
+};
+
+/** `?v=` busters for leftover JPEGs replaced under the same immutable CDN key.
+ * The table is shared with the Rust card page (deskArtUrl); see the JSON. */
+const CACHE_RULES = CATALOG_IMAGE_CACHE.rules.map((rule) => ({
+  token: rule.token,
+  ids: new Set([...(rule.ids || []), ...(ID_LISTS[rule.idList] || [])].map(Number)),
+  ranges: rule.ranges || [],
+}));
 
 /** Leftover ct_ids whose Pi JPEG was just replaced (immutable CDN cache). */
 function catalogCacheToken(id) {
   const value = Number(id);
-  if (value === 397269) {
-    return TEAM_UP_CHARIZARD_CACHE;
-  }
-  if (LEGEND_ORIENT_IDS.has(value)) {
-    return LEGEND_ORIENT_CACHE;
-  }
-  if (WEBP_AS_JPEG_IDS.has(value)) {
-    return WEBP_AS_JPEG_CACHE;
-  }
-  if (RESCAN_IDS.has(value)) {
-    return RESCAN_CACHE;
-  }
-  if (POKOIN_PLACEHOLDER_ID_SET.has(value)) {
-    return POKOIN_PLACEHOLDER_CACHE;
-  }
-  if (ODD_SCAN_ID_SET.has(value)) {
-    return ODD_SCAN_CACHE;
-  }
-  if (SMALL_SCAN_ID_SET.has(value)) {
-    return SMALL_SCAN_CACHE;
-  }
-  if (
-    (value >= 373736 && value <= 373804)
-    || (value >= 379038 && value <= 379250)
-  ) {
-    return PLACEHOLDER_SCAN_CACHE_2;
-  }
-  if (
-    (value >= 373100 && value <= 373456)
-    || value === 318878
-    || value === 374919
-    || value === 389954
-    || value === 389970
-    || value === 390273
-    || value === 390274
-  ) {
-    return PLACEHOLDER_SCAN_CACHE;
-  }
-  if (value >= 150227 && value <= 150572) {
-    return CATALOG_IMAGE_CACHE;
-  }
-  if (value >= 389941 && value <= 390062) {
-    return CHAOS_RISING_IMAGE_CACHE;
-  }
-  if (value >= 385517 && value <= 385605) {
-    return WCD_2025_IMAGE_CACHE;
-  }
-  if ((value >= 111148 && value <= 111249) || (value >= 55574 && value <= 55624)) {
-    return BASE_SET_UNLIMITED_CACHE;
+  for (const rule of CACHE_RULES) {
+    if (rule.ids.has(value) || rule.ranges.some(([from, to]) => value >= from && value <= to)) {
+      return rule.token;
+    }
   }
   return '';
 }
@@ -186,7 +120,7 @@ export function catalogSlugMatchesCard(url, card) {
 }
 
 /** Drop CardTrader preview_ / public-id keys; keep this card's leftover JPEG. */
-export function ownCatalogImage(card, advertised) {
+export function ownCatalogImage(card, advertised, gameId) {
   if (isPrefixedCatalog(advertised)) {
     return advertised;
   }
@@ -199,7 +133,7 @@ export function ownCatalogImage(card, advertised) {
   if (rewritten && leftoverKeyMatchesCard(rewritten, id) && catalogSlugMatchesCard(rewritten, withId)) {
     return withCatalogCache(String(rewritten).split(/[?#]/)[0]);
   }
-  return withCatalogCache(leftoverUrlFromCard(withId) || rewritten || advertised || '');
+  return withCatalogCache(leftoverUrlFromCard(withId, gameId) || rewritten || advertised || '');
 }
 
 export function homepageMatchesCatalog(homepageUrl, fullUrl) {

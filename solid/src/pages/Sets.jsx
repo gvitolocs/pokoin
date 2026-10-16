@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import { fetchExpansions } from '@market/api.js';
 import { satelliteGroups } from '@market/browse-hubs.js';
-import { game, isPokemonGame } from '@market/game.js';
+import { game, gameHref, isPokemonGame } from '@market/game.js';
 import { ERA_CHIPS, groupExpansions, headingHref } from '@market/set-logos.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
@@ -9,7 +9,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid, { SetGuideSkeleton } from '../components/SetGuideGrid.jsx';
 
 /**
- * /marketplace/sets (market/src/pages/Sets.jsx): every expansion grouped by
+ * /marketplace/sets: every expansion grouped by
  * TCG era (Pokémon) or one A → Z list (satellite games), with the era chips
  * and a name filter. Era membership and in-era order are set-logos.js rules.
  */
@@ -101,7 +101,7 @@ export default function Sets() {
               <section class="set-guide-era">
                 <h2>
                   <Show when={pokemon} fallback={<span>{group()[0]}</span>}>
-                    <a class="era-link" href={headingHref(group()[0])}>{group()[0]}</a>
+                    <a class="era-link" href={gameHref(headingHref(group()[0]))}>{group()[0]}</a>
                   </Show>
                 </h2>
                 <SetGuideGrid rows={group()[1]} />

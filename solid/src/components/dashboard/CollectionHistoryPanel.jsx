@@ -91,7 +91,7 @@ function layoutChart(points, timeline) {
 }
 
 /**
- * Collection value chart (market/src/components/SellerDashboardView.jsx
+ * Collection value chart (was in the React SellerDashboardView,
  * CollectionHistoryPanel): cards stacked on liquidity (wallet PKN), one point
  * per day; a window that ends today fills two thirds with realized days and
  * the hatched last third is the projection. Opens on the last month.

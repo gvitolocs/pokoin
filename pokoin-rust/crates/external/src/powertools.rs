@@ -423,8 +423,8 @@ pub fn map_language_from_name(raw: &str) -> String {
         "portuguese" => "PT",
         "japanese" => "JP",
         "korean" => "KO",
-        "chinese (trad.)" | "chinese traditional" => "ZHT",
-        "chinese" => "ZH",
+        "chinese (trad.)" | "chinese traditional" | "t-chinese" => "ZHT",
+        "chinese" | "s-chinese" => "ZH",
         "dutch" => "NL",
         "polish" => "PL",
         "russian" => "RU",
@@ -602,7 +602,7 @@ pub fn power_tools_row(raw: &Map<String, Value>) -> PowerToolsRow {
         first_edition: truthy_flag(field(raw, &["isFirstEd"])),
         quantity: {
             let n = field(raw, &["quantity"]).parse::<f64>().unwrap_or(1.0);
-            n.trunc().clamp(1.0, 99.0) as i64
+            n.trunc().clamp(0.0, 999_999.0) as i64
         },
         price_pkn: (price > 0.0).then(|| price * 200.0),
         seller_comment: clean_text(Some(field(raw, &["comment"])), 500),
@@ -937,8 +937,28 @@ mod tests {
         assert_eq!(map_condition_from_cm(""), "NM");
         assert_eq!(map_language_from_name("English"), "EN");
         assert_eq!(map_language_from_name("Chinese (Trad.)"), "ZHT");
+        assert_eq!(map_language_from_name("T-Chinese"), "ZHT");
+        assert_eq!(map_language_from_name("S-Chinese"), "ZH");
         assert_eq!(map_language_from_name("EN"), "EN");
         assert_eq!(map_language_from_name("Martian"), "EN");
+    }
+
+    #[test]
+    fn power_tools_row_preserves_zero_and_high_quantity() {
+        let row = power_tools_row(&json!({
+            "name": "Bulk",
+            "quantity": "0",
+            "finishType": "Regular",
+            "language": "English",
+        }).as_object().unwrap().clone());
+        assert_eq!(row.quantity, 0);
+        let row = power_tools_row(&json!({
+            "name": "Case",
+            "quantity": "150",
+            "finishType": "Regular",
+            "language": "English",
+        }).as_object().unwrap().clone());
+        assert_eq!(row.quantity, 150);
     }
 
     #[test]

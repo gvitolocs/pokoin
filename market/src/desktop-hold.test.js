@@ -184,20 +184,9 @@ test('readDesktopHold returns the same array when storage is unchanged', () => {
   assert.equal(a.length, 1);
 });
 
-test('Chrome mounts Desktop on the left, opposite the cart', () => {
-  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
-  const drop = fs.readFileSync(path.join(root, 'components/DesktopDrop.jsx'), 'utf8');
-  const cart = fs.readFileSync(path.join(root, 'components/CartDrop.jsx'), 'utf8');
+// The header and tray markup are guarded in solid/src/components/trays.test.js.
+test('Desktop tray CSS sits on the left, opposite the cart', () => {
   const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
-  assert.match(chrome, /import DesktopDrop from '\.\/DesktopDrop\.jsx'/);
-  assert.match(chrome, /navPop === 'desktop'/);
-  const brandAt = chrome.indexOf('className="brand"');
-  const desktopAt = chrome.indexOf('className="desktop-anchor"');
-  const searchAt = chrome.indexOf('className="search"');
-  const cartAt = chrome.indexOf('className="cart-anchor"');
-  const iconNavAt = chrome.indexOf('className="nav icon-nav"');
-  assert.ok(brandAt > 0 && desktopAt > brandAt && searchAt > desktopAt);
-  assert.ok(iconNavAt > searchAt && cartAt > iconNavAt);
   assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*-4rem/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*width:\s*max-content/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*23rem/s);
@@ -207,17 +196,6 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*transform:\s*translateX\(-50%\)/s);
   assert.match(css, /\.desktop-drop-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(css, /\.cart-drop-card \.chat-qty/);
-  assert.match(drop, /Clear desktop/);
-  assert.match(drop, /Add to cart/);
-  assert.match(drop, /Export PDF/);
-  assert.match(drop, /downloadDesktopHoldPdf/);
-  assert.match(drop, /desktop-drop-x/);
-  assert.match(drop, /QtyStepper/);
-  assert.match(drop, /setDesktopQty/);
-  assert.match(cart, /QtyStepper/);
-  assert.match(drop, /Draw the shape of your next collection/);
-  assert.doesNotMatch(drop, /Drop cards you are unsure about/);
-  assert.doesNotMatch(drop, /downloadDesktopHoldCsv/);
   // Phone ≤720px hides the Desktop chip; cart stays in the topbar.
   const phone = css.slice(css.indexOf('@media (max-width: 720px)'));
   assert.match(phone, /\.desktop-anchor \{ display: none; \}/);

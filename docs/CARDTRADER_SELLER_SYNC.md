@@ -20,6 +20,63 @@ For every `marketplace_user_listings` row whose `source_listing_id` is
 `sold_out` rows remain in Postgres for audit/history but are excluded from the
 seller shop and inventory UI.
 
+## Inventory link direction (2026-10-14)
+
+Connecting CardTrader links the two inventories; it is not a one-off import.
+Profile → CardTrader → **Inventory link** stores which way *new* stock is
+copied as `inventorySync.direction` on `seller_integrations/{uid}__cardtrader`
+(`POST /api/cardtrader-sync {"direction": …}` stores it and runs a sync; the
+status carries it as `inventorySync`). Code: `pokoin-rust/crates/external/src/cardtrader/link.rs`.
+
+| Direction | Reconcile imports CardTrader-only products | Reconcile lists Pokoin-only listings on CardTrader |
+| --- | --- | --- |
+| `ct_to_pokoin` (default; the behavior before the setting) | yes | no |
+| `pokoin_to_ct` | no (counted as `notImported`) | yes |
+| `both` | yes | yes |
+
+Linked rows stay in sync both ways in every direction (webhook + reconcile for
+CardTrader sales, `increment -n` for Pokoin sales). 1-Day Ready accounts are
+always CardTrader → Pokoin (`409 cardtrader_one_day_ready` for the others).
+
+The push runs after the plan applied its links, in the same periodic job and
+manual sync, and only when the export passed the plan's gate and the run holds
+the shared Redis reconcile lock (`blocked`: `incomplete_export` /
+`no_shared_lock`; on 2026-10-14 21:15 UTC two syncs of one seller ran at once,
+each reading an export without the other's creates). Candidates are active
+Pokémon listings with stock whose `source_listing_id` is not `ct:…` (empty, or
+another channel's id such as `scan:<item>`), never CardTrader imports. Each is:
+
+- **linked** (`linkedToExisting`) when the same card + facets is on CardTrader
+  as a product no listing holds: no duplicate is created;
+- otherwise **created** as its own product. CardTrader accepts several products
+  of the same card from one seller (one seller's 12,923 linked products cover
+  12,792 facets), so a second copy is a second product. Until 2026-10-15 such a
+  copy was skipped and, keeping its old `updated_at`, stayed first in the queue:
+  76 of every 100 candidates, ~24 listed per run.
+
+Creates are claimed with the outbox's compare-and-set (`<source read> →
+ct:pending:link-<ms>`), sent with `user_data_field = pokoin:<listing id>`, then
+linked over the claim (`origin = 'push'`). A refused create puts the old source
+back; an in-doubt create keeps the claim and the next reconcile links it by its
+`user_data_field`. A run pages through candidates (never one it already tried)
+until none is left or its budget is spent: `CARDTRADER_PUSH_PER_RUN` (2,000),
+`CARDTRADER_PUSH_SECONDS` (480, inside the 15-minute lock), at most 5 creates a
+second, and it stops at the first CardTrader 429 (`stoppedBy`). `remaining`
+counts what the next run picks up. A database error while pushing fails the
+sync instead of reporting nothing to list.
+Results land in the sync summary as `pushedToCardTrader`.
+
+## Power Tools location import
+
+Profile → CardTrader → **Import locations** uploads one Power Tools stock CSV
+per game (`powerToolsCsv: {game: csv}` with `stackSize`, `numberedInStack`,
+`locationParse`). `previewGames` lists the games in the export,
+`previewPowerTools` shows how the locations read and sample matches without
+writing; the import itself is a normal sync whose rows are matched to
+CardTrader products (`reconcile_power_tools_with_cardtrader`) and whose
+locations go onto the linked Pokoin listings. Unmatched rows on either side are
+`summary.powerToolsReconcile.ctOnly` / `ptOnly` for `/inventory/sync-review`.
+
 ## Sale accounting invariant
 
 A connected seller's `ct:<product_id>` row is an inventory mirror. When its
@@ -57,6 +114,13 @@ uses `flock` to prevent overlap and runs the native job
 3. reconciles the complete export.
 
 Unchanged product links are not rewritten, keeping frequent safety runs cheap.
+A listing can carry a `ct:<product>` source that another channel set (Card
+Rails' own CardTrader push) with no `marketplace_cardtrader_product_links` row:
+the webhook still finds it by source, but the first reconcile that sees its
+product in the export records the row (`origin = 'match'`, summary
+`linksRecorded`), so link counts and settled removals include it. On
+2026-10-14 2 of PeppeV's 1,463 linked listings had no row; both products were
+in his export, so they were never stale.
 A linked listing an earlier run already settled (sold out at zero, its link
 `missing_from_ct`) is not removed again, and seller orders are fetched only
 when a product newly left the export. The export is parsed while it downloads
@@ -184,8 +248,9 @@ ssh pi-home 'systemctl status pokoin-rust-job-cardtrader-seller-reconcile.timer 
 ssh pi-home 'journalctl -u pokoin-rust-job@cardtrader-seller-reconcile.service -n 100 --no-pager'
 ```
 
-A manual seller sync remains available from the Profile UI or authenticated
-`POST /api/cardtrader-sync`. Never infer removal from an incomplete export.
+A manual seller sync remains available from the Profile UI (Sync now) or
+authenticated `POST /api/cardtrader-sync`. Never infer removal from an
+incomplete export.
 
 Deploy the sale-accounting guard from an exact `origin/main` commit:
 

@@ -9,7 +9,7 @@ import { cartItems } from '../stores/cart.js';
 import { cartShippingChoice, setCartShippingChoice } from '../stores/cart-actions.js';
 import '@market/cart.css';
 
-/** /shipping (market/src/pages/Shipping.jsx): Packlink + letter rates, priced per seller parcel. */
+/** /shipping: Packlink + letter rates, priced per seller parcel. */
 export default function Shipping() {
   const delivery = createDeliveryCountry();
 

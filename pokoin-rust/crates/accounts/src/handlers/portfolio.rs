@@ -290,14 +290,7 @@ const PORTFOLIO_CACHE: &str =
 
 /// Per-game catalog pools. The Pokemon catalog is the configured default; every
 /// other game resolves its own URL (explicit env, else derived from the base
-/// URL's host) and keeps a lazily-created pool.
-fn game_pools() -> &'static std::sync::Mutex<std::collections::HashMap<String, MarketplaceDb>> {
-    static POOLS: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, MarketplaceDb>>,
-    > = std::sync::OnceLock::new();
-    POOLS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
+/// URL's host) and uses the process-wide satellite pool (`pokoin_db` budget).
 fn game_db(state: &DomainState, game: &str) -> Result<MarketplaceDb> {
     use crate::domain::marketplace_game::{database_url_for_game, env_pairs, is_pokemon_game};
     if is_pokemon_game(game) {
@@ -307,19 +300,9 @@ fn game_db(state: &DomainState, game: &str) -> Result<MarketplaceDb> {
     if url.is_empty() {
         return Err(ApiError::internal("Marketplace database is not configured."));
     }
-    if let Some(db) = game_pools()
-        .lock()
-        .ok()
-        .and_then(|pools| pools.get(&url).cloned())
-    {
-        return Ok(db);
-    }
-    let db = MarketplaceDb::connect_lazy(&url, 4)
+    let pool = pokoin_db::satellite_pool(&url)
         .map_err(|error| ApiError::internal(format!("Marketplace database pool failed: {error}")))?;
-    if let Ok(mut pools) = game_pools().lock() {
-        pools.insert(url, db.clone());
-    }
-    Ok(db)
+    Ok(MarketplaceDb::from_pool(pool))
 }
 
 /// `relationExists(qualified)`.

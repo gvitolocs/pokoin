@@ -8,11 +8,12 @@ import { carriesListing } from '../lib/drag.js';
 import { addCartItem, cartItems, removeCartItem, setCartQty } from '../stores/cart.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
+import { gameHref } from '@market/game.js';
 
 const CART_ICON = 'M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z';
 
 /**
- * Header cart tray (market/src/components/CartDrop.jsx): drop a card, a
+ * Header cart tray: drop a card, a
  * Pokémon, an artist or a set to add it; drag a thumb out to move it.
  * Its own chunk — it mounts only while hovered or while a card is dragged.
  */
@@ -80,7 +81,7 @@ export default function CartDrop() {
                 }}
                 onDragEnd={() => endTrayDrag()}
               >
-                <a href={row().href || '/cart'} title={row().name} draggable="false">
+                <a href={gameHref(row().href || '/cart')} title={row().name} draggable="false">
                   <Show when={row().image} fallback={<span class="suggest-ph" />}>
                     <CardArt src={row().image} alt="" full={fullArt()} />
                   </Show>

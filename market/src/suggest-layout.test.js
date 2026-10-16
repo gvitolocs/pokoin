@@ -16,17 +16,7 @@ test('suggest row is two columns without a Singles cell', () => {
   assert.match(row[0], /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/);
   assert.equal(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto/.test(row[0]), false);
   assert.equal(desktopCss.includes('.suggest-row:has(.suggest-art)'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.equal(chrome.includes('suggest-kind'), false);
-  assert.equal(chrome.includes('suggest-meta'), false);
-  assert.equal(chrome.includes('suggest-pending'), false);
   assert.equal(desktopCss.includes('.suggest-pending'), false);
-  assert.match(chrome, /data-suggest-id/);
-  assert.match(chrome, /paintCatalogGroups/);
-  assert.match(chrome, /suggestLiveReady/);
-  assert.match(chrome, /identity\.suggestExpansionShort/);
-  assert.match(chrome, /<ExpansionMark/);
-  assert.match(chrome, /expansionSymbolUrl/);
   const api = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'api.js'), 'utf8');
   assert.match(api, /expansion_symbol_url/);
 });
@@ -42,13 +32,7 @@ test('desktop collector number is its own middle column; phone folds it into the
   assert.match(desktopCss, /\.suggest-number \{[^}]*text-align:\s*left/);
   assert.match(desktopCss, /\.suggest-number \{[^}]*min-width:\s*7\.5ch/);
   assert.equal(desktopCss.includes('suggest-copy-head'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /className="suggest-translated"/);
-  assert.match(chrome, /suggestTranslatedLine/);
-  assert.match(chrome, /suggestCardName/);
   assert.match(desktopCss, /\.suggest-translated \{/);
-  assert.match(chrome, /className="suggest-number"/);
-  assert.match(chrome, /clipSuggestCollector/);
   assert.match(desktopCss, /\.suggest-number \{[^}]*font-size:\s*1\.55rem/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*color:\s*var\(--yellow\)/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*font-size:\s*1\.4rem/);
@@ -76,18 +60,9 @@ test('desktop collector number is its own middle column; phone folds it into the
   assert.match(desktopCss, /\.set-shortcut\.is-on \.set-shortcut-sym,\s*\.set-mark-glow \.set-shortcut-sym[\s\S]*drop-shadow/);
   assert.match(desktopCss, /\.set-shortcut\.is-on,\s*\.set-mark-glow \{[^}]*border-color:\s*transparent/);
   assert.equal(/\.set-shortcut\.is-on,\s*\.set-mark-glow \{[^}]*border-color:\s*var\(--yellow\)/.test(desktopCss), false);
-  assert.match(chrome, /className="set-shortcut is-on"/);
-  const expansion = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'pages/Expansion.jsx'), 'utf8');
-  assert.match(expansion, /set-sym-wrap/);
-  const setGuide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SetGuideGrid.jsx'), 'utf8');
   const desk = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'desk.css'), 'utf8');
-  assert.match(setGuide, /className="set-shortcut is-on"/);
-  // Nationality goes through resolveExpansionNationality (pins for empty/unknown catalog values, PR 254).
-  assert.match(setGuide, /printFlagFromNationality\(resolveExpansionNationality\(row\)\)/);
-  assert.match(setGuide, /set-guide-print-flag/);
   assert.match(desk, /\.set-guide-print-flag img \{[^}]*border-radius:\s*50%/);
   assert.match(desk, /\.set-guide-card strong\.has-print-flag \{[^}]*display:\s*flex/);
-  assert.doesNotMatch(setGuide.match(/function SetGuideLogo[\s\S]*?\n\}/)[0], /printFlag/);
   assert.match(
     phone720First,
     /\.suggest-art-cluster:has\(\.suggest-art\) \.suggest-print-flag \{[^}]*position:\s*absolute/,
@@ -103,7 +78,6 @@ test('phone ≤720px suggest row stays two columns', () => {
 });
 
 test('suggest list never pans sideways; long names scale to fit beside the art', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   assert.match(desktopCss, /\.suggest-list \{[^}]*overflow-x:\s*hidden/);
   assert.match(desktopCss, /\.suggest-list \{[^}]*touch-action:\s*pan-y/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*max-width:\s*100%/);
@@ -111,50 +85,31 @@ test('suggest list never pans sideways; long names scale to fit beside the art',
   // Phone: the name may run to 1px before the artwork.
   const row = phone720First.match(/\.suggest-row \{[^}]+\}/g)?.find((block) => /grid-template-columns/.test(block));
   assert.match(row, /gap:\s*1px/);
-  // Titles are fitted before FLIP measures the rows.
-  assert.match(chrome, /useSuggestTitleFit\(listRef[\s\S]*useSuggestFlip\(listRef/);
 });
 
+// The SearchBox/SearchToggles/SetGuideGrid markup is guarded in solid/src/components/{SearchBox,SetGuideGrid}.test.js.
 test('LEGEND and BREAK suggest art is the full card rotated, not the art-cut', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /resolveArtLayout/);
-  assert.match(chrome, /artLayout === 'landscape'/);
-  assert.match(chrome, /is-landscape/);
-  assert.match(chrome, /cut=\{artLayout === 'window' \|\| artLayout === 'halfart'\}/);
   assert.match(desktopCss, /\.suggest-art\.is-landscape \{/);
   assert.match(desktopCss, /\.suggest-art\.is-landscape img \{[^}]*rotate\(90deg\)/);
   assert.match(phone720First, /\.suggest-art\.is-landscape \{ --suggest-art-w:\s*6\.75rem/);
 });
 
 test('full-bleed suggest art skips the illustration window crop', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /resolveArtLayout/);
-  assert.match(chrome, /is-bleed/);
   assert.match(desktopCss, /\.suggest-art\.is-bleed \{/);
   assert.match(desktopCss, /\.suggest-art\.is-bleed img \{[^}]*object-position:\s*center 18%/);
 });
 
 test('desktop suggest hover shows leftover JPEG beside the panel', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   assert.match(desktopCss, /\.suggest-hover \{[^}]*position:\s*fixed/);
   assert.match(desktopCss, /\.suggest-hover \{[^}]*pointer-events:\s*none/);
   assert.match(phone720First, /\.suggest-hover \{\s*display:\s*none/);
-  assert.match(chrome, /className="suggest-hover"/);
-  assert.match(chrome, /full=\{Boolean\(hoverHero\)\}/);
-  assert.match(chrome, /createPortal/);
-  assert.match(chrome, /<CardArt src=\{hoverSrc\} full=\{Boolean\(hoverHero\)\} alt="" \/>/);
 });
 
 test('suggest thumbs preload into a 128 LRU; hover JPEGs are not cached', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   const images = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'suggest-images.js'), 'utf8');
   const api = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'api.js'), 'utf8');
   assert.match(images, /SUGGEST_THUMB_CACHE = 128/);
   assert.equal(images.includes('preloadSuggestHero'), false);
-  assert.match(chrome, /preloadSuggestThumbs/);
-  assert.match(chrome, /loading=\{thumbLoading\}/);
-  assert.match(chrome, /fetchPriority=\{thumbPriority\}/);
-  assert.match(chrome, /SUGGEST_THUMB_EAGER/);
   assert.match(api, /preloadSuggestThumbs\(collectPrintingThumbUrls/);
 });
 
@@ -170,15 +125,5 @@ test('game and title language sit on the left of the search pill', () => {
   assert.match(phoneBar[0], /--topbar-flag:\s*32px/);
   assert.match(phone720First, /\.desktop-anchor \{ display: none; \}/);
   assert.equal(phone720First.includes('.topbar-row > .lang-toggle {'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  const toolbar = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SearchToolbar.jsx'), 'utf8');
-  assert.match(chrome, /className="search-pill"[\s\S]*<div className="search-lead">[\s\S]*<GameSelect \/>[\s\S]*<LangToggle \/>/);
-  assert.match(chrome, /function PrintLangToggle[\s\S]*search-lens-mark[\s\S]*search-go-icon/);
-  assert.match(chrome, /isPokemonGame\(\) \? <PrintLangToggle \/>/);
-  assert.match(chrome, /className="sr-only" type="submit"/);
-  assert.equal(chrome.includes('search-submit'), false);
-  assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
   assert.match(css, /\.search-pill > input:nth-last-child\(2\)\s*\{[^}]*border-radius:\s*0 999px 999px 0/s);
-  assert.match(toolbar, /aria-label="Card print"/);
-  assert.equal(chrome.includes('variant="drawer"'), false);
 });

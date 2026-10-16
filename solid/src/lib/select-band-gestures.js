@@ -12,7 +12,7 @@ import {
 import { bandState, cardSelected, listingSelected, selectBand as band, setBand, setCards, setListings } from './select-band.js';
 
 /**
- * The selection gesture engine (market/src/select-band.jsx's listeners), a
+ * The selection gesture engine, a
  * lazy chunk of lib/select-band.js. Only the gesture starts stay on
  * (pointer/mouse down, the listing click); move/up/scroll exist only while a
  * box is being drawn, Escape and the outside press only while something is

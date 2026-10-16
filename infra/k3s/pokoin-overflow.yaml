@@ -1,6 +1,7 @@
 # pokoin-overflow on nezopt k3s — exported from the LIVE cluster 2026-10-07 (kubectl diff = empty).
 # Security objects (ServiceAccounts, PDBs, NetworkPolicies, cloudflared) live in pokoin-security.yaml.
-# Secrets (pokoin-api-env, pokoin-api-nez-tunnel, pokoin-pg-ca) are created by scripts, never committed.
+# Secrets (pokoin-api-env for the API pods, pokoin-jobs-env for the CronJobs, pokoin-api-nez-tunnel,
+# pokoin-pg-ca) are created by scripts (nezopt-k3s.sh sync), never committed.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -228,11 +229,19 @@ spec:
           value: '1'
         - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
           value: '1'
+        # Every URL here (reads, writes, all satellite games) is the one nezopt
+        # writer (max_connections 120). Per pod: catalog 6 + domain 3 (read and
+        # write share it) + commerce 3 + accounts 4+2 = 18, plus at most one
+        # connection per satellite game in use, idle-closed after 30 s.
+        # At HPA maxReplicas 4 that is 72; see docs/RUST_RUNTIME.md.
         - name: POKOIN_RUST_DB_POOL_MAX
-          value: '8'
-        # Domain pools per game database; every game database shares one writer.
+          value: '6'
         - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
-          value: '4'
+          value: '3'
+        - name: POKOIN_RUST_GAME_DB_POOL_MAX
+          value: '1'
+        - name: POKOIN_RUST_GAME_DB_IDLE_SECS
+          value: '30'
         - name: MEILI_HOST
           value: http://meili.pokoin-overflow.svc.cluster.local:7700
         - name: REDIS_HOST
@@ -437,16 +446,25 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: REDIS_HOST
               value: redis.pokoin-overflow.svc.cluster.local
             - name: REDIS_PORT
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: search-delta
             resources:
@@ -519,16 +537,25 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: REDIS_HOST
               value: redis.pokoin-overflow.svc.cluster.local
             - name: REDIS_PORT
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: search-reindex
             resources:
@@ -616,12 +643,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -650,9 +677,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-sets
             resources:
@@ -699,6 +728,134 @@ spec:
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
+# Seller shop snapshots (marketplace_seller_books: brotli-11 copy, handle, header) for
+# GET /api/marketplace-list?kind=seller: every 2 min. A seller whose stamp and profile
+# have not moved costs one cached profile read; the Pi never builds (see docs/RUST_RUNTIME.md).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: build-lists-sellers
+  namespace: pokoin-overflow
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 110
+      backoffLimit: 0
+      template:
+        spec:
+          automountServiceAccountToken: false
+          containers:
+          - command:
+            - /app/pokoin-api
+            - job
+            - build-lists
+            - --kind=seller
+            env:
+            - name: POKOIN_RUST_BIND
+              value: 127.0.0.1:18082
+            - name: POKOIN_TRUSTED_PROXY_CIDRS
+              value: 10.42.0.0/16
+            - name: POKOIN_LISTING_SYNC_WORKER
+              value: '0'
+            - name: POKOIN_SELLER_BOOK_WORKER
+              value: '0'
+            - name: POKOIN_RUST_RELEASE
+              value: nez-k3s
+            - name: POKOIN_CDN_ROOT
+              value: /srv/pokoin/card-images/objects
+            - name: POKOIN_CDN_NAME
+              value: nez-k3s
+            - name: POKOIN_CDN_FALLBACK_ORIGIN
+              value: https://cdn.pokoin.com
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-jobs-env
+            - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-jobs-env
+            - name: MARKETPLACE_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: POKOIN_CDN_HEALTH_URL
+              value: https://cdn.pokoin.com/health
+            - name: PIPELINE_HEALTH_TIMEOUT_MS
+              value: '2000'
+            - name: SCAN_PRIMARY_URL
+              value: http://172.31.250.12:18151
+            - name: SCAN_FALLBACK_URL
+              value: http://172.31.250.12:18151
+            - name: RUST_LOG
+              value: info
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '3'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            envFrom:
+            - secretRef:
+                name: pokoin-jobs-env
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: build-lists-sellers
+            resources:
+              limits:
+                cpu: '2'
+                memory: 1Gi
+              requests:
+                cpu: 250m
+                memory: 256Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/rust/current
+              type: Directory
+            name: app
+  schedule: '*/2 * * * *'
+  successfulJobsHistoryLimit: 1
+  suspend: false
+---
 # Artist desks (all cards, no cap) and versions name lineups: daily at 04:30, after the 04:10 medians (tile prices are built in).
 apiVersion: batch/v1
 kind: CronJob
@@ -740,12 +897,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -774,9 +931,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-artists
             resources:
@@ -864,12 +1023,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -898,9 +1057,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-versions
             resources:
@@ -988,12 +1149,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1022,9 +1183,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-related
             resources:
@@ -1112,12 +1275,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1146,9 +1309,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-related-delta
             resources:
@@ -1236,12 +1401,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
-                  name: pokoin-api-env
+                  name: pokoin-jobs-env
             - name: MARKETPLACE_DATABASE_SSL
               value: '1'
             - name: MARKETPLACE_DATABASE_SSL_VERIFY
@@ -1270,9 +1435,11 @@ spec:
               value: '3'
             - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
               value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
-                name: pokoin-api-env
+                name: pokoin-jobs-env
             image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
             name: build-lists-medians
             resources:

@@ -55,6 +55,25 @@ class DailySummaryTest(unittest.TestCase):
         self.assertIn("Failed stages: catalog", result["message"])
         self.assertIn("Catalogue failures: pokoin_dragon_ball_super", result["message"])
 
+    def test_dump_stopped_at_deadline_is_reported_as_failed(self):
+        self.listing.update({"completed": 1200, "stoppedAtDeadline": True, "maxSeconds": 36000})
+        self.write_reports()
+        result = self.summary(1, {**STAGES, "dump": 75})
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["rawDumpComplete"])
+        self.assertIn("stopped at its 10.0 h deadline after 1200/3383 expansions", result["message"])
+        self.assertIn("Failed stages: dump", result["message"])
+
+    def test_deferred_new_expansions_are_listed_without_failing_the_catalogue(self):
+        (self.root / "status.json").write_text(json.dumps({"errors": [], "deferred": [
+            {"database": "pokoin_flesh_and_blood",
+             "expansions": [{"id": 4908, "name": "Outbreak", "error": "HTTPError: 404"}]}]}))
+        result = self.summary()
+        self.assertEqual(result["status"], "complete")
+        self.assertIn("deferred to the next run (CardTrader export not ready): pokoin_flesh_and_blood 4908.",
+                      result["message"])
+        self.assertNotIn("Catalogue failures", result["message"])
+
     def test_partial_or_failed_dump_never_reports_completion(self):
         for change in [{"completed": 3000}, {"errors": [{"expansionId": 4678}]}, {"totalExpansions": 0}]:
             with self.subTest(change=change):
@@ -141,6 +160,8 @@ class DailySummaryTest(unittest.TestCase):
         for executable, content in {
             "node": '#!/bin/bash\nif [[ "$1" == *refresh-all-cardtrader-catalogues* ]]; then exit "$CATALOG_EXIT"; fi\nexit 0\n',
             "python3": '#!/bin/bash\nif [[ "$1" == *cardtrader-daily-notify* ]]; then exit 1; fi\nexit 0\n',
+            "dump": "#!/bin/bash\nexit 0\n",
+            "prices": "#!/bin/bash\nexit 0\n",
         }.items():
             path = bin_dir / executable
             path.write_text(content)
@@ -148,7 +169,9 @@ class DailySummaryTest(unittest.TestCase):
         for import_exit in [0, 1]:
             with self.subTest(import_exit=import_exit):
                 env = {**os.environ, "PATH": str(bin_dir) + ":" + os.environ["PATH"],
-                       "POKOIN_CATALOG_RUN_ROOT": str(self.root), "CATALOG_EXIT": str(import_exit)}
+                       "POKOIN_CATALOG_RUN_ROOT": str(self.root), "CATALOG_EXIT": str(import_exit),
+                       "POKOIN_CT_DUMP_BIN": str(bin_dir / "dump"),
+                       "POKOIN_CT_PRICE_BIN": str(bin_dir / "prices")}
                 result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, import_exit)
                 self.assertIn("import result is unchanged", result.stderr)

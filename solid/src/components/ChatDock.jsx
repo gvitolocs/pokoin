@@ -169,7 +169,7 @@ function ConversationList(props) {
 }
 
 /**
- * Floating messages dock (market/src/components/ChatDock.jsx): the chat
+ * Floating messages dock: the chat
  * button, the conversation list, person threads and the Poko assistant, with
  * card drops onto conversations. A lazy chunk the shell loads once the page
  * is idle — never on the first paint.
@@ -459,7 +459,7 @@ export default function ChatDock() {
                   <Show when={(event().listings || event().cards || []).length}>
                     <span class="chat-tags">
                       <For each={event().listings || event().cards || []}>
-                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} />}
+                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} defaultGame={poko() ? 'pokemon' : ''} />}
                       </For>
                     </span>
                   </Show>
@@ -511,6 +511,7 @@ export default function ChatDock() {
                         onQty={setChatTagQty}
                         peer={peerRef()}
                         me={me()}
+                        defaultGame={poko() ? 'pokemon' : ''}
                       />
                     )}
                   </For>
@@ -535,7 +536,7 @@ export default function ChatDock() {
                       event.target.value = '';
                       addPhotoFiles(files);
                     }}
-                    disabled={sending() || photos().length >= MAX_CHAT_PHOTOS}
+                    disabled={busy() || photos().length >= MAX_CHAT_PHOTOS}
                   />
                 </label>
                 <label class="sr-only" for="chat-dock-input">Message</label>

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import {
   connectCardTrader,
   disconnectCardTrader,
@@ -9,6 +9,7 @@ import { MIN_CARDTRADER_TOKEN_LENGTH, describeCardTraderToken } from '@market/ca
 import { DASHBOARD_HOME } from '@market/punchouts.js';
 import { getBearer } from '../../stores/auth.js';
 import CardTraderPowerToolsModal from './CardTraderPowerToolsModal.jsx';
+import { CT_LINK_DIRECTIONS, ctLinkDirection, ctLinkHealth, ctLinkOption, formatSyncSummary, syncReason } from './cardtrader-link.js';
 import WipeAllInventory from './WipeAllInventory.jsx';
 
 /** Where a seller copies their CardTrader API token. */
@@ -37,32 +38,13 @@ function tokenHint(pasted) {
   return { tone: 'ok', text: parts.join(' · ') };
 }
 
-function formatSyncSummary(summary) {
-  if (!summary || typeof summary !== 'object') return '';
-  if (summary.mode === 'one_day_ready') {
-    const hidden = Number(summary.hiddenListings || 0);
-    return [
-      `${Number(summary.assetCards || 0)} cards on your Dashboard as CardTrader 1-DR`,
-      `${Number(summary.assets || 0)} products`,
-      hidden ? `${hidden} Pokoin listings hidden` : '',
-    ].filter(Boolean).join(' · ');
-  }
-  return [
-    `${Number(summary.pokemonInventory || summary.inventory || 0)} products checked`,
-    `${Number(summary.imported || 0)} imported`,
-    `${Number(summary.matchedExisting || 0)} linked`,
-    `${Number(summary.updated || 0)} updated`,
-    `${Number(summary.removed || 0)} removed`,
-    `${Number(summary.unresolved || 0)} unresolved`,
-  ].join(' · ');
-}
-
 function phaseLabel(phase) {
   switch (String(phase || '')) {
     case 'starting': return 'Starting…';
     case 'export': return 'Downloading CardTrader inventory…';
     case 'export_done': return 'Preparing import…';
     case 'import': return 'Importing into Pokoin…';
+    case 'push': return 'Listing on CardTrader…';
     case 'finishing': return 'Finishing…';
     case 'done': return 'Done';
     case 'failed': return 'Failed';
@@ -92,9 +74,12 @@ function SyncProgress(props) {
 }
 
 /**
- * CardTrader connect / disconnect / sync panel for Profile
- * (market/src/components/CardTraderConnectPanel.jsx). `onStatus` hears every
- * status load; `showWipe` false leaves Delete all inventory to the danger zone.
+ * CardTrader connect / disconnect panel for Profile. Connected, the two
+ * inventories are linked: the seller picks which way new stock is copied and
+ * the reconcile keeps them in sync (Sync now only runs it early). Import
+ * locations reads a Power Tools CSV onto the linked listings.
+ * `onStatus` hears every status load; `showWipe` false leaves Delete all
+ * inventory to the danger zone.
  */
 export default function CardTraderConnectPanel(props) {
   const [status, setStatus] = createSignal(null);
@@ -106,6 +91,9 @@ export default function CardTraderConnectPanel(props) {
   const [error, setError] = createSignal('');
   const [syncSummary, setSyncSummary] = createSignal(null);
   const [syncProgress, setSyncProgress] = createSignal(null);
+  const [syncInfo, setSyncInfo] = createSignal(null);
+  // Shown while a direction change is on its way to the server.
+  const [pendingDirection, setPendingDirection] = createSignal('');
   const [ptModalOpen, setPtModalOpen] = createSignal(false);
   const [ptGames, setPtGames] = createSignal(null);
   const [ptGamesLoading, setPtGamesLoading] = createSignal(false);
@@ -125,6 +113,14 @@ export default function CardTraderConnectPanel(props) {
 
   function applySyncPayload(data) {
     const sync = data?.sync || null;
+    if (sync && 'lastSyncAt' in sync) {
+      setSyncInfo({
+        lastSyncAt: sync.lastSyncAt,
+        lastSyncOk: sync.lastSyncOk,
+        lastSyncIncomplete: sync.lastSyncIncomplete,
+        lastSyncError: sync.lastSyncError,
+      });
+    }
     const summary = sync?.summary || data?.summary || null;
     if (summary) setSyncSummary(() => summary);
     const running = Boolean(data?.running || sync?.running || summary?.running || data?.inventorySync?.running);
@@ -168,7 +164,10 @@ export default function CardTraderConnectPanel(props) {
           setBusy(false);
           const summary = data?.sync?.summary || data?.summary;
           if (data?.sync?.lastSyncOk === false || summary?.phase === 'failed') {
-            setError(data?.sync?.lastSyncError || 'CardTrader sync failed.');
+            setError(`CardTrader sync failed: ${syncReason(data?.sync?.lastSyncError) || 'try Sync now again'}.`);
+            setMessage('');
+          } else if (data?.sync?.lastSyncIncomplete === true) {
+            setError(`Sync incomplete — nothing was removed or listed on CardTrader. ${syncReason(data?.sync?.lastSyncError) || 'Try Sync now again.'}`);
             setMessage('');
           } else if (summary?.needsPowerToolsReview) {
             setSyncSummary(() => summary);
@@ -205,7 +204,7 @@ export default function CardTraderConnectPanel(props) {
     try {
       const bearer = await getBearer();
       const data = await connectCardTrader(bearer, pasted().token);
-      setStatus(() => data?.status || { connected: true });
+      setStatus(() => data?.status || data?.integration || { connected: true });
       setToken('');
       setTokenVisible(false);
       const sync = data?.inventorySync;
@@ -217,12 +216,12 @@ export default function CardTraderConnectPanel(props) {
         setSyncSummary(() => sync.summary);
         setMessage(
           sync.ok === false
-            ? `Connected. Inventory sync pending: ${sync.error || 'retry Sync CardTrader'}.`
+            ? `Connected. Inventory sync pending: ${sync.error || 'retry Sync now'}.`
             : `CardTrader connected. ${formatSyncSummary(sync.summary)}`,
         );
         setBusy(false);
       } else {
-        setMessage('CardTrader connected. Webhooks registered; run Sync CardTrader to import inventory.');
+        setMessage('CardTrader connected. Choose which way stock is copied — the first sync runs within 10 minutes, or press Sync now.');
         setBusy(false);
       }
     } catch (err) {
@@ -233,8 +232,9 @@ export default function CardTraderConnectPanel(props) {
 
   async function onDisconnect() {
     if (busy()) return;
-    // Without the token Pokoin can't see CardTrader sales, so imported stock comes off Pokoin.
-    if (!window.confirm('Disconnect CardTrader? Cards imported from CardTrader come off Pokoin (nothing changes on CardTrader). Reconnect any time to bring them back.')) {
+    // Without the token Pokoin can't see CardTrader sales, so imported stock is
+    // deleted (sold cards stay as sales history; nothing changes on CardTrader).
+    if (!window.confirm('Disconnect CardTrader? Cards imported from CardTrader are deleted from Pokoin — your listings on CardTrader stay. Reconnect any time to import them again.')) {
       return;
     }
     setBusy(true);
@@ -247,9 +247,10 @@ export default function CardTraderConnectPanel(props) {
       const data = await disconnectCardTrader(bearer);
       setStatus(() => data?.status || { connected: false });
       setSyncSummary(null);
-      const hidden = Number(data?.hiddenListings) || 0;
-      setMessage(hidden > 0
-        ? `CardTrader disconnected. ${hidden} imported listing${hidden === 1 ? '' : 's'} taken off Pokoin — reconnect to bring them back.`
+      const removed = Number(data?.removedListings ?? data?.hiddenListings) || 0;
+      const assets = Number(data?.removedAssets) || 0;
+      setMessage(removed > 0 || assets > 0
+        ? `CardTrader disconnected. ${removed} imported listing${removed === 1 ? '' : 's'} and ${assets} 1-Day Ready asset${assets === 1 ? '' : 's'} deleted from Pokoin — reconnect to import them again.`
         : 'CardTrader disconnected.');
     } catch (err) {
       setError(err.message || 'Could not disconnect CardTrader.');
@@ -258,7 +259,7 @@ export default function CardTraderConnectPanel(props) {
     }
   }
 
-  async function runSync(options = {}) {
+  async function runSync(options = {}, startedMessage = '') {
     setBusy(true);
     setError('');
     setMessage('');
@@ -266,11 +267,12 @@ export default function CardTraderConnectPanel(props) {
     try {
       const bearer = await getBearer();
       const data = await syncCardTraderInventory(bearer, options);
-      if (data?.async || data?.running) {
+      if (data?.status) setStatus(() => data.status);
+      if (data?.async || data?.running || data?.started || data?.alreadyRunning) {
         setSyncProgress({ running: true, phase: data?.summary?.phase || 'starting', processed: 0, total: 0 });
-        setMessage(options.powerToolsCsv
-          ? 'Importing CardTrader with Power Tools locations…'
-          : 'Import started — this stays on the page while it runs.');
+        setMessage(startedMessage || (options.powerToolsCsv
+          ? 'Importing Power Tools locations…'
+          : 'Sync started — this stays on the page while it runs.'));
         startPolling();
         return;
       }
@@ -294,11 +296,26 @@ export default function CardTraderConnectPanel(props) {
 
   const syncing = () => Boolean(syncProgress()?.running);
 
-  function onSync() {
+  function onSyncNow() {
+    if (busy() || syncing()) return;
+    runSync({});
+  }
+
+  function onImportLocations() {
     if (busy() || syncing()) return;
     setPtGames(null);
     setPtPreview(null);
     setPtModalOpen(true);
+  }
+
+  async function onDirection(next) {
+    if (busy() || syncing() || next === direction()) return;
+    setPendingDirection(next);
+    try {
+      await runSync({ direction: next }, `Inventory link set to ${ctLinkOption(next).label}. Syncing now…`);
+    } finally {
+      setPendingDirection('');
+    }
   }
 
   async function onPreviewGames() {
@@ -342,25 +359,70 @@ export default function CardTraderConnectPanel(props) {
   // 1-Day Ready: CardTrader stocks and sells the cards, so they are dashboard
   // assets, never Pokoin listings.
   const oneDayReady = () => connected() && (status()?.metadata?.oneDayReady === true || syncSummary()?.mode === 'one_day_ready');
-  const username = () => status()?.metadata?.user?.username || status()?.metadata?.seller?.name || '';
-  const appName = () => status()?.metadata?.app?.name || '';
+  const direction = () => ctLinkDirection(status());
+  const shownDirection = () => pendingDirection() || direction();
+  const health = () => ctLinkHealth({ syncing: syncing(), sync: syncInfo() });
 
   return (
     <div class="ct-connect">
       <Show when={loading()}><p class="page-lede">Checking CardTrader…</p></Show>
       <Show when={!loading() && connected()}>
-        <p class="page-lede">
-          Connected{username() ? ` as ${username()}` : ''}
-          {appName() ? ` · ${appName()}` : ''}.
-        </p>
-        <Show when={syncSummary() && !syncing()}>
-          <p class="page-lede muted">{formatSyncSummary(syncSummary())}</p>
-        </Show>
-        <Show when={syncing()}><SyncProgress progress={syncProgress()} /></Show>
+        <section class="ct-link" aria-labelledby="ct-link-title">
+          <div class="ct-link-head">
+            <h3 id="ct-link-title" class="ct-link-title">Inventory link</h3>
+            <span class={`ct-link-health is-${health().tone}`}>{health().text}</span>
+          </div>
+          <Show
+            when={!oneDayReady()}
+            fallback={(
+              <p class="ct-link-hint">
+                1-Day Ready: CardTrader stocks these cards, so they come to your Dashboard as assets and stay in sync.
+              </p>
+            )}
+          >
+            <div class="ct-link-directions" role="radiogroup" aria-label="Which way new stock is copied">
+              <For each={CT_LINK_DIRECTIONS}>
+                {(option) => (
+                  <label class={['ct-link-option', { 'is-on': shownDirection() === option.id }]}>
+                    <input
+                      type="radio"
+                      name="ct-link-direction"
+                      value={option.id}
+                      checked={shownDirection() === option.id}
+                      disabled={busy() || syncing()}
+                      onChange={() => onDirection(option.id)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                )}
+              </For>
+            </div>
+            <p class="ct-link-hint">
+              {ctLinkOption(shownDirection()).hint} A sale on either side takes the card off both.
+            </p>
+          </Show>
+          <Show when={syncing()}><SyncProgress progress={syncProgress()} /></Show>
+          <Show when={syncSummary() && !syncing()}>
+            <p class="ct-link-summary">{formatSyncSummary(syncSummary())}</p>
+          </Show>
+          <div class="ct-connect-actions">
+            <button type="button" class="btn ghost" disabled={busy() || syncing()} onClick={onSyncNow}>
+              {syncing() ? 'Syncing…' : 'Sync now'}
+            </button>
+            <Show when={!oneDayReady()}>
+              <button
+                type="button"
+                class="btn ghost"
+                title="Box and stack locations from a Power Tools stock CSV"
+                disabled={busy() || syncing()}
+                onClick={onImportLocations}
+              >
+                Import locations
+              </button>
+            </Show>
+          </div>
+        </section>
         <div class="ct-connect-actions">
-          <button type="button" class="btn btn-cardtrader" disabled={busy() || syncing()} onClick={onSync}>
-            {syncing() ? 'Syncing…' : busy() ? 'Working…' : 'Sync CardTrader'}
-          </button>
           {props.stripeAction}
           <Show when={oneDayReady()} fallback={<a class="btn ghost" href="/mypokoin">Open MyPokoin</a>}>
             <a class="btn ghost" href={DASHBOARD_HOME}>Open dashboard</a>
@@ -462,9 +524,9 @@ export default function CardTraderConnectPanel(props) {
           setPtModalOpen(false);
           setPtPreview(null);
         }}
-        onSkipPowerTools={() => runSync({})}
         onPreviewGames={onPreviewGames}
         onPreviewSample={onPreviewPowerToolsSample}
+        onClearPreview={() => setPtPreview(null)}
         onConfirmWithCsv={(opts) => runSync(opts)}
       />
     </div>

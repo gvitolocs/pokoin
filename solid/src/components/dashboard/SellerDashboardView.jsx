@@ -209,8 +209,8 @@ function assetTitle(item) {
 }
 
 /**
- * CardTrader 1-Day Ready inventory beside Your listings
- * (market/src/components/CardTraderAssetsPanel.jsx): CardTrader stocks and
+ * CardTrader 1-Day Ready inventory beside Your listings:
+ * CardTrader stocks and
  * sells it, so it shows as assets, never as Pokoin listings.
  */
 function CardTraderAssetsPanel(props) {
@@ -229,7 +229,7 @@ function CardTraderAssetsPanel(props) {
             </span>
           </Show>
         </header>
-        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Run Sync CardTrader in Profile.</p>}>
+        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Press Sync now under CardTrader in Profile.</p>}>
           <div class="seller-listing-list" data-testid="cardtrader-1dr-grid">
             <For each={shown()}>
               {(item) => (
@@ -258,7 +258,7 @@ function CardTraderAssetsPanel(props) {
 }
 
 /**
- * Presentational seller dashboard (market/src/components/SellerDashboardView.jsx).
+ * Presentational seller dashboard.
  * Data is passed in so the fixture preview renders without Firebase.
  */
 export function SellerDashboardView(props) {

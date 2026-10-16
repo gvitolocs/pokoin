@@ -4,7 +4,7 @@ import data from '@market/../public/review/western-artists.json';
 import TestDock from '../components/TestDock.jsx';
 import { BoardBar, usePageTitle } from './tools/board.jsx';
 
-/** OCR illustrator credits vs pokemontcg.io names (market/src/pages/OcrArtists.jsx). */
+/** OCR illustrator credits vs pokemontcg.io names. */
 export default function OcrArtists() {
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = createSignal(untrack(() => params.q || ''));

@@ -1,5 +1,5 @@
 import { createSignal, Match, onSettled, Show, Switch } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../../lib/game-navigate.js';
 import {
   cardtraderPublicUrl,
   ebayHref,
@@ -19,11 +19,11 @@ import { authReady, getBearer, signedIn } from '../../stores/auth.js';
 import { profile } from '../../stores/session.js';
 
 /**
- * Silver off-site pills, or the unlock prompt (market/src/pages/Card.jsx
+ * Silver off-site pills, or the unlock prompt (was in the React Card desk,
  * SilverHead). Silver comes from the cached session profile.
  */
 export default function SilverHead(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal('');
   let country = '';

@@ -25,7 +25,7 @@ import { syncRemoteRecentCardIds } from '@market/recents.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 
 /**
- * Solid versions of the /cart data hooks in market/src/cart-rails.js. Inputs
+ * The /cart data rails. Inputs
  * are accessors, outputs are accessors; the rules are cart-rails-core.js.
  */
 

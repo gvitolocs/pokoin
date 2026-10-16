@@ -685,7 +685,7 @@ test('eevee i peels illustration shorthand and keeps the cached Eevee pool, neve
       })),
     },
   ]);
-  // No pool argument — the exact Chrome.jsx call, so ranked comes from
+  // No pool argument — the header's exact call (solid SearchBox), so ranked comes from
   // catalogIntent and the query must not peel `eevee` as the Eevee Heroes set.
   const live = liveSuggestGroups('eevee i', { printLang: 'all', kind: 'singles' });
   // `i` is illustration/art EVIDENCE now (no set peel, no art hard-facet): the

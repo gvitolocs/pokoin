@@ -1,8 +1,9 @@
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js';
-import { artCutVars } from '@market/art-cut.js';
-import { artworkFigureMaskSrc } from '@market/art-figure-mask.js';
+import { artCutFor, artCutVars } from '@market/art-cut.js';
+import { artworkFigureMaskSrc, figureOrigin, loadFigureBox } from '@market/art-figure-mask.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
+import { heroOpen, onHeroGate } from '@market/hero-gate.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '@market/missing-card.js';
 
 function artDebugEnabled() {
@@ -20,13 +21,16 @@ function logCardArt(event, detail) {
 }
 
 /**
- * Card scan with CDN sibling fallback (market/src/components/CardArt.jsx):
+ * Card scan with CDN sibling fallback:
  * each failed URL, or a CardTrader grey placeholder size, steps to the next
  * raster sibling, then the Pokoin missing-card scan. Only the <img> src
  * changes on a fallback — nothing else re-renders.
  */
 export default function CardArt(props) {
-  const urls = createMemo(() => rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl).filter(Boolean));
+  const urls = createMemo(
+    () => rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl).filter(Boolean),
+    { equals: (a, b) => a.length === b.length && a.every((u, i) => u === b[i]) },
+  );
   // Writable derived state: both reset whenever the sibling list changes.
   const [index, setIndex] = createSignal(() => (urls(), 0));
   const [dead, setDead] = createSignal(() => (urls(), false));
@@ -34,6 +38,14 @@ export default function CardArt(props) {
   const cardId = () => props.card?.id || props.card?.card_id || '';
   let errorSent = false;
   let img;
+  // Thumbnails wait while a desk hero loads (market/src/hero-gate.js); full
+  // scans never do.
+  const [gateOpen, setGateOpen] = createSignal(heroOpen());
+  onSettled(() => {
+    const stop = onHeroGate(setGateOpen);
+    setGateOpen(heroOpen());
+    return stop;
+  });
 
   function failCurrent() {
     const list = urls();
@@ -77,20 +89,81 @@ export default function CardArt(props) {
   const figureMask = createMemo(() => props.figureMask
     ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : ''));
   const [showFigure, setShowFigure] = createSignal(false);
+  const [figurePhase, setFigurePhase] = createSignal('in');
+  const [figureHit, setFigureHit] = createSignal(null);
+  const figureOriginStyle = createMemo(() => {
+    const mask = figureMask();
+    const hit = figureHit();
+    if (!hit || hit.mask !== mask || !hit.box) return {};
+    const origin = figureOrigin(hit.box, artCutFor(props.card, props.cutSurface));
+    return {
+      '--figure-cx': String(origin.x),
+      '--figure-cy': String(origin.y),
+    };
+  });
+  const figureHoverStyle = createMemo(() => ({
+    '--art-figure-mask': `url("${cdnFetchUrl(figureMask())}")`,
+    ...figureOriginStyle(),
+  }));
   onSettled(() => {
     const node = img?.closest('.tile');
     if (!node || !figureMask()) return undefined;
-    const on = () => setShowFigure(true);
-    const off = () => setShowFigure(false);
-    node.addEventListener('pointerenter', on);
-    node.addEventListener('pointerleave', off);
-    node.addEventListener('focusin', on);
-    node.addEventListener('focusout', off);
+    // CSS exit is 200ms. The margin lets the scale land on the painting
+    // before the layers unmount.
+    const exitMs = 230;
+    let exitTimer = 0;
+    let exitGen = 0;
+    const reducedMotion = () => {
+      try {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      } catch {
+        return false;
+      }
+    };
+    const enter = () => {
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      exitTimer = 0;
+      setFigurePhase('in');
+      setShowFigure(true);
+      const mask = figureMask();
+      loadFigureBox(cdnFetchUrl(mask)).then((box) => {
+        if (figureMask() !== mask) return;
+        setFigureHit({ mask, box });
+      });
+    };
+    const leave = () => {
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      exitTimer = 0;
+      if (reducedMotion()) {
+        setShowFigure(false);
+        return;
+      }
+      const gen = exitGen;
+      setFigurePhase('out');
+      exitTimer = window.setTimeout(() => {
+        exitTimer = 0;
+        if (gen !== exitGen) return;
+        setShowFigure(false);
+      }, exitMs);
+    };
+    const onFocusOut = (event) => {
+      const next = event.relatedTarget;
+      if (next && node.contains(next)) return;
+      leave();
+    };
+    node.addEventListener('pointerenter', enter);
+    node.addEventListener('pointerleave', leave);
+    node.addEventListener('focusin', enter);
+    node.addEventListener('focusout', onFocusOut);
     return () => {
-      node.removeEventListener('pointerenter', on);
-      node.removeEventListener('pointerleave', off);
-      node.removeEventListener('focusin', on);
-      node.removeEventListener('focusout', off);
+      exitGen += 1;
+      window.clearTimeout(exitTimer);
+      node.removeEventListener('pointerenter', enter);
+      node.removeEventListener('pointerleave', leave);
+      node.removeEventListener('focusin', enter);
+      node.removeEventListener('focusout', onFocusOut);
     };
   });
 
@@ -101,6 +174,7 @@ export default function CardArt(props) {
       alt={props.alt || ''}
       width="630"
       height="880"
+      draggable="false"
       onClick={(event) => props.onClick?.(event)}
     />
   );
@@ -115,7 +189,7 @@ export default function CardArt(props) {
       decoding={props.full ? 'sync' : 'async'}
       // src last, like React DOM does for <img>: loading / decoding /
       // fetchpriority must be on the element before the URL is.
-      src={current()}
+      src={props.full || gateOpen() ? current() : undefined}
       // Enumerated attribute, not boolean: "false" stops the native image ghost.
       draggable={props.dragCard ? 'true' : 'false'}
       onClick={(event) => props.onClick?.(event)}
@@ -146,20 +220,23 @@ export default function CardArt(props) {
           <Show when={figureMask() && showFigure()}>
             <img
               class="art-figure-layer art-figure-shadow"
+              data-figure={figurePhase()}
               src={cdnFetchUrl(figureMask())}
               alt=""
               aria-hidden="true"
               loading="lazy"
               decoding="async"
+              style={figureOriginStyle()}
             />
             <img
               class="art-figure-layer art-figure-hover"
+              data-figure={figurePhase()}
               src={current()}
               alt=""
               aria-hidden="true"
               loading="lazy"
               decoding="async"
-              style={{ '--art-figure-mask': `url("${cdnFetchUrl(figureMask())}")` }}
+              style={figureHoverStyle()}
             />
           </Show>
         </span>

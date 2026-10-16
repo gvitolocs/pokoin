@@ -1,5 +1,5 @@
 import { createSignal, For, onSettled, Show } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   cardHref,
   catalogFromScanHit,
@@ -10,9 +10,9 @@ import {
 import { Alert, DeskPanel, FilePill, PageHead, Thread } from '../components/Desk.jsx';
 import { usePageTitle } from './tools/board.jsx';
 
-/** Public photo identify page: /scan, /cardscan, /scancard (market/src/pages/Scan.jsx). */
+/** Public photo identify page: /scan, /cardscan, /scancard. */
 export default function Scan() {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const [preview, setPreview] = createSignal('');
   const [query, setQuery] = createSignal('');
   const [file, setFile] = createSignal(null);

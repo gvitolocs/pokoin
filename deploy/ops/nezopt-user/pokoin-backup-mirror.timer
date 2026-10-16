@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily mirror of the wal-g store to mybook
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+Unit=pokoin-backup-mirror.service
+
+[Install]
+WantedBy=timers.target

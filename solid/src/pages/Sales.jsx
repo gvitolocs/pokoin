@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import { fetchSoldHistory, imageSrc, markMarketplaceShipped, refundMarketplaceOrder } from '@market/api.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import {
@@ -22,10 +22,11 @@ import {
   refundInputFromAmount,
 } from '@market/order-status.js';
 import CardArt from '../components/CardArt.jsx';
-import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import RequireSignIn from '../components/RequireSignIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { getBearer } from '../stores/auth.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewSales } from './mypokoin-preview-fixture.js';
 import '@market/sales-row.css';
 
 function SaleThumb(props) {
@@ -117,7 +118,7 @@ function RefundForm(props) {
   );
 }
 
-function SalesDesk() {
+function SalesDesk(props) {
   const location = useLocation();
   const [sales, setSales] = createSignal(null);
   const [error, setError] = createSignal('');
@@ -129,6 +130,10 @@ function SalesDesk() {
   const [shipBusy, setShipBusy] = createSignal('');
 
   onSettled(() => {
+    if (props.preview) {
+      setSales(previewSales());
+      return undefined;
+    }
     let cancelled = false;
     getBearer()
       .then((token) => fetchSoldHistory(token))
@@ -184,30 +189,28 @@ function SalesDesk() {
   }
 
   return (
-    <div class="page desk">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
         title="Sold history"
-        lede="Every card that actually sold: Pokoin checkout and your linked CardTrader store. Refund part of a Pokoin order from here."
+        lede="Every card that actually sold, on Pokoin and CardTrader."
+        metrics={sales() ? [
+          { value: totals().count, label: 'Sales' },
+          { value: totals().units, label: 'Cards sold' },
+          {
+            value: totals().eurNet ? formatOrderMoney(totals().eurNet, 'EUR') : '—',
+            label: 'EUR after refunds',
+            hint: totals().pknNet ? `+ ${formatOrderMoney(totals().pknNet, 'PKN')}` : '',
+          },
+          { value: salesRefundedLine(totals()), label: 'Refunded' },
+        ] : []}
       >
         <a class="btn ghost" href="/inventory/scan">Scan cards</a>
-      </PageHead>
-      <StockNav />
+      </StockNav>
       <Alert>{error()}</Alert>
       <Show when={notice()}><p class="desk-ok">{notice()}</p></Show>
-
-      <Show when={sales()}>
-        <MetricGrid>
-          <Metric value={totals().count} label="Sales" />
-          <Metric value={totals().units} label="Cards sold" />
-          <Metric
-            value={totals().eurNet ? formatOrderMoney(totals().eurNet, 'EUR') : '—'}
-            label="EUR after refunds"
-            hint={totals().pknNet ? `+ ${formatOrderMoney(totals().pknNet, 'PKN')}` : ''}
-          />
-          <Metric value={salesRefundedLine(totals())} label="Refunded" />
-        </MetricGrid>
-      </Show>
 
       <Show when={sales() == null && !error()}>
         <DeskPanel title="Sales"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
@@ -349,14 +352,22 @@ function SalesDesk() {
   );
 }
 
-/** /sales (market/src/pages/Sales.jsx): sold history, partial refunds, tracking. */
+/** /sales: sold history, partial refunds, tracking. */
 export default function Sales() {
+  const [params] = useSearchParams();
   onSettled(() => {
     document.title = 'Sold history · Pokoin';
   });
   return (
-    <RequireSignIn>
-      <SalesDesk />
-    </RequireSignIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <RequireSignIn>
+          <SalesDesk />
+        </RequireSignIn>
+      )}
+    >
+      <SalesDesk preview />
+    </Show>
   );
 }

@@ -1,4 +1,4 @@
-import { createSignal, For, Repeat, Show } from 'solid-js';
+import { createEffect, createSignal, For, Repeat, Show, untrack } from 'solid-js';
 import { artCutVars } from '@market/art-cut.js';
 import { openListingChat } from '@market/chat-dock-store.js';
 import { listingReference, listingsReference, writeListingDrag } from '@market/chat-listing.js';
@@ -15,12 +15,26 @@ import {
 } from '@market/listing-meta.js';
 import { listingSelectId } from '@market/shop-marquee.js';
 import { chatPhotoDisplayUrl } from '@market/user-photo-urls.js';
+import { deskDragReference, registerShop, unregisterShop } from '../../lib/select-band.js';
 import { buyerParts } from '../../stores/buyer.js';
 import { ThumbZoom } from '../ArtworkZoom.jsx';
 import PriceStack from '../PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
-/** Shop rows wrapper (market/src/components/ShopList.jsx, without the select band). */
+/**
+ * Shop rows wrapper. The select band
+ * (lib/select-band*.js) selects rows; `offers` registers them so the desk card,
+ * related tiles and selected listings drag as one pile.
+ */
 export function ShopList(props) {
+  createEffect(
+    () => (props.offers ? { offers: props.offers, deskCard: props.deskCard || null } : null),
+    (shop) => {
+      if (!shop) return undefined;
+      untrack(() => registerShop(shop));
+      return () => unregisterShop();
+    },
+  );
   return <div class={['shop-list', props.class]}>{props.children}</div>;
 }
 
@@ -115,9 +129,9 @@ function TrashIcon() {
 }
 
 /**
- * One shop listing (market/src/components/ShopListing.jsx). Same markup and
- * drag payloads; the rubber-band multi-select is not ported yet, so a row
- * drags itself (or `dragOffers` when the desk passes a pile).
+ * One shop listing. Same markup and
+ * drag payloads: a mixed desk pile when tiles and listings are selected, the
+ * selected listings (`dragOffers`), else the row itself.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
@@ -162,6 +176,22 @@ export default function ShopListingRow(props) {
 
   function dragStart(event) {
     const row = offer();
+    const mixed = deskDragReference({ heldOffer: row, heldCard: props.card });
+    if (mixed) {
+      // Stamp the held row's qty onto the matching listing in the pile.
+      if (mixed.kind === 'cards' && Array.isArray(mixed.cards)) {
+        const heldId = String(row?.id || '');
+        writeListingDrag(event, {
+          ...mixed,
+          cards: mixed.cards.map((item) => (
+            item.listingId === heldId ? { ...item, qty: pick(), stock: choices() } : item
+          )),
+        });
+        return;
+      }
+      writeListingDrag(event, { ...mixed, qty: pick(), stock: choices() });
+      return;
+    }
     const pile = props.dragOffers;
     if (pile?.length > 1) {
       const cards = pile.map((item) => listingReference({
@@ -217,15 +247,17 @@ export default function ShopListingRow(props) {
       <Show
         when={props.showCard}
         fallback={(
+          <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
           <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
-            <a class="shop-seller" href={href()} onClick={(event) => event.stopPropagation()}>
+            <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
               {seller()}
             </a>
+          </Show>
           </Show>
         )}
       >
         <Show when={cardPath()} fallback={<span class="shop-card">{cardFace()}</span>}>
-          <a class="shop-card" href={cardPath()} onClick={(event) => event.stopPropagation()}>
+          <a class="shop-card" href={gameHref(cardPath())} onClick={(event) => event.stopPropagation()}>
             {cardFace()}
           </a>
         </Show>
@@ -281,7 +313,8 @@ export default function ShopListingRow(props) {
       </span>
       <Show when={!props.mine}>
         <span class="shop-row-actions">
-          <Show when={reference().sellerUid}>
+          {/* Vault rows (props.anonymous) never name or message the account behind them. */}
+          <Show when={reference().sellerUid && !props.anonymous}>
             <button
               type="button"
               class="shop-icon"

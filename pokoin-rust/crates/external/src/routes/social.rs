@@ -33,6 +33,14 @@ fn configured_admins() -> Vec<String> {
     admins
 }
 
+/// A Firebase identity is a social admin only by a *verified* email on the
+/// configured list: an unverified token can carry any address.
+fn is_admin_identity(identity: &crate::firebase::DecodedToken, admins: &[String]) -> bool {
+    identity
+        .verified_email()
+        .is_some_and(|email| admins.iter().any(|admin| admin == &email))
+}
+
 /// `authorizeSocialRequest` — shared secret / CRON secret / Firebase admin.
 async fn authorize(
     state: &DomainState,
@@ -71,9 +79,7 @@ async fn authorize(
 
     match require_token(state, headers).await {
         Ok(identity) => {
-            let email = identity.email.clone().unwrap_or_default().to_lowercase();
-            let admins = configured_admins();
-            if !email.is_empty() && admins.iter().any(|admin| admin == &email) {
+            if is_admin_identity(&identity, &configured_admins()) {
                 return Ok(("firebase_admin".to_string(), Some(identity.uid)));
             }
             Err(ApiError::new(403, "Social autoposter access denied."))
@@ -272,6 +278,45 @@ async fn resolve_manual_post_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unverified_admin_email_is_not_an_admin() {
+        let admins = vec!["boss@pokoin.com".to_string()];
+        let mut identity = crate::firebase::DecodedToken {
+            uid: "u1".into(),
+            email: Some("Boss@Pokoin.com".into()),
+            email_verified: false,
+            name: None,
+            picture: None,
+        };
+        assert!(!is_admin_identity(&identity, &admins));
+        identity.email_verified = true;
+        assert!(is_admin_identity(&identity, &admins));
+        identity.email = Some("other@pokoin.com".into());
+        assert!(!is_admin_identity(&identity, &admins));
+    }
+
+    #[tokio::test]
+    async fn unverified_admin_email_token_is_denied_by_the_route() {
+        // Only this test sets SEARCH_DEBUG_ADMINS, so the env write cannot
+        // change another test's admin list.
+        std::env::set_var("SEARCH_DEBUG_ADMINS", "route-admin@pokoin.test");
+        let email = "route-admin@pokoin.test".to_string();
+        let verifier = crate::firebase::StaticVerifier {
+            uid_email: std::sync::Arc::new([("verified1".to_string(), email.clone())].into()),
+            unverified_uid_email: std::sync::Arc::new([("unverified1".to_string(), email)].into()),
+        };
+        let state = DomainState::for_test_with_verifier(verifier);
+        let bearer = |uid: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", format!("Bearer test-{uid}").parse().unwrap());
+            headers
+        };
+        let error = authorize(&state, &bearer("unverified1")).await.unwrap_err();
+        assert_eq!(error.status, 403);
+        let (by, uid) = authorize(&state, &bearer("verified1")).await.unwrap();
+        assert_eq!((by.as_str(), uid.as_deref()), ("firebase_admin", Some("verified1")));
+    }
 
     #[test]
     fn admin_allow_list_is_env_driven() {
