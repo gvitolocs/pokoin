@@ -74,33 +74,8 @@ async fn create_grant(state: &DomainState, uid: &str, body: &Value) -> Result<Va
         return Err(ApiError::bad_request("Name the app this token is for."));
     }
     let label = text_field(body, &["label"], 80);
-    let token = api::new_token();
-    let secret = api::new_shared_secret();
-    let sealed = api::seal_secret(&secret)?;
     // The limit and the insert are one statement: two tabs cannot both pass it.
-    let row = sqlx::query(&format!(
-        "insert into public.seller_api_grants (seller_uid, client, label, scope, token_hash, token_prefix, shared_secret) \
-         select $1, $2, $3, $4, $5, $6, $7 where (select count(*) from public.seller_api_grants \
-         where seller_uid = $1 and revoked_at is null) < $8 returning {GRANT_COLUMNS}"
-    ))
-    .bind(uid)
-    .bind(&client)
-    .bind(&label)
-    .bind(api::scope_for(&client))
-    .bind(api::token_hash(&token))
-    .bind(api::token_prefix(&token))
-    .bind(sealed)
-    .bind(api::MAX_GRANTS)
-    .fetch_optional(state.write_db())
-    .await
-    .map_err(api::store_error)?
-    .ok_or_else(|| ApiError::conflict("Revoke a token before creating another.").with_code("grant_limit"))?;
-    Ok(json!({
-        "grant": grant_json(&row).map_err(api::store_error)?,
-        // Shown once. Pokoin keeps only the token's hash.
-        "token": token,
-        "sharedSecret": secret,
-    }))
+    Ok(api::issue_grant(state, uid, &client, &label).await?.public_json())
 }
 
 async fn revoke_grant(state: &DomainState, uid: &str, body: &Value) -> Result<Value, ApiError> {
@@ -920,7 +895,10 @@ async fn events(state: &DomainState, grant: &Grant, body: &Value, orders_only: b
 
 async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, cardrails: bool) -> Result<Response, ApiError> {
     let grant = api::authenticate(state, headers).await?;
-    if cardrails && grant.scope != api::SCOPE_CARDRAILS {
+    if !api::connector_scope_ok(&grant.scope, cardrails) {
+        if grant.scope == api::SCOPE_CHANNEL_TCGPLAYER {
+            return Err(ApiError::forbidden("This token cannot change Pokoin stock.").with_code("channel_sync/wrong-scope"));
+        }
         return Err(ApiError::forbidden("This token is not a Card Rails grant.").with_code("seller_api/wrong-scope"));
     }
     let body = parse_json_body(bytes)?;

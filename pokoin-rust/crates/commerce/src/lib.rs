@@ -36,6 +36,8 @@ pub mod game;
 pub mod handlers;
 pub mod listing_live;
 pub mod listing_sync;
+/// TCGplayer sync box: job queue, device, price rule, orders. No portal driver.
+pub mod channel_sync;
 pub mod ports;
 /// Read-only daily bulk export of headline prices (the PKP2 camera dictionary).
 pub mod price_export;
@@ -126,6 +128,19 @@ pub fn router(state: DomainState) -> Router {
             post(handlers::seller_api::cardrails_connector),
         )
         .route("/api/seller-api/v1", post(handlers::seller_api::seller_api_v1))
+        // TCGplayer sync box: seller switch, and the device the box calls
+        .route(
+            "/api/channel-sync",
+            get(handlers::channel_sync::channel_sync_get).post(handlers::channel_sync::channel_sync_post),
+        )
+        .route(
+            "/api/channel-orders",
+            get(handlers::channel_sync::channel_orders_get),
+        )
+        .route(
+            "/api/channel-sync/device",
+            post(handlers::channel_sync::channel_sync_device),
+        )
         // addresses + shipping
         .route(
             "/api/account-addresses",
@@ -298,6 +313,10 @@ mod tests {
             ("GET", "/api/marketplace-seller-shop"),
             ("GET", "/api/marketplace-seller-settings"),
             ("POST", "/api/marketplace-seller-settings"),
+            ("GET", "/api/channel-sync"),
+            ("POST", "/api/channel-sync"),
+            ("GET", "/api/channel-orders"),
+            ("POST", "/api/channel-sync/device"),
             ("GET", "/api/account-addresses"),
             ("POST", "/api/account-addresses"),
             ("PUT", "/api/account-addresses"),

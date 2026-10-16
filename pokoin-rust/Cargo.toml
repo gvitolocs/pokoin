@@ -5,6 +5,7 @@ members = [
   "apps/cardtrader-bridge",
   "apps/cardtrader-listing-dump",
   "apps/cardtrader-price-cache",
+  "apps/tcgplayer-sync-box",
   "crates/config",
   "crates/db",
   "crates/cache",
