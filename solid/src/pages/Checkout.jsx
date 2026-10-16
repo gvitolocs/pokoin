@@ -23,7 +23,9 @@ import {
   GIFT_NOTE,
   MISSING_LISTING_ERROR,
   addressFieldRequired,
-  checkoutCartPayload,
+  checkoutChargeCents,
+  checkoutParcelShipping,
+  checkoutRequestBody,
   checkoutSellerKey,
   checkoutSellerParcels,
   checkoutShipOptions,
@@ -45,7 +47,6 @@ import {
 } from '@market/pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '@market/ship-countries.js';
 import {
-  cheapestServiceId,
   eurCentsFromPkn,
   pknFromEurCents,
   untrackedAllowed,
@@ -113,16 +114,27 @@ function CheckoutDesk() {
   const [showAddressForm, setShowAddressForm] = createSignal(false);
   const [quote, setQuote] = createSignal(null);
   const [quoteError, setQuoteError] = createSignal('');
-  // The service picked in the cart carries over; checkout still lists every option.
-  const [shippingService, setShippingService] = createSignal(untrack(() => cartShippingChoice().service || 'tracked'));
-  const [shippingPicked, setShippingPicked] = createSignal(untrack(() => Boolean(cartShippingChoice().service)));
+  // The services picked in the cart carry over (order-wide and per seller
+  // parcel); checkout still lists every option.
+  const [shippingService, setShippingService] = createSignal(untrack(() => cartShippingChoice().service || ''));
+  const [parcelPicks, setParcelPicks] = createSignal(untrack(() => ({ ...(cartShippingChoice().parcels || {}) })));
   const [pknRefused, setPknRefused] = createSignal([]); // sellers who take card payments only
 
   const nft = () => nftOnly() && cartCanNftOnly();
   const buyerCountry = () => String(selectedAddressCountry(addresses(), addressId()) || draft().countryCode || 'DK').toUpperCase();
-  const shippingTracked = () => shippingService() !== 'untracked';
   const sellerParcels = createMemo(() => checkoutSellerParcels(items(), quote()?.sellerOrigins || {}));
   const allowUntracked = () => untrackedAllowed(eurCentsFromPkn(subtotalPkn()));
+  // One service per seller parcel; the quote and the Stripe session book exactly these.
+  const parcelShipping = createMemo(() => checkoutParcelShipping({
+    nft: nft(),
+    sellerParcels: sellerParcels(),
+    buyerCountry: buyerCountry(),
+    allowUntracked: allowUntracked(),
+    picks: parcelPicks(),
+    service: shippingService(),
+  }));
+  const shippingServices = () => parcelShipping().services;
+  const shippingTracked = () => Object.values(shippingServices()).every((id) => id !== 'untracked');
   const shipOptions = createMemo(() => checkoutShipOptions({
     nft: nft(),
     sellerParcels: sellerParcels(),
@@ -136,6 +148,7 @@ function CheckoutDesk() {
     sellerParcels: sellerParcels(),
     buyerCountry: buyerCountry(),
     tracked: shippingTracked(),
+    services: shippingServices(),
   }));
   const shippingPkn = () => (nft()
     ? 0
@@ -177,18 +190,15 @@ function CheckoutDesk() {
     return formatLocalFromEurCents(cents, displayCurrency());
   }
 
-  // Cheapest bookable service unless the buyer picked one. Untracked is not bookable above €20.
-  createEffect(
-    () => [shipOptions(), shippingService(), shippingPicked()],
-    ([options, current, picked]) => {
-      if (!options.length) return;
-      const selectable = options.filter((row) => !row.unavailable);
-      if (!picked || !selectable.some((row) => row.id === current)) {
-        const next = cheapestServiceId(selectable, { allowUntracked: untrack(allowUntracked) }) || 'tracked';
-        if (next !== current) setShippingService(next);
-      }
-    },
-  );
+  /** The buyer's service for one seller parcel; a single parcel's pick is the order's too. */
+  function pickParcelService(sellerId, serviceId, { orderWide = false } = {}) {
+    setParcelPicks((current) => ({ ...current, [sellerId]: serviceId }));
+    if (orderWide) setShippingService(serviceId);
+    setCartShippingChoice({
+      ...(orderWide ? { service: serviceId } : {}),
+      parcel: { key: sellerId, service: serviceId },
+    });
+  }
 
   createEffect(
     () => preferFiat() && payMethod() === 'pkn',
@@ -266,13 +276,15 @@ function CheckoutDesk() {
   createEffect(
     () => {
       if (nft() || payMethod() !== 'stripe' || !items().length || missingListing() || !buyerCountry()) return null;
-      return {
-        items: checkoutCartPayload(items()),
-        ...(addressId() ? { shippingAddressId: addressId() } : { toCountry: buyerCountry() }),
-        shippingService: shippingService(),
-        tracked: shippingTracked(),
-        insurance: cartInsurance() && !nft() && !allowUntracked(),
-      };
+      // Ticking the balance box re-quotes: the server prices the discount.
+      return checkoutRequestBody({
+        items: items(),
+        addressId: addressId(),
+        toCountry: buyerCountry(),
+        services: shippingServices(),
+        insurance: insured(),
+        useBalance: cartUseBalance(),
+      });
     },
     (body) => {
       if (!body) {
@@ -388,14 +400,16 @@ function CheckoutDesk() {
       const token = await getBearer();
       const rows = items();
       // Server recalculates — never send client shipping cents.
+      // Same body as the quote the buyer is looking at: the session charges it.
       const data = await createOrderCheckoutSession({
         buyerEmail: authUser()?.email || '',
-        items: checkoutCartPayload(rows),
-        shippingAddressId: addressId(),
-        shippingService: shippingService(),
-        tracked: shippingTracked(),
-        insurance: insured() && !nft(),
-        usePknDiscount: pknDiscountPkn() >= 1,
+        ...checkoutRequestBody({
+          items: rows,
+          addressId: addressId(),
+          services: shippingServices(),
+          insurance: insured(),
+          useBalance: cartUseBalance(),
+        }),
       }, token);
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
@@ -413,7 +427,7 @@ function CheckoutDesk() {
   const selectedAddress = () => addresses().find((row) => row.id === addressId());
   const dueLabel = () => {
     if (payMethod() !== 'stripe') return formatPkn(fees().totalPkn);
-    if (quote()) return moneyFromEurCents(quote().grandTotalCents);
+    if (quote()) return moneyFromEurCents(checkoutChargeCents(quote()));
     if (shippingPreviewCents() != null) return moneyFromEurCents(eurSubtotal() + shippingPreviewCents());
     return `${moneyFromPkn(subtotalPkn())} + ship`;
   };
@@ -513,6 +527,43 @@ function CheckoutDesk() {
                     {shippingPreviewCents() != null ? ` · ${moneyFromEurCents(shippingPreviewCents())}` : ''}
                   </p>
                   <Switch fallback={<p class="page-lede">Looking up shipping…</p>}>
+                    {/* Several sellers: one parcel each, each on its own service (as in the cart). */}
+                    <Match when={parcelShipping().parcels.length > 1}>
+                      <div class="checkout-pay" aria-label="Shipping service per parcel">
+                        <span class="checkout-pay-label">Shipping</span>
+                        <For each={parcelShipping().parcels}>
+                          {(parcel) => (
+                            <label class="sell-field checkout-parcel-ship">
+                              <span>
+                                Parcel from {parcel.sellerName || 'seller'}
+                                {' · '}
+                                {shipFromCountryName(parcel.from) || parcel.from || '?'} → {shipFromCountryName(parcel.to) || parcel.to}
+                                {' · '}
+                                {parcel.count} {parcel.count === 1 ? 'card' : 'cards'}
+                              </span>
+                              <Show
+                                when={parcel.options.length}
+                                fallback={<em>No shipping service on this route yet.</em>}
+                              >
+                                <select
+                                  aria-label={`Shipping for the parcel from ${parcel.sellerName || 'this seller'}`}
+                                  value={parcel.serviceId}
+                                  onChange={(event) => pickParcelService(parcel.sellerId, event.target.value)}
+                                >
+                                  <For each={parcel.options}>
+                                    {(option) => (
+                                      <option value={option.id}>
+                                        {option.label} · {moneyFromEurCents(option.amountCents)}
+                                      </option>
+                                    )}
+                                  </For>
+                                </select>
+                              </Show>
+                            </label>
+                          )}
+                        </For>
+                      </div>
+                    </Match>
                     <Match when={shipOptions().length}>
                       <div class="checkout-pay" role="radiogroup" aria-label="Shipping service">
                         <span class="checkout-pay-label">Shipping</span>
@@ -524,7 +575,7 @@ function CheckoutDesk() {
                                 class={[
                                   'checkout-pay-option',
                                   {
-                                    'is-on': shippingService() === option.id,
+                                    'is-on': parcelShipping().parcels[0]?.serviceId === option.id,
                                     'is-unavailable': unavailable,
                                     'is-pokoin-flex': option.brand === 'pokoin-flex',
                                   },
@@ -533,13 +584,12 @@ function CheckoutDesk() {
                                 <input
                                   type="radio"
                                   name="shippingService"
-                                  checked={!unavailable && shippingService() === option.id}
+                                  checked={!unavailable && parcelShipping().parcels[0]?.serviceId === option.id}
                                   disabled={unavailable}
                                   onChange={() => {
-                                    if (unavailable) return;
-                                    setShippingPicked(true);
-                                    setShippingService(option.id);
-                                    setCartShippingChoice({ service: option.id });
+                                    const parcel = parcelShipping().parcels[0];
+                                    if (unavailable || !parcel) return;
+                                    pickParcelService(parcel.sellerId, option.id, { orderWide: true });
                                   }}
                                 />
                                 <span>
@@ -562,6 +612,19 @@ function CheckoutDesk() {
                                       <a href={option.href || '/flex'}>How Flex works</a>
                                     </Show>
                                   </em>
+                                  <Show when={!unavailable && option.parcels?.length > 1}>
+                                    <For each={option.parcels}>
+                                      {(parcel) => (
+                                        <em class="checkout-parcel-line">
+                                          {[
+                                            `${shipFromCountryName(parcel.fromCountry) || parcel.fromCountry} → ${shipFromCountryName(parcel.toCountry) || parcel.toCountry}`,
+                                            parcel.serviceName,
+                                            moneyFromEurCents(parcel.amountCents),
+                                          ].filter(Boolean).join(' · ')}
+                                        </em>
+                                      )}
+                                    </For>
+                                  </Show>
                                 </span>
                               </label>
                             );
@@ -764,13 +827,28 @@ function CheckoutDesk() {
                       <dt>Items</dt>
                       <dd>{moneyFromEurCents(q().itemsSubtotalCents || eurSubtotal())}</dd>
                     </div>
-                    <div>
-                      <dt>
-                        Shipping
-                        {q().shipments?.[0] ? ` · ${q().shipments[0].fromCountry} → ${q().shipments[0].toCountry}` : ''}
-                      </dt>
-                      <dd>{moneyFromEurCents(q().shippingTotalCents)}</dd>
-                    </div>
+                    <Show
+                      when={(q().shipments || []).length > 1}
+                      fallback={(
+                        <div>
+                          <dt>
+                            Shipping
+                            {q().shipments?.[0] ? ` · ${q().shipments[0].fromCountry} → ${q().shipments[0].toCountry}` : ''}
+                          </dt>
+                          <dd>{moneyFromEurCents(q().shippingTotalCents)}</dd>
+                        </div>
+                      )}
+                    >
+                      {/* One parcel per seller: each ships and is charged on its own lane. */}
+                      <For each={q().shipments}>
+                        {(shipment) => (
+                          <div>
+                            <dt>Shipping · {shipment.fromCountry} → {shipment.toCountry}</dt>
+                            <dd>{moneyFromEurCents(shipment.amountCents)}</dd>
+                          </div>
+                        )}
+                      </For>
+                    </Show>
                     <Show when={!allowUntracked()}>
                       <div>
                         <dt><InsuranceCheck /></dt>
@@ -781,6 +859,32 @@ function CheckoutDesk() {
                       <dt>Total</dt>
                       <dd>{moneyFromEurCents(q().grandTotalCents)}</dd>
                     </div>
+                    {/* The server prices the balance discount; these are its numbers. */}
+                    <Show when={q().pknVoucher?.pkn >= 1}>
+                      <div>
+                        <dt>
+                          <label class="checkout-pkn-voucher">
+                            <input
+                              type="checkbox"
+                              checked={cartUseBalance()}
+                              onChange={(event) => setCartUseBalance(event.target.checked)}
+                            />
+                            {' '}Use my PKN balance as a discount
+                          </label>
+                        </dt>
+                        <dd>{q().pknVoucher.pkn} PKN = {moneyFromEurCents(q().pknVoucher.eurCents)}</dd>
+                      </div>
+                    </Show>
+                    <Show when={q().pknDiscount?.applied}>
+                      <div>
+                        <dt>PKN balance discount</dt>
+                        <dd>−{q().pknDiscount.pkn} PKN ({moneyFromEurCents(q().pknDiscount.eurCents)})</dd>
+                      </div>
+                      <div>
+                        <dt>Card charge</dt>
+                        <dd>{moneyFromEurCents(checkoutChargeCents(q()))}</dd>
+                      </div>
+                    </Show>
                   </dl>
                 )}
               </Match>

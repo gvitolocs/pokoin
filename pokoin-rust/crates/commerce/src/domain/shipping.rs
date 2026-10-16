@@ -227,6 +227,142 @@ pub fn find_rate<'a>(
     })
 }
 
+/// Letter services checkout can book, as the cart names them. Packlink rates
+/// (`packlink:N` / `packlink-N`) are quotes only: nothing buys their labels.
+pub fn letter_service_tracked(id: &str) -> Option<bool> {
+    let id = id.trim();
+    if id.eq_ignore_ascii_case("tracked") {
+        Some(true)
+    } else if id.eq_ignore_ascii_case("untracked") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Most seller parcels one request may name (a cart never comes close).
+const MAX_SERVICE_ENTRIES: usize = 200;
+
+/// The service each seller's parcel ships with: the cart's per-parcel pick
+/// (`shippingServices: { sellerUid: "tracked" | "untracked" }`), else the
+/// order-wide `tracked` / `shippingTracked` / `shippingService` flag.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ServicePlan {
+    pub default_tracked: bool,
+    pub by_seller: std::collections::HashMap<String, bool>,
+}
+
+impl ServicePlan {
+    pub fn uniform(tracked: bool) -> Self {
+        Self {
+            default_tracked: tracked,
+            by_seller: Default::default(),
+        }
+    }
+
+    pub fn tracked_for(&self, seller_id: &str) -> bool {
+        self.by_seller
+            .get(seller_id)
+            .copied()
+            .unwrap_or(self.default_tracked)
+    }
+
+    /// Request body → plan. Unknown or Packlink service ids fail closed so the
+    /// buyer is never charged for a different service than the one picked.
+    pub fn from_body(body: &Value) -> ApiResult<Self> {
+        let default_tracked = body.get("tracked").and_then(Value::as_bool) != Some(false)
+            && body.get("shippingTracked").and_then(Value::as_bool) != Some(false)
+            && !body
+                .get("shippingService")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().eq_ignore_ascii_case("untracked"))
+                .unwrap_or(false);
+        let mut entries: Vec<(String, String)> = Vec::new();
+        match body.get("shippingServices") {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(map)) => {
+                for (seller, service) in map {
+                    entries.push((seller.clone(), service_text(service)));
+                }
+            }
+            Some(Value::Array(rows)) => {
+                for row in rows {
+                    let seller = ["sellerUid", "sellerId"]
+                        .iter()
+                        .find_map(|key| row.get(*key).and_then(Value::as_str))
+                        .unwrap_or_default()
+                        .to_string();
+                    let service = ["serviceId", "service", "id"]
+                        .iter()
+                        .find_map(|key| row.get(*key))
+                        .map(service_text)
+                        .unwrap_or_default();
+                    entries.push((seller, service));
+                }
+            }
+            Some(_) => {
+                return Err(http_error(
+                    400,
+                    "shippingServices must map each seller to a shipping service.",
+                    "invalid_shipping_service",
+                ))
+            }
+        }
+        if entries.len() > MAX_SERVICE_ENTRIES {
+            return Err(http_error(
+                400,
+                "Too many shipping services.",
+                "invalid_shipping_service",
+            ));
+        }
+        let mut by_seller = std::collections::HashMap::new();
+        for (seller, service) in entries {
+            let seller = seller.trim().to_string();
+            let service = service.trim().to_string();
+            if seller.is_empty() || service.is_empty() {
+                continue;
+            }
+            match letter_service_tracked(&service) {
+                Some(tracked) => {
+                    by_seller.insert(seller, tracked);
+                }
+                None if service.to_ascii_lowercase().starts_with("packlink") => {
+                    return Err(http_error(
+                        400,
+                        "Packlink services cannot be booked at checkout yet. Pick the tracked or untracked letter.",
+                        "shipping_service_unavailable",
+                    )
+                    .with_meta(json!({ "sellerId": seller, "service": service })))
+                }
+                None => {
+                    return Err(http_error(
+                        400,
+                        "Unknown shipping service.",
+                        "invalid_shipping_service",
+                    )
+                    .with_meta(json!({ "sellerId": seller, "service": service })))
+                }
+            }
+        }
+        Ok(Self {
+            default_tracked,
+            by_seller,
+        })
+    }
+}
+
+fn service_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Object(_) => ["serviceId", "service", "id"]
+            .iter()
+            .find_map(|key| value.get(*key).and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ShipmentQuote {
     pub seller_id: String,
@@ -237,6 +373,8 @@ pub struct ShipmentQuote {
     pub card_count: i64,
     pub package_tier: String,
     pub tracked: bool,
+    /// The service this parcel was asked to ship with (`tracked` / `untracked`).
+    pub requested_tracked: bool,
     pub estimated_weight_grams: i64,
     pub carrier: String,
     pub service_name: String,
@@ -267,11 +405,24 @@ pub struct CheckoutQuote {
     pub shipping_total_cents: i64,
     pub grand_total_cents: i64,
     pub currency: String,
+    /// Every parcel was asked to go tracked.
     pub tracked: bool,
     pub insurance_cents: i64,
 }
 
-fn json_items(items: &[Value]) -> Vec<QuoteItem> {
+impl ShipmentQuote {
+    /// `tracked` / `untracked`: the service the parcel is priced with.
+    pub fn service_id(&self) -> &'static str {
+        if self.tracked {
+            "tracked"
+        } else {
+            "untracked"
+        }
+    }
+}
+
+/// Cart rows as money lines (the balance-discount and subtotal maths).
+pub fn json_items(items: &[Value]) -> Vec<QuoteItem> {
     items
         .iter()
         .map(|row| QuoteItem {
@@ -305,6 +456,24 @@ pub fn quote_checkout(
     tracked: bool,
     catalog: &RateCatalog,
 ) -> ApiResult<CheckoutQuote> {
+    quote_checkout_with(
+        items,
+        seller_origins,
+        to_country,
+        &ServicePlan::uniform(tracked),
+        catalog,
+    )
+}
+
+/// `quoteCheckout` with a service per seller parcel: each parcel is priced on
+/// its own lane with the service the buyer picked for it.
+pub fn quote_checkout_with(
+    items: &[Value],
+    seller_origins: &std::collections::HashMap<String, String>,
+    to_country: &str,
+    plan: &ServicePlan,
+    catalog: &RateCatalog,
+) -> ApiResult<CheckoutQuote> {
     let groups = group_cart_by_seller(items)?;
     let mut shipments = Vec::new();
     for group in groups {
@@ -320,6 +489,7 @@ pub fn quote_checkout(
                 })
             })
             .unwrap_or_default();
+        let tracked = plan.tracked_for(&group.seller_id);
         let (rate, count, tier) = quote_shipment(
             &group.seller_id,
             &from_country,
@@ -337,6 +507,7 @@ pub fn quote_checkout(
             card_count: count,
             package_tier: tier,
             tracked: rate.is_tracked(),
+            requested_tracked: tracked,
             estimated_weight_grams: count * 2,
             carrier: rate.carrier.clone(),
             service_name: if rate.service_name.is_empty() {
@@ -356,6 +527,7 @@ pub fn quote_checkout(
     }
     let items_subtotal = shipments.iter().map(|row| row.items_subtotal_cents).sum();
     let shipping_total = shipments.iter().map(|row| row.amount_cents).sum();
+    let tracked = shipments.iter().all(|row| row.requested_tracked);
     Ok(CheckoutQuote {
         shipments,
         items_subtotal_cents: items_subtotal,
@@ -570,6 +742,144 @@ mod tests {
         assert_eq!(options[0]["amountCents"], json!(435));
         assert_eq!(options[1]["id"], json!("tracked"));
         assert_eq!(options[1]["packageTier"], json!("SMALL"));
+    }
+
+    fn two_lane_catalog() -> RateCatalog {
+        RateCatalog::from_json(
+            r#"{
+              "tiers": [{"id":"SMALL","maxCards":4},{"id":"MEDIUM","maxCards":20}],
+              "rates": [
+                {"id":"it-dk-u","fromCountry":"IT","toCountry":"DK","packageTier":"SMALL","priceEURCents":130,"carrier":"Poste Italiane","serviceName":"Postamail","tracked":false},
+                {"id":"it-dk-t","fromCountry":"IT","toCountry":"DK","packageTier":"SMALL","priceEURCents":1684,"carrier":"UPS","serviceName":"Tracked","tracked":true},
+                {"id":"dk-dk-u","fromCountry":"DK","toCountry":"DK","packageTier":"SMALL","priceEURCents":310,"carrier":"dao","serviceName":"Brev","tracked":false},
+                {"id":"dk-dk-t","fromCountry":"DK","toCountry":"DK","packageTier":"SMALL","priceEURCents":700,"carrier":"GLS","serviceName":"Pakke","tracked":true}
+              ]
+            }"#,
+        )
+        .unwrap()
+    }
+
+    fn two_sellers() -> (Vec<Value>, std::collections::HashMap<String, String>) {
+        let items = vec![
+            json!({ "sellerUid": "red", "quantity": 1, "unitPricePkn": 200 }),
+            json!({ "sellerUid": "givi", "quantity": 1, "unitPricePkn": 400 }),
+        ];
+        let origins = [("red", "IT"), ("givi", "DK")]
+            .into_iter()
+            .map(|(seller, country)| (seller.to_string(), country.to_string()))
+            .collect();
+        (items, origins)
+    }
+
+    #[test]
+    fn plan_reads_per_seller_services_over_the_order_flag() {
+        let plan = ServicePlan::from_body(&json!({
+            "tracked": true,
+            "shippingServices": { "red": "untracked", "givi": "tracked", "nobody": "" },
+        }))
+        .unwrap();
+        assert!(plan.default_tracked);
+        assert!(!plan.tracked_for("red"));
+        assert!(plan.tracked_for("givi"));
+        assert!(plan.tracked_for("someone-else"));
+        assert_eq!(plan.by_seller.len(), 2);
+
+        let rows = ServicePlan::from_body(&json!({
+            "shippingService": "untracked",
+            "shippingServices": [{ "sellerUid": "givi", "serviceId": "tracked" }],
+        }))
+        .unwrap();
+        assert!(!rows.default_tracked);
+        assert!(rows.tracked_for("givi"));
+        assert!(!rows.tracked_for("red"));
+    }
+
+    #[test]
+    fn plan_keeps_the_single_flag_contract() {
+        assert_eq!(
+            ServicePlan::from_body(&json!({})).unwrap(),
+            ServicePlan::uniform(true)
+        );
+        assert_eq!(
+            ServicePlan::from_body(&json!({ "tracked": false })).unwrap(),
+            ServicePlan::uniform(false)
+        );
+        assert_eq!(
+            ServicePlan::from_body(&json!({ "shippingService": "untracked" })).unwrap(),
+            ServicePlan::uniform(false)
+        );
+        // An order-wide Packlink id was always read as tracked; keep that.
+        assert_eq!(
+            ServicePlan::from_body(&json!({ "shippingService": "packlink:22131" })).unwrap(),
+            ServicePlan::uniform(true)
+        );
+    }
+
+    #[test]
+    fn plan_refuses_services_checkout_cannot_book() {
+        let packlink = ServicePlan::from_body(&json!({
+            "shippingServices": { "red": "packlink:22131" },
+        }))
+        .unwrap_err();
+        assert_eq!(packlink.status.as_u16(), 400);
+        assert_eq!(
+            packlink.code.as_deref(),
+            Some("shipping_service_unavailable")
+        );
+        let junk = ServicePlan::from_body(&json!({ "shippingServices": { "red": "pigeon" } }))
+            .unwrap_err();
+        assert_eq!(junk.code.as_deref(), Some("invalid_shipping_service"));
+        assert!(ServicePlan::from_body(&json!({ "shippingServices": "tracked" })).is_err());
+    }
+
+    #[test]
+    fn each_seller_parcel_is_priced_with_its_own_service() {
+        let catalog = two_lane_catalog();
+        let (items, origins) = two_sellers();
+        let plan = ServicePlan::from_body(&json!({
+            "shippingServices": { "red": "untracked", "givi": "tracked" },
+        }))
+        .unwrap();
+        let quote = quote_checkout_with(&items, &origins, "DK", &plan, &catalog).unwrap();
+        let picked: Vec<(&str, &str, i64)> = quote
+            .shipments
+            .iter()
+            .map(|row| (row.seller_id.as_str(), row.service_id(), row.amount_cents))
+            .collect();
+        assert_eq!(
+            picked,
+            vec![("red", "untracked", 130), ("givi", "tracked", 700)]
+        );
+        assert_eq!(quote.shipping_total_cents, 830);
+        // 600 PKN = 300 cents of cards.
+        assert_eq!(quote.grand_total_cents, 300 + 830);
+        assert!(!quote.tracked);
+
+        // The single flag still prices every parcel the same way.
+        let tracked = quote_checkout(&items, &origins, "DK", true, &catalog).unwrap();
+        assert_eq!(tracked.shipping_total_cents, 1684 + 700);
+        assert!(tracked.tracked);
+    }
+
+    #[test]
+    fn one_untracked_parcel_is_capped_like_an_untracked_order() {
+        let catalog = two_lane_catalog();
+        let items = vec![
+            json!({ "sellerUid": "red", "quantity": 1, "unitPriceEURCents": 2500 }),
+            json!({ "sellerUid": "givi", "quantity": 1, "unitPriceEURCents": 100 }),
+        ];
+        let (_, origins) = two_sellers();
+        let plan = ServicePlan::from_body(&json!({ "shippingServices": { "givi": "untracked" } }))
+            .unwrap();
+        let quote = quote_checkout_with(&items, &origins, "DK", &plan, &catalog).unwrap();
+        let error = guard_checkout_quote(quote.clone(), quote.tracked, false).unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("untracked_not_allowed"));
+
+        let plan = ServicePlan::uniform(true);
+        let quote = quote_checkout_with(&items, &origins, "DK", &plan, &catalog).unwrap();
+        let guarded = guard_checkout_quote(quote.clone(), quote.tracked, true).unwrap();
+        assert_eq!(guarded.insurance_cents, 130);
+        assert_eq!(guarded.grand_total_cents, 2600 + 1684 + 700 + 130);
     }
 
     #[test]

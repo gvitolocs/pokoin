@@ -2916,11 +2916,13 @@ pub async fn create_order_checkout_session(
 
     // Server-side shipping quote: seller origins come from the profile rows.
     let mut seller_origins: HashMap<String, String> = HashMap::new();
+    let mut seller_docs: Vec<(String, Value)> = Vec::new();
     for item in &items {
         if seller_origins.contains_key(&item.seller_uid) {
             continue;
         }
         let seller = store::read_user(state.firestore()?, &item.seller_uid).await?;
+        seller_docs.push((item.seller_uid.clone(), seller.clone()));
         let country = crate::domain::country::normalize_country(
             seller
                 .get("shipFromCountry")
@@ -2947,14 +2949,20 @@ pub async fn create_order_checkout_session(
             })
         })
         .collect();
+    // Same pricing as /api/marketplace-checkout-quote: each seller parcel on the
+    // service the buyer picked for it, the untracked cap and the 5% insurance.
+    let plan = crate::domain::shipping::ServicePlan::from_body(&body)?;
+    let insurance = body.get("insurance").and_then(Value::as_bool) == Some(true);
     let catalog = crate::domain::shipping::RateCatalog::default_catalog();
-    let quote = crate::domain::shipping::quote_checkout(
+    let quote = crate::domain::shipping::quote_checkout_with(
         &quote_items,
         &seller_origins,
         &to_country,
-        true,
+        &plan,
         catalog,
     )?;
+    let tracked = quote.tracked;
+    let quote = crate::domain::shipping::guard_checkout_quote(quote, tracked, insurance)?;
 
     let order_id = uuid::Uuid::new_v4().to_string();
     let decremented = verify_and_decrement_listings(&state, &items, Some(&order_id)).await?;
@@ -2964,19 +2972,22 @@ pub async fn create_order_checkout_session(
     let mut held_discount_pkn = 0i64;
     let outcome: Result<Response, ApiError> = async {
 
-        // Optional PKN balance discount: debit it once and hold the PKN.
-        let discount_pkn = body
-            .get("pknDiscount")
-            .and_then(Value::as_f64)
-            .map(|value| value.trunc() as i64)
-            .unwrap_or(0);
-        let mut discount_eur_cents = 0i64;
-        if discount_pkn > 0 {
+        // Optional PKN balance discount, priced by the server exactly as the
+        // quote prices it (the client sends only the opt-in): debit it once
+        // and hold the PKN.
+        let refused = money::pkn_refused_sellers(
+            seller_docs.iter().map(|(uid, doc)| (uid.as_str(), doc)),
+        );
+        let mut discount = money::checkout_pkn_discount(
+            0,
+            &[],
+            &refused,
+            quote.grand_total_cents,
+            false,
+        );
+        if money::wants_pkn_discount(&body) {
             let balance = store::balance(state.firestore()?, &claims.uid).await?;
-            let eligible: Vec<String> = Vec::new();
-            let quote_items: Vec<store::LedgerOp> = Vec::new();
-            drop(quote_items);
-            let plan = money::pkn_balance_discount(
+            discount = money::checkout_pkn_discount(
                 balance.available_pkn,
                 &items
                     .iter()
@@ -2987,21 +2998,26 @@ pub async fn create_order_checkout_session(
                         ..Default::default()
                     })
                     .collect::<Vec<_>>(),
-                &eligible,
+                &refused,
                 quote.grand_total_cents,
+                true,
             );
-            if plan.discount_pkn > 0 {
-                let op = LedgerOp::lock(&claims.uid, plan.discount_pkn, "order_discount_held")
-                    .with_ref(&order_id)
-                    .with_idempotency(format!("order_discount_held:{order_id}"))
-                    .with_meta(json!({ "orderId": order_id }));
+            if discount.applied.discount_pkn > 0 {
+                let op = LedgerOp::lock(
+                    &claims.uid,
+                    discount.applied.discount_pkn,
+                    "order_discount_held",
+                )
+                .with_ref(&order_id)
+                .with_idempotency(format!("order_discount_held:{order_id}"))
+                .with_meta(json!({ "orderId": order_id }));
                 store::apply(state.firestore()?, &op).await?;
-                discount_eur_cents = plan.discount_eur_cents;
-                held_discount_pkn = plan.discount_pkn;
+                held_discount_pkn = discount.applied.discount_pkn;
             }
         }
+        let discount_eur_cents = discount.applied.discount_eur_cents;
 
-        let charge_cents = quote.grand_total_cents - discount_eur_cents;
+        let charge_cents = discount.charge_cents(quote.grand_total_cents);
         if charge_cents < 50 {
             return Err(ApiError::bad_request(
                 "The card charge must be at least 50 cents.",
@@ -3067,6 +3083,7 @@ pub async fn create_order_checkout_session(
             "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
             "totalEURCents": quote.grand_total_cents,
             "shippingEURCents": quote.shipping_total_cents,
+            "insuranceEURCents": quote.insurance_cents,
             "pknDiscount": {
                 "pkn": held_discount_pkn,
                 "eurCents": discount_eur_cents,
@@ -3103,11 +3120,16 @@ pub async fn create_order_checkout_session(
         Ok(private_json(json!({
             "orderId": order_id,
             "id": session_id,
+            // Both web checkouts open `checkoutUrl`; `url` stays for older callers.
+            "checkoutUrl": url,
             "url": url,
             "totalEURCents": charge_cents,
             "shippingEURCents": quote.shipping_total_cents,
-            "discountPkn": discount_pkn,
+            "insuranceEURCents": quote.insurance_cents,
+            "chargeCents": charge_cents,
+            "discountPkn": held_discount_pkn,
             "discountEurCents": discount_eur_cents,
+            "pknDiscount": discount.applied_json(),
         })))
     }
     .await;
@@ -3164,6 +3186,8 @@ fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> 
                 "cardCount": shipment.card_count,
                 "packageTier": shipment.package_tier,
                 "shippingRateId": shipment.rate_id,
+                "serviceId": shipment.service_id(),
+                "carrier": shipment.carrier,
                 "serviceName": shipment.service_name,
                 "itemsSubtotalCents": shipment.items_subtotal_cents,
                 "shippingAmountEURCents": shipment.amount_cents,
@@ -3190,6 +3214,7 @@ mod tests {
             card_count: 2,
             package_tier: "letter".into(),
             tracked: true,
+            requested_tracked: true,
             estimated_weight_grams: 20,
             carrier: "Poste".into(),
             service_name: "Tracked".into(),
@@ -3203,6 +3228,7 @@ mod tests {
         assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
         assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
         assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
+        assert_eq!(rows[0]["serviceId"], json!("tracked"));
         // The refund share now has a non-zero EUR gross for this seller.
         let order = json!({ "channel": "eur", "currency": "EUR", "shipments": rows, "items": [] });
         let share = crate::domain::order_refund::seller_share(&order, "s1");

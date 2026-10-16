@@ -117,6 +117,15 @@ export function defaultShippingService(options = []) {
   return (letter || selectable[0] || options[0] || {}).id || 'tracked';
 }
 
+/** Letter rates read like the parcel header ("Untracked letter (Poste Italiane)"); other services keep their name. */
+export function parcelServiceLabel(row) {
+  if (row.id === 'tracked' || row.id === 'untracked') {
+    const kind = row.tracked !== false ? 'Tracked' : 'Untracked letter';
+    return row.carrier ? `${kind} (${row.carrier})` : kind;
+  }
+  return row.label || row.serviceName || (row.tracked !== false ? 'Tracked' : 'Untracked letter');
+}
+
 /** Checkout-only placeholder: partner-store pick-up / drop-off, not selectable yet. */
 export function pokoinFlexOption() {
   return {

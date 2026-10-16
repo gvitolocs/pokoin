@@ -11,7 +11,10 @@ test('PKN balance voucher is opt-in and priced at 2 PKN per euro-cent', () => {
   assert.match(src, /Use my PKN balance as a discount/);
   assert.match(src, /const pknDiscountEurCents = \(\) => \(cartUseBalance\(\) \? voucher\(\)\.eurCents : 0\)/);
   assert.match(src, /const pknDiscountPkn = \(\) => pknDiscountEurCents\(\) \* 2/);
-  assert.match(src, /usePknDiscount: pknDiscountPkn\(\) >= 1/);
+  // The buyer only opts in; quote and session bodies carry the flag, never an amount.
+  assert.match(src, /useBalance: cartUseBalance\(\),\s*\}\);/);
+  assert.equal((src.match(/useBalance: cartUseBalance\(\)/g) || []).length, 2);
+  assert.doesNotMatch(src, /usePknDiscount: pknDiscountPkn/);
   assert.doesNotMatch(src, /pknDiscountPkn\(\) \* 50|\/ 50,/);
 });
 
@@ -20,6 +23,16 @@ test('checkout does not claim the card is charged in EUR', () => {
 });
 
 test('checkout keeps the buyer\'s own shipping pick over the default', () => {
-  assert.match(src, /if \(!picked \|\| !selectable\.some\(/);
-  assert.match(src, /setShippingPicked\(true\);\s*setShippingService\(option\.id\);/);
+  // Cart parcel picks seed checkout; a pick here is that parcel's service
+  // (checkoutParcelShipping falls back to the default only without a pick).
+  assert.match(src, /createSignal\(untrack\(\(\) => \(\{ \.\.\.\(cartShippingChoice\(\)\.parcels \|\| \{\}\) \}\)\)\)/);
+  assert.match(src, /picks: parcelPicks\(\)/);
+  assert.match(src, /setParcelPicks\(\(current\) => \(\{ \.\.\.current, \[sellerId\]: serviceId \}\)\)/);
+  assert.match(src, /pickParcelService\(parcel\.sellerId, option\.id, \{ orderWide: true \}\)/);
+});
+
+test('with a server quote, Due and Card charge are the server charge', () => {
+  assert.match(src, /if \(quote\(\)\) return moneyFromEurCents\(checkoutChargeCents\(quote\(\)\)\);/);
+  assert.match(src, /<Show when=\{q\(\)\.pknVoucher\?\.pkn >= 1\}>/);
+  assert.match(src, /<dd>\{moneyFromEurCents\(checkoutChargeCents\(q\(\)\)\)\}<\/dd>/);
 });

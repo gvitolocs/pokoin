@@ -64,10 +64,28 @@ export function moveSavedIntoCart(current, row) {
 }
 
 /** Merge { country?, service? } into the buyer's shipping choice (the same object when nothing changed). */
+/**
+ * Merge { country?, service?, parcel?: { key, service } } into the buyer's
+ * shipping choice. `parcels` maps a seller parcel key to the service picked
+ * for that parcel alone; a new country clears them (other lanes, other services).
+ */
 export function mergeShippingChoice(current, patch) {
-  const next = { ...current, ...(patch || {}) };
-  if (next.country === current.country && next.service === current.service) return current;
-  return { country: String(next.country || '').toUpperCase(), service: String(next.service || '') };
+  const base = { country: '', service: '', parcels: {}, ...(current || {}) };
+  const { parcel, ...rest } = patch || {};
+  const next = { ...base, ...rest };
+  next.country = String(next.country || '').toUpperCase();
+  next.service = String(next.service || '');
+  let parcels = next.country === base.country ? { ...(base.parcels || {}) } : {};
+  if (parcel?.key) {
+    const key = String(parcel.key);
+    if (parcel.service) parcels[key] = String(parcel.service);
+    else delete parcels[key];
+  }
+  const same = next.country === base.country
+    && next.service === base.service
+    && JSON.stringify(parcels) === JSON.stringify(base.parcels || {});
+  if (same && current) return current;
+  return { country: next.country, service: next.service, parcels };
 }
 
 export const PENDING_CHECKOUT_KEY = 'pokoin.cartCheckout';
