@@ -319,10 +319,12 @@ pub async fn rebuild_with(state: &DomainState, seller: &Seller, game: &str, how:
     if !locked {
         return Ok(false);
     }
-    let Some(pools) = state.game_pools(game).await else {
+    // Listings live on the main marketplace DB. The satellite pool is only the
+    // catalog, and a game that is not mounted has nothing to rebuild.
+    if state.game_pools(game).await.is_none() {
         return Ok(false);
-    };
-    let stamp = seller_activity_stamp(&pools.read, &seller.uid)
+    }
+    let stamp = seller_activity_stamp(state.read_db(), &seller.uid)
         .await
         .map_err(|error| crate::game::catalog_error(game, error))?;
     let stored = sqlx::query("select stamp, profile, seller from public.marketplace_seller_books where seller_uid = $1 and game = $2")
@@ -569,10 +571,10 @@ pub async fn sweep_once(state: &DomainState) -> Result<usize, sqlx::Error> {
         let Some(seller) = seller_from(&row.try_get::<Value, _>("seller")?) else {
             continue;
         };
-        let Some(pools) = state.game_pools(&game).await else {
+        if state.game_pools(&game).await.is_none() {
             continue;
-        };
-        let Ok(stamp) = seller_activity_stamp(&pools.read, &seller.uid).await else {
+        }
+        let Ok(stamp) = seller_activity_stamp(state.read_db(), &seller.uid).await else {
             continue;
         };
         if stamp != stored {
