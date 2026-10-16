@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { fetchSellerSettings } from '@market/api.js';
+import { readBuyerCountry, writeBuyerCountry } from '@market/buyer-country.js';
 import { currencyForCountry, currencyFromLocale, LIST_CURRENCIES } from '@market/pkn.js';
 import { buyerPrefersFiat, buyerPriceLabel, buyerPriceParts, sellerListCurrency } from '@market/seller-currency.js';
 import { getBearer, signedIn } from './auth.js';
@@ -15,6 +16,22 @@ const [settings, setSettings] = createSignal(null);
 const [failed, setFailed] = createSignal(false);
 let requested = null;
 
+// The country the last settings read gave this uid (market/src/buyer-country.js):
+// on a reload, labels paint in its currency while the read is on its way.
+const [known, setKnown] = createSignal(readBuyerCountry(authSession()?.uid));
+
+function knownCountry() {
+  const row = known();
+  return row && row.uid === String(authSession()?.uid || '') ? row : null;
+}
+
+function rememberCountry(next) {
+  const uid = authSession()?.uid;
+  if (!uid || !next) return;
+  writeBuyerCountry(uid, next.shipFromCountry);
+  setKnown(() => readBuyerCountry(uid));
+}
+
 export function ensureSellerSettings() {
   if (requested || !signedIn()) return requested;
   requested = getBearer()
@@ -22,6 +39,7 @@ export function ensureSellerSettings() {
     .then((next) => {
       setSettings(() => next);
       setFailed(false);
+      rememberCountry(next);
     })
     .catch(() => {
       requested = null;
@@ -32,7 +50,7 @@ export function ensureSellerSettings() {
 
 /** Hold the label until the signed-in buyer's country is known (no EUR→DKK flip). */
 export function buyerPending() {
-  return signedIn() && settings() == null && !failed();
+  return signedIn() && settings() == null && !failed() && !knownCountry();
 }
 
 /** The signed-in seller's settings (ship-from country, PKN payouts); null until fetched. */
@@ -49,6 +67,7 @@ export function publishSellerSettings(next) {
   requested = Promise.resolve();
   setSettings(() => next);
   setFailed(false);
+  rememberCountry(next);
 }
 
 /** useSellerCurrency().currency: PKN, or local fiat for sellers who turned PKN payments off. */
@@ -63,7 +82,7 @@ function pinOf(pinned) {
 function buyerContext(pinned) {
   const pin = pinOf(pinned);
   const pending = !pin && buyerPending();
-  const country = String(settings()?.shipFromCountry || '').toUpperCase();
+  const country = String((settings() ? settings().shipFromCountry : knownCountry()?.country) || '').toUpperCase();
   const currency = pin || (country ? currencyForCountry(country) : currencyFromLocale());
   const balancePkn = signedIn() ? Math.max(0, Number(authSession()?.availablePkn) || 0) : null;
   return { pin, pending, currency, balancePkn };

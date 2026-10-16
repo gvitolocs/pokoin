@@ -786,6 +786,8 @@ async fn poko_chat_inner(
                 display_name: display_name.clone(),
                 user_id: claims.uid.clone(),
                 session_id: session_id.clone(),
+                memory_peer_id: None,
+                memory_session_id: None,
             },
         )
         .await

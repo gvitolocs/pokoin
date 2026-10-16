@@ -1,5 +1,6 @@
 import { noteCardView } from '@market/interest-profile.js';
 import { afterHero, holdForHero } from '@market/hero-gate.js';
+import { warmRecentCard, warmRecentsRail } from '@market/recents-rail.js';
 import {
   createEffect,
   createMemo,
@@ -134,6 +135,7 @@ import ExpansionMark from '../components/ExpansionMark.jsx';
 import PriceStack from '../components/PriceStack.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
+import { whenIdle } from '../lib/idle.js';
 import { authUser, getBearer } from '../stores/auth.js';
 import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
@@ -303,6 +305,12 @@ function CardDesk(props) {
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
     rememberCardId(merged);
+    // This card now leads Recently seen: its rail thumb and the rest of the
+    // stored rail are ready before the marketplace opens (after this hero).
+    afterHero(() => whenIdle(() => {
+      warmRecentCard(merged);
+      void warmRecentsRail();
+    }));
     // The visitor's own view history, on their device, for search predictions.
     noteCardView(merged, { print: merged?.nationality });
     setPage({

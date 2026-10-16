@@ -200,8 +200,12 @@ fn require_secret(doc: &FirestoreDoc, field: &str, message: &str) -> ApiResult<S
 }
 
 pub async fn decrypt_integration_token(firestore: &dyn FirestoreStore, uid: &str) -> ApiResult<String> {
-    let doc = read_integration_doc(firestore, uid).await?;
-    require_secret(&doc, "encryptedToken", "CardTrader is not connected for this seller.")
+    token_from_doc(&read_integration_doc(firestore, uid).await?)
+}
+
+/// The API token of an integration doc the caller already read.
+pub fn token_from_doc(doc: &FirestoreDoc) -> ApiResult<String> {
+    require_secret(doc, "encryptedToken", "CardTrader is not connected for this seller.")
 }
 
 pub async fn decrypt_integration_shared_secret(firestore: &dyn FirestoreStore, uid: &str) -> ApiResult<String> {

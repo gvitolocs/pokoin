@@ -20,12 +20,19 @@ import { HOME_BROWSE_BLOCK, createEnglishBrowseState, fillEnglishBrowse } from '
 import { readHomeVectorCache, scheduleHomeVectorCacheWrite } from '@market/home-cache.js';
 import { tilePricePkn } from '@market/pkn.js';
 import {
+  RECENT_MAX,
   pruneUnresolvedRecents,
   readRecentCardIds,
   readRecentTiles,
   rememberRecentTiles,
-  syncRemoteRecentCardIds,
 } from '@market/recents.js';
+import {
+  RECENT_RAIL_SHOWN,
+  refreshRecentTiles,
+  refreshTile,
+  stableRecentIds,
+  syncRecentAccount,
+} from '@market/recents-rail.js';
 import { Action, track } from '@market/track.js';
 import { isOriginDownError, publicErrorMessage } from '@market/working-page.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -75,31 +82,38 @@ function recentsNeedingTiles(payload, ids) {
   });
 }
 
-async function fillMissingRecents(payload, ids, already = []) {
-  const first = paintHome(payload, ids, localExtras(already));
+/** `extras(tiles)`: the rail's own tiles plus `tiles` (the page's railExtras). */
+async function fillMissingRecents(payload, ids, extras = localExtras) {
+  const first = paintHome(payload, ids, extras());
   const need = recentsNeedingTiles(first, ids);
   if (!need.length) return first;
-  const tiles = await fetchCardTiles(need).catch(() => []);
+  // A tile already on screen only takes the read's price and stock (refreshTile).
+  const painted = new Map((first.cards || []).map((card) => [String(card.id), card]));
+  const fetched = await fetchCardTiles(need).catch(() => []);
+  const tiles = fetched.map((tile) => refreshTile(painted.get(String(tile.id)), tile));
   rememberRecentTiles(tiles);
-  const filled = paintHome(payload, ids, localExtras([...already, ...tiles]));
+  const filled = paintHome(payload, ids, extras(tiles));
   const still = recentsNeedingTiles(filled, ids).filter((id) => {
     const card = (filled.cards || []).find((row) => String(row.id) === String(id));
     return !tileHasName(card);
   });
   if (!still.length) return filled;
-  const extras = await Promise.all(
+  const rows = await Promise.all(
     still.slice(0, 8).map((id) => fetchCard(id).then((row) => row?.card || null).catch(() => null)),
   );
-  const hydrated = extras.filter(Boolean);
+  const hydrated = rows.filter(Boolean);
   rememberRecentTiles(hydrated);
-  const next = paintHome(payload, ids, localExtras([...already, ...tiles, ...hydrated]));
+  const next = paintHome(payload, ids, extras([...tiles, ...hydrated]));
   const resolved = (next.sections?.recentlySeenIds || []).filter((id) => {
     const card = (next.cards || []).find((row) => String(row.id) === String(id));
     return tileHasName(card);
   });
   if (resolved.length !== ids.length) {
-    pruneUnresolvedRecents(resolved);
-    return paintHome(payload, resolved, localExtras([...already, ...tiles, ...hydrated]));
+    // Forget only the ids that did not resolve: `ids` is the rail's order, not the stored list.
+    const shown = new Set(resolved.map(String));
+    const failed = new Set(ids.map(String).filter((id) => !shown.has(id)));
+    pruneUnresolvedRecents(readRecentCardIds().filter((id) => !failed.has(id)));
+    return paintHome(payload, resolved, extras([...tiles, ...hydrated]));
   }
   return next;
 }
@@ -167,8 +181,39 @@ export default function Home() {
   let generation = 0;
   const stale = (gen) => gen !== generation;
 
+  // Recently seen as painted: its order and its tiles. Every later paint keeps
+  // both, so a refresh (account sync, a late rail, new prices) patches tiles in
+  // place and appends new ones at the end; it never reorders or blanks the rail.
+  // A TCG switch commits that game's seed, which resets both.
+  let recentOrder = [];
+  let recentTiles = [];
+  function noteRecents(next) {
+    recentOrder = (next?.sections?.recentlySeenIds || []).map(String);
+    const byId = new Map((next?.cards || []).map((card) => [String(card.id), card]));
+    recentTiles = recentOrder.map((id) => byId.get(id)).filter(Boolean);
+  }
+  noteRecents(payload);
+
+  /** The ids to paint: the rail's own order, then stored ids new to it. */
+  const recentIds = () => stableRecentIds(recentOrder, readRecentCardIds()).slice(0, RECENT_MAX);
+  /** Tiles to paint them with: the painted ones, the stored copy over them, then `tiles`. */
+  const railExtras = (tiles = []) => [...recentTiles, ...readRecentTiles(), ...tiles];
+  /**
+   * Prices the page found for tiles stored without one (last median, a rail's
+   * price) go into the stored copy, so the next visit paints them at once.
+   * Stored prices are left alone: the background refresh owns those.
+   */
+  function storeRail(gameId) {
+    const stored = new Map(readRecentTiles(gameId).map((tile) => [String(tile.id), tile]));
+    const priced = recentTiles
+      .slice(0, RECENT_RAIL_SHOWN)
+      .filter((card) => tilePricePkn(card) != null && tilePricePkn(stored.get(String(card.id))) == null);
+    if (priced.length) rememberRecentTiles(priced, gameId);
+  }
+
   function commit(next) {
     payload = next;
+    noteRecents(next);
     setHome((draft) => {
       reconcile(next?.cards || [], 'id')(draft.cards);
       draft.sections = next?.sections || {};
@@ -212,7 +257,7 @@ export default function Home() {
   async function applyRailsVector(data, gen, gameId) {
     if (stale(gen) || !data) return null;
     scheduleHomeVectorCacheWrite(gameId, data);
-    const painted = paintHome(data, readRecentCardIds(), localExtras());
+    const painted = paintHome(data, recentIds(), railExtras());
     commit(painted);
     return painted;
   }
@@ -242,7 +287,7 @@ export default function Home() {
     await paintChain;
     if (stale(gen)) return vector;
     setRailsSettled(true);
-    if (!any) return fetchHome(readRecentCardIds());
+    if (!any) return fetchHome(recentIds());
     return vector;
   }
 
@@ -250,18 +295,18 @@ export default function Home() {
     const gameId = game().id;
     const english = gameId === 'pokemon';
     try {
-      const data = await (english ? loadPokemonRails(gen, gameId) : fetchHome(readRecentCardIds()));
+      const data = await (english ? loadPokemonRails(gen, gameId) : fetchHome(recentIds()));
       if (stale(gen)) return;
       setRailsSettled(true);
-      const painted = (await applyRailsVector(data, gen, gameId)) || paintHome(data, readRecentCardIds(), localExtras());
+      const painted = (await applyRailsVector(data, gen, gameId)) || paintHome(data, recentIds(), railExtras());
       if (stale(gen)) return;
       // Network-only warmup: the suggest engine loads on search intent, not here.
       warmupSearchBar({ engine: false });
       let next = painted;
-      if (!recentsNeedingTiles(painted, readRecentCardIds()).length) {
+      if (!recentsNeedingTiles(painted, recentIds()).length) {
         setRecentPending(false);
       } else {
-        next = await fillMissingRecents(data, readRecentCardIds());
+        next = await fillMissingRecents(data, recentIds(), railExtras);
         if (stale(gen)) return;
         commit(next);
         setRecentPending(false);
@@ -271,7 +316,9 @@ export default function Home() {
       next = { ...next, cards: priced };
       scheduleHomeVectorCacheWrite(gameId, next);
       commit(next);
+      storeRail(gameId);
       loadedAt = Date.now();
+      await refreshRailQuietly(gen, gameId);
     } catch (err) {
       if (stale(gen)) return;
       setError(isOriginDownError(err, err?.status, err?.message)
@@ -285,23 +332,28 @@ export default function Home() {
   /** Signed-in buyers also see recents from other devices (account history). */
   async function syncAccountRecents(gen) {
     if (!authSession()?.uid) return;
+    const gameId = untrack(() => site().id);
     await loadAuth().catch(() => null);
     if (stale(gen)) return;
-    const ids = await syncRemoteRecentCardIds().catch(() => null);
-    if (stale(gen) || !ids || !payload) return;
-    const next = paintHome(payload, ids, localExtras());
+    const synced = await syncRecentAccount({ gameId }).catch(() => null);
+    if (stale(gen) || !synced || !payload) return;
+    // Painted tiles keep their place; ids from other devices join at the end.
+    const ids = recentIds();
+    const next = paintHome(payload, ids, railExtras());
     commit(next);
     if (!ids.length || !recentsNeedingTiles(next, ids).length) {
       setRecentPending(false);
+      storeRail(gameId);
       return;
     }
     setRecentPending(true);
-    const filled = await fillMissingRecents(payload || next, ids);
+    const filled = await fillMissingRecents(payload || next, ids, railExtras);
     if (stale(gen)) return;
     const priced = await fillMissingLastMedianPrices(filled.cards || []);
     if (stale(gen)) return;
     commit({ ...filled, cards: priced });
     setRecentPending(false);
+    storeRail(gameId);
   }
 
   async function loadEnglishBrowse(gen) {
@@ -354,15 +406,30 @@ export default function Home() {
 
   /** A restored landing only needs the cards opened since (Recently seen). */
   async function refreshRecents(gen) {
-    const ids = readRecentCardIds();
-    if (!recentsNeedingTiles(payload, ids).length) {
-      setRecentPending(false);
-      return;
+    const gameId = untrack(() => site().id);
+    const ids = recentIds();
+    if (recentsNeedingTiles(payload, ids).length) {
+      const filled = await fillMissingRecents(payload, ids, railExtras).catch(() => null);
+      if (stale(gen)) return;
+      if (filled) commit(filled);
+      storeRail(gameId);
     }
-    const filled = await fillMissingRecents(payload, ids).catch(() => null);
-    if (stale(gen)) return;
-    if (filled) commit(filled);
     setRecentPending(false);
+    await refreshRailQuietly(gen, gameId);
+  }
+
+  /**
+   * Behind the painted rail: refetch this game's stale stored tiles, then patch
+   * what changed. The stored copy may also have moved under the page (the App
+   * warm-up), so compare the repaint rather than trusting the refresh result.
+   */
+  async function refreshRailQuietly(gen, gameId) {
+    await refreshRecentTiles({ gameId });
+    if (stale(gen) || !payload) return;
+    const next = paintHome(payload, recentIds(), railExtras());
+    const byId = new Map((next.cards || []).map((card) => [String(card.id), card]));
+    const tiles = (next.sections?.recentlySeenIds || []).map((id) => byId.get(String(id)));
+    if (JSON.stringify(tiles) !== JSON.stringify(recentTiles)) commit(next);
   }
 
   function startLoads(gen, seeded) {
