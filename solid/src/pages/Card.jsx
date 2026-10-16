@@ -14,7 +14,8 @@ import {
   Switch,
   untrack,
 } from 'solid-js';
-import { useLocation, useNavigate, useParams } from '@solidjs/router';
+import { useLocation, useParams } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   artistHref,
   artistSlug,
@@ -169,7 +170,7 @@ function offerCopies(rows) {
 export default function Card() {
   const params = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const lang = () => params.lang || 'en';
   const cardId = () => realPublicCardId(params.cardId);
   const deskKey = createMemo(() => `${lang()}:${cardId()}`);
@@ -211,7 +212,7 @@ function CardDesk(props) {
   const cardId = untrack(() => String(props.cardId));
   const lang = untrack(() => props.lang);
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const pinnedCurrency = () => currencyFromSearch(location.search);
 
   // First paint: URL stub + recent tile + remembered identity + the clicked tile.

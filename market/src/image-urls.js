@@ -120,7 +120,7 @@ export function catalogSlugMatchesCard(url, card) {
 }
 
 /** Drop CardTrader preview_ / public-id keys; keep this card's leftover JPEG. */
-export function ownCatalogImage(card, advertised) {
+export function ownCatalogImage(card, advertised, gameId) {
   if (isPrefixedCatalog(advertised)) {
     return advertised;
   }
@@ -133,7 +133,7 @@ export function ownCatalogImage(card, advertised) {
   if (rewritten && leftoverKeyMatchesCard(rewritten, id) && catalogSlugMatchesCard(rewritten, withId)) {
     return withCatalogCache(String(rewritten).split(/[?#]/)[0]);
   }
-  return withCatalogCache(leftoverUrlFromCard(withId) || rewritten || advertised || '');
+  return withCatalogCache(leftoverUrlFromCard(withId, gameId) || rewritten || advertised || '');
 }
 
 export function homepageMatchesCatalog(homepageUrl, fullUrl) {

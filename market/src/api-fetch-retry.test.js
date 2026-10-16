@@ -28,6 +28,8 @@ function apiFetcher(answers) {
   const deps = {
     fetch,
     gameRequestHeaders: () => ({}),
+    gameRequestHeadersFor: () => ({}),
+    catalogGameFromUrl: () => '',
     isApiRequestPath,
     isNetworkError,
     isOriginDownError,

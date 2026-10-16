@@ -1,3 +1,4 @@
+import { game, knownGameId } from './game.js';
 import { displayName, printingIdentity } from './identity.js';
 import {
   catalogImageId,
@@ -80,6 +81,7 @@ export function listingReference({ offer, card, qty } = {}) {
     grade: String(offer?.grade || offer?.grader || ''),
     imageUrl: cardImage(card, offer),
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
+    game: knownGameId(card?.game || offer?.game) || game().id,
     pricePkn: Number(offer?.pricePkn) || 0,
     ...(stock != null ? { stock } : {}),
     ...(copies != null ? { qty: copies } : {}),
@@ -101,6 +103,7 @@ export function cardReference(card) {
     artist: identity.artist || '',
     imageUrl: cardImage(card),
     path: card?.canonicalPath || card?.path || '',
+    game: knownGameId(card?.game) || game().id,
     pricePkn: Number(tilePricePkn(card) || card?.pricePkn) || 0,
   };
 }
@@ -121,6 +124,7 @@ export function cardsReference(cards) {
     setName: '',
     imageUrl: first.imageUrl,
     path: '',
+    game: first.game,
     pricePkn: 0,
     cards: list.map((card) => cardReference(card)),
   };
@@ -141,6 +145,7 @@ export function listingsReference(rows) {
     setName: '',
     imageUrl: list[0].imageUrl || '',
     path: '',
+    game: knownGameId(list[0].game) || game().id,
     pricePkn: 0,
     cards: list,
   };
@@ -357,7 +362,7 @@ export function catalogPath(href, cardId) {
 
 /** A dashboard miniature or any picture that is not a full catalog card. */
 export function looseCardReference({
-  imageUrl = '', name = 'Card', href = '', cardId = '', sellerUid = '', seller = '', pricePkn = 0, listingId = '',
+  imageUrl = '', name = 'Card', href = '', cardId = '', sellerUid = '', seller = '', pricePkn = 0, listingId = '', game: gameId = '',
 } = {}) {
   return {
     kind: sellerUserId(sellerUid) ? 'listing' : 'card',
@@ -369,8 +374,24 @@ export function looseCardReference({
     setName: '',
     imageUrl: String(imageUrl || '').trim(),
     path: catalogPath(href, cardId),
+    game: knownGameId(gameId) || game().id,
     pricePkn: Number(pricePkn) || 0,
   };
+}
+
+/**
+ * Catalog a chat tag should load. The row's game wins, then a Poko-thread
+ * default (old replies are Pokémon), then the open page.
+ */
+export function resolveTagGame(row, { defaultGame = '', pageGame } = {}) {
+  const explicit = knownGameId(row?.game);
+  if (explicit) return explicit;
+  const fallback = knownGameId(defaultGame);
+  if (fallback) return fallback;
+  if (pageGame != null && String(pageGame).trim() !== '') {
+    return knownGameId(pageGame) || game().id;
+  }
+  return game().id;
 }
 
 /** Full scan first, so the chat card shows the whole printing. */
@@ -703,7 +724,7 @@ function stackLayerFromWarm(warm, zIndex, fit = 'cover') {
   return plate;
 }
 
-export function bundleReference({ kind, slug, name, imageUrl, path }) {
+export function bundleReference({ kind, slug, name, imageUrl, path, game: gameId }) {
   const cleanKind = kind === 'artist' || kind === 'species' ? kind : 'expansion';
   const id = String(slug || '').trim();
   const fallback = cleanKind === 'artist' ? 'Artist' : cleanKind === 'species' ? 'Pokémon' : 'Set';
@@ -717,6 +738,7 @@ export function bundleReference({ kind, slug, name, imageUrl, path }) {
     setName: cleanKind === 'expansion' ? String(name || '') : '',
     imageUrl: String(imageUrl || ''),
     path: String(path || ''),
+    game: knownGameId(gameId) || game().id,
     pricePkn: 0,
   };
 }
