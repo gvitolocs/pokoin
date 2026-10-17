@@ -1,217 +1,133 @@
 const toggle = document.querySelector(".nav-toggle");
 const navLinks = document.querySelector(".nav-links");
 const nav = document.querySelector(".nav");
+const mobileNav = window.matchMedia("(max-width: 720px)");
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 if (toggle && navLinks) {
-  const mobileNav = () => window.matchMedia("(max-width: 991px)").matches;
-  const setMenuOpen = (open) => {
+  const background = document.querySelectorAll(
+    "main, .site-footer, .cookie-banner",
+  );
+  const setMenuOpen = (open, restoreFocus = false) => {
+    open = open && mobileNav.matches;
     toggle.classList.toggle("is-open", open);
     navLinks.classList.toggle("is-open", open);
     toggle.setAttribute("aria-expanded", String(open));
-    if (mobileNav()) navLinks.setAttribute("aria-hidden", String(!open));
-    else navLinks.removeAttribute("aria-hidden");
+    toggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
     document.body.style.overflow = open ? "hidden" : "";
+    background.forEach((element) => {
+      element.inert = open;
+    });
+    if (restoreFocus) toggle.focus();
   };
   toggle.addEventListener("click", () => {
-    setMenuOpen(!toggle.classList.contains("is-open"));
+    const open = toggle.getAttribute("aria-expanded") !== "true";
+    setMenuOpen(open);
+    if (open) navLinks.querySelector("a")?.focus();
   });
   navLinks.querySelectorAll("a").forEach((link) => {
     link.addEventListener("click", () => setMenuOpen(false));
   });
+  document.addEventListener("keydown", (event) => {
+    if (toggle.getAttribute("aria-expanded") !== "true") return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setMenuOpen(false, true);
+    }
+    if (event.key === "Tab") {
+      const first = navLinks.querySelector("a");
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        toggle.focus();
+      } else if (!event.shiftKey && document.activeElement === toggle) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+  });
+  mobileNav.addEventListener("change", () => setMenuOpen(false));
 }
 
 if (nav) {
-  const onScroll = () => {
+  const onScroll = () =>
     nav.classList.toggle("is-scrolled", window.scrollY > 10);
-  };
   onScroll();
   window.addEventListener("scroll", onScroll, { passive: true });
 }
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.getRegistrations().then((regs) => {
-    regs.forEach((r) => r.unregister());
-  }).catch(() => {});
-}
-
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function staggerDelay(el) {
-  if (el.dataset.delay != null && el.dataset.delay !== "") {
-    return Number(el.dataset.delay);
-  }
-  if (el.classList.contains("reveal-fade")) return 300;
-  const parent = el.parentElement;
-  if (!parent) return 0;
-  const sibs = [...parent.children].filter((n) => n.classList.contains("reveal"));
-  const idx = Math.max(0, sibs.indexOf(el));
-  return Math.min(idx, 3) * 150;
-}
-
 const revealEls = document.querySelectorAll(".reveal");
-if (reduceMotion) {
+if (reduceMotion.matches || !("IntersectionObserver" in window)) {
   revealEls.forEach((el) => el.classList.add("is-visible"));
 } else {
-  const revealObserver = new IntersectionObserver(
+  const observer = new IntersectionObserver(
     (entries) => {
       entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-visible");
-          revealObserver.unobserve(entry.target);
-        }
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-visible");
+        observer.unobserve(entry.target);
       });
     },
-    { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
+    { threshold: 0.08 },
   );
-  revealEls.forEach((el) => {
-    const delay = staggerDelay(el);
-    if (el.matches(".store-btn, .btn-dark")) {
-      el.style.transitionDelay = `0ms, ${delay}ms, ${delay}ms`;
-    } else {
-      el.style.transitionDelay = `${delay}ms`;
-    }
-    revealObserver.observe(el);
+  revealEls.forEach((el) => observer.observe(el));
+}
+
+const tabs = [...document.querySelectorAll('.demo-tabs [role="tab"]')];
+const activateTab = (tab, focus = false) => {
+  tabs.forEach((item) => {
+    const active = item === tab;
+    item.setAttribute("aria-selected", String(active));
+    item.tabIndex = active ? 0 : -1;
+    const panel = document.getElementById(item.getAttribute("aria-controls"));
+    if (panel) panel.hidden = !active;
   });
-}
+  if (focus) tab.focus();
+};
+tabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => activateTab(tab));
+  tab.addEventListener("keydown", (event) => {
+    let next;
+    if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+    if (event.key === "ArrowLeft")
+      next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = tabs.length - 1;
+    if (next == null) return;
+    event.preventDefault();
+    activateTab(tabs[next], true);
+  });
+});
 
-function animateCounter(el) {
-  const text = el.textContent.trim();
-  const match = text.match(/^(\d+)/);
-  if (!match) return;
-  const target = parseInt(match[1], 10);
-  if (!target) return;
-  const duration = 2000;
-  const start = performance.now();
-  const tick = (now) => {
-    if (el._countCancelled) return;
-    const t = Math.min(1, (now - start) / duration);
-    el.textContent = String(Math.round(target * t));
-    if (t < 1) {
-      el._countTimer = requestAnimationFrame(tick);
-    } else {
-      el.textContent = String(target);
-      el._countTimer = 0;
-    }
-  };
-  el._countTimer = requestAnimationFrame(tick);
-}
-
-if (!reduceMotion) {
-  const counters = document.querySelectorAll("[data-count]");
-  const countObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting && !entry.target.classList.contains("counted")) {
-          entry.target.classList.add("counted");
-          animateCounter(entry.target);
-        }
-      });
-    },
-    { threshold: 0.5 }
-  );
-  counters.forEach((counter) => countObserver.observe(counter));
-}
-
-const heightEl = document.querySelector("[data-height]");
-const peerEl = document.querySelector("[data-peers]");
-const healthEl = document.querySelector("[data-health]");
-const peerList = document.querySelector("[data-peer-list]");
-
-function fill(el, value) {
-  if (!el) return;
-  el._countCancelled = true;
-  if (el._countTimer) {
-    cancelAnimationFrame(el._countTimer);
-    el._countTimer = 0;
-  }
-  el.classList.add("counted");
-  el.textContent = value;
-}
-
-function flagEmoji(cc) {
-  if (!/^[A-Za-z]{2}$/.test(cc || "")) return "";
-  return String.fromCodePoint(
-    ...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))
-  );
-}
-
-function placeText(geo) {
-  if (!geo) return "";
-  const city = geo.city || "";
-  const country = geo.country || "";
-  const cc = (geo.countryCode || "").toUpperCase();
-  const place = [city, country].filter(Boolean).join(", ");
-  const code = cc ? ` [${cc}]` : "";
-  const flag = flagEmoji(cc);
-  return [flag, `${place}${code}`].filter(Boolean).join(" ").trim();
-}
-
-function peerRow(peer, fallbackHeight) {
-  const row = document.createElement("div");
-  row.className = "peer";
-  const left = document.createElement("span");
-  const dot = document.createElement("span");
-  dot.className = "dot";
-  const place = placeText(peer);
-  left.append(dot, place ? ` ${place}` : " peer");
-  const right = document.createElement("span");
-  const height = peer.chainHeight != null ? peer.chainHeight : fallbackHeight;
-  right.className = "live";
-  right.textContent = height ? `bootstrap · height ${height}` : "bootstrap";
-  row.append(left, right);
-  return row;
-}
-
-const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 400));
-
+let marketPrefetched = false;
 function prefetchMarketplace() {
-  if (window.__pokoinMarketPrefetch) return;
-  window.__pokoinMarketPrefetch = true;
+  if (marketPrefetched || navigator.connection?.saveData) return;
+  marketPrefetched = true;
   fetch("/marketplace", { credentials: "same-origin" })
-    .then((r) => r.text())
+    .then((response) => (response.ok ? response.text() : ""))
     .then((html) => {
       const doc = new DOMParser().parseFromString(html, "text/html");
-      doc.querySelectorAll("script[src], link[rel='stylesheet'], link[rel='modulepreload']").forEach((el) => {
-        const href = el.getAttribute("src") || el.getAttribute("href");
-        if (!href) return;
-        const link = document.createElement("link");
-        link.rel = el.tagName === "SCRIPT" || el.getAttribute("rel") === "modulepreload" ? "modulepreload" : "prefetch";
-        link.href = href;
-        document.head.appendChild(link);
-      });
+      doc
+        .querySelectorAll(
+          'script[src], link[rel="stylesheet"], link[rel="modulepreload"]',
+        )
+        .forEach((element) => {
+          const href =
+            element.getAttribute("src") || element.getAttribute("href");
+          if (!href) return;
+          const link = document.createElement("link");
+          link.rel = "prefetch";
+          link.href = href;
+          document.head.appendChild(link);
+        });
     })
     .catch(() => {});
-  fetch("/api/marketplace-home?v=rising-month", { credentials: "same-origin", cache: "no-store" }).catch(() => {});
 }
-
-document.querySelectorAll('a[href="/marketplace"], a[href="/marketplace/"]').forEach((a) => {
-  a.addEventListener("pointerenter", prefetchMarketplace, { once: true });
-  a.addEventListener("focus", prefetchMarketplace, { once: true });
+document.querySelectorAll('a[href="/marketplace"]').forEach((link) => {
+  link.addEventListener("pointerenter", prefetchMarketplace, { once: true });
+  link.addEventListener("focus", prefetchMarketplace, { once: true });
 });
 
-idle(() => {
-  prefetchMarketplace();
-  fetch("https://rpc.pokoin.com/health", { cache: "no-store" })
-    .then((r) => r.json())
-    .then((d) => {
-      if (d.chainHeight != null) fill(heightEl, String(d.chainHeight));
-      if (d.status) fill(healthEl, d.status);
-    })
-    .catch(() => {});
-  fetch("https://rpc.pokoin.com/network/peer-status.json", { cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((d) => {
-      if (!d) return;
-      const live = (d.peers || []).filter((p) => p.reachable !== false);
-      const count = d.livePeerCount != null ? d.livePeerCount : live.length;
-      if (count) fill(peerEl, String(count));
-      if (!peerList || !live.length) return;
-      const height = d.chainHeight != null ? d.chainHeight : heightEl ? heightEl.textContent : "";
-      peerList.replaceChildren(...live.map((p) => peerRow(p, height)));
-    })
-    .catch(() => {});
-});
-
+// Share the existing consent key and cookie with the marketplace SPA.
 const COOKIE_KEY = "pokoin.cookieConsent";
 const COOKIE_NAME = "pokoin_cookie_consent";
 const cookieBanner = document.querySelector("[data-cookie-banner]");
@@ -229,15 +145,17 @@ if (cookieBanner) {
   if (accepted) {
     cookieBanner.remove();
   } else {
-    cookieBanner.querySelector("[data-cookie-accept]")?.addEventListener("click", () => {
-      try {
-        localStorage.setItem(COOKIE_KEY, "1");
-      } catch (_) {}
-      try {
-        const secure = location.protocol === "https:" ? "; Secure" : "";
-        document.cookie = `${COOKIE_NAME}=1; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
-      } catch (_) {}
-      cookieBanner.remove();
-    });
+    cookieBanner
+      .querySelector("[data-cookie-accept]")
+      ?.addEventListener("click", () => {
+        try {
+          localStorage.setItem(COOKIE_KEY, "1");
+        } catch (_) {}
+        try {
+          const secure = location.protocol === "https:" ? "; Secure" : "";
+          document.cookie = `${COOKIE_NAME}=1; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
+        } catch (_) {}
+        cookieBanner.remove();
+      });
   }
 }
