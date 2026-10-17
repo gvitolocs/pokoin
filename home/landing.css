@@ -976,7 +976,7 @@ h2 {
 .poko-card {
   background: #1c2144;
 }
-.extension-card {
+.inventory-card {
   background: #151519;
 }
 .companion-card:hover {
@@ -1001,7 +1001,11 @@ h2 {
   font-size: 23px;
   color: var(--yellow);
 }
-.extension-mark {
+.inventory-mark svg {
+  width: 1em;
+  height: 1em;
+}
+.inventory-mark {
   font-size: 58px;
   line-height: 1;
   margin-top: 25px;
@@ -1084,7 +1088,7 @@ h2 {
   .companion-card h2 {
     font-size: 29px;
   }
-  .extension-mark {
+  .inventory-mark {
     font-size: 45px;
   }
 }

@@ -263,65 +263,42 @@ export const FEATURES = [
     ],
   },
   {
-    path: "/features/browser-extension",
-    category: "Browse",
-    label: "Chrome extension",
-    title: "Pokoin Chrome Extension for Card Collectors | Pokoin",
+    path: "/features/cardrails-inventory",
+    category: "Organise",
+    label: "CardRails inventory",
+    title: "CardRails Trading Card Inventory & Stock Management | Pokoin",
     description:
-      "Bring Pokoin into your browsing workflow with its Chrome side panel. Download the extension ZIP and connect the card tools to your Pokoin account.",
-    headline: "Keep Pokoin beside the page you are browsing.",
+      "Scan cards, organise quantities and storage locations, and connect your Pokoin seller inventory with CardRails.",
+    headline: "Every card. In its place.",
     intro:
-      "The Pokoin Chrome extension brings a side panel into your browsing workflow. Use it as another entry point into Pokoin’s card tools and account connections while you work with cards on the web.",
+      "CardRails is a dedicated workspace for trading card inventory. Scan cards, review the matches, and keep quantities, conditions and storage locations together.",
     answer:
-      "Download the extension ZIP, extract it, and load the extracted folder as an unpacked Chrome extension. The current distribution is a ZIP download, not a Chrome Web Store installation.",
-    visual: "extension",
-    primary: cta("Download the extension ZIP", "/download/extension.zip"),
-    secondary: cta("Open your Pokoin account", "/profile"),
+      "Open CardRails to manage your stock. Connect your Pokoin account through the app’s connection flow to work with the cards you sell on Pokoin.",
+    visual: "inventory",
+    primary: cta("Open CardRails", "https://cardrails.vercel.app"),
+    secondary: cta("Open My Pokoin", "/mypokoin"),
     sections: [
-      section(
-        "Install the current ZIP build",
-        [
-          "Extract the downloaded ZIP into a folder you can keep on your computer. In Chrome, open the Extensions page, turn on Developer mode, choose Load unpacked, and select the folder containing the extension’s manifest.",
-          "Keep the folder in place after installation. When updating an unpacked extension, use the new build and check the permissions Chrome requests.",
-        ],
-        {
-          links: [
-            cta(
-              "Chrome’s official unpacked-extension instructions",
-              "https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked",
-            ),
-          ],
-        },
-      ),
-      section("Connect deliberately", [
-        "Sign in to the Pokoin account you intend to use, then follow the extension’s connection flow. Account connections and Power Tools actions are separate from simply browsing a public card page.",
-        "Supported page integrations depend on the extension version and the site being visited. Check the side panel’s state before relying on a recognition or sync action. Downloading the extension does not automatically connect every marketplace account.",
+      section("From a scan to organised stock", [
+        "Capture cards, review their printings and attributes, then add the batch to inventory. Keep quantities and physical shelf positions attached to the copies you own.",
       ]),
-      section("Keep the rest of your tools within reach", [
-        "The extension complements the website: use the photo scanner for a card image, Scan Connect for a physical pile, and My Pokoin for the inventory you have reviewed. Poko is available on the website when you want help researching a card.",
-        "You can use the public marketplace without installing the extension. Choose the browser workflow that fits the task in front of you.",
+      section("Connect your Pokoin inventory", [
+        "Start the Pokoin connection inside CardRails. Review the account and permissions before approving access. Connected inventory uses your Pokoin stock locations to help you find the physical cards.",
       ]),
     ],
     faqs: [
       faq(
-        "Is the extension installed from the Chrome Web Store?",
-        "The current public link downloads a ZIP. Extract it and load the folder as an unpacked extension in Chrome’s Developer mode.",
+        "How do I connect CardRails to Pokoin?",
+        "Open CardRails and start its Pokoin connection flow. Sign in to the intended Pokoin account, review the requested access, and return to CardRails after approving.",
       ),
       faq(
-        "Do I need the extension to use Pokoin?",
-        "No. The marketplace, scanner, inventory, collection, and Poko website tools are browser pages. The extension adds a side-panel workflow.",
+        "Can I track where my cards are stored?",
+        "Yes. CardRails tracks physical stock positions, and its Pokoin connection uses your Pokoin inventory locations.",
       ),
     ],
     related: [
       "/features/card-scanner",
       "/features/card-inventory",
-      "/features/poko-assistant",
-    ],
-    sources: [
-      cta(
-        "Google Chrome: load an unpacked extension",
-        "https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked",
-      ),
+      "/learn/scan-cards-to-inventory",
     ],
   },
   {
@@ -1151,7 +1128,7 @@ export const HUBS = [
     category: "Your card world, together",
     title: "Card Scanner, Collection Tracker, Inventory & Poko | Pokoin",
     description:
-      "Explore everything Pokoin offers: browser card scanning, collection and portfolio tracking, seller inventory, Poko AI assistant, marketplace, and Chrome extension.",
+      "Explore everything Pokoin offers: browser card scanning, collection and portfolio tracking, seller inventory, Poko AI assistant, marketplace, and CardRails inventory.",
     headline: "Find the tool for your next card move.",
     intro:
       "Pokoin brings card recognition, a collection tracker, seller inventory, an AI assistant, and a trading card marketplace into one browser experience. Start with the task in front of you and keep the same card context as you explore.",
@@ -1192,11 +1169,11 @@ export const HUBS = [
     faqs: [
       faq(
         "Is Pokoin only a token website?",
-        "No. Pokoin includes a card scanner, personal collection and portfolio, seller inventory, Poko assistant, marketplace, and Chrome extension. Card checkout supports Stripe and seller-accepted PKN.",
+        "No. Pokoin includes a card scanner, personal collection and portfolio, seller inventory, Poko assistant, marketplace, and CardRails inventory. Card checkout supports Stripe and seller-accepted PKN.",
       ),
       faq(
         "Can I use Pokoin from a browser?",
-        "Yes. The website tools work in a browser on phone and desktop. The Chrome extension is an optional side-panel workflow.",
+        "Yes. The website tools work in a browser on phone and desktop. CardRails provides a dedicated workspace for managing card stock.",
       ),
     ],
     related: ["/alternatives", "/learn"],

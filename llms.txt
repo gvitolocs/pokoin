@@ -2,7 +2,7 @@
 
 > Pokoin is a browser-based trading card platform: card identification, a
 > personal collection and portfolio, seller inventory, Poko AI card assistant,
-> Chrome extension, and a peer-to-peer marketplace. Pokémon is the main
+> CardRails inventory, and a peer-to-peer marketplace. Pokémon is the main
 > catalog; other games have their own marketplace paths.
 
 ## Product and practical workflows
@@ -16,8 +16,8 @@
   personal ownership and portfolio overview, separate from sale stock.
 - [Poko AI assistant](https://pokoin.com/features/poko-assistant): printing,
   illustrator, and market research with the open card and signed-in context.
-- [Chrome extension](https://pokoin.com/features/browser-extension): side-panel
-  workflow; current distribution is a ZIP installed as an unpacked extension.
+- [CardRails inventory](https://pokoin.com/features/cardrails-inventory): dedicated
+  card stock management, scan review, physical locations and Pokoin connection.
 - [Marketplace](https://pokoin.com/features/marketplace): catalog research,
   printings, seller listings, and sold history.
 - [Selling fees](https://pokoin.com/features/seller-fees): 3% buyer markup,
