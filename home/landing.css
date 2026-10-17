@@ -746,7 +746,7 @@ h2 {
   padding-block: 25px;
   border-bottom: 1px solid var(--border);
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 20px;
   font-size: 12px;
@@ -1421,28 +1421,5 @@ h2 {
   .sell-section .section-heading > a {
     white-space: normal;
     max-width: 10ch;
-  }
-}
-
-.market-proof > span {
-  display: block;
-  font-size: 10px;
-  color: var(--muted);
-}
-.market-proof > strong {
-  display: block;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--yellow);
-}
-@media (max-width: 720px) {
-  .market-proof {
-    max-width: 52%;
-  }
-  .market-proof > strong {
-    font-size: 11px;
-  }
-  .market-proof > span {
-    font-size: 9px;
   }
 }
