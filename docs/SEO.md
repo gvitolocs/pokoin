@@ -204,7 +204,7 @@ Keep comparisons specific and fair. Use current primary sources, state
 Pokoin's authorship, include material limitations, and change `reviewed`
 only after an actual editorial review. Do not create city/keyword doorway
 variants or claim recognition benchmarks without measured evidence.
-The fee page advertises the existing 3% marketplace commission and compares
+The fee page describes the 3% buyer markup and actual seller payment costs, and compares
 named published base rates, not universal lowest all-in selling cost.
 Commission caps, minima, seller programs, VAT, payment/withdrawal/conversion,
 and network costs can change an order's effective cost. The fee-copy test
@@ -241,10 +241,9 @@ Keep the payout media distinct: 90% of market value (minimum 1 PKN per card)
 is immediate **PKN credit**; managed selling pays **real money after sale** at
 15.5% base commission, one percentage point below CardTrader’s published
 1-Day Ready 16.5% base rate. These send-in offers use Contact for intake; the
-CardTrader 1-DR account route is an external account viewer. The 3% self-service
-marketplace rate remains the code-backed checkout rate. Current card settlement
-transfers 97% plus shipping before adjustments; Stripe processing is charged to
-the platform, rather than deducted again from that seller transfer. Contracted
+CardTrader 1-DR account route is an external account viewer. The self-service
+marketplace adds a 3% buyer markup. Seller item value is not reduced by that
+markup; actual Stripe costs are allocated across seller proceeds. Contracted
 Stripe rates and external payout/conversion charges are not established by
 repository code. See the research folder’s `SELLING-OFFERS.md` audit.
 
@@ -255,3 +254,9 @@ asks/daily lowest asks; optional matched TCGplayer aggregate USD quotes in Poko
 and inventory price-check. The price-checker page explains coverage, dates,
 currencies and the distinction from inferred/completed sales. Do not describe
 Cardmarket/eBay as integrated price feeds or claim every quote is a settled sale.
+
+The authoritative economic contract is [CHECKOUT_FEES.md](CHECKOUT_FEES.md):
+3% is added to the buyer’s card subtotal; sellers bear only actual allocated
+payment costs, not a Pokoin seller commission. The single cart transaction’s
+fixed fee is shared once with exact-cent allocation. Separately billed Connect
+costs require verified reconciliation rather than guessed per-order deductions.
