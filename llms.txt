@@ -48,13 +48,32 @@ benchmark recognition accuracy, or promise an automatic collection migration.
   as public catalog content.
 - Card recognition suggests a printing; it does not grade physical condition.
   Scanner catalog coverage and marketplace game coverage are different.
-- Listed prices are shown in PKN as plain digits, for example `2642 PKN`.
-  Review the actual payment options and buyer-protection terms at checkout.
-- The 3% platform commission is a base commission, not an all-in cost claim.
+- Card checkout supports Stripe; PKN is available where the seller accepts it.
+  When displaying PKN, use plain digits, for example `2642 PKN`.
+  Review the final payment and buyer-protection terms at checkout.
+- The seller commission is 3% of item value. Current card settlement transfers
+  97% plus shipping before refunds/adjustments; Stripe processing is charged
+  to Pokoin’s platform balance, not deducted again from that transfer.
+  This is a base commission, not an all-in cost claim.
   Shipping, optional cover, payment/conversion, withdrawals, and network costs
   need to be checked separately. Competitor caps and programs affect comparisons.
 - Asking prices, reference estimates, and recorded sold prices are different.
   Match the printing, condition, language, finish, and date when comparing.
+
+- [Pokémon card price checker](https://pokoin.com/features/pokemon-card-price-checker)
+
+## Send cards to Pokoin
+
+- [Trade cards for PKN](https://pokoin.com/features/trade-cards-for-pkn): 90% of
+  market value in PKN credit, at least 1 PKN per card; no resale wait. Coordinate
+  card receipt, valuation and credit issuance through Contact. This is PKN, not cash.
+- [Managed selling](https://pokoin.com/features/managed-selling): real-money
+  proceeds after cards sell; 15.5% managed-selling commission. Separate from
+  self-service marketplace selling at 3%. Intake is coordinated through Contact.
+- CardTrader 1-Day Ready publishes 16.5% (minimum 1 cent, VAT extra under its
+  policy). Pokoin managed selling is one percentage point lower in base rate;
+  this is not a total-cost guarantee. The CardTrader 1-DR account tab displays
+  external CardTrader data and is not a Pokoin intake flow.
 
 ## Catalog
 

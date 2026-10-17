@@ -223,3 +223,27 @@ impressions and clicks for actual task and alternative queries, and
 referrals from services such as `chatgpt.com`; use the existing analytics
 setup rather than adding an unrelated tracking script. Indexing, ranking,
 and AI recommendations depend on the search systems and are not guaranteed.
+
+### Minimal landing and offer scope (17 October 2026)
+
+The landing keeps a short hero, three task cards, two send-in offers, compact
+assistant/extension panels, and a reduced footer. Detailed articles remain on
+public URLs. Search-demand evidence, raw autocomplete responses and estimated
+keyword volumes are recorded in `docs/research/pokemon-search-2026-10-17/`.
+Volumes are country-specific Semrush estimates; suggestions have no numeric
+volume. Google Trends returned 429, so no trend claims were made.
+
+New intent pages: `/features/pokemon-card-price-checker`,
+`/features/trade-cards-for-pkn`, and `/features/managed-selling`. All are linked
+from the homepage and feature hub and included in the generated product sitemap.
+
+Keep the payout media distinct: 90% of market value (minimum 1 PKN per card)
+is immediate **PKN credit**; managed selling pays **real money after sale** at
+15.5% base commission, one percentage point below CardTrader’s published
+1-Day Ready 16.5% base rate. These send-in offers use Contact for intake; the
+CardTrader 1-DR account route is an external account viewer. The 3% self-service
+marketplace rate remains the code-backed checkout rate. Current card settlement
+transfers 97% plus shipping before adjustments; Stripe processing is charged to
+the platform, rather than deducted again from that seller transfer. Contracted
+Stripe rates and external payout/conversion charges are not established by
+repository code. See the research folder’s `SELLING-OFFERS.md` audit.

@@ -2,7 +2,6 @@ const toggle = document.querySelector(".nav-toggle");
 const navLinks = document.querySelector(".nav-links");
 const nav = document.querySelector(".nav");
 const mobileNav = window.matchMedia("(max-width: 720px)");
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 if (toggle && navLinks) {
   const background = document.querySelectorAll(
@@ -53,23 +52,6 @@ if (nav) {
     nav.classList.toggle("is-scrolled", window.scrollY > 10);
   onScroll();
   window.addEventListener("scroll", onScroll, { passive: true });
-}
-
-const revealEls = document.querySelectorAll(".reveal");
-if (reduceMotion.matches || !("IntersectionObserver" in window)) {
-  revealEls.forEach((el) => el.classList.add("is-visible"));
-} else {
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        entry.target.classList.add("is-visible");
-        observer.unobserve(entry.target);
-      });
-    },
-    { threshold: 0.08 },
-  );
-  revealEls.forEach((el) => observer.observe(el));
 }
 
 const tabs = [...document.querySelectorAll('.demo-tabs [role="tab"]')];

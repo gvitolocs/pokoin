@@ -119,7 +119,7 @@ export const FEATURES = [
       section(
         "Understand the marketplace you are listing on",
         [
-          "Pokoin marketplace prices and checkout use PKN. Check the wallet and buyer-protection information before you begin selling. An inventory record or an asking price does not mean a buyer has purchased the card.",
+          "Pokoin supports card payments via Stripe and PKN where accepted by the seller. Check payment and buyer-protection information before you begin selling. An inventory record or an asking price does not mean a buyer has purchased the card.",
         ],
         {
           links: [
@@ -330,7 +330,7 @@ export const FEATURES = [
     label: "Card marketplace",
     title: "Trading Card Marketplace, Printings & Sold History | Pokoin",
     description:
-      "Explore Pokémon and other trading card games on Pokoin. Browse sets, artists, printings, seller listings, and sold history, with marketplace checkout in PKN.",
+      "Explore Pokémon and other trading card games on Pokoin. Browse sets, artists, printings, seller listings, and sold history, with card payments and seller-supported PKN checkout.",
     headline: "A trading card marketplace built around the card.",
     intro:
       "Pokoin combines a trading card catalog with seller listings, printing research, and collection tools. Browse Pokémon or another supported game, then open a specific card to explore the market behind that printing.",
@@ -363,7 +363,7 @@ export const FEATURES = [
       section(
         "Know how Pokoin checkout works",
         [
-          "Listings and marketplace checkout use PKN. Pokoin checkout holds the buyer’s site PKN in escrow until delivery is confirmed, with the process described in the buyer-protection policy.",
+          "Pay by card through Stripe, or use PKN where the seller accepts it. Seller funds are released through the relevant delivery and buyer-protection process.",
           "Compare the actual seller, shipping terms, card attributes, and checkout requirements before purchasing. If you want to sell, review your inventory and listing details first.",
         ],
         {
@@ -382,7 +382,7 @@ export const FEATURES = [
       ),
       faq(
         "What currency does Pokoin use?",
-        "Pokoin marketplace prices and checkout use PKN. Read the wallet and buyer-protection information before using checkout.",
+        "Card payments run through Stripe. PKN is also available where accepted by the seller. Review the final checkout and buyer-protection terms.",
       ),
     ],
     related: [
@@ -426,7 +426,7 @@ export const ALTERNATIVES = [
       [
         "Things to check",
         "Current free and PRO feature limits.",
-        "Marketplace checkout uses PKN; no native app-store listing yet.",
+        "Card payments via Stripe; PKN where accepted. No native app-store listing yet.",
       ],
     ],
     sections: [
@@ -540,7 +540,7 @@ export const ALTERNATIVES = [
     label: "TCGplayer",
     title: "TCGplayer Scanner & Inventory Alternative | Pokoin",
     description:
-      "Compare Pokoin’s browser scanner and inventory workflow with TCGplayer’s app and Scan & Identify tools. Review the workflow, marketplace, and PKN differences.",
+      "Compare Pokoin’s browser scanner and inventory workflow with TCGplayer’s app and Scan & Identify tools. Review the workflow, marketplace, and payment differences.",
     headline: "A TCGplayer alternative for scanning, stock, and card research.",
     intro:
       "Pokoin is an alternative workflow for collectors and sellers who want a browser scanner, reviewed inventory, collection tools, and Poko in the same platform. It is a different marketplace, so check how listings and checkout fit your needs before moving stock.",
@@ -567,7 +567,7 @@ export const ALTERNATIVES = [
       [
         "Marketplace",
         "Listings and seller operations belong to TCGplayer’s platform.",
-        "Pokoin listings and checkout use PKN.",
+        "Card payments via Stripe, or PKN where the seller accepts it.",
       ],
     ],
     sections: [
@@ -577,7 +577,7 @@ export const ALTERNATIVES = [
       ]),
       section("Know where your listings will live", [
         "Pokoin is not a different front end for the TCGplayer Seller Portal. Preparing a Pokoin listing does not mean it has been published to TCGplayer.",
-        "Keep an export of your source stock, check quantities before importing, and use the relevant connection flow when an external service is involved. Pokoin marketplace settlement is PKN, which is a material part of the decision.",
+        "Keep an export of your source stock, check quantities before importing, and use the relevant connection flow when an external service is involved. Pokoin supports Stripe card payments and seller-supported PKN payments; review the relevant settlement requirements.",
       ]),
       section("Add a conversational research step", [
         "Open a matched printing to examine listings and sold history, or ask Poko about the card, expansion, or illustrator. The public marketplace is available for research before you decide to list stock.",
@@ -614,13 +614,13 @@ export const ALTERNATIVES = [
     label: "Cardmarket",
     title: "Cardmarket Alternative for Collectors & Sellers | Pokoin",
     description:
-      "Explore Pokoin as a Cardmarket alternative for card discovery, scanning, inventory, and Poko. Compare the workflow and understand Pokoin’s PKN checkout.",
+      "Explore Pokoin as a Cardmarket alternative for card discovery, scanning, inventory, and Poko. Compare the workflow and understand Pokoin’s card and PKN payment options.",
     headline:
       "Considering a Cardmarket alternative? Explore the card workflow.",
     intro:
       "Pokoin is a trading card marketplace alternative for collectors who also want scanning, a personal collection, inventory tools, and Poko. Compare the available seller offers and the way you want to pay, then decide whether the platform fits the card you are looking for.",
     answer:
-      "Pokoin combines printing research with collection and seller workflows. Its marketplace checkout uses PKN, so it is not a like-for-like replacement for Cardmarket’s payment flow.",
+      "Pokoin combines printing research with collection and seller workflows. It supports card payments through Stripe and PKN where sellers accept it. Compare the payment and protection terms on each marketplace.",
     competitorSummary:
       "Cardmarket’s official new-user guide describes buying from other users, comparing seller offers and attributes, and confirming shipment arrival. It explains its payment flow and Trustee Service. Read its current terms for the details of an actual purchase.",
     rows: [
@@ -632,7 +632,7 @@ export const ALTERNATIVES = [
       [
         "Checkout",
         "The official guide explains account funding and payment methods.",
-        "Marketplace prices and checkout use PKN.",
+        "Card payments via Stripe, or PKN where accepted by the seller.",
       ],
       [
         "Protection",
@@ -653,7 +653,7 @@ export const ALTERNATIVES = [
       section(
         "Understand the settlement difference",
         [
-          "Pokoin’s site-PKN checkout holds funds in escrow until delivery is confirmed under the buyer-protection process. Read the wallet and protection pages before transacting.",
+          "Pokoin releases seller funds through its delivery and buyer-protection process. Card payments use Stripe Connect; PKN is available where accepted. Read the protection policy before transacting.",
           "Neither this comparison nor a catalog reference price promises that a particular card is available, that another marketplace has the same offer, or that protection terms are identical. Check the actual seller, shipping details, and current policy.",
         ],
         {
@@ -671,7 +671,7 @@ export const ALTERNATIVES = [
     faqs: [
       faq(
         "Is Pokoin checkout the same as Cardmarket checkout?",
-        "No. Pokoin marketplace checkout uses PKN. Cardmarket documents its own funding, payment, and Trustee Service rules. Review the current terms on the platform where you buy.",
+        "No. Pokoin supports Stripe card payments and PKN where sellers accept it. Cardmarket documents its own funding, payment, and Trustee Service rules. Review the current terms on the platform where you buy.",
       ),
       faq(
         "Can I research cards before buying PKN?",
@@ -799,7 +799,7 @@ export const GUIDES = [
         "5. Confirm, then inspect the result",
         [
           "Nothing is listed until you confirm in the spreadsheet desk. After confirmation, check the result and import status, then inspect the affected listings in My Pokoin.",
-          "Prices and marketplace checkout use PKN. Verify the amount and the physical attributes before treating the new listings as ready. Export the live inventory when you need a record of the resulting stock.",
+          "Card checkout supports Stripe and seller-accepted PKN. Verify the amount and the physical attributes before treating the new listings as ready. Export the live inventory when you need a record of the resulting stock.",
         ],
         {
           links: [
@@ -840,7 +840,7 @@ FEATURES.push({
   intro:
     "Pokoin charges a 3% platform commission on the card item subtotal. It is the lowest base commission rate among the named standard marketplace plans in the comparison below. Use the comparison to understand the rate and its scope before choosing where to sell.",
   answer:
-    "On a 1000 PKN item subtotal, a 3% seller commission is 30 PKN, leaving 970 PKN of item proceeds before any other applicable costs or adjustments. Shipping and other charges are separate from this base-commission example.",
+    "On a €100 card subtotal, the seller’s item proceeds are €97 before adjustments, plus their shipping amount. The current card-payment settlement does not deduct an additional Stripe processing fee from that seller transfer.",
   visual: "inventory",
   primary: cta("Open seller inventory", "/mypokoin"),
   secondary: cta("Prepare your first listings", "/mypokoin/spreadsheet"),
@@ -875,6 +875,22 @@ FEATURES.push({
   ],
   sections: [
     section(
+      "Choose how you want to sell",
+      [
+        "Self-service marketplace: 3% commission. Managed selling: send cards to Pokoin and receive real-money proceeds after sale, with 15.5% commission. Immediate credit: exchange cards for 90% of market value in PKN, at least 1 PKN per card.",
+      ],
+      {
+        links: [
+          cta("Trade cards for PKN", "/features/trade-cards-for-pkn"),
+          cta("Managed selling for real money", "/features/managed-selling"),
+        ],
+      },
+    ),
+    section("How Stripe fits into the 3% rate", [
+      "For card payments, Pokoin transfers 97% of the item subtotal plus the seller’s shipping amount to their Stripe Connect account, before refunds or adjustments. The current settlement does not subtract another Stripe processing fee from this transfer.",
+      "Stripe charges payment processing to Pokoin’s platform balance in this payment flow. Its actual rate depends on the platform’s Stripe agreement and the transaction. Bank payouts, currency conversion, and optional services have their own terms; the 3% headline describes the marketplace commission.",
+    ]),
+    section(
       "A clear commission is a useful starting point",
       [
         "The 3% rate is Pokoin’s platform commission, not a claim that every cost of selling, receiving payment, converting currencies, or withdrawing funds is included. Review the actual payment and settlement flow for the order you are planning.",
@@ -907,6 +923,10 @@ FEATURES.push({
   ],
   faqs: [
     faq(
+      "Is Stripe processing deducted on top of the seller’s 3% commission?",
+      "The current card-payment settlement transfers 97% of item value plus shipping to the seller’s connected account. Stripe processing is charged to Pokoin’s platform balance. Payout, conversion and optional-service terms should be checked separately.",
+    ),
+    faq(
       "What is Pokoin’s platform commission?",
       "The current marketplace commission is 3% of the card item subtotal. The example on this page isolates that commission; it does not include every possible selling or payment cost.",
     ),
@@ -916,6 +936,10 @@ FEATURES.push({
     ),
   ],
   sources: [
+    cta(
+      "Stripe: separate charges and transfers",
+      "https://docs.stripe.com/connect/separate-charges-and-transfers",
+    ),
     cta(
       "Cardmarket: official selling fee table",
       "https://www.cardmarket.com/en/Pokemon/Policies/Fees",
@@ -933,6 +957,180 @@ FEATURES.push({
     "/features/card-inventory",
     "/learn/import-card-inventory",
     "/alternatives/cardmarket",
+  ],
+});
+
+FEATURES.push({
+  path: "/features/pokemon-card-price-checker",
+  category: "Check card prices",
+  label: "Pokémon card price checker",
+  reviewed: REVIEWED,
+  title: "Pokémon Card Price Checker & Value Research | Pokoin",
+  description:
+    "Check Pokémon card prices by printing. Compare seller listings and available sold history, then track your collection or prepare a listing on Pokoin.",
+  headline: "What is your Pokémon card worth?",
+  intro:
+    "Find the right printing. Compare asking prices and available sold history before you buy, collect or list.",
+  answer:
+    "A useful value check matches the set, collector number, language, finish and condition. An asking price is an offer; it is not proof of a completed sale.",
+  visual: "marketplace",
+  primary: cta("Look up a Pokémon card", "/marketplace"),
+  secondary: cta("Identify it from a photo", "/scan"),
+  sections: [
+    section(
+      "Match the printing",
+      [
+        "Search by card name and set, or start with a photo scan. Check the printed collector number, language and finish on the card page.",
+      ],
+      { links: [cta("Browse Pokémon sets", "/marketplace/sets")] },
+    ),
+    section("Read the price in context", [
+      "Compare live seller listings with the available history for the same printing and attributes. Check dates and source labels: listed prices, inferred listing changes and completed Pokoin sales are different signals. Sparse data is not a guaranteed valuation.",
+    ]),
+    section(
+      "Choose your next move",
+      [
+        "Keep the card in your collection, organise seller inventory, or prepare a listing at a price you choose.",
+      ],
+      {
+        links: [
+          cta("Track your collection", "/mypokoin/collection"),
+          cta("Compare selling fees", "/features/seller-fees"),
+        ],
+      },
+    ),
+  ],
+  faqs: [
+    faq(
+      "Can I check a Pokémon card’s value from a photo?",
+      "Start with Pokoin’s card scanner, confirm the suggested printing, then open its marketplace page to compare prices. A photo match does not grade condition.",
+    ),
+    faq(
+      "Is the displayed price what my card will sell for?",
+      "No. Your copy’s condition, language, finish and demand affect the result. Asking prices and reference data do not guarantee a buyer or a sale price.",
+    ),
+  ],
+  related: [
+    "/features/card-scanner",
+    "/features/collection-tracker",
+    "/features/seller-fees",
+  ],
+});
+
+// Owner-confirmed service terms (17 October 2026). Intake is coordinated by Contact;
+// these pages do not claim the marketplace checkout automates receipt or credit issuance.
+FEATURES.push({
+  path: "/features/trade-cards-for-pkn",
+  category: "Send cards · Get PKN",
+  label: "Trade cards for PKN",
+  reviewed: REVIEWED,
+  title: "Trade Pokémon Cards for PKN Credit: 90% Market Value | Pokoin",
+  description:
+    "Send cards to Pokoin and choose immediate PKN credit at 90% of market value, with at least 1 PKN per card. Use PKN towards other cards where accepted.",
+  headline: "Your cards. Your next collection.",
+  intro:
+    "Send your cards to Pokoin. Choose PKN credit at 90% of market value, with at least 1 PKN per card.",
+  answer:
+    "This option pays PKN credit for your next cards. Choose managed selling instead if you want real money after a sale.",
+  visual: "credit",
+  primary: cta("Arrange a card trade-in", "/contact"),
+  secondary: cta("Prefer real money?", "/features/managed-selling"),
+  sections: [
+    section("Send cards. Get PKN. Collect again.", [
+      "Contact Pokoin to arrange sending your cards and confirm the market valuation. The credit option gives you 90% of market value in PKN, with a guaranteed minimum of 1 PKN per card.",
+      "The immediate-credit option lets you receive PKN without waiting for your cards to resell. Coordinate receipt and credit issuance with Pokoin; uploading a photo does not issue tokens.",
+    ]),
+    section(
+      "Put your credit towards other cards",
+      [
+        "Browse the marketplace for your next cards. PKN is available as a payment option where the seller accepts it; review the final checkout before buying.",
+      ],
+      { links: [cta("Explore cards", "/marketplace")] },
+    ),
+    section(
+      "Want a real-money sale instead?",
+      [
+        "With managed selling, you send the cards and Pokoin handles the sale. You receive real-money proceeds after the cards sell, less the managed-selling commission.",
+      ],
+      { links: [cta("See managed selling", "/features/managed-selling")] },
+    ),
+  ],
+  faqs: [
+    faq(
+      "Is the 90% paid in cash?",
+      "No. The immediate credit is paid in PKN. Managed selling is the real-money option.",
+    ),
+    faq(
+      "Do I have to wait for a buyer to get PKN credit?",
+      "The immediate-credit option does not require a resale first. Contact Pokoin to arrange card receipt, valuation and credit issuance.",
+    ),
+  ],
+  related: [
+    "/features/managed-selling",
+    "/features/card-scanner",
+    "/features/seller-fees",
+  ],
+});
+FEATURES.push({
+  path: "/features/managed-selling",
+  category: "Send cards · Get real money",
+  label: "Managed card selling",
+  reviewed: REVIEWED,
+  title: "Managed Pokémon Card Selling: 15.5% Commission | Pokoin",
+  description:
+    "Send your trading cards to Pokoin and let us sell them for you. Receive real-money proceeds after sale, with a 15.5% managed-selling commission.",
+  headline: "We sell your cards. You get paid.",
+  intro:
+    "Send your cards to Pokoin. We handle the sale; you receive real-money proceeds when they sell. Managed-selling commission: 15.5%.",
+  answer:
+    "Managed selling pays real money after sale. It is separate from the 90% market-value PKN credit option and the 3% self-service marketplace commission.",
+  visual: "managed",
+  primary: cta("Arrange managed selling", "/contact"),
+  secondary: cta(
+    "Prefer immediate PKN credit?",
+    "/features/trade-cards-for-pkn",
+  ),
+  sections: [
+    section("Send once. Let Pokoin sell.", [
+      "Contact Pokoin to arrange sending your cards and agree the sale details. Pokoin handles selling the cards for you, and your proceeds are paid in real money after a sale. Sale timing and final price depend on buyers.",
+    ]),
+    section("15.5% managed-selling commission", [
+      "The managed-selling fee is 15.5% of the card sale price. On a €100 sale, that leaves €84.50 before any separately agreed costs, taxes or adjustments. Confirm the intake and payout terms before sending cards.",
+      "CardTrader’s published 1-Day Ready rate is 16.5%, with a minimum 1-cent fee and VAT added under its fee policy. Pokoin’s 15.5% base rate is one percentage point lower. This compares base commissions, not every possible cost.",
+    ]),
+    section(
+      "Three ways to move your cards on",
+      [
+        "Sell yourself on Pokoin for 3% marketplace commission. Send cards for immediate PKN credit at 90% of market value, at least 1 PKN per card. Or choose managed selling for real money after sale at 15.5% commission.",
+      ],
+      {
+        links: [
+          cta("Compare the selling options", "/features/seller-fees"),
+          cta("Trade cards for PKN", "/features/trade-cards-for-pkn"),
+        ],
+      },
+    ),
+  ],
+  faqs: [
+    faq(
+      "Are managed-sale proceeds paid in PKN?",
+      "No. Managed sales pay real money. The immediate 90% credit option pays PKN.",
+    ),
+    faq(
+      "Is managed selling the same as the CardTrader 1-DR tab?",
+      "No. Pokoin’s CardTrader 1-DR tab displays linked CardTrader warehouse stock and sales. Pokoin managed selling is arranged directly with Pokoin.",
+    ),
+  ],
+  sources: [
+    cta(
+      "CardTrader: published selling fees",
+      "https://static.cardtrader.com/en/pages/payments-fees-and-refunds",
+    ),
+  ],
+  related: [
+    "/features/trade-cards-for-pkn",
+    "/features/seller-fees",
+    "/features/card-inventory",
   ],
 });
 
@@ -975,7 +1173,7 @@ export const HUBS = [
       section(
         "Choose the platform that fits you",
         [
-          "Looking for an alternative to an existing collection app or marketplace? Compare the workflows and current product information. Pokoin is browser-based, has no public native app-store listing yet, and uses PKN for marketplace checkout.",
+          "Looking for an alternative to an existing collection app or marketplace? Compare the workflows and current product information. Pokoin is browser-based, has no public native app-store listing yet, and supports card payments plus seller-accepted PKN.",
         ],
         {
           links: [cta("Compare Pokoin with other card tools", "/alternatives")],
@@ -985,7 +1183,7 @@ export const HUBS = [
     faqs: [
       faq(
         "Is Pokoin only a token website?",
-        "No. Pokoin includes a card scanner, personal collection and portfolio, seller inventory, Poko assistant, marketplace, and Chrome extension. PKN is the currency used by its marketplace checkout.",
+        "No. Pokoin includes a card scanner, personal collection and portfolio, seller inventory, Poko assistant, marketplace, and Chrome extension. Card checkout supports Stripe and seller-accepted PKN.",
       ),
       faq(
         "Can I use Pokoin from a browser?",
@@ -1001,7 +1199,7 @@ export const HUBS = [
     category: "A better fit starts with your task",
     title: "Trading Card App & Marketplace Alternatives | Pokoin",
     description:
-      "Considering Collectr, Dragon Shield, TCGplayer, or Cardmarket alternatives? Compare Pokoin’s scanning, collection, inventory, assistant, and PKN marketplace workflows.",
+      "Considering Collectr, Dragon Shield, TCGplayer, or Cardmarket alternatives? Compare Pokoin’s scanning, collection, inventory, assistant, and marketplace workflows.",
     headline: "Looking for a trading card app alternative?",
     intro:
       "An alternative is useful when it fits a task your current setup makes difficult. Pokoin combines browser scanning, a personal collection, seller inventory, Poko, and marketplace research. These comparisons help you decide whether that combination fits your workflow.",
@@ -1018,7 +1216,7 @@ export const HUBS = [
       section(
         "A few Pokoin details to know first",
         [
-          "Pokoin runs in the browser. Signed-in tools include collection, inventory, and Poko. Scan Connect pairs a phone with a desktop review queue. Marketplace prices and checkout use PKN; native App Store and Google Play listings are not available yet.",
+          "Pokoin runs in the browser. Signed-in tools include collection, inventory, and Poko. Scan Connect pairs a phone with a desktop review queue. Card payments use Stripe, with PKN also available where sellers accept it. Native App Store and Google Play listings are not available yet.",
           "Use the feature pages to understand the task, then open the actual tool when you are ready.",
         ],
         {

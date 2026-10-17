@@ -625,28 +625,6 @@
   }
 }
 
-.hero-foot .hero-fee-link {
-  gap: 9px;
-  color: #c6c6d0;
-}
-.hero-fee-link strong {
-  color: var(--yellow);
-  font-size: 20px;
-}
-@media (max-width: 720px) {
-  .hero-foot {
-    flex-wrap: wrap;
-    gap: 14px;
-  }
-  .hero-foot .hero-fee-link {
-    order: -1;
-    width: 100%;
-    font-size: 11px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-}
-
 .hub-resource-title {
   font-size: 30px;
   margin-bottom: 28px;
@@ -706,4 +684,8 @@
     color: #a2a2b4;
     margin: 0 0 15px;
   }
+}
+
+.visual-managed > .fee-number {
+  font-size: clamp(95px, 11vw, 130px);
 }
