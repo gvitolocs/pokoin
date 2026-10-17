@@ -247,3 +247,11 @@ transfers 97% plus shipping before adjustments; Stripe processing is charged to
 the platform, rather than deducted again from that seller transfer. Contracted
 Stripe rates and external payout/conversion charges are not established by
 repository code. See the research folder’s `SELLING-OFFERS.md` audit.
+
+Market-data copy leads the comparison hub and names **CardTrader + TCGplayer**
+on the landing. Verified against `docs/POKO_MARKET.md` and
+`pokoin-rust/crates/accounts/src/handlers/poko_market.rs`: CardTrader observed
+asks/daily lowest asks; optional matched TCGplayer aggregate USD quotes in Poko
+and inventory price-check. The price-checker page explains coverage, dates,
+currencies and the distinction from inferred/completed sales. Do not describe
+Cardmarket/eBay as integrated price feeds or claim every quote is a settled sale.

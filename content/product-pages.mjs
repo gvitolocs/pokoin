@@ -220,7 +220,7 @@ export const FEATURES = [
       "Ask Poko about Pokémon card printings, sold history, sets, and illustrators. Start from a card page and bring your collection context into the conversation.",
     headline: "Meet Poko, your AI card assistant.",
     intro:
-      "Poko is Pokoin’s conversational assistant for card research and getting around the platform. Ask about a printing, investigate sold history, discover an illustrator, or get help finding the next step for your collection.",
+      "Ask Poko about your cards with real market data behind the answer. Explore CardTrader asking prices, available TCGplayer aggregate quotes, printings and artists.",
     answer:
       "Start a Poko conversation from Messages or a card page. When you are viewing a card, that printing can become context for your question.",
     visual: "poko",
@@ -333,7 +333,7 @@ export const FEATURES = [
       "Explore Pokémon and other trading card games on Pokoin. Browse sets, artists, printings, seller listings, and sold history, with card payments and seller-supported PKN checkout.",
     headline: "A trading card marketplace built around the card.",
     intro:
-      "Pokoin combines a trading card catalog with seller listings, printing research, and collection tools. Browse Pokémon or another supported game, then open a specific card to explore the market behind that printing.",
+      "Explore cards with real market data: CardTrader listings, available TCGplayer price history, and Pokoin seller offers. Keep your research connected to your collection.",
     answer:
       "Find a card by name, set, artist, or printing. Compare the copy you want with seller listings and sold history before deciding what to collect or list.",
     visual: "marketplace",
@@ -402,7 +402,7 @@ export const ALTERNATIVES = [
       "Compare Pokoin and Collectr for card scanning, collection tracking, and seller workflows. Explore Pokoin’s browser tools, Scan Connect, and Poko assistant.",
     headline: "Looking for a Collectr alternative? Start with your workflow.",
     intro:
-      "Pokoin is an alternative to Collectr for collectors who want to connect card identification, a personal collection, seller inventory, and an AI card assistant in a browser workspace. Both products support card discovery and collection tracking; the better fit depends on what you want to do after finding a card.",
+      "Explore Pokoin as a Collectr alternative with CardTrader and TCGplayer market data, card scanning, collection tracking, seller inventory and Poko in one browser workspace.",
     answer:
       "Consider Pokoin when your next step is reviewing a scan batch, organising stock, preparing listings, or asking Poko about a printing. Consider Collectr’s documented portfolio and mobile features when those are your priorities.",
     competitorSummary:
@@ -458,6 +458,7 @@ export const ALTERNATIVES = [
       cta("Collectr: web portfolio", "https://app.getcollectr.com/portfolio"),
     ],
     related: [
+      "/features/pokemon-card-price-checker",
       "/features/collection-tracker",
       "/features/card-scanner",
       "/features/card-inventory",
@@ -472,7 +473,7 @@ export const ALTERNATIVES = [
     headline:
       "A Dragon Shield scanner alternative for your next card workflow.",
     intro:
-      "Pokoin is an alternative to Dragon Shield’s Poké TCG Card Manager when you want browser-based card lookup connected to a collection, seller inventory, and Poko. Compare what happens after a scan as well as how you identify the card.",
+      "Scan a card, then explore CardTrader and TCGplayer market data. Pokoin connects browser scanning to collection tracking, seller inventory and Poko.",
     answer:
       "Use Pokoin to review a phone scan queue at your desktop, choose collection or listing intent, and continue researching the matched printing in the marketplace.",
     competitorSummary:
@@ -530,6 +531,7 @@ export const ALTERNATIVES = [
       ),
     ],
     related: [
+      "/features/pokemon-card-price-checker",
       "/features/card-scanner",
       "/learn/scan-cards-to-inventory",
       "/features/poko-assistant",
@@ -543,7 +545,7 @@ export const ALTERNATIVES = [
       "Compare Pokoin’s browser scanner and inventory workflow with TCGplayer’s app and Scan & Identify tools. Review the workflow, marketplace, and payment differences.",
     headline: "A TCGplayer alternative for scanning, stock, and card research.",
     intro:
-      "Pokoin is an alternative workflow for collectors and sellers who want a browser scanner, reviewed inventory, collection tools, and Poko in the same platform. It is a different marketplace, so check how listings and checkout fit your needs before moving stock.",
+      "Bring available TCGplayer price data together with CardTrader listings, a browser scanner, collection tools and Poko. Pokoin offers a separate marketplace and seller workflow.",
     answer:
       "Pokoin connects a phone scan queue to collection or listing intent. TCGplayer also has mobile scanning and desktop seller tools; phone-to-desktop scanning is not exclusive to Pokoin.",
     competitorSummary:
@@ -604,6 +606,7 @@ export const ALTERNATIVES = [
       ),
     ],
     related: [
+      "/features/pokemon-card-price-checker",
       "/features/card-inventory",
       "/learn/import-card-inventory",
       "/features/marketplace",
@@ -618,7 +621,7 @@ export const ALTERNATIVES = [
     headline:
       "Considering a Cardmarket alternative? Explore the card workflow.",
     intro:
-      "Pokoin is a trading card marketplace alternative for collectors who also want scanning, a personal collection, inventory tools, and Poko. Compare the available seller offers and the way you want to pay, then decide whether the platform fits the card you are looking for.",
+      "Research cards with CardTrader and TCGplayer market data, then scan, collect or sell on Pokoin. Compare the seller offers and payment options that fit your next card.",
     answer:
       "Pokoin combines printing research with collection and seller workflows. It supports card payments through Stripe and PKN where sellers accept it. Compare the payment and protection terms on each marketplace.",
     competitorSummary:
@@ -685,6 +688,7 @@ export const ALTERNATIVES = [
       ),
     ],
     related: [
+      "/features/pokemon-card-price-checker",
       "/features/marketplace",
       "/features/card-scanner",
       "/features/card-inventory",
@@ -967,16 +971,20 @@ FEATURES.push({
   reviewed: REVIEWED,
   title: "Pokémon Card Price Checker & Value Research | Pokoin",
   description:
-    "Check Pokémon card prices by printing. Compare seller listings and available sold history, then track your collection or prepare a listing on Pokoin.",
+    "Check Pokémon card values with CardTrader listings and TCGplayer price data. Compare the printing, available history and source before buying or selling.",
   headline: "What is your Pokémon card worth?",
   intro:
-    "Find the right printing. Compare asking prices and available sold history before you buy, collect or list.",
+    "Real market data from CardTrader and TCGplayer. Match your printing, compare available price history, and make your next move.",
   answer:
     "A useful value check matches the set, collector number, language, finish and condition. An asking price is an offer; it is not proof of a completed sale.",
   visual: "marketplace",
   primary: cta("Look up a Pokémon card", "/marketplace"),
   secondary: cta("Identify it from a photo", "/scan"),
   sections: [
+    section("Real prices. Named sources.", [
+      "CardTrader supplies observed seller listings and dated lowest asking prices. Poko and the inventory price-check tools also use available TCGplayer aggregate market-price history for matched printings and product subtypes.",
+      "Source, observation date and currency matter: CardTrader asks are listed prices, while TCGplayer aggregate quotes are in USD and do not identify the condition or language of an individual sale. Coverage varies by printing. Inferred listing changes and completed Pokoin sales are labelled separately.",
+    ]),
     section(
       "Match the printing",
       [
@@ -1199,12 +1207,12 @@ export const HUBS = [
     category: "A better fit starts with your task",
     title: "Trading Card App & Marketplace Alternatives | Pokoin",
     description:
-      "Considering Collectr, Dragon Shield, TCGplayer, or Cardmarket alternatives? Compare Pokoin’s scanning, collection, inventory, assistant, and marketplace workflows.",
-    headline: "Looking for a trading card app alternative?",
+      "Compare Pokoin with Collectr, Dragon Shield, TCGplayer and Cardmarket. Real CardTrader and TCGplayer price data, scanning and collection tools together.",
+    headline: "An alternative built on real market data.",
     intro:
-      "An alternative is useful when it fits a task your current setup makes difficult. Pokoin combines browser scanning, a personal collection, seller inventory, Poko, and marketplace research. These comparisons help you decide whether that combination fits your workflow.",
+      "Real market data from CardTrader and TCGplayer. Scanning, collection tracking, seller tools and Poko in one browser workspace.",
     answer:
-      "Compare identification, printing review, collection tracking, stock management, and checkout separately. A product can be a good collection companion without being the right marketplace for every purchase.",
+      "See where a price comes from. Compare CardTrader asking prices and dated TCGplayer aggregate quotes where available, then choose the tools that fit your cards.",
     cards: ALTERNATIVES.map((page) => page.path),
     primary: cta("Explore Pokoin’s tools", "/features"),
     secondary: cta("Try a card lookup", "/scan"),

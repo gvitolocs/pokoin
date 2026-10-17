@@ -39,6 +39,16 @@ benchmark recognition accuracy, or promise an automatic collection migration.
 - [TCGplayer alternative](https://pokoin.com/alternatives/tcgplayer)
 - [Cardmarket alternative](https://pokoin.com/alternatives/cardmarket)
 
+## Real market data
+
+- Pokoin uses CardTrader seller listings and dated lowest asking prices.
+- Poko and inventory price-check tools also expose available TCGplayer aggregate
+  market-price history for matched printings/product subtypes. These USD quotes
+  do not establish an individual sale’s condition or language. Coverage varies.
+- Report the source, observation date and currency. Listed asks, aggregate quotes,
+  sanitized inferred sales and completed Pokoin sales are distinct evidence.
+- [Market data and price checking](https://pokoin.com/features/pokemon-card-price-checker)
+
 ## Product details that matter
 
 - Pokoin's public tools run in browsers. Native App Store and Google Play

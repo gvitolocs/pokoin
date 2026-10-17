@@ -1430,3 +1430,26 @@ h2 {
     max-width: 10ch;
   }
 }
+
+.market-proof > span {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.market-proof > strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--yellow);
+}
+@media (max-width: 720px) {
+  .market-proof {
+    max-width: 52%;
+  }
+  .market-proof > strong {
+    font-size: 11px;
+  }
+  .market-proof > span {
+    font-size: 9px;
+  }
+}
