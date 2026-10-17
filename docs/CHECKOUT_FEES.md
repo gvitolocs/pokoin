@@ -12,7 +12,7 @@ Keep the existing platform charge and later separate Connect transfers. Direct C
 - Seller gross: that seller’s full card subtotal + their shipping. Do not subtract the 3% markup.
 - Seller transfer: seller gross − allocated actual processor costs − applicable refunds/adjustments.
 
-For PKN-only orders the buyer pays card subtotal plus 3% and each seller receives their full card subtotal. There is no invented Stripe processing charge on PKN ledger payments.
+For PKN-only orders the buyer pays card subtotal plus 3% and each seller receives their full card subtotal. The debit, seller credits, and treasury markup are integer PKN ledger legs in one atomic operation. There is no invented Stripe processing charge on PKN ledger payments. New PKN orders carry the same settlement-model version so they are distinguishable from legacy seller-commission orders; the Stripe fee-freeze path applies only to EUR orders.
 
 ## Actual payment costs and the single fixed fee
 
@@ -26,11 +26,21 @@ If Stripe settles the balance transaction in another currency, use that transact
 
 ## Fee availability and payout safety
 
-Stripe fees may arrive asynchronously after payment success. New orders carry `settlementModel: buyer_markup_processor_costs_v1`. Before their first transfer, read the actual fee from Stripe, verify charge/payment-intent/amount/currency, and freeze the allocation in a Firestore transaction. Missing/mismatched costs fail closed for payout; zero is accepted only when Stripe explicitly reports a zero fee. Do not substitute a guessed fee or pretend reconciliation succeeded.
+Stripe fees may arrive asynchronously after payment success. New orders carry `settlementModel: buyer_markup_processor_costs_v1`. The signed paid webhook must match the stored Checkout Session, buyer, order, payment mode, PaymentIntent, exact charge amount, and EUR currency; consuming a held PKN credit must succeed idempotently before the order advances to paid, and the stored EUR discount remains intact. Before the first seller transfer, read the actual fee from Stripe, verify charge/payment-intent/amount/currency and the balance transaction's charge source, and freeze the allocation in a Firestore transaction. Missing/mismatched costs fail closed for payout; zero is accepted only when Stripe explicitly reports a zero fee. Do not substitute a guessed fee or pretend reconciliation succeeded.
 
-Retries reuse the frozen snapshot and existing per-seller transfer idempotency keys. The freeze reads current shipments transactionally so it cannot overwrite a concurrent refund with stale shipment data. Existing orders without this model retain their original settlement amounts. Delivery confirmation continues to control when seller transfers are attempted.
+Retries reuse the frozen snapshot and existing per-seller transfer idempotency keys. The freeze derives and validates the snapshot against the transaction's latest order and shipments, so it cannot overwrite a concurrent refund with stale shipment data. Transfer responses must repeat the intended seller account, exact integer amount, and EUR currency before their references are recorded. New-model payout destinations come from the seller's current READY Connect profile, not an account id embedded in the order. Existing orders without this model retain their original settlement amounts. Delivery confirmation continues to control when seller transfers are attempted, including after a partial refund.
 
 PKN credit is funded by Pokoin, not taken from seller gross. Credit-funded orders draw from the platform’s prefunded Stripe balance rather than tying transfers to a smaller discounted charge. A platform balance must have real funds available; these changes neither mint fiat nor auto-top-up Stripe. Existing refund policies and PKN-discount refund limitations are not changed by this correction.
+
+### Financial-operation exclusion and uncertain outcomes
+
+New EUR orders reserve one `settlementOperation` in a Firestore transaction before any refund or transfer mutation. Both directions reject a held reservation, including one with an old timestamp. There is no timeout that can steal an in-flight financial operation. A token fences the final write, and successful completion clears the reservation atomically with the resulting refund or payout fields. Legacy orders keep their earlier settlement contract.
+
+A provider error, pending/mismatched refund response, process interruption, or failed transfer reversal can leave the reservation held. This is a deliberate reconciliation state, not a claim that Stripe did nothing. Normal API retries cannot issue a second financial mutation while it is held. An operator must verify the original Stripe outcome using the recorded order, PaymentIntent, refund ID or payout idempotency prefix and Stripe's request logs/transfer group; reconcile actual transfers, refunds and reversals into the order, then clear that exact reservation transactionally. Never clear a claim merely because it is old or a browser timed out. This change does not provide an automatic reconciliation worker or an admin shortcut that declares an unknown payment successful.
+
+### Refunds beyond seller net
+
+A full refund can exceed the seller's remaining transfer because Stripe processing costs may be non-refundable. Shipments record `sellerProcessingCostLiabilityCents` and an audited `sellerProcessingCostLiability` with actual charge/balance references. The amount is recomputed from cumulative refunds and the actual allocated fee, so repeating the calculation does not add the fee twice. An outstanding amount requires verified manual recovery; the application does not silently debit an account or claim it was collected. Failed transfer reversals also remain explicitly recorded and keep the financial reservation for reconciliation.
 
 ## Separately billed Connect costs
 
@@ -46,5 +56,7 @@ This change allocates the charge’s actual processor fee. It does not add an au
 - Snapshot freeze and transfer: `handlers/orders.rs::freeze_processor_costs`, `release_seller_transfers`.
 - Buyer display: `solid/src/pages/Checkout.jsx`; legacy `commissionPkn` remains a response alias for buyer markup.
 - Test coverage: exact cart/quote totals, PKN balance check including markup, allocation conservation/rounding, multi-seller fee sharing, foreign-currency fee conversion, missing/wrong charge data, and unchanged seller gross under PKN discount.
+
+Verification boundary: fee parsing/allocation uses provider-shaped fixtures; the Firestore/router harness exercises PKN hold consumption, webhook persistence, pending seller payout and financial-operation exclusion. It does not exercise a live Stripe charge or a complete HTTP fee-retrieval → transfer flow. No live charge or Stripe account pricing setting was changed by this code review.
 
 Primary reference: [Stripe actual fee expansion](https://docs.stripe.com/expand/use-cases), [balance transaction fields](https://docs.stripe.com/api/balance_transactions/object), [charge types](https://docs.stripe.com/connect/charges).

@@ -1,12 +1,12 @@
 //! Stripe: PKN checkout sessions, the marketplace webhook and Connect
 //! Express onboarding.
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{private_json, text_field};
 use crate::domain::money;
@@ -163,7 +163,10 @@ pub async fn create_pkn_checkout_session(
     let mut form: Vec<(String, String)> = vec![
         ("mode".into(), "payment".into()),
         ("payment_method_types[0]".into(), "card".into()),
-        ("success_url".into(), format!("{site}/buy?status=success&session_id={{CHECKOUT_SESSION_ID}}")),
+        (
+            "success_url".into(),
+            format!("{site}/buy?status=success&session_id={{CHECKOUT_SESSION_ID}}"),
+        ),
         ("cancel_url".into(), format!("{site}/buy?status=cancelled")),
         ("line_items[0][quantity]".into(), "1".into()),
         ("metadata[uid]".into(), claims.uid.clone()),
@@ -179,10 +182,7 @@ pub async fn create_pkn_checkout_session(
     match price_id {
         Some(price_id) => form.push(("line_items[0][price]".into(), price_id)),
         None => {
-            form.push((
-                "line_items[0][price_data][currency]".into(),
-                currency,
-            ));
+            form.push(("line_items[0][price_data][currency]".into(), currency));
             form.push((
                 "line_items[0][price_data][unit_amount]".into(),
                 fiat_cents.to_string(),
@@ -211,21 +211,38 @@ pub async fn create_pkn_checkout_session(
 // /api/stripe-webhook
 // ---------------------------------------------------------------------------
 
-pub async fn stripe_webhook(state: State<DomainState>, headers: HeaderMap, body: Bytes) -> Response {
+pub async fn stripe_webhook(
+    state: State<DomainState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     match stripe_webhook_inner(state, headers, body).await {
         Ok(response) => response,
         Err(error) => {
             let signature_error = error.status == StatusCode::BAD_REQUEST && error.message.starts_with("Webhook Error:");
             let configuration_error = error.message == "Stripe webhook is not configured.";
-            let (status, message) = if signature_error { (StatusCode::BAD_REQUEST, error.message) }
-                else if configuration_error { (StatusCode::INTERNAL_SERVER_ERROR, error.message) }
-                else { tracing::error!(%error, "Stripe webhook handling failed"); (StatusCode::INTERNAL_SERVER_ERROR, "Webhook handling failed.".to_string()) };
+            let (status, message) = if signature_error {
+                (StatusCode::BAD_REQUEST, error.message)
+            } else if configuration_error {
+                (StatusCode::INTERNAL_SERVER_ERROR, error.message)
+            } else {
+                tracing::error!(%error, "Stripe webhook handling failed");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Webhook handling failed.".to_string(),
+                )
+            };
             stripe_text(status, &message)
         }
     }
 }
 fn stripe_text(status: StatusCode, message: &str) -> Response {
-    (status, [("content-type", "text/plain; charset=utf-8")], message.to_string()).into_response()
+    (
+        status,
+        [("content-type", "text/plain; charset=utf-8")],
+        message.to_string(),
+    )
+        .into_response()
 }
 pub async fn stripe_webhook_method_not_allowed() -> Response {
     let mut response = stripe_text(StatusCode::METHOD_NOT_ALLOWED, "Method not allowed");
@@ -251,7 +268,10 @@ async fn stripe_webhook_inner(
 }
 
 /// Handle a Stripe event whose signature was already verified.
-pub async fn process_verified_event(state: &DomainState, event: &Value) -> Result<Response, ApiError> {
+pub async fn process_verified_event(
+    state: &DomainState,
+    event: &Value,
+) -> Result<Response, ApiError> {
     let event_id = event.get("id").and_then(Value::as_str).unwrap_or_default();
     let event_type = event.get("type").and_then(Value::as_str).unwrap_or_default();
 
@@ -318,8 +338,14 @@ async fn event_claim_is_stale(
     Ok(now_ms - created_ms > STALE_EVENT_CLAIM_MS)
 }
 
-async fn handle_event(state: &DomainState, event_type: &str, event: &Value) -> Result<(), ApiError> {
-    if event_type == "checkout.session.completed" || event_type == "checkout.session.async_payment_succeeded" {
+async fn handle_event(
+    state: &DomainState,
+    event_type: &str,
+    event: &Value,
+) -> Result<(), ApiError> {
+    if event_type == "checkout.session.completed"
+        || event_type == "checkout.session.async_payment_succeeded"
+    {
         let session = event
             .get("data")
             .and_then(|data| data.get("object"))
@@ -338,7 +364,9 @@ async fn handle_event(state: &DomainState, event_type: &str, event: &Value) -> R
                 .unwrap_or_default()
                 .to_string();
             if order_id.is_empty() {
-                return Err(ApiError::bad_request("Order id missing from the Stripe session."));
+                return Err(ApiError::bad_request(
+                    "Order id missing from the Stripe session.",
+                ));
             }
             handle_marketplace_order_paid(state, &order_id, &session).await?;
         } else {
@@ -371,10 +399,9 @@ async fn handle_event(state: &DomainState, event_type: &str, event: &Value) -> R
                 } else {
                     ("expired", "expired", &[])
                 };
-                let _ = super::orders::release_eur_reservation(
-                    state, &order_id, reason, status, extra,
-                )
-                .await?;
+                let _ =
+                    super::orders::release_eur_reservation(state, &order_id, reason, status, extra)
+                        .await?;
             }
         }
     }
@@ -392,7 +419,9 @@ pub(crate) async fn handle_marketplace_order_paid(
     let order = firestore
         .get_document(&firestore.document_path(store::ORDERS, order_id)?)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Order {order_id} not found for Stripe session.")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("Order {order_id} not found for Stripe session."))
+        })?;
     let buyer_uid = order
         .get("buyerUid")
         .and_then(Value::as_str)
@@ -410,6 +439,12 @@ pub(crate) async fn handle_marketplace_order_paid(
         .unwrap_or_default()
         .to_string();
 
+    if order.get("settlementModel").and_then(Value::as_str)
+        == Some(crate::domain::settlement::MODEL)
+    {
+        validate_versioned_marketplace_session(&order, order_id, session)?;
+    }
+
     if session.get("payment_status").and_then(Value::as_str) == Some("unpaid") {
         if payment_status == "pending_stripe" {
             let _ = firestore
@@ -423,7 +458,10 @@ pub(crate) async fn handle_marketplace_order_paid(
         return Ok(());
     }
 
-    if payment_status == "paid" {
+    if matches!(
+        payment_status.as_str(),
+        "paid" | "escrow" | "released" | "partially_refunded"
+    ) {
         // A Stripe retry must resume a half-finished fulfilment.
         let _ = super::orders::fulfil_paid_eur_order(state, order_id).await;
         return Ok(());
@@ -448,15 +486,13 @@ pub(crate) async fn handle_marketplace_order_paid(
     }
 
     if discount_pkn > 0 {
-        let op = LedgerOp::unlock(
-            &buyer_uid,
-            discount_pkn,
-            "order_discount_consumed",
-            false,
-        )
-        .with_ref(order_id)
-        .with_idempotency(format!("order_discount_consumed:{order_id}"));
-        let _ = store::apply(firestore, &op).await;
+        let op = LedgerOp::unlock(&buyer_uid, discount_pkn, "order_discount_consumed", false)
+            .with_ref(order_id)
+            .with_idempotency(format!("order_discount_consumed:{order_id}"));
+        // The Stripe payment is real, but the order cannot advance until the
+        // integer PKN hold is consumed. Returning an error releases the event
+        // claim so Stripe's retry resumes this idempotent operation.
+        store::apply(firestore, &op).await?;
     }
 
     let mut patch = json!({
@@ -469,14 +505,14 @@ pub(crate) async fn handle_marketplace_order_paid(
     });
     if discount_pkn > 0 {
         if let Some(object) = patch.as_object_mut() {
-            object.insert(
-                "pknDiscount".into(),
-                json!({
-                    "pkn": discount_pkn,
-                    "state": "consumed",
-                    "consumedAt": store::now_iso(),
-                }),
-            );
+            let mut discount = order
+                .get("pknDiscount")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            discount["pkn"] = json!(discount_pkn);
+            discount["state"] = json!("consumed");
+            discount["consumedAt"] = json!(store::now_iso());
+            object.insert("pknDiscount".into(), discount);
         }
     }
     firestore
@@ -486,6 +522,61 @@ pub(crate) async fn handle_marketplace_order_paid(
     // Commit the stock hold, write the Sold-on-Pokoin rows and queue the seller
     // notifications. Seller Transfers still await delivery.
     let _ = super::orders::fulfil_paid_eur_order(state, order_id).await;
+    Ok(())
+}
+
+fn validate_versioned_marketplace_session(
+    order: &Value,
+    order_id: &str,
+    session: &Value,
+) -> Result<(), ApiError> {
+    let expected = crate::domain::settlement::expected_charge_cents(order)?;
+    let session_id = session
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let stored_session = order
+        .get("stripeCheckoutSessionId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let intent = session
+        .get("payment_intent")
+        .and_then(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("id").and_then(Value::as_str))
+        })
+        .unwrap_or_default();
+    let metadata = session.get("metadata").unwrap_or(&Value::Null);
+    let buyer = order
+        .get("buyerUid")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let stored_intent=order["stripePaymentIntentId"].as_str().unwrap_or("");
+    let terminal=matches!(order["paymentStatus"].as_str().unwrap_or(""),
+        "refunded" | "cancelled" | "canceled" | "failed" | "expired")
+        || matches!(order["status"].as_str().unwrap_or(""), "refunded" | "cancelled" | "canceled");
+    if terminal || (!stored_intent.is_empty() && stored_intent != intent)
+        || !session_id.starts_with("cs_")
+        || session_id != stored_session
+        || !intent.starts_with("pi_")
+        || !matches!(
+            session.get("payment_status").and_then(Value::as_str),
+            Some("paid" | "unpaid")
+        )
+        || session.get("mode").and_then(Value::as_str) != Some("payment")
+        || session.get("currency").and_then(Value::as_str) != Some("eur")
+        || session.get("amount_total").and_then(Value::as_i64) != Some(expected)
+        || metadata.get("kind").and_then(Value::as_str) != Some("marketplace_order_eur")
+        || metadata.get("pokoinOrderId").and_then(Value::as_str) != Some(order_id)
+        || buyer.is_empty()
+        || metadata.get("pokoinUid").and_then(Value::as_str) != Some(buyer)
+    {
+        return Err(ApiError::conflict(
+            "Stripe Checkout session does not match this versioned order.",
+        )
+        .with_code("stripe_order_mismatch"));
+    }
     Ok(())
 }
 
@@ -584,7 +675,10 @@ pub async fn stripe_connect_onboard_post(
             .create_account(vec![
                 ("type".into(), "express".into()),
                 ("country".into(), country.clone()),
-                ("capabilities[card_payments][requested]".into(), "true".into()),
+                (
+                    "capabilities[card_payments][requested]".into(),
+                    "true".into(),
+                ),
                 ("capabilities[transfers][requested]".into(), "true".into()),
                 ("metadata[pokoinUid]".into(), claims.uid.clone()),
             ])
@@ -697,8 +791,18 @@ mod tests {
 
 /// Stripe collects the EUR total after consuming the buyer's PKN discount.
 fn expected_eur_charge(order: &Value) -> i64 {
-    let numeric = |value: Option<&Value>| value.and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))).filter(|n| n.is_finite()).unwrap_or(0.0);
-    (numeric(order.get("totalEURCents")) - numeric(order.get("pknDiscount").and_then(|d| d.get("eurCents")))) as i64
+    let numeric = |value: Option<&Value>| {
+        value
+            .and_then(|value| {
+                value
+                    .as_f64()
+                    .or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))
+            })
+            .filter(|n| n.is_finite())
+            .unwrap_or(0.0)
+    };
+    (numeric(order.get("totalEURCents"))
+        - numeric(order.get("pknDiscount").and_then(|d| d.get("eurCents")))) as i64
 }
 
 #[cfg(test)]
@@ -708,9 +812,66 @@ mod contract_tests {
         assert_eq!(expected_eur_charge(&json!({"totalEURCents": 1000, "pknDiscount":{"pkn":100,"eurCents":50}})), 950);
         assert_eq!(expected_eur_charge(&json!({"totalEURCents":"800"})), 800);
     }
-    #[test] fn webhook_errors_are_plain_text() {
-        let response = stripe_text(StatusCode::BAD_REQUEST, "Webhook Error: signature rejected.");
-        assert_eq!(response.headers()["content-type"], "text/plain; charset=utf-8");
+    fn versioned_order() -> Value {
+        json!({
+            "settlementModel": crate::domain::settlement::MODEL,
+            "buyerUid":"buyer-1", "stripeCheckoutSessionId":"cs_1",
+            "totalEURCents":1030, "buyerMarkupCents":30,
+            "shippingEURCents":0, "insuranceEURCents":0,
+            "pknDiscount":{"pkn":200,"eurCents":100,"state":"held"},
+            "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                          "shippingAmountEURCents":0}]
+        })
+    }
+    fn paid_session() -> Value {
+        json!({
+            "id":"cs_1", "mode":"payment", "payment_status":"paid",
+            "currency":"eur", "amount_total":930, "payment_intent":"pi_1",
+            "metadata":{"kind":"marketplace_order_eur","pokoinOrderId":"order-1",
+                        "pokoinUid":"buyer-1"}
+        })
+    }
+    #[test]
+    fn versioned_webhook_requires_exact_session_amount_currency_and_identity() {
+        validate_versioned_marketplace_session(&versioned_order(), "order-1", &paid_session())
+            .unwrap();
+        for (field, value) in [
+            ("amount_total", json!(929)),
+            ("currency", json!("usd")),
+            ("payment_intent", json!("")),
+            ("id", json!("cs_other")),
+        ] {
+            let mut session = paid_session();
+            session[field] = value;
+            assert!(
+                validate_versioned_marketplace_session(&versioned_order(), "order-1", &session)
+                    .is_err()
+            );
+        }
+    }
+    #[test]
+    fn paid_replays_cannot_change_an_existing_intent_or_reopen_terminal_orders() {
+        let mut order=versioned_order();
+        order["stripePaymentIntentId"]=json!("pi_other");
+        assert!(validate_versioned_marketplace_session(&order,"order-1",&paid_session()).is_err());
+        order["stripePaymentIntentId"]=json!("pi_1");
+        for status in ["refunded","cancelled","canceled","failed","expired"] {
+            order["paymentStatus"]=json!(status);
+            assert!(validate_versioned_marketplace_session(&order,"order-1",&paid_session()).is_err());
+        }
+        order["paymentStatus"]=json!("paid");
+        assert!(validate_versioned_marketplace_session(&order,"order-1",&paid_session()).is_ok());
+    }
+    #[test]
+    fn webhook_errors_are_plain_text() {
+        let response = stripe_text(
+            StatusCode::BAD_REQUEST,
+            "Webhook Error: signature rejected.",
+        );
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
