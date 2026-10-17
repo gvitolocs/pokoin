@@ -804,6 +804,8 @@
   line-height: 1.4;
 }
 
+.setup-fees-link { color: var(--yellow); text-decoration: underline; }
+
 .setup-action {
   display: flex;
   flex: 0 0 auto;

@@ -381,7 +381,14 @@ function ProfileDesk() {
             <SetupRow
               step={step().stripe}
               title="Stripe payouts"
-              meta={stripeMeta()}
+              meta={(
+                <>
+                  {stripeMeta()}{' '}
+                  <a class="setup-fees-link" href="https://stripe.com/connect/pricing" target="_blank" rel="noopener noreferrer">
+                    Stripe Connect fees ↗
+                  </a>
+                </>
+              )}
               action={(
                 <StripeConnectButton
                   disabled={!shipFromCountry()}
