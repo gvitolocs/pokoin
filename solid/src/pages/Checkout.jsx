@@ -791,11 +791,11 @@ function CheckoutDesk() {
                   <div>
                     <dt>
                       <span>Pokoin buyer markup 3%</span>
-                      <FeeTip label="About the platform commission">
+                      <FeeTip label="About the buyer markup">
                         Added to the buyer’s card subtotal. It is not deducted from the seller’s card price.
                       </FeeTip>
                     </dt>
-                    <dd>{formatPkn(fees().commissionPkn)}</dd>
+                    <dd>{formatPkn(fees().buyerMarkupPkn)}</dd>
                   </div>
                   <Show when={!nft()}>
                     <div>
