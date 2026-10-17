@@ -1,4 +1,4 @@
-/** Always charged. */
+/** Buyer-side markup on card items; never deducted from seller proceeds. */
 export const CHECKOUT_COMMISSION_RATE = 0.03;
 /** Optional cover if the parcel is lost. Off unless the buyer adds it. */
 export const CHECKOUT_INSURANCE_RATE = 0.05;
@@ -34,6 +34,7 @@ export function checkoutFees(subtotalPkn, { insurance = false, shippingPkn = 0 }
   const shipping = money(Math.max(0, Number(shippingPkn) || 0));
   const taxPkn = money(commissionPkn + insurancePkn);
   return {
+    buyerMarkupPkn: commissionPkn,
     commissionPkn,
     insurancePkn,
     shippingPkn: shipping,

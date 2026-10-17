@@ -272,7 +272,15 @@ test("comparisons cite primary sources and the advertised commission matches che
   assert.equal(
     advertised,
     Number(backend.match(/CHECKOUT_COMMISSION_RATE:\s*f64\s*=\s*([\d.]+)/)[1]),
-    "review fee copy when seller settlement commission changes",
+    "review fee copy when buyer markup changes",
+  );
+  const settlement = fs.readFileSync(
+    path.join(ROOT, "pokoin-rust/crates/commerce/src/domain/settlement.rs"),
+    "utf8",
+  );
+  assert.equal(
+    advertised,
+    Number(settlement.match(/BUYER_MARKUP_BPS:\s*i64\s*=\s*(\d+)/)[1]) / 10000,
   );
   assert.match(
     feePage.sections.flatMap((section) => section.paragraphs).join(" "),

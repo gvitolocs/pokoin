@@ -1,5 +1,11 @@
 # Stripe Connect pricing and Direct Charges review
 
+> Superseded economic interpretation: the owner clarified on 17 October 2026
+> that 3% is a BUYER markup, not a seller commission. Keep one multi-seller
+> Stripe charge. Seller receives full items + shipping less actual attributed
+> payment costs. See [current fee contract](CHECKOUT_FEES.md).
+
+
 Checked 17 October 2026. Scope: repository implementation and Stripe’s public documentation. This is not confirmation of the live Stripe Dashboard’s pricing agreement. No live Stripe accounts, charges, payouts or application settings were changed during this review.
 
 ## Verdict

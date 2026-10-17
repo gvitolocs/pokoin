@@ -1,5 +1,11 @@
 # Selling offers: evidence and scope
 
+> Superseded economic interpretation: the owner clarified on 17 October 2026
+> that 3% is a BUYER markup, not a seller commission. Keep one multi-seller
+> Stripe charge. Seller receives full items + shipping less actual attributed
+> payment costs. See [current fee contract](../../CHECKOUT_FEES.md).
+
+
 Reviewed 17 October 2026. This records the basis for homepage copy; it does not change checkout rates or implement an intake/payment system.
 
 ## Three different offers

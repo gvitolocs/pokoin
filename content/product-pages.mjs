@@ -837,14 +837,15 @@ FEATURES.push({
   category: "Keep more of each card sale",
   label: "Seller fees",
   reviewed: REVIEWED,
-  title: "Low Trading Card Selling Fees: 3% Commission | Pokoin",
+  title:
+    "Trading Card Selling Fees: Stripe Costs, No Pokoin Seller Cut | Pokoin",
   description:
-    "Pokoin’s marketplace commission is 3% of card prices. Compare published Cardmarket, CardTrader, and TCGplayer base selling rates, with fee scope and sources.",
-  headline: "3% marketplace commission. More room for your next card.",
+    "Pokoin adds a 3% buyer markup. Sellers pay their allocated actual Stripe processing and attributable Connect costs, with no Pokoin marketplace seller commission.",
+  headline: "3% buyer markup. No Pokoin seller commission.",
   intro:
-    "Pokoin charges a 3% platform commission on the card item subtotal. It is the lowest base commission rate among the named standard marketplace plans in the comparison below. Use the comparison to understand the rate and its scope before choosing where to sell.",
+    "Pokoin adds 3% to the buyer’s card subtotal before payment. The seller’s card price is not reduced by that markup. Sellers bear their share of actual Stripe processing and attributable Connect costs.",
   answer:
-    "On a €100 card subtotal, the seller’s item proceeds are €97 before adjustments, plus their shipping amount. The current card-payment settlement does not deduct an additional Stripe processing fee from that seller transfer.",
+    "For €100 of cards, the buyer pays €103 before shipping and optional cover. Seller proceeds start from €100 plus their shipping, less their share of actual Stripe processing and attributable Connect costs.",
   visual: "inventory",
   primary: cta("Open seller inventory", "/mypokoin"),
   secondary: cta("Prepare your first listings", "/mypokoin/spreadsheet"),
@@ -858,8 +859,8 @@ FEATURES.push({
   rows: [
     [
       "Pokoin",
-      "3% of the card item subtotal.",
-      "Marketplace commission. Review shipping, optional cover, payment and conversion costs, and any withdrawal or network charges separately.",
+      "0% Pokoin marketplace seller commission. A 3% markup is added for the buyer.",
+      "Seller bears actual allocated Stripe processing and attributable Connect costs. The single payment’s fixed fee is allocated once across sellers, not charged in full to each seller.",
     ],
     [
       "Cardmarket",
@@ -881,7 +882,7 @@ FEATURES.push({
     section(
       "Choose how you want to sell",
       [
-        "Self-service marketplace: 3% commission. Managed selling: send cards to Pokoin and receive real-money proceeds after sale, with 15.5% commission. Immediate credit: exchange cards for 90% of market value in PKN, at least 1 PKN per card.",
+        "Self-service marketplace: 3% buyer markup, with no Pokoin seller commission. Managed selling: send cards to Pokoin and receive real-money proceeds after sale, with 15.5% commission. Immediate credit: exchange cards for 90% of market value in PKN, at least 1 PKN per card.",
       ],
       {
         links: [
@@ -890,14 +891,14 @@ FEATURES.push({
         ],
       },
     ),
-    section("How Stripe fits into the 3% rate", [
-      "For card payments, Pokoin transfers 97% of the item subtotal plus the seller’s shipping amount to their Stripe Connect account, before refunds or adjustments. The current settlement does not subtract another Stripe processing fee from this transfer.",
-      "Stripe charges payment processing to Pokoin’s platform balance in this payment flow. Its actual rate depends on the platform’s Stripe agreement and the transaction. Bank payouts, currency conversion, and optional services have their own terms; the 3% headline describes the marketplace commission.",
+    section("Buyer markup and Stripe costs are separate", [
+      "Pokoin’s 3% markup is paid by the buyer. Seller proceeds are their full card subtotal plus shipping, less their allocated payment costs and any refunds. No 3% Pokoin fee is deducted from the seller’s card price.",
+      "One Stripe transaction covers the whole cart. Its actual processing cost is allocated proportionally to seller item-plus-shipping amounts, with cent rounding that preserves the exact total. Separately billed Connect costs need verified attribution; they are not guessed or charged once per item.",
     ]),
     section(
       "A clear commission is a useful starting point",
       [
-        "The 3% rate is Pokoin’s platform commission, not a claim that every cost of selling, receiving payment, converting currencies, or withdrawing funds is included. Review the actual payment and settlement flow for the order you are planning.",
+        "The 3% rate is a buyer markup, not a seller commission or an all-in payment cost. Stripe rates vary by card, currency and agreement. Compare the actual payment costs when choosing where to sell.",
         "An asking price is not a completed sale. Use a small, reviewed batch to check printings, quantities, locations, and prices before you publish more stock.",
       ],
       {
@@ -927,16 +928,16 @@ FEATURES.push({
   ],
   faqs: [
     faq(
-      "Is Stripe processing deducted on top of the seller’s 3% commission?",
-      "The current card-payment settlement transfers 97% of item value plus shipping to the seller’s connected account. Stripe processing is charged to Pokoin’s platform balance. Payout, conversion and optional-service terms should be checked separately.",
+      "Does the seller pay a 3% Pokoin commission as well as Stripe?",
+      "No. The 3% markup is paid by the buyer. The seller bears actual allocated Stripe processing and any verified attributable Connect costs, plus applicable refunds or adjustments.",
     ),
     faq(
-      "What is Pokoin’s platform commission?",
-      "The current marketplace commission is 3% of the card item subtotal. The example on this page isolates that commission; it does not include every possible selling or payment cost.",
+      "Who pays the 3% Pokoin markup?",
+      "The buyer pays a 3% markup on the card item subtotal before Stripe payment. It is not deducted from the seller’s card price.",
     ),
     faq(
-      "Does 3% mean the lowest total selling cost in every situation?",
-      "No. The published base percentage is lower than the named standard plans shown here, but caps, minimums, taxes, payment charges, seller programs, and order value can change the final comparison.",
+      "Does zero Pokoin seller commission mean selling has no costs?",
+      "No. Stripe processing, attributable Connect costs, taxes, shipping and other applicable costs remain. Compare the actual order; caps, minimums and seller programs can change the result.",
     ),
   ],
   sources: [
@@ -1091,7 +1092,7 @@ FEATURES.push({
   intro:
     "Send your cards to Pokoin. We handle the sale; you receive real-money proceeds when they sell. Managed-selling commission: 15.5%.",
   answer:
-    "Managed selling pays real money after sale. It is separate from the 90% market-value PKN credit option and the 3% self-service marketplace commission.",
+    "Managed selling pays real money after sale. It is separate from the 90% market-value PKN credit option and the 3% self-service buyer markup.",
   visual: "managed",
   primary: cta("Arrange managed selling", "/contact"),
   secondary: cta(
@@ -1109,7 +1110,7 @@ FEATURES.push({
     section(
       "Three ways to move your cards on",
       [
-        "Sell yourself on Pokoin for 3% marketplace commission. Send cards for immediate PKN credit at 90% of market value, at least 1 PKN per card. Or choose managed selling for real money after sale at 15.5% commission.",
+        "Sell yourself on Pokoin with a 3% buyer markup and no Pokoin seller commission. Send cards for immediate PKN credit at 90% of market value, at least 1 PKN per card. Or choose managed selling for real money after sale at 15.5% commission.",
       ],
       {
         links: [

@@ -17,7 +17,7 @@ use crate::error::{ApiError, StoreError};
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
-/// Pokoin checkout commission (3%).
+/// Buyer-side Pokoin markup (3%), never a deduction from seller item proceeds.
 pub const CHECKOUT_COMMISSION_RATE: f64 = 0.03;
 /// Insurance is 5% of the card subtotal (paid by the buyer, optional).
 pub const CHECKOUT_INSURANCE_RATE: f64 = 0.05;
@@ -419,14 +419,12 @@ pub async fn marketplace_orders_post(
         Some(format!("order:{}:{}", claims.uid, idempotency_key))
     };
 
-    // Each seller gets their subtotal minus commission; commission → treasury.
+    // Sellers receive their full subtotal; buyer pays an additional 3% to treasury.
     let totals = seller_totals(&items);
-    let mut commission_pkn = 0i64;
+    let commission_pkn = crate::domain::settlement::buyer_markup(total_pkn);
     let mut seller_nets: Vec<(String, i64)> = Vec::new();
     for (seller_uid, subtotal) in &totals {
-        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
-        commission_pkn += commission;
-        seller_nets.push((seller_uid.clone(), subtotal - commission));
+        seller_nets.push((seller_uid.clone(), *subtotal));
     }
 
     // The replay check, the buyer balance and the treasury account are read
@@ -457,7 +455,7 @@ pub async fn marketplace_orders_post(
     if let Some(existing) = existing {
         return Ok(private_json(existing));
     }
-    if buyer_balance.available_pkn < total_pkn {
+    if buyer_balance.available_pkn < total_pkn + commission_pkn {
         return Err(StoreError::Insufficient.into());
     }
 
@@ -558,7 +556,9 @@ pub async fn marketplace_orders_post(
         "status": "paid",
         "paymentStatus": "paid",
         "channel": "pkn",
-        "totalPkn": total_pkn,
+        "totalPkn": total_pkn + commission_pkn,
+        "itemsSubtotalPkn": total_pkn,
+        "buyerMarkupPkn": commission_pkn,
         "commissionPkn": commission_pkn,
         "items": items.iter().map(|item| json!({
             "listingId": item.listing_id,
@@ -576,7 +576,9 @@ pub async fn marketplace_orders_post(
         "paymentStatus": "paid",
         "status": "paid",
         "fulfillmentMode": "physical",
-        "totalPkn": total_pkn,
+        "totalPkn": total_pkn + commission_pkn,
+        "itemsSubtotalPkn": total_pkn,
+        "buyerMarkupPkn": commission_pkn,
         "commissionPkn": commission_pkn,
         "items": payload.get("items").cloned().unwrap_or(json!([])),
         "createdAt": store::now_iso(),
@@ -728,7 +730,7 @@ async fn order_confirm_delivery(
         return Err(ApiError::forbidden("You cannot confirm this order."));
     }
     let status = payment_status_of(&order).to_string();
-    if status != "paid" && status != "escrow" {
+    if status != "paid" && status != "escrow" && status != "partially_refunded" {
         return Err(ApiError::bad_request("This order is not paid yet."));
     }
     let pending_sellers: Vec<String> = order
@@ -2196,7 +2198,19 @@ pub async fn release_seller_transfers(
         }
     }
 
+    let order = if order["settlementModel"] == crate::domain::settlement::MODEL {
+        freeze_processor_costs(state, order_id, &order).await?
+    } else { order };
+    if order["settlementModel"] == crate::domain::settlement::MODEL {
+        source_transaction = order["stripeChargeId"].as_str().unwrap_or("").to_string();
+    }
     let plan = refunds::plan_transfer_amounts(&order);
+    if order["settlementModel"] == crate::domain::settlement::MODEL
+        && order["pknDiscount"]["eurCents"].as_i64().unwrap_or(0) > 0 {
+        // The credit discount is funded by Pokoin, never by seller proceeds.
+        // Stripe must be allowed to draw the platform's prefunded EUR balance.
+        source_transaction.clear();
+    }
     for item in &plan {
         let profile = if item.account.is_none() && !item.seller_id.is_empty() {
             store::read_user(firestore, &item.seller_id).await.ok()
@@ -2267,6 +2281,31 @@ pub async fn release_seller_transfers(
         "duplicate": false,
         "complete": complete,
     }))
+}
+
+/// Freeze one actual Stripe balance-transaction fee snapshot. A duplicate
+/// release reuses it; concurrent refunds cannot be overwritten by a stale read.
+async fn freeze_processor_costs(state: &DomainState, order_id: &str, order: &Value) -> Result<Value, ApiError> {
+    use crate::firestore::FirestoreWrite;
+    if order["settlementFees"]["status"] == "final" { return Ok(order.clone()); }
+    let intent = order["stripePaymentIntentId"].as_str().unwrap_or("");
+    let charge = state.stripe()?.payment_charge_with_fees(intent).await?;
+    let snapshot = crate::domain::settlement::fee_snapshot(order, &charge)?;
+    let firestore = state.firestore()?.clone();
+    let path = firestore.document_path(store::ORDERS, order_id)?;
+    let tx_firestore = firestore.clone(); let tx_path = path.clone();
+    firestore.run_transaction(move |transaction| {
+        let firestore=tx_firestore.clone(); let path=tx_path.clone(); let snapshot=snapshot.clone();
+        Box::pin(async move {
+            let latest=firestore.get_document_in_transaction(&path,&transaction).await?.unwrap_or(json!({}));
+            if latest["settlementFees"]["status"] == "final" { return Ok(vec![]); }
+            let patch=crate::domain::settlement::apply_fees(&latest,&snapshot)
+                .map_err(|e| crate::error::StoreError::Cache(e.message))?;
+            Ok(vec![FirestoreWrite::Update { path, value:patch,
+                update_mask:Some(vec!["shipments".into(),"settlementFees".into(),"stripeChargeId".into()]) }])
+        })
+    }).await?;
+    firestore.get_document(&path).await?.ok_or_else(||ApiError::not_found("Order not found."))
 }
 
 /// `sendNotificationsForExistingOrder`: send the seller sale notifications.
@@ -3082,6 +3121,8 @@ pub async fn create_order_checkout_session(
             "fulfillmentMode": "physical",
             "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
             "totalEURCents": quote.grand_total_cents,
+            "buyerMarkupCents": quote.buyer_markup_cents,
+            "settlementModel": crate::domain::settlement::MODEL,
             "shippingEURCents": quote.shipping_total_cents,
             "insuranceEURCents": quote.insurance_cents,
             "pknDiscount": {
@@ -3124,6 +3165,7 @@ pub async fn create_order_checkout_session(
             "checkoutUrl": url,
             "url": url,
             "totalEURCents": charge_cents,
+            "buyerMarkupCents": quote.buyer_markup_cents,
             "shippingEURCents": quote.shipping_total_cents,
             "insuranceEURCents": quote.insurance_cents,
             "chargeCents": charge_cents,
@@ -3170,14 +3212,12 @@ fn eur_order_items(items: &[OrderItem]) -> Vec<Value> {
         .collect()
 }
 
-/// Per-seller parcels. Seller settlement is items − commission + their
-/// shipping (`create-order-checkout-session.js`), not the shipping alone.
+/// Gross seller proceeds; actual processor costs are frozen before transfers.
 fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> Vec<Value> {
     shipments
         .iter()
         .map(|shipment| {
-            let items_net =
-                ((shipment.items_subtotal_cents as f64) * (1.0 - CHECKOUT_COMMISSION_RATE)).round() as i64;
+            let seller_gross = shipment.items_subtotal_cents + shipment.amount_cents;
             json!({
                 "sellerId": shipment.seller_id,
                 "sellerName": shipment.seller_name,
@@ -3191,7 +3231,8 @@ fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> 
                 "serviceName": shipment.service_name,
                 "itemsSubtotalCents": shipment.items_subtotal_cents,
                 "shippingAmountEURCents": shipment.amount_cents,
-                "sellerTransferCents": (items_net + shipment.amount_cents).max(0),
+                "sellerGrossCents": seller_gross,
+                "sellerTransferCents": Value::Null,
                 "amountCents": shipment.amount_cents,
                 "tracked": shipment.tracked,
             })
@@ -3204,7 +3245,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eur_parcels_settle_items_minus_commission_plus_shipping() {
+    fn eur_parcels_preserve_seller_gross_and_wait_for_actual_fees() {
         let shipment = crate::domain::shipping::ShipmentQuote {
             seller_id: "s1".into(),
             seller_name: "Seller".into(),
@@ -3224,8 +3265,8 @@ mod tests {
             item_count: 2,
         };
         let rows = eur_order_shipments(&[shipment]);
-        // round(1000 × 0.97) + 450, as the Node checkout writer settles it.
-        assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
+        assert_eq!(rows[0]["sellerGrossCents"], json!(1450));
+        assert!(rows[0]["sellerTransferCents"].is_null());
         assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
         assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
         assert_eq!(rows[0]["serviceId"], json!("tracked"));

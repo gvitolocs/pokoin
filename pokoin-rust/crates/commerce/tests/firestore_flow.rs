@@ -1331,7 +1331,7 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
     .await;
     assert_eq!(status, StatusCode::OK, "{quote}");
     // 1000 PKN of cards = 500 cents.
-    assert_eq!(quote["grandTotalCents"], json!(500 + shipping));
+    assert_eq!(quote["grandTotalCents"], json!(500 + 15 + shipping));
     assert_eq!(quote["shippingTotalCents"], json!(shipping));
     // 700 PKN of balance, all 1000 PKN eligible: 350 cents.
     assert_eq!(quote["pknVoucher"]["pkn"], json!(700));
@@ -1352,7 +1352,7 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
     assert_eq!(quote["pknDiscount"]["applied"], json!(true));
     assert_eq!(quote["pknDiscount"]["pkn"], json!(700));
     assert_eq!(quote["pknDiscount"]["eurCents"], json!(350));
-    assert_eq!(quote["chargeCents"], json!(500 + shipping - 350));
+    assert_eq!(quote["chargeCents"], json!(500 + 15 + shipping - 350));
     assert_eq!(quote["shipments"][0]["amountCents"], json!(price("IT", 1, false)));
     assert_eq!(quote["shipments"][1]["amountCents"], json!(price("DK", 2, true)));
 
@@ -1450,7 +1450,7 @@ async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
     );
     assert_eq!(quote["shippingTotalCents"], json!(red_cents + givi_cents));
     // 1000 PKN of cards = 500 cents.
-    assert_eq!(quote["grandTotalCents"], json!(500 + red_cents + givi_cents));
+    assert_eq!(quote["grandTotalCents"], json!(500 + 15 + red_cents + givi_cents));
     assert_eq!(quote["tracked"], json!(false));
     assert_eq!(quote["shippingServices"]["givi"], shipments[1]["serviceId"]);
 
@@ -2531,6 +2531,7 @@ async fn a_multi_leg_payment_is_all_or_nothing() {
 
 #[tokio::test]
 async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
+    // Buyer can cover the card price but not its 3% markup.
     // The harness has no Postgres: reaching the listing decrement would be a
     // 5xx, so a 400 proves the balance is checked first.
     let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
@@ -2541,7 +2542,7 @@ async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
         )
         .await
         .unwrap();
-    store::apply(&firestore, &LedgerOp::mint("buyer-1", 10, "account_top_up"))
+    store::apply(&firestore, &LedgerOp::mint("buyer-1", 500, "account_top_up"))
         .await
         .unwrap();
     let app = pokoin_commerce::router(state);
@@ -2561,7 +2562,7 @@ async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 10);
+    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 500);
 }
 
 #[tokio::test]

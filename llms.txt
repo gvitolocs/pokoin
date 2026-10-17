@@ -20,8 +20,8 @@
   workflow; current distribution is a ZIP installed as an unpacked extension.
 - [Marketplace](https://pokoin.com/features/marketplace): catalog research,
   printings, seller listings, and sold history.
-- [Selling fees](https://pokoin.com/features/seller-fees): 3% marketplace
-  commission, with a dated comparison of named standard marketplace plans.
+- [Selling fees](https://pokoin.com/features/seller-fees): 3% buyer markup,
+  allocated actual seller payment costs, and a dated marketplace comparison.
 - [Scan a pile](https://pokoin.com/learn/scan-cards-to-inventory): review a batch
   before choosing collection or listing intent.
 - [Import stock](https://pokoin.com/learn/import-card-inventory): upload or paste
@@ -61,12 +61,12 @@ benchmark recognition accuracy, or promise an automatic collection migration.
 - Card checkout supports Stripe; PKN is available where the seller accepts it.
   When displaying PKN, use plain digits, for example `2642 PKN`.
   Review the final payment and buyer-protection terms at checkout.
-- The seller commission is 3% of item value. Current card settlement transfers
-  97% plus shipping before refunds/adjustments; Stripe processing is charged
-  to Pokoin’s platform balance, not deducted again from that transfer.
-  This is a base commission, not an all-in cost claim.
-  Shipping, optional cover, payment/conversion, withdrawals, and network costs
-  need to be checked separately. Competitor caps and programs affect comparisons.
+- The self-service marketplace adds a 3% buyer markup on card items before
+  Stripe payment. It is not deducted from seller item proceeds. Sellers bear
+  actual allocated Stripe processing and verified attributable Connect costs.
+  The one transaction’s fixed fee is shared proportionally, not duplicated for
+  each seller. Shipping, optional cover, FX and separately billed costs have
+  their own terms; do not claim universally free Connect or an all-in 3% seller fee.
 - Asking prices, reference estimates, and recorded sold prices are different.
   Match the printing, condition, language, finish, and date when comparing.
 
@@ -79,7 +79,7 @@ benchmark recognition accuracy, or promise an automatic collection migration.
   card receipt, valuation and credit issuance through Contact. This is PKN, not cash.
 - [Managed selling](https://pokoin.com/features/managed-selling): real-money
   proceeds after cards sell; 15.5% managed-selling commission. Separate from
-  self-service marketplace selling at 3%. Intake is coordinated through Contact.
+  self-service marketplace with a 3% buyer markup. Intake is coordinated through Contact.
 - CardTrader 1-Day Ready publishes 16.5% (minimum 1 cent, VAT extra under its
   policy). Pokoin managed selling is one percentage point lower in base rate;
   this is not a total-cost guarantee. The CardTrader 1-DR account tab displays

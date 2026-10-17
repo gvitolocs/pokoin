@@ -169,3 +169,13 @@ cookie `pokoin.auth.token={"token":"e2e-buyer-token-not-a-firebase-jwt","uid":"e
 and `localStorage['pokoin.auth.session']={"uid":"e2e-buyer","signedIn":true}`, then
 use `/cart` → `/checkout` and pay with Stripe's test card `4242 4242 4242 4242`.
 `VITE_POKOIN_API_ORIGIN` only works under `vite dev`; production builds ignore it.
+
+## Buyer markup and processor-cost correction (17 October 2026)
+
+The owner clarified that Pokoin’s 3% is a **buyer markup**, not a deduction from
+seller prices. The quote/session now add it to card items before Stripe. Seller
+gross is full card value + shipping, less actual allocated processor costs.
+The one cart payment and delayed per-seller Connect Transfers remain. See
+[CHECKOUT_FEES.md](CHECKOUT_FEES.md) for exact rounding, asynchronous fee
+reconciliation, compatibility, PKN credit funding and separately billed Connect
+cost scope. Earlier references to 97% seller settlement are historical.

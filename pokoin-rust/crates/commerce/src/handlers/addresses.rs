@@ -524,6 +524,7 @@ pub async fn marketplace_checkout_quote(
         "itemsSubtotalCents": quote.items_subtotal_cents,
         "shippingTotalCents": quote.shipping_total_cents,
         "grandTotalCents": quote.grand_total_cents,
+        "buyerMarkupCents": quote.buyer_markup_cents,
         "currency": quote.currency,
         "tracked": quote.tracked,
         "shippingServices": quote

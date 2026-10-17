@@ -124,7 +124,7 @@ function visual(page) {
     return `<div class="feature-visual visual-fees${credit ? "" : " visual-managed"}"><span>${credit ? "CARD TRADE-IN" : "MANAGED SELLING"}</span><strong class="fee-number">${credit ? "90" : "15.5"}<span>%</span></strong><p>${credit ? "Market value in PKN" : "Commission on sale"}</p><span>${credit ? "At least 1 PKN per card" : "Real-money proceeds after sale"}</span></div>`;
   }
   if (page.kind === "fees") {
-    return `<div class="feature-visual visual-fees"><span>POKOIN MARKETPLACE</span><strong class="fee-number">3<span>%</span></strong><p>Platform commission</p><span>On the card item subtotal</span><a href="#comparison">Compare the published rates ↓</a></div>`;
+    return `<div class="feature-visual visual-fees"><span>POKOIN MARKETPLACE</span><strong class="fee-number">3<span>%</span></strong><p>Buyer markup</p><span>No Pokoin marketplace seller commission</span><a href="#comparison">Compare the published rates ↓</a></div>`;
   }
   if (page.visual === "poko") {
     return `<div class="feature-visual visual-poko"><img src="/home/pokoin-mascot.png" width="150" height="139" alt="Poko, your card assistant"><p>Card questions?<br><strong>Start a conversation.</strong></p><span>Printings · Artists · Sold history</span></div>`;
