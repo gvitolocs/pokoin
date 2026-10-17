@@ -162,3 +162,64 @@ CardTrader cache and every active Pokoin listing, read live at build time.
 ## Language-less marketplace URLs (2026-10-15)
 
 Workers Static Assets served the SPA shell for `/marketplace/pokemon`, `/marketplace/rarities`, `/marketplace/languages`, `/marketplace/guides`, `/marketplace/artists`, and `/marketplace/cards/:id/:slug`, so the `_redirects` 301 never ran. Those paths are in `run_worker_first` now, and the worker 301s every client to the `/marketplace/en/...` form, keeping the query string and any game prefix. The `_redirects` rules stay.
+
+
+## Public product, alternative, and workflow pages (2026-10-17)
+
+The homepage links a public product-discovery layer alongside the catalog:
+
+- `/features`: scanner, seller inventory, collection/portfolio, Poko assistant,
+  Chrome extension, marketplace, and seller fees.
+- `/alternatives`: workflow comparisons with Collectr, Dragon Shield,
+  TCGplayer, and Cardmarket, with primary sources and review dates.
+- `/learn`: scan-to-collection/listing and stock-spreadsheet walkthroughs.
+
+These are complete static HTML pages, identical for visitors and crawlers.
+They do not depend on SPA hydration or the bot-specific catalog Workers.
+The private application URLs remain application actions, rather than the
+indexable descriptions of the features. `robots.txt` gives Googlebot,
+Bingbot, OAI-SearchBot, and other crawlers the same public/private rules.
+The existing AI-training content policy is unchanged. A successful HTTP probe
+with a crawler user-agent does not establish access from every real crawler
+IP; verify production edge logs and URL Inspection after publication.
+
+Author content in `content/product-pages.mjs`; render with
+`node scripts/build-product-pages.mjs <output-directory>`.
+`scripts/build-web.sh` invokes the renderer into `dist-web`, including
+`sitemap-product-pages.xml`. The main sitemap generator includes that child
+sitemap. Flat `.html` assets use the host's extensionless HTML handling;
+these prefixes must stay out of SPA catch-all rewrites. The legacy Vercel
+config has explicit static-page rewrites. Vite serves the same renderer for
+local review, including proper unknown-page 404s for these prefixes.
+
+Each page has its own title, description, canonical, social metadata,
+visible breadcrumbs, WebPage/CollectionPage and BreadcrumbList JSON-LD,
+visible text, related links, and ordinary HTML links to the application.
+FAQs are visible content; no special FAQ search appearance is promised.
+The WebApplication entity has no invented price, rating, or review data.
+`llms.txt` is a supplemental product directory, not a prerequisite for AI
+search discovery or a substitute for crawling and useful content.
+
+Keep comparisons specific and fair. Use current primary sources, state
+Pokoin's authorship, include material limitations, and change `reviewed`
+only after an actual editorial review. Do not create city/keyword doorway
+variants or claim recognition benchmarks without measured evidence.
+The fee page advertises the existing 3% marketplace commission and compares
+named published base rates, not universal lowest all-in selling cost.
+Commission caps, minima, seller programs, VAT, payment/withdrawal/conversion,
+and network costs can change an order's effective cost. The fee-copy test
+fails when the checkout or native seller-settlement rate changes, prompting
+an editorial review rather than silently relabelling stale content.
+
+Checks: `node --test scripts/product-pages.test.mjs scripts/cloudflare-web-routing.test.mjs`
+and `cd solid && npm run build`. Before release, inspect generated HTML and
+the product sitemap in the deployment artifact, check mobile tables/menu,
+and verify unknown public-page paths return 404. No push, crawl submission,
+or deployment is implied by generating the pages.
+
+After an authorised production publish, submit/check the sitemap in Search
+Console and inspect representative feature and comparison URLs. Measure
+impressions and clicks for actual task and alternative queries, and
+referrals from services such as `chatgpt.com`; use the existing analytics
+setup rather than adding an unrelated tracking script. Indexing, ranking,
+and AI recommendations depend on the search systems and are not guaranteed.

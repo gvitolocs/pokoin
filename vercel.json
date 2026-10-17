@@ -715,6 +715,30 @@
       "destination": "/explorer/:path*"
     },
     {
+      "source": "/features",
+      "destination": "/features.html"
+    },
+    {
+      "source": "/features/:slug",
+      "destination": "/features/:slug.html"
+    },
+    {
+      "source": "/alternatives",
+      "destination": "/alternatives.html"
+    },
+    {
+      "source": "/alternatives/:slug",
+      "destination": "/alternatives/:slug.html"
+    },
+    {
+      "source": "/learn",
+      "destination": "/learn.html"
+    },
+    {
+      "source": "/learn/:slug",
+      "destination": "/learn/:slug.html"
+    },
+    {
       "source": "/",
       "destination": "/landing.html"
     },

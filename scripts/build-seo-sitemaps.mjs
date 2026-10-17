@@ -95,6 +95,7 @@ writeFileSync(join(ROOT, 'sitemap-sets.xml'), urlset(setUrls.length ? setUrls : 
 const cardSitemaps = existingCardSitemapNames(readdirSync(ROOT));
 writeFileSync(join(ROOT, 'sitemap.xml'), index([
   'sitemap-hubs.xml',
+  'sitemap-product-pages.xml',
   'sitemap-pokemon.xml',
   'sitemap-sets.xml',
   ...cardSitemaps,
