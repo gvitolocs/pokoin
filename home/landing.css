@@ -134,15 +134,11 @@ summary:focus-visible,
   gap: 10px;
   flex-shrink: 0;
 }
-.brand-badge {
-  width: 44px;
-  height: 44px;
-}
 .brand-word {
   display: flex;
   align-items: baseline;
   font-family: Fredoka, var(--font);
-  font-size: 32px;
+  font-size: 42px;
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1;
@@ -1038,9 +1034,6 @@ h2 {
   margin-top: 10px;
 }
 @media (max-width: 1050px) {
-  .brand-badge {
-    display: none;
-  }
   .nav-links {
     gap: 18px;
   }
@@ -1106,7 +1099,7 @@ h2 {
     padding: 13px 6%;
   }
   .brand-word {
-    font-size: 30px;
+    font-size: 38px;
   }
   .nav-account {
     display: none;
