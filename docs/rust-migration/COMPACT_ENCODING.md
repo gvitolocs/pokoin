@@ -480,10 +480,16 @@ the file and fails if this section or `LIST_DICTIONARY_ID` drifts.
   `x-pokoin-dictionary` (CORS-exposed) names the current id on every c1v2 list.
 - Snapshots record `dcb_c1v2` and `dcb_dict`; a row built with an older
   dictionary is rebuilt by the next list job and falls back to `br` meanwhile.
-- **Not live in the browser yet.** `LIST_DICTIONARY_ENABLED` stays `false`, so
-  the SPA still requests the plain URL. Zone `pokoin.com` is on the Free plan
-  and `shared_dictionary_mode` is `disabled` (Cloudflare then strips `dcb` from
-  `Accept-Encoding`). On 2026-10-10 `passthrough` cached one `dcb` body and
+- **Live in Chromium since 2026-10-18.** `LIST_DICTIONARY_ENABLED` is `true`,
+  the zone Bypass rule is the last rule of the `http_request_cache_settings`
+  ruleset, and `shared_dictionary_mode` is `passthrough`. The curl matrix passed
+  that day: `dcb` only with `dict=` plus the matching dictionary, and a stored
+  `dcb` object was never replayed to `br`, gzip or identity clients (they got
+  `s-maxage=0`, `DYNAMIC`). Zone `pokoin.com` is on the Free plan. The plain
+  list URL answered `cf-cache-status: DYNAMIC` under both `disabled` and
+  `passthrough` that day, so it is served by the Rust edge micro-cache rather
+  than Cloudflare's cache; that predates this rollout. Before 2026-10-18 the
+  mode was `disabled` (Cloudflare then strips `dcb` from `Accept-Encoding`). On 2026-10-10 `passthrough` cached one `dcb` body and
   replayed it to `br`, gzip and identity clients, because the zone cache key
   is the URL and does not include `Available-Dictionary`. There is no custom
   cache key on the Free plan. The `dict=` query is the second cache key.
