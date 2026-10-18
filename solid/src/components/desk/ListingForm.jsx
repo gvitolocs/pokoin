@@ -5,7 +5,7 @@ import {
   cardHref,
   createListing,
   fetchPriceCheck,
-  fetchSellerListings,
+  fetchSellerBoxSlots,
   formatPkn,
   formatPknNumber,
   publicCardId,
@@ -15,7 +15,7 @@ import {
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
-import { listingBox, liveInventoryListings, recentBoxes } from '@market/inventory-listings.js';
+import { listingBox } from '@market/inventory-listings.js';
 import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
 import { sellLanguages, versionRedirects } from '@market/listing-languages.js';
 import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js';
@@ -113,8 +113,14 @@ export default function ListingForm(props) {
   const [chips, setChips] = createSignal(blank.chips);
   const [comment, setComment] = createSignal(blank.comment);
   const [box, setBox] = createSignal('');
-  const [stockRows, setStockRows] = createSignal([]);
+  // The seller's boxes with their next free slot, from the server.
+  const [stockBoxes, setStockBoxes] = createSignal([]);
   const [stockReady, setStockReady] = createSignal(false);
+  // Where the listing being edited is stored (public offers carry no location);
+  // null until the server answered, and then the form leaves location alone.
+  const [ownLocation, setOwnLocation] = createSignal(null);
+  // Bumped after a save so the next card gets the slot after this one.
+  const [stockVersion, setStockVersion] = createSignal(0);
   const [photos, setPhotos] = createSignal(
     untrack(() => (Array.isArray(props.editing?.photoUrls) ? props.editing.photoUrls.slice(0, MAX_LISTING_PHOTOS) : [])),
   );
@@ -275,8 +281,8 @@ export default function ListingForm(props) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  // [signedIn, uid, editingId]: the seller's stock for the box/slot picker.
-  const stockKey = createMemo(() => (signedIn() && uid() ? `${uid()}|${editingId()}` : ''));
+  // [signedIn, uid, editingId, saves]: the seller's boxes for the box/slot picker.
+  const stockKey = createMemo(() => (signedIn() && uid() ? `${uid()}|${editingId()}|${stockVersion()}` : ''));
   createEffect(stockKey, (key) => {
     if (!key) return undefined;
     const owner = untrack(uid);
@@ -284,15 +290,15 @@ export default function ListingForm(props) {
     (async () => {
       try {
         const token = await getBearer();
-        const data = await fetchSellerListings(owner, token, { limit: 1000 });
+        const id = untrack(editingId);
+        const data = await fetchSellerBoxSlots(owner, token, { stackSize: 80, ...(id ? { id } : {}) });
         if (cancelled) return;
-        setStockRows(liveInventoryListings(data.listings || data.items || []));
+        setStockBoxes(Array.isArray(data?.boxes) ? data.boxes : []);
+        setOwnLocation(typeof data?.listing?.location === 'string' ? data.listing.location : null);
         setStockReady(true);
       } catch (_) {
-        if (!cancelled) {
-          setStockRows([]);
-          setStockReady(true);
-        }
+        // Not ready: an edit then keeps the stored location instead of clearing it.
+        if (!cancelled) setStockBoxes([]);
       }
     })();
     return () => {
@@ -301,33 +307,30 @@ export default function ListingForm(props) {
   });
 
   createEffect(
-    () => [editingId(), stockRows(), props.editing?.location || ''],
-    ([id, rows, location]) => {
+    () => [editingId(), stockBoxes(), ownLocation() ?? props.editing?.location ?? ''],
+    ([id, boxes, location]) => {
       if (id) {
-        const mine = rows.find((row) => row.id === id);
-        setBox(listingBox(mine?.location || location || ''));
+        setBox(listingBox(location || ''));
         return;
       }
       if (boxTouched) return;
-      const first = recentBoxes(rows)[0] || '';
+      const first = String(boxes[0]?.box || '');
       if (first) setBox(first);
     },
   );
 
   const boxOptions = () => {
-    const names = recentBoxes(stockRows());
+    const names = stockBoxes().map((entry) => String(entry?.box || '')).filter(Boolean);
     const current = box();
     if (current && !names.some((name) => name.toLowerCase() === current.toLowerCase())) return [current, ...names];
     return names;
   };
-  const keptLocation = () => (editingId()
-    ? (stockRows().find((row) => row.id === editingId())?.location || props.editing?.location || '')
-    : '');
+  const keptLocation = () => (editingId() ? (ownLocation() ?? props.editing?.location ?? '') : '');
   const locationValue = () => {
     const current = box();
     if (!current) return '';
     const sameBox = listingBox(keptLocation()).toLowerCase() === current.toLowerCase();
-    return sameBox ? keptLocation() : nextBoxLocation(stockRows(), current);
+    return sameBox ? keptLocation() : nextBoxLocation(stockBoxes(), current);
   };
 
   async function submit(targets = { pokoin: true, cardtrader: false }) {
@@ -403,7 +406,7 @@ export default function ListingForm(props) {
         reserveAvailable: false,
         nftAvailable: false,
         sellerComment: comment().trim(),
-        ...(!editing || stockReady() ? { location: locationValue() } : {}),
+        ...(!editing || (stockReady() && ownLocation() !== null) ? { location: locationValue() } : {}),
         source: 'pokoin_user_listing',
         cardName: row.name,
         cardImageUrl: row.heroImageUrl || row.imageUrl || '',
@@ -438,6 +441,7 @@ export default function ListingForm(props) {
         setDone(editing ? 'Listing updated.' : 'Listing created.');
       }
       if (!editing) setQty('1');
+      setStockVersion((n) => n + 1);
       const listingRow = saved?.id ? saved : saved?.listing;
       if (listingRow?.id && photos().length) {
         const attached = await saveListingPhotos(token, listingRow.id, photos());

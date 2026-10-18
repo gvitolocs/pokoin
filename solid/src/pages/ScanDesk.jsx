@@ -4,16 +4,13 @@ import {
   fetchCardSales,
   fetchCheapestPricePknMap,
   fetchExactNameCards,
-  fetchSellerListings,
+  fetchSellerBoxSlots,
   imageSrc,
 } from '@market/api.js';
 import {
-  continueBoxCursor,
   listingBox,
-  liveInventoryListings,
   nextPositionInStack,
   occupiedAbsForScanBoxes,
-  recentBoxes,
 } from '@market/inventory-listings.js';
 import { fetchScanImage, rememberActiveSession, scanApi, streamUrl } from '@market/scan-api.js';
 import {
@@ -401,15 +398,18 @@ function ScanDeskDesk() {
       let cancelled = false;
       (async () => {
         try {
-          const data = await fetchSellerListings(sellerUid, await getBearer(), { limit: 1000 });
+          const askedSize = Math.max(1, Math.trunc(Number(defaults().stackSize)) || 1);
+          // The server counts every card in the box: all games, paused and inactive too.
+          const data = await fetchSellerBoxSlots(sellerUid, await getBearer(), { box, stackSize: askedSize });
           if (cancelled) return;
-          const stock = liveInventoryListings(data.listings || data.items || []);
+          const stock = Array.isArray(data?.rows) ? data.rows : [];
           boxStock = { key, box, rows: stock };
           setBoxStockRows(stock);
           const d = defaults();
           if (listingBox(String(d.location || '').trim()) !== box) return;
           const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-          const next = continueBoxCursor(stock, box, size);
+          if (size !== askedSize) return;
+          const next = data?.next;
           if (!next) return;
           // Inventory is the cursor, including when a saved stop ran ahead of
           // the last card actually added (that stop opened an empty stack).
@@ -448,12 +448,10 @@ function ScanDeskDesk() {
       let cancelled = false;
       (async () => {
         try {
-          const data = await fetchSellerListings(sellerUid, await getBearer(), { limit: 200 });
+          const data = await fetchSellerBoxSlots(sellerUid, await getBearer());
           if (cancelled || locationSeeded === batchId) return;
-          const stock = liveInventoryListings(data.listings || data.items || []);
-          const boxes = recentBoxes(stock);
+          const boxes = (Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean);
           setRecentBoxNames(boxes);
-          setBoxStockRows((current) => (current.length ? current : stock));
           const last = boxes[0];
           if (!last || String(defaults().location || '').trim()) return;
           locationSeeded = batchId;
@@ -632,12 +630,12 @@ function ScanDeskDesk() {
         const box = listingBox(loc);
         const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? d.stackSize)) || 1);
         try {
-          const data = await fetchSellerListings(sellerUid, await getBearer(), { limit: 1000 });
-          const stock = liveInventoryListings(data.listings || data.items || []);
+          const data = await fetchSellerBoxSlots(sellerUid, await getBearer(), { box, stackSize: size });
+          const stock = Array.isArray(data?.rows) ? data.rows : [];
           boxStock = { key: `${current.id}|${box}`, box, rows: stock };
           setBoxStockRows(stock);
-          setRecentBoxNames(recentBoxes(stock));
-          const next = continueBoxCursor(stock, box, size);
+          setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
+          const next = data?.next;
           if (next && patch.stack == null && patch.startPosition == null) {
             nextPatch = {
               ...nextPatch,

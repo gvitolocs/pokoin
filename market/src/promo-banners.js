@@ -36,6 +36,49 @@ export function satellitePromoBanners(rows, gameName, limit = SATELLITE_PROMO_LI
   return slides;
 }
 
+const STORED_BANNERS_KEY = 'pokoin.promoBanners';
+
+function localStore() {
+  try {
+    const local = globalThis.localStorage;
+    return local && typeof local.getItem === 'function' ? local : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The satellite slides this browser last showed for `gameId`. The hero
+ * paints them in its first frame on a reload: a stage that waited for the
+ * expansions read painted the rails below one row (desktop) or one slide
+ * (phone) too high, then pushed them down when the slides landed.
+ */
+export function readStoredPromoBanners(gameId, store = localStore()) {
+  try {
+    const parsed = JSON.parse(store?.getItem(`${STORED_BANNERS_KEY}.${gameId}`) || 'null');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((slide) => typeof slide?.slug === 'string' && slide.slug && typeof slide.title === 'string' && slide.title)
+      .slice(0, SATELLITE_PROMO_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+/** Keep `slides` (satellitePromoBanners) for the next visit to `gameId`. */
+export function rememberPromoBanners(gameId, slides, store = localStore()) {
+  try {
+    store?.setItem(`${STORED_BANNERS_KEY}.${gameId}`, JSON.stringify((slides || []).slice(0, SATELLITE_PROMO_LIMIT)));
+  } catch {
+    /* quota / private mode: the next visit waits for the read */
+  }
+}
+
+/** True when two slide lists show the same slides (a refresh that changes nothing). */
+export function samePromoBanners(a, b) {
+  return JSON.stringify(a || []) === JSON.stringify(b || []);
+}
+
 /**
  * A western wordmark already writes the expansion name, so the hero
  * does not repeat it as a text title.

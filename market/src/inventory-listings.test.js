@@ -15,8 +15,6 @@ import {
   lastOccupiedIndex,
   listingSlotEnd,
   maxOccupiedStack,
-  continueBoxCursor,
-  nextFreeSlot,
   nextPositionInStack,
   recentBoxes,
   occupiedAbsForScanBoxes,
@@ -297,7 +295,7 @@ test('listingSlotEnd reads where a slot string ends', () => {
   assert.deepEqual(listingSlotEnd('box'), { box: 'box', stack: null, position: null });
 });
 
-test('a box continues after its stock: position inside a half-full stack, not stack + 1', () => {
+test('a box continues after its stock: last occupied index', () => {
   const rows = [
     { location: 'megaevoluzionietb·1·1-20' },
     { location: 'megaevoluzionietb·2·1-7' },
@@ -305,12 +303,7 @@ test('a box continues after its stock: position inside a half-full stack, not st
     { location: 'megaevoluzionietb' },
   ];
   assert.equal(lastOccupiedIndex(rows, 'megaevoluzionietb', 20), 27);
-  assert.deepEqual(nextFreeSlot(rows, 'megaevoluzionietb', 20), { stack: 2, startPosition: 8, abs: 28 });
-  // A full stack rolls over to the next divider.
-  assert.deepEqual(nextFreeSlot([{ location: 'b·2·1-20' }], 'b', 20), { stack: 3, startPosition: 1, abs: 41 });
-  // One card per stack: the stack number is the running slot.
-  assert.deepEqual(nextFreeSlot([{ location: 'b·1-41' }, { location: 'b·7' }], 'b', 1), { stack: 42, startPosition: 1, abs: 42 });
-  assert.equal(nextFreeSlot(rows, 'empty-box', 20), null);
+  // The next free slot itself is the server's (pokoin-rust domain/box_slots.rs).
 });
 
 test('typing a stack continues after the cards already in it', () => {
@@ -385,50 +378,4 @@ test('recent boxes follow listing order and keep the newest casing', () => {
     { location: 'MegaEvoluzioniETB·1·1' },
   ]), ['megaevoluzionietb', 'OtherBox']);
   assert.deepEqual(recentBoxes(null), []);
-});
-
-test('the next slot follows the last card added and keeps the divider size', () => {
-  const rows = [
-    { location: 'megaevoluzionietb·1·80', createdAt: '2026-10-05T10:00:00Z' },
-    { location: 'megaevoluzionietb·2·80', createdAt: '2026-10-05T11:00:00Z' },
-    { location: 'megaevoluzionietb·3·30', createdAt: '2026-10-05T12:00:00Z' },
-    { location: 'megaevoluzionietb·8' },
-    { location: 'other·2·9' },
-  ];
-  // A fresh batch is size 1. Adopt the earlier full stack (80) so position
-  // 31 stays on stack 3 instead of counting as a full 31-card stack.
-  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 1), {
-    stack: 3, startPosition: 31, stackSize: 80,
-  });
-  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 80), {
-    stack: 3, startPosition: 31, stackSize: 80,
-  });
-  // Same insert: the higher position is the last slot.
-  assert.deepEqual(continueBoxCursor([
-    { location: 'box·2·80', createdAt: '2026-10-05T11:00:00Z' },
-    { location: 'box·3·30', createdAt: '2026-10-05T12:00:00Z', id: 'a' },
-    { location: 'box·3·38', createdAt: '2026-10-05T12:00:00Z', id: 'b' },
-  ], 'box', 80), {
-    stack: 3, startPosition: 39, stackSize: 80,
-  });
-  // A position past the divider opens the next stack. It does not grow the size.
-  assert.deepEqual(continueBoxCursor([
-    { location: 'megaevoluzionietb·1·79' },
-    { location: 'megaevoluzionietb·2·88' },
-  ], 'megaevoluzionietb', 80), {
-    stack: 3, startPosition: 1, stackSize: 80,
-  });
-  // A half-full stack still continues inside it.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·2·40' }], 'box', 80), {
-    stack: 2, startPosition: 41, stackSize: 80,
-  });
-  // An exactly full stack opens the next divider.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·2·80' }], 'box', 80), {
-    stack: 3, startPosition: 1, stackSize: 80,
-  });
-  // Flat locations keep the size-1 walk and skip a deleted hole via the max.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·7' }, { location: 'box·9' }], 'box', 1), {
-    stack: 10, startPosition: 1, stackSize: 1,
-  });
-  assert.equal(continueBoxCursor([], 'box', 1), null);
 });

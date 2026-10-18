@@ -1,5 +1,6 @@
 //! Native listings reads and writer mutations, plus stock CSV import/export.
 use super::private_json;
+use crate::domain::box_slots::{self, Cursor, SlotRow};
 use crate::domain::stock_csv::{self, ImportOptions, PriceMode};
 use crate::error::ApiError;
 use crate::state::{AuthedUser, DomainState};
@@ -85,6 +86,8 @@ fn query_map(uri: &Uri) -> HashMap<String, String> {
         "nativeOnly",
         "live",
         "action",
+        "box",
+        "stackSize",
     ] {
         if let Some(value) = q.first(key) {
             map.insert(key.into(), value.into());
@@ -299,6 +302,87 @@ pub async fn read_listings(
     }
     Ok(listings)
 }
+/// Every row of a seller that holds a card in a box: all games (the box is
+/// physical) and active, paused or inactive (scan-submitted) rows.
+/// Read from the writer so a listing created a moment ago already counts.
+const BOX_SLOT_SQL: &str = "select id::text as id, btrim(location) as location, status,
+       quantity_available::bigint as quantity_available,
+       coalesce(nullif(marketplace_game, ''), 'pokemon') as game,
+       (extract(epoch from created_at) * 1000)::bigint as created_ms
+  from public.marketplace_user_listings
+ where seller_uid = $1 and status = any($2::text[]) and quantity_available > 0
+   and btrim(coalesce(location, '')) <> ''
+ order by created_at desc, id desc
+ limit 50000";
+fn cursor_json(cursor: Option<Cursor>) -> Value {
+    cursor.map_or(Value::Null, |c| {
+        json!({"stack":c.stack,"startPosition":c.start_position,"stackSize":c.stack_size,"slot":c.suffix()})
+    })
+}
+fn clean_stack_size(value: Option<&String>) -> i64 {
+    value
+        .and_then(|s| http::js_number(s))
+        .filter(|n| n.is_finite())
+        .map(|n| (n.trunc() as i64).clamp(1, 9999))
+        .unwrap_or(1)
+}
+/// `GET /api/marketplace-listings?action=box-slots&sellerUid=&box=&stackSize=&id=`:
+/// the seller's boxes (newest first) with the next free slot of each; for
+/// `box`, the rows that hold its slots plus its next slot; for `id`, where
+/// that own listing is stored (a desk edit keeps it; public offers omit it).
+async fn read_box_slots(
+    state: &DomainState,
+    seller: &str,
+    query: &HashMap<String, String>,
+) -> Result<Value, ApiError> {
+    let statuses: Vec<String> = box_slots::SLOT_STATUSES.iter().map(|s| s.to_string()).collect();
+    let rows = sqlx::query(BOX_SLOT_SQL)
+        .bind(seller)
+        .bind(&statuses)
+        .fetch_all(state.write_db())
+        .await?;
+    let size = clean_stack_size(query.get("stackSize"));
+    let wanted = box_slots::listing_box(&clean_text(query.get("box").map(String::as_str).unwrap_or(""), 120));
+    let key = box_slots::box_key(&wanted);
+    let mut slots = Vec::with_capacity(rows.len());
+    let mut in_box = vec![];
+    for row in &rows {
+        let slot = SlotRow {
+            id: row.try_get("id").unwrap_or_default(),
+            location: row.try_get("location").unwrap_or_default(),
+            created_ms: row.try_get::<Option<i64>, _>("created_ms").ok().flatten(),
+        };
+        if !key.is_empty() && box_slots::box_key(&box_slots::listing_box(&slot.location)) == key {
+            in_box.push(json!({
+                "id": slot.id,
+                "location": slot.location,
+                "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "quantityAvailable": row.try_get::<i64, _>("quantity_available").unwrap_or(0),
+                "game": row.try_get::<String, _>("game").unwrap_or_default(),
+                "createdMs": slot.created_ms,
+            }));
+        }
+        slots.push(slot);
+    }
+    let boxes: Vec<Value> = box_slots::boxes(&slots, size)
+        .into_iter()
+        .map(|b| json!({"box":b.name,"rows":b.rows,"next":cursor_json(b.next)}))
+        .collect();
+    let next = if key.is_empty() { None } else { box_slots::next_slot(&slots, &wanted, size) };
+    let mut out = json!({"stackSize":size,"boxes":boxes,"box":wanted,"rows":in_box,"next":cursor_json(next)});
+    let id = clean_listing_id(query.get("id").map(String::as_str).unwrap_or(""));
+    if !id.is_empty() {
+        let location = sqlx::query_scalar::<_, String>(
+            "select coalesce(location, '') from public.marketplace_user_listings where id = $1::uuid and seller_uid = $2",
+        )
+        .bind(&id)
+        .bind(seller)
+        .fetch_optional(state.write_db())
+        .await?;
+        out["listing"] = location.map_or(Value::Null, |location| json!({"id": id, "location": location}));
+    }
+    Ok(out)
+}
 pub async fn marketplace_listings_get(
     State(state): State<DomainState>,
     headers: HeaderMap,
@@ -327,6 +411,18 @@ pub async fn marketplace_listings_get(
         } else {
             None
         };
+        if q.get("action").map(String::as_str) == Some("box-slots") {
+            let uid = clean_text(q.get("sellerUid").map(String::as_str).unwrap_or(""), 160);
+            let Some(claims) = decoded.as_ref().filter(|_| !uid.is_empty()) else {
+                return Err(ApiError::bad_request("sellerUid is required."));
+            };
+            if claims.uid != uid {
+                return Err(ApiError::forbidden(
+                    "You can only read your own seller listings.",
+                ));
+            }
+            return read_box_slots(&state, &uid, &q).await;
+        }
         Ok(json!({"listings":read_listings(&state,&q,decoded.as_ref(),&game).await?}))
     }
     .await;
@@ -1723,6 +1819,28 @@ mod parity_tests {
         let (status, body) = call("DELETE", "/api/marketplace-listings", json!({}), true).await;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body, json!({"error":"Method not allowed."}));
+    }
+    #[tokio::test]
+    async fn box_slots_are_read_by_their_seller_only() {
+        let (status, _) = call("GET", "/api/marketplace-listings?action=box-slots&box=bin", Value::Null, true).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, body) = call(
+            "GET",
+            "/api/marketplace-listings?action=box-slots&sellerUid=u2&box=bin",
+            Value::Null,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+    #[test]
+    fn box_slot_rows_span_every_game_and_every_status_holding_a_card() {
+        // No game scope and no 1,000-row page: a box is physical.
+        assert!(!BOX_SLOT_SQL.contains("marketplace_game ="));
+        assert!(!BOX_SLOT_SQL.contains("limit 1000"));
+        assert!(BOX_SLOT_SQL.contains("status = any($2::text[])"));
+        assert!(BOX_SLOT_SQL.contains("quantity_available > 0"));
+        assert_eq!(box_slots::SLOT_STATUSES, ["active", "paused", "inactive"]);
     }
     #[test]
     fn read_plan_scopes_seller_inventory_with_catalog_intersection() {
