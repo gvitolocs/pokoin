@@ -4,10 +4,22 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
-const desktopCss = css.slice(0, css.indexOf('@media (max-width: 720px)'));
-const phone720 = css.slice(css.indexOf('@media (max-width: 720px)'));
-const phone720First = phone720.slice(0, phone720.indexOf('@media (max-width: 480px)'));
+const read = (name) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), name), 'utf8');
+// styles.css opens with @import "./search-box.css" (the header search rules); inline it like the build does.
+const styles = read('styles.css');
+assert.match(styles, /^@import "\.\/search-box\.css";/);
+const searchBox = read('search-box.css');
+const css = styles.replace(/^@import "\.\/search-box\.css";/, searchBox);
+/** Desktop rules, the first phone ≤720px block, and what follows it — per file, search rules first. */
+function split(sheet) {
+  const at = sheet.indexOf('@media (max-width: 720px)');
+  const phone = sheet.slice(at);
+  return { desktop: sheet.slice(0, at), phone, phoneFirst: phone.slice(0, phone.indexOf('@media (max-width: 480px)')) };
+}
+const [boxParts, styleParts] = [split(searchBox), split(styles)];
+const desktopCss = boxParts.desktop + styleParts.desktop;
+const phone720 = boxParts.phone + styleParts.phone;
+const phone720First = boxParts.phoneFirst + styleParts.phoneFirst;
 
 /** Desktop Playwright: `resize 1440 900`. Phone: `resize 393 852` (iPhone 16). */
 test('suggest row is two columns without a Singles cell', () => {
