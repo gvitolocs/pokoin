@@ -90,7 +90,7 @@ import {
   rarityVersions,
   versionOptionLabel,
 } from '@market/card-versions.js';
-import { ownerGameLocation } from '@market/card-response.js';
+import { ownerGameChoice } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
@@ -239,6 +239,8 @@ function CardDesk(props) {
   });
   const [offersReady, setOffersReady] = createSignal(peekHasListingRows(listed));
   const [error, setError] = createSignal('');
+  // Same-id cards of other games, offered when a game-less link cannot pick one.
+  const [ownerChoices, setOwnerChoices] = createSignal([]);
   const [zoom, setZoom] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const [watched, setWatched] = createSignal(readWatchlistIds().includes(cardId));
@@ -354,11 +356,12 @@ function CardDesk(props) {
         // Another TCG's card behind a game-less link: reload under its slug
         // (the router basename changes), never "Card market not found."
         const { pathname, search, hash } = window.location;
-        const moved = ownerGameLocation(err, { gameId: game().id, pathname, search, hash });
-        if (moved) {
-          window.location.replace(moved);
+        const owner = ownerGameChoice(err, { gameId: game().id, pathname, search, hash });
+        if (owner.location) {
+          window.location.replace(owner.location);
           return;
         }
+        setOwnerChoices(owner.choices);
         setPage(null);
         setError(err.message || 'Card not found.');
         return;
@@ -822,8 +825,20 @@ function CardDesk(props) {
   return (
     <Switch>
       <Match when={error() && !page()?.card}>
-        <div class="status error">
-          <p>Card market not found.</p>
+        <div class={ownerChoices().length ? 'status owner-games' : 'status error'}>
+          <Show when={ownerChoices().length} fallback={<p>Card market not found.</p>}>
+            <p>Card #{cardId} exists in several games. Which one did you mean?</p>
+            <ul>
+              <For each={ownerChoices()}>
+                {(choice) => (
+                  <li>
+                    <a href={choice.href}>{choice.name || `Card #${cardId}`}</a>
+                    <span>{[choice.gameName, choice.set].filter(Boolean).join(' · ')}</span>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
           <a href={gameHref('/marketplace')}>Back to marketplace</a>
         </div>
       </Match>

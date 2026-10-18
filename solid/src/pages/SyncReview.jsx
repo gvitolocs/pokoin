@@ -11,6 +11,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { GAMES } from '@market/game.js';
+import { inventoryListingHref } from '@market/inventory-listings.js';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
@@ -318,7 +319,7 @@ function SyncReviewDesk() {
                         {busyKey() === `cancel:${row.ctProductId}` ? 'Removing…' : 'Cancel listing'}
                       </button>
                       <Show when={row.cardId}>
-                        <a class="btn ghost" href={`/marketplace/en/cards/${row.cardId}`}>Open card</a>
+                        <a class="btn ghost" href={inventoryListingHref({ cardId: row.cardId, marketplaceGame: row.game })}>Open card</a>
                       </Show>
                     </span>
                   </article>

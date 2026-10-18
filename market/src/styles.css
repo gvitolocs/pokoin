@@ -1804,6 +1804,9 @@ h1, h2 { margin: 0 0 0.85rem; }
 
 .status { color: var(--muted); padding: 1.5rem 0; }
 .status.error { color: #fca5a5; }
+.status.owner-games ul { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.5rem; }
+.status.owner-games li { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
+.status.owner-games li a { color: var(--yellow); font-weight: 600; }
 
 .cookie-banner {
   position: fixed;

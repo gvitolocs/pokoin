@@ -52,6 +52,31 @@ test('inventory links prefer canonical desk paths', () => {
   assert.equal(inventoryListingHref({}), '/marketplace');
 });
 
+test('inventory links open each game on its own desk', () => {
+  // MyPokoin on Battle Spirits Saga linked /marketplace/en/cards/200000874,
+  // which opened the Pokémon catalog: "Card market not found."
+  const bss = { cardId: '200000874', marketplaceGame: 'battle_spirits_saga' };
+  assert.equal(inventoryListingHref(bss), '/battle-spirits-saga/marketplace/en/cards/200000874');
+  assert.equal(
+    inventoryListingHref({ ...bss, canonicalPath: '/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods' }),
+    '/battle-spirits-saga/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods',
+  );
+  assert.equal(inventoryListingHref({ card_id: '822658', marketplace_game: 'magic' }), '/magic/marketplace/en/cards/822658');
+  // A row without its game takes the stock desk's selected game; its own game wins.
+  assert.equal(inventoryListingHref({ cardId: '834950' }, 'one_piece'), '/one-piece/marketplace/en/cards/834950');
+  assert.equal(inventoryListingHref(bss, 'one_piece'), '/battle-spirits-saga/marketplace/en/cards/200000874');
+  assert.equal(inventoryListingHref({}, 'one_piece'), '/one-piece/marketplace');
+  // Already-prefixed paths and Pokémon rows stay as they are.
+  assert.equal(
+    inventoryListingHref({ canonicalPath: '/lorcana/marketplace/en/cards/708344/rare-megara', marketplaceGame: 'lorcana' }, 'one_piece'),
+    '/lorcana/marketplace/en/cards/708344/rare-megara',
+  );
+  assert.equal(inventoryListingHref({ cardId: '244538', marketplaceGame: 'pokemon' }, 'magic'), '/marketplace/en/cards/244538');
+  // Stacks view links through the stack, which keeps the rows' game.
+  const [stack] = groupInventoryStacks([{ ...bss, cardName: 'Arcana Joker', quantityAvailable: 1 }]);
+  assert.equal(inventoryListingHref(stack), '/battle-spirits-saga/marketplace/en/cards/200000874');
+});
+
 test('inventory meta marks paused and non-EN language', () => {
   const meta = inventoryListingMeta(
     { pricePkn: 324, condition: 'NM', quantityAvailable: 1, status: 'paused', language: 'JP' },

@@ -1,15 +1,10 @@
 import { For, Show } from 'solid-js';
-import { groupBoxStacks, listingBox } from '@market/inventory-listings.js';
+import { groupBoxStacks, inventoryListingHref, listingBox } from '@market/inventory-listings.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import RowThumb from './RowThumb.jsx';
 
 function stackLabel(stack) {
   return stack === 0 ? 'Cards in the box' : `Stack ${stack}`;
-}
-
-function stackHref(stack) {
-  const id = String(stack.cardId || '');
-  return /^\d+$/.test(id) ? `/marketplace/en/cards/${id}` : '/marketplace';
 }
 
 const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
@@ -68,7 +63,7 @@ export default function LocationBoard(props) {
                       const language = row?.language ? listingLanguageFlag(row.language) : null;
                       const slotPosition = row.slotPosition ? ` · pos ${row.slotPositionText || row.slotPosition}` : '';
                       return (
-                        <a class="loc-posting" href={stackHref(row)}>
+                        <a class="loc-posting" href={inventoryListingHref(row)}>
                           <RowThumb row={row} />
                           <span class="inv-card-txt">
                             <strong>{row?.cardName || row?.name || 'Listing'}</strong>

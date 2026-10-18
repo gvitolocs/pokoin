@@ -3,6 +3,7 @@ import { cardHref, formatPkn, imageSrc } from '@market/api.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { printingIdentity } from '@market/identity.js';
 import { formatPknNumber, tilePricePkn } from '@market/pkn.js';
+import { inventoryListingHref } from '@market/inventory-listings.js';
 import { formatDayLabel } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN, goMarket, marketUrl } from '@market/punchouts.js';
 import '@market/sell-spreadsheet.css';
@@ -239,7 +240,7 @@ function CardTraderAssetsPanel(props) {
                   title={assetTitle(item)}
                   cardId={item.cardId || ''}
                   pricePkn={item.pricePkn}
-                  href={item.cardId ? marketUrl(`/marketplace/en/cards/${item.cardId}`) : ''}
+                  href={item.cardId ? marketUrl(inventoryListingHref(item)) : ''}
                   badge={item.quantity > 1 ? `×${item.quantity}` : ''}
                 />
               )}
