@@ -13,8 +13,8 @@ import {
  * The hero binder. Signed out (or an empty collection) it keeps the static
  * demo cards. Signed in it becomes the first page of the visitor's own
  * collection: the stored page paints at once, the network read
- * (binder-sync.js, which may load Firebase for a token) runs when the page
- * goes idle. Pictures are swapped in place once they have loaded, into the
+ * (binder-sync.js, which may load Firebase for a token) runs once the binder
+ * is on screen or the page goes idle, whichever comes first. Pictures are swapped in place once they have loaded, into the
  * same nine slots, so the slot-in, scan-line and chip animations stay.
  *
  * landing-boot.js marks `html.binder-mine` when a stored page for this uid
@@ -158,10 +158,12 @@ export function mountBinder(binder, { whenIdle, sync } = {}) {
   const demo = snapshot(binder);
   let shown = null;
   let generation = 0;
+  let painting = Promise.resolve();
   const show = (page) => {
     shown = page;
     const mine = ++generation;
-    return paint(binder, page, () => mine === generation);
+    painting = paint(binder, page, () => mine === generation);
+    return painting;
   };
 
   const cached = readBinderCache(session.uid);
@@ -169,7 +171,10 @@ export function mountBinder(binder, { whenIdle, sync } = {}) {
   else unmark();
 
   const read = sync || ((uid) => import('./binder-sync.js').then((mod) => mod.syncBinder(uid)));
+  let started = false;
   const revalidate = () => {
+    if (started) return;
+    started = true;
     read(session.uid)
       .then((result) => {
         if (result?.kind === 'page') {
@@ -179,6 +184,7 @@ export function mountBinder(binder, { whenIdle, sync } = {}) {
         if (result?.kind === 'empty' || result?.kind === 'signed-out') {
           // Empty collection, or Firebase says nobody is signed in here: the demo.
           generation += 1;
+          painting = Promise.resolve();
           if (shown) restore(binder, demo);
           shown = null;
         }
@@ -186,7 +192,16 @@ export function mountBinder(binder, { whenIdle, sync } = {}) {
         return undefined;
       })
       .catch(() => {})
-      .finally(unmark);
+      // The demo hold ends once the stored page is in (never while it is still loading).
+      .finally(() => painting.then(unmark, unmark));
   };
   (whenIdle || ((fn) => setTimeout(fn, 1200)))(revalidate);
+  if (typeof IntersectionObserver === 'function') {
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      revalidate();
+    });
+    observer.observe(binder);
+  }
 }

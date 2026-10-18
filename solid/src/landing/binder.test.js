@@ -78,7 +78,9 @@ globalThis.document = {
 globalThis.Image = class {
   set src(url) {
     this._src = url;
-    queueMicrotask(() => (url.includes('broken') ? this.onerror?.() : this.onload?.()));
+    const done = () => (url.includes('broken') ? this.onerror?.() : this.onload?.());
+    if (url.includes('slow')) setTimeout(done, 30);
+    else queueMicrotask(done);
   }
   get src() { return this._src; }
 };
@@ -184,6 +186,24 @@ test("another account's stored page is never shown; that visitor's own page is",
   assert.equal(parts['.binder-grid'].children.length, 9);
   assert.ok(parts['.binder-grid'].children[8].className.includes('is-empty'));
   assert.equal(parts['.binder-count'].textContent, '3 / 3');
+});
+
+test('a fast revalidation does not end the demo hold before the stored page is in', async () => {
+  reset();
+  signIn('alice');
+  const slow = page('alice', 4);
+  for (const card of slow.cards) card.src = card.src.replace('_homepage', '_slow_homepage');
+  writeBinderCache(slow);
+  root.classList.add('binder-mine');
+  const { binder } = demoBinder();
+  mountBinder(binder, { whenIdle: now(), sync: async () => ({ kind: 'page', page: readBinderCache('alice') }) });
+  await settle();
+  // The read answered (same page) while the pictures still load: the demo stays held.
+  assert.ok(root.classList.contains('binder-mine'));
+  assert.ok(!binder.classList.contains('is-own'));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(binder.classList.contains('is-own'));
+  assert.ok(!root.classList.contains('binder-mine'));
 });
 
 test('an empty collection puts the demo back', async () => {
