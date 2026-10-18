@@ -112,3 +112,11 @@ test('the CSP allows no inline script and Solid chunks are immutable', () => {
   assert.match(headers, /\/market\/s\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/);
   assert.match(headers, /\/market\/app\.html\n {2}Cache-Control: public, max-age=0, must-revalidate/);
 });
+
+test('/extension.zip is the gated SPA page, never a static zip', () => {
+  for (const from of ['/extension.zip', '/extension']) {
+    const hit = applyRedirect(from);
+    assert.equal(hit?.location, '/market/app', from);
+    assert.equal(hit?.code, 200, from);
+  }
+});

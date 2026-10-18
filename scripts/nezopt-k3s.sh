@@ -57,7 +57,7 @@ die() { echo "nezopt-k3s: $*" >&2; exit 1; }
 kc() { docker exec -i "$CONTAINER" kubectl "$@"; }
 
 up() {
-  mkdir -p "$BASE/k3s" "$BASE/data/rust/releases" "$BASE/data/seo" "$BASE/data/meili"
+  mkdir -p "$BASE/k3s" "$BASE/data/rust/releases" "$BASE/data/seo" "$BASE/data/extension" "$BASE/data/meili"
   if docker inspect "$CONTAINER" >/dev/null 2>&1; then
     docker start "$CONTAINER" >/dev/null
   else
@@ -302,11 +302,18 @@ sync_seo() {
   rsync -a --delete "$PI:/srv/pokoin/seo/" "$BASE/data/seo/"
 }
 
+# Silver-only extension zips GET /api/extension-download serves (Pi /srv/pokoin/extension).
+sync_extension() {
+  mkdir -p "$BASE/data/extension"
+  rsync -a --delete "$PI:/srv/pokoin/extension/" "$BASE/data/extension/" || say "extension zips not synced"
+}
+
 sync() {
   network
   kc get ns "$NS" >/dev/null 2>&1 || kc create namespace "$NS" >/dev/null
   sync_secret
   sync_seo
+  sync_extension
   if sync_code; then
     if kc -n "$NS" get deploy pokoin-api >/dev/null 2>&1; then
       kc -n "$NS" rollout restart deploy/pokoin-api >/dev/null

@@ -999,6 +999,18 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/extension/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension.zip",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/profile/",
       "destination": "/market/index.html"
     },

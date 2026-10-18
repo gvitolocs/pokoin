@@ -12,6 +12,7 @@ const Invite = lazy(() => import('../pages/Invite.jsx'));
 const AmbassadorProgram = lazy(() => import('../pages/AmbassadorProgram.jsx'));
 const EmailPreferences = lazy(() => import('../pages/EmailPreferences.jsx'));
 const ExtensionAuthBridge = lazy(() => import('../pages/ExtensionAuthBridge.jsx'));
+const ExtensionDownload = lazy(() => import('../pages/ExtensionDownload.jsx'));
 const ConnectCardRails = lazy(() => import('../pages/ConnectCardRails.jsx'));
 const Auth = lazy(() => import('../pages/Auth.jsx'));
 const CardTraderZero = lazy(() => import('../pages/CardTraderZero.jsx'));
@@ -32,6 +33,9 @@ export default [
   { path: '/ambassadorprogram', component: AmbassadorProgram },
   { path: '/email-preferences', component: EmailPreferences },
   { path: '/extension/auth-bridge', component: ExtensionAuthBridge },
+  // Silver-only Chrome extension download; the zip itself is GET /api/extension-download.
+  { path: '/extension', component: ExtensionDownload },
+  { path: '/extension.zip', component: ExtensionDownload },
   { path: '/connect/cardrails', component: ConnectCardRails },
   { path: '/auth', component: Auth },
   { path: '/mypokoin/zero', component: CardTraderZero },

@@ -887,6 +887,14 @@
   "purpose": "Unlock Silver status/features for the authenticated account."
  },
  {
+  "path": "/api/extension-download",
+  "methods": [
+   "GET"
+  ],
+  "file": "extension-download.rs",
+  "purpose": "Download the Pokoin Chrome extension zip (signed-in Silver accounts only)."
+ },
+ {
   "path": "/api/upload-profile-picture",
   "methods": [
    "POST"

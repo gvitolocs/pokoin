@@ -314,6 +314,9 @@ spec:
         - mountPath: /srv/pokoin/seo
           name: seo
           readOnly: true
+        - mountPath: /srv/pokoin/extension
+          name: extension
+          readOnly: true
         - mountPath: /srv/pokoin/card-images/objects
           name: cdn
           readOnly: true
@@ -344,6 +347,11 @@ spec:
           path: /srv/pokoin-overflow/seo
           type: DirectoryOrCreate
         name: seo
+      # Silver-only extension zips (GET /api/extension-download), rsynced from the Pi.
+      - hostPath:
+          path: /srv/pokoin-overflow/extension
+          type: DirectoryOrCreate
+        name: extension
       # nezopt-k3s.sh up binds ~/data/pokoin-leftovers/objects here (ro).
       - hostPath:
           path: /srv/pokoin-cdn
