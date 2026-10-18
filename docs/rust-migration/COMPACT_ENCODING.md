@@ -552,23 +552,47 @@ The Flutter app and the extension send `br` only and must keep requesting the pl
 
 ## 4. Measurements
 
-Reproduce with:
+### 4.1 Two corpora — which table is which
+
+There are two sets of numbers below, and conflating them would overstate the
+result:
+
+| | rows per fixture | size | in the repo? |
+| --- | --- | --- | --- |
+| **Full captures** (§4.2) | all (up to 400) | 2.0 MB | **no** |
+| **Committed corpus** (§4.3) | first 16 | 196 KB | yes |
+
+§4.2 is the production claim: whole responses, exactly as `api.pokoin.com`
+served them. Those captures are **not committed** — 2.0 MB of JSON on `main`
+was not worth it — so that table is not reproducible from a clone alone.
+
+§4.3 is what a clone *does* reproduce. It is lower, and necessarily so:
+per-table overhead amortises over row count, so a 16-row table pays the same
+column header for a sixteenth of the rows. Quote §4.2 for "how big is the
+win", and §4.3 when checking that a change did not regress.
+
+Reproduce §4.3 with:
 
 ```sh
 pip install brotli zstandard
 python3 docs/handoff/compact-c1/measure-sizes.py
 ```
 
-That runs `pokoin-rust/crates/api-common/examples/c1_measure.rs` over the 11
-captured production responses in `docs/handoff/compact-c1/fixtures/` — which
-also asserts the byte-for-byte round trip for each — then compresses both
-bodies. Timings are the best of 7 passes on the cloud session's container, so
-treat them as orders of magnitude, not benchmarks.
+That runs `pokoin-rust/crates/api-common/examples/c1_measure.rs` over
+`docs/handoff/compact-c1/fixtures/` — which also asserts the byte-for-byte
+round trip for each — then compresses both bodies, and prints the corpus it
+used in its header. For §4.2, re-capture the full responses (read-only public
+GETs for the routes named in each filename) and run `c1_measure` on those
+directly.
 
-`serialize` is what the handler already spends turning its `Value` into the
-default body, so `encode − serialize` is what `c1` adds. `decode` is the **Rust**
-decoder, included because it is the round-trip check; the browser decoder is
+Timings are the best of 7 passes on the cloud session's container, so treat
+them as orders of magnitude, not benchmarks. `serialize` is what the handler
+already spends turning its `Value` into the default body, so
+`encode − serialize` is what `c1` adds. `decode` is the **Rust** decoder,
+included because it is the round-trip check; the browser decoder is
 `market/src/compact.js` and has not been profiled in a browser yet.
+
+### 4.2 Full captures (production sizes, not committed)
 
 brotli q11, zstd level 19.
 
@@ -598,6 +622,30 @@ brotli q11, zstd level 19.
 | c1 | 361.7 KB | −81.9% | +266.0% |
 | c1 + brotli q11 | 66.0 KB | −96.7% | −33.2% |
 | c1 + zstd 19 | 74.3 KB | −96.3% | −24.8% |
+
+### 4.3 Committed corpus (16 rows per fixture — what a clone reproduces)
+
+11 fixtures, 310 encoded rows across 18 tables, 196.3 KB of JSON. (More rows
+than 11 × 16 because the `sections` id arrays stay whole as vector tables.)
+brotli q11, zstd level 19.
+
+| encoding | all 11 fixtures | vs default |
+| --- | --- | --- |
+| default JSON | 196.3 KB | ±0% |
+| c1 | 43.3 KB | **−78.0%** |
+| default JSON + brotli q11 | 16.9 KB | — |
+| c1 + brotli q11 | 13.6 KB | **−19.5%** |
+| default JSON + zstd 19 | 19.1 KB | — |
+| c1 + zstd 19 | 15.5 KB | −18.7% |
+
+Against §4.2's −81.9% raw / −33.2% brotli'd. The raw figure holds up well; the
+brotli figure is the one that shrinks, because fewer rows leave less repetition
+for `c1` to strip before the compressor sees it. Truncating further makes this
+worse fast — 8 rows measures −69.0% raw — which is why the corpus is 16 rows
+and not fewer (see §5 for the coverage reason).
+
+Main's encoder emits **format 1** for every fixture in this corpus: none of
+them trigger template columns (§3.5), so the committed vectors are format 1.
 
 ### Reading the numbers honestly
 
@@ -640,7 +688,7 @@ brotli q11, zstd level 19.
 | `market/src/compact.test.js` | **cross-language**: the browser decoder rebuilds all 11 real payloads, encoded by the real Rust encoder, byte for byte; plus codecs, masks, vectors, marker escaping, every error path, and a stale-dictionary diagnostic |
 
 The JS test decodes committed Rust output in `docs/handoff/compact-c1/c1/`.
-Regenerate it when the encoder changes:
+Regenerate it whenever the encoder **or the fixtures** change:
 
 ```sh
 cd pokoin-rust
@@ -648,6 +696,38 @@ cargo run --release --example c1_measure -- \
   ../docs/handoff/compact-c1/c1 ../docs/handoff/compact-c1/fixtures/*.json
 rm -f ../docs/handoff/compact-c1/c1/*.default.json
 ```
+
+### Why the corpus is 16 rows
+
+The committed fixtures are truncated (§4.1), and row count is not just a size
+knob — it decides which codecs the corpus exercises at all. Measured by
+encoding each candidate corpus and reading back which codecs and modifiers
+appear in the emitted columns:
+
+| rows | corpus | codecs | presence mask (`m`) | dictionary tables |
+| --- | --- | --- | --- | --- |
+| 4 | 55 KB | 5/5 | no | `rarities` |
+| 8 | 106 KB | 5/5 | **no** | `rarities` |
+| 12 | 152 KB | 5/5 | **no** | `rarities` |
+| **16** | **196 KB** | **5/5** | **yes** | `rarities` |
+| 24 | 279 KB | 5/5 | yes | `rarities`, `nationalities` |
+| full | 2.0 MB | 5/5 | yes | `rarities`, `nationalities`, `productTypes` |
+
+Below 16 rows the optional pricing columns become constants and the
+**presence-mask path stops being exercised on real data** — the one path whose
+real-world trigger (a key present on some rows only) is hard to invent
+convincingly. At 16 it fires on `lowest_price_pkn`, `listed_quantity` and
+`has_cardtrader_listing` in `artist-arita`.
+
+Dictionary-coded palettes for `nationalities` and `productTypes` need 24+ rows
+and the full corpus respectively, so those stay covered synthetically by
+`compact::tests::a_dictionary_coded_column_uses_codes` and
+`compact::dict::tests::codes_are_one_based_and_round_trip`. Coding a
+`productType` column is the same encoder branch as a `nationality` one, so the
+extra 80–160 KB of fixtures was not worth it.
+
+Re-derive the table with `truncate-fixtures.py --rows N` plus `c1_measure`, and
+inspect the `c` / `m` / `t` keys of the emitted columns.
 
 ---
 
