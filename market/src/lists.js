@@ -1,5 +1,5 @@
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
-import { withGameQuery, withGameQueryFor, gameRequestHeaders, gameRequestHeadersFor } from './game.js';
+import { withGameQuery, withGameQueryFor, gameHeadersForUrl, gameRequestHeaders, gameRequestHeadersFor } from './game.js';
 import { applyTilePrice, tilePricePkn } from './pkn.js';
 import { expandProvisionalCardIds, normalizeRecentCardIds, realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 import { isSetDeskCard } from './search-filters.js';
@@ -143,7 +143,7 @@ async function fetchJsonRail(url, gameId) {
   const response = await fetch(publicApiUrl(scoped), {
     headers: {
       Accept: 'application/json',
-      ...(gameId ? gameRequestHeadersFor(gameId) : {}),
+      ...gameHeadersForUrl(scoped, gameId ? gameRequestHeadersFor(gameId) : {}),
     },
   });
   if (!response.ok) {
@@ -238,10 +238,11 @@ export async function fetchCardTiles(ids, { game: gameId, priority } = {}) {
   }
   const path = `/api/marketplace-card-tiles?ids=${wanted.join(',')}`;
   try {
-    const response = await fetch(publicApiUrl(gameId ? withGameQueryFor(path, gameId) : withGameQuery(path)), {
+    const scoped = gameId ? withGameQueryFor(path, gameId) : withGameQuery(path);
+    const response = await fetch(publicApiUrl(scoped), {
       headers: {
         Accept: 'application/json',
-        ...(gameId ? gameRequestHeadersFor(gameId) : gameRequestHeaders()),
+        ...gameHeadersForUrl(scoped, gameId ? gameRequestHeadersFor(gameId) : gameRequestHeaders()),
       },
       ...(priority ? { priority } : {}),
     });
