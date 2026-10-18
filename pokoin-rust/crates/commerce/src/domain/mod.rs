@@ -12,6 +12,7 @@ pub mod notify;
 pub mod money_request;
 pub mod order_refund;
 pub mod shipping;
+pub mod settlement;
 pub mod stock_csv;
 pub mod wpkn;
 

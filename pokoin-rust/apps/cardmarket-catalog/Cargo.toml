@@ -1,0 +1,23 @@
+[package]
+name = "cardmarket-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Cardmarket product ids, missing singles and daily price-guide prices for the
+# Cardmarket-only games (see docs/CARDMARKET_GAMES.md).
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pokoin-cardmarket-catalog"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+unicode-normalization = "0.1"

@@ -437,7 +437,6 @@ export function BasketSummary(props) {
       sellerUid: props.nudge.group.sellerUid,
     })
     : '');
-  const selected = () => props.services.find((option) => option.id === props.service) || null;
   const shippingCell = () => {
     const shipping = props.shipping;
     if (!shipping.count) return '—';
@@ -473,31 +472,44 @@ export function BasketSummary(props) {
             </For>
           </select>
         </label>
-        <Switch>
-          <Match when={props.services.length}>
-            <label class="bk-field">
-              <span>Shipping</span>
-              <select value={selected() ? selected().id : ''} onChange={(event) => props.onService(event.target.value)}>
-                <Show when={!selected()}><option value="">Cheapest for each parcel</option></Show>
-                <For each={props.services}>
-                  {(option) => (
-                    <option value={option.id}>
-                      {option.label || (option.tracked ? 'Tracked' : 'Untracked letter')}
-                      {' · '}
-                      {formatLocalFromEurCents(option.cents, props.currency)}
-                      {option.complete ? '' : ' (not every parcel)'}
-                    </option>
-                  )}
-                </For>
-              </select>
-            </label>
-          </Match>
-          <Match when={props.shipping.count}>
-            <p class="bk-sum-hint is-warn">
-              No shipping service from these sellers to {shipFromCountryName(props.country) || props.country} yet.
-            </p>
-          </Match>
-        </Switch>
+        {/* One parcel per seller, each on its own lane and service. */}
+        <For each={props.shipping.parcels}>
+          {(parcel) => (
+            <div class="bk-field bk-parcel-ship">
+              <span>
+                Parcel from {basketSellerOf({ sellerUsername: parcel.sellerUsername, sellerName: parcel.sellerName })}
+                {' · '}
+                <Flag flag={sellerCountryFlag(parcel.from)} />
+                {' '}
+                {shipFromCountryName(parcel.from) || parcel.from}
+              </span>
+              <Show
+                when={parcel.options.length}
+                fallback={(
+                  <p class="bk-sum-hint is-warn">
+                    No shipping service from {shipFromCountryName(parcel.from) || parcel.from} to {shipFromCountryName(props.country) || props.country} yet.
+                  </p>
+                )}
+              >
+                <select
+                  aria-label={`Shipping for the parcel from ${basketSellerOf({ sellerUsername: parcel.sellerUsername, sellerName: parcel.sellerName })}`}
+                  value={parcel.estimate ? parcel.estimate.serviceId : ''}
+                  onChange={(event) => props.onParcelService?.(parcel.key, event.target.value)}
+                >
+                  <For each={parcel.options}>
+                    {(option) => (
+                      <option value={option.id}>
+                        {option.label}
+                        {' · '}
+                        {formatLocalFromEurCents(option.amountCents, props.currency)}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </Show>
+            </div>
+          )}
+        </For>
         <Show when={props.shipping.count}><a class="bk-link" href="/shipping">Rates for each parcel</a></Show>
       </div>
 

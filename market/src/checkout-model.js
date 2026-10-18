@@ -4,8 +4,13 @@
 
 import { countryFromLocale } from './pkn.js';
 import { SHIP_TO_COUNTRIES } from './ship-countries.js';
+import { isBookableShippingService } from './shipping-choice.js';
 import {
+  cheapestServiceId,
   isUntrackedService,
+  parcelServiceLabel,
+  pokoinFlexOption,
+  previewShipment,
   previewShipmentCents,
   shippingServiceOptions,
 } from './shipping-quote.js';
@@ -51,6 +56,42 @@ export function checkoutCartPayload(items) {
     name: row.name,
     card: row.card || { id: row.cardId, name: row.name },
   }));
+}
+
+/**
+ * POST body for /api/marketplace-checkout-quote and the Stripe session: the
+ * server re-prices every line, each parcel's service and the balance
+ * discount. The buyer only opts in to the discount; no amount is sent.
+ */
+export function checkoutRequestBody({
+  items,
+  addressId = '',
+  toCountry = '',
+  services = {},
+  insurance = false,
+  useBalance = false,
+}) {
+  const tracked = Object.values(services || {}).every((id) => id !== 'untracked');
+  return {
+    items: checkoutCartPayload(items),
+    ...(addressId ? { shippingAddressId: addressId } : { toCountry }),
+    shippingService: tracked ? 'tracked' : 'untracked',
+    shippingServices: { ...(services || {}) },
+    tracked,
+    insurance: Boolean(insurance),
+    usePknDiscount: Boolean(useBalance),
+  };
+}
+
+/** What Stripe charges: the server's `chargeCents`, else the total less its discount. */
+export function checkoutChargeCents(quote) {
+  if (!quote) return null;
+  if (quote.chargeCents != null && Number.isFinite(Number(quote.chargeCents))) {
+    return Number(quote.chargeCents);
+  }
+  const total = Number(quote.grandTotalCents);
+  if (quote.grandTotalCents == null || !Number.isFinite(total)) return null;
+  return total - (Number(quote.pknDiscount?.eurCents) || 0);
 }
 
 export function emptyAddressDraft(preferred = '') {
@@ -106,23 +147,132 @@ export function checkoutSellerParcels(items, origins = {}) {
   return [...bySeller.values()];
 }
 
-/** Shipping services for the first parcel with a known origin (untracked only when allowed). */
+/**
+ * Tracked / untracked for the whole order, priced as checkout charges it: one
+ * parcel per seller, each on its own lane (seller country → buyer), summed.
+ * `parcels` lists each seller's share so the page can show them separately.
+ */
 export function checkoutShipOptions({ nft, sellerParcels, buyerCountry, allowUntracked }) {
   if (nft || !sellerParcels.length) return [];
-  for (const group of sellerParcels) {
-    if (!group.from) continue;
-    const options = shippingServiceOptions({
+  const lanes = sellerParcels.filter((group) => group.from);
+  if (!lanes.length) return [];
+  if (lanes.length === 1) {
+    const [group] = lanes;
+    return shippingServiceOptions({
       fromCountry: group.from,
       toCountry: buyerCountry,
       cardCount: group.count,
     }).filter((row) => allowUntracked || !isUntrackedService(row));
-    if (options.length) return options;
   }
-  return [];
+  const options = [];
+  for (const want of [true, false]) {
+    const parcels = lanes.map((group) => ({
+      sellerId: group.sellerId,
+      sellerName: group.sellerName,
+      from: group.from,
+      row: previewShipment({ fromCountry: group.from, toCountry: buyerCountry, cardCount: group.count, tracked: want }),
+    }));
+    // A seller lane with no rate at all: checkout cannot book this order.
+    if (parcels.some((parcel) => !parcel.row)) continue;
+    // Lanes without the asked kind answer with what they have (as the server does).
+    const id = parcels.some((parcel) => parcel.row.tracked) ? 'tracked' : 'untracked';
+    if (options.some((option) => option.id === id)) continue;
+    const option = {
+      id,
+      label: id === 'tracked' ? 'Tracked' : 'Untracked',
+      tracked: id === 'tracked',
+      amountCents: parcels.reduce((sum, parcel) => sum + parcel.row.amountCents, 0),
+      serviceName: `${parcels.length} parcels`,
+      parcels: parcels.map((parcel) => ({
+        sellerId: parcel.sellerId,
+        sellerName: parcel.sellerName,
+        fromCountry: parcel.row.fromCountry,
+        toCountry: parcel.row.toCountry,
+        serviceName: parcel.row.serviceName,
+        tracked: parcel.row.tracked,
+        amountCents: parcel.row.amountCents,
+      })),
+    };
+    if (allowUntracked || !isUntrackedService(option)) options.push(option);
+  }
+  if (!options.length) return [];
+  options.push(pokoinFlexOption());
+  return options;
+}
+
+/** The letter services one seller parcel can book on its lane, cheapest first. */
+export function checkoutParcelOptions({ from, to, count, allowUntracked = true }) {
+  if (!from || !to || !(Number(count) > 0)) return [];
+  return shippingServiceOptions({ fromCountry: from, toCountry: to, cardCount: count })
+    .filter((row) => !row.unavailable && isBookableShippingService(row.id))
+    .filter((row) => allowUntracked || !isUntrackedService(row))
+    .map((row) => ({ ...row, label: parcelServiceLabel(row) }))
+    .sort((a, b) => a.amountCents - b.amountCents);
+}
+
+/**
+ * One parcel per seller, each on its own service, by the cart's rule: the
+ * buyer's pick for that parcel, else the order-wide service when that lane
+ * offers it (the picked one, else the cheapest one every parcel offers), else
+ * the parcel's cheapest. `services` ({ sellerUid: serviceId }) is what the
+ * quote and the Stripe session book.
+ */
+export function checkoutParcelShipping({ nft, sellerParcels, buyerCountry, allowUntracked, picks = {}, service = '' }) {
+  if (nft) return { parcels: [], services: {}, cents: 0, missing: 0 };
+  const to = String(buyerCountry || '').toUpperCase();
+  const lanes = (sellerParcels || []).map((group) => ({
+    group,
+    options: checkoutParcelOptions({ from: group.from, to, count: group.count, allowUntracked }),
+  }));
+  const byId = new Map();
+  for (const { options } of lanes) {
+    for (const option of options) {
+      const row = byId.get(option.id) || { id: option.id, tracked: option.tracked, amountCents: 0, parcels: 0 };
+      row.amountCents += option.amountCents;
+      row.parcels += 1;
+      byId.set(option.id, row);
+    }
+  }
+  const orderRows = [...byId.values()].map((row) => ({ ...row, complete: row.parcels === lanes.length }));
+  const active = orderRows.some((row) => row.id === service)
+    ? service
+    : cheapestServiceId(orderRows, { allowUntracked });
+  const parcels = [];
+  const services = {};
+  let cents = 0;
+  let missing = 0;
+  for (const { group, options } of lanes) {
+    const wanted = picks?.[group.sellerId] || '';
+    const picked = (wanted && options.find((row) => row.id === wanted))
+      || (active && options.find((row) => row.id === active))
+      || options[0]
+      || null;
+    parcels.push({
+      sellerId: group.sellerId,
+      sellerName: group.sellerName,
+      from: group.from,
+      to,
+      count: group.count,
+      options,
+      serviceId: picked?.id || '',
+      amountCents: picked ? picked.amountCents : null,
+      tracked: picked ? picked.tracked !== false : true,
+      serviceName: picked?.serviceName || '',
+      carrier: picked?.carrier || '',
+      fallback: Boolean(wanted && picked && picked.id !== wanted),
+    });
+    if (picked) {
+      services[group.sellerId] = picked.id;
+      cents += picked.amountCents;
+    } else {
+      missing += 1;
+    }
+  }
+  return { parcels, services, cents, missing };
 }
 
 /** Euro-cents shipping: the server quote, else the rate-table preview; null when a parcel has no rate. */
-export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParcels, buyerCountry, tracked }) {
+export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParcels, buyerCountry, tracked, services = {} }) {
   if (nft || !itemCount) return 0;
   if (quote && Number.isFinite(Number(quote.shippingTotalCents))) {
     return Number(quote.shippingTotalCents);
@@ -134,7 +284,7 @@ export function checkoutShippingPreviewCents({ nft, itemCount, quote, sellerParc
       fromCountry: group.from,
       toCountry: buyerCountry,
       cardCount: group.count,
-      tracked,
+      tracked: services[group.sellerId] ? services[group.sellerId] !== 'untracked' : tracked,
     });
     if (cents == null) return null;
     total += cents;

@@ -189,8 +189,8 @@ async fn a_box_syncs_listings_and_a_channel_sale_is_not_a_pokoin_sale() {
     run_sql(&pool, SCHEMA_SQL).await;
     run_sql(&pool, include_str!("../../../../scripts/sql/096_marketplace_outbox.sql")).await;
     run_sql(&pool, include_str!("../../../../scripts/sql/115_seller_api_grants.sql")).await;
-    run_sql(&pool, include_str!("../../../../scripts/sql/126_channel_sync.sql")).await;
-    run_sql(&pool, include_str!("../../../../scripts/sql/127_channel_synced_audit.sql")).await;
+    run_sql(&pool, include_str!("../../../../scripts/sql/127_channel_sync.sql")).await;
+    run_sql(&pool, include_str!("../../../../scripts/sql/128_channel_synced_audit.sql")).await;
     run_sql(&pool, TRIGGER_SQL).await;
 
     let linked = seed(&pool, "card-linked", "pokemon", false, false, 2).await;

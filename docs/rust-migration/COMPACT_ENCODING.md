@@ -454,30 +454,101 @@ dictionary trained on every list snapshot
 SHA-256). The `pokoin-shared-dictionary` crate wraps Google's C brotli (vendored
 by `brotlic-sys`) because the pure-Rust crate has no raw shared dictionary.
 
+The current id is `d30efab9dda40a4b`. Its `Available-Dictionary` value is
+`:0w76ud2kCkt2+0xtRnsSk9UcC4eXv5KPeFtQvaJapOQ=:`.
+`the_bypass_rule_and_spa_id_match_the_shipped_dictionary` recomputes both from
+the file and fails if this section or `LIST_DICTIONARY_ID` drifts.
+
 - `GET /api/c1-dictionary` serves the dictionary with
   `Use-As-Dictionary: match="/api/marketplace-list?*", id="<id>"` (CORS, one day,
   ETag = id). The SPA adds `<link rel="compression-dictionary">` once, after its
   first list snapshot, only where the browser supports it (Chromium 130+).
-- `/api/marketplace-list` answers `Content-Encoding: dcb` when the client asked
-  for `c1v2`, accepts `dcb`, its `Available-Dictionary` is our hash and the row's
-  `dcb_dict` is the current id; otherwise `br`, otherwise identity.
-  `Vary: Accept, Accept-Encoding, Available-Dictionary`; `x-pokoin-dictionary`
-  names the current id.
+- **Plain URL** (`/api/marketplace-list?kind=set|artist|name&key=&format=c1v2`,
+  no `dict`) never answers `Content-Encoding: dcb`, whatever headers arrive.
+  It stays `br` or identity with `LIST_CACHE`
+  (`public, max-age=120, s-maxage=900, stale-while-revalidate=86400`).
+  `kind=seller` is unchanged and has no `dcb` copy.
+- **`dict=<id>` URL.** Origin emits `dcb` only when `dict` equals the current
+  id, `Accept-Encoding` contains `dcb` (not `q=0`), `Available-Dictionary`
+  matches, and the row's `dcb_dict` is that id. That response uses `LIST_CACHE`.
+  Any other `dict=` value (missing header, wrong hash, stale row, unknown id)
+  is the `br` or identity bytes with
+  `Cache-Control: public, max-age=120, s-maxage=0`.
+  `s-maxage=0` is not stored by the Rust edge. `private` is not used: a private
+  200 marks the whole `/api/marketplace-list` pathname uncacheable for five
+  minutes. `Vary: Accept, Accept-Encoding, Available-Dictionary`.
+  `x-pokoin-dictionary` (CORS-exposed) names the current id on every c1v2 list.
 - Snapshots record `dcb_c1v2` and `dcb_dict`; a row built with an older
   dictionary is rebuilt by the next list job and falls back to `br` meanwhile.
-- **Not live.** Cloudflare's `shared_dictionary_mode = passthrough` (beta) does
-  not key its cache on `Available-Dictionary`: on 2026-10-10 one cached `dcb`
-  body was replayed to `br`, gzip and identity clients, so the setting was set
-  back to `disabled` within a minute and the list cache purged. With it disabled
-  Cloudflare never forwards `dcb`, so the origin serves `br`. The SPA prime is
-  off (`LIST_DICTIONARY_ENABLED`); `dcb` responses are `Cache-Control: private`
-  and the Rust edge cache keys on `Accept` and the negotiated coding, so turning
-  passthrough on again cannot poison a shared cache. Bypassing Cloudflare's
-  cache for `dcb` would cost an origin round trip (~50–150 ms) to save ~15% of a
-  list body, so it waits for a variant-aware Cloudflare cache.
+- **Not live in the browser yet.** `LIST_DICTIONARY_ENABLED` stays `false`, so
+  the SPA still requests the plain URL. Zone `pokoin.com` is on the Free plan
+  and `shared_dictionary_mode` is `disabled` (Cloudflare then strips `dcb` from
+  `Accept-Encoding`). On 2026-10-10 `passthrough` cached one `dcb` body and
+  replayed it to `br`, gzip and identity clients, because the zone cache key
+  is the URL and does not include `Available-Dictionary`. There is no custom
+  cache key on the Free plan. The `dict=` query is the second cache key.
 
 On the benchmark's 469-payload test subset `dcb` on top of `c1v2` is a further
-−18.3% (−36.6% vs `c1` + brotli 11).
+−18.3% (−36.6% vs `c1` + brotli 11). A warm Chromium HIT is that much smaller
+at the same edge RTT. Firefox, Safari, the Flutter app and the extension keep
+the plain URL.
+
+##### Cloudflare Bypass rule (Free plan)
+
+Action: **Bypass cache**. A request with no `dict` argument does not match.
+Generated from the shipped dictionary (do not edit the hash by hand):
+
+```
+(http.request.uri.path eq "/api/marketplace-list" and http.request.uri.args["dict"][0] ne "" and not (http.request.uri.args["dict"][0] eq "d30efab9dda40a4b" and http.request.headers["available-dictionary"][0] eq ":0w76ud2kCkt2+0xtRnsSk9UcC4eXv5KPeFtQvaJapOQ=:" and lower(http.request.headers["accept-encoding"][0]) contains "dcb"))
+```
+
+Fields used (`http.request.uri.path`, `http.request.uri.args`, `http.request.headers`, `lower`, `eq` / `ne` / `contains`) are on every plan. Confirm the zone is still Free (`GET /zones/:id` → `plan.name`) and that this expression saves. If it is rejected, do not turn on `passthrough`.
+
+##### Rollout
+
+Do these in order. Stop if a step fails.
+
+1. Deploy the origin to the Pi and to the nezopt k3s overflow (same commit). Both must refuse `dcb` on the plain URL before the zone changes.
+2. Add the Bypass rule above on `api.pokoin.com`.
+3. Set the zone setting `shared_dictionary_mode` to `passthrough`.
+4. Run the curl matrix below. Purge that one list URL first.
+5. Only then set `LIST_DICTIONARY_ENABLED` to `true` and deploy the web app.
+
+##### Curl matrix
+
+`curl` does not send `Accept-Encoding` unless you do. Against
+`https://api.pokoin.com/api/marketplace-list?kind=set&key=<a-real-set>&format=c1v2`:
+
+| Request | Expect |
+| --- | --- |
+| `Accept-Encoding: br` | `content-encoding: br`, second call `cf-cache-status: HIT` |
+| `Accept-Encoding: br, dcb` and `Available-Dictionary: :0w76ud2kCkt2+0xtRnsSk9UcC4eXv5KPeFtQvaJapOQ=:` and no `dict` | `br`, never `dcb` |
+| same headers plus `&dict=d30efab9dda40a4b` | `content-encoding: dcb`, `cache-control` contains `s-maxage=900`, second call HIT; body starts `ff 44 43 42` then the 32-byte SHA-256 |
+| `&dict=d30efab9dda40a4b` with `Accept-Encoding: br` only, then the same URL with the matching dictionary headers | the second call is `dcb` (MISS, then HIT), not the first call's `br` |
+| `&dict=d30efab9dda40a4b` with a different `Available-Dictionary`, after the `dcb` HIT | not `dcb` (`cf-cache-status` BYPASS or DYNAMIC), `br`, `s-maxage=0` |
+| `&dict=not-the-id` with the matching dictionary headers | `br` or identity, `s-maxage=0` |
+
+##### Rotation
+
+A new dictionary is a new file `c1-shared-<id>.dict`. The same change updates the Bypass literal and `LIST_DICTIONARY_ID` (the Rust test fails if either still names the old id). Ship both origins before the new rule is the one Cloudflare evaluates. Until the rule's hash matches, `dict=` requests bypass and origin still answers `dcb` only when the header matches the binary's dictionary. An old `dict=<previous id>` is not the current id, so it is `br` with `s-maxage=0` and cannot pin a `dcb` body. Rows whose `dcb_dict` is stale stay on `br` until the list job rebuilds them.
+
+##### Rollback
+
+1. Set `LIST_DICTIONARY_ENABLED` back to `false` and deploy the web app. New pages stop sending `dict=`.
+2. Set `shared_dictionary_mode` back to `disabled`.
+3. Purge `api.pokoin.com/api/marketplace-list`. A disabled zone still replays a stored `dcb` object until that purge.
+4. Delete the Bypass rule.
+
+No origin rollback is required for the kill switch: without `dict=`, the plain URL cannot be `dcb`.
+
+##### Other clients (Flutter, MV3 extension)
+
+The Flutter app and the extension send `br` only and must keep requesting the plain URL. The MV3 extension's dormant Rust/WASM `dcb` decoder, if it is switched on, uses the same contract as the SPA:
+
+- Dictionary: `GET /api/c1-dictionary`. Hold the raw bytes, the `Use-As-Dictionary` id, and the SHA-256.
+- List: `GET /api/marketplace-list?kind=set|artist|name&key=<key>&format=c1v2&dict=<id>` with `Accept-Encoding: br, dcb` and `Available-Dictionary: :<base64 sha256>:`. Do not add `dict` on `kind=seller`.
+- Decode a `Content-Encoding: dcb` body only when `x-pokoin-dictionary` equals the id you hold. The body is RFC 9842: magic `ff 44 43 42`, then the 32-byte SHA-256, then the brotli stream. Those 32 bytes must equal your dictionary's hash. If the header, the magic, or the hash disagrees, or the fetch fails, drop the bytes and GET the plain URL with `Accept-Encoding: br`.
+- A `dict=` response that is `br` or identity (`s-maxage=0`) is already decodable. Do not run it through the dictionary decoder.
 
 ## 4. Measurements
 

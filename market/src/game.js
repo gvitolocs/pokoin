@@ -282,15 +282,17 @@ export function setScanGameOverride(gameId) {
   }
 }
 
-/** Seller desk has no game subdomain, so it can honor the scan Game picker. */
+/** Private stock desks keep their route and select the catalog through the Game picker. */
 export function sellerDeskUsesGameOverride(hostname, pathname = '') {
   const host = String(hostname || '').toLowerCase();
-  const bare = String(pathname || '').replace(/\/$/, '') || '/';
-  const sellerDesk = bare === '/dashboard' || bare.startsWith('/dashboard/');
+  const bare = String(pathname || '').split(/[?#]/)[0].replace(/\/$/, '') || '/';
+  const sellerDesk = ['/dashboard', '/mypokoin', '/inventory'].some(
+    (root) => bare === root || bare.startsWith(`${root}/`),
+  );
   return host === 'dashboard.pokoin.com'
     || host === 'localhost'
     || host.endsWith('.localhost')
-    || ((host === 'pokoin.com' || host === 'www.pokoin.com') && sellerDesk);
+    || ((host === 'pokoin.com' || host === 'www.pokoin.com' || host === '127.0.0.1') && sellerDesk);
 }
 
 export function gameIdFromHost(hostname = hostName(), pathname) {

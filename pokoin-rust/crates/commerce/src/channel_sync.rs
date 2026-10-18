@@ -263,7 +263,7 @@ fn is_unique(error: &sqlx::Error) -> bool {
     error.as_database_error().and_then(|e| e.code()).as_deref() == Some("23505")
 }
 
-/// Migration 126 is not applied yet. Routes answer 503 instead of a generic 500.
+/// Migration 127 is not applied yet. Routes answer 503 instead of a generic 500.
 pub fn store_error(error: sqlx::Error) -> ApiError {
     if is_missing_table(&error) {
         return ApiError::unavailable("Channel sync is not enabled yet.").with_code("channel_sync_disabled");

@@ -1,4 +1,4 @@
-import { flagSrc, getSearchLang, isSearchLang } from './locale.js';
+import { flagSrc, getSearchLang, hasFlagFile, isSearchLang } from './locale.js';
 import { countryFlagEmoji, shipFromCountryName } from './ship-countries.js';
 
 const CONDITION_TONE = {
@@ -267,7 +267,8 @@ export function sellerCountryFlag(country) {
     code: code || String(short || '').toLowerCase(),
     short: short || String(code || '').toUpperCase(),
     emoji,
-    src: code ? flagSrc(code) : '',
+    // No image for this country (DK, SE, AT…): the emoji, never flagSrc's UK fallback.
+    src: code && hasFlagFile(code) ? flagSrc(code) : '',
     label: sellerCountryLabel(country) || short || String(code || '').toUpperCase(),
   };
 }

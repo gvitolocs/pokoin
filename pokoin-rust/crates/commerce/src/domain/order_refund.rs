@@ -3,7 +3,7 @@
 //! paths depend on (what is still refundable, what a refund may not exceed)
 //! lives here so it can be asserted directly.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ApiError;
 
@@ -171,8 +171,9 @@ pub fn assert_refundable(
             .with_code("order_not_paid"));
     }
     if seller_items(order, seller_uid).is_empty() {
-        return Err(ApiError::forbidden("You did not sell anything on this order.")
-            .with_code("not_seller"));
+        return Err(
+            ApiError::forbidden("You did not sell anything on this order.").with_code("not_seller"),
+        );
     }
     let share = seller_share(order, seller_uid);
     let Some(amount) = raw_amount else {
@@ -288,7 +289,12 @@ pub fn sale_docs_from_order(order_id: &str, order: &Value) -> Vec<SaleDoc> {
             }
         }
         rows.push(SaleDoc {
-            id: sale_doc_id(order_id, item.get("listingId").and_then(Value::as_str).unwrap_or_default()),
+            id: sale_doc_id(
+                order_id,
+                item.get("listingId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ),
             data,
         });
     }
@@ -362,7 +368,12 @@ pub fn plan_transfer_amounts(order: &Value) -> Vec<TransferPlanItem> {
 }
 
 /// The Stripe `transfers.create` form for one plan item.
-pub fn transfer_form(order_id: &str, item: &TransferPlanItem, account: &str, source_transaction: &str) -> Value {
+pub fn transfer_form(
+    order_id: &str,
+    item: &TransferPlanItem,
+    account: &str,
+    source_transaction: &str,
+) -> Value {
     let mut form = json!({
         "amount": item.amount_cents,
         "currency": "eur",
@@ -373,13 +384,52 @@ pub fn transfer_form(order_id: &str, item: &TransferPlanItem, account: &str, sou
     });
     if !source_transaction.is_empty() {
         if let Some(object) = form.as_object_mut() {
-            object.insert(
-                "source_transaction".into(),
-                json!(source_transaction),
-            );
+            object.insert("source_transaction".into(), json!(source_transaction));
         }
     }
     form
+}
+
+/// A successful HTTP response is not enough to mark seller money released.
+/// Verify the authenticated Stripe object names the intended destination and
+/// exact amount before its id is persisted as the retry anchor.
+pub fn validate_refund_response(refund: &Value, amount: i64, intent: &str) -> Result<(), ApiError> {
+    if !refund["id"].as_str().is_some_and(|id|id.starts_with("re_"))
+        || refund["amount"].as_i64() != Some(amount) || refund["currency"] != "eur"
+        || refund["payment_intent"].as_str() != Some(intent) || refund["status"] != "succeeded" {
+        return Err(ApiError::conflict("Stripe refund is not confirmed. Reconcile the pending financial operation.")
+            .with_code("refund_reconciliation_required"));
+    }
+    Ok(())
+}
+
+pub fn validated_transfer_id(
+    transfer: &Value,
+    item: &TransferPlanItem,
+    account: &str,
+) -> Result<String, ApiError> {
+    let id = transfer
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| id.starts_with("tr_"))
+        .ok_or_else(|| ApiError::unavailable("Stripe returned an invalid transfer reference."))?;
+    let destination = transfer
+        .get("destination")
+        .and_then(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("id").and_then(Value::as_str))
+        })
+        .unwrap_or_default();
+    if transfer.get("amount").and_then(Value::as_i64) != Some(item.amount_cents)
+        || transfer.get("currency").and_then(Value::as_str) != Some("eur")
+        || destination != account
+    {
+        return Err(ApiError::unavailable(
+            "Stripe transfer does not match the intended seller payout.",
+        ));
+    }
+    Ok(id.to_string())
 }
 
 /// A seller may connect Stripe after the buyer paid, so a READY profile at
@@ -502,8 +552,17 @@ mod tests {
         for status in ["paid", "escrow", "released", "partially_refunded"] {
             assert!(order_is_sold(&json!({ "paymentStatus": status })), "{status}");
         }
-        for status in ["pending", "pending_stripe", "expired", "failed", "cancelled"] {
-            assert!(!order_is_sold(&json!({ "paymentStatus": status })), "{status}");
+        for status in [
+            "pending",
+            "pending_stripe",
+            "expired",
+            "failed",
+            "cancelled",
+        ] {
+            assert!(
+                !order_is_sold(&json!({ "paymentStatus": status })),
+                "{status}"
+            );
         }
     }
 
@@ -614,7 +673,11 @@ mod tests {
             json!({ "id": "a", "status": "pending" }),
             json!({ "id": "b", "status": "pending" }),
         ];
-        let patched = patch_refund(&refunds, "a", json!({ "status": "succeeded", "stripeRefundId": "re_1" }));
+        let patched = patch_refund(
+            &refunds,
+            "a",
+            json!({ "status": "succeeded", "stripeRefundId": "re_1" }),
+        );
         assert_eq!(patched[0]["status"], json!("succeeded"));
         assert_eq!(patched[0]["stripeRefundId"], json!("re_1"));
         assert_eq!(patched[1]["status"], json!("pending"));
@@ -713,6 +776,27 @@ mod tests {
     }
 
     #[test]
+    fn new_model_refunds_never_include_buyer_markup_or_restore_processor_costs() {
+        let order = json!({
+            "settlementModel":"buyer_markup_processor_costs_v1",
+            "currency":"EUR", "paymentStatus":"partially_refunded",
+            "totalEURCents":10300, "buyerMarkupCents":300,
+            "items":[{"sellerUid":"s1","quantity":1,"unitPriceEURCents":10000}],
+            "shipments":[{"sellerId":"s1","itemsSubtotalCents":10000,
+                "shippingAmountEURCents":0,"sellerGrossCents":10000,
+                "stripeProcessingFeeCents":185,"sellerTransferCents":9815,
+                "refundedCents":1000}],
+            "refunds":[{"id":"rf_1","sellerUid":"s1","amount":1000,
+                "status":"succeeded"}]
+        });
+        let share = seller_share(&order, "s1");
+        assert_eq!(share.gross, 10000, "buyer markup is not seller money");
+        assert_eq!(share.refundable, 9000);
+        let plan = plan_transfer_amounts(&order);
+        assert_eq!(plan[0].amount_cents, 8815);
+    }
+
+    #[test]
     fn transfer_forms_carry_the_stripe_grouping_and_source_charge() {
         let item = TransferPlanItem {
             seller_id: "s1".into(),
@@ -730,6 +814,41 @@ mod tests {
         // Without a source charge the key is absent.
         let form = transfer_form("order-1", &item, "acct_1", "");
         assert!(form.get("source_transaction").is_none());
+    }
+
+    #[test]
+    fn transfer_response_must_match_amount_currency_and_account() {
+        let item = TransferPlanItem {
+            seller_id: "s1".into(),
+            amount_cents: 1500,
+            account: None,
+        };
+        let transfer = json!({
+            "id":"tr_1", "amount":1500, "currency":"eur", "destination":"acct_1"
+        });
+        assert_eq!(
+            validated_transfer_id(&transfer, &item, "acct_1").unwrap(),
+            "tr_1"
+        );
+        for bad in [
+            json!({"id":"x", "amount":1500, "currency":"eur", "destination":"acct_1"}),
+            json!({"id":"tr_1", "amount":1499, "currency":"eur", "destination":"acct_1"}),
+            json!({"id":"tr_1", "amount":1500, "currency":"usd", "destination":"acct_1"}),
+            json!({"id":"tr_1", "amount":1500, "currency":"eur", "destination":"acct_2"}),
+        ] {
+            assert!(validated_transfer_id(&bad, &item, "acct_1").is_err());
+        }
+    }
+    #[test]
+    fn pending_or_mismatched_refunds_are_not_recorded_as_succeeded() {
+        let mut refund=json!({"id":"re_1","amount":100,"currency":"eur",
+            "payment_intent":"pi_1","status":"succeeded"});
+        validate_refund_response(&refund,100,"pi_1").unwrap();
+        refund["status"]=json!("pending");
+        assert!(validate_refund_response(&refund,100,"pi_1").is_err());
+        refund["status"]=json!("succeeded");
+        refund["amount"]=json!(99);
+        assert!(validate_refund_response(&refund,100,"pi_1").is_err());
     }
 
     #[test]

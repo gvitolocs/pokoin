@@ -2,8 +2,15 @@
 // useLiveShipping() (React) and the Solid cart/shipping pages. No framework.
 
 import { fetchShippingOptions } from './api.js';
-import { orderServices, parcelEstimate, shippingEstimate, tierRoom } from './cart-shipping.js';
-import { cheapestServiceId, eurCentsFromPkn, isUntrackedService, untrackedAllowed } from './shipping-quote.js';
+import { orderServices, parcelEstimate, parcelServices, tierRoom } from './cart-shipping.js';
+import { isBookableShippingService } from './shipping-choice.js';
+import {
+  cheapestServiceId,
+  eurCentsFromPkn,
+  isUntrackedService,
+  parcelServiceLabel,
+  untrackedAllowed,
+} from './shipping-quote.js';
 
 export function shippingIso(value) {
   const code = String(value || '').trim().toUpperCase();
@@ -65,6 +72,7 @@ export function liveShippingServices({ liveByKey, seedServices, ticked, allowUnt
       const options = liveByKey.get(group.key);
       if (!options?.length) continue;
       for (const option of options) {
+        if (!isBookableShippingService(option.id)) continue;
         const row = byId.get(option.id) || {
           id: option.id,
           label: option.label || option.serviceName || option.id,
@@ -95,45 +103,78 @@ export function activeShippingService(services, service, allowUntracked) {
     : cheapestServiceId(services, { allowUntracked });
 }
 
-/** Per-parcel estimates and the total for the active service. */
-export function liveShippingTotals({ liveByKey, ticked, country, services, activeService, allowUntracked }) {
+function parcelOption(row) {
+  return {
+    id: row.id,
+    label: parcelServiceLabel(row),
+    amountCents: Number(row.amountCents) || 0,
+    tracked: row.tracked !== false,
+    serviceName: row.serviceName || '',
+    carrier: row.carrier || '',
+    packageTier: row.packageTier || '',
+  };
+}
+
+/**
+ * The services one seller's parcel can use on its own lane (seller country →
+ * buyer), cheapest first: the live letter rates once they land, the seeded
+ * table before that. Only services checkout can book are offered.
+ */
+export function parcelShippingOptions({ liveByKey, group, country, allowUntracked }) {
   const to = shippingIso(country);
-  const wanted = activeService;
-  if (!liveByKey.size) {
-    const seeded = shippingEstimate(ticked, to, wanted);
-    const chosen = services.find((row) => row.id === wanted);
-    // The summary follows the dropdown price, not a silent fallback rate.
-    if (chosen && seeded.cents !== chosen.cents) {
-      return { ...seeded, cents: chosen.cents };
-    }
-    return seeded;
-  }
+  const live = (liveByKey?.get?.(group.key) || [])
+    .filter((row) => !row.unavailable && isBookableShippingService(row.id));
+  const rows = live.length
+    ? live
+    : parcelServices({ from: group.sellerCountry, to, cards: group.selectedCount });
+  return rows
+    .filter((row) => allowUntracked || !isUntrackedService(row))
+    .map(parcelOption)
+    .sort((a, b) => a.amountCents - b.amountCents);
+}
+
+/**
+ * One parcel per seller, each with its own service: the buyer's pick for that
+ * parcel, else the order-wide service when that lane offers it, else the
+ * lane's cheapest. The order's shipping is the sum of those parcels.
+ */
+export function liveShippingTotals({ liveByKey, ticked, country, activeService, allowUntracked, parcelPicks = {} }) {
+  const to = shippingIso(country);
   const parcels = [];
   let cents = 0;
   let missing = 0;
   for (const group of ticked) {
-    const options = (liveByKey.get(group.key) || []).filter((row) => allowUntracked || !isUntrackedService(row));
-    const picked = options.find((row) => row.id === wanted) || null;
+    const options = parcelShippingOptions({ liveByKey, group, country: to, allowUntracked });
+    const wanted = parcelPicks?.[group.key] || '';
+    const picked = (wanted && options.find((row) => row.id === wanted))
+      || (activeService && options.find((row) => row.id === activeService))
+      || options[0]
+      || null;
     const estimate = picked
       ? {
+        ...picked,
         serviceId: picked.id,
-        amountCents: Number(picked.amountCents) || 0,
-        tracked: picked.tracked !== false,
-        serviceName: picked.serviceName || '',
-        carrier: picked.carrier || '',
-        packageTier: picked.packageTier || '',
         room: picked.id === 'tracked' || picked.id === 'untracked'
           ? parcelEstimate({ from: group.sellerCountry, to, cards: group.selectedCount, service: picked.id })?.room || 0
           : tierRoom(group.selectedCount),
-        fallback: false,
+        fallback: Boolean(wanted && picked.id !== wanted),
       }
       : null;
-    parcels.push({ key: group.key, estimate });
+    parcels.push({
+      key: group.key,
+      sellerUid: group.sellerUid,
+      sellerName: group.sellerName,
+      sellerUsername: group.sellerUsername,
+      from: shippingIso(group.sellerCountry),
+      to,
+      cards: group.selectedCount,
+      options,
+      estimate,
+    });
     if (estimate) cents += estimate.amountCents;
     else missing += 1;
   }
-  const chosen = services.find((row) => row.id === wanted);
-  return { parcels, cents: chosen ? chosen.cents : cents, missing, count: parcels.length };
+  return { parcels, cents, missing, count: parcels.length };
 }
 
 export function shippingEstimatesByKey(shipping) {

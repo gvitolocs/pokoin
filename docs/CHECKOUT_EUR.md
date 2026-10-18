@@ -98,3 +98,84 @@ lines and their shipping share are card-only, `pokoin-rust/crates/commerce/src/h
 - Ensure `ADDRESS_ENCRYPTION_KEY` is set in the Pi Rust env (`/srv/pokoin/rust/pokoin-api.env`) before first address write.
 
 Refresh rates with `scripts/sync-shipping-rates.py` (PackZoo + porto-data + dao letters; writes API + SPA JSON). Daily timer: `pokoin-shipping-rates-sync.timer`. The API copy is compiled in, so new rates need a Rust release plus the web deploy.
+
+## Shipping service per seller parcel (2026-10-14)
+
+Each seller's cards ship as one parcel on that seller's lane, and the buyer picks a
+service for each parcel (cart `/cart`, then `/checkout`). The cart keeps the picks
+as `cartShippingChoice().parcels` (`{ sellerUid: serviceId }`, session storage);
+checkout prefills from them (`checkoutParcelShipping` in
+[`market/src/checkout-model.js`](../market/src/checkout-model.js)) and sends them
+to both `POST /api/marketplace-checkout-quote` and
+`POST /api/create-order-checkout-session`:
+
+```json
+{ "shippingServices": { "sellerUidA": "untracked", "sellerUidB": "tracked" },
+  "shippingService": "untracked", "tracked": false, "insurance": false }
+```
+
+- `shippingServices` (object, or `[{ sellerUid, serviceId }]`) wins per seller;
+  sellers it leaves out use the order-wide `tracked` / `shippingTracked` /
+  `shippingService` flag, which is how older clients still work.
+- Bookable services are the letter rates, `tracked` and `untracked`. Live Packlink
+  rates (`packlink:N`) are quotes only: nothing buys their labels and
+  `PACKLINK_API_KEY` is unset in production, so the cart does not offer them and
+  the API refuses a Packlink parcel (400 `shipping_service_unavailable`) instead of
+  re-pricing it. Unknown ids are 400 `invalid_shipping_service`.
+- The €20 untracked cap applies to the order: any untracked parcel on a card
+  subtotal above €20 is 400 `untracked_not_allowed`. Insurance (5%) is unchanged.
+- The session prices exactly like the quote (same services, cap and insurance),
+  stores `serviceId`, `rateId`, `carrier` and `serviceName` on each `shipments[]`
+  row plus `insuranceEURCents`, and answers `checkoutUrl` (and `url`).
+- Quote shipments carry `serviceId`; the quote also returns `shippingServices`.
+
+## PKN balance discount on a card checkout (2026-10-16)
+
+The buyer only opts in: quote and session both take `usePknDiscount: true` (a
+legacy numeric `pknDiscount` > 0 is read as the same opt-in; its amount is
+ignored). The server prices the discount itself with one rule
+(`money::checkout_pkn_discount`): the buyer's Firestore `balances/{uid}`
+available PKN, only lines from sellers whose profile does not say
+`acceptsPkn: false`, 2 PKN per euro-cent, and a card charge never below 50 cents.
+
+- The quote answers `pknVoucher` (what the buyer could take), `pknDiscount`
+  (`applied` only when opted in), `pknRefusedSellers` and `chargeCents`
+  (= `grandTotalCents` − `pknDiscount.eurCents`). Checkout shows those numbers.
+- The session locks the same amount (`order_discount_held`), charges
+  `chargeCents`, stores `pknDiscount` on the order and answers `chargeCents` and
+  `pknDiscount`. The webhook's expected charge is `totalEURCents − pknDiscount.eurCents`.
+
+### Local checkout end to end (Stripe test mode)
+
+`pokoin-rust/crates/commerce/examples/checkout_e2e.rs` runs the real commerce
+router on `127.0.0.1:8790` against the Firestore emulator (project
+`demo-pokoin-e2e`), a throwaway Postgres and Stripe TEST mode. It refuses a live
+Stripe key and anything not on localhost, and seeds one buyer (1000 PKN), two
+sellers (Italy, Denmark) and a two-parcel cart on every start.
+
+```sh
+docker run -d --name pokoin-checkout-e2e-pg -e POSTGRES_USER=e2e -e POSTGRES_PASSWORD=e2e \
+  -e POSTGRES_DB=e2e -p 127.0.0.1:55432:5432 postgres:17-alpine
+java -jar ~/.cache/firebase/emulators/cloud-firestore-emulator-v1.22.0.jar --host 127.0.0.1 --port 8086 &
+set -a; . ~/.config/pokoin/stripe-test.env; set +a   # STRIPE_SECRET_KEY=sk_test_...
+POKOIN_LISTING_SYNC_WORKER=0 POKOIN_SYNC_CONSUMER=0 \
+  cargo run -p pokoin-commerce --example checkout_e2e
+cd solid && VITE_POKOIN_API_ORIGIN=http://127.0.0.1:5199 POKOIN_API_PROXY=http://127.0.0.1:8790 \
+  npx vite --host 127.0.0.1 --port 5199 --strictPort
+```
+
+In the browser on `http://127.0.0.1:5199`, sign in as the seeded buyer with the
+cookie `pokoin.auth.token={"token":"e2e-buyer-token-not-a-firebase-jwt","uid":"e2e-buyer","expiresAt":<ms>}`
+and `localStorage['pokoin.auth.session']={"uid":"e2e-buyer","signedIn":true}`, then
+use `/cart` → `/checkout` and pay with Stripe's test card `4242 4242 4242 4242`.
+`VITE_POKOIN_API_ORIGIN` only works under `vite dev`; production builds ignore it.
+
+## Buyer markup and processor-cost correction (17 October 2026)
+
+The owner clarified that Pokoin’s 3% is a **buyer markup**, not a deduction from
+seller prices. The quote/session now add it to card items before Stripe. Seller
+gross is full card value + shipping, less actual allocated processor costs.
+The one cart payment and delayed per-seller Connect Transfers remain. See
+[CHECKOUT_FEES.md](CHECKOUT_FEES.md) for exact rounding, asynchronous fee
+reconciliation, compatibility, PKN credit funding and separately billed Connect
+cost scope. Earlier references to 97% seller settlement are historical.

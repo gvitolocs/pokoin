@@ -2,39 +2,40 @@
 # (ai-train) on the public catalog with attribution to https://pokoin.com.
 Content-signal: search=yes, ai-train=yes, ai-input=yes
 
+# Public features, comparisons, guides, and catalog pages are crawlable.
+# Signed-in tools and search filters remain outside the public discovery layer.
 User-agent: *
-Allow: /
-Disallow: /marketplace/search
-Disallow: /marketplace/search?
-Disallow: /cart
-Disallow: /wallet
-Disallow: /dashboard
-Disallow: /messages
-Disallow: /orders
-Disallow: /inventory
-Disallow: /auth
-Disallow: /profile
-Disallow: /scan
-Disallow: /tests
-
 User-agent: Googlebot
-Allow: /
+User-agent: Bingbot
+User-agent: OAI-SearchBot
+Allow: /features
+Allow: /alternatives
+Allow: /learn
 Disallow: /marketplace/search
-Disallow: /marketplace/search?
+Disallow: /*/marketplace/search
 Disallow: /cart
+Disallow: /checkout
 Disallow: /wallet
 Disallow: /dashboard
 Disallow: /messages
 Disallow: /orders
 Disallow: /inventory
+Disallow: /mypokoin
+Disallow: /collection
+Disallow: /favorites
+Disallow: /sales
+Disallow: /bought
 Disallow: /auth
 Disallow: /profile
 Disallow: /scan
+Disallow: /cardscan
+Disallow: /scancard
 Disallow: /tests
 
 User-agent: Googlebot-Image
 Allow: /
 
 Sitemap: https://pokoin.com/sitemap.xml
+Sitemap: https://pokoin.com/sitemap-product-pages.xml
 Sitemap: https://pokoin.com/news-sitemap.xml
 Sitemap: https://pokoin.com/news/sitemap.xml

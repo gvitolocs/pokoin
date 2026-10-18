@@ -1,4 +1,4 @@
-import { cardStubFromRoute } from './card-stub.js';
+import { cardReference, chatQty } from './chat-listing.js';
 import { game, knownGameId } from './game.js';
 
 const CART_KEY = 'pokoin.cartItems';
@@ -45,17 +45,26 @@ export function isPokoPeer(value) {
 
 const HISTORY_PREFIX = 'pokoin.pokoChat.';
 
-/** Live desk card published by Card.jsx so dock chat knows what the user is viewing. */
+/**
+ * The card desk the user is viewing, as a chat card reference. Card.jsx
+ * publishes it so the Poko composer can offer it as a chip; it never reaches
+ * Poko on its own.
+ */
 let activeDeskCard = null;
+const deskListeners = new Set();
+
+function publishDesk(next) {
+  const same = (next?.cardId || '') === (activeDeskCard?.cardId || '')
+    && (next?.cardName || '') === (activeDeskCard?.cardName || '')
+    && (next?.imageUrl || '') === (activeDeskCard?.imageUrl || '');
+  activeDeskCard = next;
+  if (!same) for (const listener of deskListeners) listener(next);
+  return next;
+}
 
 export function setActiveDeskCard(card) {
-  if (!card) {
-    activeDeskCard = null;
-    return null;
-  }
-  const row = toPokoCard(card);
-  activeDeskCard = row.cardId || row.name ? row : null;
-  return activeDeskCard;
+  const row = card ? cardReference(card) : null;
+  return publishDesk(row?.cardId ? row : null);
 }
 
 export function getActiveDeskCard() {
@@ -63,7 +72,42 @@ export function getActiveDeskCard() {
 }
 
 export function clearActiveDeskCard() {
-  activeDeskCard = null;
+  publishDesk(null);
+}
+
+export function subscribeActiveDeskCard(listener) {
+  deskListeners.add(listener);
+  return () => deskListeners.delete(listener);
+}
+
+function sameTags(a, b) {
+  return a.length === b.length && a.every((row, index) => JSON.stringify(row) === JSON.stringify(b[index]));
+}
+
+/**
+ * The page-card chip in the Poko composer: on a card desk, Poko offers that
+ * card as an ordinary removable card tag (flagged `pageCard`). Only tags in
+ * the composer reach Poko; there is no implicit "card being viewed".
+ * - Seller chats never get one (`poko` false strips it).
+ * - × turns page chips off for the rest of this Poko conversation (`off`).
+ * - A sent chip is not offered again in this conversation (`used`), but a
+ *   different card is: navigating swaps an unsent chip for the new card.
+ * - Leaving card desks drops an unsent chip.
+ * Returns `tags` itself when nothing changes.
+ */
+export function reconcilePokoPageChip(tags = [], { pageCard = null, poko = false, off = false, used = [] } = {}) {
+  const list = Array.isArray(tags) ? tags : [];
+  const id = String(pageCard?.cardId || '');
+  const rest = list.filter((row) => !row?.pageCard);
+  const wanted = poko && !off && id && !used.includes(id)
+    && !rest.some((row) => String(row?.cardId || '') === id)
+    && rest.length < 4;
+  let next = rest;
+  if (wanted) {
+    const prior = list.find((row) => row?.pageCard && String(row.cardId || '') === id);
+    next = [{ ...pageCard, qty: chatQty(prior?.qty ?? 1), pageCard: true }, ...rest];
+  }
+  return sameTags(list, next) ? list : next;
 }
 
 export function normalizePokoEvent(row = {}) {
@@ -236,29 +280,9 @@ export function tagsToPokoCards(tags = []) {
   return (Array.isArray(tags) ? tags : []).slice(0, 8).map(toPokoCard).filter((row) => row.cardId || row.name);
 }
 
-/** Parse `/marketplace/:lang/cards/:cardId/:slug?` into a poko card when no live desk publish. */
-export function deskCardFromPath(pathname = '') {
-  const match = String(pathname || '').match(/\/marketplace\/([a-z]{2})\/cards\/(\d+)(?:\/([^/?#]+))?/i);
-  if (!match) return null;
-  const stub = cardStubFromRoute({ lang: match[1], cardId: match[2], slug: match[3] || '' });
-  return stub ? toPokoCard(stub) : null;
-}
-
-/**
- * Prefer explicit attaches; otherwise the live desk card, else URL stub.
- * Keeps Hermes from inventing a different card when the user is on a desk.
- */
-export function resolvePokoCards({ tags = [], pathname = '' } = {}) {
-  const attached = tagsToPokoCards(tags);
-  if (attached.length) return attached;
-  const live = getActiveDeskCard();
-  if (live?.cardId || live?.name) return [live];
-  const fromPath = deskCardFromPath(pathname);
-  return fromPath ? [fromPath] : [];
-}
-
+/** The desk card fields name the first attached card only — never the page being viewed. */
 export function buildPokoPageContext({ pathname = '', cards = [], images = [] } = {}) {
-  const desk = cards[0] || getActiveDeskCard() || deskCardFromPath(pathname);
+  const desk = cards[0] || null;
   return {
     channel: 'website-messages',
     path: String(pathname || '').slice(0, 300),

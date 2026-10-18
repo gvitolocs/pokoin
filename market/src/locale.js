@@ -109,9 +109,15 @@ export function rewriteCatalogLang(pathname, nextLang) {
   return path.replace(CATALOG_PATH, `$1${next}$3`);
 }
 
+/** True when public/flags has an image for this code (flagSrc paints 'en' otherwise). */
+export function hasFlagFile(code) {
+  const raw = String(code || '').toLowerCase();
+  return Boolean(raw) && (isSearchLang(raw) || PRINT_FLAG_CODES.has(raw));
+}
+
 export function flagSrc(code) {
   const raw = String(code || '').toLowerCase();
-  const lang = isSearchLang(raw) || PRINT_FLAG_CODES.has(raw) ? raw : 'en';
+  const lang = hasFlagFile(raw) ? raw : 'en';
   const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
   const file = FLAG_FILE[lang] || `${lang}.svg`;
   return `${base}flags/${file}`;

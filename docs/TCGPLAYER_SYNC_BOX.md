@@ -218,7 +218,7 @@ enqueues the listing's `listing.changed` outbox event. So the other channels
 Pokoin sale.
 
 That transaction sets `pokoin.listing_change_source = 'channel:tcgplayer'`
-(`set local`). Migration 127 adds one branch to the listing audit trigger
+(`set local`). Migration 128 adds one branch to the listing audit trigger
 (`marketplace_user_listings_audit`, last defined in 092): a decrease under
 that setting is recorded as `channel_synced`, not `sold`, the same way a
 CardTrader mirror decrease is `cardtrader_synced`. A TCGplayer sale happened
@@ -357,8 +357,8 @@ the process exits, and starts it again on the next pass if it has died.
 
 ## Code
 
-- Migrations: `scripts/sql/126_channel_sync.sql` (tables),
-  `scripts/sql/127_channel_synced_audit.sql` (audit trigger branch). Not
+- Migrations: `scripts/sql/127_channel_sync.sql` (tables),
+  `scripts/sql/128_channel_synced_audit.sql` (audit trigger branch). Not
   applied yet; apply on the nezopt writer.
 - Server: `pokoin-rust/crates/commerce/src/channel_sync.rs`,
   `pokoin-rust/crates/commerce/src/handlers/channel_sync.rs`

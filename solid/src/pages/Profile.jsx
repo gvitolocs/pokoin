@@ -3,7 +3,6 @@ import { useSearchParams } from '@solidjs/router';
 import { fetchAllSellerListings, fetchCollectionSummary } from '@market/api.js';
 import { accountHeading, accountLede } from '@market/auth-session.js';
 import { liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
-import { sellerHref } from '@market/listing-meta.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { portfolioTilesFromSummary, readPortfolioTilesCache, writePortfolioTilesCache } from '@market/portfolio-tiles-cache.js';
 import { orderActivity, sellerSetupSteps, timeAgo } from '@market/profile-overview.js';
@@ -247,7 +246,6 @@ function ProfileDesk() {
     const until = profile()?.silverUntil;
     return until ? (until.toISOString?.().slice(0, 10) || until) : '';
   };
-  const shopHref = () => (profile()?.username ? sellerHref({ sellerUsername: profile().username }) : '');
 
   const sellerSettings = () => (loadedSellerSettings() || sellerSettingsPatch()
     ? { ...(loadedSellerSettings() || {}), ...(sellerSettingsPatch() || {}) }
@@ -321,9 +319,6 @@ function ProfileDesk() {
         >
           <div class="profile-mypokoin">
             <MyPokoinTile />
-            <Show when={shopHref()}>
-              <a class="profile-shop-link" href={shopHref()}>View public shop</a>
-            </Show>
           </div>
         </PageHead>
         <MetricGrid>
@@ -381,7 +376,14 @@ function ProfileDesk() {
             <SetupRow
               step={step().stripe}
               title="Stripe payouts"
-              meta={stripeMeta()}
+              meta={(
+                <>
+                  {stripeMeta()}{' '}
+                  <a class="setup-fees-link" href="https://stripe.com/connect/pricing" target="_blank" rel="noopener noreferrer">
+                    Stripe Connect fees ↗
+                  </a>
+                </>
+              )}
               action={(
                 <StripeConnectButton
                   disabled={!shipFromCountry()}
@@ -570,7 +572,6 @@ function MyPokoinTile() {
 
 /** Header only. Skips the signed-in desk so the gold tile can be checked without API calls. */
 function ProfilePreview() {
-  const shop = sellerHref({ sellerUsername: 'preview-seller' });
   return (
     <div class="page desk profile-page">
       <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
@@ -584,7 +585,6 @@ function ProfilePreview() {
         >
           <div class="profile-mypokoin">
             <MyPokoinTile />
-            <a class="profile-shop-link" href={shop}>View public shop</a>
           </div>
         </PageHead>
         <MetricGrid>

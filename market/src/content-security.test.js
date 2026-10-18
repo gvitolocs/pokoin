@@ -23,12 +23,14 @@ test('landing and marketplace boot from same-origin files', () => {
   const market = readFileSync(join(root, 'solid/index.html'), 'utf8');
   assert.equal(executableInlineScripts(landing).length, 0);
   assert.equal(executableInlineScripts(market).length, 0);
-  assert.match(landing, /src="home\/landing-boot\.js"/);
+  assert.match(landing, /src="\/home\/landing\.js(?:\?[^\"]*)?"/);
   assert.match(market, /src="%BASE_URL%card-url-boot\.js"/);
   // Classic script ahead of the module entry, so it runs even when the entry chunk 404s.
   assert.ok(market.indexOf('%BASE_URL%chunk-reload.js') > 0);
   assert.ok(market.indexOf('%BASE_URL%chunk-reload.js') < market.indexOf('type="module"'));
-  assert.equal(readFileSync(join(root, 'home/landing-boot.js'), 'utf8').includes('cookies-ok'), true);
+  const landingBoot = readFileSync(join(root, 'home/landing.js'), 'utf8');
+  assert.equal(landingBoot.includes('pokoin.cookieConsent'), true);
+  assert.equal(landingBoot.includes('[data-cookie-accept]'), true);
   assert.equal(readFileSync(join(root, 'market/public/card-url-boot.js'), 'utf8').includes('marketplace-card-url'), true);
 });
 

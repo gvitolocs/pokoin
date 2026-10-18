@@ -178,6 +178,7 @@ mod tests {
             expect: "greet".into(),
             game: None,
             history: Vec::new(),
+            context: Vec::new(),
         }];
         let replies = BTreeMap::from([(
             "a".to_string(),

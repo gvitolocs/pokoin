@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import solid from '@solidjs/vite-plugin';
+import { productPageForPath } from '../content/product-pages.mjs';
+import { renderProductPage, productPagesSitemap } from '../scripts/build-product-pages.mjs';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const marketDir = path.resolve(rootDir, '../market');
@@ -45,6 +47,48 @@ function serveLandingHome() {
         if (!file.startsWith(homeDir) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return next();
         res.setHeader('Content-Type', TYPES[path.extname(file)] || 'application/octet-stream');
         fs.createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
+/** Public marketing pages render complete HTML in dev, as in the static build. */
+function serveProductPages() {
+  return {
+    name: 'pokoin-product-pages',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const pathname = url.pathname;
+        if (pathname === '/' || pathname === '/landing.html') {
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(req.method === 'HEAD' ? '' : fs.readFileSync(path.resolve(rootDir, '../index.html'), 'utf8'));
+          return;
+        }
+        if (pathname === '/sitemap-product-pages.xml') {
+          res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+          res.end(productPagesSitemap());
+          return;
+        }
+        const page = productPageForPath(pathname);
+        if (!page) {
+          if (/^\/(features|alternatives|learn)(?:\/|$)/.test(pathname)) {
+            res.statusCode = 404;
+            res.end('Page not found');
+            return;
+          }
+          next();
+          return;
+        }
+        if (pathname !== page.path) {
+          res.writeHead(301, { Location: page.path + url.search });
+          res.end();
+          return;
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(req.method === 'HEAD' ? '' : renderProductPage(page));
       });
     },
   };
@@ -133,7 +177,7 @@ export default defineConfig(({ command }) => ({
   // chunks under /market/s/.
   base: command === 'build' ? '/market/' : '/',
   publicDir: path.join(marketDir, 'public'),
-  plugins: [forbidReact(), solid(), serveLandingHome(), prefetchSuggestEngine()],
+  plugins: [forbidReact(), solid(), serveLandingHome(), serveProductPages(), prefetchSuggestEngine()],
   resolve: {
     alias: { '@market': path.join(marketDir, 'src') },
     dedupe: ['solid-js', '@solidjs/web', '@solidjs/signals'],
