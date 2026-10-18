@@ -601,6 +601,35 @@
     0 0 28px rgb(255 211 61 / 0.35);
 }
 
+/* A signed-in visitor's own first page (solid/src/landing/binder.js). Until
+   it paints, a warm visit (html.binder-mine, set by landing-boot.js) holds the
+   demo cards and count back; they still slot in after 3 s if it never does. */
+.binder-mine .binder:not(.is-own) .binder-slot img,
+.binder-mine .binder:not(.is-own) .binder-progress span {
+  animation-delay: 3s;
+}
+
+.binder-mine .binder:not(.is-own) .binder-count {
+  animation: binder-hold 0.3s 3s both;
+}
+
+a.binder-slot {
+  color: inherit;
+}
+
+a.binder-slot img {
+  transition: translate 0.2s var(--ease-out);
+}
+
+a.binder-slot:hover img {
+  translate: 0 -3px;
+}
+
+a.binder-slot:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+}
+
 .binder-slot .scan-line {
   position: absolute;
   left: 6%;
@@ -1514,6 +1543,12 @@ a:hover > .tool-arrow {
   to {
     opacity: 1;
     scale: 1;
+  }
+}
+
+@keyframes binder-hold {
+  from {
+    opacity: 0;
   }
 }
 

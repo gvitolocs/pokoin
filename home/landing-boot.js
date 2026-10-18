@@ -22,5 +22,11 @@ try {
     var name = String(s.username || "").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 32);
     document.documentElement.classList.add("signed-in");
     document.documentElement.style.setProperty("--account-name", JSON.stringify(name || "My Pokoin"));
+    // The binder's stored first page for this uid (market/src/landing-binder.js):
+    // home.css holds the demo cards back while the island paints it.
+    try {
+      var page = JSON.parse(localStorage.getItem("pokoin.landing.binder.v1") || "null");
+      if (page && page.uid === String(s.uid).trim()) document.documentElement.classList.add("binder-mine");
+    } catch (e) {}
   }
 } catch (e) {}

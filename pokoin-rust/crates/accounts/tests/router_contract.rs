@@ -611,6 +611,55 @@ async fn marketplace_collection_returns_the_owners_holdings() {
 }
 
 #[tokio::test]
+async fn marketplace_collection_limit_sends_the_first_page_with_whole_totals() {
+    let transport = ScriptedTransport::new();
+    let doc = |id: &str, name: &str, quantity: &str| {
+        serde_json::json!({ "document": document(
+            &format!("projects/{TEST_PROJECT}{DOCS}/user_card_collections/{id}"),
+            serde_json::json!({
+                "uid": { "stringValue": "user-1" },
+                "cardId": { "stringValue": "12345" },
+                "cardName": { "stringValue": name },
+                "quantity": { "integerValue": quantity }
+            })
+        ) })
+    };
+    script_run_query(
+        &transport,
+        serde_json::json!([
+            doc("scan:3", "Zapdos", "1"),
+            doc("scan:1", "abra", "2"),
+            doc("scan:2", "Pikachu", "4")
+        ]),
+    );
+    let app = router(test_state(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let (status, body, headers) =
+        call(&app, "GET", "/api/marketplace-collection?limit=2", Some(&token), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["uid"], serde_json::json!("user-1"));
+    // Collection order (case-insensitive name), cut to the limit.
+    let names: Vec<_> = body["items"].as_array().unwrap().iter().map(|item| item["cardName"].clone()).collect();
+    assert_eq!(names, vec![serde_json::json!("abra"), serde_json::json!("Pikachu")]);
+    // Totals stay the whole collection's.
+    assert_eq!(body["itemCount"], serde_json::json!(3));
+    assert_eq!(body["cardsOwned"], serde_json::json!(7));
+    assert_eq!(body["limit"], serde_json::json!(2));
+    assert_eq!(headers["cache-control"], "private, no-cache");
+    assert!(headers.contains_key("etag"));
+
+    // Without a limit the full body and its no-store policy are unchanged.
+    let (_, full, headers) =
+        call(&app, "GET", "/api/marketplace-collection", Some(&token), None).await;
+    assert_eq!(full["items"].as_array().unwrap().len(), 3);
+    assert!(full.get("limit").is_none());
+    assert_eq!(headers["cache-control"], "private, no-store");
+    assert!(!headers.contains_key("etag"));
+}
+
+#[tokio::test]
 async fn marketplace_collection_summary_returns_the_dashboard_shape() {
     let transport = ScriptedTransport::new();
     script_run_query(

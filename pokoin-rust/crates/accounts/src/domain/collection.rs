@@ -239,6 +239,20 @@ impl OwnedCollection {
         })
     }
 
+    /// The `?limit=N` body: the first `limit` items in collection order, with
+    /// the whole collection's totals.
+    pub fn first_page_json(&self, limit: usize) -> Json {
+        json!({
+            "uid": self.uid,
+            "items": self.items.iter().take(limit).collect::<Vec<_>>(),
+            "cardsOwned": self.cards_owned,
+            "itemCount": self.item_count,
+            "physicalItems": self.physical_items,
+            "nftItems": self.nft_items,
+            "limit": limit,
+        })
+    }
+
     /// Summary when live listings are unknown: the collection sum, plus
     /// `collectionOwned` and `"listed": null`.
     pub fn to_summary_json(&self) -> Json {

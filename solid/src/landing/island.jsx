@@ -1,4 +1,5 @@
 import { render } from '@solidjs/web';
+import { mountBinder } from './binder.js';
 
 /**
  * The static landing (index.html) stays plain HTML; this island upgrades two
@@ -11,6 +12,7 @@ import { render } from '@solidjs/web';
  *   first search intent; its ranking engine still loads on focus.
  * - the Best sellers rail paints the Rust /api/marketplace-home/best-sellers
  *   rail with the marketplace Carousel + CardTile.
+ * - the hero binder shows a signed-in visitor's own first page (binder.js).
  */
 
 function whenIdle(fn) {
@@ -129,6 +131,8 @@ function mountRail(host) {
   });
 }
 
+const binder = document.querySelector('[data-landing-binder]');
+if (binder) mountBinder(binder, { whenIdle });
 const form = document.querySelector('[data-landing-search]');
 if (form) mountSearch(form);
 for (const host of document.querySelectorAll('[data-landing-rail]')) mountRail(host);
