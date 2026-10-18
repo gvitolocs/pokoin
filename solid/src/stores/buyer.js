@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import { fetchSellerSettings } from '@market/api.js';
 import { readBuyerCountry, writeBuyerCountry } from '@market/buyer-country.js';
-import { currencyForCountry, currencyFromLocale, LIST_CURRENCIES } from '@market/pkn.js';
+import { currencyForCountry, currencyFromLocale, formatFiatFromPkn, formatPkn, LIST_CURRENCIES } from '@market/pkn.js';
 import { buyerPrefersFiat, buyerPriceLabel, buyerPriceParts, sellerListCurrency } from '@market/seller-currency.js';
 import { getBearer, signedIn } from './auth.js';
 import { authSession } from './session.js';
@@ -116,3 +116,12 @@ export function buyerFiat(pricePkn, sellerAcceptsPkn = true, pinned = '') {
 
 /** useBuyerCurrency().pinned: the `?currency=` pin, or ''. */
 export const buyerPinned = pinOf;
+
+/**
+ * `{ local, pkn }` for a public page that always shows one local fiat: the
+ * amount in `currency` alone, PKN only when that currency has no label.
+ */
+export function visitorParts(pricePkn, currency) {
+  const local = formatFiatFromPkn(pricePkn, currency) || '';
+  return { local, pkn: local ? '' : formatPkn(pricePkn) || '' };
+}

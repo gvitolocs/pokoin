@@ -63,7 +63,7 @@ export default function Carousel(props) {
             <CardSelectGrid class="carousel-track" cards={ready() ? props.cards : []}>
               <Show when={ready()} fallback={<Repeat count={props.placeholders || 0}>{() => <SkeletonTile />}</Repeat>}>
                 <For each={props.cards}>
-                  {(card, index) => <CardTile card={card} rank={index()} eagerLimit={props.eagerLimit || 0} />}
+                  {(card, index) => <CardTile card={card} rank={index()} eagerLimit={props.eagerLimit || 0} currency={props.currency} />}
                 </For>
               </Show>
             </CardSelectGrid>

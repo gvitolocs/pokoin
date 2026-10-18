@@ -81,8 +81,8 @@
       crossorigin
     />
     <script src="/home/landing-boot.js"></script>
-    <link rel="stylesheet" href="/home/landing.css?v=20261018-minimal-tiles" />
-    <link rel="stylesheet" href="/home/discovery.css?v=20261017-market-data" />
+    <link rel="stylesheet" href="/home/landing.css?v=20261018-home-search" />
+    <link rel="stylesheet" href="/home/home.css?v=20261018-home-search" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -135,7 +135,7 @@
       }
     </script>
   </head>
-  <body>
+  <body class="home-page">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="nav">
       <div class="wrap nav-inner">
@@ -151,8 +151,9 @@
           ></a
         >
         <nav class="nav-links" id="primary-nav" aria-label="Primary">
-          <a href="/marketplace">Marketplace</a><a href="#scanner">Scanner</a
-          ><a href="#inventory">Inventory</a><a href="#poko">Meet Poko</a>
+          <a href="/marketplace">Marketplace</a><a href="/marketplace/sets">Sets</a
+          ><a href="/#scanner">Scanner</a><a href="/#sell">Sell</a
+          ><a href="/#poko">Meet Poko</a>
           <a class="nav-mobile-account" href="/mypokoin">Open My Pokoin ↗</a>
         </nav>
         <div class="nav-end">
@@ -174,201 +175,275 @@
     </header>
 
     <main id="main">
-      <section class="hero pad" aria-labelledby="hero-heading">
-        <div class="wrap hero-inner">
-          <div class="hero-copy">
-            <p class="eyebrow">Pokémon cards. One home.</p>
+      <section class="home-hero" aria-labelledby="hero-heading">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="pad"><div class="wrap home-hero-inner">
+          <div class="home-hero-copy">
+            <p class="hero-pill">
+              <span class="hero-pill-dot" aria-hidden="true"></span>Scanner ·
+              Collection · Marketplace
+            </p>
             <h1 id="hero-heading">
-              Your cards.<br /><span>All together.</span>
+              Your cards.<br /><span class="hero-mark">All together.</span>
             </h1>
-            <p class="lede">
-              Scan cards. Track your collection.<br />Trade for PKN. Or sell for
-              real money.
+            <p class="home-lede">
+              Find any Pokémon card, track your collection, and buy or sell at
+              real market prices.
             </p>
-            <div class="button-row">
-              <a class="button button-yellow" href="/scan"
-                >Scan a card <span aria-hidden="true">↗</span></a
-              ><a class="button button-outline" href="/marketplace"
-                >Explore cards <span aria-hidden="true">→</span></a
-              >
-            </div>
-            <p class="hero-note">
-              On your phone. In your browser. Ready when you are.
-            </p>
-          </div>
-          <div
-            class="product-demo"
-            aria-label="Illustrative preview of Pokoin tools"
-          >
-            <div
-              class="demo-tabs"
-              role="tablist"
-              aria-label="Explore Pokoin tools"
+            <form
+              class="hero-search"
+              action="/marketplace/search"
+              method="get"
+              role="search"
+              data-landing-search
             >
-              <button
-                id="tab-scan"
-                type="button"
-                role="tab"
-                aria-selected="true"
-                aria-controls="preview-scan"
-                tabindex="0"
+              <label class="visually-hidden" for="hero-q"
+                >Search Pokémon cards</label
               >
-                Scan</button
-              ><button
-                id="tab-collect"
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-controls="preview-collect"
-                tabindex="-1"
+              <svg
+                class="hero-search-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
               >
-                Collect</button
-              ><button
-                id="tab-poko"
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-controls="preview-poko"
-                tabindex="-1"
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <input
+                id="hero-q"
+                name="q"
+                type="search"
+                placeholder="Search Pokémon cards…"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                enterkeyhint="search"
+              />
+              <button type="submit">Search</button>
+              <div class="hero-suggest" data-landing-suggest></div>
+            </form>
+            <div class="hero-popular" aria-label="Popular searches">
+              <span>Popular</span
+              ><a href="/marketplace/search?q=charizard" data-landing-query="charizard"
+                >Charizard</a
+              ><a href="/marketplace/search?q=umbreon" data-landing-query="umbreon"
+                >Umbreon</a
+              ><a href="/marketplace/search?q=pikachu" data-landing-query="pikachu"
+                >Pikachu</a
+              ><a href="/marketplace/search?q=lugia" data-landing-query="lugia"
+                >Lugia</a
+              ><a href="/marketplace/search?q=151" data-landing-query="151"
+                >151</a
               >
-                Ask Poko
-              </button>
             </div>
-            <div class="demo-stage">
-              <div
-                id="preview-scan"
-                class="demo-panel scan-panel"
-                role="tabpanel"
-                aria-labelledby="tab-scan"
-                tabindex="0"
+            <div class="button-row hero-ctas">
+              <a class="button button-yellow" href="/marketplace"
+                >Shop cards <span aria-hidden="true">→</span></a
+              ><a class="button button-outline" href="/#sell"
+                >Sell your collection</a
+              ><a class="button button-ghost" href="/scan"
+                ><svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M4 12h16" /></svg
+                >Scan a card</a
               >
-                <div class="scan-target">
-                  <img
+            </div>
+          </div>
+
+          <div class="hero-visual" aria-hidden="true">
+            <img
+              class="float-card float-card-a"
+              src="https://cdn.pokoin.com/825064_umbreon-ex_homepage.webp"
+              width="280"
+              height="392"
+              alt=""
+            /><img
+              class="float-card float-card-b"
+              src="https://cdn.pokoin.com/790994_charizard_homepage.webp"
+              width="280"
+              height="392"
+              alt=""
+            /><img
+              class="float-card float-card-c"
+              src="https://cdn.pokoin.com/813464_sylveon-ex_homepage.webp"
+              width="280"
+              height="392"
+              alt=""
+            />
+            <div class="binder">
+              <div class="binder-head">
+                <div>
+                  <strong>My collection</strong>
+                  <span>Favourite pulls</span>
+                </div>
+                <span class="binder-count">9 / 18</span>
+              </div>
+              <div class="binder-progress"><span></span></div>
+              <div class="binder-grid">
+                <span class="binder-slot is-scanning"
+                  ><img
                     src="https://cdn.pokoin.com/251437_snorlax-181-165-pokemon-card-151_homepage.webp"
                     width="280"
                     height="392"
-                    alt="Japanese Snorlax illustration rare card from Pokémon Card 151"
-                    fetchpriority="high"
-                  /><span class="scan-line" aria-hidden="true"></span>
-                </div>
-                <span class="floating-tag tag-print"
-                  >Find the printing <span aria-hidden="true">↗</span></span
-                ><span class="floating-tag tag-collection"
-                  ><span aria-hidden="true">＋</span> Add to collection</span
-                >
-                <div class="demo-caption">
-                  <div>
-                    <strong>Find your card.</strong
-                    ><span>Then make it yours.</span>
-                  </div>
-                  <a href="/scan" aria-label="Open the card scanner">↗</a>
-                </div>
-              </div>
-              <div
-                id="preview-collect"
-                class="demo-panel collect-panel"
-                role="tabpanel"
-                aria-labelledby="tab-collect"
-                tabindex="0"
-                hidden
-              >
-                <div class="collection-preview-title">
-                  <span>MY POKOIN</span><strong>Your cards, together.</strong>
-                  <p>Collection. Inventory. One place.</p>
-                </div>
-                <div class="mini-card-grid">
-                  <img
+                    alt=""
+                    fetchpriority="high" /><span class="scan-line"></span
+                ></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/261321_pikachu-illustration-rare-173-165-151_homepage.webp"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
                     src="https://cdn.pokoin.com/261291_bulbasaur-illustration-rare-166-165-151_homepage.webp"
-                    width="140"
-                    height="196"
-                    alt="Bulbasaur illustration rare card from 151"
-                    loading="lazy"
-                  /><img
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
                     src="https://cdn.pokoin.com/287883_eevee-illustration-rare-188-167-twilight-masquerade_homepage.webp"
-                    width="140"
-                    height="196"
-                    alt="Eevee illustration rare card from Twilight Masquerade"
-                    loading="lazy"
-                  /><img
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/261377_charizard-ex-special-illustration-rare-199-165-151_homepage.webp"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/825058_espeon-ex_homepage.webp"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
                     src="https://cdn.pokoin.com/166430_dragonite-v-192-203-evolving-skies_homepage.webp"
-                    width="140"
-                    height="196"
-                    alt="Dragonite V card from Evolving Skies"
+                    width="280"
+                    height="392"
+                    alt=""
                     loading="lazy"
-                  />
-                </div>
-                <a class="demo-panel-link" href="/mypokoin"
-                  >Open your inventory <span aria-hidden="true">↗</span></a
-                >
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/200493_gengar-vmax-271-264-fusion-strike_homepage.webp"
+                    width="280"
+                    height="392"
+                    alt=""
+                    loading="lazy"
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/166456_rayquaza-vmax-secret-rare-218-203-evolving-skies_homepage.webp"
+                    width="280"
+                    height="392"
+                    alt=""
+                    loading="lazy"
+                /></span>
               </div>
-              <div
-                id="preview-poko"
-                class="demo-panel poko-panel"
-                role="tabpanel"
-                aria-labelledby="tab-poko"
-                tabindex="0"
-                hidden
-              >
-                <img
-                  class="demo-mascot"
-                  src="/home/pokoin-mascot.png"
-                  width="110"
-                  height="102"
-                  alt="Poko mascot"
-                />
-                <h2>Meet Poko.</h2>
-                <p>Your card assistant.</p>
-                <a class="question-chip" href="/messages/poko"
-                  >“Which printing is this?”
-                  <span aria-hidden="true">↗</span></a
-                ><a class="question-chip" href="/messages/poko"
-                  >“Show me its sold history.”
-                  <span aria-hidden="true">↗</span></a
-                ><a class="demo-panel-link" href="/messages/poko"
-                  >Start a conversation <span aria-hidden="true">↗</span></a
-                >
-              </div>
+            </div>
+            <span class="floating-chip chip-identified"
+              ><span class="chip-dot"></span>Card identified</span
+            ><span class="floating-chip chip-added"
+              ><span class="chip-plus">+</span>Added to collection</span
+            >
+          </div>
+        </div></div>
+        <div class="hero-marquee" aria-hidden="true">
+          <div class="hero-marquee-track">
+            <span>Scan from a photo</span><span>CardTrader listings</span
+            ><span>TCGplayer price data</span><span>Buyer protection</span
+            ><span>90% in PKN credit</span><span>Ask Poko</span
+            ><span>Scan from a photo</span><span>CardTrader listings</span
+            ><span>TCGplayer price data</span><span>Buyer protection</span
+            ><span>90% in PKN credit</span><span>Ask Poko</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="pad home-rail"
+        id="best-sellers"
+        aria-labelledby="best-heading"
+      >
+        <div class="wrap">
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Marketplace</p>
+              <h2 id="best-heading">Best sellers</h2>
+              <p class="home-head-sub">
+                The Pokémon cards selling most this week.
+              </p>
+            </div>
+            <a class="pill-link" href="/marketplace"
+              >View marketplace <span aria-hidden="true">→</span></a
+            >
+          </div>
+          <div
+            class="landing-rail"
+            data-landing-rail="bestSellers"
+            data-title="Best sellers"
+          >
+            <div class="landing-rail-skeleton" aria-hidden="true">
+              <span></span><span></span><span></span><span></span
+              ><span></span><span></span>
             </div>
           </div>
         </div>
-        <div class="wrap hero-foot">
-          <a href="/marketplace/sets"
-            >Browse Pokémon sets <span aria-hidden="true">↗</span></a
-          >
-        </div>
       </section>
-      <section class="pad toolkit" aria-labelledby="tools-heading">
+
+      <section class="pad home-tools" aria-labelledby="tools-heading">
         <div class="wrap">
-          <div class="section-heading">
-            <h2 id="tools-heading">Less admin.<br />More collecting.</h2>
-            <a class="text-link" href="/features"
-              >All the tools <span aria-hidden="true">↗</span></a
-            >
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Tools</p>
+              <h2 id="tools-heading">Less admin.<br />More collecting.</h2>
+            </div>
           </div>
-          <div class="task-grid">
-            <a class="task-card" id="scanner" href="/features/card-scanner"
-              ><div class="task-art art-scan" aria-hidden="true">
+          <div class="home-tool-grid">
+            <a
+              class="home-tool"
+              id="scanner"
+              href="/features/card-scanner"
+              data-reveal
+              ><div class="home-tool-art tool-scan" aria-hidden="true">
                 <img
                   src="https://cdn.pokoin.com/261321_pikachu-illustration-rare-173-165-151_homepage.webp"
                   width="280"
                   height="392"
                   alt=""
                   loading="lazy"
-                /><span class="art-bracket"></span
-                ><span class="art-label">Card identified ↗</span>
+                /><span class="tool-bracket"></span
+                ><span class="tool-chip">Card identified</span>
               </div>
-              <div class="task-copy">
-                <span class="task-number">01 / SCAN</span>
+              <div class="home-tool-copy">
+                <span class="tool-step">01 · Scan</span>
                 <h3>Skip the typing.</h3>
                 <p>Find a Pokémon card from a photo.</p>
-                <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span>
-              </div></a
-            >
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
             <a
-              class="task-card"
+              class="home-tool"
               id="inventory"
               href="/features/collection-tracker"
-              ><div class="task-art art-collection" aria-hidden="true">
+              data-reveal
+              ><div class="home-tool-art tool-collect" aria-hidden="true">
                 <img
                   src="https://cdn.pokoin.com/261377_charizard-ex-special-illustration-rare-199-165-151_homepage.webp"
                   width="280"
@@ -381,109 +456,130 @@
                   height="392"
                   alt=""
                   loading="lazy"
-                /><span class="art-label">Your collection +</span>
+                /><span class="tool-chip">+ Your collection</span>
               </div>
-              <div class="task-copy">
-                <span class="task-number">02 / COLLECT</span>
+              <div class="home-tool-copy">
+                <span class="tool-step">02 · Collect</span>
                 <h3>Keep it together.</h3>
                 <p>Your collection, portfolio and seller inventory.</p>
-                <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span>
-              </div></a
-            >
-            <a class="task-card" href="/features/pokemon-card-price-checker"
-              ><div class="task-art art-market" aria-hidden="true">
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+            <a
+              class="home-tool"
+              href="/features/pokemon-card-price-checker"
+              data-reveal
+              ><div class="home-tool-art tool-market" aria-hidden="true">
                 <img
                   src="https://cdn.pokoin.com/166456_rayquaza-vmax-secret-rare-218-203-evolving-skies_homepage.webp"
                   width="280"
                   height="392"
                   alt=""
                   loading="lazy"
-                /><span class="art-label">CardTrader · TCGplayer</span>
+                /><span class="tool-chip">CardTrader · TCGplayer</span>
               </div>
-              <div class="task-copy">
-                <span class="task-number">03 / DISCOVER</span>
+              <div class="home-tool-copy">
+                <span class="tool-step">03 · Discover</span>
                 <h3>Real market data.</h3>
                 <p>CardTrader listings. TCGplayer price data.</p>
-                <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span>
-              </div></a
-            >
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
           </div>
         </div>
       </section>
-      <section class="pad sell-section" aria-labelledby="sell-heading">
+
+      <section class="pad home-sell" id="sell" aria-labelledby="sell-heading">
         <div class="wrap">
-          <div class="section-heading">
-            <h2 id="sell-heading">Send your cards.<br />Choose your return.</h2>
-            <a class="text-link" href="/features/seller-fees"
-              >Compare the options <span aria-hidden="true">↗</span></a
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Sell</p>
+              <h2 id="sell-heading">Send your cards.<br />Choose your return.</h2>
+            </div>
+            <a class="pill-link" href="/features/seller-fees"
+              >Compare the options <span aria-hidden="true">→</span></a
             >
           </div>
-          <div class="return-grid">
+          <div class="home-return-grid">
             <a
-              class="return-card credit-offer"
+              class="home-return return-credit"
               href="/features/trade-cards-for-pkn"
-              ><p class="eyebrow">INSTANT PKN CREDIT</p>
-              <div class="return-number">90<span>%</span></div>
+              data-reveal
+              ><p class="return-label">Instant PKN credit</p>
+              <div class="home-return-number">90<span>%</span></div>
               <h3>New cards start here.</h3>
               <p>
-                Of market value in PKN.<br />At least 1 PKN per card you send
-                us.
+                Of market value in PKN. At least 1 PKN per card you send us.
               </p>
-              <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span></a
-            >
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
             <a
-              class="return-card managed-offer"
+              class="home-return return-managed"
               href="/features/managed-selling"
-              ><p class="eyebrow">MANAGED SELLING · REAL MONEY</p>
-              <div class="return-number">15.5<span>%</span></div>
+              data-reveal
+              ><p class="return-label">Managed selling · real money</p>
+              <div class="home-return-number">15.5<span>%</span></div>
               <h3>We sell. You get paid.</h3>
               <p>
-                Send us your cards. We handle the sale.<br />Get real money when
+                Send us your cards. We handle the sale. Get real money when
                 they sell.
               </p>
-              <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span></a
-            >
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
           </div>
-          <div class="self-sell">
-            <span
-              >Selling yourself?
-              <strong>No Pokoin seller commission.</strong></span
-            ><a href="/mypokoin"
-              >Start listing <span aria-hidden="true">↗</span></a
+          <div class="home-self-sell" data-reveal>
+            <p>
+              Selling yourself? <strong>No Pokoin seller commission.</strong>
+            </p>
+            <a class="button button-small button-outline" href="/mypokoin"
+              >Start listing <span aria-hidden="true">→</span></a
             >
           </div>
         </div>
       </section>
-      <section class="pad companions" aria-label="More from Pokoin">
-        <div class="wrap companion-grid">
-          <a class="companion-card poko-card" id="poko" href="/messages/poko"
-            ><span class="companion-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M27 15a11 11 0 0 1-11 11H6l-3 3V15A12 12 0 0 1 15 3h1a11 11 0 0 1 11 12Z"/><path d="M9 12h12M9 17h8"/></svg></span>
+
+      <section class="pad home-companions" aria-label="More from Pokoin">
+        <div class="wrap home-companion-grid">
+          <a
+            class="home-companion companion-poko"
+            id="poko"
+            href="/messages/poko"
+            data-reveal
+            ><img
+              class="companion-mascot"
+              src="/home/pokoin-mascot.png"
+              width="110"
+              height="102"
+              alt=""
+              loading="lazy"
+            />
             <div>
               <h2>Ask Poko.</h2>
               <p>Card research. Real market data.</p>
             </div>
-            <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span></a
-          >
+            <span class="tool-arrow" aria-hidden="true"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+          ></a>
           <a
-            class="companion-card inventory-card"
+            class="home-companion companion-rails"
             href="/features/cardrails-inventory"
-            ><span class="companion-icon" aria-hidden="true"
+            data-reveal
+            ><span class="companion-glyph" aria-hidden="true"
               ><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3">
                 <rect x="9" y="7" width="34" height="44" rx="4" />
                 <path d="M21 51v6h34V18H43M18 20h16M18 29h16M18 38h10" />
-              </svg></span
-            >
+              </svg></span>
             <div>
               <h2>CardRails inventory.</h2>
               <p>Scan. Organise. Find every card.</p>
             </div>
-            <span class="tile-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6h12v12" /></svg></span></a
-          >
-        </div>
-        <div class="wrap discovery-links">
-          <span>Find your fit.</span
-          ><a href="/alternatives">Compare alternatives ↗</a
-          ><a href="/learn">Quick-start guides ↗</a>
+            <span class="tool-arrow" aria-hidden="true"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+          ></a>
         </div>
       </section>
     </main>
@@ -553,6 +649,7 @@
       </p>
       <button type="button" data-cookie-accept>Accept</button>
     </div>
-    <script src="/home/landing.js?v=20261017-market-data" defer></script>
+    <script src="/home/landing.js?v=20261018-home-search" defer></script>
+    <script type="module" src="/market/landing-island.js"></script>
   </body>
 </html>

@@ -171,7 +171,7 @@ summary:focus-visible,
   gap: 28px;
 }
 .nav-links > a {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #c4c4cb;
   transition: color 0.2s;
@@ -219,13 +219,13 @@ summary:focus-visible,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 28px;
+  gap: 12px;
   min-height: 52px;
-  padding: 13px 23px;
-  font-size: 14px;
+  padding: 13px 26px;
+  font-size: 15px;
   font-weight: 700;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 999px;
   transition:
     background 0.2s,
     transform 0.2s,
@@ -242,6 +242,7 @@ summary:focus-visible,
 .button-yellow {
   background: var(--yellow);
   color: #111;
+  box-shadow: 0 10px 30px -10px rgb(255 211 61 / 0.55);
 }
 .button-yellow:hover {
   background: #ffe17b;
@@ -256,9 +257,21 @@ summary:focus-visible,
 }
 .button-small {
   min-height: 42px;
-  padding: 9px 17px;
-  font-size: 12px;
-  gap: 23px;
+  padding: 9px 18px;
+  font-size: 13px;
+  gap: 10px;
+}
+.button-ghost {
+  padding-inline: 14px;
+  color: #cfcfd8;
+  gap: 10px;
+}
+.button-ghost:hover {
+  color: var(--yellow);
+}
+.button-ghost svg {
+  width: 19px;
+  height: 19px;
 }
 .button-row {
   display: flex;
@@ -289,8 +302,6 @@ summary:focus-visible,
   display: inline-block;
   color: var(--muted);
   font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 4px;
 }
 .subtle-link:hover {
   color: var(--text);
@@ -670,7 +681,7 @@ summary:focus-visible,
   padding: 16px 20px;
   background: #24242b;
   border: 1px solid #4c4c57;
-  border-radius: 12px;
+  border-radius: 18px;
   box-shadow: 0 10px 45px #000;
 }
 .cookie-banner p {
@@ -678,17 +689,17 @@ summary:focus-visible,
   color: #c5c5ce;
 }
 .cookie-banner a {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: var(--yellow);
+  font-weight: 700;
 }
 .cookie-banner button {
   border: 0;
   background: var(--yellow);
   color: #111;
-  border-radius: 6px;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  padding: 10px 19px;
+  padding: 10px 20px;
 }
 .cookies-ok .cookie-banner {
   display: none;

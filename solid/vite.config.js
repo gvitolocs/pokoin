@@ -63,7 +63,15 @@ function serveProductPages() {
         if (pathname === '/' || pathname === '/landing.html') {
           res.setHeader('Content-Type', 'text/html; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
-          res.end(req.method === 'HEAD' ? '' : fs.readFileSync(path.resolve(rootDir, '../index.html'), 'utf8'));
+          // The landing island runs from source in dev (build-web.sh points it at the built entry).
+          const landing = fs
+            .readFileSync(path.resolve(rootDir, '../index.html'), 'utf8')
+            .replace('src="/market/landing-island.js"', 'src="/src/landing/island.jsx"');
+          if (req.method === 'HEAD') {
+            res.end('');
+            return;
+          }
+          server.transformIndexHtml(pathname, landing).then((html) => res.end(html), next);
           return;
         }
         if (pathname === '/sitemap-product-pages.xml') {
