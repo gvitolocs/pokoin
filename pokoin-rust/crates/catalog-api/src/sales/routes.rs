@@ -7,6 +7,7 @@ use axum::response::Response;
 use pokoin_api_common::pg::{self, Bind};
 use pokoin_api_common::{game, http, RouteState};
 use serde_json::{json, Map, Value};
+use sqlx::PgPool;
 
 use super::core::{self, SoldSlice};
 use super::tcgcsv::{self, TcgError};
@@ -121,9 +122,9 @@ fn normalize_sale_item(order_id: &str, paid_at: &Value, item: &Value) -> Value {
 }
 
 /// `readCardSales({ cardId, limit, includeNative, ...slice })`.
-async fn read_card_sales(state: &RouteState, card_id: &str, limit: i64, include_native: bool, slice: &SoldSlice) -> Result<Vec<Value>, Response> {
+async fn read_card_sales(pool: &PgPool, state: &RouteState, card_id: &str, limit: i64, include_native: bool, slice: &SoldSlice) -> Result<Vec<Value>, Response> {
     let id: i64 = card_id.parse().unwrap_or(0);
-    let mut oracle = core::read_oracle_card_sales(state.api.read(), id, limit, slice)
+    let mut oracle = core::read_oracle_card_sales(pool, id, limit, slice)
         .await
         .map_err(|e| db_failure("marketplace-card-sales", &e, "Marketplace card sales failed.", &READ_CORS))?;
     let sort = |rows: &mut Vec<Value>| rows.sort_by(|a, b| js::string_or_empty(a.get("soldAt")).cmp(&js::string_or_empty(b.get("soldAt"))));
@@ -160,7 +161,7 @@ async fn read_card_sales(state: &RouteState, card_id: &str, limit: i64, include_
 }
 
 /// `GET /api/marketplace-card-sales`.
-pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn card_sales(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     if let Some(r) = preflight_or_405(&method, &READ_CORS) {
         return r;
     }
@@ -169,25 +170,42 @@ pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Ur
     if card_id.is_empty() || !card_id.bytes().all(|b| b.is_ascii_digit()) {
         return with_headers(StatusCode::BAD_REQUEST, json!({ "error": "cardId is required." }), &READ_CORS, &[]);
     }
+    let game_id = current_game(&headers, &q);
+    let satellite = !game::is_pokemon_game(&game_id);
+    let pool = if satellite {
+        match state.api.game_pool(&game_id).await {
+            Some(pool) => pool,
+            None => return with_headers(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{game_id} marketplace database URL is not configured.")}), &READ_CORS, &[]),
+        }
+    } else {
+        state.api.read().clone()
+    };
     let id: i64 = card_id.parse().unwrap_or(0);
     let cache = [("cache-control", "public, max-age=20, s-maxage=120")];
     let include_native = q.search_param("includeNative").unwrap_or("").trim() == "1";
     let include_rows = include_native || q.search_param("includeRows").unwrap_or("").trim() == "1";
     if q.search_param("slices").unwrap_or("").trim() == "1" {
-        return match core::read_oracle_sold_daily_rows(state.api.read(), id, &SoldSlice::default()).await {
-            Ok((_, rows)) => with_headers(StatusCode::OK, json!({ "slices": rows.iter().map(core::compact_sold_daily_slice).collect::<Vec<_>>(), "source": "cardtrader_removed_sale" }), &READ_CORS, &cache),
+        return match core::read_oracle_sold_daily_rows(&pool, id, &SoldSlice::default()).await {
+            Ok((missing, rows)) => {
+                let mut body = Map::new();
+                body.insert("slices".into(), Value::Array(rows.iter().map(core::compact_sold_daily_slice).collect::<Vec<_>>()));
+                body.insert("source".into(), json!("cardtrader_removed_sale"));
+                if satellite && missing {
+                    body.insert("soldData".into(), json!("unavailable"));
+                }
+                with_headers(StatusCode::OK, Value::Object(body), &READ_CORS, &cache)
+            }
             Err(e) => db_failure("marketplace-card-sales", &e, "Marketplace card sales failed.", &READ_CORS),
         };
     }
     let slice = SoldSlice::from_query(&q);
     let limit = util::js_limit(q.search_param("limit"), 120, 500);
-    let pool = state.api.read();
     let (rows, series, filters) = tokio::join!(
         async {
-            if include_rows { read_card_sales(&state, &card_id, limit, include_native, &slice).await } else { Ok(Vec::new()) }
+            if include_rows { read_card_sales(&pool, &state, &card_id, limit, include_native && !satellite, &slice).await } else { Ok(Vec::new()) }
         },
-        core::read_oracle_card_sales_series(pool, id, &slice),
-        core::read_oracle_sales_filters(pool, id, &slice),
+        core::read_oracle_card_sales_series(&pool, id, &slice),
+        core::read_oracle_sales_filters(&pool, id, &slice),
     );
     let rows = match rows {
         Ok(rows) => rows,
@@ -203,6 +221,13 @@ pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Ur
     body.insert("filters".into(), filters);
     body.insert("slice".into(), Value::Object(slice.payload()));
     body.insert("source".into(), json!("cardtrader_removed_sale"));
+    if satellite {
+        if let Ok((missing, _)) = core::read_oracle_sold_daily_rows(&pool, id, &SoldSlice::default()).await {
+            if missing {
+                body.insert("soldData".into(), json!("unavailable"));
+            }
+        }
+    }
     with_headers(StatusCode::OK, Value::Object(body), &READ_CORS, &cache)
 }
 
@@ -214,7 +239,7 @@ const LAST_MEDIAN_CORS: [(&str, &str); 4] = [
 ];
 
 /// `GET /api/marketplace-card-last-median`.
-pub async fn card_last_median(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn card_last_median(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     if let Some(r) = preflight_or_405(&method, &LAST_MEDIAN_CORS) {
         return r;
     }
@@ -243,9 +268,17 @@ pub async fn card_last_median(State(state): State<RouteState>, method: Method, u
     if ids.is_empty() {
         return with_headers(StatusCode::BAD_REQUEST, json!({ "error": "cardId is required." }), &LAST_MEDIAN_CORS, &[]);
     }
+    let game_id = current_game(&headers, &q);
+    let pool = if game::is_pokemon_game(&game_id) {
+        state.api.read().clone()
+    } else {
+        match state.api.game_pool(&game_id).await {
+            Some(pool) => pool,
+            None => return with_headers(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{game_id} marketplace database URL is not configured.")}), &LAST_MEDIAN_CORS, &[]),
+        }
+    };
     let slice = SoldSlice::from_query(&q);
-    let pool = state.api.read();
-    let futures = ids.iter().map(|id| core::read_oracle_last_median(pool, id.parse().unwrap_or(0), &slice));
+    let futures = ids.iter().map(|id| core::read_oracle_last_median(&pool, id.parse().unwrap_or(0), &slice));
     let results = futures_util::future::join_all(futures).await;
     let mut prices = Vec::new();
     for r in results {
@@ -729,5 +762,16 @@ mod tests {
         assert_eq!(p["pricePkn"], json!(22));
         assert_eq!(p["provider"], "cardtrader");
         assert_eq!(p["available"], json!(true));
+    }
+
+    #[test]
+    fn current_game_from_query_header_or_default() {
+        let q = http::Query::from_uri(&"/api/marketplace-card-sales?cardId=1&game=yugioh".parse().unwrap());
+        assert_eq!(current_game(&HeaderMap::new(), &q), "yugioh");
+        let mut headers = HeaderMap::new();
+        headers.insert("x-pokoin-game", "magic".parse().unwrap());
+        let q = http::Query::from_uri(&"/api/marketplace-card-sales?cardId=1".parse().unwrap());
+        assert_eq!(current_game(&headers, &q), "magic");
+        assert_eq!(current_game(&HeaderMap::new(), &http::Query::parse("cardId=1")), "pokemon");
     }
 }
