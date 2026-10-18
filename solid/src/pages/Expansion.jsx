@@ -8,6 +8,7 @@ import { isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } fro
 import { filterExpansionCards } from '@market/expansion-filters.js';
 import { setSeoTitle } from '@market/seo.js';
 import { setDeskSkeletonCount } from '@market/set-desk-preview.js';
+import { expansionStampSrc } from '@market/expansion-stamps.js';
 import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '@market/set-logos.js';
 import { defaultExpansionSort, expansionTilesReady, hasOfficialSetList } from '@market/set-official-lists.js';
 import { Action, track } from '@market/track.js';
@@ -221,7 +222,8 @@ function SetDesk(props) {
   const name = () => info()?.expansion?.name || prettySlug(slug);
   const tilesReady = () => expansionTilesReady(info(), slug, name());
   const loading = () => !error() && !tilesReady();
-  const symbol = () => expansionSymbolSrc(info()?.expansion || { slug });
+  // Trainer Kit halves: the mascot stamp is the set mark on every card.
+  const symbol = () => expansionStampSrc({ slug }) || expansionSymbolSrc(info()?.expansion || { slug });
   const wordmark = () => expansionLogoSrc(info()?.expansion || { slug, name: name() });
   const printFlag = () => printFlagFromNationality(resolveExpansionNationality({
     ...(info()?.expansion || {}),
