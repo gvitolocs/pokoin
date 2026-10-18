@@ -27,7 +27,7 @@
 .home-hero {
   position: relative;
   isolation: isolate;
-  padding-top: 132px;
+  padding-top: 116px;
   overflow-x: clip;
 }
 
@@ -59,6 +59,13 @@
   align-items: center;
   gap: 56px;
   min-height: min(720px, calc(100svh - 200px));
+}
+
+/* The search leads the hero, right under the nav, so it is above the fold on
+   every screen; the copy column starts at the top instead of centring on the
+   binder. */
+.home-hero-copy {
+  align-self: start;
 }
 
 .home-hero-copy > * {
@@ -94,8 +101,12 @@
   animation: pulse 2.4s ease-in-out infinite;
 }
 
+.hero-popular + .hero-pill {
+  margin-top: 44px;
+}
+
 .home-hero h1 {
-  margin-top: 26px;
+  margin-top: 22px;
   font-size: clamp(46px, 6.1vw, 88px);
   font-weight: 700;
   line-height: 0.98;
@@ -143,7 +154,7 @@
   z-index: 10;
   width: 100%;
   max-width: 600px;
-  margin: 34px 0 0;
+  margin: 0;
 }
 
 .suggest-hover {
@@ -469,6 +480,13 @@
     color 0.2s;
 }
 
+.hero-popular a[aria-busy="true"] {
+  border-color: rgb(255 211 61 / 0.5);
+  background: rgb(255 211 61 / 0.12);
+  color: #fff;
+  cursor: progress;
+}
+
 .hero-popular a:hover {
   border-color: rgb(255 211 61 / 0.5);
   background: rgb(255 211 61 / 0.08);
@@ -676,11 +694,14 @@ a.binder-slot:focus-visible {
 
 /* Where the hero has room beside the 420px binder (wide desktop, and the
    stacked tablet layout), Umbreon and Sylveon peek out from behind its edges
-   instead of hiding under it: each overlaps the binder by ~45px. */
+   instead of hiding under it: Umbreon tucks ~16px behind it, Sylveon ~40px.
+   Umbreon sits a fifth of the way down, beside the headline rather than the
+   search pill that now leads the copy column. */
 @media (min-width: 1180px), (min-width: 721px) and (max-width: 900px) {
   .float-card-a {
+    top: 20%;
     left: auto;
-    right: calc(50% + min(50%, 210px) - 46px);
+    right: calc(50% + min(50%, 210px) - 16px);
   }
   .float-card-c {
     right: auto;
@@ -1663,7 +1684,10 @@ a:hover > .tool-arrow {
 
 @media (max-width: 720px) {
   .home-hero {
-    padding-top: 104px;
+    padding-top: 96px;
+  }
+  .hero-popular + .hero-pill {
+    margin-top: 32px;
   }
   .hero-pill {
     font-size: 11px;
@@ -1676,7 +1700,7 @@ a:hover > .tool-arrow {
     font-size: 17px;
   }
   .home-hero-copy .search-hero {
-    margin-top: 28px;
+    margin-top: 0;
   }
   .home-hero-copy .search-hero .search-pill {
     height: 58px;

@@ -82,7 +82,7 @@ test('the landing account button says Log in, or the signed-in username, never M
 test('Umbreon and Sylveon sit beside the binder where the hero has room', () => {
   const css = read('home/home.css');
   const block = css.match(/@media \(min-width: 1180px\), \(min-width: 721px\) and \(max-width: 900px\) \{[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(block, /\.float-card-a \{\s*left: auto;\s*right: calc\(50% \+ min\(50%, 210px\) - 46px\);/);
+  assert.match(block, /\.float-card-a \{\s*top: 20%;\s*left: auto;\s*right: calc\(50% \+ min\(50%, 210px\) - 16px\);/);
   assert.match(block, /\.float-card-c \{\s*right: auto;\s*left: calc\(50% \+ min\(50%, 210px\) - 40px\);/);
 });
 
@@ -93,4 +93,15 @@ test('lower landing sections render lazily and the hero loops pause off-screen',
   assert.match(css, /\.home-rail \{\s*overflow-x: clip;/);
   assert.match(read('home/landing.js'), /classList\.toggle\("is-offscreen"/);
   assert.match(read('solid/src/landing/island.jsx'), /whenIdle\(\(\) => \{\s*observer\.disconnect\(\);\s*show\(\);/);
+});
+
+test('the hero search sits right under the nav, above the headline', () => {
+  const copy = landing.match(/<div class="home-hero-copy">[\s\S]*?<div class="button-row hero-ctas">/)?.[0] || '';
+  const order = ['data-landing-search', 'class="hero-popular"', 'class="hero-pill"', '<h1 id="hero-heading">', 'class="home-lede"']
+    .map((needle) => copy.indexOf(needle));
+  assert.ok(order.every((at) => at >= 0), 'every hero piece is in the copy column');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'search, Popular, pill, headline, lede');
+  const css = read('home/home.css');
+  assert.match(css, /\.home-hero-copy \{\s*align-self: start;\s*\}/);
+  assert.match(css, /\.home-hero \{\s*position: relative;\s*isolation: isolate;\s*padding-top: 116px;/);
 });

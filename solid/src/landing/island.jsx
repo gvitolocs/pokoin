@@ -19,11 +19,23 @@ function whenIdle(fn) {
   else setTimeout(fn, 1200);
 }
 
+/** Longest a Popular chip waits for its warmed list before filling the box anyway. */
+const CHIP_WAIT_MS = 1500;
+
+/** Idle warming of every Popular chip costs ~200 kB of engine plus their pages: not on slow or metered links. */
+function canWarmAtIdle() {
+  const link = typeof navigator === 'undefined' ? null : navigator.connection;
+  return !(link?.saveData || /(?:^|-)[23]g$/.test(String(link?.effectiveType || '')));
+}
+
 function mountSearch(form) {
   let mounted = null;
+  let landing = null;
   const start = () => {
     mounted ||= import('./LandingSearch.jsx')
-      .then(({ default: LandingSearch }) => {
+      .then((module) => {
+        landing = module;
+        const { default: LandingSearch } = module;
         // Carry over what the static field already holds, then swap it out
         // in the same task (no frame shows both).
         const staticInput = form.querySelector('input[name="q"]');
@@ -72,18 +84,50 @@ function mountSearch(form) {
         .catch(() => {});
     });
   }
-  // Popular searches: fill the field and open the typeahead instead of leaving the page.
-  for (const chip of form.parentElement?.querySelectorAll('[data-landing-query]') || []) {
+  // Popular searches: fill the field and open the typeahead instead of leaving
+  // the page. Each chip's query is warmed ahead (SearchBox prewarmSuggest:
+  // engine, every suggest page, the results total, then the first thumbnails
+  // on hover / focus / touch), so the click paints its final list in one frame.
+  const chips = [...(form.parentElement?.querySelectorAll('[data-landing-query]') || [])];
+  const warm = (query, thumbs) => start()
+    .then(() => (landing?.popularWarmable() ? landing.warmPopular(query, { thumbs }) : null));
+  for (const chip of chips) {
+    const query = chip.getAttribute('data-landing-query') || '';
+    const warmThumbs = () => {
+      warm(query, true).catch(() => {});
+    };
+    chip.addEventListener('pointerenter', warmThumbs, { once: true });
+    chip.addEventListener('focus', warmThumbs, { once: true });
+    chip.addEventListener('touchstart', warmThumbs, { once: true, passive: true });
     chip.addEventListener('click', (event) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.button) return;
       event.preventDefault();
-      const query = chip.getAttribute('data-landing-query') || '';
+      chip.setAttribute('aria-busy', 'true');
       start()
-        .then((input) => fill(input, query, true))
-        .catch(() => window.location.assign(chip.href));
+        .then((input) => {
+          if (!landing?.popularWarmable()) {
+            fill(input, query, true);
+            return undefined;
+          }
+          const ready = landing.warmPopular(query, { thumbs: true }).catch(() => {});
+          return Promise.race([ready, new Promise((resolve) => setTimeout(resolve, CHIP_WAIT_MS))]).then(() => {
+            input.focus();
+            landing.fillSuggest(input, query);
+          });
+        })
+        .catch(() => window.location.assign(chip.href))
+        .finally(() => chip.removeAttribute('aria-busy'));
     });
   }
   whenIdle(startQuietly);
+  if (canWarmAtIdle()) {
+    // One chip at a time, after the box mounted; a hovered chip jumps the queue on its own.
+    whenIdle(() => {
+      chips
+        .reduce((chain, chip) => chain.then(() => warm(chip.getAttribute('data-landing-query') || '', false)).catch(() => {}), Promise.resolve())
+        .catch(() => {});
+    });
+  }
 }
 
 /** Type `value` into the SearchBox input the way a visitor would. */
