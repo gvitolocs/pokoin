@@ -577,7 +577,7 @@ export default function Associate() {
   document.title = 'Associate · Pokoin';
   return (
     <Show when={!allowLayoutPreview(params)} fallback={<PreviewDesk params={params} />}>
-      <SignedIn from="/associate">
+      <SignedIn early from="/associate">
         <AssociateDesk />
       </SignedIn>
     </Show>

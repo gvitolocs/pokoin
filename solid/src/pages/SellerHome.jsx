@@ -5,9 +5,10 @@ import {
   fetchCardTraderAssets,
   fetchCollectionSummary,
   fetchPortfolioHistory,
-  fetchSellerListings,
 } from '@market/api.js';
-import { inventoryListingHref, liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { game } from '@market/game.js';
+import { inventoryBooks } from '@market/inventory-book.js';
+import { inventoryListingHref, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { fetchRail, RAIL } from '@market/lists.js';
 import { addUtcDays, utcDayKey } from '@market/portfolio-history.js';
 import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
@@ -21,13 +22,13 @@ import { APP, marketUrl } from '@market/punchouts.js';
 import '@market/seller-home.css';
 import { DashboardBoundary, SellerDashboardView } from '../components/dashboard/SellerDashboardView.jsx';
 import SignedIn from '../components/SignedIn.jsx';
+import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile, availablePkn } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
 
 const MOVER_LIMIT = 10;
 // Owner reads come back cheapest-first and include cancelled rows. One page
 // of 200 was 146 inactive + 54 live, so the sheet hid the rest of the stock.
-const LISTINGS_PAGE = 1000;
 
 /** Dev/local layout fixtures — never presented as live production data. */
 const PREVIEW_FIXTURE = {
@@ -148,6 +149,8 @@ function LiveDashboard() {
   const [uniqueItems, setUniqueItems] = createSignal(0);
   const [listed, setListed] = createSignal(null);
   const [listingRows, setListingRows] = createSignal([]);
+  // "No cards listed yet" only once the book answered, never while it loads.
+  const [listingsLoaded, setListingsLoaded] = createSignal(false);
   const [movers, setMovers] = createSignal([]);
   const [cardTraderAssets, setCardTraderAssets] = createSignal(null);
   const [historySeries, setHistorySeries] = createSignal([]);
@@ -195,42 +198,28 @@ function LiveDashboard() {
     return () => { cancelled = true; };
   });
 
-  // Every live listing (active or paused with stock, D00005R), paged.
+  // Every live listing (active or paused with stock, D00005R): the seller's
+  // MyPokoin book, painted from storage and revalidated with its stamp.
   createEffect(sellerUid, (id) => {
     if (!id) return undefined;
     let cancelled = false;
+    const gameId = game().id;
     const cached = readPortfolioTilesCache(id);
     // Do not blank listed tiles when we already painted from cache.
-    if (!cached?.listed) {
-      setListed(null);
-      setListingRows([]);
-    }
-    getBearer()
-      .then(async (token) => {
-        const live = [];
-        const seen = new Set();
-        let offset = 0;
-        for (;;) {
-          const data = await fetchSellerListings(id, token, { limit: LISTINGS_PAGE, offset });
-          const raw = data.listings || data.items || [];
-          for (const row of liveInventoryListings(raw)) {
-            const key = String(row.id || row.listingId || '');
-            if (key && seen.has(key)) continue;
-            if (key) seen.add(key);
-            live.push(row);
-          }
-          if (raw.length < LISTINGS_PAGE) break;
-          offset += raw.length;
-        }
-        return live;
-      })
-      .then((live) => {
-        if (cancelled || !live) return;
-        const summary = summarizeLiveInventory(live);
-        writePortfolioTilesCache(id, { listed: summary });
-        setListed(() => summary);
-        setListingRows(live);
-      })
+    if (!cached?.listed) setListed(null);
+    const stored = inventoryBooks.peek(id, gameId);
+    setListingRows(stored?.rows || []);
+    setListingsLoaded(Boolean(stored));
+    const show = (live) => {
+      const summary = summarizeLiveInventory(live);
+      writePortfolioTilesCache(id, { listed: summary });
+      setListed(() => summary);
+      setListingRows(live);
+      setListingsLoaded(true);
+    };
+    loadOwnerBook(id, gameId, (live, complete = true) => {
+      if (!cancelled && complete) show(live);
+    })
       .catch(() => {
         if (cancelled) return;
         // Keep the cached listed tile; only fail when we had nothing to show.
@@ -239,6 +228,7 @@ function LiveDashboard() {
         writePortfolioTilesCache(id, { listed: failed });
         setListed(failed);
         setListingRows([]);
+        setListingsLoaded(true);
       });
     return () => { cancelled = true; };
   });
@@ -318,6 +308,7 @@ function LiveDashboard() {
         historyPending={historyPending()}
         listed={listed()}
         listingRows={listingRows()}
+        listingsLoading={!listingsLoaded()}
         movers={movers()}
         loading={ownedCards() == null}
         error={error()}
@@ -342,7 +333,7 @@ export default function SellerHome() {
   document.title = 'Dashboard · Pokoin';
   return (
     <Show when={!untrack(() => allowLayoutPreview(params))} fallback={<PreviewDashboard />}>
-      <SignedIn from="/dashboard">
+      <SignedIn early from="/dashboard">
         <LiveDashboard />
       </SignedIn>
     </Show>

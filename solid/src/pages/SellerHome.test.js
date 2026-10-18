@@ -95,7 +95,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(dashSrc, /ListingPreviewRow/);
   assert.doesNotMatch(dashSrc, /seller-listing-copy/);
   assert.doesNotMatch(dashSrc, /seller-listing-price/);
-  assert.match(homeSrc, /const LISTINGS_PAGE = 1000/);
+  // The whole book comes from the stored MyPokoin book (lib/owner-book.js).
+  assert.match(homeSrc, /loadOwnerBook\(id, gameId,/);
+  assert.match(dashSrc, /!props\.listingsLoading/);
   assert.doesNotMatch(homeSrc, /LISTING_PREVIEW/);
   assert.doesNotMatch(homeSrc, /live\.slice\(0,/);
   // Art-only Your listings tiles: no set/condition/qty/price chrome on the preview.

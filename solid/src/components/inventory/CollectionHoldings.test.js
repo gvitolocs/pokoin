@@ -30,7 +30,7 @@ test('MyPokoin owns the page head and the sign-in gate; holdings load over the B
   assert.match(src, /data-testid=\{`collection-\$\{colProps\.side\}`\}/);
   assert.match(src, /<Column side="held">/);
   assert.match(src, /<Column side="listed">/);
-  assert.match(src, /fetchAllSellerListings|fetchSellerListings/);
+  assert.match(src, /loadOwnerBook\(seller, gameId,/);
   assert.match(src, /data-testid="collection-physical"|Physical/);
   assert.match(src, /Request physical shipping \(NFT\)|canShip/);
   assert.match(src, /fetchOwnedCollection/);

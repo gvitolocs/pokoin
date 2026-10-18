@@ -184,7 +184,7 @@ export async function getJson(path, options = {}) {
   const { text } = await fetchApiText(localUrl(path, options.game), options, path);
   const data = parseApiText(text);
   if (options.method && options.method !== 'GET' && /^\/api\/marketplace-listings(?:[?/-]|$)/.test(path)) {
-    inventoryBooks.clear();
+    inventoryBooks.markStale();
   }
   return data;
 }
@@ -3205,7 +3205,7 @@ export async function fetchPriceCheck(items, token) {
   });
 }
 
-export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId } = {}) {
+export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId, order = '' } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),
     nativeOnly: '1',
@@ -3214,10 +3214,26 @@ export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, 
   if (Number(offset) > 0) {
     params.set('offset', String(Math.trunc(Number(offset))));
   }
+  if (order === 'price-desc') params.set('order', order);
   return getJson(`/api/marketplace-listings?${params}`, {
     ...(gameId ? { game: gameId } : {}),
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+}
+
+/**
+ * The owner's book stamp (listing count + last change) for MyPokoin
+ * revalidation: one index read, `private, no-store`. '' from an API that
+ * predates it, so the caller reads the whole book as before.
+ */
+export async function fetchSellerListingsStamp(sellerUid, token, { game: gameId } = {}) {
+  // limit=1: an API without stamp=1 answers one row, not a page.
+  const params = new URLSearchParams({ sellerUid: String(sellerUid || ''), stamp: '1', limit: '1' });
+  const data = await getJson(`/api/marketplace-listings?${params}`, {
+    ...(gameId ? { game: gameId } : {}),
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  return typeof data?.stamp === 'string' ? data.stamp : '';
 }
 
 /**

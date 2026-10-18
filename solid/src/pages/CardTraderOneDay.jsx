@@ -203,7 +203,7 @@ function OneDayDesk() {
 export default function CardTraderOneDay() {
   document.title = 'CardTrader 1-DR · Pokoin';
   return (
-    <SignedIn from="/mypokoin/1dr">
+    <SignedIn early from="/mypokoin/1dr">
       <OneDayDesk />
     </SignedIn>
   );

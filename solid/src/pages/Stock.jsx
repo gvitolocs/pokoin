@@ -5,7 +5,7 @@ import StockNav from '../components/StockNav.jsx';
 /** /stock. */
 export default function Stock() {
   return (
-    <SignedIn from="/stock">
+    <SignedIn early from="/stock">
       <div class="page desk mypokoin">
         <StockNav title="Stock" lede="Live listings, what you sold, and what you bought.">
           <a class="btn" href="/inventory/scan">Scan cards</a>

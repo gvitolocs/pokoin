@@ -444,7 +444,7 @@ export function SellerDashboardView(props) {
               {showAllListings() ? 'Show fewer' : `Show all ${listingRows().length}`}
             </button>
           </Show>
-          <Show when={!listed()?.failed && !listingRows().length && !props.loading}>
+          <Show when={!listed()?.failed && !listingRows().length && !props.loading && !props.listingsLoading}>
             <EmptyDesk nested title="No cards listed yet" lede="Scan a pile and list what you want to sell.">
               <a class="btn" href={DASHBOARD_SCAN}>Scan cards</a>
             </EmptyDesk>

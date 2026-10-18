@@ -88,6 +88,8 @@ fn query_map(uri: &Uri) -> HashMap<String, String> {
         "action",
         "box",
         "stackSize",
+        "stamp",
+        "order",
     ] {
         if let Some(value) = q.first(key) {
             map.insert(key.into(), value.into());
@@ -221,7 +223,10 @@ fn read_sql(
     } else {
         String::new()
     };
-    (format!("select to_jsonb(listings) as listing from public.marketplace_user_listings listings {} order by price_pkn asc, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
+    // `order=price-desc`: MyPokoin opens on price high → low, so a first load
+    // that paints its first page shows the rows that stay on top.
+    let price = if query.get("order").map(String::as_str) == Some("price-desc") { "desc" } else { "asc" };
+    (format!("select to_jsonb(listings) as listing from public.marketplace_user_listings listings {} order by price_pkn {price}, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
 }
 pub async fn read_listings(
     state: &DomainState,
@@ -423,10 +428,53 @@ pub async fn marketplace_listings_get(
             }
             return read_box_slots(&state, &uid, &q).await;
         }
-        Ok(json!({"listings":read_listings(&state,&q,decoded.as_ref(),&game).await?}))
+        let owner = decoded.as_ref().map(|claims| owner_uid(&q, claims)).transpose()?;
+        if q.get("stamp").map(String::as_str) == Some("1") {
+            let Some(uid) = owner else {
+                return Err(ApiError::bad_request("stamp=1 needs sellerUid."));
+            };
+            return Ok(json!({"stamp":owner_book_stamp(state.read_db(),&uid).await?}));
+        }
+        // The first page of the owner's whole book carries the stamp read
+        // before it: a change racing the read moves the next stamp check.
+        let whole_book = owner.is_some()
+            && clean_offset(q.get("offset")) == 0
+            && q.get("id").map_or(true, |s| s.trim().is_empty())
+            && q.get("cardId").map_or(true, |s| s.trim().is_empty());
+        let stamp = match (&owner, whole_book) {
+            (Some(uid), true) => Some(owner_book_stamp(state.read_db(), uid).await?),
+            _ => None,
+        };
+        let mut body = json!({"listings":read_listings(&state,&q,decoded.as_ref(),&game).await?});
+        if let Some(stamp) = stamp {
+            body["stamp"] = json!(stamp);
+        }
+        Ok(body)
     }
     .await;
     response(result, true)
+}
+/// `sellerUid` when it is the signed-in seller (the read below enforces the same).
+fn owner_uid(query: &HashMap<String, String>, claims: &crate::Claims) -> Result<String, ApiError> {
+    let uid = clean_text(query.get("sellerUid").map(String::as_str).unwrap_or(""), 160);
+    if uid != claims.uid {
+        return Err(ApiError::forbidden("You can only read your own seller listings."));
+    }
+    Ok(uid)
+}
+/// A seller's own-book stamp for MyPokoin revalidation (`stamp=1`, and the
+/// first page of the whole book): listing count and `max(updated_at)` over
+/// every listing of the seller, any game or status. Every listing writer sets
+/// `updated_at`, and a delete changes the count. One read of
+/// `marketplace_user_listings_seller_idx`.
+pub(crate) async fn owner_book_stamp(read_db: &sqlx::PgPool, uid: &str) -> Result<String, ApiError> {
+    let (count, last): (i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "select count(*), max(updated_at) from public.marketplace_user_listings where seller_uid = $1",
+    )
+    .bind(uid)
+    .fetch_one(read_db)
+    .await?;
+    Ok(format!("{count}:{}", super::seller::stamp_text(last)))
 }
 fn parse_body(headers: &HeaderMap, body: &Bytes) -> Result<Value, ApiError> {
     http::parse_body(headers, body)

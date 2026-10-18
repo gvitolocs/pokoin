@@ -2,7 +2,6 @@ import { createEffect, createMemo, createSignal, For, Show, untrack } from 'soli
 import {
   cancelListing,
   createListing,
-  fetchAllSellerListings,
   fetchOwnedCollection,
   fetchPriceCheck,
   imageSrc,
@@ -10,9 +9,12 @@ import {
   requestNftShipping,
 } from '@market/api.js';
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
+import { game } from '@market/game.js';
+import { inventoryBooks } from '@market/inventory-book.js';
 import { priceCheckItem } from '@market/inventory-price.js';
 import ScanImage from '../ScanImage.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
+import { loadOwnerBook } from '../../lib/owner-book.js';
 import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -20,6 +22,10 @@ import { sellerCurrency, sellerSettings } from '../../stores/buyer.js';
 import { previewCollection } from '../../pages/mypokoin-preview-fixture.js';
 
 const ADDRESS_FIELDS = ['name', 'line1', 'city', 'postalCode', 'country'];
+
+// The last holdings read, in memory only: a revisit of the tab repaints them
+// while they refresh instead of blanking to a skeleton.
+let holdingsMemo = { uid: '', rows: null };
 
 function canShip(row) {
   const status = String(row.physicalShippingStatus || '');
@@ -203,8 +209,10 @@ function facetOptions(rows) {
  */
 export default function CollectionHoldings(props) {
   const uid = () => authUid() || accountProfile()?.uid || '';
-  const [rows, setRows] = createSignal(null);
-  const [listings, setListings] = createSignal([]);
+  const firstUid = untrack(uid);
+  const [rows, setRows] = createSignal(holdingsMemo.uid && holdingsMemo.uid === firstUid ? holdingsMemo.rows : null);
+  // Listed copies come from the seller's MyPokoin book (stored, stamp-checked).
+  const [listings, setListings] = createSignal(inventoryBooks.peek(firstUid, game().id)?.rows || []);
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal('');
@@ -221,17 +229,20 @@ export default function CollectionHoldings(props) {
   const editedAsks = new Set();
 
   async function loadCollection() {
-    setRows(null);
     setError('');
     const seller = untrack(uid);
+    const gameId = game().id;
     try {
       const token = await getBearer();
-      const [owned, stock] = await Promise.all([
+      const [owned] = await Promise.all([
         fetchOwnedCollection(token),
-        seller ? fetchAllSellerListings(seller, token).catch(() => ({ listings: [] })) : { listings: [] },
+        seller
+          ? loadOwnerBook(seller, gameId, (next, complete = true) => { if (complete) setListings(next); }).catch(() => null)
+          : null,
       ]);
-      setRows(Array.isArray(owned.items) ? owned.items : []);
-      setListings(stock.listings || stock.items || []);
+      const items = Array.isArray(owned.items) ? owned.items : [];
+      holdingsMemo = { uid: seller, rows: items };
+      setRows(items);
     } catch (err) {
       console.error('collection load failed', err);
       setError("Couldn't load your collection");
