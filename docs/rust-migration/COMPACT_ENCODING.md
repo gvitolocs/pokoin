@@ -319,20 +319,30 @@ cargo run --quiet --example c1_dictionary > ../market/src/compact-dictionary.jso
 
 ### 3.2 Negotiation and HTTP semantics
 
-- **Opt in** with `?format=c1` (preferred) or `Accept: application/vnd.pokoin.c1+json`.
-  `*/*` is deliberately **not** a match — every browser sends it. Browsers
-  should use `?format=c1`: Cloudflare and the edge micro-cache key on the URL
-  and ignore `Vary`, so only the query parameter keeps the two representations
-  in separate cache entries. The edge rewrites an `Accept`-only request to
-  `?format=c1` before its own cache (`apps/api/src/http_cache.rs`).
+- **Opt in with `?format=c1` / `?format=c1v2`.** Cloudflare and the edge
+  micro-cache key on the URL and ignore `Vary: Accept`, so only the query
+  parameter keeps the two representations in separate cache entries. Through
+  api.pokoin.com, `Accept: application/vnd.pokoin.c1+json` on a URL without
+  `?format=` is answered as **plain JSON**: the public edge
+  (`apps/api/src/http_cache.rs`, `c1_only_in_accept`) replaces that `Accept`
+  before routing. In-process callers still negotiate on `Accept`. `*/*` is
+  never a match — every browser sends it.
+  Why (2026-10-18, read-only curl on a fresh `&zz=<random>` key): until then the
+  edge rewrote an `Accept`-only ask to `?format=c1` *internally*, so Cloudflare
+  stored the c1 body under the bare URL (`cf-cache-status: MISS`,
+  `x-pokoin-format: c1`) and the next plain-JSON request got that c1 body as a
+  `HIT` for `s-maxage=60` + `stale-while-revalidate=120`, despite `Vary: Accept`.
+  The SPA decodes either form, but the Flutter apps and the extension read
+  plain JSON, and anyone could do it to any public catalogue URL with one curl.
 - Content type `application/json; charset=utf-8` plus `x-pokoin-format: c1`
   (since 2026-10-10; before, `application/vnd.pokoin.c1+json`). Cloudflare only
   brotli-compresses content types it knows, and an uncompressed `c1` body was
   larger on the wire than brotli'd JSON. The payload marks itself (`{"c1":1,…}`),
   so a client branches on `isC1(payload)`.
 - Same status code and same `Cache-Control` as the default response.
-- **`Vary: Accept` on both representations**, so a shared cache can never hand a
-  `c1` body to a client that asked for plain JSON.
+- **`Vary: Accept` on both representations**, for caches that honour it.
+  Cloudflare does not (it varies only on `Accept-Encoding`, and on `Accept` for
+  images), which is why the edge never answers c1 to an `Accept`-only ask.
 - `apps/api`'s Redis read cache keys `/api/marketplace-search-page` per
   representation (`:c1` suffix), for the same reason.
 - `sanitize_public_json` runs before encoding, so an infrastructure error is the
@@ -671,6 +681,49 @@ them trigger template columns (§3.5), so the committed vectors are format 1.
 - The 400-row artist page is the one case where encode time is worth watching;
   it is also the one route where the raw saving is 658 KB.
 
+### 4.4 In the browser: wire bytes and decode time (2026-10-18)
+
+Live api.pokoin.com bodies for the routes the SPA reads, each fetched as JSON,
+`?format=c1` and `?format=c1v2`. **Wire** is what Cloudflare sends a browser
+with `Accept-Encoding: br` (`curl -w %{size_download}`). **Decode** is the whole
+main-thread step after the network, the same as `decodeApiText`: UTF-8 bytes →
+string → `JSON.parse` → `decodeC1` when the body is c1. Median of 40 interleaved
+runs on Chrome 152 (headless, Ryzen 5 7600), at 1× and with CDP
+`Emulation.setCPUThrottlingRate(4)` (Lighthouse's mobile profile); the browser
+pane on an Apple-silicon Mac agrees in shape (artist page 4.8 → 3.5 ms).
+
+| payload | JSON wire | c1 wire | c1v2 wire | JSON decode 1× / 4× | c1 decode 1× / 4× | c1v2 decode 1× / 4× |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| search `charizard` (90 KB raw) | 8.2 KB | 5.5 KB | 4.7 KB | 0.3 / 0.6 ms | 0.3 / 0.9 ms | 0.4 / 1.1 ms |
+| set desk `base-set` (140 KB) | 9.9 KB | 4.7 KB | 4.2 KB | 0.5 / 1.1 ms | 0.2 / 1.1 ms | 0.4 / 2.0 ms |
+| set desk `destined-rivals` (328 KB) | 24.8 KB | 11.0 KB | 8.6 KB | 1.2 / 2.9 ms | 0.6 / 2.2 ms | 1.0 / 4.4 ms |
+| expansion index (144 KB) | 15.3 KB | 11.7 KB | 9.9 KB | 0.6 / 1.2 ms | 0.3 / 1.1 ms | 0.6 / 2.7 ms |
+| artist `mitsuhiro-arita` (3.8 MB) | 206 KB | 135 KB | 110 KB | 15.7 / **59.9 ms** | 8.5 / **32.2 ms** | 10.1 / 38.1 ms |
+| list snapshot, artist arita (2.2 MB) | 118 KB | 93 KB | 65 KB | 8.1 / 35.1 ms | 4.2 / 20.7 ms | 6.8 / 30.8 ms |
+| suggest `mew` (12 KB) | 1.92 KB | 1.99 KB | (= c1) | < 0.1 ms | < 0.1 ms | |
+| card-versions (1.8 KB) | 672 B | 696 B | (= c1) | < 0.1 ms | < 0.1 ms | |
+
+- **Decode is never the cost.** Below ~300 KB raw every variant is within
+  ±1 ms of `JSON.parse`, even at 4×. On the big pages c1 *halves* the
+  main-thread block: the artist page drops from a 60 ms long task to 32 ms at
+  4×, because the decoder materialises interned rows instead of parsing 3.8 MB
+  of repeated keys. §2.3's premise holds.
+- **c1v2 trades decode for bytes.** Template expansion makes it slower than c1
+  (artist 38 vs 32 ms at 4×) but still faster than JSON, and 15–30% smaller on
+  the wire than c1. Lists, which are c1v2 + origin brotli 11, are the right
+  place for it.
+- **Two routes do not benefit:** `suggest` and `card-versions` are 3–4% *larger*
+  as c1 (+25–70 B), with no decode difference. Harmless, but nothing gained.
+- **`dcb` does not overtake c1; it stacks on it.** Brotli 11 with the shared
+  `c1-shared-d30efab9dda40a4b.dict` (computed locally; the zone path is off,
+  §3.5): list `base-set` c1v2 3.4 → 2.5 KB, list arita 64.9 → 61.2 KB; plain
+  JSON with the same dictionary only goes 7.4 → 6.8 KB and 117.8 → 114.9 KB,
+  because the dictionary was trained on c1v2.
+- Row order of a search can differ between two requests (ties), so the
+  `charizard`/`pikachu` c1 body was not byte-equal to the JSON fetched a moment
+  later; decode correctness is pinned by the fixture round trips (§5), not by
+  this table.
+
 ---
 
 ## 5. Tests
@@ -733,43 +786,38 @@ inspect the `c` / `m` / `t` keys of the emitted columns.
 
 ## 6. Rollout
 
-1. **Now (this change).** Encoder, dictionary route, decoder, tests. Opt-in
-   only; no client requests `c1`, so production behaviour is unchanged except
-   for `Vary: Accept` on the target routes' success responses and the new
-   `/api/dictionary` route.
-2. **Confirm `Vary: Accept` at the edge.** Before any client opts in, check that
-   Cloudflare honours `Vary: Accept` for these routes (`curl -I` with and
-   without the `Accept`, compare `cf-cache-status` and the content type). If it
-   does not, clients must use `?format=c1` instead, which varies the URL and so
-   varies the cache key unconditionally. This is a release gate, not a nice to
-   have: getting it wrong serves `c1` bytes to the Flutter apps.
-3. **One route, behind a flag.** `/api/marketplace-expansion-page` first: it has
-   the best ratio (−51.8% brotli'd), one consumer (the set desk), and the
-   simplest shape. Have the SPA fetch `?format=c1` for that route only, decode
-   with `decodeC1`, and keep the default path as the fallback on any `C1Error`.
-4. **Measure in a browser.** `JSON.parse` + `decodeC1` against `JSON.parse`
-   alone, on a mid-range Android, over a throttled connection. The size win is
-   measured; the *decode* win is the thing this document does not yet have a
-   number for, and it is the main reason to prefer this design over brotli
-   alone. If `decodeC1` turns out slower end to end than parsing the default
-   body, stop here — that result would invalidate §2.3's premise.
-5. **Then the rest**, in descending order of benefit: `home-page` and the rails
-   (−40.8%/−35.4%), `artist-cards` (658 KB raw), `card-versions`,
-   `search-page`.
-6. **Pin the dictionary.** Once a client depends on codes, fetch
-   `/api/dictionary?v=<version from the payload>` so it is immutably cached, and
-   treat a `C1Error` mentioning a missing code as "refetch the current
-   dictionary", not as a failure.
-7. **Flutter.** Only after the SPA is proven. The format is deliberately plain
-   JSON so a Dart decoder is the same ~200 lines.
+Where it stands on 2026-10-18:
+
+1. **Done.** Encoder, `/api/dictionary`, decoder, tests (#284); the SPA reads
+   catalogue routes with `?format=c1` (`C1_READS` in `market/src/api.js`, on;
+   its comment has the 2026-10-12 size check) and list snapshots as `format=c1v2`.
+2. **The cache-key gate.** `?format=` puts c1 in its own Cloudflare cache entry,
+   so the SPA was never exposed. The `Accept`-only path was: see §3.2. The fix
+   is in the origin (`http_cache::edge` answers JSON to it), so **no Cloudflare
+   zone change is needed**. Ship order: deploy the API to the Pi and the k3s
+   overflow (both run the edge listener), then rerun the probe below; any c1
+   body already cached under a bare URL ages out within 3 minutes
+   (`s-maxage=60` + `stale-while-revalidate=120`), so no purge either.
+
+   ```sh
+   U="https://api.pokoin.com/api/marketplace-search-page?q=charizard&limit=24&zz=$RANDOM$RANDOM"
+   curl -s -o /dev/null -D - -H 'Accept: application/vnd.pokoin.c1+json' "$U" | grep -i x-pokoin-format  # expect nothing
+   curl -s "$U" | head -c 12                                                                           # expect {"query":
+   ```
+3. **Measured in a browser** (§4.4): decode is not a cost anywhere and halves
+   the long task on the big pages.
+4. **Optional trims** (not done): drop `format=c1` for `suggest` and
+   `card-versions`, which gain nothing; consider `c1v2` for `artist-cards` and
+   the set desk (−15–20% wire for ~+20% decode).
+5. **Flutter / extension.** Plain JSON today. If they ever opt in, they use
+   `?format=`, never `Accept`.
 
 ### Backing out
 
-Opt-in means backing out is client-side: stop sending the header. Nothing is
-removed from the default representation, so a rollback never needs a server
-deploy. The two server-side changes that *are* observable without a client —
-`Vary: Accept` on the target routes and the `/api/dictionary` route — are both
-additive.
+Client-side: set `C1_READS = false` and the SPA reads plain JSON again. Nothing
+is removed from the default representation, so a rollback never needs a server
+deploy. The edge's JSON answer to an `Accept`-only ask is independent of it and
+should stay.
 
 ### When this needs revisiting
 
