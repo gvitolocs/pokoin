@@ -945,7 +945,11 @@ function SuggestRow(props) {
           <button type="button" class="suggest-main" onClick={choose}>
             <span class="suggest-set" aria-hidden="true">
               <span class="set-shortcut is-on">
-                <ExpansionMark setName={identity().set} symbolUrl={card().expansionSymbolUrl} />
+                <ExpansionMark
+                  setName={identity().set}
+                  number={card().number || card().card_number}
+                  symbolUrl={card().expansionSymbolUrl}
+                />
               </span>
             </span>
             <Show when={thumb()} fallback={<span class="suggest-ph" />}>

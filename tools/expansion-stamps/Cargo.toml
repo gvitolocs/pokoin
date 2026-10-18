@@ -1,0 +1,21 @@
+[package]
+name = "expansion-stamps"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Deck mascot stamp plates (Battle Academy, Trainer Kits, ...) for the expansion symbol chips"
+
+# Own workspace: asset tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "expansion-stamps"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+png = "0.18"
+serde_json = "1"
+
+[profile.release]
+strip = true

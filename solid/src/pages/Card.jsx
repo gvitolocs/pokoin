@@ -1035,7 +1035,11 @@ function CardDesk(props) {
                               const ident = printingIdentity(row);
                               const label = [ident.set, ident.number].filter(Boolean).join(' ');
                               const mark = () => (
-                                <ExpansionMark setName={ident.set} symbolUrl={row.expansionSymbolUrl || row.defaultSymbolUrl} />
+                                <ExpansionMark
+                                  setName={ident.set}
+                                  number={row.number || row.card_number}
+                                  symbolUrl={row.expansionSymbolUrl || row.defaultSymbolUrl}
+                                />
                               );
                               return (
                                 <Show
