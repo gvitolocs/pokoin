@@ -1,3 +1,4 @@
+import { inventoryBooks } from './inventory-book.js';
 import { priceCheckKey } from './inventory-price.js';
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { C1_DICTIONARY, C1Error, decodeC1, isC1 } from './compact.js';
@@ -57,6 +58,7 @@ import {
   homepageMatchesCatalog,
   leftoverKeyMatchesCard,
   ownCatalogImage,
+  withCatalogCache,
   preferFullImage,
   cdnFetchUrl,
   rasterSiblings,
@@ -179,7 +181,11 @@ function parseApiText(raw) {
 
 export async function getJson(path, options = {}) {
   const { text } = await fetchApiText(localUrl(path, options.game), options, path);
-  return parseApiText(text);
+  const data = parseApiText(text);
+  if (options.method && options.method !== 'GET' && /^\/api\/marketplace-listings(?:[?/-]|$)/.test(path)) {
+    inventoryBooks.clear();
+  }
+  return data;
 }
 
 /** The c1 dictionary decodes use: the bundled one, or a newer /api/dictionary. */
@@ -2037,7 +2043,8 @@ const preloadedArt = new Set();
 export function deskArtUrl(card) {
   const served = card?.deskArtUrl;
   if (typeof served === 'string' && served) {
-    return served;
+    // An older API release may not yet know an immutable image replacement.
+    return withCatalogCache(served);
   }
   return clientDeskArtUrl(card);
 }
@@ -3197,7 +3204,7 @@ export async function fetchPriceCheck(items, token) {
   });
 }
 
-export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0 } = {}) {
+export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),
     nativeOnly: '1',
@@ -3207,6 +3214,7 @@ export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0 }
     params.set('offset', String(Math.trunc(Number(offset))));
   }
   return getJson(`/api/marketplace-listings?${params}`, {
+    ...(gameId ? { game: gameId } : {}),
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 }

@@ -869,11 +869,7 @@ h2 {
   line-height: 1.7;
   min-height: 44px;
 }
-.task-copy .text-link {
-  margin-top: 22px;
-  font-size: 12px;
-  color: var(--yellow);
-}
+
 .sell-section {
   padding-block: 0 65px;
 }
@@ -932,13 +928,8 @@ h2 {
 .credit-offer > p:not(.eyebrow) {
   color: #574916;
 }
-.return-card .text-link {
-  margin-top: 28px;
-  font-size: 13px;
-}
-.managed-offer .text-link {
-  color: var(--yellow);
-}
+
+
 .self-sell {
   display: flex;
   justify-content: space-between;
@@ -997,20 +988,9 @@ h2 {
   color: #b6b6c6;
   margin-top: 15px;
 }
-.companion-arrow {
-  font-size: 23px;
-  color: var(--yellow);
-}
-.inventory-mark svg {
-  width: 1em;
-  height: 1em;
-}
-.inventory-mark {
-  font-size: 58px;
-  line-height: 1;
-  margin-top: 25px;
-  color: var(--yellow);
-}
+
+
+
 .discovery-links {
   display: flex;
   gap: 28px;
@@ -1088,9 +1068,7 @@ h2 {
   .companion-card h2 {
     font-size: 29px;
   }
-  .inventory-mark {
-    font-size: 45px;
-  }
+
 }
 @media (max-width: 720px) {
   html {
@@ -1274,11 +1252,7 @@ h2 {
     margin-top: 10px;
     min-height: 0;
   }
-  .task-copy .text-link {
-    font-size: 11px;
-    margin-top: 16px;
-    gap: 10px;
-  }
+
   .sell-section {
     padding-bottom: 35px;
   }
@@ -1403,10 +1377,7 @@ h2 {
     font-size: 13px;
     margin-top: 12px;
   }
-  .return-card .text-link {
-    font-size: 12px;
-    margin-top: 22px;
-  }
+
   .self-sell {
     align-items: start;
     font-size: 11px;
@@ -1426,4 +1397,23 @@ h2 {
     white-space: normal;
     max-width: 10ch;
   }
+}
+
+/* The full tile is the link; one quiet SVG replaces repeated CTA labels. */
+.task-copy, .return-card, .companion-card { position: relative; }
+.tile-arrow { position: absolute; top: 25px; right: 25px; color: var(--yellow); }
+.tile-arrow svg { display: block; width: 22px; height: 22px; }
+.credit-offer .tile-arrow { color: #17131f; }
+.companion-card { grid-template-columns: 40px 1fr; gap: 20px; padding: 28px; }
+.companion-card h2 { padding-right: 22px; font-size: 28px; }
+.companion-card p { margin-top: 10px; max-width: none; }
+.companion-icon { color: var(--yellow); margin-top: 3px; }
+.companion-icon svg { display: block; width: 36px; height: 36px; }
+.task-number { padding-right: 26px; }
+@media (max-width: 720px) {
+  .companion-card { padding: 24px; gap: 16px; grid-template-columns: 32px 1fr; }
+  .companion-card h2 { font-size: 25px; }
+  .companion-icon svg { width: 30px; height: 30px; }
+  .tile-arrow { top: 20px; right: 18px; }
+  .tile-arrow svg { width: 18px; height: 18px; }
 }

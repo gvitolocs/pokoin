@@ -44,3 +44,10 @@ test('the SPA still gives every golden answer (regenerate the fixture when it ch
   }
   assert.deepEqual(wrong.slice(0, 10), []);
 });
+
+
+test('restored Espathra scans bypass an older immutable green-matte response', () => {
+  useGame('pokemon');
+  assert.equal(deskArtUrl({ deskArtUrl: 'https://cdn.pokoin.com/274190_espathra-ex.jpg' }),
+    'https://cdn.pokoin.com/274190_espathra-ex.jpg?v=esp-original-20261018');
+});

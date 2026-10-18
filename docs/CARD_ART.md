@@ -375,3 +375,17 @@ Sets / Era catalog tiles (`SetGuideGrid`) use the same flag **left of the set na
 
 Flutter analog: `CollectionExpansionScreen` `_SelectedExpansionHeader`.
 Copy notes: [PRINT_FLAGS.md](PRINT_FLAGS.md).
+
+
+### Espathra ex 006/091 original scan (18 October 2026)
+
+The short `274190_espathra-ex.jpg` master had an artificial green matte and
+clipped the collector line. Restore its bytes and its existing homepage WebP
+from `274190_espathra-ex-006-091-paldean-fates.jpg` / `_homepage.webp`.
+Both original assets already exist; copy them without sanitising or rescaling.
+The CDN resolves matching slugs to the short preferred key, so restoring only
+the longer filename or changing its URL does not fix the served picture.
+NVMe, the HDD replica and Pi preferred keys were restored together, preserving
+backups outside the object index. `esp-original-20261018` bypasses the immutable
+old response. The targeted catalog updates are in
+`scripts/sql/20261018_manaphy_espathra.sql`; re-projections must retain these URLs.

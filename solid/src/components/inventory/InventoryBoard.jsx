@@ -162,8 +162,16 @@ export default function InventoryBoard(props) {
     setMode(next);
     writeBoardMode(next);
   }
-  // React useState(defaultSource): the first value only.
   const [pricerSource, setPricerSource] = createSignal(props.defaultSource || '');
+  let pricerChosen = false;
+  // A cached book can paint before seller preferences arrive.
+  createEffect(() => props.defaultSource, (source) => {
+    if (!pricerChosen && source) setPricerSource(source);
+  });
+  function choosePricer(id) {
+    pricerChosen = true;
+    setPricerSource(pricerSource() === id ? '' : id);
+  }
   const pricerOn = () => Boolean(pricerSource()) || Boolean(props.autoMarketColumn);
   const [prices, setPrices] = createSignal({});
   const [pricesPending, setPricesPending] = createSignal(false);
@@ -175,12 +183,30 @@ export default function InventoryBoard(props) {
     filterInventoryRows(props.rows, { query: query(), status: status(), condition: condition(), language: language() }),
     sort(),
   ));
+  // Filter the full book, but mount only one page, as the seller shop does.
+  const [page, setPage] = createSignal(() => {
+    query(); status(); condition(); language(); sort(); mode();
+    return 1;
+  });
+  let board;
+  function choosePage(next) {
+    setPage(next);
+    board?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }
+  const pageSize = 50;
+  const entries = createMemo(() => mode() === 'stacks' ? groupInventoryStacks(view())
+    : mode() === 'titles' ? groupInventoryTitles(view()) : view());
+  const totalPages = () => Math.max(1, Math.ceil(entries().length / pageSize));
+  const safePage = () => Math.min(page(), totalPages());
+  const pageEntries = createMemo(() => entries().slice((safePage() - 1) * pageSize, safePage() * pageSize));
+  const visibleRows = () => mode() === 'stacks' || mode() === 'titles'
+    ? pageEntries().flatMap((group) => group.postings) : pageEntries();
   const pausedCount = () => props.rows.filter(paused).length;
   const market = (row) => inventoryMarketValue(prices(), row, pricerSource());
 
   // Market comps for the current filtered rows while a pricer source is on.
   createEffect(
-    () => (pricerOn() ? { source: pricerSource(), rows: view() } : null),
+    () => (pricerOn() ? { source: pricerSource(), rows: visibleRows() } : null),
     (input) => {
       if (!input) {
         pricesKey = '';
@@ -188,7 +214,7 @@ export default function InventoryBoard(props) {
       }
       const items = input.rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
       if (!items.length) return undefined;
-      const key = `${input.source}|${items.map((item) => item.cardId).join(',')}`;
+      const key = `${input.source}|${JSON.stringify(items)}`;
       if (pricesKey === key) return undefined;
       let cancelled = false;
       setPricesPending(true);
@@ -213,7 +239,7 @@ export default function InventoryBoard(props) {
   );
 
   return (
-    <section class="inv-board" aria-label="My listings">
+    <section class="inv-board" aria-label="My listings" ref={(node) => { board = node; }}>
       <div class="mypokoin-panel-head">
         <div>
           <h2>Live listings</h2>
@@ -281,7 +307,7 @@ export default function InventoryBoard(props) {
                 class={['inv-chip', 'inv-src', { on: pricerSource() === source.id }]}
                 disabled={!source.enabled}
                 title={source.enabled ? `Market ${source.label} prices` : `${source.label} prices are not connected yet`}
-                onClick={() => setPricerSource(pricerSource() === source.id ? '' : source.id)}
+                onClick={() => choosePricer(source.id)}
               >
                 {source.label}
               </button>
@@ -293,7 +319,7 @@ export default function InventoryBoard(props) {
       <Switch>
         <Match when={mode() === 'stacks'}>
           <div class="loc-list">
-            <For each={groupInventoryStacks(view())}>
+            <For each={pageEntries()}>
               {(stack) => (
                 <div class="loc-stack">
                   <div class="loc-stack-head">
@@ -337,7 +363,7 @@ export default function InventoryBoard(props) {
         </Match>
         <Match when={mode() === 'titles'}>
           <div class="loc-list">
-            <For each={groupInventoryTitles(view())}>
+            <For each={pageEntries()}>
               {(group) => (
                 <div class="loc-stack">
                   <div class="loc-stack-head">
@@ -391,7 +417,7 @@ export default function InventoryBoard(props) {
         <Match when={mode() === 'grid'}>
           <Show when={view().length} fallback={<p class="inv-empty">No listings match the current filters.</p>}>
             <div class="collection-tile-grid inv-grid">
-              <For each={view()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} />}</For>
+              <For each={pageEntries()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} />}</For>
             </div>
           </Show>
         </Match>
@@ -414,7 +440,7 @@ export default function InventoryBoard(props) {
               <span>Listed</span>
               <span />
             </div>
-            <For each={view()}>
+            <For each={pageEntries()}>
               {(row) => {
                 const setName = String(row?.setName || row?.set_name || '').trim();
                 const collector = String(row?.collectorNumber || row?.collector_number || '').trim();
@@ -457,6 +483,17 @@ export default function InventoryBoard(props) {
           </div>
         </Match>
       </Switch>
+      <Show when={entries().length > pageSize}>
+        <nav class="seller-pager" aria-label="Inventory pages">
+          <button type="button" class="btn ghost" disabled={safePage() <= 1}
+            onClick={() => choosePage(safePage() - 1)}>Previous</button>
+          <span class="seller-pager-status" aria-live="polite">
+            Page {safePage()} / {totalPages()} · {view().length} listings
+          </span>
+          <button type="button" class="btn ghost" disabled={safePage() >= totalPages()}
+            onClick={() => choosePage(safePage() + 1)}>Next</button>
+        </nav>
+      </Show>
     </section>
   );
 }

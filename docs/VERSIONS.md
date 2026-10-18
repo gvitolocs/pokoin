@@ -257,3 +257,14 @@ painting stay together.
 Prior chats: [Version work documentation](4cb496e2-2d89-4bb2-856f-03407393ab8e)
 (Cacturne / illustration groups), [Current version zip file](49d5df89-6f9d-4b74-9cd3-035d1383ad1a)
 (PCG-P 112 has an EN printing of that artwork).
+
+
+### Manaphy promo artwork correction (18 October 2026)
+
+SWSH275 (`473078`) and Japanese 286/S-P (`477518`) are the same NC Empire
+painting. They are pinned together as `v473078` with source `artbox-pin`.
+SWSH275 had incorrectly joined `v254856`, the four Shining Legends / GX Ultra
+Shiny / CSMPlC printings with different artwork. The targeted, idempotent writer
+correction is `scripts/sql/20261018_manaphy_espathra.sql`. The ordinary CLIP
+pipeline protects `artbox-pin` membership; do not undo this with a broad
+Manaphy name re-cluster that ignores protected cards.
