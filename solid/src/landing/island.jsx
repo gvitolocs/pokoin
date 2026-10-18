@@ -1,5 +1,4 @@
 import { render } from '@solidjs/web';
-import { mountBinder } from './binder.js';
 
 /**
  * The static landing (index.html) stays plain HTML; this island upgrades two
@@ -131,8 +130,13 @@ function mountRail(host) {
   });
 }
 
+// Only a signed-in visitor (landing-boot.js) loads the binder code at all.
 const binder = document.querySelector('[data-landing-binder]');
-if (binder) mountBinder(binder, { whenIdle });
+if (binder && document.documentElement.classList.contains('signed-in')) {
+  import('./binder.js')
+    .then(({ mountBinder }) => mountBinder(binder, { whenIdle }))
+    .catch(() => document.documentElement.classList.remove('binder-mine'));
+}
 const form = document.querySelector('[data-landing-search]');
 if (form) mountSearch(form);
 for (const host of document.querySelectorAll('[data-landing-rail]')) mountRail(host);

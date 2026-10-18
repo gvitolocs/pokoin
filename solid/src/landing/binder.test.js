@@ -328,7 +328,9 @@ test('binder pictures are the CDN homepage derivative with the scan as fallback;
 test('the island mounts the binder; boot marks a stored page only for the same uid', () => {
   const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
   const island = read('./island.jsx');
-  assert.match(island, /import \{ mountBinder \} from '\.\/binder\.js';/);
+  // Signed-out visitors never load the binder code.
+  assert.doesNotMatch(island, /import \{ mountBinder \}/);
+  assert.match(island, /classList\.contains\('signed-in'\)\) \{\n  import\('\.\/binder\.js'\)/);
   assert.match(island, /querySelector\('\[data-landing-binder\]'\)/);
   // Firebase and the API read stay out of the island entry.
   const binder = read('./binder.js');
@@ -337,6 +339,7 @@ test('the island mounts the binder; boot marks a stored page only for the same u
   const boot = read('../../../home/landing-boot.js');
   assert.ok(boot.includes(`localStorage.getItem("${LANDING_BINDER_KEY}")`));
   assert.match(boot, /page\.uid === String\(s\.uid\)\.trim\(\)/);
+  assert.match(boot, /if \(!signedIn\) \{\n  try \{\n    localStorage\.removeItem\("pokoin\.landing\.binder\.v1"\);/);
   const html = read('../../../index.html');
   assert.match(html, /<div class="binder" data-landing-binder>/);
 });
