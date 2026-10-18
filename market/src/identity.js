@@ -322,7 +322,7 @@ const PRINTED_FRACTION = /\d{1,4}[a-z]?\s*\/\s*\d{1,4}/i;
 const SEALED_EXPANSION = /\bproducts?\b/i;
 /** Sealed phrases CT files as cards. Ignore fake n/m so 001/001 cannot leak. */
 const SEALED_SKU = /\b(?:theme decks?|league battle|battle decks?|dice sets?|elite trainer|pin collections?|ultra[- ]?premium collections?|build\s*(?:&|and)\s*battle)\b/i;
-const PRODUCT_NAME = /\b(box(?:es)?|etb|elite trainer|tins?|bundle|collections?|pins?|coins?|boosters?|blister|displays?|sleeves?|decks?|playmat|posters?|binders?|calendars?|figures?|plush(?:es)?|erasers?|checklane|kits?|gift sets?|starter sets?|special sets?|build\s*(?:&|and)\s*battle|league battle|portfolios?|dice sets?|chests?|cases?|packs?|albums?|toolkits?|one-touch|ultra pro|constructed starter|high[- ]class|wcd\b|world championships?|case files?|premium files?|empty mini|glass(?:es)?|mugs?|tumblers?|keychains?|exclusives?)\b/i;
+const PRODUCT_NAME = /\b(box(?:es)?|etb|elite trainer|tins?|bundle|collections?|pins?|coins?|boosters?|blister|displays?|sleeves?|decks?|playmat|posters?|binders?|dividers?|calendars?|figures?|plush(?:es)?|erasers?|checklane|kits?|gift sets?|starter sets?|special sets?|build\s*(?:&|and)\s*battle|league battle|portfolios?|dice sets?|chests?|cases?|packs?|albums?|toolkits?|one-touch|ultra pro|constructed starter|high[- ]class|wcd\b|world championships?|case files?|premium files?|empty mini|glass(?:es)?|mugs?|tumblers?|keychains?|exclusives?)\b/i;
 const JUMBO_PRODUCT = /\b(jumbo|oversized)\b/i;
 
 function collectorHash(number) {

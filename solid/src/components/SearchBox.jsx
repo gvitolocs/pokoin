@@ -37,6 +37,7 @@ import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
 import { createSuggestFlip } from '@market/suggest-flip.js';
+import { SUGGEST_SESSION_CLOSED, nextSuggestSession } from '@market/suggest-hold.js';
 import { SUGGEST_REPAINT_MS, createRepaintGate } from '@market/suggest-repaint.js';
 import {
   SUGGEST_ROTATE_HEAD,
@@ -572,9 +573,25 @@ export default function SearchBox(props) {
   const suggestPending = () => (pokemon() && searchTab() !== 'users'
     ? progressivePending() || !engine() || term() !== query() || rankPrint() !== printLang()
     : otherPending() || term() !== query());
-  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon() || visibleGroups().length > 0 || suggestPending());
-  const activeOption = () => (activeIndex() >= 0 ? flat()[activeIndex()] : null);
-  const suggestIds = () => (open() ? flat().map((row) => String(row.card.id)).join('|') : '');
+  // One typing session (suggest-hold.js): once open, the popup stays up and
+  // keeps its last rows while the next keystroke's rows are on their way.
+  let session = SUGGEST_SESSION_CLOSED;
+  const popup = createMemo(() => {
+    session = nextSuggestSession(session, {
+      open: open(),
+      query: query(),
+      ready: liveReady(query()) || Boolean(predicted()),
+      pending: suggestPending(),
+      rows: flat(),
+      scope: `${searchTab()}|${rankPrint()}|${pokemon()}`,
+      pokemon: pokemon(),
+    });
+    return session;
+  });
+  const suggestVisible = () => popup().visible;
+  const shownRows = () => popup().rows;
+  const activeOption = () => (activeIndex() >= 0 ? shownRows()[activeIndex()] : null);
+  const suggestIds = () => (open() ? shownRows().map((row) => String(row.card.id)).join('|') : '');
 
   // Thumbs + per-card shade buckets for the rows on screen.
   // Rotation may also warm the next tail page; it never preloads the whole pool.
@@ -647,7 +664,7 @@ export default function SearchBox(props) {
   const previewOptionId = () => pointerHoverId() || activeOption()?.optionId || '';
   const hoverCard = () => {
     const id = previewOptionId();
-    const row = id ? flat().find((item) => item.optionId === id) : null;
+    const row = id ? shownRows().find((item) => item.optionId === id) : null;
     const live = engine();
     return row && !(live && live.isLiveStub(row.card)) ? row.card : null;
   };
@@ -717,7 +734,7 @@ export default function SearchBox(props) {
     if (!open()) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveIndex((current) => Math.min(current + 1, flat().length - 1));
+      setActiveIndex((current) => Math.min(current + 1, shownRows().length - 1));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setActiveIndex((current) => Math.max(current - 1, -1));
@@ -830,7 +847,7 @@ export default function SearchBox(props) {
             </Show>
             <ul class="suggest-list" role="listbox" aria-label="Card suggestions" ref={(node) => { list = node; }}>
               <Show
-                when={flat().length}
+                when={shownRows().length}
                 fallback={(
                   <li class="suggest-empty">
                     {suggestPending()
@@ -841,7 +858,7 @@ export default function SearchBox(props) {
                   </li>
                 )}
               >
-                <For each={flat()} keyed={(row) => row.key}>
+                <For each={shownRows()} keyed={(row) => row.key}>
                   {(row, index) => (
                     <SuggestRow
                       pokemon={pokemon()}

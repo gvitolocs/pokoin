@@ -96,3 +96,13 @@ test('satellite games: no Pokémon print chip in suggest or search; one icon per
 test('the extension side panel asks for cards only', () => {
   assert.match(box, /props\.extensionDesk \? 'Search cards'/);
 });
+
+test('one typing session: the popup and its rows follow suggest-hold, not each keystroke', () => {
+  assert.match(box, /import \{ SUGGEST_SESSION_CLOSED, nextSuggestSession \} from '@market\/suggest-hold\.js';/);
+  assert.match(box, /const suggestVisible = \(\) => popup\(\)\.visible;/);
+  assert.match(box, /<Show when=\{suggestVisible\(\)\}>/);
+  assert.match(box, /<For each=\{shownRows\(\)\} keyed=\{\(row\) => row\.key\}>/);
+  assert.match(box, /when=\{shownRows\(\)\.length\}/);
+  // Visibility no longer re-derives readiness from the raw input on every keystroke.
+  assert.doesNotMatch(box, /suggestVisible = \(\) => open\(\) && \(liveReady\(query\(\)\)/);
+});
