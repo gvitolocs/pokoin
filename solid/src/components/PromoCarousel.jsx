@@ -1,7 +1,15 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '@market/api.js';
 import { game, gameHref, isPokemonGame } from '@market/game.js';
-import { PROMO_BANNERS, promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '@market/promo-banners.js';
+import {
+  PROMO_BANNERS,
+  promoLogoIsName,
+  promoLogoSrc,
+  readStoredPromoBanners,
+  rememberPromoBanners,
+  samePromoBanners,
+  satellitePromoBanners,
+} from '@market/promo-banners.js';
 import { FAN_POOL, fillFan, pickFan } from '@market/promo-fan.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
@@ -134,14 +142,20 @@ function PromoWordmark(props) {
  * unless hovered, focused, hidden or reduced-motion. The stage paints with
  * its copy and fixed fan box on the first frame, so the scans landing later
  * never move the rails below, and it holds its tallest slide (see boxHeight).
+ * A satellite TCG's slides come from the expansions read: the ones this
+ * browser showed last paint first (readStoredPromoBanners), and a first
+ * visit reserves a slide's box while the read runs (`is-loading`).
  */
 export default function PromoCarousel() {
   const pokemon = () => isPokemonGame();
   const site = () => game();
   const initialPokemon = untrack(pokemon);
   const initialName = untrack(() => site().name);
+  const initialId = untrack(() => site().id);
   const firstSlug = PROMO_BANNERS[0].slug;
-  const [banners, setBanners] = createSignal(initialPokemon ? PROMO_BANNERS : []);
+  const [banners, setBanners] = createSignal(initialPokemon ? PROMO_BANNERS : readStoredPromoBanners(initialId));
+  // A satellite read still on its way with no stored slides to show.
+  const [loadingSlides, setLoadingSlides] = createSignal(!initialPokemon && !untrack(banners).length);
   const [index, setIndex] = createSignal(0);
   const [cardsBySlug, setCardsBySlug] = createSignal((() => {
     if (!initialPokemon) return {};
@@ -155,6 +169,14 @@ export default function PromoCarousel() {
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
 
+  /** The expansions read's slides for `id`: kept for the next visit, painted only if they differ. */
+  function showSlides(id, slides) {
+    rememberPromoBanners(id, slides);
+    // Same slides as the stored ones on screen: the keyed slide stays mounted.
+    if (!samePromoBanners(untrack(banners), slides)) setBanners(slides);
+    if (slides[0]?.slug) loadFanPool(slides[0].slug).catch(() => {});
+  }
+
   onSettled(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const onMotion = () => setReduceMotion(mq.matches);
@@ -166,11 +188,12 @@ export default function PromoCarousel() {
       getJson('/api/marketplace-expansion-page?limit=12')
         .then((data) => {
           if (cancel) return;
-          const slides = satellitePromoBanners(data?.expansions, initialName);
-          setBanners(slides);
-          if (slides[0]?.slug) loadFanPool(slides[0].slug).catch(() => {});
+          showSlides(initialId, satellitePromoBanners(data?.expansions, initialName));
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (!cancel) setLoadingSlides(false);
+        });
     }
     return () => {
       cancel = true;
@@ -187,21 +210,25 @@ export default function PromoCarousel() {
     setCardsBySlug({});
     if (isPokemon) {
       setBanners(PROMO_BANNERS);
+      setLoadingSlides(false);
       const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
       if (first?.length) setCardsBySlug({ [PROMO_BANNERS[0].slug]: first });
       loadFanPool(PROMO_BANNERS[0].slug).catch(() => {});
       return undefined;
     }
-    setBanners([]);
+    const stored = readStoredPromoBanners(id);
+    setBanners(stored);
+    setLoadingSlides(!stored.length);
     let cancel = false;
     getJson('/api/marketplace-expansion-page?limit=12')
       .then((data) => {
         if (cancel || game().id !== id) return;
-        const slides = satellitePromoBanners(data?.expansions, game().name);
-        setBanners(slides);
-        if (slides[0]?.slug) loadFanPool(slides[0].slug).catch(() => {});
+        showSlides(id, satellitePromoBanners(data?.expansions, game().name));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancel && game().id === id) setLoadingSlides(false);
+      });
     return () => { cancel = true; };
   }, { defer: true });
 
@@ -278,7 +305,7 @@ export default function PromoCarousel() {
 
   return (
       <section
-        class="promo-stage"
+        class={['promo-stage', { 'is-loading': loadingSlides() && !banners().length }]}
         aria-roledescription="carousel"
         aria-label="Featured expansions"
         aria-hidden={banner() ? undefined : 'true'}
