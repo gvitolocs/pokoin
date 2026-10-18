@@ -305,7 +305,7 @@ sync_seo() {
 # Silver-only extension zips GET /api/extension-download serves (Pi /srv/pokoin/extension).
 sync_extension() {
   mkdir -p "$BASE/data/extension"
-  rsync -a --delete "$PI:/srv/pokoin/extension/" "$BASE/data/extension/" || say "extension zips not synced"
+  rsync -rt --chmod=D750,F640 --delete "$PI:/srv/pokoin/extension/" "$BASE/data/extension/" || say "extension zips not synced"
 }
 
 sync() {
