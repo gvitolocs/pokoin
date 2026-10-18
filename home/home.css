@@ -117,17 +117,44 @@
   line-height: 1.55;
 }
 
-/* Search */
+/* Search: the marketplace header SearchBox (solid/src/components/SearchBox.jsx,
+   hero variant). market/src/search-box.css paints its pickers, menus and popup
+   once the island mounts; these rules make the large hero field, and paint the
+   static first-paint copy in index.html the same way before it does. */
 
-.hero-search {
+.hero-search-host {
+  display: contents;
+}
+
+.home-hero-copy .search-hero {
+  /* market/src/styles.css tokens the shared search rules read */
+  --g3: #1f202d;
+  --g4: #25222c;
+  --g5: #38363f;
+  --muted: #9d9aa4;
+  --tcg-corner: 5% / 3.571%;
+  --topbar-flag: 32px;
+  --art-left: 0.086;
+  --art-top: 0.126;
+  --art-width: 0.828;
+  --art-height: 0.338;
+  --card-ratio: 0.715909;
   position: relative;
   z-index: 10;
+  width: 100%;
+  max-width: 600px;
+  margin: 34px 0 0;
+}
+
+.suggest-hover {
+  --tcg-corner: 5% / 3.571%;
+}
+
+.home-hero-copy .search-hero .search-pill {
   display: flex;
   align-items: center;
-  max-width: 600px;
   height: 66px;
-  margin-top: 34px;
-  padding: 6px 6px 6px 22px;
+  padding: 6px;
   border: 1.5px solid var(--line-strong);
   border-radius: 999px;
   background: rgb(22 22 27 / 0.92);
@@ -139,30 +166,101 @@
     box-shadow 0.2s;
 }
 
-.hero-search:hover {
+.home-hero-copy .search-hero .search-pill:hover {
   border-color: rgb(255 255 255 / 0.24);
 }
 
-.hero-search:focus-within {
+.home-hero-copy .search-hero .search-pill:focus-within {
   border-color: var(--yellow);
   box-shadow:
     0 0 0 5px rgb(255 211 61 / 0.14),
     0 24px 60px -24px rgb(0 0 0 / 0.9);
 }
 
-.hero-search-icon {
+.home-hero-copy .search-hero .search-lead {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  height: 100%;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-right: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.home-hero-copy .search-hero :is(.game-select, .lang-toggle, .print-lang-toggle) {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  align-self: center;
+  height: 100%;
+}
+
+.home-hero-copy .search-hero :is(.game-select, .lang-toggle, .print-lang-toggle) > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: 44px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--yellow);
+}
+
+.home-hero-copy .search-hero :is(.game-select, .lang-toggle, .print-lang-toggle) > button:hover,
+.home-hero-copy .search-hero :is(.game-select, .lang-toggle, .print-lang-toggle) > button[aria-expanded="true"] {
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: none;
+}
+
+.home-hero-copy .search-hero .lang-toggle > button:hover img,
+.home-hero-copy .search-hero .lang-toggle > button[aria-expanded="true"] img {
+  box-shadow: none;
+}
+
+.home-hero-copy .search-hero .game-icon {
+  display: block;
   flex: none;
   width: 22px;
   height: 22px;
-  color: #8d8d99;
+  background: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
 }
 
-.hero-search input {
+.home-hero-copy .search-hero .lang-toggle img {
+  display: block;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.home-hero-copy .search-hero .lang-caret {
+  display: block;
+  flex: none;
+  width: 9px;
+  height: 6px;
+}
+
+.home-hero-copy .search-hero .search-pill input {
   flex: 1;
   min-width: 0;
   height: 100%;
   padding: 0 14px;
   border: 0;
+  border-radius: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
@@ -170,15 +268,59 @@
   font-size: 17px;
 }
 
-.hero-search input::placeholder {
+.home-hero-copy .search-hero .search-pill input::placeholder {
   color: #7f7f8b;
 }
 
-.hero-search input::-webkit-search-cancel-button {
+.home-hero-copy .search-hero .search-pill input::-webkit-search-cancel-button {
   appearance: none;
 }
 
-.hero-search button {
+.home-hero-copy .search-hero .print-lang-toggle {
+  display: flex;
+  margin-right: 6px;
+  padding-left: 6px;
+  border: 0;
+  border-left: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.home-hero-copy .search-hero .search-lens {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+
+.home-hero-copy .search-hero .search-go-icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.home-hero-copy .search-hero .search-lens-mark {
+  position: absolute;
+  left: 38.33%;
+  top: 38.33%;
+  width: 62%;
+  height: 62%;
+  overflow: hidden;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.home-hero-copy .search-hero .search-lens-mark :is(img, svg) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-hero-copy .search-hero .search-go {
   flex: none;
   height: 100%;
   padding: 0 30px;
@@ -193,96 +335,107 @@
     transform 0.2s;
 }
 
-.hero-search button:hover {
+.home-hero-copy .search-hero .search-go:hover {
   background: #ffe17b;
 }
 
-.hero-search button:active {
+.home-hero-copy .search-hero .search-go:active {
   transform: scale(0.97);
 }
 
-.hero-suggest {
-  position: absolute;
+/* Menus and popup open under the hero field, over the sections below it. */
+.home-hero:has(.search-hero :is(.suggest, .lang-menu)) {
+  z-index: 20;
+}
+
+/* Menus and popup open under the hero field. */
+.home-hero-copy .search-hero .lang-menu {
+  top: calc(100% + 4px);
+}
+
+.home-hero-copy .search-hero .suggest {
   top: calc(100% + 10px);
   left: 0;
   right: 0;
-}
-
-.hero-suggest-list {
-  max-height: min(460px, 62vh);
-  margin: 0;
-  padding: 8px;
-  overflow-y: auto;
-  list-style: none;
-  border: 1px solid var(--line-strong);
-  border-radius: 24px;
-  background: #15151a;
+  /* The island scrolls the field up when the popup would pass the fold. */
+  max-height: min(34rem, calc(100vh - 13rem));
+  border-color: var(--line-strong);
+  border-radius: 22px;
   box-shadow: 0 32px 80px -12px rgb(0 0 0 / 0.9);
   animation: pop 0.16s ease-out;
 }
 
-.hero-suggest-list a {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 12px;
-  border-radius: 16px;
-}
-
-.hero-suggest-list li.is-active > a {
-  background: rgb(255 255 255 / 0.07);
-}
-
-.hero-suggest-thumb {
-  flex: none;
-  width: 40px;
-  aspect-ratio: 63 / 88;
+/* styles.css primitives the popup rows use, at their marketplace specificity. */
+:where(.search-hero) .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  border-radius: 4px;
-  background: #24242b;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.hero-suggest-thumb img {
+:where(.search-hero) .art-cut {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: calc(var(--art-width) * var(--card-ratio) / var(--art-height));
+  border-radius: 8px;
+}
+
+:where(.search-hero) .art-cut img,
+:where(.search-hero) .suggest-art .art-cut img {
+  position: absolute;
+  width: calc(100% / var(--art-width));
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  left: calc(-100% * var(--art-left) / var(--art-width));
+  top: calc(-100% * var(--art-top) / var(--art-height));
+  object-fit: fill;
+}
+
+:where(.search-hero) .set-shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #bec0c2;
+}
+
+:where(.search-hero) .set-shortcut.is-on:has(.set-shortcut-code) {
+  border-radius: 0.55rem;
+  background: rgb(35 31 32);
+  box-shadow:
+    0 0 0 1px rgb(255 211 61 / 0.45),
+    0 0 12px rgb(255 211 61 / 0.4);
+}
+
+:where(.search-hero) .set-shortcut.is-on .set-shortcut-sym {
+  filter:
+    drop-shadow(0 0 3px rgb(255 211 61 / 0.95))
+    drop-shadow(0 0 8px rgb(255 211 61 / 0.7))
+    drop-shadow(0 0 16px rgb(255 211 61 / 0.35));
+}
+
+:where(.search-hero) .set-shortcut-sym {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
-.hero-suggest-text {
-  display: grid;
-  min-width: 0;
-  line-height: 1.3;
-}
-
-.hero-suggest-text strong,
-.hero-suggest-text span {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.hero-suggest-text strong {
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.hero-suggest-text span {
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.hero-suggest-all {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-}
-
-.hero-suggest-all > a {
-  justify-content: space-between;
-  padding: 12px;
-  color: var(--yellow);
-  font-size: 14px;
-  font-weight: 700;
+:where(.search-hero) .set-shortcut-code {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .hero-popular {
@@ -492,6 +645,29 @@
   animation-delay: -4.5s;
 }
 
+/* Where the hero has room beside the 420px binder (wide desktop, and the
+   stacked tablet layout), Umbreon and Sylveon peek out from behind its edges
+   instead of hiding under it: each overlaps the binder by ~45px. */
+@media (min-width: 1180px), (min-width: 721px) and (max-width: 900px) {
+  .float-card-a {
+    left: auto;
+    right: calc(50% + min(50%, 210px) - 46px);
+  }
+  .float-card-c {
+    right: auto;
+    left: calc(50% + min(50%, 210px) - 40px);
+  }
+}
+
+/* Off-screen hero: its endless float/scan/marquee loops stop compositing. */
+.home-hero.is-offscreen .float-card,
+.home-hero.is-offscreen .floating-chip,
+.home-hero.is-offscreen .hero-marquee-track,
+.home-hero.is-offscreen .scan-line,
+.home-hero.is-offscreen .hero-pill-dot {
+  animation-play-state: paused;
+}
+
 .floating-chip {
   --r: 0deg;
   position: absolute;
@@ -663,6 +839,21 @@ html:not(.js) .home-rail {
 
 .landing-rail .carousel-head {
   display: none;
+}
+
+/* The rail's arrow gutters use negative inline margins; keep them from
+   widening the page (820px viewport scrolled sideways by 17px). */
+.home-rail {
+  overflow-x: clip;
+}
+
+/* Below-the-fold sections render when they come near the viewport instead
+   of all at once while the visitor scrolls into them. */
+.home-tools,
+.home-sell,
+.home-companions {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
 }
 
 .landing-rail .rail-wrap {
@@ -1449,22 +1640,60 @@ a:hover > .tool-arrow {
   .home-lede {
     font-size: 17px;
   }
-  .hero-search {
-    height: 58px;
+  .home-hero-copy .search-hero {
     margin-top: 28px;
-    padding-left: 16px;
   }
-  .hero-search-icon {
+  .home-hero-copy .search-hero .search-pill {
+    height: 58px;
+    padding: 5px;
+  }
+  .home-hero-copy .search-hero .search-lead {
+    gap: 0;
+    padding: 0 4px 0 2px;
+  }
+  .home-hero-copy .search-hero :is(.game-select, .lang-toggle, .print-lang-toggle) > button {
+    gap: 3px;
+    height: 40px;
+    padding: 0 5px;
+  }
+  .home-hero-copy .search-hero .game-icon {
     width: 19px;
     height: 19px;
   }
-  .hero-search input {
-    padding: 0 10px;
+  .home-hero-copy .search-hero .lang-toggle img {
+    width: 22px;
+    height: 22px;
+  }
+  .home-hero-copy .search-hero .search-lens {
+    width: 28px;
+    height: 28px;
+  }
+  .home-hero-copy .search-hero .print-lang-toggle {
+    margin-right: 4px;
+    padding-left: 2px;
+  }
+  .home-hero-copy .search-hero .search-pill input {
+    padding: 0 8px;
     font-size: 16px;
   }
-  .hero-search button {
-    padding: 0 20px;
-    font-size: 14px;
+  /* Phones: the Search button keeps its name for screen readers and shows an
+     arrow, so the field keeps room for the query. */
+  .home-hero-copy .search-hero .search-go {
+    position: relative;
+    width: 46px;
+    padding: 0;
+    font-size: 0;
+  }
+  .home-hero-copy .search-hero .search-go::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 20px;
+    height: 20px;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
   }
   .hero-ctas {
     display: grid;

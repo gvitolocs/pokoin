@@ -80,9 +80,9 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/home/landing-boot.js"></script>
-    <link rel="stylesheet" href="/home/landing.css?v=20261018-home-search" />
-    <link rel="stylesheet" href="/home/home.css?v=20261018-home-search" />
+    <script src="/home/landing-boot.js?v=20261018-account"></script>
+    <link rel="stylesheet" href="/home/landing.css?v=20261018-account" />
+    <link rel="stylesheet" href="/home/home.css?v=20261018-landing-polish" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -154,13 +154,18 @@
           <a href="/marketplace">Marketplace</a><a href="/marketplace/sets">Sets</a
           ><a href="/#scanner">Scanner</a><a href="/#sell">Sell</a
           ><a href="/#poko">Meet Poko</a>
-          <a class="nav-mobile-account" href="/mypokoin">Open My Pokoin ↗</a>
+          <a class="nav-mobile-account" href="/auth?from=%2Fmypokoin" rel="nofollow" data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span> ↗</a
+          >
         </nav>
         <div class="nav-end">
           <a
             class="button button-small button-outline nav-account"
-            href="/mypokoin"
-            >My Pokoin <span aria-hidden="true">↗</span></a
+            href="/auth?from=%2Fmypokoin"
+            rel="nofollow"
+            data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span>
+            <span aria-hidden="true">↗</span></a
           ><button
             class="nav-toggle"
             type="button"
@@ -190,39 +195,53 @@
               Find any Pokémon card, track your collection, and buy or sell at
               real market prices.
             </p>
+            <!-- First paint of the marketplace header SearchBox (hero variant):
+                 the island swaps in the live box with the same markup. Without
+                 JavaScript it is a plain GET form to the search page. -->
             <form
-              class="hero-search"
+              class="search search-hero"
               action="/marketplace/search"
               method="get"
               role="search"
               data-landing-search
             >
-              <label class="visually-hidden" for="hero-q"
-                >Search Pokémon cards</label
-              >
-              <svg
-                class="hero-search-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <path d="m20 20-3.5-3.5" />
-              </svg>
-              <input
-                id="hero-q"
-                name="q"
-                type="search"
-                placeholder="Search Pokémon cards…"
-                autocomplete="off"
-                autocapitalize="off"
-                spellcheck="false"
-                enterkeyhint="search"
-              />
-              <button type="submit">Search</button>
-              <div class="hero-suggest" data-landing-suggest></div>
+              <label class="sr-only" for="hero-q">Search Pokémon cards</label>
+              <div class="search-pill">
+                <div class="search-lead">
+                  <div class="game-select" data-landing-picker="game-select">
+                    <button type="button" aria-label="Game, Pokémon" title="Pokémon">
+                      <span class="game-icon" style="-webkit-mask-image: url(/market/games/pokemon.svg); mask-image: url(/market/games/pokemon.svg)" aria-hidden="true"></span>
+                      <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                    </button>
+                  </div>
+                  <div class="lang-toggle" data-landing-picker="lang-toggle">
+                    <button type="button" aria-label="Card title language, English" title="English">
+                      <img src="/market/flags/en.svg" alt="" width="40" height="40" />
+                      <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                    </button>
+                  </div>
+                </div>
+                <input
+                  id="hero-q"
+                  name="q"
+                  type="search"
+                  placeholder="Search Pokémon cards…"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  enterkeyhint="search"
+                />
+                <div class="print-lang-toggle" data-landing-picker="print-lang-toggle">
+                  <button type="button" aria-label="Card print language, All prints" title="All prints">
+                    <span class="search-lens" aria-hidden="true">
+                      <span class="search-lens-mark"><svg class="print-lang-all" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" /></svg></span>
+                      <svg class="search-go-icon" viewBox="0 0 24 24" width="30" height="30"><circle cx="9.2" cy="9.2" r="7.1" fill="none" stroke="currentColor" stroke-width="1.7" /><path d="M14.3 14.3 21.2 21.2" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" /></svg>
+                    </span>
+                    <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                  </button>
+                </div>
+                <button class="search-go" type="submit">Search</button>
+              </div>
             </form>
             <div class="hero-popular" aria-label="Popular searches">
               <span>Popular</span
@@ -649,7 +668,7 @@
       </p>
       <button type="button" data-cookie-accept>Accept</button>
     </div>
-    <script src="/home/landing.js?v=20261018-home-search" defer></script>
+    <script src="/home/landing.js?v=20261018-account" defer></script>
     <script type="module" src="/market/landing-island.js"></script>
   </body>
 </html>
