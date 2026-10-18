@@ -5,22 +5,11 @@ import test from 'node:test';
 const src = fs.readFileSync(new URL('./Inventory.jsx', import.meta.url), 'utf8');
 const nav = fs.readFileSync(new URL('../components/StockNav.jsx', import.meta.url), 'utf8');
 
-test('inventory top-up uses the bearer from the same callback', () => {
-  assert.match(
-    src,
-    /getBearer\(\)\.then\(async \(token\) => \{[\s\S]*fetchSellerListings\(uid, token[\s\S]*topUpInventory\(uid, token, gen\)/,
-  );
-  assert.doesNotMatch(src, /\.then\(\(data\) => \{[\s\S]*topUpInventory\(uid, token/);
-});
-
-test('inventory first page survives a late uid and retries a stalled load', () => {
-  // The cached session uid and the restored Firebase uid are one key, so the
-  // second arriving does not cancel the first request.
-  assert.match(src, /const listingsUid = createMemo\(\(\) => \(signedIn\(\) \? authUid\(\) \|\| accountProfile\(\)\?\.uid \|\| '' : ''\)\);/);
-  assert.match(src, /createEffect\(\s*\(\) => \(\{ uid: listingsUid\(\), \.\.\.tab\(\) \}\),/);
-  // A stalled token refresh or request is asked again; the first answer wins.
-  assert.match(src, /setTimeout\(\(\) => \{\s*if \(!cancelled && !settled\) attempt\(\)\.catch\(fail\);\s*\}, INVENTORY_RETRY_MS\)/);
-  assert.match(src, /clearTimeout\(retry\)/);
+test('inventory uses one scoped private book and ignores disposed page updates', () => {
+  assert.match(src, /inventoryBooks.load\(uid, selectedGame/);
+  assert.match(src, /fetchSellerListings\(uid, await getBearer\(\), \{ \.\.\.page, game: selectedGame \}\)/);
+  assert.match(src, /if \(cancelled\) return;/);
+  assert.match(src, /inventoryBooks.invalidate\(uid, selectedGame\)/);
 });
 
 test('holdings are the MyPokoin Collection tab, which loads holdings only', () => {

@@ -404,6 +404,7 @@ pub struct CheckoutQuote {
     pub items_subtotal_cents: i64,
     pub shipping_total_cents: i64,
     pub grand_total_cents: i64,
+    pub buyer_markup_cents: i64,
     pub currency: String,
     /// Every parcel was asked to go tracked.
     pub tracked: bool,
@@ -532,7 +533,8 @@ pub fn quote_checkout_with(
         shipments,
         items_subtotal_cents: items_subtotal,
         shipping_total_cents: shipping_total,
-        grand_total_cents: items_subtotal + shipping_total,
+        grand_total_cents: items_subtotal + shipping_total + super::settlement::buyer_markup(items_subtotal),
+        buyer_markup_cents: super::settlement::buyer_markup(items_subtotal),
         currency: "EUR".to_string(),
         tracked,
         insurance_cents: 0,
@@ -712,7 +714,8 @@ mod tests {
         // 2 * 200 PKN = 400 PKN = 200 cents + 1684 tracked = 1884.
         assert_eq!(quote.items_subtotal_cents, 200);
         assert_eq!(quote.shipping_total_cents, 1684);
-        assert_eq!(quote.grand_total_cents, 1884);
+        assert_eq!(quote.buyer_markup_cents, 6);
+        assert_eq!(quote.grand_total_cents, 1890);
         assert_eq!(quote.shipments[0].estimated_weight_grams, 4);
     }
 
@@ -730,7 +733,7 @@ mod tests {
         let quote = quote_checkout(&items, &origins, "DK", true, &catalog).unwrap();
         let guarded = guard_checkout_quote(quote, true, true).unwrap();
         assert_eq!(guarded.insurance_cents, 125);
-        assert_eq!(guarded.grand_total_cents, 2500 + 1684 + 125);
+        assert_eq!(guarded.grand_total_cents, 2500 + 75 + 1684 + 125);
     }
 
     #[test]
@@ -852,7 +855,7 @@ mod tests {
         );
         assert_eq!(quote.shipping_total_cents, 830);
         // 600 PKN = 300 cents of cards.
-        assert_eq!(quote.grand_total_cents, 300 + 830);
+        assert_eq!(quote.grand_total_cents, 300 + 9 + 830);
         assert!(!quote.tracked);
 
         // The single flag still prices every parcel the same way.
@@ -879,7 +882,7 @@ mod tests {
         let quote = quote_checkout_with(&items, &origins, "DK", &plan, &catalog).unwrap();
         let guarded = guard_checkout_quote(quote.clone(), quote.tracked, true).unwrap();
         assert_eq!(guarded.insurance_cents, 130);
-        assert_eq!(guarded.grand_total_cents, 2600 + 1684 + 700 + 130);
+        assert_eq!(guarded.grand_total_cents, 2600 + 78 + 1684 + 700 + 130);
     }
 
     #[test]

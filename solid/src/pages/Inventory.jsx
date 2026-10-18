@@ -1,7 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
 import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '@market/api.js';
-import { inventoryRowsForLocation, liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { game } from '@market/game.js';
+import { inventoryBooks } from '@market/inventory-book.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
 import '@market/export-preview.css';
@@ -30,14 +32,6 @@ const FORMATS = [
   { id: 'cardtrader', label: 'CardTrader' },
   { id: 'tcgplayer', label: 'TCGPlayer' },
 ];
-
-// Paint the board off the first raw page, then top up the rest in the
-// background — one round trip to first row instead of the full inventory.
-const INVENTORY_FIRST_PAGE = 200;
-const INVENTORY_PAGE_LIMIT = 1000;
-// A first page still missing after this long is asked for again; whichever
-// answer lands first fills the board.
-const INVENTORY_RETRY_MS = 12000;
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -121,38 +115,24 @@ function InventoryDesk(props) {
   const [busy, setBusy] = createSignal('');
   const [pricerDefaults, setPricerDefaults] = createSignal(props.preview ? previewPricer() : null);
   const [collectionStats, setCollectionStats] = createSignal(null);
-  // Bumped by reload() so a stale background top-up stops writing rows.
-  let inventorySeq = 0;
+  const selectedGame = game().id;
+  let paintedKey = '';
 
-  async function topUpInventory(uid, token, gen) {
-    let offset = INVENTORY_FIRST_PAGE;
-    for (;;) {
-      let data;
-      try {
-        data = await fetchSellerListings(uid, token, { limit: INVENTORY_PAGE_LIMIT, offset });
-      } catch (_) {
-        return;
-      }
-      if (gen !== inventorySeq) return;
-      const raw = data.listings || data.items || [];
-      if (!raw.length) return;
-      const filtered = liveInventoryListings(raw);
-      const base = Array.isArray(untrack(rows)) ? untrack(rows) : [];
-      const known = new Set(base.map((row) => String(row.id || row.listingId || '')));
-      const fresh = filtered.filter((row) => !known.has(String(row.id || row.listingId || '')));
-      if (fresh.length) setRows([...base, ...fresh]);
-      if (raw.length < INVENTORY_PAGE_LIMIT) return;
-      offset += raw.length;
-    }
+  async function readBook(uid, onUpdate, force = false) {
+    return inventoryBooks.load(uid, selectedGame, {
+      force,
+      fetchPage: async (page) => fetchSellerListings(uid, await getBearer(), { ...page, game: selectedGame }),
+      onUpdate,
+    });
   }
 
   async function reload() {
     const uid = listingsUid();
     if (!uid) return;
-    const token = await getBearer();
-    inventorySeq += 1;
-    const data = await fetchSellerListings(uid, token, { limit: 1000 });
-    setRows(liveInventoryListings(data.listings || data.items || []));
+    inventoryBooks.invalidate(uid, selectedGame);
+    return readBook(uid, (next) => {
+      if (listingsUid() === uid) setRows(next);
+    }, true);
   }
 
   // One identity for the listings load: the cached session uid and the
@@ -174,28 +154,19 @@ function InventoryDesk(props) {
       if (props.preview) return undefined;
       if (!uid || collectionTab) return undefined;
       let cancelled = false;
-      let settled = false;
-      const gen = ++inventorySeq;
-      const attempt = () => getBearer().then(async (token) => {
-        const data = await fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE });
-        if (cancelled || settled) return;
-        settled = true;
+      const key = `${uid}:${selectedGame}`;
+      if (paintedKey !== key) {
+        paintedKey = key;
+        setRows(inventoryBooks.peek(uid, selectedGame)?.rows ?? null);
+      }
+      readBook(uid, (next) => {
+        if (cancelled) return;
         setError('');
-        setRows(liveInventoryListings(data.listings || data.items || []));
-        topUpInventory(uid, token, gen).catch(() => {});
+        setRows(next);
+      }).catch((err) => {
+        if (!cancelled) setError(err.message || 'Listings failed.');
       });
-      const fail = (err) => {
-        if (!cancelled && !settled) setError(err.message || 'Listings failed.');
-      };
-      attempt().catch(fail);
-      // A stalled token refresh or request must not leave the skeleton up for good.
-      const retry = setTimeout(() => {
-        if (!cancelled && !settled) attempt().catch(fail);
-      }, INVENTORY_RETRY_MS);
-      return () => {
-        cancelled = true;
-        clearTimeout(retry);
-      };
+      return () => { cancelled = true; };
     },
   );
 

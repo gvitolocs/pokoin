@@ -51,6 +51,8 @@ export function redirectLines() {
     '# /{game}/careers|contact|privacy|sitemap. The SPA client-navigates those.',
     `# Game private segments: ${GAME_PRIVATE_SEGMENTS.join(', ')}`,
     '# Static exact paths.',
+    '/features/browser-extension /features/cardrails-inventory 301',
+    '/features/browser-extension/ /features/cardrails-inventory 301',
     `/download/extension.zip ${EXTENSION_ZIP} 302`,
     `/download/extention.zip ${EXTENSION_ZIP} 302`,
   ];

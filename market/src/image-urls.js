@@ -37,7 +37,7 @@ function catalogCacheToken(id) {
   return '';
 }
 
-function withCatalogCache(url) {
+export function withCatalogCache(url) {
   const text = String(url || '');
   if (!text || isPrefixedCatalog(text) || /(?:^|\/)competitive\//i.test(text)) {
     return text;

@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
+use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row;
 
 use super::{private_json, public_json, text_field};
@@ -17,7 +17,7 @@ use crate::error::{ApiError, StoreError};
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
-/// Pokoin checkout commission (3%).
+/// Buyer-side Pokoin markup (3%), never a deduction from seller item proceeds.
 pub const CHECKOUT_COMMISSION_RATE: f64 = 0.03;
 /// Insurance is 5% of the card subtotal (paid by the buyer, optional).
 pub const CHECKOUT_INSURANCE_RATE: f64 = 0.05;
@@ -419,14 +419,12 @@ pub async fn marketplace_orders_post(
         Some(format!("order:{}:{}", claims.uid, idempotency_key))
     };
 
-    // Each seller gets their subtotal minus commission; commission → treasury.
+    // Sellers receive their full subtotal; buyer pays an additional 3% to treasury.
     let totals = seller_totals(&items);
-    let mut commission_pkn = 0i64;
+    let commission_pkn = crate::domain::settlement::buyer_markup(total_pkn);
     let mut seller_nets: Vec<(String, i64)> = Vec::new();
     for (seller_uid, subtotal) in &totals {
-        let commission = ((*subtotal as f64) * CHECKOUT_COMMISSION_RATE).round() as i64;
-        commission_pkn += commission;
-        seller_nets.push((seller_uid.clone(), subtotal - commission));
+        seller_nets.push((seller_uid.clone(), *subtotal));
     }
 
     // The replay check, the buyer balance and the treasury account are read
@@ -457,7 +455,7 @@ pub async fn marketplace_orders_post(
     if let Some(existing) = existing {
         return Ok(private_json(existing));
     }
-    if buyer_balance.available_pkn < total_pkn {
+    if buyer_balance.available_pkn < total_pkn + commission_pkn {
         return Err(StoreError::Insufficient.into());
     }
 
@@ -543,7 +541,11 @@ pub async fn marketplace_orders_post(
             object.insert("soldAt".into(), json!(store::now_iso()));
             object.insert("updatedAt".into(), json!(store::now_iso()));
         }
-        crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
+        crate::sales_index::note_sale(
+            data.get("cardId")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
         // Paid already: a bad sale-row id must not fail the response.
         if let Ok(path) = firestore.document_path(store::SALES_COLLECTION, &row.id) {
             let _ = firestore.set_document(&path, &data).await;
@@ -558,7 +560,10 @@ pub async fn marketplace_orders_post(
         "status": "paid",
         "paymentStatus": "paid",
         "channel": "pkn",
-        "totalPkn": total_pkn,
+        "settlementModel": crate::domain::settlement::MODEL,
+        "totalPkn": total_pkn + commission_pkn,
+        "itemsSubtotalPkn": total_pkn,
+        "buyerMarkupPkn": commission_pkn,
         "commissionPkn": commission_pkn,
         "items": items.iter().map(|item| json!({
             "listingId": item.listing_id,
@@ -573,10 +578,13 @@ pub async fn marketplace_orders_post(
     let order_document = json!({
         "buyerUid": claims.uid,
         "channel": "pkn",
+        "settlementModel": crate::domain::settlement::MODEL,
         "paymentStatus": "paid",
         "status": "paid",
         "fulfillmentMode": "physical",
-        "totalPkn": total_pkn,
+        "totalPkn": total_pkn + commission_pkn,
+        "itemsSubtotalPkn": total_pkn,
+        "buyerMarkupPkn": commission_pkn,
         "commissionPkn": commission_pkn,
         "items": payload.get("items").cloned().unwrap_or(json!([])),
         "createdAt": store::now_iso(),
@@ -728,7 +736,7 @@ async fn order_confirm_delivery(
         return Err(ApiError::forbidden("You cannot confirm this order."));
     }
     let status = payment_status_of(&order).to_string();
-    if status != "paid" && status != "escrow" {
+    if status != "paid" && status != "escrow" && status != "partially_refunded" {
         return Err(ApiError::bad_request("This order is not paid yet."));
     }
     let pending_sellers: Vec<String> = order
@@ -779,7 +787,7 @@ async fn order_mark_shipped(
         return Err(ApiError::forbidden("You cannot mark this order shipped."));
     }
     let status = payment_status_of(&order).to_string();
-    if status != "escrow" && status != "paid" {
+    if status != "escrow" && status != "paid" && status != "partially_refunded" {
         return Err(ApiError::bad_request("This order is not ready to ship."));
     }
     let tracking = text_field(body, &["trackingCode"], 80);
@@ -815,7 +823,10 @@ async fn order_reveal_shipping(
         ));
     }
     let status = payment_status_of(&order);
-    if !matches!(status, "paid" | "escrow" | "released") {
+    if !matches!(
+        status,
+        "paid" | "escrow" | "released" | "partially_refunded"
+    ) {
         return Err(ApiError::conflict("Order is not paid yet."));
     }
     let stored = order
@@ -1145,13 +1156,13 @@ async fn order_cancel(
     }
     match cancel_plan(payment_status_of(&order)) {
         CancelPlan::AlreadyPaid => {
-            return Err(ApiError::conflict("This order is already paid.").with_code("already_paid"))
+            return Err(ApiError::conflict("This order is already paid.").with_code("already_paid"));
         }
         CancelPlan::AlreadyClosed => {
             return Ok(private_json(json!({
                 "order": order,
                 "release": {"orderId": order_id, "outcome": "already_closed"},
-            })))
+            })));
         }
         CancelPlan::ExpireThenRelease => {}
     }
@@ -1169,9 +1180,12 @@ async fn order_cancel(
             let session = stripe.retrieve_checkout_session(&session_id).await?;
             match expire_refused(&session) {
                 ExpireRefused::Paid => {
-                    super::stripe::handle_marketplace_order_paid(state, &order_id, &session).await?;
-                    return Err(ApiError::conflict("Stripe already took this payment — the order is paid.")
-                        .with_code("already_paid"));
+                    super::stripe::handle_marketplace_order_paid(state, &order_id, &session)
+                        .await?;
+                    return Err(ApiError::conflict(
+                        "Stripe already took this payment — the order is paid.",
+                    )
+                    .with_code("already_paid"));
                 }
                 ExpireRefused::AlreadyExpired => {}
                 ExpireRefused::Unknown => return Err(error),
@@ -1522,7 +1536,11 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
             let mut data = row.data.clone();
             data["soldAt"] = json!(state.now_iso());
             data["updatedAt"] = json!(state.now_iso());
-            crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
+            crate::sales_index::note_sale(
+                data.get("cardId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            );
             let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id)?;
             if firestore.set_document(&sale_path, &data).await.is_err() {
                 failed = true;
@@ -1878,7 +1896,11 @@ pub async fn decrement_seller_ownership_for_sale(
 /// that died between the decrement and `ownershipDone`, or two fulfilments
 /// of one order, used to take the units twice (specs/tla/eur-fulfilment
 /// bugs/ownership-twice.cfg).
-async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc_id: &str) -> Result<Value, ApiError> {
+async fn decrement_ownership_once(
+    state: &DomainState,
+    line: &OwnershipLine,
+    doc_id: &str,
+) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
     let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id)?;
@@ -1897,7 +1919,9 @@ async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc
         };
         let Some(keys) = ownership_sale_keys(&row, &line.sale_key) else {
             firestore.rollback(&transaction).await;
-            return Ok(json!({ "ok": true, "skipped": true, "reason": "already_decremented", "docId": doc_id }));
+            return Ok(
+                json!({ "ok": true, "skipped": true, "reason": "already_decremented", "docId": doc_id }),
+            );
         };
         let current = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
         let next = refunds::ownership_quantity_after_sale(current, line.quantity);
@@ -1907,14 +1931,18 @@ async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc
             crate::firestore::FirestoreWrite::Update {
                 path: path.clone(),
                 value: json!({ "quantity": next, "saleKeys": keys, "updatedAt": store::now_iso() }),
-                update_mask: Some(vec!["quantity".into(), "saleKeys".into(), "updatedAt".into()]),
+                update_mask: Some(vec![
+                    "quantity".into(),
+                    "saleKeys".into(),
+                    "updatedAt".into(),
+                ]),
             }
         };
         match firestore.commit(Some(&transaction), &[write]).await {
             Ok(_) => {
                 return Ok(json!({
                     "ok": true, "deleted": next <= 0, "docId": doc_id, "before": current, "after": next.max(0),
-                }))
+                }));
             }
             Err(error) => {
                 firestore.rollback(&transaction).await;
@@ -1924,7 +1952,9 @@ async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc
             }
         }
     }
-    Err(ApiError::internal("Could not decrement the seller's collection."))
+    Err(ApiError::internal(
+        "Could not decrement the seller's collection.",
+    ))
 }
 
 /// `syncSellerOwnershipAfterPhysicalSale`: per-line, idempotent by listing id.
@@ -2142,22 +2172,32 @@ pub async fn send_seller_sale_notifications_for_paid_order(
 /// with a stable `pokoin-transfer-{orderId}-{sellerId}` idempotency key. Sellers
 /// without a READY Connect account are reported as pending (never silently
 /// dropped) and the order stays in escrow.
-pub async fn release_seller_transfers(
-    state: &DomainState,
-    order_id: &str,
-) -> Result<Value, ApiError> {
+pub async fn release_seller_transfers(state: &DomainState, order_id: &str) -> Result<Value, ApiError> {
+    let order = load_order(state, order_id).await?;
+    if order["transfersReleased"] == true {
+        return Ok(json!({"orderId":order_id,"duplicate":true}));
+    }
+    if !matches!(payment_status_of(&order), "paid" | "escrow" | "partially_refunded") {
+        return Err(ApiError::conflict("Order is not paid."));
+    }
+    if order["settlementModel"] == crate::domain::settlement::MODEL {
+        freeze_processor_costs(state, order_id, &order).await?;
+        let (order, token) = begin_settlement_operation(state, order_id, "payout",
+            json!({"idempotencyPrefix":format!("pokoin-transfer-{order_id}-")})).await?;
+        return release_seller_transfers_inner(state, order_id, order, Some(&token)).await;
+    }
+    release_seller_transfers_inner(state, order_id, order, None).await
+}
+
+async fn release_seller_transfers_inner(state: &DomainState, order_id: &str, order: Value,
+    operation_token: Option<&str>) -> Result<Value, ApiError> {
     use crate::domain::order_refund as refunds;
     let firestore = state.firestore()?;
-    let path = firestore.document_path(store::ORDERS, order_id)?;
-    let order = firestore
-        .get_document(&path)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Order not found."))?;
     if order.get("transfersReleased").and_then(Value::as_bool) == Some(true) {
         return Ok(json!({ "orderId": order_id, "duplicate": true }));
     }
     let status = payment_status_of(&order).to_string();
-    if status != "paid" && status != "escrow" {
+    if status != "paid" && status != "escrow" && status != "partially_refunded" {
         return Err(ApiError::conflict("Order is not paid."));
     }
 
@@ -2177,13 +2217,22 @@ pub async fn release_seller_transfers(
         .unwrap_or_default();
     let mut pending_sellers: Vec<String> = Vec::new();
 
-    // Tie each seller Transfer to the single Checkout charge.
+    let new_model = order["settlementModel"] == crate::domain::settlement::MODEL;
+    let order = if new_model {
+        freeze_processor_costs(state, order_id, &order).await?
+    } else {
+        order
+    };
+
+    // Tie legacy transfers to their Checkout charge when it is available. A
+    // versioned order always uses the charge that passed fee-snapshot identity
+    // validation above.
     let mut source_transaction = order
         .get("stripeChargeId")
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if source_transaction.is_empty() {
+    if !new_model && source_transaction.is_empty() {
         if let Some(intent) = order.get("stripePaymentIntentId").and_then(Value::as_str) {
             if !intent.is_empty() {
                 if let Ok(stripe) = state.stripe() {
@@ -2195,15 +2244,37 @@ pub async fn release_seller_transfers(
             }
         }
     }
-
     let plan = refunds::plan_transfer_amounts(&order);
+    if new_model && order["pknDiscount"]["eurCents"].as_i64().unwrap_or(0) > 0 {
+        // The credit discount is funded by Pokoin, never by seller proceeds.
+        // Stripe must be allowed to draw the platform's prefunded EUR balance.
+        source_transaction.clear();
+    }
     for item in &plan {
-        let profile = if item.account.is_none() && !item.seller_id.is_empty() {
+        // A retry after one seller already succeeded must not create a second
+        // logical payout. Stripe idempotency still covers the crash window
+        // before this mapping is persisted.
+        if by_seller
+            .get(&item.seller_id)
+            .and_then(Value::as_str)
+            .is_some_and(|id| id.starts_with("tr_"))
+        {
+            continue;
+        }
+        let profile = if (new_model || item.account.is_none()) && !item.seller_id.is_empty() {
             store::read_user(firestore, &item.seller_id).await.ok()
         } else {
             None
         };
-        let Some(account) = refunds::resolve_transfer_account(item, profile.as_ref()) else {
+        // New-model destinations always come from the seller's current READY
+        // profile. An order document cannot redirect a payout by carrying an
+        // embedded account id. Legacy orders retain their recorded promise.
+        let mut account_item = item.clone();
+        if new_model {
+            account_item.account = None;
+        }
+        let Some(account) = refunds::resolve_transfer_account(&account_item, profile.as_ref())
+        else {
             pending_sellers.push(if item.seller_id.is_empty() {
                 "unknown".to_string()
             } else {
@@ -2234,11 +2305,7 @@ pub async fn release_seller_transfers(
                 &format!("pokoin-transfer-{order_id}-{}", item.seller_id),
             )
             .await?;
-        let transfer_id = transfer
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let transfer_id = refunds::validated_transfer_id(&transfer, item, &account)?;
         if !transfer_id.is_empty() && !transfer_ids.contains(&transfer_id) {
             transfer_ids.push(transfer_id.clone());
         }
@@ -2258,7 +2325,11 @@ pub async fn release_seller_transfers(
     if complete {
         patch["escrowReleasedAt"] = json!(store::now_iso());
     }
-    patch_order(state, order_id, patch).await?;
+    if let Some(token) = operation_token {
+        finish_settlement_operation(state, order_id, token, patch).await?;
+    } else {
+        patch_order(state, order_id, patch).await?;
+    }
 
     Ok(json!({
         "orderId": order_id,
@@ -2267,6 +2338,136 @@ pub async fn release_seller_transfers(
         "duplicate": false,
         "complete": complete,
     }))
+}
+
+/// A non-expiring reservation excludes refunds and payouts across processes.
+/// An uncertain Stripe outcome keeps this claim for verified reconciliation;
+/// a timer or retry must never steal a claim from an in-flight financial call.
+async fn begin_settlement_operation(state: &DomainState, order_id: &str, kind: &str,
+    request: Value) -> Result<(Value, String), ApiError> {
+    use crate::firestore::FirestoreWrite;
+    let fs = state.firestore()?.clone();
+    let path = fs.document_path(store::ORDERS, order_id)?;
+    let token = uuid::Uuid::new_v4().to_string();
+    let tx_fs = fs.clone(); let tx_path = path.clone();
+    let tx_token = token.clone(); let kind = kind.to_string();
+    let result = fs.run_transaction(move |transaction| {
+        let fs=tx_fs.clone(); let path=tx_path.clone(); let token=tx_token.clone();
+        let kind=kind.clone(); let request=request.clone();
+        Box::pin(async move {
+            let latest=fs.get_document_in_transaction(&path,&transaction).await?
+                .ok_or_else(|| StoreError::Cache("Order not found.".into()))?;
+            // A retry of this SAME Firestore commit can observe its own claim.
+            if latest["settlementOperation"]["token"] == token { return Ok(vec![]); }
+            let operation=crate::domain::settlement::reserve_operation(&latest,&token,&kind,request)
+                .map_err(|e| StoreError::Cache(format!("settlement_operation_busy: {}",e.message)))?;
+            Ok(vec![FirestoreWrite::Update { path, value:json!({"settlementOperation":operation}),
+                update_mask:Some(vec!["settlementOperation".into()]) }])
+        })
+    }).await;
+    if let Err(error) = result {
+        if let StoreError::Cache(message) = &error {
+            if message.starts_with("settlement_operation_busy:") {
+                return Err(ApiError::conflict(message.trim_start_matches("settlement_operation_busy: "))
+                    .with_code("settlement_operation_busy"));
+            }
+        }
+        return Err(error.into());
+    }
+    let order=fs.get_document(&path).await?.ok_or_else(||ApiError::not_found("Order not found."))?;
+    Ok((order,token))
+}
+
+async fn finish_settlement_operation(state: &DomainState, order_id: &str, token: &str,
+    patch: Value) -> Result<Value, ApiError> {
+    use crate::firestore::FirestoreWrite;
+    let fs=state.firestore()?.clone(); let path=fs.document_path(store::ORDERS,order_id)?;
+    let tx_fs=fs.clone(); let tx_path=path.clone(); let token=token.to_string();
+    fs.run_transaction(move |transaction| {
+        let fs=tx_fs.clone(); let path=tx_path.clone(); let token=token.clone(); let mut patch=patch.clone();
+        Box::pin(async move {
+            let latest=fs.get_document_in_transaction(&path,&transaction).await?
+                .ok_or_else(||StoreError::Cache("Order not found.".into()))?;
+            crate::domain::settlement::require_operation(&latest,&token)
+                .map_err(|e|StoreError::Cache(e.message))?;
+            let mut completed=latest["settlementOperation"].clone();
+            completed["completedAt"]=json!(store::now_iso()); completed["status"]=json!("completed");
+            patch["settlementLastOperation"]=completed;
+            patch["settlementOperation"]=Value::Null;
+            let mask=patch.as_object().unwrap().keys().cloned().collect();
+            Ok(vec![FirestoreWrite::Update{path,value:patch,update_mask:Some(mask)}])
+        })
+    }).await?;
+    fs.get_document(&path).await?.ok_or_else(||ApiError::not_found("Order not found."))
+}
+
+/// Freeze one actual Stripe balance-transaction fee snapshot. A duplicate
+/// release reuses it; concurrent refunds cannot be overwritten by a stale read.
+async fn freeze_processor_costs(
+    state: &DomainState,
+    order_id: &str,
+    order: &Value,
+) -> Result<Value, ApiError> {
+    use crate::firestore::FirestoreWrite;
+    if order["settlementFees"]["status"] == "final" { return Ok(order.clone()); }
+    let intent = order["stripePaymentIntentId"].as_str().unwrap_or("");
+    if !intent.starts_with("pi_") {
+        return Err(
+            ApiError::conflict("Order payment identity is unavailable for settlement.")
+                .with_code("settlement_costs_unavailable"),
+        );
+    }
+    let charge = state.stripe()?.payment_charge_with_fees(intent).await?;
+    let firestore = state.firestore()?.clone();
+    let path = firestore.document_path(store::ORDERS, order_id)?;
+    let tx_firestore = firestore.clone();
+    let tx_path = path.clone();
+    firestore
+        .run_transaction(move |transaction| {
+            let firestore = tx_firestore.clone();
+            let path = tx_path.clone();
+            let charge = charge.clone();
+            Box::pin(async move {
+                let latest = firestore
+                    .get_document_in_transaction(&path, &transaction)
+                    .await?
+                    .unwrap_or(json!({}));
+                if latest["settlementFees"]["status"] == "final" {
+                    return Ok(vec![]);
+                }
+                if latest["settlementModel"] != crate::domain::settlement::MODEL
+                    || !matches!(
+                        payment_status_of(&latest),
+                        "paid" | "escrow" | "partially_refunded"
+                    )
+                {
+                    return Err(crate::error::StoreError::Cache(
+                        "Order is no longer eligible for settlement.".into(),
+                    ));
+                }
+                // Validate the fetched charge against the transaction's latest
+                // order view. A concurrent discount/refund write cannot freeze a
+                // snapshot derived from stale checkout economics.
+                let snapshot = crate::domain::settlement::fee_snapshot(&latest, &charge)
+                    .map_err(|e| crate::error::StoreError::Cache(e.message))?;
+                let patch = crate::domain::settlement::apply_fees(&latest, &snapshot)
+                    .map_err(|e| crate::error::StoreError::Cache(e.message))?;
+                Ok(vec![FirestoreWrite::Update {
+                    path,
+                    value: patch,
+                    update_mask: Some(vec![
+                        "shipments".into(),
+                        "settlementFees".into(),
+                        "stripeChargeId".into(),
+                    ]),
+                }])
+            })
+        })
+        .await?;
+    firestore
+        .get_document(&path)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Order not found."))
 }
 
 /// `sendNotificationsForExistingOrder`: send the seller sale notifications.
@@ -2465,7 +2666,7 @@ async fn order_refund(
 ) -> Result<Response, ApiError> {
     use crate::domain::order_refund as refunds;
     let order_id = order_id_of(body)?;
-    let order = load_order(state, &order_id).await?;
+    let mut order = load_order(state, &order_id).await?;
     if !seller_on_order(&order, &claims.uid) {
         return Err(ApiError::forbidden(
             "Only a seller on this order can refund it.",
@@ -2496,6 +2697,28 @@ async fn order_refund(
     let amount_input = crate::domain::js_number(body.get("amount"));
     let (amount, share) = refunds::assert_refundable(&order, &claims.uid, amount_input)?;
     let eur = refunds::is_eur_order(&order);
+    let operation_token = if eur && order["settlementModel"] == crate::domain::settlement::MODEL {
+        // Freeze real costs before reserving monetary mutation. This is a read
+        // from Stripe, and pending fees remain retryable without a money claim.
+        order = freeze_processor_costs(state, &order_id, &order).await?;
+        let (reserved, token) = begin_settlement_operation(state, &order_id, "refund",
+            json!({"sellerId":claims.uid,"refundId":refund_id,"amountCents":amount,
+                "paymentIntentId":order["stripePaymentIntentId"],
+                "idempotencyKey":format!("pokoin-refund-{order_id}-{refund_id}")})).await?;
+        order = reserved;
+        if let Some(existing) = order["refunds"].as_array().and_then(|rows|rows.iter().find(|row|row["id"]==refund_id)) {
+            let existing=existing.clone();
+            finish_settlement_operation(state,&order_id,&token,json!({})).await?;
+            return Ok(private_json(json!({"orderId":order_id,"duplicate":true,"refund":existing})));
+        }
+        let recheck=refunds::assert_refundable(&order,&claims.uid,amount_input);
+        if !matches!(recheck, Ok((current, _)) if current == amount) {
+            finish_settlement_operation(state,&order_id,&token,json!({})).await?;
+            return Err(ApiError::conflict("Refund balance changed. Review the current order and retry."));
+        }
+        Some(token)
+    } else { None };
+
     let buyer_uid = order
         .get("buyerUid")
         .or_else(|| order.get("uid"))
@@ -2543,7 +2766,7 @@ async fn order_refund(
                 return Err(ApiError::conflict(
                     "Your PKN balance is too low to refund this amount.",
                 )
-                .with_code("seller_balance_low"))
+                .with_code("seller_balance_low"));
             }
             Err(other) => return Err(other.into()),
         }
@@ -2576,6 +2799,11 @@ async fn order_refund(
         {
             Ok(payload) => payload,
             Err(error) => {
+                if operation_token.is_some() {
+                    // A network error is not proof Stripe did nothing. Keep
+                    // the durable claim and original idempotency key intact.
+                    return Err(error);
+                }
                 let patch = json!({
                     "refunds": refunds::patch_refund(
                         order.get("refunds").and_then(Value::as_array).cloned().unwrap_or_default().as_slice(),
@@ -2587,6 +2815,11 @@ async fn order_refund(
                 return Err(error);
             }
         };
+
+        if operation_token.is_some() {
+            refunds::validate_refund_response(&stripe_refund, amount,
+                order["stripePaymentIntentId"].as_str().unwrap_or(""))?;
+        }
 
         // Seller settlement follows the refund when a Transfer exists.
         let mut reversal_id: Option<String> = None;
@@ -2617,16 +2850,13 @@ async fn order_refund(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let total = transfer
-                .get("amount")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0);
+            let total = transfer.get("amount").and_then(Value::as_i64).unwrap_or(0);
             let reversed = transfer
                 .get("amount_reversed")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0);
-            let reversible = (total - reversed).max(0.0);
-            let reverse_amount = (amount as f64).min(reversible) as i64;
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let reversible = total.saturating_sub(reversed).max(0);
+            let reverse_amount = amount.min(reversible);
             if reverse_amount > 0 && !transfer_id.is_empty() {
                 match stripe
                     .create_transfer_reversal(
@@ -2650,89 +2880,21 @@ async fn order_refund(
                 }
             }
         }
-        let mut patch = json!({
-            "refunds": refunds::patch_refund(
-                order.get("refunds").and_then(Value::as_array).cloned().unwrap_or_default().as_slice(),
-                &refund_id,
-                json!({
-                    "status": "succeeded",
-                    "stripeRefundId": stripe_refund.get("id").cloned().unwrap_or(Value::Null),
-                }),
-            ),
-        });
-        if let (Some(object), Some(reversal), Some(status)) = (
-            patch.as_object_mut(),
-            reversal_id.as_ref(),
-            stripe_refund.get("id").cloned(),
-        ) {
-            let _ = status;
-            object.insert("transferReversalId".into(), json!(reversal));
-        }
-        if !reversal_error.is_empty() {
-            if let Some(object) = patch.as_object_mut() {
-                object.insert("transferReversalError".into(), json!(reversal_error));
-            }
-        }
-        patch_order(state, &order_id, patch).await?;
         refund["status"] = json!("succeeded");
         refund["stripeRefundId"] = stripe_refund.get("id").cloned().unwrap_or(Value::Null);
-    }
-
-    // Record the running refund totals for this seller.
-    let current = load_order(state, &order_id).await?;
-    let mut refunds_list = current
-        .get("refunds")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    refunds_list.push(refund.clone());
-    let refunded_for_seller: i64 = refunds_list
-        .iter()
-        .filter(|row| {
-            row.get("sellerUid").and_then(Value::as_str) == Some(claims.uid.as_str())
-                && row.get("status").and_then(Value::as_str) != Some("failed")
-        })
-        .map(|row| row.get("amount").and_then(Value::as_i64).unwrap_or(0))
-        .sum();
-    let refunded_total: i64 = current
-        .get("refundedTotal")
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
-        + amount;
-    let mut patch = json!({
-        "refunds": refunds_list,
-        "refundsBySeller": { claims.uid.clone(): refunded_for_seller },
-        "refundedTotal": refunded_total,
-    });
-    if eur {
-        // Not transferred yet → the seller's later Transfer is smaller.
-        if let Some(object) = patch.as_object_mut() {
-            if current.get("transfersReleased").and_then(Value::as_bool) != Some(true) {
-                let shipments: Vec<Value> = current
-                    .get("shipments")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|mut row| {
-                        if row.get("sellerId").and_then(Value::as_str) == Some(claims.uid.as_str())
-                        {
-                            let already = row
-                                .get("refundedCents")
-                                .and_then(Value::as_i64)
-                                .unwrap_or(0);
-                            if let Some(map) = row.as_object_mut() {
-                                map.insert("refundedCents".into(), json!(already + amount));
-                            }
-                        }
-                        row
-                    })
-                    .collect();
-                object.insert("shipments".into(), json!(shipments));
-            }
+        if let Some(reversal) = reversal_id {
+            refund["transferReversalId"] = json!(reversal);
+        }
+        if !reversal_error.is_empty() {
+            refund["transferReversalError"] = json!(reversal_error);
         }
     }
-    let updated = patch_order(state, &order_id, patch).await?;
+
+    // The refund list, aggregate, and pre-transfer deduction are one
+    // transaction. This conflicts/retries against fee freezing, so neither
+    // path can replace the other's shipment fields with a stale copy.
+    let updated = record_completed_refund(state, &order_id, &refund, eur,
+        operation_token.as_deref()).await?;
 
     // Whole seller share handed back → those lines stop counting as sold.
     let after = refunds::seller_share(&updated, &claims.uid);
@@ -2747,6 +2909,142 @@ async fn order_refund(
         "refundable": after.refundable,
         "currency": after.currency,
     })))
+}
+
+async fn record_completed_refund(
+    state: &DomainState,
+    order_id: &str,
+    refund: &Value,
+    eur: bool,
+    operation_token: Option<&str>,
+) -> Result<Value, ApiError> {
+    use crate::firestore::FirestoreWrite;
+
+    let firestore = state.firestore()?.clone();
+    let path = firestore.document_path(store::ORDERS, order_id)?;
+    let tx_firestore = firestore.clone();
+    let tx_path = path.clone();
+    let refund = refund.clone();
+    let operation_token=operation_token.map(str::to_string);
+    firestore
+        .run_transaction(move |transaction| {
+            let firestore = tx_firestore.clone();
+            let path = tx_path.clone();
+            let refund = refund.clone();
+            let operation_token=operation_token.clone();
+            Box::pin(async move {
+                let latest = firestore
+                    .get_document_in_transaction(&path, &transaction)
+                    .await?
+                    .ok_or_else(|| StoreError::Cache("Order disappeared during refund.".into()))?;
+                if let Some(token)=operation_token.as_deref() {
+                    crate::domain::settlement::require_operation(&latest,token)
+                        .map_err(|e|StoreError::Cache(e.message))?;
+                }
+                let refund_id = refund.get("id").and_then(Value::as_str).unwrap_or_default();
+                let seller_id = refund
+                    .get("sellerUid")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let mut refunds = latest
+                    .get("refunds")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if refunds
+                    .iter()
+                    .any(|row| row.get("id").and_then(Value::as_str) == Some(refund_id))
+                {
+                    return Ok(vec![]);
+                }
+                let reversal_failed=refund["transferReversalError"].as_str().is_some_and(|s|!s.is_empty());
+                refunds.push(refund);
+                let succeeded =
+                    |row: &&Value| row.get("status").and_then(Value::as_str) != Some("failed");
+                let refunded_total: i64 = refunds
+                    .iter()
+                    .filter(succeeded)
+                    .map(|row| row.get("amount").and_then(Value::as_i64).unwrap_or(0))
+                    .sum();
+                let refunded_for_seller: i64 = refunds
+                    .iter()
+                    .filter(|row| {
+                        succeeded(row)
+                            && row.get("sellerUid").and_then(Value::as_str)
+                                == Some(seller_id.as_str())
+                    })
+                    .map(|row| row.get("amount").and_then(Value::as_i64).unwrap_or(0))
+                    .sum();
+                let mut by_seller = latest
+                    .get("refundsBySeller")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                by_seller.insert(seller_id.clone(), json!(refunded_for_seller));
+                let mut patch = json!({
+                    "refunds": refunds,
+                    "refundsBySeller": Value::Object(by_seller),
+                    "refundedTotal": refunded_total,
+                });
+                let mut mask = vec![
+                    "refunds".into(),
+                    "refundsBySeller".into(),
+                    "refundedTotal".into(),
+                ];
+                if latest.get("settlementModel").and_then(Value::as_str)
+                    == Some(crate::domain::settlement::MODEL)
+                {
+                    patch["paymentStatus"] = json!("partially_refunded");
+                    mask.push("paymentStatus".into());
+                }
+                let seller_has_transfer = latest
+                    .get("transfersBySeller")
+                    .and_then(|rows| rows.get(&seller_id))
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.starts_with("tr_"));
+                if eur {
+                    let shipments: Vec<Value> = latest
+                        .get("shipments")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|mut row| {
+                            if row.get("sellerId").and_then(Value::as_str)
+                                == Some(seller_id.as_str())
+                            {
+                                if !seller_has_transfer { row["refundedCents"] = json!(refunded_for_seller); }
+                                if latest["settlementFees"]["status"] == "final" {
+                                    crate::domain::settlement::stamp_processing_liability(&mut row,
+                                        refunded_for_seller, &latest["settlementFees"])
+                                        .map_err(|e| StoreError::Cache(e.message))?;
+                                }
+                            }
+                            Ok(row)
+                        })
+                        .collect::<Result<Vec<_>, StoreError>>()?;
+                    patch["shipments"] = json!(shipments);
+                    mask.push("shipments".into());
+                }
+                if operation_token.is_some() && !reversal_failed {
+                    let mut completed=latest["settlementOperation"].clone();
+                    completed["completedAt"]=json!(store::now_iso()); completed["status"]=json!("completed");
+                    patch["settlementLastOperation"]=completed; patch["settlementOperation"]=Value::Null;
+                    mask.extend(["settlementLastOperation".into(),"settlementOperation".into()]);
+                }
+                Ok(vec![FirestoreWrite::Update {
+                    path,
+                    value: patch,
+                    update_mask: Some(mask),
+                }])
+            })
+        })
+        .await?;
+    firestore
+        .get_document(&path)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Order not found."))
 }
 
 /// `voidNativeSales`: mark this seller's Sold-on-Pokoin rows void.
@@ -2817,7 +3115,9 @@ pub async fn marketplace_native_sales(
     let mut response = public_json(json!({ "cardId": card_id, "sales": sales }), 60);
     response.headers_mut().insert(
         "cache-control",
-        axum::http::HeaderValue::from_static("public, max-age=60, s-maxage=60, stale-while-revalidate=600"),
+        axum::http::HeaderValue::from_static(
+            "public, max-age=60, s-maxage=60, stale-while-revalidate=600",
+        ),
     );
     Ok(response)
 }
@@ -3082,6 +3382,8 @@ pub async fn create_order_checkout_session(
             "fulfillmentMode": "physical",
             "totalPkn": items.iter().map(|item| item.quantity * item.unit_price_pkn).sum::<i64>(),
             "totalEURCents": quote.grand_total_cents,
+            "buyerMarkupCents": quote.buyer_markup_cents,
+            "settlementModel": crate::domain::settlement::MODEL,
             "shippingEURCents": quote.shipping_total_cents,
             "insuranceEURCents": quote.insurance_cents,
             "pknDiscount": {
@@ -3124,6 +3426,7 @@ pub async fn create_order_checkout_session(
             "checkoutUrl": url,
             "url": url,
             "totalEURCents": charge_cents,
+            "buyerMarkupCents": quote.buyer_markup_cents,
             "shippingEURCents": quote.shipping_total_cents,
             "insuranceEURCents": quote.insurance_cents,
             "chargeCents": charge_cents,
@@ -3138,10 +3441,15 @@ pub async fn create_order_checkout_session(
         Err(error) => {
             rollback_decrements(&state, &decremented, Some(&order_id)).await;
             if held_discount_pkn > 0 {
-                let op = LedgerOp::unlock(&claims.uid, held_discount_pkn, "order_discount_released", true)
-                    .with_ref(&order_id)
-                    .with_idempotency(format!("order_discount_release:{order_id}"))
-                    .with_meta(json!({ "orderId": order_id, "reason": "checkout_failed" }));
+                let op = LedgerOp::unlock(
+                    &claims.uid,
+                    held_discount_pkn,
+                    "order_discount_released",
+                    true,
+                )
+                .with_ref(&order_id)
+                .with_idempotency(format!("order_discount_release:{order_id}"))
+                .with_meta(json!({ "orderId": order_id, "reason": "checkout_failed" }));
                 if let Err(release) = store::apply(state.firestore()?, &op).await {
                     tracing::error!(%release, order_id, "could not release the held PKN discount");
                 }
@@ -3170,14 +3478,12 @@ fn eur_order_items(items: &[OrderItem]) -> Vec<Value> {
         .collect()
 }
 
-/// Per-seller parcels. Seller settlement is items − commission + their
-/// shipping (`create-order-checkout-session.js`), not the shipping alone.
+/// Gross seller proceeds; actual processor costs are frozen before transfers.
 fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> Vec<Value> {
     shipments
         .iter()
         .map(|shipment| {
-            let items_net =
-                ((shipment.items_subtotal_cents as f64) * (1.0 - CHECKOUT_COMMISSION_RATE)).round() as i64;
+            let seller_gross = shipment.items_subtotal_cents + shipment.amount_cents;
             json!({
                 "sellerId": shipment.seller_id,
                 "sellerName": shipment.seller_name,
@@ -3191,7 +3497,8 @@ fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> 
                 "serviceName": shipment.service_name,
                 "itemsSubtotalCents": shipment.items_subtotal_cents,
                 "shippingAmountEURCents": shipment.amount_cents,
-                "sellerTransferCents": (items_net + shipment.amount_cents).max(0),
+                "sellerGrossCents": seller_gross,
+                "sellerTransferCents": Value::Null,
                 "amountCents": shipment.amount_cents,
                 "tracked": shipment.tracked,
             })
@@ -3204,7 +3511,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eur_parcels_settle_items_minus_commission_plus_shipping() {
+    fn eur_parcels_preserve_seller_gross_and_wait_for_actual_fees() {
         let shipment = crate::domain::shipping::ShipmentQuote {
             seller_id: "s1".into(),
             seller_name: "Seller".into(),
@@ -3224,8 +3531,8 @@ mod tests {
             item_count: 2,
         };
         let rows = eur_order_shipments(&[shipment]);
-        // round(1000 × 0.97) + 450, as the Node checkout writer settles it.
-        assert_eq!(rows[0]["sellerTransferCents"], json!(1420));
+        assert_eq!(rows[0]["sellerGrossCents"], json!(1450));
+        assert!(rows[0]["sellerTransferCents"].is_null());
         assert_eq!(rows[0]["itemsSubtotalCents"], json!(1000));
         assert_eq!(rows[0]["shippingAmountEURCents"], json!(450));
         assert_eq!(rows[0]["serviceId"], json!("tracked"));

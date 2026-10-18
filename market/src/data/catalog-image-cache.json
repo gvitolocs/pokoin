@@ -1,6 +1,7 @@
 {
   "about": "Cache busters (?v=token) for Pokemon leftover JPEGs replaced under the same immutable CDN key, by leftover ct_id. The first matching rule wins. Read by market/src/image-urls.js and by pokoin-rust/crates/catalog/src/desk_art.rs (card-page deskArtUrl): change both URLs together by changing only this file. idList names a sibling JSON array in this folder.",
   "rules": [
+    { "token": "esp-original-20261018", "note": "Espathra ex 006/091: restore the original full card scan, replacing the added green matte.", "ids": [274190] },
     { "token": "ct397", "note": "Team Up Charizard 014/181 swapped off the pokemontcg.io digital onto CardTrader's scan.", "ids": [397269] },
     { "token": "leg1", "note": "30th Celebration Darkrai & Cresselia LEGEND halves reoriented to Pokoin portrait (leftover + public ids).", "ids": [413222, 413224, 826444, 826448] },
     { "token": "wj1", "note": "30th Celebration WebP bytes behind a .jpg key, re-encoded to real JPEG (Eevee 116/128 is 406777).", "ids": [406703, 406711, 406749, 406763, 406774, 406777, 406800, 406805] },

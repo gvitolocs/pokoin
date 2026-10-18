@@ -16,16 +16,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use http_body_util::BodyExt;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 use pokoin_commerce::auth::{AuthError, Claims, TokenVerifier};
 use pokoin_commerce::config::CommerceConfig;
-use pokoin_commerce::firestore::{value_to_fields, FirestoreClient};
+use pokoin_commerce::firestore::{FirestoreClient, value_to_fields};
 use pokoin_commerce::state::DomainState;
 use pokoin_commerce::store::LedgerOp;
-use pokoin_commerce::{store, FixedClock};
+use pokoin_commerce::{FixedClock, store};
 
 // ---------------------------------------------------------------------------
 // Mock Firestore
@@ -1110,7 +1110,7 @@ async fn transfers_are_refused_for_an_unpaid_order() {
 
 #[tokio::test]
 async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
-    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
+    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1141,7 +1141,11 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
     assert_eq!(result["before"], json!(3));
     assert_eq!(result["after"], json!(2));
     let row = firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-1").unwrap())
+        .get_document(
+            &firestore
+                .document_path("user_card_collections", "row-1")
+                .unwrap(),
+        )
         .await
         .unwrap()
         .expect("row");
@@ -1174,7 +1178,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
 async fn a_sale_key_decrements_the_ownership_row_once() {
     // specs/tla/eur-fulfilment bugs/ownership-twice.cfg: a fulfilment that
     // died after the decrement but before ownershipDone, retried.
-    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
+    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1199,7 +1203,11 @@ async fn a_sale_key_decrements_the_ownership_row_once() {
     let second = decrement_seller_ownership_for_sale(&state, &other).await.expect("second sale");
     assert_eq!(second["after"], json!(1));
     let row = firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-k").unwrap())
+        .get_document(
+            &firestore
+                .document_path("user_card_collections", "row-k")
+                .unwrap(),
+        )
         .await
         .unwrap()
         .expect("row");
@@ -1209,7 +1217,7 @@ async fn a_sale_key_decrements_the_ownership_row_once() {
 
 #[tokio::test]
 async fn nft_ownership_rows_are_never_decremented() {
-    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
+    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1249,7 +1257,7 @@ async fn nft_ownership_rows_are_never_decremented() {
 
 #[tokio::test]
 async fn a_scan_source_row_is_decremented_by_its_full_document_id() {
-    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
+    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1308,7 +1316,9 @@ async fn connect_state_lives_on_the_firestore_user_document() {
 
 #[tokio::test]
 async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance() {
-    use pokoin_commerce::domain::shipping::{find_rate, package_tier_for_count_default, RateCatalog};
+    use pokoin_commerce::domain::shipping::{
+        RateCatalog, find_rate, package_tier_for_count_default,
+    };
     let (app, firestore) = harness().await;
     for (uid, country, accepts) in [("red", "IT", true), ("givi", "DK", true)] {
         firestore
@@ -1320,9 +1330,12 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
             .await
             .expect("seller");
     }
-    store::apply(&firestore, &LedgerOp::mint("buyer-1", 700, "account_top_up"))
-        .await
-        .expect("mint");
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 700, "account_top_up"),
+    )
+    .await
+    .expect("mint");
     let items = json!([
         { "listingId": "l1", "sellerUid": "red", "quantity": 1, "unitPricePkn": 200 },
         { "listingId": "l2", "sellerUid": "givi", "quantity": 2, "unitPricePkn": 400 },
@@ -1356,7 +1369,7 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
     .await;
     assert_eq!(status, StatusCode::OK, "{quote}");
     // 1000 PKN of cards = 500 cents.
-    assert_eq!(quote["grandTotalCents"], json!(500 + shipping));
+    assert_eq!(quote["grandTotalCents"], json!(500 + 15 + shipping));
     assert_eq!(quote["shippingTotalCents"], json!(shipping));
     // 700 PKN of balance, all 1000 PKN eligible: 350 cents.
     assert_eq!(quote["pknVoucher"]["pkn"], json!(700));
@@ -1377,7 +1390,7 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
     assert_eq!(quote["pknDiscount"]["applied"], json!(true));
     assert_eq!(quote["pknDiscount"]["pkn"], json!(700));
     assert_eq!(quote["pknDiscount"]["eurCents"], json!(350));
-    assert_eq!(quote["chargeCents"], json!(500 + shipping - 350));
+    assert_eq!(quote["chargeCents"], json!(500 + 15 + shipping - 350));
     assert_eq!(quote["shipments"][0]["amountCents"], json!(price("IT", 1, false)));
     assert_eq!(quote["shipments"][1]["amountCents"], json!(price("DK", 2, true)));
 
@@ -1424,7 +1437,9 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
 
 #[tokio::test]
 async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
-    use pokoin_commerce::domain::shipping::{find_rate, package_tier_for_count_default, RateCatalog};
+    use pokoin_commerce::domain::shipping::{
+        RateCatalog, find_rate, package_tier_for_count_default,
+    };
     let (app, firestore) = harness().await;
     for (uid, country) in [("red", "IT"), ("givi", "DK")] {
         firestore
@@ -1475,7 +1490,7 @@ async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
     );
     assert_eq!(quote["shippingTotalCents"], json!(red_cents + givi_cents));
     // 1000 PKN of cards = 500 cents.
-    assert_eq!(quote["grandTotalCents"], json!(500 + red_cents + givi_cents));
+    assert_eq!(quote["grandTotalCents"], json!(500 + 15 + red_cents + givi_cents));
     assert_eq!(quote["tracked"], json!(false));
     assert_eq!(quote["shippingServices"]["givi"], shipments[1]["serviceId"]);
 
@@ -1618,10 +1633,14 @@ async fn seller_sale_notifications_claim_the_real_firestore_marker() {
 
     // The marker documents exist with the Node doc ids and statuses.
     let marker1 = firestore
-        .get_document(&firestore.document_path(
-            notify::NOTIFICATION_COLLECTION,
-            &notify::notification_marker_id("order-notify", "seller-1"),
-        ).unwrap())
+        .get_document(
+            &firestore
+                .document_path(
+                    notify::NOTIFICATION_COLLECTION,
+                    &notify::notification_marker_id("order-notify", "seller-1"),
+                )
+                .unwrap(),
+        )
         .await
         .unwrap()
         .expect("marker");
@@ -2398,9 +2417,12 @@ async fn unconfigured_cardtrader_result_retries_and_never_becomes_done() {
 async fn address_ids_that_walk_out_of_the_users_addresses_are_400_and_touch_nothing() {
     let (state, firestore, _store) = state_harness_with_store(|_| {}).await;
     let app = pokoin_commerce::router(state);
-    store::apply(&firestore, &LedgerOp::mint("buyer-1", 1_000, "account_top_up"))
-        .await
-        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
 
     for uri in [
         "/api/account-addresses?id=../../../balances/buyer-1",
@@ -2524,11 +2546,10 @@ async fn racing_replays_of_one_key_move_money_once() {
     store::apply(&firestore, &LedgerOp::mint("u1", 1_000, "account_top_up"))
         .await
         .unwrap();
-    let op = LedgerOp::transfer("u1", "u2", 100, "account_transfer_sent").with_idempotency("race:1");
-    let outcomes = futures_util::future::join_all(
-        (0..8).map(|_| store::apply(&firestore, &op)),
-    )
-    .await;
+    let op =
+        LedgerOp::transfer("u1", "u2", 100, "account_transfer_sent").with_idempotency("race:1");
+    let outcomes =
+        futures_util::future::join_all((0..8).map(|_| store::apply(&firestore, &op))).await;
     let applied = outcomes
         .iter()
         .filter(|outcome| outcome.as_ref().expect("apply").applied)
@@ -2621,6 +2642,7 @@ async fn a_multi_leg_payment_is_all_or_nothing() {
 
 #[tokio::test]
 async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
+    // Buyer can cover the card price but not its 3% markup.
     // The harness has no Postgres: reaching the listing decrement would be a
     // 5xx, so a 400 proves the balance is checked first.
     let (state, firestore, _mock) = state_harness_with_store(|_| {}).await;
@@ -2631,9 +2653,12 @@ async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
         )
         .await
         .unwrap();
-    store::apply(&firestore, &LedgerOp::mint("buyer-1", 10, "account_top_up"))
-        .await
-        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 500, "account_top_up"),
+    )
+    .await
+    .unwrap();
     let app = pokoin_commerce::router(state);
     let (status, body) = call(
         &app,
@@ -2651,7 +2676,7 @@ async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 10);
+    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 500);
 }
 
 #[tokio::test]
@@ -2674,7 +2699,11 @@ async fn a_top_up_hash_is_claimed_before_it_mints_and_credits_one_account() {
     assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 50);
     assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 0);
     let deposit = firestore
-        .get_document(&firestore.document_path("native_pkn_deposits", &hash).unwrap())
+        .get_document(
+            &firestore
+                .document_path("native_pkn_deposits", &hash)
+                .unwrap(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -2815,9 +2844,176 @@ async fn confirming_a_channel_only_eur_order_releases_seller_transfers() {
     // The Stripe-transfer path ran (it records the pending seller and escrow).
     assert_eq!(body["transfers"]["duplicate"], json!(false), "{body}");
     let order = firestore
-        .get_document(&firestore.document_path("orders", "order-eur-channel").unwrap())
+        .get_document(
+            &firestore
+                .document_path("orders", "order-eur-channel")
+                .unwrap(),
+        )
         .await
         .unwrap()
         .expect("order");
     assert_eq!(order["transfersPendingSellerIds"], json!(["seller-1"]));
+}
+
+#[tokio::test]
+async fn versioned_partially_refunded_order_reaches_pending_transfer_state() {
+    let (state, firestore) = state_harness().await;
+    firestore
+        .create_document(
+            "orders",
+            "order-partial-v1",
+            &json!({
+                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+                "settlementModel":"buyer_markup_processor_costs_v1",
+                "paymentStatus":"partially_refunded", "totalEURCents":1030,
+                "buyerMarkupCents":30, "shippingEURCents":0, "insuranceEURCents":0,
+                "stripePaymentIntentId":"pi_1", "stripeChargeId":"ch_1",
+                "settlementFees":{"status":"final", "currency":"EUR",
+                    "processingFeeCents":30, "stripeChargeId":"ch_1",
+                    "balanceTransactionId":"txn_1"},
+                "shipments":[{"sellerId":"seller-1", "itemsSubtotalCents":1000,
+                    "shippingAmountEURCents":0, "sellerGrossCents":1000,
+                    "stripeProcessingFeeCents":30, "sellerTransferCents":970,
+                    "refundedCents":100}],
+                "items":[{"sellerUid":"seller-1", "quantity":1,
+                    "unitPriceEURCents":1000}],
+                "pknDiscount":{"pkn":0,"eurCents":0,"state":"none"}
+            }),
+        )
+        .await
+        .unwrap();
+    firestore
+        .create_document(
+            "users",
+            "seller-1",
+            &json!({"stripeConnectStatus":"pending"}),
+        )
+        .await
+        .unwrap();
+
+    let result =
+        pokoin_commerce::handlers::orders::release_seller_transfers(&state, "order-partial-v1")
+            .await
+            .unwrap();
+    assert_eq!(result["complete"], json!(false));
+    assert_eq!(result["pendingSellerIds"], json!(["seller-1"]));
+    let stored = firestore
+        .get_document(
+            &firestore
+                .document_path("orders", "order-partial-v1")
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored["paymentStatus"], json!("escrow"));
+    assert_eq!(stored["settlementFees"]["processingFeeCents"], json!(30));
+    assert_eq!(stored["shipments"][0]["refundedCents"], json!(100));
+}
+
+#[tokio::test]
+async fn versioned_paid_webhook_preserves_discount_economics_and_consumes_integer_pkn() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore) = state_harness().await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 500, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("buyer-1", 200, "order_discount_held").with_ref("order-webhook-v1"),
+    )
+    .await
+    .unwrap();
+    firestore
+        .create_document(
+            "orders",
+            "order-webhook-v1",
+            &json!({
+                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+                "paymentMethod":"stripe", "paymentStatus":"pending_stripe",
+                "status":"pending", "settlementModel":"buyer_markup_processor_costs_v1",
+                "stripeCheckoutSessionId":"cs_order_1", "totalEURCents":1030,
+                "buyerMarkupCents":30, "shippingEURCents":0, "insuranceEURCents":0,
+                "pknDiscount":{"pkn":200,"eurCents":100,"state":"held"},
+                "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                    "shippingAmountEURCents":0,"sellerGrossCents":1000,
+                    "sellerTransferCents":null}],
+                "items":[{"sellerUid":"seller-1","quantity":1,
+                    "unitPriceEURCents":1000}],
+                "inventory":{"state":"committed","lines":[]},
+                "fulfillment":{"state":"done","steps":{}}
+            }),
+        )
+        .await
+        .unwrap();
+    let event = json!({
+        "id":"evt_order_v1", "type":"checkout.session.completed",
+        "data":{"object":{
+            "id":"cs_order_1", "mode":"payment", "payment_status":"paid",
+            "currency":"eur", "amount_total":930, "payment_intent":"pi_order_1",
+            "metadata":{"kind":"marketplace_order_eur",
+                "pokoinOrderId":"order-webhook-v1", "pokoinUid":"buyer-1"}
+        }}
+    });
+    process_verified_event(&state, &event).await.unwrap();
+
+    let stored = firestore
+        .get_document(
+            &firestore
+                .document_path("orders", "order-webhook-v1")
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(stored["stripePaymentIntentId"], json!("pi_order_1"));
+    assert_eq!(stored["pknDiscount"]["pkn"], json!(200));
+    assert_eq!(stored["pknDiscount"]["eurCents"], json!(100));
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+#[tokio::test]
+async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() {
+    let (state, firestore)=state_harness().await;
+    let app=pokoin_commerce::router(state.clone());
+    for kind in ["refund","payout"] {
+        let id=format!("order-busy-{kind}");
+        let order=json!({
+            "buyerUid":"customer", "channel":"eur","currency":"EUR",
+            "settlementModel":"buyer_markup_processor_costs_v1", "paymentStatus":"paid",
+            "totalEURCents":1030,"buyerMarkupCents":30,"shippingEURCents":0,"insuranceEURCents":0,
+            "stripePaymentIntentId":"pi_1","stripeChargeId":"ch_1",
+            "settlementFees":{"status":"final","currency":"EUR","processingFeeCents":30,
+                "stripeChargeId":"ch_1","balanceTransactionId":"txn_1"},
+            "shipments":[{"sellerId":"buyer-1","itemsSubtotalCents":1000,"shippingAmountEURCents":0,
+                "sellerGrossCents":1000,"stripeProcessingFeeCents":30,"sellerTransferCents":970}],
+            "items":[{"sellerUid":"buyer-1","quantity":1,"unitPriceEURCents":1000}],
+            "settlementOperation":{"kind":kind,"token":"in-flight","createdAt":"2000-01-01T00:00:00Z"}
+        });
+        firestore.create_document("orders",&id,&order).await.unwrap();
+        // There is deliberately no Stripe client in this harness. Both calls
+        // must stop at the durable reservation, before any provider mutation.
+        let (payout,(status,payload))=tokio::join!(
+            pokoin_commerce::handlers::orders::release_seller_transfers(&state,&id),
+            call(&app,"POST","/api/marketplace-orders",Some(json!({
+                "action":"refund","orderId":id,"clientToken":"retry","amount":100
+            })))
+        );
+        assert_eq!(payout.unwrap_err().code.as_deref(),Some("settlement_operation_busy"));
+        assert_eq!(status,StatusCode::CONFLICT,"{payload}");
+        assert_eq!(payload["code"],"settlement_operation_busy");
+        let stored=firestore.get_document(&firestore.document_path("orders",&id).unwrap())
+            .await.unwrap().unwrap();
+        assert_eq!(stored["settlementOperation"],order["settlementOperation"]);
+        assert!(stored["refunds"].is_null());
+        assert!(stored["transferIds"].is_null());
+    }
 }

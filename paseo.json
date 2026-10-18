@@ -8,7 +8,7 @@
   "scripts": {
     "test": {
       "description": "Shared-module and Solid node tests (docs/DEPLOY.md)",
-      "command": "node --test market/src/*.test.js && cd solid && npm test"
+      "command": "node --test scripts/product-pages.test.mjs scripts/cloudflare-web-routing.test.mjs && node --test market/src/*.test.js && cd solid && npm test"
     },
     "build": {
       "description": "Full web build (scripts/build-web.sh, same as Vercel and Cloudflare)",

@@ -3,6 +3,7 @@
 // calls api.pokoin.com directly (CORS) — one hop less per edit, and
 // streaming through the Vercel rewrite is not verified.
 
+import { inventoryBooks } from './inventory-book.js';
 import { PUBLIC_API_ORIGIN } from './extension-auth-bridge.js';
 
 const ACTIVE_SESSION_KEY = 'pokoin.scan.session';
@@ -53,6 +54,7 @@ async function request(path, { method = 'GET', body, token }) {
     error.problems = data.problems || [];
     throw error;
   }
+  if (method === 'POST' && path === '/api/scan-batch?action=submit') inventoryBooks.clear();
   return data;
 }
 

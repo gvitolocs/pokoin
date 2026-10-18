@@ -790,12 +790,12 @@ function CheckoutDesk() {
                   </div>
                   <div>
                     <dt>
-                      <span>Platform commission 3%</span>
-                      <FeeTip label="About the platform commission">
-                        Pokoin keeps 3% of the card prices on every order.
+                      <span>Pokoin buyer markup 3%</span>
+                      <FeeTip label="About the buyer markup">
+                        Added to the buyer’s card subtotal. It is not deducted from the seller’s card price.
                       </FeeTip>
                     </dt>
-                    <dd>{formatPkn(fees().commissionPkn)}</dd>
+                    <dd>{formatPkn(fees().buyerMarkupPkn)}</dd>
                   </div>
                   <Show when={!nft()}>
                     <div>
@@ -849,6 +849,10 @@ function CheckoutDesk() {
                         )}
                       </For>
                     </Show>
+                    <div>
+                      <dt>Pokoin buyer markup 3%</dt>
+                      <dd>{moneyFromEurCents(q().buyerMarkupCents || 0)}</dd>
+                    </div>
                     <Show when={!allowUntracked()}>
                       <div>
                         <dt><InsuranceCheck /></dt>
