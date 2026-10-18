@@ -319,20 +319,30 @@ cargo run --quiet --example c1_dictionary > ../market/src/compact-dictionary.jso
 
 ### 3.2 Negotiation and HTTP semantics
 
-- **Opt in** with `?format=c1` (preferred) or `Accept: application/vnd.pokoin.c1+json`.
-  `*/*` is deliberately **not** a match — every browser sends it. Browsers
-  should use `?format=c1`: Cloudflare and the edge micro-cache key on the URL
-  and ignore `Vary`, so only the query parameter keeps the two representations
-  in separate cache entries. The edge rewrites an `Accept`-only request to
-  `?format=c1` before its own cache (`apps/api/src/http_cache.rs`).
+- **Opt in with `?format=c1` / `?format=c1v2`.** Cloudflare and the edge
+  micro-cache key on the URL and ignore `Vary: Accept`, so only the query
+  parameter keeps the two representations in separate cache entries. Through
+  api.pokoin.com, `Accept: application/vnd.pokoin.c1+json` on a URL without
+  `?format=` is answered as **plain JSON**: the public edge
+  (`apps/api/src/http_cache.rs`, `c1_only_in_accept`) replaces that `Accept`
+  before routing. In-process callers still negotiate on `Accept`. `*/*` is
+  never a match — every browser sends it.
+  Why (2026-10-18, read-only curl on a fresh `&zz=<random>` key): until then the
+  edge rewrote an `Accept`-only ask to `?format=c1` *internally*, so Cloudflare
+  stored the c1 body under the bare URL (`cf-cache-status: MISS`,
+  `x-pokoin-format: c1`) and the next plain-JSON request got that c1 body as a
+  `HIT` for `s-maxage=60` + `stale-while-revalidate=120`, despite `Vary: Accept`.
+  The SPA decodes either form, but the Flutter apps and the extension read
+  plain JSON, and anyone could do it to any public catalogue URL with one curl.
 - Content type `application/json; charset=utf-8` plus `x-pokoin-format: c1`
   (since 2026-10-10; before, `application/vnd.pokoin.c1+json`). Cloudflare only
   brotli-compresses content types it knows, and an uncompressed `c1` body was
   larger on the wire than brotli'd JSON. The payload marks itself (`{"c1":1,…}`),
   so a client branches on `isC1(payload)`.
 - Same status code and same `Cache-Control` as the default response.
-- **`Vary: Accept` on both representations**, so a shared cache can never hand a
-  `c1` body to a client that asked for plain JSON.
+- **`Vary: Accept` on both representations**, for caches that honour it.
+  Cloudflare does not (it varies only on `Accept-Encoding`, and on `Accept` for
+  images), which is why the edge never answers c1 to an `Accept`-only ask.
 - `apps/api`'s Redis read cache keys `/api/marketplace-search-page` per
   representation (`:c1` suffix), for the same reason.
 - `sanitize_public_json` runs before encoding, so an infrastructure error is the
@@ -558,23 +568,47 @@ The Flutter app and the extension send `br` only and must keep requesting the pl
 
 ## 4. Measurements
 
-Reproduce with:
+### 4.1 Two corpora — which table is which
+
+There are two sets of numbers below, and conflating them would overstate the
+result:
+
+| | rows per fixture | size | in the repo? |
+| --- | --- | --- | --- |
+| **Full captures** (§4.2) | all (up to 400) | 2.0 MB | **no** |
+| **Committed corpus** (§4.3) | first 16 | 196 KB | yes |
+
+§4.2 is the production claim: whole responses, exactly as `api.pokoin.com`
+served them. Those captures are **not committed** — 2.0 MB of JSON on `main`
+was not worth it — so that table is not reproducible from a clone alone.
+
+§4.3 is what a clone *does* reproduce. It is lower, and necessarily so:
+per-table overhead amortises over row count, so a 16-row table pays the same
+column header for a sixteenth of the rows. Quote §4.2 for "how big is the
+win", and §4.3 when checking that a change did not regress.
+
+Reproduce §4.3 with:
 
 ```sh
 pip install brotli zstandard
 python3 docs/handoff/compact-c1/measure-sizes.py
 ```
 
-That runs `pokoin-rust/crates/api-common/examples/c1_measure.rs` over the 11
-captured production responses in `docs/handoff/compact-c1/fixtures/` — which
-also asserts the byte-for-byte round trip for each — then compresses both
-bodies. Timings are the best of 7 passes on the cloud session's container, so
-treat them as orders of magnitude, not benchmarks.
+That runs `pokoin-rust/crates/api-common/examples/c1_measure.rs` over
+`docs/handoff/compact-c1/fixtures/` — which also asserts the byte-for-byte
+round trip for each — then compresses both bodies, and prints the corpus it
+used in its header. For §4.2, re-capture the full responses (read-only public
+GETs for the routes named in each filename) and run `c1_measure` on those
+directly.
 
-`serialize` is what the handler already spends turning its `Value` into the
-default body, so `encode − serialize` is what `c1` adds. `decode` is the **Rust**
-decoder, included because it is the round-trip check; the browser decoder is
+Timings are the best of 7 passes on the cloud session's container, so treat
+them as orders of magnitude, not benchmarks. `serialize` is what the handler
+already spends turning its `Value` into the default body, so
+`encode − serialize` is what `c1` adds. `decode` is the **Rust** decoder,
+included because it is the round-trip check; the browser decoder is
 `market/src/compact.js` and has not been profiled in a browser yet.
+
+### 4.2 Full captures (production sizes, not committed)
 
 brotli q11, zstd level 19.
 
@@ -605,6 +639,30 @@ brotli q11, zstd level 19.
 | c1 + brotli q11 | 66.0 KB | −96.7% | −33.2% |
 | c1 + zstd 19 | 74.3 KB | −96.3% | −24.8% |
 
+### 4.3 Committed corpus (16 rows per fixture — what a clone reproduces)
+
+11 fixtures, 310 encoded rows across 18 tables, 196.3 KB of JSON. (More rows
+than 11 × 16 because the `sections` id arrays stay whole as vector tables.)
+brotli q11, zstd level 19.
+
+| encoding | all 11 fixtures | vs default |
+| --- | --- | --- |
+| default JSON | 196.3 KB | ±0% |
+| c1 | 43.3 KB | **−78.0%** |
+| default JSON + brotli q11 | 16.9 KB | — |
+| c1 + brotli q11 | 13.6 KB | **−19.5%** |
+| default JSON + zstd 19 | 19.1 KB | — |
+| c1 + zstd 19 | 15.5 KB | −18.7% |
+
+Against §4.2's −81.9% raw / −33.2% brotli'd. The raw figure holds up well; the
+brotli figure is the one that shrinks, because fewer rows leave less repetition
+for `c1` to strip before the compressor sees it. Truncating further makes this
+worse fast — 8 rows measures −69.0% raw — which is why the corpus is 16 rows
+and not fewer (see §5 for the coverage reason).
+
+Main's encoder emits **format 1** for every fixture in this corpus: none of
+them trigger template columns (§3.5), so the committed vectors are format 1.
+
 ### Reading the numbers honestly
 
 - **Raw −81.9%** is the headline, and it is the wrong number to plan with: the
@@ -629,6 +687,49 @@ brotli q11, zstd level 19.
 - The 400-row artist page is the one case where encode time is worth watching;
   it is also the one route where the raw saving is 658 KB.
 
+### 4.4 In the browser: wire bytes and decode time (2026-10-18)
+
+Live api.pokoin.com bodies for the routes the SPA reads, each fetched as JSON,
+`?format=c1` and `?format=c1v2`. **Wire** is what Cloudflare sends a browser
+with `Accept-Encoding: br` (`curl -w %{size_download}`). **Decode** is the whole
+main-thread step after the network, the same as `decodeApiText`: UTF-8 bytes →
+string → `JSON.parse` → `decodeC1` when the body is c1. Median of 40 interleaved
+runs on Chrome 152 (headless, Ryzen 5 7600), at 1× and with CDP
+`Emulation.setCPUThrottlingRate(4)` (Lighthouse's mobile profile); the browser
+pane on an Apple-silicon Mac agrees in shape (artist page 4.8 → 3.5 ms).
+
+| payload | JSON wire | c1 wire | c1v2 wire | JSON decode 1× / 4× | c1 decode 1× / 4× | c1v2 decode 1× / 4× |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| search `charizard` (90 KB raw) | 8.2 KB | 5.5 KB | 4.7 KB | 0.3 / 0.6 ms | 0.3 / 0.9 ms | 0.4 / 1.1 ms |
+| set desk `base-set` (140 KB) | 9.9 KB | 4.7 KB | 4.2 KB | 0.5 / 1.1 ms | 0.2 / 1.1 ms | 0.4 / 2.0 ms |
+| set desk `destined-rivals` (328 KB) | 24.8 KB | 11.0 KB | 8.6 KB | 1.2 / 2.9 ms | 0.6 / 2.2 ms | 1.0 / 4.4 ms |
+| expansion index (144 KB) | 15.3 KB | 11.7 KB | 9.9 KB | 0.6 / 1.2 ms | 0.3 / 1.1 ms | 0.6 / 2.7 ms |
+| artist `mitsuhiro-arita` (3.8 MB) | 206 KB | 135 KB | 110 KB | 15.7 / **59.9 ms** | 8.5 / **32.2 ms** | 10.1 / 38.1 ms |
+| list snapshot, artist arita (2.2 MB) | 118 KB | 93 KB | 65 KB | 8.1 / 35.1 ms | 4.2 / 20.7 ms | 6.8 / 30.8 ms |
+| suggest `mew` (12 KB) | 1.92 KB | 1.99 KB | (= c1) | < 0.1 ms | < 0.1 ms | |
+| card-versions (1.8 KB) | 672 B | 696 B | (= c1) | < 0.1 ms | < 0.1 ms | |
+
+- **Decode is never the cost.** Below ~300 KB raw every variant is within
+  ±1 ms of `JSON.parse`, even at 4×. On the big pages c1 *halves* the
+  main-thread block: the artist page drops from a 60 ms long task to 32 ms at
+  4×, because the decoder materialises interned rows instead of parsing 3.8 MB
+  of repeated keys. §2.3's premise holds.
+- **c1v2 trades decode for bytes.** Template expansion makes it slower than c1
+  (artist 38 vs 32 ms at 4×) but still faster than JSON, and 15–30% smaller on
+  the wire than c1. Lists, which are c1v2 + origin brotli 11, are the right
+  place for it.
+- **Two routes do not benefit:** `suggest` and `card-versions` are 3–4% *larger*
+  as c1 (+25–70 B), with no decode difference. Harmless, but nothing gained.
+- **`dcb` does not overtake c1; it stacks on it.** Brotli 11 with the shared
+  `c1-shared-d30efab9dda40a4b.dict` (computed locally; the zone path is off,
+  §3.5): list `base-set` c1v2 3.4 → 2.5 KB, list arita 64.9 → 61.2 KB; plain
+  JSON with the same dictionary only goes 7.4 → 6.8 KB and 117.8 → 114.9 KB,
+  because the dictionary was trained on c1v2.
+- Row order of a search can differ between two requests (ties), so the
+  `charizard`/`pikachu` c1 body was not byte-equal to the JSON fetched a moment
+  later; decode correctness is pinned by the fixture round trips (§5), not by
+  this table.
+
 ---
 
 ## 5. Tests
@@ -646,7 +747,7 @@ brotli q11, zstd level 19.
 | `market/src/compact.test.js` | **cross-language**: the browser decoder rebuilds all 11 real payloads, encoded by the real Rust encoder, byte for byte; plus codecs, masks, vectors, marker escaping, every error path, and a stale-dictionary diagnostic |
 
 The JS test decodes committed Rust output in `docs/handoff/compact-c1/c1/`.
-Regenerate it when the encoder changes:
+Regenerate it whenever the encoder **or the fixtures** change:
 
 ```sh
 cd pokoin-rust
@@ -655,47 +756,74 @@ cargo run --release --example c1_measure -- \
 rm -f ../docs/handoff/compact-c1/c1/*.default.json
 ```
 
+### Why the corpus is 16 rows
+
+The committed fixtures are truncated (§4.1), and row count is not just a size
+knob — it decides which codecs the corpus exercises at all. Measured by
+encoding each candidate corpus and reading back which codecs and modifiers
+appear in the emitted columns:
+
+| rows | corpus | codecs | presence mask (`m`) | dictionary tables |
+| --- | --- | --- | --- | --- |
+| 4 | 55 KB | 5/5 | no | `rarities` |
+| 8 | 106 KB | 5/5 | **no** | `rarities` |
+| 12 | 152 KB | 5/5 | **no** | `rarities` |
+| **16** | **196 KB** | **5/5** | **yes** | `rarities` |
+| 24 | 279 KB | 5/5 | yes | `rarities`, `nationalities` |
+| full | 2.0 MB | 5/5 | yes | `rarities`, `nationalities`, `productTypes` |
+
+Below 16 rows the optional pricing columns become constants and the
+**presence-mask path stops being exercised on real data** — the one path whose
+real-world trigger (a key present on some rows only) is hard to invent
+convincingly. At 16 it fires on `lowest_price_pkn`, `listed_quantity` and
+`has_cardtrader_listing` in `artist-arita`.
+
+Dictionary-coded palettes for `nationalities` and `productTypes` need 24+ rows
+and the full corpus respectively, so those stay covered synthetically by
+`compact::tests::a_dictionary_coded_column_uses_codes` and
+`compact::dict::tests::codes_are_one_based_and_round_trip`. Coding a
+`productType` column is the same encoder branch as a `nationality` one, so the
+extra 80–160 KB of fixtures was not worth it.
+
+Re-derive the table with `truncate-fixtures.py --rows N` plus `c1_measure`, and
+inspect the `c` / `m` / `t` keys of the emitted columns.
+
 ---
 
 ## 6. Rollout
 
-1. **Now (this change).** Encoder, dictionary route, decoder, tests. Opt-in
-   only; no client requests `c1`, so production behaviour is unchanged except
-   for `Vary: Accept` on the target routes' success responses and the new
-   `/api/dictionary` route.
-2. **Confirm `Vary: Accept` at the edge.** Before any client opts in, check that
-   Cloudflare honours `Vary: Accept` for these routes (`curl -I` with and
-   without the `Accept`, compare `cf-cache-status` and the content type). If it
-   does not, clients must use `?format=c1` instead, which varies the URL and so
-   varies the cache key unconditionally. This is a release gate, not a nice to
-   have: getting it wrong serves `c1` bytes to the Flutter apps.
-3. **One route, behind a flag.** `/api/marketplace-expansion-page` first: it has
-   the best ratio (−51.8% brotli'd), one consumer (the set desk), and the
-   simplest shape. Have the SPA fetch `?format=c1` for that route only, decode
-   with `decodeC1`, and keep the default path as the fallback on any `C1Error`.
-4. **Measure in a browser.** `JSON.parse` + `decodeC1` against `JSON.parse`
-   alone, on a mid-range Android, over a throttled connection. The size win is
-   measured; the *decode* win is the thing this document does not yet have a
-   number for, and it is the main reason to prefer this design over brotli
-   alone. If `decodeC1` turns out slower end to end than parsing the default
-   body, stop here — that result would invalidate §2.3's premise.
-5. **Then the rest**, in descending order of benefit: `home-page` and the rails
-   (−40.8%/−35.4%), `artist-cards` (658 KB raw), `card-versions`,
-   `search-page`.
-6. **Pin the dictionary.** Once a client depends on codes, fetch
-   `/api/dictionary?v=<version from the payload>` so it is immutably cached, and
-   treat a `C1Error` mentioning a missing code as "refetch the current
-   dictionary", not as a failure.
-7. **Flutter.** Only after the SPA is proven. The format is deliberately plain
-   JSON so a Dart decoder is the same ~200 lines.
+Where it stands on 2026-10-18:
+
+1. **Done.** Encoder, `/api/dictionary`, decoder, tests (#284); the SPA reads
+   catalogue routes with `?format=c1` (`C1_READS` in `market/src/api.js`, on;
+   its comment has the 2026-10-12 size check) and list snapshots as `format=c1v2`.
+2. **The cache-key gate.** `?format=` puts c1 in its own Cloudflare cache entry,
+   so the SPA was never exposed. The `Accept`-only path was: see §3.2. The fix
+   is in the origin (`http_cache::edge` answers JSON to it), so **no Cloudflare
+   zone change is needed**. Ship order: deploy the API to the Pi and the k3s
+   overflow (both run the edge listener), then rerun the probe below; any c1
+   body already cached under a bare URL ages out within 3 minutes
+   (`s-maxage=60` + `stale-while-revalidate=120`), so no purge either.
+
+   ```sh
+   U="https://api.pokoin.com/api/marketplace-search-page?q=charizard&limit=24&zz=$RANDOM$RANDOM"
+   curl -s -o /dev/null -D - -H 'Accept: application/vnd.pokoin.c1+json' "$U" | grep -i x-pokoin-format  # expect nothing
+   curl -s "$U" | head -c 12                                                                           # expect {"query":
+   ```
+3. **Measured in a browser** (§4.4): decode is not a cost anywhere and halves
+   the long task on the big pages.
+4. **Optional trims** (not done): drop `format=c1` for `suggest` and
+   `card-versions`, which gain nothing; consider `c1v2` for `artist-cards` and
+   the set desk (−15–20% wire for ~+20% decode).
+5. **Flutter / extension.** Plain JSON today. If they ever opt in, they use
+   `?format=`, never `Accept`.
 
 ### Backing out
 
-Opt-in means backing out is client-side: stop sending the header. Nothing is
-removed from the default representation, so a rollback never needs a server
-deploy. The two server-side changes that *are* observable without a client —
-`Vary: Accept` on the target routes and the `/api/dictionary` route — are both
-additive.
+Client-side: set `C1_READS = false` and the SPA reads plain JSON again. Nothing
+is removed from the default representation, so a rollback never needs a server
+deploy. The edge's JSON answer to an `Accept`-only ask is independent of it and
+should stay.
 
 ### When this needs revisiting
 

@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """Measure default vs c1 payload sizes, compressed and not.
 
-Runs the Rust `c1_measure` example over the captured fixtures in this
-directory (which also asserts the byte-for-byte round trip), then compresses
-both bodies with brotli and zstd and prints the markdown table that lives in
-`docs/rust-migration/COMPACT_ENCODING.md`.
+Runs the Rust `c1_measure` example over the fixtures in this directory (which
+also asserts the byte-for-byte round trip), then compresses both bodies with
+brotli and zstd and prints a markdown table.
 
     python3 docs/handoff/compact-c1/measure-sizes.py [--out DIR]
 
 Needs `brotli` and `zstandard` (`pip install brotli zstandard`); either one
 missing just leaves its columns out.
+
+**The committed fixtures are 16-row truncations**, so the ratios this prints
+are *lower* than production: per-table overhead amortises over row count. The
+production figures in `docs/rust-migration/COMPACT_ENCODING.md` §4.2 were
+measured against the full 2.0 MB captures, which are not in the repo. To
+reproduce those, re-capture the full responses and run `c1_measure` on them:
+
+    cd pokoin-rust && cargo run --release --example c1_measure -- \\
+        <out-dir> <full-captures>/*.json
+
+The header this prints names the corpus so the two tables cannot be confused.
 """
 
 from __future__ import annotations
@@ -139,7 +149,12 @@ def main() -> int:
             defaults.append((out / f"{name}.default.json").read_bytes())
             compacts.append((out / f"{name}.c1.json").read_bytes())
 
-        print(f"brotli q{BROTLI_QUALITY}, zstd level {ZSTD_LEVEL}\n")
+        total_rows = sum(int(row["rows"]) for row in rows)
+        print(
+            f"Corpus: {len(rows)} fixtures in {HERE / 'fixtures'} "
+            f"({total_rows} encoded rows, {human(sum(len(b) for b in defaults))} of JSON). "
+            f"brotli q{BROTLI_QUALITY}, zstd level {ZSTD_LEVEL}.\n"
+        )
         print(
             "| fixture | rows | default | c1 | c1 vs default | default+br | c1+br "
             "| c1+br vs default+br | serialize | encode | decode |"
