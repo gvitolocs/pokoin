@@ -4,3 +4,23 @@ try {
     document.documentElement.classList.add("cookies-ok");
   }
 } catch (e) {}
+// Account button paint hint: the marketplace's last-known session
+// (market/src/auth-session.js, localStorage or the .pokoin.com cookie).
+// Runs in <head> so a signed-in visitor never sees "Log in" first; the
+// name is a CSS string until landing.js writes the real text.
+try {
+  var raw = null;
+  try {
+    raw = localStorage.getItem("pokoin.auth.session");
+  } catch (e) {}
+  if (!raw) {
+    var m = /(?:^|;\s*)pokoin\.auth\.session\.cookie=([^;]*)/.exec(document.cookie);
+    if (m) raw = decodeURIComponent(m[1]);
+  }
+  var s = raw ? JSON.parse(raw) : null;
+  if (s && s.signedIn === true && String(s.uid || "").trim()) {
+    var name = String(s.username || "").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 32);
+    document.documentElement.classList.add("signed-in");
+    document.documentElement.style.setProperty("--account-name", JSON.stringify(name || "My Pokoin"));
+  }
+} catch (e) {}

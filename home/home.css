@@ -645,6 +645,29 @@
   animation-delay: -4.5s;
 }
 
+/* Where the hero has room beside the 420px binder (wide desktop, and the
+   stacked tablet layout), Umbreon and Sylveon peek out from behind its edges
+   instead of hiding under it: each overlaps the binder by ~45px. */
+@media (min-width: 1180px), (min-width: 721px) and (max-width: 900px) {
+  .float-card-a {
+    left: auto;
+    right: calc(50% + min(50%, 210px) - 46px);
+  }
+  .float-card-c {
+    right: auto;
+    left: calc(50% + min(50%, 210px) - 40px);
+  }
+}
+
+/* Off-screen hero: its endless float/scan/marquee loops stop compositing. */
+.home-hero.is-offscreen .float-card,
+.home-hero.is-offscreen .floating-chip,
+.home-hero.is-offscreen .hero-marquee-track,
+.home-hero.is-offscreen .scan-line,
+.home-hero.is-offscreen .hero-pill-dot {
+  animation-play-state: paused;
+}
+
 .floating-chip {
   --r: 0deg;
   position: absolute;
@@ -816,6 +839,21 @@ html:not(.js) .home-rail {
 
 .landing-rail .carousel-head {
   display: none;
+}
+
+/* The rail's arrow gutters use negative inline margins; keep them from
+   widening the page (820px viewport scrolled sideways by 17px). */
+.home-rail {
+  overflow-x: clip;
+}
+
+/* Below-the-fold sections render when they come near the viewport instead
+   of all at once while the visitor scrolls into them. */
+.home-tools,
+.home-sell,
+.home-companions {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
 }
 
 .landing-rail .rail-wrap {
