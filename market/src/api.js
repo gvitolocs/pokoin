@@ -22,7 +22,7 @@ import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsM
 export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
-import { withGameQuery, withGameQueryFor, isPokemonGame, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
+import { withGameQuery, withGameQueryFor, isPokemonGame, gameHeadersForUrl, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
@@ -126,7 +126,7 @@ async function fetchApiTextOnce(url, options = {}, path = url) {
     response = await fetch(url, {
       headers: {
         Accept: 'application/json',
-        ...(catalogGame ? gameRequestHeadersFor(catalogGame) : gameRequestHeaders()),
+        ...gameHeadersForUrl(url, catalogGame ? gameRequestHeadersFor(catalogGame) : gameRequestHeaders()),
         ...(options.headers || {}),
       },
       method: options.method || 'GET',

@@ -329,7 +329,11 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         wanted,
         StatusCode::OK,
         plain_body(&snapshot, &game, sections),
-        "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+        // The Pokémon home rails' window (rails.rs): with s-maxage=30 most
+        // satellite visitors waited on a synchronous edge revalidation
+        // (0.24-1.13 s measured) instead of a 0.04 s HIT. Cart and checkout
+        // re-price every line, so a rail price at most 2 min old is display only.
+        "public, max-age=30, s-maxage=120, stale-while-revalidate=600",
     )
 }
 

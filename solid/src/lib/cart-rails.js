@@ -24,6 +24,16 @@ import {
 import { syncRemoteRecentCardIds } from '@market/recents.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 
+// Live entries outlive a remount: reopening /cart within RECHECK_AFTER_MS
+// reuses them instead of re-reading every card's listings (checkout
+// re-verifies every price anyway).
+const liveMemo = new Map();
+
+function rememberedLive(id) {
+  const entry = liveMemo.get(id);
+  return entry && Date.now() - entry.at < RECHECK_AFTER_MS ? entry : null;
+}
+
 /**
  * The /cart data rails. Inputs
  * are accessors, outputs are accessors; the rules are cart-rails-core.js.
@@ -65,13 +75,26 @@ export function createCartLive({ items, saved, applyLive, excludeSellerUid }) {
   createEffect(
     () => [ids(), round(), excludeSellerUid()],
     ([list, , exclude]) => {
-      const todo = list.filter((id) => !asked.has(id));
+      const pending = list.filter((id) => !asked.has(id));
+      if (!pending.length) return;
+      for (const id of pending) asked.add(id);
+      const todo = [];
+      for (const id of pending) {
+        const entry = rememberedLive(id);
+        if (!entry) {
+          todo.push(id);
+          continue;
+        }
+        // Already announced when it was read: patch quietly, no new notes.
+        setLive((current) => ({ ...current, [id]: entry }));
+        applyLive(id, entry, { excludeSellerUid: exclude });
+      }
       if (!todo.length) return;
-      for (const id of todo) asked.add(id);
       lastCheck = Date.now();
       setChecking((n) => n + todo.length);
       void runPool(todo, LIVE_WIDTH, async (id) => {
         const entry = await fetchLiveEntry(id);
+        if (entry) liveMemo.set(id, entry);
         if (!mounted) return;
         setChecking((n) => Math.max(0, n - 1));
         if (!entry) {

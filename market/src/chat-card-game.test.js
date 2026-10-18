@@ -90,7 +90,8 @@ test('explicit game replaces the page game on tile and card reads, and cache key
     await fetchCardTiles(['12'], { game: 'one_piece' });
     const satelliteTiles = calls.find((call) => call.href.includes('marketplace-card-tiles'));
     assert.equal(new URL(satelliteTiles.href).searchParams.get('game'), 'one_piece');
-    assert.equal(satelliteTiles.headers['x-pokoin-game'], 'one_piece');
+    // The URL names the game: no custom header, so no CORS preflight.
+    assert.equal(satelliteTiles.headers['x-pokoin-game'], undefined);
 
     calls.length = 0;
     const pokemon = await fetchCard('12', { game: 'pokemon', lang: 'en' });
@@ -102,7 +103,7 @@ test('explicit game replaces the page game on tile and card reads, and cache key
     assert.equal(new URL(pageCalls[0].href).searchParams.get('game'), null);
     assert.equal(pageCalls[0].headers['x-pokoin-game'], undefined);
     assert.equal(new URL(pageCalls[1].href).searchParams.get('game'), 'one_piece');
-    assert.equal(pageCalls[1].headers['x-pokoin-game'], 'one_piece');
+    assert.equal(pageCalls[1].headers['x-pokoin-game'], undefined);
 
     calls.length = 0;
     const again = await fetchCard('12', { game: 'pokemon', lang: 'en' });

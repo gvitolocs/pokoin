@@ -27,6 +27,7 @@ function apiFetcher(answers) {
   };
   const deps = {
     fetch,
+    gameHeadersForUrl: (_url, headers) => headers,
     gameRequestHeaders: () => ({}),
     gameRequestHeadersFor: () => ({}),
     catalogGameFromUrl: () => '',

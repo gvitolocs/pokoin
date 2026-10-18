@@ -112,6 +112,9 @@ function CheckoutDesk() {
   const [addressId, setAddressId] = createSignal('');
   const [draft, setDraft] = createSignal(untrack(() => emptyAddressDraft(cartShippingChoice().country)));
   const [showAddressForm, setShowAddressForm] = createSignal(false);
+  // Saved addresses answered: until then neither the 8-field form (it
+  // collapsed for every returning buyer) nor a quote for the fallback country.
+  const [addressesLoaded, setAddressesLoaded] = createSignal(false);
   const [quote, setQuote] = createSignal(null);
   const [quoteError, setQuoteError] = createSignal('');
   // The services picked in the cart carry over (order-wide and per seller
@@ -233,7 +236,10 @@ function CheckoutDesk() {
   );
 
   createEffect(nft, (digital) => {
-    if (digital) return undefined;
+    if (digital) {
+      setAddressesLoaded(true);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -245,8 +251,11 @@ function CheckoutDesk() {
         const preferred = list.find((row) => row.isDefault) || list[0];
         setAddressId(preferred?.id || '');
         setShowAddressForm(!list.length);
+        setAddressesLoaded(true);
       } catch (err) {
-        if (!cancelled) setError(err.message || 'Could not load addresses.');
+        if (cancelled) return;
+        setError(err.message || 'Could not load addresses.');
+        setAddressesLoaded(true);
       }
     })();
     return () => {
@@ -275,7 +284,7 @@ function CheckoutDesk() {
   // Server quote for a card payment (debounced); the server re-prices every line.
   createEffect(
     () => {
-      if (nft() || payMethod() !== 'stripe' || !items().length || missingListing() || !buyerCountry()) return null;
+      if (nft() || payMethod() !== 'stripe' || !items().length || missingListing() || !addressesLoaded() || !buyerCountry()) return null;
       // Ticking the balance box re-quotes: the server prices the discount.
       return checkoutRequestBody({
         items: items(),
@@ -680,6 +689,9 @@ function CheckoutDesk() {
 
           <Show when={!nft() && payMethod() === 'stripe'}>
             <DeskPanel title="Shipping address">
+              <Show when={!addressesLoaded()}>
+                <div class="page-lede checkout-address-wait" aria-busy="true"><div class="skeleton-line" /><div class="skeleton-line short" /></div>
+              </Show>
               <Show when={selectedAddress() && !showAddressForm()}>
                 <div class="page-lede">
                   <p>
@@ -707,7 +719,7 @@ function CheckoutDesk() {
                   </Show>
                 </div>
               </Show>
-              <Show when={showAddressForm() || !addresses().length}>
+              <Show when={addressesLoaded() && (showAddressForm() || !addresses().length)}>
                 <form class="sell-form" onSubmit={saveAddress}>
                   <p class="page-lede">Add shipping address</p>
                   <For each={ADDRESS_FIELDS}>
