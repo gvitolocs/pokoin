@@ -13,6 +13,7 @@ name = "expansion-stamps"
 path = "src/main.rs"
 
 [dependencies]
+ab_glyph = "0.2"
 anyhow = "1"
 png = "0.18"
 serde_json = "1"

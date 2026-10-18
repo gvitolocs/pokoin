@@ -35,6 +35,8 @@ enum Source {
     /// artwork pose breaks apart at chip size.
     PokeApiHome(String),
     Draw(String),
+    /// A logo stamp that is a letter mark (Team Rocket R): light letters.
+    Text(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +59,7 @@ fn parse_manifest(text: &str) -> Result<Vec<Stamp>> {
             Some(("pokeapi", name)) => Source::PokeApi(name.to_string()),
             Some(("pokeapi-home", name)) => Source::PokeApiHome(name.to_string()),
             Some(("draw", shape)) => Source::Draw(shape.to_string()),
+            Some(("text", label)) => Source::Text(label.to_string()),
             _ => bail!("stamps.tsv:{}: unknown source {source}", n + 1),
         };
         out.push(Stamp { key: key.to_string(), source });
@@ -226,6 +229,66 @@ fn snowflake(x: f64, y: f64) -> f64 {
     0.0
 }
 
+/// Same face as the D00002C code plates (scripts/export-expansion-code-marks.py).
+const FONT: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+
+fn text_mask(label: &str) -> Result<Mask> {
+    use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+    let path = std::env::var("EXPANSION_STAMP_FONT").unwrap_or_else(|_| FONT.to_string());
+    let font = FontVec::try_from_vec(fs::read(&path).with_context(|| format!("font {path}"))?)?;
+    let inner = SIZE as f64 - 2.0 * PAD;
+    // Lay out at a reference size, then scale to fit the inner box.
+    let reference = 100.0f32;
+    let sf = font.as_scaled(PxScale::from(reference));
+    let mut x = 0.0f32;
+    let mut glyphs = Vec::new();
+    let mut prev = None;
+    for ch in label.chars() {
+        let id = sf.glyph_id(ch);
+        if let Some(p) = prev {
+            x += sf.kern(p, id);
+        }
+        glyphs.push(id.with_scale_and_position(reference, ab_glyph::point(x, sf.ascent())));
+        x += sf.h_advance(id);
+        prev = Some(id);
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    let outlined: Vec<_> = glyphs.into_iter().filter_map(|g| font.outline_glyph(g)).collect();
+    for g in &outlined {
+        let b = g.px_bounds();
+        x0 = x0.min(b.min.x);
+        y0 = y0.min(b.min.y);
+        x1 = x1.max(b.max.x);
+        y1 = y1.max(b.max.y);
+    }
+    if outlined.is_empty() {
+        bail!("text {label:?} has no glyphs");
+    }
+    // Letters sit a little smaller than silhouettes: 80 % of the inner box.
+    let scale = (inner * 0.8) / f64::from((x1 - x0).max(y1 - y0));
+    let (w, h) = (f64::from(x1 - x0) * scale, f64::from(y1 - y0) * scale);
+    let (ox, oy) = ((SIZE as f64 - w) / 2.0, (SIZE as f64 - h) / 2.0);
+    let (rw, rh) = ((x1 - x0).ceil() as usize + 2, (y1 - y0).ceil() as usize + 2);
+    let mut raster = vec![0.0f64; rw * rh];
+    for g in &outlined {
+        let b = g.px_bounds();
+        g.draw(|gx, gy, c| {
+            let (px, py) = ((b.min.x - x0) as i64 + i64::from(gx), (b.min.y - y0) as i64 + i64::from(gy));
+            if px >= 0 && py >= 0 && (px as usize) < rw && (py as usize) < rh {
+                let cell = &mut raster[py as usize * rw + px as usize];
+                *cell = (*cell + f64::from(c)).min(1.0);
+            }
+        });
+    }
+    Ok(supersample(|x, y| {
+        let (sx, sy) = ((x - ox) / scale, (y - oy) / scale);
+        if sx < 0.0 || sy < 0.0 || sx >= rw as f64 || sy >= rh as f64 {
+            return 0.0;
+        }
+        raster[sy as usize * rw + sx as usize]
+    }))
+}
+
 fn drawn_mask(shape: &str) -> Result<Mask> {
     Ok(match shape {
         "poke-ball" => supersample(poke_ball),
@@ -309,6 +372,7 @@ fn mask_for(stamp: &Stamp, cache: &Path) -> Result<Mask> {
         Source::PokeApi(name) => silhouette_mask(&pokeapi_art(name, "official-artwork", cache)?),
         Source::PokeApiHome(name) => silhouette_mask(&pokeapi_art(name, "home", cache)?),
         Source::Draw(shape) => drawn_mask(shape),
+        Source::Text(label) => text_mask(label),
     }
 }
 
@@ -402,6 +466,17 @@ mod tests {
             assert!(c > 0.08 && c < 0.6, "{shape} coverage {c}");
             assert_eq!(mask[0], 0.0, "{shape} paints the corner");
         }
+    }
+
+    #[test]
+    fn text_plates_render_centred_letters() {
+        if !Path::new(FONT).exists() {
+            return;
+        }
+        let mask = text_mask("R").unwrap();
+        let c = coverage(&mask);
+        assert!(c > 0.05 && c < 0.5, "coverage {c}");
+        assert_eq!(mask[0], 0.0);
     }
 
     #[test]

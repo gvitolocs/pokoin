@@ -8,14 +8,14 @@ import { expansionCode, expansionSymbolSrc } from '@market/set-logos.js';
 /**
  * Circular expansion mark, or the letter code when the PNG is missing.
  * A stamped deck printing (Battle Academy Mewtwo, Trainer Kit Bisharp, …)
- * shows its stamp first; pass the printing's catalog `number`.
+ * shows its stamp first; pass the printing's catalog `number` and `cardId`.
  * Loads from cdn.pokoin.com
  * directly: /card-images/* is a zone 301 to the CDN, one redirect per symbol.
  */
 export default function ExpansionMark(props) {
   const slug = () => setSlug(props.setName);
   const sources = () => [
-    expansionStampSrc({ slug: slug(), number: props.number }),
+    expansionStampSrc({ slug: slug(), number: props.number, id: props.cardId }),
     expansionSymbolSrc({ slug: slug(), expansionSymbolUrl: props.symbolUrl }),
   ].filter(Boolean).map(cdnFetchUrl);
   const [failed, setFailed] = createSignal(() => (sources(), 0));

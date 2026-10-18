@@ -1038,6 +1038,7 @@ function CardDesk(props) {
                                 <ExpansionMark
                                   setName={ident.set}
                                   number={row.number || row.card_number}
+                                  cardId={row.id}
                                   symbolUrl={row.expansionSymbolUrl || row.defaultSymbolUrl}
                                 />
                               );

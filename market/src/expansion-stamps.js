@@ -1,3 +1,4 @@
+import { CARD_STAMPS } from './data/card-stamps.js';
 import { isPokemonGame } from './game.js';
 
 /**
@@ -11,7 +12,7 @@ import { isPokemonGame } from './game.js';
  */
 
 /** Bust CDN `immutable` when the plates are redrawn. */
-const STAMP_CACHE = 'st1';
+const STAMP_CACHE = 'st2';
 
 /**
  * Per-printing stamps: the catalog card_number names the stamp
@@ -27,7 +28,7 @@ export const PRINTING_STAMPS = {
   'beginning-set-plus': ['oshawott', 'snivy', 'tepig'],
   'beginning-set-pikachu-version': ['oshawott', 'snivy', 'tepig'],
   'national-pokedex-beginning-set': ['oshawott', 'snivy', 'tepig'],
-  'xy-beginning-set': ['chespin', 'fennekin'],
+  'xy-beginning-set': ['chespin', 'fennekin', 'froakie'],
   'everyone-s-exciting-battle': [
     'cobalion', 'keldeo', 'meloetta', 'pikachu', 'terrakion', 'victini', 'virizion', 'zoroark',
   ],
@@ -39,8 +40,26 @@ export const PRINTING_STAMPS = {
   'holiday-calendar': ['holiday-snowflake'],
 };
 
-/** Half-deck Trainer Kits print the mascot as the set symbol on every card. */
+/**
+ * Every card of these products carries the same stamp: half-deck Trainer Kits
+ * print the mascot as the set symbol, the Victini theme deck a Victini, Trick
+ * or Trade the Pumpkaboo, Prize Packs the Play! Pokémon mark (checked on scans).
+ */
 export const SET_STAMPS = {
+  'battle-theme-deck-victini': 'victini',
+  'trick-or-trade': 'pumpkaboo',
+  'trick-or-trade-2023': 'pumpkaboo',
+  'trick-or-trade-2024': 'pumpkaboo',
+  'play-pokemon-prize-pack-series': 'play-pokemon',
+  'play-pokemon-prize-pack-series-one': 'play-pokemon',
+  'play-pokemon-prize-pack-series-two': 'play-pokemon',
+  'play-pokemon-prize-pack-series-three': 'play-pokemon',
+  'play-pokemon-prize-pack-series-four': 'play-pokemon',
+  'play-pokemon-prize-pack-series-five': 'play-pokemon',
+  'play-pokemon-prize-pack-series-six': 'play-pokemon',
+  'play-pokemon-prize-pack-series-seven': 'play-pokemon',
+  'play-pokemon-prize-pack-series-eight': 'play-pokemon',
+  'play-pokemon-prize-pack-series-nine': 'play-pokemon',
   'bw-trainer-kit-excadrill': 'excadrill',
   'bw-trainer-kit-zoroark': 'zoroark',
   'dp-trainer-kit-lucario': 'lucario',
@@ -78,14 +97,18 @@ function stampPattern(key) {
 export const STAMP_KEYS = [...new Set([
   ...Object.values(PRINTING_STAMPS).flat(),
   ...Object.values(SET_STAMPS),
+  ...Object.values(CARD_STAMPS),
 ])].sort();
 
 /**
  * Stamp key for an expansion `slug` and, on a printing, its `number`
- * (catalog card_number). Empty when the printing has no known stamp.
+ * (catalog card_number) and `id` (card_id, for stamps read off the scan).
+ * Empty when the printing has no known stamp.
  */
 export function expansionStampKey(row = {}, hostname) {
   if (!isPokemonGame(hostname)) return '';
+  const fromScan = CARD_STAMPS[String(row.id ?? row.card_id ?? '').trim()];
+  if (fromScan) return fromScan;
   const slug = String(row.slug || '').trim();
   if (!slug) return '';
   const number = String(row.number ?? row.card_number ?? '');

@@ -58,10 +58,32 @@ test('half-deck Trainer Kits use the mascot for every card and the set tile', ()
   assert.equal(key('Lost Thunder', '089/214 | Mewtwo Stamp'), '');
 });
 
+test('printings whose number names no stamp use the stamp read off the scan', () => {
+  const byId = (id, set = '') => expansionStampKey({ id, slug: setSlug(set) });
+  // XY Beginning Set Bidoof 029/039 carries the blue Froakie deck stamp.
+  assert.equal(byId('631450', 'XY Beginning Set'), 'froakie');
+  // Everyone's Exciting Battle Deerling 004/047: green Virizion stamp.
+  assert.equal(byId(624928), 'virizion');
+  // Sun & Moon Family Bug Catcher: red Charizard deck stamp.
+  assert.equal(byId(643468), 'charizard');
+  // Ash vs Team Rocket Rowlet: Ash's Pikachu half.
+  assert.equal(byId(630808), 'pikachu');
+  // Sword & Shield Family Zarude: red Pawniard "15".
+  assert.equal(expansionStampKey({ card_id: '566532', slug: 'x' }), 'pawniard');
+  assert.equal(byId(1), '');
+});
+
+test('whole-product stamps: Victini theme deck, Trick or Trade, Prize Packs', () => {
+  assert.equal(key('Battle Theme Deck: Victini', '016/021'), 'victini');
+  assert.equal(key('Trick or Trade 2023', '089/196'), 'pumpkaboo');
+  assert.equal(key('Play! Pokémon Prize Pack Series Seven', '014/191'), 'play-pokemon');
+  assert.equal(key('Play! Pokémon Prize Pack Series', 'SVI 197'), 'play-pokemon');
+});
+
 test('stamp src is the Pokémon CDN plate and never paints on satellite games', () => {
   assert.equal(
     expansionStampSrc({ slug: 'battle-academy-2020', number: '089/214 | Mewtwo Stamp' }),
-    '/card-images/expansions/stamps/mewtwo.png?v=st1',
+    '/card-images/expansions/stamps/mewtwo.png?v=st2',
   );
   assert.equal(expansionStampSrc({ slug: 'lost-thunder', number: '089/214' }), '');
   assert.equal(

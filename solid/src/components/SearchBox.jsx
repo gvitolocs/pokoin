@@ -948,6 +948,7 @@ function SuggestRow(props) {
                 <ExpansionMark
                   setName={identity().set}
                   number={card().number || card().card_number}
+                  cardId={card().id}
                   symbolUrl={card().expansionSymbolUrl}
                 />
               </span>
