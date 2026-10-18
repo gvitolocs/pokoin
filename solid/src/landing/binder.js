@@ -38,9 +38,10 @@ function loadPicture(card) {
         resolve(MISSING_CARD);
         return;
       }
+      // onload, not decode(): decode() can wait for a frame that a background
+      // tab (or headless Chrome) never draws, which held the page back 2.5 s.
       const img = new Image();
-      img.decoding = 'async';
-      img.onload = () => (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(url));
+      img.onload = () => resolve(url);
       img.onerror = next;
       img.src = url;
     };
