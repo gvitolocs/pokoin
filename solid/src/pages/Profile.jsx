@@ -552,20 +552,15 @@ function ProfileDesk() {
   );
 }
 
+/** MyPokoin covers every game, so the mark is the Pokoin coin badge, not a Pokéball. */
 function MyPokoinTile() {
   return (
-    <a class="tile-cta" href="/mypokoin">
-      <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
-        <rect x="18" y="6" width="42" height="58" rx="5" fill="#17131f" stroke="#6f5414" stroke-width="2" />
-        <rect x="12" y="14" width="42" height="58" rx="5" fill="#17131f" stroke="#c9a227" stroke-width="2" />
-        <rect x="6" y="24" width="60" height="70" rx="7" fill="#17131f" stroke="#ffd33d" stroke-width="2" />
-        <path d="M36 24v70" fill="none" stroke="#6f5414" stroke-width="2" />
-        <circle cx="36" cy="58" r="11" fill="#211b2b" stroke="#ffd33d" stroke-width="2" />
-        <path d="M25 58h22" fill="none" stroke="#ffd33d" stroke-width="2.4" />
-        <circle cx="36" cy="58" r="3.5" fill="#17131f" stroke="#ffd33d" stroke-width="2" />
-        <circle cx="36" cy="58" r="1.4" fill="#ffd33d" />
-      </svg>
-      <strong>MyPokoin</strong>
+    <a class="tile-cta mypokoin-logo-tile" href="/mypokoin" aria-label="MyPokoin">
+      <img class="mypokoin-badge" src="/home/logo.png" alt="" width="72" height="72" />
+      <strong class="mypokoin-logo" aria-hidden="true">
+        <span class="mypokoin-my">My</span>
+        <span class="mypokoin-word">Poko<span class="brand-i">ı</span>n</span>
+      </strong>
     </a>
   );
 }

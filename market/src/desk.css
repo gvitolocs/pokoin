@@ -4314,6 +4314,15 @@ html.is-pointer-dragging body {
     width: 3.15rem;
   }
 
+  .profile-page .mypokoin-badge {
+    width: 3.4rem;
+    height: 3.4rem;
+  }
+
+  .profile-page .tile-cta .mypokoin-logo {
+    font-size: 1rem;
+  }
+
   .page.profile-page {
     overflow-x: clip;
   }
