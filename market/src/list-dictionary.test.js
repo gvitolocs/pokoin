@@ -10,9 +10,9 @@ test("primeListDictionary adds one compression-dictionary link per page", () => 
     head: { appendChild: (node) => appended.push(node) },
     createElement: () => ({ relList: { supports: (rel) => rel === "compression-dictionary" } }),
   };
-  assert.equal(primeListDictionary(doc), false, "off by default");
+  assert.equal(primeListDictionary(doc, false), false, "the kill switch adds nothing");
   assert.equal(appended.length, 0);
-  assert.equal(primeListDictionary(doc, true), true);
+  assert.equal(primeListDictionary(doc), true, "on by default");
   assert.equal(appended[0].rel, "compression-dictionary");
   assert.match(appended[0].href, /\/api\/c1-dictionary$/);
   assert.equal(primeListDictionary(doc, true), false);
@@ -27,8 +27,8 @@ test("LIST_DICTIONARY_ID is the shipped dictionary filename and its sha256 prefi
   assert.equal(hex, LIST_DICTIONARY_ID);
 });
 
-test("flag off keeps today's plain c1v2 list URL", () => {
-  assert.equal(LIST_DICTIONARY_ENABLED, false);
+test("the flag is on, and browsers without compression-dictionary keep the plain c1v2 list URL", () => {
+  assert.equal(LIST_DICTIONARY_ENABLED, true);
   const plain = "/api/marketplace-list?kind=set&key=sv1&format=c1v2";
   assert.equal(listSnapshotPath("set", "SV1"), plain);
   assert.equal(listSnapshotPath("set", "SV1", ""), plain);
