@@ -270,6 +270,7 @@ pub async fn handler(State(state): State<RouteState>, method: Method, headers: H
         url_card_id: text("urlCardId"),
         pokemon,
     };
+    const NEGATIVE_CACHE: &str = "public, max-age=300, s-maxage=600";
     let pool;
     if pokemon {
         pool = state.api.read().clone();
@@ -281,7 +282,9 @@ pub async fn handler(State(state): State<RouteState>, method: Method, headers: H
     }
     match canonical_card_url_for_lookup(&pool, &lookup).await {
         Ok(Some(found)) => util::json_cache(StatusCode::OK, found, "public, max-age=60, s-maxage=300"),
-        Ok(None) => http::json(StatusCode::NOT_FOUND, json!({ "error": "Marketplace card URL not found." })),
+        // A card with no stored URL stays so until the next import: every desk
+        // reload asked again (no-store), so the miss is cached like a hit.
+        Ok(None) => util::json_cache(StatusCode::NOT_FOUND, json!({ "error": "Marketplace card URL not found." }), NEGATIVE_CACHE),
         Err(error) => util::db_error("marketplace-card-url", &error, "Marketplace card URL lookup failed."),
     }
 }

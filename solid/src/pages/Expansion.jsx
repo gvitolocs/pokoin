@@ -265,9 +265,10 @@ function SetDesk(props) {
     || sort() !== defaultSort();
   const eraName = () => tcgEra(info()?.expansion || { slug, name: name(), set: name() });
   const eraPath = () => (eraName() ? eraHref(eraName()) : '');
-  const lede = () => (loading()
+  const ledeText = () => (loading()
     ? 'Loading cards…'
     : `${(deskTotal() || shown().length).toLocaleString()} cards${eraName() ? ` in ${eraName()}` : ''}.`);
+  const lede = () => (loading() ? <span class="wait-text">Loading cards…</span> : ledeText());
   // Skeletons only while the set is really loading, at most three rows. Loaded
   // cards always render (images are loading="lazy"); off-screen tiles skip
   // layout via content-visibility (.set-desk .grid > .tile).
@@ -314,7 +315,7 @@ function SetDesk(props) {
 
   return (
     <div class="page desk set-desk" aria-busy={loading() ? 'true' : undefined}>
-      <SeoHead title={setSeoTitle(name())} description={lede()} canonical={`/marketplace/sets/${slug}`} />
+      <SeoHead title={setSeoTitle(name())} description={ledeText()} canonical={`/marketplace/sets/${slug}`} />
       <SeoCrumbs items={crumbs()} />
       <PageHead kicker="Set" title={name()} lede={lede()} printFlag={printFlag()}>
         <Show when={wordmark()}>
@@ -440,7 +441,7 @@ function SetDesk(props) {
           </Show>
         </div>
         <p class="result-count">
-          <Show when={!loading()} fallback="Loading…">
+          <Show when={!loading()} fallback={<span class="wait-text">Loading…</span>}>
             <strong>{shown().length.toLocaleString()}</strong>
             {filtersOn() ? ' matching' : ` of ${deskTotal().toLocaleString()}`}
           </Show>

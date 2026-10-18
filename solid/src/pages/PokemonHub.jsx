@@ -90,7 +90,7 @@ function SpeciesCards(props) {
       ]} />
       <PageHead kicker={dex(species.n)} title={species.name} />
       <p class="result-count">
-        <Show when={ready()} fallback="Loading…">
+        <Show when={ready()} fallback={<span class="wait-text">Loading…</span>}>
           <strong>{shown().length}</strong> {species.name} cards
         </Show>
       </p>

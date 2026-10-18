@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, Repeat, Show, untrack } from 'solid-js
 import { artCutVars } from '@market/art-cut.js';
 import { openListingChat } from '@market/chat-dock-store.js';
 import { listingReference, listingsReference, writeListingDrag } from '@market/chat-listing.js';
+import { rememberImageFallback, workingImage } from '@market/image-fallback-memo.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import {
   conditionChipSrc,
@@ -40,7 +41,9 @@ export function ShopList(props) {
 
 function ShopScan(props) {
   const full = () => preferFullImage(props.image) || props.image;
-  const thumb = () => homepageDerivativeUrl(props.image) || props.image;
+  const listedThumb = () => homepageDerivativeUrl(props.image) || props.image;
+  // A thumb that 404'd here before paints its full scan at once.
+  const thumb = () => workingImage(listedThumb());
   return (
     <ThumbZoom src={full()} full alt={props.name || ''}>
       <span class="art-cut shop-art" style={artCutVars({ set: props.setName || '', name: props.name })}>
@@ -52,6 +55,7 @@ function ShopScan(props) {
             const img = event.currentTarget;
             if (img.dataset.fallback) return;
             img.dataset.fallback = '1';
+            rememberImageFallback(listedThumb(), full());
             img.src = full();
           }}
         />

@@ -302,8 +302,11 @@ fn brotli11(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A list that is not built answers the same for minutes (builders run every
+/// 2 min to daily): a short public cache spares the origin a request on every
+/// page load that asks for it (satellite name lists are never built).
 fn missing() -> Response {
-    catalog_api::response(StatusCode::NOT_FOUND, json!({"error": "List not built yet.", "missing": true}), "no-store")
+    catalog_api::response(StatusCode::NOT_FOUND, json!({"error": "List not built yet.", "missing": true}), "public, max-age=60, s-maxage=120")
 }
 
 use axum::response::IntoResponse;

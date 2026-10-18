@@ -113,7 +113,7 @@ function EraSets(props) {
         lede={years || undefined}
       />
       <p class="result-count">
-        <Show when={expansions() != null} fallback="Loading…">
+        <Show when={expansions() != null} fallback={<span class="wait-text">Loading…</span>}>
           <strong>{rows().length}</strong> sets
         </Show>
       </p>

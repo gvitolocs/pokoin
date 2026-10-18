@@ -2522,6 +2522,27 @@ html.is-card-banding * {
   }
 }
 
+/* Skeletons stay invisible for their first 250 ms (they still hold their
+   space): a page that paints from its stored answer replaces them first, so
+   a reload with unchanged data never flashes one. */
+@keyframes skel-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tile-skel,
+.shop-row-skel,
+.skeleton-thread,
+.skeleton-line,
+.seller-history-skel,
+.messages-list-skeleton,
+.wait-text {
+  animation-name: skel-appear;
+  animation-duration: 1ms;
+  animation-delay: 250ms;
+  animation-fill-mode: both;
+}
+
 @keyframes skel-shimmer {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }

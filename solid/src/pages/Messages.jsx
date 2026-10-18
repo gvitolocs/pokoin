@@ -126,7 +126,8 @@ export default function Messages() {
     if (!untrack(signedIn)) return;
     try {
       const token = await getBearer();
-      const result = await listConversations(token);
+      // The inbox itself always asks: a message just sent must show.
+      const result = await listConversations(token, { fresh: true });
       const next = mergeChatPreviewRows(readChatPreviews(), result.conversations || []);
       writeChatPreviews(next);
       const current = untrack(rows);

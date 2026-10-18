@@ -8,12 +8,14 @@ const mark = read('./ExpansionMark.jsx');
 test('a stamped deck printing shows its stamp before the set mark, then the code', () => {
   assert.match(mark, /expansionStampSrc\(\{ slug: slug\(\), number: props\.number, id: props\.cardId \}\),\s*expansionSymbolSrc\(/);
   // A missing stamp plate falls through to the set mark, not straight to letters.
-  assert.match(mark, /onError=\{\(\) => setFailed\(\(n\) => n \+ 1\)\}/);
+  // The failed source is remembered (image-fallback-memo) and the next one is tried.
+  assert.match(mark, /onError=\{\(\) => \{\s*rememberImageFallback\(src\(\), DEAD_IMAGE, [^)]*\);\s*setFailed\(\(n\) => n \+ 1\);/);
   assert.match(mark, /fallback=\{<span class="set-shortcut-code">/);
 });
 
 test('desk version row and search suggest pass the printing number', () => {
-  assert.match(read('../pages/Card.jsx'), /<ExpansionMark\s+setName=\{ident\.set\}\s+number=\{row\.number \|\| row\.card_number\}\s+cardId=\{row\.id\}/);
+  // Set shortcuts are keyed by id, so the row is an accessor.
+  assert.match(read('../pages/Card.jsx'), /<ExpansionMark\s+setName=\{ident\(\)\.set\}\s+number=\{row\(\)\.number \|\| row\(\)\.card_number\}\s+cardId=\{row\(\)\.id\}/);
   assert.match(read('./SearchBox.jsx'), /<ExpansionMark\s+setName=\{identity\(\)\.set\}\s+number=\{card\(\)\.number \|\| card\(\)\.card_number\}\s+cardId=\{card\(\)\.id\}/);
 });
 

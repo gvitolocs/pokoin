@@ -77,7 +77,7 @@ export default function Sets() {
       </Show>
       <form class="shop-toolbar" onSubmit={(event) => event.preventDefault()}>
         <p class="result-count">
-          <Show when={expansions() != null} fallback="Loading…">
+          <Show when={expansions() != null} fallback={<span class="wait-text">Loading…</span>}>
             <strong>{shown()}</strong> sets
           </Show>
         </p>

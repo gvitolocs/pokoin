@@ -140,7 +140,9 @@ export default function ListingForm(props) {
 
   const uid = () => authUser()?.uid || authSession()?.uid || '';
   const sellerName = () => sellerNameOf(authUser(), profile());
-  const ready = () => authReady();
+  // The cached session is enough to paint the form enabled; a save waits for
+  // the bearer (getBearer) anyway.
+  const ready = () => authReady() || signedIn();
   const listLangs = createMemo(() => sellLanguages({
     nationality: card().nationality,
     setName: props.identity?.set || card().set,
