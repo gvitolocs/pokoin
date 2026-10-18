@@ -203,6 +203,10 @@ pub fn router(state: DomainState) -> Router {
         )
         .route("/api/unlock-silver", post(handlers::wallet::unlock_silver))
         .route(
+            "/api/extension-download",
+            get(handlers::extension::extension_download),
+        )
+        .route(
             "/api/money-request",
             get(handlers::wallet::money_request_get).post(handlers::wallet::money_request_post),
         )
@@ -324,6 +328,7 @@ mod tests {
             ("POST", "/api/transfer-account-balance"),
             ("POST", "/api/request-pkn-withdraw"),
             ("POST", "/api/unlock-silver"),
+            ("GET", "/api/extension-download"),
             ("GET", "/api/money-request"),
             ("POST", "/api/money-request"),
             ("POST", "/api/earn-pkn"),

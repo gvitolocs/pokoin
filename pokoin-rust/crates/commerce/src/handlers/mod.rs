@@ -3,6 +3,7 @@
 pub mod addresses;
 pub mod cart;
 pub mod crypto;
+pub mod extension;
 pub mod listings;
 pub mod orders;
 pub mod seller;

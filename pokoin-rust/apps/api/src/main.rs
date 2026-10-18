@@ -693,6 +693,7 @@ fn commerce_fallback_router() -> Router {
         "/api/transfer-account-balance",
         "/api/request-pkn-withdraw",
         "/api/unlock-silver",
+        "/api/extension-download",
         "/api/money-request",
         "/api/earn-pkn",
     ])

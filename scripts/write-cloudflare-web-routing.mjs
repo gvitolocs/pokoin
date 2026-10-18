@@ -55,6 +55,9 @@ export function redirectLines() {
     '/features/browser-extension/ /features/cardrails-inventory 301',
     `/download/extension.zip ${EXTENSION_ZIP} 302`,
     `/download/extention.zip ${EXTENSION_ZIP} 302`,
+    '# The Silver-only extension zip is never a static file: /extension.zip is the SPA page',
+    '# that downloads it from api.pokoin.com /api/extension-download (token + Silver checked there).',
+    '/extension.zip /market/app 200',
   ];
   // Exact /{game}/{private} before any wildcard so they stay static and still
   // win over the later /{game}* SPA catch-all (first match in this file).
@@ -247,7 +250,7 @@ export function writeCloudflareRouting(root) {
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, '_redirects'), `${lines.join('\n')}\n`);
   fs.writeFileSync(path.join(root, '_headers'), headerLines());
-  fs.writeFileSync(path.join(root, '.assetsignore'), 'download/*.zip\ndownload/*.ZIP\n');
+  fs.writeFileSync(path.join(root, '.assetsignore'), 'download/*.zip\ndownload/*.ZIP\nextension.zip\nextension/*.zip\n');
 
   const landing = path.join(root, 'landing.html');
   if (fs.existsSync(landing)) {
