@@ -15,7 +15,7 @@ import { game } from '@market/game.js';
 import { cardmarketSearchUrl } from '@market/identity.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { SILVER_PRICE_PKN } from '@market/silver.js';
-import { authReady, getBearer, signedIn } from '../../stores/auth.js';
+import { getBearer, signedIn } from '../../stores/auth.js';
 import { profile } from '../../stores/session.js';
 
 /**
@@ -156,7 +156,8 @@ export default function SilverHead(props) {
           {note()}
         </div>
       </Match>
-      <Match when={!authReady() || (signedIn() && !profile())}>
+      {/* The cached session already carries silver: no blank head until Firebase answers. */}
+      <Match when={signedIn() && !profile()}>
         <div class="silver-tools is-pending" aria-hidden="true" />
       </Match>
     </Switch>

@@ -132,9 +132,12 @@ async fn handle(state: RouteState, headers: axum::http::HeaderMap, uri: Uri) -> 
     };
     let rows = react_sql::overlay_cheapest_on_rows(&pool, true, &rows).await;
     if rows.is_empty() {
-        return support::json_with_cors(
+        // No artwork set yet: cached briefly so a desk reload does not ask again
+        // (sets are rebuilt hourly).
+        return support::json_with_cache_control(
             StatusCode::NOT_FOUND,
             json!({ "error": "Card not found.", "cardId": card_id }),
+            "public, max-age=300, s-maxage=600",
         );
     }
 

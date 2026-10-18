@@ -33,6 +33,32 @@ import { gameHref } from '@market/game.js';
 
 const ALBUM_PAGE = 24;
 const PRELOAD_AHEAD = 20;
+const ARTIST_STORED_KEY = 'pokoin.artistAlbums.v1';
+
+/** Artist slugs whose whole album this browser stored (IndexedDB), newest last. */
+function storedArtistAlbums() {
+  try {
+    const list = JSON.parse(localStorage.getItem(ARTIST_STORED_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function artistAlbumStored(slug) {
+  return storedArtistAlbums().includes(slug);
+}
+
+function rememberArtistAlbum(slug) {
+  const list = storedArtistAlbums().filter((item) => item !== slug);
+  list.push(slug);
+  try {
+    localStorage.setItem(ARTIST_STORED_KEY, JSON.stringify(list.slice(-200)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /** First pokedex page. SQL already returns this order, so it can paint before the rest. */
 const ARTIST_FIRST = 48;
 
@@ -67,6 +93,7 @@ function ArtistsIndex(props) {
     });
   onSettled(() => () => {
     disposed = true;
+    window.clearTimeout(firstTimer);
     stopRestore();
   });
 
@@ -101,7 +128,7 @@ function ArtistsIndex(props) {
       />
       <form class="shop-toolbar" onSubmit={(event) => event.preventDefault()}>
         <p class="result-count">
-          <Show when={artists() != null} fallback="Loading…">
+          <Show when={artists() != null} fallback={<span class="wait-text">Loading…</span>}>
             <strong>{shown().length}</strong> artists
           </Show>
         </p>
@@ -260,14 +287,24 @@ function ArtistDesk(props) {
     document.title = artistDeskIsUnknown(data) ? 'Artist · Pokoin' : artistSeoTitle(data.artist?.name || firstPaint);
     setError('');
   }
+  // The live first page (48 tiles) is for a first visit. When this browser
+  // stored the album, IndexedDB answers in a few ms: painting the 48 first
+  // made the album, its count and its facets swap a moment later.
+  let firstTimer = 0;
   if (!peekArtist(slug, 5000)) {
-    fetchArtist(slug, { limit: ARTIST_FIRST })
-      .then((data) => paintArtist(data))
-      .catch(() => {});
+    const firstPage = () => {
+      if (disposed || painted) return;
+      fetchArtist(slug, { limit: ARTIST_FIRST })
+        .then((data) => paintArtist(data))
+        .catch(() => {});
+    };
+    if (artistAlbumStored(slug)) firstTimer = window.setTimeout(firstPage, 300);
+    else firstPage();
   }
   // A stored album of any age paints at once; the revalidated one replaces it.
   fetchArtist(slug, { limit: 5000, onUpdate: (data) => paintArtist(data, { replace: true }) })
     .then((data) => {
+      if (data?.cards?.length) rememberArtistAlbum(slug);
       paintArtist(data, { replace: true });
       if (!disposed) setRestPending(false);
     })
@@ -540,7 +577,7 @@ function ArtistDesk(props) {
             />
           </div>
           <p class="result-count">
-            <Switch fallback="Loading…">
+            <Switch fallback={<span class="wait-text">Loading…</span>}>
               <Match when={payload() && !allCards()?.length}>No cards for this artist.</Match>
               <Match when={payload() && filtersOn()}>
                 <strong>{uniqueCardCount()}</strong> matching{sortNote()}

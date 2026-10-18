@@ -32,6 +32,7 @@ import {
   fetchExactNameCards,
   fetchListings,
   fetchPrintNationality,
+  peekPrintNationality,
   fetchVersionSet,
   invalidateListings,
   mergeCreatedListing,
@@ -136,7 +137,8 @@ import PriceStack from '../components/PriceStack.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { whenIdle } from '../lib/idle.js';
-import { authUser, getBearer } from '../stores/auth.js';
+import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
+import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
 import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
@@ -228,6 +230,10 @@ function CardDesk(props) {
 
   const cached = peekCard(cardId, { lang });
   const listed = peekListings(cardId);
+  // A reload paints the last answer of this desk; the live read reconciles it.
+  const deskGame = untrack(() => game().id);
+  const stored = peekHasListingRows(listed) ? null : readDeskListings(deskGame, cardId);
+  let paintedFromStore = Boolean(stored);
   const firstStub = untrack(stubCard);
   const [page, setPage] = createSignal(
     cached
@@ -235,9 +241,9 @@ function CardDesk(props) {
       : (firstStub ? { card: firstStub, versions: [], neighbors: neighborsOrPeek(cardId) } : null),
   );
   const [shop, setShop] = createStore({
-    offers: offerCopies(peekHasListingRows(listed) ? listed.listings : (cached?.offers || [])),
+    offers: offerCopies(peekHasListingRows(listed) ? listed.listings : (stored ? stored.rows : (cached?.offers || []))),
   });
-  const [offersReady, setOffersReady] = createSignal(peekHasListingRows(listed));
+  const [offersReady, setOffersReady] = createSignal(peekHasListingRows(listed) || Boolean(stored));
   const [error, setError] = createSignal('');
   // Same-id cards of other games, offered when a game-less link cannot pick one.
   const [ownerChoices, setOwnerChoices] = createSignal([]);
@@ -252,7 +258,10 @@ function CardDesk(props) {
   const [listingBusy, setListingBusy] = createSignal(false);
   const [shopError, setShopError] = createSignal('');
   const [editingOffer, setEditingOffer] = createSignal(null);
-  const [namePrintings, setNamePrintings] = createSignal(catalogPrintings(cached?.rarities));
+  // The rarity select as this desk last showed it, so it does not swap in
+  // after the collector label once the name snapshot answers.
+  const storedVersions = readDeskVersions(deskGame, cardId)?.rows || [];
+  const [namePrintings, setNamePrintings] = createSignal(mergePrintingRows(catalogPrintings(cached?.rarities), storedVersions));
   const [artPrintings, setArtPrintings] = createSignal(rowsFrom(cached?.versions));
   const [salesSlices, setSalesSlices] = createSignal(peekCardSales(cardId)?.slices ?? null);
   const [salesCondition, setSalesCondition] = createSignal('');
@@ -260,7 +269,9 @@ function CardDesk(props) {
   const [salesReverse, setSalesReverse] = createSignal(false);
   const [salesFirstEdition, setSalesFirstEdition] = createSignal(false);
   const [salesGraded, setSalesGraded] = createSignal(false);
-  const [setNationality, setSetNationality] = createSignal('');
+  const [setNationality, setSetNationality] = createSignal(untrack(() => peekPrintNationality(setSlug(
+    page()?.card?.set || page()?.card?.set_name || stubCard()?.set || stubCard()?.set_name || '',
+  ))));
   const [artistCover, setArtistCover] = createSignal('');
   let disposed = false;
   let viewed = false;
@@ -282,9 +293,13 @@ function CardDesk(props) {
   /** Same freshness rule as React: an empty refetch never wipes painted rows. */
   function refreshListings(seq, maxAgeMs = 0) {
     return fetchListings(cardId, { fresh: true, maxAgeMs }).then((list) => {
-      if (disposed || seq !== listingsSeq) return;
       const rows = list.listings || [];
-      if (rows.length || !shop.offers.length) setOffers(rows);
+      // Stored even when this desk was replaced (canonical redirect, ‹ ›).
+      if (seq === listingsSeq) writeDeskListings(deskGame, cardId, rows);
+      if (disposed || seq !== listingsSeq) return;
+      // A stored answer is old: an empty live one clears it.
+      if (rows.length || !shop.offers.length || paintedFromStore) setOffers(rows);
+      paintedFromStore = false;
       setOffersReady(true);
     });
   }
@@ -438,6 +453,8 @@ function CardDesk(props) {
       setSetNationality('');
       return undefined;
     }
+    const known = peekPrintNationality(slug);
+    if (known) setSetNationality(known);
     let live = true;
     fetchPrintNationality(slug).then((value) => {
       if (live) setSetNationality(value);
@@ -611,6 +628,9 @@ function CardDesk(props) {
   ));
   const collector = () => identity().number || '';
   const versionRows = createMemo(() => rarityVersions(card(), namePrintings()));
+  createEffect(versionRows, (rows) => {
+    if (rows.length > 1) writeDeskVersions(deskGame, cardId, rows);
+  });
   const versionLabel = () => versionOptionLabel(card()) || collector();
   const clipPrintings = createMemo(() => deskClipCandidates(artPrintings(), page()?.versions));
   const setShortcuts = createMemo(() => deskSetShortcuts(card(), clipPrintings()));
@@ -701,7 +721,8 @@ function CardDesk(props) {
   // The Vault (Pokoin's own stock) gets its own panel; the Shop lists everyone else.
   const split = createMemo(() => splitVaultOffers(offers()));
   const mineIds = createMemo(() => {
-    const uid = String(authUser()?.uid || '');
+    // The cached session names the seller before Firebase answers.
+    const uid = signedIn() ? String(authUid() || authSession()?.uid || '') : '';
     if (!uid) return [];
     return shop.offers.filter((row) => String(row.sellerUid || '') === uid).map((row) => row.id).filter(Boolean);
   });
@@ -994,10 +1015,11 @@ function CardDesk(props) {
                           onChange={goVersion}
                           aria-label="Version"
                         >
-                          <For each={versionRows()}>
+                          {/* Keyed by card id: a revalidated list of equal rows keeps its options. */}
+                          <For each={versionRows()} keyed={(row) => String(row.id)}>
                             {(row) => (
-                              <option value={String(row.id)} selected={String(row.id) === String(card().id)}>
-                                {versionOptionLabel(row)}
+                              <option value={String(row().id)} selected={String(row().id) === String(card().id)}>
+                                {versionOptionLabel(row())}
                               </option>
                             )}
                           </For>
@@ -1030,33 +1052,33 @@ function CardDesk(props) {
                     <div class="set-link tight version-links">
                       <Show when={setShortcuts().length}>
                         <div class="version-shortcuts">
-                          <For each={setShortcuts()}>
+                          <For each={setShortcuts()} keyed={(row) => String(row.id)}>
                             {(row) => {
-                              const ident = printingIdentity(row);
-                              const label = [ident.set, ident.number].filter(Boolean).join(' ');
+                              const ident = () => printingIdentity(row());
+                              const label = () => [ident().set, ident().number].filter(Boolean).join(' ');
                               const mark = () => (
-                                <ExpansionMark setName={ident.set} symbolUrl={row.expansionSymbolUrl || row.defaultSymbolUrl} />
+                                <ExpansionMark setName={ident().set} symbolUrl={row().expansionSymbolUrl || row().defaultSymbolUrl} />
                               );
                               return (
                                 <Show
-                                  when={String(row.id) === String(card().id)}
+                                  when={String(row().id) === String(card().id)}
                                   fallback={(
                                     <a
                                       class="set-shortcut"
-                                      href={gameHref(cardHref(row))}
-                                      title={label}
-                                      aria-label={label}
-                                      onPointerEnter={() => warm(row)}
+                                      href={gameHref(cardHref(row()))}
+                                      title={label()}
+                                      aria-label={label()}
+                                      onPointerEnter={() => warm(row())}
                                       onClick={() => {
-                                        handOffCard(row);
-                                        track(Action.clickVersion, row);
+                                        handOffCard(row());
+                                        track(Action.clickVersion, row());
                                       }}
                                     >
                                       {mark()}
                                     </a>
                                   )}
                                 >
-                                  <span class="set-shortcut is-on" title={label} aria-label={label} aria-current="page">
+                                  <span class="set-shortcut is-on" title={label()} aria-label={label()} aria-current="page">
                                     {mark()}
                                   </span>
                                 </Show>

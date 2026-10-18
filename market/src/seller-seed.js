@@ -2,12 +2,22 @@ import { safeAvatarUrl } from './avatar.js';
 import { peekHasListingRows, peekSellerListings } from './listings-cache.js';
 
 const IDENTITY_STORAGE = 'pokoin-seller-identity';
+const IDENTITY_MAX = 200;
 const identities = new Map();
 
-function storedIdentities() {
-  if (typeof sessionStorage === 'undefined') return {};
+// Public shop headers (name, photo, item counts): localStorage, so a reload
+// or a new tab paints the shop header as it was instead of the bare handle.
+function identityStore() {
   try {
-    const data = JSON.parse(sessionStorage.getItem(IDENTITY_STORAGE) || '{}');
+    return globalThis.localStorage || globalThis.sessionStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function storedIdentities() {
+  try {
+    const data = JSON.parse(identityStore()?.getItem(IDENTITY_STORAGE) || '{}');
     return data && typeof data === 'object' ? data : {};
   } catch {
     return {};
@@ -15,11 +25,13 @@ function storedIdentities() {
 }
 
 function saveIdentities() {
-  if (typeof sessionStorage === 'undefined') return;
+  const store = identityStore();
+  if (!store) return;
+  while (identities.size > IDENTITY_MAX) identities.delete(identities.keys().next().value);
   const payload = {};
   for (const [key, value] of identities) payload[key] = value;
   try {
-    sessionStorage.setItem(IDENTITY_STORAGE, JSON.stringify(payload));
+    store.setItem(IDENTITY_STORAGE, JSON.stringify(payload));
   } catch {
     /* private mode */
   }
@@ -41,13 +53,19 @@ export function rememberSellerIdentity(handle, profile = {}) {
   const photoUrl = safeAvatarUrl(profile.photoUrl);
   const uid = String(profile.uid || '').trim();
   const prev = identities.get(key) || {};
+  const count = (value, before) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : before);
   const next = {
     uid: uid || prev.uid || '',
     username,
     displayName: displayName || prev.displayName || '',
     photoUrl: photoUrl || prev.photoUrl || '',
+    copies: count(profile.copies, prev.copies),
+    unique: count(profile.unique, prev.unique),
   };
   if (!next.uid && !next.displayName && !next.photoUrl) return null;
+  if (prev.uid === next.uid && prev.username === next.username && prev.displayName === next.displayName
+    && prev.photoUrl === next.photoUrl && prev.copies === next.copies && prev.unique === next.unique) return next;
+  identities.delete(key);
   identities.set(key, next);
   saveIdentities();
   return next;
@@ -75,11 +93,15 @@ export function sellerIdentitySeed(handle) {
   };
 }
 
+/** The shop's item counts as last painted here ({ copies, unique }), or null. */
+export function sellerCountsSeed(handle) {
+  const known = peekSellerIdentity(handle);
+  return Number.isFinite(known?.copies) && Number.isFinite(known?.unique) ? { copies: known.copies, unique: known.unique } : null;
+}
+
 export function resetSellerIdentityForTests() {
   identities.clear();
-  if (typeof sessionStorage !== 'undefined') {
-    try { sessionStorage.removeItem(IDENTITY_STORAGE); } catch { /* ignore */ }
-  }
+  try { identityStore()?.removeItem(IDENTITY_STORAGE); } catch { /* ignore */ }
 }
 
 /**

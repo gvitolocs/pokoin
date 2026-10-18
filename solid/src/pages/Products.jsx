@@ -66,7 +66,7 @@ function Aisle(props) {
       </nav>
       <div class="shop-toolbar">
         <p class="result-count">
-          <Show when={!loading()} fallback="Loading…">
+          <Show when={!loading()} fallback={<span class="wait-text">Loading…</span>}>
             <Show
               when={list.cards.length}
               fallback={kind === 'graded' ? 'No graded cards listed.' : 'No products in that search.'}

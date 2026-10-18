@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-j
 import { artCutFor, artCutVars } from '@market/art-cut.js';
 import { artworkFigureMaskSrc, figureOrigin, loadFigureBox } from '@market/art-figure-mask.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
+import { DEAD_IMAGE, rememberImageFallback, workingImage } from '@market/image-fallback-memo.js';
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
 import { heroOpen, onHeroGate } from '@market/hero-gate.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '@market/missing-card.js';
@@ -32,8 +33,13 @@ export default function CardArt(props) {
     { equals: (a, b) => a.length === b.length && a.every((u, i) => u === b[i]) },
   );
   // Writable derived state: both reset whenever the sibling list changes.
-  const [index, setIndex] = createSignal(() => (urls(), 0));
-  const [dead, setDead] = createSignal(() => (urls(), false));
+  // A sibling that loaded here before is tried first, so a revisit never
+  // repaints through the failing ones (.jpg → .png → .webp).
+  const firstIndex = (list) => Math.max(0, list.indexOf(workingImage(list[0])));
+
+  const [index, setIndex] = createSignal(() => firstIndex(urls()));
+  // All siblings failed here before (within a day): the missing-card scan at once.
+  const [dead, setDead] = createSignal(() => workingImage(urls()[0]) === DEAD_IMAGE);
   const current = () => urls()[index()] || '';
   const cardId = () => props.card?.id || props.card?.card_id || '';
   let errorSent = false;
@@ -57,6 +63,7 @@ export default function CardArt(props) {
       return;
     }
     setDead(true);
+    rememberImageFallback(list[0], DEAD_IMAGE, { keepMs: 24 * 60 * 60_000 });
     logCardArt('dead', { full: props.full, cardId: cardId(), src: props.src, siblings: list });
     if (!errorSent) {
       errorSent = true;
@@ -71,6 +78,7 @@ export default function CardArt(props) {
       failCurrent();
       return;
     }
+    if (index() > 0) rememberImageFallback(urls()[0], current());
     if (props.full) {
       logCardArt('load', { cardId: cardId(), src: node.currentSrc, natural: `${node.naturalWidth}x${node.naturalHeight}` });
     }

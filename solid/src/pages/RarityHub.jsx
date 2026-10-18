@@ -75,7 +75,7 @@ function RarityCards(props) {
       ]} />
       <PageHead kicker="Rarity" title={hub.name} />
       <p class="result-count">
-        <Show when={ready()} fallback="Loading…">
+        <Show when={ready()} fallback={<span class="wait-text">Loading…</span>}>
           <strong>{list.cards.length}</strong> cards
         </Show>
       </p>

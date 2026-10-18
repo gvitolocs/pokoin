@@ -1525,6 +1525,41 @@ export function peekExpansion(opts = {}) {
 
 const printNationalityCache = new Map();
 const printNationalityInflight = new Map();
+// A set's print nationality never changes: kept in localStorage so a desk
+// reload paints the right language and flag in its first frame.
+const PRINT_NATIONALITY_KEY = 'pokoin.printNationality.v1';
+let storedNationalities = null;
+function nationalityStore() {
+  if (storedNationalities) return storedNationalities;
+  try {
+    const saved = JSON.parse(globalThis.localStorage?.getItem(PRINT_NATIONALITY_KEY) || '{}');
+    storedNationalities = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch {
+    storedNationalities = {};
+  }
+  return storedNationalities;
+}
+function storeNationality(slug, value) {
+  if (!value) return;
+  const all = nationalityStore();
+  if (all[slug] === value) return;
+  all[slug] = value;
+  const keys = Object.keys(all);
+  if (keys.length > 2000) delete all[keys[0]];
+  try {
+    globalThis.localStorage?.setItem(PRINT_NATIONALITY_KEY, JSON.stringify(all));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** The print nationality already known on this browser, synchronously ('' when not). */
+export function peekPrintNationality(slug) {
+  const key = String(slug || '').trim();
+  if (!key) return '';
+  if (printNationalityCache.has(key)) return printNationalityCache.get(key);
+  return String(nationalityStore()[key] || '');
+}
 
 /** Expansion nationality for the card desk. Cards themselves often omit the field. */
 export function fetchPrintNationality(slug) {
@@ -1534,6 +1569,11 @@ export function fetchPrintNationality(slug) {
   }
   if (printNationalityCache.has(key)) {
     return Promise.resolve(printNationalityCache.get(key));
+  }
+  const known = String(nationalityStore()[key] || '');
+  if (known) {
+    printNationalityCache.set(key, known);
+    return Promise.resolve(known);
   }
   const peeked = peekExpansion({ slug: key, limit: EXPANSION_PAGE, offset: 0 });
   const fromPeek = String(peeked?.expansion?.nationality || '').trim();
@@ -1550,6 +1590,7 @@ export function fetchPrintNationality(slug) {
     .then((data) => {
       const value = String(data?.expansion?.nationality || '').trim();
       printNationalityCache.set(key, value);
+      storeNationality(key, value);
       return value;
     })
     .catch(() => '')

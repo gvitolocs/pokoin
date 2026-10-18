@@ -7,7 +7,7 @@ import { cartItemFromOffer } from '@market/cart-rows.js';
 import { game } from '@market/game.js';
 import { publicListingSellerName, sellerCountryFlag, sellerCountryShort, sellerHandle } from '@market/listing-meta.js';
 import { getSearchLang } from '@market/locale.js';
-import { rememberSellerIdentity, seedSellerListings, sellerIdentitySeed } from '@market/seller-seed.js';
+import { rememberSellerIdentity, seedSellerListings, sellerCountsSeed, sellerIdentitySeed } from '@market/seller-seed.js';
 import { filterSellerBook } from '@market/seller-shop-filter.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import {
@@ -96,6 +96,7 @@ function SellerShop(props) {
   const selectedGame = game().apiGame;
   const seeded = seedSellerListings(handle, { pageSize: PAGE_SIZE, sort: 'price-desc', game: selectedGame });
   const known = sellerIdentitySeed(handle);
+  const knownCounts = sellerCountsSeed(handle);
 
   const [listings, setListings] = createSignal(seeded?.listings ?? null);
   const [total, setTotal] = createSignal(seeded?.total ?? null);
@@ -335,6 +336,19 @@ function SellerShop(props) {
   const copyCount = () => (bookView() ? bookView().copies : copies());
   const busy = () => (bookView() ? false : (loading() || (bookPhase() === 'loading' && filtersNarrow())));
 
+  // The next visit paints this header (name, photo, unfiltered counts) in its first frame.
+  createEffect(
+    () => {
+      const view = bookView();
+      if (!view || filtersNarrow()) return null;
+      const who = seller();
+      return { uid: who.uid, username: who.username, displayName: who.displayName, photoUrl: who.photoUrl, copies: view.copies, unique: view.unique };
+    },
+    (header) => {
+      if (header) rememberSellerIdentity(handle, header);
+    },
+  );
+
   const sample = () => shown()?.[0];
   const display = () => seller().displayName || publicListingSellerName(sample(), handle);
   const tag = () => seller().username || sellerHandle(sample()) || handle;
@@ -430,8 +444,8 @@ function SellerShop(props) {
           </header>
 
           <MetricGrid>
-            <Metric value={shown() == null || copyCount() == null ? '…' : copyCount()} label="Total items" />
-            <Metric value={shown() == null ? '…' : uniqueItems()} label="Unique items" />
+            <Metric value={shown() == null || copyCount() == null ? (knownCounts?.copies ?? '…') : copyCount()} label="Total items" />
+            <Metric value={shown() == null ? (knownCounts?.unique ?? '…') : uniqueItems()} label="Unique items" />
           </MetricGrid>
 
           <Alert message={shown()?.length && error()?.lede ? error().lede : ''} />
@@ -493,7 +507,7 @@ function SellerShop(props) {
             </div>
 
             <p class="seller-result-count">
-              <Show when={!(shown() == null || busy())} fallback="Loading…">
+              <Show when={!(shown() == null || busy())} fallback={<span class="wait-text">Loading…</span>}>
                 <Show when={productCount()} fallback="No matching listings">
                   Showing <strong>{startIdx()}</strong>–<strong>{endIdx()}</strong> of{' '}
                   <strong>{productCount()}</strong>

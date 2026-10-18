@@ -67,7 +67,7 @@ function LanguageSets(props) {
       ]} />
       <PageHead kicker="Print language" title={`${hub.name} print`} />
       <p class="result-count">
-        <Show when={expansions() != null} fallback="Loading…">
+        <Show when={expansions() != null} fallback={<span class="wait-text">Loading…</span>}>
           <strong>{rows().length}</strong> sets
         </Show>
       </p>

@@ -351,12 +351,35 @@ export function writeCachedPricerSettings(uid, settings) {
   try { globalThis.localStorage?.setItem(PRICER_KEY, JSON.stringify({ uid, settings: settings || {} })); } catch (_) { /* Optional. */ }
 }
 
+/** The seller's last CardTrader link state ({ connected, oneDayReady }), so the
+ *  listing form paints its targets and primary button as they were. */
+const CT_STATUS_KEY = 'pokoin.ctStatus.v1';
+
+export function readCachedCardTraderStatus(uid) {
+  try {
+    const saved = JSON.parse(globalThis.localStorage?.getItem(CT_STATUS_KEY) || 'null');
+    return saved?.uid && saved.uid === uid ? { connected: saved.connected === true, oneDayReady: saved.oneDayReady === true } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function writeCachedCardTraderStatus(uid, status) {
+  if (!uid) return;
+  try {
+    globalThis.localStorage?.setItem(CT_STATUS_KEY, JSON.stringify({ uid, connected: status.connected === true, oneDayReady: status.oneDayReady === true }));
+  } catch (_) { /* Optional. */ }
+}
+
 /** Sign-out / no session: drop every private seller cache on this browser. */
 export function wipePrivateBooks() {
   inventoryBooks.clear();
   try {
     globalThis.localStorage?.removeItem(PRICER_KEY);
     globalThis.localStorage?.removeItem(STALE_KEY);
+    globalThis.localStorage?.removeItem(CT_STATUS_KEY);
+    // The cart's personal recommendations of this account.
+    globalThis.localStorage?.removeItem('pokoin.cartRecs.v1');
   } catch (_) { /* Optional. */ }
 }
 
