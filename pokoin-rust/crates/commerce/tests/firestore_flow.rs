@@ -356,6 +356,9 @@ async fn mock_create(
     Query(query): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Response {
+    if let Some(parent) = collection.strip_suffix(":runQuery") {
+        return run_query_under(&state, parent, &body);
+    }
     let id = query
         .get("documentId")
         .cloned()
@@ -380,6 +383,20 @@ async fn mock_create(
 }
 
 async fn mock_run_query(State(state): State<MockStore>, Json(body): Json<Value>) -> Response {
+    run_query_under(&state, "", &body)
+}
+
+/// `runQuery` on the root (`parent` empty) or on `{parent}`'s sub-collection.
+/// Like the emulator, a `parent` in the body is refused: Firestore takes it
+/// from the URL path only.
+fn run_query_under(state: &MockStore, parent: &str, body: &Value) -> Response {
+    if body.get("parent").is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": { "status": "INVALID_ARGUMENT", "message": "parent belongs in the URL path" } })),
+        )
+            .into_response();
+    }
     let query = body.get("structuredQuery").cloned().unwrap_or(json!({}));
     let collection = query
         .get("from")
@@ -404,7 +421,15 @@ async fn mock_run_query(State(state): State<MockStore>, Json(body): Json<Value>)
     let mut rows: Vec<(String, Value)> = state
         .all()
         .into_iter()
-        .filter(|(path, _)| path.starts_with(&format!("{collection}/")))
+        .filter(|(path, _)| {
+            let prefix = if parent.is_empty() {
+                format!("{collection}/")
+            } else {
+                format!("{parent}/{collection}/")
+            };
+            // Direct children only (no allDescendants): `{prefix}{id}`.
+            path.strip_prefix(&prefix).is_some_and(|id| !id.contains('/'))
+        })
         .filter(|(_, value)| {
             filters.iter().all(|filter| {
                 let Some(field_filter) = filter.get("fieldFilter") else {
@@ -2448,6 +2473,71 @@ async fn address_ids_that_walk_out_of_the_users_addresses_are_400_and_touch_noth
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn saved_addresses_list_and_default_read_only_the_users_subcollection() {
+    let (state, firestore, store) =
+        state_harness_with_store(|config| config.address_encryption_key = Some(test_address_key()))
+            .await;
+    let app = pokoin_commerce::router(state);
+    // Decoys a root-scoped query would read: another user's default and a
+    // root-level `shipping_addresses` document.
+    for (collection, id) in [
+        ("users/someone-else/shipping_addresses", "other-default"),
+        ("shipping_addresses", "root-decoy"),
+    ] {
+        firestore
+            .create_document(collection, id, &json!({ "countryCode": "DE", "isDefault": true }))
+            .await
+            .expect("decoy");
+    }
+
+    let address = |city: &str| {
+        json!({
+            "fullName": "Alice Buyer",
+            "addressLine1": "Via Roma 1",
+            "postalCode": "00100",
+            "city": city,
+            "countryCode": "IT",
+            "isDefault": true,
+        })
+    };
+    let (status, first) = call(&app, "POST", "/api/account-addresses", Some(address("Roma"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let (status, second) = call(&app, "POST", "/api/account-addresses", Some(address("Milano"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let first_id = first["address"]["id"].as_str().unwrap().to_string();
+    let second_id = second["address"]["id"].as_str().unwrap().to_string();
+
+    let (status, listed) = call(&app, "GET", "/api/account-addresses", None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let mut rows: Vec<(String, bool)> = listed["addresses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["id"].as_str().unwrap().to_string(),
+                row["isDefault"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    rows.sort();
+    let mut expected = vec![(first_id.clone(), false), (second_id, true)];
+    expected.sort();
+    assert_eq!(rows, expected, "{listed}");
+
+    // The new default cleared only this user's previous default.
+    assert_eq!(
+        store.get(&format!("users/buyer-1/shipping_addresses/{first_id}")).unwrap()["isDefault"],
+        json!(false)
+    );
+    assert_eq!(
+        store.get("users/someone-else/shipping_addresses/other-default").unwrap()["isDefault"],
+        json!(true)
+    );
+    assert_eq!(store.get("shipping_addresses/root-decoy").unwrap()["isDefault"], json!(true));
 }
 
 #[tokio::test]

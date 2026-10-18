@@ -170,6 +170,9 @@ and `localStorage['pokoin.auth.session']={"uid":"e2e-buyer","signedIn":true}`, t
 use `/cart` → `/checkout` and pay with Stripe's test card `4242 4242 4242 4242`.
 `VITE_POKOIN_API_ORIGIN` only works under `vite dev`; production builds ignore it.
 
+With the emulator up, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8086 cargo test -p pokoin-commerce --test firestore_emulator`
+checks that sub-collection queries (saved addresses) put the parent in the `runQuery` URL path.
+
 ## Buyer markup and processor-cost correction (17 October 2026)
 
 The owner clarified that Pokoin’s 3% is a **buyer markup**, not a deduction from

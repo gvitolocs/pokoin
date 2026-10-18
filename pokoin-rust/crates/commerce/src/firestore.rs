@@ -357,14 +357,42 @@ impl FirestoreClient {
             .unwrap_or_default())
     }
 
+    /// URL and body of a `runQuery`. A sub-collection parent goes in the URL
+    /// path (`{parent}:runQuery`): Firestore ignores a `parent` in the body
+    /// and would run the query on the root collection of the same name.
+    pub fn run_query_request(&self, query: &StructuredQuery) -> Result<(String, Value), StoreError> {
+        let url = match &query.parent_document {
+            Some(parent) => format!("{}:runQuery", self.parent_document_url(parent)?),
+            None => format!("{}:runQuery", self.base),
+        };
+        Ok((url, json!({ "structuredQuery": query.to_json() })))
+    }
+
+    /// REST URL of a query parent: a document URL under this client's base
+    /// (what [`Self::document_path`] returns) or a relative `coll/id[/coll/id]`.
+    fn parent_document_url(&self, parent: &str) -> Result<String, StoreError> {
+        let relative = match parent.strip_prefix(&format!("{}/", self.base)) {
+            Some(relative) => relative,
+            None if parent.contains("://") => {
+                return Err(StoreError::Invalid("Invalid query parent.".into()))
+            }
+            None => parent,
+        };
+        let segments: Vec<&str> = relative.split('/').collect();
+        if !segments.len().is_multiple_of(2) {
+            return Err(StoreError::Invalid("Invalid query parent.".into()));
+        }
+        for segment in &segments {
+            validate_document_id(segment)
+                .map_err(|_| StoreError::Invalid("Invalid query parent.".into()))?;
+        }
+        Ok(format!("{}/{relative}", self.base))
+    }
+
     /// Structured query: `runQuery`.
     pub async fn run_query(&self, query: &StructuredQuery) -> Result<Vec<Value>, StoreError> {
-        let url = format!("{}/../documents:runQuery", self.base);
+        let (url, body) = self.run_query_request(query)?;
         let request = self.authorized(self.http.post(&url)).await?;
-        let mut body = json!({ "structuredQuery": query.to_json() });
-        if let Some(parent) = &query.parent_document {
-            body["parent"] = Value::String(parent.clone());
-        }
         let response = request
             .json(&body)
             .timeout(Duration::from_secs(10))
@@ -1002,7 +1030,8 @@ impl StructuredQuery {
         self
     }
 
-    /// Sub-collection scope: `parent` is the full document path.
+    /// Sub-collection scope: `parent` is a document (a REST URL under the
+    /// client base, or relative `users/{uid}`); it goes in the URL path.
     pub fn parent(mut self, parent: impl Into<String>) -> Self {
         self.parent_document = Some(parent.into());
         self
@@ -1490,6 +1519,72 @@ mod tests {
     #[test]
     fn the_commit_write_limit_matches_firestore() {
         assert_eq!(MAX_WRITES_PER_COMMIT, 500);
+    }
+
+    const QUERY_BASE: &str =
+        "https://firestore.googleapis.com/v1/projects/pokoin-test/databases/(default)/documents";
+
+    fn query_client() -> FirestoreClient {
+        FirestoreClient::with_static_token(reqwest::Client::new(), "pokoin-test", QUERY_BASE, "t")
+    }
+
+    #[test]
+    fn a_root_query_posts_to_the_documents_root_without_a_parent() {
+        let (url, body) = query_client()
+            .run_query_request(&StructuredQuery::collection("orders").where_eq("buyerUid", json!("u1")))
+            .unwrap();
+        assert_eq!(url, format!("{QUERY_BASE}:runQuery"));
+        assert!(body.get("parent").is_none(), "{body}");
+        assert_eq!(body["structuredQuery"]["from"], json!([{ "collectionId": "orders" }]));
+    }
+
+    #[test]
+    fn a_subcollection_query_puts_the_parent_in_the_url_path() {
+        let client = query_client();
+        let parent = client.document_path("users", "u1").unwrap();
+        let query = StructuredQuery::collection("shipping_addresses")
+            .parent(parent)
+            .order_by("createdAt", true)
+            .limit(20);
+        let (url, body) = client.run_query_request(&query).unwrap();
+        assert_eq!(url, format!("{QUERY_BASE}/users/u1:runQuery"));
+        assert_eq!(
+            body,
+            json!({
+                "structuredQuery": {
+                    "from": [{ "collectionId": "shipping_addresses" }],
+                    "orderBy": [{ "field": { "fieldPath": "createdAt" }, "direction": "DESCENDING" }],
+                    "limit": 20,
+                }
+            })
+        );
+
+        let relative = StructuredQuery::collection("shipping_addresses").parent("users/u1");
+        let (url, _) = client.run_query_request(&relative).unwrap();
+        assert_eq!(url, format!("{QUERY_BASE}/users/u1:runQuery"));
+    }
+
+    #[test]
+    fn a_query_parent_outside_this_database_or_not_a_document_is_rejected() {
+        let client = query_client();
+        for parent in [
+            "",
+            "users",
+            "users/",
+            "users//u1",
+            "users/../balances/x",
+            "users/u1/shipping_addresses",
+            "users/u1%2F..",
+            "https://firestore.googleapis.com/v1/projects/other/databases/(default)/documents/users/u1",
+            "https://evil.example/v1/projects/pokoin-test/databases/(default)/documents/users/u1",
+            QUERY_BASE,
+        ] {
+            let query = StructuredQuery::collection("shipping_addresses").parent(parent);
+            assert!(
+                matches!(client.run_query_request(&query), Err(StoreError::Invalid(_))),
+                "accepted parent {parent:?}"
+            );
+        }
     }
 }
 
