@@ -3220,6 +3220,27 @@ export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, 
 }
 
 /**
+ * The seller's storage boxes, newest first, each with its next free slot
+ * (`next.slot` is the `·stack·position` suffix). The server counts every
+ * card that still sits in the box: all games, active, paused and inactive
+ * rows. With `box`, also that box's rows and its `next` slot.
+ */
+export function fetchSellerBoxSlots(sellerUid, token, { box = '', stackSize = 1, id = '' } = {}) {
+  const params = new URLSearchParams({
+    action: 'box-slots',
+    sellerUid: String(sellerUid || ''),
+    stackSize: String(Math.max(1, Math.trunc(Number(stackSize)) || 1)),
+  });
+  const name = String(box || '').trim();
+  if (name) params.set('box', name);
+  // An own listing id also returns where it is stored (`listing.location`).
+  if (id) params.set('id', String(id));
+  return getJson(`/api/marketplace-listings?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
  * Every live listing of a seller, paging past the API's 1,000-row cap
  * (a seller with 1,463 listings saw only the first 1,000). Rows are deduped by id.
  */
