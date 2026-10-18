@@ -2129,6 +2129,9 @@ h1, h2 { margin: 0 0 0.85rem; }
   justify-content: center;
   gap: 0.4rem;
   margin-top: 0.9rem;
+  /* The dot row's height before a satellite TCG's slides land: the rails
+     below must not move down 8px when the dots appear. */
+  min-height: 0.5rem;
 }
 
 .promo-dots button {
@@ -8000,6 +8003,11 @@ dialog.zoom:not([open]) {
 @media (max-width: 720px) {
   .promo-stage { padding-top: 2.4rem; }
 
+  /* First visit to a satellite TCG: its slides wait on the expansions read.
+     Hold the shortest slide's box (518px at 600-720px) so the rails below
+     are not painted one slide too high, then pushed down. */
+  .promo-stage.is-loading .promo { min-height: 32rem; }
+
   .promo-slide {
     grid-template-columns: 1fr;
     min-width: 0;
@@ -8288,6 +8296,9 @@ dialog.zoom:not([open]) {
     min-height: 0;
     border-radius: 14px;
   }
+
+  /* Shortest satellite slide on phones: 448px at 390px wide. */
+  .promo-stage.is-loading .promo { min-height: 28rem; }
 
   .promo-slide {
     grid-template-columns: 1fr;
