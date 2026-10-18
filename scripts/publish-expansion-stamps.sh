@@ -28,9 +28,10 @@ if [ "${1:-}" != "--apply" ]; then
   exit 0
 fi
 
+# Same modes as the neighbouring expansions/symbols trees on each origin.
 mkdir -p "$NEZ_OBJECTS/$DEST"
-rsync -a --checksum "$STAGING/" "$NEZ_OBJECTS/$DEST/"
-rsync -a --checksum --chown=nes:nes \
-  --rsync-path="mkdir -p $PI_OBJECTS/$DEST && chown nes:nes $PI_OBJECTS/$DEST && rsync" \
+rsync -a --checksum --chmod=D775,F664 "$STAGING/" "$NEZ_OBJECTS/$DEST/"
+rsync -a --checksum --chown=nes:nes --chmod=D775,F644 \
+  --rsync-path="mkdir -p $PI_OBJECTS/$DEST && chown nes:nes $PI_OBJECTS/$DEST && chmod 775 $PI_OBJECTS/$DEST && rsync" \
   "$STAGING/" "$PI_HOST:$PI_OBJECTS/$DEST/"
 echo "published $DEST to the nezopt mirror and $PI_HOST"
