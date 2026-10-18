@@ -38,7 +38,7 @@ test('an image that failed on this browser paints its working sibling at once', 
   assert.match(art, /workingImage\(urls\(\)\[0\]\) === DEAD_IMAGE/);
   assert.match(shop, /const thumb = \(\) => workingImage\(listedThumb\(\)\);/);
   assert.match(guide, /workingImage\(logo\(\)\) === DEAD_IMAGE/);
-  assert.match(mark, /workingImage\(src\(\)\) === DEAD_IMAGE/);
+  assert.match(mark, /\.filter\(\(url\) => workingImage\(url\) !== DEAD_IMAGE\)/);
 });
 
 test('shop, artist and cart paint their last answer instead of a placeholder', () => {

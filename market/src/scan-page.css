@@ -1,0 +1,600 @@
+/* pokoin.com/scan: live card scanner (solid/src/pages/Scan.jsx). */
+
+.scan-page {
+  padding-bottom: 3.5rem;
+}
+
+.scan-head {
+  margin: 0.15rem 0 1rem;
+}
+
+.scan-head .page-title {
+  margin-bottom: 0.35rem;
+}
+
+.scan-lede {
+  margin: 0;
+  max-width: 38rem;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* ---------- game + language ---------- */
+
+.scan-catalogs {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+  min-width: 0;
+}
+
+.scan-games,
+.scan-langs {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 2px;
+  margin: -2px;
+}
+
+.scan-games::-webkit-scrollbar,
+.scan-langs::-webkit-scrollbar {
+  display: none;
+}
+
+.scan-game,
+.scan-lang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 40px;
+  padding: 0 0.95rem;
+  border: 1px solid var(--g4);
+  border-radius: 999px;
+  background: var(--g2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.scan-game-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: no-repeat center / contain;
+  mask: no-repeat center / contain;
+}
+
+/* The game row scrolls sideways; fade its right edge so the cut reads as more. */
+.scan-games {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+  padding-right: 40px;
+}
+
+.scan-game:hover,
+.scan-lang:hover {
+  border-color: var(--g5);
+}
+
+.scan-game.on,
+.scan-lang.on {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.12);
+  color: var(--yellow);
+}
+
+.scan-lang {
+  min-height: 34px;
+  padding: 0 0.8rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.scan-game:focus-visible,
+.scan-lang:focus-visible,
+.scan-seg button:focus-visible,
+.scan-icon:focus-visible,
+.scan-hit:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.scan-catalogs-note {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* ---------- layout ---------- */
+
+.scan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* ---------- camera stage ---------- */
+
+.scan-stage {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  max-height: max(380px, min(calc(100vh - var(--topbar-h) - 15rem), 680px));
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--g4);
+  border-radius: 22px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgb(255 211 61 / 0.07), transparent 60%),
+    #07070a;
+  isolation: isolate;
+}
+
+.scan-stage.dragging {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 4px rgb(255 211 61 / 0.18);
+}
+
+.scan-video,
+.scan-photo,
+.scan-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.scan-video,
+.scan-photo {
+  object-fit: contain;
+  background: #000;
+}
+
+.scan-video[hidden],
+.scan-photo[hidden],
+.scan-file {
+  display: none;
+}
+
+.scan-overlay {
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Faint 63:88 frame while the camera looks for a card. */
+.scan-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.scan-guide span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 74%;
+  aspect-ratio: 63 / 88;
+  transform: translate(-50%, -50%);
+  opacity: 0.6;
+  --c: rgb(255 255 255 / 0.85);
+  --l: 26px;
+  --t: 3px;
+  background:
+    linear-gradient(var(--c), var(--c)) top left / var(--l) var(--t) no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / var(--t) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--l) var(--t) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--t) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--l) var(--t) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--t) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--l) var(--t) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--t) var(--l) no-repeat;
+}
+
+.scan-start {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.35rem;
+  padding: 4.5rem 1.5rem 5.5rem;
+  text-align: center;
+}
+
+.scan-start-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 0.4rem;
+  border-radius: 50%;
+  background: rgb(255 211 61 / 0.14);
+  color: var(--yellow);
+}
+
+.scan-start h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.scan-start p {
+  margin: 0;
+  max-width: 26rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.scan-start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.scan-start-hint {
+  margin-top: 0.35rem !important;
+  font-size: 0.82rem;
+}
+
+.scan-status {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  left: 14px;
+  max-width: calc(100% - 28px);
+  margin: 0;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.3;
+  pointer-events: none;
+}
+
+.scan-status.quiet {
+  display: none;
+}
+
+.scan-controls {
+  position: absolute;
+  z-index: 4;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.scan-controls > * {
+  pointer-events: auto;
+}
+
+.scan-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.scan-seg button {
+  min-height: 38px;
+  min-width: 72px;
+  padding: 0 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scan-seg button.on {
+  background: var(--yellow);
+  color: #111;
+}
+
+.scan-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.scan-seg + .scan-icon {
+  margin-left: auto;
+}
+
+.scan-icon.on {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.scan-camera-select {
+  height: 44px;
+  max-width: 13rem;
+  min-width: 0;
+  padding: 0 0.8rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.62);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+/* ---------- side: results + save ---------- */
+
+.scan-side {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  scroll-margin-top: calc(var(--topbar-h) + 12px);
+}
+
+.scan-panel {
+  padding: 1.15rem;
+  border: 1px solid var(--g4);
+  border-radius: 18px;
+  background: var(--g2);
+}
+
+.scan-panel h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.scan-panel p {
+  margin: 0 0 0.9rem;
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+
+.scan-empty ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.scan-empty li {
+  position: relative;
+  padding-left: 1rem;
+}
+
+.scan-empty li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.scan-match {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.scan-match-art {
+  display: block;
+  aspect-ratio: 63 / 88;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--g3);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.5);
+}
+
+.scan-match-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scan-match-score {
+  display: inline-block;
+  margin: 0 0 0.5rem !important;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgb(255 211 61 / 0.14);
+  color: var(--yellow) !important;
+  font-size: 0.78rem !important;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-match h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.scan-match-meta {
+  margin-bottom: 1rem !important;
+}
+
+.scan-match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.scan-match-actions .btn {
+  padding: 0.55rem 0.95rem;
+  font-size: 0.9rem;
+}
+
+.scan-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.scan-hit {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 64px;
+  padding: 0.45rem 0.55rem;
+  margin: 0 -0.55rem;
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.scan-hit:hover {
+  background: var(--g3);
+  text-decoration: none;
+}
+
+.scan-hit[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+.scan-hit-art {
+  display: block;
+  width: 44px;
+  aspect-ratio: 63 / 88;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--g3);
+}
+
+.scan-hit-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scan-hit-text {
+  display: grid;
+  min-width: 0;
+}
+
+.scan-hit-text strong,
+.scan-hit-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-hit-text span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.scan-hit-score {
+  color: var(--yellow);
+  font-weight: 750;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- tablet / phone ---------- */
+
+@media (max-width: 900px) {
+  .scan-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .scan-head {
+    margin-bottom: 0.85rem;
+  }
+
+  .scan-lede {
+    font-size: 0.92rem;
+  }
+
+  /* A phone holds the card upright: a portrait stage, as tall as fits. */
+  .scan-stage {
+    aspect-ratio: 3 / 4;
+    max-height: calc(100dvh - var(--topbar-h) - 9rem);
+    min-height: 360px;
+    border-radius: 18px;
+  }
+
+  .scan-status {
+    top: 10px;
+    left: 10px;
+    max-width: calc(100% - 20px);
+    font-size: 0.84rem;
+  }
+
+  .scan-controls {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .scan-seg button {
+    min-width: 64px;
+    padding: 0 0.75rem;
+  }
+
+  .scan-camera-select {
+    max-width: 9rem;
+  }
+
+  .scan-match {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
+
+  .scan-match h2 {
+    font-size: 1.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-game,
+  .scan-lang {
+    transition: none;
+  }
+}

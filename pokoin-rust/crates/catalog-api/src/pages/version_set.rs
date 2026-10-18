@@ -54,6 +54,62 @@ pub const PRINTING_SQL: &str = "
   limit 128
 ";
 
+/// Satellite games have no CLIP version sets: printings of the same card are
+/// the same name in that game's catalog. The synthetic version key is
+/// `name:<lower name>`; nationality comes from `pokoin_expansions` or the set
+/// name (Yu-Gi-Oh! OCG / Japanese / Chinese / Korean sets).
+pub const SATELLITE_PRINTING_SQL: &str = "
+  with target as (
+    select lower(btrim(name)) as name_key, name_prefix
+    from public.marketplace_search_candidates
+    where card_id = $1::bigint and item_kind = 'single' and product_type = 'card'
+    limit 1
+  ),
+  printings as (
+    select
+      c.card_id,
+      c.ct_id,
+      c.name,
+      c.set_name,
+      c.card_number,
+      c.rarity,
+      c.cdn_image_url,
+      c.image_url,
+      c.preview_image_url,
+      c.homepage_image_url,
+      'name:' || t.name_key as version,
+      coalesce(nullif(nullif(btrim(e.nationality), ''), 'unknown'), case
+        when c.set_name ~ '\\mOCG\\M' or c.set_name ~* 'japan' then 'japanese'
+        when c.set_name ~* 'chinese' then 'chinese'
+        when c.set_name ~* 'korea' then 'korean'
+        else 'western'
+      end) as nationality,
+      count(*) over () as member_count,
+      u.canonical_path
+    from public.marketplace_search_candidates c
+    join target t
+      on c.name_prefix = t.name_prefix -- indexed; one prefix per name
+     and lower(btrim(c.name)) = t.name_key
+    left join public.pokoin_expansions e on e.name = c.set_name
+    left join public.marketplace_card_urls u
+      on u.card_id = c.card_id and u.language = 'en'
+    where c.item_kind = 'single'
+      and c.product_type = 'card'
+  )
+  select *
+  from printings
+  order by
+    (card_id = $1::bigint) desc,
+    case nationality
+      when 'japanese' then 0
+      when 'western' then 1
+      when 'chinese' then 2
+      else 3
+    end,
+    card_id
+  limit 128
+";
+
 /// Route handler — the route is registered with `any()` and dispatches
 /// itself so the 405 has no `Allow` header, exactly like the reference
 /// (`setCorsHeaders`, OPTIONS 204, GET/HEAD, everything else 405).
@@ -98,10 +154,12 @@ async fn handle(state: RouteState, headers: axum::http::HeaderMap, uri: Uri) -> 
             json!({ "error": "cardId is required (public marketplace id)." }),
         );
     }
-    let game = "pokemon";
-    // PRINTING_SQL joins the pokemon catalog tables; the pool is the request
-    // game's (satellites fail their SQL exactly like the reference).
-    let pool = match support::game_pool(&state, game).await {
+    let game = support::resolve_game(&headers, q.first("game"), q.first("marketplaceGame"));
+    let is_pokemon = pokoin_api_common::game::is_pokemon_game(&game);
+    // Pokémon uses PRINTING_SQL against the pokemon catalog tables; satellite
+    // games read their own DB with SATELLITE_PRINTING_SQL (no CLIP version
+    // sets there).
+    let pool = match support::game_pool(&state, &game).await {
         Ok(pool) => pool,
         Err(response) => return response,
     };
@@ -115,7 +173,7 @@ async fn handle(state: RouteState, headers: axum::http::HeaderMap, uri: Uri) -> 
         }
     };
 
-    if !headers.contains_key(page_snapshot::BUILD_HEADER) {
+    if is_pokemon && !headers.contains_key(page_snapshot::BUILD_HEADER) {
         if let Some(page) = page_snapshot::read_version_of_card(&pool, id).await {
             if let Some(bytes) = version_bytes(&card_id, &page).filter(|_| !page.rows.is_empty()) {
                 return support::prebuilt(wanted, bytes, None, VERSION_CACHE);
@@ -123,14 +181,15 @@ async fn handle(state: RouteState, headers: axum::http::HeaderMap, uri: Uri) -> 
         }
     }
 
-    let rows = match sql_json::rows_json(&pool, PRINTING_SQL, &[sql_json::SqlBind::Int(id)]).await {
+    let sql = if is_pokemon { PRINTING_SQL } else { SATELLITE_PRINTING_SQL };
+    let rows = match sql_json::rows_json(&pool, sql, &[sql_json::SqlBind::Int(id)]).await {
         Ok(rows) => rows,
         Err(error) => {
             tracing::warn!(error = %error, "marketplace-version-set failed");
             return support::node_error_response(&error, "Version set failed.");
         }
     };
-    let rows = react_sql::overlay_cheapest_on_rows(&pool, true, &rows).await;
+    let rows = react_sql::overlay_cheapest_on_rows(&pool, is_pokemon, &rows).await;
     if rows.is_empty() {
         // No artwork set yet: cached briefly so a desk reload does not ask again
         // (sets are rebuilt hourly).
@@ -212,5 +271,18 @@ mod snapshot_tests {
         };
         let live = success_body("4", "v1", json!(2), printings);
         assert_eq!(String::from_utf8(version_bytes("4", &page).unwrap()).unwrap(), live.to_string());
+    }
+
+    #[test]
+    fn satellite_sql_is_name_keyed_and_never_touches_version_sets() {
+        assert!(SATELLITE_PRINTING_SQL.contains("$1::bigint"));
+        assert!(SATELLITE_PRINTING_SQL.contains("limit 128"));
+        assert!(SATELLITE_PRINTING_SQL.contains("'name:'"));
+        assert!(!SATELLITE_PRINTING_SQL.contains("pokoin_version_sets"));
+    }
+
+    #[test]
+    fn pokemon_sql_still_uses_the_clip_version_sets() {
+        assert!(PRINTING_SQL.contains("pokoin_version_sets"));
     }
 }

@@ -1,0 +1,20 @@
+[package]
+name = "stamp-survey"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Survey card scans for printed stamps: review sheets per expansion and stamp matching inside stamped decks"
+
+# Own workspace: survey tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "stamp-survey"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+[profile.release]
+strip = true

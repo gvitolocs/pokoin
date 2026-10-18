@@ -810,3 +810,78 @@ test('a print filter with no matching rows returns an empty popup', () => {
   const rows = out.groups.flatMap((group) => group.printings);
   assert.equal(rows.length, 0, 'western hard filter does not broaden to Japanese');
 });
+
+test('151 browses Scarlet & Violet—151 singles toward 20; its n/151 leads, dividers and tins stay off Singles', () => {
+  resetSuggestLive();
+  // Meili's `151` page: collector-number hits from many sets plus the set's sealed SKUs.
+  rememberSuggestGroups([
+    { name: 'Mew ex', printings: [
+      { id: 'mew-151', name: 'Mew ex', set: '151', number: '151/165', product_type: 'card' },
+      { id: 'mew-cn', name: 'Mew ex', set: 'Collect 151', number: '151/151', product_type: 'card', nationality: 'chinese' },
+    ] },
+    { name: "Lillie's Pearl", printings: [{ id: 'pearl', name: "Lillie's Pearl", set: 'Journey Together', number: '151/159', product_type: 'card' }] },
+    { name: 'Togedemaru', printings: [{ id: 'toge', name: 'Togedemaru', set: 'Obsidian Flames', number: '151/197', product_type: 'card' }] },
+    { name: '151: Divider', printings: [{ id: 'divider', name: '151: Divider', set: '151', rarity: 'Card' }] },
+    { name: '151: Gengar Mini Tin', printings: [{ id: 'tin', name: '151: Gengar Mini Tin', set: '151', rarity: 'Card' }] },
+  ]);
+  // Before the set lands, the collector paint stands in: no sealed row on Singles.
+  const early = liveSuggestGroups('151', { kind: 'singles' }).groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.ok(early.includes('mew-151'));
+  assert.ok(!early.includes('divider') && !early.includes('tin'));
+  // The expansion hydration (SearchBox hydrateCatalog → set:151).
+  rememberPrintings('set:151', [
+    ...Array.from({ length: 30 }, (_, index) => ({
+      id: `sv151-${index + 1}`,
+      name: `Kanto Mon ${index + 1}`,
+      set: '151',
+      number: `${String(index + 1).padStart(3, '0')}/165`,
+      product_type: 'card',
+    })),
+    { id: 'mew-151', name: 'Mew ex', set: '151', number: '151/165', product_type: 'card' },
+    { id: 'divider', name: '151: Divider', set: '151', rarity: 'Card' },
+  ]);
+  for (const kind of ['singles', '']) {
+    const live = liveSuggestGroups('151', { kind });
+    assert.equal(live.intent.kind, 'set');
+    assert.equal(live.intent.slug, '151');
+    const ids = live.groups.flatMap((group) => group.printings.map((row) => row.id));
+    assert.equal(ids.length, 20, `${kind || 'default'}: fills 20`);
+    assert.equal(ids[0], 'mew-151', 'the set\'s own n/151 printing leads');
+    assert.ok(ids.includes('pearl') && ids.includes('toge'), 'other collector hits keep a row');
+    assert.ok(ids.filter((id) => id.startsWith('sv151-')).length >= 14, 'the set browse is not starved');
+    assert.ok(!ids.includes('divider') && !ids.includes('tin'), 'no sealed product on Singles');
+  }
+  // paintCatalogGroups (what SearchBox paints) keeps that list.
+  const painted = paintCatalogGroups('151', { kind: 'singles' }).flatMap((group) => group.printings.map((row) => row.id));
+  assert.equal(painted[0], 'mew-151');
+  assert.equal(painted.length, 20);
+  // The Product tab still lists the set's sealed SKUs from the name pool.
+  const product = liveSuggestGroups('151', { kind: 'product' }).groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.ok(!product.includes('mew-151'));
+});
+
+test('a plain collector number (025) keeps the collector browse', () => {
+  resetSuggestLive();
+  rememberSuggestGroups([
+    { name: 'Pikachu', printings: [{ id: 'pika', name: 'Pikachu', set: 'Base Set', number: '58/102', product_type: 'card' }] },
+    { name: 'Grovyle', printings: [{ id: 'grov', name: 'Grovyle', set: 'Celestial Storm', number: '025/168', product_type: 'card' }] },
+  ]);
+  const ids = liveSuggestGroups('025', { kind: 'singles' }).groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.equal(ids[0], 'grov');
+});
+
+test('charizar (typing Charizard) keeps Charizard rows, not an empty Charizard SP Half Deck browse', () => {
+  resetSuggestLive();
+  rememberSuggestGroups([
+    { name: 'Charizard', printings: [
+      { id: 'zard-base', name: 'Charizard', set: 'Base Set', number: '4/102', product_type: 'card' },
+      { id: 'zard-ev', name: 'Charizard', set: 'Evolutions', number: '11/108', product_type: 'card' },
+    ] },
+  ]);
+  for (const typed of ['chariz', 'charizar', 'charizard']) {
+    const live = liveSuggestGroups(typed, { kind: 'singles' });
+    assert.notEqual(live.intent?.kind, 'set', typed);
+    const ids = live.groups.flatMap((group) => group.printings.map((row) => row.id));
+    assert.ok(ids.includes('zard-base'), `${typed} paints Charizard`);
+  }
+});

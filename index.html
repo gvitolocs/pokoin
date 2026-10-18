@@ -80,9 +80,9 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/home/landing-boot.js?v=20261018-account"></script>
+    <script src="/home/landing-boot.js?v=20261018-binder"></script>
     <link rel="stylesheet" href="/home/landing.css?v=20261018-account" />
-    <link rel="stylesheet" href="/home/home.css?v=20261018-landing-polish" />
+    <link rel="stylesheet" href="/home/home.css?v=20261018-binder" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -184,17 +184,6 @@
         <div class="hero-glow" aria-hidden="true"></div>
         <div class="pad"><div class="wrap home-hero-inner">
           <div class="home-hero-copy">
-            <p class="hero-pill">
-              <span class="hero-pill-dot" aria-hidden="true"></span>Scanner ·
-              Collection · Marketplace
-            </p>
-            <h1 id="hero-heading">
-              Your cards.<br /><span class="hero-mark">All together.</span>
-            </h1>
-            <p class="home-lede">
-              Find any Pokémon card, track your collection, and buy or sell at
-              real market prices.
-            </p>
             <!-- First paint of the marketplace header SearchBox (hero variant):
                  the island swaps in the live box with the same markup. Without
                  JavaScript it is a plain GET form to the search page. -->
@@ -257,6 +246,17 @@
                 >151</a
               >
             </div>
+            <p class="hero-pill">
+              <span class="hero-pill-dot" aria-hidden="true"></span>Scanner ·
+              Collection · Marketplace
+            </p>
+            <h1 id="hero-heading">
+              Your cards.<br /><span class="hero-mark">All together.</span>
+            </h1>
+            <p class="home-lede">
+              Find any Pokémon card, track your collection, and buy or sell at
+              real market prices.
+            </p>
             <div class="button-row hero-ctas">
               <a class="button button-yellow" href="/marketplace"
                 >Shop cards <span aria-hidden="true">→</span></a
@@ -296,7 +296,7 @@
               height="392"
               alt=""
             />
-            <div class="binder">
+            <div class="binder" data-landing-binder>
               <div class="binder-head">
                 <div>
                   <strong>My collection</strong>

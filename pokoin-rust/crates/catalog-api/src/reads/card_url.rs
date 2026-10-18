@@ -3,9 +3,9 @@
 use std::sync::OnceLock;
 
 use axum::extract::State;
-use axum::http::{Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
-use pokoin_api_common::{http, RouteState};
+use pokoin_api_common::{game, http, RouteState};
 use regex::Regex;
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -124,6 +124,8 @@ pub struct Lookup {
     pub language: String,
     pub doubled_card_id: String,
     pub url_card_id: String,
+    /// The Drifloon legacy id only ever applies to the Pokémon catalog.
+    pub pokemon: bool,
 }
 
 fn path_public_number(l: &Lookup) -> String {
@@ -141,7 +143,7 @@ fn candidate_card_ids(l: &Lookup) -> Vec<String> {
     let direct = clean_card_id(&l.card_id);
     let path_our_id = path_public_number(l);
     let ct_from_path = if path_our_id.is_empty() { String::new() } else { doubled(&path_our_id) };
-    let legacy = legacy_override(&direct).or_else(|| legacy_override(&path_our_id)).unwrap_or("").to_owned();
+    let legacy = if l.pokemon { legacy_override(&direct).or_else(|| legacy_override(&path_our_id)).unwrap_or("").to_owned() } else { String::new() };
     let mut out: Vec<String> = Vec::new();
     for id in [path_our_id, direct, ct_from_path, legacy] {
         if !id.is_empty() && !out.contains(&id) {
@@ -164,6 +166,26 @@ const LOOKUP_SQL: &str = "
       order by
         case
           when nullif($3::text, '') is not null and public_number = $3::bigint then 0
+          when $3::text <> '' and canonical_path like '%/cards/' || $3::text || '/%' then 1
+          else 2
+        end,
+        array_position($1::bigint[], card_id)
+    ";
+
+/// Satellite catalogs have no public_number column: the public number is card_id.
+const SATELLITE_LOOKUP_SQL: &str = "
+      select card_id, language, canonical_path, card_id as public_number
+      from public.marketplace_card_urls
+      where (
+          card_id = any($1::bigint[])
+          or ct_id = any($1::bigint[])
+          or (nullif($3::text, '') is not null and card_id = $3::bigint)
+          or (nullif($3::text, '') is not null and canonical_path like '%/cards/' || $3::text || '/%')
+        )
+        and language = $2
+      order by
+        case
+          when nullif($3::text, '') is not null and card_id = $3::bigint then 0
           when $3::text <> '' and canonical_path like '%/cards/' || $3::text || '/%' then 1
           else 2
         end,
@@ -200,7 +222,7 @@ pub async fn canonical_card_url_for_lookup(pool: &PgPool, l: &Lookup) -> Result<
     let decoded_requested = doubled(&requested_url_id);
     let rows = sql_json::rows_json(
         pool,
-        LOOKUP_SQL,
+        if l.pokemon { LOOKUP_SQL } else { SATELLITE_LOOKUP_SQL },
         &[sql_json::SqlBind::BigIntArray(numeric), sql_json::SqlBind::Text(lang.clone()), sql_json::SqlBind::Text(requested_url_id.clone())],
     )
     .await?;
@@ -231,12 +253,14 @@ pub async fn canonical_card_url_for_lookup(pool: &PgPool, l: &Lookup) -> Result<
     Ok(rows.iter().find(|row| !canonical_of(row).is_empty()).map(|row| found(row, &lang)))
 }
 
-pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn handler(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     if method != Method::GET && method != Method::HEAD {
         return util::method_not_allowed("GET, HEAD");
     }
     let q = http::Query::from_uri(&uri);
     let text = |k: &str| q.search_param(k).unwrap_or("").to_owned();
+    let game_id = game::parse_game_from_request(&http::header_pairs(&headers), q.first("game").filter(|v| !v.is_empty()), q.first("marketplaceGame").filter(|v| !v.is_empty()));
+    let pokemon = game::is_pokemon_game(&game_id);
     let lookup = Lookup {
         card_id: text("cardId"),
         card_slug: util::first_of(&q, &["cardSlug", "slug"]).unwrap_or("").to_owned(),
@@ -244,9 +268,19 @@ pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) 
         language: util::first_of(&q, &["language", "lang"]).unwrap_or("").to_owned(),
         doubled_card_id: text("doubledCardId"),
         url_card_id: text("urlCardId"),
+        pokemon,
     };
     const NEGATIVE_CACHE: &str = "public, max-age=300, s-maxage=600";
-    match canonical_card_url_for_lookup(state.api.read(), &lookup).await {
+    let pool;
+    if pokemon {
+        pool = state.api.read().clone();
+    } else {
+        let Some(satellite) = state.api.game_pool(&game_id).await else {
+            return http::json(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{game_id} marketplace database URL is not configured.")}));
+        };
+        pool = satellite;
+    }
+    match canonical_card_url_for_lookup(&pool, &lookup).await {
         Ok(Some(found)) => util::json_cache(StatusCode::OK, found, "public, max-age=60, s-maxage=300"),
         // A card with no stored URL stays so until the next import: every desk
         // reload asked again (no-store), so the miss is cached like a hit.
@@ -269,11 +303,15 @@ mod tests {
         assert_eq!(parse_root_card_path("/239324/gambler"), ("239324".into(), "gambler".into()));
         assert_eq!(parse_marketplace_card_path("/marketplace/it/cards/239324/card-x").1, "239324");
         assert_eq!(parse_marketplace_public_short_path("/marketplace/239324"), "239324");
-        let l = Lookup { card_id: "248768".into(), ..Default::default() };
+        let l = Lookup { card_id: "248768".into(), pokemon: true, ..Default::default() };
         assert_eq!(candidate_card_ids(&l), vec!["248768", "124384"]);
-        let l = Lookup { path: "/marketplace/en/cards/239324/x".into(), ..Default::default() };
+        let l = Lookup { path: "/marketplace/en/cards/239324/x".into(), pokemon: true, ..Default::default() };
         assert_eq!(candidate_card_ids(&l), vec!["239324", "119662"]);
+        let l = Lookup { card_id: "248768".into(), pokemon: false, ..Default::default() };
+        assert_eq!(candidate_card_ids(&l), vec!["248768"]);
         assert_eq!(canonical_slug_from_path("/marketplace/en/cards/239324/card-gambler-060"), "card-gambler-060");
         assert_eq!(public_number_from_canonical_path("/marketplace/en/cards/239324/x"), "239324");
+        assert!(!SATELLITE_LOOKUP_SQL.contains("public_number ="));
+        assert!(LOOKUP_SQL.contains("public_number = $3::bigint"));
     }
 }
