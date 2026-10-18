@@ -1651,6 +1651,9 @@
 
 .skeleton-line.short { width: 42%; }
 
+/* Checkout: the saved-address summary's height while addresses load. */
+.checkout-address-wait { min-height: 8.5rem; }
+
 .skeleton-thread {
   border: 1px solid var(--g5);
   border-radius: 16px;

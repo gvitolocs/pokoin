@@ -427,6 +427,19 @@ export function gameRequestHeaders(hostname = hostName()) {
   };
 }
 
+/**
+ * `headers` unless `url` already names a non-Pokémon game. The API reads
+ * `?game=` before the headers, and the custom headers make every new URL a
+ * CORS preflight on satellites: an origin round trip (75-95 ms) that
+ * Cloudflare never caches.
+ */
+export function gameHeadersForUrl(url, headers) {
+  const query = String(url || '').split('#')[0].split('?')[1] || '';
+  const params = new URLSearchParams(query);
+  const named = String(params.get('game') || params.get('marketplaceGame') || '').trim().toLowerCase();
+  return named && named !== 'pokemon' ? {} : headers;
+}
+
 /** `x-pokoin-game` for an explicit catalog. Pokémon sends no game header. */
 export function gameRequestHeadersFor(gameId, hostname = hostName()) {
   const id = knownGameId(gameId);
