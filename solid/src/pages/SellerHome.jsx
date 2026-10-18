@@ -326,10 +326,7 @@ function LiveDashboard() {
         salesHref={HREFS.sales()}
         marketplaceHref={HREFS.marketplace()}
         onRetry={retryCollection}
-        listingHrefFor={(row) => {
-          const path = inventoryListingHref(row);
-          return path.startsWith('/marketplace') ? marketUrl(path) : path;
-        }}
+        listingHrefFor={(row) => marketUrl(inventoryListingHref(row))}
       />
     </DashboardBoundary>
   );

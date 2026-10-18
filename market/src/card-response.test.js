@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertCardPageIdentity, cardPageMatchesId, ownerGameLocation } from './card-response.js';
+import { assertCardPageIdentity, cardPageMatchesId, ownerGameChoice, ownerGameLocation } from './card-response.js';
 
 test('a game-less link to another TCG moves under that game', () => {
   const err = { status: 404, body: { error: 'Card not found.', cardId: '834950', ownerGame: 'digimon' } };
@@ -16,6 +16,41 @@ test('a game-less link to another TCG moves under that game', () => {
   assert.equal(ownerGameLocation({ status: 503, body: { ownerGame: 'digimon' } }, at), '');
   assert.equal(ownerGameLocation(err, { ...at, gameId: 'digimon' }), '');
   assert.equal(ownerGameLocation(err, { pathname: '/marketplace/search' }), '');
+});
+
+test('a shared Cardmarket id finds its game by the URL slug, or offers each game', () => {
+  // 200000874 is Arcana Joker in Battle Spirits Saga and a different card in six
+  // other Cardmarket-only games, so ownerGame is absent and ownerGames lists them.
+  const err = { status: 404, body: { error: 'Card not found.', cardId: '200000874', ownerGames: [
+    { game: 'final_fantasy', name: 'President Shinra', set: 'Opus XXI' },
+    { game: 'world_of_warcraft', name: "No'Kaled, the Elements of Death", set: 'Cataclysm' },
+    { game: 'battle_spirits_saga', name: 'Arcana Joker', set: 'False Gods' },
+    { game: 'chess', name: 'Rook', set: '' },
+  ] } };
+  const slugged = { pathname: '/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods', search: '', hash: '#shop' };
+  assert.deepEqual(ownerGameChoice(err, slugged), {
+    location: '/battle-spirits-saga/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods#shop',
+    choices: [],
+  });
+  assert.equal(
+    ownerGameLocation(err, { pathname: '/marketplace/en/cards/200000874/no-kaled-the-elements-of-death' }),
+    '/world-of-warcraft/marketplace/en/cards/200000874/no-kaled-the-elements-of-death',
+  );
+  // No slug (MyPokoin's old links): one link per known game, nothing guessed.
+  const bare = ownerGameChoice(err, { pathname: '/marketplace/en/cards/200000874' });
+  assert.equal(bare.location, '');
+  assert.deepEqual(bare.choices.map((row) => [row.gameName, row.name, row.href]), [
+    ['Final Fantasy TCG', 'President Shinra', '/final-fantasy/marketplace/en/cards/200000874'],
+    ['World of Warcraft TCG', "No'Kaled, the Elements of Death", '/world-of-warcraft/marketplace/en/cards/200000874'],
+    ['Battle Spirits Saga', 'Arcana Joker', '/battle-spirits-saga/marketplace/en/cards/200000874'],
+  ]);
+  // One known holder moves at once; satellite desks and other pages never choose.
+  assert.equal(
+    ownerGameLocation({ status: 404, body: { ownerGames: [{ game: 'digimon', name: 'Omnimon' }] } }, { pathname: '/marketplace/en/cards/834950' }),
+    '/digimon/marketplace/en/cards/834950',
+  );
+  assert.deepEqual(ownerGameChoice(err, { ...slugged, gameId: 'magic' }), { location: '', choices: [] });
+  assert.deepEqual(ownerGameChoice(err, { pathname: '/marketplace/en/cards/200000874abc' }), { location: '', choices: [] });
 });
 
 test('public Pokoin id binds the desk and every canonical link', () => {

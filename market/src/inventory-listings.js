@@ -4,6 +4,7 @@
  * not look like live inventory links.
  */
 
+import { game, gameIdFromPath, gamePublicPath, knownGameId, publicGamePath } from './game.js';
 import { indexToStackPos, stackPosToIndex } from './scan-model.js';
 
 export function isLiveInventoryListing(row) {
@@ -35,12 +36,20 @@ export function summarizeLiveInventory(rows) {
   };
 }
 
-export function inventoryListingHref(row) {
+/**
+ * Card desk for a seller row. The API's canonical paths are game-less, and a
+ * game-less desk URL opens the Pokémon catalog ("Card market not found." for a
+ * Battle Spirits Saga card), so the path gets the slug of the row's own
+ * `marketplaceGame`, else of `gameId` (the stock desk's selected game).
+ */
+export function inventoryListingHref(row, gameId = game().id) {
+  const target = knownGameId(row?.marketplaceGame || row?.marketplace_game) || knownGameId(gameId) || 'pokemon';
   const path = String(row?.canonicalPath || row?.canonical_path || '').trim();
-  if (path.startsWith('/marketplace/')) return path;
+  if (gameIdFromPath(path)) return path;
+  if (path.startsWith('/marketplace/')) return publicGamePath(path, target);
   const id = String(row?.cardId || row?.card_id || '').trim();
-  if (/^\d+$/.test(id)) return `/marketplace/en/cards/${id}`;
-  return '/marketplace';
+  if (/^\d+$/.test(id)) return publicGamePath(`/marketplace/en/cards/${id}`, target);
+  return gamePublicPath(target);
 }
 
 export function inventoryListingMeta(row, formatPkn) {
@@ -209,6 +218,7 @@ export function groupInventoryStacks(rows) {
     const stack = stacks.get(key) || {
       key,
       cardId: row?.cardId || row?.card_id,
+      marketplaceGame: row?.marketplaceGame || row?.marketplace_game || '',
       cardName: row?.cardName || row?.name || 'Listing',
       setName: row?.setName || row?.set_name || '',
       collectorNumber: row?.collectorNumber || row?.collector_number || '',

@@ -3380,6 +3380,16 @@
   background: var(--g3);
 }
 
+/* Row and tile links highlight, never underline: the global a:hover
+   underline ran through every cell of the hovered row. */
+.inv-row:hover,
+.inv-card:hover,
+.loc-posting:hover,
+.collection-tile:hover,
+.inv-loc:hover {
+  text-decoration: none;
+}
+
 .inv-card {
   display: flex;
   align-items: center;

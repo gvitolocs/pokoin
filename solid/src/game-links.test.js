@@ -72,3 +72,20 @@ test('claimed link clicks navigate through gameHref', () => {
   // the router base only applies to resolved navigations, not to claimed paths.
   assert.match(fs.readFileSync(path.join(SRC, 'App.jsx'), 'utf8'), /setLinkNavigator\(\(path, options\) => navigate\(gameHref\(path\), options\)\)/);
 });
+
+test('stock desks link cards through inventoryListingHref, never a game-less /cards/ path', () => {
+  // MyPokoin, the dashboard and the sync/scan desks list the Game picker's
+  // catalog on the apex. A hand-built /marketplace/en/cards/${id} there opened a
+  // Battle Spirits Saga card as Pokémon ("Card market not found.").
+  const DESKS = [
+    'components/inventory/InventoryBoard.jsx',
+    'components/inventory/LocationBoard.jsx',
+    'components/dashboard/SellerDashboardView.jsx',
+    'pages/SellerHome.jsx',
+    'pages/SyncReview.jsx',
+    'pages/Scan.jsx',
+  ];
+  const offenders = DESKS.filter((rel) => /\/marketplace\/en\/cards\/\$\{/.test(fs.readFileSync(path.join(SRC, rel), 'utf8')));
+  assert.deepEqual(offenders, []);
+  assert.match(fs.readFileSync(path.join(SRC, 'components/inventory/LocationBoard.jsx'), 'utf8'), /href=\{inventoryListingHref\(row\)\}/);
+});

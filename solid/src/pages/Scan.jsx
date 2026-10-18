@@ -7,6 +7,7 @@ import {
   publicIdFromScanHit,
   scanHitsOf,
 } from '@market/api.js';
+import { inventoryListingHref } from '@market/inventory-listings.js';
 import { Alert, DeskPanel, FilePill, PageHead, Thread } from '../components/Desk.jsx';
 import { usePageTitle } from './tools/board.jsx';
 
@@ -77,7 +78,7 @@ export default function Scan() {
     }
   }
 
-  const rowHref = (row) => (row.card ? cardHref(row.card) : (row.publicId ? `/marketplace/en/cards/${row.publicId}` : ''));
+  const rowHref = (row) => (row.card ? cardHref(row.card) : (row.publicId ? inventoryListingHref({ cardId: row.publicId }) : ''));
 
   return (
     <div class="page desk">
