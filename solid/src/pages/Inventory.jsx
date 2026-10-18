@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
-import { exportStockCsv, fetchPricingStrategies, fetchSellerListings, fetchSellerListingsStamp } from '@market/api.js';
+import { exportStockCsv, fetchPricingStrategies } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
 import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
@@ -22,6 +22,7 @@ import {
   previewPricer,
   previewStrategies,
 } from './mypokoin-preview-fixture.js';
+import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
@@ -133,14 +134,8 @@ function InventoryDesk(props) {
     props.preview ? previewPricer() : readCachedPricerSettings(untrack(listingsUid)),
   );
 
-  async function readBook(uid, onUpdate, force = false) {
-    return inventoryBooks.load(uid, selectedGame, {
-      force,
-      // The board opens on price high → low: a first load's first page stays on top.
-      fetchPage: async (page) => fetchSellerListings(uid, await getBearer(), { ...page, game: selectedGame, order: 'price-desc' }),
-      fetchStamp: async () => fetchSellerListingsStamp(uid, await getBearer(), { game: selectedGame }),
-      onUpdate,
-    });
+  function readBook(uid, onUpdate, force = false) {
+    return loadOwnerBook(uid, selectedGame, onUpdate, { force });
   }
 
   async function reload() {

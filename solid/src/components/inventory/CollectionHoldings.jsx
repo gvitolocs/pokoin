@@ -4,8 +4,6 @@ import {
   createListing,
   fetchOwnedCollection,
   fetchPriceCheck,
-  fetchSellerListings,
-  fetchSellerListingsStamp,
   imageSrc,
   removeCollectionItem,
   requestNftShipping,
@@ -16,6 +14,7 @@ import { inventoryBooks } from '@market/inventory-book.js';
 import { priceCheckItem } from '@market/inventory-price.js';
 import ScanImage from '../ScanImage.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
+import { loadOwnerBook } from '../../lib/owner-book.js';
 import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -238,11 +237,7 @@ export default function CollectionHoldings(props) {
       const [owned] = await Promise.all([
         fetchOwnedCollection(token),
         seller
-          ? inventoryBooks.load(seller, gameId, {
-            fetchPage: async (page) => fetchSellerListings(seller, await getBearer(), { ...page, game: gameId }),
-            fetchStamp: async () => fetchSellerListingsStamp(seller, await getBearer(), { game: gameId }),
-            onUpdate: (next, complete = true) => { if (complete) setListings(next); },
-          }).catch(() => null)
+          ? loadOwnerBook(seller, gameId, (next, complete = true) => { if (complete) setListings(next); }).catch(() => null)
           : null,
       ]);
       const items = Array.isArray(owned.items) ? owned.items : [];
