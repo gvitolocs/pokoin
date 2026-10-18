@@ -2,6 +2,8 @@
 //! be exercised by fast, hermetic tests.
 
 pub mod address;
+/// Storage-box slots (`box·stack·position`) across every game.
+pub mod box_slots;
 pub mod cart;
 pub mod country;
 pub mod crypto;

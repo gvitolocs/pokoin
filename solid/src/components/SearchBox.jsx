@@ -179,11 +179,22 @@ function withGroupStarts(rows) {
  * catalog hydration run on `term`, committed after that paint. Rows are one
  * flat list keyed by card id, so a printing that changes group stays the same
  * `<li>` (FLIP slides it) instead of remounting inside a new group.
+ *
+ * `hero` is the pokoin.com landing (solid/src/landing/LandingSearch.jsx): the
+ * same box, pickers and popup in the large hero field, with a visible Search
+ * button. It mounts at idle, so its search-universe warmup waits for the
+ * first search intent instead of running with the page.
  */
 export default function SearchBox(props) {
   const navigate = useGameNavigate();
   const location = useLocation();
   const pokemon = () => isPokemonGame();
+  const inputId = props.inputId || 'market-search';
+  const [intent, setIntent] = createSignal(!props.hero);
+  const onIntent = () => {
+    setIntent(true);
+    loadSuggestEngineOnIntent();
+  };
   const [query, setQuery] = createSignal('');
   const [term, setTerm] = createSignal('');
   const [open, setOpen] = createSignal(false);
@@ -268,8 +279,8 @@ export default function SearchBox(props) {
   });
 
   // Language / print-family / tab change refreshes the typed query's universe at once.
-  createEffect(() => [searchLang(), printLang(), searchTab(), pokemon()], ([lang, print, tab, isPokemon]) => {
-    if (!isPokemon || tab === 'users') return;
+  createEffect(() => [searchLang(), printLang(), searchTab(), pokemon(), intent()], ([lang, print, tab, isPokemon, wanted]) => {
+    if (!isPokemon || tab === 'users' || !wanted) return;
     const typed = untrack(term).trim();
     // Network-only until the engine is loaded on search intent (no engine eval on mount).
     warmupSearchUniverse({
@@ -727,32 +738,32 @@ export default function SearchBox(props) {
   }
 
   return (
-    <form class="search" onSubmit={goSearch} role="search" ref={(node) => { box = node; }}>
-      <label class="sr-only" for="market-search">Search cards</label>
+    <form class={['search', { 'search-hero': props.hero }]} onSubmit={goSearch} role="search" ref={(node) => { box = node; }}>
+      <label class="sr-only" for={inputId}>{props.label || 'Search cards'}</label>
       <div class="search-pill">
         <div class="search-lead">
           <GameSelect />
           <LangToggle />
         </div>
         <input
-          id="market-search"
+          id={inputId}
           type="search"
           role="combobox"
           value={query()}
           onInput={(event) => {
-            loadSuggestEngineOnIntent();
+            onIntent();
             const value = event.currentTarget.value;
             setQuery(value);
             setOpen(true);
             commitTerm(value);
           }}
-          onPointerDown={loadSuggestEngineOnIntent}
+          onPointerDown={onIntent}
           onFocus={() => {
             setOpen(true);
-            loadSuggestEngineOnIntent();
+            onIntent();
           }}
           onKeyDown={onKeyDown}
-          placeholder={props.extensionDesk ? 'Search cards' : 'Search cards, sets, products...'}
+          placeholder={props.placeholder || (props.extensionDesk ? 'Search cards' : 'Search cards, sets, products...')}
           autocomplete="off"
           aria-expanded={ariaBool(suggestVisible())}
           aria-controls="market-suggest"
@@ -761,7 +772,7 @@ export default function SearchBox(props) {
           aria-busy={ariaBool(suggestVisible() && suggestPending())}
         />
         <Show when={pokemon()}><PrintLangToggle /></Show>
-        <button class="sr-only" type="submit">Search</button>
+        <button class={props.hero ? 'search-go' : 'sr-only'} type="submit">Search</button>
       </div>
       <Show when={suggestVisible()}>
         <div

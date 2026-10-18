@@ -9,13 +9,23 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const landing = read('index.html');
 
 test('the landing hero search works without JavaScript (marketplace search page)', () => {
-  const form = landing.match(/<form[^>]*class="hero-search"[\s\S]*?<\/form>/)?.[0] || '';
+  const form = landing.match(/<form[^>]*class="search search-hero"[\s\S]*?<\/form>/)?.[0] || '';
   assert.match(form, /action="\/marketplace\/search"/);
   assert.match(form, /method="get"/);
   assert.match(form, /role="search"/);
+  assert.match(form, /data-landing-search/);
+  assert.match(form, /<input[^>]*id="hero-q"/);
   assert.match(form, /<input[^>]*name="q"/);
-  assert.match(form, /<button type="submit">Search<\/button>/);
-  assert.match(form, /data-landing-suggest/);
+  assert.match(form, /<button class="search-go" type="submit">Search<\/button>/);
+});
+
+test('the hero first paint is the header SearchBox markup with its three pickers', () => {
+  const form = landing.match(/<form[^>]*class="search search-hero"[\s\S]*?<\/form>/)?.[0] || '';
+  assert.match(form, /<div class="search-pill">/);
+  assert.match(form, /<div class="search-lead">/);
+  for (const picker of ['game-select', 'lang-toggle', 'print-lang-toggle']) {
+    assert.match(form, new RegExp(`<div class="${picker}" data-landing-picker="${picker}">`));
+  }
 });
 
 test('the landing offers Shop cards and Sell your collection', () => {
@@ -32,9 +42,10 @@ test('the Best sellers rail is the island over the Rust best-sellers rail', () =
   assert.match(rail, /<Carousel/);
 });
 
-test('the island search reuses the header typeahead engine', () => {
+test('the island search is the header SearchBox', () => {
   const search = read('solid/src/landing/LandingSearch.jsx');
-  assert.match(search, /createLiveSuggest\(query/);
+  assert.match(search, /import SearchBox from '\.\.\/components\/SearchBox\.jsx';/);
+  assert.match(search, /<SearchBox\s+hero/);
 });
 
 test('the build points the landing at the hashed island entry', () => {
