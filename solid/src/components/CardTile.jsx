@@ -8,7 +8,7 @@ import { tilePricePkn } from '@market/pkn.js';
 import { cardImageAlt } from '@market/seo.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
-import { buyerParts } from '../stores/buyer.js';
+import { buyerParts, visitorParts } from '../stores/buyer.js';
 import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
@@ -53,7 +53,9 @@ export default function CardTile(props) {
     }
   }
 
-  const priceLabel = () => (price() ? <PriceStack parts={buyerParts(pricePkn())} /> : 'Out of stock');
+  // `currency` pins the label to one local fiat (the public landing shows the visitor's currency).
+  const parts = () => (props.currency ? visitorParts(pricePkn(), props.currency) : buyerParts(pricePkn()));
+  const priceLabel = () => (price() ? <PriceStack parts={parts()} /> : 'Out of stock');
 
   return (
     <Show when={card()?.id}>
