@@ -314,7 +314,7 @@ export default function CardTraderZero() {
     <Show
       when={untrack(() => allowMypokoinPreview(params))}
       fallback={(
-        <SignedIn from="/mypokoin/zero">
+        <SignedIn early from="/mypokoin/zero">
           <ZeroDesk />
         </SignedIn>
       )}

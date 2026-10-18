@@ -113,6 +113,12 @@ The slow public desks answer from `marketplace_page_snapshots` (migration `scrip
 
 Builders: the Pi never builds seller books (`scripts/install-pokoin-rust.py` pins `POKOIN_SELLER_BOOK_WORKER=0`); the overflow pods' sweep (every 30 s) and the listing outbox rebuild changed books on nezopt within seconds, without `br`, and the CronJob adds it on its next run. Cart and checkout verify every price live; a snapshot price is display only.
 
+### MyPokoin (the owner's own book)
+
+`GET /api/marketplace-listings?sellerUid=<own uid>` (bearer, `private, no-store`) is the seller's whole book in 200 + 1000-row pages. The first page of the whole book also carries `stamp`: `<count>:<max(updated_at)>` over every listing of the seller, any game or status, read before the page (`owner_book_stamp`, one `marketplace_user_listings_seller_idx` read). `&stamp=1` answers `{stamp}` alone, and `&order=price-desc` serves the book dearest first (MyPokoin opens on price high → low, so a first load's first page is the top of the board).
+
+The SPA keeps the book per uid + game in IndexedDB `pokoin-private` (`market/src/inventory-book.js`), paints it on the cached session before Firebase answers, and revalidates with `stamp=1`: nothing within 15 s of the last check; the whole book again only when the stamp moved, after a listing write, or when the stamp is 6 h old (catalogue enrichment does not move it). Unchanged rows keep their objects, so the board keeps their DOM nodes. Sign-out wipes every stored book; another account signing in keeps only its own.
+
 `marketplace-native-sales` answers `sales: []` from an in-memory set of card ids that have any Sold-on-Pokoin row (`crates/commerce/src/sales_index.rs`, Firestore delta every 30 s, full reload every 6 h) instead of one Firestore query per desk.
 
 Every public cacheable `GET /api/*` 200 carries a strong `ETag` and answers `304` to `If-None-Match`; every response carries `Server-Timing` (`sql`, `ser`, `build`, `src`, `total`, plus `edge` at the edge listener).

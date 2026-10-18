@@ -358,7 +358,7 @@ export default function SellSpreadsheet() {
   document.title = 'Sell via spreadsheet · Pokoin';
   if (allowLayoutPreview(untrack(() => location.search))) return <SpreadsheetDesk />;
   return (
-    <SignedIn from="/mypokoin/spreadsheet">
+    <SignedIn early from="/mypokoin/spreadsheet">
       <SpreadsheetDesk />
     </SignedIn>
   );

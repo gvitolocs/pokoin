@@ -342,7 +342,7 @@ export default function SellerHome() {
   document.title = 'Dashboard · Pokoin';
   return (
     <Show when={!untrack(() => allowLayoutPreview(params))} fallback={<PreviewDashboard />}>
-      <SignedIn from="/dashboard">
+      <SignedIn early from="/dashboard">
         <LiveDashboard />
       </SignedIn>
     </Show>

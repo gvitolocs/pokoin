@@ -1,9 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
-import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '@market/api.js';
+import { exportStockCsv, fetchPricingStrategies, fetchSellerListings, fetchSellerListingsStamp } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
-import { inventoryBooks } from '@market/inventory-book.js';
+import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
 import '@market/export-preview.css';
@@ -32,6 +32,8 @@ const FORMATS = [
   { id: 'cardtrader', label: 'CardTrader' },
   { id: 'tcgplayer', label: 'TCGPlayer' },
 ];
+
+const LISTING_METRICS = ['Live listings', 'Cards in stock', 'Total asking', 'Paused'];
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -108,20 +110,35 @@ function InventoryDesk(props) {
   // PKN opt-out sellers read their prices in local currency.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
   const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
+  // A first load paints page by page; its totals wait for the whole book.
+  const [partial, setPartial] = createSignal(false);
+  // A stored book answers from IndexedDB in a few ms: no skeleton flash before it.
+  const [waitShown, setWaitShown] = createSignal(Boolean(props.preview) || !hasStoredBooks());
+  if (!waitShown()) setTimeout(() => setWaitShown(true), 300);
   const [error, setError] = createSignal('');
   const [previewFormat, setPreviewFormat] = createSignal('powertools');
   const [preview, setPreview] = createSignal(null);
   const [previewBlob, setPreviewBlob] = createSignal(null);
   const [busy, setBusy] = createSignal('');
-  const [pricerDefaults, setPricerDefaults] = createSignal(props.preview ? previewPricer() : null);
   const [collectionStats, setCollectionStats] = createSignal(null);
   const selectedGame = game().id;
   let paintedKey = '';
 
+  // One identity for the listings load: the cached session uid and the
+  // restored Firebase uid are the same seller, so their arrival in either
+  // order must not cancel a request already in flight.
+  const listingsUid = createMemo(() => (signedIn() ? authUid() || accountProfile()?.uid || '' : ''));
+  // The seller's last pricer settings paint the market column with the book.
+  const [pricerDefaults, setPricerDefaults] = createSignal(
+    props.preview ? previewPricer() : readCachedPricerSettings(untrack(listingsUid)),
+  );
+
   async function readBook(uid, onUpdate, force = false) {
     return inventoryBooks.load(uid, selectedGame, {
       force,
-      fetchPage: async (page) => fetchSellerListings(uid, await getBearer(), { ...page, game: selectedGame }),
+      // The board opens on price high → low: a first load's first page stays on top.
+      fetchPage: async (page) => fetchSellerListings(uid, await getBearer(), { ...page, game: selectedGame, order: 'price-desc' }),
+      fetchStamp: async () => fetchSellerListingsStamp(uid, await getBearer(), { game: selectedGame }),
       onUpdate,
     });
   }
@@ -130,15 +147,12 @@ function InventoryDesk(props) {
     const uid = listingsUid();
     if (!uid) return;
     inventoryBooks.invalidate(uid, selectedGame);
-    return readBook(uid, (next) => {
-      if (listingsUid() === uid) setRows(next);
+    return readBook(uid, (next, complete = true) => {
+      if (listingsUid() !== uid) return;
+      setPartial(!complete);
+      setRows(next);
     }, true);
   }
-
-  // One identity for the listings load: the cached session uid and the
-  // restored Firebase uid are the same seller, so their arrival in either
-  // order must not cancel a request already in flight.
-  const listingsUid = createMemo(() => (signedIn() ? authUid() || accountProfile()?.uid || '' : ''));
 
   createEffect(
     () => ({ uid: listingsUid(), ...tab() }),
@@ -157,11 +171,14 @@ function InventoryDesk(props) {
       const key = `${uid}:${selectedGame}`;
       if (paintedKey !== key) {
         paintedKey = key;
+        // Another seller's rows never stay on screen; this seller's book
+        // paints now (memory) or as soon as IndexedDB answers.
         setRows(inventoryBooks.peek(uid, selectedGame)?.rows ?? null);
       }
-      readBook(uid, (next) => {
+      readBook(uid, (next, complete = true) => {
         if (cancelled) return;
         setError('');
+        setPartial(!complete);
         setRows(next);
       }).catch((err) => {
         if (!cancelled) setError(err.message || 'Listings failed.');
@@ -172,14 +189,17 @@ function InventoryDesk(props) {
 
   // Pricer defaults feed the board's market column and source preselect.
   createEffect(
-    () => signedIn() && !tab().importTab && !tab().collectionTab,
-    (on) => {
-      if (props.preview || !on) return undefined;
+    () => (!tab().importTab && !tab().collectionTab ? listingsUid() : ''),
+    (uid) => {
+      if (props.preview || !uid) return undefined;
       let cancelled = false;
       getBearer()
         .then((token) => fetchPricingStrategies(token))
         .then((data) => {
-          if (!cancelled) setPricerDefaults(() => data.pricerSettings || {});
+          if (cancelled) return;
+          const settings = data.pricerSettings || {};
+          writeCachedPricerSettings(uid, settings);
+          setPricerDefaults(() => settings);
         })
         .catch(() => {});
       return () => { cancelled = true; };
@@ -234,15 +254,17 @@ function InventoryDesk(props) {
       ];
     }
     const live = rows();
-    if (!onListings() || !live) return [];
+    if (!onListings()) return [];
+    // Hold the tiles' row while the first book loads, so it does not push the page.
+    if (!live || partial()) return LISTING_METRICS.map((label) => ({ value: '—', label }));
     const scoped = locationName() ? inventoryRowsForLocation(live, locationName()) : live;
     const summary = summarizeLiveInventory(scoped);
     const paused = scoped.filter((row) => String(row.status || '').toLowerCase() === 'paused').length;
     return [
-      { value: summary.listings, label: 'Live listings' },
-      { value: summary.cards, label: 'Cards in stock' },
-      { value: `${formatPknNumber(summary.listedPkn)} PKN`, label: 'Total asking' },
-      { value: paused, label: 'Paused' },
+      { value: summary.listings, label: LISTING_METRICS[0] },
+      { value: summary.cards, label: LISTING_METRICS[1] },
+      { value: `${formatPknNumber(summary.listedPkn)} PKN`, label: LISTING_METRICS[2] },
+      { value: paused, label: LISTING_METRICS[3] },
     ];
   };
 
@@ -318,8 +340,12 @@ function InventoryDesk(props) {
 
       <Show when={tab().collectionTab}><CollectionHoldings preview={props.preview} onStats={setCollectionStats} /></Show>
 
-      <Show when={!tab().importTab && !tab().collectionTab && rows() == null && !error()}>
-        <DeskPanel title="Listings"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
+      <Show when={!tab().importTab && !tab().collectionTab && !tab().settingsTab && rows() == null && !error()}>
+        {/* First visit only (later visits paint the stored book): holds the
+            footer below the fold so the board does not push it. */}
+        <Show when={waitShown()} fallback={<div class="mypokoin-wait" aria-hidden="true" />}>
+          <DeskPanel title="Listings" class="mypokoin-wait"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
+        </Show>
       </Show>
       <Show when={tab().settingsTab}>
         <div class="mypokoin-settings">
@@ -420,7 +446,7 @@ export default function Inventory() {
     <Show
       when={untrack(() => allowMypokoinPreview(params))}
       fallback={(
-        <SignedIn from={untrack(() => location.pathname) || '/mypokoin'}>
+        <SignedIn early from={untrack(() => location.pathname) || '/mypokoin'}>
           <InventoryDesk />
         </SignedIn>
       )}

@@ -4041,6 +4041,11 @@
   max-width: 42rem;
 }
 
+/* First-visit listings skeleton: keeps the footer below the fold until the board paints. */
+.mypokoin .mypokoin-wait {
+  min-height: 100vh;
+}
+
 .mypokoin .mypokoin-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));

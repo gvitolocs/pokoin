@@ -23,7 +23,7 @@ import {
 } from '@market/order-status.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
-import RequireSignIn from '../components/RequireSignIn.jsx';
+import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { getBearer } from '../stores/auth.js';
 import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewSales } from './mypokoin-preview-fixture.js';
@@ -362,9 +362,9 @@ export default function Sales() {
     <Show
       when={untrack(() => allowMypokoinPreview(params))}
       fallback={(
-        <RequireSignIn>
+        <SignedIn early>
           <SalesDesk />
-        </RequireSignIn>
+        </SignedIn>
       )}
     >
       <SalesDesk preview />

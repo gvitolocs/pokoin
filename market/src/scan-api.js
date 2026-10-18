@@ -54,7 +54,7 @@ async function request(path, { method = 'GET', body, token }) {
     error.problems = data.problems || [];
     throw error;
   }
-  if (method === 'POST' && path === '/api/scan-batch?action=submit') inventoryBooks.clear();
+  if (method === 'POST' && path === '/api/scan-batch?action=submit') inventoryBooks.markStale();
   return data;
 }
 

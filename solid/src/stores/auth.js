@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { clearAuthSession, readAuthSession, readAuthToken, writeAuthSession, writeAuthToken } from '@market/auth-session.js';
 import { setBearerProvider } from '@market/auth-bearer.js';
+import { retainPrivateBooks, wipePrivateBooks } from '@market/inventory-book.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
   framedByChromeExtension,
@@ -39,6 +40,8 @@ function dropSession() {
   deskSession = { token: '', uid: '', expiresAt: 0 };
   setDeskUid('');
   clearAuthSession();
+  // The seller's stored MyPokoin book never outlives the session.
+  wipePrivateBooks();
   refreshSession();
 }
 
@@ -51,6 +54,7 @@ function onFirebaseUser(user) {
     deskSession = { token: '', uid: '', expiresAt: 0 };
     setDeskUid('');
     const cached = readAuthSession();
+    if (cached?.uid !== user.uid) retainPrivateBooks(user.uid);
     writeAuthSession(cached?.uid === user.uid ? cached : { uid: user.uid, signedIn: true });
     refreshSession();
     return;
@@ -66,6 +70,7 @@ function onFirebaseUser(user) {
   // Cold start without a Firebase user: a still-valid token cookie signs in.
   const shared = readAuthToken();
   if (shared && applyDeskSession(shared)) {
+    if (readAuthSession()?.uid !== shared.uid) retainPrivateBooks(shared.uid);
     writeAuthSession(readAuthSession()?.uid === shared.uid ? readAuthSession() : { uid: shared.uid, signedIn: true });
     refreshSession();
     setDeskUid(shared.uid);
@@ -85,6 +90,7 @@ export function watchDeskSession(onSession) {
     if (!applyDeskSession(event.data)) return;
     const uid = deskSession.uid;
     const cached = readAuthSession();
+    if (cached?.uid !== uid) retainPrivateBooks(uid);
     writeAuthSession(cached?.uid === uid ? cached : { uid, signedIn: true });
     refreshSession();
     setDeskUid(uid);
@@ -140,6 +146,9 @@ export async function getBearer(forceRefresh = false) {
     }
   }
   const auth = await loadAuth();
+  // Pages that paint on the cached session ask before Firebase restored its
+  // user: currentUser is null until then, which would send no bearer.
+  await auth.authStateReady?.();
   const user = auth.currentUser;
   return user ? user.getIdToken(forceRefresh) : '';
 }

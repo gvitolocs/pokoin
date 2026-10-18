@@ -24,8 +24,10 @@ import { ensureSellerSettings } from './stores/buyer.js';
 import { startCartSync } from './stores/cart.js';
 
 /** Route placeholder: keeps the desk shell, no CLS. */
+// A full viewport: with 55vh the footer showed under a cold route chunk and
+// jumped away when the page painted (CLS 0.1–0.2 on every deep link).
 function RoutePending() {
-  return <div class="page desk" style={{ 'min-height': '55vh' }} role="status" aria-busy="true" />;
+  return <div class="page desk" style={{ 'min-height': '100vh' }} role="status" aria-busy="true" />;
 }
 
 function RouteError(props) {

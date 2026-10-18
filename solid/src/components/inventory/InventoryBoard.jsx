@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
 import { fetchPriceCheck, imageSrc } from '@market/api.js';
 import {
   filterInventoryRows,
@@ -66,6 +66,27 @@ function writeBoardMode(next) {
       localStorage.setItem('pokoin.invView', next);
     }
   } catch (_) { /* private mode */ }
+}
+
+// Market comps of the rows on screen outlive a remount (tab switch, back
+// from a card desk): the column paints with the board instead of "…".
+const PRICE_MEMO_MS = 10 * 60_000;
+const priceMemo = new Map();
+
+function priceRequest(source, rows) {
+  const items = rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
+  return { items, key: `${source}|${JSON.stringify(items)}` };
+}
+
+function memoPrices(key) {
+  const hit = priceMemo.get(key);
+  return hit && Date.now() - hit.at < PRICE_MEMO_MS ? hit.prices : null;
+}
+
+function rememberPrices(key, prices) {
+  priceMemo.delete(key);
+  priceMemo.set(key, { prices, at: Date.now() });
+  while (priceMemo.size > 24) priceMemo.delete(priceMemo.keys().next().value);
 }
 
 const qty = (row) => Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
@@ -173,9 +194,6 @@ export default function InventoryBoard(props) {
     setPricerSource(pricerSource() === id ? '' : id);
   }
   const pricerOn = () => Boolean(pricerSource()) || Boolean(props.autoMarketColumn);
-  const [prices, setPrices] = createSignal({});
-  const [pricesPending, setPricesPending] = createSignal(false);
-  let pricesKey = '';
 
   const facets = createMemo(() => inventoryFacets(props.rows));
   const summary = createMemo(() => summarizeLiveInventory(props.rows));
@@ -202,6 +220,10 @@ export default function InventoryBoard(props) {
   const visibleRows = () => mode() === 'stacks' || mode() === 'titles'
     ? pageEntries().flatMap((group) => group.postings) : pageEntries();
   const pausedCount = () => props.rows.filter(paused).length;
+  const firstPrices = untrack(() => (pricerOn() ? priceRequest(pricerSource(), visibleRows()) : null));
+  const [prices, setPrices] = createSignal((firstPrices && memoPrices(firstPrices.key)) || {});
+  const [pricesPending, setPricesPending] = createSignal(false);
+  let pricesKey = firstPrices && memoPrices(firstPrices.key) ? firstPrices.key : '';
   const market = (row) => inventoryMarketValue(prices(), row, pricerSource());
 
   // Market comps for the current filtered rows while a pricer source is on.
@@ -212,10 +234,15 @@ export default function InventoryBoard(props) {
         pricesKey = '';
         return undefined;
       }
-      const items = input.rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
+      const { items, key } = priceRequest(input.source, input.rows);
       if (!items.length) return undefined;
-      const key = `${input.source}|${JSON.stringify(items)}`;
       if (pricesKey === key) return undefined;
+      const remembered = memoPrices(key);
+      if (remembered) {
+        pricesKey = key;
+        setPrices(remembered);
+        return undefined;
+      }
       let cancelled = false;
       setPricesPending(true);
       (async () => {
@@ -224,6 +251,7 @@ export default function InventoryBoard(props) {
           const data = await fetchPriceCheck(items, token);
           if (!cancelled) {
             pricesKey = key;
+            rememberPrices(key, data.prices || {});
             setPrices(data.prices || {});
           }
         } catch {
