@@ -80,9 +80,9 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/home/landing-boot.js"></script>
-    <link rel="stylesheet" href="/home/landing.css?v=20261018-home-search" />
-    <link rel="stylesheet" href="/home/home.css?v=20261018-header-search" />
+    <script src="/home/landing-boot.js?v=20261018-account"></script>
+    <link rel="stylesheet" href="/home/landing.css?v=20261018-account" />
+    <link rel="stylesheet" href="/home/home.css?v=20261018-landing-polish" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -154,13 +154,18 @@
           <a href="/marketplace">Marketplace</a><a href="/marketplace/sets">Sets</a
           ><a href="/#scanner">Scanner</a><a href="/#sell">Sell</a
           ><a href="/#poko">Meet Poko</a>
-          <a class="nav-mobile-account" href="/mypokoin">Open My Pokoin ↗</a>
+          <a class="nav-mobile-account" href="/auth?from=%2Fmypokoin" rel="nofollow" data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span> ↗</a
+          >
         </nav>
         <div class="nav-end">
           <a
             class="button button-small button-outline nav-account"
-            href="/mypokoin"
-            >My Pokoin <span aria-hidden="true">↗</span></a
+            href="/auth?from=%2Fmypokoin"
+            rel="nofollow"
+            data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span>
+            <span aria-hidden="true">↗</span></a
           ><button
             class="nav-toggle"
             type="button"
@@ -663,7 +668,7 @@
       </p>
       <button type="button" data-cookie-accept>Accept</button>
     </div>
-    <script src="/home/landing.js?v=20261018-home-search" defer></script>
+    <script src="/home/landing.js?v=20261018-account" defer></script>
     <script type="module" src="/market/landing-island.js"></script>
   </body>
 </html>

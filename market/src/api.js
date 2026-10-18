@@ -1818,10 +1818,11 @@ export function fetchSellerSnapshot(handle, { version = '', ...options } = {}) {
 
 let listDictionaryPrimed = false;
 
-/** Off until the zone Bypass rule is in place and `shared_dictionary_mode` is
- * `passthrough` (docs/rust-migration/COMPACT_ENCODING.md). Flag off keeps
- * today's plain `format=c1v2` URLs. */
-export const LIST_DICTIONARY_ENABLED = false;
+/** On since 2026-10-18: the zone Bypass rule is in place and
+ * `shared_dictionary_mode` is `passthrough` (docs/rust-migration/COMPACT_ENCODING.md).
+ * Kill switch: set false and deploy the web app; pages go back to the plain
+ * `format=c1v2` URL. Browsers without compression-dictionary never send `dict=`. */
+export const LIST_DICTIONARY_ENABLED = true;
 
 /** First 8 bytes of the SHA-256 of `pokoin-rust/apps/api/assets/c1-shared-<id>.dict`, hex.
  * The Rust test `the_bypass_rule_and_spa_id_match_the_shipped_dictionary` asserts this literal. */

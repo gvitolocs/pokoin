@@ -94,7 +94,13 @@ function fill(input, value, focus) {
 
 function mountRail(host) {
   const section = host.closest('section');
+  let shown = false;
+  // Build the rail while the visitor is still on the hero (idle time), not
+  // in the frames where they scroll into it: mounting the Carousel and its
+  // tiles mid-scroll made arriving at Best sellers / Tools stutter.
   const show = () => {
+    if (shown) return;
+    shown = true;
     import('./LandingRail.jsx')
       .then(({ default: LandingRail }) => {
         host.textContent = '';
@@ -115,8 +121,12 @@ function mountRail(host) {
     if (!entries.some((entry) => entry.isIntersecting)) return;
     observer.disconnect();
     show();
-  }, { rootMargin: '600px 0px' });
+  }, { rootMargin: '1200px 0px' });
   observer.observe(host);
+  whenIdle(() => {
+    observer.disconnect();
+    show();
+  });
 }
 
 const form = document.querySelector('[data-landing-search]');

@@ -97,6 +97,11 @@ function clearCookie(name, { jar, hostname, shared = true } = {}) {
   writeCookie(name, '', { maxAgeSec: 0, jar, hostname, shared });
 }
 
+/** Username for the landing's account button: handle characters only. */
+export function sessionUsername(value) {
+  return String(value || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 32);
+}
+
 export function readAuthSession(overrideStore) {
   const storage = store(overrideStore);
   let raw = null;
@@ -131,6 +136,7 @@ export function readAuthSession(overrideStore) {
       silverUntil: untilLive ? silverUntil : null,
       availablePkn: Number(parsed.availablePkn) || 0,
       photoUrl: safeAvatarUrl(parsed.photoUrl),
+      username: sessionUsername(parsed.username),
     };
   } catch (_) {
     return null;
@@ -152,6 +158,7 @@ export function writeAuthSession(session, overrideStore) {
     silverUntil: silverUntil ? silverUntil.toISOString() : null,
     availablePkn: Number(session.availablePkn) || 0,
     photoUrl: safeAvatarUrl(session.photoUrl),
+    username: sessionUsername(session.username),
   });
   if (storage?.setItem) {
     try {
