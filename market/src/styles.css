@@ -1266,6 +1266,61 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   width: 8.5rem;
 }
 
+/* MyPokoin logo button: the navy Pokoin coin badge over a "MyPokoin" wordmark, game-neutral. */
+.mypokoin-logo-tile {
+  gap: 0.55rem;
+  padding: 0.85rem 0.6rem 0.75rem;
+  background: linear-gradient(180deg, #ffe27a 0%, var(--yellow) 55%, #f4c21f 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 8px 22px rgb(0 0 0 / 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mypokoin-logo-tile:hover,
+.mypokoin-logo-tile:focus-visible {
+  background: linear-gradient(180deg, #ffe998 0%, #ffdb55 55%, #f7c92e 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 0 0 2px rgb(255 211 61 / 0.32), 0 10px 26px rgb(0 0 0 / 0.4);
+  transform: translateY(-1px);
+}
+
+.mypokoin-badge {
+  display: block;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  image-rendering: pixelated;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6), 0 5px 12px rgb(27 43 94 / 0.32);
+}
+
+.tile-cta .mypokoin-logo {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.08em;
+  color: #1b2b5e;
+  font-size: 1.22rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mypokoin-my {
+  font-family: var(--font);
+  font-size: 0.82em;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.mypokoin-word {
+  font-family: PokoinWordmark, var(--font);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* The header's coin tittle would vanish on yellow: navy dot here. */
+.mypokoin-word .brand-i::after {
+  top: 0.16em;
+  background: #1b2b5e;
+  box-shadow: none;
+}
+
 .tile-cta svg {
   width: 4.5rem;
   height: auto;
