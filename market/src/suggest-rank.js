@@ -185,6 +185,24 @@ export function namePoolHasCompact(compact) {
   return Boolean(key) && NAME_POOL.some((row) => row.compact === key);
 }
 
+let namePoolCompacts = null;
+
+/**
+ * A typed word still spelling a card name that the expansion title starts
+ * with: `charizar` → Charizard → `Charizard SP Half Deck`. The visitor is
+ * typing the Pokémon, not browsing that deck (D00004M's `expedition` is not a
+ * name prefix of `Expedition Base Set`).
+ */
+function typingTitleName(compact, titleCompact) {
+  namePoolCompacts ||= new Set(NAME_POOL.map((row) => row.compact));
+  for (let end = compact.length + 1; end < titleCompact.length; end += 1) {
+    if (namePoolCompacts.has(titleCompact.slice(0, end))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Exact expansion alias (`hgss`, `sl`), or null. Read-only view for the resolver. */
 export function exactSetAlias(word) {
   return expansionAliasIndex().get(compactQuery(word)) || null;
@@ -1232,7 +1250,7 @@ function expansionPrefixRows() {
   return rows;
 }
 
-function packedFromExpansionPrefix(compact) {
+function packedFromExpansionPrefix(compact, { bare = false } = {}) {
   if (!compact || compact.length < MIN_EXPANSION_PREFIX || BLOCKED_SET_ALIASES.has(compact)) {
     return null;
   }
@@ -1242,8 +1260,11 @@ function packedFromExpansionPrefix(compact) {
   if (namePoolHasCompact(compact)) {
     return null;
   }
+  // A bare word still spelling a Pokémon (`charizar`, `blastois`) must not
+  // browse a product titled after it: that keystroke emptied the popup.
   const hits = expansionPrefixRows().filter((row) => (
-    row.compact === compact || row.compact.startsWith(compact)
+    (row.compact === compact || row.compact.startsWith(compact))
+    && !(bare && typingTitleName(compact, row.compact))
   ));
   if (!hits.length) {
     return null;
@@ -1496,7 +1517,7 @@ export function parseTypedQuery(query) {
     }
     const compact = compactQuery(raw);
     const packed = compact.length >= MIN_BARE_SET_PREFIX
-      ? packedFromExpansionPrefix(compact)
+      ? packedFromExpansionPrefix(compact, { bare: true })
       : null;
     if (packed) {
       return {

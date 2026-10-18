@@ -385,6 +385,50 @@ function popupGroups(groups, printLang) {
   return filterSuggestByPrintLang(groups, printLang);
 }
 
+/** Other expansions' n/151 printings kept above a number-titled set's browse. */
+const NUMBER_SET_COLLECTOR_HEAD = 4;
+
+/**
+ * A bare number that is also a set title (`151` → Scarlet & Violet—151)
+ * browses that set's singles toward 20, like a bare set title (D00004M). The
+ * set's own n/151 printing leads, a few other collector-number hits follow, and
+ * the rest of them only top up a short list, so they cannot starve the set.
+ * Null until the set's cards are cached (the collector paint stands in) and on
+ * the Product tab, where the set's sealed SKUs come from the name pool.
+ */
+function numberSetBrowse(query, parsed, { limit, printLang, kind }) {
+  const tab = String(kind || '').trim().toLowerCase();
+  if (tab && tab !== 'singles') {
+    return null;
+  }
+  const intent = catalogIntent(query);
+  if (intent.kind !== 'set' || !intent.slug || intent.compact !== compactQuery(query)) {
+    return null;
+  }
+  const setRows = cachedPrintings(catalogCacheKey(intent));
+  if (!setRows.length) {
+    return null;
+  }
+  const idOf = (row) => String(row.id || row.card_id || '');
+  const inSet = new Set(setRows.map(idOf));
+  const collector = cachedNumberPrintings(parsed);
+  const others = collector.filter((row) => !inSet.has(idOf(row)));
+  const rows = [
+    ...collector.filter((row) => inSet.has(idOf(row))),
+    ...others.slice(0, NUMBER_SET_COLLECTOR_HEAD),
+    ...setRows,
+    ...others.slice(NUMBER_SET_COLLECTOR_HEAD),
+  ];
+  // Tokenless fill: keep this order; the Singles tab drops sealed rows.
+  const browse = { ...parsed, nameQuery: '', numberTokens: [] };
+  return {
+    groups: fillSuggestGroups(popupGroups(groupsFromCards(rows), printLang), limit, limit, browse, kind || 'singles'),
+    ranked: intent.ranked || [],
+    parsed,
+    intent,
+  };
+}
+
 export function liveSuggestGroups(query, {
   rank = rankNames,
   pool,
@@ -398,6 +442,12 @@ export function liveSuggestGroups(query, {
     return { groups: [], ranked: [], parsed: parseTypedQuery(query) };
   }
   const parsed = parseTypedQuery(query);
+  if (isBareCollectorQuery(parsed)) {
+    const numberSet = numberSetBrowse(query, parsed, { limit, printLang, kind });
+    if (numberSet) {
+      return numberSet;
+    }
+  }
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
