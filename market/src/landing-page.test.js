@@ -44,7 +44,7 @@ test('the Best sellers rail is the island over the Rust best-sellers rail', () =
 
 test('the island search is the header SearchBox', () => {
   const search = read('solid/src/landing/LandingSearch.jsx');
-  assert.match(search, /import SearchBox from '\.\.\/components\/SearchBox\.jsx';/);
+  assert.match(search, /import SearchBox(?:, \{ fillSuggest, prewarmSuggest \})? from '\.\.\/components\/SearchBox\.jsx';/);
   assert.match(search, /<SearchBox\s+hero/);
 });
 
