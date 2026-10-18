@@ -116,7 +116,8 @@ export function extensionAuthTokenPayload(user, accessToken, extra = {}) {
   if (token.length < 20) {
     return null;
   }
-  return {
+  const refreshToken = String(user?.refreshToken || extra.refreshToken || '').trim();
+  const payload = {
     type: EXTENSION_AUTH_TOKEN,
     ok: true,
     token: {
@@ -127,4 +128,9 @@ export function extensionAuthTokenPayload(user, accessToken, extra = {}) {
       email: user?.email || extra.email || '',
     },
   };
+  // Persistable Firebase refresh token for the Chrome extension silent-refresh path.
+  if (refreshToken.length > 20) {
+    payload.token.refreshToken = refreshToken;
+  }
+  return payload;
 }
