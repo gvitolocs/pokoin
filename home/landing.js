@@ -141,3 +141,31 @@ if (cookieBanner) {
       });
   }
 }
+
+// Account button: landing-boot.js already painted "Log in" or the session's
+// username (a CSS string). Write the real text and point a signed-in visitor
+// straight at MyPokoin instead of the sign-in page.
+if (document.documentElement.classList.contains("signed-in")) {
+  const name = (() => {
+    try {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--account-name").trim();
+      return raw ? JSON.parse(raw) : "";
+    } catch (_) {
+      return "";
+    }
+  })();
+  document.querySelectorAll("[data-account-link]").forEach((link) => {
+    link.setAttribute("href", "/mypokoin");
+    link.removeAttribute("rel");
+    const label = link.querySelector("[data-account-name]");
+    if (label && name) label.textContent = name;
+  });
+}
+
+// The hero's endless float/scan/marquee loops pause once it scrolls away.
+const hero = document.querySelector(".home-hero");
+if (hero && typeof IntersectionObserver === "function") {
+  new IntersectionObserver((entries) => {
+    for (const entry of entries) hero.classList.toggle("is-offscreen", !entry.isIntersecting);
+  }).observe(hero);
+}

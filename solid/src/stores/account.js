@@ -79,6 +79,7 @@ async function readAccount() {
     silverUntil: profile.silverUntil,
     availablePkn: pkn,
     photoUrl: profile.photoUrl,
+    username: profile.username,
   });
   refreshSession();
 }
@@ -93,8 +94,11 @@ export function patchAccountProfile(partial) {
   const base = accountProfile();
   if (!uid || !base) return;
   setLive({ uid, profile: { ...base, ...partial }, availablePkn: availablePkn() });
-  if ('photoUrl' in partial) {
-    writeAuthSession({ ...authSession(), uid, signedIn: true, photoUrl: partial.photoUrl });
+  if ('photoUrl' in partial || 'username' in partial) {
+    const session = { ...authSession(), uid, signedIn: true };
+    if ('photoUrl' in partial) session.photoUrl = partial.photoUrl;
+    if ('username' in partial) session.username = partial.username;
+    writeAuthSession(session);
     refreshSession();
   }
 }

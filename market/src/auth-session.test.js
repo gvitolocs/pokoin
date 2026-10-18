@@ -193,3 +193,13 @@ test('writeAuthSession also mirrors into the shared cookie jar', () => {
   assert.equal(readAuthSession(dual).uid, 'user-2');
   assert.equal(dual.cookie.includes('user-2'), true);
 });
+
+test('the session hint keeps a handle-safe username for the landing account button', () => {
+  const store = memoryStore();
+  writeAuthSession({ uid: 'u1', username: 'PeppeV' }, store);
+  assert.equal(readAuthSession(store).username, 'PeppeV');
+  writeAuthSession({ uid: 'u1', username: '<b>"x"</b>;}' }, store);
+  assert.equal(readAuthSession(store).username, 'bxb');
+  writeAuthSession({ uid: 'u1' }, store);
+  assert.equal(readAuthSession(store).username, '');
+});

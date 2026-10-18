@@ -215,6 +215,21 @@ summary:focus-visible,
 .nav-links .nav-mobile-account {
   display: none;
 }
+/* Account button: "Log in", or the signed-in username (landing-boot.js sets
+   html.signed-in and --account-name from the marketplace session hint). */
+html:not(.signed-in) .account-in,
+html.signed-in .account-out {
+  display: none;
+}
+.account-in {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-in:empty::before {
+  content: var(--account-name, "My Pokoin");
+}
 .button {
   display: inline-flex;
   align-items: center;
