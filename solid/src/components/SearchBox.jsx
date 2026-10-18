@@ -30,7 +30,8 @@ import { clipSuggestCollector, printingIdentity, suggestCardName, suggestTransla
 import { sellerHref } from '@market/listing-meta.js';
 import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/locale.js';
 import { prefersArtworkDelta, rarityRowTheme } from '@market/rarity-theme.js';
-import { prefetchSearchPage } from '@market/search-hot.js';
+import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
+import { prefetchSearchPage, takeHotSearchPage } from '@market/search-hot.js';
 import { createPageMemo } from '@market/suggest-page-memo.js';
 import { buildInterestProfile, personalPopup, predictInterest, readInterestEvents } from '@market/interest-profile.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
@@ -163,6 +164,176 @@ function flattenSuggestRows(groups) {
   return rows;
 }
 
+/**
+ * Page every catalogRecall lookup of `text` through `suggestPage`, the way the
+ * progressive pool does, remembering each page in the suggest-live cache.
+ * `onPage(page, incoming)` runs per page; `alive()` false stops between pages
+ * (returns 'stale' when a page landed after that). Shared by the pool and
+ * prewarmSuggest, so a warmed query hits exactly the same memo keys.
+ */
+async function pageUniverse(live, text, { lang, print, signal, alive = () => true, onPage } = {}) {
+  for (const lookup of live.catalogRecall(text)) {
+    if (!alive()) return 'stopped';
+    let offset = 0;
+    let chunks = 0;
+    let fetched = 0;
+    const compactLength = compactQuery(lookup).length;
+    while (alive()) {
+      const size = live.chunkSize(chunks);
+      const page = await suggestPage(lookup, {
+        limit: size, offset, progressive: true, hydrate: true, signal, lang, printLang: print,
+      });
+      if (!alive()) return 'stale';
+      live.rememberSuggestGroups(page?.groups, { searchLang: lang });
+      const incoming = (page?.groups || []).reduce((sum, group) => sum + (group.printings || []).length, 0);
+      onPage?.(page, incoming);
+      fetched += incoming;
+      chunks += 1;
+      offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
+      const exhaustive = page?.exhaustive === true || incoming < size;
+      if (exhaustive || incoming === 0) break;
+      if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
+      // One letter prefetches a page. A real name keeps paging its printings.
+      if (compactLength <= 2) break;
+    }
+  }
+  return 'done';
+}
+
+/** The name / artist / set catalogs the local resolver points `text` at. */
+function catalogTargets(live, text, lang) {
+  const targets = [];
+  const prefixName = live.earlySetPrefixName(text, { lang });
+  if (prefixName) targets.push({ key: `prefix-name:${lang}:${prefixName}`, kind: 'name', name: prefixName });
+  const resolved = live.resolveSuggestQuery(text);
+  if (resolved?.best) {
+    for (const entity of resolved.best.entities.artist) {
+      const span = resolved.best.spans?.find((row) => row.candidate?.slug === entity.slug);
+      if (entity.slug && compactQuery(span?.raw || '').length >= 3) {
+        targets.push({ key: `artist:${entity.slug}`, kind: 'artist', slug: entity.slug });
+      }
+    }
+    for (const entity of resolved.best.entities.set) {
+      if (entity.slug) targets.push({ key: `set:${entity.slug}`, kind: 'set', slug: entity.slug });
+    }
+  }
+  const intent = live.catalogIntent(text);
+  const legacyKey = live.catalogCacheKey(intent);
+  if (legacyKey && intent.slug) targets.push({ key: legacyKey, kind: intent.kind, slug: intent.slug });
+  const seen = new Set();
+  return targets.filter((target) => {
+    if (seen.has(target.key) || live.cachedPrintings(target.key).length) return false;
+    seen.add(target.key);
+    return true;
+  });
+}
+
+/** One catalog's cards, remembered: `{ cards }` once landed. */
+function hydrateTarget(live, target, lang) {
+  const landed = (cards, remember) => {
+    live.rememberPrintings(target.key, cards);
+    if (remember) live.rememberSuggestGroups(live.groupsFromCards(cards));
+    preloadSuggestThumbs(collectPrintingThumbUrls(live.groupsFromCards(cards), suggestThumbSrc));
+    return { cards };
+  };
+  if (target.kind === 'name') {
+    return fetchNamePrintings(target.name, { lang }).then((cards) => landed(cards, false));
+  }
+  if (target.kind === 'artist') {
+    return fetchArtist(target.slug, { limit: 80 }).then((data) => landed(live.cardsWithCatalogArtist(data), true));
+  }
+  // A matching name may sit beyond the first set page: hydrate the whole catalog.
+  return fetchExpansionCards({ slug: target.slug }).then((data) => landed(data?.cards || [], true));
+}
+
+/** Thumbs + per-card shade buckets for rows about to show (the popup's `flat` effect). */
+function warmRows(rows, preloadRows = rows) {
+  preloadSuggestThumbs(
+    collectPrintingThumbUrls([{ printings: preloadRows.map((row) => row.printing) }], suggestThumbSrc),
+    { first: true },
+  );
+  const live = engine();
+  for (const row of rows) {
+    const card = row.card;
+    if (!card.id || (live && live.isLiveStub(card))) continue;
+    rememberDeskIdentity(card);
+    const shade = albumShade(card);
+    if (shade) {
+      rememberCardBucket(card.id, shade);
+      continue;
+    }
+    warmCardBucket(card.id, thumbOf(card));
+  }
+}
+
+/** Resolves once `url` loaded or failed (never rejects). */
+function loadedImage(url) {
+  return new Promise((resolve) => {
+    if (!url || typeof Image === 'undefined') {
+      resolve();
+      return;
+    }
+    const img = new Image();
+    img.onload = resolve;
+    img.onerror = resolve;
+    img.src = url;
+  });
+}
+
+const prewarmed = new Map();
+
+/**
+ * Run a whole query ahead of time (the landing's Popular chips): the engine,
+ * every suggest page and catalog the popup would read, and the results-page
+ * total, all in the caches the popup reads. With `thumbs`, the first rows'
+ * pictures are loaded and their shades warmed too. A chip filled with
+ * `fillSuggest` then paints its final list in its first frame: no
+ * "Searching…", no re-rank, no count change. Ranking is untouched: the popup
+ * still ranks at paint time, it just finds everything already there.
+ */
+export function prewarmSuggest(text, { lang, printLang: print = 'all', tab = 'singles', thumbs = false } = {}) {
+  const q = String(text || '').trim();
+  if (!q) return Promise.resolve();
+  const key = `${lang}\0${print}\0${tab}\0${q}`;
+  let entry = prewarmed.get(key);
+  if (!entry) {
+    entry = {
+      data: (async () => {
+        const live = await loadSuggestEngine();
+        await Promise.all([
+          pageUniverse(live, q, { lang, print }),
+          ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang).catch(() => null)),
+          prefetchSearchPage(q, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print }).catch(() => null),
+        ]);
+        return live;
+      })(),
+      thumbs: null,
+    };
+    entry.data.catch(() => prewarmed.delete(key));
+    prewarmed.set(key, entry);
+  }
+  if (!thumbs) return entry.data;
+  entry.thumbs ||= entry.data.then((live) => {
+    const paint = (limit) => live.paintCatalogGroups(q, { printLang: print, searchLang: lang, kind: tab, limit });
+    const interest = buildInterestProfile(readInterestEvents('pokemon'), { print, eraOf: live.matchTcgEra });
+    const rows = flattenSuggestRows(personalPopup(paint, q, interest, { eraOf: live.matchTcgEra }));
+    warmRows(rows);
+    // The <img> CardArt renders first for each row in view (its first raster sibling).
+    const urls = rows.slice(0, SUGGEST_THUMB_EAGER).map((row) => cdnFetchUrl(rasterSiblings(suggestThumbSrc(row.printing))[0] || '')).filter(Boolean);
+    return Promise.all(urls.map(loadedImage));
+  });
+  return entry.thumbs;
+}
+
+/**
+ * Put a whole query in the box at once (a landing Popular chip): `term`
+ * commits with the input instead of a paint later, so after prewarmSuggest
+ * the popup's first frame is the final list. `input` is the SearchBox field.
+ */
+export function fillSuggest(input, value) {
+  input.dispatchEvent(new CustomEvent('suggest-fill', { detail: String(value || '') }));
+}
+
 /** Dividers follow the groups that are actually next to each other after a rotation. */
 function withGroupStarts(rows) {
   let prevGroup = null;
@@ -239,6 +410,23 @@ export default function SearchBox(props) {
   createEffect(open, (isOpen) => {
     if (isOpen) setInterestTick((tick) => tick + 1);
   });
+
+  // fillSuggest (a landing Popular chip): the whole query, term and all, in one
+  // update; the results-page total is applied at once when prewarmSuggest has it.
+  function fillWhole(value) {
+    onIntent();
+    const text = value.trim();
+    nextTerm = value;
+    setQuery(value);
+    setTerm(value);
+    setActiveIndex(-1);
+    setOpen(true);
+    const hot = takeHotSearchPage(text, searchLang(), searchTab(), printLang());
+    if (hot?.count > 0) {
+      countedQuery = text;
+      setHitCount(hot.count);
+    }
+  }
 
   function commitTerm(value) {
     nextTerm = value;
@@ -325,42 +513,22 @@ export default function SearchBox(props) {
       });
       setProgressivePending(true);
       (async () => {
-        for (const lookup of live.catalogRecall(text)) {
-          if (stopped || pool.generation !== generation) return;
-          let offset = 0;
-          let chunks = 0;
-          let fetched = 0;
-          const compactLength = compactQuery(lookup).length;
-          while (!stopped && pool.generation === generation) {
-            const size = live.chunkSize(chunks);
-            let page;
-            try {
-              page = await suggestPage(lookup, {
-                limit: size, offset, progressive: true, hydrate: true, signal: controller.signal, lang, printLang: print,
-              });
-            } catch (error) {
-              if (error?.name === 'AbortError') pool.cancelled = (pool.cancelled || 0) + 1;
-              return;
-            }
-            if (stopped || pool.generation !== generation) {
-              pool.stale = (pool.stale || 0) + 1;
-              return;
-            }
-            live.rememberSuggestGroups(page?.groups, { searchLang: lang });
-            const incoming = (page?.groups || []).reduce((sum, group) => sum + (group.printings || []).length, 0);
-            pool.transferred = (pool.transferred || 0) + incoming;
-            // Placeholder until the search-page total lands: "View all N" = rows the page lists.
-            if (countedQuery !== text) setHitCount(Number(page?.count) || 0);
-            fetched += incoming;
-            chunks += 1;
-            offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
-            repaint.page();
-            const exhaustive = page?.exhaustive === true || incoming < size;
-            if (exhaustive || incoming === 0) break;
-            if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
-            // One letter prefetches a page. A real name keeps paging its printings.
-            if (compactLength <= 2) break;
-          }
+        try {
+          const ended = await pageUniverse(live, text, {
+            lang,
+            print,
+            signal: controller.signal,
+            alive: () => !stopped && pool.generation === generation,
+            onPage: (page, incoming) => {
+              pool.transferred = (pool.transferred || 0) + incoming;
+              // Placeholder until the search-page total lands: "View all N" = rows the page lists.
+              if (countedQuery !== text) setHitCount(Number(page?.count) || 0);
+              repaint.page();
+            },
+          });
+          if (ended === 'stale') pool.stale = (pool.stale || 0) + 1;
+        } catch (error) {
+          if (error?.name === 'AbortError') pool.cancelled = (pool.cancelled || 0) + 1;
         }
       })().finally(() => {
         if (!stopped && pool.generation === generation) {
@@ -433,42 +601,12 @@ export default function SearchBox(props) {
   );
 
   function hydrateCatalog(live, text, lang) {
-    const targets = [];
-    const prefixName = live.earlySetPrefixName(text, { lang });
-    if (prefixName) targets.push({ key: `prefix-name:${lang}:${prefixName}`, kind: 'name', name: prefixName });
-    const resolved = live.resolveSuggestQuery(text);
-    if (resolved?.best) {
-      for (const entity of resolved.best.entities.artist) {
-        const span = resolved.best.spans?.find((row) => row.candidate?.slug === entity.slug);
-        if (entity.slug && compactQuery(span?.raw || '').length >= 3) {
-          targets.push({ key: `artist:${entity.slug}`, kind: 'artist', slug: entity.slug });
-        }
-      }
-      for (const entity of resolved.best.entities.set) {
-        if (entity.slug) targets.push({ key: `set:${entity.slug}`, kind: 'set', slug: entity.slug });
-      }
-    }
-    const intent = live.catalogIntent(text);
-    const legacyKey = live.catalogCacheKey(intent);
-    if (legacyKey && intent.slug) targets.push({ key: legacyKey, kind: intent.kind, slug: intent.slug });
-    const seen = new Set();
-    const landed = (key, cards, remember) => {
-      live.rememberPrintings(key, cards);
-      if (remember) live.rememberSuggestGroups(live.groupsFromCards(cards));
-      preloadSuggestThumbs(collectPrintingThumbUrls(live.groupsFromCards(cards), suggestThumbSrc));
-      if (liveReady(String(untrack(searchTerm) || '').trim())) setLiveTick((tick) => tick + 1);
-    };
-    for (const target of targets) {
-      if (seen.has(target.key) || live.cachedPrintings(target.key).length) continue;
-      seen.add(target.key);
-      if (target.kind === 'name') {
-        fetchNamePrintings(target.name, { lang }).then((cards) => landed(target.key, cards, false)).catch(() => {});
-      } else if (target.kind === 'artist') {
-        fetchArtist(target.slug, { limit: 80 }).then((data) => landed(target.key, live.cardsWithCatalogArtist(data), true)).catch(() => {});
-      } else {
-        // A matching name may sit beyond the first set page: hydrate the whole catalog.
-        fetchExpansionCards({ slug: target.slug }).then((data) => landed(target.key, data?.cards || [], true)).catch(() => {});
-      }
+    for (const target of catalogTargets(live, text, lang)) {
+      hydrateTarget(live, target, lang)
+        .then(() => {
+          if (liveReady(String(untrack(searchTerm) || '').trim())) setLiveTick((tick) => tick + 1);
+        })
+        .catch(() => {});
     }
   }
 
@@ -597,23 +735,7 @@ export default function SearchBox(props) {
   // Rotation may also warm the next tail page; it never preloads the whole pool.
   createEffect(flat, (rows) => {
     if (!rows.length) return;
-    const preloadRows = rotatePreload.length ? rows.concat(rotatePreload) : rows;
-    preloadSuggestThumbs(
-      collectPrintingThumbUrls([{ printings: preloadRows.map((row) => row.printing) }], suggestThumbSrc),
-      { first: true },
-    );
-    const live = engine();
-    for (const row of rows) {
-      const card = row.card;
-      if (!card.id || (live && live.isLiveStub(card))) continue;
-      rememberDeskIdentity(card);
-      const shade = albumShade(card);
-      if (shade) {
-        rememberCardBucket(card.id, shade);
-        continue;
-      }
-      warmCardBucket(card.id, thumbOf(card));
-    }
+    warmRows(rows, rotatePreload.length ? rows.concat(rotatePreload) : rows);
   });
 
   // Fit long titles, then FLIP rows to their new slots (same order as React).
@@ -766,6 +888,7 @@ export default function SearchBox(props) {
           id={inputId}
           type="search"
           role="combobox"
+          ref={(node) => node.addEventListener('suggest-fill', (event) => fillWhole(String(event.detail || '')))}
           value={query()}
           onInput={(event) => {
             onIntent();

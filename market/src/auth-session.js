@@ -11,6 +11,8 @@ import { safeAvatarUrl } from './avatar.js';
 export const AUTH_SESSION_KEY = 'pokoin.auth.session';
 export const AUTH_TOKEN_COOKIE = 'pokoin.auth.token';
 export const AUTH_SESSION_COOKIE = 'pokoin.auth.session.cookie';
+/** The landing binder's stored first page (landing-binder.js): one account's cards. */
+export const LANDING_BINDER_KEY = 'pokoin.landing.binder.v1';
 
 function store(override) {
   if (override) {
@@ -177,6 +179,7 @@ export function clearAuthSession(overrideStore) {
   const storage = store(overrideStore);
   try {
     storage?.removeItem?.(AUTH_SESSION_KEY);
+    storage?.removeItem?.(LANDING_BINDER_KEY);
   } catch (_) {
     /* private mode */
   }

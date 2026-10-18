@@ -24,7 +24,7 @@ const tick = () => new Promise((resolve) => queueMicrotask(resolve));
 test('the landing and the header render the same SearchBox component', () => {
   assert.match(chrome, /import SearchBox from '\.\/SearchBox\.jsx';/);
   assert.match(chrome, /<SearchBox /);
-  assert.match(landing, /import SearchBox from '\.\.\/components\/SearchBox\.jsx';/);
+  assert.match(landing, /import SearchBox, \{ fillSuggest, prewarmSuggest \} from '\.\.\/components\/SearchBox\.jsx';/);
   assert.match(landing, /<SearchBox\s+hero/);
   // No second typeahead: no own engine, listbox or result rows on the landing.
   for (const source of [landing, island]) {
@@ -109,4 +109,30 @@ test('the title-language picker does not navigate away from the landing', () => 
     assert.equal(searchLanguageNavigationPath('/marketplace', lang), '/marketplace');
     assert.equal(searchLanguageNavigationPath('/one-piece/marketplace', lang), '/one-piece/marketplace');
   }
+});
+
+test('a Popular chip is warmed ahead and fills the box in one update', () => {
+  // One paging loop for the live pool and the prewarm: the same suggestPage keys.
+  assert.equal((box.match(/await suggestPage\(/g) || []).length, 1);
+  assert.match(box, /async function pageUniverse\(live, text, \{ lang, print, signal, alive = \(\) => true, onPage \} = \{\}\)/);
+  assert.match(box, /const ended = await pageUniverse\(live, text, \{/);
+  assert.match(box, /pageUniverse\(live, q, \{ lang, print \}\),/);
+  // Catalog hydration and row warming are shared too.
+  assert.match(box, /for \(const target of catalogTargets\(live, text, lang\)\) \{\s*hydrateTarget\(live, target, lang\)/);
+  assert.match(box, /\.\.\.catalogTargets\(live, q, lang\)\.map\(\(target\) => hydrateTarget\(live, target, lang\)/);
+  assert.match(box, /warmRows\(rows, rotatePreload\.length \? rows\.concat\(rotatePreload\) : rows\);/);
+  // The results total is asked for with the same options as the popup's count.
+  assert.match(box, /prefetchSearchPage\(q, lang, \{ fetchSearchPage: fetchSearchRecall, tab, printLang: print \}\)/);
+  // fillSuggest commits query and term together and takes the warmed total at once.
+  assert.match(box, /node\.addEventListener\('suggest-fill', \(event\) => fillWhole\(String\(event\.detail \|\| ''\)\)\)/);
+  assert.match(box, /function fillWhole\(value\) \{[\s\S]*?setQuery\(value\);\s*setTerm\(value\);[\s\S]*?takeHotSearchPage\(text, searchLang\(\), searchTab\(\), printLang\(\)\)/);
+  // Typing still trails a paint (unchanged).
+  assert.match(box, /termTimer = afterPaint\(\(\) => \{\s*termTimer = 0;\s*setTerm\(nextTerm\);/);
+
+  assert.match(landing, /export function warmPopular\(query, \{ thumbs = false \} = \{\}\) \{\s*return prewarmSuggest\(query, \{ lang: searchLang\(\), printLang: printLang\(\), thumbs \}\);/);
+  // Island: warm on hover / focus / touch, wait (capped) on click, then fill; idle warming skips slow or metered links.
+  assert.match(island, /chip\.addEventListener\('pointerenter', warmThumbs, \{ once: true \}\);/);
+  assert.match(island, /Promise\.race\(\[ready, new Promise\(\(resolve\) => setTimeout\(resolve, CHIP_WAIT_MS\)\)\]\)/);
+  assert.match(island, /landing\.fillSuggest\(input, query\);/);
+  assert.match(island, /link\?\.saveData \|\| \/\(\?:\^\|-\)\[23\]g\$\//);
 });

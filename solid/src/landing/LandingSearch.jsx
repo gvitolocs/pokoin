@@ -1,9 +1,22 @@
 import { onCleanup } from 'solid-js';
 import { createRouter, useLocation } from '@solidjs/router';
 import '@market/search-box.css';
-import { game, setGamePathSource } from '@market/game.js';
-import SearchBox from '../components/SearchBox.jsx';
+import { game, isPokemonGame, setGamePathSource } from '@market/game.js';
+import SearchBox, { fillSuggest, prewarmSuggest } from '../components/SearchBox.jsx';
+import { printLang, searchLang } from '../stores/locale.js';
 import { landingHistory } from './landing-history.js';
+
+export { fillSuggest };
+
+/** The Popular chips are Pokémon names: warm them only while the box searches Pokémon. */
+export function popularWarmable() {
+  return isPokemonGame();
+}
+
+/** Run a Popular chip's query ahead of the click, for the box's language and print family. */
+export function warmPopular(query, { thumbs = false } = {}) {
+  return prewarmSuggest(query, { lang: searchLang(), printLang: printLang(), thumbs });
+}
 
 /**
  * The hero search is the marketplace header's SearchBox: same game picker,

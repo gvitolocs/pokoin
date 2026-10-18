@@ -47,6 +47,13 @@ pub fn none_match(if_none_match: &str, etag: &str) -> bool {
     if_none_match.split(',').any(|candidate| candidate.trim() == "*" || strong(candidate) == wanted)
 }
 
+/// A `private` answer whose handler set its own `ETag` (the landing binder's
+/// first page): revalidated like a public one, never stored by the edge.
+fn personal_validator(headers: &HeaderMap) -> bool {
+    let cc = headers.get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    headers.contains_key(header::ETAG) && cc.split(',').any(|part| part.trim() == "private") && !cc.split(',').any(|part| part.trim() == "no-store")
+}
+
 fn publicly_cacheable(headers: &HeaderMap) -> bool {
     let cc = headers.get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
     let has = |word: &str| cc.split(',').any(|part| part.trim() == word);
@@ -56,7 +63,7 @@ fn publicly_cacheable(headers: &HeaderMap) -> bool {
 /// Add the validator to a cacheable 200 and turn it into a 304 when the
 /// client already holds that body.
 async fn validate(response: Response, if_none_match: Option<HeaderValue>) -> Response {
-    if response.status() != StatusCode::OK || !publicly_cacheable(response.headers()) {
+    if response.status() != StatusCode::OK || !(publicly_cacheable(response.headers()) || personal_validator(response.headers())) {
         return response;
     }
     let (mut parts, body) = response.into_parts();
@@ -168,6 +175,7 @@ mod tests {
         Router::new()
             .route("/api/public", get(|| async { ([(header::CACHE_CONTROL, "public, max-age=60")], "{\"ok\":true}") }))
             .route("/api/private", get(|| async { ([(header::CACHE_CONTROL, "private, no-store")], "{}") }))
+            .route("/api/mine", get(|| async { ([(header::CACHE_CONTROL, "private, no-cache"), (header::ETAG, "\"mine-2\"")], "{}") }))
             .route("/api/big", get(|| async { ([(header::CACHE_CONTROL, "public, max-age=60")], vec![b'x'; ETAG_MAX_BYTES + 1]) }))
             .route("/api/echo", get(|uri: Uri, headers: HeaderMap| async move {
                 let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()).unwrap_or("-").to_owned();
@@ -213,6 +221,18 @@ mod tests {
         let response = call(&[("if-none-match", "*")], "/api/private").await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(!response.headers().contains_key(header::ETAG));
+    }
+
+    #[tokio::test]
+    async fn a_personal_answer_with_its_own_etag_answers_304() {
+        let first = call(&[], "/api/mine").await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::ETAG], "\"mine-2\"");
+        let again = call(&[("if-none-match", "\"mine-2\"")], "/api/mine").await;
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(again.headers()[header::CACHE_CONTROL], "private, no-cache");
+        let other = call(&[("if-none-match", "\"mine-1\"")], "/api/mine").await;
+        assert_eq!(other.status(), StatusCode::OK);
     }
 
     #[tokio::test]
