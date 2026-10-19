@@ -1380,6 +1380,7 @@ function CardDesk(props) {
                 <Show when={art()}>
                   <CardArt
                     src={art()}
+                    langScans={isLandscapeDesk(card()) ? undefined : card().langScans}
                     alt={cardImageAlt(card())}
                     full
                     dragCard={dragThisCard(card(), shop.offers)}

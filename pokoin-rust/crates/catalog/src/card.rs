@@ -95,6 +95,11 @@ pub fn react_record(row: &Value) -> Value {
     for (target,keys) in [("localized_name",["localized_name","localizedName"]),("localized_set",["localized_set","localizedSet"]),("localized_rarity",["localized_rarity","localizedRarity"])] {
         let v=text(row,&keys);if !v.is_empty(){card[target]=json!(v);}
     }
+    // Western printings with a TCGdex scan per language, `de,fr,it:swsh/swsh3/136`
+    // (cdn.pokoin.com/tcgdex/{lang}/{path}.webp, scripts/sql/127). Absent
+    // when there is none, so rows without it keep their exact shape.
+    let scans=text(row,&["langScans","lang_scans"]);
+    if !scans.is_empty(){card["langScans"]=json!(scans);}
     card
 }
 #[cfg(test)]
@@ -114,6 +119,11 @@ mod tests {
  #[test]fn updated_full_scan_does_not_reuse_an_old_homepage_thumbnail(){
   let card=react_record(&json!({"card_id":20,"ct_id":10,"cdn_image_url":"https://cdn.pokoin.com/10_correct.jpg?v=we1","homepage_image_url":"https://cdn.pokoin.com/10_correct_homepage.webp"}));
   assert_eq!(card["homepageImageUrl"],"");assert_eq!(card["tileImageUrl"],card["imageUrl"]);
+ }
+ #[test] fn language_scans_ride_along_only_when_present() {
+  let card=react_record(&json!({"card_id":20,"ct_id":10,"lang_scans":"de,it:swsh/swsh3/136"}));
+  assert_eq!(card["langScans"],"de,it:swsh/swsh3/136");
+  assert!(react_record(&json!({"card_id":20,"ct_id":10})).get("langScans").is_none());
  }
  #[test] fn multigame_ids_are_not_rewritten() {
   let card=react_record(&json!({"card_id":20,"ct_id":10,"cdn_image_url":"https://cdn.pokoin.com/magic/10_card.jpg"}));

@@ -68,15 +68,18 @@ pub async fn cards(pool:&PgPool,ids:&[i64],game:&str)->Result<Vec<Value>,sqlx::E
  let ct_ids=rows.iter().filter_map(|r|positive_id(&text(r,&["ct_id"]))).collect::<Vec<_>>();
  let public_ids=ids.iter().map(i64::to_string).collect::<Vec<_>>();
  let prices=if game=="pokemon"{
-  let (prices,shades,themes)=tokio::join!(
+  let (prices,shades,themes,scans)=tokio::join!(
    cache_prices(pool,&ct_ids,&public_ids),
    optional_rows(pool,"marketplace_leftover_art_shades","select to_jsonb(s) from public.marketplace_leftover_art_shades s where ct_id=any($1::bigint[])",&ct_ids),
-   optional_rows(pool,"marketplace_leftover_visual_themes","select to_jsonb(t) from public.marketplace_leftover_visual_themes t where ct_id=any($1::bigint[])",&ct_ids)
+   optional_rows(pool,"marketplace_leftover_visual_themes","select to_jsonb(t) from public.marketplace_leftover_visual_themes t where ct_id=any($1::bigint[])",&ct_ids),
+   optional_rows(pool,"marketplace_leftover_lang_scans",LANG_SCANS_SQL,&ct_ids)
   );
   let shades:HashMap<_,_>=shades?.into_iter().map(|r|(text(&r,&["ct_id"]),r)).collect();
   let themes:HashMap<_,_>=themes?.into_iter().map(|r|(text(&r,&["ct_id"]),r)).collect();
+  let scans:HashMap<_,_>=scans?.into_iter().map(|r|(text(&r,&["ct_id"]),text(&r,&["scans"]))).collect();
   for row in &mut rows{
    let ct=text(row,&["ct_id"]);
+   if let Some(scans)=scans.get(&ct){row["lang_scans"]=json!(scans)}
    if let Some(shade)=shades.get(&ct){
     row["art_shade"]=shade["shade"].clone();
     row["current_artwork_identity"]=json!(text(shade,&["artwork_identity"]));
@@ -91,6 +94,10 @@ pub async fn cards(pool:&PgPool,ids:&[i64],game:&str)->Result<Vec<Value>,sqlx::E
  let mut by_id:HashMap<i64,Value>=rows.into_iter().filter_map(|r|Some((positive_id(&text(&r,&["card_id"]))?,r))).collect();
  Ok(ids.iter().filter_map(|id|by_id.remove(id)).collect())
 }
+/// One compact string per western leftover with TCGdex language scans:
+/// `de,fr,it:swsh/swsh3/136`. Every language of a printing shares the path
+/// (tools/lang-scans drops any that does not), so `min` is that path.
+const LANG_SCANS_SQL:&str="select jsonb_build_object('ct_id',ct_id::text,'scans',string_agg(language,',' order by language)||':'||min(scan_path)) from public.marketplace_leftover_lang_scans where ct_id=any($1::bigint[]) group by ct_id";
 /// CardTrader / native ask from `cheapest_homepage_cache_blueprint`. SQLSTATE
 /// 42P01 (relation missing) is an empty price list, same as [`optional_rows`].
 async fn cache_prices(pool:&PgPool,ct_ids:&[i64],public_ids:&[String])->Result<Vec<Value>,sqlx::Error>{
@@ -162,6 +169,8 @@ pub async fn card_tiles(State(state):State<AppState>,headers:HeaderMap,uri:axum:
   let theme=crate::visual_theme::visual_theme(r.get("visual_theme_row").unwrap_or(&Value::Null),&text(r,&["art_shade"]),&text(r,&["current_artwork_identity"]));
   crate::visual_theme::pack_visual_theme(&theme).map(|pack|(text(r,&["card_id"]),pack))
  }).collect();
+ // The tile payload is prebuilt; language scans come from the live row.
+ let scans:HashMap<_,_>=meta.iter().map(|r|(text(r,&["card_id"]),text(r,&["lang_scans"]))).filter(|(_,s)|!s.is_empty()).collect();
  let by_id:HashMap<_,_>=rows.into_iter().map(|r|{
   let row=r;let mut card=pokoin_catalog::react_record(&row);
   if let Some(day)=row.get("salesDay").and_then(Value::as_str).filter(|s|!s.is_empty()){
@@ -170,6 +179,7 @@ pub async fn card_tiles(State(state):State<AppState>,headers:HeaderMap,uri:axum:
    for key in ["dailyMedianPkn","dailyMinPkn","dailyMaxPkn"]{let n=number(&row,&[key]);card[key]=if n==0.{Value::Null}else{json!(n)};}
   }
   let id=text(&card,&["id"]);if let Some(pack)=packs.get(&id){card["vt"]=json!(pack)}
+  if let Some(scans)=scans.get(&id){card["langScans"]=json!(scans)}
   (id,card)
  }).collect();
  response(StatusCode::OK,json!({"source":"pi","cards":ids.iter().filter_map(|id|by_id.get(&id.to_string())).collect::<Vec<_>>()}),"public, max-age=30, s-maxage=120")
@@ -348,6 +358,15 @@ async fn neighbors(pool:&PgPool,set:&str,id:i64,radius:i64)->Result<Vec<(i64,i64
   let mut body=json!({"error":"Card not found."});
   name_holders(&mut body,&[]);
   assert!(body.get("ownerGame").is_none() && body.get("ownerGames").is_none());
+ }
+ #[test]fn language_scans_survive_the_compact_encoding(){
+  let body=json!({"cards":[
+   {"id":"308070","name":"Rapid Strike Urshifu VMAX","langScans":"de,es,fr,it,pt:swsh/swsh5/170"},
+   {"id":"308072","name":"Single Strike Urshifu VMAX"}
+  ]});
+  let packed=compact::encode::encode_to_vec_with(&body,Wanted::from_parts(None,"format=c1").encode_options());
+  let decoded=compact::decode::decode(&serde_json::from_slice(&packed).unwrap()).unwrap();
+  assert_eq!(decoded,body);
  }
  #[test]fn non_pokemon_cards_take_cache_prices(){
   let mut rows=vec![json!({"card_id":"822658","ct_id":"9001","name":"Sol Ring"})];
