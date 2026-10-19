@@ -96,7 +96,7 @@ pub fn react_record(row: &Value) -> Value {
         let v=text(row,&keys);if !v.is_empty(){card[target]=json!(v);}
     }
     // Western printings with a TCGdex scan per language, `de,fr,it:swsh/swsh3/136`
-    // (cdn.pokoin.com/tcgdex/{lang}/{path}.webp, scripts/sql/127). Absent
+    // (cdn.pokoin.com/tcgdex/{lang}/{path}.webp, scripts/sql/129). Absent
     // when there is none, so rows without it keep their exact shape.
     let scans=text(row,&["langScans","lang_scans"]);
     if !scans.is_empty(){card["langScans"]=json!(scans);}

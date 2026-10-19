@@ -1,5 +1,5 @@
 -- Load tools/lang-scans mapping.tsv (ct_id, language, scan_path) into
--- public.marketplace_leftover_lang_scans (scripts/sql/127). Replaces the
+-- public.marketplace_leftover_lang_scans (scripts/sql/129). Replaces the
 -- tcgdex rows in one transaction: new pairs are added, changed paths updated,
 -- pairs the tool no longer emits removed.
 --   psql -v ON_ERROR_STOP=1 -d pokoin_marketplace -f load.sql < mapping.tsv

@@ -16,12 +16,17 @@ families are their own printings (D000065, D000084) and never get a western
 language scan. English names stay primary (D00001T); the scan follows the
 language menu the way the second name line does.
 
+**Stamped printings keep their own scan.** A leftover with an event, store,
+league or staff stamp (Worlds, Top Thirty-Two, 1st Place, Prerelease,
+STAFF, Pokémon Day, …) is a different physical card from the plain TCGdex
+scan, so it never gets a language scan (see the stamp rules below).
+
 ## Data
 
 | Piece | Where |
 | --- | --- |
 | Scans | `cdn.pokoin.com/tcgdex/{lang}/{serie}/{set}/{localId}.webp` (both CDN origins), 600×825, transparent rounded corners. Source and upload manifests on nezopt 15T: `~/mnt/mybook/datasets/tcg/pokoin-cdn/tcgdex/{lang}/…`, `…/manifest/{lang}.jsonl` |
-| Mapping table | `public.marketplace_leftover_lang_scans (ct_id, language, scan_path)` — `scripts/sql/127_leftover_lang_scans.sql`. Key = leftover `ct_id` (public card id / 2). `scan_path` is `{serie}/{set}/{localId}` |
+| Mapping table | `public.marketplace_leftover_lang_scans (ct_id, language, scan_path)` — `scripts/sql/129_leftover_lang_scans.sql`. Key = leftover `ct_id` (public card id / 2). `scan_path` is `{serie}/{set}/{localId}` |
 | Mapping tool | `tools/lang-scans` (Rust, own workspace) |
 | API field | `langScans: "de,fr,it:swsh/swsh3/136"` on card records, only when the printing has one |
 | SPA | `market/src/lang-scans.js`, `solid/src/components/CardArt.jsx` (`langScans` prop) |
@@ -36,6 +41,9 @@ language menu the way the second name line does.
    lang-scans --cards cards.tsv \
      --manifests ~/mnt/mybook/datasets/tcg/pokoin-cdn/tcgdex/manifest \
      --scan-root ~/mnt/mybook/datasets/tcg/pokoin-cdn \
+     --leftover-root ~/data/pokoin-leftovers/objects \
+     --stamps market/src/data/card-stamps.js \
+     --promo-report promo-report.tsv \
      --out mapping.tsv --rejects rejects.tsv --sample 100 --sample-out sample.tsv
    ```
    - Join: expansion `official_id` (pokemontcg.io / TCGdex id) + printed
@@ -47,9 +55,32 @@ language menu the way the second name line does.
      to the leftover's name (accents, case, punctuation, `Lv.36`,
      `δ Delta Species`, `☆ Gold Star`, `◇ Prism Star`, ` - subtitle`,
      `[stamp]` ignored). TCGdex Pocket (`tcgp`) is never used.
-   - Each language scan must decode, be ≥ 400 px wide and be opaque down
-     its middle (some TCGdex files are cut off, e.g. FR xyp Champions
-     Festival is only the top 44 %).
+   - **Stamps.** A printing is skipped when its card number, name, set name
+     or leftover file name contains a stamp word (`stamp`, `prerelease`,
+     `staff`, `league`, `world(s)`, `championship`, `place`, `winner`,
+     `top`, `finalist`, `pokemon day`, `comic con`, `general mills`,
+     `origins game`, `illustration contest`, `pokemon center`, …; folded
+     words, so `Semi-Finalist` and `Pokémon Day` match), or when its public
+     id is in `market/src/data/card-stamps.js` (deck-kit stamps).
+   - **Promo artwork guard.** In the Black Star promo families (`basep np
+     dpp hsp bwp xyp smp swshp svp mep`) the same number is often handed
+     out again with a stamp the catalog does not name. The tool compares
+     the artwork window (x 10–90 %, y 12–47 %) of the leftover JPEG and each
+     scan as normalised 32×24 grayscale, in a 4×4 grid of blocks, and drops
+     the scan when the worst block stands out from the median block by more
+     than **0.15**. Holo glare and exposure raise every block alike; a stamp
+     raises one. Calibration (2026-10-19, 1,336 promo pairs): catalog-stamped
+     pairs median 0.37 (p10 0.15), plain pairs median 0.04 (p75 0.22); the
+     kept pairs just under 0.15 were checked on a contact sheet. The
+     threshold is low on purpose: a dropped promo shows its English scan, a
+     wrong stamp shows the wrong card. A promo whose leftover JPEG cannot be
+     read is dropped too. `--promo-report` lists every pair with its
+     numbers.
+   - Each language scan must decode, be ≥ 400 px wide, and its opaque card
+     must span the whole image: along three columns and three rows the
+     first and last opaque pixel sit within 3 % of the edges (only the
+     rounded corners are transparent). Some TCGdex files are cut off, e.g.
+     FR xyp Festival des Champions is only the top 44 %.
 3. Look at a contact sheet before loading:
    `tools/lang-scans/contact-sheet.sh cards.tsv sample.tsv OUT_DIR` (leftover
    left, language scan right).

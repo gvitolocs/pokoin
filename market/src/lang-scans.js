@@ -4,7 +4,7 @@
  * A western printing is one CardTrader blueprint for every western language,
  * so its leftover JPEG is the English scan. Card rows from the API carry
  * `langScans: "de,fr,it:swsh/swsh3/136"` when TCGdex has the same card in
- * other languages (scripts/sql/127). With Italian picked in the language
+ * other languages (scripts/sql/129). With Italian picked in the language
  * menu, the tile and desk show cdn.pokoin.com/tcgdex/it/swsh/swsh3/136.webp
  * first and fall back to the leftover JPEG when it fails. English, Japanese
  * and Korean keep the leftover scan: those are their own printings.
