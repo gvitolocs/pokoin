@@ -55,8 +55,8 @@ imported module"). Tabs left open on the old release hit the same 404 on their n
 - **A missing chunk's 404 is cached for a year.** The `_headers` rule `/market/s/*` matches
   by path, not by status, so a 404 there also gets `max-age=31536000, immutable`, and
   browsers keep it. This can still happen when a new shell reaches an edge that is still
-  on the old version. `market/public/chunk-reload.js` refetches the failed file with
-  `cache: 'reload'` before it reloads. A zone fix needs Giuseppe's approval and is **not
+  on the old version. `market/public/chunk-reload.js` refetches the failed files with
+  `cache: 'reload'` before it reloads (below). A zone fix needs Giuseppe's approval and is **not
   applied**: a Response Header Transform Rule `(http.host eq "pokoin.com" and
   starts_with(http.request.uri.path, "/market/s/") and http.response.code eq 404)` → set
   `Cache-Control: no-store`. After applying it, check with
@@ -72,7 +72,14 @@ unhandled `import()` rejections. The Solid route boundary (`RouteError` in
 `solid/src/App.jsx`) calls `window.__pokoinChunkReload(error)` and shows "Loading the
 latest Pokoin…" while a reload is pending. When a chunk fails, the script:
 
-1. refetches the file with `cache: 'reload'` and reloads once it answers 200;
+1. refetches the file with `cache: 'reload'`, plus every `/market/s/*` file Resource
+   Timing lists for this page with a failed status (`cache: 'reload'`) or no status
+   (Safari, some Chrome cache hits: `cache: 'no-cache'`, a 304 for a good chunk), and
+   reloads once all of them answer 200. The error names only the chunk `import()` asked
+   for; when the cached 404 is one of its static dependencies, refreshing only the named
+   file let the 404 survive the reload (seen 2026-10-19 after 6383d726). A `?v=` retry of
+   the import would not help: it makes a second module instance and its static imports
+   still hit the cached 404;
 2. else reloads at once if the live `/market/app` names a different entry chunk (a newer release);
 3. else retries every 10 s while the deploy propagates, and reloads after the sixth try.
 
