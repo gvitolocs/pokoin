@@ -1,8 +1,9 @@
-import { Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import { releaseHero } from '@market/hero-gate.js';
 import { isLandscapePrintName } from '@market/art-cut-landscape.js';
 import { getChatDock } from '@market/chat-dock-store.js';
 import { referenceForPeer, writeListingDrag } from '@market/chat-listing.js';
+import { langScanLabel } from '@market/lang-scans.js';
 import { cardImageAlt } from '@market/seo.js';
 import { cardSelected, deskDragReference, dragPayload } from '../../lib/select-band.js';
 import CardArt from '../CardArt.jsx';
@@ -41,6 +42,9 @@ export function Chevron(props) {
 export default function DeskArtFrame(props) {
   const id = () => String(props.card?.id || '');
   const picked = () => Boolean(id() && cardSelected().has(id()));
+  // "Italian scan" under a painted language scan; cleared when the leftover
+  // JPEG paints instead (no scan in that language, or it failed).
+  const [langLabel, setLangLabel] = createSignal('');
   function dragStart(event) {
     const mixed = deskDragReference({ heldCard: props.card });
     if (mixed) {
@@ -69,13 +73,18 @@ export default function DeskArtFrame(props) {
         <CardArt
           src={props.art}
           card={props.card}
+          langScans={isLandscapeDesk(props.card) ? undefined : props.card?.langScans}
           alt={cardImageAlt(props.card)}
           fetchPriority="high"
           full
           // Only a painted scan opens the gate: the first stub card can name a
           // guessed file that fails at once, and failures wait for HERO_WAIT_MS.
-          onLoad={() => releaseHero()}
+          onLoad={(node) => {
+            setLangLabel(langScanLabel(node?.currentSrc || node?.src));
+            releaseHero();
+          }}
           onError={() => {
+            setLangLabel('');
             console.warn('[pokoin:desk-art] hero failed', {
               cardId: props.card?.id,
               art: props.art,
@@ -84,6 +93,9 @@ export default function DeskArtFrame(props) {
             });
           }}
         />
+      </Show>
+      <Show when={langLabel()}>
+        <span class="lang-scan-note">{langLabel()}</span>
       </Show>
     </div>
   );

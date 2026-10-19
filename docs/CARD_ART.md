@@ -8,6 +8,7 @@ rails, search results, set grids, and the card desk stay **full card scans**.
 Canonical crop math: `market/src/art-cut.js`. Chrome: [CHROME.md](CHROME.md).
 Pipeline / images: [MARKET.md](MARKET.md), [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 Games + **nezopt 15T Pi replica**: [GAMES.md](GAMES.md). JP/CN flags: [PRINT_FLAGS.md](PRINT_FLAGS.md).
+Scan in the visitor's card language (IT/FR/DE/ES/PT, full-card surfaces only): [CARD_LANGUAGE_SCANS.md](CARD_LANGUAGE_SCANS.md).
 
 ---
 

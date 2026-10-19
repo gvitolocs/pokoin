@@ -105,6 +105,7 @@ export default function CardTile(props) {
                   cutSurface="album"
                   full={cut()}
                   card={cut() ? card() : undefined}
+                  langScans={cut() ? undefined : card().langScans}
                   loading={eager() ? 'eager' : 'lazy'}
                   fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
                 />

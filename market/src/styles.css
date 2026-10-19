@@ -11013,6 +11013,35 @@ html:has(.wallet-page) .brand span {
   contain-intrinsic-size: auto 360px;
 }
 
+/* Card scan in the picked card language (market/src/lang-scans.js). TCGdex
+   scans are 600×825 (0.727) with transparent rounded corners: cover the
+   63:88 frame (a ~1.5% side crop) and paint the corners dark, as on a
+   leftover JPEG. */
+img.is-lang-scan {
+  object-fit: cover;
+  background: #101114;
+}
+
+.art-frame:has(> .lang-scan-note) {
+  position: relative;
+}
+
+.lang-scan-note {
+  position: absolute;
+  left: 50%;
+  bottom: 0.6rem;
+  transform: translateX(-50%);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgb(8 10 16 / 0.72);
+  color: #f2f3f5;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Shop row add-to-cart confirmation (ShopListing). Sits above the chat button. */
 .cart-toast {
   position: fixed;
