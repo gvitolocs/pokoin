@@ -44,21 +44,21 @@ test('Scarlet Violet 312px leftovers bust after CardTrader full ingest', () => {
   );
 });
 
-test('Chilling Reign Rapidash V leftover busts the 255px catalog thumb', () => {
+test('Chilling Reign Rapidash V leftover busts the 255px catalog thumb, then the hd1 upgrade', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg'),
-    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg?v=ctf1',
+    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg?v=hd1',
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg'),
-    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign_homepage.webp?v=ctf1',
+    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign_homepage.webp?v=hd1',
   );
 });
 
-test('Shiny Treasure ex 255px leftovers bust after CardTrader full ingest', () => {
+test('Shiny Treasure ex 255px leftovers bust after CardTrader full ingest, then the hd1 upgrade', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/269648_natu-078-190-shiny-treasure-ex.jpg'),
-    '/card-images/269648_natu-078-190-shiny-treasure-ex.jpg?v=ctf1',
+    '/card-images/269648_natu-078-190-shiny-treasure-ex.jpg?v=hd1',
   );
 });
 
@@ -346,7 +346,7 @@ test('ownCatalogImage rewrites preview_, public-id, and stale leftover keys to l
       name: 'Mega Lucario ex',
       canonicalPath: '/marketplace/en/cards/703072/card-mega-lucario-ex-ultra-rare-077-132-mega-evolution',
     }, '/card-images/21971_mega-lucario-ex.jpg'),
-    '/card-images/351536_mega-lucario-ex.jpg',
+    '/card-images/351536_mega-lucario-ex.jpg?v=hd1',
   );
   assert.equal(
     ownCatalogImage({ id: '689316' }, '/card-images/689316_mega-lucario-ex.jpg'),
