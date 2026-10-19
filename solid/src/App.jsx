@@ -1,6 +1,7 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onCleanup, onSettled, runWithOwner, Show, untrack } from 'solid-js';
 import { useLocation } from '@solidjs/router';
 import { useGameNavigate } from './lib/game-navigate.js';
+import { hasFullCookieConsent } from '@market/cookie-consent.js';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
 import { gameBasename, gameHref, gameSwitchReloads, setGamePathSource } from '@market/game.js';
 import { isGamePrivatePath } from '@market/game-private-path.js';
@@ -114,7 +115,10 @@ export default function App(props) {
       import('./lib/referral-claim.js')
         .then(({ watchReferralClaims }) => runWithOwner(owner, () => watchReferralClaims(location)))
         .catch(() => {});
-      import('@market/google-reviews.js').then(({ showReviewsBadge }) => showReviewsBadge()).catch(() => {});
+      // Google's store badge is a third-party widget: only after "Accept all".
+      if (hasFullCookieConsent()) {
+        import('@market/google-reviews.js').then(({ showReviewsBadge }) => showReviewsBadge()).catch(() => {});
+      }
     }); });
     return () => {
       stopAuthWait();

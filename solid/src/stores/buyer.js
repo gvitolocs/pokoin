@@ -119,9 +119,9 @@ export const buyerPinned = pinOf;
 
 /**
  * `{ local, pkn }` for a public page that always shows one local fiat: the
- * amount in `currency` alone, PKN only when that currency has no label.
+ * amount in `currency` with PKN under it, the same stack a signed-out
+ * visitor sees on /marketplace, so the landing price is not a different unit.
  */
 export function visitorParts(pricePkn, currency) {
-  const local = formatFiatFromPkn(pricePkn, currency) || '';
-  return { local, pkn: local ? '' : formatPkn(pricePkn) || '' };
+  return { local: formatFiatFromPkn(pricePkn, currency) || '', pkn: formatPkn(pricePkn) || '' };
 }

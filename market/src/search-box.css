@@ -749,6 +749,15 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   box-shadow: 0 16px 40px rgb(0 0 0 / 0.45);
 }
 
+.lang-menu-head {
+  padding: 0.4rem 0.65rem 0.3rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .lang-menu button {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
@@ -880,6 +889,11 @@ html.is-card-dragging .zoom::backdrop { display: none; }
     font-size: 16px;
     min-width: 0;
   }
+
+  /* At 375px the game and title-language buttons left the field 32px wide:
+     while typing, they step aside so the query is readable. */
+  .search-pill:has(> input:focus) .search-lead { display: none; }
+  .search-pill:has(> input:focus) > input { border-radius: 999px 0 0 999px; }
 
   .suggest {
     left: 0.75rem;
