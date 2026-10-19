@@ -1,3 +1,4 @@
+import { PNG_ONLY_SYMBOLS } from './expansion-symbols-png.js';
 import { game, isPokemonGame } from './game.js';
 import { setAbbrev } from './identity.js';
 import { TCG_ERA_CATALOG, TCG_ERA_ORDER, eraHaystack, matchTcgEra, tcgEraYears } from './tcg-eras.js';
@@ -73,30 +74,37 @@ export const LOGO_SLUGS = new Set([
   'white-flare-sv11w', 'wild-force', 'xy-black-star-promos',
 ]);
 
+/**
+ * The code printed on the cards (MEG EN 001/132), never the series number
+ * (ME1) or setAbbrev. Same text as the SVG marks (tools/expansion-symbols).
+ */
 export const SET_CODES = {
   '151': 'MEW',
   'ascended-heroes': 'ASC',
-  'black-bolt': 'BBT',
-  'chaos-rising': 'ME4',
-  'destined-rivals': 'SV10',
-  'journey-together': 'SV9',
-  'mega-evolution': 'ME1',
-  'obsidian-flames': 'SV3',
-  'paldea-evolved': 'SV2',
+  'black-bolt': 'BLK',
+  'chaos-rising': 'CRI',
+  'destined-rivals': 'DRI',
+  'journey-together': 'JTG',
+  'mega-evolution': 'MEG',
+  'obsidian-flames': 'OBF',
+  'paldea-evolved': 'PAL',
   'paldean-fates': 'PAF',
-  'paradox-rift': 'SV4',
-  'perfect-order': 'ME3',
+  'paradox-rift': 'PAR',
+  'perfect-order': 'POR',
   'phantasmal-flames': 'PFL',
-  'pitch-black': 'ME5',
+  'pitch-black': 'PBL',
   'prismatic-evolutions': 'PRE',
-  'scarlet-and-violet': 'SV1',
+  'scarlet-and-violet': 'SVI',
   'shrouded-fable': 'SFA',
-  'stellar-crown': 'SV7',
-  'surging-sparks': 'SV8',
-  'temporal-forces': 'SV5',
-  'twilight-masquerade': 'SV6',
-  'white-flare': 'WHF',
-  'delta-reign': 'ME6',
+  'stellar-crown': 'SCR',
+  'surging-sparks': 'SSP',
+  'temporal-forces': 'TEF',
+  'twilight-masquerade': 'TWM',
+  'white-flare': 'WHT',
+  'delta-reign': 'DER',
+  'csv9-stellar-crystal': 'csv9C',
+  'csv7-blade-awakening': 'csv7C',
+  'cs3-5-scorching-skies': 'cs3.5C',
 };
 
 export const ERA_ORDER = [
@@ -414,8 +422,11 @@ export function expansionLogoSrc(row = {}, hostname) {
   return '';
 }
 
-/** Bust CDN `immutable` after saved code-mark plates. */
-const SYMBOL_CACHE = 'cm1';
+/**
+ * Bust CDN `immutable` after a redraw of the symbol objects: cm1 = D00002C
+ * code-mark plates, sv1 = SVG marks + PNGs synced on both CDN origins.
+ */
+const SYMBOL_CACHE = 'sv1';
 
 function withSymbolCache(url) {
   const src = String(url || '').trim();
@@ -424,21 +435,39 @@ function withSymbolCache(url) {
   return `${src}${src.includes('?') ? '&' : '?'}v=${SYMBOL_CACHE}`;
 }
 
-/** Circular set mark (desk shortcuts, expansion title). Not the wordmark. */
-export function expansionSymbolSrc(row = {}, hostname) {
+/** `…/expansions/symbols/{slug}.png` on the Pokémon CDN tree, or ''. */
+function pokemonSymbolSlug(url) {
+  const match = String(url || '').match(/^(?:https:\/\/cdn\.pokoin\.com|\/card-images)\/expansions\/symbols\/([a-z0-9-]+)\.png$/);
+  return match ? match[1] : '';
+}
+
+/**
+ * Set mark sources, best first: the clean SVG (tools/expansion-symbols), then
+ * the PNG it was drawn from. Sets with only a small raster mark skip the SVG.
+ */
+export function expansionSymbolSources(row = {}, hostname) {
   const fromApi = String(
     row.defaultSymbolUrl || row.symbolImageUrl || row.expansionSymbolUrl || '',
   ).trim();
-  if (fromApi) return withSymbolCache(fromApi);
   const slug = String(row.slug || '').trim();
-  if (!slug) return '';
   // Satellite: game-scoped symbols only. Pokémon `/expansions/symbols/unleashed.png`
   // must not paint on Riftbound Unleashed.
   if (!isPokemonGame(hostname)) {
+    if (fromApi) return [withSymbolCache(fromApi)];
     const base = satelliteExpansionPrefix(hostname);
-    return base ? withSymbolCache(`${base}/symbols/${slug}.png`) : '';
+    return base && slug ? [withSymbolCache(`${base}/symbols/${slug}.png`)] : [];
   }
-  return withSymbolCache(`/card-images/expansions/symbols/${slug}.png`);
+  // A pinned `?v=` or a non-CDN URL from the API is used as given.
+  const png = fromApi || (slug ? `/card-images/expansions/symbols/${slug}.png` : '');
+  if (!png) return [];
+  const svgSlug = pokemonSymbolSlug(png);
+  if (!svgSlug || PNG_ONLY_SYMBOLS.has(svgSlug)) return [withSymbolCache(png)];
+  return [withSymbolCache(png.replace(/\.png$/, '.svg')), withSymbolCache(png)];
+}
+
+/** Circular set mark (desk shortcuts, expansion title). Not the wordmark. */
+export function expansionSymbolSrc(row = {}, hostname) {
+  return expansionSymbolSources(row, hostname)[0] || '';
 }
 
 export function expansionCode(row = {}, hostname) {

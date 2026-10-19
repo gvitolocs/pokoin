@@ -8,11 +8,10 @@ import { isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } fro
 import { filterExpansionCards } from '@market/expansion-filters.js';
 import { setSeoTitle } from '@market/seo.js';
 import { setDeskSkeletonCount } from '@market/set-desk-preview.js';
-import { expansionStampSrc } from '@market/expansion-stamps.js';
-import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '@market/set-logos.js';
+import { expansionLogoSrc, eraHref, tcgEra } from '@market/set-logos.js';
 import { defaultExpansionSort, expansionTilesReady, hasOfficialSetList } from '@market/set-official-lists.js';
 import { Action, track } from '@market/track.js';
-import CardArt from '../components/CardArt.jsx';
+import ExpansionMark from '../components/ExpansionMark.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -222,8 +221,6 @@ function SetDesk(props) {
   const name = () => info()?.expansion?.name || prettySlug(slug);
   const tilesReady = () => expansionTilesReady(info(), slug, name());
   const loading = () => !error() && !tilesReady();
-  // Trainer Kit halves: the mascot stamp is the set mark on every card.
-  const symbol = () => expansionStampSrc({ slug }) || expansionSymbolSrc(info()?.expansion || { slug });
   const wordmark = () => expansionLogoSrc(info()?.expansion || { slug, name: name() });
   const printFlag = () => printFlagFromNationality(resolveExpansionNationality({
     ...(info()?.expansion || {}),
@@ -333,11 +330,15 @@ function SetDesk(props) {
             }))}
           />
         </Show>
-        <Show when={symbol()}>
-          <span class="set-shortcut is-on set-sym-wrap" aria-hidden="true">
-            <CardArt class="set-sym set-shortcut-sym" src={symbol()} alt="" fallback="hide" />
-          </span>
-        </Show>
+        {/* Trainer Kit halves: the mascot stamp is the set mark (ExpansionMark). */}
+        <span class="set-shortcut is-on set-sym-wrap" aria-hidden="true">
+          <ExpansionMark
+            class="set-sym"
+            slug={slug}
+            setName={name()}
+            symbolUrl={info()?.expansion?.defaultSymbolUrl || info()?.expansion?.symbolImageUrl}
+          />
+        </span>
       </PageHead>
       <form
         class="set-browse"
