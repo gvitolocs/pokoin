@@ -110,3 +110,39 @@ scripts/deploy-cardtrader-dump.sh   # clean origin/main checkout on nezopt
 It builds the three binaries, installs the bridge on Oracle (checks glibc ≤ 2.35
 and a dry start), and switches `/home/nez/pokoin-cardtrader/current`. Rollback:
 point `current` at the previous release, or remove it to fall back to Python.
+
+### Job code (the scripts)
+
+The unit runs the scripts from `~/pokoin-deploy/cardtrader-daily`, a detached
+checkout of `origin/main` (`deploy/systemd/pokoin-all-cardtrader-daily.service`,
+`WorkingDirectory`). It never runs from the canonical checkout
+`~/Projects/pokoin-web`: until 2026-10-19 it did, and ran another agent's
+uncommitted, 850-commit-old copies of these scripts every night. After a merge
+that changes the job's scripts or its unit:
+
+```bash
+scripts/deploy-cardtrader-daily-checkout.sh   # from any checkout; default origin/main, or pass a sha on main
+```
+
+It fetches, refuses a commit that is not on `origin/main`, waits for a running
+job (it takes the job's `daily.lock`), moves the checkout with
+`checkout --force` + `clean -ffdx`, installs the unit and timer from it and
+checks that the unit's `WorkingDirectory` is that checkout. Rollback: run it
+with the previous sha. The nightly summary names the job's commit and how many
+newer commits to the job's files on `origin/main` are not deployed yet.
+
+## Nightly summary
+
+`scripts/cardtrader-daily-notify.py` runs at the end of the job (~00:55 UTC).
+The Pokémon daily analytics (`cardtrader_blueprint_daily_analytics`) are built
+later, by the Oracle `pokoin-cardtrader-daily-market-refresh` timer (01:00 UTC,
+done ~02:40), which has its own failure mail. So the summary's analytics state is:
+
+| State | Meaning | Status |
+|---|---|---|
+| `fresh` | refreshed after this run started | complete |
+| `expected` | newest bucket is the previous night's (the normal case at ~00:55) | complete |
+| `stale` | newest bucket is older: a refresh was missed (14 Oct 2026) | partial |
+| `missing` / `unknown` | no rows, or the writer probe failed | partial |
+
+A failed stage or an incomplete dump still makes the run `partial` / `failed`.

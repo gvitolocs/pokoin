@@ -3,7 +3,9 @@ Description=Pokoin all-game CardTrader catalogues, pictures and raw daily books 
 After=network-online.target docker.service
 [Service]
 Type=oneshot
-WorkingDirectory=/home/nez/Projects/pokoin-web
+# Clean detached checkout of origin/main, never the canonical checkout (other agents'
+# WIP). Installed and moved by scripts/deploy-cardtrader-daily-checkout.sh.
+WorkingDirectory=%h/pokoin-deploy/cardtrader-daily
 # Optional: POKOIN_PRICE_CACHE_PG_USER=pokoin_jobs and its password (mode 600),
 # docs/SECURITY_HARDENING.md "Least-privilege roles". Without it the price cache
 # logs in as the container superuser, as before.
