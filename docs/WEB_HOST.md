@@ -56,11 +56,27 @@ imported module"). Tabs left open on the old release hit the same 404 on their n
   by path, not by status, so a 404 there also gets `max-age=31536000, immutable`, and
   browsers keep it. This can still happen when a new shell reaches an edge that is still
   on the old version. `market/public/chunk-reload.js` refetches the failed files with
-  `cache: 'reload'` before it reloads (below). A zone fix needs Giuseppe's approval and is **not
-  applied**: a Response Header Transform Rule `(http.host eq "pokoin.com" and
-  starts_with(http.request.uri.path, "/market/s/") and http.response.code eq 404)` → set
-  `Cache-Control: no-store`. After applying it, check with
-  `curl -sI https://pokoin.com/market/s/missing-x.js`.
+  `cache: 'reload'` before it reloads (below). Since 2026-10-19 (approved by Giuseppe)
+  a zone **Response Header Transform Rule** makes those 404s uncacheable: `(http.host eq
+  "pokoin.com" and starts_with(http.request.uri.path, "/market/s/") and
+  http.response.code eq 404)` → set `Cache-Control: no-store`. `www` 301s to the apex, so
+  it needs no rule of its own. The rule also covers 404s that reach the Worker's
+  `ASSETS.fetch` fallback (`not_found_handling: "none"`). Existing chunks keep
+  `immutable`. Zone ruleset `2dc275a24e9e4dc0b53a66235667ea89` (phase
+  `http_response_headers_transform`, the zone's only rule there), rule
+  `e66a3507f0c14555bcdb19cdcb8cb2ae`. Check:
+
+  ```bash
+  curl -sI https://pokoin.com/market/s/missing-x.js | grep -i cache-control   # no-store
+  ```
+
+  Revert (credentials in nezopt `~/.config/pokoin/cloudflare.env`):
+
+  ```bash
+  set -a; . ~/.config/pokoin/cloudflare.env; set +a
+  curl -sS -X DELETE -H "X-Auth-Email: $CLOUDFLARE_API_EMAIL" -H "X-Auth-Key: $CLOUDFLARE_API_KEY" \
+    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/rulesets/2dc275a24e9e4dc0b53a66235667ea89/rules/e66a3507f0c14555bcdb19cdcb8cb2ae"
+  ```
 
 ### Client fallback
 
