@@ -395,3 +395,10 @@ NVMe, the HDD replica and Pi preferred keys were restored together, preserving
 backups outside the object index. `esp-original-20261018` bypasses the immutable
 old response. The targeted catalog updates are in
 `scripts/sql/20261018_manaphy_espathra.sql`; re-projections must retain these URLs.
+
+
+### HD upgrades, cache token hd1 (19 October 2026)
+
+10,470 leftovers were replaced by a larger scan of the same printing (artofpkm
+for Japanese, tcgdex for western), under their existing keys, busted by `hd1`.
+Rules, tool, lists and rollback: [HD_CARD_IMAGES.md](HD_CARD_IMAGES.md).
