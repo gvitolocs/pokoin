@@ -1,0 +1,272 @@
+sheet	version	verdict	move	note
+0	v746496	wrong	746496	Gible CSM2D 149/342 clay desert art vs CSMPf 005/024 cliff art
+0	v746478	wrong	746478	Sudowoodo CSM2D 140/342 vs Chaos Rising 043/086 forest
+0	v294514	false		Gardevoir VMAX rainbow EN/CS1a/JP same painting
+0	v244130	wrong	257644,271794	Shedinja Lv.40 SV 44/147 + BotF 16/100 night art vs Lv.34 LA/DP5 day art
+0	v316968	false		Inteleon VMAX sGI 023 looks shiny/texture variant
+0	v758352	wrong	758352	Flaaffy SV-P 158 standing vs Chaos Rising 028/086 sitting in flowers
+1	v758186	wrong	758186	Toxel SV-P 075 night art vs MEP 078
+1	v746404	wrong	746404	Charjabug CSM2D 103/342 vs SV-P 169
+1	v244482	wrong	244482	Yanma Lv.13 LA 128/146 vs Lv.17 SV 88/147 + BotF 8/100
+1	v224890	wrong	508776	Teddiursa neo intro pack No.216 vs CoL 73/95 + L-P 010
+1	v224750	wrong	224750	Weezing CoL 38/95 vs HGSS 34/123 + HG collection 036/070
+1	v746596	wrong	746596	Flabebe CSM2D 199/342 vs SV-P 185
+2	v746726	wrong	746726	Pokemon Catcher CSM2D 264 purple art vs SV-P 237 red art
+2	v483258	wrong	705614	Gem Pack vol3 705614 is a rainbow Luminous-style energy, not the Fighting energy painting
+2	v746314	wrong	746314	Magikarp CSM2D 058 vs SVP 024 IR
+2	v260110	false		Darkrai & Cresselia LEGEND 30th 152/103
+2	v224830	wrong	224830	Hitmonlee CoL 58/95 moon art vs HGSS25/UD 52/90
+2	v758282	wrong	758282	Miraidon SV-P 123 gym (Kouki Saitou) vs SV-P 229 (GOSSAN)
+3	v572434	hold	572434	Potion Latias ex half deck 014/018 leftover is the Pokoin missing-card placeholder; no evidence
+3	v244062	wrong	288968	Delcatty WCP 073/108 vs Lv.46 LA 23/146 + DP5
+3	v525260	false		Gholdengo ex SR/UR/CSV4C + gold hyper rare: same painting
+3	v758076	wrong	758076	Scovillain SV-P 020 IR street vs SV-P 122
+3	v250284	wrong	623782	Garchomp C Lv.62 deck 006/016 vs Plasma Freeze 120/116 + Thunder Knuckle 057/051
+3	v746576	wrong	746576	Ferrothorn CSM2D 189 vs Chaos Rising 063/086
+4	v758284	wrong	758284	Koraidon SV-P 124 gym (Kouki Saitou) vs WCD 2025 (Ryuta Fuse)
+4	v746504	wrong	746504	Excadrill CSM2D 153 vs SV-P 228
+4	v494372	wrong	494372	Tropical Present 247186 Snorlax/beach vs 247187 Lapras sea (two different Special Cards)
+4	v596032	hold	596032	Switch Stellar Tera starter 017/022 leftover is the missing-card placeholder
+4	v758150	wrong	758150	Pawmi SV-P 057 vs SV-P 096 IR
+4	v746364	wrong	746364	Magnemite CSM2D 083 vs SV-P 102
+5	v758210	wrong	758210	Iono SV-P 087 vs SV-P 154
+5	v746628	wrong	746628	Ho-Oh CSM2D 215 vs Chaos Rising 010
+5	v443412	wrong	540408	Vileplume Shiny Treasure 193/190 shiny art vs Lost Origin 003/196 stack
+5	v240434	wrong	240434	Kakuna Lv.9 GE 073/106 vs Lv.8 RR 066/111 stack
+5	v245374	false		Sigilyph GX FA 052/050 and rainbow recolours: same painting
+5	v746332	wrong	746332	Regice CSM2D 067 vs SV-P 135
+6	v758152	wrong	758152	Pawmot SV-P 058 vs SV-P 095
+6	v747476	wrong	758224;758312	Pachirisu CSMPd 003/021, SV-P 094, SV-P 138 are three paintings
+6	v488524	wrong	488524	Bulbasaur DPt-P 030 vs 151 001/165 stack
+6	v257104	wrong	758478	Rare Candy SV-P 231 vs SUM 129/149 stack
+6	v795190	wrong	795190	Zapdos MEP 098 vs 30th JP 049/103
+6	v471380	wrong	540380,722460	Smoliv shiny rares (Shiny Treasure 203/190, CSV6C 055/052) vs regular stack
+7	v476906	wrong	476906	Celebration Fanfare 306/S-P (Championship Series 2022 art) vs 254/S-P 2021 + CS5.1C
+7	v758086	wrong	758086	Eiscue SVP 025 IR vs SV-P 121
+7	v287710	false		Ho-Oh GX CSM1aC shiny ultra rare 169/151 vs FA
+7	v746296	wrong	758080;758268	Fletchinder: CSM2D 049, SVP 022 IR, SV-P 116 are three paintings
+7	v758192	wrong	758192	Xatu SV-P 078 vs SV-P 085
+7	v545178	wrong	545178	Gym Badge Norman vs Gym Badge Brawly (XY-P)
+8	v758364	wrong	758370;758424	Skwovet SV-P 164, 167 (shiny), 194 are three paintings
+8	v224878	wrong	224878	Slowpoke CoL 70/95 rock art vs HGSS 081/123 + HG collection
+8	v424910	wrong	659516	CS5.1C 015/004 is Gallade V full art, not the Astral Radiance Gallade painting
+8	v221030	wrong	221182	Scizor EX full art 119/122 vs regular 76/122 stack
+8	v234062	wrong	234062	Pelipper RS 19/109 vs Sandstorm 50/100 + JP 031/080
+8	v401228	wrong	684932	Munna Black Bolt IR 116/086 vs Fusion Strike 121/264 stack
+9	v222490	hold		Fire Energy basic energy mass group (110 printings), not reviewed
+9	v746670	wrong	746670	Energy Retrieval CSM2D 236 vs SV-P 235
+9	v758302	wrong	758302	Remoraid SV-P 133 vs Chaos Rising 016
+9	v758190	wrong	758190	Natu SV-P 077 cactus art vs SV-P 084 shiny
+9	v471452	wrong	625454	Lucario 027/047 Everyone's Exciting Battle vs SVI 114 stack
+9	v758254	wrong	758254	Grafaiai SV-P 109 vs SV-P 112 shiny
+r0	v746512	wrong	758194;771196	Hawlucha CSM2D 157, SV-P 079, WCD 2025 are three paintings
+r0	v401006	wrong	476420	Swadloon SM-P 353 gym vs Fusion Strike 010/264 stack
+r0	v254166	wrong	254166,473170	Inteleon V SWSH016 promo + jumbo (blue swirl art) vs Rebel Clash 049/192 stack
+r0	v248290	wrong	248290	Elgyem NV 55/101 vs Plasma Storm 68/135 + JP 005/017
+r0	v222116	wrong	222116	Deoxys EX BW82 promo vs Plasma Freeze 53/116 stack
+r0	v746568	wrong	746568	Jirachi CSM2D 185 vs SV-P 215
+r1	v746288	wrong	746288	Darmanitan CSM2D 045 vs SV-P 132
+r1	v758348	wrong	758348	Pineco SV-P 156 forest vs SV-P 171
+r1	v221186	wrong	221186	Ho-Oh EX Breakpoint 121/122 vs Dragons Exalted 119/124 + Dragon Blade FA
+r1	v245230	false		Counter Gain Paradise Dragona 059/064: same object illustration, new background
+r1	v746358	wrong	746358;758218	Raichu CSMPd 002/021, CSM2D 080, SV-P 091 are three paintings
+r1	v758078	wrong	758078	Ninetales SVP 021 IR vs Chaos Rising 009
+r2	v220394	wrong	488482	Tyrogue McDonald's 2002 023/P net art vs Aquapolis 63/147 + JP 055/092
+r2	v758088	wrong	758088	Cleffa SVP 026 IR vs SV-P 211
+r2	v758366	wrong	758366;758426	Greedent SV-P 165, 168 (shiny), 195 are three paintings
+r2	v455864	wrong	466006,470228,691828	Wailmer sleeping-on-beach art (Incandescent Arcana 025/068, Crown Zenith 031/159, CS6b 009/131) vs open-mouth Silver Tempest 037/195 stack
+r2	v220098	wrong	281278	Houndoom Mysterious Mountains 070/088 night art vs Aquapolis H11/15 stack
+r2	v228586	wrong	228768	Kingdra GX full art 66/70 vs Ultra Rare 18/70 stack
+r3	v263192	wrong	521508	Remoraid neo intro pack No.223 vs Unleashed 59/95 + HG collection
+r3	v258214	wrong	258218,643092	Krabby beach art (SSH 43/202, Water starter V 003/023) vs SSH 42/202 bubble stack
+r3	v261076	wrong	779984	Crobat Chaos Rising 051/086 vs Unbroken Bonds 066/214 stack
+r3	v747478	wrong	747478	Emolga CSMPd 004/021 vs Chaos Rising 030/086
+r3	v521146	false		Melmetal GX rainbow 217 recolour of the full art
+r3	v471406	wrong	758160;758308	Wiglett SV-P 062 (shiny) and SV-P 136 are two other paintings
+r4	v746386	wrong	746386	Minun CSM2D 094 vs SV-P 093
+r4	v758236	wrong	758236	Charmeleon SV-P 100 vs MEP 079
+r4	v746600	wrong	746600	Florges CSM2D 201 vs SV-P 187
+r4	v273524	wrong	273524	Collection Y 037/060 Yveltal (holo, not the ex painting) vs Yveltal ex 052/080 stack
+r4	v505132	wrong	505132	Sea's Manaphy PCG-P 146 vs movie pack 005/019
+r4	v746622	wrong	746622	Eevee CSM2D 212 vs SV-P 061
+r5	v567148	wrong	806124	Enamorus Storm Emeralda 034/076 vs Crimson Haze 039/066 stack
+r5	v758196	wrong	758196	Nacli SV-P 080 vs SV-P 162
+r5	v241640	wrong	494336	Brock's Mankey CoroCoro No.056 close-up vs Gym Heroes 68/132 + JP gym booster
+r5	v651324	wrong	654270	Cynthia's Garchomp ex SVP 204 promo pose vs SIR/gold stack
+r5	v260108	false		Darkrai & Cresselia LEGEND 30th Top 151/103 (orientation?)
+r5	v237750	wrong	545562	Burmy XY-P 236 gym (other composition) vs Fates Collide 2/124 + JP 002/078
+r6	v233220	wrong	233220	Delcatty Legend Maker 4/92 holo art vs RS 29/109 stack
+r6	v265928	wrong	291548	Hatenna SWSH040 promo dark forest art vs Rebel Clash 083/192 stack
+r6	v231854	wrong	232744	Registeel ex Hidden Legends 99/101 vs Emerald 100/106 + PLAY
+r6	v756110	hold	806376	Nitro Energy Storm Emeralda UR 105/076: textured full-art of the same symbol; energy, not changed
+r6	v247278	wrong	247280	Chikorita Neo Genesis 54/111 vs 53/111 stack
+r6	v250952	wrong	557278	Dialga Lv.68 DP-P 033 vs Lv.73 Platinum 023/127 + half deck
+r7	v224770	wrong	224770	Flaaffy CoL 43/95 vs HGSS 042/123 + trainer kit stack
+r7	v683694	wrong	683694	Illusion's Zoroark 2010 CoroCoro Winner vs Ichiban: two contest designs
+r7	v224718	wrong	224718	Pidgeot CoL 30/95 perched vs Triumphant 29/102 + JP 060/080
+r7	v316660	wrong	316780	Tornadus V full art 184/198 vs Ultra Rare 124/198 stack
+r7	v746354	wrong	746356;746362;747472;758216	Pikachu CSM2D 078, 079, 082 (GX), CSMPd 001/021, SV-P 090 are five paintings
+r7	v758200	wrong	758200	Lechonk SV-P 082 vs SV-P 110
+r8	v263284	wrong	274606,281122	Rare Candy DP JP pink background (Dawn Dash, Moonlit Pursuit) vs Unleashed 82/95 stack
+r8	v221412	wrong	221412	REPORTED: Pikachu BREAKthrough 48/162 forest (Kouki Saitou) vs BW54 thunder + BW-P 163 Work Book stamp
+r8	v254816	wrong	260922,274648	Litten desert art (UNB 026/214, Double Blaze 013/095) vs SLG 015/073 grass + JP 016/072
+r8	v262902	false		Naganadel GX rainbows are recolours of the full art
+r8	v259248	wrong	259248	Zeraora Team Up 052/181 vs UNB 060/214 stack
+r8	v235386	wrong	586510	Dark Pupitar black deck kit 010/020 vs Team Rocket Returns 40/109 + kit 009/020
+r9	v746598	wrong	746598	Floette CSM2D 200 vs SV-P 186
+r9	v556752	false		Victory Medal L-P 2nd place silver / 3rd place bronze: same illustration, medal recoloured
+r9	v250168	wrong	250168	Dragonite Plasma Freeze 83/116 vs Roaring Skies 51/108 + JP 042/078
+r9	v256758	wrong	475832	Popplio SM-P 175 splash art vs Sun & Moon 39/149 stack
+r9	v222266	wrong	317008,471906,643168,747148,785298	Energy Retrieval SWSH yellow/green orbs art vs BW red/blue art stack
+r9	v746408	wrong	746408	Togedemaru CSM2D 105 vs CSMPd 006/021
+r10	v232930	wrong	248636,504630	Donphan POP 3 8/17 + PCG-P 109 vs Holon Phantoms 40/110 + kit 005/015
+r10	v746264	wrong	746264	Rapidash CSM2D 033 vs SV-P 130
+r10	v243084	false		Dark Dragonite Team Rocket 22/82 is the non-holo rare of the 5/82 painting
+r10	v746252	wrong	746252	Tapu Bulu CSM2D 027 vs SV-P 222
+r10	v233004	wrong	233744,288948	Aron Power Keepers 42/108 + WCP 063/108 vs Holon Phantoms 58/110 + GBML
+r10	v250802	wrong	503984	Team Plasma Grunt BW-P 176 gym challenge art vs Plasma Storm 125/135 stack
+r11	v226290	wrong	226290,516156,706852	Whimsicott Cosmic Eclipse 148/236 + JP 098/173 + CSM2c 084/150 vs Guardians Rising 91/145 stack
+r11	v253964	wrong	253964,253966,520110	Persian SM182 prerelease (+staff) + JP 106/173 sunset art vs UNB 148/214 stack
+r11	v746714	wrong	758450	Ultra Ball SV-P 217 vs CSM2D 258 stack
+r11	v243514	wrong	624934	Tangela Everyone's Exciting Battle 001/047 vs Legendary Treasures 1/113 + kit
+r11	v253318	wrong	546096	Taillow XY-P 134 vs Roaring Skies 70/108 stack
+r11	v253542	wrong	253542	Rowlet SM22 vs SM153 + SM-P 049/204
+r12	v238206	false		Tyranitar Fates Collide 56/124 cosmos holo = XY130 prerelease painting (dark scan)
+r12	v257184	wrong	502950,681150	Switch SV gold (151 209/165, CSV1C) is another drawing than SM gold 160/149 stack
+r12	v224722	wrong	224722	Skarmory CoL 31/95 vs neo intro pack No.227
+r12	v222978	wrong	227524,624528	Joltik Dark Explorers 41/108 + battle gift 005/020 vs Black & White 44/114 stack
+r12	v237188	wrong	237188	Poliwrath Expedition 024/165 vs Skyridge H24/26 + Split Earth
+r12	v471758	wrong	471758	Galarian Meowth start deck 100 291/414 vs S-P 314
+r13	v221894	wrong	221894	Reshiram BW004 promo pose vs Black & White 26/114 stack
+r13	v746616	wrong	746616;746618	Kangaskhan SV-P 150, CSM2D 209, CSM2D 210 are three paintings
+r13	v261624	false		Honchkrow GX rainbows are recolours of the full art
+r13	v224234	wrong	476428	Crabrawler SM-P 357 gym wave art vs Burning Shadows 73/147 stack
+r13	v231852	wrong	232742	Regirock ex Hidden Legends 98/101 vs Emerald 99/106 + PLAY
+r13	v224202	wrong	258414,284468	Rhyhorn SSH 96/202 + JP 28/060 vs Burning Shadows 65/147 stack
+r14	v746468	wrong	746472;758208	Onix CSM2D 135, CSM2D 137 (GX), SV-P 086 are three paintings
+r14	v248202	wrong	248202,278820	Cryogonal NV 33/101 + Hail Blizzard 21/052 vs Black Flame 028/108 + OBF 055/197
+r14	v471548	wrong	471548,484146,674712,756366	Zangoose SVI 147/198 art (scarlet ex 062/078, CSV3C, CSVH2a) vs SVI 146/198 stack
+r14	v221932	wrong	221932	Samurott BW22 promo cloud art vs BW 32/114 + White Collection
+r14	v746258	wrong	746258	Growlithe CSM2D 030 vs SV-P 052
+r14	v245376	false		Tyranitar GX full art and rainbows: same painting recoloured
+r15	v261234	wrong	516072	Stakataka JP 071/173 vs UNB 106/214 stack
+r15	v746262	wrong	746262	Ponyta CSM2D 032 vs SV-P 129
+r15	v316630	wrong	503906	Aron BW-P 136 gym challenge vs Chilling Reign 109/198 stack
+r15	v255444	wrong	255444,281148	Nidoran F Skyridge 81/144 + MM 006/088 ruins art vs 82/144 + 007/088 riverside
+r15	v713842	wrong	713842	Professor's Research SVP 223 Magnolia vs SWSH sB/sC Magnolia art
+r15	v220166	wrong	488514	Donphan McDonald's 2002 034/P vs Aquapolis 7/147 + 054/092
+r16	v242156	wrong	521494	Qwilfish neo intro pack No.211 vs HGSS 050/123 + HG collection
+r16	v231936	false		Pidgeot FRLG 10/112 and its WCD 2005/2006 reprints: same painting
+r16	v227108	false		Alolan Exeggutor GX full art and rainbows: same painting recoloured
+r16	v758144	wrong	758144;758162	Wugtrio SV-P 054, 063 (shiny), 137 are three paintings
+r16	v225734	wrong	226530	Vileplume GX full art 211/236 (with Erika) vs 004/236 + Dream League
+r16	v244002	wrong	244002	Luxray Lv.51 LA 8/146 vs Lv.53 Arceus 005/099 + JP 039/090
+r17	v758304	wrong	758304	Octillery SV-P 134 vs Chaos Rising 017
+r17	v316834	false		Agatha rainbows are recolours of the full art
+r17	v232974	wrong	543024	Raichu ADV-P 058 sunset art vs Holon Phantoms 51/110 + kit
+r17	v746422	wrong	746422	Golbat CSM2D 112 vs Chaos Rising 050
+r17	v276568	wrong	276568	Fever-Burst Fighter 46/054 scan is Rufflet (ワシボン), not the Fletchling painting
+r17	v749610	hold		Blank Filler Card misprints: no artwork to compare
+r18	v758252	wrong	758252	Shroodle SV-P 108 vs SV-P 111 shiny
+r18	v242812	wrong	548676	Ralts Paldean Fates 153/091 shiny vs Hidden Fates SV34 stack
+r18	v264332	wrong	264334,546044	Mewtwo XY101 + 202/XY-P red art vs XY100 + 176/XY-P forest art
+r18	v231626	wrong	231626	Ninetales Emerald 38/106 vs Power Keepers 19/108 + WCP 010/108
+r18	v250176	wrong	250268	Latias EX full art 112/116 vs 85/116 stack
+r18	v700524	false		Jumbo Ice Cream M-P 077 is the same illustration (small photo scan with stamp)
+r19	v237848	wrong	545482	Mew XY-P 20th Anniversary Festa (Arita) vs Fates Collide 29/124 stack
+r19	v652122	false		Brock's Scouting M-P 083 is the same illustration (small photo scan with stamp)
+r19	v240846	wrong	240846,279944	Barboach Guardians Rising 70/145 + JP 32/050 vs Rebel Clash 099/192 stack
+r19	v746202	wrong	746202	Weedle CSM2D 002 vs Chaos Rising 001
+r19	v413108	wrong	477760	Weavile S-P 261 gym vs Brilliant Stars 087/172 stack
+r19	v227102	false		Buzzwole GX full art, shiny and rainbow prints: same painting recoloured
+r20	v510796	wrong	722604	Charizard ex CSVL2C special illustration (dark) vs OBF 215/197 / gold / SVP 074 stack
+r20	v746440	wrong	746440;779944;779948;779950	Deoxys CSM2D 121 and Chaos Rising 031/032/033/034 are five paintings
+r20	v264236	wrong	264236	Absol EX XY62 (XY-era EX) vs SV Absol ex stack
+r20	v294310	wrong	451360	Gardevoir V SWSH105 promo sun art vs Champion's Path 016/073 stack
+r20	v600680	wrong	720128,728748	Surfer MEGA art (Mega Dream ex 171/193, start deck 708/742) vs SV Surfer stack
+r20	v502672	wrong	806116	Hypno Storm Emeralda 030/076 vs 151 097/165 stack
+r21	v494422	wrong	494422;494428	Lucky Stadium unnumbered promos 247211 (mountain), 247213 (castle), 247214 (sea) are three pictures
+r21	v225618	false		Articuno GX SV54 shiny is the full-art painting recoloured
+r21	v228180	false		Chimchar jumbo 076 is the same painting
+r21	v253694	false		Ho-Oh GX jumbo is the same painting
+r21	v286762	false		Lapras VMAX rainbow and shiny prints: same painting recoloured
+r21	v746502	wrong	746502	Drilbur CSM2D 152 vs SV-P 227
+r22	v746454	wrong	746454	Trevenant CSM2D 128 vs Chaos Rising 039
+r22	v244798	wrong	755984	Delibird Ninja Spinner 018/083 town art vs Lost Thunder 057/214 + JP
+r22	v232526	wrong	232526,574040;248000,542452	Metang: Hidden Legends 43/101 + deck 004/019, Nintendo promo 23 + ADV-P 044, Power Keepers 35/108 + WCP are three paintings
+r22	v758202	wrong	758202	Tandemaus SV-P 083 vs SV-P 166
+r22	v260988	wrong	260988	Slowbro UNB 043/214 vs Paldean Fates 117/091 shiny + CSVL1
+r22	v746402	wrong	746402;747480	Dedenne CSM2D 102 (GX), CSM2D 202, CSMPd 005/021 are three paintings
+r23	v242708	false		Moltres & Zapdos & Articuno GX rainbow is the full art recoloured
+r23	v248106	wrong	250366,281758	Foongus Plasma Storm 12/135 + Plasma Gale 007/070 vs NV 9/101 + Red Collection
+r23	v746574	wrong	746574	Ferroseed CSM2D 188 vs Chaos Rising 062
+r23	v510804	wrong	510804	Charizard ex OBF SIR 223/197 vs the dark Tera SIR (Paldean Fates / Shiny Treasure)
+r23	v239302	wrong	244378,287028	Horsea Lv.8 Legends Awakened 102/146 + DP5 vs Fossil 49/62 + JP No.116
+r23	v239214	false		Gengar Fossil 20/62 non-holo and WotC cosmos promo: same painting as 5/62
+r24	v224496	false		Necrozma GX rainbows are recolours of the full art
+r24	v239218	false		Hitmonlee Fossil 22/62 non-holo is the 7/62 painting
+r24	v244434	wrong	244434,273944	Poochyena Lv.17 Legends Awakened 116/146 + DPBP#311 vs XY Kalos starter 16/39 + JP 016/039
+r24	v502464	wrong	622062	Ivysaur CS5b 002/128 vs 151 002/165 stack
+r24	v248668	wrong	494312	Mew glossy No.151 vs POP 4 4/17 + PCG-P 091
+r24	v258812	hold		Air Balloon artbox-pin (documented decision in VERSIONS.md): not touched
+r25	v279674	wrong	450402,684002	Piers Shiny Star V 194/190 + CS4.1C 009/004 seated art vs Infinity Zone / Darkness Ablaze full-art stack
+r25	v248298	wrong	248298,283016	Litwick NV 57/101 + Red Collection 034/066 cave art vs Steam Siege 48/114 stack
+r25	v557426	hold		Pikachu Lv.14 DP-P 098/101/102 store promos: same Pikachu, photo backgrounds differ; not decided
+r25	v746500	wrong	747572	Garchomp CSMPf 007/024 vs CSM2D 151 + CSMPf 001/024
+r25	v253724	wrong	475792	Marshadow SM-P 155 vs SM93 + SM-P 123
+r25	v406246	false		Charizard No.006 and 280/XY-P are both the Arita Base Set painting
+r26	v231538	wrong	234144,569650	Manectric RS 39/109 + starter 009/019 meadow art vs Emerald 16/106 + gift box 005/019
+r26	v301130	false		Nessa FA 111/100 + CS2b UR 132/115 vs rainbow 196/185 stack
+r26	v540444	false		Veluza SHT 230/190 shiny vs PAF 125/091 + CSV6C
+r26	v245502	false		Manaphy Lv.32 Regigigas LV.X collection 006/012
+r26	v227762	wrong	227762,249788,250288,286066,624990,625820,625856,628430,629612,631162,632152,642776,643372,646230,651726,653496,661554,752752;255054,255056,569192	Ultra Ball: BW orange art (Dark Explorers 102/108 stack), XY red art (Fates Collide/Flashfire/Roaring Skies stack) and SM art (League Cup 68a/73 + Full Metal Wall 051/054) are three illustrations
+r26	v540702	false		Chi-Yu ex gold SHT 356/190 = PAF 241/091 gold painting
+r27	v491900	wrong	491910	LaRousse's Munchlax PCG-P 020 laughing art vs PCG-P 025 + movie 006/019
+r27	v475182	false		Mimikyu ex jumbo SVP 004 is the same painting
+r27	v300610	wrong	451284,477578,637996	Pikachu VMAX arms-up art (SWSH 062, S-P 123, CS0LC 002/004) vs Vivid Voltage 044/185 stack
+r27	v546046	wrong	546046	Poncho-wearing Pikachu 207/XY-P (Mega Charizard X) vs 208/XY-P (Mega Charizard Y)
+r27	v230262	wrong	230262	Breloom Deoxys 003/107 vs Emerald 22/106 + JP 004/015
+r27	v244594	wrong	533592	Scyther My First Battle vs Lost Thunder 003/214 stack
+r28	v521058	false		Trevenant & Dusknoir GX rainbows are recolours of the full art
+r28	v746420	wrong	746420	Zubat CSM2D 111 vs Chaos Rising 049
+r28	v262860	false		Garchomp & Giratina GX gold is the full art recoloured
+r28	v234152	wrong	569684	Marshtomp mudkip starter 004/019 vs RS 41/109 + 005/019
+r28	v746710	wrong	746710,747488,747574	Nest Ball SWSH red-background art (CSM2D 256, CSMPd 009, CSMPf 008) vs SV blue art (SV-P 216/230, WCD 2025)
+r28	v746452	wrong	746452	Phantump CSM2D 127 vs Chaos Rising 038
+r29	v306130	wrong	306130	Rotom Shining Fates SV38 shiny art vs Surging Sparks 061/191 stack
+r29	v590088	false		Crabominable holiday calendar snowflake stamp: same painting
+r29	v239146	false		Xerneas GX full art and rainbows: same painting recoloured
+r29	v306170	false		Alcremie SV58 and Shiny Star V 257/190: same shiny painting
+r29	v746204	wrong	746204	Kakuna CSM2D 003 vs Chaos Rising 002
+r29	v490982	false		Chien-Pao ex gold prints: same painting recoloured
+r30	v258782	false		Cramorant V jumbo 086: same full-art pose, colour-shifted photo
+r30	v488480	wrong	488480	Victory Medal DPt-P 036 vs DPt-P 031: different Pokemon behind the medal
+r30	v247992	wrong	572420	Ludicolo Latias ex half deck 007/018 vs Nintendo promo 20 + ADV-P 021/022
+r30	v221928	wrong	221928	Serperior BW20 promo curled pose vs Black & White 6/114 + White Collection
+r30	v260292	wrong	476006	Wash Rotom SM-P 213 gym fountain art vs Ultra Prism 40/156 stack
+r30	v245370	false		Suicune GX full art and rainbows: same painting recoloured
+r31	v688962	wrong	747782	Basic Water Energy CSMPi 037/024 frame design vs SV gold energy stack
+r31	v466642	false		Hisuian Electrode V jumbo SWSH294: same painting
+r31	v271090	wrong	271090	Houndoom No.229 Awakening Legends vs Crossing the Ruins No.229
+r31	v547014	false		Blastoise 009/165 WotC-era promos: same painting, holo vs plain
+r31	v683712	wrong	683712	Illusion's Zorua L-P Elementary School winner vs Pucchigumi winner: two contest designs
+r31	v226418	wrong	664994	Bewear Ash vs Team Rocket deck 018/026 vs Cosmic Eclipse 182/236 stack
+r32	v227934	wrong	256300,279822	Skuntank Lv.40 Stormfront 26/100 + JP 64/092 vs Lv.36 Diamond & Pearl 15/130 + DPBP#497
+r32	v522686	wrong	625444	Scraggy Everyone's Exciting Battle 032/047 vs Raging Surf 037/062 stack
+r32	v262194	wrong	262194,280522,707658	Dewpider Unified Minds 48/236 + Miracle Twin + CSM2a vs Silver Tempest 047/195 stack
+r32	v222076	hold		Drifblim BW64 + BW-P 147 is a documented artbox-pin (washed JP leftover): not touched
+r32	v247034	false		Kabutops Neo Discovery 25/75 non-holo is the 6/75 painting
+r32	v455778	false		Serena rainbows are recolours of the full art
+r33	v239204	wrong	239204	Mysterious Treasure Forbidden Light league promo 113a/131 vs Miracle Twin 093/094 yellow art
+r33	v265682	wrong	265682,508868	Applin Rebel Clash 020/192 + VMAX Rising 010/070 apple-tree art vs 021/192 stack
+r33	v467858	wrong	467858	Lightning Energy VSTAR Universe 254/172 gold design vs Violet ex 108/078
+r33	v225660	false		Scizor GX shiny and rainbow prints recolour the full art
+r33	v587910	wrong	755956	Carnivine Ninja Spinner 004/083 vs Stellar Miracle 005/102 stack
+r33	v540394	false		Charmeleon SHT 211/190 shiny = Paldean Fates 110/091 painting
+r34	v609378	false		Pikachu ex gold prints (Terastal Festival 236/187, Prismatic 179/131, CSV9.5C) vs Surging Sparks FA/gold
+r34	v728732	false		Waitress M-P 082 small photo scan: same illustration
+r34	v223058	false		Krokorok cracked ice blister: same painting as BW 64/114
+r34	v746286	wrong	746286	Darumaka CSM2D 044 vs SV-P 131
+r34	v224508	false		Gardevoir GX full art and rainbows: same painting recoloured
+r34	v550650	false		Chatot Wild Force 081/071 = Temporal Forces 181/162 painting
+r35	v530622	false		Garchomp ex gold and UR/FA: same painting
