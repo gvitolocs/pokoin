@@ -37,11 +37,16 @@ Games + **nezopt 15T Pi replica**: [GAMES.md](GAMES.md). JP/CN flags: [PRINT_FLA
 7. `/marketplace/sets` wordmarks (`set-logos.js`) are expansion logos on the
    Pi (`/card-images/expansions/wordmarks/{slug}.png` and leftover
    `/card-images/expansions/logos/{slug}.png`). `/marketplace/eras/:id` reuses
-   that grid. Desk reprint shortcuts use
-   `/card-images/expansions/symbols/{slug}.png`. Missing official marks are
-   saved once as SVI-style dark plates (`scripts/export-expansion-code-marks.py`),
-   not HTML letter discs. They are **not** leftover
-   card scans and **not** `CardArt cut`.
+   that grid. Desk reprint shortcuts and the set desk title use
+   `/card-images/expansions/symbols/{slug}.svg`, then `{slug}.png`, then the
+   letter code (`ExpansionMark`). The SVGs come from `tools/expansion-symbols`
+   (`symbols.tsv`, published to both CDN origins by
+   `scripts/publish-expansion-symbols.sh`): printed code marks (MEG, sv8, XY11,
+   csv9C) redrawn as plates with the code as paths, large pictorial symbols
+   traced, the Black Star PROMO star drawn, and SVI-style dark plates for sets
+   without a known mark. Sets whose only mark is a small raster stay PNG
+   (`market/src/expansion-symbols-png.js`). They are **not** leftover card
+   scans and **not** `CardArt cut`.
 
 ---
 

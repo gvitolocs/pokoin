@@ -1,0 +1,37 @@
+# Hand corrections on top of `init` (see src/main.rs apply_overrides).
+# slug	kind	text	style	plate	ink   ("." keeps the proposed value)
+# Printed text differs from the CardTrader code:
+25th-anniversary-edition	.	s8a-P
+black-bolt-sv11b	.	sv11B
+ex-starter-set-sprigatito-and-lucario-ex	.	svAM
+premium-trainer-box-mega	.	mA
+starter-set-mega-mega-diancie-ex	.	mBD
+starter-set-mega-mega-gengar-ex	.	mBG
+gx-starter-decks	.	SMH
+start-deck-100	.	sI
+sun-and-moon-family-pokemon-card-game	.	SML
+secret-of-the-lakes	.	DP2
+# ADV-era pictorial marks whose CardTrader code looks like a Mega code (mic, mif, mod, mvsa):
+miracle-crystal	png
+mirage-forest	png
+miracle-of-the-desert	png
+magma-vs-aqua-two-ambitions	png
+# The circled A of the SM starter set (the Pi copy was the SM1+ mark):
+sun-and-moon-starter-set	png
+# PROMO plates and stars:
+mep-black-star-promos	promo
+sm-p-sun-and-moon-promos	code	PROMO	ring	#1a1a1a	#f5f5f5
+m-p-promos	code	PROMO	ring	#1a1a1a	#f5f5f5
+s-p-sword-and-shield-promos	code	PROMO	ring	#1a1a1a	#f5f5f5
+scarlet-and-violet-promos	code	PROMO	ring	#1a1a1a	#f5f5f5
+play-promos	png
+# White-boxed XY mark:
+the-best-of-xy	code	XY	sub	#f5f5f5	#1a1a1a
+legendary-heartbeat	code	s3a	ring	#020202	#f7f7f7
+gem-pack-vol-4	.	.	.	#221714	#f9f8f8
+shaymin-lv-x-collection-pack	trace
+# EN SV black star promos print SVP; CFM is white text on a transparent canvas:
+sv-black-star-promos	code	SVP	ring	#231f20	#f4f4f4
+cry-from-the-mysterious	code	CFM	ring	#231f20	#f4f4f4
+# tcgdex official id is wrong here (dp7); CardTrader sf matches the other S-era boxes (sK):
+single-strike-and-rapid-strike-premium-trainer-boxes	.	sF
