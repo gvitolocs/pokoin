@@ -10,11 +10,24 @@ result=0
 # stage that did not run as passed.
 stage_args=()
 dump_pid=""
+# The unit runs the clean checkout ~/pokoin-deploy/cardtrader-daily, moved to origin/main
+# by scripts/deploy-cardtrader-daily-checkout.sh. The summary names its commit and how
+# many newer commits to the job's own files are waiting there (shared refs, no fetch).
+job_paths=(scripts/run-all-cardtrader-daily.sh scripts/refresh-all-cardtrader-catalogues.cjs
+  scripts/cardtrader-fetch-bridge.py scripts/refresh-all-cardtrader-pictures.py
+  scripts/satellite-scan-ingest.py scripts/ingest-missing-product-images.py
+  scripts/cardtrader-scan-fetch.py scripts/sync-catalog-pictures.py
+  scripts/match-refreshed-pokemon-artwork.py scripts/cardtrader-daily-notify.py
+  scripts/dump-all-cardtrader-listings.py deploy/systemd/pokoin-all-cardtrader-daily.service
+  deploy/systemd/pokoin-all-cardtrader-daily.timer)
+code_commit=$(git rev-parse --short=12 HEAD 2>/dev/null) || code_commit=""
+code_undeployed=$(git rev-list --count HEAD..origin/main -- "${job_paths[@]}" 2>/dev/null) || code_undeployed=""
 
 notify() {
   # Delivery is best effort; the notifier queues failures for later retry.
   python3 scripts/cardtrader-daily-notify.py \
     --run-root "$POKOIN_CATALOG_RUN_ROOT" --started-at "$run_started_at" \
+    --code-commit "$code_commit" --code-undeployed "$code_undeployed" \
     --exit-code "$1" "${stage_args[@]}" "${@:2}" \
     || echo "CardTrader notification pending; import result is unchanged." >&2
 }
