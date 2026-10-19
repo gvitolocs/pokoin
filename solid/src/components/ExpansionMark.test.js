@@ -6,7 +6,8 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const mark = read('./ExpansionMark.jsx');
 
 test('a stamped deck printing shows its stamp before the set mark, then the code', () => {
-  assert.match(mark, /expansionStampSrc\(\{ slug: slug\(\), number: props\.number, id: props\.cardId \}\),\s*expansionSymbolSrc\(/);
+  // Stamp, then the set mark SVG and its PNG (expansionSymbolSources), then letters.
+  assert.match(mark, /expansionStampSrc\(\{ slug: slug\(\), number: props\.number, id: props\.cardId \}\),\s*\.\.\.expansionSymbolSources\(/);
   // A missing stamp plate falls through to the set mark, not straight to letters.
   // The failed source is remembered (image-fallback-memo) and the next one is tried.
   assert.match(mark, /onError=\{\(\) => \{\s*rememberImageFallback\(src\(\), DEAD_IMAGE, [^)]*\);\s*setFailed\(\(n\) => n \+ 1\);/);
@@ -20,5 +21,6 @@ test('desk version row and search suggest pass the printing number', () => {
 });
 
 test('expansion page title uses the Trainer Kit mascot stamp first', () => {
-  assert.match(read('../pages/Expansion.jsx'), /expansionStampSrc\(\{ slug \}\) \|\| expansionSymbolSrc\(/);
+  // ExpansionMark tries the stamp, the SVG, the PNG, then the code.
+  assert.match(read('../pages/Expansion.jsx'), /<ExpansionMark\s+class="set-sym"\s+slug=\{slug\}/);
 });

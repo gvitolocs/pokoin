@@ -49,5 +49,7 @@ test('a missing language falls back to the account country, not a cheaper grade'
     selected: 'EN',
     listed: ['FR'],
     country: 'DK',
-  }), 'EN');
+  }), 'FR');
+  // Only an Italian copy listed, signed out (no country): Best Deal shows it.
+  assert.equal(resolveDealLanguage({ selected: 'EN', listed: ['IT'] }), 'IT');
 });

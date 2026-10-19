@@ -489,7 +489,23 @@ export default function ListingForm(props) {
     }
   }
 
+  // A signed-out visitor came to buy: the sell form waits behind one button
+  // instead of being the biggest panel on the desk.
+  const [opened, setOpened] = createSignal(false);
+  const collapsed = () => authReady() && !signedIn() && !isEditing() && !opened();
+
   return (
+    <Show
+      when={!collapsed()}
+      fallback={(
+        <section class="panel sell-form is-collapsed">
+          <div class="add-head">
+            <h2>Sell this card</h2>
+            <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+          </div>
+        </section>
+      )}
+    >
     <section class={['panel sell-form', { 'is-editing': isEditing() }]} ref={(el) => { formEl = el; }}>
       <div class="add-head">
         <h2>{isEditing() ? 'Edit listing' : 'List your card'}</h2>
@@ -749,5 +765,6 @@ export default function ListingForm(props) {
         }}
       />
     </section>
+    </Show>
   );
 }

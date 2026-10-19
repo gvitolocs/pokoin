@@ -80,8 +80,8 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/home/landing-boot.js?v=20261018-binder"></script>
-    <link rel="stylesheet" href="/home/landing.css?v=20261018-account" />
+    <script src="/home/landing-boot.js?v=20261019-cookies"></script>
+    <link rel="stylesheet" href="/home/landing.css?v=20261019-cookies" />
     <link rel="stylesheet" href="/home/home.css?v=20261018-binder" />
     <script type="application/ld+json">
       {
@@ -214,6 +214,7 @@
                   id="hero-q"
                   name="q"
                   type="search"
+                  maxlength="200"
                   placeholder="Search Pokémon cards…"
                   autocomplete="off"
                   autocapitalize="off"
@@ -666,9 +667,14 @@
         We use cookies to keep you signed in, remember your cart, and run the
         marketplace. <a href="/privacy">Privacy</a>
       </p>
-      <button type="button" data-cookie-accept>Accept</button>
+      <div class="cookie-actions">
+        <button type="button" class="cookie-essential" data-cookie-essential>
+          Essential only
+        </button>
+        <button type="button" data-cookie-accept>Accept all</button>
+      </div>
     </div>
-    <script src="/home/landing.js?v=20261018-account" defer></script>
+    <script src="/home/landing.js?v=20261019-cookies" defer></script>
     <script type="module" src="/market/landing-island.js"></script>
   </body>
 </html>

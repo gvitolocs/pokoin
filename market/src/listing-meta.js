@@ -187,6 +187,20 @@ export function conditionShort(condition) {
   return text || 'NM';
 }
 
+const CONDITION_LABEL = Object.freeze({
+  nm: 'Near Mint',
+  ex: 'Excellent',
+  sp: 'Slightly Played',
+  mp: 'Moderately Played',
+  pl: 'Played',
+  poor: 'Poor',
+});
+
+/** Spelled-out grade for a chip's alt/title: "Poor", not "PO". */
+export function conditionLabel(condition) {
+  return CONDITION_LABEL[conditionTone(condition)] || String(condition || '').trim() || 'Near Mint';
+}
+
 /** CardTrader-style condition chip SVG (one file per grade).
  *
  * Assets live in `market/public/conditions/` (see README there):

@@ -110,9 +110,34 @@ class DailySummaryTest(unittest.TestCase):
                 self.assertTrue(result["rawDumpComplete"])
                 self.assertNotIn("price analytics: fresh;", result["message"])
 
+    def test_previous_nights_analytics_is_expected_before_the_oracle_refresh(self):
+        # The notifier runs ~00:55; the Oracle refresh builds tonight's bucket ~02:40.
+        expected = {"state": "expected", "dumpDay": "2026-09-30",
+                    "sourceTimestamp": "2026-10-01T02:40:13+00:00", "printings": 66050}
+        result = self.summary(analytics=expected)
+        self.assertEqual(result["status"], "complete")
+        self.assertIn("previous night's bucket", result["message"])
+        self.assertIn("dump bucket 2026-09-30", result["message"])
+        result = self.summary(analytics={**expected, "state": "stale", "dumpDay": "2026-09-29"})
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("BEHIND, a nightly refresh was missed", result["message"])
+
+    def test_job_code_commit_and_undeployed_commits_are_named(self):
+        result = notify.build_summary(self.root, START, 0, STAGES, FRESH, {"commit": "abc123def456", "undeployed": 0})
+        self.assertIn("Job code abc123def456.", result["message"])
+        self.assertEqual(result["status"], "complete")
+        result = notify.build_summary(self.root, START, 0, STAGES, FRESH, {"commit": "abc123def456", "undeployed": 3})
+        self.assertIn("3 newer job-script commits on origin/main are not deployed", result["message"])
+        self.assertEqual(result["status"], "complete")
+
     def test_writer_probe_has_timeouts_and_handles_missing_or_stale_data(self):
         for output, expected in [("", "missing"), ("not-json", "unknown"), ("[]", "unknown"),
-                                 (json.dumps({**FRESH, "sourceTimestamp": "2026-10-01T02:21:13Z"}), "stale"),
+                                 (json.dumps({**FRESH, "dumpDay": "2026-09-30",
+                                              "sourceTimestamp": "2026-10-01T02:40:13Z"}), "expected"),
+                                 (json.dumps({**FRESH, "dumpDay": "2026-09-29",
+                                              "sourceTimestamp": "2026-09-30T02:40:13Z"}), "stale"),
+                                 (json.dumps({**FRESH, "dumpDay": None,
+                                              "sourceTimestamp": "2026-10-01T02:21:13Z"}), "stale"),
                                  (json.dumps(FRESH), "fresh")]:
             with self.subTest(output=output), patch.object(notify.subprocess, "run") as run:
                 run.return_value = subprocess.CompletedProcess([], 0, output, "")

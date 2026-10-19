@@ -7,6 +7,13 @@
     <meta name="theme-color" content="#000000" />
     <style>
       html, body, #root { margin: 0; min-height: 100%; background: #000; color: #fff; color-scheme: dark; }
+      /* Until the app paints into #root, a slow link shows the logo instead of a black screen. */
+      .boot-loader { position: fixed; inset: 0; display: grid; place-items: center; align-content: center; gap: 14px; opacity: 0; animation: boot-in 0.25s 0.35s forwards; font: 600 14px/1.4 system-ui, sans-serif; color: #9a9aa6; }
+      .boot-loader img { width: 64px; height: 64px; animation: boot-pulse 1.2s ease-in-out infinite; }
+      #root:not(:empty) + .boot-loader { display: none; }
+      @keyframes boot-in { to { opacity: 1; } }
+      @keyframes boot-pulse { 50% { transform: scale(0.9); opacity: 0.7; } }
+      @media (prefers-reduced-motion: reduce) { .boot-loader img { animation: none; } }
     </style>
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
@@ -24,6 +31,7 @@
   </head>
   <body>
     <div id="root"></div>
+    <div class="boot-loader" role="status"><img src="/home/logo.png" alt="" width="64" height="64" /><span>Loading Pokoin…</span></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

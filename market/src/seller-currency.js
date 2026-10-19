@@ -58,13 +58,15 @@ export function buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn = true) 
 
 /**
  * { local, pkn } labels for a buyer price stack. A currency pinned through
- * the URL keeps the two-line local + PKN stack; an unaffordable signed-in
- * price (or a card-only seller) shows the local currency only; everything
- * else — affordable prices and signed-out buyers — PKN only.
+ * the URL keeps the two-line local + PKN stack, and so does a signed-out
+ * visitor: they hold no PKN, so the local amount comes first and PKN under
+ * it. An unaffordable signed-in price (or a card-only seller) shows the
+ * local currency only; affordable signed-in prices stay PKN only.
  */
 export function buyerPriceParts({ pricePkn, currency, balancePkn, sellerAcceptsPkn = true, pinned = '' }) {
   const pin = String(pinned || '').toUpperCase();
   if (pin && pin !== 'PKN') return localAndPknFromPkn(pricePkn, currency);
+  if (!pin && balancePkn == null && sellerAcceptsPkn !== false) return localAndPknFromPkn(pricePkn, currency);
   if (buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn)) {
     return { local: formatFiatFromPkn(pricePkn, currency) || '', pkn: '' };
   }

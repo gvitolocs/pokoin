@@ -1,4 +1,5 @@
-import { createEffect, createSignal, For, Repeat, Show, untrack } from 'solid-js';
+import { createEffect, createSignal, For, onCleanup, Repeat, Show, untrack } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { artCutVars } from '@market/art-cut.js';
 import { openListingChat } from '@market/chat-dock-store.js';
 import { listingReference, listingsReference, writeListingDrag } from '@market/chat-listing.js';
@@ -6,7 +7,7 @@ import { rememberImageFallback, workingImage } from '@market/image-fallback-memo
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import {
   conditionChipSrc,
-  conditionShort,
+  conditionLabel,
   conditionTone,
   listingExtraTags,
   listingLanguageFlag,
@@ -140,6 +141,15 @@ function TrashIcon() {
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
   const [added, setAdded] = createSignal(false);
+  // The icon turning green was the only sign a click worked: say it, briefly.
+  const [toast, setToast] = createSignal(false);
+  let toastTimer = 0;
+  onCleanup(() => clearTimeout(toastTimer));
+  function confirmAdded() {
+    setToast(true);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => setToast(false), 3000);
+  }
   const [pick, setPick] = createSignal(1);
   const name = () => publicShopSellerLabel(offer());
   const stock = () => Math.max(0, Math.trunc(Number(offer()?.quantityAvailable ?? offer()?.quantity_available) || 0));
@@ -153,7 +163,7 @@ export default function ShopListingRow(props) {
   const country = () => sellerCountryFlag(offer()?.sellerCountry);
   const language = () => listingLanguageFlag(offer()?.language);
   const tone = () => conditionTone(offer()?.condition) || 'nm';
-  const cond = () => conditionShort(offer()?.condition);
+  const cond = () => conditionLabel(offer()?.condition);
   const tags = () => listingExtraTags(offer());
   const cardPath = () => offer()?.canonicalPath || offer()?.canonical_path || '';
   const cardName = () => offer()?.cardName || offer()?.name || '';
@@ -346,10 +356,18 @@ export default function ShopListingRow(props) {
                 event.stopPropagation();
                 props.onCart?.(pick());
                 setAdded(true);
+                confirmAdded();
               }}
             >
               <CartIcon />
             </button>
+            <Show when={toast()}>
+              <Portal>
+                <div class="cart-toast" role="status">
+                  Added to cart · <a href={gameHref('/cart')}>View cart</a>
+                </div>
+              </Portal>
+            </Show>
           </Show>
         </span>
       </Show>

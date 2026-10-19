@@ -4,6 +4,7 @@ import { useGameNavigate } from '../lib/game-navigate.js';
 import { getJson } from '@market/api.js';
 import { googleAuthPopupFailed, isAuthFramed, topLevelLoginUrl } from '@market/auth-google.js';
 import {
+  authErrorMessage,
   classifyVerifyError,
   isNativeVerifiedReturn,
   isPendingLoginError,
@@ -106,7 +107,7 @@ export default function Auth() {
           if (!cancelled && result?.user) leave(safeFrom);
         })
         .catch((err) => {
-          if (!cancelled) setError(err.message || 'Google sign-in failed.');
+          if (!cancelled) setError(authErrorMessage(err, 'Google sign-in failed.'));
         });
       stop = firebaseAuth.onAuthStateChanged((user) => {
         if (!cancelled && user) leave(safeFrom);
@@ -205,7 +206,7 @@ export default function Auth() {
       }
       leave(safeFrom);
     } catch (err) {
-      setError(err.message || (signup ? 'Registration failed.' : 'Sign in failed.'));
+      setError(authErrorMessage(err, signup ? 'Registration failed.' : 'Sign in failed.'));
     } finally {
       setBusy(false);
     }
@@ -222,7 +223,7 @@ export default function Auth() {
         const retryAfterSec = Number(err.body?.retryAfterSec) || 60;
         setResendReadyAt(Date.now() - RESEND_COOLDOWN_MS + retryAfterSec * 1000);
       }
-      setError(err.message || 'Could not resend the verification email.');
+      setError(authErrorMessage(err, 'Could not resend the verification email.'));
     } finally {
       setBusy(false);
     }
@@ -254,7 +255,7 @@ export default function Auth() {
         await signInWithRedirect(firebaseAuth, new GoogleAuthProvider());
         return;
       }
-      setError(err.message || 'Google sign-in failed.');
+      setError(authErrorMessage(err, 'Google sign-in failed.'));
     } finally {
       setBusy(false);
     }

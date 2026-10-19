@@ -20,6 +20,7 @@ import { printingIdentity } from '@market/identity.js';
 import { homepageDerivativeUrl } from '@market/image-urls.js';
 import {
   conditionChipSrc,
+  conditionLabel,
   conditionShort,
   conditionTone,
   listingExtraTags,
@@ -253,7 +254,7 @@ export function BasketRow(props) {
             <b>Condition: </b>
             <img class={`bk-cond is-${tone()}`} src={conditionChipSrc(row().condition)} alt="" width="30" height="21" />
             {' '}
-            {conditionShort(row().condition)}
+            {conditionLabel(row().condition)}
           </span>
           <Show when={language()}>
             {(lang) => (
@@ -427,6 +428,9 @@ export function BasketSummary(props) {
   const balance = () => Math.max(0, Math.trunc(Number(props.availablePkn) || 0));
   const discountOn = () => Boolean(props.useBalance && props.discount.pkn >= 1);
   const insuranceCents = () => Math.round((props.subtotalEurCents || 0) * 0.05);
+  const estimatedTotalCents = () => (props.subtotalEurCents || 0)
+    + Math.max(0, props.shipping.cents || 0)
+    + (props.insurance && props.subtotalEurCents > 2000 ? insuranceCents() : 0);
   const nudgeLabel = () => (props.nudge
     ? basketSellerOf({ sellerUsername: props.nudge.group.sellerUsername, sellerName: props.nudge.group.sellerName })
     : '');
@@ -534,6 +538,16 @@ export function BasketSummary(props) {
           <div>
             <dt>Estimated card charge</dt>
             <dd>{formatLocalFromEurCents(props.discount.chargeCents, props.currency)}</dd>
+          </div>
+        </Show>
+        {/* Cards are priced in PKN and shipping in euro: one sum a visitor can read. Display only. */}
+        <Show when={!discountOn() && estimatedTotalCents() > 0}>
+          <div class="bk-sum-total">
+            <dt>Estimated total</dt>
+            <dd>
+              ≈ {formatLocalFromEurCents(estimatedTotalCents(), props.currency)}
+              {props.shipping.missing || !props.shipping.cents ? ' + shipping' : ''}
+            </dd>
           </div>
         </Show>
       </dl>

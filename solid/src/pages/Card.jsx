@@ -99,9 +99,9 @@ import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
 import { sellLanguages } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
-import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
+import { conditionChipSrc, conditionLabel, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
-import { currencyFromSearch } from '@market/pkn.js';
+import { currencyFromSearch, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import { authFrom } from '@market/punchouts.js';
@@ -139,7 +139,7 @@ import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
-import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
+import { buyerCurrency, buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 import { listingSelected } from '../lib/select-band.js';
@@ -171,6 +171,20 @@ function offerCopies(rows) {
  * React page resets by hand. The theme and the Poko desk card are cleared only
  * when the route itself unmounts, so a neighbour step never flashes untinted.
  */
+
+const LANGUAGE_NAMES = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['en'], { type: 'language' }) : null;
+const LANGUAGE_TAGS = { JP: 'ja', ZH: 'zh-Hans', ZHT: 'zh-Hant', KO: 'ko' };
+
+/** Deal language code (EN, JP, ZHT…) → "English", "Japanese", "Chinese (Traditional)…". */
+function languageName(code) {
+  const raw = String(code || '').toUpperCase();
+  try {
+    return LANGUAGE_NAMES?.of(LANGUAGE_TAGS[raw] || raw.toLowerCase()) || raw;
+  } catch {
+    return raw;
+  }
+}
+
 export default function Card() {
   const params = useParams();
   const location = useLocation();
@@ -605,6 +619,7 @@ function CardDesk(props) {
   });
   const dealPick = createMemo(() => (offersReady() ? matchDeal(nativeLive(), shownLang(), shownCond(), card()) : null));
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
+  const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
   const change72h = () => formatChange72h(salesSeries()?.change24hPct);
   const canBuy = () => Boolean(dealPick());
@@ -847,7 +862,7 @@ function CardDesk(props) {
     <Switch>
       <Match when={error() && !page()?.card}>
         <div class={ownerChoices().length ? 'status owner-games' : 'status error'}>
-          <Show when={ownerChoices().length} fallback={<p>Card market not found.</p>}>
+          <Show when={ownerChoices().length} fallback={<p>We couldn't find this card. <a href={gameHref('/marketplace/search')}>Search cards</a></p>}>
             <p>Card #{cardId} exists in several games. Which one did you mean?</p>
             <ul>
               <For each={ownerChoices()}>
@@ -970,12 +985,18 @@ function CardDesk(props) {
                   </Show>
                 </p>
                 <div class="asset-quotes">
-                  <span
+                  <span class="quote-label">Market price</span>
+                  {/* A button, not a hover title: on a phone a tap is the only way to learn what the number is. */}
+                  <button
+                    type="button"
                     class={pricePending() || lastDayPkn() ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
-                    title="Last day's median inferred sold price"
+                    title="Median sold price over the last day"
+                    aria-expanded={priceHelp() ? 'true' : 'false'}
+                    aria-controls="quote-help"
+                    onClick={() => setPriceHelp((open) => !open)}
                   >
                     {pricePending() ? ' ' : (salesSeries() == null ? '—' : (lastDayPkn() || '—'))}
-                  </span>
+                  </button>
                   <span
                     class={change72h().empty ? 'quote-pill oos' : 'quote-pill'}
                     title="Change versus the sold median from 3 days earlier"
@@ -984,6 +1005,11 @@ function CardDesk(props) {
                   </span>
                 </div>
               </div>
+              <Show when={priceHelp()}>
+                <p id="quote-help" class="quote-help">
+                  Market price is the median this card sold for over the last day, not a listing. {pknRateLabel(buyerCurrency(pinnedCurrency()) || 'EUR')}.
+                </p>
+              </Show>
             </header>
 
             <div class="card-desk">
@@ -1164,6 +1190,8 @@ function CardDesk(props) {
                         <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
                       </Show>
                     </p>
+                    {/* The chips are pictures: say the grade and language in words ("Poor · French"). */}
+                    <p class="deal-what">{conditionLabel(dealPick()?.condition)} · {languageName(shownLang())}</p>
                   </Show>
                   <div class="deal-facets">
                     <div class="deal-facet-row" role="radiogroup" aria-label="Condition">
@@ -1221,7 +1249,13 @@ function CardDesk(props) {
                       </div>
                     </Show>
                   </div>
-                  <Show when={canBuy()} fallback={<span class="btn ghost buy-btn">Unavailable</span>}>
+                  {/* Once offers load, no fake grey button: say why there is nothing to add. */}
+                  <Show
+                    when={canBuy()}
+                    fallback={offersReady()
+                      ? <p class="deal-none">No Pokoin seller has this card right now.</p>
+                      : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
+                  >
                     <button
                       class="btn buy-btn"
                       type="button"
@@ -1314,7 +1348,12 @@ function CardDesk(props) {
                   when={split().shop.length}
                   fallback={(
                     <div class="empty-shop">
-                      <p class="status">{offersReady() ? 'No items found' : ' '}</p>
+                      <Show when={offersReady()} fallback={<p class="status"> </p>}>
+                        <p class="status">No Pokoin listings for this card yet.</p>
+                        <Show when={salesSeries()?.lastMedianPkn}>
+                          <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
+                        </Show>
+                      </Show>
                     </div>
                   )}
                 >
