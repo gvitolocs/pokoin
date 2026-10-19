@@ -93,7 +93,8 @@ export default function Search() {
   const navigate = useGameNavigate();
   const pokemon = isPokemonGame();
   const params = createMemo(() => new URLSearchParams(location.search));
-  const typedQuery = createMemo(() => (params().get('q') || params().get('query') || '').trim());
+  // Same 200-character cap as the search box: a pasted wall of text froze ranking.
+  const typedQuery = createMemo(() => (params().get('q') || params().get('query') || '').slice(0, 200).trim());
   const tab = createMemo(() => normalizeSearchTab(params().get('tab')));
   const resolvedParamRaw = createMemo(() => (params().get('resolved') || '').trim());
   // Print filter is Pokémon-only (expansion nationality catalog). Satellite

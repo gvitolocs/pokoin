@@ -127,6 +127,14 @@ export function formatEurAndDkkFromPkn(pkn) {
   return formatLocalFromPkn(pkn, 'DKK');
 }
 
+/** "1 PKN = …" in the currency a price is shown in: €0.005, $0.005 (USDT peg), 0.0375 DKK. */
+export function pknRateLabel(currency = 'EUR') {
+  const code = String(currency || 'EUR').trim().toUpperCase();
+  if (code === 'DKK') return `1 PKN = ${formatPknNumber(PKN_USDT_PRICE * DKK_PER_EUR, { maximumFractionDigits: 4 })} DKK`;
+  if (code === 'USD') return `1 PKN = $${PKN_USDT_PRICE}`;
+  return `1 PKN = €${PKN_USDT_PRICE}`;
+}
+
 export function pknFromEur(eur) {
   const amount = parseListAmount(eur);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -242,7 +250,8 @@ export function listPriceHint(pkn, currency = 'PKN') {
   return String(Number(converted.toFixed(2)));
 }
 
-export function tilePricePkn(card) {
+/** The tile's cheapest-offer price in PKN, or null when the tile has no offer price. */
+export function tileOfferPricePkn(card) {
   if (!card || typeof card !== 'object') {
     return null;
   }
@@ -252,7 +261,14 @@ export function tilePricePkn(card) {
       return amount;
     }
   }
-  return pknFromEur(card.medianSoldEur ?? card.median_sold_eur);
+  return null;
+}
+
+export function tilePricePkn(card) {
+  if (!card || typeof card !== 'object') {
+    return null;
+  }
+  return tileOfferPricePkn(card) ?? pknFromEur(card.medianSoldEur ?? card.median_sold_eur);
 }
 
 export function applyTilePrice(card) {

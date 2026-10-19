@@ -130,7 +130,7 @@ export default function SilverHead(props) {
             when={signedIn()}
             fallback={(
               <a class="silver-link" href={authFrom(props.fromPath)} rel={authAnchorRel(authFrom(props.fromPath)) || undefined}>
-                Sign in to unlock
+                Compare other marketplaces · Sign in
               </a>
             )}
           >

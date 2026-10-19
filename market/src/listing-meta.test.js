@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   conditionChipSrc,
+  conditionLabel,
   conditionShort,
   conditionTone,
   isReserveSeller,
@@ -141,4 +142,11 @@ test('shop chip prefers handle over displayName/email', () => {
     publicShopSellerLabel({ sellerReputationLabel: 'pknreserve', sellerName: 'pknreserve' }),
     'pknreserve',
   );
+});
+
+test('conditionLabel spells the grade out for chip alt/title', () => {
+  assert.equal(conditionLabel('Poor'), 'Poor');
+  assert.equal(conditionLabel('PO'), 'Poor');
+  assert.equal(conditionLabel('Near Mint'), 'Near Mint');
+  assert.equal(conditionLabel('HP'), 'Played');
 });

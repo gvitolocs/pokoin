@@ -22,6 +22,7 @@ import { displayName, printingIdentity } from '@market/identity.js';
 import { homepageDerivativeUrl } from '@market/image-urls.js';
 import {
   conditionChipSrc,
+  conditionLabel,
   conditionShort,
   conditionTone,
   listingLanguageFlag,
@@ -441,7 +442,7 @@ function SavedCard(props) {
           {row().unavailable ? 'Currently unavailable' : 'Listed'}
         </div>
         <div class="bk-saved-variant">
-          <b>Condition:</b> {conditionShort(row().condition)}
+          <b>Condition:</b> {conditionLabel(row().condition)}
           <Show when={language()}>{(lang) => <> · <b>Language:</b> {lang().label}</>}</Show>
           {' · '}{seller()}
         </div>
