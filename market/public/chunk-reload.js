@@ -4,9 +4,10 @@
 // chunks (scripts/carry-web-release-chunks.mjs), so open tabs and the old shell
 // some edges serve for a minute after a deploy keep working. This covers what
 // is still missing: a dynamic import, the entry module, or a stylesheet fails,
-// and the page would stay blank. Refetch the failed file past the HTTP cache
-// (a 404 under /market/s/* carries the year-long immutable header, so the
-// browser would keep it), then reload once the file is reachable or a newer
+// and the page would stay blank. Refetch the failed file, and every
+// /market/s/* file Resource Timing reports as failed, past the HTTP cache (a
+// 404 under /market/s/* carries the year-long immutable header, so the
+// browser would keep it), then reload once they are all reachable or a newer
 // shell is live. sessionStorage allows one reload a minute, so a broken
 // release ends on the route error instead of a reload loop.
 //
@@ -37,6 +38,13 @@ function isChunkLoadError(value) {
 function installChunkReload(win) {
   var doc = win.document;
   var busy = false;
+  // The default 250-entry buffer fills on image-heavy pages before a late
+  // chunk fails, and failedChunks() would not see it.
+  try {
+    if (win.performance && win.performance.setResourceTimingBufferSize) {
+      win.performance.setResourceTimingBufferSize(1000);
+    }
+  } catch (_) { /* optional */ }
 
   function reloadedRecently(now) {
     try {
@@ -66,10 +74,54 @@ function installChunkReload(win) {
     return script ? chunkPath(script.getAttribute("src") || script.src || "") : "";
   }
 
-  function reachable(path) {
-    if (!path) return Promise.resolve(false);
-    return win.fetch(path, { cache: "reload", credentials: "same-origin" })
+  /**
+   * /market/s/* files this page got a failed or unknown answer for. The error
+   * names the chunk import() asked for, but the 404 can be a static
+   * dependency of it, still cached after the reload. Known failures refetch
+   * in full; an unknown status (Safari has no responseStatus, Chrome reports
+   * 0 for some cache hits) revalidates, which is a 304 for a good chunk.
+   */
+  function failedChunks() {
+    var perf = win.performance;
+    var entries = [];
+    try {
+      entries = (perf && perf.getEntriesByType && perf.getEntriesByType("resource")) || [];
+    } catch (_) {
+      entries = [];
+    }
+    var rows = [];
+    for (var i = 0; i < entries.length; i += 1) {
+      var path = chunkPath(entries[i].name || "");
+      if (!path) continue;
+      var status = entries[i].responseStatus;
+      var known = typeof status === "number" && status > 0;
+      if (known && status >= 200 && status < 400) continue;
+      rows.push({ path: path, cache: known ? "reload" : "no-cache" });
+    }
+    return rows;
+  }
+
+  function fetchOk(row) {
+    return win.fetch(row.path, { cache: row.cache, credentials: "same-origin" })
       .then(function (res) { return res.ok; }, function () { return false; });
+  }
+
+  /** Refetch the failed chunk and every failed file of this page; true when all answer 200. */
+  function reachable(path) {
+    var rows = path ? [{ path: path, cache: "reload" }] : [];
+    var seen = {};
+    if (path) seen[path] = true;
+    var failed = failedChunks();
+    for (var i = 0; i < failed.length; i += 1) {
+      if (seen[failed[i].path]) continue;
+      seen[failed[i].path] = true;
+      rows.push(failed[i]);
+    }
+    if (!rows.length) return Promise.resolve(false);
+    return Promise.all(rows.map(fetchOk)).then(function (oks) {
+      for (var j = 0; j < oks.length; j += 1) if (!oks[j]) return false;
+      return true;
+    });
   }
 
   function liveEntry() {

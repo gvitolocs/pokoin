@@ -9,8 +9,9 @@ const OWN_ENTRY = '/market/s/index-OLD.js';
 /**
  * Runs public/chunk-reload.js against a fake window. `site` maps a path to the
  * status the network answers (default 404); `/market/app` answers `shell`.
+ * `resources` are the page's Resource Timing entries ({ name, responseStatus }).
  */
-function boot({ site = {}, shell = `<script type="module" crossorigin src="${OWN_ENTRY}"></script>`, storage = new Map(), onLine = true, storageThrows = false } = {}) {
+function boot({ site = {}, shell = `<script type="module" crossorigin src="${OWN_ENTRY}"></script>`, storage = new Map(), onLine = true, storageThrows = false, resources = [] } = {}) {
   const listeners = {};
   const fetches = [];
   const timers = [];
@@ -30,6 +31,10 @@ function boot({ site = {}, shell = `<script type="module" crossorigin src="${OWN
       querySelector: () => ({ getAttribute: () => OWN_ENTRY }),
     },
     navigator: { onLine },
+    performance: {
+      getEntriesByType: (type) => (type === 'resource' ? resources : []),
+      setResourceTimingBufferSize: () => {},
+    },
     sessionStorage,
     location: { reload: () => { reloads += 1; } },
     setTimeout: (fn) => { timers.push(fn); },
@@ -148,4 +153,50 @@ test('the route error boundary hook starts one recovery for chunk errors only', 
   assert.equal(page.reloads, 1);
   assert.equal(page.context.isChunkLoadError(new Error('Failed to fetch')), false);
   assert.equal(page.context.chunkPath('https://pokoin.com/market/s/a-B.js?x=1'), '/market/s/a-B.js');
+});
+
+test('a cached 404 on a static dependency is refetched too before the reload', async () => {
+  const site = { '/market/s/Card-NEW.js': 200 };
+  const page = boot({
+    site,
+    resources: [
+      { name: 'https://pokoin.com/market/s/index-OLD.js', responseStatus: 200 },
+      { name: 'https://pokoin.com/market/s/Card-NEW.js', responseStatus: 200 },
+      { name: 'https://pokoin.com/market/s/shared-DEP.js', responseStatus: 404 },
+      { name: 'https://cdn.pokoin.com/x.jpg', responseStatus: 404 },
+    ],
+  });
+  page.fire('vite:preloadError', { payload: importError('Card-NEW.js') });
+  await settle();
+  const chunks = page.fetches.filter((row) => row.url.startsWith('/market/s/'));
+  assert.deepEqual(chunks, [
+    { url: '/market/s/Card-NEW.js', cache: 'reload' },
+    { url: '/market/s/shared-DEP.js', cache: 'reload' },
+  ]);
+  // The dependency is still missing on this edge: no reload yet, retry later.
+  assert.equal(page.reloads, 0);
+  assert.equal(page.timers.length, 1);
+  site['/market/s/shared-DEP.js'] = 200;
+  page.timers.shift()();
+  await settle();
+  assert.equal(page.reloads, 1);
+});
+
+test('an unknown resource status revalidates instead of downloading again', async () => {
+  const page = boot({
+    site: { '/market/s/a-A.js': 200, '/market/s/b-B.js': 200 },
+    resources: [
+      { name: 'https://pokoin.com/market/s/a-A.js' },
+      { name: 'https://pokoin.com/market/s/b-B.js?v=1', responseStatus: 0 },
+      { name: 'https://pokoin.com/market/s/a-A.js' },
+    ],
+  });
+  // Safari names no file at all.
+  page.fire('unhandledrejection', { reason: new TypeError('Importing a module script failed.') });
+  await settle();
+  assert.deepEqual(page.fetches, [
+    { url: '/market/s/a-A.js', cache: 'no-cache' },
+    { url: '/market/s/b-B.js', cache: 'no-cache' },
+  ]);
+  assert.equal(page.reloads, 1);
 });
