@@ -1,3 +1,5 @@
+import { ARTOFPKM_FIGURE_MASK_REV, ARTOFPKM_FIGURE_MASK_VERSIONS } from './figure-masks-artofpkm.js';
+
 const FIGURE_MASK_REV = 'clean-2';
 
 const figureBoxLoads = new Map();
@@ -8,6 +10,9 @@ export function artworkFigureMaskSrc(card = {}) {
   const version = String(card.version || card.version_set || '').trim();
   if (!/^[A-Za-z0-9._-]+$/.test(version)) {
     return '';
+  }
+  if (ARTOFPKM_FIGURE_MASK_VERSIONS.has(version)) {
+    return `/card-images/figure-masks-artofpkm/${version}.webp?v=${ARTOFPKM_FIGURE_MASK_REV}`;
   }
   return `/card-images/figure-masks-clean/${version}.webp?v=${FIGURE_MASK_REV}`;
 }

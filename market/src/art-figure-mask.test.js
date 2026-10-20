@@ -10,6 +10,13 @@ test('figure mask is keyed by same-painting CLIP version', () => {
   );
 });
 
+test('full-art versions cut from the artofpkm clean artwork use their own set', () => {
+  assert.equal(
+    artworkFigureMaskSrc({ version: 'v436094' }),
+    '/card-images/figure-masks-artofpkm/v436094.webp?v=artofpkm-1',
+  );
+});
+
 test('missing or unsafe versions never become mask paths', () => {
   assert.equal(artworkFigureMaskSrc({}), '');
   assert.equal(artworkFigureMaskSrc({ version: '../secret' }), '');

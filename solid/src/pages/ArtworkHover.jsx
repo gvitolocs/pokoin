@@ -3,11 +3,12 @@ import CardArt from '../components/CardArt.jsx';
 import TestDock from '../components/TestDock.jsx';
 import { BoardBar, usePageTitle } from './tools/board.jsx';
 
-const REVISION = '2026-09-17';
+const REVISION = '2026-10-20';
 
 const BEFORE_MASK_REV = 'sam21-1';
 const AFTER_MASK_REV = 'clean-1';
 const WHOLE_MASK_REV = 'whole-1';
+const PRODUCTION_MASK_REV = 'clean-2';
 
 // Whole-silhouette rework: fill every interior hole + keep small details so the
 // cut-out reads as one solid shape. Served from figure-masks-whole/ (test only;
@@ -83,6 +84,70 @@ const ARTIFACT_CASES = [
     image: '/card-images/119560_xerneas-gx-full-v4.jpg',
     status: 'Pass',
     note: '497 foil specks and 7.2% interior holes before. Cleanup clears both — QA passes, so this mask ships on production.',
+  },
+];
+
+// Full-art silhouettes cut from the artofpkm "TCG Gallery" clean artwork (no
+// card text). Production is figure-masks-clean/; the clean-art set is
+// figure-masks-artofpkm/. VITE_ARTOFPKM_MASK_BASE points the right tile at a
+// local copy while the set is still under review (dev only).
+const ARTOFPKM_MASK_BASE = import.meta.env.VITE_ARTOFPKM_MASK_BASE || '/card-images/figure-masks-artofpkm';
+const CLEAN_ART_CASES = [
+  {
+    version: 'v240808',
+    name: 'Tapu Lele GX',
+    image: '/card-images/120404_tapu-lele-gx-full-v4.jpg',
+    status: 'Pass',
+    note: 'Guardians Rising 60/145. The attack text bit the lower body off the scan-cut silhouette; the clean painting keeps it, and the opaque Tapu Cure GX bar stays out.',
+  },
+  {
+    version: 'v436094',
+    name: 'Mewtwo V',
+    image: '/card-images/218047_mewtwo-v-ultra-rare-072-078-pokemon-tcg-pokemon-go.jpg',
+    status: 'Pass',
+    note: 'Pokémon GO 072/078. Holes where the scan foil and text broke the body are gone.',
+  },
+  {
+    version: 'v290118',
+    name: 'Charizard VMAX',
+    image: '/card-images/145059_charizard-vmax-020-189-darkness-ablaze.jpg',
+    status: 'Pass',
+    note: 'Darkness Ablaze 020/189. The scan mask failed QA, so production has no hover; the clean painting gives the whole Charizard. Energy icons inside the body stay part of it.',
+  },
+  {
+    version: 'v254958',
+    name: 'Zoroark GX',
+    image: '/card-images/127479_zoroark-gx-rare-holo-53-73-shining-legends.jpg',
+    status: 'Pass',
+    note: 'Shining Legends 53/73. New hover. The tail runs under the Trickster GX bar; the bar is cut so it does not lift with the Pokémon.',
+  },
+  {
+    version: 'v316756',
+    name: 'Shadow Rider Calyrex V',
+    image: '/card-images/158378_shadow-rider-calyrex-v-rare-ultra-172-198-chilling-reign.jpg',
+    status: 'Pass',
+    note: 'Chilling Reign 172/198. The scan cut dropped Calyrex riding on Spectrier.',
+  },
+  {
+    version: 'v260900',
+    name: 'Reshiram & Charizard GX',
+    image: '/card-images/130450_reshiram-charizard-gx-rare-holo-20-214-unbroken-bonds.jpg',
+    status: 'Pass',
+    note: 'Unbroken Bonds 20/214. Text-heavy full art: silhouettes follow the painting under the attack text.',
+  },
+  {
+    version: 'v424984',
+    name: 'Hisuian Lilligant V',
+    image: '/card-images/212492_hisuian-lilligant-v-ultra-rare-017-189-astral-radiance.jpg',
+    status: 'Review',
+    note: 'Astral Radiance 017/189. New hover (the scan mask failed QA). Motion streaks next to the body are partly included.',
+  },
+  {
+    version: 'v262284',
+    name: 'Mewtwo & Mew GX',
+    image: '/card-images/131142_mewtwo-mew-gx-secret-rare-rare-71-236-unified-minds.jpg',
+    status: 'Pass',
+    note: 'Unified Minds 71/236. Mew under the Miraculous Duo text now lifts with Mewtwo.',
   },
 ];
 
@@ -227,6 +292,21 @@ function MaskCase(props) {
   );
 }
 
+function CleanArtCase(props) {
+  return (
+    <PairCase
+      item={props.item}
+      before={maskUrl(props.item.version, PRODUCTION_MASK_REV, 'figure-masks-clean')}
+      after={`${ARTOFPKM_MASK_BASE}/${props.item.version}.webp?v=artofpkm-1`}
+      labels={['Scan cut', 'Clean art']}
+      alts={['production scan-cut mask', 'clean-artwork mask']}
+      captions={['Production (scan, clean-2)', 'Clean artwork (artofpkm-1)']}
+    >
+      <p class="artwork-test-id">{props.item.version}</p>
+    </PairCase>
+  );
+}
+
 /** Pokémon-only album hover mask review board. */
 export default function ArtworkHover() {
   usePageTitle('Artwork hover masks · test.pokoin.com');
@@ -247,6 +327,19 @@ export default function ArtworkHover() {
           This is a review board, not a production rollout. Pass means the visible
           silhouette is clean; Review marks a useful edge case retained for inspection.
         </p>
+
+        <h2 class="artwork-section-title">Clean-art silhouettes — scan cut / clean artwork</h2>
+        <p class="sanitize-note">
+          Full arts only: their attack text, HP and rule bars sit on the painting, so the
+          silhouette SAM cut from the scan had bites and holes. These masks are cut from the
+          artofpkm TCG Gallery artwork (catalog 668, no card text), registered onto the same
+          scan, and solid card bars are left out. Left tile wears production
+          (<code>figure-masks-clean/</code>), right the clean-art mask
+          (<code>figure-masks-artofpkm/</code>). Window-art cards keep their scan masks.
+        </p>
+        <section class="artwork-review-grid" aria-label="Clean-art silhouettes">
+          <For each={CLEAN_ART_CASES}>{(item) => <CleanArtCase item={item} />}</For>
+        </section>
 
         <h2 class="artwork-section-title">Whole silhouette — production / rework</h2>
         <p class="sanitize-note">
