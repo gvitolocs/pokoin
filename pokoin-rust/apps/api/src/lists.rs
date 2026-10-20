@@ -408,7 +408,12 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
         if !o.dry_run && sqlx::query_scalar::<_, bool>("select pg_is_in_recovery()").fetch_one(&pool).await? {
             anyhow::bail!("build-lists writes: the {game} database URL is a read-only standby, not the writer");
         }
-        if o.kinds.iter().any(|k| k == "median") && game == "pokemon" {
+        // Every CardTrader game has a sold graph (Pokémon from the Oracle job, the
+        // others from pokoin-cardtrader-sold); Cardmarket-only games keep the
+        // Cardmarket trend that pokoin-cardmarket-catalog stores here.
+        let cardtrader = game == "pokemon"
+            || pokoin_api_common::game::ingest_game_config(game).is_some_and(|g| !g.cardmarket_only);
+        if o.kinds.iter().any(|k| k == "median") && cardtrader {
             let n = build_medians(&pool).await?;
             tracing::info!(%game, medians = n, "build-lists medians");
         }
@@ -1002,6 +1007,13 @@ fn nonempty(bytes: Vec<u8>) -> Option<Vec<u8>> {
 /// One display median per sold card: the last day of the card-sales series.
 async fn build_medians(pool: &PgPool) -> anyhow::Result<usize> {
     use pokoin_catalog_api::sales::core::{read_oracle_card_sales_series, SoldSlice};
+    // A game database without migration 131 has no sold graph yet.
+    let has_sales: bool = sqlx::query_scalar("select to_regclass('public.cardtrader_sold_daily') is not null")
+        .fetch_one(pool)
+        .await?;
+    if !has_sales {
+        return Ok(0);
+    }
     let ids: Vec<i64> = sqlx::query_scalar(
         "select distinct c.card_id from public.marketplace_search_candidates c
          where c.ct_id in (select distinct blueprint_id from public.cardtrader_sold_daily)",

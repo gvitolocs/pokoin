@@ -1136,6 +1136,7 @@ function CardDesk(props) {
                   condition={salesCondition()}
                   language={salesLanguage()}
                   reverse={salesReverse()}
+                  reverseLabel={game().id === 'pokemon' ? 'Reverse' : 'Foil'}
                   firstEdition={salesFirstEdition()}
                   graded={salesGraded()}
                   onCondition={setSalesCondition}

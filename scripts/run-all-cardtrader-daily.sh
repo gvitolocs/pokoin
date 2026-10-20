@@ -93,5 +93,14 @@ if [[ -x "$PRICE_BIN" ]]; then
 fi
 (( prices_result == 0 )) || result=1
 stage_args+=(--stage-result "prices=$prices_result")
+# Sold graph of the other games, replayed from the stored books (docs/CARDTRADER_DAILY_DUMP.md
+# "Sold graph"). Pokémon's comes from the Oracle job. POKOIN_CT_SOLD=off skips it.
+sold_result=0
+SOLD_BIN="${POKOIN_CT_SOLD_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-sold}"
+if [[ -x "$SOLD_BIN" && "${POKOIN_CT_SOLD:-on}" != off ]]; then
+  "$SOLD_BIN" || sold_result=$?
+fi
+(( sold_result == 0 )) || result=1
+stage_args+=(--stage-result "sold=$sold_result")
 notify "$result"
 exit "$result"

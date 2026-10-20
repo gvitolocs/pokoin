@@ -130,7 +130,7 @@ Pi.
 
 | Piece | Where | Role |
 | --- | --- | --- |
-| `api.pokoin.com` | **pi-home** CF tunnel (Rust edge `:18079` → in-process API; Cloudflare LB also sends ~10% to the nezopt k3s overflow) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
+| `api.pokoin.com` | **pi-home** CF tunnel (Rust edge `:18079` → in-process API; Cloudflare LB also sends ~10% to the nezopt k3s overflow) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily` of the card's game database (Pokémon: Oracle job; other CardTrader games: `pokoin-cardtrader-sold`, [CARDTRADER_DAILY_DUMP.md](CARDTRADER_DAILY_DUMP.md#sold-graph)). |
 | `cdn.pokoin.com` | **pi-home** `:18081` | Leftover JPEG origin (`/srv/pokoin/card-images/objects`). |
 | Meili + Redis | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. Cache is `pokoin-redis` on `:6380`. |
 
