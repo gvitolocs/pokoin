@@ -5674,6 +5674,85 @@ dialog.zoom:not([open]) {
   font-weight: 800;
 }
 
+/* Founder bubble: one compact card, the page stays about Pokoin. */
+.about-founder-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.1rem;
+  margin: 0;
+  padding: 1rem 1.4rem 1rem 1rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px -32px rgb(255 211 61 / 0.25);
+}
+
+.about-founder-card picture {
+  flex: none;
+  display: block;
+}
+
+.about-founder-avatar {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgb(255 211 61 / 0.4);
+}
+
+.about-founder-monogram {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--surface);
+  color: var(--yellow);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.about-founder-name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.about-founder-name .about-gold {
+  color: var(--yellow);
+}
+
+.about-section .about-founder-role,
+.about-section .about-founder-meta {
+  margin: 0.1rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.about-section .about-founder-role {
+  color: var(--text);
+}
+
+.about-founder-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+}
+
+.about-founder-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 0.92rem;
+}
+
+.about-founder a:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
 
 /* ── /careers — Phantom careers geometry, Pokoin skin ───────────────
    Source: candyext/dumps/phantom + live phantom.com/careers measurements.
@@ -7483,6 +7562,12 @@ dialog.zoom:not([open]) {
   .about-surfaces {
     grid-template-columns: 1fr;
   }
+  .about-founder-card {
+    display: flex;
+    border-radius: 18px;
+    padding: 0.9rem 1rem;
+  }
+  .about-founder-avatar { width: 4.5rem; height: 4.5rem; }
   .about-mark { display: none; }
   .about-title {
     font-size: clamp(1.7rem, 8vw, 2.25rem);
