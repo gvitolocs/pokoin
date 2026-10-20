@@ -2,6 +2,7 @@
 
 pub mod addresses;
 pub mod cart;
+pub mod channel_sync;
 pub mod crypto;
 pub mod extension;
 pub mod listings;
