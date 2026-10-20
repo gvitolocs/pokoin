@@ -1258,7 +1258,6 @@ html:has(.mobile-panel.on) .cookie-banner { display: none; }
   animation: promo-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.promo-copy > .eyebrow { animation-delay: 0s; }
 .promo-copy > .promo-wordmark-slot { animation-delay: 0.21s; }
 .promo-copy > h1 { animation-delay: 0.42s; }
 .promo-copy > .promo-lede { animation-delay: 0.84s; }
