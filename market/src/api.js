@@ -3233,15 +3233,18 @@ export function deletePricingStrategy(id, token) {
 }
 
 /** PowerTools-style pricer: batch market comps for the MyPokoin listings board. */
-export async function fetchPriceCheck(items, token) {
+/** Market comps of up to 100 items of one game (`game`: card ids are per game). */
+export async function fetchPriceCheck(items, token, { game: gameId } = {}) {
   const params = new URLSearchParams({
     items: (items || []).slice(0, 100).map((item) => (
       item.condition || item.language || item.reverse || item.firstEdition
+        || item.foil || item.graded || item.signed || item.altered
         ? priceCheckKey(item)
         : String(item.cardId || item)
     )).join(','),
   });
   return getJson(`/api/marketplace-price-check?${params}`, {
+    ...(gameId ? { game: gameId } : {}),
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 }

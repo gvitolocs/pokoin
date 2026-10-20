@@ -22,6 +22,7 @@ pub mod firebase;
 pub mod geo;
 pub mod powertools;
 pub mod powertools_games;
+pub mod price_book;
 pub mod price_check;
 pub mod pricing;
 pub mod r2;
