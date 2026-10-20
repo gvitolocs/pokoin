@@ -138,3 +138,31 @@ rebuild. The 55 landscape BREAK masters kept their rotated thumbs.
   change `thumbToken`.
 - Open: the 5,420 drifted masters themselves (which store holds the right scan; some
   Pi copies of WOTC prints may be 1st Edition) — not changed here.
+
+## artofpkm instead of tcgdex (token ap1, 20 October 2026)
+
+tcgdex images are flat digital renders, not scans (Giuseppe, 2026-10-20). The hd1
+cards that came from tcgdex (1,255 `en` + 56 `ja`) were matched again against the
+artofpkm download only (`--no-tcgdex --ap-western`, keyed by the printing's set
+label so `Mega Evolution · Reverse Holo` never matches the regular print):
+
+- **Replaced, 188:** 187 Mega Evolution / Chaos Rising / Phantasmal Flames
+  printings (591×825 render → 733×1024 scan; every pair checked on sheets, the 63
+  under the visual thresholds differ only by real holo foil) and Mega Charizard X ex
+  130/094 (`356916`, was a washed-out CardTrader photo, token `ct4`). JPEG q92 +
+  480 px `_homepage.webp` on NVMe, 15T and Pi, MD5-verified. Old files:
+  `backups/ap1-20261020/`. Cache token `ap1` (ids rule, first in the table).
+- **No artofpkm scan, 1,124:** artofpkm has no cards for most western sets
+  (Chilling Reign, Lost Origin, Vivid Voltage, EX era, Scarlet & Violet, POP;
+  its pages say "No cards"), nor for the 56 Japanese ones. They keep the hd1
+  tcgdex-derived master (591×825). The pre-hd1 files are 255×361–400×550, so
+  falling back would show an older, smaller image.
+- `tcgdex/en` and `tcgdex/ja` were deleted from both CDN origins (nothing referenced
+  them: 0 catalog URLs, and the SPA only builds `tcgdex/{de,es,fr,it,pt}` from
+  `marketplace_leftover_lang_scans`). Lists: nezopt `~/tmp/ap-replace/deleted-*.txt`.
+
+```bash
+$B match --catalog catalog.tsv --objects ~/data/pokoin-leftovers/objects --data market/src/data \
+  --tcgdex-root /nonexistent --no-tcgdex --ap-western --only-ids tcgdex.ids --min-gain 1.0 \
+  --ap-printings ap-printings.tsv --ap-sets ap-sets.tsv --ap-root <artofpkm> --out run1
+```

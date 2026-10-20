@@ -45,9 +45,17 @@ impl Flags {
         let mut i = 0;
         while i < args.len() {
             if let Some(key) = args[i].strip_prefix("--") {
-                let value = args.get(i + 1).cloned().unwrap_or_default();
-                map.insert(key.to_owned(), value);
-                i += 2;
+                // A switch (`--no-tcgdex`) has no value: the next word is another flag.
+                match args.get(i + 1).filter(|v| !v.starts_with("--")) {
+                    Some(value) => {
+                        map.insert(key.to_owned(), value.clone());
+                        i += 2;
+                    }
+                    None => {
+                        map.insert(key.to_owned(), String::new());
+                        i += 1;
+                    }
+                }
             } else {
                 i += 1;
             }
@@ -297,6 +305,26 @@ struct Cand {
 struct Sources {
     tcgdex: HashMap<(&'static str, String, String), Vec<Cand>>,
     ap: HashMap<(String, String), Vec<Cand>>,
+    /// artofpkm western sets only (no Japanese name), keyed by `ap_west_key`; empty without `--ap-western`.
+    ap_west: HashMap<(String, String), Vec<Cand>>,
+}
+
+/// Pokoin western expansion name → artofpkm western set name, compacted.
+fn ap_west_key(expansion: &str) -> String {
+    let e = expansion.trim().to_lowercase();
+    let alias = match e.as_str() {
+        "sm black star promos" => "sun & moon promos",
+        "swsh black star promos" => "sword & shield promos",
+        "dp black star promos" => "diamond & pearl promos",
+        "bw black star promos" => "black & white promos",
+        "xy black star promos" => "xy promos",
+        "hgss black star promos" => "heartgold & soulsilver promos",
+        "151" => "scarlet & violet 151",
+        "pok mon rumble" | "pokemon rumble" => "rumble",
+        "platinum arceus" => "arceus",
+        other => other.strip_prefix("ex ").unwrap_or(other),
+    };
+    compact(alias)
 }
 
 fn load_tcgdex(root: &Path, lang: &'static str, into: &mut HashMap<(&'static str, String, String), Vec<Cand>>) -> Result<usize> {
@@ -323,16 +351,24 @@ fn load_tcgdex(root: &Path, lang: &'static str, into: &mut HashMap<(&'static str
     Ok(n)
 }
 
-fn load_ap(printings: &str, sets: &str, assets_root: &Path) -> Result<HashMap<(String, String), Vec<Cand>>> {
+type ApIndex = HashMap<(String, String), Vec<Cand>>;
+
+/// (every set by English name, western sets only by English name).
+fn load_ap(printings: &str, sets: &str, assets_root: &Path) -> Result<(ApIndex, ApIndex)> {
     let mut set_names: HashMap<String, String> = HashMap::new();
+    let mut western: HashSet<String> = HashSet::new();
     for line in BufReader::new(File::open(sets)?).lines() {
         let line = line?;
         let c: Vec<&str> = line.split('\t').collect();
         if c.len() >= 2 {
             set_names.insert(c[0].to_owned(), c[1].to_owned());
+            if c.get(2).map_or(true, |ja| ja.trim().is_empty()) {
+                western.insert(c[0].to_owned());
+            }
         }
     }
-    let mut out: HashMap<(String, String), Vec<Cand>> = HashMap::new();
+    let mut out: ApIndex = HashMap::new();
+    let mut west: ApIndex = HashMap::new();
     let mut seen = HashSet::new();
     for line in BufReader::new(File::open(printings)?).lines() {
         let line = line?;
@@ -341,15 +377,22 @@ fn load_ap(printings: &str, sets: &str, assets_root: &Path) -> Result<HashMap<(S
             continue;
         }
         let set_name = set_names.get(c[0]).cloned().filter(|s| !s.is_empty()).unwrap_or_else(|| c[1].to_owned());
-        out.entry((compact(&set_name), fold_num(c[2]))).or_default().push(Cand {
+        let cand = Cand {
             source: "artofpkm",
             path: assets_root.join(c[6]),
             name: c[3].to_owned(),
             name_comparable: true,
             ref_id: c[7].to_owned(),
-        });
+        };
+        // Western sets are keyed by the printing label: `Mega Evolution · Reverse Holo`
+        // (set 873) is its own artofpkm set and must not match the regular print.
+        if western.contains(c[0]) {
+            let label = if c[1].is_empty() { set_name.as_str() } else { c[1] };
+            west.entry((compact(label), fold_num(c[2]))).or_default().push(cand.clone());
+        }
+        out.entry((compact(&set_name), fold_num(c[2]))).or_default().push(cand);
     }
-    Ok(out)
+    Ok((out, west))
 }
 
 fn load_id_list(path: &Path) -> HashSet<u64> {
@@ -378,8 +421,29 @@ fn hand_fixed_ids(path: &Path) -> HashSet<u64> {
 
 // ---------------------------------------------------------------- images
 
+/// JPEGs go through `jpeg-decoder`: `image` 0.25 (zune-jpeg 0.5) decodes the
+/// hd1 masters this tool wrote with `jpeg-encoder` as a washed-out ghost.
 fn load_rgb(path: &Path) -> Result<RgbImage> {
-    let img = image::ImageReader::open(path)?.with_guessed_format()?.decode()?;
+    let bytes = std::fs::read(path)?;
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        let mut dec = jpeg_decoder::Decoder::new(bytes.as_slice());
+        let px = dec.decode()?;
+        let info = dec.info().context("jpeg info")?;
+        let rgb: Vec<u8> = match info.pixel_format {
+            jpeg_decoder::PixelFormat::RGB24 => px,
+            jpeg_decoder::PixelFormat::L8 => px.iter().flat_map(|&v| [v, v, v]).collect(),
+            jpeg_decoder::PixelFormat::L16 => px.chunks(2).flat_map(|c| [c[0], c[0], c[0]]).collect(),
+            jpeg_decoder::PixelFormat::CMYK32 => px
+                .chunks(4)
+                .flat_map(|c| {
+                    let k = c[3] as u32;
+                    [(c[0] as u32 * k / 255) as u8, (c[1] as u32 * k / 255) as u8, (c[2] as u32 * k / 255) as u8]
+                })
+                .collect(),
+        };
+        return RgbImage::from_raw(info.width as u32, info.height as u32, rgb).context("jpeg buffer size");
+    }
+    let img = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()?;
     Ok(if img.color().has_alpha() { flatten(&img.to_rgba8()) } else { img.to_rgb8() })
 }
 
@@ -779,12 +843,17 @@ fn run_match(f: &Flags) -> Result<()> {
     let placeholders = load_id_list(&data.join("pokoin-placeholder-leftovers.json"));
     let hand_fixed = hand_fixed_ids(&data.join("catalog-image-cache.json"));
 
+    // `--no-tcgdex`: artofpkm only (2026-10-20: tcgdex renders are not scans).
     let mut tcgdex = HashMap::new();
-    let n_en = load_tcgdex(&cdn_root, "en", &mut tcgdex)?;
-    let n_ja = load_tcgdex(&cdn_root, "ja", &mut tcgdex)?;
-    let ap = load_ap(f.get("ap-printings")?, f.get("ap-sets")?, Path::new(f.get("ap-root")?))?;
-    let sources = Sources { tcgdex, ap };
-    eprintln!("tcgdex en={n_en} ja={n_ja} artofpkm keys={}", sources.ap.len());
+    let (n_en, n_ja) = if f.opt("no-tcgdex").is_some() {
+        (0, 0)
+    } else {
+        (load_tcgdex(&cdn_root, "en", &mut tcgdex)?, load_tcgdex(&cdn_root, "ja", &mut tcgdex)?)
+    };
+    let (ap, ap_west) = load_ap(f.get("ap-printings")?, f.get("ap-sets")?, Path::new(f.get("ap-root")?))?;
+    let ap_west = if f.opt("ap-western").is_some() { ap_west } else { HashMap::new() };
+    let sources = Sources { tcgdex, ap, ap_west };
+    eprintln!("tcgdex en={n_en} ja={n_ja} artofpkm keys={} western keys={}", sources.ap.len(), sources.ap_west.len());
 
     // Objects index, as the CDN server builds it.
     let mut by_id: HashMap<u64, Vec<String>> = HashMap::new();
@@ -798,7 +867,11 @@ fn run_match(f: &Flags) -> Result<()> {
     }
     eprintln!("objects ids={}", by_id.len());
 
-    let rows: Vec<Row> = rows.into_iter().take(limit).collect();
+    let only: Option<HashSet<u64>> = f
+        .opt("only-ids")
+        .map(|p| std::fs::read_to_string(p).map(|t| t.lines().filter_map(|l| l.trim().parse().ok()).collect()))
+        .transpose()?;
+    let rows: Vec<Row> = rows.into_iter().filter(|r| only.as_ref().map_or(true, |o| o.contains(&r.ct_id))).take(limit).collect();
     let pairs: Vec<Pair> = rows
         .par_iter()
         .map(|r| evaluate(r, &sources, &by_id, &objects, &placeholders, &hand_fixed, min_gain))
@@ -870,6 +943,11 @@ fn evaluate(
     let western = r.nationality == "western" || r.nationality == "american";
     if western && (r.official_source == "pokemontcg.io" || r.official_source == "tcgdex-en") && !r.official_id.is_empty() {
         if let Some(v) = s.tcgdex.get(&("en", fold_set(&r.official_id), num.clone())) {
+            cands.extend(v.iter().cloned());
+        }
+    }
+    if western {
+        if let Some(v) = s.ap_west.get(&(ap_west_key(&r.expansion), num.clone())) {
             cands.extend(v.iter().cloned());
         }
     }
