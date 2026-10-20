@@ -70,11 +70,55 @@ pub fn find_chrome(explicit: Option<&Path>) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+/// Stderr lines kept for error messages, and the per-line character cap.
+const STDERR_TAIL_LINES: usize = 8;
+const STDERR_LINE_MAX_CHARS: usize = 200;
+/// Pause before the one retry after Chrome died before opening the debug port.
+const RETRY_DELAY: Duration = Duration::from_millis(500);
+
 pub async fn launch(options: &LaunchOptions) -> anyhow::Result<Chrome> {
     let binary = find_chrome(options.chrome.as_deref()).context("could not find Chrome; set --chrome or CHROME")?;
     let profile = options.profile_dir.canonicalize().unwrap_or_else(|_| options.profile_dir.clone());
     std::fs::create_dir_all(&profile).with_context(|| format!("could not create {}", profile.display()))?;
-    let mut command = Command::new(&binary);
+    match launch_attempt(&binary, &profile, options.headless).await {
+        Ok(chrome) => Ok(chrome),
+        Err(error) => {
+            let retryable = matches!(
+                error.downcast_ref::<DevtoolsFailure>(),
+                Some(DevtoolsFailure::EarlyExit(_))
+            );
+            if !retryable {
+                return Err(error);
+            }
+            // Chrome occasionally dies once at startup on a loaded host (seen on the
+            // release gate); a fresh spawn with the same profile usually clears it.
+            tokio::time::sleep(RETRY_DELAY).await;
+            launch_attempt(&binary, &profile, options.headless).await
+        }
+    }
+}
+
+async fn launch_attempt(binary: &Path, profile: &Path, headless: bool) -> anyhow::Result<Chrome> {
+    let mut child = build_chrome_command(binary, profile, headless)
+        .spawn()
+        .with_context(|| format!("could not start {}", binary.display()))?;
+    let stderr = child.stderr.take().context("chrome stderr was not piped")?;
+    let port = match tokio::task::spawn_blocking(move || wait_for_devtools(stderr)).await {
+        Ok(Ok(port)) => port,
+        Ok(Err(failure)) => {
+            kill_child(&mut child);
+            return Err(anyhow::Error::new(failure));
+        }
+        Err(error) => {
+            kill_child(&mut child);
+            anyhow::bail!("chrome debug port wait failed: {error}");
+        }
+    };
+    Ok(Chrome { child, port })
+}
+
+fn build_chrome_command(binary: &Path, profile: &Path, headless: bool) -> Command {
+    let mut command = Command::new(binary);
     command
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg("--remote-debugging-port=0")
@@ -86,7 +130,7 @@ pub async fn launch(options: &LaunchOptions) -> anyhow::Result<Chrome> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    if options.headless {
+    if headless {
         command.arg("--headless=new");
     }
     command.arg("about:blank");
@@ -95,23 +139,10 @@ pub async fn launch(options: &LaunchOptions) -> anyhow::Result<Chrome> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = command.spawn().with_context(|| format!("could not start {}", binary.display()))?;
-    let stderr = child.stderr.take().context("chrome stderr was not piped")?;
-    let port = match tokio::task::spawn_blocking(move || wait_for_devtools(stderr)).await {
-        Ok(Ok(port)) => port,
-        Ok(Err(error)) => {
-            kill_child(&mut child);
-            anyhow::bail!("{error}");
-        }
-        Err(error) => {
-            kill_child(&mut child);
-            anyhow::bail!("chrome debug port wait failed: {error}");
-        }
-    };
-    Ok(Chrome { child, port })
+    command
 }
 
-fn wait_for_devtools(stderr: std::process::ChildStderr) -> Result<u16, String> {
+fn wait_for_devtools(stderr: std::process::ChildStderr) -> Result<u16, DevtoolsFailure> {
     let (tx, rx) = std::sync::mpsc::sync_channel(64);
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
@@ -124,6 +155,7 @@ fn wait_for_devtools(stderr: std::process::ChildStderr) -> Result<u16, String> {
         }
     });
     let deadline = Instant::now() + Duration::from_secs(20);
+    let mut recent: Vec<String> = Vec::new();
     while Instant::now() < deadline {
         let left = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(left.min(Duration::from_millis(200))) {
@@ -131,14 +163,59 @@ fn wait_for_devtools(stderr: std::process::ChildStderr) -> Result<u16, String> {
                 if let Some(port) = devtools_port(&line) {
                     return Ok(port);
                 }
+                recent.push(line);
+                if recent.len() > STDERR_TAIL_LINES {
+                    recent.remove(0);
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("chrome exited before the debug port opened".to_string());
+                return Err(DevtoolsFailure::EarlyExit(stderr_tail(&recent)));
             }
         }
     }
-    Err("chrome did not open a debug port within 20s".to_string())
+    Err(DevtoolsFailure::Timeout(stderr_tail(&recent)))
+}
+
+/// Why the debug port never opened. The message carries the stderr tail when
+/// Chrome said anything; `EarlyExit` is the only variant `launch` retries.
+#[derive(Debug)]
+enum DevtoolsFailure {
+    EarlyExit(String),
+    Timeout(String),
+}
+
+impl std::fmt::Display for DevtoolsFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (base, tail) = match self {
+            DevtoolsFailure::EarlyExit(tail) => ("chrome exited before the debug port opened", tail),
+            DevtoolsFailure::Timeout(tail) => ("chrome did not open a debug port within 20s", tail),
+        };
+        if tail.is_empty() {
+            f.write_str(base)
+        } else {
+            write!(f, "{base} | {tail}")
+        }
+    }
+}
+
+impl std::error::Error for DevtoolsFailure {}
+
+/// Last [`STDERR_TAIL_LINES`] lines joined with " | ", each trimmed and capped
+/// at [`STDERR_LINE_MAX_CHARS`] characters.
+fn stderr_tail(lines: &[String]) -> String {
+    let start = lines.len().saturating_sub(STDERR_TAIL_LINES);
+    lines[start..]
+        .iter()
+        .map(|line| {
+            let line = line.trim();
+            match line.char_indices().nth(STDERR_LINE_MAX_CHARS) {
+                Some((cut, _)) => &line[..cut],
+                None => line,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 pub fn devtools_port(line: &str) -> Option<u16> {
@@ -186,5 +263,33 @@ mod tests {
         let line = "DevTools listening on ws://127.0.0.1:4321/devtools/browser/abc";
         assert_eq!(devtools_port(line), Some(4321));
         assert!(devtools_port("DevTools listening on ws://10.0.0.8:4321/devtools/browser/abc").is_none());
+    }
+
+    #[test]
+    fn stderr_tail_keeps_the_last_eight_lines() {
+        let lines: Vec<String> = (0..12).map(|i| format!("line-{i}")).collect();
+        let expected = (4..12).map(|i| format!("line-{i}")).collect::<Vec<_>>().join(" | ");
+        assert_eq!(stderr_tail(&lines), expected);
+        assert_eq!(stderr_tail(&[]), "");
+    }
+
+    #[test]
+    fn stderr_tail_trims_whitespace_and_caps_each_line() {
+        let long = "x".repeat(STDERR_LINE_MAX_CHARS + 100);
+        let tail = stderr_tail(&[format!("  {long} "), "ok".to_string()]);
+        assert_eq!(tail, format!("{} | ok", "x".repeat(STDERR_LINE_MAX_CHARS)));
+    }
+
+    #[test]
+    fn devtools_failure_text_appends_the_stderr_tail() {
+        let dbus = "[4044:4044]: Failed to connect to the bus".to_string();
+        assert_eq!(
+            DevtoolsFailure::EarlyExit(stderr_tail(&[dbus.clone()])).to_string(),
+            format!("chrome exited before the debug port opened | {dbus}")
+        );
+        assert_eq!(
+            DevtoolsFailure::Timeout(stderr_tail(&[])).to_string(),
+            "chrome did not open a debug port within 20s"
+        );
     }
 }
