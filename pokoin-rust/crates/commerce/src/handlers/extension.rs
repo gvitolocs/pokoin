@@ -21,6 +21,7 @@ use axum::response::Response;
 use serde_json::Value;
 use tokio_util::io::ReaderStream;
 
+use super::date_ms;
 use crate::error::ApiError;
 use crate::state::{AuthedUser, DomainState};
 use crate::store;
@@ -37,22 +38,6 @@ pub fn extension_dir() -> PathBuf {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_EXTENSION_DIR))
-}
-
-/// A Firestore date as epoch ms: the decoded RFC 3339 string, epoch ms, or
-/// `{seconds}` (`readDate` in auth-profile.js).
-fn date_ms(value: &Value) -> Option<i64> {
-    match value {
-        Value::String(text) => chrono::DateTime::parse_from_rfc3339(text.trim())
-            .ok()
-            .map(|date| date.timestamp_millis()),
-        Value::Number(number) => number.as_f64().map(|ms| ms as i64),
-        Value::Object(object) => object
-            .get("seconds")
-            .and_then(Value::as_f64)
-            .map(|seconds| (seconds * 1000.0) as i64),
-        _ => None,
-    }
 }
 
 /// `profileFrom(users/{uid}).silver`: admin, or an unexpired `silverUntil`.
@@ -207,6 +192,33 @@ mod tests {
         assert!(profile_is_silver(&json!({"silverUntil": NOW + 1}), NOW));
         assert!(profile_is_silver(&json!({"silverUntil": {"seconds": NOW / 1000 + 60}}), NOW));
         assert!(!profile_is_silver(&json!({"silverUntil": "not a date"}), NOW));
+    }
+
+    #[test]
+    fn a_firestore_timestamp_typed_silver_until_still_counts() {
+        // The exact read_user shape: FirestoreClient decodes a Firestore
+        // timestampValue into a plain RFC 3339 string (firestore.rs
+        // decode_value). The paying user with legacy role "silver" keeps
+        // Silver through it; an expired one does not.
+        let document = |timestamp: &str| {
+            json!({
+                "fields": {
+                    "role": { "stringValue": "silver" },
+                    "silverUntil": { "timestampValue": timestamp },
+                }
+            })
+        };
+        let future =
+            crate::firestore::fields_to_value(document("2027-09-16T14:05:58.514Z").get("fields"));
+        assert_eq!(future["silverUntil"], json!("2027-09-16T14:05:58.514Z"));
+        assert!(profile_is_silver(&future, NOW));
+        let past =
+            crate::firestore::fields_to_value(document("2020-01-01T00:00:00.000Z").get("fields"));
+        assert!(!profile_is_silver(&past, NOW));
+        // A raw (undecoded) timestampValue object is accepted too, so the
+        // helper does not depend on the caller having decoded the document.
+        let raw = json!({"silverUntil": {"timestampValue": "2030-01-01T00:00:00Z"}});
+        assert!(profile_is_silver(&raw, NOW));
     }
 
     #[test]

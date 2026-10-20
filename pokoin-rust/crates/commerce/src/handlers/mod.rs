@@ -114,6 +114,33 @@ pub fn clean_listing_id(value: &str) -> String {
     }
 }
 
+/// A Firestore date as epoch ms: the decoded RFC 3339 string (what the REST
+/// client turns a `timestampValue` into), epoch ms, a raw
+/// `{"timestampValue": ...}` field, or `{seconds}` (`readDate` in
+/// auth-profile.js).
+pub fn date_ms(value: &Value) -> Option<i64> {
+    match value {
+        Value::String(text) => parse_rfc3339_ms(text),
+        Value::Number(number) => number.as_f64().map(|ms| ms as i64),
+        Value::Object(object) => {
+            if let Some(text) = object.get("timestampValue").and_then(Value::as_str) {
+                return parse_rfc3339_ms(text);
+            }
+            object
+                .get("seconds")
+                .and_then(Value::as_f64)
+                .map(|seconds| (seconds * 1000.0) as i64)
+        }
+        _ => None,
+    }
+}
+
+fn parse_rfc3339_ms(text: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(text.trim())
+        .ok()
+        .map(|date| date.timestamp_millis())
+}
+
 /// JSON body parse failures become the same 400 the Node handlers produce.
 pub fn parse_json_body(bytes: &[u8]) -> Result<Value, ApiError> {
     if bytes.is_empty() {

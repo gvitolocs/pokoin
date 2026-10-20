@@ -23,6 +23,31 @@ test('a future silverUntil is Silver', () => {
   assert.equal(profile.silverUntil.toISOString(), '2030-01-01T00:00:00.000Z');
 });
 
+test('a Firestore client Timestamp silverUntil is Silver', () => {
+  // SDK Timestamp instance: readDate calls toDate().
+  const futureSeconds = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
+  const sdkTimestamp = {
+    seconds: futureSeconds,
+    nanoseconds: 514000000,
+    toDate: () => new Date(futureSeconds * 1000),
+  };
+  assert.equal(profileFrom({ silverUntil: sdkTimestamp }, 'u1').silver, true);
+  // Plain {seconds, nanoseconds} snapshot without toDate().
+  assert.equal(
+    profileFrom({ silverUntil: { seconds: futureSeconds, nanoseconds: 0 } }, 'u1').silver,
+    true,
+  );
+  // And the same shapes expired stay non-Silver.
+  const pastSeconds = Math.floor(Date.now() / 1000) - 60;
+  assert.ok(!profileFrom({ silverUntil: { seconds: pastSeconds, nanoseconds: 0 } }, 'u1').silver);
+  const expiredSdk = {
+    seconds: pastSeconds,
+    nanoseconds: 0,
+    toDate: () => new Date(pastSeconds * 1000),
+  };
+  assert.ok(!profileFrom({ silverUntil: expiredSdk }, 'u2').silver);
+});
+
 test('admins stay Silver permanently without silverUntil', () => {
   assert.equal(profileFrom({ admin: true }, 'u1').silver, true);
   assert.equal(profileFrom({ isAdmin: true }, 'u1').silver, true);
