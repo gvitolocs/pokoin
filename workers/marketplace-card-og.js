@@ -18,7 +18,7 @@ export { realPublicCardId } from './public-card-id.js';
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
 /** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
-export const OG_CACHE_VERSION = 'v13';
+export const OG_CACHE_VERSION = 'v14';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -504,9 +504,12 @@ export async function fetchCardPageForOg(cardId, language, game = '', {
     const resolvedGame = String(page?.game || expectedGame);
     const canonical = page?.seo?.canonicalPath || page?.canonicalPath || page?.card?.canonicalPath;
     const target = canonical ? parseCardRequest(canonical) : null;
+    // Satellite cards carry a game-less canonical (the API's normal shape);
+    // such a canonical belongs to the game the API resolved. A canonical that
+    // names a different game prefix still mismatches.
     if (actual !== String(cardId) || resolvedGame !== expectedGame
         || (canonical && (!target || target.cardId !== String(cardId)
-          || (target.game || 'pokemon') !== expectedGame))) {
+          || (target.game || resolvedGame) !== expectedGame))) {
       const error = new Error('card-page identity mismatch');
       error.status = 502;
       throw error;

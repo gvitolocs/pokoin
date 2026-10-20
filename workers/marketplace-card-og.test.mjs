@@ -403,6 +403,119 @@ test('unprefixed non-Pokemon card 301s to the game canonical path', async () => 
   });
 });
 
+const DIGIMON_SLUG = 'u-onmon-bt25-045-bt-25-dual-revolution';
+
+function digimonCardPage(overrides = {}) {
+  return {
+    game: 'digimon',
+    card: { id: '778386', name: 'U-Onmon', set: 'BT-25 Dual Revolution', number: 'BT25-045' },
+    seo: {
+      title: 'U-Onmon BT25-045 · BT-25 Dual Revolution',
+      // The API's normal shape for satellite games: the canonical has no game prefix.
+      canonicalPath: `/marketplace/en/cards/778386/${DIGIMON_SLUG}`,
+      imageUrl: '/card-images/digimon/389193_onmon.jpg',
+    },
+    ...overrides,
+  };
+}
+
+test('satellite card with a game-less API canonical resolves (no identity throw)', async () => {
+  await withFetch(async (url) => {
+    assert.ok(String(url).includes('game=digimon'), String(url));
+    return new Response(JSON.stringify(digimonCardPage()), { status: 200, headers: { 'content-type': 'application/json' } });
+  }, async () => {
+    const resolved = await fetchCardPageForOg('778386', 'en', 'digimon');
+    assert.equal(resolved.game, 'digimon');
+    assert.equal(resolved.page.card.id, '778386');
+  });
+});
+
+test('Googlebot satellite card URL is 200 with prefixed canonical and direct CDN og:image', async () => {
+  await withFetch(async () => new Response(JSON.stringify(digimonCardPage()), { status: 200, headers: { 'content-type': 'application/json' } }), async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      `https://pokoin.com/digimon/marketplace/en/cards/778386/${DIGIMON_SLUG}`,
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response.status, 200);
+    const canonicalPath = `/digimon/marketplace/en/cards/778386/${DIGIMON_SLUG}`;
+    assert.equal(response.headers.get('x-pokoin-canonical'), canonicalPath);
+    const html = await response.text();
+    const canonical = `https://pokoin.com${canonicalPath}`;
+    const escaped = canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(html, new RegExp(`rel="canonical" href="${escaped}"`));
+    assert.match(html, new RegExp(`property="og:url" content="${escaped}"`));
+    assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/digimon\/389193_onmon\.jpg"/);
+    assert.match(html, /<img src="https:\/\/cdn\.pokoin\.com\/digimon\/389193_onmon\.jpg"/);
+    const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+    assert.equal(jsonLd.image, 'https://cdn.pokoin.com/digimon/389193_onmon.jpg');
+    assert.equal(jsonLd.url, canonical);
+  });
+});
+
+test('satellite canonical naming a different game or a different card id still 503s Googlebot', async () => {
+  const respond = (page) => async () => new Response(JSON.stringify(page), { status: 200, headers: { 'content-type': 'application/json' } });
+  const request = () => new Request(
+    `https://pokoin.com/digimon/marketplace/en/cards/778386/${DIGIMON_SLUG}`,
+    { headers: { 'user-agent': GOOGLEBOT } },
+  );
+  await withFetch(respond(digimonCardPage({
+    seo: { canonicalPath: '/one-piece/marketplace/en/cards/778386/u-onmon' },
+  })), async () => {
+    const response = await handleMarketplaceCardOgRequest(request());
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('location'), null);
+  });
+  await withFetch(respond(digimonCardPage({
+    seo: { canonicalPath: '/marketplace/en/cards/778999/u-onmon' },
+  })), async () => {
+    const response = await handleMarketplaceCardOgRequest(request());
+    assert.equal(response.status, 503);
+  });
+});
+
+test('Pokemon page whose canonical names another game still throws (unchanged)', async () => {
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      game: 'pokemon',
+      card: { id: '239000', name: 'Charizard' },
+      seo: { canonicalPath: '/one-piece/marketplace/en/cards/239000/charizard' },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }, async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/239000/charizard',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response.status, 503);
+    assert.equal(calls, 1);
+    const resolved = await fetchCardPageForOg('239000', 'en', '').catch((error) => error);
+    assert.match(String(resolved.message || ''), /identity mismatch/);
+  });
+});
+
+test('unprefixed satellite URL 301s to the prefixed canonical, which serves 200 (no loop)', async () => {
+  await withFetch(async (url) => {
+    if (String(url).includes('game=digimon')) {
+      return new Response(JSON.stringify(digimonCardPage()), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ error: 'Card not found.' }), { status: 404 });
+  }, async () => {
+    const unprefixed = await handleMarketplaceCardOgRequest(new Request(
+      `https://pokoin.com/marketplace/en/cards/778386/${DIGIMON_SLUG}`,
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(unprefixed.status, 301);
+    const prefixedUrl = `https://pokoin.com/digimon/marketplace/en/cards/778386/${DIGIMON_SLUG}`;
+    assert.equal(unprefixed.headers.get('location'), prefixedUrl);
+    const prefixed = await handleMarketplaceCardOgRequest(new Request(
+      prefixedUrl,
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(prefixed.status, 200);
+  });
+});
+
 test('card page 500 does not probe other games and does not throw', async () => {
   let calls = 0;
   await withFetch(async () => {
