@@ -498,11 +498,6 @@ pub async fn unlock_silver(
     let price = state.config().silver_price_pkn;
     let treasury_username = state.config().pokoin_treasury_username.clone();
     let profile = store::read_user(state.firestore()?, &claims.uid).await?;
-    let role = profile
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
     let silver_until = profile
         .get("silverUntil")
         .and_then(Value::as_str)
@@ -511,7 +506,7 @@ pub async fn unlock_silver(
     let balance = store::balance(state.firestore()?, &claims.uid).await?;
 
     let active = silver_until.map(|until| until > state.now_ms()).unwrap_or(false);
-    if claims.has_admin_access() || role == "silver" || active {
+    if claims.has_admin_access() || active {
         let until = silver_until
             .map(|until| {
                 chrono::DateTime::<chrono::Utc>::from_timestamp_millis(until)
@@ -563,11 +558,12 @@ pub async fn unlock_silver(
     }));
     store::apply(state.firestore()?, &op).await?;
 
+    // `role: "silver"` no longer grants anything (paid Silver expires after a
+    // year); write_user merges, so a pre-existing role is left untouched.
     store::write_user(
         state.firestore()?,
         &claims.uid,
         json!({
-            "role": "silver",
             "silverUntil": until.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             "silverUnlockedAt": store::now_iso(),
         }),

@@ -9,8 +9,8 @@
 //! (`scripts/nezopt-k3s.sh`).
 //!
 //! 401 without a valid Firebase ID token, 403 when the account is not Silver
-//! (the site rule, `market/src/auth-profile.js` `profileFrom`: admin, role
-//! `silver`, or `silverUntil` in the future), 404 while no zip is published.
+//! (the site rule, `market/src/auth-profile.js` `profileFrom`: admin, or an
+//! unexpired `silverUntil`), 404 while no zip is published.
 
 use std::path::{Path, PathBuf};
 
@@ -55,8 +55,9 @@ fn date_ms(value: &Value) -> Option<i64> {
     }
 }
 
-/// `profileFrom(users/{uid}).silver`: admin, role `silver`, or an unexpired
-/// `silverUntil`.
+/// `profileFrom(users/{uid}).silver`: admin, or an unexpired `silverUntil`.
+/// A `role: "silver"` grants nothing — paid Silver expires after a year,
+/// admins stay Silver permanently.
 pub fn profile_is_silver(profile: &Value, now_ms: i64) -> bool {
     let role = profile
         .get("role")
@@ -79,7 +80,7 @@ pub fn profile_is_silver(profile: &Value, now_ms: i64) -> bool {
         || role == "admin"
         || roles_admin;
     let until = profile.get("silverUntil").and_then(date_ms);
-    admin || role == "silver" || until.map(|ms| ms > now_ms).unwrap_or(false)
+    admin || until.map(|ms| ms > now_ms).unwrap_or(false)
 }
 
 /// `12.0.72` from `pokoin-extension-12.0.72.zip`, as comparable parts.
@@ -162,12 +163,35 @@ mod tests {
     fn silver_follows_the_site_profile_rule() {
         assert!(!profile_is_silver(&json!({}), NOW));
         assert!(!profile_is_silver(&json!({"role": "member"}), NOW));
-        assert!(profile_is_silver(&json!({"role": "Silver"}), NOW));
         assert!(profile_is_silver(&json!({"admin": true}), NOW));
         assert!(profile_is_silver(&json!({"isAdmin": true}), NOW));
         assert!(profile_is_silver(&json!({"role": "admin"}), NOW));
         assert!(profile_is_silver(&json!({"roles": ["user", "ADMIN"]}), NOW));
         assert!(!profile_is_silver(&json!({"admin": "yes"}), NOW));
+    }
+
+    #[test]
+    fn role_silver_no_longer_grants_silver() {
+        // Paid Silver expires after a year: a legacy `role: "silver"` without
+        // a live `silverUntil` is just an expired membership, while admins
+        // keep Silver with nothing else on the document.
+        assert!(!profile_is_silver(&json!({"role": "silver"}), NOW));
+        assert!(!profile_is_silver(&json!({"role": "Silver"}), NOW));
+        let past = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW - 60_000)
+            .unwrap()
+            .to_rfc3339();
+        assert!(!profile_is_silver(
+            &json!({"role": "silver", "silverUntil": past}),
+            NOW
+        ));
+        let future = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW + 60_000)
+            .unwrap()
+            .to_rfc3339();
+        assert!(profile_is_silver(
+            &json!({"role": "silver", "silverUntil": future}),
+            NOW
+        ));
+        assert!(profile_is_silver(&json!({"admin": true}), NOW));
     }
 
     #[test]
