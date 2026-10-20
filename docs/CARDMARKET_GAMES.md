@@ -123,3 +123,68 @@ Dry run 2026-10-16: 1,094 of 1,823 Cardmarket singles match catalog cards
 (every card of 11 sets, 90.9–97.9% of the other 6; the 25 left are tokens,
 core cards and misprint/corrected scans Cardmarket does not list), 532 new
 rows with pictures, 197 without; 1,565 of the 1,651 listed cards get a price.
+
+## Weiss Schwarz product links
+
+Cardmarket sells only the **English** edition of Weiss Schwarz (idGame 10:
+165 expansions, 28,140 singles). Japanese printings (47,727 of our 66,723)
+have no Cardmarket product, so their CM button can only search. Product names
+carry no card code, so `/api/cardmarket-redirect` searches the name alone for
+this game (like Battle Spirits Saga).
+
+`pokoin-cardmarket-catalog links` pairs EN printings with Cardmarket products
+and writes exact product pages into `public.marketplace_cm_verified_links`,
+which the redirect reads first:
+
+```bash
+sqlite3 -json ~/pokoin-catalogs/cardmarket-links.sqlite \
+  "select cm_id id, url from products where game = 'weiss_schwarz'" > harvest.json
+pokoin-cardmarket-catalog links --game weiss_schwarz --urls harvest.json            # dry run + report
+pokoin-cardmarket-catalog links --game weiss_schwarz --urls harvest.json --apply    # harvested URLs only
+```
+
+- Expansion: each EN set (collector prefix `AYT/W110`) belongs to the
+  idExpansion holding most of its names.
+- Printing: same name in that expansion. A repeated name has a
+  `-V<n>-<Rarity>` URL suffix; that rarity picks the printing (`N` premium
+  cards are Cardmarket's Common). Most EN parallels (SR/SP/SSP/OFR/FR) are
+  not in our catalog and stay unmatched.
+- URL: only harvested product pages (the candyext dump) are exact. Generated
+  slugs are accepted only where the expansion's own harvested pages confirm
+  the style (≥ 20 pages, ≥ 98 %); 2014–2018 pages mix `V-1`/`V1` and bare
+  suffixes inside one expansion, so none qualify today.
+
+Dry run 2026-10-19: 3,035 of 18,996 EN printings get an exact page; 13,577
+more pair with a Cardmarket product but sit in the 98 expansions whose
+candyext listing came back empty (no URL), 867 are repeated names (booster vs
+Trial Deck) with no harvested rarity, 354 have no product of that name, and
+1,163 are in sets Cardmarket does not list.
+
+### Japanese printings through their English twin
+
+A Japanese printing shares the Cardmarket page of its English twin when both
+show the same artwork, as Pokémon printings share links across artwork
+versions. The English edition keeps the Japanese code with an `E` before the
+number (`MM/W35-096` → `MM/W35-E096`, trial decks `T01` → `TE01`).
+
+```bash
+pokoin-cardmarket-catalog links --game weiss_schwarz --urls harvest.json --jp-twins             # dry run
+pokoin-cardmarket-catalog links --game weiss_schwarz --urls harvest.json --jp-twins --apply-jp  # needs 130_printing_cm_links.sql
+```
+
+- Artwork: a 64-bit difference hash of the art area of both local scans
+  (`~/pokoin-catalogs/weiss_schwarz/images/weiss-schwarz`), at most 18 bits
+  apart. Checked by eye: same art stays within ~23 bits (SAMPLE stamp, crop,
+  added logo); different art or a renumbered English card starts at 28.
+- Parallels (`010S` SR, SP, SSP) would take the harvested `-V<n>-<Rarity>`
+  product, but Pokoin has no English parallel scan to compare against, and
+  none of the 89 candidates matches the English regular art within 8 bits, so
+  none are linked.
+- Rows go to `public.pokoin_printing_cm_links` (public card id → page; the
+  redirect reads it first), not `marketplace_cm_verified_links`, whose URL is
+  unique per printing.
+
+Dry run 2026-10-19: 2,815 of 47,727 Japanese printings link through their
+twin; 29,511 are in sets with no English edition, 13,338 have an English twin
+without a Cardmarket page yet (the missing harvest above), 1,552 have no
+English printing of that number, 467 are parallels, 8 have different art.

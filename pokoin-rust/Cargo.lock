@@ -413,6 +413,7 @@ name = "cardmarket-catalog"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "image",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

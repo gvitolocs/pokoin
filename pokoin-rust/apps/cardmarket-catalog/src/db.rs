@@ -19,6 +19,8 @@ pub struct Card {
     pub set_code: String,
     pub collector: String,
     pub rarity: String,
+    /// `fixed_properties.language` (Weiss Schwarz: `EN` or `JP`).
+    pub language: String,
     pub card_market_ids: Vec<i64>,
     /// `marketplace_search_candidates.card_id`; `None` when not projected.
     pub card_id: Option<i64>,
@@ -105,6 +107,7 @@ pub async fn cards(pool: &PgPool, schema: &str) -> Result<Vec<Card>, sqlx::Error
              coalesce(p.expansion->>'name', '') as set_name, coalesce(p.expansion->>'code', '') as set_code,
              coalesce(p.blueprint->'fixed_properties'->>'collector_number', '') as collector,
              coalesce(p.blueprint->'fixed_properties'->>'cm_rarity', '') as rarity,
+             coalesce(p.blueprint->'fixed_properties'->>'language', '') as language,
              coalesce((select array_agg(v::bigint) from jsonb_array_elements_text(
                case when jsonb_typeof(p.card_market_ids) = 'array' then p.card_market_ids else '[]'::jsonb end) v
                where v ~ '^[0-9]+$'), '{{}}') as cm,
@@ -123,6 +126,7 @@ pub async fn cards(pool: &PgPool, schema: &str) -> Result<Vec<Card>, sqlx::Error
             set_code: row.try_get("set_code")?,
             collector: row.try_get("collector")?,
             rarity: row.try_get("rarity")?,
+            language: row.try_get("language")?,
             card_market_ids: row.try_get("cm")?,
             card_id: row.try_get("card_id")?,
         });
@@ -223,4 +227,111 @@ pub async fn store_medians(
     };
     tx.commit().await?;
     Ok((upserted, removed))
+}
+
+/// One printing → Cardmarket product page, for
+/// `public.marketplace_cm_verified_links` (read by `/api/cardmarket-redirect`).
+pub struct LinkRow<'a> {
+    pub blueprint_id: i64,
+    pub url: &'a str,
+    pub product_slug: &'a str,
+    pub name: &'a str,
+    pub set_name: &'a str,
+    pub collector: &'a str,
+    pub notes: String,
+}
+
+/// Upsert links of one `source`. Hand-entered (`manual`) rows and URLs another
+/// printing already holds are left alone; returns (written, skipped).
+pub async fn store_links(
+    pool: &PgPool,
+    source: &str,
+    rows: &[LinkRow<'_>],
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let (mut written, mut skipped) = (0, 0);
+    for row in rows {
+        let done = sqlx::query(
+            "insert into public.marketplace_cm_verified_links (
+               blueprint_id, cardmarket_locale, cardmarket_url, cardmarket_product_slug, card_name,
+               expansion_name, collector_number, source, confidence, notes, verified_at, updated_at)
+             select $1, 'en', $2, $3, $4, $5, $6, $7, 'verified', $8, now(), now()
+             where not exists (select 1 from public.marketplace_cm_verified_links o
+                               where o.cardmarket_url = $2 and o.blueprint_id <> $1)
+             on conflict (blueprint_id, cardmarket_locale) do update set
+               cardmarket_url = excluded.cardmarket_url,
+               cardmarket_product_slug = excluded.cardmarket_product_slug,
+               card_name = excluded.card_name, expansion_name = excluded.expansion_name,
+               collector_number = excluded.collector_number, source = excluded.source,
+               notes = excluded.notes, updated_at = now()
+             where marketplace_cm_verified_links.confidence <> 'manual'",
+        )
+        .bind(row.blueprint_id)
+        .bind(row.url)
+        .bind(row.product_slug)
+        .bind(row.name)
+        .bind(row.set_name)
+        .bind(row.collector)
+        .bind(source)
+        .bind(&row.notes)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if done == 0 {
+            skipped += 1;
+        }
+        written += done;
+    }
+    tx.commit().await?;
+    Ok((written, skipped))
+}
+
+/// A printing that shares another printing's Cardmarket page, for
+/// `public.pokoin_printing_cm_links` (migration 130), keyed by public card id;
+/// `/api/cardmarket-redirect` reads it before any other link.
+pub struct PrintingLinkRow<'a> {
+    pub public_id: i64,
+    pub blueprint_id: i64,
+    pub url: &'a str,
+    pub product: i64,
+    pub method: &'a str,
+    pub series: &'a str,
+}
+
+/// Upsert the rows of one `source`; rows another source wrote are left alone.
+/// Returns (written, skipped).
+pub async fn store_printing_links(
+    pool: &PgPool,
+    source: &str,
+    rows: &[PrintingLinkRow<'_>],
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let (mut written, mut skipped) = (0, 0);
+    for row in rows {
+        let done = sqlx::query(
+            "insert into public.pokoin_printing_cm_links
+               (public_id, ct_id, cm_url, cm_product_id, n_candidates, method, all_urls, series, source, created_at)
+             values ($1, $2, $3, $4, 1, $5, jsonb_build_array($3::text), $6, $7, now())
+             on conflict (public_id) do update set ct_id = excluded.ct_id, cm_url = excluded.cm_url,
+               cm_product_id = excluded.cm_product_id, method = excluded.method,
+               all_urls = excluded.all_urls, series = excluded.series
+             where pokoin_printing_cm_links.source = excluded.source",
+        )
+        .bind(row.public_id)
+        .bind(row.blueprint_id)
+        .bind(row.url)
+        .bind(row.product)
+        .bind(row.method)
+        .bind(row.series)
+        .bind(source)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if done == 0 {
+            skipped += 1;
+        }
+        written += done;
+    }
+    tx.commit().await?;
+    Ok((written, skipped))
 }

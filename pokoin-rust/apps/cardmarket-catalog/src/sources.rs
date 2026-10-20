@@ -271,6 +271,24 @@ fn tcg_products(group: i64, products: &Value, prices: &Value) -> Vec<TcgProduct>
     out
 }
 
+/// Cardmarket singles only (the `links` command needs no TCGplayer rows).
+pub async fn singles(
+    cache: &Path,
+    cardmarket_game: i64,
+    refresh: bool,
+) -> Result<Vec<CmProduct>, String> {
+    let file = format!("products_singles_{cardmarket_game}.json");
+    let bytes = cached(
+        &client()?,
+        &raw_dir(cache).join("cardmarket").join(&file),
+        &format!("{CARDMARKET}/productList/{file}"),
+        refresh,
+    )
+    .await?;
+    let list: ProductList = serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+    Ok(list.products)
+}
+
 /// Today's price guide, stored as `price_guide_<game>-<createdAt day>.json`
 /// (one file per Cardmarket build, so history is kept lossless on disk).
 pub async fn price_guide(
