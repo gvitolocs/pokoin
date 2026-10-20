@@ -11,6 +11,8 @@ export const SITE_PAGES = {
       ['Run a node', 'Docker peer images live in the chain repo. Do not point api.pokoin.com at a new region until restore is verified.'],
       ['Wallets', `Injected wallets use chain ID ${POKOIN_CHAIN_ID} and ${POKOIN_RPC}.`],
       ['Health', 'Use /health here or the live RPC. Explorer is Caddy, not Vercel.'],
+      ['Operators', 'Two bootstrap peers are live. Hosting a node is documented; new operators are approved — there is no open intake form.'],
+      ['Security pass', 'The 28 May 2026 security pass is an official PokoinPoS report from Go-native tools (/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf). It is not a paid third-party audit.'],
     ],
   },
   '/contact': {

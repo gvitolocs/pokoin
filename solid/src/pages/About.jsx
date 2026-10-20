@@ -144,7 +144,7 @@ export default function About() {
           <p class="page-kicker">Pokoin</p>
           <h1 class="about-title">
             <span>The market belongs to the collectors.</span>
-            <span class="about-gold">Buy. Sell. Settle in PKN.</span>
+            <span class="about-gold">Buy. Sell. Trade with collectors.</span>
           </h1>
           <p class="about-lede">A global peer-to-peer marketplace built for everyone.</p>
           <div class="about-actions">
@@ -160,7 +160,7 @@ export default function About() {
           <h2 id="about-story-heading">A collector market, not a listing farm.</h2>
           <p>
             Pokoin is peer-to-peer. You list a card. Another collector buys it.
-            Settlement is native PKN on PokoinPoS — chain ID 26062026.
+            Pay by card or with PKN, Pokoin&rsquo;s store credit.
           </p>
           <p>
             Card Reserve is the shop. The wallet holds PKN. Scan identifies a card
@@ -173,12 +173,12 @@ export default function About() {
             <span>Collectors trade with collectors. Offers sit on the desk, not a house account.</span>
           </li>
           <li>
-            <strong>Native PKN</strong>
-            <span>Listings and checkout settle in PKN. Buy PKN when you need a top-up.</span>
+            <strong>Simple checkout</strong>
+            <span>Pay by card or PKN.</span>
           </li>
           <li>
-            <strong>PokoinPoS</strong>
-            <span>Permissioned proof-of-stake. Public RPC and explorer stay on their own hosts.</span>
+            <strong>Trusted sellers</strong>
+            <span>Every offer comes from a real collector.</span>
           </li>
         </ul>
       </section>
@@ -194,18 +194,18 @@ export default function About() {
           <li>
             <span class="about-step-n">02</span>
             <h3>Buy or list</h3>
-            <p>Pay in PKN, or put your own cards on the market from inventory.</p>
+            <p>Pay by card or PKN, or put your own cards on the market from inventory.</p>
           </li>
           <li>
             <span class="about-step-n">03</span>
-            <h3>Settle</h3>
-            <p>Orders and chain transfers use PokoinPoS. The explorer stays public.</p>
+            <h3>Ship &amp; track</h3>
+            <p>Orders stay visible from payment to delivery.</p>
           </li>
         </ol>
       </section>
 
       <section class="about-section" aria-labelledby="about-surfaces-heading">
-        <h2 id="about-surfaces-heading">Shop. Wallet. Chain.</h2>
+        <h2 id="about-surfaces-heading">Shop. Scan. Collect.</h2>
         <p>Open any of them from this site. Native apps are not in the stores yet.</p>
         <div class="about-surfaces">
           <a class="about-surface" href="/marketplace">
@@ -215,33 +215,14 @@ export default function About() {
           </a>
           <a class="about-surface" href={APP.wallet}>
             <IconWallet />
-            <h3>PKN wallet</h3>
-            <p>Native PKN on PokoinPoS. Chain ID 26062026.</p>
+            <h3>Wallet</h3>
+            <p>Your balance and order history.</p>
           </a>
           <a class="about-surface" href={APP.scan}>
             <IconScan />
             <h3>Scan</h3>
             <p>Explorer, health, and card camera.</p>
           </a>
-        </div>
-      </section>
-
-      <section class="about-section" aria-labelledby="about-network-heading">
-        <h2 id="about-network-heading">The network</h2>
-        <p>
-          PokoinPoS is permissioned. Two bootstrap peers are live. Hosting a node
-          is documented; new operators are approved — there is no open intake form.
-        </p>
-        <p>
-          The 28 May 2026 security pass is an official PokoinPoS report from
-          Go-native tools. It is not a paid third-party audit.
-        </p>
-        <div class="about-links">
-          <a href={APP.docs}>Host a node</a>
-          <a href={APP.health}>Health</a>
-          <a href="https://explorer.pokoin.com">Explorer</a>
-          <a href="https://rpc.pokoin.com/rpc">RPC</a>
-          <a href="/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf">Security PDF</a>
         </div>
       </section>
 
@@ -257,12 +238,13 @@ export default function About() {
           <a href={APP.contact}>Contact</a>
           <a href={APP.privacy}>Privacy</a>
           <a href={APP.forum}>Forum</a>
+          <a href={APP.docs}>Network</a>
         </div>
       </section>
 
       <section class="about-cta" aria-labelledby="about-open-heading">
         <h2 id="about-open-heading">Open the market</h2>
-        <p>Cards, wallet, and chain in the browser. No App Store or Play listing yet.</p>
+        <p>Cards, scanning and your collection in the browser. No App Store or Play listing yet.</p>
         <div class="about-actions">
           <a class="btn" href="/marketplace">Marketplace</a>
           <a class="btn ghost" href="/mypokoin">Start selling</a>

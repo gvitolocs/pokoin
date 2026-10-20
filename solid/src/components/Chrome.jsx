@@ -424,7 +424,7 @@ function Footer(props) {
       <div class="foot-grid">
         <div>
           <strong>Pokoin</strong>
-          <p>Buy. Sell. Settle in PKN.</p>
+          <p>Buy. Sell. Trade with collectors.</p>
         </div>
         <div>
           <h3>Shop</h3>
