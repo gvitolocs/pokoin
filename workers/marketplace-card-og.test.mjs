@@ -15,6 +15,16 @@ import {
   renderCardOgHtml,
 } from './marketplace-card-og.js';
 
+const LD_SCRIPT_RE = /<script type="application\/ld\+json">([^]+?)<\/script>/;
+
+/** The Product node: the graph's Product, or the whole payload when no graph. */
+function productNode(jsonLd) {
+  if (Array.isArray(jsonLd['@graph'])) {
+    return jsonLd['@graph'].find((node) => node['@type'] === 'Product');
+  }
+  return jsonLd;
+}
+
 test('detects Discord and other link-preview bots', () => {
   assert.equal(isLinkPreviewBot('Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'), true);
   assert.equal(isLinkPreviewBot('Twitterbot/1.0'), true);
@@ -113,9 +123,15 @@ test('search-engine card HTML keeps description, ItemPage JSON-LD, and crawlable
   const html = renderCardOgHtml(payload);
   assert.match(html, /<h1>Charizard<\/h1>/);
   assert.match(html, /application\/ld\+json/);
-  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
   assert.equal(jsonLd['@type'], 'ItemPage');
   assert.equal(jsonLd.offers, undefined);
+  // Catalog-only card: the ItemPage itself carries the primary image.
+  assert.equal(jsonLd['@id'], 'https://pokoin.com/marketplace/en/cards/239000/charizard');
+  assert.equal(jsonLd.image, 'https://cdn.pokoin.com/119500_charizard.jpg');
+  assert.equal(jsonLd.primaryImageOfPage.url, 'https://cdn.pokoin.com/119500_charizard.jpg');
+  assert.equal(jsonLd.primaryImageOfPage.contentUrl, jsonLd.image);
+  assert.equal(jsonLd.primaryImageOfPage.caption, 'Charizard Base Set 4/102 Pokemon card');
   assert.match(html, /href="\/marketplace\/sets\/base-set"/);
   assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/119500_charizard\.jpg"/);
   assert.ok(html.indexOf('<img ') < html.indexOf('Venusaur'));
@@ -140,11 +156,12 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   assert.match(html, /not a Pokoin offer/);
   const eurHtml = renderCardOgHtml({ ...payload, currency: 'EUR' });
   assert.match(eurHtml, /Out of stock · minimum 13.21 EUR/);
-  const eurLd = JSON.parse(eurHtml.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const eurLd = JSON.parse(eurHtml.match(LD_SCRIPT_RE)[1]);
   assert.equal(eurLd.offers.availability, 'https://schema.org/OutOfStock');
   assert.equal(eurLd.offers.price, '13.21');
-  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
   assert.equal(jsonLd['@type'], 'Product');
+  assert.equal(jsonLd['@graph'], undefined);
   assert.equal(jsonLd.dateModified, payload.snapshotDate);
   assert.equal(jsonLd.offers.availability, 'https://schema.org/OutOfStock');
   assert.equal(jsonLd.offers.priceCurrency, 'EUR');
@@ -161,11 +178,108 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   assert.equal(bare.includes('<img '), false);
   assert.equal(cardOgImageUrl('', '248768'), '');
   assert.equal(cardOgImageUrl('https://pokoin.com/pokoin-512.png', '248768'), '');
-  const bareLd = JSON.parse(bare.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const bareLd = JSON.parse(bare.match(LD_SCRIPT_RE)[1]);
   assert.equal(bareLd['@type'], 'ItemPage');
+  assert.equal(bareLd['@graph'], undefined);
+  assert.equal(bareLd.primaryImageOfPage, undefined);
   assert.equal(bareLd.offers, undefined);
   assert.equal(bareLd.review, undefined);
   assert.equal(bareLd.aggregateRating, undefined);
+});
+
+test('card JSON-LD graph marks the scan as primaryImageOfPage of the WebPage', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'Charizard Base Set 4/102 Price & Cards for Sale | Pokoin',
+        description: 'Charizard · 4/102 · Base Set',
+        canonicalPath: '/marketplace/en/cards/239000/charizard',
+        imageUrl: '/card-images/119500_charizard.jpg',
+      },
+      card: { id: '239000', name: 'Charizard', set: 'Base Set', number: '4/102', artist: 'Mitsuhiro Arita' },
+      offers: [
+        {
+          id: 'lst-a',
+          sellerUid: 'seller-a',
+          sellerName: 'Seller A',
+          condition: 'NM',
+          pricePkn: 64000,
+          quantityAvailable: 1,
+          status: 'active',
+          cardImageUrl: 'https://cdn.pokoin.com/cards/239000.jpg',
+        },
+      ],
+    },
+    { cardId: '239000', language: 'en', includeDescription: true },
+  );
+  payload.currency = 'EUR';
+  payload.indexable = true;
+  const html = renderCardOgHtml(payload);
+  const scripts = html.match(new RegExp(LD_SCRIPT_RE.source, 'g')) || [];
+  assert.equal(scripts.length, 1);
+  const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
+  const canonical = 'https://pokoin.com/marketplace/en/cards/239000/charizard';
+  const image = 'https://cdn.pokoin.com/119500_charizard.jpg';
+  const caption = 'Charizard Base Set 4/102 Pokemon card';
+  assert.equal(jsonLd['@context'], 'https://schema.org');
+  assert.equal(jsonLd['@graph'].length, 2);
+  const webPage = jsonLd['@graph'].find((node) => node['@type'] === 'WebPage');
+  const product = jsonLd['@graph'].find((node) => node['@type'] === 'Product');
+  assert.equal(webPage['@id'], canonical);
+  assert.equal(webPage.url, canonical);
+  assert.equal(webPage.name, payload.title);
+  assert.deepEqual(webPage.primaryImageOfPage, {
+    '@type': 'ImageObject',
+    '@id': image,
+    url: image,
+    contentUrl: image,
+    caption,
+  });
+  // Same scan everywhere: primaryImageOfPage === og:image === <img src>.
+  assert.match(html, new RegExp(`property="og:image" content="${image.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.match(html, new RegExp(`<img src="${image.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.equal(webPage.primaryImageOfPage.url, html.match(/property="og:image" content="([^"]*)"/)[1]);
+  assert.equal(webPage.primaryImageOfPage.caption, html.match(/property="og:image:alt" content="([^"]*)"/)[1]);
+  assert.deepEqual(webPage.mainEntity, { '@id': `${canonical}#product` });
+  assert.equal(product['@id'], `${canonical}#product`);
+  assert.equal(product.mainEntityOfPage['@id'], canonical);
+  assert.equal(product['@context'], undefined);
+  // Every pre-existing Product field stays on the Product node.
+  assert.deepEqual(
+    Object.keys(product).sort(),
+    ['@id', '@type', 'additionalProperty', 'brand', 'dateModified', 'description', 'image', 'mainEntityOfPage', 'name', 'offers', 'sku', 'url'],
+  );
+  assert.equal(product.name, 'Charizard');
+  assert.equal(product.sku, '239000');
+  assert.equal(product.image, image);
+  assert.equal(product.brand.name, 'Pokémon TCG');
+  assert.equal(product.url, canonical);
+  assert.equal(product.dateModified, payload.snapshotDate);
+  assert.equal(product.offers['@type'], 'AggregateOffer');
+  assert.equal(product.offers.lowPrice, '320.00');
+  assert.equal(product.offers.priceCurrency, 'EUR');
+  assert.equal(product.offers.url, canonical);
+});
+
+test('JSON-LD graph keeps the < escaping with unescaped name and caption strings', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'Drifloon <Lv.17> · POP Series 6',
+        canonicalPath: '/marketplace/en/cards/248768/card-drifloon',
+        imageUrl: '/card-images/124384_drifloon-lv-17.jpg',
+      },
+      card: { id: '248768', name: 'Drifloon <Lv.17>', set: 'POP Series 6', number: '6/17' },
+    },
+    { cardId: '248768', language: 'en' },
+  );
+  const html = renderCardOgHtml(payload);
+  const raw = html.match(LD_SCRIPT_RE)[1];
+  assert.match(raw, /\\u003c/);
+  const jsonLd = JSON.parse(raw);
+  assert.equal(jsonLd['@type'], 'ItemPage');
+  assert.equal(jsonLd.name, 'Drifloon <Lv.17>');
+  assert.equal(jsonLd.primaryImageOfPage.caption, 'Drifloon <Lv.17> POP Series 6 6/17 Pokemon card');
 });
 
 test('search HTML AggregateOffer uses only active Pokoin listings in the pinned currency', () => {
@@ -210,7 +324,7 @@ test('search HTML AggregateOffer uses only active Pokoin listings in the pinned 
   assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/cards\/239000\/card-charizard-4-102-base-set"/);
   assert.match(html, /name="robots" content="index, follow, max-image-preview:large"/);
   assert.match(html, /1 Pokoin listing from 320.00 EUR/);
-  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const jsonLd = productNode(JSON.parse(html.match(LD_SCRIPT_RE)[1]));
   assert.equal(jsonLd.offers['@type'], 'AggregateOffer');
   assert.equal(jsonLd.offers.lowPrice, '320.00');
   assert.equal(jsonLd.offers.highPrice, '320.00');
@@ -247,11 +361,14 @@ test('a catalog-only non-Pokémon card is an ItemPage on the game URL', () => {
   assert.match(html, new RegExp(`rel="canonical" href="${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
   assert.match(html, new RegExp(`property="og:url" content="${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
   assert.match(html, /href="\/one-piece\/marketplace"/);
-  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
   assert.equal(jsonLd['@type'], 'ItemPage');
   assert.equal(jsonLd.url, canonical);
   assert.equal(jsonLd.name, 'Tony Tony.Chopper');
   assert.equal(jsonLd.image, 'https://cdn.pokoin.com/one-piece/chopper.jpg');
+  assert.equal(jsonLd['@id'], canonical);
+  assert.equal(jsonLd.primaryImageOfPage.url, 'https://cdn.pokoin.com/one-piece/chopper.jpg');
+  assert.equal(jsonLd.primaryImageOfPage.contentUrl, jsonLd.image);
   assert.equal(jsonLd.offers, undefined);
   assert.equal(jsonLd.review, undefined);
   assert.equal(jsonLd.aggregateRating, undefined);
@@ -270,7 +387,7 @@ test('a catalog-only non-Pokémon card is an ItemPage on the game URL', () => {
       cardImageUrl: 'https://cdn.pokoin.com/one-piece/chopper.jpg',
     }],
   });
-  const listedLd = JSON.parse(listed.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  const listedLd = productNode(JSON.parse(listed.match(LD_SCRIPT_RE)[1]));
   assert.equal(listedLd['@type'], 'Product');
   assert.equal(listedLd.brand.name, 'One Piece');
   assert.equal(listedLd.url, canonical);
@@ -446,10 +563,48 @@ test('Googlebot satellite card URL is 200 with prefixed canonical and direct CDN
     assert.match(html, new RegExp(`property="og:url" content="${escaped}"`));
     assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/digimon\/389193_onmon\.jpg"/);
     assert.match(html, /<img src="https:\/\/cdn\.pokoin\.com\/digimon\/389193_onmon\.jpg"/);
-    const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+    const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
     assert.equal(jsonLd.image, 'https://cdn.pokoin.com/digimon/389193_onmon.jpg');
     assert.equal(jsonLd.url, canonical);
+    assert.equal(jsonLd['@id'], canonical);
+    assert.equal(jsonLd.primaryImageOfPage.url, 'https://cdn.pokoin.com/digimon/389193_onmon.jpg');
+    assert.equal(jsonLd.primaryImageOfPage.contentUrl, jsonLd.image);
   });
+});
+
+test('satellite card with a listing gets the WebPage/Product graph on the prefixed canonical', () => {
+  const payload = buildCardOgPayload(
+    digimonCardPage({
+      offers: [
+        {
+          id: 'lst-d',
+          sellerUid: 'seller-d',
+          sellerName: 'Seller D',
+          condition: 'NM',
+          pricePkn: 2000,
+          quantityAvailable: 1,
+          status: 'active',
+          cardImageUrl: 'https://cdn.pokoin.com/digimon/389193_onmon.jpg',
+        },
+      ],
+    }),
+    { cardId: '778386', language: 'en', includeDescription: true, game: 'digimon' },
+  );
+  payload.currency = 'EUR';
+  payload.indexable = true;
+  const html = renderCardOgHtml(payload);
+  const jsonLd = JSON.parse(html.match(LD_SCRIPT_RE)[1]);
+  const canonical = `https://pokoin.com/digimon/marketplace/en/cards/778386/${DIGIMON_SLUG}`;
+  const webPage = jsonLd['@graph'].find((node) => node['@type'] === 'WebPage');
+  const product = jsonLd['@graph'].find((node) => node['@type'] === 'Product');
+  assert.equal(webPage['@id'], canonical);
+  assert.equal(webPage.mainEntity['@id'], product['@id']);
+  assert.equal(product['@id'], `${canonical}#product`);
+  assert.equal(product.mainEntityOfPage['@id'], canonical);
+  assert.equal(webPage.primaryImageOfPage.url, 'https://cdn.pokoin.com/digimon/389193_onmon.jpg');
+  assert.equal(product.brand.name, 'Digimon');
+  assert.equal(product.offers.lowPrice, '10.00');
+  assert.equal(product.offers.url, canonical);
 });
 
 test('satellite canonical naming a different game or a different card id still 503s Googlebot', async () => {
