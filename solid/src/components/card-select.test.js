@@ -37,7 +37,7 @@ test('bands start on empty background, touch desk + related tiles and listings, 
 
 test('the desk scan joins the selection and drags the pile it is part of', () => {
   assert.match(card, /<CardSelectGrid class="card-desk-select" contents>/);
-  assert.match(card, /<DeskArtFrame card=\{card\(\)\} art=\{art\(\)\} offers=\{shop\.offers\} onZoom=\{openZoom\} \/>/);
+  assert.match(card, /<DeskArtFrame\n\s+card=\{card\(\)\}\n\s+art=\{heroArt\(\)\}\n\s+note=\{.+\}\n\s+offers=\{shop\.offers\}\n\s+onZoom=\{openZoom\}\n\s+\/>/);
   assert.doesNotMatch(card, /<button[\s\S]*class="art-frame"/);
   assert.match(frame, /data-card-id=\{id\(\) \|\| undefined\}/);
   assert.match(frame, /'is-selected': picked\(\)/);

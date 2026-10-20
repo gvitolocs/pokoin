@@ -73,7 +73,8 @@ export default function DeskArtFrame(props) {
         <CardArt
           src={props.art}
           card={props.card}
-          langScans={isLandscapeDesk(props.card) ? undefined : props.card?.langScans}
+          // A variant scan (props.note: the reverse holo) is the scan itself, never a language swap.
+          langScans={props.note || isLandscapeDesk(props.card) ? undefined : props.card?.langScans}
           alt={cardImageAlt(props.card)}
           fetchPriority="high"
           full
@@ -94,8 +95,8 @@ export default function DeskArtFrame(props) {
           }}
         />
       </Show>
-      <Show when={langLabel()}>
-        <span class="lang-scan-note">{langLabel()}</span>
+      <Show when={props.note || langLabel()}>
+        <span class="lang-scan-note">{props.note || langLabel()}</span>
       </Show>
     </div>
   );

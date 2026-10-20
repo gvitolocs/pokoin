@@ -3337,6 +3337,35 @@ select.collector-badge.version-badge option {
   line-height: 1;
 }
 
+/* Gold sparkles: swaps the desk scan to the printing's reverse holo and back. */
+.reverse-toggle {
+  padding: 0.15rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.reverse-toggle .reverse-sparkles {
+  width: 100%;
+  height: 100%;
+  opacity: 0.82;
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.reverse-toggle:hover .reverse-sparkles,
+.reverse-toggle:focus-visible .reverse-sparkles,
+.reverse-toggle.is-on .reverse-sparkles {
+  opacity: 1;
+  filter:
+    drop-shadow(0 0 3px rgb(255 211 61 / 0.95))
+    drop-shadow(0 0 8px rgb(255 211 61 / 0.7))
+    drop-shadow(0 0 16px rgb(255 211 61 / 0.35));
+}
+
+.reverse-toggle:focus-visible {
+  outline: 2px solid rgb(255 211 61 / 0.8);
+  outline-offset: 2px;
+}
+
 .more-versions {
   display: inline-block;
   padding: 0.38rem 0.95rem;

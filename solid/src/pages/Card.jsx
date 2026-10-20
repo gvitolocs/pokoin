@@ -124,6 +124,8 @@ import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
+import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
+import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
 import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
@@ -591,6 +593,13 @@ function CardDesk(props) {
   // The exact URL the boot script and the router preloaded (card.deskArtUrl
   // from the card page), so this <img> reuses that download.
   const art = createMemo(() => deskArtUrl(card()));
+  // Gold sparkles: the verified reverse-holo / mirror scan of this printing.
+  // The toggle belongs to one card id, so the next desk opens on its own scan.
+  const reverseScan = createMemo(() => reverseScanUrl(card()));
+  const [reverseFor, setReverseFor] = createSignal('');
+  const reverseOn = () => Boolean(reverseScan()) && reverseFor() === String(card().id);
+  const toggleReverse = () => setReverseFor(reverseOn() ? '' : String(card().id));
+  const heroArt = createMemo(() => (reverseOn() ? reverseScan() : art()));
   // A new hero closes the gate until DeskArtFrame reports it loaded or failed.
   createEffect(art, (url) => {
     if (url) holdForHero();
@@ -1073,10 +1082,16 @@ function CardDesk(props) {
                       </a>
                     </Show>
                   </div>
-                  <DeskArtFrame card={card()} art={art()} offers={shop.offers} onZoom={openZoom} />
-                  <Show when={setShortcuts().length || showMoreVersions()}>
+                  <DeskArtFrame
+                    card={card()}
+                    art={heroArt()}
+                    note={reverseOn() ? `${REVERSE_SCAN_LABEL} scan` : ''}
+                    offers={shop.offers}
+                    onZoom={openZoom}
+                  />
+                  <Show when={setShortcuts().length || showMoreVersions() || reverseScan()}>
                     <div class="set-link tight version-links">
-                      <Show when={setShortcuts().length}>
+                      <Show when={setShortcuts().length || reverseScan()}>
                         <div class="version-shortcuts">
                           <For each={setShortcuts()} keyed={(row) => String(row.id)}>
                             {(row) => {
@@ -1116,10 +1131,22 @@ function CardDesk(props) {
                               );
                             }}
                           </For>
+                          <Show when={reverseScan()}>
+                            <button
+                              type="button"
+                              class={['set-shortcut', 'reverse-toggle', { 'is-on': reverseOn() }]}
+                              title={reverseOn() ? 'Back to the regular scan' : REVERSE_SCAN_LABEL}
+                              aria-label={REVERSE_SCAN_LABEL}
+                              aria-pressed={reverseOn() ? 'true' : 'false'}
+                              onClick={toggleReverse}
+                            >
+                              <ReverseSparkles />
+                            </button>
+                          </Show>
                         </div>
                       </Show>
                       <Show when={showMoreVersions()}>
-                        <a class={['more-versions', { 'is-solo': !setShortcuts().length }]} href={gameHref(versionsHref(card(), lang))}>
+                        <a class={['more-versions', { 'is-solo': !setShortcuts().length && !reverseScan() }]} href={gameHref(versionsHref(card(), lang))}>
                           More versions...
                         </a>
                       </Show>
@@ -1417,10 +1444,10 @@ function CardDesk(props) {
                   if (event.target === zoomEl) setZoom(false);
                 }}
               >
-                <Show when={art()}>
+                <Show when={heroArt()}>
                   <CardArt
-                    src={art()}
-                    langScans={isLandscapeDesk(card()) ? undefined : card().langScans}
+                    src={heroArt()}
+                    langScans={reverseOn() || isLandscapeDesk(card()) ? undefined : card().langScans}
                     alt={cardImageAlt(card())}
                     full
                     dragCard={dragThisCard(card(), shop.offers)}
