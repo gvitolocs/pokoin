@@ -25,7 +25,7 @@ scan, so it never gets a language scan (see the stamp rules below).
 
 | Piece | Where |
 | --- | --- |
-| Scans | `cdn.pokoin.com/tcgdex/{lang}/{serie}/{set}/{localId}.webp` (both CDN origins), 600×825, transparent rounded corners. Source and upload manifests on nezopt 15T: `~/mnt/mybook/datasets/tcg/pokoin-cdn/tcgdex/{lang}/…`, `…/manifest/{lang}.jsonl` |
+| Scans | `cdn.pokoin.com/tcgdex/{lang}/{serie}/{set}/{localId}.webp` (both CDN origins), 600×825, transparent rounded corners. Mapped languages: `de es fr it pt` (66,863 rows). Also kept, not mapped: `es-mx id pt-br th zh-tw`. `tcgdex/en` and `tcgdex/ja` (card renders, never language scans) were deleted from both origins on 2026-10-20. Manifests: only the CDN copy `objects/tcgdex/manifest/{lang}.jsonl` is left. The 15T source tree `~/mnt/mybook/datasets/tcg/pokoin-cdn/tcgdex` no longer has `de en es es-mx fr it pt` or its `manifest` (deleted 2026-10-20), so a rebuild must first fetch the scans again |
 | Mapping table | `public.marketplace_leftover_lang_scans (ct_id, language, scan_path)` — `scripts/sql/129_leftover_lang_scans.sql`. Key = leftover `ct_id` (public card id / 2). `scan_path` is `{serie}/{set}/{localId}` |
 | Mapping tool | `tools/lang-scans` (Rust, own workspace) |
 | API field | `langScans: "de,fr,it:swsh/swsh3/136"` on card records, only when the printing has one |

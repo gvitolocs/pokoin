@@ -348,7 +348,7 @@ test('ownCatalogImage rewrites preview_, public-id, and stale leftover keys to l
       name: 'Mega Lucario ex',
       canonicalPath: '/marketplace/en/cards/703072/card-mega-lucario-ex-ultra-rare-077-132-mega-evolution',
     }, '/card-images/21971_mega-lucario-ex.jpg'),
-    '/card-images/351536_mega-lucario-ex.jpg?v=hd1',
+    '/card-images/351536_mega-lucario-ex.jpg?v=ap1',
   );
   assert.equal(
     ownCatalogImage({ id: '689316' }, '/card-images/689316_mega-lucario-ex.jpg'),
