@@ -491,6 +491,27 @@ pub async fn request_pkn_withdraw(
 // POST /api/unlock-silver
 // ---------------------------------------------------------------------------
 
+/// `users/{uid}.silverUntil` as epoch ms. FirestoreClient decodes a Firestore
+/// timestampValue into an RFC 3339 string, but raw `{"timestampValue": ...}`,
+/// epoch ms and `{seconds}` snapshots are accepted too.
+fn silver_until_ms(profile: &Value) -> Option<i64> {
+    profile.get("silverUntil").and_then(super::date_ms)
+}
+
+/// The paid membership is live while `silverUntil` is in the future; admins
+/// are the caller's `has_admin_access()`.
+fn silver_membership_active(silver_until_ms: Option<i64>, now_ms: i64) -> bool {
+    silver_until_ms.map(|until| until > now_ms).unwrap_or(false)
+}
+
+/// Responses and writes always report `silverUntil` as an RFC 3339 string,
+/// even when the stored value was a Firestore timestamp.
+fn silver_until_rfc3339(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 pub async fn unlock_silver(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
@@ -498,33 +519,13 @@ pub async fn unlock_silver(
     let price = state.config().silver_price_pkn;
     let treasury_username = state.config().pokoin_treasury_username.clone();
     let profile = store::read_user(state.firestore()?, &claims.uid).await?;
-    let role = profile
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let silver_until = profile
-        .get("silverUntil")
-        .and_then(Value::as_str)
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.timestamp_millis());
+    let silver_until = silver_until_ms(&profile);
     let balance = store::balance(state.firestore()?, &claims.uid).await?;
 
-    let active = silver_until.map(|until| until > state.now_ms()).unwrap_or(false);
-    if claims.has_admin_access() || role == "silver" || active {
+    if claims.has_admin_access() || silver_membership_active(silver_until, state.now_ms()) {
         let until = silver_until
-            .map(|until| {
-                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(until)
-                    .unwrap_or_else(chrono::Utc::now)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            })
-            .unwrap_or_else(|| {
-                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
-                    state.now_ms() + SILVER_DURATION_MS,
-                )
-                .unwrap_or_else(chrono::Utc::now)
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            });
+            .map(silver_until_rfc3339)
+            .unwrap_or_else(|| silver_until_rfc3339(state.now_ms() + SILVER_DURATION_MS));
         return Ok(private_json(json!({
             "ok": true,
             "pricePkn": price,
@@ -545,30 +546,23 @@ pub async fn unlock_silver(
             "Pokoin treasury account cannot unlock Silver for itself.",
         ));
     }
-    let until = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
-        state.now_ms() + SILVER_DURATION_MS,
-    )
-    .unwrap_or_else(chrono::Utc::now);
+    let until = silver_until_rfc3339(state.now_ms() + SILVER_DURATION_MS);
 
-    let op = LedgerOp::transfer(
-        &claims.uid,
-        &treasury,
-        price,
-        "silver_unlock_payment_sent",
-    )
-    .with_meta(json!({
-        "purpose": "silver_membership",
-        "silverUntil": until.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "counterpartyUsername": treasury_username,
-    }));
+    let op = LedgerOp::transfer(&claims.uid, &treasury, price, "silver_unlock_payment_sent")
+        .with_meta(json!({
+            "purpose": "silver_membership",
+            "silverUntil": until,
+            "counterpartyUsername": treasury_username,
+        }));
     store::apply(state.firestore()?, &op).await?;
 
+    // `role: "silver"` no longer grants anything (paid Silver expires after a
+    // year); write_user merges, so a pre-existing role is left untouched.
     store::write_user(
         state.firestore()?,
         &claims.uid,
         json!({
-            "role": "silver",
-            "silverUntil": until.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "silverUntil": until,
             "silverUnlockedAt": store::now_iso(),
         }),
     )
@@ -578,7 +572,7 @@ pub async fn unlock_silver(
         "ok": true,
         "pricePkn": price,
         "availablePkn": balance.available_pkn - price,
-        "silverUntil": until.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "silverUntil": until,
     })))
 }
 
@@ -1043,4 +1037,85 @@ pub async fn earn_pkn(
     }
     Ok(axum::Json(json!({ "ok": true, "email": {"ok": true, "id": delivery.id} })).into_response())
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const NOW: i64 = 1_800_000_000_000;
+
+    /// The exact `store::read_user` shape: FirestoreClient decodes a Firestore
+    /// timestampValue into a plain RFC 3339 string (firestore.rs decode_value).
+    fn decoded_user(silver_until_field: Value) -> Value {
+        let document = json!({
+            "fields": {
+                "role": { "stringValue": "silver" },
+                "silverUntil": silver_until_field,
+            }
+        });
+        crate::firestore::fields_to_value(document.get("fields"))
+    }
+
+    #[test]
+    fn a_timestamp_typed_future_silver_until_is_active() {
+        // A paying user whose silverUntil is the 2027 Firestore TIMESTAMP and
+        // who still has the legacy role: already Silver, no charge path.
+        let typed = decoded_user(json!({ "timestampValue": "2027-09-16T14:05:58.514Z" }));
+        let ms = silver_until_ms(&typed).unwrap();
+        assert!(silver_membership_active(Some(ms), NOW));
+        // The already-Silver response still reports an RFC 3339 string.
+        let reported = silver_until_rfc3339(ms);
+        assert_eq!(
+            chrono::DateTime::parse_from_rfc3339(&reported)
+                .unwrap()
+                .timestamp_millis(),
+            chrono::DateTime::parse_from_rfc3339("2027-09-16T14:05:58.514Z")
+                .unwrap()
+                .timestamp_millis(),
+        );
+        // Same verdict when the field was stored as a string: both decode to
+        // the same plain RFC 3339 string read_user hands the handler.
+        assert!(silver_membership_active(
+            silver_until_ms(&decoded_user(
+                json!({ "stringValue": "2027-09-16T14:05:58.514Z" })
+            )),
+            NOW
+        ));
+    }
+
+    #[test]
+    fn a_timestamp_typed_past_silver_until_is_not_active() {
+        let typed = decoded_user(json!({ "timestampValue": "2020-01-01T00:00:00.000Z" }));
+        assert!(!silver_membership_active(silver_until_ms(&typed), NOW));
+        assert!(!silver_membership_active(
+            silver_until_ms(&decoded_user(
+                json!({ "stringValue": "2020-01-01T00:00:00.000Z" })
+            )),
+            NOW
+        ));
+        // The legacy role alone never reactivates an expired (or missing)
+        // membership: buying again is the only path back.
+        assert!(!silver_membership_active(
+            silver_until_ms(&json!({ "role": "silver" })),
+            NOW
+        ));
+    }
+
+    #[test]
+    fn seconds_and_millis_timestamp_shapes_count_too() {
+        let future_seconds = json!({ "silverUntil": { "seconds": NOW / 1000 + 60 } });
+        assert!(silver_membership_active(
+            silver_until_ms(&future_seconds),
+            NOW
+        ));
+        let millis = json!({ "silverUntil": NOW + 1 });
+        assert!(silver_membership_active(silver_until_ms(&millis), NOW));
+        let past_seconds = json!({ "silverUntil": { "seconds": NOW / 1000 - 60 } });
+        assert!(!silver_membership_active(
+            silver_until_ms(&past_seconds),
+            NOW
+        ));
+    }
 }

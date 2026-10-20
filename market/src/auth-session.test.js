@@ -61,6 +61,39 @@ test('expired silverUntil does not keep CT/CM/VT unlocked', () => {
   assert.equal(cached.silverUntil, null);
 });
 
+test('a cached silver flag without a live silverUntil does not paint Silver', () => {
+  const store = memoryStore();
+  writeAuthSession({ uid: 'user-1', silver: true, admin: false }, store);
+  const cached = readAuthSession(store);
+  assert.equal(cached.signedIn, true);
+  assert.equal(cached.silver, false);
+  assert.equal(cached.silverUntil, null);
+});
+
+test('a cached silver flag with an expired silverUntil does not paint Silver', () => {
+  const store = memoryStore();
+  store.setItem(AUTH_SESSION_KEY, JSON.stringify({
+    uid: 'user-1',
+    signedIn: true,
+    admin: false,
+    silver: true,
+    silverUntil: '2020-01-01T00:00:00.000Z',
+  }));
+  const cached = readAuthSession(store);
+  assert.equal(cached.signedIn, true);
+  assert.equal(cached.silver, false);
+  assert.equal(cached.silverUntil, null);
+});
+
+test('a cached admin paints Silver with no silverUntil', () => {
+  const store = memoryStore();
+  writeAuthSession({ uid: 'user-1', silver: true, admin: true }, store);
+  const cached = readAuthSession(store);
+  assert.equal(cached.admin, true);
+  assert.equal(cached.silver, true);
+  assert.equal(cached.silverUntil, null);
+});
+
 test('sign-out clears the paint hint', () => {
   const store = memoryStore();
   writeAuthSession({ uid: 'user-1', silver: true }, store);

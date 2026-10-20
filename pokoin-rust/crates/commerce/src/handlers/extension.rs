@@ -9,8 +9,8 @@
 //! (`scripts/nezopt-k3s.sh`).
 //!
 //! 401 without a valid Firebase ID token, 403 when the account is not Silver
-//! (the site rule, `market/src/auth-profile.js` `profileFrom`: admin, role
-//! `silver`, or `silverUntil` in the future), 404 while no zip is published.
+//! (the site rule, `market/src/auth-profile.js` `profileFrom`: admin, or an
+//! unexpired `silverUntil`), 404 while no zip is published.
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +21,7 @@ use axum::response::Response;
 use serde_json::Value;
 use tokio_util::io::ReaderStream;
 
+use super::date_ms;
 use crate::error::ApiError;
 use crate::state::{AuthedUser, DomainState};
 use crate::store;
@@ -39,24 +40,9 @@ pub fn extension_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_EXTENSION_DIR))
 }
 
-/// A Firestore date as epoch ms: the decoded RFC 3339 string, epoch ms, or
-/// `{seconds}` (`readDate` in auth-profile.js).
-fn date_ms(value: &Value) -> Option<i64> {
-    match value {
-        Value::String(text) => chrono::DateTime::parse_from_rfc3339(text.trim())
-            .ok()
-            .map(|date| date.timestamp_millis()),
-        Value::Number(number) => number.as_f64().map(|ms| ms as i64),
-        Value::Object(object) => object
-            .get("seconds")
-            .and_then(Value::as_f64)
-            .map(|seconds| (seconds * 1000.0) as i64),
-        _ => None,
-    }
-}
-
-/// `profileFrom(users/{uid}).silver`: admin, role `silver`, or an unexpired
-/// `silverUntil`.
+/// `profileFrom(users/{uid}).silver`: admin, or an unexpired `silverUntil`.
+/// A `role: "silver"` grants nothing — paid Silver expires after a year,
+/// admins stay Silver permanently.
 pub fn profile_is_silver(profile: &Value, now_ms: i64) -> bool {
     let role = profile
         .get("role")
@@ -79,7 +65,7 @@ pub fn profile_is_silver(profile: &Value, now_ms: i64) -> bool {
         || role == "admin"
         || roles_admin;
     let until = profile.get("silverUntil").and_then(date_ms);
-    admin || role == "silver" || until.map(|ms| ms > now_ms).unwrap_or(false)
+    admin || until.map(|ms| ms > now_ms).unwrap_or(false)
 }
 
 /// `12.0.72` from `pokoin-extension-12.0.72.zip`, as comparable parts.
@@ -162,12 +148,35 @@ mod tests {
     fn silver_follows_the_site_profile_rule() {
         assert!(!profile_is_silver(&json!({}), NOW));
         assert!(!profile_is_silver(&json!({"role": "member"}), NOW));
-        assert!(profile_is_silver(&json!({"role": "Silver"}), NOW));
         assert!(profile_is_silver(&json!({"admin": true}), NOW));
         assert!(profile_is_silver(&json!({"isAdmin": true}), NOW));
         assert!(profile_is_silver(&json!({"role": "admin"}), NOW));
         assert!(profile_is_silver(&json!({"roles": ["user", "ADMIN"]}), NOW));
         assert!(!profile_is_silver(&json!({"admin": "yes"}), NOW));
+    }
+
+    #[test]
+    fn role_silver_no_longer_grants_silver() {
+        // Paid Silver expires after a year: a legacy `role: "silver"` without
+        // a live `silverUntil` is just an expired membership, while admins
+        // keep Silver with nothing else on the document.
+        assert!(!profile_is_silver(&json!({"role": "silver"}), NOW));
+        assert!(!profile_is_silver(&json!({"role": "Silver"}), NOW));
+        let past = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW - 60_000)
+            .unwrap()
+            .to_rfc3339();
+        assert!(!profile_is_silver(
+            &json!({"role": "silver", "silverUntil": past}),
+            NOW
+        ));
+        let future = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW + 60_000)
+            .unwrap()
+            .to_rfc3339();
+        assert!(profile_is_silver(
+            &json!({"role": "silver", "silverUntil": future}),
+            NOW
+        ));
+        assert!(profile_is_silver(&json!({"admin": true}), NOW));
     }
 
     #[test]
@@ -183,6 +192,33 @@ mod tests {
         assert!(profile_is_silver(&json!({"silverUntil": NOW + 1}), NOW));
         assert!(profile_is_silver(&json!({"silverUntil": {"seconds": NOW / 1000 + 60}}), NOW));
         assert!(!profile_is_silver(&json!({"silverUntil": "not a date"}), NOW));
+    }
+
+    #[test]
+    fn a_firestore_timestamp_typed_silver_until_still_counts() {
+        // The exact read_user shape: FirestoreClient decodes a Firestore
+        // timestampValue into a plain RFC 3339 string (firestore.rs
+        // decode_value). The paying user with legacy role "silver" keeps
+        // Silver through it; an expired one does not.
+        let document = |timestamp: &str| {
+            json!({
+                "fields": {
+                    "role": { "stringValue": "silver" },
+                    "silverUntil": { "timestampValue": timestamp },
+                }
+            })
+        };
+        let future =
+            crate::firestore::fields_to_value(document("2027-09-16T14:05:58.514Z").get("fields"));
+        assert_eq!(future["silverUntil"], json!("2027-09-16T14:05:58.514Z"));
+        assert!(profile_is_silver(&future, NOW));
+        let past =
+            crate::firestore::fields_to_value(document("2020-01-01T00:00:00.000Z").get("fields"));
+        assert!(!profile_is_silver(&past, NOW));
+        // A raw (undecoded) timestampValue object is accepted too, so the
+        // helper does not depend on the caller having decoded the document.
+        let raw = json!({"silverUntil": {"timestampValue": "2030-01-01T00:00:00Z"}});
+        assert!(profile_is_silver(&raw, NOW));
     }
 
     #[test]
