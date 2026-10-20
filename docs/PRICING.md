@@ -8,8 +8,10 @@ Since 2026-10-15 every place that prices a card from CardTrader uses one rule
 > **condition**, **language**, **reverse** and **first edition**.
 
 - Offers come from `cardtrader_market_listing_snapshots` (the complete daily
-  book). Offers not seen in the last 3 days and sellers on vacation
-  (`cardtrader_seller_vacation.on_vacation`) do not count.
+  book). Offers not seen in the last 3 days, sellers on vacation
+  (`cardtrader_seller_vacation.on_vacation`) and graded, signed or altered
+  copies do not count. A graded, signed or altered listing has no CardTrader
+  price.
 - Private (`normal`) sellers do not count: their one-off asks undercut the
   market and made every comp too low.
 - No fallback to another facet. A reverse holo is never priced from the plain
@@ -25,12 +27,35 @@ Since 2026-10-15 every place that prices a card from CardTrader uses one rule
 Where it is used:
 
 - `GET /api/marketplace-price-check` (`ctMatchedPkn`, `ctBasis: "pro"`). Items
-  are `card:CONDITION:LANGUAGE[:FLAGS]` with flags `R` (reverse) and `F`
-  (first edition); each comp is also returned under that key so two copies of
-  one card never share a comp.
+  are `card:CONDITION:LANGUAGE[:FLAGS]` with flags `R` (reverse), `F` (first
+  edition), `H` (foil), `G` (graded), `S` (signed) and `A` (altered); each
+  comp is also returned under that key so two copies of one card never share
+  a comp.
 - MyPokoin board market column, pricing strategies with the CardTrader source,
   the collection's suggested asks, and the card desk's suggested price (the
   sold graph only fills in when no professional offer exists).
+
+## Games other than Pokémon
+
+The satellite game databases have no per-offer book (only the cheapest offer
+per blueprint in `cardtrader_blueprint_listing_cache`), so the price check
+prices them from the CardRails price file the Pokoin extension reads:
+`GET https://cardrails-api.pokoin.com/v1/prices/{game}` (PKP3, built twice a
+day on nezopt by `price-book.timer`, pokoin-scanner `native/price_book`).
+`pokoin-rust/crates/external/src/price_book.rs` keeps its source 7 and
+applies the extension's rule (`pricebook.rs` `grid`):
+
+> the cheapest current offer of a **CardTrader Zero / hub** (or "1 day
+> ready") seller of the same card, in the same **language** and **finish**
+> (foil), in the listing's **condition or a better one**.
+
+- Graded, signed and altered offers are not in the file; such a listing has
+  no CardTrader price. The file does not split first edition from unlimited.
+- No matching offer means no CardTrader price (`—`); the extension's sold
+  median fallback is not used.
+- The SPA sends one price check per game (`?game=`): card ids are per game.
+  Comps carry `ctBasis: "zero"`. The API caches each game's file for an hour
+  (`POKOIN_PRICE_FILE_ORIGIN` overrides the host).
 
 ## Repricing a seller
 

@@ -1,0 +1,28 @@
+[package]
+name = "artofpkm-catalog"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Polite, resumable archive of one artofpkm catalog (artwork pages, full-resolution images, linked card pages)"
+
+# Own workspace: crawler deps must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "artofpkm-catalog"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+fs2 = "0.4"
+imagesize = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "brotli", "deflate"] }
+scraper = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+strip = true

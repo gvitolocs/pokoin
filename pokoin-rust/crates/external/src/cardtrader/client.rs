@@ -477,16 +477,21 @@ pub const TRANSPORT_ERROR: &str = "cardtrader_transport";
 /// Error code prefix of an HTTP error answer (`cardtrader_http_422`).
 pub const HTTP_ERROR_PREFIX: &str = "cardtrader_http_";
 
+/// HTTP status carried by an HTTP error answer (`cardtrader_http_503` → `Some(503)`).
+pub fn http_error_status(error: &ApiError) -> Option<u16> {
+    error
+        .code
+        .as_deref()
+        .and_then(|code| code.strip_prefix(HTTP_ERROR_PREFIX))
+        .and_then(|status| status.parse::<u16>().ok())
+}
+
 /// Whether a failed write may still have happened on CardTrader: no answer at
 /// all, or a 5xx. A 4xx answer, a rejected token or an edge block did nothing.
 pub fn write_in_doubt(error: &ApiError) -> bool {
     match error.code.as_deref() {
         Some(TRANSPORT_ERROR) => true,
-        Some(code) => code
-            .strip_prefix(HTTP_ERROR_PREFIX)
-            .and_then(|status| status.parse::<u16>().ok())
-            .is_some_and(|status| status >= 500),
-        None => false,
+        _ => http_error_status(error).is_some_and(|status| status >= 500),
     }
 }
 

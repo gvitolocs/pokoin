@@ -1117,9 +1117,19 @@ h1, h2 { margin: 0 0 0.85rem; }
   border: 0;
   border-radius: 999px;
   padding: 0.5rem 1.15rem;
+  min-height: 2.5rem;
   font-weight: 700;
   cursor: pointer;
 }
+
+.cookie-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 0.5rem; }
+.cookie-banner button.cookie-essential {
+  background: transparent;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.4);
+}
+/* The open phone menu (z 55) sits under the banner (z 80): hide the banner while it is open. */
+html:has(.mobile-panel.on) .cookie-banner { display: none; }
 
 .working-on-it {
   min-height: 100vh;
@@ -1248,7 +1258,6 @@ h1, h2 { margin: 0 0 0.85rem; }
   animation: promo-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.promo-copy > .eyebrow { animation-delay: 0s; }
 .promo-copy > .promo-wordmark-slot { animation-delay: 0.21s; }
 .promo-copy > h1 { animation-delay: 0.42s; }
 .promo-copy > .promo-lede { animation-delay: 0.84s; }
@@ -2907,6 +2916,23 @@ html.desk-tinted.desk-ghost .card-page .asset-header.shaded {
 }
 
 .quote-pill.quote-pkn { color: var(--yellow); }
+button.quote-pill { font: inherit; font-size: 0.72rem; font-weight: 800; cursor: pointer; }
+
+/* "Market price" names the median pill; the tap-open line says what it is. */
+.quote-label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quote-help {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
 
 .quote-pill.oos { color: var(--muted); }
 
@@ -3311,6 +3337,35 @@ select.collector-badge.version-badge option {
   line-height: 1;
 }
 
+/* Gold sparkles: swaps the desk scan to the printing's reverse holo and back. */
+.reverse-toggle {
+  padding: 0.15rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.reverse-toggle .reverse-sparkles {
+  width: 100%;
+  height: 100%;
+  opacity: 0.82;
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.reverse-toggle:hover .reverse-sparkles,
+.reverse-toggle:focus-visible .reverse-sparkles,
+.reverse-toggle.is-on .reverse-sparkles {
+  opacity: 1;
+  filter:
+    drop-shadow(0 0 3px rgb(255 211 61 / 0.95))
+    drop-shadow(0 0 8px rgb(255 211 61 / 0.7))
+    drop-shadow(0 0 16px rgb(255 211 61 / 0.35));
+}
+
+.reverse-toggle:focus-visible {
+  outline: 2px solid rgb(255 211 61 / 0.8);
+  outline-offset: 2px;
+}
+
 .more-versions {
   display: inline-block;
   padding: 0.38rem 0.95rem;
@@ -3534,6 +3589,16 @@ a.era-link:focus-visible {
 
 .hero-deal .buy-btn {
   margin-top: auto;
+}
+
+.hero-deal .deal-what { margin: 0.1rem 0 0.4rem; color: var(--muted); font-size: 0.85rem; }
+
+/* Best Deal with no Pokoin offer: a sentence, not a dead grey button. */
+.hero-deal .deal-none {
+  margin: auto 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .hero-art-col .art-frame {
@@ -4173,6 +4238,10 @@ a.era-link:focus-visible {
 }
 
 .sell-form { background: var(--surface); }
+/* Signed-out desk: the sell form folds to one row until "List yours". */
+.sell-form.is-collapsed { align-self: start; flex: none; height: auto; min-height: 0; }
+.sell-form.is-collapsed .add-head { margin-bottom: 0; align-items: center; }
+.sell-form .sell-open { min-height: 2.5rem; padding: 0 1rem; border-radius: 999px; }
 
 .sell-msg {
   margin: 0.55rem 0 0;
@@ -5603,6 +5672,85 @@ dialog.zoom:not([open]) {
 .about-cta a {
   color: inherit;
   font-weight: 800;
+}
+
+/* Founder bubble: one compact card, the page stays about Pokoin. */
+.about-founder-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.1rem;
+  margin: 0;
+  padding: 1rem 1.4rem 1rem 1rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px -32px rgb(255 211 61 / 0.25);
+}
+
+.about-founder-card picture {
+  flex: none;
+  display: block;
+}
+
+.about-founder-avatar {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgb(255 211 61 / 0.4);
+}
+
+.about-founder-monogram {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--surface);
+  color: var(--yellow);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.about-founder-name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.about-founder-name .about-gold {
+  color: var(--yellow);
+}
+
+.about-section .about-founder-role,
+.about-section .about-founder-meta {
+  margin: 0.1rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.about-section .about-founder-role {
+  color: var(--text);
+}
+
+.about-founder-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+}
+
+.about-founder-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 0.92rem;
+}
+
+.about-founder a:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
 
@@ -7414,6 +7562,12 @@ dialog.zoom:not([open]) {
   .about-surfaces {
     grid-template-columns: 1fr;
   }
+  .about-founder-card {
+    display: flex;
+    border-radius: 18px;
+    padding: 0.9rem 1rem;
+  }
+  .about-founder-avatar { width: 4.5rem; height: 4.5rem; }
   .about-mark { display: none; }
   .about-title {
     font-size: clamp(1.7rem, 8vw, 2.25rem);
@@ -7647,7 +7801,7 @@ dialog.zoom:not([open]) {
      line beside the corner buttons; the sub line then keeps the full width
      for set + number + artist. */
   .asset-header {
-    height: 5.75rem;
+    min-height: 5.75rem;
     padding: 0.7rem 0.8rem;
     gap: 0.2rem 0.45rem;
     border-radius: 12px;
@@ -7663,21 +7817,31 @@ dialog.zoom:not([open]) {
     display: contents;
   }
 
+  /* The name keeps the row with the corner buttons only; the price pills
+     drop to their own line so "Pikachu" is not cut to "Pikac…". */
   .asset-title-row h1 {
     order: 1;
+    flex: 1 1 0;
     font-size: 1.35rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .asset-header .asset-quotes {
+  .asset-header .asset-title-tools {
     order: 2;
+    padding-top: 0;
   }
 
-  .asset-header .asset-title-tools {
+  .asset-header .asset-quotes {
     order: 3;
+    flex: 0 0 100%;
     padding-top: 0;
+  }
+
+  .asset-header .quote-help {
+    order: 5;
+    flex: 0 0 100%;
   }
 
   .asset-sub {
@@ -7698,8 +7862,8 @@ dialog.zoom:not([open]) {
   }
 
   .asset-header .icon-btn {
-    width: 2rem;
-    height: 2rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .quote-pill,
@@ -10961,3 +11125,52 @@ html:has(.wallet-page) .brand span {
   content-visibility: auto;
   contain-intrinsic-size: auto 360px;
 }
+
+/* Card scan in the picked card language (market/src/lang-scans.js). TCGdex
+   scans are 600×825 (0.727) with transparent rounded corners: cover the
+   63:88 frame (a ~1.5% side crop) and paint the corners dark, as on a
+   leftover JPEG. */
+img.is-lang-scan {
+  object-fit: cover;
+  background: #101114;
+}
+
+.art-frame:has(> .lang-scan-note) {
+  position: relative;
+}
+
+.lang-scan-note {
+  position: absolute;
+  left: 50%;
+  bottom: 0.6rem;
+  transform: translateX(-50%);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgb(8 10 16 / 0.72);
+  color: #f2f3f5;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Shop row add-to-cart confirmation (ShopListing). Sits above the chat button. */
+.cart-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1.25rem + var(--cookie-banner-h, 0px));
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 0.7rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g2);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 650;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+  white-space: nowrap;
+}
+
+.cart-toast a { color: var(--yellow); font-weight: 800; }

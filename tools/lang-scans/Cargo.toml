@@ -1,0 +1,23 @@
+[package]
+name = "lang-scans"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Map western leftover printings to the TCGdex scan of the same card in another language"
+
+# Own workspace: data tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "lang-scans"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"
+image = { version = "0.25", default-features = false, features = ["webp", "jpeg"] }
+
+[profile.release]
+strip = true

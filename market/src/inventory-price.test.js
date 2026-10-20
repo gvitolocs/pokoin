@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inventoryMarketLabel, inventoryMarketValue, priceCheckKey } from './inventory-price.js';
+import { inventoryMarketLabel, inventoryMarketValue, priceCheckItem, priceCheckKey, priceGame } from './inventory-price.js';
 
 const row = { cardId: '824942' };
 const daily = { days: [
@@ -32,6 +32,34 @@ test('a reverse or first-edition copy reads its own comp', () => {
   assert.equal(priceCheckKey({ cardId: '1', condition: 'PO', language: 'IT' }), '1:Poor:IT:');
   assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN', reverse: true }, 'cardtrader').value, 590);
   assert.equal(inventoryMarketValue(prices, { cardId: '824942', condition: 'NM', language: 'EN' }, 'cardtrader').value, 64);
+});
+
+test('graded, signed, altered and foil copies carry their own flags in the server order', () => {
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'NM', language: 'EN', graded: true }), '1:NM:EN:G');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'NM', language: 'EN', signed: true, altered: true }), '1:NM:EN:SA');
+  assert.equal(priceCheckKey({ cardId: '1', condition: 'NM', language: 'EN', foil_state: 'foil' }), '1:NM:EN:H');
+  assert.equal(priceCheckKey({
+    cardId: '1', condition: 'NM', language: 'EN', reverse: true, firstEdition: true, foil: true, graded: true, signed: true, altered: true,
+  }), '1:NM:EN:RFHGSA');
+  // An item keys like the row it came from (fetchPriceCheck sends items).
+  const item = priceCheckItem({ card_id: '7', condition: 'LP', language: 'it', foilState: 'reverse', graded: true });
+  assert.equal(priceCheckKey(item), '7:SP:IT:RG');
+  // A graded copy never reads the raw copy's comp.
+  const prices = { 7: { ctMatchedPkn: 50 }, '7:NM:EN:': { ctMatchedPkn: 50 }, '7:NM:EN:G': { ctMatchedPkn: null } };
+  assert.equal(inventoryMarketValue(prices, { cardId: '7', condition: 'NM', language: 'EN', graded: true }, 'cardtrader'), null);
+});
+
+test('rows price against their own game', () => {
+  assert.equal(priceGame({ marketplaceGame: 'riftbound' }), 'riftbound');
+  assert.equal(priceGame({ marketplace_game: 'magic' }, 'pokemon'), 'magic');
+  assert.equal(priceGame({}, 'one_piece'), 'one_piece');
+  assert.equal(priceGame({ marketplaceGame: '' }), 'pokemon');
+});
+
+test('other games read the CardTrader Zero price file', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'zero' } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 240);
+  assert.match(value.title, /CardTrader Zero seller with the same language and finish, in this condition or better/);
 });
 
 test('TCGplayer variants retain USD and source timestamps without PKN conversion', () => {

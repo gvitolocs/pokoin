@@ -38,9 +38,14 @@ struct CacheRule {
     ranges: Vec<(u64, u64)>,
 }
 
+static CACHE_TABLE: LazyLock<Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../../../market/src/data/catalog-image-cache.json")).expect("catalog-image-cache.json")
+});
+
+static THUMB_TOKEN: LazyLock<String> = LazyLock::new(|| CACHE_TABLE["thumbToken"].as_str().unwrap_or("").to_owned());
+
 static CACHE_RULES: LazyLock<Vec<CacheRule>> = LazyLock::new(|| {
-    let table: Value = serde_json::from_str(include_str!("../../../../market/src/data/catalog-image-cache.json"))
-        .expect("catalog-image-cache.json");
+    let table = &*CACHE_TABLE;
     let list = |name: &str| -> Vec<u64> {
         let text = match name {
             "small-scan-ctf1" => include_str!("../../../../market/src/data/small-scan-ctf1.json"),
@@ -70,6 +75,8 @@ static VERSION_QUERY_RE: LazyLock<Regex> = LazyLock::new(|| re("[?&]v="));
 static PREVIEW_RE: LazyLock<Regex> = LazyLock::new(|| re("/(?i-u:previews/|preview_)"));
 static CARDTRADER_HOST_RE: LazyLock<Regex> = LazyLock::new(|| re(r"(?:^|\.)(?i-u:cardtrader\.com)$"));
 static HOMEPAGE_WEBP_RE: LazyLock<Regex> = LazyLock::new(|| re(r"(?i-u:_homepage\.webp)(\?|$)"));
+static HOMEPAGE_THUMB_RE: LazyLock<Regex> = LazyLock::new(|| re(r"(?i-u:_homepage\.webp)(?:[?#]|$)"));
+static VERSION_VALUE_RE: LazyLock<Regex> = LazyLock::new(|| re("([?&]v=)([^&#]*)"));
 static PNG_WEBP_RE: LazyLock<Regex> = LazyLock::new(|| re(r"\.(?i-u:png|webp)(\?|$)"));
 static RASTER_EXT_RE: LazyLock<Regex> = LazyLock::new(|| re(r"\.(?i-u:jpe?g|png|webp)(\?|$)"));
 static EXT_MATCH_RE: LazyLock<Regex> = LazyLock::new(|| re(r"\.((?i-u:jpe?g|png|webp))(?:\?|$)"));
@@ -183,9 +190,52 @@ fn with_catalog_cache(url: &str) -> String {
     }
     let token = catalog_cache_token(&catalog_image_id(url));
     if token.is_empty() || VERSION_QUERY_RE.is_match(url) {
+        return with_thumb_token(url);
+    }
+    with_thumb_token(&format!("{url}{}v={token}", if url.contains('?') { '&' } else { '?' }))
+}
+
+/// `withThumbToken`: Pokemon `_homepage.webp` thumbs were all rebuilt under their
+/// old keys, so their `v` also carries `thumbToken` (`v=hd1.t480`, or `v=t480`).
+fn with_thumb_token(url: &str) -> String {
+    let token = THUMB_TOKEN.as_str();
+    if token.is_empty() || !HOMEPAGE_THUMB_RE.is_match(url) || is_prefixed_catalog(url) {
         return url.to_owned();
     }
-    format!("{url}{}v={token}", if url.contains('?') { '&' } else { '?' })
+    let Some(caps) = VERSION_VALUE_RE.captures(url) else {
+        let (head, hash) = url.find('#').map_or((url, ""), |i| url.split_at(i));
+        return format!("{head}{}v={token}{hash}", if head.contains('?') { '&' } else { '?' });
+    };
+    let value = group(&caps, 2);
+    if value == token || value.ends_with(&format!(".{token}")) {
+        return url.to_owned();
+    }
+    let whole = caps.get(0).expect("match");
+    let dot = if value.is_empty() { String::new() } else { format!("{value}.") };
+    format!("{}{}{dot}{token}{}", &url[..whole.start()], group(&caps, 1), &url[whole.end()..])
+}
+
+/// `withoutThumbToken`: the JPEG behind a thumb keeps only its own id token.
+fn without_thumb_token(url: &str) -> String {
+    let token = THUMB_TOKEN.as_str();
+    let Some(at) = url.find('?') else { return url.to_owned() };
+    if token.is_empty() {
+        return url.to_owned();
+    }
+    let hash_at = url[at..].find('#').map(|i| at + i);
+    let query = &url[at + 1..hash_at.unwrap_or(url.len())];
+    let hash = hash_at.map_or("", |i| &url[i..]);
+    let suffix = format!(".{token}");
+    let params: Vec<String> = query
+        .split('&')
+        .filter_map(|param| match param.strip_prefix("v=") {
+            Some(value) if value == token => None,
+            Some(value) => Some(value.strip_suffix(&suffix).map_or_else(|| param.to_owned(), |v| format!("v={v}"))),
+            None => Some(param.to_owned()),
+        })
+        .collect();
+    let query = if params.is_empty() { String::new() } else { format!("?{}", params.join("&")) };
+    format!("{}{query}{hash}", &url[..at])
 }
 
 fn leftover_key_matches_card(url: &str, card_id: &str) -> bool {
@@ -383,7 +433,7 @@ fn prefer_full_image(value: &str) -> String {
         }
     }
     if HOMEPAGE_WEBP_RE.is_match(&next) {
-        next = replace_first(&HOMEPAGE_WEBP_RE, &next, |c| format!(".jpg{}", group(c, 1)));
+        next = without_thumb_token(&replace_first(&HOMEPAGE_WEBP_RE, &next, |c| format!(".jpg{}", group(c, 1))));
     }
     if is_prefixed_catalog(&next) || COMPETITIVE_RE.is_match(&next) {
         return next;
@@ -393,10 +443,13 @@ fn prefer_full_image(value: &str) -> String {
 
 fn homepage_derivative_url(value: &str) -> String {
     let full = prefer_full_image(value);
-    if full.is_empty() || HOMEPAGE_WEBP_RE.is_match(&full) {
+    if full.is_empty() {
         return full;
     }
-    replace_first(&RASTER_EXT_RE, &full, |c| format!("_homepage.webp{}", group(c, 1)))
+    if HOMEPAGE_WEBP_RE.is_match(&full) {
+        return with_thumb_token(&full);
+    }
+    with_thumb_token(&replace_first(&RASTER_EXT_RE, &full, |c| format!("_homepage.webp{}", group(c, 1))))
 }
 
 fn own_catalog_image(card: &Value, advertised: &str, game: &str) -> String {
@@ -514,6 +567,23 @@ mod tests {
     fn previews_and_cardtrader_scans_fall_back_to_the_leftover() {
         let card = json!({"id":"806390","name":"Pikachu","heroImageUrl":"https://www.cardtrader.com/uploads/x.jpg"});
         assert_eq!(desk_art_url(&card, "pokemon"), "https://cdn.pokoin.com/403195_pikachu.jpg");
+    }
+
+    #[test]
+    fn thumbs_carry_the_thumb_token_and_their_jpeg_does_not() {
+        assert_eq!(with_thumb_token("/card-images/1_x_homepage.webp"), "/card-images/1_x_homepage.webp?v=t480");
+        assert_eq!(with_thumb_token("/card-images/1_x_homepage.webp?v=hd1"), "/card-images/1_x_homepage.webp?v=hd1.t480");
+        assert_eq!(with_thumb_token("/card-images/1_x_homepage.webp?v=hd1.t480"), "/card-images/1_x_homepage.webp?v=hd1.t480");
+        assert_eq!(with_thumb_token("/card-images/1_x.jpg?v=hd1"), "/card-images/1_x.jpg?v=hd1");
+        assert_eq!(with_thumb_token("/card-images/magic/1_x_homepage.webp"), "/card-images/magic/1_x_homepage.webp");
+        assert_eq!(without_thumb_token("/card-images/1_x.jpg?v=hd1.t480"), "/card-images/1_x.jpg?v=hd1");
+        assert_eq!(without_thumb_token("/card-images/1_x.jpg?v=t480"), "/card-images/1_x.jpg");
+        assert_eq!(without_thumb_token("/card-images/1_x.jpg?a=1&v=t480#z"), "/card-images/1_x.jpg?a=1#z");
+        assert_eq!(prefer_full_image("/card-images/1_x_homepage.webp?v=hd1.t480"), "/card-images/1_x.jpg?v=hd1");
+        assert_eq!(
+            homepage_derivative_url("/card-images/114719_wigglytuff-rare-holo-13-100-ex-crystal-guardians.jpg"),
+            "/card-images/114719_wigglytuff-rare-holo-13-100-ex-crystal-guardians_homepage.webp?v=wg1.t480"
+        );
     }
 
     #[test]

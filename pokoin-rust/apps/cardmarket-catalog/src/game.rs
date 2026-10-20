@@ -179,9 +179,20 @@ pub const BATTLE_SPIRITS_SAGA: Game = Game {
     ],
 };
 
+/// Weiss Schwarz: Cardmarket idGame 10 (English edition only). No expansion
+/// table: the `links` command derives it from card names (`links.rs`).
+pub const WEISS_SCHWARZ: Game = Game {
+    slug: "weiss_schwarz",
+    cardmarket_game: 10,
+    tcgplayer_category: 20,
+    expansions: &[],
+    promo_pins: &[],
+};
+
 pub fn by_slug(slug: &str) -> Option<Game> {
     match slug {
         "battle_spirits_saga" | "bss" | "battle_spirits" => Some(BATTLE_SPIRITS_SAGA),
+        "weiss_schwarz" | "ws" => Some(WEISS_SCHWARZ),
         _ => None,
     }
 }

@@ -61,14 +61,16 @@ test('a pinned URL currency keeps the two-line local + PKN stack', () => {
   assert.equal(parts.pkn, '86 PKN');
 });
 
-test('signed-out buyers keep plain PKN', () => {
+test('signed-out buyers see local currency first, PKN under it', () => {
   const parts = buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null });
-  assert.equal(parts.local, '');
+  assert.ok(parts.local.endsWith('DKK'));
   assert.equal(parts.pkn, '86 PKN');
+  assert.deepEqual(buyerPriceParts({ pricePkn: 352, currency: 'EUR', balancePkn: null }), { local: '€1.76', pkn: '352 PKN' });
+  assert.equal(buyerPriceLabel({ pricePkn: 352, currency: 'EUR', balancePkn: null }), '€1.76 (352 PKN)');
 });
 
-test('signed-out buyers see PKN, except card-only sellers in local currency', () => {
-  assert.deepEqual(buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null }), { local: '', pkn: '86 PKN' });
+test('signed-out buyers pinned to PKN keep plain PKN; card-only sellers stay local only', () => {
+  assert.deepEqual(buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null, pinned: 'PKN' }), { local: '', pkn: '86 PKN' });
   const cardOnly = buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null, sellerAcceptsPkn: false });
   assert.equal(cardOnly.pkn, '');
   assert.ok(cardOnly.local.endsWith('DKK'));

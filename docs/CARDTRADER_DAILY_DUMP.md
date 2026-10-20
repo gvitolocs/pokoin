@@ -11,6 +11,7 @@ into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 |---|---|
 | nezopt | `pokoin-cardtrader-listing-dump` (`pokoin-rust/apps/cardtrader-listing-dump`): order, resume, deadline, status, storage |
 | nezopt | `pokoin-cardtrader-price-cache` (`pokoin-rust/apps/cardtrader-price-cache`): those books → each game's price cache |
+| nezopt | `pokoin-cardtrader-sold` (`pokoin-rust/apps/cardtrader-sold`): those books → the sold graph of every game except Pokémon |
 | Oracle `pokoin-marketplace` | `pokoin-cardtrader-bridge` (`pokoin-rust/apps/cardtrader-bridge`): CardTrader GETs; the token never leaves Oracle |
 | both | `ctbook` (`pokoin-rust/crates/ctbook`): the `.ctb` book format and a CLI |
 
@@ -101,12 +102,106 @@ provider's rows. Native listings are the active shippable rows in
 `--game <slug>` limits the run (`pokemon` for CardTrader game 5). The run
 writes `<root>/price-cache-status.json`.
 
+## Sold graph
+
+The card desk's sold graph and "Market price" read `cardtrader_sold_daily` from
+the card's game database (`GET /api/marketplace-card-sales`). For Pokémon the
+Oracle job `pokoin-cardtrader-daily-market-refresh` fetches the Pokémon
+expansions a second time and runs the writer's persist SQL (MARKET.md "Sold
+comps"). Until 2026-10-20 nothing built it for the other games: their books
+and price cache existed, but every desk said "No sold-card analytics yet".
+
+After the price cache, `run-all-cardtrader-daily.sh` runs
+`pokoin-cardtrader-sold` when installed (`POKOIN_CT_SOLD_BIN` overrides the
+path, `POKOIN_CT_SOLD=off` skips it). It replays the last 16 nights of books of
+every game but Pokémon through the same rules, one expansion book per persist
+step and the finalize after each night:
+
+- the seller stack is seller + blueprint + condition + language + reverse/foil +
+  1st edition + graded (D00002Q, D00002S); a new listing id for the same stack is
+  `listing_id_rotated`; `quantity_decreased` is a same-id drip;
+- a vanished stack counts after 3 complete absences (093) and only when the
+  listing was in the book at least 3 days (101); 088 continuity, the observation
+  sanity freeze, seller vacation (D00003W) and store withdrawal (103) as in SQL;
+- only removed-sale rows of one day per listing and no longer live, as
+  `refresh_cardtrader_sold_daily`.
+
+It writes only `cardtrader_sold_daily` (migration 131) for removed days
+`[from + 4, to]`; the first four nights rebuild the live book. Older days keep
+what earlier runs wrote, so a day stops changing once it leaves the 10-day
+correction window. The per-listing history stays in memory: nothing but the
+daily rows reaches the writer or the Pi replica. The graph's newest two days
+fill in over the next nights (3 complete absences), as on Pokémon.
+
+Two rules are new for the other games:
+
+- The language is the game's own `<game>_language` property when none of the
+  Pokémon/Magic keys is set (`yugioh_language`, `onepiece_language`, …). Foil
+  (`<game>_foil`, `fab_foil_new`) is a stack facet and fills the `reverse`
+  column; the desk labels that chip "Foil" outside Pokémon.
+- An expansion whose book was missing on earlier nights (the partial dumps of
+  8–11 Oct 2026) marks the next night's vanishes `complete_book_cutover`, not
+  sales: what left over several nights would land on one day, like the
+  11–12 Sep cutovers (D00000G, D00000R). Same-id drips still count.
+
+`--dry-run` computes and reports without writing; `--compare` also reads the
+stored rows of the same days, and `--game pokemon --dry-run --compare` is the
+parity check against the Oracle job (it refuses to write Pokémon). On
+2026-10-20, 8–19 Oct: 92,819 rows replayed vs 91,697 stored, 85,865 keys in
+both, 84,188 of them with the same median; 12–19 Oct within a few percent per
+day. `--sample <blueprint>` prints that printing's episodes and rows. `--from`,
+`--to`, `--write-from` set the range (a backfill), `POKOIN_CT_SOLD_THREADS` the
+decode threads (6). The run writes `<root>/sold-status.json`
+(`sold-dry-status.json` for a dry run). About 13 s per Pokémon-sized night;
+the 15 other games take about 20 minutes for 16 nights.
+
+`pokoin-api job build-lists --kind=median` (the `build-lists-medians` CronJob)
+now also stores each CardTrader game's tile medians in
+`marketplace_card_daily_median`; Cardmarket-only games keep the Cardmarket
+trend there.
+
 ## Deploy
 
 ```bash
 scripts/deploy-cardtrader-dump.sh   # clean origin/main checkout on nezopt
 ```
 
-It builds the three binaries, installs the bridge on Oracle (checks glibc ≤ 2.35
+It builds the binaries, installs the bridge on Oracle (checks glibc ≤ 2.35
 and a dry start), and switches `/home/nez/pokoin-cardtrader/current`. Rollback:
 point `current` at the previous release, or remove it to fall back to Python.
+
+### Job code (the scripts)
+
+The unit runs the scripts from `~/pokoin-deploy/cardtrader-daily`, a detached
+checkout of `origin/main` (`deploy/systemd/pokoin-all-cardtrader-daily.service`,
+`WorkingDirectory`). It never runs from the canonical checkout
+`~/Projects/pokoin-web`: until 2026-10-19 it did, and ran another agent's
+uncommitted, 850-commit-old copies of these scripts every night. After a merge
+that changes the job's scripts or its unit:
+
+```bash
+scripts/deploy-cardtrader-daily-checkout.sh   # from any checkout; default origin/main, or pass a sha on main
+```
+
+It fetches, refuses a commit that is not on `origin/main`, waits for a running
+job (it takes the job's `daily.lock`), moves the checkout with
+`checkout --force` + `clean -ffdx`, installs the unit and timer from it and
+checks that the unit's `WorkingDirectory` is that checkout. Rollback: run it
+with the previous sha. The nightly summary names the job's commit and how many
+newer commits to the job's files on `origin/main` are not deployed yet.
+
+## Nightly summary
+
+`scripts/cardtrader-daily-notify.py` runs at the end of the job (~00:55 UTC).
+The Pokémon daily analytics (`cardtrader_blueprint_daily_analytics`) are built
+later, by the Oracle `pokoin-cardtrader-daily-market-refresh` timer (01:00 UTC,
+done ~02:40), which has its own failure mail. So the summary's analytics state is:
+
+| State | Meaning | Status |
+|---|---|---|
+| `fresh` | refreshed after this run started | complete |
+| `expected` | newest bucket is the previous night's (the normal case at ~00:55) | complete |
+| `stale` | newest bucket is older: a refresh was missed (14 Oct 2026) | partial |
+| `missing` / `unknown` | no rows, or the writer probe failed | partial |
+
+A failed stage or an incomplete dump still makes the run `partial` / `failed`.

@@ -3,8 +3,10 @@ import test from 'node:test';
 import {
   COOKIE_BANNER_COPY,
   COOKIE_CONSENT_KEY,
+  COOKIE_CONSENT_ESSENTIAL,
   acceptCookieConsent,
   hasCookieConsent,
+  hasFullCookieConsent,
   isEmbeddedMarketplace,
   readConsentCookie,
   shouldShowCookieBanner,
@@ -61,4 +63,17 @@ test('the chat button and panel sit above the cookie banner instead of covering 
   assert.match(dock, /bottom: calc\(0\.85rem \+ var\(--cookie-banner-h, 0px\)\)/);
   const panel = dock.match(/\.chat-dock \{[^}]*\}/)[0];
   assert.match(panel, /bottom: var\(--cookie-banner-h, 0px\)/);
+});
+
+test('essential-only answers the banner but does not count as full consent', () => {
+  const store = memoryStore();
+  acceptCookieConsent(store, COOKIE_CONSENT_ESSENTIAL);
+  assert.equal(store.getItem(COOKIE_CONSENT_KEY), 'essential');
+  assert.equal(hasCookieConsent(store), true);
+  assert.equal(hasFullCookieConsent(store), false);
+  assert.equal(shouldShowCookieBanner(store, { self: {}, top: null }), false);
+  assert.equal(hasFullCookieConsent(memoryStore(), 'pokoin_cookie_consent=essential'), false);
+  assert.equal(hasCookieConsent(memoryStore(), 'pokoin_cookie_consent=essential'), true);
+  acceptCookieConsent(store);
+  assert.equal(hasFullCookieConsent(store), true);
 });

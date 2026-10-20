@@ -687,6 +687,16 @@ pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value
         crate::seller_api::log_listing_event(state, event_id, payload).await?;
         payload["steps"]["sellerApi"] = json!(true);
     }
+    // TCGplayer (and later channels). Missing tables mean the feature is off;
+    // any other database error retries with the outbox. The step flag keeps a
+    // retry of this same event from enqueueing twice.
+    if payload["steps"]["tcgplayer"] != true {
+        match crate::channel_sync::enqueue_for_event(state, payload).await {
+            Err(error) if error.code.as_deref() == Some("channel_sync_disabled") => {}
+            Err(error) => return Err(error),
+            Ok(()) => payload["steps"]["tcgplayer"] = json!(true),
+        }
+    }
     // The seller's stored shop book is rebuilt behind this, not by a visitor.
     crate::handlers::seller_book::kick_seller(state, &seller);
     if payload["wantsCardtrader"] == true && payload["steps"]["cardtrader"].is_null() {

@@ -55,12 +55,28 @@ imported module"). Tabs left open on the old release hit the same 404 on their n
 - **A missing chunk's 404 is cached for a year.** The `_headers` rule `/market/s/*` matches
   by path, not by status, so a 404 there also gets `max-age=31536000, immutable`, and
   browsers keep it. This can still happen when a new shell reaches an edge that is still
-  on the old version. `market/public/chunk-reload.js` refetches the failed file with
-  `cache: 'reload'` before it reloads. A zone fix needs Giuseppe's approval and is **not
-  applied**: a Response Header Transform Rule `(http.host eq "pokoin.com" and
-  starts_with(http.request.uri.path, "/market/s/") and http.response.code eq 404)` → set
-  `Cache-Control: no-store`. After applying it, check with
-  `curl -sI https://pokoin.com/market/s/missing-x.js`.
+  on the old version. `market/public/chunk-reload.js` refetches the failed files with
+  `cache: 'reload'` before it reloads (below). Since 2026-10-19 (approved by Giuseppe)
+  a zone **Response Header Transform Rule** makes those 404s uncacheable: `(http.host eq
+  "pokoin.com" and starts_with(http.request.uri.path, "/market/s/") and
+  http.response.code eq 404)` → set `Cache-Control: no-store`. `www` 301s to the apex, so
+  it needs no rule of its own. The rule also covers 404s that reach the Worker's
+  `ASSETS.fetch` fallback (`not_found_handling: "none"`). Existing chunks keep
+  `immutable`. Zone ruleset `2dc275a24e9e4dc0b53a66235667ea89` (phase
+  `http_response_headers_transform`, the zone's only rule there), rule
+  `e66a3507f0c14555bcdb19cdcb8cb2ae`. Check:
+
+  ```bash
+  curl -sI https://pokoin.com/market/s/missing-x.js | grep -i cache-control   # no-store
+  ```
+
+  Revert (credentials in nezopt `~/.config/pokoin/cloudflare.env`):
+
+  ```bash
+  set -a; . ~/.config/pokoin/cloudflare.env; set +a
+  curl -sS -X DELETE -H "X-Auth-Email: $CLOUDFLARE_API_EMAIL" -H "X-Auth-Key: $CLOUDFLARE_API_KEY" \
+    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/rulesets/2dc275a24e9e4dc0b53a66235667ea89/rules/e66a3507f0c14555bcdb19cdcb8cb2ae"
+  ```
 
 ### Client fallback
 
@@ -72,7 +88,14 @@ unhandled `import()` rejections. The Solid route boundary (`RouteError` in
 `solid/src/App.jsx`) calls `window.__pokoinChunkReload(error)` and shows "Loading the
 latest Pokoin…" while a reload is pending. When a chunk fails, the script:
 
-1. refetches the file with `cache: 'reload'` and reloads once it answers 200;
+1. refetches the file with `cache: 'reload'`, plus every `/market/s/*` file Resource
+   Timing lists for this page with a failed status (`cache: 'reload'`) or no status
+   (Safari, some Chrome cache hits: `cache: 'no-cache'`, a 304 for a good chunk), and
+   reloads once all of them answer 200. The error names only the chunk `import()` asked
+   for; when the cached 404 is one of its static dependencies, refreshing only the named
+   file let the 404 survive the reload (seen 2026-10-19 after 6383d726). A `?v=` retry of
+   the import would not help: it makes a second module instance and its static imports
+   still hit the cached 404;
 2. else reloads at once if the live `/market/app` names a different entry chunk (a newer release);
 3. else retries every 10 s while the deploy propagates, and reloads after the sixth try.
 

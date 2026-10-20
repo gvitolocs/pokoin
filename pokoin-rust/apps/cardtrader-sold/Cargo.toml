@@ -1,0 +1,25 @@
+[package]
+name = "cardtrader-sold"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Nightly CardTrader sold graph for every game, from the stored listing books
+# (see docs/CARDTRADER_DAILY_DUMP.md "Sold graph").
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pokoin-cardtrader-sold"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ctbook = { path = "../../crates/ctbook" }
+regex = "1"
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+ctbook = { path = "../../crates/ctbook" }

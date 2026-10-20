@@ -1,0 +1,24 @@
+[package]
+name = "expansion-symbols"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Clean SVG expansion symbols: printed code marks, traced pictorial marks, promo stars"
+
+# Own workspace: asset tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "expansion-symbols"
+path = "src/main.rs"
+
+[dependencies]
+ab_glyph = "0.2"
+anyhow = "1"
+png = "0.18"
+resvg = "0.45"
+vtracer = "0.6"
+visioncortex = "0.8"
+
+[profile.release]
+strip = true

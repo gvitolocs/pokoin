@@ -25,7 +25,10 @@ use crate::{error::ApiError, state::DomainState};
 pub const TOKEN_PREFIX: &str = "pkn_";
 pub const SCOPE_CARDRAILS: &str = "cardrails:stock";
 pub const SCOPE_STOCK: &str = "seller:stock";
+/// The TCGplayer sync box. Not a stock connector: it cannot call seller-api/v1.
+pub const SCOPE_CHANNEL_TCGPLAYER: &str = "channel:tcgplayer";
 pub const CLIENT_CARDRAILS: &str = "cardrails";
+pub const CLIENT_TCGPLAYER_BOX: &str = "tcgplayer-sync-box";
 /// Live grants one seller can hold.
 pub const MAX_GRANTS: i64 = 10;
 /// CLAIM_SQL's `attempts < 8`.
@@ -134,9 +137,97 @@ pub fn clean_client(raw: &str) -> String {
 pub fn scope_for(client: &str) -> &'static str {
     if client == CLIENT_CARDRAILS {
         SCOPE_CARDRAILS
+    } else if client == CLIENT_TCGPLAYER_BOX {
+        SCOPE_CHANNEL_TCGPLAYER
     } else {
         SCOPE_STOCK
     }
+}
+
+/// Stock connectors refuse a channel-sync box token. Card Rails still requires
+/// its own scope; the generic connector still accepts every other grant.
+pub fn connector_scope_ok(scope: &str, cardrails: bool) -> bool {
+    if scope == SCOPE_CHANNEL_TCGPLAYER {
+        return false;
+    }
+    !cardrails || scope == SCOPE_CARDRAILS
+}
+
+/// A grant just created. `token` and `shared_secret` are shown once; the row
+/// keeps the hash and the sealed secret.
+pub struct IssuedGrant {
+    pub id: uuid::Uuid,
+    pub client: String,
+    pub label: String,
+    pub scope: String,
+    pub token_prefix: String,
+    pub webhook_url: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub token: String,
+    pub shared_secret: String,
+}
+
+impl IssuedGrant {
+    /// The JSON `POST /api/seller-api-grants` returns for `action: create`.
+    pub fn public_json(&self) -> Value {
+        let stamp = |at: Option<chrono::DateTime<chrono::Utc>>| {
+            at.map(|t| json!(t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)))
+                .unwrap_or(Value::Null)
+        };
+        json!({
+            "grant": {
+                "id": self.id.to_string(),
+                "client": self.client,
+                "label": self.label,
+                "scope": self.scope,
+                "tokenPrefix": self.token_prefix,
+                "webhookUrl": self.webhook_url,
+                "createdAt": stamp(self.created_at),
+                "lastUsedAt": stamp(self.last_used_at),
+            },
+            "token": self.token,
+            "sharedSecret": self.shared_secret,
+        })
+    }
+}
+
+/// Insert one live grant for `client`, or 409 when the seller is at the cap.
+/// The caller has already cleaned `client`.
+pub async fn issue_grant(state: &DomainState, uid: &str, client: &str, label: &str) -> Result<IssuedGrant, ApiError> {
+    let token = new_token();
+    let secret = new_shared_secret();
+    let sealed = seal_secret(&secret)?;
+    let row = sqlx::query(
+        "insert into public.seller_api_grants (seller_uid, client, label, scope, token_hash, token_prefix, shared_secret) \
+         select $1, $2, $3, $4, $5, $6, $7 where (select count(*) from public.seller_api_grants \
+         where seller_uid = $1 and revoked_at is null) < $8 \
+         returning id, client, label, scope, token_prefix, webhook_url, created_at, last_used_at",
+    )
+    .bind(uid)
+    .bind(client)
+    .bind(label)
+    .bind(scope_for(client))
+    .bind(token_hash(&token))
+    .bind(token_prefix(&token))
+    .bind(sealed)
+    .bind(MAX_GRANTS)
+    .fetch_optional(state.write_db())
+    .await
+    .map_err(store_error)?
+    .ok_or_else(|| ApiError::conflict("Revoke a token before creating another.").with_code("grant_limit"))?;
+    Ok(IssuedGrant {
+        id: row.try_get("id").map_err(store_error)?,
+        client: row.try_get("client").map_err(store_error)?,
+        label: row.try_get("label").map_err(store_error)?,
+        scope: row.try_get("scope").map_err(store_error)?,
+        token_prefix: row.try_get("token_prefix").map_err(store_error)?,
+        webhook_url: row.try_get("webhook_url").map_err(store_error)?,
+        created_at: row.try_get("created_at").map_err(store_error)?,
+        last_used_at: row.try_get("last_used_at").map_err(store_error)?,
+        token,
+        shared_secret: secret,
+    })
 }
 
 /// `Signature` header value: base64 HMAC-SHA256 of the exact bytes posted.
@@ -584,6 +675,17 @@ mod tests {
         assert_eq!(clean_client("***"), "");
         assert_eq!(scope_for("cardrails"), SCOPE_CARDRAILS);
         assert_eq!(scope_for("my-tool"), SCOPE_STOCK);
+        assert_eq!(scope_for(CLIENT_TCGPLAYER_BOX), SCOPE_CHANNEL_TCGPLAYER);
+    }
+
+    #[test]
+    fn channel_box_scope_cannot_call_the_stock_connector() {
+        assert!(!connector_scope_ok(SCOPE_CHANNEL_TCGPLAYER, false));
+        assert!(!connector_scope_ok(SCOPE_CHANNEL_TCGPLAYER, true));
+        assert!(connector_scope_ok(SCOPE_STOCK, false));
+        assert!(connector_scope_ok(SCOPE_CARDRAILS, false));
+        assert!(connector_scope_ok(SCOPE_CARDRAILS, true));
+        assert!(!connector_scope_ok(SCOPE_STOCK, true));
     }
 
     #[test]

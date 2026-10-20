@@ -57,7 +57,7 @@ test('a refresh keeps the painted order and appends new ids at the end', () => {
 test('rail thumbs are the homepage derivative a rail tile asks for first', () => {
   assert.equal(
     railThumbUrl({ id: '806390', name: 'Mega Rayquaza ex', gridImageUrl: 'https://cdn.pokoin.com/403195_mega-rayquaza-ex.jpg' }),
-    'https://cdn.pokoin.com/403195_mega-rayquaza-ex_homepage.webp',
+    'https://cdn.pokoin.com/403195_mega-rayquaza-ex_homepage.webp?v=t480',
   );
   assert.equal(railThumbUrl(null), '');
   const preloaded = [];
@@ -69,7 +69,7 @@ test('rail thumbs are the homepage derivative a rail tile asks for first', () =>
   ], 3, (list) => preloaded.push(...list));
   assert.equal(urls.length, 2);
   assert.deepEqual(preloaded, urls);
-  assert.match(urls[0], /_homepage\.webp$/);
+  assert.match(urls[0], /_homepage\.webp\?v=t480$/);
 });
 
 test('a fresh stored rail only fetches the tiles it is missing', async () => {

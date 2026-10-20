@@ -155,3 +155,92 @@ re-QAs, and rsyncs the new pass list.
 - [RobustSAM (CVPR 2024)](https://cvpr.thecvf.com/virtual/2024/poster/29230)
   — robustness fixes for SAM on degraded images; background option for if
   post-processing is not enough on foil scans.
+
+## Clean-art silhouettes (artofpkm TCG Gallery, 2026-10-20)
+
+Full-art cards print their attack text, HP and rule bars on top of the
+painting, so SAM on the leftover scan cut bites and holes where text crossed
+the Pokémon. artofpkm's catalog 668 ("TCG Gallery", the 2022 Pokémon TCG
+Online Illustration Exhibition) has the same paintings without card text. For
+100 full-art versions the album hover now uses a silhouette cut from that
+clean painting, registered onto the same scan.
+
+### Data
+
+| Step | Tool | Output (nezopt, 15T) |
+| --- | --- | --- |
+| Dump catalog 668 | `tools/artofpkm-catalog` (Rust; 2 s between requests, resumable, robots-clean URLs, reuses the 2026-10-16 archive by SHA-256) | `/home/nez/mnt/mybook/datasets/tcg/artofpkm/catalog668-20261020/` (`artworks.jsonl`, `catalog.jsonl`, `assets/`, `html/`, `metadata/`, `progress.json`) |
+| CLIP art-box vectors of the clean art | `scripts/embed-clean-artworks.py` (open_clip ViT-B-32 laion2b, same space as `artbox-clip.npz`) | `…/match/clean-clip.npy` |
+| Match to versions | `tools/clean-art-match match` (Rust) | `…/match/match.jsonl`, `match-summary.json`, `review/` |
+
+The dump holds 521 artworks and 599 full-resolution images (918×1280 card-sized
+paintings, or the ~1106×696 window painting), plus each artwork's linked card
+pages (set, collector number, illustrator). Only 22 requests went to the site;
+the rest were copied from `full-20261016` after a hash check.
+
+### Matching
+
+CLIP art-box kNN (top 40 printings) and name + collector-number candidates
+propose versions. Each is verified by registering the clean painting onto the
+scan its mask is drawn on (the Qwen `image_key`) with the scanner's pure-Rust
+ORB + RANSAC homography (`pokoin-scanner/native/artwork_matcher`). Verified =
+a near-rectangular homography (upright, ≤15% keystone, no shear), at least 25
+inliers inside the painting interior, and NCC ≥ 0.35 after warping (or ≥ 0.2
+with ≥ 100 interior inliers on foil recolours). Interior-only evidence matters:
+the portrait clean art of V/GX cards keeps the card frame, which otherwise
+matches any card with that frame. A verified version with a different name
+needs ≥ 60 interior inliers and NCC ≥ 0.6 (art reused under another name).
+
+Result: 491 artworks matched (568 artwork–version pairs, 563 versions),
+9 ambiguous, 21 unmatched (V-UNION pieces, cards missing from the catalogue,
+tiny scans). A hand-checked sample of 81 pairs (40 random, all 35 with < 60
+interior inliers, all 6 name mismatches) was 81/81 correct.
+
+### Masks
+
+SAM on the bare clean painting fails: the Qwen boxes span the whole picture
+and SAM returns a part (one Unown, Electrode's white half). So:
+
+1. `clean-art-match composite` paints the clean art over the scan, upscaled to
+   ~1024 px tall: same framing and boxes as the scan builder, no card text.
+2. `scripts/build-clean-art-figure-masks.py --select guided` runs the same SAM
+   2.1 + `clean_mask`, but per box picks the candidate that best matches the
+   production mask inside the box (granularity from production, edges from the
+   clean painting).
+3. `clean-art-match warp --ui-clip-objects …` downsamples to the scan, cuts
+   solid card UI the body runs under (GX / attack bars, ability boxes: large
+   regions where scan ≠ clean painting after an opening + closing; enclosed
+   icons such as energy costs stay), and drops specks.
+4. `scripts/qa-figure-masks.py`, and `clean-art-match compare` for IoU vs
+   production plus before/after images.
+
+Window-art cards keep their scan masks: their text never overlaps the
+painting, and the new masks were no better there. Full-art versions ship when
+they pass QA (or fail only `holes` and pass visual review, as in the 2026-09-17
+salvage) and keep IoU ≥ 0.5 with production. That gives 100 versions: 94
+replace a production mask, and 6 had no hover before (their scan masks failed
+QA: Charizard VMAX, Zoroark GX, Rayquaza GX, …). Per-version decisions are in
+`…/match/mask-decisions.jsonl`.
+
+### Serving
+
+The 100 masks live in `figure-masks-artofpkm/{version}.webp` on both CDN
+origins (Pi `/srv/pokoin/card-images/objects/` and the nezopt mirror
+`~/data/pokoin-leftovers/objects/`), in the same scan frame as
+`figure-masks-clean/`. `market/src/figure-masks-artofpkm.js` lists the
+versions; `artworkFigureMaskSrc` sends those to the new directory with rev
+`artofpkm-1`. Nothing in `figure-masks-clean/` is overwritten, so removing a
+version from the list reverts it. Upload the directory to both origins before
+deploying the SPA change, or those 100 tiles lose their hover. The `/artwork`
+board has a "Clean-art silhouettes" section; in dev,
+`VITE_ARTOFPKM_MASK_BASE=/_review/figure-masks-artofpkm` (with the files in
+`market/public/_review/`) shows unpublished masks.
+
+### Known limits
+
+- The hover duplicate is still the scan, so text printed over the body lifts
+  with it. Lifting the clean painting itself would remove that.
+- A mask is per CLIP version, drawn on one representative scan. Other
+  printings of the version sit a median 1.2% of the card off that frame (p90
+  3.8%, 46 of 1,297 over 5%, measured by registering the clean art on each
+  printing). Per-printing masks would fix it.

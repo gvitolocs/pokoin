@@ -6,6 +6,7 @@ import {
   expansionEra,
   expansionLogoSrc,
   expansionMatchesChip,
+  expansionSymbolSources,
   expansionSymbolSrc,
   eraFromParam,
   eraHref,
@@ -144,21 +145,38 @@ test('wordmarks are not set icons', () => {
 
 test('desk shortcuts use the circular expansion symbol, not the wordmark', () => {
   assert.equal(
-    expansionSymbolSrc({ slug: 'lost-thunder' }),
-    '/card-images/expansions/symbols/lost-thunder.png?v=cm1',
+    expansionSymbolSrc({ slug: 'stormfront' }),
+    '/card-images/expansions/symbols/stormfront.svg?v=sv1',
   );
   assert.equal(
-    expansionSymbolSrc({ slug: 'lost-thunder', defaultSymbolUrl: 'https://cdn.pokoin.com/expansions/symbols/lost-thunder.png' }),
-    'https://cdn.pokoin.com/expansions/symbols/lost-thunder.png?v=cm1',
+    expansionSymbolSrc({ slug: 'stormfront', defaultSymbolUrl: 'https://cdn.pokoin.com/expansions/symbols/stormfront.png' }),
+    'https://cdn.pokoin.com/expansions/symbols/stormfront.svg?v=sv1',
   );
+  // A pinned version from the API is used as given.
   assert.equal(
     expansionSymbolSrc({ slug: 'super-burst-impact', expansionSymbolUrl: 'https://cdn.pokoin.com/expansions/symbols/super-burst-impact.png?v=aa2' }),
     'https://cdn.pokoin.com/expansions/symbols/super-burst-impact.png?v=aa2',
   );
   assert.equal(
     expansionSymbolSrc({ slug: 'pop-series-7' }),
-    '/card-images/expansions/symbols/pop-series-7.png?v=cm1',
+    '/card-images/expansions/symbols/pop-series-7.svg?v=sv1',
   );
+});
+
+test('symbol sources fall back from the SVG to its PNG; small raster marks stay PNG', () => {
+  assert.deepEqual(expansionSymbolSources({ slug: 'super-electric-breaker' }), [
+    '/card-images/expansions/symbols/super-electric-breaker.svg?v=sv1',
+    '/card-images/expansions/symbols/super-electric-breaker.png?v=sv1',
+  ]);
+  // 40 px Sword & Shield symbol: no SVG was traced from it.
+  assert.deepEqual(expansionSymbolSources({ slug: 'sword-and-shield' }), [
+    '/card-images/expansions/symbols/sword-and-shield.png?v=sv1',
+  ]);
+  // A symbol hosted elsewhere is not rewritten.
+  assert.deepEqual(expansionSymbolSources({ slug: 'x', symbolImageUrl: 'https://example.com/x.png' }), [
+    'https://example.com/x.png?v=sv1',
+  ]);
+  assert.deepEqual(expansionSymbolSources({}), []);
 });
 
 test('satellite TCGs never reuse Pokémon expansion logos or eras', () => {
@@ -167,12 +185,12 @@ test('satellite TCGs never reuse Pokémon expansion logos or eras', () => {
   // Slug collision: Riftbound Unleashed ≠ HS Unleashed CDN assets.
   assert.equal(
     expansionSymbolSrc({ slug: 'unleashed' }, rift),
-    '/card-images/riftbound/expansions/symbols/unleashed.png?v=cm1',
+    '/card-images/riftbound/expansions/symbols/unleashed.png?v=sv1',
   );
   assert.equal(expansionLogoSrc({ slug: 'unleashed' }, rift), '');
   assert.equal(
     expansionSymbolSrc({ slug: 'unleashed' }, piece),
-    '/card-images/one-piece/expansions/symbols/unleashed.png?v=cm1',
+    '/card-images/one-piece/expansions/symbols/unleashed.png?v=sv1',
   );
   assert.equal(tcgEra({ slug: 'unleashed', name: 'Unleashed', set: 'Unleashed' }, rift), '');
   assert.equal(tcgEra({ slug: 'unleashed', name: 'Unleashed', set: 'Unleashed' }, piece), '');
@@ -188,14 +206,19 @@ test('satellite TCGs never reuse Pokémon expansion logos or eras', () => {
       slug: 'unleashed',
       defaultSymbolUrl: 'https://cdn.pokoin.com/riftbound/expansions/symbols/unleashed.png',
     }, rift),
-    'https://cdn.pokoin.com/riftbound/expansions/symbols/unleashed.png?v=cm1',
+    'https://cdn.pokoin.com/riftbound/expansions/symbols/unleashed.png?v=sv1',
   );
 });
 
 test('official codes prefer Watchtower marks', () => {
   assert.equal(expansionCode({ slug: '151', name: '151' }), 'MEW');
   assert.equal(expansionCode({ slug: 'paldean-fates', name: 'Paldean Fates' }), 'PAF');
-  assert.equal(expansionCode({ slug: 'pitch-black', name: 'Pitch Black' }), 'ME5');
+  assert.equal(expansionCode({ slug: 'pitch-black', name: 'Pitch Black' }), 'PBL');
+  // Printed codes, not series numbers: MEG EN 001/132, not ME1.
+  assert.equal(expansionCode({ slug: 'mega-evolution', name: 'Mega Evolution' }), 'MEG');
+  assert.equal(expansionCode({ slug: 'perfect-order', name: 'Perfect Order' }), 'POR');
+  assert.equal(expansionCode({ slug: 'chaos-rising', name: 'Chaos Rising' }), 'CRI');
+  assert.equal(expansionCode({ slug: 'csv9-stellar-crystal', name: 'CSV9: Stellar Crystal' }), 'csv9C');
 });
 
 test('reverse-holo subsets stay hidden until searched', () => {

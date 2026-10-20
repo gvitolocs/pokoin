@@ -84,6 +84,8 @@ export function loadSuggestEngine() {
 const suggestPage = createPageMemo(fetchSuggest);
 /** How long typing must pause before the results-page total is asked for. */
 const RESULTS_COUNT_DELAY_MS = 150;
+/** Longest query the box keeps: a 5000-character paste froze ranking for about a minute. */
+const SEARCH_MAX_CHARS = 200;
 
 /**
  * Evaluate the engine on search intent (pointer down, focus, first key), after
@@ -414,6 +416,7 @@ export default function SearchBox(props) {
   // fillSuggest (a landing Popular chip): the whole query, term and all, in one
   // update; the results-page total is applied at once when prewarmSuggest has it.
   function fillWhole(value) {
+    value = String(value || '').slice(0, SEARCH_MAX_CHARS);
     onIntent();
     const text = value.trim();
     nextTerm = value;
@@ -459,7 +462,7 @@ export default function SearchBox(props) {
   createEffect(() => [location.pathname, location.search], ([pathname, search]) => {
     if (stripGamePrefix(pathname) !== '/marketplace/search') return;
     const params = new URLSearchParams(search);
-    const q = params.get('q');
+    const q = (params.get('q') || '').slice(0, SEARCH_MAX_CHARS);
     if (q) {
       setQuery(q);
       setTerm(q);
@@ -905,6 +908,7 @@ export default function SearchBox(props) {
           onKeyDown={onKeyDown}
           placeholder={props.placeholder || (props.extensionDesk ? 'Search cards' : 'Search cards, sets, products...')}
           autocomplete="off"
+          maxLength={SEARCH_MAX_CHARS}
           aria-expanded={ariaBool(suggestVisible())}
           aria-controls="market-suggest"
           aria-activedescendant={activeOption()?.optionId}

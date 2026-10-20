@@ -6,6 +6,8 @@ import { DEAD_IMAGE, rememberImageFallback, workingImage } from '@market/image-f
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
 import { heroOpen, onHeroGate } from '@market/hero-gate.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '@market/missing-card.js';
+import { langScanLanguage, langScanUrl } from '@market/lang-scans.js';
+import { searchLang } from '../stores/locale.js';
 
 function artDebugEnabled() {
   try {
@@ -26,10 +28,15 @@ function logCardArt(event, detail) {
  * each failed URL, or a CardTrader grey placeholder size, steps to the next
  * raster sibling, then the Pokoin missing-card scan. Only the <img> src
  * changes on a fallback — nothing else re-renders.
+ *
+ * `langScans` (a card row's `langScans`) puts the TCGdex scan in the picked
+ * card language first (market/src/lang-scans.js); the leftover scan is its
+ * fallback. Crops (`cut`) keep the leftover: their windows are measured on it.
  */
 export default function CardArt(props) {
+  const langSrc = () => (props.cut ? '' : langScanUrl(props.langScans, searchLang()));
   const urls = createMemo(
-    () => rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl).filter(Boolean),
+    () => [langSrc(), ...rasterSiblings(props.src, { full: Boolean(props.full) }).map(cdnFetchUrl)].filter(Boolean),
     { equals: (a, b) => a.length === b.length && a.every((u, i) => u === b[i]) },
   );
   // Writable derived state: both reset whenever the sibling list changes.
@@ -190,7 +197,7 @@ export default function CardArt(props) {
   const image = () => (
     <img
       ref={(node) => { img = node; }}
-      class={props.class}
+      class={[props.class, { 'is-lang-scan': Boolean(langScanLanguage(current())) }]}
       alt={props.alt || ''}
       loading={props.loading}
       fetchpriority={props.fetchPriority}

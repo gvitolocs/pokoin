@@ -1,0 +1,59 @@
+{
+  "note": "Selectors and paths are unverified until calibrated against the live Portal by the seller.",
+  "baseUrl": "https://store.tcgplayer.com",
+  "allowedOrigins": [
+    "https://store.tcgplayer.com",
+    "https://sellerportal.tcgplayer.com",
+    "https://id.tcgplayer.com"
+  ],
+  "paths": {
+    "home": "/",
+    "login": "/login",
+    "loginMarkers": ["/login", "/signin", "id.tcgplayer.com"],
+    "inventorySearch": "/search?q={query}",
+    "sku": "/sku/{sku}",
+    "orders": "/orders?page={page}",
+    "order": "/order/{order}"
+  },
+  "selectors": {
+    "loginForm": "form[data-login]",
+    "signedInMarker": "[data-signed-in]",
+    "resultRow": "tr.product-row",
+    "rowSkuAttribute": "data-sku",
+    "condition": "[data-condition]",
+    "printing": "[data-printing]",
+    "language": "[data-language]",
+    "quantityInput": "input[name='quantity']",
+    "priceInput": "input[name='price']",
+    "saveButton": "button[data-save]",
+    "savedMarker": "[data-saved]",
+    "errorMarker": "[data-error]",
+    "orderRow": "[data-order]",
+    "orderId": "[data-order-id]",
+    "orderDate": "[data-order-date]",
+    "orderStatus": "[data-order-status]",
+    "orderBuyer": "[data-order-buyer]",
+    "lineRow": "[data-line]",
+    "lineSkuAttribute": "data-sku",
+    "lineName": "[data-line-name]",
+    "lineQuantity": "[data-line-qty]",
+    "linePrice": "[data-line-price]",
+    "shipName": "[data-ship-name]",
+    "shipLine1": "[data-ship-line1]",
+    "shipLine2": "[data-ship-line2]",
+    "shipCity": "[data-ship-city]",
+    "shipState": "[data-ship-state]",
+    "shipZip": "[data-ship-zip]",
+    "shipCountry": "[data-ship-country]",
+    "shippingMethod": "[data-shipping-method]",
+    "orderTotal": "[data-order-total]",
+    "nextPage": "a[data-next]",
+    "captcha": [
+      "iframe[src*='recaptcha']",
+      "iframe[src*='hcaptcha']",
+      "iframe[src*='turnstile']",
+      "iframe[src*='captcha']",
+      "iframe[src*='challenges.cloudflare']"
+    ]
+  }
+}

@@ -8,6 +8,7 @@ rails, search results, set grids, and the card desk stay **full card scans**.
 Canonical crop math: `market/src/art-cut.js`. Chrome: [CHROME.md](CHROME.md).
 Pipeline / images: [MARKET.md](MARKET.md), [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 Games + **nezopt 15T Pi replica**: [GAMES.md](GAMES.md). JP/CN flags: [PRINT_FLAGS.md](PRINT_FLAGS.md).
+Scan in the visitor's card language (IT/FR/DE/ES/PT, full-card surfaces only): [CARD_LANGUAGE_SCANS.md](CARD_LANGUAGE_SCANS.md).
 
 ---
 
@@ -37,11 +38,16 @@ Games + **nezopt 15T Pi replica**: [GAMES.md](GAMES.md). JP/CN flags: [PRINT_FLA
 7. `/marketplace/sets` wordmarks (`set-logos.js`) are expansion logos on the
    Pi (`/card-images/expansions/wordmarks/{slug}.png` and leftover
    `/card-images/expansions/logos/{slug}.png`). `/marketplace/eras/:id` reuses
-   that grid. Desk reprint shortcuts use
-   `/card-images/expansions/symbols/{slug}.png`. Missing official marks are
-   saved once as SVI-style dark plates (`scripts/export-expansion-code-marks.py`),
-   not HTML letter discs. They are **not** leftover
-   card scans and **not** `CardArt cut`.
+   that grid. Desk reprint shortcuts and the set desk title use
+   `/card-images/expansions/symbols/{slug}.svg`, then `{slug}.png`, then the
+   letter code (`ExpansionMark`). The SVGs come from `tools/expansion-symbols`
+   (`symbols.tsv`, published to both CDN origins by
+   `scripts/publish-expansion-symbols.sh`): printed code marks (MEG, sv8, XY11,
+   csv9C) redrawn as plates with the code as paths, large pictorial symbols
+   traced, the Black Star PROMO star drawn, and SVI-style dark plates for sets
+   without a known mark. Sets whose only mark is a small raster stay PNG
+   (`market/src/expansion-symbols-png.js`). They are **not** leftover card
+   scans and **not** `CardArt cut`.
 
 ---
 
@@ -389,3 +395,10 @@ NVMe, the HDD replica and Pi preferred keys were restored together, preserving
 backups outside the object index. `esp-original-20261018` bypasses the immutable
 old response. The targeted catalog updates are in
 `scripts/sql/20261018_manaphy_espathra.sql`; re-projections must retain these URLs.
+
+
+### HD upgrades, cache token hd1 (19 October 2026)
+
+10,470 leftovers were replaced by a larger scan of the same printing (artofpkm
+for Japanese, tcgdex for western), under their existing keys, busted by `hd1`.
+Rules, tool, lists and rollback: [HD_CARD_IMAGES.md](HD_CARD_IMAGES.md).

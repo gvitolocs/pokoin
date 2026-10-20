@@ -114,31 +114,32 @@ const COOKIE_KEY = "pokoin.cookieConsent";
 const COOKIE_NAME = "pokoin_cookie_consent";
 const cookieBanner = document.querySelector("[data-cookie-banner]");
 if (cookieBanner) {
-  const accepted = (() => {
+  // "1" = all cookies, "essential" = sign-in and cart only (market/src/cookie-consent.js).
+  const answered = (() => {
     try {
-      if (localStorage.getItem(COOKIE_KEY) === "1") return true;
+      if (/^(1|essential)$/.test(localStorage.getItem(COOKIE_KEY) || "")) return true;
     } catch (_) {}
     try {
-      return /(?:^|;\s*)pokoin_cookie_consent=1(?:;|$)/.test(document.cookie);
+      return /(?:^|;\s*)pokoin_cookie_consent=(1|essential)(?:;|$)/.test(document.cookie);
     } catch (_) {
       return false;
     }
   })();
-  if (accepted) {
+  const answer = (value) => () => {
+    try {
+      localStorage.setItem(COOKIE_KEY, value);
+    } catch (_) {}
+    try {
+      const secure = location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `${COOKIE_NAME}=${value}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
+    } catch (_) {}
+    cookieBanner.remove();
+  };
+  if (answered) {
     cookieBanner.remove();
   } else {
-    cookieBanner
-      .querySelector("[data-cookie-accept]")
-      ?.addEventListener("click", () => {
-        try {
-          localStorage.setItem(COOKIE_KEY, "1");
-        } catch (_) {}
-        try {
-          const secure = location.protocol === "https:" ? "; Secure" : "";
-          document.cookie = `${COOKIE_NAME}=1; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
-        } catch (_) {}
-        cookieBanner.remove();
-      });
+    cookieBanner.querySelector("[data-cookie-accept]")?.addEventListener("click", answer("1"));
+    cookieBanner.querySelector("[data-cookie-essential]")?.addEventListener("click", answer("essential"));
   }
 }
 

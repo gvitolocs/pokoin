@@ -33,7 +33,12 @@ function GlobeIcon(props) {
   );
 }
 
-/** Card title language (market Chrome.jsx LangToggle). The URL language wins. */
+/**
+ * Card title language (market Chrome.jsx LangToggle). The URL language wins.
+ * It renames cards (and shows the western scan in that language when there
+ * is one, market/src/lang-scans.js), not the site, so the menu says so
+ * ("Card names & scans in") and lists each language in its own script.
+ */
 export function LangToggle() {
   const navigate = useGameNavigate();
   const location = useLocation();
@@ -54,23 +59,24 @@ export function LangToggle() {
     <div class="lang-toggle" ref={(node) => { box = node; }}>
       <button
         type="button"
-        aria-label={`Card title language, ${current().label}`}
+        aria-label={`Card names & scans in ${current().native || current().label}`}
         aria-haspopup="listbox"
         aria-expanded={open() ? 'true' : 'false'}
-        title={current().label}
+        title={`Card names & scans in ${current().native || current().label}`}
         onClick={() => setOpen((value) => !value)}
       >
         <img src={flagSrc(current().code)} alt="" width="40" height="40" />
         <Caret />
       </button>
       <Show when={open()}>
-        <ul class="lang-menu" role="listbox" aria-label="Card title language">
+        <ul class="lang-menu" role="listbox" aria-label="Card names & scans in">
+          <li class="lang-menu-head" role="presentation">Card names & scans in</li>
           <For each={SEARCH_LANGS}>
             {(item) => (
               <li role="option" aria-selected={(item.code === searchLang()) ? 'true' : 'false'}>
                 <button type="button" class={{ 'is-active': item.code === searchLang() }} onClick={() => pick(item.code)}>
                   <img src={flagSrc(item.code)} alt="" width="22" height="22" />
-                  <span>{item.label}</span>
+                  <span lang={item.code === 'jp' ? 'ja' : item.code === 'zht' ? 'zh-Hant' : item.code}>{item.native || item.label}</span>
                 </button>
               </li>
             )}

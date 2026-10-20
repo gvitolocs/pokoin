@@ -77,12 +77,12 @@ export function pricedOffers(rows) {
 
 export function formatChange72h(pct) {
   if (pct == null || !Number.isFinite(Number(pct))) {
-    return { text: '72h —', empty: true };
+    return { text: '3 days —', empty: true };
   }
   const value = Number(pct) * 100;
   const sign = value > 0 ? '+' : '';
   return {
-    text: `72h ${sign}${value.toFixed(1)}%`,
+    text: `${sign}${value.toFixed(1)}% · 3 days`,
     empty: false,
     up: value >= 0,
   };
