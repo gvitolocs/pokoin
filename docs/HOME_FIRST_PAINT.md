@@ -28,7 +28,7 @@ Worker reads `https://api.pokoin.com` (pi-home). Vite `/api` already proxies the
 | Firestore `user_card_recent_views/{uid}` | `getDoc` after auth | **No** — Recently seen only |
 | `GET /api/marketplace-card-tiles` | Pi API on api.pokoin.com; Worker proxies the same path | **No** — leftover recents after paint |
 | Catalog leftover JPEG (Lucario ex) | **166 KB** | **No** — desk / hero only |
-| `_homepage.webp` sibling (240px, q82) | **26 KB** | Yes — grid / carousel |
+| `_homepage.webp` sibling (480px, q82; 240px before 2026-10-20) | **~38 KB** (was 19–26 KB) | Yes — grid / carousel |
 
 From this host, `https://pokoin.com/api/marketplace-home` is Cloudflare WAF
 **403** (`Your request was blocked`). Real browsers still hit

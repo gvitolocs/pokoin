@@ -634,7 +634,7 @@ after New cards already painted. Nameless stubs are treated as missing:
 do not paint the coin placeholder, and `fetchCard` after tiles miss.
 
 Tiles show `formatPkn` (2642 PKN, no thousands comma) plus `printingIdentity().tileLine`. Grid art is the
-240px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
+480px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
 home promo fan). First eight visible tiles are `loading=eager`; the first
 four use `fetchPriority=high`. `CardTile` is always a **full 63:88 scan**.
 Search suggest (desktop and phone) can show a CSS-cropped illustration
@@ -1089,7 +1089,7 @@ of truth.
 Raspberry Pi (`/srv/pokoin/card-images/objects`). Worker `pokoin-cdn-card-images`
 reads Pi first, R2 only as backup. `api2.pokoin.com` is the same Pi origin as
 `api.pokoin.com`. Do not rewrite DB URLs. See [GAMES.md](GAMES.md).
-Home/search tiles use `_homepage.webp` (240px, q82); desk and promo fan use
+Home/search tiles use `_homepage.webp` (480px, q82, `?v=…t480`); desk and promo fan use
 leftover JPEG (`CardArt full`). Grid 404 falls back to JPEG. Search suggest
 may CSS-crop that same webp into the illustration rectangle on the right of
 the popup (`art-cut.js`); no second download.

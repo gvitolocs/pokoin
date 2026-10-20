@@ -3,7 +3,7 @@
 //! `ap-index`  artofpkm catalog.jsonl → printings TSV (set, number, name, original asset).
 //! `match`     catalog TSV × (tcgdex en/ja, artofpkm) → pairs.tsv with metrics and a verdict.
 //! `render`    before | after | difference panels for review sheets.
-//! `encode`    accepted pairs → JPEG q92 at the source size + `_homepage.webp` (240 px, q82).
+//! `encode`    accepted pairs → JPEG q92 at the source size + `_homepage.webp` (480 px, q82).
 //!
 //! The visual check is the guard against wrong printings: both scans are
 //! normalised to 63:88, aligned (small shift/scale search), and compared on
@@ -1253,7 +1253,7 @@ fn write_jpeg(img: &RgbImage, path: &Path, quality: u8) -> Result<()> {
 // ---------------------------------------------------------------- encode
 
 /// Accepted pairs → `<out>/<served>.jpg` (q92, source size, 63:88) and
-/// `<out>/<served stem>_homepage.webp` (240 px wide, q82, as the ingest script).
+/// `<out>/<served stem>_homepage.webp` (480 px wide, q82, as the ingest script).
 fn encode(f: &Flags) -> Result<()> {
     let pairs = read_pairs(f.get("pairs")?)?;
     let out = PathBuf::from(f.get("out")?);
@@ -1272,7 +1272,7 @@ fn encode(f: &Flags) -> Result<()> {
                 let first = *targets.first().context("no targets")?;
                 write_jpeg(&img, &out.join(first), 92)?;
                 let (w, h) = img.dimensions();
-                let hw = 240u32.min(w);
+                let hw = 480u32.min(w);
                 let hh = ((h as f64) * hw as f64 / w as f64).round().max(1.0) as u32;
                 let small = imageops::resize(&img, hw, hh, FilterType::Lanczos3);
                 let webp = webp::Encoder::from_rgb(small.as_raw(), hw, hh).encode_advanced(&{

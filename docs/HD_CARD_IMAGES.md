@@ -67,7 +67,7 @@ official_source, kind, art_layout, product_type, version, image_url).
 
 Encoding: the source is made exactly 63:88 at its own height (transparent tcgdex
 corners are flattened onto the card's border colour). Output is JPEG q92 and
-`_homepage.webp` at 240 px wide, q82, the same as `scripts/ingest-missing-product-images.py`.
+`_homepage.webp` at 240 px wide (480 px since 2026-10-20), q82, the same as `scripts/ingest-missing-product-images.py`.
 
 ## Lists
 
@@ -85,3 +85,56 @@ store: nezopt NVMe `~/data/pokoin-leftovers/`, the 15T copy
 `~/mnt/mybook/pokoin-pi-card-images/`, and the Pi `/srv/pokoin/card-images/`.
 Copy them back (`rsync -a backups/hd1-20261019/ objects/`) and change the `hd1`
 token to a new one, so caches refetch.
+
+## Derived previews (`tools/preview-regen`)
+
+The desk, zoom, promo fan, album crops (CSS), og:image and JSON-LD all use the
+master JPEG. Every grid tile and the suggest thumb + illustration crop use the
+`_homepage.webp` sibling (480 px, q82, since 2026-10-20; was 240 px). `objects/previews/{stem}.webp` (96 px) is
+legacy and is not used by Pokémon tiles. `artcut/` crops are CLIP-only (nezopt).
+A thumb must be its master, downscaled.
+
+```bash
+cd tools/preview-regen && CARGO_TARGET_DIR=~/tmp/hd-card-images/target cargo build --release
+B=~/tmp/hd-card-images/target/release/preview-regen
+$B audit --objects ~/data/pokoin-leftovers/objects --previews ~/data/pokoin-leftovers/objects/previews \
+  --visual --out audit.tsv          # ~2 min for 88k masters, read-only
+$B encode --objects ~/data/pokoin-leftovers/objects --keys keys.txt --out stage --width 240
+```
+
+`audit` flags `home_mismatch` when the thumb is not a picture of its master
+(48×67 grey NCC < 0.90 whole or < 0.85 artwork), `home_older`, `no_home`,
+`home_width`, `small_master` (< 240 px). `encode` writes to a staging directory only.
+Landscape masters (55 XY BREAK `full-v4` at 1024×734) are skipped: their thumbs are
+stored rotated for `.is-landscape`.
+
+**Decoder.** `image` 0.25 (zune-jpeg 0.5.15) decodes the hd1 `jpeg-encoder` masters
+as a washed-out ghost; libjpeg and browsers read them fine. Rust tools that read CDN
+JPEGs must decode them with `jpeg-decoder` (as `preview-regen` does). The first
+audit run with `image` reported 11,412 false mismatches.
+
+### 480 px thumbs, token t480 (20 October 2026)
+
+All Pokémon `_homepage.webp` were rebuilt from their masters at 480 px wide (q82,
+mean ~47 KB; was 240 px, ~19 KB) because 240 px tiles were upscaled on 2× screens
+(155 CSS px tiles = 310 device px). Each store got the thumb of **its own** master:
+the stores had drifted (5,420 masters differ between the nezopt NVMe mirror and the
+Pi; the 15T copy follows the Pi), so Pi and 15T thumbs for those keys come from the
+Pi master. 931 old thumbs were another picture than their master (189 grey
+CardTrader placeholders over real scans, ~430 other variants); all fixed by the
+rebuild. The 55 landscape BREAK masters kept their rotated thumbs.
+
+- Written: NVMe 88,713, 15T 85,754, Pi 88,705 thumbs, plus Wigglytuff 13/100
+  (`114719`, token `wg1`: the stamped reverse-holo scan replaced by the Holo Rare from
+  pokemontcg.io `ex14/13_hires.png`, 591×825) on every store.
+- Old files: `backups/thumbs480-20261020/` beside `objects/` on each store.
+- Cache: `thumbToken` `t480` in `catalog-image-cache.json`. `withThumbToken` /
+  `withoutThumbToken` (`image-urls.js`, mirrored in `desk_art.rs`) give thumbs
+  `v=<id token>.t480` and strip it again when a thumb URL becomes its JPEG, so the
+  desk JPEG URL is unchanged. `index.html` landing thumbs carry the same tokens.
+- New thumbs: `scripts/ingest-missing-product-images.py` and `tools/hd-scan-upgrade`
+  now write 480 px.
+- Rollback: copy `backups/thumbs480-20261020/` back over `objects/` on each store and
+  change `thumbToken`.
+- Open: the 5,420 drifted masters themselves (which store holds the right scan; some
+  Pi copies of WOTC prints may be 1st Edition) — not changed here.

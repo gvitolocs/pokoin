@@ -44,9 +44,49 @@ export function withCatalogCache(url) {
   }
   const token = catalogCacheToken(catalogImageId(text));
   if (!token || /[?&]v=/.test(text)) {
+    return withThumbToken(text);
+  }
+  return withThumbToken(`${text}${text.includes('?') ? '&' : '?'}v=${token}`);
+}
+
+/** Pokemon `_homepage.webp` thumbs were all rebuilt under their old keys
+ * (`thumbToken` in the JSON): `v=hd1` becomes `v=hd1.t480`, no token `v=t480`. */
+const THUMB_TOKEN = CATALOG_IMAGE_CACHE.thumbToken || '';
+
+export function withThumbToken(url) {
+  const text = String(url || '');
+  if (!THUMB_TOKEN || !/_homepage\.webp(?:[?#]|$)/i.test(text) || isPrefixedCatalog(text)) {
     return text;
   }
-  return `${text}${text.includes('?') ? '&' : '?'}v=${token}`;
+  const version = text.match(/([?&]v=)([^&#]*)/);
+  if (!version) {
+    const [head, hash = ''] = text.split(/(?=#)/);
+    return `${head}${head.includes('?') ? '&' : '?'}v=${THUMB_TOKEN}${hash}`;
+  }
+  const value = version[2];
+  if (value === THUMB_TOKEN || value.endsWith(`.${THUMB_TOKEN}`)) {
+    return text;
+  }
+  return text.replace(version[0], `${version[1]}${value ? `${value}.` : ''}${THUMB_TOKEN}`);
+}
+
+/** The JPEG behind a thumb keeps only its own id token (`v=hd1.t480` → `v=hd1`). */
+export function withoutThumbToken(url) {
+  const text = String(url || '');
+  const at = text.indexOf('?');
+  if (!THUMB_TOKEN || at < 0) {
+    return text;
+  }
+  const hashAt = text.indexOf('#', at);
+  const query = hashAt < 0 ? text.slice(at + 1) : text.slice(at + 1, hashAt);
+  const hash = hashAt < 0 ? '' : text.slice(hashAt);
+  const params = query.split('&').flatMap((param) => {
+    if (!param.startsWith('v=')) return [param];
+    const value = param.slice(2);
+    if (value === THUMB_TOKEN) return [];
+    return [value.endsWith(`.${THUMB_TOKEN}`) ? `v=${value.slice(0, -THUMB_TOKEN.length - 1)}` : param];
+  });
+  return `${text.slice(0, at)}${params.length ? `?${params.join('&')}` : ''}${hash}`;
 }
 
 function catalogFileName(value) {
@@ -147,9 +187,9 @@ export function homepageDerivativeUrl(value) {
     return '';
   }
   if (/_homepage\.webp(?:\?|$)/i.test(full)) {
-    return full;
+    return withThumbToken(full);
   }
-  return full.replace(/\.(jpe?g|png|webp)(\?|$)/i, '_homepage.webp$2');
+  return withThumbToken(full.replace(/\.(jpe?g|png|webp)(\?|$)/i, '_homepage.webp$2'));
 }
 
 /** Live pokoin.com zone Redirect Rule turns `/card-images/*` into a 301 to
@@ -200,7 +240,7 @@ export function rewritePublicImage(value, { allowPreview = false } = {}) {
     next = text;
   }
   if (/_homepage\.webp(?:\?|$)/i.test(next)) {
-    next = next.replace(/_homepage\.webp(\?|$)/i, '.jpg$1');
+    next = withoutThumbToken(next.replace(/_homepage\.webp(\?|$)/i, '.jpg$1'));
   }
   if (isPrefixedCatalog(next) || /(?:^|\/)competitive\//i.test(next)) {
     return next;
@@ -259,7 +299,7 @@ export function rasterSiblings(value, { full = false } = {}) {
     return uniqueUrls([jpeg, homepageDerivativeUrl(jpeg)].filter(Boolean));
   }
   if (/_homepage\.webp(?:\?|$)/i.test(text)) {
-    const jpeg = text.replace(/_homepage\.webp(\?|$)/i, '.jpg$1');
+    const jpeg = withoutThumbToken(text.replace(/_homepage\.webp(\?|$)/i, '.jpg$1'));
     if (isPrefixedCatalog(text)) {
       return uniqueUrls([text, ...prefixedMasterSiblings(jpeg || text)]);
     }
