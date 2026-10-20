@@ -73,7 +73,7 @@ function SoldGraphFilters(props) {
         onPointerUp={stopSoldPointer}
       >
         <Show when={props.chips.reverse}>
-          <SoldGraphToggle label="Reverse" pressed={props.reverse} onToggle={props.onReverse} />
+          <SoldGraphToggle label={props.reverseLabel || 'Reverse'} pressed={props.reverse} onToggle={props.onReverse} />
         </Show>
         <Show when={props.chips.firstEdition}>
           <SoldGraphToggle label="1st Ed." pressed={props.firstEdition} onToggle={props.onFirstEdition} />
@@ -257,6 +257,7 @@ export default function SoldPriceGraph(props) {
         condition={props.condition}
         language={props.language}
         reverse={props.reverse}
+        reverseLabel={props.reverseLabel}
         firstEdition={props.firstEdition}
         graded={props.graded}
         unitsLabel={unitsLabel()}

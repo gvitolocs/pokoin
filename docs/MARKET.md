@@ -874,6 +874,9 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   (continuity reconciliation in `088_seller_stack_continuity.sql`). The copy at
   `scripts/sql/cardtrader-listing-qty-diff.sql` in this repo is a superseded
   snapshot and must never be applied.
+  The other CardTrader games get the same rules from the nightly listing
+  books (`pokoin-cardtrader-sold`, [CARDTRADER_DAILY_DUMP.md](CARDTRADER_DAILY_DUMP.md#sold-graph)):
+  only `cardtrader_sold_daily` is stored in their databases.
 
   **Stack key (the listing identity for “sold?”):**
 
