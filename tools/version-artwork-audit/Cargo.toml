@@ -1,0 +1,24 @@
+[package]
+name = "version-artwork-audit"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Audit CLIP version sets (pokoin_version_sets) for members whose leftover artwork is a different painting"
+
+# Own workspace: image tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "version-artwork-audit"
+path = "src/main.rs"
+
+[dependencies]
+ab_glyph = "0.2"
+anyhow = "1"
+csv = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+jpeg-decoder = { version = "0.3", default-features = false }
+rayon = "1"
+
+[profile.release]
+strip = true
