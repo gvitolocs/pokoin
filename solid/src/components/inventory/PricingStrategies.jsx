@@ -1,14 +1,15 @@
 import { createEffect, createSignal, For, Match, Show, Switch } from 'solid-js';
 import {
   deletePricingStrategy,
-  fetchPriceCheck,
+  fetchPriceChecksByGame,
   fetchPricingStrategies,
   fetchSellerListings,
   savePricingStrategies,
   updateListing,
 } from '@market/api.js';
+import { game } from '@market/game.js';
 import { liveInventoryListings, strategyMatchesListing } from '@market/inventory-listings.js';
-import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
+import { gamePrices, priceCheckGroups, priceCheckKey } from '@market/inventory-price.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, getBearer } from '../../stores/auth.js';
 
@@ -160,13 +161,18 @@ export default function PricingStrategies(props) {
       const data = await fetchSellerListings(sellerUid(), token, { limit: 1000 });
       const rows = liveInventoryListings(data.listings || data.items || [])
         .filter((row) => strategyMatchesListing(strategy, row));
-      const items = rows.slice(0, 100).map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
-      const comps = items.length ? await fetchPriceCheck(items, token) : { prices: {} };
+      // One price check per game: card ids are per game.
+      const gameId = game().id;
+      const comps = await fetchPriceChecksByGame(priceCheckGroups(rows.slice(0, 100), gameId), token);
+      const failed = Object.keys(comps).filter((id) => !comps[id]);
+      if (failed.length) throw new Error(`Price check failed for ${failed.join(', ')}.`);
       const plan = rows.slice(0, 100).map((row) => {
         const cardId = String(row?.cardId || row?.card_id || '');
-        const comp = comps.prices?.[priceCheckKey(row)] || comps.prices?.[cardId] || {};
+        const prices = gamePrices(comps, row, gameId);
+        const comp = prices[priceCheckKey(row)] || prices[cardId] || {};
         // CardTrader: the cheapest professional seller with the same
-        // condition, language and finish, or no target at all.
+        // condition, language and finish (the other games: the cheapest
+        // CardTrader Zero ask in this condition or better), or no target.
         const compPkn = strategy.source === 'pokoin'
           ? (comp.pokoinCheapestPkn ?? comp.soldMedianPkn ?? null)
           : (comp.ctMatchedPkn ?? null);

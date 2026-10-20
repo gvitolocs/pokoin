@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
-import { fetchPriceCheck, imageSrc } from '@market/api.js';
+import { fetchPriceChecksByGame, imageSrc } from '@market/api.js';
 import {
   filterInventoryRows,
   groupInventoryStacks,
@@ -13,7 +13,7 @@ import {
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
-import { inventoryMarketLabel, inventoryMarketValue, priceCheckItem, priceGame } from '@market/inventory-price.js';
+import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import ScanImage from '../ScanImage.jsx';
 import { getBearer } from '../../stores/auth.js';
@@ -79,15 +79,7 @@ const priceMemo = new Map();
  * and a Riftbound or Magic card read from the Pokémon catalog has no comp.
  */
 function priceRequest(source, rows) {
-  const groups = new Map();
-  for (const row of rows.slice(0, 100)) {
-    const item = priceCheckItem(row);
-    if (!/^\d+$/.test(item.cardId)) continue;
-    const id = priceGame(row, game().id);
-    if (!groups.has(id)) groups.set(id, []);
-    groups.get(id).push(item);
-  }
-  const games = [...groups].map(([id, items]) => ({ game: id, items }));
+  const games = priceCheckGroups(rows, game().id);
   return { games, count: games.reduce((sum, group) => sum + group.items.length, 0), key: `${source}|${JSON.stringify(games)}` };
 }
 
@@ -237,7 +229,7 @@ export default function InventoryBoard(props) {
   const [prices, setPrices] = createSignal((firstPrices && memoPrices(firstPrices.key)) || {});
   const [pricesPending, setPricesPending] = createSignal(false);
   let pricesKey = firstPrices && memoPrices(firstPrices.key) ? firstPrices.key : '';
-  const market = (row) => inventoryMarketValue(prices()[priceGame(row, game().id)] || {}, row, pricerSource());
+  const market = (row) => inventoryMarketValue(gamePrices(prices(), row, game().id), row, pricerSource());
 
   // Market comps for the current filtered rows while a pricer source is on.
   createEffect(
@@ -262,8 +254,7 @@ export default function InventoryBoard(props) {
         try {
           const token = await getBearer();
           // One game failing leaves only its own rows without a comp.
-          const answers = await Promise.all(games.map((group) => fetchPriceCheck(group.items, token, { game: group.game })
-            .then((data) => [group.game, data.prices || {}], () => [group.game, null])));
+          const answers = Object.entries(await fetchPriceChecksByGame(games, token));
           if (!cancelled) {
             const byGame = Object.fromEntries(answers.filter(([, value]) => value));
             pricesKey = answers.every(([, value]) => value) ? key : '';

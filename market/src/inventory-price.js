@@ -69,6 +69,32 @@ export function priceCheckKey(row) {
   return `${item.cardId}:${item.condition}:${item.language}:${finishFlags(item)}`;
 }
 
+/**
+ * The price checks of `rows`, one per game: the first `limit` rows with a
+ * numeric card id, grouped by `priceGame` as `[{ game, items }]`. Card ids
+ * are per game, and a Riftbound or Magic card read from the Pokémon catalog
+ * has no comp (or another card's).
+ */
+export function priceCheckGroups(rows, fallbackGame, { limit = 100 } = {}) {
+  const groups = new Map();
+  let count = 0;
+  for (const row of rows || []) {
+    if (count >= limit) break;
+    const item = priceCheckItem(row);
+    if (!/^\d+$/.test(item.cardId)) continue;
+    count += 1;
+    const id = priceGame(row, fallbackGame);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(item);
+  }
+  return [...groups].map(([game, items]) => ({ game, items }));
+}
+
+/** A row's game's answer in per-game price checks (`{ [game]: prices }`). */
+export function gamePrices(pricesByGame, row, fallbackGame) {
+  return pricesByGame?.[priceGame(row, fallbackGame)] || {};
+}
+
 export function inventoryMarketValue(prices, row, source) {
   const entry = prices[priceCheckKey(row)] || prices[String(row?.cardId || row?.card_id || '')];
   if (!entry) return null;
