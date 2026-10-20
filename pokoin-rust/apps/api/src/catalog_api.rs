@@ -223,6 +223,8 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  card["version"]=json!(version);
  // The exact hero scan URL the desk requests, so card-url-boot.js preloads it.
  card["deskArtUrl"]=json!(pokoin_catalog::desk_art::desk_art_url(&card,&game));
+ // A verified reverse-holo / mirror scan of this printing: the desk's sparkles toggle.
+ if let Some(url)=pokoin_catalog::reverse_scan::reverse_scan_url(&text(&primary,&["ct_id"]),&game){card["reverseScan"]=json!(url)}
  let versions=version_ids.iter().filter_map(|i|map.get(i).cloned()).collect::<Vec<_>>();
  let rarities=rarity_ids.iter().filter_map(|i|map.get(i).cloned()).collect::<Vec<_>>();
  let mut prev=neighbors.iter().filter(|(_,_,d)|*d<=6).map(|(id,_,d)|(*d,*id)).collect::<Vec<_>>();prev.sort_unstable();

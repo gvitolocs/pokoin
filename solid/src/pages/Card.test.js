@@ -36,3 +36,18 @@ test('a desk not painted from a peek shows the stored copy and merges the revali
 test('the desk language list follows the printing nationality', () => {
   assert.match(page, /languagesForNationality/);
 });
+
+test('the gold sparkles swap the desk scan to the verified reverse holo and back', () => {
+  assert.match(page, /const reverseScan = createMemo\(\(\) => reverseScanUrl\(card\(\)\)\)/);
+  // The toggle is keyed by card id: the next desk opens on its regular scan.
+  assert.match(page, /reverseFor\(\) === String\(card\(\)\.id\)/);
+  assert.match(page, /const heroArt = createMemo\(\(\) => \(reverseOn\(\) \? reverseScan\(\) : art\(\)\)\)/);
+  assert.match(page, /<DeskArtFrame\n\s+card=\{card\(\)\}\n\s+art=\{heroArt\(\)\}/);
+  // Shown only for printings that have one, next to the expansion marks.
+  const row = page.slice(page.indexOf('class="version-shortcuts"'), page.indexOf('More versions...'));
+  assert.match(row, /<Show when=\{reverseScan\(\)\}>\s*<button\s+type="button"\s+class=\{\['set-shortcut', 'reverse-toggle'/);
+  assert.match(row, /aria-pressed=\{reverseOn\(\) \? 'true' : 'false'\}/);
+  assert.match(row, /<ReverseSparkles \/>/);
+  // SEO and drags keep the regular printing's scan.
+  assert.match(page, /image=\{art\(\)\}/);
+});
