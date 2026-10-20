@@ -347,7 +347,6 @@ export default function PromoCarousel() {
               return (
                 <div class="promo-slide">
                   <div class={['promo-copy', { 'is-logo-name': logoName() }]}>
-                    <p class="eyebrow">{slide.series}</p>
                     <Show when={logoFailed() !== slide.slug}>
                       <PromoWordmark banner={slide} pokemon={pokemon()} onFail={() => setLogoFailed(slide.slug)} />
                     </Show>
