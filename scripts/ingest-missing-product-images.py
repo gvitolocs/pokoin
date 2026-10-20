@@ -82,7 +82,7 @@ VERSION_MATCH_SCRIPT = Path(
         "/home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py",
     )
 )
-REF = int(os.environ.get("HOMEPAGE_IMAGE_REFERENCE_WIDTH", "240"))
+REF = int(os.environ.get("HOMEPAGE_IMAGE_REFERENCE_WIDTH", "480"))  # 2026-10-20: thumbs are 480 px (catalog-image-cache.json thumbToken)
 QUALITY = int(os.environ.get("HOMEPAGE_IMAGE_QUALITY", "82"))
 UA = "Pokoin leftover ingest (https://pokoin.com)"
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]

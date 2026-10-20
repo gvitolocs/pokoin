@@ -112,7 +112,7 @@ test('a listing reference never keeps a CardTrader image URL', () => {
       canonicalPath: '/marketplace/en/cards/741644/card-buddy-buddy-poffin-184-217-ascended-heroes',
     },
   });
-  assert.equal(row.imageUrl, '/card-images/370822_buddy-buddy-poffin_homepage.webp');
+  assert.equal(row.imageUrl, '/card-images/370822_buddy-buddy-poffin_homepage.webp?v=t480');
 });
 
 test('chat tags keep one copy of a listing and cap at four', () => {
@@ -152,7 +152,7 @@ test('a miniature keeps a site path and shows the full scan before the homepage 
   assert.equal(catalogPath('/marketplace/en/cards/9?x=1', ''), '/marketplace/en/cards/9');
   assert.deepEqual(chatImageSources({ imageUrl: '/card-images/502874_snorlax.jpg' }), [
     '/card-images/502874_snorlax.jpg',
-    '/card-images/502874_snorlax_homepage.webp',
+    '/card-images/502874_snorlax_homepage.webp?v=t480',
   ]);
   assert.equal(row.kind, 'card');
 });
@@ -295,7 +295,7 @@ test('card drag imageUrl prefers the homepage derivative already on rails', () =
     name: 'Meowth',
     imageUrl: '/card-images/123_meowth.jpg',
   });
-  assert.match(row.imageUrl, /_homepage\.webp$/);
+  assert.match(row.imageUrl, /_homepage\.webp\?v=t480$/);
 });
 
 test('card drag rewrites CardTrader preview_ to leftover homepage (Eevee desk)', () => {
