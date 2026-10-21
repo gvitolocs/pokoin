@@ -69,9 +69,11 @@ subscriptions before March 2026 (guaranteed to active sellers until
   CardTrader ask is not cut by the commission.
 - A connected seller's own CardTrader products: the reconcile gives an import
   or a link the product's ask net of the commission the seller pays
-  (`ct_fees::seller_channel`: 7 % for an account that can sell through
-  CardTrader Zero, `can_sell_via_hub` in the stored `/info` user; 5 %
-  otherwise). Listings linked before this change are set once with
+  (`ct_fees::resolve_seller_channel`: 7 % for an account that can sell
+  through CardTrader Zero, 5 % otherwise. The stored `/info` user has no such
+  flag, so it is read from `can_sell_via_hub` on the seller's own offers in
+  the market book; unknown is 7 %. On 2026-10-21 redshakkio, CardTrader user
+  180405, was Zero-enabled and PeppeV, 595699, was not). Listings linked before this change are set once with
   `pokoin-api job cardtrader-net-prices --seller=<uid> [--csv=…] [--apply]`: one
   `/products/export` read, the target always computed from the CardTrader
   ask (a rerun changes nothing), compare-and-set per listing, nothing

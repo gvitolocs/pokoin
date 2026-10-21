@@ -819,7 +819,7 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     // CardTrader's commission (ct_fees, docs/PRICING.md): imports and links
     // take that, never the CardTrader ask itself.
     let channel = match ct_integration::read_integration_doc(firestore, &seller_uid).await {
-        Ok(doc) => crate::ct_fees::seller_channel(&doc.data),
+        Ok(doc) => crate::ct_fees::resolve_seller_channel(db, &doc.data).await,
         Err(_) => crate::ct_fees::Channel::Zero,
     };
     let mut export = export;
