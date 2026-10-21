@@ -16,8 +16,10 @@
 //! never return a fake success.
 
 pub mod crypto;
+pub mod ct_fees;
 pub mod db;
 pub mod error;
+pub mod facet_store;
 pub mod firebase;
 pub mod geo;
 pub mod powertools;

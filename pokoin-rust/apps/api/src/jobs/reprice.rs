@@ -1,7 +1,8 @@
 //! `job cardtrader-pro-floor-reprice --seller=<uid> [--apply] [--csv=<path>]`
 //!
 //! Reprices one seller's active Pokémon listings to Pokoin's CardTrader
-//! reference price: the cheapest current offer of a professional CardTrader
+//! reference price net of CardTrader's commission (`ct_fees`; a linked
+//! CardTrader product is set to the floor itself): the cheapest current offer of a professional CardTrader
 //! seller of the same printing, condition, language, reverse and first
 //! edition (`price_check::pro_floors`), leaving the seller's own CardTrader
 //! offers out. A listing with no such offer keeps its price.
@@ -57,6 +58,10 @@ pub struct Repricing {
     pub old_pkn: f64,
     /// `None`: no professional offer of the same printing and facets.
     pub new_pkn: Option<f64>,
+    /// The professional floor itself (the CardTrader ask), whole PKN: the
+    /// price a linked CardTrader product is set to. `new_pkn` is that ask net
+    /// of CardTrader's commission (`ct_fees`), what the seller nets there.
+    pub ct_pkn: Option<f64>,
 }
 
 impl Repricing {
@@ -77,10 +82,14 @@ pub fn plan_row(row: &Value, groups: &[Value]) -> Repricing {
         row["reverse"] == true,
         row["first_edition"] == true,
     );
+    let rule = pokoin_external::ct_fees::rule();
     Repricing {
         id: row["id"].as_str().unwrap_or("").to_string(),
         old_pkn: row["price_pkn"].as_f64().unwrap_or(0.0),
-        new_pkn: matched.map(|pkn| pkn.round().max(1.0)),
+        new_pkn: matched
+            .and_then(|pkn| rule.net_pkn(pkn, pokoin_external::ct_fees::Channel::Direct))
+            .map(|pkn| pkn.round().max(1.0)),
+        ct_pkn: matched.map(|pkn| pkn.round().max(1.0)),
     }
 }
 
@@ -255,7 +264,8 @@ async fn apply(
         let source = row["source_listing_id"].as_str().unwrap_or("");
         if let (Some(product_id), Some(token)) = (ct_product_id(source), token.as_deref()) {
             let started = Instant::now();
-            match state.cardtrader.update_product(token, product_id, json!({ "price": eur(new_pkn) })).await {
+            // CardTrader keeps the floor itself; only Pokoin takes the net price.
+            match state.cardtrader.update_product(token, product_id, json!({ "price": eur(plan.ct_pkn.unwrap_or(new_pkn)) })).await {
                 Ok(_) => bump(summary, "ctUpdated"),
                 // Gone from CardTrader: the reconcile settles the link; the
                 // Pokoin price still follows the rule.
@@ -318,14 +328,17 @@ mod tests {
     fn a_listing_takes_the_pro_floor_of_its_own_facets() {
         let plain = json!({"id": "a", "condition": "NM", "language": "IT", "reverse": false, "first_edition": false, "price_pkn": 118.0});
         let plan = plan_row(&plain, &groups());
-        assert_eq!(plan.new_pkn, Some(22.0));
+        // The €0.11 floor nets €0.0978 after the 1-cent minimum commission + VAT.
+        assert_eq!((plan.new_pkn, plan.ct_pkn), (Some(20.0), Some(22.0)));
         assert!(plan.changes());
         let reverse = json!({"id": "b", "condition": "NM", "language": "IT", "reverse": true, "first_edition": false, "price_pkn": 40.0});
-        assert_eq!(plan_row(&reverse, &groups()).new_pkn, Some(618.0));
+        // €3.09 less 5 % (15.45 c) and its VAT: €2.9015.
+        let plan = plan_row(&reverse, &groups());
+        assert_eq!((plan.new_pkn, plan.ct_pkn), (Some(580.0), Some(618.0)));
         // Pokoin LP is CardTrader Slightly Played; rounded to whole PKN.
-        let lp = json!({"id": "c", "condition": "LP", "language": "IT", "reverse": false, "first_edition": false, "price_pkn": 24.0});
+        let lp = json!({"id": "c", "condition": "LP", "language": "IT", "reverse": false, "first_edition": false, "price_pkn": 22.0});
         let plan = plan_row(&lp, &groups());
-        assert_eq!(plan.new_pkn, Some(24.0));
+        assert_eq!(plan.new_pkn, Some(22.0));
         assert!(!plan.changes());
     }
 

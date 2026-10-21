@@ -55,6 +55,8 @@ pub struct Ask {
 #[derive(Debug, Default)]
 pub struct CtAsks {
     rows: Vec<Ask>,
+    /// The header's `generated_at` (Unix seconds): when the file was built.
+    pub generated_at: u64,
 }
 
 impl CtAsks {
@@ -79,7 +81,13 @@ impl CtAsks {
         // The file is sorted already; sorting again keeps lookups right if not.
         out.sort_by_key(|ask| ask.card_id);
         out.shrink_to_fit();
-        Ok(Self { rows: out })
+        let generated_at = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        Ok(Self { rows: out, generated_at })
+    }
+
+    /// Every source-7 row, sorted by card id (the price store's refill).
+    pub fn rows(&self) -> &[Ask] {
+        &self.rows
     }
 
     /// Every ask of one card.
@@ -188,7 +196,9 @@ fn http() -> &'static reqwest::Client {
     })
 }
 
-async fn download(game: &str) -> Result<CtAsks, String> {
+/// Download and parse one game's file, uncached (the price store's refill;
+/// requests go through [`ct_asks`]). A game without a file answers `HTTP 404`.
+pub async fn download(game: &str) -> Result<CtAsks, String> {
     let url = format!("{}/v1/prices/{}", origin(), game);
     let response = http().get(&url).send().await.map_err(|error| format!("{url}: {error}"))?;
     if !response.status().is_success() {

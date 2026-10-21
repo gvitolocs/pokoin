@@ -438,6 +438,17 @@ pub fn import_lock_key(seller_uid: &str, source_listing_id: &str) -> String {
     format!("ct-import:{seller_uid}:{source_listing_id}")
 }
 
+/// A product's Pokoin price: its CardTrader ask net of the commission the
+/// seller pays on it, whole PKN (prices are digits only).
+pub fn net_product_prices(products: &mut [NormalizedProduct], rule: crate::ct_fees::FeeRule, channel: crate::ct_fees::Channel) {
+    for product in products {
+        product.price_pkn = product
+            .price_pkn
+            .and_then(|gross| rule.net_pkn(gross, channel))
+            .map(|net| net.round().max(1.0));
+    }
+}
+
 /// `delistCtListing` — seller removed it on CardTrader: inactive, not sold.
 pub async fn delist_ct_listing(db: &DbPools, listing_id: &str) -> ApiResult<Option<Value>> {
     let rows = db.write("pokemon", DELIST_CT_LISTING_SQL, &[json!(listing_id)]).await?;
@@ -804,6 +815,16 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         return reconcile_one_day_ready_assets(db, firestore, ct, &seller_uid, products, allow_destructive, gate_reason, &mut summary, &emit, &token).await;
     }
 
+    // Pokoin prices a CardTrader product at what the seller nets there, after
+    // CardTrader's commission (ct_fees, docs/PRICING.md): imports and links
+    // take that, never the CardTrader ask itself.
+    let channel = match ct_integration::read_integration_doc(firestore, &seller_uid).await {
+        Ok(doc) => crate::ct_fees::seller_channel(&doc.data),
+        Err(_) => crate::ct_fees::Channel::Zero,
+    };
+    let mut export = export;
+    net_product_prices(&mut export.products, crate::ct_fees::rule(), channel);
+    let products = &export.products;
     let direction = match direction {
         Some(direction) => direction,
         None => crate::cardtrader::link::read_direction(firestore, &seller_uid).await,
@@ -843,7 +864,16 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     if direction.pushes() {
         let pushed = match crate::cardtrader::link::push_gate(result["complete"] == true, exclusive) {
             Some(reason) => json!({ "blocked": reason, "pushed": 0 }),
-            None => crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::PushBudget::from_env(), products).await,
+            None => crate::cardtrader::link::push_unlisted(
+                db,
+                ct,
+                &token,
+                &seller_uid,
+                crate::cardtrader::link::PushBudget::from_env(),
+                products,
+                export_started_at.as_deref(),
+            )
+            .await,
         };
         if pushed.get("error").is_some_and(|error| !error.is_null()) {
             result["summary"]["errors"].incr(1);
@@ -1558,6 +1588,21 @@ pub async fn with_last_sold(db: &DbPools, rows: Vec<Value>) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn imports_and_links_take_the_ask_net_of_the_commission() {
+        let product = |price: f64| {
+            let mut p = crate::cardtrader::sync_core::normalize_product(&json!({"id": 1, "blueprint_id": 400553, "quantity": 1}));
+            p.price_pkn = Some(price);
+            p
+        };
+        let mut products = vec![product(240.0), product(22.0), product(2.0)];
+        products.push({ let mut p = product(1.0); p.price_pkn = None; p });
+        net_product_prices(&mut products, crate::ct_fees::FeeRule::DEFAULT, crate::ct_fees::Channel::Zero);
+        let prices: Vec<Option<f64>> = products.iter().map(|p| p.price_pkn).collect();
+        // €1.20 → 220 PKN; €0.11 → 20; a 1-cent ask nets nothing; no price stays none.
+        assert_eq!(prices, vec![Some(220.0), Some(20.0), None, None]);
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};

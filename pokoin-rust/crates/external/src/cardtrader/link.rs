@@ -497,10 +497,13 @@ impl PushBudget {
     }
 }
 
-/// Active Pokémon listings with stock and no CardTrader product yet, never
-/// CardTrader's own imports. "No CardTrader product" is any source that is not
-/// `ct:…`: empty, or another channel's id such as a Scan Connect item
-/// (`scan:<id>`), which Scan's own CardTrader push also replaces.
+/// Active listings of every CardTrader game with stock and no CardTrader
+/// product yet, never CardTrader's own imports. "No CardTrader product" is any
+/// source that is not `ct:…`: empty, or another channel's id such as a Scan
+/// Connect item (`scan:<id>`), which Scan's own CardTrader push also replaces.
+/// Until 2026-10-20 only Pokémon listings were candidates, so a Card Rails
+/// Riftbound listing never reached CardTrader; the other games are created
+/// from their blueprint's own properties (`push::product_body_for_blueprint`).
 const PUSH_CANDIDATES_WHERE: &str = r#"
       from public.marketplace_user_listings as listing
       where listing.seller_uid = $1
@@ -508,9 +511,57 @@ const PUSH_CANDIDATES_WHERE: &str = r#"
         and listing.quantity_available > 0
         and coalesce(listing.source_listing_id, '') not like 'ct:%'
         and coalesce(listing.source, '') <> $2
-        and coalesce(nullif(listing.marketplace_game, ''), 'pokemon') = 'pokemon'
         and listing.card_id ~ '^[0-9]+$'
 "#;
+
+/// `editable_properties` of these blueprints in a game's own database. The
+/// schema name comes from the API's game table, never from a request.
+fn blueprint_properties_sql(game: &str) -> Option<String> {
+    let known = crate::db::INGEST_GAMES.iter().any(|(id, _, _)| *id == game);
+    known.then(|| {
+        format!(
+            "select id::text as id, editable_properties from marketplace_{game}.cardtrader_blueprints \
+             where id = any($1::bigint[])"
+        )
+    })
+}
+
+/// Blueprint id → `editable_properties` for the page's listings of games
+/// other than Pokémon. A game whose database cannot be read leaves its
+/// listings without properties: they are refused, never created wrongly.
+async fn page_blueprint_properties(db: &DbPools, rows: &[Value]) -> HashMap<(String, i64), Vec<Value>> {
+    let mut by_game: HashMap<String, Vec<i64>> = HashMap::new();
+    for row in rows {
+        let listing = row.get("listing").unwrap_or(&Value::Null);
+        let game = push::listing_game(listing);
+        if game == "pokemon" {
+            continue;
+        }
+        let card = clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80);
+        if let Some(blueprint) = push::blueprint(&card) {
+            by_game.entry(game).or_default().push(blueprint);
+        }
+    }
+    let mut out = HashMap::new();
+    for (game, mut ids) in by_game {
+        ids.sort_unstable();
+        ids.dedup();
+        let Some(sql) = blueprint_properties_sql(&game) else { continue };
+        match db.query(&game, &sql, &[json!(ids)]).await {
+            Ok(found) => {
+                for row in found {
+                    let id = clean_text_value(row.get("id").unwrap_or(&Value::Null), 40).parse::<i64>().ok();
+                    let properties = row.get("editable_properties").and_then(Value::as_array).cloned();
+                    if let (Some(id), Some(properties)) = (id, properties) {
+                        out.insert((game.clone(), id), properties);
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(game, error = %error.message, "blueprint properties unavailable"),
+        }
+    }
+    out
+}
 
 /// A page of candidates, never one this run already tried (`$4`): a listing
 /// CardTrader refused goes back to its old source and must not come round
@@ -557,6 +608,98 @@ const LINK_SQL: &str = r#"
       where id = $1::uuid and coalesce(source_listing_id, '') = $3
       returning id, status, quantity_available, card_id
 "#;
+
+/// An in-doubt create (no answer, a 5xx) keeps its `ct:pending:…` claim so
+/// nothing creates it twice, and the reconcile links it by `user_data_field`
+/// once CardTrader's export shows it. A create that never happened left the
+/// listing pending for ever: never listed on CardTrader, never a candidate
+/// again. A claim older than this when a complete export was taken, whose
+/// listing no exported product names, is released: that export would show
+/// the product if CardTrader had made it (specs/tla/listing-ct-sync).
+pub const STALE_CLAIM_GRACE_SECS: i64 = 15 * 60;
+
+/// Stale claims of one seller (`$2` the export's start on the writer clock,
+/// `$3` the grace in seconds, `$4` listing ids the export names).
+pub const STALE_CLAIMS_SQL: &str = r#"
+      select id::text as id from public.marketplace_user_listings
+      where seller_uid = $1
+        and source_listing_id like 'ct:pending:%'
+        and updated_at < $2::timestamptz - make_interval(secs => $3::int)
+        and not (id::text = any($4::text[]))
+"#;
+
+/// Release them, re-checked under the same conditions (`$5`: the ids).
+pub const RELEASE_STALE_CLAIMS_SQL: &str = r#"
+      update public.marketplace_user_listings
+      set source_listing_id = '', updated_at = now()
+      where seller_uid = $1
+        and source_listing_id like 'ct:pending:%'
+        and updated_at < $2::timestamptz - make_interval(secs => $3::int)
+        and not (id::text = any($4::text[]))
+        and id::text = any($5::text[])
+      returning id::text as id
+"#;
+
+/// A stale claim a seller order names sold on CardTrader before any export
+/// showed its product: settle it sold out (`ct:pending:` rows are CardTrader
+/// mirrors to the audit trigger, so this is `cardtrader_synced`, never a
+/// native sale), so it is neither left for sale on Pokoin nor created again.
+pub const SETTLE_SOLD_CLAIMS_SQL: &str = r#"
+      update public.marketplace_user_listings
+      set quantity_available = 0, status = 'sold_out', updated_at = now()
+      where seller_uid = $1
+        and source_listing_id like 'ct:pending:%'
+        and updated_at < $2::timestamptz - make_interval(secs => $3::int)
+        and not (id::text = any($4::text[]))
+        and id::text = any($5::text[])
+        and status in ('active', 'paused')
+      returning id::text as id
+"#;
+
+/// Days of seller orders read before releasing a claim: a product made by
+/// an in-doubt create and sold before any export saw it is only in orders.
+pub const STALE_CLAIM_ORDER_DAYS: i64 = 2;
+
+/// Listing ids CardTrader seller orders name (`user_data_field`
+/// `pokoin:<id>`, on the item or its product).
+pub fn ordered_listing_ids(orders: &[Value]) -> HashSet<String> {
+    orders
+        .iter()
+        .filter_map(|order| order.get("order_items").and_then(Value::as_array))
+        .flatten()
+        .map(|item| crate::cardtrader::sync_core::parse_pokoin_listing_id(&crate::cardtrader::webhook::item_user_data_field(item)))
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+/// Of the stale claims, the ones safe to release: none when the orders could
+/// not be read, never one an order names (it sold on CardTrader).
+pub fn releasable(stale: &[String], orders: Option<&HashSet<String>>) -> Vec<String> {
+    match orders {
+        None => Vec::new(),
+        Some(ordered) => stale.iter().filter(|id| !ordered.contains(*id)).cloned().collect(),
+    }
+}
+
+/// Of the stale claims, the ones an order names: sold on CardTrader.
+pub fn sold_claims(stale: &[String], orders: Option<&HashSet<String>>) -> Vec<String> {
+    match orders {
+        None => Vec::new(),
+        Some(ordered) => stale.iter().filter(|id| ordered.contains(*id)).cloned().collect(),
+    }
+}
+
+/// Listing ids the export's products name in `user_data_field` (`pokoin:<id>`).
+pub fn exported_listing_ids(export: &[NormalizedProduct]) -> Vec<String> {
+    let mut ids: Vec<String> = export
+        .iter()
+        .map(|product| crate::cardtrader::sync_core::parse_pokoin_listing_id(&product.user_data_field))
+        .filter(|id| !id.is_empty())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
 
 /// `source_listing_id` while the reconcile's own push is in flight. Starts with
 /// `ct:pending:` like the outbox's, so nothing treats it as a product id, and
@@ -660,11 +803,17 @@ pub async fn push_unlisted(
     seller_uid: &str,
     budget: PushBudget,
     export: &[NormalizedProduct],
+    export_started_at: Option<&str>,
 ) -> Value {
     let mut out = json!({
         "candidates": 0, "pushed": 0, "linkedToExisting": 0, "failed": 0, "inDoubt": 0,
-        "skipped": 0, "remaining": 0, "stoppedBy": "done", "errorItems": [],
+        "skipped": 0, "remaining": 0, "releasedStaleClaims": 0, "stoppedBy": "done", "errorItems": [],
     });
+    // Claims whose create never reached CardTrader become candidates again.
+    // The caller passed the push gate: this export is complete.
+    if let Some(started) = export_started_at {
+        release_stale_claims(db, ct, token, seller_uid, started, export, &mut out).await;
+    }
     if budget.per_run <= 0 {
         out["stoppedBy"] = json!("per_run_cap");
         return out;
@@ -704,6 +853,7 @@ pub async fn push_unlisted(
         if rows.is_empty() {
             break;
         }
+        let properties = page_blueprint_properties(db, &rows).await;
         for row in rows {
             if std::time::Instant::now() >= deadline {
                 out["stoppedBy"] = json!("time_budget");
@@ -751,7 +901,11 @@ pub async fn push_unlisted(
                 }
             }
             let started = std::time::Instant::now();
-            match push::create_with_token(ct, token, &listing).await {
+            let game = push::listing_game(&listing);
+            let editable = push::blueprint(&clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80))
+                .and_then(|blueprint| properties.get(&(game, blueprint)))
+                .map(Vec::as_slice);
+            match push::create_with_token_for(ct, token, &listing, editable).await {
                 PushOutcome::Created(pushed) => {
                     let product_id = clean_text_value(pushed.get("productId").unwrap_or(&Value::Null), 80);
                     let source = clean_text_value(pushed.get("sourceListingId").unwrap_or(&Value::Null), 160);
@@ -810,6 +964,53 @@ pub async fn push_unlisted(
         out["remaining"] = rows.first().and_then(|row| row.get("remaining")).cloned().unwrap_or(json!(0));
     }
     out
+}
+
+/// Free the claims of creates that never reached CardTrader (see
+/// [`STALE_CLAIM_GRACE_SECS`]): only after a complete export, only claims
+/// older than the export minus the grace that no exported product and no
+/// recent seller order names. One orders read, and only when there is a
+/// stale claim at all.
+async fn release_stale_claims(
+    db: &DbPools,
+    ct: &CardTraderClient,
+    token: &str,
+    seller_uid: &str,
+    started: &str,
+    export: &[NormalizedProduct],
+    out: &mut Value,
+) {
+    let named = exported_listing_ids(export);
+    let base = [json!(seller_uid), json!(started), json!(STALE_CLAIM_GRACE_SECS), json!(named)];
+    let stale: Vec<String> = match db.write("pokemon", STALE_CLAIMS_SQL, &base).await {
+        Ok(rows) => rows.iter().map(|row| clean_text_value(row.get("id").unwrap_or(&Value::Null), 80)).collect(),
+        Err(error) => {
+            if !error.is_table_missing() {
+                note_error(out, json!({ "reason": error.message }));
+            }
+            return;
+        }
+    };
+    if stale.is_empty() {
+        return;
+    }
+    let from = crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms() - STALE_CLAIM_ORDER_DAYS * 86_400_000);
+    let ordered = ct.fetch_seller_sale_orders(token, &from, 100, 5).await.ok().map(|orders| ordered_listing_ids(&orders));
+    out["staleClaims"] = json!(stale.len());
+    for (sql, ids, counter) in [
+        (SETTLE_SOLD_CLAIMS_SQL, sold_claims(&stale, ordered.as_ref()), "staleClaimsSold"),
+        (RELEASE_STALE_CLAIMS_SQL, releasable(&stale, ordered.as_ref()), "releasedStaleClaims"),
+    ] {
+        if ids.is_empty() {
+            continue;
+        }
+        let mut params = base.to_vec();
+        params.push(json!(ids));
+        match db.write("pokemon", sql, &params).await {
+            Ok(rows) => out[counter] = json!(rows.len()),
+            Err(error) => note_error(out, json!({ "reason": error.message })),
+        }
+    }
 }
 
 /// Why the push pass must not run this time, if it must not. It writes to the
@@ -974,6 +1175,62 @@ mod tests {
         assert!(sql.contains("limit $3"));
         assert!(sql.contains("any($4::text[])"), "rows this run tried never come round again");
         assert!(!push_remaining_sql().contains("limit"));
+    }
+
+    #[test]
+    fn push_candidates_cover_every_game_and_properties_come_from_known_games() {
+        let sql = push_candidates_sql();
+        assert!(!sql.contains("= 'pokemon'"), "Riftbound, Magic, … listings are candidates too");
+        assert_eq!(
+            blueprint_properties_sql("riftbound").as_deref().map(|sql| sql.contains("marketplace_riftbound.cardtrader_blueprints")),
+            Some(true)
+        );
+        assert!(blueprint_properties_sql("pokemon").is_none());
+        assert!(blueprint_properties_sql("x; drop table y").is_none());
+    }
+
+    #[test]
+    fn only_stale_unnamed_claims_are_released() {
+        // Released only with order data, and never a listing an order names.
+        let (a, b, c) = (
+            "0a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+            "1b8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+            "2c8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+        );
+        let stale = vec![a.to_string(), b.to_string()];
+        assert!(releasable(&stale, None).is_empty(), "orders unreadable: release nothing");
+        let orders = vec![json!({"id": 1, "order_items": [
+            {"id": 7, "product_id": 99, "user_data_field": format!("pokoin:{a}")},
+            {"id": 8, "product": {"id": 100, "user_data_field": format!("pokoin:{c}")}},
+        ]})];
+        let ordered = ordered_listing_ids(&orders);
+        assert_eq!(releasable(&stale, Some(&ordered)), vec![b.to_string()]);
+        assert_eq!(sold_claims(&stale, Some(&ordered)), vec![a.to_string()], "sold on CardTrader: settled, not relisted");
+        assert!(sold_claims(&stale, None).is_empty());
+        assert!(SETTLE_SOLD_CLAIMS_SQL.contains("status = 'sold_out'") && SETTLE_SOLD_CLAIMS_SQL.contains("like 'ct:pending:%'"));
+        assert!(ordered.contains(c));
+        // The slim sale order keeps the item's user_data_field.
+        let slim = crate::cardtrader::sync_core::slim_sale_order(orders[0].clone());
+        assert_eq!(ordered_listing_ids(&[slim]).len(), 2);
+        assert!(STALE_CLAIMS_SQL.contains("like 'ct:pending:%'"));
+        let sql = RELEASE_STALE_CLAIMS_SQL;
+        assert!(sql.contains("id::text = any($5::text[])"));
+        assert!(sql.contains("like 'ct:pending:%'"), "never a linked ct:<id> or another channel's source");
+        assert!(sql.contains("updated_at < $2::timestamptz - make_interval"), "only claims older than the export minus the grace");
+        assert!(sql.contains("not (id::text = any($4::text[]))"), "a listing the export names is linked, not released");
+        assert!(STALE_CLAIM_GRACE_SECS >= 600, "longer than any CardTrader create can stay in flight");
+        let product = |id: &str, udf: &str| crate::cardtrader::sync_core::normalize_product(&json!({
+            "id": id, "blueprint_id": 400553, "quantity": 1, "user_data_field": udf,
+            "properties_hash": {"condition": "Near Mint", "riftbound_language": "fr", "riftbound_foil": true}
+        }));
+        let export = [
+            product("1", "pokoin:9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d"),
+            product("2", ""),
+            product("3", "pokoin:9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d"),
+        ];
+        assert_eq!(exported_listing_ids(&export), vec!["9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d".to_string()]);
+        // Other games' facets are read from their own properties.
+        assert_eq!((export[1].language, export[1].reverse), ("FR", true));
     }
 
     #[test]

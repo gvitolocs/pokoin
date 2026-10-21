@@ -24,6 +24,8 @@ use crate::error::ApiError;
 use crate::listing_live as live;
 use crate::seller_api::{self as api, Grant};
 use crate::state::{AuthedUser, DomainState};
+use pokoin_external::facet_store::{self, Basis, FacetPrice};
+use pokoin_external::price_check::{condition_key, PriceItem};
 
 const GRANT_COLUMNS: &str = "id, client, label, scope, token_prefix, webhook_url, created_at, last_used_at";
 
@@ -323,7 +325,12 @@ async fn last_sold_minimums(state: &DomainState, rows: &[Value]) -> HashMap<Sold
             .into_iter()
             .filter(|(_, _, _, _, _, min_pkn)| min_pkn.is_finite() && *min_pkn >= 0.0)
             .map(|(blueprint_id, condition, language, reverse, first_edition, min_pkn)| {
-                let cents = (min_pkn / PKN_PER_EUR_CENT as f64).round() as i64;
+                // What that CardTrader seller netted, after CardTrader's commission.
+                let gross = min_pkn / PKN_PER_EUR_CENT as f64;
+                let net = pokoin_external::ct_fees::rule()
+                    .net_cents(gross, pokoin_external::ct_fees::Channel::Direct)
+                    .unwrap_or(0.0);
+                let cents = (net.round() as i64).max(if gross > 0.0 { 1 } else { 0 });
                 ((blueprint_id, condition, language, reverse, first_edition), cents)
             })
             .collect(),
@@ -557,7 +564,106 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
     Ok(body)
 }
 
-/// Quote new inventory with the same exact facets used for existing listings.
+/// The price store rows of these cards, every game, from fresh runs only:
+/// `(game, row)`. Empty when the store cannot answer (never a failed quote).
+const FACET_QUOTE_SQL: &str = "select price.game, price.card_id, price.language, price.condition, price.foil, \
+       price.first_edition, price.min_pkn::float8 as min_pkn, price.offers, price.basis \
+     from public.cardtrader_facet_prices as price \
+     join public.cardtrader_facet_price_runs as run \
+       on run.game = price.game and run.refreshed_at > now() - interval '3 days' \
+     where price.card_id = any($1::bigint[])";
+
+async fn facet_rows(state: &DomainState, card_ids: &[i64]) -> Vec<(String, FacetPrice)> {
+    if card_ids.is_empty() {
+        return Vec::new();
+    }
+    let rows = sqlx::query(FACET_QUOTE_SQL).bind(card_ids).fetch_all(state.read_db()).await;
+    match rows {
+        Ok(rows) => rows
+            .iter()
+            .filter_map(|row| {
+                let basis = match row.try_get::<String, _>("basis").ok()?.as_str() {
+                    "pro" => Basis::Pro,
+                    "zero" => Basis::Zero,
+                    _ => return None,
+                };
+                Some((
+                    row.try_get::<String, _>("game").ok()?,
+                    FacetPrice {
+                        card_id: row.try_get("card_id").ok()?,
+                        language: row.try_get("language").ok()?,
+                        condition: row.try_get("condition").ok()?,
+                        foil: row.try_get("foil").ok()?,
+                        first_edition: row.try_get("first_edition").ok()?,
+                        min_pkn: row.try_get("min_pkn").ok()?,
+                        offers: i64::from(row.try_get::<i32, _>("offers").unwrap_or(0)),
+                        basis,
+                    },
+                ))
+            })
+            .collect(),
+        Err(error) => {
+            tracing::warn!(%error, "price store quote lookup failed");
+            Vec::new()
+        }
+    }
+}
+
+/// A quote item as the pricer's facets: the same keys the inventory price
+/// check sends (`price_check::parse_items`).
+pub fn quote_item(item: &Value, game: &str) -> PriceItem {
+    let finish = live::first(item, &["printing", "finish"], 40).to_lowercase().replace([' ', '-'], "_");
+    let reverse = finish == "reverse" || finish == "reverse_holo";
+    PriceItem {
+        card_id: live::first(&item["identity"], &["publicId", "pokoinId", "cardId"], 80),
+        condition: condition_key(&live::field(item, "condition", 20)),
+        language: live::field(item, "language", 10).to_uppercase(),
+        reverse,
+        first_edition: item["firstEdition"] == true || finish == "first_edition",
+        // Pokémon's only finish facet is reverse; "Holo" is the printing itself.
+        foil: game != "pokemon" && (finish == "foil" || finish == "holo"),
+        graded: false,
+        signed: item["signed"] == true,
+        altered: item["altered"] == true,
+    }
+}
+
+/// The CardTrader reference price of one quote item from the price store, in
+/// EUR cents: the cheapest professional (Pokémon) or CardTrader Zero (other
+/// games) copy of its facets. The item's game when it names one; otherwise
+/// the only game the store has that card id in (CardTrader blueprint ids are
+/// unique across games), never a guess between two.
+pub fn facet_quote(rows: &[(String, FacetPrice)], game: &str, item: &Value) -> Option<i64> {
+    let card_id: i64 = live::first(&item["identity"], &["publicId", "pokoinId", "cardId"], 80).parse().ok()?;
+    let of_card: Vec<&(String, FacetPrice)> = rows.iter().filter(|(_, row)| row.card_id == card_id).collect();
+    let game = if game.is_empty() {
+        let first = &of_card.first()?.0;
+        if of_card.iter().any(|(other, _)| other != first) {
+            return None;
+        }
+        first.clone()
+    } else {
+        game.to_string()
+    };
+    let prices: Vec<FacetPrice> =
+        of_card.into_iter().filter(|(row_game, _)| *row_game == game).map(|(_, row)| row.clone()).collect();
+    let priced = quote_item(item, &game);
+    if priced.one_of_a_kind() {
+        return None;
+    }
+    let (_, matched) = facet_store::comp(&prices, &priced);
+    // What a seller nets at that ask on CardTrader, after its commission.
+    let channel = prices.first()?.basis.channel();
+    matched
+        .and_then(|pkn| pokoin_external::ct_fees::rule().net_pkn(pkn, channel))
+        .map(|pkn| ((pkn / PKN_PER_EUR_CENT as f64).round() as i64).max(1))
+}
+
+/// Quote new inventory with the same exact facets used for existing listings:
+/// the cheapest confirmed sale of the last 30 days, else the CardTrader
+/// reference price of the facets from the price store (every game), else
+/// the cheapest CardTrader ask of the card (Pokémon tiles). Card Rails lists
+/// a quoted copy at that price and active; an unquoted one stays paused.
 async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
     let items=body["items"].as_array().ok_or_else(||ApiError::bad_request("items is required"))?;
     if items.len()>500 {return Err(ApiError::bad_request("At most 500 inventory items per quote"));}
@@ -568,18 +674,40 @@ async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
         "language":live::field(item,"language",10).to_uppercase(),"reverse":finish=="reverse_holo"||finish=="reverse",
         "first_edition":item["firstEdition"]==true})
     }).collect();
-    let sold=last_sold_minimums(state,&rows).await;
+    let card_ids:Vec<i64>={
+      let mut ids:Vec<i64>=items.iter().filter_map(|item|live::first(&item["identity"],&["publicId","pokoinId","cardId"],80).parse().ok()).collect();
+      ids.sort_unstable();ids.dedup();ids
+    };
+    let (sold,facets)=tokio::join!(last_sold_minimums(state,&rows),facet_rows(state,&card_ids));
     let ids:Vec<i64>=rows.iter().filter_map(|r|blueprint_id_of(&r["card_id"])).collect();
     let fallback:HashMap<i64,f64>=sqlx::query_as::<_,(i64,f64)>("SELECT blueprint_id,min(cheapest_price_pkn)::float8 FROM cheapest_homepage_cache_blueprint WHERE blueprint_id=ANY($1) AND provider='cardtrader' AND cheapest_price_pkn>0 GROUP BY blueprint_id").bind(&ids).fetch_all(state.read_db()).await.unwrap_or_default().into_iter().collect();
     let prices:Vec<Value>=items.iter().zip(&rows).map(|(item,row)| {
+      let game=live::first(item,&["game"],40);
+      let game=if game.is_empty(){live::field(&item["identity"],"game",40)}else{game}.to_lowercase();
+      // Every CardTrader figure is what a seller nets there, after CardTrader's commission.
+      let net_cents=|cents:i64|pokoin_external::ct_fees::rule().net_cents(cents as f64,pokoin_external::ct_fees::Channel::Direct).map(|c|(c.round() as i64).max(1));
       let price=blueprint_id_of(&row["card_id"]).and_then(|id| sold.get(&(id,live::field(row,"condition",20),live::field(row,"language",10),row["reverse"]==true,row["first_edition"]==true))).copied();
-      let tile=blueprint_id_of(&row["card_id"]).and_then(|id|fallback.get(&id)).filter(|v|v.is_finite()&&**v>0.0).map(|v|(v/PKN_PER_EUR_CENT as f64).round()as i64);
-      json!({"itemId":item["id"],"publicId":row["card_id"],"minEurCents":price.or(tile),"priceSource":if price.is_some(){"sold_exact_30d"}else if tile.is_some(){"cardtrader_tile_minimum"}else{"unavailable"}})
+      let facet=facet_quote(&facets,&game,item);
+      let tile=blueprint_id_of(&row["card_id"]).and_then(|id|fallback.get(&id)).filter(|v|v.is_finite()&&**v>0.0).map(|v|(v/PKN_PER_EUR_CENT as f64).round()as i64).and_then(net_cents);
+      json!({"itemId":item["id"],"publicId":row["card_id"],"minEurCents":price.or(facet).or(tile),
+        "priceSource":if price.is_some(){"sold_exact_30d"}else if facet.is_some(){"cardtrader_facet_floor"}else if tile.is_some(){"cardtrader_tile_minimum"}else{"unavailable"}})
     }).collect();
     Ok(json!({"prices":prices,"windowDays":LAST_SOLD_WINDOW_DAYS}))
 }
 
 /// Create a listing from a tool's item, at most once per idempotency key.
+///
+/// The key row is claimed first (`seller_api_listing_keys`), and the listing
+/// row is bound to it inside the insert's own transaction, only while it is
+/// still unbound. So:
+/// - a retry after the answer was lost finds the key bound and answers the
+///   same listing (`created: false`);
+/// - two attempts at once both insert, one binds, the other rolls back and
+///   answers the bound listing;
+/// - a crash anywhere leaves either no row (the key unbound: the next attempt
+///   creates it) or the row and its bound key together. Before 2026-10-20 the
+///   key was bound after the insert committed; a crash in between left the key
+///   claimed and unbound, and every retry answered `list_in_doubt` for ever.
 async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
     only_pokoin(body)?;
     let key = text_field(body, &["idempotencyKey"], 200);
@@ -587,7 +715,25 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
         return Err(ApiError::bad_request("idempotencyKey is required."));
     }
     let db = state.write_db();
-    let claimed = sqlx::query(
+    let bound = || async {
+        sqlx::query_scalar::<_, Option<uuid::Uuid>>(
+            "select listing_id from public.seller_api_listing_keys where grant_id = $1 and idempotency_key = $2",
+        )
+        .bind(grant.id)
+        .bind(&key)
+        .fetch_optional(db)
+        .await
+        .map_err(api::store_error)
+        .map(Option::flatten)
+    };
+    let existing = |id: uuid::Uuid| json!({ "confirmed": true, "listingId": id.to_string(), "stockMode": "absolute", "created": false });
+    if let Some(id) = bound().await? {
+        return Ok(existing(id));
+    }
+    let (name, country) = seller_profile(state, &grant.seller_uid).await;
+    // A refused item never claims its key.
+    let listing_body = listing_body(&body["item"], if name.is_empty() { "Pokoin seller" } else { &name }, &country)?;
+    sqlx::query(
         "insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, $2) \
          on conflict (grant_id, idempotency_key) do nothing",
     )
@@ -595,62 +741,40 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     .bind(&key)
     .execute(db)
     .await
-    .map_err(api::store_error)?
-    .rows_affected()
-        == 1;
-    if !claimed {
-        let existing: Option<uuid::Uuid> = sqlx::query_scalar(
-            "select listing_id from public.seller_api_listing_keys where grant_id = $1 and idempotency_key = $2",
-        )
-        .bind(grant.id)
-        .bind(&key)
-        .fetch_optional(db)
-        .await
-        .map_err(api::store_error)?
-        .flatten();
-        // A claim with no listing: an earlier attempt may or may not have
-        // created it. The tool reads `listings` rather than create a second.
-        let id = existing.ok_or_else(|| {
-            ApiError::conflict("An earlier attempt with this key is unresolved. Read listings before retrying.")
-                .with_code("list_in_doubt")
-        })?;
-        return Ok(json!({ "confirmed": true, "listingId": id.to_string(), "stockMode": "absolute", "created": false }));
-    }
-    let release = || async {
-        let _ = sqlx::query("delete from public.seller_api_listing_keys where grant_id = $1 and idempotency_key = $2 and listing_id is null")
+    .map_err(api::store_error)?;
+    let game = live::field(&listing_body, "marketplaceGame", 40);
+    let created = super::listings::create_listing_keyed(
+        state,
+        &seller_claims(grant),
+        &listing_body,
+        if game.is_empty() { "pokemon" } else { &game },
+        Some((grant.id, key.as_str())),
+    )
+    .await;
+    let listing = match created {
+        Ok(listing) => listing,
+        // Another attempt with this key bound its row first: that listing.
+        Err(error) if error.code.as_deref() == Some("list_key_bound") => {
+            return match bound().await? {
+                Some(id) => Ok(existing(id)),
+                None => Err(error),
+            };
+        }
+        // Refused before or by the insert: nothing exists, free the key.
+        Err(error) if error.status.is_client_error() => {
+            let _ = sqlx::query(
+                "delete from public.seller_api_listing_keys where grant_id = $1 and idempotency_key = $2 and listing_id is null",
+            )
             .bind(grant.id)
             .bind(&key)
             .execute(db)
             .await;
-    };
-    let (name, country) = seller_profile(state, &grant.seller_uid).await;
-    let listing_body = match listing_body(&body["item"], if name.is_empty() { "Pokoin seller" } else { &name }, &country) {
-        Ok(listing_body) => listing_body,
-        Err(error) => {
-            release().await;
-            return Err(error);
-        }
-    };
-    let game = live::field(&listing_body, "marketplaceGame", 40);
-    let created = super::listings::create_listing(state, &seller_claims(grant), &listing_body, if game.is_empty() { "pokemon" } else { &game }).await;
-    let listing = match created {
-        Ok(listing) => listing,
-        // Rejected before or by the insert: nothing exists, the key is free.
-        Err(error) if error.status.is_client_error() => {
-            release().await;
             return Err(error);
         }
         Err(error) => return Err(error),
     };
     let id = uuid::Uuid::parse_str(&live::field(&listing, "id", 80))
         .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
-    sqlx::query("update public.seller_api_listing_keys set listing_id = $3 where grant_id = $1 and idempotency_key = $2")
-        .bind(grant.id)
-        .bind(&key)
-        .bind(id)
-        .execute(db)
-        .await
-        .map_err(api::store_error)?;
     Ok(json!({
         "confirmed": true,
         "listingId": id.to_string(),
@@ -734,6 +858,23 @@ pub fn update_patch(item: &Value) -> Result<Value, ApiError> {
     Ok(patch)
 }
 
+/// A listing that is paused only because it had no price (Card Rails lists
+/// an unquoted copy as `paused` at 0, and Pokoin cannot sell at 0) goes on
+/// sale when an update gives it a price. A listing the seller paused with a
+/// price on it stays paused: only a price of 0 marks "paused for no price".
+pub fn activate_priced(row: &Value, patch: &mut Value) {
+    let unpriced = live::number(&row["price_pkn"]);
+    let priced = patch.get("pricePkn").map(live::number).is_some_and(|pkn| pkn.is_finite() && pkn > 0.0);
+    if live::field(row, "status", 20) == "paused"
+        && !(unpriced.is_finite() && unpriced > 0.0)
+        && priced
+        && patch.get("status").is_none()
+        && live::number(&row["quantity_available"]) > 0.0
+    {
+        patch["status"] = json!("active");
+    }
+}
+
 /// Would this patch change the stored listing? Repeating the same `update`
 /// must answer `changed: false`, so a retry never rewrites or re-queues.
 fn patch_differs(row: &Value, patch: &Value) -> bool {
@@ -774,8 +915,9 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     if !body["item"].is_object() {
         return Err(ApiError::bad_request("Send the fields to change in `item`."));
     }
-    let patch = update_patch(&body["item"])?;
+    let mut patch = update_patch(&body["item"])?;
     let row = seller_listing_row(state, &grant.seller_uid, uuid).await?;
+    activate_priced(&row, &mut patch);
     if !matches!(live::field(&row, "status", 20).as_str(), "active" | "paused" | "sold_out") {
         return Err(ApiError::conflict("This listing was removed on Pokoin.").with_code("listing_removed"));
     }
@@ -1048,6 +1190,75 @@ mod tests {
         // Locations cut at 64 characters, like `list`.
         let long = update_patch(&json!({"location":"x".repeat(80)})).unwrap();
         assert_eq!(long["location"], "x".repeat(64));
+    }
+
+    #[test]
+    fn pricing_a_listing_paused_for_no_price_puts_it_on_sale() {
+        // The 2026-10-20 Card Rails Vendetta rows: paused at 0, then priced.
+        let unpriced = json!({"status": "paused", "price_pkn": "0", "quantity_available": 1});
+        let mut patch = update_patch(&json!({"priceEurCents": 120})).unwrap();
+        activate_priced(&unpriced, &mut patch);
+        assert_eq!(patch, json!({"pricePkn": 240.0, "status": "active"}));
+        assert!(patch_differs(&unpriced, &patch));
+        // Repeating it on the row it produced changes nothing (idempotent).
+        let live = json!({"status": "active", "price_pkn": "240", "quantity_available": 1});
+        let mut again = update_patch(&json!({"priceEurCents": 120})).unwrap();
+        activate_priced(&live, &mut again);
+        assert!(!patch_differs(&live, &again));
+        // The seller's own pause with a price on it is kept.
+        let held = json!({"status": "paused", "price_pkn": "500", "quantity_available": 1});
+        let mut patch = update_patch(&json!({"priceEurCents": 300})).unwrap();
+        activate_priced(&held, &mut patch);
+        assert_eq!(patch.get("status"), None);
+        // Still unpriced, no stock, or another field only: stays paused.
+        for (row, item) in [
+            (&unpriced, json!({"priceEurCents": 0})),
+            (&json!({"status": "paused", "price_pkn": 0, "quantity_available": 0}), json!({"priceEurCents": 120})),
+            (&unpriced, json!({"condition": "NM"})),
+        ] {
+            let mut patch = update_patch(&item).unwrap();
+            activate_priced(row, &mut patch);
+            assert_ne!(patch.get("status"), Some(&json!("active")), "{item}");
+        }
+    }
+
+    #[test]
+    fn quotes_price_every_game_from_the_store_by_the_listing_facets() {
+        let row = |game: &str, card_id: i64, language: &str, condition: &str, foil: bool, pkn: f64, basis: Basis| {
+            (game.to_string(), FacetPrice {
+                card_id, language: language.into(), condition: condition.into(), foil,
+                first_edition: false, min_pkn: pkn, offers: 1, basis,
+            })
+        };
+        let rows = vec![
+            row("riftbound", 801106, "EN", "NM", false, 240.0, Basis::Zero),
+            row("riftbound", 801106, "EN", "SP", false, 180.0, Basis::Zero),
+            row("riftbound", 801106, "EN", "NM", true, 1200.0, Basis::Zero),
+            row("pokemon", 633380, "IT", "NM", false, 64.0, Basis::Pro),
+            row("pokemon", 633380, "IT", "NM", true, 590.0, Basis::Pro),
+            row("pokemon", 42, "EN", "NM", false, 10.0, Basis::Pro),
+            row("magic", 42, "EN", "NM", false, 20.0, Basis::Zero),
+        ];
+        let item = |card: i64, condition: &str, language: &str, printing: &str| {
+            json!({"id": "i", "identity": {"publicId": card.to_string()}, "condition": condition,
+                   "language": language, "printing": printing, "firstEdition": false})
+        };
+        // Card Rails sends no game: the card id names it.
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Standard")), Some(110), "€1.20 Zero ask nets €1.0975");
+        assert_eq!(facet_quote(&rows, "", &item(801106, "MP", "EN", "Standard")), Some(82), "SP or better prices MP: €0.90 nets €0.8231");
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Foil")), Some(549));
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "IT", "Standard")), None);
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Standard")), Some(30), "€0.32 pro ask, direct 5 %: min 1 c + VAT");
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Reverse Holo")), Some(277));
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Holo")), Some(30), "Pokémon holo is not a facet");
+        assert_eq!(facet_quote(&rows, "", &item(633380, "SP", "IT", "Standard")), None, "pro floor is exact");
+        // Two games hold the id: only the named game prices it.
+        assert_eq!(facet_quote(&rows, "", &item(42, "NM", "EN", "Standard")), None);
+        assert_eq!(facet_quote(&rows, "magic", &item(42, "NM", "EN", "Standard")), Some(9));
+        assert_eq!(facet_quote(&rows, "", &item(7, "NM", "EN", "Standard")), None);
+        let mut signed = item(801106, "NM", "EN", "Standard");
+        signed["signed"] = json!(true);
+        assert_eq!(facet_quote(&rows, "", &signed), None, "a signed copy has no CardTrader comp");
     }
 
     #[test]

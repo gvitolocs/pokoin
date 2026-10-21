@@ -1,9 +1,12 @@
 //! Native one-shot Pi timer jobs. Never invoke the retired Node backend.
 mod cardtrader;
 mod eur;
+mod facet_prices;
+mod net_prices;
 mod referral;
 mod reprice;
 mod search;
+mod unpriced;
 
 use anyhow::{bail, Context, Result};
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -19,6 +22,8 @@ struct Options {
     apply: bool,
     /// `--csv=<path>`: where a job writes its CSV report.
     csv: Option<String>,
+    /// `--game=<slug>`: the one game a per-game job works on.
+    game: Option<String>,
 }
 impl Options {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
@@ -41,6 +46,9 @@ impl Options {
             if let Some(path) = arg.strip_prefix("--csv=").filter(|v| !v.trim().is_empty()) {
                 options.csv.get_or_insert_with(|| path.trim().to_string());
             }
+            if let Some(game) = arg.strip_prefix("--game=").filter(|v| !v.trim().is_empty()) {
+                options.game.get_or_insert_with(|| game.trim().to_string());
+            }
         }
         options
     }
@@ -53,6 +61,9 @@ pub async fn run(name: &str) -> Result<()> {
         "referral-reconcile" => referral::run(&options).await,
         "cardtrader-seller-reconcile" => cardtrader::run(&options).await,
         "cardtrader-pro-floor-reprice" => reprice::run(&options).await,
+        "cardtrader-facet-prices" => facet_prices::run(&options).await,
+        "price-unpriced-listings" => unpriced::run(&options).await,
+        "cardtrader-net-prices" => net_prices::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
@@ -123,6 +134,7 @@ mod tests {
         assert!(options.apply && !options.dry_run);
         assert_eq!(options.csv.as_deref(), Some("/tmp/x.csv"));
         assert_eq!(Options::parse(["--seller=".into()]).seller, None);
+        assert_eq!(Options::parse(["--game=riftbound".into(), "--game=magic".into()]).game.as_deref(), Some("riftbound"));
     }
     #[test]
     fn timer_flags_keep_first_since_and_dry_run() {

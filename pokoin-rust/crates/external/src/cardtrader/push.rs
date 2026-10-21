@@ -152,6 +152,134 @@ pub fn product_body(listing: &Value) -> ApiResult<Value> {
     Ok(body)
 }
 
+/// A listing's game (`marketplace_game`); Pokémon when unset.
+pub fn listing_game(listing: &Value) -> String {
+    let raw = first(listing, &["marketplace_game", "marketplaceGame", "game"], 40);
+    crate::db::normalize_game(if raw.is_empty() { "pokemon" } else { &raw })
+}
+
+/// A Pokoin listing's foil on a game other than Pokémon: imports store it as
+/// `reverse` (`foil_state = 'reverse'`), Card Rails as `foil`/`holo`.
+fn other_game_foil(listing: &Value) -> bool {
+    listing["reverse"] == true
+        || matches!(
+            first(listing, &["foilState", "foil_state"], 40).to_lowercase().as_str(),
+            "reverse" | "foil" | "holo"
+        )
+}
+
+/// CardTrader's code for a Pokoin language among a blueprint's allowed values
+/// (Riftbound: `en`, `zh-CN`, `fr`, `kr`; Magic adds `zh-TW`, …).
+pub fn ct_language(language: &str, possible: &[Value]) -> Option<String> {
+    let wanted: &[&str] = match language.trim().to_uppercase().as_str() {
+        "" | "EN" => &["en"],
+        "IT" => &["it"],
+        "FR" => &["fr"],
+        "DE" => &["de"],
+        "ES" => &["es"],
+        "PT" => &["pt"],
+        "JP" | "JA" | "JPN" => &["jp", "ja"],
+        "KO" | "KR" => &["kr", "ko"],
+        "ZH" | "CN" | "ZHS" | "ZH-CN" => &["zh-CN", "zh"],
+        "ZHT" | "TW" | "ZH-TW" => &["zh-TW", "zht"],
+        "RU" => &["ru"],
+        "NL" => &["nl"],
+        "PL" => &["pl"],
+        "ID" => &["id"],
+        "TH" => &["th"],
+        "VI" => &["vi"],
+        _ => &[],
+    };
+    wanted.iter().find_map(|code| {
+        possible
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|value| value.eq_ignore_ascii_case(code))
+            .map(str::to_string)
+    })
+}
+
+/// CardTrader's condition for a Pokoin one among a blueprint's allowed values.
+pub fn ct_condition(condition: &str, possible: &[Value]) -> Option<String> {
+    let wanted: &[&str] = match condition.trim().to_uppercase().as_str() {
+        "M" | "MT" | "MINT" => &["Mint", "Near Mint"],
+        "SP" | "LP" | "EX" => &["Slightly Played"],
+        "MP" | "GD" => &["Moderately Played"],
+        "PL" | "HP" => &["Played", "Heavily Played"],
+        "PO" | "POOR" | "DMG" => &["Poor"],
+        _ => &["Near Mint"],
+    };
+    if possible.is_empty() {
+        return wanted.first().map(|value| value.to_string());
+    }
+    wanted.iter().find_map(|want| {
+        possible.iter().filter_map(Value::as_str).find(|value| value == want).map(str::to_string)
+    })
+}
+
+/// `POST /products` body for a listing of a game other than Pokémon, from
+/// its blueprint's `editable_properties` (`marketplace_<game>.cardtrader_blueprints`):
+/// only properties the blueprint has and values it allows (`riftbound_language`,
+/// `riftbound_foil`, `mtg_foil`, `first_edition`, …). A facet the blueprint
+/// cannot carry is refused, so nothing is created, rather than listed on
+/// CardTrader as another copy.
+pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiResult<Value> {
+    let mut body = product_body(listing)?;
+    let named = |test: &dyn Fn(&str) -> bool| {
+        editable.iter().find(|property| property["name"].as_str().is_some_and(|name| test(name)))
+    };
+    let possible = |property: &Value| property["possible_values"].as_array().cloned().unwrap_or_default();
+    let refuse = |what: &str| {
+        ApiError::bad_request(format!("CardTrader has no {what} for this card.")).with_code("cardtrader_facet_unsupported")
+    };
+    let mut properties = serde_json::Map::new();
+    let condition = field(listing, "condition", 20);
+    let condition = match named(&|name| name == "condition") {
+        Some(property) => ct_condition(&condition, &possible(property)).ok_or_else(|| refuse("such condition"))?,
+        None => ct_condition(&condition, &[]).unwrap_or_else(|| "Near Mint".into()),
+    };
+    properties.insert("condition".into(), json!(condition));
+    if let Some(property) = named(&|name| name.ends_with("_language")) {
+        let language = field(listing, "language", 10);
+        let code = ct_language(&language, &possible(property)).ok_or_else(|| refuse("such language"))?;
+        properties.insert(property["name"].as_str().unwrap_or_default().to_string(), json!(code));
+    }
+    let boolean = |property: &Value| property["type"] == "boolean";
+    let flags: [(bool, &dyn Fn(&str) -> bool, &str); 4] = [
+        (other_game_foil(listing), &|name: &str| name.ends_with("_foil"), "foil"),
+        (
+            listing["firstEdition"] == true || listing["first_edition"] == true,
+            &|name: &str| name == "first_edition" || name.ends_with("_first_edition"),
+            "first edition",
+        ),
+        (listing["signed"] == true, &|name: &str| name == "signed", "signed copy"),
+        (listing["altered"] == true, &|name: &str| name == "altered", "altered copy"),
+    ];
+    for (on, test, what) in flags {
+        if !on {
+            continue;
+        }
+        let property = named(test).filter(|property| boolean(property)).ok_or_else(|| refuse(what))?;
+        properties.insert(property["name"].as_str().unwrap_or_default().to_string(), json!(true));
+    }
+    body["properties"] = Value::Object(properties);
+    Ok(body)
+}
+
+/// The create body for any game: Pokémon's fixed properties, or the
+/// blueprint's own for the other games (`None` when its blueprint is unknown:
+/// refused, nothing is created).
+pub fn product_body_for_game(listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
+    if listing_game(listing) == "pokemon" {
+        return product_body(listing);
+    }
+    match editable {
+        Some(editable) => product_body_for_blueprint(listing, editable),
+        None => Err(ApiError::bad_request("CardTrader blueprint properties are unknown for this card.")
+            .with_code("cardtrader_blueprint_unknown")),
+    }
+}
+
 /// What a CardTrader create did, as far as Pokoin can know.
 #[derive(Debug)]
 pub enum PushOutcome {
@@ -187,7 +315,18 @@ pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient
 /// Create `listing` with a token the caller already holds (the reconcile's
 /// push pass). The caller has ruled out 1-Day Ready accounts.
 pub async fn create_with_token(ct: &CardTraderClient, token: &str, listing: &Value) -> PushOutcome {
-    match product_body(listing) {
+    create_with_token_for(ct, token, listing, None).await
+}
+
+/// [`create_with_token`] for any game: `editable` is the blueprint's
+/// `editable_properties` (required for the games other than Pokémon).
+pub async fn create_with_token_for(
+    ct: &CardTraderClient,
+    token: &str,
+    listing: &Value,
+    editable: Option<&[Value]>,
+) -> PushOutcome {
+    match product_body_for_game(listing, editable) {
         Ok(body) => create_body(ct, token, body).await,
         Err(error) => PushOutcome::Rejected(error),
     }
@@ -362,6 +501,49 @@ mod tests {
         assert_eq!(body["description"], json!("mint"));
         assert!(product_body(&json!({ "cardId": "238", "pricePkn": 0 })).is_err());
         assert!(product_body(&json!({ "cardId": "x", "pricePkn": 10 })).is_err());
+    }
+
+    fn riftbound_props() -> Vec<Value> {
+        // Punching Poro 400553, from the nightly blueprint export.
+        serde_json::from_str(r#"[
+          {"name": "condition", "type": "string", "default_value": "Near Mint", "possible_values": ["Mint", "Near Mint", "Slightly Played", "Moderately Played", "Played", "Poor"]},
+          {"name": "signed", "type": "boolean", "default_value": "false", "possible_values": [true, false]},
+          {"name": "altered", "type": "boolean", "default_value": "false", "possible_values": [true, false]},
+          {"name": "riftbound_language", "type": "string", "default_value": "en", "possible_values": ["en", "zh-CN", "fr", "kr"]},
+          {"name": "riftbound_foil", "type": "boolean", "default_value": "false", "possible_values": [true, false]}
+        ]"#).unwrap()
+    }
+
+    #[test]
+    fn other_games_take_the_blueprint_properties() {
+        let listing = json!({"id": "l1", "card_id": "801106", "price_pkn": 240, "quantity_available": 1,
+                             "condition": "NM", "language": "EN", "foil_state": "standard", "reverse": false,
+                             "marketplace_game": "riftbound"});
+        let body = product_body_for_game(&listing, Some(&riftbound_props())).unwrap();
+        assert_eq!(body["blueprint_id"], json!(400553));
+        assert_eq!(body["price"], json!(1.2));
+        assert_eq!(body["user_data_field"], json!("pokoin:l1"));
+        assert_eq!(body["properties"], json!({"condition": "Near Mint", "riftbound_language": "en"}));
+        let mut foil = listing.clone();
+        foil["foil_state"] = json!("foil");
+        foil["language"] = json!("KO");
+        foil["condition"] = json!("HP");
+        let body = product_body_for_game(&foil, Some(&riftbound_props())).unwrap();
+        assert_eq!(body["properties"], json!({"condition": "Played", "riftbound_language": "kr", "riftbound_foil": true}));
+        // Facets the blueprint cannot carry are refused: nothing is created.
+        let mut italian = listing.clone();
+        italian["language"] = json!("IT");
+        assert!(product_body_for_game(&italian, Some(&riftbound_props())).is_err());
+        let mut first = listing.clone();
+        first["first_edition"] = json!(true);
+        assert!(product_body_for_game(&first, Some(&riftbound_props())).is_err());
+        assert!(product_body_for_game(&listing, None).is_err(), "unknown blueprint");
+        // Pokémon keeps its fixed body with or without properties.
+        let pokemon = json!({"id": "p", "cardId": "238", "pricePkn": 200, "language": "IT"});
+        assert_eq!(listing_game(&pokemon), "pokemon");
+        assert_eq!(product_body_for_game(&pokemon, None).unwrap()["properties"]["pokemon_language"], json!("it"));
+        assert_eq!(ct_language("ZHT", &[json!("en"), json!("zh-TW")]).as_deref(), Some("zh-TW"));
+        assert_eq!(ct_condition("LP", &[]).as_deref(), Some("Slightly Played"));
     }
 
     #[test]

@@ -749,6 +749,26 @@ pub(crate) async fn create_listing(
     body: &Value,
     requested_game: &str,
 ) -> Result<Value, ApiError> {
+    create_listing_keyed(state, claims, body, requested_game, None).await
+}
+
+/// Binds a Seller API `list` idempotency key to the new row in the insert's
+/// own transaction: only while the key is still unbound (compare-and-set),
+/// so two attempts with one key never both commit a row, and a crash leaves
+/// either no row and an unbound key (the retry creates it) or both.
+pub(crate) const BIND_API_KEY_SQL: &str = "update public.seller_api_listing_keys set listing_id = $3 \
+     where grant_id = $1 and idempotency_key = $2 and listing_id is null";
+
+/// [`create_listing`] for a Seller API `list` call: `api_key` is the grant
+/// and idempotency key the row is bound to (see [`BIND_API_KEY_SQL`]). A key
+/// another attempt bound first answers `409 list_key_bound` and writes nothing.
+pub(crate) async fn create_listing_keyed(
+    state: &DomainState,
+    claims: &crate::Claims,
+    body: &Value,
+    requested_game: &str,
+    api_key: Option<(uuid::Uuid, &str)>,
+) -> Result<Value, ApiError> {
     let card = live::field(body, "cardId", 80);
     let price = live::number(&body["pricePkn"]);
     let qty = live::number(&body["quantityAvailable"]);
@@ -800,6 +820,21 @@ pub(crate) async fn create_listing(
         state.now_ms(),
     );
     let queued = sync::enqueue(&mut tx, event).await?;
+    if let Some((grant, key)) = api_key {
+        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
+            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
+        let bound = sqlx::query(BIND_API_KEY_SQL)
+            .bind(grant)
+            .bind(key)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if bound != 1 {
+            tx.rollback().await?;
+            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
+        }
+    }
     tx.commit().await?;
     let mut listing = finish_write(state, &row, queued, &game, &claims.uid).await?;
     if targets["cardtrader"] == true {

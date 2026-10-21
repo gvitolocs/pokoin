@@ -8,6 +8,7 @@ and a README that maps every action to the Rust code with `file:line`.
 | [`ct-reconcile/`](ct-reconcile/README.md) | CardTrader seller reconcile (export, plan, guards, Redis lock) racing the order webhook |
 | [`listing-outbox/`](listing-outbox/README.md) | Listings outbox: claim/lease/retry, price refresh, cache generations, CardTrader push/link/destroy |
 | [`eur-fulfilment/`](eur-fulfilment/README.md) | EUR orders: reservation, Stripe webhook, buyer cancel, sweep, fulfilment lease, CardTrader buy-through |
+| [`listing-ct-sync/`](listing-ct-sync/README.md) | Card Rails `list` → Pokoin listing → one CardTrader product: key binding, pricing, reconcile push, in-doubt claims, webhook replay |
 | [`edge-coalesce/`](edge-coalesce/README.md) | Edge request coalescing (PR #307): FlightGuard, leader panic/hang-up/timeout, re-election, stale refresh |
 
 [`FINDINGS.md`](FINDINGS.md) records every counterexample TLC found, whether
