@@ -2,7 +2,8 @@
 //!
 //! Sets one connected seller's CardTrader-linked Pokoin listings (`ct:<product
 //! id>`) to their CardTrader ask net of the commission the seller pays on it
-//! (`ct_fees`: 7 % + VAT for a CardTrader Zero seller, 5 % + VAT otherwise),
+//! (`ct_fees`: 7 % + VAT for a CardTrader Zero seller, 5 % + VAT otherwise;
+//! `resolve_seller_channel` reads the Zero flag from the seller's own offers in the market book),
 //! the price the reconcile now gives every import and link
 //! (docs/PRICING.md "Net of CardTrader's commission").
 //!
@@ -57,7 +58,7 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     if integration::is_one_day_ready_integration(&doc) {
         bail!("1-Day Ready accounts are priced by CardTrader; nothing to do.");
     }
-    let channel = ct_fees::seller_channel(&doc.data);
+    let channel = ct_fees::resolve_seller_channel(&state.db, &doc.data).await;
     let rule = ct_fees::rule();
     let token = integration::decrypt_integration_token(state.firestore.as_ref(), &seller).await?;
     let export = state.cardtrader.fetch_products_export(&token).await?;

@@ -100,19 +100,67 @@ impl FeeRule {
 }
 
 /// The channel a connected seller's own CardTrader sales pay: CardTrader
-/// Zero when the account can sell through the hub (`can_sell_via_hub` in the
-/// `/info` user Pokoin stores as `metadata.user` on the integration), direct
-/// otherwise. Zero is the higher rate, so a Zero-enabled seller is never
+/// Zero for an account that can sell through the hub (`can_sell_via_hub`),
+/// direct otherwise. `stored` is the flag in the `/info` user Pokoin keeps as
+/// `metadata.user` on the integration (absent on every account connected so
+/// far: CardTrader's `/info` user carries only id, email and username);
+/// `book` is the flag CardTrader prints on the seller's own offers in the
+/// daily market book. Unknown is Zero, the higher rate, so a seller is never
 /// priced above what they net.
-pub fn seller_channel(integration_data: &serde_json::Value) -> Channel {
-    let user = integration_data.pointer("/metadata/user").unwrap_or(&serde_json::Value::Null);
-    let hub = matches!(user.get("can_sell_via_hub"), Some(serde_json::Value::Bool(true)))
-        || user.get("can_sell_via_hub").and_then(serde_json::Value::as_str) == Some("true");
-    if hub {
-        Channel::Zero
-    } else {
-        Channel::Direct
+pub fn channel_from(stored: Option<bool>, book: Option<bool>) -> Channel {
+    match stored.or(book) {
+        Some(false) => Channel::Direct,
+        _ => Channel::Zero,
     }
+}
+
+fn flag(value: Option<&serde_json::Value>) -> Option<bool> {
+    match value? {
+        serde_json::Value::Bool(flag) => Some(*flag),
+        serde_json::Value::String(text) if text == "true" || text == "false" => Some(text == "true"),
+        _ => None,
+    }
+}
+
+/// [`channel_from`] with only the stored flag (no database at hand).
+pub fn seller_channel(integration_data: &serde_json::Value) -> Channel {
+    channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None)
+}
+
+/// The seller's own offers in the market book of the last week, by their
+/// CardTrader user id: whether CardTrader lets them sell through Zero.
+pub const SELLER_HUB_SQL: &str = "
+    select bool_or(raw_metadata->'user'->>'can_sell_via_hub' = 'true') as hub, count(*)::int as offers
+    from public.cardtrader_market_listing_snapshots
+    where seller_account_id = $1 and last_seen_at >= now() - interval '7 days'";
+
+/// The channel of a connected seller: the stored flag, else the market book
+/// (redshakkio, CardTrader user 180405, is a Zero seller there; PeppeV,
+/// 595699, is not), else Zero.
+pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &serde_json::Value) -> Channel {
+    let stored = flag(integration_data.pointer("/metadata/user/can_sell_via_hub"));
+    if stored.is_some() {
+        return channel_from(stored, None);
+    }
+    let id = match integration_data.pointer("/metadata/user/id") {
+        Some(serde_json::Value::String(id)) => id.trim().to_string(),
+        Some(serde_json::Value::Number(id)) => id.to_string(),
+        _ => String::new(),
+    };
+    if id.is_empty() {
+        return channel_from(None, None);
+    }
+    let book = match db.query("pokemon", SELLER_HUB_SQL, &[serde_json::json!(id)]).await {
+        Ok(rows) => rows.first().and_then(|row| {
+            let offers = row.get("offers").and_then(serde_json::Value::as_i64).unwrap_or(0);
+            (offers > 0).then(|| row.get("hub") == Some(&serde_json::Value::Bool(true)))
+        }),
+        Err(error) => {
+            tracing::warn!(error = %error.message, "seller channel: market book unavailable");
+            None
+        }
+    };
+    channel_from(None, book)
 }
 
 /// The rule of this process (read once from the environment).
@@ -153,7 +201,14 @@ mod tests {
         let zero = serde_json::json!({"metadata": {"user": {"id": 1, "can_sell_via_hub": true}}});
         assert_eq!(seller_channel(&zero), Channel::Zero);
         assert_eq!(seller_channel(&serde_json::json!({"metadata": {"user": {"can_sell_via_hub": false}}})), Channel::Direct);
-        assert_eq!(seller_channel(&serde_json::json!({})), Channel::Direct);
+        // The book decides when the stored info has no flag (every account so far).
+        assert_eq!(channel_from(None, Some(true)), Channel::Zero);
+        assert_eq!(channel_from(None, Some(false)), Channel::Direct);
+        assert_eq!(channel_from(Some(false), Some(true)), Channel::Direct, "the stored flag wins");
+        // Unknown is the higher rate: never priced above what the seller nets.
+        assert_eq!(seller_channel(&serde_json::json!({})), Channel::Zero);
+        assert_eq!(channel_from(None, None), Channel::Zero);
+        assert!(SELLER_HUB_SQL.contains("seller_account_id = $1"));
     }
 
     #[test]
