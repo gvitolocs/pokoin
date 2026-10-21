@@ -2308,6 +2308,9 @@ export function cardFromAutocomplete(row = {}) {
     isMarketAvailable: row.isMarketAvailable === true,
     nationality: row.nationality || expansionNationality(row.set_name || row.set) || '',
     expansionSymbolUrl: row.expansionSymbolUrl || row.expansion_symbol_url || row.defaultSymbolUrl || row.symbolImageUrl || '',
+    // TCGdex scans of this printing per card language (lang-scans.js): the
+    // popup shows the French scan under French, as the desk does.
+    langScans: row.langScans || row.lang_scans || '',
     live,
   };
 }

@@ -48,6 +48,7 @@ import { filterSuggestByPrintLang } from './locale.js';
 import { mergePrintingFields } from './print-bucket.js';
 import { earlySetPrefixName, rankFreeText, scoreGroups, tokenizeQuery } from './search-score.js';
 import { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady } from './compact-query.js';
+import { englishQuery } from './localized-names.js';
 export { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady };
 
 const TTL_MS = 30 * 60 * 1000;
@@ -441,6 +442,14 @@ export function liveSuggestGroups(query, {
   if (!suggestLiveReady(query)) {
     return { groups: [], ranked: [], parsed: parseTypedQuery(query) };
   }
+  // A localized card name (`evoli`, `glurak`, `イーブイ`) ranks as its English
+  // identity; the rows keep their localized subtitle (localized-names.js).
+  const english = englishQuery(query, searchLang);
+  if (english) {
+    return liveSuggestGroups(english, {
+      rank, pool, limit, preferPerGroup, printLang, searchLang: 'en', kind,
+    });
+  }
   const parsed = parseTypedQuery(query);
   if (isBareCollectorQuery(parsed)) {
     const numberSet = numberSetBrowse(query, parsed, { limit, printLang, kind });
@@ -653,12 +662,14 @@ function firstNameToken(query) {
  * second word cannot replace the local catalog with an empty singles row.
  */
 export function paintCatalogGroups(query, options = {}) {
+  const english = englishQuery(query, options.searchLang);
+  if (english) return paintCatalogGroups(english, { ...options, searchLang: 'en' });
   const live = liveSuggestGroups(query, options);
   const limit = options.limit || SUGGEST_RESULT_FLOOR;
   const have = printingCount(live.groups);
   if (have >= limit) return live.groups;
   const token = firstNameToken(query);
-  if (compactQuery(token).length < SUGGEST_LIVE_MIN_CHARS) return live.groups;
+  if (!suggestLiveReady(token)) return live.groups;
   const rank = options.rank || rankNames;
   const ranked = rank(token, options.pool);
   const groups = ranked.filter((row) => row.withinCap !== false).flatMap((row) => {
