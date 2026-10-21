@@ -116,6 +116,7 @@ export function inventoryMarketValue(prices, row, source) {
     // sellers, this condition or better.
     const value = positive(entry.ctMatchedPkn);
     if (value == null) return null;
+    const ask = positive(entry.ctMatchedGrossPkn);
     // `ctAsOf`: when the price store was refilled (docs/PRICING.md "Price store").
     const asOf = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(entry.ctAsOf || ''))
       ? ` Prices of ${String(entry.ctAsOf).slice(0, 16).replace('T', ' ')} UTC.`
@@ -128,6 +129,8 @@ export function inventoryMarketValue(prices, row, source) {
       : '';
     return {
       currency: 'PKN', value,
+      // The CardTrader ask, shown under the net so the two are never confused.
+      askLabel: ask != null && Math.round(ask) !== Math.round(value) ? `${formatPknNumber(ask, { maximumFractionDigits: 0 })} PKN` : '',
       title: (entry.ctBasis === 'zero'
         ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
         : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).') + fee + asOf,

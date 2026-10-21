@@ -103,7 +103,12 @@ idempotency key, and what a retry, a crash or a replay does:
 | Reconcile push claim | `source_listing_id` compare-and-set `"" → ct:pending:link-<ms>` | a claimed listing is not a candidate | the claim stays; see in-doubt | the outbox push uses the same claim (`ct:pending:<event>`), so only one of them ever creates |
 | CardTrader `POST /products` | `user_data_field = pokoin:<listing id>` | refused: claim released, retried next run; in doubt: claim kept | in doubt | the next complete export links the product by `user_data_field`; a stale claim is released only when no product and no order names it |
 | Link back (`ct:<product id>`, `marketplace_cardtrader_product_links`) | `LINK_SQL` over the claim; link row `(seller_uid, ct_product_id)` | upsert | the next export links it by `user_data_field` | a product already linked to another listing is never relinked (`listing_linked_elsewhere`) |
+| Reprice while the create is in flight | the linked row's `price_pkn` vs the price the create sent | the re-send is an absolute `PUT` | the next Pokoin edit or `cardtrader-fee-once` corrects the ask | the reconcile re-sends after `LINK_SQL` (`repricedAfterPush`); the outbox queues a `LISTING_PRICE_CHANGED` edit in the link transaction |
 | CardTrader sale → Pokoin stock | `cardtrader_webhook_events` seller + order + order item | the claim answers "already applied" | a failed decrement releases the claim | the reconcile records a missed sale with the same claim id |
+
+Every CardTrader write lists the gross-up of the Pokoin price, never the
+Pokoin price itself (that is already net, and CardTrader would take its fee
+twice): see [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21).
 
 Why the Vendetta copies of 2026-10-20 stayed paused: Pokoin's quote read only
 Pokémon tables, so Card Rails got no price for any Riftbound copy and listed
@@ -133,9 +138,12 @@ get a write.
   nothing echoes back to CardTrader.
 - The outbox step (`listing_sync::edit_cardtrader`) reads
   `seller_integrations/{uid}__cardtrader` and sends:
-  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push
-    (200 PKN = €1, to the cent). It is absolute, so a write in doubt (no answer,
-    a 5xx) is retried by the outbox.
+  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push:
+    the gross-up of the Pokoin price at the seller's CardTrader rate (the
+    smallest whole-cent ask that nets it; 26 PKN direct → €0.14, see
+    [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21)).
+    It is absolute, so a write in doubt (no answer, a 5xx) is retried by the
+    outbox.
   - **quantity**: `POST /products/:id/increment` with the change
     (`delta_quantity: new − old`), never the new total: the same rule as a
     Pokoin sale (see "Never written back"). Example: CardTrader and Pokoin

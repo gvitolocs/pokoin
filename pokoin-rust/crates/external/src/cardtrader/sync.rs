@@ -872,6 +872,7 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
                 crate::cardtrader::link::PushBudget::from_env(),
                 products,
                 export_started_at.as_deref(),
+                channel,
             )
             .await,
         };

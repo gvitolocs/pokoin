@@ -35,8 +35,14 @@ Riftbound card (any game but Pokémon).
 | `CtLand` | CardTrader applies a create whose answer was lost |
 | `CtSell`, `HookDeliver`, `HookLost` | a CardTrader order; `webhook.rs` finds the listing by `user_data_field`, claims the order item once (`cardtrader_webhook_events`) and decrements |
 | `Tick` | time since the claim, against `STALE_CLAIM_GRACE_SECS` (15 min) |
+| `Reprice` | the Pricer dialog, the seller desk or Seller API `update` changes the Pokoin price; `update_listing` queues `cardtraderEdit` only for a linked listing (a `ct:pending:*` push sends nothing) |
+| `EditDeliver` | `listing_sync::edit_cardtrader`: `PUT /products/:id` with `push::price_body`, the gross-up `Gross(p)` |
+| `FeeOnceJob` | `job cardtrader-fee-once`: raises a linked ask that does not net the price, never lowers one |
+| `CreateAnswered` re-send | `link.rs` `repriced_while_pushing` and the outbox's `LISTING_PRICE_CHANGED` after `LINK_PUSH_SQL`: a price that moved while the create was in flight is sent again |
 
-`made`, `rows` and `decs` are ghost counters for the properties.
+`made`, `rows` and `decs` are ghost counters for the properties. Prices are
+abstract units and the fee is one unit: `Gross(p) = p + 1` in the fixed
+code, `p` on origin/main (the push listed the net price as the ask).
 
 ## Properties
 
@@ -45,6 +51,7 @@ Riftbound card (any game but Pokémon).
 | `NoDuplicateRow` | One Card Rails copy is at most one Pokoin row, whatever the retries, races and crashes. |
 | `NoDuplicateProduct` | One Pokoin listing is at most one CardTrader product, ever: an in-doubt create is never followed by a second while the first may exist or may still land, and a copy sold on CardTrader is never listed again. |
 | `NoDoubleDecrement` | A CardTrader sale takes the stock down once (webhook replay, reconcile settling the same order). |
+| `FeeOnce` | Once the listing is linked, live, on sale, with no edit or push in flight, the CardTrader ask is the gross-up of the Pokoin price: the fee is counted once, after any reprice, any reprice during a create, and the fee-once job. |
 | `EventuallyListed` (`FairSpec`) | Every copy ends up on Pokoin, Card Rails linked, and listed on CardTrader by exactly one live product, or sold there. |
 
 Assumption (`LandsInGrace`): a CardTrader create lands within
@@ -55,17 +62,18 @@ that follows if CardTrader ever applied a create later than that.
 
 ## Configs
 
-| Config | Expectation | Result on nezopt |
+| Config | Expectation | Result on nezopt (TLC, 2026-10-21) |
 | --- | --- | --- |
-| `Model.cfg` | fixed, Riftbound copy quoted: every invariant | 200,898 distinct states, depth 57 |
-| `unquoted.cfg` | fixed, unquoted copy (paused at 0, priced later): every invariant | 201,210 distinct states, depth 58 |
-| `liveness.cfg` | fixed, `EventuallyListed` under weak fairness | 68,152 distinct states, depth 49 |
+| `Model.cfg` | fixed, Riftbound copy quoted, one reprice: every invariant | 1,547,148 distinct states, depth 59 |
+| `unquoted.cfg` | fixed, unquoted copy (paused at 0, priced later): every invariant | 1,548,396 distinct states, depth 60 |
+| `liveness.cfg` | fixed, `EventuallyListed` under weak fairness | 525,264 distinct states, depth 51 |
 | `bugs/other-game-never-pushed.cfg` | origin: a Riftbound listing is never a push candidate | `EventuallyListed` violated |
 | `bugs/paused-forever.cfg` | origin: a listing paused at 0 stays paused when priced | `EventuallyListed` violated |
 | `bugs/stuck-in-doubt-claim.cfg` | origin: an in-doubt create that never happened keeps `ct:pending` for ever | `EventuallyListed` violated |
 | `bugs/list-key-in-doubt.cfg` | origin: a crash between key claim and insert answers `list_in_doubt` for ever | `EventuallyListed` violated |
+| `bugs/double-fee.cfg` | origin: the push lists the net Pokoin price as the ask | `FeeOnce` violated |
 | `design/create-lands-after-grace.cfg` | fixed, the grace assumption dropped | `NoDuplicateProduct` violated (accepted residual) |
-| `witness/*.cfg` | fixed: a stale claim is released, a listing is linked after an in-doubt create, a copy sells out | each invariant violated |
+| `witness/*.cfg` | fixed: a stale claim is released, a listing is linked after an in-doubt create, a copy sells out, a listing repriced during its create settles at the right ask | each invariant violated |
 
 ```bash
 specs/tla/run.sh listing-ct-sync                 # the fixed configs: must pass
@@ -83,3 +91,9 @@ well as one in flight at CardTrader. Writing the model also showed that a
 stale claim whose product sold before any export saw it, with its webhook
 lost, would have been left for sale on Pokoin; `SETTLE_SOLD_CLAIMS_SQL`
 settles such a claim sold out instead of releasing it.
+
+Adding the pricer's write path to the model showed that a reprice while
+the CardTrader create was in flight left the create's old ask on
+CardTrader: the edit of a `ct:pending:*` listing sends nothing and the link
+did not re-send. The reconcile and the outbox now re-send a price that moved
+after the link, and `FeeOnce` holds in `Model.cfg` with that path.

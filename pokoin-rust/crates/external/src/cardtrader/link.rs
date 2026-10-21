@@ -606,7 +606,7 @@ const LINK_SQL: &str = r#"
       update public.marketplace_user_listings
       set source_listing_id = $2, updated_at = now()
       where id = $1::uuid and coalesce(source_listing_id, '') = $3
-      returning id, status, quantity_available, card_id
+      returning id, status, quantity_available, card_id, price_pkn::float8 as price_pkn
 "#;
 
 /// An in-doubt create (no answer, a 5xx) keeps its `ct:pending:…` claim so
@@ -804,6 +804,7 @@ pub async fn push_unlisted(
     budget: PushBudget,
     export: &[NormalizedProduct],
     export_started_at: Option<&str>,
+    channel: crate::ct_fees::Channel,
 ) -> Value {
     let mut out = json!({
         "candidates": 0, "pushed": 0, "linkedToExisting": 0, "failed": 0, "inDoubt": 0,
@@ -859,7 +860,12 @@ pub async fn push_unlisted(
                 out["stoppedBy"] = json!("time_budget");
                 break 'pages;
             }
-            let listing = row.get("listing").cloned().unwrap_or(Value::Null);
+            let mut listing = row.get("listing").cloned().unwrap_or(Value::Null);
+            // The product is listed at the ask that nets the Pokoin price
+            // after this seller's commission (push::ct_ask_eur).
+            if listing.is_object() {
+                listing["ctChannel"] = json!(channel.as_str());
+            }
             let id = clean_text_value(listing.get("id").unwrap_or(&Value::Null), 80);
             if id.is_empty() {
                 continue;
@@ -929,6 +935,13 @@ pub async fn push_unlisted(
                             if push::off_sale(&clean_text_value(linked.get("status").unwrap_or(&Value::Null), 20)) {
                                 // Went off sale while CardTrader created it.
                                 let _ = ct.destroy_product(token, &product_id).await;
+                            } else if let Some(body) = repriced_while_pushing(&listing, &linked, channel) {
+                                // Repriced while the create was in flight: an edit of a
+                                // pending push sends nothing, so send the new ask now
+                                // (specs/tla/listing-ct-sync FeeOnce).
+                                if ct.update_product(token, &product_id, body).await.is_ok() {
+                                    bump(&mut out, "repricedAfterPush");
+                                }
                             }
                             bump(&mut out, "pushed");
                         }
@@ -1011,6 +1024,21 @@ async fn release_stale_claims(
             Err(error) => note_error(out, json!({ "reason": error.message })),
         }
     }
+}
+
+/// The CardTrader price body when a listing's Pokoin price moved between the
+/// read the create was sent from and its link: `None` when it did not.
+pub fn repriced_while_pushing(sent: &Value, linked: &Value, channel: crate::ct_fees::Channel) -> Option<Value> {
+    let price = |row: &Value| match row.get("price_pkn").or_else(|| row.get("pricePkn")) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    let (before, now) = (price(sent)?, price(linked)?);
+    if (before - now).abs() < 0.5 {
+        return None;
+    }
+    push::price_body(now, channel)
 }
 
 /// Why the push pass must not run this time, if it must not. It writes to the
@@ -1231,6 +1259,15 @@ mod tests {
         assert_eq!(exported_listing_ids(&export), vec!["9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d".to_string()]);
         // Other games' facets are read from their own properties.
         assert_eq!((export[1].language, export[1].reverse), ("FR", true));
+    }
+
+    #[test]
+    fn a_reprice_during_the_create_reaches_cardtrader() {
+        use crate::ct_fees::Channel::Direct;
+        let sent = json!({"price_pkn": "26"});
+        assert_eq!(repriced_while_pushing(&sent, &json!({"price_pkn": 26.0}), Direct), None);
+        assert_eq!(repriced_while_pushing(&sent, &json!({"price_pkn": 40.0}), Direct), Some(json!({"price": 0.22})));
+        assert_eq!(repriced_while_pushing(&json!({}), &json!({"price_pkn": 40.0}), Direct), None);
     }
 
     #[test]
