@@ -3249,6 +3249,16 @@ export async function fetchPriceCheck(items, token, { game: gameId } = {}) {
   });
 }
 
+/**
+ * One price check per `priceCheckGroups` group, in parallel:
+ * `{ [game]: prices }`, a failed game `null` so only its rows lack a comp.
+ */
+export async function fetchPriceChecksByGame(groups, token) {
+  const answers = await Promise.all((groups || []).map((group) => fetchPriceCheck(group.items, token, { game: group.game })
+    .then((data) => [group.game, data?.prices || {}], () => [group.game, null])));
+  return Object.fromEntries(answers);
+}
+
 export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId, order = '' } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),
