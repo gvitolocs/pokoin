@@ -3591,7 +3591,6 @@ a.era-link:focus-visible {
   margin-top: auto;
 }
 
-.hero-deal .deal-what { margin: 0.1rem 0 0.4rem; color: var(--muted); font-size: 0.85rem; }
 
 /* Best Deal with no Pokoin offer: a sentence, not a dead grey button. */
 .hero-deal .deal-none {
