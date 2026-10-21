@@ -65,6 +65,24 @@ Fallback ladder: brain → Hermes HTTP (same message) → fixed apology. Service
   Discord replies ≤1,800 chars per message.
 - Short per-chat history (10 turns) kept in memory and snapshotted to `/var/lib/poko-bot/history.json`.
 
+Hermes Agent v0.22 (Oct 2026) behaviour, shared with Hermes Node:
+
+- **Gateway singleton lock** (`HERMES_GATEWAY_LOCK`, default on; `HERMES_GATEWAY_LOCK_DIR`, default
+  `$POKO_BOT_STATE_DIR/gateway-locks`). Before polling Telegram, poko-bot takes `telegram-<botId>.lock`, a JSON record
+  with the kernel boot id and a 30 s heartbeat. A record from another holder blocks polling only if it was written in
+  this boot and its heartbeat is under 90 s old, so recycled PIDs after a reboot never count. A deferred gateway retries
+  every 60 s; one that loses the lock stops polling and goes back to waiting. The record format is the same as Hermes
+  `src/gateway-lock.js`: point both at one directory and they cannot both poll the Poko token (e.g. a half-finished
+  `poko-switch`). A fresh record left by our own previous run never blocks us: same `HERMES_GATEWAY_INSTANCE`
+  (set it per deployment, e.g. `poko-bot` and `hermes-poko`), or same PID namespace with that PID gone.
+  `/health` shows `telegram.gatewayLock` (`held`, `deferred:<name>@<host>`, `lost`, `unguarded:<why>`).
+- **Bounded wait-out** (`POKO_BOT_TRANSIENT_WAIT_MS`, default `4000,12000`; empty disables). When the brain and the
+  Hermes fallback both fail only transiently (timeouts, 5xx/529, overload, connection resets), the turn keeps typing
+  and retries up to that many cycles before the apology. Auth, quota and validation errors are never retried.
+  `/health` counts `turns.transientWaits`.
+- **Invisible Unicode**: bidi overrides/isolates, Unicode tag characters and zero-width characters are stripped from
+  text and captions before the gate and the model see them (`turns.invisibleStripped`).
+
 Not ported in this phase: LoL bets and the Discord slash commands (stay in Hermes), news scout/newsroom, X webhook,
 YouTube replies, owner-only social posting / Twitter drafts from Telegram, Honcho long-term memory, Hypemeter news
 context (follow-up: a news tool in the brain so the website gets it too), local faster-whisper.
