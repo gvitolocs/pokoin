@@ -99,7 +99,7 @@ import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
 import { sellLanguages } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
-import { conditionChipSrc, conditionLabel, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
+import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
@@ -173,19 +173,6 @@ function offerCopies(rows) {
  * React page resets by hand. The theme and the Poko desk card are cleared only
  * when the route itself unmounts, so a neighbour step never flashes untinted.
  */
-
-const LANGUAGE_NAMES = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['en'], { type: 'language' }) : null;
-const LANGUAGE_TAGS = { JP: 'ja', ZH: 'zh-Hans', ZHT: 'zh-Hant', KO: 'ko' };
-
-/** Deal language code (EN, JP, ZHT…) → "English", "Japanese", "Chinese (Traditional)…". */
-function languageName(code) {
-  const raw = String(code || '').toUpperCase();
-  try {
-    return LANGUAGE_NAMES?.of(LANGUAGE_TAGS[raw] || raw.toLowerCase()) || raw;
-  } catch {
-    return raw;
-  }
-}
 
 export default function Card() {
   const params = useParams();
@@ -1224,8 +1211,6 @@ function CardDesk(props) {
                         </Show>
                       </p>
                     </Show>
-                    {/* The chips are pictures: say the grade and language in words ("Poor · French"). */}
-                    <p class="deal-what">{conditionLabel(dealPick()?.condition)} · {languageName(shownLang())}</p>
                   </Show>
                   <div class="deal-facets">
                     <div class="deal-facet-row" role="radiogroup" aria-label="Condition">
