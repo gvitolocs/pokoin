@@ -121,8 +121,8 @@ fn response(result: Result<Value, ApiError>, private: bool) -> Response {
         }
         Err(e) => {
             let mut v = json!({"error":e.message});
-            if e.code.as_deref() == Some("insufficient_quantity") {
-                v["code"] = json!("insufficient_quantity");
+            if let Some(code @ ("insufficient_quantity" | "GAME_CARD_MISMATCH")) = e.code.as_deref() {
+                v["code"] = json!(code);
             }
             (e.status, Json(v)).into_response()
         }
@@ -161,6 +161,118 @@ async fn seller_card_ids(
 ) -> Result<Option<Vec<String>>, ApiError> {
     let ids=sqlx::query_scalar::<_,String>("select distinct card_id from public.marketplace_user_listings where seller_uid = $1 and nullif(card_id, '') is not null").bind(seller).fetch_all(state.read_db()).await?;
     card_ids_in_catalog(state, &ids, game).await
+}
+/// Another catalog that holds a card id, with that card's name there.
+#[derive(Debug, Clone, PartialEq)]
+struct CatalogHolder {
+    game: &'static str,
+    name: String,
+}
+fn name_key(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+/// The game a new listing is stored under, from the game the client claimed,
+/// whether that game's catalog holds the card (`None`: it could not be
+/// checked), and the other catalogs that hold the same id.
+///
+/// The claim stands when its catalog holds the card, cannot be checked, or no
+/// catalog has the id at all (a lagging catalog must not block a listing).
+/// Otherwise the one other catalog that has the id under the listing's name
+/// wins. 200000000+ synthetic ids repeat across Cardmarket-only games, so the
+/// id alone never picks one, and a card no catalog vouches for is refused.
+fn pick_listing_game(
+    claimed: &str,
+    claimed_holds: Option<bool>,
+    others: &[CatalogHolder],
+    card: &str,
+    name: &str,
+) -> Result<String, ApiError> {
+    if claimed_holds != Some(false) || others.is_empty() {
+        return Ok(claimed.to_string());
+    }
+    let key = name_key(name);
+    let named: Vec<&CatalogHolder> = others
+        .iter()
+        .filter(|holder| key.is_empty() || name_key(&holder.name) == key)
+        .collect();
+    if let [only] = named.as_slice() {
+        return Ok(only.game.to_string());
+    }
+    Err(ApiError::bad_request(format!(
+        "Card {card} is not in the {claimed} catalog. Send the card's marketplaceGame."
+    ))
+    .with_code("GAME_CARD_MISMATCH"))
+}
+/// Every other mounted catalog that holds `id`, Pokémon first and then in
+/// `SATELLITE_GAMES` order; `None` when the probes did not finish in time.
+async fn other_catalog_holders(
+    state: &DomainState,
+    id: i64,
+    claimed: &str,
+) -> Option<Vec<CatalogHolder>> {
+    let games: Vec<&'static str> = std::iter::once(crate::game::POKEMON)
+        .chain(crate::game::SATELLITE_GAMES.iter().map(|(game, _)| *game))
+        .filter(|game| *game != claimed)
+        .collect();
+    let mut probes = tokio::task::JoinSet::new();
+    for game in games.iter().copied() {
+        let Some(pools) = state.game_pools(game).await else { continue };
+        probes.spawn(async move {
+            sqlx::query_scalar::<_, String>("select coalesce(name, '') from public.marketplace_search_candidates where card_id = $1 limit 1")
+                .bind(id)
+                .fetch_optional(&pools.read)
+                .await
+                .ok()
+                .flatten()
+                .map(|name| CatalogHolder { game, name })
+        });
+    }
+    let collect = async {
+        let mut hits = vec![];
+        while let Some(found) = probes.join_next().await {
+            if let Ok(Some(hit)) = found {
+                hits.push(hit);
+            }
+        }
+        hits
+    };
+    let mut hits = tokio::time::timeout(std::time::Duration::from_millis(1500), collect)
+        .await
+        .ok()?;
+    hits.sort_by_key(|hit| games.iter().position(|game| *game == hit.game));
+    Some(hits)
+}
+/// The claimed game, checked against the catalogs: a client's tag is a claim.
+/// Card Rails sent 41 Battle Spirits Saga cards tagged `pokemon` on
+/// 2026-10-16, and the stock board then priced and linked them as Pokémon.
+async fn listing_game(
+    state: &DomainState,
+    card: &str,
+    claimed: &str,
+    name: &str,
+) -> Result<String, ApiError> {
+    let Ok(id) = card.trim().parse::<i64>() else {
+        return Ok(claimed.to_string());
+    };
+    let claimed_holds = match card_ids_in_catalog(state, &[card.to_string()], claimed).await {
+        Ok(Some(ids)) => Some(!ids.is_empty()),
+        Ok(None) | Err(_) => None,
+    };
+    if claimed_holds != Some(false) {
+        return Ok(claimed.to_string());
+    }
+    let Some(others) = other_catalog_holders(state, id, claimed).await else {
+        tracing::warn!(card, claimed, "listing game check timed out; keeping the claimed game");
+        return Ok(claimed.to_string());
+    };
+    let game = pick_listing_game(claimed, claimed_holds, &others, card, name)?;
+    if game != claimed {
+        tracing::warn!(card, claimed, game = %game, "listing game corrected from the catalogs");
+    }
+    Ok(game)
 }
 fn read_sql(
     query: &HashMap<String, String>,
@@ -804,6 +916,7 @@ pub(crate) async fn create_listing_keyed(
     let g = live::field(body, "marketplaceGame", 40);
     let game =
         pokoin_api_common::game::normalize_game(if g.is_empty() { requested_game } else { &g });
+    let game = listing_game(state, &card, &game, &live::field(body, "cardName", 240)).await?;
     let values = create_values(body, &claims.uid, &game, &meta)?;
     let sql =
         format!("with written as ({CREATE_SQL}) select to_jsonb(written) as listing from written");
@@ -2027,5 +2140,58 @@ mod inventory_price_tests {
         assert!(valid_inventory_price(0.0,"paused"));assert!(valid_inventory_price(1.0,"active"));
         assert!(!valid_inventory_price(0.0,"active"));assert!(!valid_inventory_price(0.0,""));
         assert!(!valid_inventory_price(-1.0,"paused"));assert!(!valid_inventory_price(f64::NAN,"paused"));
+    }
+}
+
+#[cfg(test)]
+mod listing_game_tests {
+    use super::*;
+    fn holder(game: &'static str, name: &str) -> CatalogHolder {
+        CatalogHolder { game, name: name.into() }
+    }
+    /// 200001768 as the live catalogs hold it: one synthetic id, eight games.
+    fn shared_id() -> Vec<CatalogHolder> {
+        vec![
+            holder("weiss_schwarz", "ヴェイパーヘイズ役 楓"),
+            holder("final_fantasy", "Nu Mou"),
+            holder("force_of_will", "True Successor of Certo, Volga"),
+            holder("world_of_warcraft", "Divine Justice"),
+            holder("battle_spirits_saga", "Gladiator Squalo"),
+            holder("star_wars_destiny", "This Is Our Rebellion"),
+            holder("my_little_pony", "High Rollers, Let's go Bowling"),
+            holder("the_spoils", "Heirloom Incinerator"),
+        ]
+    }
+    #[test]
+    fn a_satellite_card_tagged_pokemon_is_stored_under_its_named_catalog() {
+        let game = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", "Gladiator Squalo");
+        assert_eq!(game.unwrap(), "battle_spirits_saga");
+        // Case and punctuation do not matter; the name still has to match.
+        let game = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", "gladiator  squalo!");
+        assert_eq!(game.unwrap(), "battle_spirits_saga");
+    }
+    #[test]
+    fn a_shared_id_without_a_matching_name_is_refused() {
+        for name in ["Pikachu", ""] {
+            let error = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", name).unwrap_err();
+            assert_eq!(error.status.as_u16(), 400);
+            assert_eq!(error.code.as_deref(), Some("GAME_CARD_MISMATCH"));
+        }
+    }
+    #[test]
+    fn one_other_holder_takes_the_card_even_without_a_name() {
+        let only = [holder("magic", "Sol Ring")];
+        assert_eq!(pick_listing_game("pokemon", Some(false), &only, "822658", "").unwrap(), "magic");
+    }
+    #[test]
+    fn the_claim_stands_when_its_catalog_holds_or_cannot_be_checked() {
+        for holds in [Some(true), None] {
+            assert_eq!(
+                pick_listing_game("pokemon", holds, &shared_id(), "200001768", "Gladiator Squalo").unwrap(),
+                "pokemon"
+            );
+        }
+        // No catalog knows the id: a lagging catalog must not block the listing.
+        assert_eq!(pick_listing_game("pokemon", Some(false), &[], "999999", "New card").unwrap(), "pokemon");
     }
 }
