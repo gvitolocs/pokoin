@@ -168,6 +168,7 @@ pub async fn suggest(
         if needs_title {
             overlay_titles(&pool, &search_language, &mut groups).await;
         }
+        overlay_lang_scans(&pool, &search_language, &mut groups).await;
         state.sql_ms.fetch_add(
             sql_started.elapsed().as_millis() as u64,
             std::sync::atomic::Ordering::Relaxed,
@@ -598,6 +599,65 @@ async fn lookup_pairs(
         .collect()
 }
 
+/// Card languages with TCGdex scans of western printings (docs/CARD_LANGUAGE_SCANS.md).
+const LANG_SCAN_LANGUAGES: &[&str] = &["it", "fr", "de", "es", "pt"];
+
+/// Same compact `langScans` string as the tile / desk reads (`de,fr,it:swsh/swsh3/136`),
+/// so a French popup row shows the French scan the desk shows. Keyed by leftover
+/// ct_id = public card id / 2. A failed lookup leaves the English scan.
+async fn overlay_lang_scans(pool: &sqlx::PgPool, language: &str, groups: &mut [Value]) {
+    if !LANG_SCAN_LANGUAGES.contains(&title_language(language).as_str()) {
+        return;
+    }
+    let ct_ids = suggest_ct_ids(groups);
+    if ct_ids.is_empty() {
+        return;
+    }
+    let Ok(rows) = sqlx::query_as::<_, (i64, String)>(
+        "select ct_id, string_agg(language, ',' order by language) || ':' || min(scan_path) from public.marketplace_leftover_lang_scans where ct_id = any($1::bigint[]) group by ct_id",
+    )
+    .bind(&ct_ids)
+    .fetch_all(pool)
+    .await
+    else {
+        return;
+    };
+    apply_lang_scans(groups, &rows.into_iter().collect());
+}
+
+fn printing_ct_id(printing: &Value) -> Option<i64> {
+    let id = printing
+        .get("card_id")
+        .or_else(|| printing.get("id"))
+        .and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_i64().map(|n| n.to_string())))?;
+    let id = id.trim().parse::<i64>().ok().filter(|n| *n > 0 && n % 2 == 0)?;
+    Some(id / 2)
+}
+
+fn suggest_ct_ids(groups: &[Value]) -> Vec<i64> {
+    let mut ids = groups
+        .iter()
+        .flat_map(|group| group.get("printings").and_then(|v| v.as_array()).into_iter().flatten())
+        .filter_map(printing_ct_id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn apply_lang_scans(groups: &mut [Value], scans: &HashMap<i64, String>) {
+    for group in groups {
+        let Some(printings) = group.get_mut("printings").and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for printing in printings {
+            if let Some(scan) = printing_ct_id(printing).and_then(|ct| scans.get(&ct)) {
+                printing["langScans"] = json!(scan);
+            }
+        }
+    }
+}
+
 fn title_language(value: &str) -> String {
     let language = value.trim().to_ascii_lowercase();
     match language.as_str() {
@@ -705,6 +765,37 @@ async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)
  }
  let shown=groups.iter().map(|g|g["printings"].as_array().unwrap().len()).sum::<usize>();
  json_ok(&json!({"query":query,"game":game,"groups":groups,"count":shown,"shown":shown}),"public, max-age=5, s-maxage=30")
+}
+
+#[cfg(test)]
+mod lang_scan_tests {
+    use super::*;
+
+    #[test]
+    fn popup_printings_take_the_leftover_language_scans() {
+        let mut groups = vec![json!({"name": "Scolipede", "printings": [
+            {"id": "684588", "card_id": "684588", "name": "Scolipede"},
+            {"id": 263748, "name": "Scolipede"},
+            {"id": "live:scolipede", "name": "Scolipede"},
+        ]})];
+        assert_eq!(suggest_ct_ids(&groups), vec![131874, 342294]);
+        let scans = HashMap::from([(342294, "de,es,fr,it,pt:sv/sv10.5b/056".to_string())]);
+        apply_lang_scans(&mut groups, &scans);
+        let rows = groups[0]["printings"].as_array().unwrap();
+        assert_eq!(rows[0]["langScans"], "de,es,fr,it,pt:sv/sv10.5b/056");
+        assert!(rows[1].get("langScans").is_none());
+        assert!(rows[2].get("langScans").is_none());
+    }
+
+    #[test]
+    fn only_scan_languages_are_looked_up() {
+        for lang in ["it", "fr", "de", "es", "pt"] {
+            assert!(LANG_SCAN_LANGUAGES.contains(&title_language(lang).as_str()), "{lang}");
+        }
+        for lang in ["en", "jp", "ja", "ko", "zh", "zht", "nl", ""] {
+            assert!(!LANG_SCAN_LANGUAGES.contains(&title_language(lang).as_str()), "{lang}");
+        }
+    }
 }
 
 #[cfg(test)]
