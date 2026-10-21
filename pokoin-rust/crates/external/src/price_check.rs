@@ -1,7 +1,9 @@
 //! `/api/marketplace-price-check` — PowerTools-style pricer. Native port of
 //! `marketplace-price-check.js` (pokoin + CardTrader asks + 30-day sold median
 //! + bounded listed history). TCGplayer quotes come from the separate TCGCSV
-//! store and are reported as `unconfigured` here.
+//! store and are reported as `unconfigured` here. Pokémon prices CardTrader
+//! from the professional-seller floor below; the other games from the
+//! CardRails price file (`crate::price_book`), as the extension does.
 
 use serde_json::{json, Map, Value};
 
@@ -84,6 +86,19 @@ pub struct PriceItem {
     pub language: String,
     pub reverse: bool,
     pub first_edition: bool,
+    /// Foil finish of the games other than Pokémon (Pokémon's is `reverse`).
+    pub foil: bool,
+    pub graded: bool,
+    pub signed: bool,
+    pub altered: bool,
+}
+
+impl PriceItem {
+    /// A graded, signed or altered copy has no CardTrader comp: those offers
+    /// are left out of both floors, and a raw copy's price is not its price.
+    pub fn one_of_a_kind(&self) -> bool {
+        self.graded || self.signed || self.altered
+    }
 }
 
 /// A listing's condition as the pricer's CardTrader condition key. Pokoin
@@ -104,23 +119,28 @@ pub fn condition_key(raw: &str) -> String {
 }
 
 /// The key a comp is returned under besides the bare card id:
-/// `card:CONDITION:LANGUAGE:FLAGS` (flags `R` reverse, `F` first edition), so
-/// a plain and a reverse copy of one card never share a comp. The web builds
-/// the same key (`priceCheckKey` in market/src/inventory-price.js).
+/// `card:CONDITION:LANGUAGE:FLAGS` (flags `R` reverse, `F` first edition, `H`
+/// foil, `G` graded, `S` signed, `A` altered, in that order), so a plain and
+/// a reverse copy of one card never share a comp. The web builds the same key
+/// (`priceCheckKey` in market/src/inventory-price.js).
 pub fn price_check_key(item: &PriceItem) -> String {
-    format!(
-        "{}:{}:{}:{}{}",
-        item.card_id,
-        item.condition,
-        item.language,
-        if item.reverse { "R" } else { "" },
-        if item.first_edition { "F" } else { "" },
-    )
+    let flags: String = [
+        (item.reverse, 'R'),
+        (item.first_edition, 'F'),
+        (item.foil, 'H'),
+        (item.graded, 'G'),
+        (item.signed, 'S'),
+        (item.altered, 'A'),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, flag)| *flag)
+    .collect();
+    format!("{}:{}:{}:{}", item.card_id, item.condition, item.language, flags)
 }
 
 /// `parseItems` — `"633380:NM:IT,713648,633380:NM:IT:RF"` → items (≤ 100,
-/// de-duped). The optional fourth part holds finish flags: `R` reverse holo,
-/// `F` first edition.
+/// de-duped). The optional fourth part holds the flags of `price_check_key`.
 pub fn parse_items(raw: &str) -> Vec<PriceItem> {
     let mut items = Vec::new();
     let mut seen: Vec<String> = Vec::new();
@@ -150,6 +170,10 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
             language,
             reverse: flags.contains('R'),
             first_edition: flags.contains('F'),
+            foil: flags.contains('H'),
+            graded: flags.contains('G'),
+            signed: flags.contains('S'),
+            altered: flags.contains('A'),
         });
         if items.len() >= MAX_ITEMS {
             break;
@@ -161,7 +185,8 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
 /// Pokoin's CardTrader reference price: the cheapest current offer from a
 /// professional (`pro`) CardTrader seller of the same printing, grouped by
 /// condition, language, reverse and first edition. Private sellers' one-off
-/// asks, offers of sellers on vacation and offers no dump saw for 3 days do
+/// asks, offers of sellers on vacation, offers no dump saw for 3 days and
+/// graded, signed or altered copies (as in the extension's price file) do
 /// not count. `$2` lists CardTrader seller ids to leave out (a seller's own
 /// offers when pricing that seller).
 pub fn pro_floor_sql() -> String {
@@ -179,6 +204,9 @@ pub fn pro_floor_sql() -> String {
            and quantity > 0
            and seller_type = 'pro'
            and last_seen_at >= now() - interval '3 days'
+           and coalesce(raw_metadata->>'graded', '') <> 'true'
+           and coalesce(properties->>'signed', '') <> 'true'
+           and coalesce(properties->>'altered', '') <> 'true'
            and not (coalesce(seller_account_id, '') = any($2::text[]))
            and not exists (
              select 1 from public.cardtrader_seller_vacation as vacation
@@ -347,14 +375,42 @@ fn text_of(value: &Value) -> String {
     }
 }
 
-/// `readPrices` — per-item comps keyed by public card id.
-pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
+fn unique_card_ids(items: &[PriceItem]) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     for item in items {
         if !ids.contains(&item.card_id) {
             ids.push(item.card_id.clone());
         }
     }
+    ids
+}
+
+/// Cheapest active Pokoin listing per card of one game, the caller's own
+/// listings left out. Card ids are per game, so the game is part of the key.
+const POKOIN_CHEAPEST_SQL: &str = "
+    select card_id, min(price_pkn)::float8 as min_pkn
+    from public.marketplace_user_listings
+    where card_id = any($1::text[])
+      and status = 'active'
+      and quantity_available > 0
+      and price_pkn > 0
+      and ($2::text = '' or seller_uid is distinct from $2::text)
+      and coalesce(nullif(btrim(marketplace_game), ''), 'pokemon') = $3::text
+    group by card_id";
+
+fn pokoin_cheapest(rows: &[Value], card_id: &str) -> Option<f64> {
+    rows.iter()
+        .find(|row| row.get("card_id").map(text_of).as_deref() == Some(card_id))
+        .and_then(|row| number(row.get("min_pkn")))
+}
+
+/// `readPrices` — per-item comps keyed by public card id, for one game.
+pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
+    let game = crate::db::normalize_game(game);
+    if game != "pokemon" {
+        return read_game_prices(db, &game, items, exclude_seller_uid).await;
+    }
+    let ids = unique_card_ids(items);
     if ids.is_empty() {
         return Ok(json!({}));
     }
@@ -395,17 +451,8 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
         crate::time_util::iso_from_ms(ms).get(..10).unwrap_or("").to_string()
     };
 
-    let pokoin_sql = "
-        select card_id, min(price_pkn)::float8 as min_pkn
-        from public.marketplace_user_listings
-        where card_id = any($1::text[])
-          and status = 'active'
-          and quantity_available > 0
-          and price_pkn > 0
-          and ($2::text = '' or seller_uid is distinct from $2::text)
-        group by card_id";
     let pokoin_rows = db
-        .query("pokemon", pokoin_sql, &[json!(ids), json!(exclude_seller_uid)])
+        .query("pokemon", POKOIN_CHEAPEST_SQL, &[json!(ids), json!(exclude_seller_uid), json!("pokemon")])
         .await?;
 
     // Professional sellers only, same finishes: private one-off asks made
@@ -441,10 +488,8 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
             .cloned()
             .unwrap_or_default();
         let (ct_cheapest, ct_matched) = pick_matched_ct(&groups, &item.condition, &item.language, item.reverse, item.first_edition);
-        let pokoin_cheapest = pokoin_rows
-            .iter()
-            .find(|row| row.get("card_id").map(text_of).as_deref() == Some(item.card_id.as_str()))
-            .and_then(|row| number(row.get("min_pkn")));
+        let ct_matched = ct_matched.filter(|_| !item.one_of_a_kind());
+        let pokoin_cheapest = pokoin_cheapest(&pokoin_rows, &item.card_id);
         let sold_median = ct_id.as_ref().and_then(|ct_id| {
             sold_rows
                 .iter()
@@ -477,15 +522,61 @@ pub async fn read_prices(db: &DbPools, items: &[PriceItem], exclude_seller_uid: 
     Ok(Value::Object(prices))
 }
 
+/// One comp of a game other than Pokémon. CardTrader asks come from the
+/// game's price file: the cheapest CardTrader Zero copy of the listing's
+/// language and finish in its condition or better (`price_book::facet_cents`).
+pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pokoin_cheapest: Option<f64>) -> Value {
+    let card = item.card_id.parse::<u32>().ok();
+    let (cheapest, matched) = match (asks, card) {
+        (Some(asks), Some(card)) => crate::price_book::facet_cents(
+            asks.card(card),
+            &item.language,
+            &item.condition,
+            item.foil || item.reverse,
+        ),
+        _ => (None, None),
+    };
+    let matched = matched.filter(|_| !item.one_of_a_kind());
+    json!({
+        "pokoinCheapestPkn": pokoin_cheapest,
+        "ctCheapestPkn": cheapest.map(crate::price_book::pkn_from_cents),
+        "ctMatchedPkn": matched.map(crate::price_book::pkn_from_cents),
+        "ctBasis": "zero",
+        "soldMedianPkn": Value::Null,
+        "cardtraderListed": cardtrader_source(&[], Some(if asks.is_some() { "empty" } else { "unavailable" })),
+        "tcgplayer": [],
+        "tcgplayerStatus": "unconfigured",
+    })
+}
+
+async fn read_game_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
+    let ids = unique_card_ids(items);
+    if ids.is_empty() {
+        return Ok(json!({}));
+    }
+    // Pokoin listings of every game live in the shared database.
+    let pokoin_rows = db
+        .query("pokemon", POKOIN_CHEAPEST_SQL, &[json!(ids), json!(exclude_seller_uid), json!(game)])
+        .await?;
+    let asks = crate::price_book::ct_asks(game).await;
+    let mut prices = Map::new();
+    for item in items {
+        let comp = game_comp(item, asks.as_deref(), pokoin_cheapest(&pokoin_rows, &item.card_id));
+        prices.insert(price_check_key(item), comp.clone());
+        prices.insert(item.card_id.clone(), comp);
+    }
+    Ok(Value::Object(prices))
+}
+
 /// Handler helper: validate + read.
-pub async fn handle(db: &DbPools, raw_items: &str, exclude_seller_uid: &str) -> ApiResult<Value> {
+pub async fn handle(db: &DbPools, game: &str, raw_items: &str, exclude_seller_uid: &str) -> ApiResult<Value> {
     let items = parse_items(raw_items);
     if items.is_empty() {
         return Err(ApiError::bad_request(
             clean_text(Some("items query param required (cardId[:COND:LANG], max 100)."), 200),
         ));
     }
-    let prices = read_prices(db, &items, exclude_seller_uid).await?;
+    let prices = read_prices(db, game, &items, exclude_seller_uid).await?;
     let count = prices.as_object().map(|map| map.len()).unwrap_or(0);
     Ok(json!({ "prices": prices, "source": "pokoin+cardtrader", "count": count }))
 }
@@ -571,6 +662,68 @@ mod tests {
         assert!(sql.contains("on_vacation"));
         assert!(sql.contains("interval '3 days'"));
         assert!(sql.contains("group by 1, 2, 3, 4, 5"), "condition, language, reverse and first edition are facets");
+        // Graded, signed and altered copies never set a raw card's floor.
+        assert!(sql.contains("raw_metadata->>'graded', '') <> 'true'"));
+        assert!(sql.contains("properties->>'signed', '') <> 'true'"));
+        assert!(sql.contains("properties->>'altered', '') <> 'true'"));
+    }
+
+    #[test]
+    fn one_of_a_kind_flags_round_trip() {
+        let items = parse_items("801148:NM:EN:H,801148:NM:EN:G,801148:NM:EN:RFHGSA,801148:NM:EN");
+        assert!(items[0].foil && !items[0].one_of_a_kind());
+        assert!(items[1].graded && items[1].one_of_a_kind());
+        assert!(items[2].reverse && items[2].first_edition && items[2].foil);
+        assert!(items[2].graded && items[2].signed && items[2].altered);
+        assert_eq!(price_check_key(&items[2]), "801148:NM:EN:RFHGSA");
+        assert_eq!(price_check_key(&items[0]), "801148:NM:EN:H");
+        assert_eq!(price_check_key(&items[3]), "801148:NM:EN:");
+        assert!(!items[3].one_of_a_kind());
+    }
+
+    #[test]
+    fn other_games_price_from_the_zero_asks_of_the_listing_facets() {
+        use crate::price_book::{Ask, CtAsks};
+        // Riftbound 801148: EN NM 1.20, EN SP 0.90, EN NM foil 6.00, FR NM 0.50.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"PKP3");
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&6u16.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        let rows: [Ask; 4] = [
+            Ask { card_id: 801148, variant: 1, cents: 120 },
+            Ask { card_id: 801148, variant: 1 + 16, cents: 90 },
+            Ask { card_id: 801148, variant: 1 + 128, cents: 600 },
+            Ask { card_id: 801148, variant: 3, cents: 50 },
+        ];
+        bytes.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        for row in rows {
+            bytes.extend_from_slice(&row.card_id.to_le_bytes());
+            bytes.push(7);
+            bytes.push(row.variant);
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&row.cents.to_le_bytes());
+        }
+        let asks = CtAsks::parse(&bytes).unwrap();
+        let comp = |raw: &str| game_comp(&parse_items(raw)[0], Some(&asks), None);
+        // NM is priced by NM copies only; SP by the cheaper SP copy.
+        assert_eq!(comp("801148:NM:EN")["ctMatchedPkn"], json!(240.0));
+        assert_eq!(comp("801148:SP:EN")["ctMatchedPkn"], json!(180.0));
+        assert_eq!(comp("801148:MP:EN")["ctMatchedPkn"], json!(180.0));
+        assert_eq!(comp("801148:NM:EN:H")["ctMatchedPkn"], json!(1200.0));
+        assert_eq!(comp("801148:NM:FR")["ctMatchedPkn"], json!(100.0));
+        assert_eq!(comp("801148:NM:EN")["ctCheapestPkn"], json!(100.0));
+        assert_eq!(comp("801148:NM:EN")["ctBasis"], "zero");
+        // No such facet, a one-of-a-kind copy, another card, no file: no price.
+        assert_eq!(comp("801148:NM:IT")["ctMatchedPkn"], Value::Null);
+        assert_eq!(comp("801148:NM:EN:G")["ctMatchedPkn"], Value::Null);
+        assert_eq!(comp("801148:NM:EN:S")["ctMatchedPkn"], Value::Null);
+        assert_eq!(comp("801150:NM:EN")["ctMatchedPkn"], Value::Null);
+        let none = game_comp(&parse_items("801148:NM:EN")[0], None, Some(30.0));
+        assert_eq!(none["ctMatchedPkn"], Value::Null);
+        assert_eq!(none["pokoinCheapestPkn"], json!(30.0));
+        assert_eq!(none["cardtraderListed"]["status"], "unavailable");
     }
 
     #[test]

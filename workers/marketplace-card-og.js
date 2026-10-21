@@ -18,7 +18,7 @@ export { realPublicCardId } from './public-card-id.js';
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
 /** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
-export const OG_CACHE_VERSION = 'v14';
+export const OG_CACHE_VERSION = 'v15';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -342,21 +342,57 @@ function productJsonLd(payload) {
   return data;
 }
 
+// Google's result-thumbnail hints, strongest first: primaryImageOfPage on the
+// WebPage, then image on its mainEntity, then og:image — all the same scan.
+function cardPageJsonLd(payload, { url, caption }) {
+  const data = productJsonLd(payload);
+  if (!payload.image) return data;
+  const primaryImageOfPage = {
+    '@type': 'ImageObject',
+    '@id': payload.image,
+    url: payload.image,
+    contentUrl: payload.image,
+    caption,
+  };
+  if (data['@type'] !== 'Product') {
+    // Catalog-only ItemPage is already the WebPage node.
+    return { ...data, '@id': url, primaryImageOfPage };
+  }
+  const { '@context': context, ...product } = data;
+  const productId = `${url}#product`;
+  return {
+    '@context': context,
+    '@graph': [
+      {
+        '@type': 'WebPage',
+        '@id': url,
+        url,
+        name: payload.title,
+        primaryImageOfPage,
+        mainEntity: { '@id': productId },
+      },
+      { '@id': productId, ...product, mainEntityOfPage: { '@id': url } },
+    ],
+  };
+}
+
 export function renderCardOgHtml(payload) {
   const title = escapeHtml(payload.title);
   const description = escapeHtml(payload.description);
   const image = escapeHtml(payload.image);
-  const canonical = escapeHtml(cardCanonicalUrl({
+  const canonicalUrl = cardCanonicalUrl({
     canonicalPath: payload.path,
     cardId: payload.cardId,
     origin: SITE,
     game: payload.game,
-  }));
+  });
+  const canonical = escapeHtml(canonicalUrl);
   const url = canonical;
   const path = escapeHtml(payload.path || '/marketplace');
   const h1 = escapeHtml(payload.name || payload.title);
   const cardLabel = payload.game ? `${tcgBrandName(payload.game)} card` : 'Pokemon card';
-  const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, cardLabel].filter(Boolean).join(' ') || payload.title);
+  const imageCaption = [payload.name, payload.setName, payload.number, cardLabel].filter(Boolean).join(' ') || payload.title;
+  const imageAlt = escapeHtml(imageCaption);
   const hrefFor = (path) => escapeHtml(publicGamePath(path, payload.game) || path || '');
   const imageType = /\.webp(?:$|\?)/i.test(payload.image || '')
     ? 'image/webp'
@@ -384,7 +420,7 @@ export function renderCardOgHtml(payload) {
     return `<li><a href="${href}">${name}</a></li>`;
   }).join('');
   const jsonLd = payload.name && !String(payload.robots || '').startsWith('noindex')
-    ? `\n  <script type="application/ld+json">${JSON.stringify(productJsonLd(payload)).replace(/</g, '\\u003c')}</script>`
+    ? `\n  <script type="application/ld+json">${JSON.stringify(cardPageJsonLd(payload, { url: canonicalUrl, caption: imageCaption })).replace(/</g, '\\u003c')}</script>`
     : '';
   const descriptionBody = description ? `\n  <p>${description}</p>` : '';
   const offerLabel = aggregateLabel(

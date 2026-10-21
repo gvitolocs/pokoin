@@ -207,7 +207,12 @@ pub async fn price_check(
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     let items = query_first(&uri, "items").unwrap_or_default();
-    let payload = crate::price_check::handle(&state.db, &items, &identity.uid).await?;
+    let game = pokoin_api_common::game::parse_game_from_request(
+        &pokoin_api_common::http::header_pairs(&headers),
+        query_first(&uri, "game").as_deref(),
+        query_first(&uri, "marketplaceGame").as_deref(),
+    );
+    let payload = crate::price_check::handle(&state.db, &game, &items, &identity.uid).await?;
     let mut response = json_response(200, payload);
     response
         .headers_mut()

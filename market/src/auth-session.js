@@ -129,7 +129,9 @@ export function readAuthSession(overrideStore) {
     const silverUntil = readDate(parsed.silverUntil);
     const untilLive = Boolean(silverUntil && silverUntil.getTime() > Date.now());
     const admin = parsed.admin === true;
-    const silver = admin || parsed.silver === true || untilLive;
+    // A cached silver:true without a live silverUntil is an expired (or
+    // legacy role) membership — only admins stay Silver permanently.
+    const silver = admin || untilLive;
     return {
       uid,
       signedIn: true,

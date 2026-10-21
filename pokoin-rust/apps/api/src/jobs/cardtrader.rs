@@ -1,10 +1,12 @@
 use super::{accounts_firestore, clipped, now_ms, redis_connection, text, Options};
 use anyhow::{bail, Result};
 use pokoin_external::cardtrader::{
+    client::http_error_status,
     integration,
     sync::{reconcile_cardtrader_inventory, ReconcileArgs},
 };
 use serde_json::{json, Value};
+use std::time::Duration;
 
 #[derive(Clone)]
 struct Lock {
@@ -42,12 +44,29 @@ fn registered_url(response: &Value) -> String {
         .trim()
         .into()
 }
+/// Why webhook re-registration failed. Only a CardTrader HTTP 5xx is
+/// transient (2026-10-20 02:08 UTC: 503 on PUT /app for one seller); every
+/// other failure — 4xx, rejected token, transport, missing URL, confirmation
+/// mismatch — is final. The message stays the fixed client message.
+enum WebhookError {
+    Transient { status: u16, message: String },
+    Failed(String),
+}
+impl std::fmt::Display for WebhookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            WebhookError::Transient { message, .. } => message,
+            WebhookError::Failed(message) => message,
+        };
+        f.write_str(message)
+    }
+}
 trait Backend {
     async fn integrations(&mut self) -> Result<Vec<Value>>;
     async fn acquire(&mut self, uid: &str) -> Option<Lock>;
     async fn release(&mut self, lock: &Lock);
     async fn token(&mut self, uid: &str) -> Result<String>;
-    async fn register(&mut self, uid: &str, token: &str) -> Result<()>;
+    async fn register(&mut self, uid: &str, token: &str) -> Result<(), WebhookError>;
     async fn reconcile(
         &mut self,
         uid: &str,
@@ -57,7 +76,11 @@ trait Backend {
         exclusive: bool,
     ) -> Result<Value>;
 }
-async fn reconcile_all(backend: &mut impl Backend, dry_run: bool) -> Result<Value> {
+async fn reconcile_all(
+    backend: &mut impl Backend,
+    dry_run: bool,
+    webhook_retry_wait: Duration,
+) -> Result<Value> {
     let integrations = backend.integrations().await?;
     if dry_run {
         return Ok(
@@ -77,9 +100,25 @@ async fn reconcile_all(backend: &mut impl Backend, dry_run: bool) -> Result<Valu
         };
         let sync_result = async {
             let token = backend.token(&uid).await?;
-            match backend.register(&uid, &token).await {
+            // One CardTrader HTTP 5xx on webhook registration is retried once
+            // after a short wait; 4xx, rejected tokens and transport errors
+            // are final.
+            let register_outcome = match backend.register(&uid, &token).await {
+                Err(WebhookError::Transient { status, .. }) => {
+                    tokio::time::sleep(webhook_retry_wait).await;
+                    tracing::warn!(status, "cardtrader webhook re-registration retry");
+                    backend.register(&uid, &token).await
+                }
+                outcome => outcome,
+            };
+            match register_outcome {
                 Ok(()) => row["webhookOk"] = json!(true),
-                Err(error) => row["webhookError"] = json!(clipped(&error.to_string(), 500)),
+                Err(error) => {
+                    row["webhookError"] = json!(clipped(&error.to_string(), 500));
+                    if matches!(&error, WebhookError::Transient { .. }) {
+                        row["webhookTransient"] = json!(true);
+                    }
+                }
             }
             let sync = backend
                 .reconcile(
@@ -123,12 +162,22 @@ async fn reconcile_all(backend: &mut impl Backend, dry_run: bool) -> Result<Valu
         results.push(row);
     }
     let skipped = results.iter().filter(|r| r["skipped"] == true).count();
+    // A transient-only webhook miss (both attempts 5xx, sync fine) is a
+    // warning, not a failure; with a sync failure it still fails.
+    let warnings = results
+        .iter()
+        .filter(|r| r["webhookTransient"] == true && r["syncOk"] == true)
+        .count();
     let failed = results
         .iter()
-        .filter(|r| r["skipped"] != true && (r["webhookOk"] != true || r["syncOk"] != true))
+        .filter(|r| {
+            r["skipped"] != true
+                && (r["syncOk"] != true
+                    || (r["webhookOk"] != true && r["webhookTransient"] != true))
+        })
         .count();
     Ok(
-        json!({"ok":failed == 0, "sellers":results.len(), "failed":failed, "skipped":skipped, "results":results}),
+        json!({"ok":failed == 0, "sellers":results.len(), "failed":failed, "warnings":warnings, "skipped":skipped, "results":results}),
     )
 }
 struct Native {
@@ -201,10 +250,12 @@ impl Backend for Native {
     async fn token(&mut self, uid: &str) -> Result<String> {
         Ok(integration::decrypt_integration_token(self.state.firestore.as_ref(), uid).await?)
     }
-    async fn register(&mut self, uid: &str, token: &str) -> Result<()> {
+    async fn register(&mut self, uid: &str, token: &str) -> Result<(), WebhookError> {
         let url = self.state.webhook_url_for_uid(uid);
         if url.is_empty() {
-            bail!("Missing CardTrader webhook URL.");
+            return Err(WebhookError::Failed(
+                "Missing CardTrader webhook URL.".into(),
+            ));
         }
         let outcome = match self
             .state
@@ -213,10 +264,16 @@ impl Backend for Native {
             .await
         {
             Ok(response) if registered_url(&response) == url.trim() => Ok(()),
-            Ok(_) => Err(anyhow::anyhow!(
-                "CardTrader did not confirm the requested webhook URL."
+            Ok(_) => Err(WebhookError::Failed(
+                "CardTrader did not confirm the requested webhook URL.".into(),
             )),
-            Err(error) => Err(anyhow::anyhow!(error.to_string())),
+            Err(error) => Err(match http_error_status(&error) {
+                Some(status) if (500..=599).contains(&status) => WebhookError::Transient {
+                    status,
+                    message: error.message,
+                },
+                _ => WebhookError::Failed(error.to_string()),
+            }),
         };
         let at = pokoin_external::time_util::iso_from_ms(now_ms());
         let mut registration = json!({"ok":outcome.is_ok(),"url":clipped(&url,500),"error":outcome.as_ref().err().map(|e| clipped(&e.to_string(),500)).unwrap_or_default(),"lastAttemptAt":at});
@@ -233,7 +290,7 @@ impl Backend for Native {
             )
             .await;
         outcome?;
-        written?;
+        written.map_err(|error| WebhookError::Failed(error.to_string()))?;
         Ok(())
     }
     async fn reconcile(
@@ -266,7 +323,7 @@ pub(super) async fn run(options: &Options) -> Result<()> {
         state: pokoin_external::DomainState::from_env(2).await?,
         firestore: accounts_firestore()?,
     };
-    let report = reconcile_all(&mut backend, options.dry_run).await?;
+    let report = reconcile_all(&mut backend, options.dry_run, Duration::from_secs(2)).await?;
     println!("cardtrader periodic reconcile complete {report}");
     if !options.dry_run && report["ok"] != true {
         bail!(
@@ -284,7 +341,9 @@ mod tests {
         skip: bool,
         token_failure: bool,
         webhook_failure: bool,
+        webhook_transient: usize,
         incomplete: bool,
+        register_calls: usize,
         released: usize,
         synced: usize,
     }
@@ -314,10 +373,18 @@ mod tests {
             };
             Ok("token".into())
         }
-        async fn register(&mut self, _: &str, _: &str) -> Result<()> {
+        async fn register(&mut self, _: &str, _: &str) -> Result<(), WebhookError> {
+            self.register_calls += 1;
+            if self.webhook_transient > 0 {
+                self.webhook_transient -= 1;
+                return Err(WebhookError::Transient {
+                    status: 503,
+                    message: "CardTrader request failed with HTTP 503.".into(),
+                });
+            }
             if self.webhook_failure {
-                bail!("registration failed")
-            };
+                return Err(WebhookError::Failed("registration failed".into()));
+            }
             Ok(())
         }
         async fn reconcile(
@@ -362,12 +429,16 @@ mod tests {
             skip: true,
             ..Default::default()
         };
-        let report = reconcile_all(&mut backend, false).await.unwrap();
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
         assert_eq!(report["ok"], true);
         assert_eq!(report["skipped"], 1);
         assert_eq!(backend.synced, 0);
         backend.skip = false;
-        reconcile_all(&mut backend, true).await.unwrap();
+        reconcile_all(&mut backend, true, Duration::ZERO)
+            .await
+            .unwrap();
         assert_eq!(backend.synced, 0);
         assert_eq!(backend.released, 0);
     }
@@ -377,12 +448,16 @@ mod tests {
             webhook_failure: true,
             ..Default::default()
         };
-        let report = reconcile_all(&mut backend, false).await.unwrap();
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
         assert_eq!(report["ok"], false);
         assert_eq!(backend.synced, 1);
         assert_eq!(backend.released, 1);
         backend.token_failure = true;
-        reconcile_all(&mut backend, false).await.unwrap();
+        reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
         assert_eq!(backend.synced, 1);
         assert_eq!(backend.released, 2);
     }
@@ -399,7 +474,9 @@ mod tests {
             .filter(|line| !line.starts_with('#'))
             .collect();
         assert!(settings.contains(&"OnUnitInactiveSec=10min"));
-        assert!(!settings.iter().any(|line| line.starts_with("OnUnitActiveSec")));
+        assert!(!settings
+            .iter()
+            .any(|line| line.starts_with("OnUnitActiveSec")));
         // The first run after boot still needs a start of its own.
         assert!(settings.contains(&"OnBootSec=2min"));
     }
@@ -409,11 +486,80 @@ mod tests {
             incomplete: true,
             ..Default::default()
         };
-        let report = reconcile_all(&mut backend, false).await.unwrap();
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
         assert_eq!(report["failed"], 1);
         assert_eq!(
             report["results"][0]["syncError"],
             "Incomplete inventory export."
         );
+    }
+    #[tokio::test]
+    async fn webhook_5xx_is_retried_once_and_then_ok() {
+        let mut backend = Mock {
+            webhook_transient: 1,
+            ..Default::default()
+        };
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(backend.register_calls, 2);
+        assert_eq!(report["results"][0]["webhookOk"], true);
+        assert_eq!(report["results"][0].get("webhookTransient"), None);
+        assert_eq!(report["ok"], true);
+        assert_eq!(report["failed"], 0);
+        assert_eq!(report["warnings"], 0);
+    }
+    #[tokio::test]
+    async fn webhook_5xx_twice_with_sync_ok_is_warning_only() {
+        // Two retries would mean the loop retries more than once.
+        let mut backend = Mock {
+            webhook_transient: 9,
+            ..Default::default()
+        };
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(backend.register_calls, 2);
+        assert_eq!(report["results"][0]["webhookOk"], false);
+        assert_eq!(
+            report["results"][0]["webhookError"],
+            "CardTrader request failed with HTTP 503."
+        );
+        assert_eq!(report["results"][0]["webhookTransient"], true);
+        assert_eq!(report["ok"], true);
+        assert_eq!(report["failed"], 0);
+        assert_eq!(report["warnings"], 1);
+    }
+    #[tokio::test]
+    async fn webhook_5xx_twice_with_sync_failure_still_fails() {
+        let mut backend = Mock {
+            webhook_transient: 9,
+            incomplete: true,
+            ..Default::default()
+        };
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(backend.register_calls, 2);
+        assert_eq!(report["ok"], false);
+        assert_eq!(report["failed"], 1);
+    }
+    #[tokio::test]
+    async fn webhook_non_5xx_is_not_retried() {
+        let mut backend = Mock {
+            webhook_failure: true,
+            ..Default::default()
+        };
+        let report = reconcile_all(&mut backend, false, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(backend.register_calls, 1);
+        assert_eq!(report["results"][0]["webhookOk"], false);
+        assert_eq!(report["results"][0].get("webhookTransient"), None);
+        assert_eq!(report["ok"], false);
+        assert_eq!(report["failed"], 1);
+        assert_eq!(report["warnings"], 0);
     }
 }

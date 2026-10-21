@@ -1,3 +1,4 @@
+import { knownGameId } from './game.js';
 import { formatPknNumber } from './pkn.js';
 
 function positive(value) {
@@ -5,11 +6,26 @@ function positive(value) {
   return value != null && Number.isFinite(number) && number > 0 ? number : null;
 }
 
-/** Finish flags of a listing or holding: `R` reverse holo, `F` first edition. */
+/**
+ * Facet flags of a listing or holding, in the server's order
+ * (`price_check_key`): `R` reverse holo (the foil of the other games),
+ * `F` first edition, `H` foil, `G` graded, `S` signed, `A` altered.
+ */
 function finishFlags(row) {
-  const reverse = row?.reverse === true || String(row?.foilState || row?.foil_state || '').toLowerCase() === 'reverse';
-  const firstEdition = row?.firstEdition === true || row?.first_edition === true;
-  return `${reverse ? 'R' : ''}${firstEdition ? 'F' : ''}`;
+  const foilState = String(row?.foilState || row?.foil_state || '').toLowerCase();
+  return [
+    [row?.reverse === true || foilState === 'reverse', 'R'],
+    [row?.firstEdition === true || row?.first_edition === true, 'F'],
+    [row?.foil === true || foilState === 'foil', 'H'],
+    [row?.graded === true, 'G'],
+    [row?.signed === true, 'S'],
+    [row?.altered === true, 'A'],
+  ].filter(([on]) => on).map(([, flag]) => flag).join('');
+}
+
+/** The game a row's card id belongs to: card ids are per game. */
+export function priceGame(row, fallback = 'pokemon') {
+  return knownGameId(row?.marketplaceGame || row?.marketplace_game) || knownGameId(fallback) || 'pokemon';
 }
 
 /**
@@ -27,7 +43,7 @@ export function pricerCondition(raw) {
   return value;
 }
 
-/** One price-check item: card, condition, language and finishes. */
+/** One price-check item: card, condition, language and facet flags. */
 export function priceCheckItem(row) {
   const flags = finishFlags(row);
   return {
@@ -36,17 +52,21 @@ export function priceCheckItem(row) {
     language: String(row?.language || '').toUpperCase(),
     reverse: flags.includes('R'),
     firstEdition: flags.includes('F'),
+    foil: flags.includes('H'),
+    graded: flags.includes('G'),
+    signed: flags.includes('S'),
+    altered: flags.includes('A'),
   };
 }
 
 /**
  * `card:CONDITION:LANGUAGE:FLAGS`, the key the price check returns a comp
- * under (server: `price_check_key`), so a reverse copy never reads the plain
- * copy's comp.
+ * under (server: `price_check_key`), so a reverse, graded or signed copy
+ * never reads the plain copy's comp.
  */
 export function priceCheckKey(row) {
   const item = priceCheckItem(row);
-  return `${item.cardId}:${item.condition}:${item.language}:${item.reverse ? 'R' : ''}${item.firstEdition ? 'F' : ''}`;
+  return `${item.cardId}:${item.condition}:${item.language}:${finishFlags(item)}`;
 }
 
 export function inventoryMarketValue(prices, row, source) {
@@ -66,11 +86,15 @@ export function inventoryMarketValue(prices, row, source) {
     // Only the cheapest professional seller with the same condition,
     // language and finishes counts: another condition, a private one-off
     // ask, or the plain copy of a reverse card is not this card's price.
+    // The other games read the extension's price file: CardTrader Zero
+    // sellers, this condition or better.
     const value = positive(entry.ctMatchedPkn);
     if (value == null) return null;
     return {
       currency: 'PKN', value,
-      title: 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).',
+      title: entry.ctBasis === 'zero'
+        ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
+        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).',
     };
   }
   const native = positive(entry.pokoinCheapestPkn);

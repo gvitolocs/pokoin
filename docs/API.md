@@ -173,6 +173,8 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 
 **Silver CT / CM / VT** (Best Deal pills; Firestore Silver **or** `pokoin.auth.session`)
 
+Silver is an unexpired `silverUntil` (365 days from purchase) or an admin; admins are permanent.
+
 | Pill | Behavior |
 | --- | --- |
 | CT | SPA opens leftover `https://www.cardtrader.com/en/cards/{ct_id}` in a new tab with `noopener,noreferrer` (no Pokoin referrer). Lookup fallback `GET /api/cardtrader-redirect?format=json` then the same open — the browser never 302s through pokoin.com. Sanji `818358` → `409179`. Do not spoof Google as the referrer. |
