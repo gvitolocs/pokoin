@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::cardtrader::client::CardTraderClient;
+use crate::cardtrader::group;
 use crate::cardtrader::integration::{integration_doc_id, COLLECTION};
 use crate::cardtrader::push::{self, PushOutcome};
 use crate::cardtrader::sync::upsert_product_link;
@@ -576,6 +577,94 @@ fn push_remaining_sql() -> String {
     format!("select count(*)::bigint as remaining {PUSH_CANDIDATES_WHERE}")
 }
 
+/// Unlisted candidates of one card (`$3`): a candidate's identical copies are
+/// among them (cardtrader::group).
+fn sibling_candidates_sql() -> String {
+    format!("select to_jsonb(listing) as listing {PUSH_CANDIDATES_WHERE} and listing.card_id = $3 order by listing.created_at, listing.id")
+}
+
+/// The seller's listings on CardTrader by Pokoin (never CardTrader's own
+/// imports), for the groups a new copy joins.
+const LINKED_GROUPS_SQL: &str = r#"
+      select to_jsonb(listing) as listing from public.marketplace_user_listings as listing
+      where listing.seller_uid = $1
+        and listing.source_listing_id ~ '^ct:[0-9]+$'
+        and listing.status in ('active', 'paused')
+        and coalesce(listing.source, '') <> $2
+"#;
+
+/// Every copy a group's claim holds moves to its product (`$3`).
+const LINK_GROUP_SQL: &str = r#"
+      update public.marketplace_user_listings
+      set source_listing_id = $3, updated_at = now()
+      where seller_uid = $1 and source_listing_id = $2
+      returning id::text as id, status, quantity_available, card_id, price_pkn::float8 as price_pkn
+"#;
+
+/// Members that left the group while CardTrader answered: they are pushed
+/// again into the group of what they are now.
+const DETACH_SQL: &str = r#"
+      update public.marketplace_user_listings
+      set source_listing_id = '', updated_at = now()
+      where seller_uid = $1 and source_listing_id = $2 and id::text = any($3::text[])
+      returning id::text as id
+"#;
+
+fn row_id(row: &Value) -> String {
+    clean_text_value(row.get("id").unwrap_or(&Value::Null), 80)
+}
+
+/// Group key → the CardTrader product its listed copies hold, for products
+/// still in this export.
+async fn existing_groups(db: &DbPools, seller_uid: &str, export: &[NormalizedProduct]) -> HashMap<String, String> {
+    let exported: HashSet<&str> = export.iter().map(|product| product.id.as_str()).collect();
+    let mut groups = HashMap::new();
+    let Ok(rows) = db.write("pokemon", LINKED_GROUPS_SQL, &[json!(seller_uid), json!(IMPORT_SOURCE)]).await else {
+        return groups;
+    };
+    for row in rows {
+        let Some(listing) = row.get("listing") else { continue };
+        let source = clean_text_value(listing.get("source_listing_id").unwrap_or(&Value::Null), 160);
+        let product_id = crate::cardtrader::sync_core::parse_ct_product_id(&source);
+        if !product_id.is_empty() && exported.contains(product_id.as_str()) {
+            groups.entry(group::listing_group_key(listing)).or_insert(product_id);
+        }
+    }
+    groups
+}
+
+/// After linking a group's claim: detach the copies that left it meanwhile and
+/// bring the product's quantity to what its members hold (an increment; a
+/// product left with no copy (`created` total known) is deleted).
+#[allow(clippy::too_many_arguments)]
+async fn settle_group(
+    db: &DbPools,
+    ct: &CardTraderClient,
+    token: &str,
+    seller_uid: &str,
+    product_id: &str,
+    sent: &[group::Sent],
+    linked: &[Value],
+    created: Option<i64>,
+    out: &mut Value,
+) {
+    let (delta, detach) = group::settle_after_link(sent, linked);
+    if !detach.is_empty() {
+        let _ = db
+            .write("pokemon", DETACH_SQL, &[json!(seller_uid), json!(ct_source_listing_id(product_id)), json!(detach)])
+            .await;
+        out["detachedAfterPush"] = json!(out["detachedAfterPush"].as_i64().unwrap_or(0) + detach.len() as i64);
+    }
+    if delta == 0 {
+        return;
+    }
+    if created.is_some_and(|total| total + delta <= 0) {
+        let _ = ct.destroy_product(token, product_id).await;
+    } else if ct.increment_product(token, product_id, delta).await.is_ok() {
+        bump(out, "quantityCaughtUp");
+    }
+}
+
 /// Every CardTrader source a listing of the seller holds, any status.
 const LINKED_SOURCES_SQL: &str = r#"
       select source_listing_id from public.marketplace_user_listings
@@ -621,11 +710,15 @@ pub const STALE_CLAIM_GRACE_SECS: i64 = 15 * 60;
 /// Stale claims of one seller (`$2` the export's start on the writer clock,
 /// `$3` the grace in seconds, `$4` listing ids the export names).
 pub const STALE_CLAIMS_SQL: &str = r#"
-      select id::text as id from public.marketplace_user_listings
+      select id::text as id, source_listing_id from public.marketplace_user_listings
       where seller_uid = $1
         and source_listing_id like 'ct:pending:%'
         and updated_at < $2::timestamptz - make_interval(secs => $3::int)
         and not (id::text = any($4::text[]))
+        and source_listing_id not in (
+          select coalesce(named.source_listing_id, '') from public.marketplace_user_listings as named
+          where named.seller_uid = $1 and named.id::text = any($4::text[])
+        )
 "#;
 
 /// Release them, re-checked under the same conditions (`$5`: the ids).
@@ -636,6 +729,10 @@ pub const RELEASE_STALE_CLAIMS_SQL: &str = r#"
         and source_listing_id like 'ct:pending:%'
         and updated_at < $2::timestamptz - make_interval(secs => $3::int)
         and not (id::text = any($4::text[]))
+        and source_listing_id not in (
+          select coalesce(named.source_listing_id, '') from public.marketplace_user_listings as named
+          where named.seller_uid = $1 and named.id::text = any($4::text[])
+        )
         and id::text = any($5::text[])
       returning id::text as id
 "#;
@@ -651,6 +748,10 @@ pub const SETTLE_SOLD_CLAIMS_SQL: &str = r#"
         and source_listing_id like 'ct:pending:%'
         and updated_at < $2::timestamptz - make_interval(secs => $3::int)
         and not (id::text = any($4::text[]))
+        and source_listing_id not in (
+          select coalesce(named.source_listing_id, '') from public.marketplace_user_listings as named
+          where named.seller_uid = $1 and named.id::text = any($4::text[])
+        )
         and id::text = any($5::text[])
         and status in ('active', 'paused')
       returning id::text as id
@@ -670,6 +771,15 @@ pub fn ordered_listing_ids(orders: &[Value]) -> HashSet<String> {
         .map(|item| crate::cardtrader::sync_core::parse_pokoin_listing_id(&crate::cardtrader::webhook::item_user_data_field(item)))
         .filter(|id| !id.is_empty())
         .collect()
+}
+
+/// A group's copies share one claim and its product names only the primary
+/// (cardtrader::group): an order naming one copy of a claim names them all.
+pub fn claim_members(stale: &[(String, String)], ordered: &HashSet<String>) -> HashSet<String> {
+    let sold: HashSet<&str> = stale.iter().filter(|(id, _)| ordered.contains(id)).map(|(_, claim)| claim.as_str()).collect();
+    let mut out = ordered.clone();
+    out.extend(stale.iter().filter(|(_, claim)| sold.contains(claim.as_str())).map(|(id, _)| id.clone()));
+    out
 }
 
 /// Of the stale claims, the ones safe to release: none when the orders could
@@ -832,6 +942,7 @@ pub async fn push_unlisted(
         }
     };
     let mut twins = Twins::new(export, &linked_sources);
+    let mut groups = existing_groups(db, seller_uid, export).await;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(budget.seconds.max(0) as u64);
     let mut attempted: Vec<String> = Vec::new();
     'pages: loop {
@@ -892,78 +1003,129 @@ pub async fn push_unlisted(
                 }
                 continue;
             }
+            // One CardTrader product for every identical copy (game, card,
+            // condition, language, finishes, price): the candidate and its
+            // unlisted twins on Pokoin, claimed together (cardtrader::group).
+            let key = group::listing_group_key(&listing);
+            let card_id = clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80);
+            let mut copies: Vec<Value> = match db.write("pokemon", &sibling_candidates_sql(), &[json!(seller_uid), json!(IMPORT_SOURCE), json!(card_id)]).await {
+                Ok(rows) => rows
+                    .into_iter()
+                    .filter_map(|row| row.get("listing").cloned())
+                    .filter(|copy| row_id(copy) != id && !attempted.contains(&row_id(copy)) && group::listing_group_key(copy) == key)
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            copies.insert(0, listing.clone());
             let pending = pending_source(crate::time_util::now_ms());
-            match db.write("pokemon", CLAIM_SQL, &[json!(id), json!(pending), json!(read_source)]).await {
-                Ok(claimed) if !claimed.is_empty() => {}
-                Ok(_) => {
-                    bump(&mut out, "skipped");
-                    continue;
+            let mut sent: Vec<group::Sent> = Vec::new();
+            let mut reads: Vec<(String, String)> = Vec::new();
+            for copy in &copies {
+                let copy_id = row_id(copy);
+                if copy_id != id {
+                    attempted.push(copy_id.clone());
+                    bump(&mut out, "candidates");
                 }
-                Err(error) => {
-                    bump(&mut out, "failed");
-                    out["error"] = json!(error.message);
-                    note_error(&mut out, json!({ "listingId": id, "reason": error.message }));
-                    continue;
+                let read = clean_text_value(copy.get("source_listing_id").unwrap_or(&Value::Null), 160);
+                match db.write("pokemon", CLAIM_SQL, &[json!(copy_id), json!(pending), json!(read)]).await {
+                    Ok(claimed) if !claimed.is_empty() => {
+                        sent.push(group::Sent {
+                            id: copy_id.clone(),
+                            quantity: copy.get("quantity_available").and_then(Value::as_i64).unwrap_or(0).max(0),
+                            price_pkn: copy.get("price_pkn").and_then(Value::as_f64).unwrap_or(0.0),
+                        });
+                        reads.push((copy_id, read));
+                    }
+                    Ok(_) => bump(&mut out, "skipped"),
+                    Err(error) => {
+                        bump(&mut out, "failed");
+                        out["error"] = json!(error.message);
+                        note_error(&mut out, json!({ "listingId": copy_id, "reason": error.message }));
+                    }
                 }
             }
+            if sent.is_empty() {
+                continue;
+            }
+            let total: i64 = sent.iter().map(|copy| copy.quantity).sum();
             let started = std::time::Instant::now();
-            let game = push::listing_game(&listing);
-            let editable = push::blueprint(&clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80))
-                .and_then(|blueprint| properties.get(&(game, blueprint)))
-                .map(Vec::as_slice);
-            match push::create_with_token_for(ct, token, &listing, editable).await {
-                PushOutcome::Created(pushed) => {
-                    let product_id = clean_text_value(pushed.get("productId").unwrap_or(&Value::Null), 80);
-                    let source = clean_text_value(pushed.get("sourceListingId").unwrap_or(&Value::Null), 160);
-                    let linked = db
-                        .write("pokemon", LINK_SQL, &[json!(id), json!(source), json!(pending)])
-                        .await
-                        .ok()
-                        .and_then(|rows| rows.into_iter().next());
-                    match linked {
-                        None => {
-                            // The claim is gone (listing deleted meanwhile): take the
+            let release = |reads: Vec<(String, String)>, pending: String| async move {
+                for (copy_id, read) in reads {
+                    let _ = db.write("pokemon", RELEASE_SQL, &[json!(copy_id), json!(pending), json!(read)]).await;
+                }
+            };
+            if let Some(product_id) = groups.get(&key).cloned() {
+                // The group is on CardTrader already: add these copies to it.
+                // An increment is never sent twice: one in doubt is taken as
+                // applied (a lost increment under-lists, a repeated one would
+                // over-list; D00008U).
+                match ct.increment_product(token, &product_id, total).await {
+                    Ok(_) => {}
+                    Err(error) if crate::cardtrader::client::write_in_doubt(&error) => bump(&mut out, "inDoubt"),
+                    Err(error) => {
+                        release(reads, pending.clone()).await;
+                        if rate_limited(&error) {
+                            out["stoppedBy"] = json!("rate_limited");
+                            break 'pages;
+                        }
+                        groups.remove(&key);
+                        bump(&mut out, "failed");
+                        note_error(&mut out, json!({ "listingId": id, "ctProductId": product_id, "reason": error.message }));
+                        continue;
+                    }
+                }
+                let linked = db
+                    .write("pokemon", LINK_GROUP_SQL, &[json!(seller_uid), json!(pending), json!(ct_source_listing_id(&product_id))])
+                    .await
+                    .unwrap_or_default();
+                settle_group(db, ct, token, seller_uid, &product_id, &sent, &linked, None, &mut out).await;
+                out["joined"] = json!(out["joined"].as_i64().unwrap_or(0) + linked.len() as i64);
+            } else {
+                let primary = copies.iter().find(|copy| row_id(copy) == sent[0].id).cloned().unwrap_or_else(|| listing.clone());
+                let mut body_listing = primary.clone();
+                body_listing["ctChannel"] = json!(channel.as_str());
+                body_listing["quantity_available"] = json!(total);
+                let game = push::listing_game(&body_listing);
+                let editable = push::blueprint(&card_id)
+                    .and_then(|blueprint| properties.get(&(game, blueprint)))
+                    .map(Vec::as_slice);
+                match push::create_with_token_for(ct, token, &body_listing, editable).await {
+                    PushOutcome::Created(pushed) => {
+                        let product_id = clean_text_value(pushed.get("productId").unwrap_or(&Value::Null), 80);
+                        let source = ct_source_listing_id(&product_id);
+                        let linked = db
+                            .write("pokemon", LINK_GROUP_SQL, &[json!(seller_uid), json!(pending), json!(source)])
+                            .await
+                            .unwrap_or_default();
+                        if linked.is_empty() {
+                            // Every claim is gone (deleted meanwhile): take the
                             // product back off CardTrader rather than leave it unlinked.
                             let _ = ct.destroy_product(token, &product_id).await;
                             bump(&mut out, "skipped");
-                        }
-                        Some(linked) => {
-                            let card_id = clean_text_value(linked.get("card_id").unwrap_or(&Value::Null), 80);
+                        } else {
                             let blueprint = push::blueprint(&card_id).map(|n| n.to_string()).unwrap_or_default();
-                            let quantity = linked.get("quantity_available").and_then(Value::as_i64).unwrap_or(0);
-                            let _ = upsert_product_link(db, seller_uid, &product_id, &id, &blueprint, quantity, "push", false).await;
-                            if push::off_sale(&clean_text_value(linked.get("status").unwrap_or(&Value::Null), 20)) {
-                                // Went off sale while CardTrader created it.
-                                let _ = ct.destroy_product(token, &product_id).await;
-                            } else if let Some(body) = repriced_while_pushing(&listing, &linked, channel) {
-                                // Repriced while the create was in flight: an edit of a
-                                // pending push sends nothing, so send the new ask now
-                                // (specs/tla/listing-ct-sync FeeOnce).
-                                if ct.update_product(token, &product_id, body).await.is_ok() {
-                                    bump(&mut out, "repricedAfterPush");
-                                }
-                            }
+                            let _ = upsert_product_link(db, seller_uid, &product_id, &sent[0].id, &blueprint, total, "push", false).await;
+                            settle_group(db, ct, token, seller_uid, &product_id, &sent, &linked, Some(total), &mut out).await;
+                            groups.insert(key.clone(), product_id.clone());
                             bump(&mut out, "pushed");
+                            out["pushedCopies"] = json!(out["pushedCopies"].as_i64().unwrap_or(0) + linked.len() as i64);
                         }
                     }
-                }
-                PushOutcome::Rejected(error) => {
-                    // Nothing was created: free the claim for a later run.
-                    let _ = db.write("pokemon", RELEASE_SQL, &[json!(id), json!(pending), json!(read_source)]).await;
-                    if rate_limited(&error) {
-                        out["stoppedBy"] = json!("rate_limited");
-                        break 'pages;
+                    PushOutcome::Rejected(error) => {
+                        // Nothing was created: free the claims for a later run.
+                        release(reads, pending.clone()).await;
+                        if rate_limited(&error) {
+                            out["stoppedBy"] = json!("rate_limited");
+                            break 'pages;
+                        }
+                        bump(&mut out, "failed");
+                        note_error(&mut out, json!({ "listingId": id, "cardId": card_id, "reason": error.message }));
                     }
-                    bump(&mut out, "failed");
-                    note_error(&mut out, json!({
-                        "listingId": id,
-                        "cardId": clean_text_value(listing.get("card_id").unwrap_or(&Value::Null), 80),
-                        "reason": error.message,
-                    }));
+                    // The product may exist: every copy keeps the shared claim; the
+                    // next reconcile links them all by the primary's
+                    // `user_data_field` and nothing pushes them again.
+                    PushOutcome::InDoubt(_) => bump(&mut out, "inDoubt"),
                 }
-                // The product may exist: keep the claim; the next reconcile links
-                // it by `user_data_field` and nothing pushes it again.
-                PushOutcome::InDoubt(_) => bump(&mut out, "inDoubt"),
             }
             let spent = started.elapsed();
             let floor = std::time::Duration::from_millis(PUSH_MIN_INTERVAL_MS);
@@ -995,8 +1157,16 @@ async fn release_stale_claims(
 ) {
     let named = exported_listing_ids(export);
     let base = [json!(seller_uid), json!(started), json!(STALE_CLAIM_GRACE_SECS), json!(named)];
-    let stale: Vec<String> = match db.write("pokemon", STALE_CLAIMS_SQL, &base).await {
-        Ok(rows) => rows.iter().map(|row| clean_text_value(row.get("id").unwrap_or(&Value::Null), 80)).collect(),
+    let stale: Vec<(String, String)> = match db.write("pokemon", STALE_CLAIMS_SQL, &base).await {
+        Ok(rows) => rows
+            .iter()
+            .map(|row| {
+                (
+                    clean_text_value(row.get("id").unwrap_or(&Value::Null), 80),
+                    clean_text_value(row.get("source_listing_id").unwrap_or(&Value::Null), 160),
+                )
+            })
+            .collect(),
         Err(error) => {
             if !error.is_table_missing() {
                 note_error(out, json!({ "reason": error.message }));
@@ -1008,7 +1178,12 @@ async fn release_stale_claims(
         return;
     }
     let from = crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms() - STALE_CLAIM_ORDER_DAYS * 86_400_000);
-    let ordered = ct.fetch_seller_sale_orders(token, &from, 100, 5).await.ok().map(|orders| ordered_listing_ids(&orders));
+    let ordered = ct
+        .fetch_seller_sale_orders(token, &from, 100, 5)
+        .await
+        .ok()
+        .map(|orders| claim_members(&stale, &ordered_listing_ids(&orders)));
+    let stale: Vec<String> = stale.into_iter().map(|(id, _)| id).collect();
     out["staleClaims"] = json!(stale.len());
     for (sql, ids, counter) in [
         (SETTLE_SOLD_CLAIMS_SQL, sold_claims(&stale, ordered.as_ref()), "staleClaimsSold"),
@@ -1024,21 +1199,6 @@ async fn release_stale_claims(
             Err(error) => note_error(out, json!({ "reason": error.message })),
         }
     }
-}
-
-/// The CardTrader price body when a listing's Pokoin price moved between the
-/// read the create was sent from and its link: `None` when it did not.
-pub fn repriced_while_pushing(sent: &Value, linked: &Value, channel: crate::ct_fees::Channel) -> Option<Value> {
-    let price = |row: &Value| match row.get("price_pkn").or_else(|| row.get("pricePkn")) {
-        Some(Value::Number(n)) => n.as_f64(),
-        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
-        _ => None,
-    };
-    let (before, now) = (price(sent)?, price(linked)?);
-    if (before - now).abs() < 0.5 {
-        return None;
-    }
-    push::price_body(now, channel)
 }
 
 /// Why the push pass must not run this time, if it must not. It writes to the
@@ -1235,6 +1395,18 @@ mod tests {
         assert_eq!(releasable(&stale, Some(&ordered)), vec![b.to_string()]);
         assert_eq!(sold_claims(&stale, Some(&ordered)), vec![a.to_string()], "sold on CardTrader: settled, not relisted");
         assert!(sold_claims(&stale, None).is_empty());
+        // A group's copies share the claim; the order names only the primary.
+        let claims = [
+            ("p".to_string(), "ct:pending:link-1".to_string()),
+            ("q".to_string(), "ct:pending:link-1".to_string()),
+            ("r".to_string(), "ct:pending:link-2".to_string()),
+        ];
+        let named_in_order: HashSet<String> = ["p".to_string()].into();
+        let expanded = claim_members(&claims, &named_in_order);
+        let ids: Vec<String> = claims.iter().map(|(id, _)| id.clone()).collect();
+        assert_eq!(sold_claims(&ids, Some(&expanded)), vec!["p".to_string(), "q".to_string()]);
+        assert_eq!(releasable(&ids, Some(&expanded)), vec!["r".to_string()]);
+        assert!(STALE_CLAIMS_SQL.contains("coalesce(named.source_listing_id"), "a claim the export names through its primary is not stale");
         assert!(SETTLE_SOLD_CLAIMS_SQL.contains("status = 'sold_out'") && SETTLE_SOLD_CLAIMS_SQL.contains("like 'ct:pending:%'"));
         assert!(ordered.contains(c));
         // The slim sale order keeps the item's user_data_field.
@@ -1262,12 +1434,28 @@ mod tests {
     }
 
     #[test]
-    fn a_reprice_during_the_create_reaches_cardtrader() {
-        use crate::ct_fees::Channel::Direct;
-        let sent = json!({"price_pkn": "26"});
-        assert_eq!(repriced_while_pushing(&sent, &json!({"price_pkn": 26.0}), Direct), None);
-        assert_eq!(repriced_while_pushing(&sent, &json!({"price_pkn": 40.0}), Direct), Some(json!({"price": 0.22})));
-        assert_eq!(repriced_while_pushing(&json!({}), &json!({"price_pkn": 40.0}), Direct), None);
+    fn a_copy_that_changed_during_the_create_is_caught_up_or_pushed_again() {
+        use crate::cardtrader::group::{settle_after_link, Sent};
+        let sent = [
+            Sent { id: "a".into(), quantity: 1, price_pkn: 26.0 },
+            Sent { id: "b".into(), quantity: 1, price_pkn: 26.0 },
+            Sent { id: "c".into(), quantity: 2, price_pkn: 26.0 },
+            Sent { id: "d".into(), quantity: 1, price_pkn: 26.0 },
+        ];
+        let linked = [
+            json!({"id": "a", "status": "active", "quantity_available": 1, "price_pkn": 26.0}),
+            // Repriced while CardTrader created the product: it leaves the group.
+            json!({"id": "b", "status": "active", "quantity_available": 1, "price_pkn": 40.0}),
+            // One more copy scanned in.
+            json!({"id": "c", "status": "active", "quantity_available": 3, "price_pkn": 26.0}),
+            // "d" was deleted meanwhile.
+        ];
+        let (delta, detach) = settle_after_link(&sent, &linked);
+        assert_eq!(delta, -1 - 1 + 1);
+        assert_eq!(detach, vec!["b".to_string()]);
+        assert!(LINK_GROUP_SQL.contains("source_listing_id = $2"));
+        assert!(DETACH_SQL.contains("source_listing_id = $2") && DETACH_SQL.contains("set source_listing_id = ''"));
+        assert!(sibling_candidates_sql().contains("listing.card_id = $3") && sibling_candidates_sql().contains("not like 'ct:%'"));
     }
 
     #[test]

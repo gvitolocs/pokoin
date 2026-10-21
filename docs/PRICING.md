@@ -49,6 +49,18 @@ fee = max(1 cent, ask × rate)    rate: 5 % direct (Pokémon pro floor, sold med
 net = ask − fee × (1 + 22 % VAT)
 ```
 
+A connected seller's own sales use their own rate from CardTrader's full
+table (`ct_fees::Tier`, `Channel::Plan`): EU direct / Zero 5.0 / 7.0 % for
+subscriptions before March 2026 (kept by active sellers until 2026-12-31),
+5.3 / 7.3 % from March 2026; outside the EU 6 / 8 % (7 / 10 %); 1-Day Ready
+16.5 %. The country and Zero status come from the seller's own offers in the
+market book (`country_code`, `can_sell_via_hub`); the subscription date
+comes from the integration's `metadata.feeEra` (`before-2026-03`), else
+`CARDTRADER_FEE_ERA`, else the current, higher rate. CardTrader shows no
+account date anywhere Pokoin reads, so this is set when the seller confirms
+it. Below €0.19 direct (€0.14 Zero) the 1-cent minimum applies at every EU
+rate, so the tier changes nothing on cheap cards.
+
 Rates from CardTrader's "Payments, fees and refunds" page
 (static.cardtrader.com/en/pages/payments-fees-and-refunds, 2026-10-21): EU
 sellers 5.0 % direct / 7.0 % Zero, minimum 1 cent, VAT added, for
@@ -105,10 +117,10 @@ Listing €0.13 instead (the old push) nets 11.78 c = 24 PKN: 2 PKN short.
 - The price check, the Seller API quote and the Card Rails price check net a
   connected seller's comps at the seller's own channel (5 % or 7 %);
   everyone else sees the 5 % pro floor and the 7 % Zero file as before.
-- A Pokoin reprice while a CardTrader create is in flight is re-sent after
-  the create links (`repricedAfterPush` in the reconcile summary; a
-  `LISTING_PRICE_CHANGED` edit from the outbox), so the stale ask of the
-  create does not stay on CardTrader.
+- A Pokoin reprice while a CardTrader create is in flight is caught after
+  the create links: the repriced copy leaves the product and the next
+  reconcile pushes it at its new price (`detachedAfterPush` in the reconcile
+  summary), so the stale ask of the create does not stay on CardTrader.
 - Products listed before the fix are raised once:
   `pokoin-api job cardtrader-fee-once --seller=<uid> [--csv=…] [--apply]`.
   One `/products/export` read; each active linked listing whose ask does not

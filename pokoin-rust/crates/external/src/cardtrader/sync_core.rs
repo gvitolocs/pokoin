@@ -572,28 +572,62 @@ pub enum Attachment {
 }
 
 pub struct AttachmentIndex {
+    /// One row per linked product: its oldest member, carrying the copies of
+    /// every member (several identical listings share one product,
+    /// cardtrader::group).
     pub by_source_id: HashMap<String, ListingRow>,
+    /// Every member listing of each linked product.
+    pub members: HashMap<String, Vec<ListingRow>>,
     pub by_listing_id: HashMap<String, ListingRow>,
     pub unlinked_by_facet: HashMap<String, Vec<ListingRow>>,
 }
 
 impl AttachmentIndex {
     pub fn build(listings: &[ListingRow]) -> Self {
-        let mut by_source_id = HashMap::new();
+        let mut members: HashMap<String, Vec<ListingRow>> = HashMap::new();
         let mut by_listing_id = HashMap::new();
         let mut unlinked_by_facet: HashMap<String, Vec<ListingRow>> = HashMap::new();
         for row in listings {
             let row = row.clone();
             by_listing_id.insert(row.id.clone(), row.clone());
             if is_ct_linked_source(&row.source_listing_id) {
-                by_source_id.insert(row.source_listing_id.clone(), row);
+                members.entry(row.source_listing_id.clone()).or_default().push(row);
             } else if row.status == "active" || row.status == "paused" || row.status.is_empty() {
                 let facet = listing_facet(&row);
                 unlinked_by_facet.entry(facet).or_default().push(row);
             }
         }
-        Self { by_source_id, by_listing_id, unlinked_by_facet }
+        let by_source_id = members.iter().map(|(source, rows)| (source.clone(), group_row(rows))).collect();
+        Self { by_source_id, members, by_listing_id, unlinked_by_facet }
     }
+}
+
+/// A product's members as one row: the oldest member, the copies of all, and
+/// `sold_out` only when every member is.
+fn group_row(rows: &[ListingRow]) -> ListingRow {
+    let mut oldest = rows
+        .iter()
+        .min_by(|a, b| a.created_ms.unwrap_or(i64::MAX).cmp(&b.created_ms.unwrap_or(i64::MAX)).then(a.id.cmp(&b.id)))
+        .cloned()
+        .unwrap_or_else(|| rows[0].clone());
+    if rows.len() > 1 {
+        oldest.quantity_available = rows.iter().map(|row| row.quantity_available.max(0)).sum();
+        if let Some(live) = rows.iter().find(|row| row.status == "active").or_else(|| rows.iter().find(|row| row.status == "paused")) {
+            oldest.status = live.status.clone();
+        }
+    }
+    oldest
+}
+
+fn members_of(rows: &[ListingRow], primary: &str) -> Vec<crate::cardtrader::group::Member> {
+    rows.iter()
+        .map(|row| crate::cardtrader::group::Member {
+            id: row.id.clone(),
+            quantity: row.quantity_available,
+            primary: row.id == primary,
+            created_ms: row.created_ms.unwrap_or(0),
+        })
+        .collect()
 }
 
 fn listing_facet(row: &ListingRow) -> String {
@@ -675,6 +709,9 @@ pub fn resolve_product_attachment(product: &NormalizedProduct, index: &mut Attac
 pub enum PlannedAction {
     Noop { product_id: String, listing_id: String },
     UpdateQty { product_id: String, listing_id: String, quantity: i64 },
+    /// CardTrader's quantity of a product several listings share, spread over
+    /// them (`group::distribute`): (listing id, its new quantity).
+    UpdateGroupQty { product_id: String, primary_id: String, changes: Vec<(String, i64)> },
     Link { product_id: String, listing_id: String },
     Import { product_id: String, card_id: String, listing_id: String },
     Remove { product_id: String, listing_id: String, source_id: String },
@@ -707,8 +744,9 @@ pub fn plan_inventory_reconcile(
     // Planned imports and links must not dilute it (specs/tla/ct-reconcile),
     // and neither may rows already settled as sold out.
     let linked_before = index
-        .by_source_id
+        .members
         .iter()
+        .flat_map(|(source_id, rows)| rows.iter().map(move |row| (source_id, row)))
         .filter(|(source_id, row)| !settled_absent(row, &parse_ct_product_id(source_id), link_missing))
         .count();
     let mut pokoin_only_ids: HashSet<String> = HashSet::new();
@@ -749,7 +787,21 @@ pub fn plan_inventory_reconcile(
             }
             Attachment::AlreadyLinked { listing } => {
                 summary["alreadyLinked"].incr(1);
-                if listing.quantity_available != product.quantity {
+                let group = index.members.get(&source_id).filter(|rows| rows.len() > 1);
+                if let Some(rows) = group {
+                    let primary = parse_pokoin_listing_id(&product.user_data_field);
+                    let changes = crate::cardtrader::group::distribute(&members_of(rows, &primary), product.quantity);
+                    if changes.is_empty() {
+                        actions.push(PlannedAction::Noop { product_id: product.id.clone(), listing_id: listing.id.clone() });
+                    } else {
+                        summary["updated"].incr(1);
+                        actions.push(PlannedAction::UpdateGroupQty {
+                            product_id: product.id.clone(),
+                            primary_id: if rows.iter().any(|row| row.id == primary) { primary } else { listing.id.clone() },
+                            changes,
+                        });
+                    }
+                } else if listing.quantity_available != product.quantity {
                     summary["updated"].incr(1);
                     actions.push(PlannedAction::UpdateQty {
                         product_id: product.id.clone(),
@@ -766,6 +818,7 @@ pub fn plan_inventory_reconcile(
                     index.unlinked_by_facet.insert(facet, Vec::new());
                 }
                 index.by_source_id.insert(source_id.clone(), listing.clone());
+                index.members.insert(source_id.clone(), vec![listing.clone()]);
                 if let Some(entry) = index.by_listing_id.get_mut(&listing.id) {
                     entry.source_listing_id = source_id.clone();
                 }
@@ -807,11 +860,16 @@ pub fn plan_inventory_reconcile(
         summary["unparsedRows"] = json!(unparsed_rows);
     }
     if allow_destructive {
-        let linked: Vec<(String, ListingRow)> = index
+        // Every member of a vanished product is removed, not only one.
+        let mut linked: Vec<(String, ListingRow)> = index
             .by_source_id
             .iter()
-            .map(|(source_id, row)| (source_id.clone(), row.clone()))
+            .flat_map(|(source_id, row)| match index.members.get(source_id) {
+                Some(rows) if !rows.is_empty() => rows.iter().map(|member| (source_id.clone(), member.clone())).collect::<Vec<_>>(),
+                _ => vec![(source_id.clone(), row.clone())],
+            })
             .collect();
+        linked.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
         for (source_id, listing) in linked {
             let product_id = parse_ct_product_id(&source_id);
             if product_id.is_empty() || seen_product_ids.contains(&product_id) {

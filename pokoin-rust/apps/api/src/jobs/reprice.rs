@@ -259,10 +259,14 @@ async fn apply(
     };
     let writer = state.db.writer()?;
     let mut cards: HashSet<String> = HashSet::new();
+    // Identical copies share one product (cardtrader::group) and get the same
+    // floor: CardTrader is written once per product.
+    let mut written: HashSet<String> = HashSet::new();
     for (row, plan) in plans.iter().filter(|(_, plan)| plan.changes()) {
         let Some(new_pkn) = plan.new_pkn else { continue };
         let source = row["source_listing_id"].as_str().unwrap_or("");
-        if let (Some(product_id), Some(token)) = (ct_product_id(source), token.as_deref()) {
+        let first_write = ct_product_id(source).is_some_and(|product_id| written.insert(product_id.to_string()));
+        if let (Some(product_id), Some(token), true) = (ct_product_id(source), token.as_deref(), first_write) {
             let started = Instant::now();
             // CardTrader keeps the floor itself; only Pokoin takes the net price.
             match state.cardtrader.update_product(token, product_id, json!({ "price": eur(plan.ct_pkn.unwrap_or(new_pkn)) })).await {

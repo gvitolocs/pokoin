@@ -98,10 +98,7 @@ pub fn ct_ask_eur(pkn: f64, channel: crate::ct_fees::Channel) -> Option<f64> {
 /// (`ctChannel`, set by whoever resolved it); Zero, the higher rate, when
 /// unknown, so a seller always nets at least the Pokoin price.
 pub fn listing_channel(listing: &Value) -> crate::ct_fees::Channel {
-    match first(listing, &["ctChannel"], 10).as_str() {
-        "direct" => crate::ct_fees::Channel::Direct,
-        _ => crate::ct_fees::Channel::Zero,
-    }
+    crate::ct_fees::Channel::parse(&first(listing, &["ctChannel"], 30))
 }
 
 /// CardTrader `PUT /products/:id` body for a Pokoin price edit: the ask that

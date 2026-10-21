@@ -82,8 +82,14 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     let bump = |summary: &mut Value, key: &str| summary[key] = json!(summary[key].as_i64().unwrap_or(0) + 1);
     let mut plans: Vec<(&Value, i128, i128)> = Vec::new();
     let (mut before, mut after) = (0i128, 0i128);
+    // Identical copies share one product (cardtrader::group): one write each.
+    let mut seen = std::collections::HashSet::new();
     for row in &rows {
         let source = row["source_listing_id"].as_str().unwrap_or("");
+        if !seen.insert(source.to_string()) {
+            bump(&mut summary, "sameProduct");
+            continue;
+        }
         let Some(current) = asks.get(source).copied() else {
             bump(&mut summary, "notInExport");
             continue;

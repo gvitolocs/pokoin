@@ -38,7 +38,7 @@ Riftbound card (any game but Pokémon).
 | `Reprice` | the Pricer dialog, the seller desk or Seller API `update` changes the Pokoin price; `update_listing` queues `cardtraderEdit` only for a linked listing (a `ct:pending:*` push sends nothing) |
 | `EditDeliver` | `listing_sync::edit_cardtrader`: `PUT /products/:id` with `push::price_body`, the gross-up `Gross(p)` |
 | `FeeOnceJob` | `job cardtrader-fee-once`: raises a linked ask that does not net the price, never lowers one |
-| `CreateAnswered` re-send | `link.rs` `repriced_while_pushing` and the outbox's `LISTING_PRICE_CHANGED` after `LINK_PUSH_SQL`: a price that moved while the create was in flight is sent again |
+| `CreateAnswered` re-send | `link.rs` `settle_group` after `LINK_GROUP_SQL`: a copy repriced while the create was in flight leaves the product and is pushed again at its new price (modelled as a re-send of the ask: the end state, ask = gross-up of the price, is the same) |
 
 `made`, `rows` and `decs` are ghost counters for the properties. Prices are
 abstract units and the fee is one unit: `Gross(p) = p + 1` in the fixed

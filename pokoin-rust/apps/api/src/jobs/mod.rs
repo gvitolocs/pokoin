@@ -3,6 +3,7 @@ mod cardtrader;
 mod eur;
 mod facet_prices;
 mod fee_once;
+mod group_products;
 mod net_prices;
 mod referral;
 mod reprice;
@@ -66,6 +67,7 @@ pub async fn run(name: &str) -> Result<()> {
         "price-unpriced-listings" => unpriced::run(&options).await,
         "cardtrader-net-prices" => net_prices::run(&options).await,
         "cardtrader-fee-once" => fee_once::run(&options).await,
+        "cardtrader-group-products" => group_products::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),

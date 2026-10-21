@@ -59,11 +59,84 @@ pub struct FeeRule {
     pub min_fee_pkn: i128,
 }
 
-/// How the offers are sold on CardTrader.
+/// How the offers are sold on CardTrader. `Direct` and `Zero` are the
+/// market-wide rates (`FeeRule`, env-configurable: the professional floor and
+/// the Zero price file); `Plan` is one connected seller's own rate from
+/// CardTrader's full table ([`Tier`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channel {
     Direct,
     Zero,
+    Plan(Plan),
+}
+
+/// A connected seller's CardTrader commission: Zero (hub) or direct, at their tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub zero: bool,
+    pub tier: Tier,
+}
+
+/// CardTrader's seller commission table ("Payments, fees and refunds",
+/// static.cardtrader.com/en/pages/payments-fees-and-refunds, read
+/// 2026-10-21), before VAT, minimum 1 cent:
+///
+/// | Tier | direct | Zero |
+/// | --- | --- | --- |
+/// | EU, subscribed before March 2026 (kept by active sellers until 2026-12-31) | 5.0 % | 7.0 % |
+/// | EU, from March 2026 | 5.3 % | 7.3 % |
+/// | outside the EU, before March 2026 | 6.0 % | 8.0 % |
+/// | outside the EU, from March 2026 | 7.0 % | 10.0 % |
+/// | 1-Day Ready | 16.5 % | 16.5 % |
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    EuBeforeMarch2026,
+    Eu,
+    ExtraEuBeforeMarch2026,
+    ExtraEu,
+    OneDayReady,
+}
+
+impl Tier {
+    pub fn rate_bps(self, zero: bool) -> i128 {
+        match (self, zero) {
+            (Tier::EuBeforeMarch2026, false) => 500,
+            (Tier::EuBeforeMarch2026, true) => 700,
+            (Tier::Eu, false) => 530,
+            (Tier::Eu, true) => 730,
+            (Tier::ExtraEuBeforeMarch2026, false) => 600,
+            (Tier::ExtraEuBeforeMarch2026, true) => 800,
+            (Tier::ExtraEu, false) => 700,
+            (Tier::ExtraEu, true) => 1000,
+            (Tier::OneDayReady, _) => 1650,
+        }
+    }
+}
+
+/// The last day CardTrader keeps the pre-March-2026 rates for active sellers.
+pub const LEGACY_RATE_UNTIL: &str = "2026-12-31";
+
+/// EU member states (ISO 3166-1 alpha-2), for the EU / non-EU tiers.
+pub const EU_COUNTRIES: [&str; 27] = [
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU",
+    "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+];
+
+/// The tier of a seller: 1-Day Ready, else by country (unknown is EU, where
+/// Pokoin sells) and by when the subscription started (`before_march_2026`,
+/// honoured until [`LEGACY_RATE_UNTIL`]; `today` is `YYYY-MM-DD`).
+pub fn tier_of(one_day_ready: bool, country: Option<&str>, before_march_2026: bool, today: &str) -> Tier {
+    if one_day_ready {
+        return Tier::OneDayReady;
+    }
+    let eu = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty()).is_none_or(|code| EU_COUNTRIES.contains(&code.as_str()));
+    let legacy = before_march_2026 && today <= LEGACY_RATE_UNTIL;
+    match (eu, legacy) {
+        (true, true) => Tier::EuBeforeMarch2026,
+        (true, false) => Tier::Eu,
+        (false, true) => Tier::ExtraEuBeforeMarch2026,
+        (false, false) => Tier::ExtraEu,
+    }
 }
 
 impl Channel {
@@ -71,6 +144,45 @@ impl Channel {
         match self {
             Channel::Direct => "direct",
             Channel::Zero => "zero",
+            Channel::Plan(Plan { tier: Tier::OneDayReady, .. }) => "1dr",
+            Channel::Plan(Plan { zero, tier }) => match (tier, zero) {
+                (Tier::EuBeforeMarch2026, false) => "eu-pre2026-direct",
+                (Tier::EuBeforeMarch2026, true) => "eu-pre2026-zero",
+                (Tier::Eu, false) => "eu-direct",
+                (Tier::Eu, true) => "eu-zero",
+                (Tier::ExtraEuBeforeMarch2026, false) => "extra-eu-pre2026-direct",
+                (Tier::ExtraEuBeforeMarch2026, true) => "extra-eu-pre2026-zero",
+                (Tier::ExtraEu, false) => "extra-eu-direct",
+                (Tier::ExtraEu, true) => "extra-eu-zero",
+                (Tier::OneDayReady, _) => "1dr",
+            },
+        }
+    }
+
+    /// [`as_str`] back (a listing's stored `ctChannel`); unknown is Zero.
+    pub fn parse(code: &str) -> Channel {
+        let plan = |zero, tier| Channel::Plan(Plan { zero, tier });
+        match code.trim() {
+            "direct" => Channel::Direct,
+            "1dr" => plan(false, Tier::OneDayReady),
+            "eu-pre2026-direct" => plan(false, Tier::EuBeforeMarch2026),
+            "eu-pre2026-zero" => plan(true, Tier::EuBeforeMarch2026),
+            "eu-direct" => plan(false, Tier::Eu),
+            "eu-zero" => plan(true, Tier::Eu),
+            "extra-eu-pre2026-direct" => plan(false, Tier::ExtraEuBeforeMarch2026),
+            "extra-eu-pre2026-zero" => plan(true, Tier::ExtraEuBeforeMarch2026),
+            "extra-eu-direct" => plan(false, Tier::ExtraEu),
+            "extra-eu-zero" => plan(true, Tier::ExtraEu),
+            _ => Channel::Zero,
+        }
+    }
+
+    /// Zero (hub) sales, at any tier.
+    pub fn is_zero(self) -> bool {
+        match self {
+            Channel::Direct => false,
+            Channel::Zero => true,
+            Channel::Plan(plan) => plan.zero,
         }
     }
 }
@@ -172,6 +284,7 @@ impl FeeRule {
         match channel {
             Channel::Direct => self.direct_bps,
             Channel::Zero => self.zero_bps,
+            Channel::Plan(plan) => plan.tier.rate_bps(plan.zero),
         }
     }
 
@@ -272,15 +385,47 @@ fn flag(value: Option<&serde_json::Value>) -> Option<bool> {
 
 /// [`channel_from`] with only the stored flag (no database at hand).
 pub fn seller_channel(integration_data: &serde_json::Value) -> Channel {
-    channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None)
+    let zero = channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero;
+    plan_for(integration_data, zero, None)
 }
 
 /// The seller's own offers in the market book of the last week, by their
 /// CardTrader user id: whether CardTrader lets them sell through Zero.
 pub const SELLER_HUB_SQL: &str = "
-    select bool_or(raw_metadata->'user'->>'can_sell_via_hub' = 'true') as hub, count(*)::int as offers
+    select bool_or(raw_metadata->'user'->>'can_sell_via_hub' = 'true') as hub, count(*)::int as offers,
+           max(coalesce(nullif(raw_metadata->'user'->>'country_code', ''), seller_country)) as country
     from public.cardtrader_market_listing_snapshots
     where seller_account_id = $1 and last_seen_at >= now() - interval '7 days'";
+
+/// Whether the seller's CardTrader subscription predates March 2026: the
+/// integration's `metadata.feeEra` (`before-2026-03` or `current`), set when
+/// the seller confirms it, else `CARDTRADER_FEE_ERA`, else `current`, the
+/// higher rate, so a seller is never priced above what they net. Nothing
+/// CardTrader returns (`/info`, the market book) says when an account opened.
+/// CardTrader user ids whose sellers confirmed a subscription from before
+/// March 2026 (2026-10-21: PeppeV / Flareon99 595699, redshakkio 180405).
+/// `CARDTRADER_FEE_PRE2026_USERS` (comma-separated ids) adds more.
+pub const PRE_MARCH_2026_USERS: [&str; 2] = ["595699", "180405"];
+
+pub fn before_march_2026(integration_data: &serde_json::Value) -> bool {
+    let user = ct_user_id(integration_data);
+    let listed = std::env::var("CARDTRADER_FEE_PRE2026_USERS").unwrap_or_default();
+    if !user.is_empty() && (PRE_MARCH_2026_USERS.contains(&user.as_str()) || listed.split(',').any(|id| id.trim() == user)) {
+        return true;
+    }
+    let stored = integration_data.pointer("/metadata/feeEra").and_then(serde_json::Value::as_str).map(str::trim).unwrap_or("");
+    let era = if stored.is_empty() { std::env::var("CARDTRADER_FEE_ERA").unwrap_or_default() } else { stored.to_string() };
+    era.trim() == "before-2026-03"
+}
+
+fn today() -> String {
+    crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms())
+}
+
+fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&str>) -> Channel {
+    let one_day_ready = integration_data.pointer("/metadata/oneDayReady") == Some(&serde_json::Value::Bool(true));
+    Channel::Plan(Plan { zero, tier: tier_of(one_day_ready, country, before_march_2026(integration_data), &today()) })
+}
 
 fn ct_user_id(integration_data: &serde_json::Value) -> String {
     match integration_data.pointer("/metadata/user/id") {
@@ -296,7 +441,7 @@ fn ct_user_id(integration_data: &serde_json::Value) -> String {
 pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &serde_json::Value) -> Channel {
     match db.read("pokemon").await {
         Ok(pool) => resolve_seller_channel_pool(&pool, integration_data).await,
-        Err(_) => channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None),
+        Err(_) => plan_for(integration_data, channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero, None),
     }
 }
 
@@ -304,21 +449,20 @@ pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &
 /// Scan Connect).
 pub async fn resolve_seller_channel_pool(pool: &sqlx::PgPool, integration_data: &serde_json::Value) -> Channel {
     let stored = flag(integration_data.pointer("/metadata/user/can_sell_via_hub"));
-    if stored.is_some() {
-        return channel_from(stored, None);
-    }
     let id = ct_user_id(integration_data);
-    if id.is_empty() {
-        return channel_from(None, None);
-    }
-    let book = match sqlx::query_as::<_, (Option<bool>, i32)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
-        Ok((hub, offers)) => (offers > 0).then_some(hub == Some(true)),
-        Err(error) => {
-            tracing::warn!(%error, "seller channel: market book unavailable");
-            None
+    let (book, country) = if id.is_empty() {
+        (None, None)
+    } else {
+        match sqlx::query_as::<_, (Option<bool>, i32, Option<String>)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
+            Ok((hub, offers, country)) => ((offers > 0).then_some(hub == Some(true)), country),
+            Err(error) => {
+                tracing::warn!(%error, "seller channel: market book unavailable");
+                (None, None)
+            }
         }
     };
-    channel_from(None, book)
+    let zero = channel_from(stored, book) == Channel::Zero;
+    plan_for(integration_data, zero, country.as_deref())
 }
 
 /// A connected seller's channel by uid, cached for an hour per process (the
@@ -445,14 +589,61 @@ mod tests {
     }
 
     #[test]
+    fn the_full_cardtrader_table_by_country_subscription_and_one_day_ready() {
+        let at = |tier, zero| R.rate_bps(Channel::Plan(Plan { zero, tier }));
+        assert_eq!((at(Tier::EuBeforeMarch2026, false), at(Tier::EuBeforeMarch2026, true)), (500, 700));
+        assert_eq!((at(Tier::Eu, false), at(Tier::Eu, true)), (530, 730));
+        assert_eq!((at(Tier::ExtraEuBeforeMarch2026, false), at(Tier::ExtraEuBeforeMarch2026, true)), (600, 800));
+        assert_eq!((at(Tier::ExtraEu, false), at(Tier::ExtraEu, true)), (700, 1000));
+        assert_eq!((at(Tier::OneDayReady, false), at(Tier::OneDayReady, true)), (1650, 1650));
+        // PeppeV / Flareon99 is in Denmark, redshakkio in Italy: EU.
+        assert_eq!(tier_of(false, Some("dk"), true, "2026-10-21"), Tier::EuBeforeMarch2026);
+        assert_eq!(tier_of(false, Some("IT"), false, "2026-10-21"), Tier::Eu);
+        assert_eq!(tier_of(false, Some("US"), true, "2026-10-21"), Tier::ExtraEuBeforeMarch2026);
+        assert_eq!(tier_of(false, Some("GB"), false, "2026-10-21"), Tier::ExtraEu);
+        assert_eq!(tier_of(false, None, false, "2026-10-21"), Tier::Eu, "unknown country: EU");
+        assert_eq!(tier_of(false, Some("IT"), true, "2027-01-01"), Tier::Eu, "the old rate ends 2026-12-31");
+        assert_eq!(tier_of(true, Some("IT"), true, "2026-10-21"), Tier::OneDayReady);
+        // Unknown subscription date: the current (higher) rate.
+        assert!(!before_march_2026(&serde_json::json!({})) || std::env::var("CARDTRADER_FEE_ERA").is_ok());
+        assert!(before_march_2026(&serde_json::json!({"metadata": {"feeEra": "before-2026-03"}})));
+        assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": 595699}}})), "PeppeV confirmed");
+        assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": "180405"}}})), "redshakkio confirmed");
+        for code in ["direct", "zero", "1dr", "eu-pre2026-direct", "eu-zero", "extra-eu-pre2026-zero", "extra-eu-direct"] {
+            assert_eq!(Channel::parse(code).as_str(), code);
+        }
+        assert_eq!(Channel::parse("?"), Channel::Zero);
+        assert!(SELLER_HUB_SQL.contains("country_code"));
+    }
+
+    #[test]
+    fn spiderling_worked_through_at_each_eu_rate() {
+        // A €0.13 ask: below €0.19 (direct) or €0.14 (Zero) the 1-cent minimum
+        // is the commission at every EU rate, so the tier changes nothing.
+        for tier in [Tier::EuBeforeMarch2026, Tier::Eu] {
+            for zero in [false, true] {
+                let channel = Channel::Plan(Plan { zero, tier });
+                assert_eq!(R.net_cents(13.0, channel), Some(11.78));
+                let row = R.breakdown(24.0, channel).unwrap();
+                assert_eq!((row["askCents"].as_i64(), row["buyerPaysCents"].as_i64()), (Some(13), Some(22)));
+                assert_eq!(R.breakdown(26.0, channel).unwrap()["askCents"], 14);
+            }
+        }
+        // Dearer cards do feel the tier: a €10 ask nets €9.3534 at 5.3 % direct, €9.39 at 5 %.
+        let current = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::Eu })).unwrap();
+        let before = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026 })).unwrap();
+        assert!((current - 935.34).abs() < 1e-6 && (before - 939.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn a_zero_enabled_seller_pays_the_zero_rate() {
         let zero = serde_json::json!({"metadata": {"user": {"id": 1, "can_sell_via_hub": true}}});
-        assert_eq!(seller_channel(&zero), Channel::Zero);
-        assert_eq!(seller_channel(&serde_json::json!({"metadata": {"user": {"can_sell_via_hub": false}}})), Channel::Direct);
+        assert!(seller_channel(&zero).is_zero());
+        assert!(!seller_channel(&serde_json::json!({"metadata": {"user": {"can_sell_via_hub": false}}})).is_zero());
         assert_eq!(channel_from(None, Some(true)), Channel::Zero);
         assert_eq!(channel_from(None, Some(false)), Channel::Direct);
         assert_eq!(channel_from(Some(false), Some(true)), Channel::Direct, "the stored flag wins");
-        assert_eq!(seller_channel(&serde_json::json!({})), Channel::Zero);
+        assert!(seller_channel(&serde_json::json!({})).is_zero());
         assert_eq!(channel_from(None, None), Channel::Zero);
         assert!(SELLER_HUB_SQL.contains("seller_account_id = $1"));
     }
