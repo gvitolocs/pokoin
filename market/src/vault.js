@@ -5,6 +5,9 @@
  */
 export const VAULT_SELLER_UID = 'Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2';
 
+/** Best Deal line under the price when the deal is a Vault listing (instead of "Sold by …"). */
+export const VAULT_DEAL_LINE = 'Available in the Vault';
+
 export function isVaultOffer(offer) {
   return String(offer?.sellerUid || offer?.seller_uid || '') === VAULT_SELLER_UID;
 }
