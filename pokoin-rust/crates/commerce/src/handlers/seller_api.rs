@@ -633,7 +633,7 @@ pub fn quote_item(item: &Value, game: &str) -> PriceItem {
 /// games) copy of its facets. The item's game when it names one; otherwise
 /// the only game the store has that card id in (CardTrader blueprint ids are
 /// unique across games), never a guess between two.
-pub fn facet_quote(rows: &[(String, FacetPrice)], game: &str, item: &Value) -> Option<i64> {
+pub fn facet_quote(rows: &[(String, FacetPrice)], game: &str, item: &Value, seller: Option<pokoin_external::ct_fees::Channel>) -> Option<i64> {
     let card_id: i64 = live::first(&item["identity"], &["publicId", "pokoinId", "cardId"], 80).parse().ok()?;
     let of_card: Vec<&(String, FacetPrice)> = rows.iter().filter(|(_, row)| row.card_id == card_id).collect();
     let game = if game.is_empty() {
@@ -653,10 +653,21 @@ pub fn facet_quote(rows: &[(String, FacetPrice)], game: &str, item: &Value) -> O
     }
     let (_, matched) = facet_store::comp(&prices, &priced);
     // What a seller nets at that ask on CardTrader, after its commission.
-    let channel = prices.first()?.basis.channel();
+    let channel = seller.unwrap_or(prices.first()?.basis.channel());
     matched
         .and_then(|pkn| pokoin_external::ct_fees::rule().net_pkn(pkn, channel))
         .map(|pkn| ((pkn / PKN_PER_EUR_CENT as f64).round() as i64).max(1))
+}
+
+/// The grant's seller's own CardTrader channel (Zero or direct), when they
+/// connected CardTrader: their quotes net their own commission.
+async fn grant_channel(state: &DomainState, grant: &Grant) -> Option<pokoin_external::ct_fees::Channel> {
+    let fs = pokoin_external::firebase::FirestoreRest::from_env()?;
+    let doc = pokoin_external::cardtrader::integration::read_integration_doc(&fs, &grant.seller_uid).await.ok()?;
+    if !doc.exists {
+        return None;
+    }
+    Some(pokoin_external::ct_fees::resolve_seller_channel_pool(state.read_db(), &doc.data).await)
 }
 
 /// Quote new inventory with the same exact facets used for existing listings:
@@ -664,7 +675,7 @@ pub fn facet_quote(rows: &[(String, FacetPrice)], game: &str, item: &Value) -> O
 /// reference price of the facets from the price store (every game), else
 /// the cheapest CardTrader ask of the card (Pokémon tiles). Card Rails lists
 /// a quoted copy at that price and active; an unquoted one stays paused.
-async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
+async fn sold_prices(state:&DomainState,grant:&Grant,body:&Value)->Result<Value,ApiError> {
     let items=body["items"].as_array().ok_or_else(||ApiError::bad_request("items is required"))?;
     if items.len()>500 {return Err(ApiError::bad_request("At most 500 inventory items per quote"));}
     let rows:Vec<Value>=items.iter().map(|item| {
@@ -678,7 +689,7 @@ async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
       let mut ids:Vec<i64>=items.iter().filter_map(|item|live::first(&item["identity"],&["publicId","pokoinId","cardId"],80).parse().ok()).collect();
       ids.sort_unstable();ids.dedup();ids
     };
-    let (sold,facets)=tokio::join!(last_sold_minimums(state,&rows),facet_rows(state,&card_ids));
+    let (sold,facets,seller)=tokio::join!(last_sold_minimums(state,&rows),facet_rows(state,&card_ids),grant_channel(state,grant));
     let ids:Vec<i64>=rows.iter().filter_map(|r|blueprint_id_of(&r["card_id"])).collect();
     let fallback:HashMap<i64,f64>=sqlx::query_as::<_,(i64,f64)>("SELECT blueprint_id,min(cheapest_price_pkn)::float8 FROM cheapest_homepage_cache_blueprint WHERE blueprint_id=ANY($1) AND provider='cardtrader' AND cheapest_price_pkn>0 GROUP BY blueprint_id").bind(&ids).fetch_all(state.read_db()).await.unwrap_or_default().into_iter().collect();
     let prices:Vec<Value>=items.iter().zip(&rows).map(|(item,row)| {
@@ -687,7 +698,7 @@ async fn sold_prices(state:&DomainState,body:&Value)->Result<Value,ApiError> {
       // Every CardTrader figure is what a seller nets there, after CardTrader's commission.
       let net_cents=|cents:i64|pokoin_external::ct_fees::rule().net_cents(cents as f64,pokoin_external::ct_fees::Channel::Direct).map(|c|(c.round() as i64).max(1));
       let price=blueprint_id_of(&row["card_id"]).and_then(|id| sold.get(&(id,live::field(row,"condition",20),live::field(row,"language",10),row["reverse"]==true,row["first_edition"]==true))).copied();
-      let facet=facet_quote(&facets,&game,item);
+      let facet=facet_quote(&facets,&game,item,seller);
       let tile=blueprint_id_of(&row["card_id"]).and_then(|id|fallback.get(&id)).filter(|v|v.is_finite()&&**v>0.0).map(|v|(v/PKN_PER_EUR_CENT as f64).round()as i64).and_then(net_cents);
       json!({"itemId":item["id"],"publicId":row["card_id"],"minEurCents":price.or(facet).or(tile),
         "priceSource":if price.is_some(){"sold_exact_30d"}else if facet.is_some(){"cardtrader_facet_floor"}else if tile.is_some(){"cardtrader_tile_minimum"}else{"unavailable"}})
@@ -1057,7 +1068,7 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         "list" => list(state, &grant, &body).await?,
         "update" => update(state, &grant, &body).await?,
         "unlist" => unlist(state, &grant, &body).await?,
-        "sold-prices" => sold_prices(state,&body).await?,
+        "sold-prices" => sold_prices(state,&grant,&body).await?,
         "sales" => events(state, &grant, &body, true).await?,
         "events" => events(state, &grant, &body, false).await?,
         _ => return Err(ApiError::bad_request("Unknown action.").with_code("seller_api/unknown-action")),
@@ -1244,21 +1255,23 @@ mod tests {
                    "language": language, "printing": printing, "firstEdition": false})
         };
         // Card Rails sends no game: the card id names it.
-        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Standard")), Some(110), "€1.20 Zero ask nets €1.0975");
-        assert_eq!(facet_quote(&rows, "", &item(801106, "MP", "EN", "Standard")), Some(82), "SP or better prices MP: €0.90 nets €0.8231");
-        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Foil")), Some(549));
-        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "IT", "Standard")), None);
-        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Standard")), Some(30), "€0.32 pro ask, direct 5 %: min 1 c + VAT");
-        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Reverse Holo")), Some(277));
-        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Holo")), Some(30), "Pokémon holo is not a facet");
-        assert_eq!(facet_quote(&rows, "", &item(633380, "SP", "IT", "Standard")), None, "pro floor is exact");
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Standard"), None), Some(110), "€1.20 Zero ask nets €1.0975");
+        assert_eq!(facet_quote(&rows, "", &item(801106, "MP", "EN", "Standard"), None), Some(82), "SP or better prices MP: €0.90 nets €0.8231");
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Foil"), None), Some(549));
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "IT", "Standard"), None), None);
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Standard"), None), Some(30), "€0.32 pro ask, direct 5 %: min 1 c + VAT");
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Reverse Holo"), None), Some(277));
+        assert_eq!(facet_quote(&rows, "", &item(633380, "NM", "IT", "Holo"), None), Some(30), "Pokémon holo is not a facet");
+        assert_eq!(facet_quote(&rows, "", &item(633380, "SP", "IT", "Standard"), None), None, "pro floor is exact");
         // Two games hold the id: only the named game prices it.
-        assert_eq!(facet_quote(&rows, "", &item(42, "NM", "EN", "Standard")), None);
-        assert_eq!(facet_quote(&rows, "magic", &item(42, "NM", "EN", "Standard")), Some(9));
-        assert_eq!(facet_quote(&rows, "", &item(7, "NM", "EN", "Standard")), None);
+        assert_eq!(facet_quote(&rows, "", &item(42, "NM", "EN", "Standard"), None), None);
+        assert_eq!(facet_quote(&rows, "magic", &item(42, "NM", "EN", "Standard"), None), Some(9));
+        assert_eq!(facet_quote(&rows, "", &item(7, "NM", "EN", "Standard"), None), None);
         let mut signed = item(801106, "NM", "EN", "Standard");
         signed["signed"] = json!(true);
-        assert_eq!(facet_quote(&rows, "", &signed), None, "a signed copy has no CardTrader comp");
+        assert_eq!(facet_quote(&rows, "", &signed, None), None, "a signed copy has no CardTrader comp");
+        // A direct seller nets 5 %: the €1.20 Zero ask nets €1.1268 for them.
+        assert_eq!(facet_quote(&rows, "", &item(801106, "NM", "EN", "Standard"), Some(pokoin_external::ct_fees::Channel::Direct)), Some(113));
     }
 
     #[test]

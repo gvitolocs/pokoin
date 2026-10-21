@@ -11,7 +11,11 @@ use crate::error::{clean_text, f64_field, ApiError, ApiResult};
 
 pub const SOURCES: [&str; 2] = ["pokoin", "cardtrader"];
 pub const ACTIONS: [&str; 3] = ["match", "undercut", "premium"];
-pub const ROUNDINGS: [&str; 2] = ["none", "integer"];
+pub const ROUNDINGS: [&str; 4] = ["none", "integer", "down", "up"];
+/// What a strategy prices from (market/src/pricer.js `PRICER_BASES`).
+pub const BASES: [&str; 3] = ["matched", "cheapest", "sold"];
+/// Listing status scope: both, live only, paused only.
+pub const STATUSES: [&str; 3] = ["", "active", "paused"];
 pub const CONDITIONS: [&str; 6] = ["", "NM", "SP", "MP", "PL", "Poor"];
 
 fn number_or(value: Option<f64>, fallback: f64, min: f64, max: f64) -> f64 {
@@ -70,6 +74,17 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, now_iso: &str)
         return Err(ApiError::bad_request("Condition scope is invalid."));
     }
     let language = clean_text(input.get("language").and_then(Value::as_str), 8).to_uppercase();
+    let basis_raw = light(input, &["basis"], 20).to_lowercase();
+    let basis = if BASES.contains(&basis_raw.as_str()) { basis_raw } else { "matched".to_string() };
+    // Fee-exclusive unless the seller asks for the CardTrader ask itself.
+    let fee_exclusive = input.get("feeExclusive") != Some(&Value::Bool(false));
+    let status = light(input, &["status"], 12).to_lowercase();
+    if !STATUSES.contains(&status.as_str()) {
+        return Err(ApiError::bad_request("Status scope must be active, paused or empty."));
+    }
+    let game_raw = clean_text(input.get("game").and_then(Value::as_str), 40).to_lowercase();
+    let game = if game_raw.is_empty() { String::new() } else { crate::db::normalize_game(&game_raw) };
+    let activate_paused = input.get("activatePaused") == Some(&Value::Bool(true));
     let enabled = match input.get("enabled") {
         None | Some(Value::Null) => existing.get("enabled").and_then(Value::as_bool).unwrap_or(true),
         Some(value) => value == &Value::Bool(true),
@@ -95,6 +110,11 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, now_iso: &str)
     out.insert("rounding".into(), json!(rounding));
     out.insert("condition".into(), json!(condition));
     out.insert("language".into(), json!(language));
+    out.insert("basis".into(), json!(basis));
+    out.insert("feeExclusive".into(), json!(fee_exclusive));
+    out.insert("status".into(), json!(status));
+    out.insert("game".into(), json!(game));
+    out.insert("activatePaused".into(), json!(activate_paused));
     out.insert("enabled".into(), json!(enabled));
     out.insert("createdAt".into(), json!(created_at));
     out.insert("updatedAt".into(), json!(now_iso));
@@ -126,8 +146,11 @@ pub fn evaluate_strategy_target(comp_pkn: Option<f64>, strategy: &Value) -> Opti
         Some("premium") => target = target * (1.0 + pct / 100.0) + flat,
         _ => {}
     }
-    if strategy.get("rounding").and_then(Value::as_str) == Some("integer") {
-        target = target.round();
+    match strategy.get("rounding").and_then(Value::as_str) {
+        Some("integer") => target = target.round(),
+        Some("down") => target = (target + 1e-9).floor(),
+        Some("up") => target = (target - 1e-9).ceil(),
+        _ => {}
     }
     let min = f64_field(strategy, &["minPkn"]).unwrap_or(0.0);
     if min > 0.0 {
@@ -218,6 +241,32 @@ mod tests {
                 .message,
             "Condition scope is invalid."
         );
+    }
+
+    #[test]
+    fn pricer_dialog_fields_are_validated_with_safe_defaults() {
+        let out = sanitize_strategy(
+            &json!({"name": "Riftbound paused", "source": "cardtrader", "action": "match", "basis": "cheapest",
+                    "feeExclusive": false, "rounding": "down", "game": "Riftbound", "status": "paused", "activatePaused": true}),
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!((out["basis"].clone(), out["feeExclusive"].clone()), (json!("cheapest"), json!(false)));
+        assert_eq!((out["rounding"].clone(), out["game"].clone(), out["status"].clone()), (json!("down"), json!("riftbound"), json!("paused")));
+        assert_eq!(out["activatePaused"], true);
+        // Unknown or missing: matched, fee-exclusive, no scope, nothing activated.
+        let plain = sanitize_strategy(&json!({"name": "x", "source": "pokoin", "action": "match", "basis": "magic"}), None, now()).unwrap();
+        assert_eq!((plain["basis"].clone(), plain["feeExclusive"].clone(), plain["activatePaused"].clone()), (json!("matched"), json!(true), json!(false)));
+        assert!(sanitize_strategy(&json!({"name": "x", "source": "pokoin", "action": "match", "status": "sold"}), None, now()).is_err());
+        // Rounding down or up, then the floor.
+        let down = json!({"action": "match", "rounding": "down", "minPkn": 0});
+        assert_eq!(evaluate_strategy_target(Some(25.56), &down), Some(25.0));
+        let up = json!({"action": "match", "rounding": "up", "minPkn": 0});
+        assert_eq!(evaluate_strategy_target(Some(25.56), &up), Some(26.0));
+        assert_eq!(evaluate_strategy_target(Some(26.0), &up), Some(26.0));
+        let floored = json!({"action": "match", "rounding": "down", "minPkn": 3.5});
+        assert_eq!(evaluate_strategy_target(Some(3.4), &floored), Some(3.5));
     }
 
     #[test]

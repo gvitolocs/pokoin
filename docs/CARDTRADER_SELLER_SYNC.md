@@ -103,7 +103,12 @@ idempotency key, and what a retry, a crash or a replay does:
 | Reconcile push claim | `source_listing_id` compare-and-set `"" → ct:pending:link-<ms>` | a claimed listing is not a candidate | the claim stays; see in-doubt | the outbox push uses the same claim (`ct:pending:<event>`), so only one of them ever creates |
 | CardTrader `POST /products` | `user_data_field = pokoin:<listing id>` | refused: claim released, retried next run; in doubt: claim kept | in doubt | the next complete export links the product by `user_data_field`; a stale claim is released only when no product and no order names it |
 | Link back (`ct:<product id>`, `marketplace_cardtrader_product_links`) | `LINK_SQL` over the claim; link row `(seller_uid, ct_product_id)` | upsert | the next export links it by `user_data_field` | a product already linked to another listing is never relinked (`listing_linked_elsewhere`) |
+| Reprice while the create is in flight | the linked row's `price_pkn` vs the price the create sent | the copy leaves the product (an increment) | the next Pokoin edit or `cardtrader-fee-once` corrects the ask | after the link the reconcile detaches a repriced copy, which is pushed again at its new price (`group::settle_after_link`, `detachedAfterPush`); the outbox no longer creates products |
 | CardTrader sale → Pokoin stock | `cardtrader_webhook_events` seller + order + order item | the claim answers "already applied" | a failed decrement releases the claim | the reconcile records a missed sale with the same claim id |
+
+Every CardTrader write lists the gross-up of the Pokoin price, never the
+Pokoin price itself (that is already net, and CardTrader would take its fee
+twice): see [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21).
 
 Why the Vendetta copies of 2026-10-20 stayed paused: Pokoin's quote read only
 Pokémon tables, so Card Rails got no price for any Riftbound copy and listed
@@ -113,6 +118,86 @@ now reads the price store for every game (`priceSource:
 `job price-unpriced-listings --seller=<uid>` (dry run unless `--apply`) prices
 the existing ones. The TLA+ model is
 [`../specs/tla/listing-ct-sync`](../specs/tla/listing-ct-sync/README.md).
+
+## Identical copies are one CardTrader product (2026-10-21)
+
+A seller's copies with the same CardTrader characteristics and price are one
+CardTrader product whose quantity is the sum of theirs: same game, card
+(blueprint), condition, language, finishes (reverse/foil, first edition,
+signed, altered, graded) and Pokoin price. Where a copy is stored (box, stack,
+position) is not a CardTrader characteristic. Before this, every Pokoin
+listing was its own product, so Card Rails' 1× postings of one card stood on
+CardTrader as dozens of "1 of 1" rows (PeppeV's Spiderling, VEN 097/166).
+Code: `pokoin-rust/crates/external/src/cardtrader/group.rs`; migration
+`scripts/sql/133_cardtrader_grouped_products.sql` (the source is no longer
+unique per seller).
+
+- **Model.** Every member listing holds the product's source `ct:<id>`. The
+  product's `user_data_field` names one member (`pokoin:<id>`, the primary),
+  and the product-link row is the product's (`listing_id` = the primary).
+- **Push** (`link.rs` `push_unlisted`, the seller reconcile, every 10
+  minutes). It is the only create path now: the outbox no longer creates
+  Pokémon products itself (`listing_sync::outbox_pushes`).
+  - A candidate and its identical unlisted copies are claimed together under
+    one `ct:pending:link-<ms>` (one compare-and-set per listing).
+  - If the group is already on CardTrader, its product gains their copies
+    (`POST /products/:id/increment`). Otherwise one product is created with
+    their sum.
+  - All of them are then linked over the shared claim (`LINK_GROUP_SQL`).
+  - A copy that changed while CardTrader answered is caught up
+    (`group::settle_after_link`): a quantity change is an increment, and a
+    copy repriced, taken off sale or deleted leaves the group (`DETACH_SQL`).
+  - An increment in doubt is taken as applied and never sent twice: a lost
+    one under-lists, a repeated one would over-list (D00008U).
+  - A create in doubt keeps the shared claim. The reconcile links the whole
+    claim when the export shows the primary (`LINK_PENDING_GROUP_SQL`).
+  - A stale claim is released or settled as a group: an export or an order
+    naming the primary names its siblings (`STALE_CLAIMS_SQL`,
+    `claim_members`).
+- **CardTrader sale** (webhook): the copies come from the group, the named
+  listing first, then the oldest. This is one locked statement
+  (`group::GROUP_DECREMENT_SQL`) that writes nothing unless the group holds
+  them all.
+  - The event doc records `allocations` `[{listingId, quantity}]`, and a
+    cancellation restores exactly those.
+  - If the primary has left the group, the product's current members answer.
+- **Reconcile quantity** (`sync_core::plan_inventory_reconcile`): CardTrader's
+  quantity is spread over the members (`group::distribute`). A shortfall comes
+  off the newest copies; a restock goes to the primary.
+  - A vanished product removes every member.
+  - The mass-removal guard counts listings.
+- **Pokoin edits** (`update_listing`):
+  - A quantity change stays in the group (an increment of the change).
+  - A copy repriced or taken off sale leaves the group (`listing_sync::group_leave`):
+    - its copies come off the product (`quantityDelta`);
+    - its source is cleared;
+    - the next reconcile pushes it into the group of its new price.
+  - The shared product is never repriced or deleted for one copy. A listing
+    alone on its product keeps the old rules: price `PUT`, delete when off sale.
+- **Pokoin sale:** `increment -n` on the product, deleted at 0, as before.
+- **Jobs:** `cardtrader-fee-once` and `cardtrader-pro-floor-reprice` write
+  each product once.
+- **Existing products:** `pokoin-api job cardtrader-group-products
+  --seller=<uid> [--csv=…] [--log=…] [--apply]`. It folds the identical
+  products Pokoin made or linked into the one with the most copies. Hand-made
+  products are never touched, and a group whose CardTrader and Pokoin copies
+  differ is skipped and reported. A dry run unless `--apply`.
+  - It runs under the seller's reconcile lock, and per group, in order: a
+    journal `begin` line, then the Pokoin relink and link-row cleanup in one
+    transaction, then each duplicate deleted, then the kept product
+    incremented, then `end`.
+  - CardTrader never lists more copies than exist.
+  - It stops at any error or 429. A rerun first finishes a group the journal
+    left open.
+  - The journal (JSON lines, default `/var/tmp/pokoin-ct-group-products-<uid>.jsonl`)
+    holds every product's id, copies, ask and characteristics, which is
+    enough to undo a run.
+  - Dry run on 2026-10-21 (replica estimate): PeppeV has 297 groups, 1,964
+    products folding into 297 (1,667 deleted); 2,931 Pokoin-made products
+    become 1,264.
+- **Not covered:** the Zero pick list (`zero.rs`) still shows one member's
+  location per product. The TLA+ model `specs/tla/listing-ct-sync` follows
+  one copy, not a group.
 
 ## Pokoin edits of linked listings (2026-10-14)
 
@@ -133,9 +218,12 @@ get a write.
   nothing echoes back to CardTrader.
 - The outbox step (`listing_sync::edit_cardtrader`) reads
   `seller_integrations/{uid}__cardtrader` and sends:
-  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push
-    (200 PKN = €1, to the cent). It is absolute, so a write in doubt (no answer,
-    a 5xx) is retried by the outbox.
+  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push:
+    the gross-up of the Pokoin price at the seller's CardTrader rate (the
+    smallest whole-cent ask that nets it; 26 PKN direct → €0.14, see
+    [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21)).
+    It is absolute, so a write in doubt (no answer, a 5xx) is retried by the
+    outbox.
   - **quantity**: `POST /products/:id/increment` with the change
     (`delta_quantity: new − old`), never the new total: the same rule as a
     Pokoin sale (see "Never written back"). Example: CardTrader and Pokoin

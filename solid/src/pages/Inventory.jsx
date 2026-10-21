@@ -20,6 +20,7 @@ import {
   MYPOKOIN_PREVIEW_BANNER,
   previewListings,
   previewPricer,
+  previewComps,
   previewStrategies,
 } from './mypokoin-preview-fixture.js';
 import { loadOwnerBook } from '../lib/owner-book.js';
@@ -422,6 +423,10 @@ function InventoryDesk(props) {
             showSummary={false}
             defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
+            preview={props.preview}
+            previewStrategies={props.preview ? previewStrategies() : undefined}
+            previewComps={props.preview ? previewComps() : undefined}
+            onApplied={() => reload().catch(() => {})}
           />
         </Match>
       </Switch>
