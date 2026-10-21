@@ -109,6 +109,21 @@ test('other games read the CardTrader Zero price file', () => {
   const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'zero' } }, { cardId: '801148' }, 'cardtrader');
   assert.equal(value.value, 240);
   assert.match(value.title, /CardTrader Zero seller with the same language and finish, in this condition or better/);
+  assert.doesNotMatch(value.title, /Prices of/);
+});
+
+test('the CardTrader column is net of the seller fee and names the ask', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 219.5, ctMatchedGrossPkn: 240, ctBasis: 'zero', ctFee: { pct: 7, vatPct: 22, minCents: 1, channel: 'zero' } } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 219.5);
+  assert.match(value.title, /Net of CardTrader's 7% seller fee \+ 22% VAT \(ask 240 PKN\)\./);
+});
+
+test('a price from the price store says when the store was refilled', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'zero', ctAsOf: '2026-10-21T04:31:07Z' } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 240);
+  assert.match(value.title, /Prices of 2026-10-21 04:31 UTC\.$/);
+  const junk = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'pro', ctAsOf: '<b>' } }, { cardId: '801148' }, 'cardtrader');
+  assert.doesNotMatch(junk.title, /Prices of/);
 });
 
 test('TCGplayer variants retain USD and source timestamps without PKN conversion', () => {

@@ -465,3 +465,34 @@ marker into `assert(F)` and requires it to fail.
 - **The Rust and JS themselves**: Logika checks Slang ports. Each port follows
   its source (comments name it), states its abstraction at the top, and each
   finding was reproduced by a failing test on the real code.
+
+## Card Rails → CardTrader listing sync (2026-10-20)
+
+[`listing-ct-sync/`](listing-ct-sync/README.md), written against origin/main
+`1259f2c2` after 1,482 Riftbound copies from Card Rails stayed paused and
+never reached CardTrader. TLC 2026.10.06, Java 21 on nezopt.
+
+| Config | Result | Distinct states | Depth |
+| --- | --- | --- | --- |
+| `listing-ct-sync/Model.cfg` | pass | 200,898 | 57 |
+| `listing-ct-sync/unquoted.cfg` | pass | 201,210 | 58 |
+| `listing-ct-sync/liveness.cfg` | pass (liveness) | 68,152 | 49 |
+| 4 `bugs/*.cfg` | each reports its counterexample on origin/main | | |
+| 1 `design/*.cfg` | reports the accepted residual | | |
+| 3 `witness/*.cfg` | each finds the behaviour reachable | | |
+
+| # | Finding | How | Fix |
+| --- | --- | --- | --- |
+| L1 | A Riftbound (any non-Pokémon) listing is never a push candidate: `PUSH_CANDIDATES_WHERE` filtered Pokémon, and `product_body` only knows Pokémon properties. | TLC (`bugs/other-game-never-pushed.cfg`) | Candidates of every game; other games are created from their blueprint's `editable_properties` (`push::product_body_for_blueprint`); the outbox leaves them to the reconcile (`listing_sync::outbox_pushes`) so there is one create path. |
+| L2 | A copy Card Rails could not quote is listed `paused` at 0, and a later Seller API `update` with a price keeps it paused. The quote read only Pokémon tables, so every Riftbound copy was unquoted. | TLC (`bugs/paused-forever.cfg`) + mapping | `update` puts a listing paused at 0 on sale when it gets a price (`activate_priced`); `sold-prices` quotes every game from the price store (`facet_quote`); `job price-unpriced-listings` prices existing rows. |
+| L3 | An in-doubt CardTrader create that never happened keeps `ct:pending:…` for ever: the listing is never listed and never a candidate again. | TLC (`bugs/stuck-in-doubt-claim.cfg`) | `release_stale_claims`: after a complete export, a claim older than 15 minutes that no exported product and no seller order names goes back to `""`. |
+| L4 | A crash between the Seller API key claim and the insert left the key claimed and unbound; every retry answered `list_in_doubt` for ever. | TLC (`bugs/list-key-in-doubt.cfg`) | The key is bound in the insert's own transaction with a compare-and-set (`BIND_API_KEY_SQL`); a claimed, unbound key is safe to create again. |
+| L5 | A stale claim whose product sold before any export saw it, with the webhook lost, would be left for sale on Pokoin by L3's release. | TLC (while fixing L3) | `SETTLE_SOLD_CLAIMS_SQL` settles it sold out. |
+| L6 | The reconcile read only `pokemon_language` / `mtg_language` / `mtg_foil`: a French foil Riftbound product was EN non-foil, so it matched the wrong listing facets. | mapping | `normalize_product` reads any `*_language`, `*_foil`, `*_first_edition`. |
+
+Spec correction: the first fixed run broke `NoDuplicateProduct` because time
+could pass the grace while the create request was still being sent; the
+15-minute grace is far longer than the client timeout, so the assumption
+(`LandsInGrace`) now covers a create being sent as well as one in flight.
+Accepted residual: `design/create-lands-after-grace.cfg` (CardTrader applying
+a create more than 15 minutes after it was sent would duplicate it).

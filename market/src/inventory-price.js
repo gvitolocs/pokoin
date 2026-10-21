@@ -116,11 +116,21 @@ export function inventoryMarketValue(prices, row, source) {
     // sellers, this condition or better.
     const value = positive(entry.ctMatchedPkn);
     if (value == null) return null;
+    // `ctAsOf`: when the price store was refilled (docs/PRICING.md "Price store").
+    const asOf = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(entry.ctAsOf || ''))
+      ? ` Prices of ${String(entry.ctAsOf).slice(0, 16).replace('T', ' ')} UTC.`
+      : '';
+    // `ctMatchedPkn` is what a seller nets at that ask, after CardTrader's
+    // commission and its VAT (server: ct_fees); `ctMatchedGrossPkn` is the ask.
+    const gross = positive(entry.ctMatchedGrossPkn);
+    const fee = entry.ctFee && Number.isFinite(Number(entry.ctFee.pct))
+      ? ` Net of CardTrader's ${Number(entry.ctFee.pct)}% seller fee + ${Number(entry.ctFee.vatPct) || 0}% VAT${gross != null ? ` (ask ${formatPknNumber(gross, { maximumFractionDigits: 0 })} PKN)` : ''}.`
+      : '';
     return {
       currency: 'PKN', value,
-      title: entry.ctBasis === 'zero'
+      title: (entry.ctBasis === 'zero'
         ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
-        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).',
+        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).') + fee + asOf,
     };
   }
   const native = positive(entry.pokoinCheapestPkn);

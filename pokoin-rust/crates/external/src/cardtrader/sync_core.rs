@@ -64,6 +64,9 @@ pub fn ct_language_to_pokoin(raw: &str) -> &'static str {
         "kr" | "ko" => "KO",
         "zh" | "zh-cn" => "ZH",
         "zh-tw" | "zht" => "ZHT",
+        "ru" => "RU",
+        "nl" => "NL",
+        "pl" => "PL",
         "id" => "ID",
         "th" => "TH",
         "vi" => "VI",
@@ -237,18 +240,31 @@ pub fn normalize_product(product: &Value) -> NormalizedProduct {
     let condition = ct_condition_to_pokoin(
         props.get("condition").and_then(Value::as_str).unwrap_or_default(),
     );
+    // Every game names its own facets (`riftbound_language`, `lorcana_foil`,
+    // `fow_first_edition`, …); reading only Pokémon's and Magic's made every
+    // other game's copy English and non-foil, so a pushed French foil
+    // Riftbound card never matched its own product.
+    let game_property = |suffix: &str| {
+        props
+            .as_object()
+            .and_then(|map| map.iter().find(|(name, _)| name.ends_with(suffix)).map(|(_, value)| value))
+    };
     let language_raw = props
         .get("pokemon_language")
         .or_else(|| props.get("mtg_language"))
         .or_else(|| props.get("language"))
+        .or_else(|| game_property("_language"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     let language = ct_language_to_pokoin(language_raw);
+    let boolean = |value: &Value| matches!(value, Value::Bool(true)) || value.as_str() == Some("true");
     let reverse = props.get("pokemon_reverse").map(truthy).unwrap_or(false)
         || props.get("mtg_foil").map(truthy).unwrap_or(false)
-        || props.get("foil").map(truthy).unwrap_or(false);
+        || props.get("foil").map(truthy).unwrap_or(false)
+        || game_property("_foil").is_some_and(boolean);
     let first_edition = props.get("pokemon_first_edition").map(truthy).unwrap_or(false)
-        || props.get("first_edition").map(truthy).unwrap_or(false);
+        || props.get("first_edition").map(truthy).unwrap_or(false)
+        || game_property("_first_edition").is_some_and(boolean);
     let graded = product.get("graded").map(truthy).unwrap_or(false);
     NormalizedProduct {
         id,
@@ -854,6 +870,7 @@ const SALE_ORDER_KEYS: &[&str] = &["id", "code", "state", "order_items"];
 const SALE_ITEM_KEYS: &[&str] = &[
     "id", "order_item_id", "orderItemId", "product_id", "productId", "seller_product_id", "sellerProductId",
     "product", "quantity", "qty", "seller_price", "name", "created_at", "blueprint_id", "blueprintId",
+    "user_data_field", "userDataField",
 ];
 
 /// A seller order cut to what the reconcile reads (`sale_items_by_product`,

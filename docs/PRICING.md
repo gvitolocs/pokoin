@@ -35,6 +35,48 @@ Where it is used:
   the collection's suggested asks, and the card desk's suggested price (the
   sold graph only fills in when no professional offer exists).
 
+## Net of CardTrader's commission (2026-10-21)
+
+A CardTrader ask (`price_cents` in `/marketplace/products`, the listing books
+and the PKP3 file) is the price the seller set. CardTrader adds the buyer's
+Safeguard fee on top (€0.09–€0.64 per item) and takes its commission, plus VAT
+on it, from the seller. Every CardTrader figure Pokoin shows or prices from is
+what the seller **nets** (`pokoin-rust/crates/external/src/ct_fees.rs`):
+
+```text
+fee = max(1 cent, ask × rate)    rate: 5 % direct (Pokémon pro floor, sold medians, tile minimum)
+                                       7 % CardTrader Zero (the other games' price file)
+net = ask − fee × (1 + 22 % VAT)
+```
+
+Rates from CardTrader's "Payments, fees and refunds" page
+(static.cardtrader.com/en/pages/payments-fees-and-refunds, 2026-10-21): EU
+sellers 5.0 % direct / 7.0 % Zero, minimum 1 cent, VAT added, for
+subscriptions before March 2026 (guaranteed to active sellers until
+2026-12-31); 5.3 % / 7.3 % after; extra-EU 6/8 % (7/10 %); 1-Day Ready 16.5 %.
+`CARDTRADER_FEE_DIRECT_PCT`, `CARDTRADER_FEE_ZERO_PCT` and
+`CARDTRADER_FEE_VAT_PCT` change them. Example: a €0.11 Zero ask (22 PKN) nets
+€0.0978 (the 1-cent minimum plus VAT), shown as 20 PKN.
+
+- The price check returns the net as `ctMatchedPkn` / `ctCheapestPkn` /
+  `soldMedianPkn`, the asks as `ctMatchedGrossPkn` / `ctCheapestGrossPkn` /
+  `soldMedianGrossPkn`, and the rule as `ctFee`. The board's tooltip names both.
+- The price store keeps the asks; the commission is taken at read time, so a
+  rate change needs no refill.
+- The Seller API quote (Card Rails), `job price-unpriced-listings` and
+  `job cardtrader-pro-floor-reprice` price Pokoin at the net. The reprice job
+  still sets a linked CardTrader product to the floor itself, so the seller's
+  CardTrader ask is not cut by the commission.
+- A connected seller's own CardTrader products: the reconcile gives an import
+  or a link the product's ask net of the commission the seller pays
+  (`ct_fees::seller_channel`: 7 % for an account that can sell through
+  CardTrader Zero, `can_sell_via_hub` in the stored `/info` user; 5 %
+  otherwise). Listings linked before this change are set once with
+  `pokoin-api job cardtrader-net-prices --seller=<uid> [--csv=…] [--apply]`: one
+  `/products/export` read, the target always computed from the CardTrader
+  ask (a rerun changes nothing), compare-and-set per listing, nothing
+  written to CardTrader.
+
 ## Games other than Pokémon
 
 The satellite game databases have no per-offer book (only the cheapest offer
@@ -56,6 +98,46 @@ applies the extension's rule (`pricebook.rs` `grid`):
 - The SPA sends one price check per game (`?game=`): card ids are per game.
   Comps carry `ctBasis: "zero"`. The API caches each game's file for an hour
   (`POKOIN_PRICE_FILE_ORIGIN` overrides the host).
+
+## Price store (2026-10-20)
+
+Both rules above are also kept per facet in Postgres, so a page of listings
+is priced with one indexed lookup instead of the pro floor over the book or a
+price-file download:
+
+- `public.cardtrader_facet_prices` (`scripts/sql/132_cardtrader_facet_prices.sql`):
+  `(game, card_id, language, condition, foil, first_edition) → min_pkn,
+  offers, basis`. Pokémon rows are the professional floor (`basis = 'pro'`,
+  `foil` = reverse, keyed by public card id through
+  `marketplace_search_candidates.ct_id`); the other games are source 7 of
+  their PKP3 file (`basis = 'zero'`). `cardtrader_facet_price_runs` has one row
+  per game with its last refill.
+- Refill: `pokoin-api job cardtrader-facet-prices [--game=<slug>] [--dry-run]`
+  (`pokoin-rust/apps/api/src/jobs/facet_prices.rs`, `pokoin_external::facet_store`),
+  timer `pokoin-rust-job-cardtrader-facet-prices.timer` at 04:30 and 18:30 UTC,
+  an hour after each price-book build (the 04:30 run also follows the 23:00
+  daily dump). Pokémon is one statement on the writer (4.5 s, ~320k rows on
+  2026-10-20); each other game downloads its file. Every game is one
+  transaction that writes only changed rows, deletes the vanished ones and
+  refuses to drop more than half of a game's rows; a game without a file is
+  skipped. Market prices come from the books, not from the seller webhook or
+  reconcile: those only carry the seller's own products.
+- Read: `price_check::read_prices` asks the store for the page's cards
+  (`facet_store::LOOKUP_SQL`, one round trip with the run row) in parallel
+  with the page's other queries. With no run for the game, a run older than
+  3 days, or the tables not migrated, it prices live as before. Comps from the
+  store carry `ctAsOf` (the refill time; the board's tooltip shows it). The
+  Seller API `sold-prices` quote (Card Rails) falls back to the store for
+  every game (`priceSource: "cardtrader_facet_floor"`) before the Pokémon
+  tile minimum.
+- `pokoin-api job price-unpriced-listings --seller=<uid> [--game=…] [--csv=…] [--apply]`
+  prices a seller's listings that are paused at 0 (Card Rails could not quote
+  them) from the store and puts them on sale; a dry run unless `--apply`.
+
+A listing still shows `—` when the store (like the live rule) has no offer of
+its facets: no professional (Pokémon) or CardTrader Zero (other games) copy
+in its language and finish, and for Pokémon in its exact condition. Graded,
+signed and altered copies never have a CardTrader comp.
 
 ## Repricing a seller
 

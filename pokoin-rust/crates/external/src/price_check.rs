@@ -190,6 +190,19 @@ pub fn parse_items(raw: &str) -> Vec<PriceItem> {
 /// not count. `$2` lists CardTrader seller ids to leave out (a seller's own
 /// offers when pricing that seller).
 pub fn pro_floor_sql() -> String {
+    pro_floor_select(
+        "coalesce(blueprint_id, cardtrader_blueprint_id) = any($1::bigint[])
+           and not (coalesce(seller_account_id, '') = any($2::text[]))",
+    )
+}
+
+/// The same floor over every blueprint of the book, no seller left out: the
+/// price store's Pokémon refill (`facet_store`), computed on the writer.
+pub fn pro_floor_all_sql() -> String {
+    pro_floor_select("true")
+}
+
+fn pro_floor_select(filter: &str) -> String {
     format!(
         "select
            coalesce(blueprint_id, cardtrader_blueprint_id) as ct_id,
@@ -200,14 +213,13 @@ pub fn pro_floor_sql() -> String {
            min(public.marketplace_price_pkn_from_cardtrader(price, price_cents, currency))::float8 as min_pkn,
            count(*)::int as offers
          from public.cardtrader_market_listing_snapshots as offer
-         where coalesce(blueprint_id, cardtrader_blueprint_id) = any($1::bigint[])
+         where {filter}
            and quantity > 0
            and seller_type = 'pro'
            and last_seen_at >= now() - interval '3 days'
            and coalesce(raw_metadata->>'graded', '') <> 'true'
            and coalesce(properties->>'signed', '') <> 'true'
            and coalesce(properties->>'altered', '') <> 'true'
-           and not (coalesce(seller_account_id, '') = any($2::text[]))
            and not exists (
              select 1 from public.cardtrader_seller_vacation as vacation
              where vacation.provider = 'cardtrader'
@@ -415,13 +427,20 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         return Ok(json!({}));
     }
     let numeric_ids: Vec<i64> = ids.iter().filter_map(|id| id.parse::<i64>().ok()).collect();
-    let mapping = db
-        .query(
+    // The card → blueprint map, the page's own Pokoin asks and the price
+    // store answer independently: one round trip of wall time, not three.
+    let mapping_params = [json!(numeric_ids)];
+    let pokoin_params = [json!(ids), json!(exclude_seller_uid), json!("pokemon")];
+    let (mapping, pokoin_rows, store) = tokio::join!(
+        db.query(
             "pokemon",
             "select card_id, ct_id from public.marketplace_search_candidates where card_id = any($1::bigint[])",
-            &[json!(numeric_ids)],
-        )
-        .await?;
+            &mapping_params,
+        ),
+        db.query("pokemon", POKOIN_CHEAPEST_SQL, &pokoin_params),
+        store_lookup(db, "pokemon", &numeric_ids),
+    );
+    let (mapping, pokoin_rows) = (mapping?, pokoin_rows?);
     let mut blueprint_by_card: Vec<(String, String)> = Vec::new();
     for row in &mapping {
         if let (Some(card_id), Some(ct_id)) = (
@@ -451,13 +470,13 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         crate::time_util::iso_from_ms(ms).get(..10).unwrap_or("").to_string()
     };
 
-    let pokoin_rows = db
-        .query("pokemon", POKOIN_CHEAPEST_SQL, &[json!(ids), json!(exclude_seller_uid), json!("pokemon")])
-        .await?;
-
     // Professional sellers only, same finishes: private one-off asks made
-    // every comp look too cheap.
-    let ct_groups = pro_floors(db, &ct_ids, &[]).await?;
+    // every comp look too cheap. The price store holds this floor for every
+    // card; the live query over the book is the fallback while it cannot answer.
+    let ct_groups = match store {
+        Some(_) => Map::new(),
+        None => pro_floors(db, &ct_ids, &[]).await?,
+    };
 
     let sold_sql = "
         select blueprint_id,
@@ -468,12 +487,15 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
           and sold_qty > 0
           and median_pkn > 0
         group by blueprint_id";
-    let sold_rows = db.query("pokemon", sold_sql, &[json!(ct_ids)]).await?;
-
-    let listed_rows = db
-        .query("pokemon", &listed_bulk_sql(), &[json!(ct_ids), json!(from), json!(to)])
-        .await
-        .unwrap_or_default();
+    let sold_params = [json!(ct_ids)];
+    let listed_sql = listed_bulk_sql();
+    let listed_params = [json!(ct_ids), json!(from), json!(to)];
+    let (sold_rows, listed_rows) = tokio::join!(
+        db.query("pokemon", sold_sql, &sold_params),
+        db.query("pokemon", &listed_sql, &listed_params),
+    );
+    let sold_rows = sold_rows?;
+    let listed_rows = listed_rows.unwrap_or_default();
 
     let mut prices = Map::new();
     for item in items {
@@ -487,7 +509,10 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let (ct_cheapest, ct_matched) = pick_matched_ct(&groups, &item.condition, &item.language, item.reverse, item.first_edition);
+        let (ct_cheapest, ct_matched) = match &store {
+            Some(hit) => hit.comp(item),
+            None => pick_matched_ct(&groups, &item.condition, &item.language, item.reverse, item.first_edition),
+        };
         let ct_matched = ct_matched.filter(|_| !item.one_of_a_kind());
         let pokoin_cheapest = pokoin_cheapest(&pokoin_rows, &item.card_id);
         let sold_median = ct_id.as_ref().and_then(|ct_id| {
@@ -506,20 +531,38 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
                     .collect()
             })
             .unwrap_or_default();
-        let comp = json!({
+        let mut comp = json!({
                 "pokoinCheapestPkn": pokoin_cheapest,
-                "ctCheapestPkn": ct_cheapest,
-                "ctMatchedPkn": ct_matched,
                 "ctBasis": "pro",
+                "ctAsOf": store.as_ref().map(|hit| hit.refreshed_at.clone()),
                 "soldMedianPkn": sold_median,
                 "cardtraderListed": cardtrader_source(&listed_days, None),
                 "tcgplayer": [],
                 "tcgplayerStatus": "unconfigured",
             });
+        // The professional floor sells direct and through Zero alike.
+        ct_fields(&mut comp, ct_cheapest, ct_matched, crate::ct_fees::Channel::Direct);
+        // CardTrader sales: what their sellers netted.
+        comp["soldMedianGrossPkn"] = json!(sold_median);
+        comp["soldMedianPkn"] = json!(sold_median.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Direct)));
         prices.insert(price_check_key(item), comp.clone());
         prices.insert(item.card_id.clone(), comp);
     }
     Ok(Value::Object(prices))
+}
+
+/// The CardTrader fields of a comp. `ctMatchedPkn` / `ctCheapestPkn` are what
+/// a seller nets on CardTrader at those asks, after CardTrader's commission
+/// and its VAT (`ct_fees`); the asks themselves stay in `ctMatchedGrossPkn` /
+/// `ctCheapestGrossPkn`, and `ctFee` names the rule.
+pub fn ct_fields(comp: &mut Value, cheapest: Option<f64>, matched: Option<f64>, channel: crate::ct_fees::Channel) {
+    let rule = crate::ct_fees::rule();
+    let net = |gross: Option<f64>| gross.and_then(|pkn| rule.net_pkn(pkn, channel));
+    comp["ctCheapestPkn"] = json!(net(cheapest));
+    comp["ctMatchedPkn"] = json!(net(matched));
+    comp["ctCheapestGrossPkn"] = json!(cheapest);
+    comp["ctMatchedGrossPkn"] = json!(matched);
+    comp["ctFee"] = rule.describe(channel);
 }
 
 /// One comp of a game other than Pokémon. CardTrader asks come from the
@@ -537,16 +580,21 @@ pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pok
         _ => (None, None),
     };
     let matched = matched.filter(|_| !item.one_of_a_kind());
-    json!({
+    let mut comp = json!({
         "pokoinCheapestPkn": pokoin_cheapest,
-        "ctCheapestPkn": cheapest.map(crate::price_book::pkn_from_cents),
-        "ctMatchedPkn": matched.map(crate::price_book::pkn_from_cents),
         "ctBasis": "zero",
         "soldMedianPkn": Value::Null,
         "cardtraderListed": cardtrader_source(&[], Some(if asks.is_some() { "empty" } else { "unavailable" })),
         "tcgplayer": [],
         "tcgplayerStatus": "unconfigured",
-    })
+    });
+    ct_fields(
+        &mut comp,
+        cheapest.map(crate::price_book::pkn_from_cents),
+        matched.map(crate::price_book::pkn_from_cents),
+        crate::ct_fees::Channel::Zero,
+    );
+    comp
 }
 
 async fn read_game_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
@@ -555,17 +603,61 @@ async fn read_game_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude
         return Ok(json!({}));
     }
     // Pokoin listings of every game live in the shared database.
-    let pokoin_rows = db
-        .query("pokemon", POKOIN_CHEAPEST_SQL, &[json!(ids), json!(exclude_seller_uid), json!(game)])
-        .await?;
-    let asks = crate::price_book::ct_asks(game).await;
+    let numeric_ids: Vec<i64> = ids.iter().filter_map(|id| id.parse::<i64>().ok()).collect();
+    let pokoin_params = [json!(ids), json!(exclude_seller_uid), json!(game)];
+    let (pokoin_rows, store) = tokio::join!(
+        db.query("pokemon", POKOIN_CHEAPEST_SQL, &pokoin_params),
+        store_lookup(db, game, &numeric_ids),
+    );
+    let pokoin_rows = pokoin_rows?;
     let mut prices = Map::new();
+    if let Some(hit) = store {
+        for item in items {
+            let comp = store_game_comp(item, &hit, pokoin_cheapest(&pokoin_rows, &item.card_id));
+            prices.insert(price_check_key(item), comp.clone());
+            prices.insert(item.card_id.clone(), comp);
+        }
+        return Ok(Value::Object(prices));
+    }
+    // No store for this game yet: the price file itself, downloaded and
+    // cached per API process.
+    let asks = crate::price_book::ct_asks(game).await;
     for item in items {
         let comp = game_comp(item, asks.as_deref(), pokoin_cheapest(&pokoin_rows, &item.card_id));
         prices.insert(price_check_key(item), comp.clone());
         prices.insert(item.card_id.clone(), comp);
     }
     Ok(Value::Object(prices))
+}
+
+/// The price store's rows of a page, or `None` (the live path) when the store
+/// cannot answer. A store error never fails the price check.
+async fn store_lookup(db: &DbPools, game: &str, card_ids: &[i64]) -> Option<crate::facet_store::StoreHit> {
+    match crate::facet_store::lookup(db, game, card_ids).await {
+        Ok(hit) => hit,
+        Err(error) => {
+            tracing::warn!(game, error = %error, "price store lookup failed; pricing live");
+            None
+        }
+    }
+}
+
+/// [`game_comp`] from the price store: the same comp, plus when the store
+/// was refilled (`ctAsOf`).
+pub fn store_game_comp(item: &PriceItem, hit: &crate::facet_store::StoreHit, pokoin_cheapest: Option<f64>) -> Value {
+    let (cheapest, matched) = hit.comp(item);
+    let matched = matched.filter(|_| !item.one_of_a_kind());
+    let mut comp = json!({
+        "pokoinCheapestPkn": pokoin_cheapest,
+        "ctBasis": "zero",
+        "ctAsOf": hit.refreshed_at,
+        "soldMedianPkn": Value::Null,
+        "cardtraderListed": cardtrader_source(&[], Some("empty")),
+        "tcgplayer": [],
+        "tcgplayerStatus": "unconfigured",
+    });
+    ct_fields(&mut comp, cheapest, matched, crate::ct_fees::Channel::Zero);
+    comp
 }
 
 /// Handler helper: validate + read.
@@ -708,20 +800,24 @@ mod tests {
         let asks = CtAsks::parse(&bytes).unwrap();
         let comp = |raw: &str| game_comp(&parse_items(raw)[0], Some(&asks), None);
         // NM is priced by NM copies only; SP by the cheaper SP copy.
-        assert_eq!(comp("801148:NM:EN")["ctMatchedPkn"], json!(240.0));
-        assert_eq!(comp("801148:SP:EN")["ctMatchedPkn"], json!(180.0));
-        assert_eq!(comp("801148:MP:EN")["ctMatchedPkn"], json!(180.0));
-        assert_eq!(comp("801148:NM:EN:H")["ctMatchedPkn"], json!(1200.0));
-        assert_eq!(comp("801148:NM:FR")["ctMatchedPkn"], json!(100.0));
-        assert_eq!(comp("801148:NM:EN")["ctCheapestPkn"], json!(100.0));
+        assert_eq!(comp("801148:NM:EN")["ctMatchedGrossPkn"], json!(240.0));
+        assert_eq!(comp("801148:SP:EN")["ctMatchedGrossPkn"], json!(180.0));
+        assert_eq!(comp("801148:MP:EN")["ctMatchedGrossPkn"], json!(180.0));
+        assert_eq!(comp("801148:NM:EN:H")["ctMatchedGrossPkn"], json!(1200.0));
+        assert_eq!(comp("801148:NM:FR")["ctMatchedGrossPkn"], json!(100.0));
+        assert_eq!(comp("801148:NM:EN")["ctCheapestGrossPkn"], json!(100.0));
         assert_eq!(comp("801148:NM:EN")["ctBasis"], "zero");
         // No such facet, a one-of-a-kind copy, another card, no file: no price.
-        assert_eq!(comp("801148:NM:IT")["ctMatchedPkn"], Value::Null);
+        assert_eq!(comp("801148:NM:IT")["ctMatchedGrossPkn"], Value::Null);
+        assert_eq!(comp("801148:NM:EN:G")["ctMatchedGrossPkn"], Value::Null);
+        assert_eq!(comp("801148:NM:EN:S")["ctMatchedGrossPkn"], Value::Null);
+        assert_eq!(comp("801150:NM:EN")["ctMatchedGrossPkn"], Value::Null);
+        // What a seller nets: 240 PKN (€1.20) Zero ask less 7 % (8.4 c) and its VAT = 219.5 PKN.
+        assert_eq!(comp("801148:NM:EN")["ctMatchedPkn"], json!(219.5));
+        assert_eq!(comp("801148:NM:EN")["ctFee"]["pct"], json!(7.0));
         assert_eq!(comp("801148:NM:EN:G")["ctMatchedPkn"], Value::Null);
-        assert_eq!(comp("801148:NM:EN:S")["ctMatchedPkn"], Value::Null);
-        assert_eq!(comp("801150:NM:EN")["ctMatchedPkn"], Value::Null);
         let none = game_comp(&parse_items("801148:NM:EN")[0], None, Some(30.0));
-        assert_eq!(none["ctMatchedPkn"], Value::Null);
+        assert_eq!(none["ctMatchedGrossPkn"], Value::Null);
         assert_eq!(none["pokoinCheapestPkn"], json!(30.0));
         assert_eq!(none["cardtraderListed"]["status"], "unavailable");
     }

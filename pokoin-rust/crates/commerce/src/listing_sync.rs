@@ -362,6 +362,13 @@ pub async fn await_replica(state: &DomainState) -> bool {
     }
 }
 
+/// Does this event's own CardTrader push create the product? Pokémon only:
+/// it is the one game whose properties are fixed (`push::product_body`).
+pub fn outbox_pushes(payload: &Value) -> bool {
+    let game = field(payload, "game", 40);
+    game.is_empty() || pokoin_external::db::normalize_game(&game) == "pokemon"
+}
+
 /// What the CardTrader step does once the push claim was attempted.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PushPlan {
@@ -700,7 +707,12 @@ pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value
     // The seller's stored shop book is rebuilt behind this, not by a visitor.
     crate::handlers::seller_book::kick_seller(state, &seller);
     if payload["wantsCardtrader"] == true && payload["steps"]["cardtrader"].is_null() {
-        if field(payload, "sourceListingId", 160).is_empty() {
+        if !outbox_pushes(payload) {
+            // The other games need their blueprint's own CardTrader properties:
+            // the seller reconcile lists them (link.rs push_unlisted), with
+            // the same claim, so there is one create path and no second product.
+            payload["steps"]["cardtrader"] = json!("reconcile_push");
+        } else if field(payload, "sourceListingId", 160).is_empty() {
             push_cardtrader(state, event_id, &seller, payload).await?;
         } else {
             payload["steps"]["cardtrader"] = json!("already_linked");
@@ -875,6 +887,9 @@ mod tests {
         assert_eq!(push_plan(true, None), PushPlan::Push);
         assert_eq!(push_plan(false, None), PushPlan::Missing);
         assert_eq!(push_plan(false, Some("ct:pending:41")), PushPlan::InDoubt);
+        // Other games are created by the reconcile only, never twice.
+        assert!(outbox_pushes(&json!({"game": "pokemon"})) && outbox_pushes(&json!({})));
+        assert!(!outbox_pushes(&json!({"game": "riftbound"})));
         assert_eq!(push_plan(false, Some("ct:444")), PushPlan::AlreadyLinked);
         assert!(LINK_PUSH_SQL.contains("source_listing_id = $3"), "link only over our own claim");
         assert_eq!(ct_push::pending_source(41), "ct:pending:41");
