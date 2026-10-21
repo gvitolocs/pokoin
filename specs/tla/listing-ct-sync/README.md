@@ -80,6 +80,37 @@ specs/tla/run.sh listing-ct-sync                 # the fixed configs: must pass
 specs/tla/run.sh --regressions listing-ct-sync   # also bugs/, design/, witness/: each must report its violation
 ```
 
+## Second checker: tla-rs (Rust)
+
+[tla-rs](https://github.com/fabracht/tla-rs) 0.24.9, a TLA+ model checker
+written in Rust, checks the same `Model.tla` and configs. Built from source
+on nezopt (`cargo build --release --bin tla`, target on the 15T disk), then:
+
+```bash
+tla Model.tla --config Model.cfg --allow-unassigned-stutter --max-states 50000000 --max-depth 1000
+```
+
+`--allow-unassigned-stutter` is needed because tla-rs does not follow
+assignments into `IF … THEN … ELSE` branches (`ListInsert` assigns `key`
+and `req` in every branch). For it the spec states `UNCHANGED CtVars`
+inline (not through an operator parameter) and parenthesises one-line
+`IF … ELSE x` before a `/\` bullet: same meaning, and TLC reruns on the
+same file.
+
+Result on 2026-10-21, identical to TLC on every config:
+
+| Config | TLC | tla-rs (one thread) |
+| --- | --- | --- |
+| `Model.cfg` | pass, 1,547,148 states, depth 59 | pass, 1,547,148 states, depth 59, 250 s |
+| `unquoted.cfg` | pass, 1,548,396, depth 60 | pass, 1,548,396, depth 60, 237 s |
+| `liveness.cfg` | pass, 525,264, depth 51 | pass, 525,264, depth 51, 175 s |
+| `bugs/double-fee.cfg` | `FeeOnce` violated | `FeeOnce` violated (8-state trace) |
+| other 4 `bugs/` | `EventuallyListed` violated | `EventuallyListed` violated |
+| `design/create-lands-after-grace.cfg` | `NoDuplicateProduct` violated | violated |
+| 4 `witness/` | each reached | each reached |
+
+TLC stays the checker of record (`run.sh`); tla-rs is a cross-check.
+
 ## What TLC found while writing it
 
 The first fixed run broke `NoDuplicateProduct`: `Tick` let time pass the
