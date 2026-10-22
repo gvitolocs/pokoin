@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   confirmPickEntry,
+  readLastPack,
+  writeLastPack,
   csvField,
   dirtyPickEntries,
   dropPickEntry,
@@ -224,4 +226,25 @@ test('save bodies always carry picked or issue; 4xx is final, network and 5xx re
   assert.equal(retryableSaveError({ status: 400 }), false);
   assert.equal(retryableSaveError({ status: 404 }), false);
   assert.deepEqual(dropPickEntry({ a: { picked: 1 }, b: { picked: 0 } }, 'a'), { b: { picked: 0 } });
+});
+
+test('the last pack is kept per seller for a week and never half-written', () => {
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+    removeItem: (key) => store.delete(key),
+  };
+  const pack = { weekly: [{ orderId: '1', items: [] }], fetchedAt: '2026-10-22T09:00:00.000Z' };
+  assert.equal(writeLastPack(storage, 'u1', pack, 1000), true);
+  assert.deepEqual(readLastPack(storage, 'u1', 2000), pack);
+  assert.equal(readLastPack(storage, 'u2', 2000), null);
+  assert.equal(readLastPack(storage, 'u1', 1000 + 8 * 86_400_000), null);
+  assert.equal(readLastPack(null, 'u1'), null);
+  const huge = { weekly: [{ items: ['x'.repeat(2_100_000)] }] };
+  assert.equal(writeLastPack(storage, 'u1', huge, 3000), false);
+  assert.equal(readLastPack(storage, 'u1', 3000), null, 'an oversized pack drops the old copy too');
+  const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+  assert.equal(readLastPack(broken, 'u1'), null);
+  assert.equal(writeLastPack(broken, 'u1', pack), false);
 });

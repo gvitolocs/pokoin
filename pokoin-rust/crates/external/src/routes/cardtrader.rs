@@ -322,17 +322,32 @@ pub async fn assets(State(state): State<DomainState>, headers: HeaderMap) -> Api
 }
 
 /// `GET /api/cardtrader-zero` — weekly merged Zero picking list.
-pub async fn zero(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
+/// `powertools=0` answers without Power Tools (the page asks for the overlay
+/// next); `refresh=1` skips the per-seller cache. `Server-Timing` names each step.
+pub async fn zero(State(state): State<DomainState>, uri: Uri, headers: HeaderMap) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
-    let list = zero::zero_list(
+    let (list, timings) = zero::zero_list(
         &state.cardtrader,
         state.firestore.as_ref(),
         &state.db,
         &state.powertools,
         &identity.uid,
+        zero_options(&uri),
     )
     .await?;
-    Ok(json_response(200, list))
+    let mut response = json_response(200, list);
+    if let Ok(value) = axum::http::HeaderValue::from_str(&timings.header()) {
+        response.headers_mut().insert("server-timing", value);
+    }
+    Ok(response)
+}
+
+fn zero_options(uri: &Uri) -> zero::ZeroOptions {
+    let flag = |key: &str| query_first(uri, key).map(|v| v.trim().to_string());
+    zero::ZeroOptions {
+        power_tools: !matches!(flag("powertools").as_deref(), Some("0" | "false")),
+        refresh: matches!(flag("refresh").as_deref(), Some("1" | "true")),
+    }
 }
 
 /// `POST /api/cardtrader-zero-pick` — picked count / issue of one Zero
@@ -727,5 +742,13 @@ mod tests {
         let error = zero_pick(State(state), headers, bad).await.unwrap_err();
         assert_eq!(error.status, 400);
         assert_eq!(error.code.as_deref(), Some("invalid_order"));
+    }
+
+    #[test]
+    fn zero_query_flags() {
+        let options = |q: &str| zero_options(&format!("/api/cardtrader-zero{q}").parse::<Uri>().unwrap());
+        assert!(options("").power_tools && !options("").refresh);
+        assert!(!options("?powertools=0").power_tools);
+        assert!(options("?powertools=1&refresh=1").refresh);
     }
 }

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, flush, For, lazy, Loading, onSettled, Show, untrack } from 'solid-js';
 import { saveCardTraderZeroPick } from '@market/api.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import {
@@ -31,9 +31,12 @@ import { createPointerDrag } from '../lib/pointer-drag.js';
 import { getBearer } from '../stores/auth.js';
 import ScanImage from './ScanImage.jsx';
 import { DeskPanel } from './Desk.jsx';
-import PickingMode from './zero/PickingMode.jsx';
-import { IssueDialog, PickQuantityDialog } from './zero/ZeroDialogs.jsx';
 import ZeroList from './zero/ZeroList.jsx';
+
+// Loaded on first use: most visits never open a dialog or picking mode.
+const PickingMode = lazy(() => import('./zero/PickingMode.jsx'));
+const PickQuantityDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.PickQuantityDialog })));
+const IssueDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.IssueDialog })));
 import { FacetBadges, IssueBadge, lineImage, linePrice, LocationText, lineWhere, PtPlace, TakeBits } from './zero/zero-bits.jsx';
 
 function day(value) {
@@ -363,6 +366,18 @@ export function ShipmentPanel(props) {
   const setView = (next) => { setViewSignal(next); writeView(next); };
   const [ptSort, setPtSort] = createSignal(false);
   const [picking, setPicking] = createSignal(false);
+  // The print list exists only while printing: on screen it doubled the DOM.
+  const [printing, setPrinting] = createSignal(false);
+  const startPrint = () => { setPrinting(true); flush(); };
+  const endPrint = () => setPrinting(false);
+  onSettled(() => {
+    window.addEventListener('beforeprint', startPrint);
+    window.addEventListener('afterprint', endPrint);
+    return () => {
+      window.removeEventListener('beforeprint', startPrint);
+      window.removeEventListener('afterprint', endPrint);
+    };
+  });
   const [qtyKey, setQtyKey] = createSignal('');
   const [issueKey, setIssueKey] = createSignal('');
 
@@ -489,7 +504,7 @@ export function ShipmentPanel(props) {
           Sort by PT order
         </button>
         <button class="btn ghost" type="button" onClick={() => downloadCsv(order(), current)}>Export CSV</button>
-        <button class="btn ghost" type="button" onClick={() => window.print()}>Print</button>
+        <button class="btn ghost" type="button" onClick={() => { startPrint(); window.print(); }}>Print</button>
       </div>
 
       <div class="zero-search">
@@ -556,7 +571,7 @@ export function ShipmentPanel(props) {
                 consumeClick={pointer.consumeClick}
               />
             </div>
-            <ZeroList {...rowProps} groups={allGroups()} printOnly />
+            <Show when={printing()}><ZeroList {...rowProps} groups={allGroups()} printOnly /></Show>
           </>
         )}
       >
@@ -567,27 +582,29 @@ export function ShipmentPanel(props) {
 
       <Show when={qtyKey() && lineByKey(qtyKey())}>
         {(line) => (
-          <PickQuantityDialog
+          <Loading fallback={null}><PickQuantityDialog
             line={line()}
             picked={pickOf(line()).picked}
             onChange={(picked) => setPicked(line(), picked)}
             onClose={() => setQtyKey('')}
-          />
+          /></Loading>
         )}
       </Show>
       <Show when={issueKey() && lineByKey(issueKey())}>
         {(line) => (
-          <IssueDialog
+          <Loading fallback={null}><IssueDialog
             line={line()}
             issue={pickOf(line()).issue}
             onSave={(issue) => { change(line(), { issue }); setIssueKey(''); }}
             onClear={() => { change(line(), { issue: null }); setIssueKey(''); }}
             onClose={() => setIssueKey('')}
-          />
+          /></Loading>
         )}
       </Show>
       <Show when={picking()}>
-        <PickingMode lines={lines()} pickOf={pickOf} isDone={isDone} onSetPicked={setPicked} onClose={() => setPicking(false)} />
+        <Loading fallback={null}>
+          <PickingMode lines={lines()} pickOf={pickOf} isDone={isDone} onSetPicked={setPicked} onClose={() => setPicking(false)} />
+        </Loading>
       </Show>
     </div>
   );

@@ -8,6 +8,8 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -343,8 +345,6 @@ pub fn linked_source_ids(list: &Value) -> Vec<String> {
 
 /// Firestore collection of the server-side picked state.
 pub const PICKS_COLLECTION: &str = "cardtrader_zero_picks";
-/// Bounded concurrency of the per-line / per-order Firestore reads.
-const READ_CONCURRENCY: usize = 8;
 
 fn text(value: Option<&Value>, max: usize) -> String {
     clean_text_value(value.unwrap_or(&Value::Null), max)
@@ -394,8 +394,9 @@ fn event_doc_candidates(uid: &str, item: &Value) -> Vec<String> {
     out
 }
 
-/// Webhook allocations per CardTrader item id. Missing or failed docs are
-/// simply absent (the members fallback applies).
+/// Webhook allocations per CardTrader item id: every candidate event doc of
+/// the pack in one batched read (a 135-line pack was ~270 sequential-ish
+/// gets). Missing docs, or a failed read, leave the members fallback.
 pub async fn read_allocations(
     firestore: &dyn crate::firebase::FirestoreStore,
     uid: &str,
@@ -406,23 +407,22 @@ pub async fn read_allocations(
         .map(|item| (text(item.get("itemId"), 40), event_doc_candidates(uid, item)))
         .filter(|(item_id, ids)| !item_id.is_empty() && !ids.is_empty())
         .collect();
-    futures_util::stream::iter(jobs)
-        .map(|(item_id, ids)| async move {
-            for id in ids {
-                let Ok(doc) = firestore.get_doc(EVENTS_COLLECTION, &id).await else { continue };
-                if !doc.exists {
-                    continue;
-                }
-                if let Some(allocations) = event_allocations(&doc.data).filter(|rows| !rows.is_empty()) {
-                    return Some((item_id, allocations));
-                }
-            }
-            None
+    let mut ids: Vec<String> = Vec::new();
+    for id in jobs.iter().flat_map(|(_, candidates)| candidates) {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    let Ok(docs) = firestore.get_docs(EVENTS_COLLECTION, &ids).await else { return HashMap::new() };
+    let by_id: HashMap<&String, &crate::firebase::FirestoreDoc> = ids.iter().zip(docs.iter()).collect();
+    jobs.into_iter()
+        .filter_map(|(item_id, candidates)| {
+            candidates.iter().find_map(|id| {
+                let doc = by_id.get(id).filter(|doc| doc.exists)?;
+                event_allocations(&doc.data).filter(|rows| !rows.is_empty()).map(|rows| (item_id.clone(), rows))
+            })
         })
-        .buffer_unordered(READ_CONCURRENCY)
-        .filter_map(|found| async move { found })
         .collect()
-        .await
 }
 
 /// Listing ids the lines name: webhook allocations plus `user_data_field`.
@@ -1228,42 +1228,6 @@ pub fn mark_pt_mismatches(list: &mut Value) {
     }
 }
 
-/// Power Tools reads for the picking order: open picking lists once, then one
-/// getArticlesToPick per distinct chosen list. Returns
-/// (lists, articles by list id, error).
-async fn fetch_picking(
-    powertools: &crate::powertools::PowerToolsClient,
-    jwt: &str,
-    list: &Value,
-    pt_orders: &[Value],
-) -> (Vec<Value>, HashMap<String, Value>, Option<crate::error::ApiError>) {
-    if !any_weekly_pt_match(list, pt_orders) {
-        return (Vec::new(), HashMap::new(), None);
-    }
-    let lists = match powertools.fetch_picking_lists(jwt).await {
-        Ok(lists) => lists,
-        Err(error) => return (Vec::new(), HashMap::new(), Some(error)),
-    };
-    let mut wanted: Vec<Value> = Vec::new();
-    for (_, chosen) in picking_targets(list, pt_orders, &lists) {
-        let id = chosen.get("ptId").cloned().unwrap_or(Value::Null);
-        if !id_text(&id).is_empty() && !wanted.iter().any(|w| id_text(w) == id_text(&id)) {
-            wanted.push(id);
-        }
-    }
-    let mut articles = HashMap::new();
-    let mut error = None;
-    for id in wanted {
-        match powertools.fetch_articles_to_pick(jwt, &id).await {
-            Ok(payload) => {
-                articles.insert(id_text(&id), payload);
-            }
-            Err(failure) => error = Some(failure),
-        }
-    }
-    (lists, articles, error)
-}
-
 // ------------------------------------------------------------ picked state
 
 pub const ISSUE_TYPES: [&str; 6] = ["missing", "wrong_condition", "wrong_language", "wrong_foil", "wrong_first_edition", "other"];
@@ -1387,15 +1351,9 @@ pub async fn read_picks(firestore: &dyn crate::firebase::FirestoreStore, uid: &s
         .and_then(Value::as_array)
         .map(|orders| orders.iter().map(|o| text(o.get("orderId"), 40)).filter(|id| !id.is_empty()).collect())
         .unwrap_or_default();
-    futures_util::stream::iter(order_ids)
-        .map(|order_id| async move {
-            let doc = firestore.get_doc(PICKS_COLLECTION, &picks_doc_id(uid, &order_id)).await.ok()?;
-            doc.exists.then_some((order_id, doc.data))
-        })
-        .buffer_unordered(READ_CONCURRENCY)
-        .filter_map(|found| async move { found })
-        .collect()
-        .await
+    let doc_ids: Vec<String> = order_ids.iter().map(|order_id| picks_doc_id(uid, order_id)).collect();
+    let Ok(docs) = firestore.get_docs(PICKS_COLLECTION, &doc_ids).await else { return HashMap::new() };
+    order_ids.into_iter().zip(docs).filter(|(_, doc)| doc.exists).map(|(order_id, doc)| (order_id, doc.data)).collect()
 }
 
 /// Server picked state onto the weekly lines (picked clamped to the line).
@@ -1453,7 +1411,7 @@ pub async fn blueprint_games(db: &crate::db::DbPools, list: &Value) -> HashMap<S
                 (game, rows)
             }
         })
-        .buffer_unordered(4)
+        .buffer_unordered(8)
         .collect()
         .await;
     let mut found: HashMap<String, HashSet<String>> = HashMap::new();
@@ -1477,113 +1435,403 @@ const LISTINGS_SQL: &str = "select id::text as id, card_id, source_listing_id, l
      from public.marketplace_user_listings \
      where seller_uid = $1 and (source_listing_id = any($2::text[]) or id::text = any($3::text[]))";
 
-/// Full zeroList composition used by the route.
+// ------------------------------------------------------------ speed
+
+/// CardTrader orders newer than this many days. The weekly merged `paid`
+/// order is at most a week old and `hub_pending` sales are this week's, so
+/// 60 days leaves room for a late shipment while a seller with a long tail
+/// of unshipped direct orders no longer pages through all of them.
+pub const ZERO_ORDER_DAYS: i64 = 60;
+/// How long one seller's CardTrader orders and Power Tools reads are reused.
+pub const ZERO_CACHE_TTL: Duration = Duration::from_secs(60);
+/// A `refresh=1` still reuses a read this young (the page's own duplicate).
+pub const ZERO_REFRESH_REUSE: Duration = Duration::from_secs(3);
+/// Sellers kept per cache; the oldest entry goes first.
+const ZERO_CACHE_MAX: usize = 500;
+
+/// Per-seller reads kept for a short time, in this process only. Never
+/// Firestore picks, allocations or listing rows: those change on every pick
+/// and sale.
+pub struct TtlCache<T> {
+    entries: Mutex<HashMap<String, (Instant, T)>>,
+}
+
+impl<T: Clone> Default for TtlCache<T> {
+    fn default() -> Self {
+        Self { entries: Mutex::new(HashMap::new()) }
+    }
+}
+
+impl<T: Clone> TtlCache<T> {
+    /// The entry of `key` when it is younger than `max_age` at `now`.
+    pub fn get(&self, key: &str, now: Instant, max_age: Duration) -> Option<T> {
+        let entries = self.entries.lock().ok()?;
+        let (at, value) = entries.get(key)?;
+        (now.saturating_duration_since(*at) < max_age).then(|| value.clone())
+    }
+
+    pub fn put(&self, key: &str, now: Instant, value: T) {
+        let Ok(mut entries) = self.entries.lock() else { return };
+        if entries.len() >= ZERO_CACHE_MAX && !entries.contains_key(key) {
+            if let Some(oldest) = entries.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+                entries.remove(&oldest);
+            }
+        }
+        entries.insert(key.to_string(), (now, value));
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.lock().map(|e| e.len()).unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// One seller's Power Tools reads: `user/order`, the open picking lists and
+/// the getArticlesToPick payloads by list id.
+#[derive(Clone, Default)]
+pub struct PtReads {
+    pub orders: Arc<Vec<Value>>,
+    pub lists: Arc<Vec<Value>>,
+    pub articles: Arc<HashMap<String, Value>>,
+}
+
+fn ct_cache() -> &'static TtlCache<Arc<Vec<Value>>> {
+    static CACHE: OnceLock<TtlCache<Arc<Vec<Value>>>> = OnceLock::new();
+    CACHE.get_or_init(TtlCache::default)
+}
+
+fn pt_cache() -> &'static TtlCache<PtReads> {
+    static CACHE: OnceLock<TtlCache<PtReads>> = OnceLock::new();
+    CACHE.get_or_init(TtlCache::default)
+}
+
+/// One lock per seller around the CardTrader / Power Tools reads: concurrent
+/// requests of one seller share a single fetch (the second finds the cache).
+fn flight(uid: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static FLIGHTS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut flights = FLIGHTS.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if flights.len() >= ZERO_CACHE_MAX {
+        flights.retain(|_, lock| Arc::strong_count(lock) > 1);
+    }
+    flights.entry(uid.to_string()).or_default().clone()
+}
+
+/// What `GET /api/cardtrader-zero` should do.
+#[derive(Clone, Copy, Debug)]
+pub struct ZeroOptions {
+    /// false = `powertools=0`: no Power Tools call, the overlay comes later.
+    pub power_tools: bool,
+    /// `refresh=1`: skip the short cache (Refresh button).
+    pub refresh: bool,
+}
+
+impl Default for ZeroOptions {
+    fn default() -> Self {
+        Self { power_tools: true, refresh: false }
+    }
+}
+
+/// Wall time of each step, for `Server-Timing` and the `zero_list_timing` log.
+#[derive(Clone, Debug, Default)]
+pub struct ZeroTimings {
+    pub steps: Vec<(&'static str, f64)>,
+    pub ct_cached: bool,
+    pub pt_cached: bool,
+    pub lines: usize,
+}
+
+impl ZeroTimings {
+    fn add(&mut self, name: &'static str, ms: f64) {
+        self.steps.push((name, ms));
+    }
+
+    /// `Server-Timing` header value: `ct_orders;dur=812.4, …, total;dur=…`.
+    pub fn header(&self) -> String {
+        let mut parts: Vec<String> = self.steps.iter().map(|(name, ms)| format!("{name};dur={ms:.1}")).collect();
+        if self.ct_cached {
+            parts.push("ct_cache;desc=hit".into());
+        }
+        if self.pt_cached {
+            parts.push("pt_cache;desc=hit".into());
+        }
+        parts.join(", ")
+    }
+
+    fn log(&self, deferred: bool) {
+        let steps: serde_json::Map<String, Value> = self.steps.iter().map(|(name, ms)| (name.to_string(), json!((ms * 10.0).round() / 10.0))).collect();
+        let steps = Value::Object(steps).to_string();
+        tracing::info!(
+            lines = self.lines,
+            ct_cached = self.ct_cached,
+            pt_cached = self.pt_cached,
+            deferred,
+            steps = %steps,
+            "zero_list_timing"
+        );
+    }
+}
+
+async fn timed<T>(future: impl std::future::Future<Output = T>) -> (T, f64) {
+    let start = Instant::now();
+    let out = future.await;
+    (out, start.elapsed().as_secs_f64() * 1000.0)
+}
+
+/// getArticlesToPick for every picking list the weekly orders sit in: cached
+/// payloads are reused, the rest fetched at once. Returns (articles by list
+/// id, the first failure).
+async fn picking_articles(
+    powertools: &crate::powertools::PowerToolsClient,
+    jwt: &str,
+    list: &Value,
+    reads: &PtReads,
+) -> (HashMap<String, Value>, Option<ApiError>) {
+    if !any_weekly_pt_match(list, &reads.orders) {
+        return (HashMap::new(), None);
+    }
+    let mut wanted: Vec<Value> = Vec::new();
+    for (_, chosen) in picking_targets(list, &reads.orders, &reads.lists) {
+        let id = chosen.get("ptId").cloned().unwrap_or(Value::Null);
+        if !id_text(&id).is_empty() && !wanted.iter().any(|w| id_text(w) == id_text(&id)) {
+            wanted.push(id);
+        }
+    }
+    let mut articles = HashMap::new();
+    let mut missing = Vec::new();
+    for id in wanted {
+        match reads.articles.get(&id_text(&id)) {
+            Some(payload) => {
+                articles.insert(id_text(&id), payload.clone());
+            }
+            None => missing.push(id),
+        }
+    }
+    let fetched = futures_util::future::join_all(missing.iter().map(|id| powertools.fetch_articles_to_pick(jwt, id))).await;
+    let mut error = None;
+    for (id, answer) in missing.iter().zip(fetched) {
+        match answer {
+            Ok(payload) => {
+                articles.insert(id_text(id), payload);
+            }
+            Err(failure) => error = Some(failure),
+        }
+    }
+    (articles, error)
+}
+
+/// Full zeroList composition used by the route. Independent reads run at
+/// once: the CardTrader and Power Tools integration docs, then the CardTrader
+/// orders beside Power Tools `user/order` + picking lists, then the webhook
+/// allocations, blueprint games, picks and getArticlesToPick, then the
+/// listing rows. CardTrader and Power Tools reads are cached per seller for
+/// [`ZERO_CACHE_TTL`]; `options.power_tools = false` skips Power Tools.
 pub async fn zero_list(
     ct: &crate::cardtrader::client::CardTraderClient,
     firestore: &dyn crate::firebase::FirestoreStore,
     db: &crate::db::DbPools,
     powertools: &crate::powertools::PowerToolsClient,
     uid: &str,
-) -> ApiResult<Value> {
-    // Zero orders are few; page far enough behind direct paid orders.
-    let token = crate::cardtrader::integration::decrypt_integration_token(firestore, uid).await
-        .map_err(|mut error| {
-            if error.status == 404 {
-                error.code = Some("cardtrader_not_connected".into());
-            }
-            error
-        })?;
-    let (weekly, pending) = tokio::join!(
-        ct.fetch_seller_orders(&token, "", WEEKLY_STATE, 100, 10),
-        ct.fetch_seller_orders(&token, "", PENDING_STATE, 100, 10),
+    options: ZeroOptions,
+) -> ApiResult<(Value, ZeroTimings)> {
+    let started = Instant::now();
+    let mut timings = ZeroTimings::default();
+    let ((ct_doc, pt_doc), docs_ms) = timed(async {
+        tokio::join!(
+            crate::cardtrader::integration::read_integration_doc(firestore, uid),
+            crate::powertools::read_power_tools_doc(firestore, uid),
+        )
+    })
+    .await;
+    timings.add("docs", docs_ms);
+    let ct_doc = ct_doc?;
+    let token = crate::cardtrader::integration::token_from_doc(&ct_doc).map_err(|mut error| {
+        if error.status == 404 {
+            error.code = Some("cardtrader_not_connected".into());
+        }
+        error
+    })?;
+    let pt_doc = pt_doc.unwrap_or_default();
+    let pt_status = crate::powertools::safe_power_tools_status(&pt_doc);
+    let pt_connected = pt_status["connected"] == json!(true);
+    let username = pt_status.pointer("/account/username").and_then(Value::as_str).unwrap_or_default().to_string();
+    let jwt = if pt_connected && options.power_tools {
+        crate::powertools::session_from_doc(&pt_doc).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let want_pt = !jwt.is_empty();
+
+    // Remote reads: one flight per seller, reused for ZERO_CACHE_TTL.
+    let gate = flight(uid);
+    let guard = gate.lock().await;
+    let now = Instant::now();
+    let max_age = if options.refresh { ZERO_REFRESH_REUSE } else { ZERO_CACHE_TTL };
+    let cached_ct = ct_cache().get(uid, now, max_age);
+    let cached_pt = if want_pt { pt_cache().get(uid, now, max_age) } else { None };
+    timings.ct_cached = cached_ct.is_some();
+    timings.pt_cached = cached_pt.is_some();
+    let from = crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms() - ZERO_ORDER_DAYS * 86_400_000);
+    let ct_read = async {
+        if let Some(orders) = cached_ct.clone() {
+            return (orders, false);
+        }
+        let (weekly, pending) = tokio::join!(
+            ct.fetch_seller_orders(&token, &from, WEEKLY_STATE, 100, 10),
+            ct.fetch_seller_orders(&token, &from, PENDING_STATE, 100, 10),
+        );
+        let complete = weekly.is_ok() && pending.is_ok();
+        let mut combined = weekly.unwrap_or_default();
+        combined.extend(pending.unwrap_or_default());
+        (Arc::new(combined), complete)
+    };
+    let pt_read = async {
+        if !want_pt {
+            return None;
+        }
+        if let Some(reads) = cached_pt.clone() {
+            return Some(Ok((reads, None)));
+        }
+        let (orders, lists) = tokio::join!(powertools.fetch_orders(&jwt), powertools.fetch_picking_lists(&jwt));
+        Some(orders.map(|orders| {
+            let (lists, lists_error) = match lists {
+                Ok(lists) => (lists, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
+            (PtReads { orders: Arc::new(orders), lists: Arc::new(lists), articles: Arc::new(HashMap::new()) }, lists_error)
+        }))
+    };
+    let (((ct_orders, ct_fresh), ct_ms), (pt_read, pt_ms)) = tokio::join!(timed(ct_read), timed(pt_read));
+    timings.add("ct_orders", ct_ms);
+    if want_pt {
+        timings.add("pt_orders", pt_ms);
+    }
+    if ct_fresh {
+        // Stamped when the read finished, so the overlay request right after
+        // a slow refresh still reuses it.
+        ct_cache().put(uid, Instant::now(), ct_orders.clone());
+    }
+    let mut list = build_zero_list(&ct_orders);
+
+    let pt_reads = pt_read.as_ref().and_then(|answer| answer.as_ref().ok()).map(|(reads, _)| reads.clone());
+    let articles_read = async {
+        match &pt_reads {
+            Some(reads) => Some(picking_articles(powertools, &jwt, &list, reads).await),
+            None => None,
+        }
+    };
+    let ((allocations, alloc_ms), (games, games_ms), (picks, picks_ms), (articles, articles_ms)) = tokio::join!(
+        timed(read_allocations(firestore, uid, &list)),
+        timed(blueprint_games(db, &list)),
+        timed(read_picks(firestore, uid, &list)),
+        timed(articles_read),
     );
-    let mut combined = weekly.unwrap_or_default();
-    combined.extend(pending.unwrap_or_default());
-    let mut list = build_zero_list(&combined);
-    let (allocations, games) = tokio::join!(read_allocations(firestore, uid, &list), blueprint_games(db, &list));
+    timings.add("allocations", alloc_ms);
+    timings.add("games", games_ms);
+    timings.add("picks", picks_ms);
+    if articles.is_some() {
+        timings.add("pt_articles", articles_ms);
+    }
+    let (articles, articles_error) = articles.unwrap_or_default();
+    if let Some((reads, lists_error)) = pt_read.as_ref().and_then(|answer| answer.as_ref().ok()) {
+        if lists_error.is_none() && articles_error.is_none() {
+            let merged = PtReads { articles: Arc::new(articles.clone()), ..reads.clone() };
+            pt_cache().put(uid, Instant::now(), merged);
+        }
+    }
+    drop(guard);
+
     let source_ids = linked_source_ids(&list);
     let listing_ids = linked_listing_ids(&list, &allocations);
     // No status filter: a sold_out row still says which box the copy left.
-    let rows = if source_ids.is_empty() && listing_ids.is_empty() {
-        Vec::new()
-    } else {
-        db.query("pokemon", LISTINGS_SQL, &[json!(uid), json!(source_ids), json!(listing_ids)])
-            .await
-            .unwrap_or_default()
-    };
+    let (rows, listings_ms) = timed(async {
+        if source_ids.is_empty() && listing_ids.is_empty() {
+            Vec::new()
+        } else {
+            db.query("pokemon", LISTINGS_SQL, &[json!(uid), json!(source_ids), json!(listing_ids)])
+                .await
+                .unwrap_or_default()
+        }
+    })
+    .await;
+    timings.add("listings", listings_ms);
     split_lines(&mut list, &rows, &allocations, &games);
 
     // Power Tools overlay; never fails the CardTrader list.
     let mut power_tools = json!({ "connected": false });
     let mut picking = json!({ "ok": false, "source": "none", "error": Value::Null });
-    let doc = crate::powertools::read_power_tools_doc(firestore, uid).await.unwrap_or_default();
-    let status = crate::powertools::safe_power_tools_status(&doc);
-    if status["connected"] == json!(true) {
-        let username = status.pointer("/account/username").and_then(Value::as_str).unwrap_or_default().to_string();
-        match crate::powertools::decrypt_power_tools_session(firestore, uid).await {
-            Ok(jwt) if !jwt.is_empty() => match powertools.fetch_orders(&jwt).await {
-                Ok(pt_orders) => {
-                    let (lists, articles, failure) = fetch_picking(powertools, &jwt, &list, &pt_orders).await;
-                    let overlaid = attach_power_tools_picking(&mut list, &pt_orders, &lists, &articles);
-                    let pt_order_count = attach_power_tools_orders(&mut list, &pt_orders);
-                    let (matched_orders, matched_items) = power_tools_counts(&list);
-                    if let Some(error) = &failure {
-                        if error.code.as_deref() == Some("powertools_session_expired") {
-                            crate::powertools::mark_session_expired(firestore, uid).await;
-                        }
-                    }
-                    picking = json!({
-                        "ok": failure.is_none(),
-                        "source": if overlaid > 0 { "articlesToPick" } else { "orders" },
-                        "error": failure.map(|e| json!(e.message)).unwrap_or(Value::Null),
-                    });
-                    power_tools = json!({
-                        "connected": true,
-                        "ok": true,
-                        "username": username,
-                        "matchedOrders": matched_orders,
-                        "matchedItems": matched_items,
-                        "ptOrderCount": pt_order_count,
-                    });
-                }
-                Err(error) => {
+    if pt_connected && !options.power_tools {
+        power_tools = json!({ "connected": true, "deferred": true, "username": username });
+        picking["source"] = json!("deferred");
+    } else if pt_connected {
+        match pt_read {
+            Some(Ok((reads, lists_error))) => {
+                let overlaid = attach_power_tools_picking(&mut list, &reads.orders, &reads.lists, &articles);
+                let pt_order_count = attach_power_tools_orders(&mut list, &reads.orders);
+                let (matched_orders, matched_items) = power_tools_counts(&list);
+                let failure = lists_error.or(articles_error);
+                if let Some(error) = &failure {
                     if error.code.as_deref() == Some("powertools_session_expired") {
                         crate::powertools::mark_session_expired(firestore, uid).await;
                     }
-                    picking["error"] = json!(error.message.clone());
-                    power_tools = json!({
-                        "connected": true,
-                        "ok": false,
-                        "username": username,
-                        "code": error.code.unwrap_or_default(),
-                        "error": error.message,
-                    });
                 }
-            },
-            _ => {
+                picking = json!({
+                    "ok": failure.is_none(),
+                    "source": if overlaid > 0 { "articlesToPick" } else { "orders" },
+                    "error": failure.map(|e| json!(e.message)).unwrap_or(Value::Null),
+                });
+                power_tools = json!({
+                    "connected": true,
+                    "ok": true,
+                    "username": username,
+                    "matchedOrders": matched_orders,
+                    "matchedItems": matched_items,
+                    "ptOrderCount": pt_order_count,
+                });
+            }
+            Some(Err(error)) => {
+                if error.code.as_deref() == Some("powertools_session_expired") {
+                    crate::powertools::mark_session_expired(firestore, uid).await;
+                }
+                picking["error"] = json!(error.message.clone());
+                power_tools = json!({
+                    "connected": true,
+                    "ok": false,
+                    "username": username,
+                    "code": error.code.unwrap_or_default(),
+                    "error": error.message,
+                });
+            }
+            None => {
                 power_tools = json!({ "connected": true, "ok": false, "username": username, "code": "", "error": "Power Tools orders failed." });
             }
         }
     }
     power_tools["picking"] = picking;
-    let picks = read_picks(firestore, uid, &list).await;
     apply_picks(&mut list, &picks);
     sort_for_picking(&mut list);
     mark_pt_mismatches(&mut list);
-    let ct_doc = crate::cardtrader::integration::read_integration_doc(firestore, uid).await?;
     let ct_user = ct_doc.data.pointer("/metadata/user").cloned().unwrap_or(json!({}));
-    Ok(json!({
-        "fetchedAt": crate::time_util::iso_from_ms(crate::time_util::now_ms()),
-        "cardtrader": {
-            "username": clean_text_value(ct_user.get("username").unwrap_or(&Value::Null), 160),
-            "userId": clean_text_value(ct_user.get("id").unwrap_or(&Value::Null), 80),
-        },
-        "oneDayReady": ct_doc.exists && ct_doc.data.get("enabled") == Some(&Value::Bool(true)) && ct_doc.data.pointer("/metadata/oneDayReady") == Some(&Value::Bool(true)),
-        "weekly": list["weekly"].clone(),
-        "pending": list["pending"].clone(),
-        "totals": list["totals"].clone(),
-        "powerTools": power_tools,
-    }))
+    timings.lines = all_items(&list).len();
+    timings.add("total", started.elapsed().as_secs_f64() * 1000.0);
+    timings.log(!options.power_tools);
+    Ok((
+        json!({
+            "fetchedAt": crate::time_util::iso_from_ms(crate::time_util::now_ms()),
+            "cardtrader": {
+                "username": clean_text_value(ct_user.get("username").unwrap_or(&Value::Null), 160),
+                "userId": clean_text_value(ct_user.get("id").unwrap_or(&Value::Null), 80),
+            },
+            "oneDayReady": ct_doc.exists && ct_doc.data.get("enabled") == Some(&Value::Bool(true)) && ct_doc.data.pointer("/metadata/oneDayReady") == Some(&Value::Bool(true)),
+            "weekly": list["weekly"].clone(),
+            "pending": list["pending"].clone(),
+            "totals": list["totals"].clone(),
+            "powerTools": power_tools,
+        }),
+        timings,
+    ))
 }
 
 #[cfg(test)]
@@ -2275,5 +2523,134 @@ mod tests {
         assert_eq!(lone["weekly"][0]["items"][0]["gameSource"], "listing");
         assert_eq!(cardmarket_game(9), "");
         assert_eq!(cardmarket_game(13), "dragon_ball_super");
+    }
+
+    // ------------------------------------------------------------ speed
+
+    #[test]
+    fn ttl_cache_expires_and_caps() {
+        let cache: TtlCache<i32> = TtlCache::default();
+        let t0 = Instant::now();
+        cache.put("a", t0, 1);
+        assert_eq!(cache.get("a", t0 + Duration::from_secs(59), ZERO_CACHE_TTL), Some(1));
+        assert_eq!(cache.get("a", t0 + Duration::from_secs(61), ZERO_CACHE_TTL), None);
+        // A refresh only reuses a read a few seconds old.
+        assert_eq!(cache.get("a", t0 + Duration::from_secs(2), ZERO_REFRESH_REUSE), Some(1));
+        assert_eq!(cache.get("a", t0 + Duration::from_secs(4), ZERO_REFRESH_REUSE), None);
+        for i in 0..ZERO_CACHE_MAX + 10 {
+            cache.put(&format!("k{i}"), t0 + Duration::from_millis(i as u64), 0);
+        }
+        assert_eq!(cache.len(), ZERO_CACHE_MAX);
+        assert_eq!(cache.get("a", t0, ZERO_CACHE_TTL), None, "the oldest entry went first");
+    }
+
+    #[test]
+    fn server_timing_names_each_step() {
+        let mut timings = ZeroTimings::default();
+        timings.add("ct_orders", 812.44);
+        timings.add("total", 900.0);
+        timings.ct_cached = true;
+        assert_eq!(timings.header(), "ct_orders;dur=812.4, total;dur=900.0, ct_cache;desc=hit");
+    }
+
+    struct FakeRemotes {
+        ct: crate::cardtrader::client::CardTraderClient,
+        pt: crate::powertools::PowerToolsClient,
+        ct_calls: Arc<Mutex<Vec<String>>>,
+        pt_calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn fake_remotes() -> FakeRemotes {
+        let ct_calls = Arc::new(Mutex::new(Vec::new()));
+        let pt_calls = Arc::new(Mutex::new(Vec::new()));
+        let seen = ct_calls.clone();
+        let ct_app = axum::Router::new().route(
+            "/orders",
+            axum::routing::get(move |uri: axum::http::Uri| {
+                let query = uri.query().unwrap_or_default().to_string();
+                seen.lock().unwrap().push(query.clone());
+                async move {
+                    // A small delay so concurrent requests overlap.
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    if query.contains("state=paid") {
+                        axum::Json(json!([zero_order("700", "paid", vec![item("71", "101", 1, 100)])]))
+                    } else {
+                        axum::Json(json!([]))
+                    }
+                }
+            }),
+        );
+        let seen = pt_calls.clone();
+        let pt_app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
+            seen.lock().unwrap().push(uri.path().to_string());
+            async move { axum::Json(json!([])) }
+        });
+        let mut bases = Vec::new();
+        for app in [ct_app, pt_app] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            bases.push(format!("http://{}", listener.local_addr().unwrap()));
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        }
+        FakeRemotes {
+            ct: crate::cardtrader::client::CardTraderClient::with_base(bases[0].clone()),
+            pt: crate::powertools::PowerToolsClient::new().with_base(bases[1].clone()),
+            ct_calls,
+            pt_calls,
+        }
+    }
+
+    async fn connected_seller(uid: &str) -> MemoryFirestore {
+        std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        let firestore = MemoryFirestore::new();
+        let info = json!({ "user": { "id": "5", "username": "sel" } });
+        crate::cardtrader::integration::store_connected_integration(&firestore, uid, "e@x.y", "ct-token", &info).await.unwrap();
+        crate::powertools::store_power_tools_session(&firestore, uid, "a.b.c", &json!({ "username": "pt-sel" })).await.unwrap();
+        firestore
+    }
+
+    #[tokio::test]
+    async fn deferred_power_tools_then_cached_reads() {
+        let remotes = fake_remotes().await;
+        let firestore = connected_seller("speed-u1").await;
+        let db = crate::db::DbPools::disconnected();
+        let run = |power_tools: bool| {
+            zero_list(&remotes.ct, &firestore, &db, &remotes.pt, "speed-u1", ZeroOptions { power_tools, refresh: false })
+        };
+
+        let (first, timings) = run(false).await.unwrap();
+        assert_eq!(first["powerTools"]["deferred"], true);
+        assert_eq!(first["weekly"][0]["items"][0]["itemId"], "71");
+        assert!(remotes.pt_calls.lock().unwrap().is_empty(), "powertools=0 makes no Power Tools call");
+        let ct_queries = remotes.ct_calls.lock().unwrap().clone();
+        assert_eq!(ct_queries.len(), 2);
+        assert!(ct_queries.iter().all(|q| q.contains("&from=20")), "CardTrader paging is bounded by date: {ct_queries:?}");
+        assert!(timings.header().contains("ct_orders;dur="));
+
+        // The overlay request reuses the CardTrader orders.
+        let (second, timings) = run(true).await.unwrap();
+        assert!(timings.ct_cached);
+        assert_eq!(remotes.ct_calls.lock().unwrap().len(), 2);
+        assert_eq!(second["powerTools"]["ok"], true);
+        let pt_after_second = remotes.pt_calls.lock().unwrap().len();
+        assert_eq!(pt_after_second, 2, "user/order + picking lists");
+
+        // And a third within the TTL reuses the Power Tools reads too.
+        let (_, timings) = run(true).await.unwrap();
+        assert!(timings.pt_cached);
+        assert_eq!(remotes.pt_calls.lock().unwrap().len(), pt_after_second);
+    }
+
+    #[tokio::test]
+    async fn concurrent_requests_share_one_fetch() {
+        let remotes = fake_remotes().await;
+        let firestore = connected_seller("speed-u2").await;
+        let db = crate::db::DbPools::disconnected();
+        let options = ZeroOptions { power_tools: false, refresh: false };
+        let (a, b) = tokio::join!(
+            zero_list(&remotes.ct, &firestore, &db, &remotes.pt, "speed-u2", options),
+            zero_list(&remotes.ct, &firestore, &db, &remotes.pt, "speed-u2", options),
+        );
+        assert_eq!(a.unwrap().0["weekly"], b.unwrap().0["weekly"]);
+        assert_eq!(remotes.ct_calls.lock().unwrap().len(), 2, "one paid + one hub_pending fetch for both requests");
     }
 }
