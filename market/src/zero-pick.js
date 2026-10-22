@@ -354,3 +354,37 @@ export function zeroPickCsv(order, cache = {}) {
   }
   return `${rows.map((row) => row.map(csvField).join(',')).join('\r\n')}\r\n`;
 }
+
+/* ---- last pack (instant paint on revisit) ---- */
+
+export const LAST_PACK_PREFIX = 'pokoin.ctZero.last.';
+const LAST_PACK_MAX_CHARS = 2_000_000;
+const LAST_PACK_MAX_AGE_MS = 7 * 86_400_000;
+
+/** The seller's last Zero payload, painted while the fresh one loads (null when none, stale or unreadable). */
+export function readLastPack(storage, uid, now = Date.now()) {
+  if (!storage || !uid) return null;
+  try {
+    const saved = JSON.parse(storage.getItem(LAST_PACK_PREFIX + uid) || 'null');
+    if (!saved?.data || !(now - Number(saved.savedAt) < LAST_PACK_MAX_AGE_MS)) return null;
+    return saved.data;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Keep the payload for the next visit; a pack too big for storage is dropped, not half-kept. */
+export function writeLastPack(storage, uid, data, now = Date.now()) {
+  if (!storage || !uid || !data) return false;
+  try {
+    const raw = JSON.stringify({ savedAt: now, data });
+    if (raw.length > LAST_PACK_MAX_CHARS) {
+      storage.removeItem(LAST_PACK_PREFIX + uid);
+      return false;
+    }
+    storage.setItem(LAST_PACK_PREFIX + uid, raw);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}

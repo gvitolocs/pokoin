@@ -202,8 +202,33 @@ const ZERO_LINES = [
   };
 });
 
+/**
+ * Local-only load test (dev server, or a build served on localhost): `?mypokoinPreview&previewLines=135` repeats the fixture
+ * to N lines, each with its own image URL, so a big pack can be measured.
+ */
+function previewLineCount() {
+  if (typeof window === 'undefined') return 0;
+  const host = window.location.hostname;
+  if (!import.meta.env?.DEV && host !== 'localhost' && host !== '127.0.0.1') return 0;
+  const n = Number(new URLSearchParams(window.location.search).get('previewLines'));
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), 1000) : 0;
+}
+
+function scaledZeroLines(count) {
+  const base = copy(ZERO_LINES);
+  return Array.from({ length: count }, (_, index) => {
+    const line = copy(base[index % base.length]);
+    const art = card(index).imageUrl || '';
+    line.itemId = String(80000 + index);
+    line.lineKey = line.listingId ? `${line.itemId}@${line.listingId}` : line.itemId;
+    line.imageUrl = art ? `${art}${art.includes('?') ? '&' : '?'}n=${index}` : '';
+    return line;
+  });
+}
+
 export function previewZero() {
-  const items = copy(ZERO_LINES);
+  const scaled = previewLineCount();
+  const items = scaled ? scaledZeroLines(scaled) : copy(ZERO_LINES);
   const units = items.reduce((sum, item) => sum + item.quantity, 0);
   const cents = items.reduce((sum, item) => sum + item.lineCents, 0);
   return {
