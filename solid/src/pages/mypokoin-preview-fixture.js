@@ -94,6 +94,26 @@ export function previewPricer() {
   return { defaultSource: 'cardtrader', autoMarketColumn: false };
 }
 
+/**
+ * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
+ * the price check returns them: CardTrader numbers net of the commission
+ * (`ctMatchedPkn`) beside the ask (`ctMatchedGrossPkn`).
+ */
+export function previewComps() {
+  const comp = (ask, net, extra = {}) => ({
+    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: net, ctCheapestGrossPkn: ask, ctBasis: 'pro',
+    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' }, ...extra,
+  });
+  return {
+    '222410:NM:EN:': comp(460, 431.94, { pokoinCheapestPkn: 440 }),
+    '222302:SP:EN:': comp(2100, 1971.9),
+    '222314:NM:JP:': comp(1040, 976.56),
+    '502874:NM:EN:': comp(560, 525.84),
+    '502862:NM:IT:': comp(28, 25.56),
+    '484062:MP:EN:': comp(150, 140.85),
+  };
+}
+
 export function previewStrategies() {
   return [{
     id: 'preview-strategy-1',

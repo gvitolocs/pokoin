@@ -60,7 +60,7 @@ pub async fn push_listing(
     let result = if link {
         pokoin_external::cardtrader::push::push_and_link(&fs, &ct, state.write_db(), uid, listing).await
     } else {
-        pokoin_external::cardtrader::push::push_product(&fs, &ct, uid, listing).await
+        pokoin_external::cardtrader::push::push_product_on(&fs, &ct, uid, listing, Some(state.write_db())).await
     };
     result.map_err(external_error)
 }
@@ -364,9 +364,11 @@ pub async fn await_replica(state: &DomainState) -> bool {
 
 /// Does this event's own CardTrader push create the product? Pokémon only:
 /// it is the one game whose properties are fixed (`push::product_body`).
-pub fn outbox_pushes(payload: &Value) -> bool {
-    let game = field(payload, "game", 40);
-    game.is_empty() || pokoin_external::db::normalize_game(&game) == "pokemon"
+pub fn outbox_pushes(_payload: &Value) -> bool {
+    // Since 2026-10-21 none: a seller's identical copies are one CardTrader
+    // product (cardtrader::group), and the seller reconcile (every 10
+    // minutes) is the one path that creates or joins it.
+    false
 }
 
 /// What the CardTrader step does once the push claim was attempted.
@@ -444,7 +446,7 @@ async fn push_cardtrader(state: &DomainState, event_id: i64, seller: &str, paylo
     let fs = FirestoreRest::from_env()
         .ok_or_else(|| ApiError::internal("Firebase Admin credentials are not configured."))?;
     let ct = CardTraderClient::new();
-    match ct_push::push_product_outcome(&fs, &ct, seller, &payload["listing"]).await {
+    match ct_push::push_product_outcome_on(&fs, &ct, seller, &payload["listing"], Some(state.write_db())).await {
         PushOutcome::Created(pushed) => {
             let source = field(&pushed, "sourceListingId", 160);
             // Link over our claim and, when the listing went off sale while
@@ -459,6 +461,23 @@ async fn push_cardtrader(state: &DomainState, event_id: i64, seller: &str, paylo
                 .fetch_optional(&mut *tx)
                 .await?;
             let off_sale = linked.as_ref().is_none_or(|row| ct_push::off_sale(&field(row, "status", 20)));
+            // Repriced while CardTrader created it: an edit of a pending push
+            // sends nothing, so queue the new price as an edit of the product
+            // now (edit_cardtrader sends the ask that nets it).
+            if let Some(row) = linked.as_ref().filter(|_| !off_sale) {
+                let sent = number(&payload["listing"]["pricePkn"]);
+                let now = number(&row["price_pkn"]);
+                if sent.is_finite() && now.is_finite() && now > 0.0 && (sent - now).abs() >= 0.5 {
+                    let product_id = source.trim_start_matches("ct:").to_string();
+                    let reprice = event(
+                        row,
+                        &json!({"game": field(payload, "game", 40), "sellerUid": seller, "mutation": "LISTING_PRICE_CHANGED",
+                                "sourceListingId": source, "cardtraderEdit": {"productId": product_id, "pricePkn": json_number(now)}}),
+                        state.now_ms(),
+                    );
+                    enqueue(&mut tx, reprice).await?;
+                }
+            }
             if off_sale {
                 let row = linked.clone().unwrap_or_else(|| json!({"id": listing_id.to_string(), "card_id": card_of(payload), "seller_uid": seller}));
                 let destroy = event(
@@ -527,6 +546,40 @@ pub fn cardtrader_edit(before: &Value, after: &Value) -> Option<Value> {
     (edit.get("pricePkn").is_some() || edit.get("quantityDelta").is_some()).then_some(edit)
 }
 
+/// A listing that shares its CardTrader product with identical copies
+/// (`siblings` other live members, pokoin_external::cardtrader::group) and
+/// goes off sale or changes price leaves the group instead: its copies come
+/// off the product (`quantityDelta`, an increment), the caller clears its
+/// source, and the seller reconcile pushes it again into the group of its new
+/// price. The product stays for the other copies: never deleted, never
+/// repriced for one of them.
+pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value> {
+    let source = field(before, "source_listing_id", 160);
+    let product = parse_ct_product_id(&source);
+    if siblings <= 0 || product.is_empty() || field(after, "source_listing_id", 160) != source {
+        return None;
+    }
+    let qty = number(&after["quantity_available"]);
+    let off = ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0);
+    let price = number(&after["price_pkn"]);
+    let repriced = price.is_finite() && price > 0.0 && (price - number(&before["price_pkn"])).abs() >= 0.005;
+    if !off && !repriced {
+        return None;
+    }
+    let mut edit = json!({ "productId": product, "leaveGroup": true });
+    let held = number(&before["quantity_available"]);
+    if held.is_finite() && held >= 1.0 {
+        edit["quantityDelta"] = json!(-(held as i64));
+    }
+    Some(edit)
+}
+
+/// Live members of a product other than this listing (`$1` seller, `$2`
+/// source, `$3` the listing).
+pub const SIBLINGS_SQL: &str = "select count(*)::bigint from public.marketplace_user_listings where seller_uid = $1 and source_listing_id = $2 and id <> $3 and status in ('active', 'paused')";
+/// The listing leaves its group: no product until the reconcile pushes it again.
+pub const LEAVE_GROUP_SQL: &str = "update public.marketplace_user_listings set source_listing_id = '' where id = $1 and source_listing_id = $2";
+
 /// What one CardTrader write of an edit did.
 #[derive(Debug)]
 pub enum EditOutcome {
@@ -571,6 +624,11 @@ pub trait StepMarks: Send + Sync {
     /// Set `steps.<step>` only while it is unset. False: it was already set.
     async fn claim(&self, step: &str, value: &str) -> Result<bool, ApiError>;
     async fn mark(&self, step: &str, value: &str) -> Result<(), ApiError>;
+    /// The seller's CardTrader channel, for the ask a price edit sends
+    /// (`ct_fees`): the stored flag, else Zero; the outbox reads the market book.
+    async fn channel(&self, integration_data: &Value) -> pokoin_external::ct_fees::Channel {
+        pokoin_external::ct_fees::seller_channel(integration_data)
+    }
 }
 
 const MARK_STEP_SQL: &str = "update public.marketplace_outbox set payload = jsonb_set(payload, '{steps}', coalesce(payload->'steps', '{}'::jsonb) || jsonb_build_object($2::text, $3::text)) where id = $1";
@@ -595,6 +653,9 @@ impl StepMarks for OutboxMarks<'_> {
     async fn mark(&self, step: &str, value: &str) -> Result<(), ApiError> {
         sqlx::query(MARK_STEP_SQL).bind(self.id).bind(step).bind(value).execute(self.db).await?;
         Ok(())
+    }
+    async fn channel(&self, integration_data: &Value) -> pokoin_external::ct_fees::Channel {
+        pokoin_external::ct_fees::resolve_seller_channel_pool(self.db, integration_data).await
     }
 }
 
@@ -631,7 +692,9 @@ pub async fn edit_cardtrader(
     }
     let token = integration::token_from_doc(&doc).map_err(external_error)?;
     if edit.get("pricePkn").is_some() && payload["steps"]["cardtraderPrice"].is_null() {
-        let label = match ct_push::price_body(number(&edit["pricePkn"])) {
+        // The ask that nets the Pokoin price after this seller's commission.
+        let channel = marks.channel(&doc.data).await;
+        let label = match ct_push::price_body(number(&edit["pricePkn"]), channel) {
             None => "invalid_price",
             Some(body) => match EditOutcome::of(ct.update_product(&token, &product, body).await) {
                 EditOutcome::InDoubt(e) => return Err(external_error(e)),
@@ -708,9 +771,8 @@ pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value
     crate::handlers::seller_book::kick_seller(state, &seller);
     if payload["wantsCardtrader"] == true && payload["steps"]["cardtrader"].is_null() {
         if !outbox_pushes(payload) {
-            // The other games need their blueprint's own CardTrader properties:
-            // the seller reconcile lists them (link.rs push_unlisted), with
-            // the same claim, so there is one create path and no second product.
+            // The seller reconcile lists every game (link.rs push_unlisted):
+            // one create path, which groups identical copies into one product.
             payload["steps"]["cardtrader"] = json!("reconcile_push");
         } else if field(payload, "sourceListingId", 160).is_empty() {
             push_cardtrader(state, event_id, &seller, payload).await?;
@@ -840,7 +902,7 @@ mod tests {
         let p=product_body(&json!({"id":"a","cardId":"220962","pricePkn":"200","quantityAvailable":"3","condition":"LP","language":"JA","reverse":true,"signed":true,"altered":true,"firstEdition":true,"sellerComment":"corner crease"})).unwrap();
         assert_eq!(
             p,
-            json!({"blueprint_id":110481,"price":1,"quantity":3,"graded":false,"properties":{"condition":"Slightly Played","pokemon_language":"jp","signed":true,"altered":true,"pokemon_reverse":true,"pokemon_first_edition":true},"user_data_field":"pokoin:a","description":"corner crease"})
+            json!({"blueprint_id":110481,"price":1.1,"quantity":3,"graded":false,"properties":{"condition":"Slightly Played","pokemon_language":"jp","signed":true,"altered":true,"pokemon_reverse":true,"pokemon_first_edition":true},"user_data_field":"pokoin:a","description":"corner crease"})
         );
         assert_eq!(blueprint("7"), Some(7));
         assert_eq!(blueprint("0"), None);
@@ -881,14 +943,31 @@ mod tests {
         assert!(event(&json!({}), &json!({}), 0).is_none());
     }
     #[test]
+    fn a_grouped_copy_leaves_its_group_instead_of_repricing_or_deleting_the_product() {
+        let before = json!({"source_listing_id": "ct:900", "price_pkn": 26.0, "quantity_available": 1, "status": "active"});
+        let repriced = json!({"source_listing_id": "ct:900", "price_pkn": 30.0, "quantity_available": 1, "status": "active"});
+        assert_eq!(group_leave(&before, &repriced, 3), Some(json!({"productId": "900", "leaveGroup": true, "quantityDelta": -1})));
+        let paused_off = json!({"source_listing_id": "ct:900", "price_pkn": 26.0, "quantity_available": 1, "status": "inactive"});
+        assert_eq!(group_leave(&before, &paused_off, 1).unwrap()["quantityDelta"], -1);
+        // A quantity edit stays in the group: an increment of the change.
+        let restocked = json!({"source_listing_id": "ct:900", "price_pkn": 26.0, "quantity_available": 3, "status": "active"});
+        assert_eq!(group_leave(&before, &restocked, 3), None);
+        assert_eq!(cardtrader_edit(&before, &restocked).unwrap()["quantityDelta"], 2);
+        // Alone on its product: the old rules (price PUT, destroy off sale).
+        assert_eq!(group_leave(&before, &repriced, 0), None);
+        assert!(SIBLINGS_SQL.contains("id <> $3") && LEAVE_GROUP_SQL.contains("source_listing_id = $2"));
+    }
+
+    #[test]
     fn push_claim_is_decided_from_the_row_as_it_is_now() {
         // specs/tla/listing-outbox: one push per listing, in-doubt pushes
         // left to the reconcile, off-sale listings lose their product.
         assert_eq!(push_plan(true, None), PushPlan::Push);
         assert_eq!(push_plan(false, None), PushPlan::Missing);
         assert_eq!(push_plan(false, Some("ct:pending:41")), PushPlan::InDoubt);
-        // Other games are created by the reconcile only, never twice.
-        assert!(outbox_pushes(&json!({"game": "pokemon"})) && outbox_pushes(&json!({})));
+        // Every game is created by the reconcile only, which groups a
+        // seller's identical copies into one product (cardtrader::group).
+        assert!(!outbox_pushes(&json!({"game": "pokemon"})) && !outbox_pushes(&json!({})));
         assert!(!outbox_pushes(&json!({"game": "riftbound"})));
         assert_eq!(push_plan(false, Some("ct:444")), PushPlan::AlreadyLinked);
         assert!(LINK_PUSH_SQL.contains("source_listing_id = $3"), "link only over our own claim");
@@ -1082,11 +1161,13 @@ mod tests {
         }
         assert!(taken().is_empty());
 
-        // Price at the push's EUR rate, quantity as the change.
+        // Price as the CardTrader ask that nets it (no stored channel and no
+        // known subscription date: EU Zero at the current 7.3 %, 300 PKN →
+        // €1.65, which nets €1.5030 = 301 PKN; €1.64 nets 299), quantity as the change.
         let marks = MemoryMarks::default();
         let mut p = payload("7", json!({"pricePkn": 300, "quantityDelta": 2}));
         edit_cardtrader(&fs, &ct, &marks, "both", &mut p).await.unwrap();
-        assert_eq!(taken(), vec![r#"put:7:{"price":1.5}"#.to_string(), "increment:7:2".into()]);
+        assert_eq!(taken(), vec![r#"put:7:{"price":1.65}"#.to_string(), "increment:7:2".into()]);
         assert_eq!(p["steps"], json!({"cardtraderPrice": "updated", "cardtraderQuantity": "updated", "cardtraderEdit": "done"}));
         assert_eq!(marks.0.lock().unwrap()["cardtraderQuantity"], "updated");
 
