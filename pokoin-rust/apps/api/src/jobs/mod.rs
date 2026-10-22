@@ -2,6 +2,8 @@
 mod cardtrader;
 mod eur;
 mod facet_prices;
+mod fee_once;
+mod group_products;
 mod net_prices;
 mod referral;
 mod reprice;
@@ -64,6 +66,8 @@ pub async fn run(name: &str) -> Result<()> {
         "cardtrader-facet-prices" => facet_prices::run(&options).await,
         "price-unpriced-listings" => unpriced::run(&options).await,
         "cardtrader-net-prices" => net_prices::run(&options).await,
+        "cardtrader-fee-once" => fee_once::run(&options).await,
+        "cardtrader-group-products" => group_products::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
@@ -102,9 +106,10 @@ fn accounts_firestore() -> Result<pokoin_accounts::firestore::Firestore> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 async fn redis_connection() -> Result<redis::aio::ConnectionManager> {
-    let host = std::env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("REDIS_PORT").unwrap_or_else(|_| "6380".into());
-    let client = redis::Client::open(format!("redis://{host}:{port}"))?;
+    // The API's own Valkey (VALKEY_URL / REDIS_URL, else host and port), so a
+    // job's seller lock is the one the API's reconcile takes.
+    let url = pokoin_config::Config::from_env().valkey_url.unwrap_or_else(|| "redis://127.0.0.1:6380".into());
+    let client = redis::Client::open(url)?;
     tokio::time::timeout(Duration::from_secs(5), client.get_connection_manager())
         .await
         .context("Redis connect timed out")?

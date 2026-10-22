@@ -5,7 +5,11 @@
 //! (`ct_fees`: 7 % + VAT for a CardTrader Zero seller, 5 % + VAT otherwise;
 //! `resolve_seller_channel` reads the Zero flag from the seller's own offers in the market book),
 //! the price the reconcile now gives every import and link
-//! (docs/PRICING.md "Net of CardTrader's commission").
+//! (docs/PRICING.md "Net of CardTrader's commission"). Only the seller's own
+//! products (an `import` or `match` link row): a product Pokoin pushed was
+//! listed at the gross-up of its Pokoin price, so netting it again would cut
+//! the Pokoin price by the commission each run (`cardtrader-fee-once` is its
+//! direction).
 //!
 //! The ask comes from one complete `GET /products/export` (one CardTrader
 //! read; nothing is written to CardTrader), never from the Pokoin price, so a
@@ -30,6 +34,12 @@ const LINKED_SQL: &str = r#"
     and listing.source_listing_id ~ '^ct:[0-9]+$'
     and listing.status in ('active', 'paused')
     and listing.quantity_available > 0
+    and exists (
+      select 1 from public.marketplace_cardtrader_product_links as link
+      where link.seller_uid = listing.seller_uid
+        and 'ct:' || link.ct_product_id = listing.source_listing_id
+        and link.origin in ('import', 'match')
+    )
   order by listing.price_pkn desc, listing.id
 "#;
 
@@ -163,6 +173,12 @@ pub(super) async fn run(options: &Options) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_sellers_own_products_are_netted() {
+        assert!(LINKED_SQL.contains("link.origin in ('import', 'match')"));
+        assert!(!LINKED_SQL.contains("'push'"));
+    }
 
     #[test]
     fn the_target_comes_from_the_ask_so_a_rerun_changes_nothing() {

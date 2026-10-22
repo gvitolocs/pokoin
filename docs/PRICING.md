@@ -49,6 +49,27 @@ fee = max(1 cent, ask × rate)    rate: 5 % direct (Pokémon pro floor, sold med
 net = ask − fee × (1 + 22 % VAT)
 ```
 
+A connected seller's own sales use their own rate from CardTrader's full
+table (`ct_fees::Tier`, `Channel::Plan`): EU direct / Zero 5.0 / 7.0 % for
+subscriptions before March 2026 (kept by active sellers until 2026-12-31),
+5.3 / 7.3 % from March 2026; outside the EU 6 / 8 % (7 / 10 %); 1-Day Ready
+16.5 %. The country, Zero status and account type come from the seller's own offers
+in the market book (`country_code`, `can_sell_via_hub`, `user_type`). VAT on
+the commission is per seller (`ct_fees::vat_of`): a private EU seller pays
+their own country's rate (PeppeV, Denmark: 25 %); a VAT-registered business
+(`pro`, or `metadata.vatRegistered`) pays none outside Italy (reverse charge)
+and 22 % in Italy (redshakkio); outside the EU, none. An unknown country is
+priced, at each price, at the worse of outside the EU (7 / 10 %, no VAT) and
+the EU at 27 % VAT (Hungary): on the 1-cent minimum the VAT costs more (a
+14 c ask nets 12.73 c, Denmark's 5 % + 25 % nets 12.75 c), on dearer cards
+the outside-EU rate does. The gross-up is the larger of the two asks. The
+subscription date
+comes from the integration's `metadata.feeEra` (`before-2026-03`), else
+`CARDTRADER_FEE_ERA`, else the current, higher rate. CardTrader shows no
+account date anywhere Pokoin reads, so this is set when the seller confirms
+it. Below €0.19 direct (€0.14 Zero) the 1-cent minimum applies at every EU
+rate, so the tier changes nothing on cheap cards.
+
 Rates from CardTrader's "Payments, fees and refunds" page
 (static.cardtrader.com/en/pages/payments-fees-and-refunds, 2026-10-21): EU
 sellers 5.0 % direct / 7.0 % Zero, minimum 1 cent, VAT added, for
@@ -78,6 +99,70 @@ subscriptions before March 2026 (guaranteed to active sellers until
   `/products/export` read, the target always computed from the CardTrader
   ask (a rerun changes nothing), compare-and-set per listing, nothing
   written to CardTrader.
+
+## Writing to CardTrader: the fee once (2026-10-21)
+
+A Pokoin price is already net, so it is never the CardTrader ask. Every
+write to CardTrader (the push of a new product, an edit from the listing
+outbox, the re-send after a create, `cardtrader-fee-once`) lists the
+**gross-up**: the smallest whole-cent ask whose net, rounded to whole PKN,
+is at least the Pokoin price, at the seller's own rate
+(`FeeRule::gross_cents`; the channel is resolved once per push and stored on
+the listing as `ctChannel`). Before this, the push listed the net as the ask
+and CardTrader took its fee a second time.
+
+Worked row, Spiderling, PeppeV (direct, 5 %), Pokoin 26 PKN:
+
+| | cents | PKN |
+| --- | --- | --- |
+| CardTrader ask (gross-up) | 14 | 28 |
+| commission: max(1 c, 5 % × 14 c) = 1 c, + 22 % VAT | 1.22 | 2.44 |
+| the seller nets | 12.78 | 25.56 → 26 |
+| the buyer pays: ask + Safeguard (€0.09 up to €0.25) | 23 | 46 |
+
+Listing €0.13 instead (the old push) nets 11.78 c = 24 PKN: 2 PKN short.
+
+- The board shows the net with the ask under it (`ask 28`) when they differ.
+- The price check, the Seller API quote and the Card Rails price check net a
+  connected seller's comps at the seller's own channel (5 % or 7 %);
+  everyone else sees the 5 % pro floor and the 7 % Zero file as before.
+- A Pokoin reprice while a CardTrader create is in flight is caught after
+  the create links: the repriced copy leaves the product and the next
+  reconcile pushes it at its new price (`detachedAfterPush` in the reconcile
+  summary), so the stale ask of the create does not stay on CardTrader.
+- Products listed before the fix are raised once:
+  `pokoin-api job cardtrader-fee-once --seller=<uid> [--csv=…] [--apply]`.
+  One `/products/export` read; each active linked listing whose ask does not
+  net its Pokoin price is raised to the gross-up (never lowered; at most 5
+  PUTs a second, stops at a 429). A rerun changes nothing.
+- The integer core (PKN, basis points, 10⁻⁸ PKN) is proved with Verus:
+  `pokoin-rust/verus/README.md`.
+
+## The Pricer (Listings toolbar)
+
+**Pricer…** on the Listings board opens a dialog on the same saved
+strategies as the Pricing page (`users/{uid}` `pricingStrategies`, through
+`/api/pricing-strategies`), not a second model:
+
+- **Source**: CardTrader, or Pokoin (the cheapest Pokoin ask, else the sold
+  median). eBay and TCGplayer are shown, not offered yet.
+- **Basis**: same card and facets (`ctMatchedPkn`), cheapest offer, sold
+  median. **Fee-exclusive** (default on) prices from the net; off, from the
+  CardTrader ask.
+- **Action**: match, undercut or premium, by % and by a fixed PKN amount.
+  **Rounding**: none, whole PKN (nearest), down, up. **Minimum** price:
+  rounding never goes below it; a target at or below 0 is skipped.
+- **Scope**: the board's current view or all listings, game, live or paused,
+  condition, language; "put paused listings on sale" sets them active.
+  Sold-out and removed listings are never repriced.
+
+Preview fetches the comps per game in chunks of 100 and lists the old price,
+the new one, the comp and the CardTrader ask; Apply writes each listing with
+`updateListing` (4 at a time). A CardTrader-linked listing then reaches
+CardTrader through the outbox edit at the gross-up. The planning code is
+`market/src/pricer.js` (tests in `pricer.test.js`); the server validates
+`basis`, `feeExclusive`, `status`, `game` and the roundings in
+`crates/external/src/pricing.rs`.
 
 ## Games other than Pokémon
 

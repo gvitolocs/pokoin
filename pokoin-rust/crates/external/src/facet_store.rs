@@ -261,13 +261,14 @@ pub fn item_from_listing(row: &Value) -> PriceItem {
 /// digits only, D000014): the matching ask net of CardTrader's commission
 /// (`ct_fees`), or `None` without a matching offer or for a graded, signed or
 /// altered copy.
-pub fn listing_price(hit: &StoreHit, row: &Value) -> Option<f64> {
+pub fn listing_price(hit: &StoreHit, row: &Value, seller: Option<crate::ct_fees::Channel>) -> Option<f64> {
     let item = item_from_listing(row);
     if item.one_of_a_kind() {
         return None;
     }
     let (_, matched) = hit.comp(&item);
-    let channel = hit.basis_of(&item)?.channel();
+    // The seller's own commission when known, else the basis's.
+    let channel = seller.or_else(|| hit.basis_of(&item).map(Basis::channel))?;
     matched
         .and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel))
         .map(|pkn| pkn.round().max(1.0))
@@ -681,20 +682,20 @@ mod tests {
                              "reverse": false, "first_edition": false, "graded": false, "signed": false,
                              "altered": false, "marketplace_game": "riftbound"});
         // 240 PKN Zero ask nets 219.5 PKN after 7 % + VAT: 220 PKN.
-        assert_eq!(listing_price(&hit, &listing), Some(220.0));
+        assert_eq!(listing_price(&hit, &listing, None), Some(220.0));
         let mut foil = listing.clone();
         foil["foil_state"] = json!("foil");
         // 1200 PKN: €6.00 less 42 c × 1.22 = €5.4876 → 1098 PKN.
-        assert_eq!(listing_price(&hit, &foil), Some(1098.0));
+        assert_eq!(listing_price(&hit, &foil, None), Some(1098.0));
         let mut lp = listing.clone();
         lp["condition"] = json!("LP");
-        assert_eq!(listing_price(&hit, &lp), Some(220.0), "NM prices LP (SP) under the zero rule");
+        assert_eq!(listing_price(&hit, &lp, None), Some(220.0), "NM prices LP (SP) under the zero rule");
         let mut signed = listing.clone();
         signed["signed"] = json!(true);
-        assert_eq!(listing_price(&hit, &signed), None);
+        assert_eq!(listing_price(&hit, &signed, None), None);
         let mut italian = listing;
         italian["language"] = json!("IT");
-        assert_eq!(listing_price(&hit, &italian), None);
+        assert_eq!(listing_price(&hit, &italian, None), None);
     }
 
     #[test]

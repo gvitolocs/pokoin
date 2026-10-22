@@ -951,17 +951,9 @@ pub(crate) async fn create_listing_keyed(
     tx.commit().await?;
     let mut listing = finish_write(state, &row, queued, &game, &claims.uid).await?;
     if targets["cardtrader"] == true {
-        if queued {
-            cardtrader = json!({"ok":true,"pending":true});
-        } else {
-            match sync::push_listing(state, &claims.uid, &ct_listing(&row), true).await {
-                Ok(p) => {
-                    cardtrader = json!({"ok":true,"productId":p["productId"],"sourceListingId":p["sourceListingId"]});
-                    listing["sourceListingId"] = p["sourceListingId"].clone();
-                }
-                Err(e) => cardtrader = json!({"ok":false,"error":e.message}),
-            }
-        }
+        // The seller reconcile lists it, in one CardTrader product with its
+        // identical copies (cardtrader::group), queued or not.
+        cardtrader = json!({"ok":true,"pending":true});
     }
     listing["cardtrader"] = cardtrader;
     listing["targets"] = targets;
@@ -1179,6 +1171,17 @@ pub(crate) async fn update_listing(
     .await?
     .unwrap_or_else(|| json!({}));
     let source = live::field(&before, "source_listing_id", 160);
+    // Identical copies on the same CardTrader product (cardtrader::group).
+    let siblings: i64 = if pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty() {
+        0
+    } else {
+        sqlx::query_scalar(sync::SIBLINGS_SQL)
+            .bind(&claims.uid)
+            .bind(&source)
+            .bind(uuid)
+            .fetch_one(&mut *tx)
+            .await?
+    };
     let mut builder = sqlx::query(&sql);
     for value in &values {
         builder = bind_json(builder, value);
@@ -1188,7 +1191,17 @@ pub(crate) async fn update_listing(
         .await?
         .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
     let row: Value = row.try_get("listing")?;
-    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":inactive&&!source.is_empty(),"sourceListingId":source,"cardtraderEdit":sync::cardtrader_edit(&before,&row)}),state.now_ms())).await?;
+    // A copy that goes off sale or changes price leaves its group; the
+    // product stays for the others.
+    let leave = sync::group_leave(&before, &row, siblings);
+    if leave.is_some() {
+        sqlx::query(sync::LEAVE_GROUP_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
+        sqlx::query(sync::HAND_OVER_LINK_SQL).bind(uuid).bind(&source).bind(&claims.uid).execute(&mut *tx).await?;
+        sqlx::query(sync::DROP_LEFT_LINK_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
+    }
+    let destroy = inactive && !source.is_empty() && leave.is_none();
+    let edit = leave.or_else(|| sync::cardtrader_edit(&before, &row));
+    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":destroy,"sourceListingId":source,"cardtraderEdit":edit}),state.now_ms())).await?;
     tx.commit().await?;
     let game = live::field(&row, "marketplace_game", 40);
     let listing = finish_write(
@@ -1199,7 +1212,7 @@ pub(crate) async fn update_listing(
         &claims.uid,
     )
     .await?;
-    if !queued && inactive && !source.is_empty() {
+    if !queued && destroy {
         let _ = sync::destroy_product(
             state,
             &claims.uid,
