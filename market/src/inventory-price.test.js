@@ -116,9 +116,6 @@ test('the CardTrader column is net of the seller fee and names the ask', () => {
   const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 219.5, ctMatchedGrossPkn: 240, ctBasis: 'zero', ctFee: { pct: 7, vatPct: 22, minCents: 1, channel: 'zero' } } }, { cardId: '801148' }, 'cardtrader');
   assert.equal(value.value, 219.5);
   assert.match(value.title, /Net of CardTrader's 7% seller fee \+ 22% VAT \(ask 240 PKN\)\./);
-  assert.equal(value.askLabel, '240 PKN', 'the ask shows under the net in the cell');
-  const plain = inventoryMarketValue({ 1: { ctMatchedPkn: 26 } }, { cardId: '1' }, 'cardtrader');
-  assert.equal(plain.askLabel, '');
 });
 
 test('a price from the price store says when the store was refilled', () => {

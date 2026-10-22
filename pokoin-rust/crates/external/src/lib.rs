@@ -45,7 +45,6 @@ pub mod cardtrader_live;
 pub mod cardtrader {
     pub mod async_sync;
     pub mod client;
-    pub mod group;
     pub mod integration;
     pub mod link;
     pub mod push;

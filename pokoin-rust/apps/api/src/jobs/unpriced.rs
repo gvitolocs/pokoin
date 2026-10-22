@@ -52,15 +52,6 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     // Only Postgres: no Firestore, no CardTrader.
     let db = pokoin_external::db::DbPools::from_env(2).await?;
     let game_filter = options.game.clone().unwrap_or_default();
-    // Priced at what this seller nets after their own CardTrader commission
-    // (Zero or direct, from the market book), when the seller is connected.
-    let seller_channel = match pokoin_external::firebase::FirestoreRest::from_env() {
-        Some(fs) => match pokoin_external::cardtrader::integration::read_integration_doc(&fs, &seller).await {
-            Ok(doc) if doc.exists => Some(pokoin_external::ct_fees::resolve_seller_channel(&db, &doc.data).await),
-            _ => None,
-        },
-        None => None,
-    };
     let rows = db.query("pokemon", UNPRICED_SQL, &[json!(seller), json!(game_filter)]).await?;
 
     let mut by_game: BTreeMap<String, Vec<i64>> = BTreeMap::new();
@@ -81,13 +72,12 @@ pub(super) async fn run(options: &Options) -> Result<()> {
         .iter()
         .map(|row| {
             let game = row["marketplace_game"].as_str().unwrap_or("pokemon");
-            let price = hits.get(game).and_then(Option::as_ref).and_then(|hit| facet_store::listing_price(hit, row, seller_channel));
+            let price = hits.get(game).and_then(Option::as_ref).and_then(|hit| facet_store::listing_price(hit, row));
             (row, price)
         })
         .collect();
     let mut summary = json!({
         "seller": seller, "apply": options.apply, "unpriced": plans.len(),
-        "channel": seller_channel.map(|channel| channel.as_str()),
         "priced": 0, "noOffer": 0, "noStore": [], "eurStock": 0.0,
         "activated": 0, "skipped": 0, "games": {},
     });

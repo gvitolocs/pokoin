@@ -660,36 +660,6 @@ pub fn store_game_comp(item: &PriceItem, hit: &crate::facet_store::StoreHit, pok
     comp
 }
 
-/// A comp's net fields again with the seller's own CardTrader channel (what
-/// this seller would net at those asks): the column and the pricer price a
-/// seller's listing by their own commission, not the market basis's.
-pub fn renet(comp: &mut Value, channel: crate::ct_fees::Channel) {
-    let gross = |key: &str| comp.get(key).and_then(Value::as_f64);
-    let (cheapest, matched, sold) = (gross("ctCheapestGrossPkn"), gross("ctMatchedGrossPkn"), gross("soldMedianGrossPkn"));
-    ct_fields(comp, cheapest, matched, channel);
-    if comp.get("soldMedianGrossPkn").is_some() {
-        comp["soldMedianPkn"] = json!(sold.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel)));
-    }
-}
-
-/// [`handle`] for a connected seller: comps net of that seller's own
-/// commission (`channel`, `ct_fees::seller_channel_cached`).
-pub async fn handle_for(
-    db: &DbPools,
-    game: &str,
-    raw_items: &str,
-    exclude_seller_uid: &str,
-    channel: Option<crate::ct_fees::Channel>,
-) -> ApiResult<Value> {
-    let mut payload = handle(db, game, raw_items, exclude_seller_uid).await?;
-    if let (Some(channel), Some(prices)) = (channel, payload["prices"].as_object_mut()) {
-        for comp in prices.values_mut() {
-            renet(comp, channel);
-        }
-    }
-    Ok(payload)
-}
-
 /// Handler helper: validate + read.
 pub async fn handle(db: &DbPools, game: &str, raw_items: &str, exclude_seller_uid: &str) -> ApiResult<Value> {
     let items = parse_items(raw_items);
@@ -850,24 +820,6 @@ mod tests {
         assert_eq!(none["ctMatchedGrossPkn"], Value::Null);
         assert_eq!(none["pokoinCheapestPkn"], json!(30.0));
         assert_eq!(none["cardtraderListed"]["status"], "unavailable");
-    }
-
-    #[test]
-    fn a_sellers_column_nets_their_own_commission() {
-        // A €10.00 Zero ask: the market basis nets 7 % (1829.2 PKN); a direct
-        // seller nets 5 % (1878 PKN). Small asks hit the 1-cent minimum either way.
-        let mut comp = json!({});
-        ct_fields(&mut comp, Some(2000.0), Some(2000.0), crate::ct_fees::Channel::Zero);
-        assert_eq!(comp["ctMatchedPkn"], json!(1829.2));
-        renet(&mut comp, crate::ct_fees::Channel::Direct);
-        assert_eq!(comp["ctMatchedPkn"], json!(1878.0));
-        assert_eq!(comp["ctMatchedGrossPkn"], json!(2000.0));
-        assert_eq!(comp["ctFee"]["channel"], "direct");
-        let mut small = json!({});
-        ct_fields(&mut small, Some(28.0), Some(28.0), crate::ct_fees::Channel::Zero);
-        let zero = small["ctMatchedPkn"].clone();
-        renet(&mut small, crate::ct_fees::Channel::Direct);
-        assert_eq!(small["ctMatchedPkn"], zero, "Spiderling €0.14: 1 cent + VAT either way, 25.56 PKN");
     }
 
     #[test]
