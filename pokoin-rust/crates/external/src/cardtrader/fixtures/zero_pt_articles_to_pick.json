@@ -1,0 +1,38 @@
+{
+  "articleMap": {
+    "7001": {
+      "ptOrderArticleId": 7001, "ptOrderId": 80, "source": "Cardtrader",
+      "sourceOrderId": 9001, "sourceArticleId": "502", "pickingId": "B-12", "quantity": 3,
+      "product": { "enName": "Pikachu", "locName": "Pikachu", "nr": "25", "expansion": "Base Set", "expansionCode": "BS", "rarity": "Common", "category": "Singles", "idGame": 6 },
+      "locationIds": [11, 12], "updatedAt": "2026-10-20T09:00:00.000Z"
+    },
+    "7002": {
+      "ptOrderArticleId": 7002, "ptOrderId": 80, "source": "Cardtrader",
+      "sourceOrderId": "9001", "sourceArticleId": 501, "pickingId": "B-12", "quantity": 1,
+      "product": { "enName": "Bulbasaur", "nr": "44" }, "locationIds": []
+    },
+    "7003": {
+      "ptOrderArticleId": "7003", "ptOrderId": "80", "source": "Cardtrader",
+      "sourceOrderId": " 9001 ", "sourceArticleId": "503", "pickingId": 12, "quantity": 1,
+      "product": { "enName": "Charmander", "nr": "46" }, "locationIds": [12]
+    },
+    "7004": {
+      "ptOrderArticleId": 7004, "ptOrderId": 81, "source": "Cardtrader",
+      "sourceOrderId": 9002, "sourceArticleId": "601", "pickingId": "B-13", "quantity": 1,
+      "product": { "enName": "Squirtle", "nr": "63" }, "locationIds": [11]
+    }
+  },
+  "locationMap": {
+    "11": { "name": "Binder A", "quantity": 4 },
+    "12": { "name": "Box 3", "quantity": 9 },
+    "13": { "name": "unknown*", "quantity": 0 }
+  },
+  "pickings": [
+    { "ptOrderArticleId": 7004, "locationId": 11, "deltaQuantity": -1, "pickedQuantity": 0, "articleState": "toPick", "issues": [], "sortIndex": 0 },
+    { "ptOrderArticleId": 7003, "locationId": "12", "deltaQuantity": -1, "pickedQuantity": 0, "articleState": "toPick", "issues": [], "sortIndex": 7 },
+    { "ptOrderArticleId": "7001", "locationId": 11, "deltaQuantity": -2, "pickedQuantity": 1, "articleState": "picked", "issues": [], "sortIndex": 2 },
+    { "ptOrderArticleId": 7002, "pickedQuantity": 0, "articleState": "toPick", "issues": [], "sortIndex": 1 },
+    { "ptOrderArticleId": 7001, "locationId": 12, "deltaQuantity": -1, "pickedQuantity": 0, "articleState": "toPick", "issues": [], "sortIndex": 5 }
+  ],
+  "sortingFields": [{ "field": "location", "direction": "asc" }]
+}

@@ -28,6 +28,7 @@ pub fn router(state: DomainState) -> Router {
         .route("/api/cardtrader-sync", get(cardtrader::sync_status).post(cardtrader::sync_start))
         .route("/api/cardtrader-assets", get(cardtrader::assets))
         .route("/api/cardtrader-zero", get(cardtrader::zero))
+        .route("/api/cardtrader-zero-pick", post(cardtrader::zero_pick))
         .route("/api/cardtrader-clean-listings", post(cardtrader::clean_listings))
         .route("/api/cardtrader-webhook/{uid}", post(cardtrader::webhook))
         .route("/api/cardtrader-blueprint-listings", get(cardtrader::blueprint_listings))

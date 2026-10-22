@@ -138,36 +138,69 @@ export function previewCollection() {
   return { rows, listings, asks };
 }
 
+// Already in the contract's picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then other games;
+// inside a game by box (natural), stacked lines before the bare box, unlocated lines last.
 const ZERO_LINES = [
-  { itemId: 'z-1', quantity: 1, location: 'box1·2', condition: 'NM', language: 'EN', lineCents: 1200, currency: 'EUR' },
-  { itemId: 'z-2', quantity: 2, location: 'box1·4', condition: 'NM', language: 'EN', lineCents: 2400, currency: 'EUR' },
-  { itemId: 'z-3', quantity: 1, location: 'binder·1', condition: 'SP', language: 'IT', lineCents: 800, currency: 'EUR' },
-  { itemId: 'z-4', quantity: 1, location: '', condition: 'NM', language: 'EN', lineCents: 450, currency: 'EUR' },
-  { itemId: 'z-5', quantity: 2, location: 'box2·1', condition: 'NM', language: 'JP', lineCents: 1600, currency: 'EUR' },
-  { itemId: 'z-6', quantity: 1, location: 'box2·3', condition: 'MP', language: 'EN', lineCents: 300, currency: 'EUR' },
-  { itemId: 'z-7', quantity: 1, location: '', condition: 'NM', language: 'EN', lineCents: 900, currency: 'EUR' },
-  { itemId: 'z-8', quantity: 1, location: 'box1·1', condition: 'NM', language: 'EN', lineCents: 700, currency: 'EUR' },
-  { itemId: 'z-9', quantity: 2, location: 'binder·2', condition: 'NM', language: 'EN', lineCents: 1100, currency: 'EUR' },
-  { itemId: 'z-10', quantity: 1, location: '', condition: 'SP', language: 'EN', lineCents: 500, currency: 'EUR' },
+  { itemId: 7001, game: 'magic', name: 'Lightning Bolt', expansion: 'Magic 2010', collectorNumber: '146', rarity: 'Common', location: 'binder·1·1', slot: { box: 'binder', stack: 1, position: 1 }, unitCents: 180, condition: 'NM', language: 'EN', picked: 1, pt: 1 },
+  { itemId: 7002, game: 'magic', name: 'Fulmine', nameEn: 'Lightning Bolt', expansion: 'Fourth Edition', collectorNumber: '208', rarity: 'Common', location: 'binder·1·4', slot: { box: 'binder', stack: 1, position: 4 }, unitCents: 250, condition: 'SP', language: 'IT', allocation: 'members', alsoIn: ['binder·2·7'], pt: 2 },
+  { itemId: 7003, game: 'pokemon', card: 0, rarity: 'Common', location: 'box2·1', slot: { box: 'box2', stack: 1, position: null }, unitCents: 120, condition: 'NM', language: 'EN', firstEdition: true, pt: 3 },
+  { itemId: 7004, game: 'pokemon', card: 1, rarity: 'Holo Rare', location: 'box10·1', slot: { box: 'box10', stack: 1, position: null }, unitCents: 18500, condition: 'MP', language: 'EN', pt: 5, mismatch: true },
+  { itemId: 7011, game: 'pokemon', card: 5, rarity: 'Illustration Rare', location: '', locationSource: 'powertools', sortLocation: 'FUOCOBOMBA 001 - 2', slot: { box: 'FUOCOBOMBA 001', stack: 2, position: null }, unitCents: 760, condition: 'NM', language: 'EN', pt: 4, mismatch: true },
+  { itemId: 7008, game: 'pokemon', card: 4, rarity: 'Illustration Rare', location: '', slot: null, unitCents: 900, condition: 'NM', language: 'JP', reverse: true, pt: 6, nameJa: 'コダック' },
+  { itemId: 7006, game: 'yugioh', name: 'Blue-Eyes White Dragon', expansion: 'Legend of Blue Eyes', collectorNumber: 'LOB-001', rarity: 'Ultra Rare', location: 'ygo·3', slot: { box: 'ygo', stack: 3, position: null }, unitCents: 3200, condition: 'NM', language: 'EN', pt: 7, issue: { type: 'wrong_condition', note: 'Edge wear, looks SP.', at: '2026-10-22T08:15:00.000Z' } },
+  { itemId: 7005, listing: 'L71', game: 'riftbound', name: 'Vendetta', expansion: 'Origins', collectorNumber: '41', rarity: 'Rare', location: 'megaevoluzionietb-41-20·2', slot: { box: 'megaevoluzionietb-41-20', stack: 2, position: null }, unitCents: 450, quantity: 3, itemQuantity: 5, allocation: 'event', picked: 1, foil: true, condition: 'NM', language: 'EN', pt: 8 },
+  { itemId: 7005, listing: 'L72', game: 'riftbound', name: 'Vendetta', expansion: 'Origins', collectorNumber: '41', rarity: 'Rare', location: 'megaevoluzionietb-41-20·5', slot: { box: 'megaevoluzionietb-41-20', stack: 5, position: null }, unitCents: 450, quantity: 2, itemQuantity: 5, allocation: 'event', foil: true, condition: 'NM', language: 'EN', pt: 8 },
+  { itemId: 7009, game: 'riftbound', name: 'Jinx, Loose Cannon', expansion: 'Origins', collectorNumber: '202', rarity: 'Epic', location: 'megaevoluzionietb-41-20', slot: { box: 'megaevoluzionietb-41-20', stack: null, position: null }, unitCents: 1290, condition: 'NM', language: 'EN', signed: true, pt: 9 },
+  { itemId: 7010, game: 'one_piece', name: 'Monkey.D.Luffy', expansion: 'Romance Dawn', collectorNumber: 'OP01-024', rarity: 'Super Rare', location: 'op·1', slot: { box: 'op', stack: 1, position: null }, unitCents: 640, condition: 'NM', language: 'JP', altered: true, pt: 10 },
 ].map((line, index) => {
-  const printing = card(index);
+  const printing = line.card != null ? card(line.card) : null;
+  const quantity = line.quantity || 1;
   return {
-    ...line,
-    cardId: printing.cardId,
-    name: printing.cardName,
-    expansion: printing.expansion,
-    collectorNumber: printing.collectorNumber,
-    imageUrl: printing.imageUrl || '',
-    powerTools: { position: index + 1, bin: line.location ? 'A' : '', orderState: 'to pick' },
+    itemId: line.itemId,
+    lineKey: line.listing ? `${line.itemId}@${line.listing}` : String(line.itemId),
+    quantity,
+    itemQuantity: line.itemQuantity || quantity,
+    game: line.game,
+    cardId: printing?.cardId || '',
+    name: line.nameJa || printing?.cardName || line.name,
+    nameEn: line.nameEn || (line.nameJa ? printing.cardName : ''),
+    rarity: line.rarity || '',
+    expansion: printing?.expansion || line.expansion,
+    collectorNumber: printing?.collectorNumber || line.collectorNumber,
+    imageUrl: printing?.imageUrl || '',
+    condition: line.condition,
+    language: line.language,
+    reverse: Boolean(line.reverse),
+    foil: Boolean(line.foil),
+    firstEdition: Boolean(line.firstEdition),
+    signed: Boolean(line.signed),
+    altered: Boolean(line.altered),
+    graded: false,
+    unitCents: line.unitCents,
+    lineCents: line.unitCents * quantity,
+    currency: 'EUR',
+    location: line.location,
+    locationSource: line.locationSource ?? (line.location ? 'pokoin' : ''),
+    sortLocation: line.sortLocation ?? line.location,
+    listedAt: line.location ? `2026-09-${String(10 + index).padStart(2, '0')}T09:00:00.000Z` : null,
+    slot: line.slot,
+    allocation: line.allocation || (line.location ? 'listing' : 'none'),
+    alsoIn: line.alsoIn || [],
+    picked: line.picked || 0,
+    issue: line.issue || null,
+    powerTools: {
+      orderState: 'to pick',
+      isCtZeroClosing: true,
+      articleState: 'to_pick',
+      pickedQuantity: line.picked || 0,
+      location: line.sortLocation || line.location,
+      bin: 'B7',
+      position: line.pt,
+      ptQuantity: line.itemQuantity || quantity,
+      mismatch: Boolean(line.mismatch),
+    },
   };
 });
-
-export function seedPreviewPicked() {
-  try {
-    const key = 'pokoin.ctZero.picked.preview-zero';
-    if (localStorage.getItem(key) == null) localStorage.setItem(key, JSON.stringify(['z-3', 'z-7']));
-  } catch (_) { /* private mode */ }
-}
 
 export function previewZero() {
   const items = copy(ZERO_LINES);
@@ -175,18 +208,39 @@ export function previewZero() {
   const cents = items.reduce((sum, item) => sum + item.lineCents, 0);
   return {
     oneDayReady: false,
+    fetchedAt: '2026-10-22T09:41:00.000Z',
     cardtrader: { username: 'preview-seller' },
-    powerTools: { ok: true },
+    powerTools: {
+      connected: true,
+      ok: true,
+      username: 'preview-seller',
+      matchedOrders: 1,
+      matchedItems: items.length,
+      ptOrderCount: 1,
+      picking: { ok: true, source: 'articlesToPick', error: null },
+    },
     pending: { items: [], orderCount: 0 },
     totals: {
       weekly: { units, lines: items.length, cents },
       pending: { units: 0 },
     },
     weekly: [{
-      orderId: 'preview-zero',
+      orderId: '90421042',
       code: 'Z-1042',
       packingNumber: 12,
       paidAt: '2026-10-09T10:00:00.000Z',
+      pickedLines: items.filter((item) => item.picked >= item.quantity).length,
+      issueCount: items.filter((item) => item.issue).length,
+      ptPicking: {
+        listId: 'pt-preview',
+        listName: 'Ct Zero closed',
+        variant: 'ct_zero',
+        ctZeroClosed: true,
+        bin: 'B7',
+        sortingFields: ['location'],
+        comparable: true,
+        mismatches: 2,
+      },
       items,
     }],
   };

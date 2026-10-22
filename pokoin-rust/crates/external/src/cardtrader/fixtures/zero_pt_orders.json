@@ -1,0 +1,16 @@
+[
+  {
+    "ptOrderId": 80, "source": "CardTrader", "sourceOrderId": 9001, "isCtZero": true, "isCtZeroClosing": false,
+    "state": "open",
+    "articles": [
+      { "ptOrderArticleId": 7001, "sourceArticleId": 502, "pickingId": "ART-BIN", "quantity": 3, "pickedQuantity": 1, "articleState": "toPick", "locationInfo": { "name": "Binder A" } },
+      { "ptOrderArticleId": 7002, "sourceArticleId": "501", "pickingId": "ART-BIN", "quantity": 1, "pickedQuantity": 0 },
+      { "ptOrderArticleId": 7003, "sourceArticleId": "503", "pickingId": "ART-BIN", "quantity": 1, "pickedQuantity": 0 }
+    ],
+    "picking": { "pickingList": "Zero 42", "pickingId": "B-12", "numPickedArticles": 1, "numArticles": 5 }
+  },
+  {
+    "ptOrderId": 81, "source": "Cardtrader", "sourceOrderId": "9002", "isCtZero": true, "isCtZeroClosing": true,
+    "state": "open", "articles": [], "picking": { "pickingList": "Zero 42", "pickingId": "B-13" }
+  }
+]

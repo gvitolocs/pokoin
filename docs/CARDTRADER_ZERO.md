@@ -1,7 +1,8 @@
 # CardTrader Zero list
 
 Pokoin page: `/mypokoin/zero` (MyPokoin → **CardTrader Zero**).
-API: `GET /api/cardtrader-zero`, `GET/POST/DELETE /api/powertools-connect`.
+API: `GET /api/cardtrader-zero`, `POST /api/cardtrader-zero-pick`,
+`GET/POST/DELETE /api/powertools-connect`.
 
 ## What the Thursday list is
 
@@ -39,14 +40,117 @@ Returns `weekly[]` (merged orders with `items[]`), `pending.items[]`, `totals`, 
 expansion, collector number, condition/language (blank when CardTrader has none, per
 D00000F), quantity, seller price, and:
 
-- `location`: the seller's MyPokoin location from the linked
-  `marketplace_user_listings` row (`source_listing_id = ct:<product_id>`);
-- `powerTools`: Power Tools order state, picked quantity, location, and bin, when a
-  Power Tools session is connected.
+- `location` / `slot`: the seller's MyPokoin location of the copy, and its parse
+  (`{box, stack, position}`, the port of `parseListingLocation`);
+- `game` and `gameSource`, `listedAt` (when the copy entered the inventory), `nameEn`, `rarity`;
+- `locationSource` (`pokoin` | `powertools` | `""`), `sortLocation` (the location actually
+  ranked), and `ptLocation` (this line's Power Tools location);
+- `lineKey`, `quantity` (copies on this line), `itemQuantity`, `allocation`, `alsoIn`;
+- `picked` / `issue`: the server-side picked state;
+- `powerTools`: Power Tools order state, picked quantity, location, bin, and its picking
+  position, when a Power Tools session is connected.
 
-Lines sort by location (natural order, located first), then set, collector number, and name.
-The page's "picked" ticks are kept per browser in `localStorage`. They are a picking aid,
-not shared state.
+Each weekly order adds `ptPicking`, `pickedLines`, and `issueCount`; top-level
+`powerTools.picking` is `{ok, source: "articlesToPick" | "orders" | "none", error}`.
+
+### One line per box
+
+Since one CardTrader product carries all of a seller's identical copies
+(`source_listing_id = ct:<productId>` on every member), a 5-copy sale can leave from
+five boxes. Each CardTrader item becomes one line per box:
+
+1. **`event`**: the sale's webhook event doc `cardtrader_webhook_events/{uid}_{order}_{item}`
+   lists `allocations: [{listingId, quantity}]` (the copies the decrement took: the named
+   listing first, then oldest). Zero decrements on the `hub_pending` order, so the doc of
+   the item's `hub_pending_order_id` is read first, then the weekly order's. One line per
+   allocation; a short sum puts the remainder on the first line.
+2. **`members`**: no allocations and several members: one line at the named listing,
+   else the oldest member, for the full quantity; `alsoIn` lists the other members'
+   locations.
+3. **`listing`**: a single member, or the listing `user_data_field` names.
+4. **`none`**: no Pokoin listing.
+
+Rows are read without a status filter: a `sold_out` row still says which box the copy
+left. `lineKey` is `<itemId>@<listingId>` for a linked line, else `<itemId>`.
+
+### Picking order
+
+> "the picking list should always start with magic cards, pokemon, yugioh, riftbound and
+> all the other games, and assume the position according to when they have been added to
+> the inventory of the seller."
+
+Lines of one order (and the pending list) sort by:
+
+1. game: magic, pokemon, yugioh, riftbound, every other game (by slug), unknown last;
+2. located lines before lines with no location;
+3. box (text before the first `·`/`•`), natural and case-insensitive (`box2` < `box10`);
+4. lines with a stack number before bare-box lines, then stack ascending;
+5. explicit position ascending, lines without one after;
+6. listing `created_at` ascending (when the copy entered the inventory), missing last;
+7. listing id (numeric when both are digits);
+8. unlinked lines: expansion, collector number (`2/102` < `10/102`), name, item id, `lineKey`.
+
+Stack and position follow `parseListingLocation`: `box·3·5-9` is stack 3 position 5,
+`box·2-4` is stack 2, `box1·47` is box `box1` stack 47.
+
+**Effective location.** A line ranks by its Pokoin location; with none, by its Power
+Tools location (`locationMap[locationId].name` of its picking, or in the `user/order`
+fallback `locationInfo.name`, else the `locations[]` holding copies). A line with only a
+Power Tools location is located and takes its place in the box order; a line with both
+always uses the Pokoin one. When Power Tools splits an item over several locations, the
+item's first line takes the first location, the second the second, and so on. Power
+Tools names are free text: a trailing `: n (m available)`, `(m available)`, or `:` is
+stripped, and `""` / `unknown…` count as no location. Names with `·`/`•` parse like
+Pokoin locations; others use the Power Tools import grammar (`trailing_stack`):
+`FUOCOBOMBA 001 - 131` is box `FUOCOBOMBA 001` stack 131, `BINDER 7` is box `BINDER`
+stack 7, `DANDANDECK` is a bare box. So `FUOCOBOMBA 001 - 2` sorts between Pokoin
+`FUOCOBOMBA 001·1` and `FUOCOBOMBA 001·3`.
+
+**Game per line**, first answer wins (`gameSource`):
+
+1. `cardtrader`: the order item's `game_id`;
+2. `blueprint`: the blueprint id found in exactly one game catalog (one bulk query per
+   catalog, the same registry as the Power Tools CSV import);
+3. `powertools`: the Power Tools article's `product.idGame` (Cardmarket ids: 1 Magic,
+   3 Yu-Gi-Oh!, 6 Pokémon, 8 Vanguard, 13 Dragon Ball Super, 16 Flesh and Blood,
+   17 Digimon, 18 One Piece, 19 Lorcana, 21 Star Wars, 22 Riftbound, 23 Cyberpunk);
+4. `listing`: the linked listing's `marketplace_game`. It is last because that
+   column defaults to `pokemon`, so older non-Pokémon imports can carry the wrong game;
+5. none: `""`, sorted last.
+
+### Power Tools picking order
+
+With a Power Tools session, Pokoin reads (never writes) Power Tools' own order:
+
+1. `GET user/order` (as before), matched to the weekly order by `sourceOrderId`;
+2. once, `GET user/order/getUserPickingLists?state=open`; per weekly order the open list
+   holding its `ptOrderId` (or named by `picking.pickingList`), a `cardtrader_zero` list first;
+3. per chosen list, `PUT user/order/getArticlesToPick` with `{pickingListId}` **only**.
+   `pickings[]` comes back in Power Tools picking order.
+
+Never send `sortingFields` (Power Tools re-sorts and saves the seller's sort on that
+list) and never call `updateSorting` or any other Power Tools write. Each item gets its
+1-based `position` in that order, its picked count (sum over its pickings), its locations,
+and the bin (`article.pickingId`). `mismatch` flags items whose rank in Pokoin's order
+differs from Power Tools'; `ptPicking.ctZeroClosed` mirrors the "Ct Zero closed" tag.
+Ids arrive as strings or numbers and are compared as text. Any Power Tools failure keeps
+the CardTrader list and falls back to the `user/order` article overlay (position null,
+bin from the order's `picking.pickingId`).
+
+### Picked state
+
+`POST /api/cardtrader-zero-pick`, Firebase bearer:
+`{orderId, lineKey, picked?, issue?}` or `{orderId, reset: true}`.
+`orderId` is digits (≤ 40, else `400 invalid_order`), `lineKey` ≤ 120 chars of
+`[0-9A-Za-z@_:.-]`, `picked` is clamped to 0..999, and `issue` is null (clears) or
+`{type, note ≤ 280}` with type `missing`, `wrong_condition`, `wrong_language`,
+`wrong_foil`, `wrong_first_edition`, or `other`. Answers
+`{ok, orderId, line: {lineKey, picked, issue, updatedAt}}`.
+
+Stored on Firestore `cardtrader_zero_picks/{uid}_{orderId}`, one top-level field per line,
+`l_<hex of lineKey>`, because a Firestore merge replaces a nested map wholesale.
+`reset` deletes the doc. `GET /api/cardtrader-zero` reads it back, clamping `picked` to
+the line, so ticks follow the seller across devices.
 
 ## Power Tools session
 
@@ -77,6 +181,6 @@ is encrypted and why it can be deleted.
 
 ## Deploy
 
-Both routes ship in the Rust release (`pokoin-rust/crates/external`: `cardtrader/zero.rs`,
+The routes ship in the Rust release (`pokoin-rust/crates/external`: `cardtrader/zero.rs`,
 `powertools.rs`; `scripts/deploy-pokoin-rust.sh`). Without a bearer each answers `401`.
 The SPA page ships with the web deploy.

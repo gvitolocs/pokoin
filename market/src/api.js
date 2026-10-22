@@ -1106,6 +1106,18 @@ export function fetchCardTraderZero(token) {
   });
 }
 
+/** `{ orderId, lineKey, picked?, issue? }` or `{ orderId, reset: true }`: Zero picking state, server side. */
+export function saveCardTraderZeroPick(token, body) {
+  return getJson('/api/cardtrader-zero-pick', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export function fetchPowerToolsStatus(token) {
   return getJson('/api/powertools-connect', {
     headers: {

@@ -629,6 +629,7 @@ fn external_fallback_router() -> Router {
         "/api/cardtrader-sync",
         "/api/cardtrader-assets",
         "/api/cardtrader-zero",
+        "/api/cardtrader-zero-pick",
         "/api/cardtrader-clean-listings",
         "/api/cardtrader-webhook/{uid}",
         "/api/cardtrader-blueprint-listings",

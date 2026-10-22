@@ -1184,6 +1184,14 @@
   "purpose": "CardTrader Zero picking list: the weekly merged paid Zero order (the Thursday shipment) plus hub_pending Zero sales still waiting for the next merge, with MyPokoin locations and an optional Power Tools picking overlay."
  },
  {
+  "path": "/api/cardtrader-zero-pick",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_pick; no Node origin)",
+  "purpose": "CardTrader Zero picking list picked state: per-line picked count and issue (missing, wrong condition/language/foil/first edition, other) for one weekly Zero order, or reset of the whole order. Stored on Firestore cardtrader_zero_picks/{uid}_{orderId}; GET /api/cardtrader-zero reads it back."
+ },
+ {
   "path": "/api/powertools-connect",
   "methods": [
    "GET",

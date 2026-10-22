@@ -12,7 +12,7 @@ pub type GameIndex = HashMap<String, HashSet<String>>;
 pub type SetNameIndex = HashMap<String, HashSet<String>>;
 
 /// The registry is checked into the binary; request data never becomes SQL.
-fn catalogs() -> Vec<(String, String)> {
+pub(crate) fn catalogs() -> Vec<(String, String)> {
     let games: Vec<Value> = serde_json::from_str(include_str!("ingest_games.json")).expect("game registry");
     let mut tables = vec![("pokemon".into(), "public.cardtrader_pokemon_blueprints".into())];
     tables.extend(games.iter().map(|g| (
