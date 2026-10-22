@@ -197,11 +197,12 @@ fn plain_collector_number(value: &str) -> String {
         .to_owned()
 }
 
-/// Terms tried only when the full structured term finds no candidates. The candidate search
-/// misses rows when a collector number and a set name share one term ("Pikachu 039 30th
-/// Celebration" finds nothing, while "Pikachu 039" and "Pikachu 30th Celebration" do), so
-/// search those halves; ranking still scores the rows against the full term.
-fn structured_fallback_terms(input: &SearchInput) -> Vec<String> {
+/// Candidate terms for a structured request with both a collector number and a set. The
+/// candidate search misses rows when a number and a set name share one term ("Pikachu 039
+/// 30th Celebration" finds nothing, and on the Pi takes ~8 s to do so), while "Pikachu 039"
+/// and "Pikachu 30th Celebration" each find the card in 1-3 s. Search those halves instead
+/// (concurrently); ranking still scores the rows against the full term.
+fn structured_split_terms(input: &SearchInput) -> Vec<String> {
     if input.source != "structured_fields" {
         return Vec::new();
     }
@@ -212,7 +213,7 @@ fn structured_fallback_terms(input: &SearchInput) -> Vec<String> {
     if name.is_empty() || number.is_empty() || expansion.is_empty() {
         return Vec::new();
     }
-    let mut seen: HashSet<String> = input.search_terms.iter().cloned().collect();
+    let mut seen = HashSet::new();
     [format!("{name} {number}"), format!("{name} {expansion}")]
         .into_iter()
         .map(term)
@@ -307,33 +308,39 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
         return Ok(Value::Object(out));
     }
     let redis = state.api.redis().await;
-    let mut ctx = Ctx::new(state.api.read().clone(), redis);
+    let mut ctx = Ctx::new(state.api.read().clone(), redis.clone());
     if wants_debug {
         ctx.debug = Some(json!({ "steps": [] }));
     }
     let candidate_started = std::time::Instant::now();
     let mut seen = HashSet::new();
     let mut rows = Vec::new();
-    for term in &input.search_terms {
-        let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
-            .await
-            .map_err(|e| engine_error(&e, "Extension card search failed."))?;
-        for row in found {
-            let id = id_string(&row);
-            if !id.is_empty() && seen.insert(id) {
-                rows.push(row);
+    let split_terms = structured_split_terms(&input);
+    if !split_terms.is_empty() {
+        let read = state.api.read().clone();
+        let searches = split_terms.iter().map(|term| {
+            let mut term_ctx = Ctx::new(read.clone(), redis.clone());
+            let language = language.clone();
+            async move { engine::rows_for_autocomplete_search_term(&mut term_ctx, term, pool_limit as i64, &language, None, false).await }
+        });
+        for found in futures_util::future::join_all(searches).await {
+            for row in found.map_err(|e| engine_error(&e, "Extension card search failed."))? {
+                let id = id_string(&row);
+                if !id.is_empty() && seen.insert(id) {
+                    rows.push(row);
+                }
             }
         }
-    }
-    let fallback_terms = if rows.is_empty() { structured_fallback_terms(&input) } else { Vec::new() };
-    for term in &fallback_terms {
-        let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
-            .await
-            .map_err(|e| engine_error(&e, "Extension card search failed."))?;
-        for row in found {
-            let id = id_string(&row);
-            if !id.is_empty() && seen.insert(id) {
-                rows.push(row);
+    } else {
+        for term in &input.search_terms {
+            let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
+                .await
+                .map_err(|e| engine_error(&e, "Extension card search failed."))?;
+            for row in found {
+                let id = id_string(&row);
+                if !id.is_empty() && seen.insert(id) {
+                    rows.push(row);
+                }
             }
         }
     }
@@ -345,7 +352,13 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
     let analytics_ms = analytics_started.elapsed().as_millis() as u64;
     let rank_started = std::time::Instant::now();
     let candidate_rows = rows.len();
-    let ranked = rank_autocomplete_entries(rows, &input.search_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    let mut ranked = rank_autocomplete_entries(rows, &input.search_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    // The requested set wins against same-number siblings ("30th Celebration" before
+    // "30th Celebration Simplified Chinese"); the sort is stable, so rank order holds otherwise.
+    let wanted_set = compact_part(&input.parts.expansion).to_lowercase();
+    if !wanted_set.is_empty() {
+        ranked.sort_by_key(|entry| compact_part(&js::string_or_empty(entry.row.get("set_name"))).to_lowercase() != wanted_set);
+    }
     let rank_ms = rank_started.elapsed().as_millis() as u64;
     out.insert("matches".into(), Value::Array(ranked.iter().map(|e| match_from_entry(e, &language)).collect()));
     if wants_debug {
@@ -366,7 +379,7 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
             "debug".into(),
             json!({
                 "searchTerms": input.search_terms,
-                "fallbackTerms": fallback_terms,
+                "splitTerms": split_terms,
                 "candidateRows": candidate_rows,
                 "boostedRows": boosts.size(),
                 "candidateDurationMs": candidate_ms,
@@ -418,14 +431,14 @@ mod tests {
     }
 
     #[test]
-    fn structured_fallback_splits_number_and_set() {
+    fn structured_requests_split_number_and_set() {
         let input = build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "30C 039", "expansion": "30th Celebration" }));
         assert_eq!(input.search_term, "Pikachu 30C 039 30th Celebration");
-        assert_eq!(structured_fallback_terms(&input), vec!["Pikachu 039", "Pikachu 30th Celebration"]);
+        assert_eq!(structured_split_terms(&input), vec!["Pikachu 039", "Pikachu 30th Celebration"]);
         let plain = build_extension_search_term(&json!({ "name": "Umbreon V", "collectorNumber": "189/203", "expansion": "Evolving Skies" }));
-        assert_eq!(structured_fallback_terms(&plain), vec!["Umbreon V 189/203", "Umbreon V Evolving Skies"]);
-        // No fallback without both a number and a set, or for free-text queries.
-        assert!(structured_fallback_terms(&build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "039" }))).is_empty());
-        assert!(structured_fallback_terms(&build_extension_search_term(&json!({ "query": "Pikachu 039 30th Celebration", "collectorNumber": "039", "expansion": "30th Celebration" }))).is_empty());
+        assert_eq!(structured_split_terms(&plain), vec!["Umbreon V 189/203", "Umbreon V Evolving Skies"]);
+        // No split without both a number and a set, or for free-text queries.
+        assert!(structured_split_terms(&build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "039" }))).is_empty());
+        assert!(structured_split_terms(&build_extension_search_term(&json!({ "query": "Pikachu 039 30th Celebration", "collectorNumber": "039", "expansion": "30th Celebration" }))).is_empty());
     }
 }
