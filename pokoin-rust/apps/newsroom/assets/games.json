@@ -1,0 +1,295 @@
+[
+  {
+    "id": "pokemon",
+    "name": "Pokémon",
+    "short": "Pokémon TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Pokemon TCG\" OR \"Pokémon TCG\" OR \"Pokemon Trading Card Game\"",
+      "\"Pokemon card\" OR \"Pokémon cards\" set OR promo OR booster"
+    ],
+    "match": "\\bpok[eé]mon\\b",
+    "strong": "\\b(pok[eé]mon tcg|pok[eé]mon trading card game|pokebeach|pok[eé]mon cards?|pok[eé]mon card game|pok[eé]mon pocket)\\b",
+    "exclude": "\\bpok[eé]mon go\\b(?![^.]*\\bcard)",
+    "slug": ""
+  },
+  {
+    "id": "one_piece",
+    "name": "One Piece",
+    "short": "One Piece Card Game",
+    "newsActive": true,
+    "queries": [
+      "\"One Piece Card Game\" OR \"One Piece TCG\""
+    ],
+    "match": "\\bone piece\\b",
+    "strong": "\\bone piece (card game|tcg|ccg)\\b|\\bop-?\\d{2}\\b",
+    "slug": "one-piece"
+  },
+  {
+    "id": "riftbound",
+    "name": "Riftbound",
+    "short": "Riftbound",
+    "newsActive": true,
+    "queries": [
+      "Riftbound \"League of Legends\" card game OR TCG"
+    ],
+    "match": "\\briftbound\\b",
+    "strong": "\\briftbound\\b",
+    "slug": "riftbound"
+  },
+  {
+    "id": "magic",
+    "name": "Magic",
+    "short": "Magic: The Gathering",
+    "newsActive": true,
+    "queries": [
+      "\"Magic: The Gathering\" OR \"MTG\" set OR card OR banned",
+      "\"Magic the Gathering\" Secret Lair OR Commander OR booster"
+    ],
+    "match": "\\b(magic:? the gathering|mtg)\\b",
+    "strong": "\\b(magic:? the gathering|mtg|secret lair|commander precon|mtg arena)\\b",
+    "slug": "magic"
+  },
+  {
+    "id": "yugioh",
+    "name": "Yu-Gi-Oh!",
+    "short": "Yu-Gi-Oh! TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Yu-Gi-Oh\" TCG OR OCG OR \"card game\" OR banlist"
+    ],
+    "match": "\\byu-?gi-?oh!?\\b",
+    "strong": "\\byu-?gi-?oh!? (tcg|ocg|card game|trading card game|master duel)\\b|\\bforbidden (and|&) limited\\b",
+    "slug": "yugioh"
+  },
+  {
+    "id": "lorcana",
+    "name": "Lorcana",
+    "short": "Disney Lorcana",
+    "newsActive": true,
+    "queries": [
+      "\"Disney Lorcana\" OR \"Lorcana TCG\""
+    ],
+    "match": "\\blorcana\\b",
+    "strong": "\\blorcana\\b",
+    "slug": "lorcana"
+  },
+  {
+    "id": "flesh_and_blood",
+    "name": "Flesh and Blood",
+    "short": "Flesh and Blood TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Flesh and Blood\" TCG OR \"card game\" \"Legend Story\""
+    ],
+    "match": "\\bflesh (and|&) blood\\b",
+    "strong": "\\bflesh (and|&) blood (tcg|card game)\\b|\\blegend story studios\\b",
+    "slug": "flesh-and-blood"
+  },
+  {
+    "id": "digimon",
+    "name": "Digimon",
+    "short": "Digimon Card Game",
+    "newsActive": true,
+    "queries": [
+      "\"Digimon Card Game\" OR \"Digimon TCG\""
+    ],
+    "match": "\\bdigimon\\b",
+    "strong": "\\bdigimon (card game|tcg)\\b",
+    "slug": "digimon"
+  },
+  {
+    "id": "dragon_ball_super",
+    "name": "Dragon Ball Super",
+    "short": "Dragon Ball Super Card Game",
+    "newsActive": true,
+    "queries": [
+      "\"Dragon Ball Super Card Game\" OR \"Fusion World\" Dragon Ball card"
+    ],
+    "match": "\\bdragon ball\\b",
+    "strong": "\\bdragon ball (super )?(card game|tcg)\\b|\\bfusion world\\b",
+    "slug": "dragon-ball-super"
+  },
+  {
+    "id": "vanguard",
+    "name": "Vanguard",
+    "short": "Cardfight!! Vanguard",
+    "newsActive": true,
+    "queries": [
+      "\"Cardfight Vanguard\" OR \"Cardfight!! Vanguard\""
+    ],
+    "match": "\\bcardfight!{0,2} ?vanguard\\b",
+    "strong": "\\bcardfight!{0,2} ?vanguard\\b",
+    "slug": "vanguard"
+  },
+  {
+    "id": "star_wars",
+    "name": "Star Wars",
+    "short": "Star Wars: Unlimited",
+    "newsActive": true,
+    "queries": [
+      "\"Star Wars: Unlimited\" OR \"Star Wars Unlimited\" card game"
+    ],
+    "match": "\\bstar wars:? unlimited\\b",
+    "strong": "\\bstar wars:? unlimited\\b",
+    "slug": "star-wars"
+  },
+  {
+    "id": "union_arena",
+    "name": "Union Arena",
+    "short": "Union Arena",
+    "newsActive": true,
+    "queries": [
+      "\"Union Arena\" card game OR TCG"
+    ],
+    "match": "\\bunion arena\\b",
+    "strong": "\\bunion arena\\b",
+    "slug": "union-arena"
+  },
+  {
+    "id": "gundam",
+    "name": "Gundam",
+    "short": "Gundam Card Game",
+    "newsActive": true,
+    "queries": [
+      "\"Gundam Card Game\" OR \"Gundam TCG\""
+    ],
+    "match": "\\bgundam\\b",
+    "strong": "\\bgundam (card game|tcg)\\b",
+    "slug": "gundam"
+  },
+  {
+    "id": "sorcery",
+    "name": "Sorcery",
+    "short": "Sorcery: Contested Realm",
+    "newsActive": true,
+    "queries": [
+      "\"Sorcery: Contested Realm\" OR \"Sorcery TCG\""
+    ],
+    "match": "\\bsorcery:? contested realm\\b|\\bsorcery tcg\\b",
+    "strong": "\\bsorcery:? contested realm\\b|\\bsorcery tcg\\b",
+    "slug": "sorcery"
+  },
+  {
+    "id": "palworld",
+    "name": "Palworld",
+    "short": "Palworld TCG",
+    "newsActive": true,
+    "queries": [
+      "Palworld \"card game\" OR TCG"
+    ],
+    "match": "\\bpalworld\\b",
+    "strong": "\\bpalworld (card game|tcg|trading card)\\b",
+    "slug": "palworld"
+  },
+  {
+    "id": "cyberpunk",
+    "name": "Cyberpunk",
+    "short": "Cyberpunk TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Cyberpunk TCG\" OR \"Cyberpunk trading card game\""
+    ],
+    "match": "\\bcyberpunk\\b",
+    "strong": "\\bcyberpunk (tcg|trading card game|card game)\\b",
+    "slug": "cyberpunk"
+  },
+  {
+    "id": "weiss_schwarz",
+    "name": "Weiss Schwarz",
+    "short": "Weiss Schwarz",
+    "newsActive": true,
+    "queries": [
+      "\"Weiss Schwarz\" card game OR TCG"
+    ],
+    "match": "\\bwei(ss|ß) schwarz\\b",
+    "strong": "\\bwei(ss|ß) schwarz\\b",
+    "slug": "weiss-schwarz"
+  },
+  {
+    "id": "final_fantasy",
+    "name": "Final Fantasy TCG",
+    "short": "Final Fantasy TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Final Fantasy TCG\" OR \"Final Fantasy Trading Card Game\""
+    ],
+    "match": "\\bfinal fantasy\\b",
+    "strong": "\\bfinal fantasy (tcg|trading card game)\\b|\\bfftcg\\b",
+    "slug": "final-fantasy"
+  },
+  {
+    "id": "force_of_will",
+    "name": "Force of Will",
+    "short": "Force of Will TCG",
+    "newsActive": true,
+    "queries": [
+      "\"Force of Will\" TCG OR \"card game\""
+    ],
+    "match": "\\bforce of will\\b",
+    "strong": "\\bforce of will (tcg|card game)\\b",
+    "slug": "force-of-will"
+  },
+  {
+    "id": "battle_spirits_saga",
+    "name": "Battle Spirits Saga",
+    "short": "Battle Spirits Saga",
+    "newsActive": true,
+    "queries": [
+      "\"Battle Spirits Saga\""
+    ],
+    "match": "\\bbattle spirits\\b",
+    "strong": "\\bbattle spirits saga\\b",
+    "slug": "battle-spirits-saga"
+  },
+  {
+    "id": "world_of_warcraft",
+    "name": "World of Warcraft TCG",
+    "short": "World of Warcraft TCG",
+    "newsActive": false,
+    "queries": [],
+    "match": "\\bworld of warcraft (tcg|trading card game)\\b",
+    "strong": "\\bworld of warcraft (tcg|trading card game)\\b",
+    "slug": "world-of-warcraft"
+  },
+  {
+    "id": "star_wars_destiny",
+    "name": "Star Wars Destiny",
+    "short": "Star Wars Destiny",
+    "newsActive": false,
+    "queries": [],
+    "match": "\\bstar wars:? destiny\\b",
+    "strong": "\\bstar wars:? destiny\\b",
+    "slug": "star-wars-destiny"
+  },
+  {
+    "id": "the_spoils",
+    "name": "The Spoils",
+    "short": "The Spoils",
+    "newsActive": false,
+    "queries": [],
+    "match": "\\bthe spoils (tcg|ccg)\\b",
+    "strong": "\\bthe spoils (tcg|ccg)\\b",
+    "slug": "the-spoils"
+  },
+  {
+    "id": "my_little_pony",
+    "name": "My Little Pony CCG",
+    "short": "My Little Pony CCG",
+    "newsActive": false,
+    "queries": [],
+    "match": "\\bmy little pony (ccg|card game)\\b",
+    "strong": "\\bmy little pony (ccg|card game)\\b",
+    "slug": "my-little-pony"
+  },
+  {
+    "id": "dragon_born",
+    "name": "Dragoborne",
+    "short": "Dragoborne",
+    "newsActive": false,
+    "queries": [],
+    "match": "\\bdragoborne\\b",
+    "strong": "\\bdragoborne\\b",
+    "slug": "dragon-born"
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "task": "edit_article",
+  "instructions": [
+    "You are the editor. You may approve, revise or reject.",
+    "Check every sentence against the evidence pack: unsupported claims, numbers, certainty language, hidden conflicts, analysis that adds facts, prose market numbers, attribution, template fit.",
+    "Return revised headline, dek and blocks only when the fixes are local; reject when the draft cannot be fixed locally.",
+    "Return only JSON."
+  ],
+  "evidence_pack": {
+    "canonicalStoryId": null,
+    "game": "pokemon",
+    "gameName": "Pokémon TCG",
+    "summaryOfEvent": "",
+    "status": null,
+    "angle": null,
+    "sourceList": [],
+    "claimLedger": [],
+    "conflicts": [],
+    "confirmedClaims": [],
+    "pressClaims": [],
+    "unconfirmedClaims": [],
+    "dates": [],
+    "numbers": [],
+    "entities": [],
+    "isUpdate": false,
+    "previousCoverage": null,
+    "market": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "images": []
+  },
+  "draft": {
+    "template": "breaking",
+    "headline": "",
+    "dek": "",
+    "articleType": "BREAKING",
+    "section": "sets",
+    "blocks": []
+  }
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Pokoin newsroom read-only captured-evidence acceptance check
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/services/pokoin-newsroom
+Environment=NEWSROOM_DATA_DIR=%h/services/pokoin-newsroom/data
+Environment=POKO_NEWSROOM_CLAUDE_PROVIDER=deepseek
+ExecStart=%h/services/pokoin-newsroom/rust/pokoin-newsroom dry-run --env-file %h/.config/pokoin/newsroom.env --input %h/services/pokoin-newsroom/checks/evidence.json --output %h/services/pokoin-newsroom/checks/dry-run.json --max-model-calls 10
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadOnlyPaths=%h/services/pokoin-newsroom/data
+ReadWritePaths=%h/services/pokoin-newsroom/checks

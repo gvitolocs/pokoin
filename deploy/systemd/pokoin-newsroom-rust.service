@@ -1,0 +1,27 @@
+[Unit]
+Description=Native Pokoin newsroom (J17; activation requires complete parity)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/services/pokoin-newsroom
+Environment=NEWSROOM_DATA_DIR=%h/services/pokoin-newsroom/data
+Environment=POKOIN_WEB_DIR=%h/services/pokoin-newsroom/web
+Environment=POKO_NEWSROOM_CLAUDE_PROVIDER=deepseek
+Environment=POKO_NEWSROOM_AUTOPUBLISH=*:confirmed,*:multi_source
+Environment=POKO_NEWSROOM_AUTOPUBLISH_EXCLUDE=fact_check
+# The binary validates mode 0600 and ownership; it never prints env contents.
+ExecStartPre=%h/services/pokoin-newsroom/rust/pokoin-newsroom preflight --activate --env-file %h/.config/pokoin/newsroom.env
+ExecStart=%h/services/pokoin-newsroom/rust/pokoin-newsroom run --env-file %h/.config/pokoin/newsroom.env
+Restart=on-failure
+RestartSec=60
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/services/pokoin-newsroom/data %h/services/pokoin-newsroom/web
+
+[Install]
+WantedBy=default.target

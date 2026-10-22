@@ -1,0 +1,30 @@
+{
+  "skillVersion": "71c0370ce05b",
+  "sha256": {
+    "src/newsroom/angles.js": "713c2103812f7c1cdafdb84c053c2bce17281fd9a9e716a224d16b9a88a32d15",
+    "src/newsroom/article-store.js": "4522a8b80e4d6cf753fb68affb50c00b4e7b46b272eb11ffcd188b17e097759b",
+    "src/newsroom/cadence.js": "38b5b9bcadaae1eb0c30c086357a888f2950fd527c8ed7c213eb4b22666ffeab",
+    "src/newsroom/claims.js": "ff432ceaa31f4d1d3e3534c02415889a6275251da4b0c03cc94ba9f41ec89f83",
+    "src/newsroom/claude.js": "c0d802582604e98dfe4dac3717003b8951143f157226f402513c120540657822",
+    "src/newsroom/comment-moderation.js": "0ccd718b45921929b4478420c02444ec97edebb0659d4c1bd5d7311fa8e3b673",
+    "src/newsroom/enrich.js": "235bc2cfe42251d6b419d648ed29b71562331ae53e03dcd9407a0fcd6dd0a5e0",
+    "src/newsroom/evidence.js": "734ca2d918e98e6451415fc88c572e00aa1901322c7a2de759db76fb5c74cd40",
+    "src/newsroom/games.js": "21e5c272e2971d9bb46d8722a2374fe3c1124f72f6487c9979789997ef4c3efb",
+    "src/newsroom/images.js": "0eadf945332f781cf5e1503f0d119edba7685829db6ee107ba743679dba59257",
+    "src/newsroom/index.js": "b59a34e5c9f77a17192fed00e2721cc169454171e30c27a139bf9f19ec4ac832",
+    "src/newsroom/memory.js": "c8c393dea20b1d428df79d21396ef6439a849f9bc6111cc10f175995a7b6e1fd",
+    "src/newsroom/pipeline.js": "6cb854761256bab4a31b015f84f0e3bdfc3c7edd371b04a0d847cbe56ee15dfb",
+    "src/newsroom/publication.js": "e3f9f46ed2f7e9e8d29c5f759dc029eb631254bc6a046cad2798b0123651314e",
+    "src/newsroom/reporter.js": "482ef127e689209249ef512b8b1b3e44ae0de7c010389857a0742b231e417d4b",
+    "src/newsroom/schema.js": "71d0d1b2b4267ba9493040e07997739dc84d1a3c2afcd5c6bdadb65cd6d1c87e",
+    "src/newsroom/source-fetch.js": "493d1e543e286883f4debf96f7507c10037ccf0cbb0cf6877cbac5777b927d7a",
+    "src/newsroom/sources.js": "65bd394395e1028df70976774487a15204e83d1705516ccc622ebf9f8b2ec88e",
+    "src/newsroom/store.js": "8702b38b4d5c11ddb19a5531e3e9e166bc439bebae6e8d45a1ce47ef71e44dc5",
+    "src/newsroom/stories.js": "08bafe064da6240cc16391018671ff2d5d2a83e27d5c929bb1b8b6d14622f8d5",
+    "src/newsroom/style.js": "d31b2b6818dd2b62cc9600d17293153c352069fd13ff90d57bb4f6b801f5acfd",
+    "src/newsroom/tcg-feeds.js": "cc1de8a798a24ed2c7f8f11f717d34eabbed945bb01d47ea2f0dc58eeab7341e",
+    "src/newsroom/templates.js": "be4b2e75bdf5bacaf641effb056c8b865abc16b877b3d8caea33958be4cfe2b6",
+    "src/newsroom/website.js": "b1262029e0fc098709fe5fdcd74a666241b487281832e94edddce9294dfa7720",
+    "scripts/newsroom-publisher.mjs": "7c644a91ba35e5ddc79c08412ecc8996ea07f709cd07111f5e0bfede16f82b6b"
+  }
+}
