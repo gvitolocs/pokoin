@@ -31,7 +31,9 @@
 //! copies, asks and properties, enough to undo a run. A rerun first finishes
 //! the groups the journal left open. At most 5 CardTrader writes a second;
 //! the run stops at any CardTrader error or 429. A dry run unless `--apply`
-//! (no lock, no writes, the same plan and skips).
+//! (no lock, no writes, the same plan and skips). `--keep=<product id>` runs
+//! only the group that product is in; `--max-groups=N` stops after N groups
+//! (a group is always finished: journal and marker closed).
 use super::Options;
 use anyhow::{bail, Context, Result};
 use pokoin_external::cardtrader::group::{self, LinkedListing, Merge};
@@ -98,6 +100,26 @@ const MEMBERS_COPIES_SQL: &str = r#"
   select coalesce(sum(quantity_available), 0)::bigint as copies from public.marketplace_user_listings
   where seller_uid = $1 and source_listing_id = $2 and status in ('active', 'paused')
 "#;
+
+/// The groups this run takes: the one a product id names (kept or deleted),
+/// then at most `max` of them, in plan order.
+pub(crate) fn select(merges: Vec<Merge>, keep: Option<&str>, max: Option<usize>) -> Vec<Merge> {
+    let mut merges: Vec<Merge> = match keep {
+        Some(id) => merges.into_iter().filter(|m| m.keep == id || m.delete.iter().any(|(d, _)| d == id)).collect(),
+        None => merges,
+    };
+    if let Some(max) = max {
+        merges.truncate(max);
+    }
+    merges
+}
+
+fn max_groups() -> Result<Option<usize>> {
+    match arg("--max-groups=") {
+        None => Ok(None),
+        Some(n) => n.parse::<usize>().map(Some).map_err(|_| anyhow::anyhow!("--max-groups must be a number, not {n:?}")),
+    }
+}
 
 fn arg(prefix: &str) -> Option<String> {
     std::env::args().find_map(|a| a.strip_prefix(prefix).map(|v| v.trim().to_string())).filter(|v| !v.is_empty())
@@ -445,6 +467,13 @@ async fn consolidate(
         .into_iter()
         .partition(|m| !recent.contains(&m.keep) && m.delete.iter().all(|(id, _)| !recent.contains(id)));
     summary["skippedRecentOrders"] = json!(skipped.iter().map(|m| json!({"keep": m.keep, "products": m.delete.len() + 1})).collect::<Vec<_>>());
+    // `--keep=<product>` / `--max-groups=N`: this run touches only these
+    // groups (the dry run with the same flags lists exactly them).
+    summary["plannedGroups"] = json!(merges.len());
+    let merges = select(merges, arg("--keep=").as_deref(), max_groups()?);
+    if merges.is_empty() && (arg("--keep=").is_some()) {
+        summary["keepNotFound"] = json!(arg("--keep="));
+    }
 
     let products_before = export.products.len();
     let to_delete: usize = merges.iter().map(|m| m.delete.len()).sum();
@@ -607,6 +636,22 @@ mod tests {
         assert_eq!(open.len(), 2);
         assert_eq!(open[0], OpenGroup { keep: "5".into(), moved: vec![("8".into(), vec!["e".into()])], owed: 3 });
         assert_eq!(open[1], OpenGroup { keep: "9".into(), moved: vec![], owed: 0 });
+    }
+
+    #[test]
+    fn one_chosen_group_or_the_first_n() {
+        let merge = |keep: &str, delete: &[&str]| Merge {
+            key: keep.into(), keep: keep.into(), keep_quantity: 1,
+            delete: delete.iter().map(|d| (d.to_string(), 1)).collect(),
+            total: 1 + delete.len() as i64, pokoin_total: 1 + delete.len() as i64, relink: vec![],
+        };
+        let all = || vec![merge("1", &["2", "3"]), merge("4", &["5"]), merge("6", &["7"])];
+        assert_eq!(select(all(), None, None).len(), 3);
+        assert_eq!(select(all(), None, Some(1)).iter().map(|m| m.keep.clone()).collect::<Vec<_>>(), vec!["1"]);
+        assert_eq!(select(all(), Some("5"), None).iter().map(|m| m.keep.clone()).collect::<Vec<_>>(), vec!["4"], "a deleted product names its group");
+        assert_eq!(select(all(), Some("6"), Some(5)).len(), 1);
+        assert!(select(all(), Some("99"), None).is_empty());
+        assert!(select(all(), None, Some(0)).is_empty());
     }
 
     #[test]

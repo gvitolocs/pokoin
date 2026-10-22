@@ -1,4 +1,4 @@
-//! `job cardtrader-net-prices --seller=<uid> [--apply] [--csv=<path>]`
+//! `job cardtrader-net-prices --seller=<uid> [--origin=push] [--example=<card>] [--apply] [--csv=<path>]`
 //!
 //! Sets one connected seller's CardTrader-linked Pokoin listings (`ct:<product
 //! id>`) to their CardTrader ask net of the commission the seller pays on it
@@ -9,7 +9,11 @@
 //! products (an `import` or `match` link row): a product Pokoin pushed was
 //! listed at the gross-up of its Pokoin price, so netting it again would cut
 //! the Pokoin price by the commission each run (`cardtrader-fee-once` is its
-//! direction).
+//! direction). `--origin=push` is that other choice, made per seller: keep the
+//! CardTrader asks Pokoin pushed and set Pokoin to their net (2026-10-22, PeppeV:
+//! the double-fee asks stay, Spiderling €0.13 → 24 PKN). It writes Pokoin only;
+//! every copy of a product gets the same price, and the Pokoin price grosses up
+//! to the same ask, so later edits do not move it.
 //!
 //! The ask comes from one complete `GET /products/export` (one CardTrader
 //! read; nothing is written to CardTrader), never from the Pokoin price, so a
@@ -38,7 +42,7 @@ const LINKED_SQL: &str = r#"
       select 1 from public.marketplace_cardtrader_product_links as link
       where link.seller_uid = listing.seller_uid
         and 'ct:' || link.ct_product_id = listing.source_listing_id
-        and link.origin in ('import', 'match')
+        and link.origin = any($2::text[])
     )
   order by listing.price_pkn desc, listing.id
 "#;
@@ -55,6 +59,31 @@ pub const SET_PRICE_SQL: &str = r#"
 /// commission, whole PKN. `None`: no product or no price in the export.
 pub fn target_pkn(gross: Option<f64>, rule: ct_fees::FeeRule, channel: ct_fees::Channel) -> Option<f64> {
     gross.and_then(|pkn| rule.net_pkn(pkn, channel)).map(|net| net.round().max(1.0))
+}
+
+/// Which products' listings are netted: the seller's own (`import`, `match`)
+/// unless `--origin=push`: the products Pokoin pushed, whose CardTrader ask
+/// the seller keeps (2026-10-22: PeppeV's asks stay, Pokoin takes their net).
+pub fn origins(flag: Option<&str>) -> Result<Vec<&'static str>> {
+    match flag.map(str::trim) {
+        None | Some("") | Some("own") => Ok(vec!["import", "match"]),
+        Some("push") => Ok(vec!["push"]),
+        Some(other) => bail!("--origin must be push (or own, the default), not {other:?}"),
+    }
+}
+
+/// An ask worked through for the report: cents asked, the commission with
+/// VAT, what the seller nets, and the Pokoin price it gives.
+pub fn worked(ask_pkn: f64, rule: ct_fees::FeeRule, channel: ct_fees::Channel) -> Value {
+    let ask_cents = (ask_pkn / 2.0).round();
+    let net = rule.net_cents(ask_cents, channel);
+    json!({
+        "askCents": ask_cents,
+        "feeCents": net.map(|net| ((ask_cents - net) * 10_000.0).round() / 10_000.0),
+        "netCents": net.map(|net| (net * 10_000.0).round() / 10_000.0),
+        "pokoinPkn": target_pkn(Some(ask_pkn), rule, channel),
+        "plan": rule.describe(channel),
+    })
 }
 
 pub fn changes(current: f64, target: f64) -> bool {
@@ -77,10 +106,13 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     }
     let asks: HashMap<String, Option<f64>> =
         export.products.iter().map(|product| (sync_core::ct_source_listing_id(&product.id), product.price_pkn)).collect();
-    let rows = state.db.query("pokemon", LINKED_SQL, &[json!(seller)]).await?;
+    let origin_flag = std::env::args().find_map(|a| a.strip_prefix("--origin=").map(String::from));
+    let origins = origins(origin_flag.as_deref())?;
+    let example = std::env::args().find_map(|a| a.strip_prefix("--example=").map(|v| v.trim().to_lowercase()));
+    let rows = state.db.query("pokemon", LINKED_SQL, &[json!(seller), json!(origins)]).await?;
 
     let mut summary = json!({
-        "seller": seller, "apply": options.apply, "channel": rule.describe(channel), "linked": rows.len(),
+        "seller": seller, "apply": options.apply, "origins": origins, "channel": rule.describe(channel), "linked": rows.len(),
         "exported": export.products.len(), "notInExport": 0, "changes": 0, "unchanged": 0,
         "eurBefore": 0.0, "eurAfter": 0.0, "updated": 0, "skipped": 0, "games": {},
     });
@@ -115,8 +147,23 @@ pub(super) async fn run(options: &Options) -> Result<()> {
         .map(|(row, current, target)| json!({
             "card": row["card_name"], "set": row["set_name"], "number": row["collector_number"],
             "condition": row["condition"], "language": row["language"], "from": current, "to": target,
+            "worked": asks.get(row["source_listing_id"].as_str().unwrap_or("")).copied().flatten().map(|ask| worked(ask, rule, channel)),
         }))
         .collect::<Vec<_>>());
+    // `--example=<card name>`: that card worked through (else the first change).
+    let shown = plans
+        .iter()
+        .find(|(row, _, _)| {
+            example.as_deref().is_some_and(|name| row["card_name"].as_str().unwrap_or("").to_lowercase().contains(name))
+        })
+        .or(plans.first());
+    if let Some((row, current, target)) = shown {
+        summary["example"] = json!({
+            "card": row["card_name"], "set": row["set_name"], "number": row["collector_number"],
+            "copies": row["quantity_available"], "from": current, "to": target,
+            "worked": asks.get(row["source_listing_id"].as_str().unwrap_or("")).copied().flatten().map(|ask| worked(ask, rule, channel)),
+        });
+    }
 
     if let Some(path) = &options.csv {
         let mut out = String::from("listing_id,game,card_name,set_name,collector_number,condition,language,quantity,old_pkn,new_pkn,source_listing_id\n");
@@ -175,9 +222,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_sellers_own_products_are_netted() {
-        assert!(LINKED_SQL.contains("link.origin in ('import', 'match')"));
-        assert!(!LINKED_SQL.contains("'push'"));
+    fn the_sellers_own_products_unless_push_is_asked_for() {
+        assert!(LINKED_SQL.contains("link.origin = any($2::text[])"));
+        assert_eq!(origins(None).unwrap(), vec!["import", "match"], "the default never touches a pushed product");
+        assert_eq!(origins(Some("own")).unwrap(), vec!["import", "match"]);
+        assert_eq!(origins(Some("push")).unwrap(), vec!["push"]);
+        assert!(origins(Some("all")).is_err());
+    }
+
+    #[test]
+    fn spiderling_at_peppevs_plan_keeps_its_ask_and_takes_its_net() {
+        use ct_fees::{Channel, Plan, Tier};
+        let rule = ct_fees::FeeRule::DEFAULT;
+        // PeppeV: EU, before March 2026, direct 5 %, VAT-registered (no VAT).
+        let peppev = Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 0 });
+        // €0.13 ask (26 PKN): 1-cent minimum, no VAT: nets 12 c = 24 PKN.
+        assert_eq!(target_pkn(Some(26.0), rule, peppev), Some(24.0));
+        let row = worked(26.0, rule, peppev);
+        assert_eq!((row["askCents"].as_f64(), row["feeCents"].as_f64(), row["netCents"].as_f64()), (Some(13.0), Some(1.0), Some(12.0)));
+        assert_eq!(row["pokoinPkn"], 24.0);
+        assert_eq!(row["plan"]["vatPct"], 0.0);
+        // Every copy of one product reads the same ask: the same price. A
+        // rerun reads it again: nothing changes.
+        assert!(changes(26.0, 24.0));
+        assert!(!changes(24.0, target_pkn(Some(26.0), rule, peppev).unwrap()));
+        // And Pokoin's 24 PKN lists at that same €0.13 on CardTrader: no drift.
+        assert_eq!(rule.gross_cents(24.0, peppev), Some(13));
     }
 
     #[test]

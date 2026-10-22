@@ -200,10 +200,15 @@ unique per seller).
   each product once, counting it written only once CardTrader took it.
   `cardtrader-fee-once` raises only products Pokoin pushed (`push` link
   rows); `cardtrader-net-prices` nets only the seller's own (`import` /
-  `match`). The reprice nets at the seller's own rate and VAT and leaves a
+  `match`) unless `--origin=push`: the products Pokoin pushed keep their
+  CardTrader ask and Pokoin takes its net (the choice for PeppeV on
+  2026-10-22; `--example=<card>` works one card through). The reprice nets at the seller's own rate and VAT and leaves a
   `ct_to_pokoin` seller's linked listings alone.
 - **Existing products:** `pokoin-api job cardtrader-group-products
-  --seller=<uid> [--csv=…] [--log=…] [--apply]`. A dry run unless `--apply`.
+  --seller=<uid> [--keep=<product id>] [--max-groups=N] [--csv=…] [--log=…]
+  [--apply]`. A dry run unless `--apply`; `--keep` runs only the group that
+  product is in, `--max-groups` stops after N whole groups, and the dry run
+  with the same flags lists exactly those.
   - Only products Pokoin pushed (a `push` link row or a `pokoin:` user data
     field), grouped by blueprint, CardTrader's own properties as sent (Mint
     and Near Mint stay apart), description and ask; folded into the one with
