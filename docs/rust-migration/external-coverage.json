@@ -23,7 +23,7 @@
     "rust_to_node_proxy": false
   },
   "counts": {
-    "implemented": 36,
+    "implemented": 37,
     "partial": 2,
     "unresolved": 3
   },
@@ -98,6 +98,16 @@
       "status": "implemented",
       "rust": "src/routes/cardtrader.rs::zero + src/cardtrader/zero.rs",
       "evidence": "picking-order/location-rank/build-zero-list unit tests"
+    },
+    {
+      "path": "/api/cardtrader-zero-pick",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": null,
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::zero_pick + src/cardtrader/zero.rs (parse_pick_request, save_pick)",
+      "evidence": "pick body validation / field key / picks round-trip unit tests + routes::cardtrader zero_pick 401/200/400 test"
     },
     {
       "path": "/api/cardtrader-clean-listings",

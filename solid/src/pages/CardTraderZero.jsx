@@ -18,7 +18,6 @@ import {
   allowMypokoinPreview,
   MYPOKOIN_PREVIEW_BANNER,
   previewZero,
-  seedPreviewPicked,
 } from './mypokoin-preview-fixture.js';
 
 function PowerToolsPanel(props) {
@@ -78,7 +77,7 @@ function PowerToolsPanel(props) {
   const expired = () => overlay()?.connected && overlay().ok === false && overlay().code === 'powertools_session_expired';
 
   return (
-    <DeskPanel title="Power Tools">
+    <DeskPanel title="Power Tools" class="zero-pt-panel">
       <Alert>{error()}</Alert>
       <Switch fallback={<div class="skeleton-line" />}>
         <Match when={status()?.connected}>
@@ -188,7 +187,6 @@ function PowerToolsPanel(props) {
 }
 
 function ZeroDesk(props) {
-  if (props.preview) seedPreviewPicked();
   const navigate = useGameNavigate();
   const [data, setData] = createSignal(props.preview ? previewZero() : null);
   const [error, setError] = createSignal('');
@@ -234,6 +232,12 @@ function ZeroDesk(props) {
   );
 
   const totals = () => data()?.totals;
+  const refreshedAt = () => {
+    const at = data()?.fetchedAt ? new Date(data().fetchedAt) : null;
+    return at && !Number.isNaN(at.getTime())
+      ? at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      : '';
+  };
   const pendingItems = () => data()?.pending?.items || [];
 
   return (
@@ -251,11 +255,14 @@ function ZeroDesk(props) {
           { value: data().cardtrader?.username || '—', label: 'CardTrader seller' },
         ] : []}
       >
-        <button class="btn ghost" type="button" onClick={load} disabled={loading() || notConnected()}>
+        <Show when={refreshedAt()}>
+          <span class="zero-refreshed thread-meta">Refreshed at {refreshedAt()}</span>
+        </Show>
+        <button class="btn ghost" type="button" onClick={load} disabled={loading() || notConnected() || props.preview}>
           {loading() ? 'Refreshing…' : 'Refresh'}
         </button>
       </StockNav>
-      <p class="mypokoin-help">Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: location box, then stock number from smaller to bigger.</p>
+      <p class="mypokoin-help">Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then the other games; inside a game by location box, then stack and position, then the order the copies were added to your inventory.</p>
       <Alert>{error()}</Alert>
 
       <Show when={notConnected()}>
@@ -278,12 +285,13 @@ function ZeroDesk(props) {
       </Show>
 
       <For each={data()?.weekly || []} keyed={(order) => order.orderId}>
-        {(order) => <ShipmentPanel order={order()} powerTools={data()?.powerTools} />}
+        {(order) => <ShipmentPanel order={order()} powerTools={data()?.powerTools} preview={props.preview} />}
       </For>
 
       <Show when={pendingItems().length}>
         <DeskPanel
           flush
+          class="zero-pending-panel"
           title={`Waiting for the next merge · ${totals().pending.units} card${totals().pending.units === 1 ? '' : 's'}`}
           extra={(
             <button class="btn ghost" type="button" onClick={() => setShowPending((open) => !open)}>

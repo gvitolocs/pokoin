@@ -3112,6 +3112,26 @@
     }
   },
   {
+    "path": "/api/cardtrader-zero-pick",
+    "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_pick; no Node origin)",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "CardTrader Zero picking list picked state: per-line picked count and issue (missing, wrong condition/language/foil/first edition, other) for one weekly Zero order, or reset of the whole order. Stored on Firestore cardtrader_zero_picks/{uid}_{orderId}; GET /api/cardtrader-zero reads it back.",
+    "auth": "Required Firebase bearer token; picks belong to the bearer uid.",
+    "params": {
+      "body": "{ orderId, lineKey, picked?, issue? } or { orderId, reset: true }. orderId digits <= 40 (400 invalid_order); lineKey <= 120 chars of [0-9A-Za-z@_:.-] (400 invalid_line); picked clamped 0..999; issue null clears or { type, note <= 280 } (400 invalid_issue)."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
     "path": "/api/powertools-connect",
     "file": "powertools-connect.js",
     "methods": [

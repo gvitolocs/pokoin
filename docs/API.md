@@ -62,6 +62,7 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardrails/connector` / `POST /api/seller-api/v1` | An app with a seller's `pkn_` grant: connect, locations, listings, stock, list, sales, webhook URL. Pokoin posts signed stock and order webhooks back |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 | `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `POST /api/cardtrader-zero-pick` | Picked count / issue of one Zero picking line, or `reset` of the order; Firestore `cardtrader_zero_picks` ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
 | `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are

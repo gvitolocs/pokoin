@@ -210,12 +210,16 @@ impl PowerToolsClient {
         self.exchange_access_token(&access_token).await
     }
 
-    async fn request(&self, jwt: &str, path: &str) -> ApiResult<Value> {
-        let response = self
+    async fn request(&self, method: reqwest::Method, jwt: &str, path: &str, body: Option<&Value>) -> ApiResult<Value> {
+        let mut builder = self
             .http
-            .get(format!("{}/api/{}", self.base, path.trim_start_matches('/')))
+            .request(method, format!("{}/api/{}", self.base, path.trim_start_matches('/')))
             .header("Accept", "application/json")
-            .header("Cookie", format!("jwt={jwt}"))
+            .header("Cookie", format!("jwt={jwt}"));
+        if let Some(body) = body {
+            builder = builder.header("Content-Type", "application/json").body(body.to_string());
+        }
+        let response = builder
             .send()
             .await
             .map_err(|e| ApiError::new(502, format!("Power Tools {path} failed ({e}).")).with_code("powertools_unavailable"))?;
@@ -237,9 +241,13 @@ impl PowerToolsClient {
             .map_err(|_| ApiError::new(502, format!("Power Tools {path} returned no JSON.")).with_code("powertools_unavailable"))
     }
 
+    async fn get(&self, jwt: &str, path: &str) -> ApiResult<Value> {
+        self.request(reqwest::Method::GET, jwt, path, None).await
+    }
+
     /// Non-secret identity from GET /api/user.
     pub async fn fetch_user(&self, jwt: &str) -> ApiResult<Value> {
-        let user = self.request(jwt, "user").await?;
+        let user = self.get(jwt, "user").await?;
         let safe = safe_power_tools_user(&user);
         if safe["userId"].as_str().unwrap_or_default().is_empty() && safe["username"].as_str().unwrap_or_default().is_empty() {
             return Err(ApiError::new(502, "Power Tools returned no account for that session.")
@@ -249,11 +257,55 @@ impl PowerToolsClient {
     }
 
     pub async fn fetch_orders(&self, jwt: &str) -> ApiResult<Vec<Value>> {
-        let orders = self.request(jwt, "user/order").await?;
+        let orders = self.get(jwt, "user/order").await?;
         match orders {
             Value::Array(rows) => Ok(rows),
             _ => Err(ApiError::new(502, "Power Tools orders did not return a list.").with_code("powertools_unavailable")),
         }
+    }
+
+    /// Open picking lists (`GET user/order/getUserPickingLists?state=open`).
+    /// Read-only; a non-array answer is no lists.
+    pub async fn fetch_picking_lists(&self, jwt: &str) -> ApiResult<Vec<Value>> {
+        match self.get(jwt, "user/order/getUserPickingLists?state=open").await? {
+            Value::Array(rows) => Ok(rows),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// One picking list's pickings in Power Tools picking order
+    /// (`PUT user/order/getArticlesToPick`). The body is `{pickingListId}`
+    /// ONLY: sending `sortingFields` makes Power Tools re-sort AND SAVE that
+    /// sort on the seller's list. Pokoin never sends it, and never calls
+    /// `updateSorting` or any other Power Tools write.
+    pub async fn fetch_articles_to_pick(&self, jwt: &str, picking_list_id: &Value) -> ApiResult<Value> {
+        let body = json!({ "pickingListId": picking_list_id });
+        match self.request(reqwest::Method::PUT, jwt, "user/order/getArticlesToPick", Some(&body)).await? {
+            payload @ Value::Object(_) => Ok(payload),
+            _ => Err(ApiError::new(502, "Power Tools articles to pick did not return an object.")
+                .with_code("powertools_unavailable")),
+        }
+    }
+}
+
+/// Power Tools ids arrive as JSON strings or numbers: the trimmed string, the
+/// integer's digits, else "".
+pub fn id_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.trim().to_string(),
+        Value::Number(number) => {
+            if let Some(int) = number.as_i64() {
+                int.to_string()
+            } else if let Some(int) = number.as_u64() {
+                int.to_string()
+            } else {
+                match number.as_f64() {
+                    Some(float) if float.fract() == 0.0 && float.abs() < 9.0e15 => (float as i64).to_string(),
+                    _ => String::new(),
+                }
+            }
+        }
+        _ => String::new(),
     }
 }
 
@@ -1085,5 +1137,71 @@ mod tests {
         assert!(truthy_flag("x"));
         assert!(!truthy_flag("false"));
         assert!(truthy(&json!(true)));
+    }
+
+    #[test]
+    fn id_text_reads_strings_and_numbers() {
+        assert_eq!(id_text(&json!(" 9001 ")), "9001");
+        assert_eq!(id_text(&json!(9001)), "9001");
+        assert_eq!(id_text(&json!(9001.0)), "9001");
+        assert_eq!(id_text(&json!(1.5)), "");
+        assert_eq!(id_text(&json!(null)), "");
+        assert_eq!(id_text(&json!({ "id": 1 })), "");
+    }
+
+    /// A local fake Power Tools recording method, path, content type and body.
+    async fn fake_power_tools(answer: Value) -> (String, std::sync::Arc<std::sync::Mutex<Vec<(String, String, String, String)>>>) {
+        use axum::extract::Request;
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let app = axum::Router::new().fallback(move |request: Request| {
+            let log = log.clone();
+            let answer = answer.clone();
+            async move {
+                let method = request.method().to_string();
+                let uri = request.uri().to_string();
+                let content_type = request
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                let body = axum::body::to_bytes(request.into_body(), 4096).await.unwrap_or_default();
+                log.lock().unwrap().push((method, uri, content_type, String::from_utf8_lossy(&body).to_string()));
+                axum::Json(answer)
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}"), seen)
+    }
+
+    #[tokio::test]
+    async fn articles_to_pick_sends_only_the_list_id() {
+        let (base, seen) = fake_power_tools(json!({ "pickings": [] })).await;
+        let client = PowerToolsClient::new().with_base(base);
+        client.fetch_articles_to_pick("a.b.c", &json!(301)).await.unwrap();
+        let rows = seen.lock().unwrap().clone();
+        assert_eq!(rows.len(), 1);
+        let (method, uri, content_type, body) = &rows[0];
+        assert_eq!(method, "PUT");
+        assert_eq!(uri, "/api/user/order/getArticlesToPick");
+        assert_eq!(content_type, "application/json");
+        // Never sortingFields: Power Tools would re-sort and save the seller's list.
+        assert_eq!(serde_json::from_str::<Value>(body).unwrap(), json!({ "pickingListId": 301 }));
+    }
+
+    #[tokio::test]
+    async fn picking_lists_are_an_open_get_and_non_arrays_are_empty() {
+        let (base, seen) = fake_power_tools(json!({ "message": "nope" })).await;
+        let client = PowerToolsClient::new().with_base(base);
+        assert!(client.fetch_picking_lists("a.b.c").await.unwrap().is_empty());
+        let rows = seen.lock().unwrap().clone();
+        assert_eq!(rows[0].0, "GET");
+        assert_eq!(rows[0].1, "/api/user/order/getUserPickingLists?state=open");
+        assert_eq!(rows[0].3, "");
     }
 }

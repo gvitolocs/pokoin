@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn manifest_and_families() {
-        assert_eq!(route_count(), 152);
+        assert_eq!(route_count(), 153);
         assert_eq!(route_rows("page-bff").len(), 5);
         assert_eq!(family_for_path("/api/marketplace-card-page"), "page-bff");
         assert_eq!(family_for_path("/api/searchbar-cards"), "search");

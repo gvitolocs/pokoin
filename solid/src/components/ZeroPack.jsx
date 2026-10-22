@@ -1,14 +1,40 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { saveCardTraderZeroPick } from '@market/api.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
-import ScanImage from './ScanImage.jsx';
-import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
-import { formatOrderMoney } from '@market/order-status.js';
-import { pickingOrdersMatch } from '@market/zero-pick.js';
+import {
+  confirmPickEntry,
+  dirtyPickEntries,
+  dropPickEntry,
+  effectivePick,
+  groupLinesByGame,
+  lineDone,
+  lineKeyOf,
+  lineLocation,
+  lineLocationFromPt,
+  lineMatches,
+  lineQuantity,
+  migrateLegacyPicks,
+  pickingOrdersMatch,
+  pickSaveBody,
+  readPickCache,
+  reconcilePickCache,
+  retryableSaveError,
+  setPickEntry,
+  sortByPtOrder,
+  takeLegacyPicked,
+  VIEW_KEY,
+  writePickCache,
+  zeroPickCsv,
+} from '@market/zero-pick.js';
 import '@market/zero-pack.css';
 import { createPointerDrag } from '../lib/pointer-drag.js';
+import { getBearer } from '../stores/auth.js';
+import ScanImage from './ScanImage.jsx';
 import { DeskPanel } from './Desk.jsx';
-
-const PICKED_KEY = 'pokoin.ctZero.picked.';
+import PickingMode from './zero/PickingMode.jsx';
+import { IssueDialog, PickQuantityDialog } from './zero/ZeroDialogs.jsx';
+import ZeroList from './zero/ZeroList.jsx';
+import { FacetBadges, IssueBadge, lineImage, linePrice, LocationText, lineWhere, PtPlace, TakeBits } from './zero/zero-bits.jsx';
 
 function day(value) {
   const parsed = value ? new Date(value) : null;
@@ -17,35 +43,42 @@ function day(value) {
     : '—';
 }
 
-/** Ticked lines per shipment, this browser only (a picking aid, not shared state). */
-function readPicked(orderId) {
+function storage() {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(PICKED_KEY + orderId) || '[]');
-    return new Set(Array.isArray(raw) ? raw.map(String) : []);
+    return window.localStorage;
   } catch (_) {
-    return new Set();
+    return null;
   }
 }
 
-function writePicked(orderId, picked) {
+const NO_STORAGE = { getItem: () => null, setItem() {}, removeItem() {} };
+
+function readView() {
   try {
-    if (picked.size) window.localStorage.setItem(PICKED_KEY + orderId, JSON.stringify([...picked]));
-    else window.localStorage.removeItem(PICKED_KEY + orderId);
+    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'cards';
   } catch (_) {
-    /* private mode: ticks just don't survive a reload */
+    return 'cards';
   }
 }
 
-function facets(item) {
-  return [
-    item.condition,
-    item.language,
-    item.reverse ? 'Reverse' : '',
-    item.firstEdition ? '1st ed.' : '',
-    item.signed ? 'Signed' : '',
-    item.altered ? 'Altered' : '',
-    item.graded ? 'Graded' : '',
-  ].filter(Boolean).join(' ');
+function writeView(view) {
+  try {
+    window.localStorage.setItem(VIEW_KEY, view);
+  } catch (_) {
+    /* private mode: the view resets on reload */
+  }
+}
+
+function downloadCsv(order, cache) {
+  const blob = new Blob([zeroPickCsv(order, cache)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `zero-${String(order.code || order.orderId).replace(/[^\w.-]+/g, '_')}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function powerToolsLine(pt) {
@@ -57,35 +90,35 @@ function powerToolsLine(pt) {
   return parts.length ? `Power Tools: ${parts.join(' · ')}` : '';
 }
 
-function lineImage(item) {
-  return homepageDerivativeUrl(ownCatalogImage(
-    { id: item?.cardId, name: item?.name || '' },
-    preferFullImage(item?.imageUrl || ''),
-  ));
-}
-
 /**
- * One pack line. Without `onMove` it is a
+ * One pack line (one box of a CardTrader item). Without `onPick` it is a
  * read-only line (the "waiting for the next merge" list): no drag, no button.
  */
 export function ZeroLine(props) {
   const item = () => props.item;
-  const location = () => item().location || item().powerTools?.location || '';
-  const fromPowerTools = () => !item().location && Boolean(item().powerTools?.location);
-  const where = () => [item().expansion, item().collectorNumber ? `#${item().collectorNumber}` : ''].filter(Boolean).join(' · ');
+  const location = () => lineLocation(item());
+  const quantity = () => lineQuantity(item());
+  const pick = () => props.pick || { picked: Number(item().picked) || 0, issue: item().issue || null };
+  const done = () => Boolean(props.done);
   const pt = () => powerToolsLine(item().powerTools);
-  const ptPlace = () => (Number(item().powerTools?.position) > 0 ? `PT ${item().powerTools.position}` : '');
-  const price = () => (item().lineCents != null ? formatOrderMoney(item().lineCents, item().currency) : '');
+  const price = () => linePrice(item());
   const src = () => lineImage(item());
-  const interactive = () => Boolean(props.onMove);
+  const interactive = () => Boolean(props.onPick);
   return (
     <article
-      class={['zero-card', { 'is-picked': Boolean(props.picked), 'is-draggable': interactive() }]}
+      class={['zero-card', {
+        'is-picked': done(),
+        'is-draggable': interactive(),
+        'has-issue': Boolean(pick().issue),
+        'is-match': Boolean(props.match),
+        'is-current': Boolean(props.current),
+      }]}
       draggable="false"
+      data-zero-line={interactive() ? lineKeyOf(item()) : undefined}
       onPointerDown={(event) => {
         if (!interactive()) return;
         props.onPointerDown?.(event, {
-          itemId: item().itemId,
+          lineKey: lineKeyOf(item()),
           image: src(),
           label: item().name || '',
         });
@@ -98,7 +131,7 @@ export function ZeroLine(props) {
         class="zero-card-art"
         onClick={() => {
           if (!interactive() || props.consumeClick?.()) return;
-          props.onMove(item().itemId, !props.picked);
+          props.onPick(item());
         }}
       >
         <ScanImage
@@ -108,15 +141,14 @@ export function ZeroLine(props) {
           width="126"
           height="176"
         />
-        <span class={['zero-loc', { 'is-empty': !location() }]} title={fromPowerTools() ? 'Location from Power Tools' : 'MyPokoin location'}>
-          {location() || 'No location'}
-          <Show when={fromPowerTools()}><small> PT</small></Show>
+        <span class={['zero-loc', { 'is-empty': !location() }]} title={lineLocationFromPt(item()) ? 'Location from Power Tools' : 'MyPokoin location'}>
+          <LocationText item={item()} />
         </span>
         <Show when={props.place != null}>
-          <span class="zero-place" title="Place in this pack, by location">{props.place}</span>
+          <span class="zero-place" title="Place in this pack, in picking order">{props.place}</span>
         </Show>
-        <Show when={item().quantity > 1}><span class="zero-qty">×{item().quantity}</span></Show>
-        <Show when={props.picked}>
+        <Show when={quantity() > 1}><span class="zero-qty">take {quantity()}</span></Show>
+        <Show when={done()}>
           <span class="zero-card-check" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="36" height="36">
               <path d="M5 12.5 10 17l9-10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
@@ -130,23 +162,48 @@ export function ZeroLine(props) {
             <a href={inventoryListingHref(item())} draggable="false">{item().name}</a>
           </Show>
         </strong>
-        <Show when={where()}><span class="thread-meta">{where()}</span></Show>
-        <Show when={facets(item())}><span class="thread-meta">{facets(item())}</span></Show>
+        <Show when={item().nameEn}><span class="thread-meta">{item().nameEn}</span></Show>
+        <Show when={lineWhere(item())}><span class="thread-meta">{lineWhere(item())}</span></Show>
+        <div class="zero-line-tags">
+          <FacetBadges item={item()} />
+          <TakeBits item={item()} />
+          <PtPlace item={item()} />
+          <IssueBadge issue={pick().issue} />
+        </div>
         <Show when={price()}><span class="zero-card-price">{price()}</span></Show>
-        <Show when={ptPlace()}><span class="thread-meta">{ptPlace()}</span></Show>
-        <Show when={pt()}><span class="zero-pt">{pt()}</span></Show>
+        <Show when={props.error}><span class="zero-save-error" role="alert">{props.error}</span></Show>
+        <Show when={interactive()}>
+          <span class="zero-picked-count">picked {pick().picked}/{quantity()}</span>
+        </Show>
+        <Show when={!interactive() && pt()}><span class="zero-pt">{pt()}</span></Show>
       </div>
       <Show when={interactive()}>
-        <button
-          class="btn ghost zero-move"
-          type="button"
-          draggable="false"
-          onClick={() => props.onMove(item().itemId, !props.picked)}
-        >
-          <Show when={props.picked} fallback={<><span class="zero-move-full">Mark picked</span><span class="zero-move-short">Picked</span></>}>
-            Undo
+        <div class="zero-card-actions">
+          <button
+            class="btn ghost zero-move"
+            type="button"
+            draggable="false"
+            aria-pressed={pick().picked >= quantity() ? 'true' : 'false'}
+            onClick={() => props.onPick(item())}
+          >
+            <Show
+              when={quantity() > 1}
+              fallback={(
+                <Show when={pick().picked} fallback={<><span class="zero-move-full">Mark picked</span><span class="zero-move-short">Picked</span></>}>
+                  Undo
+                </Show>
+              )}
+            >
+              Picked {pick().picked}/{quantity()}
+            </Show>
+          </button>
+          <Show
+            when={pick().issue}
+            fallback={<button class="zero-issue-link" type="button" onClick={() => props.onIssue(item())}>Report issue</button>}
+          >
+            <button class="zero-issue-link" type="button" onClick={() => props.onClearIssue(item())}>Clear issue</button>
           </Show>
-        </button>
+        </div>
       </Show>
     </article>
   );
@@ -160,60 +217,214 @@ function DropRow(props) {
       ref={(element) => props.setZone?.(props.zone, element)}
     >
       <DeskPanel flush title={props.title} extra={<span class="zero-progress">{props.hint}</span>}>
-        <div class="zero-grid">
-          <For
-            each={props.items}
-            fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing left to pick.' : 'Drag a card down, or click Mark picked.'}</p>}
-          >
-            {(item) => (
-              <ZeroLine
-                item={item}
-                place={props.places.get(item.itemId)}
-                picked={props.picked}
-                onMove={props.onMove}
-                onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
-                onPointerMove={props.onPointerMove}
-                onPointerUp={props.onPointerUp}
-                onPointerCancel={props.onPointerCancel}
-                consumeClick={props.consumeClick}
-              />
-            )}
-          </For>
-        </div>
+        <Show
+          when={props.groups.length}
+          fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing picked yet. Drag a card down, or click Mark picked.' : 'Nothing left to pick.'}</p>}
+        >
+          <div class="zero-grid">
+            <For each={props.groups}>
+              {(group) => (
+                <>
+                  <h3 class="zero-game-head">
+                    {group.label}
+                    <span>{group.cards} card{group.cards === 1 ? '' : 's'}</span>
+                  </h3>
+                  <For each={group.lines}>
+                    {(entry) => (
+                      <ZeroLine
+                        item={entry.line}
+                        place={props.places.get(lineKeyOf(entry.line))}
+                        pick={props.pickOf(entry.line)}
+                        done={props.isDone(entry.line)}
+                        match={props.matches.has(lineKeyOf(entry.line))}
+                        current={props.current === lineKeyOf(entry.line)}
+                        error={props.errors?.[lineKeyOf(entry.line)]}
+                        onPick={props.onPick}
+                        onIssue={props.onIssue}
+                        onClearIssue={props.onClearIssue}
+                        onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
+                        onPointerMove={props.onPointerMove}
+                        onPointerUp={props.onPointerUp}
+                        onPointerCancel={props.onPointerCancel}
+                        consumeClick={props.consumeClick}
+                      />
+                    )}
+                  </For>
+                </>
+              )}
+            </For>
+          </div>
+        </Show>
       </DeskPanel>
     </div>
   );
 }
 
-/** One weekly Zero shipment in picking order, with Pick / Picked drop rows. */
+/** Lines grouped under game headers; with "Sort by PT order" one Power Tools group. */
+function groupsFor(lines, byPt) {
+  if (!byPt) return groupLinesByGame(lines);
+  return lines.length ? [{
+    game: 'pt',
+    label: 'Power Tools order',
+    lines: lines.map((line, index) => ({ line, place: index + 1 })),
+    cards: lines.reduce((sum, line) => sum + lineQuantity(line), 0),
+  }] : [];
+}
+
+/**
+ * One weekly Zero shipment in the server's picking order. Picked copies and
+ * issues are server state (POST /api/cardtrader-zero-pick); localStorage only
+ * keeps unsaved changes until the next load or the `online` event.
+ */
 export function ShipmentPanel(props) {
   const order = () => props.order;
-  const [picked, setPicked] = createSignal(readPicked(props.order.orderId));
-  const units = () => order().items.reduce((sum, item) => sum + item.quantity, 0);
+  const orderId = () => String(order().orderId);
+  const store = () => storage() || NO_STORAGE;
+
+  let current = untrack(() => {
+    const items = order().items;
+    let cache = reconcilePickCache(readPickCache(store(), orderId()), items);
+    const legacy = takeLegacyPicked(store(), orderId());
+    if (legacy) cache = migrateLegacyPicks(items, legacy, cache);
+    writePickCache(store(), orderId(), cache);
+    return cache;
+  });
+  const [cache, setCache] = createSignal(current);
+  const [errors, setErrors] = createSignal({});
+  const inFlight = new Set();
+  const setError = (lineKey, message) => setErrors((all) => {
+    const next = { ...all };
+    if (message) next[lineKey] = message;
+    else delete next[lineKey];
+    return next;
+  });
+
+  function commit(next) {
+    current = next;
+    setCache(next);
+    writePickCache(store(), untrack(orderId), next);
+  }
+
+  // Fresh server data: server wins for every saved line.
+  createEffect(
+    () => order().items,
+    (items) => commit(reconcilePickCache(current, items)),
+    { defer: true },
+  );
+
+  async function send(lineKey, fields) {
+    if (props.preview || inFlight.has(lineKey)) return false;
+    const entry = current[lineKey];
+    if (!entry?.dirty) return true;
+    const sent = { picked: entry.picked, issue: entry.issue };
+    const body = pickSaveBody(untrack(orderId), lineKey, entry, fields);
+    inFlight.add(lineKey);
+    try {
+      const token = await getBearer();
+      const data = await saveCardTraderZeroPick(token, body);
+      commit(confirmPickEntry(current, lineKey, sent, data?.line));
+      setError(lineKey, '');
+      return true;
+    } catch (err) {
+      if (retryableSaveError(err)) return false; // stays dirty: retried on the next load or when back online
+      // Rejected (4xx): drop the change, show the server value and why.
+      if (current[lineKey] === entry) commit(dropPickEntry(current, lineKey));
+      setError(lineKey, `Not saved: ${err.message || 'the server refused this change.'}`);
+      return true;
+    } finally {
+      inFlight.delete(lineKey);
+      if (current[lineKey]?.dirty && current[lineKey] !== entry && navigator.onLine !== false) send(lineKey, ['picked', 'issue']);
+    }
+  }
+
+  async function flushDirty() {
+    for (const entry of dirtyPickEntries(current)) {
+      if (!(await send(entry.lineKey, ['picked', 'issue']))) break;
+    }
+  }
+
+  onSettled(() => {
+    flushDirty();
+    window.addEventListener('online', flushDirty);
+    return () => window.removeEventListener('online', flushDirty);
+  });
+
+  const pickOf = (line) => effectivePick(line, cache());
+  const isDone = (line) => lineDone(line, cache());
+
+  function change(line, fields) {
+    commit(setPickEntry(current, line, fields));
+    send(lineKeyOf(line), Object.keys(fields));
+  }
+  const setPicked = (line, picked) => change(line, { picked });
+
+  /* ---- views and order ---- */
+  const [view, setViewSignal] = createSignal(readView());
+  const setView = (next) => { setViewSignal(next); writeView(next); };
+  const [ptSort, setPtSort] = createSignal(false);
+  const [picking, setPicking] = createSignal(false);
+  const [qtyKey, setQtyKey] = createSignal('');
+  const [issueKey, setIssueKey] = createSignal('');
+
+  const match = createMemo(() => pickingOrdersMatch(order().items));
+  const ptComparable = () => order().ptPicking?.comparable === true;
+  const ptSortTitle = () => {
+    if (ptComparable()) return 'Reorder lines by their Power Tools position';
+    if (!order().ptPicking) return 'No Power Tools picking list for this shipment';
+    return 'Some cards have no Power Tools position, so the Power Tools order is incomplete';
+  };
+  const lines = createMemo(() => (ptSort() && ptComparable() ? sortByPtOrder(order().items) : order().items));
   const places = createMemo(() => {
     const map = new Map();
-    order().items.forEach((item, index) => map.set(item.itemId, index + 1));
+    order().items.forEach((line, index) => map.set(lineKeyOf(line), index + 1));
     return map;
   });
-  const open = () => order().items.filter((item) => !picked().has(item.itemId));
-  const doneItems = () => order().items.filter((item) => picked().has(item.itemId));
-  const match = () => (props.powerTools?.ok ? pickingOrdersMatch(order().items) : { comparable: false, equal: false });
-  const hot = (zone) => pointer.view().phase === 'dragging' && pointer.view().over === zone;
+  const lineByKey = (key) => order().items.find((line) => lineKeyOf(line) === key);
+  const openLines = () => lines().filter((line) => !isDone(line));
+  const doneLines = () => lines().filter((line) => isDone(line));
+  const allGroups = () => groupsFor(lines(), ptSort() && ptComparable());
+  const openGroups = () => groupsFor(openLines(), ptSort() && ptComparable());
+  const doneGroups = () => groupsFor(doneLines(), ptSort() && ptComparable());
+  const units = () => order().items.reduce((sum, line) => sum + lineQuantity(line), 0);
+  const pickedUnits = () => order().items.reduce((sum, line) => sum + pickOf(line).picked, 0);
+  const issues = () => order().items.filter((line) => pickOf(line).issue).length;
+  const ptBin = () => order().ptPicking?.bin || order().items.find((line) => line.powerTools?.bin)?.powerTools.bin || '';
 
-  function move(itemId, toPicked) {
-    const next = new Set(picked());
-    if (toPicked) next.add(itemId);
-    else next.delete(itemId);
-    writePicked(order().orderId, next);
-    setPicked(next);
+  function onPick(line) {
+    if (lineQuantity(line) > 1) setQtyKey(lineKeyOf(line));
+    else setPicked(line, pickOf(line).picked ? 0 : 1);
+  }
+
+  /* ---- search: highlight, not filter ---- */
+  let root;
+  const [query, setQuery] = createSignal('');
+  const [hit, setHit] = createSignal(0);
+  const matchKeys = createMemo(() => lines().filter((line) => lineMatches(line, query())).map(lineKeyOf));
+  const matchSet = createMemo(() => new Set(matchKeys()));
+  const currentKey = () => (matchKeys().length ? matchKeys()[Math.min(hit(), matchKeys().length - 1)] : '');
+
+  function reveal(key) {
+    if (!key || !root) return;
+    const nodes = [...root.querySelectorAll('[data-zero-line]')].filter((node) => node.dataset.zeroLine === key);
+    nodes.find((node) => node.offsetParent !== null)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function step(delta) {
+    const count = matchKeys().length;
+    if (!count) return;
+    const next = (Math.min(hit(), count - 1) + delta + count) % count;
+    setHit(next);
+    reveal(matchKeys()[next]);
   }
 
   const pointer = createPointerDrag({
     onMove(action) {
-      if (!action?.payload?.itemId || action.from === action.to) return;
-      move(action.payload.itemId, action.to === 'picked');
+      if (!action?.payload?.lineKey || action.from === action.to) return;
+      const line = lineByKey(action.payload.lineKey);
+      if (line) setPicked(line, action.to === 'picked' ? lineQuantity(line) : 0);
     },
   });
+  const hot = (zone) => pointer.view().phase === 'dragging' && pointer.view().over === zone;
 
   const title = () => [
     `Shipment ${order().code || order().orderId}`,
@@ -221,53 +432,163 @@ export function ShipmentPanel(props) {
     order().paidAt ? `merged ${day(order().paidAt)}` : '',
   ].filter(Boolean).join(' · ');
 
+  const rowProps = {
+    get places() { return places(); },
+    get matches() { return matchSet(); },
+    get current() { return currentKey(); },
+    get errors() { return errors(); },
+    pickOf,
+    isDone,
+    onPick,
+    onIssue: (line) => setIssueKey(lineKeyOf(line)),
+    onClearIssue: (line) => change(line, { issue: null }),
+  };
+
   return (
-    <div class="zero-pack">
-      <p class="zero-pack-title">
-        {title()}
-        <span>{picked().size}/{order().items.length} picked · {units()} card{units() === 1 ? '' : 's'}</span>
-      </p>
+    <div class="zero-pack" ref={root}>
+      <div class="zero-pack-title">
+        <span>{title()}</span>
+        <span>
+          {doneLines().length}/{order().items.length} lines picked · {pickedUnits()}/{units()} card{units() === 1 ? '' : 's'}
+          <Show when={issues()}><strong class="zero-issue-count"> · {issues()} issue{issues() === 1 ? '' : 's'}</strong></Show>
+        </span>
+      </div>
+
+      <Show when={order().ptPicking || ptBin()}>
+        <p class="zero-pt-list">
+          <Show when={order().ptPicking?.listName}><span>Power Tools list: <strong>{order().ptPicking.listName}</strong></span></Show>
+          <Show when={order().ptPicking?.ctZeroClosed}><span class="zero-tag">Ct Zero closed</span></Show>
+          <Show when={ptBin()}><span>PT bin <strong>{ptBin()}</strong></span></Show>
+        </p>
+      </Show>
+
       <Show when={props.powerTools?.ok && order().items.length}>
         <p class={match().equal ? 'desk-ok' : 'ct-token-hint is-warn'} role="status">
           {match().equal
-            ? 'Your location order matches the Power Tools position order.'
+            ? 'Your picking order matches the Power Tools order.'
             : match().comparable
-              ? 'Your location order differs from the Power Tools position order.'
-              : 'Power Tools is connected, but this pack is missing a position on some cards.'}
+              ? `${match().mismatches} card${match().mismatches === 1 ? ' is' : 's are'} in a different place than in Power Tools.`
+              : 'Power Tools is connected, but some cards in this pack have no Power Tools position, so the orders cannot be compared.'}
         </p>
       </Show>
-      <DropRow
-        title="Pick"
-        hint={`${open().length} still to pick · location order`}
-        items={open()}
-        picked={false}
-        zone="pick"
-        over={hot('pick')}
-        places={places()}
-        onMove={move}
-        setZone={pointer.setZone}
-        onPointerDown={pointer.onPointerDown}
-        onPointerMove={pointer.onPointerMove}
-        onPointerUp={pointer.onPointerUp}
-        onPointerCancel={pointer.onPointerCancel}
-        consumeClick={pointer.consumeClick}
-      />
-      <DropRow
-        title="Picked"
-        hint={`${doneItems().length} picked`}
-        items={doneItems()}
-        picked
-        zone="picked"
-        over={hot('picked')}
-        places={places()}
-        onMove={move}
-        setZone={pointer.setZone}
-        onPointerDown={pointer.onPointerDown}
-        onPointerMove={pointer.onPointerMove}
-        onPointerUp={pointer.onPointerUp}
-        onPointerCancel={pointer.onPointerCancel}
-        consumeClick={pointer.consumeClick}
-      />
+
+      <div class="zero-toolbar">
+        <div class="zero-view-toggle" role="group" aria-label="View">
+          <button type="button" class={['inv-chip', { on: view() === 'cards' }]} aria-pressed={view() === 'cards'} onClick={() => setView('cards')}>Cards</button>
+          <button type="button" class={['inv-chip', { on: view() === 'list' }]} aria-pressed={view() === 'list'} onClick={() => setView('list')}>List</button>
+        </div>
+        <button class="btn" type="button" onClick={() => setPicking(true)} disabled={!order().items.length}>Start picking</button>
+        <button
+          type="button"
+          class={['inv-chip', { on: ptSort() && ptComparable() }]}
+          aria-pressed={ptSort() && ptComparable()}
+          disabled={!ptComparable()}
+          title={ptSortTitle()}
+          onClick={() => setPtSort((on) => !on)}
+        >
+          Sort by PT order
+        </button>
+        <button class="btn ghost" type="button" onClick={() => downloadCsv(order(), current)}>Export CSV</button>
+        <button class="btn ghost" type="button" onClick={() => window.print()}>Print</button>
+      </div>
+
+      <div class="zero-search">
+        <label class="ct-token-field">
+          <span class="sr-only">Find a card in this shipment</span>
+          <input
+            type="search"
+            placeholder="Find: name, set, number, location"
+            value={query()}
+            onInput={(event) => {
+              setQuery(event.target.value);
+              setHit(0);
+              window.requestAnimationFrame(() => reveal(currentKey()));
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              step(event.shiftKey ? -1 : 1);
+            }}
+          />
+        </label>
+        <Show when={query().trim()}>
+          <span class="zero-search-count" aria-live="polite">
+            {matchKeys().length ? `${Math.min(hit(), matchKeys().length - 1) + 1} of ${matchKeys().length}` : 'No match'}
+          </span>
+          <button class="btn ghost" type="button" onClick={() => step(-1)} disabled={!matchKeys().length}>Prev</button>
+          <button class="btn ghost" type="button" onClick={() => step(1)} disabled={!matchKeys().length}>Next</button>
+        </Show>
+      </div>
+
+      <Show
+        when={view() === 'list'}
+        fallback={(
+          <>
+            <div class="zero-cards-view">
+              <DropRow
+                {...rowProps}
+                title="Pick"
+                hint={`${openLines().length} still to pick · picking order`}
+                groups={openGroups()}
+                picked={false}
+                zone="pick"
+                over={hot('pick')}
+                setZone={pointer.setZone}
+                onPointerDown={pointer.onPointerDown}
+                onPointerMove={pointer.onPointerMove}
+                onPointerUp={pointer.onPointerUp}
+                onPointerCancel={pointer.onPointerCancel}
+                consumeClick={pointer.consumeClick}
+              />
+              <DropRow
+                {...rowProps}
+                title="Picked"
+                hint={`${doneLines().length} picked`}
+                groups={doneGroups()}
+                picked
+                zone="picked"
+                over={hot('picked')}
+                setZone={pointer.setZone}
+                onPointerDown={pointer.onPointerDown}
+                onPointerMove={pointer.onPointerMove}
+                onPointerUp={pointer.onPointerUp}
+                onPointerCancel={pointer.onPointerCancel}
+                consumeClick={pointer.consumeClick}
+              />
+            </div>
+            <ZeroList {...rowProps} groups={allGroups()} printOnly />
+          </>
+        )}
+      >
+        <DeskPanel flush title="Picking list" extra={<span class="zero-progress">{openLines().length} still to pick</span>}>
+          <ZeroList {...rowProps} groups={allGroups()} />
+        </DeskPanel>
+      </Show>
+
+      <Show when={qtyKey() && lineByKey(qtyKey())}>
+        {(line) => (
+          <PickQuantityDialog
+            line={line()}
+            picked={pickOf(line()).picked}
+            onChange={(picked) => setPicked(line(), picked)}
+            onClose={() => setQtyKey('')}
+          />
+        )}
+      </Show>
+      <Show when={issueKey() && lineByKey(issueKey())}>
+        {(line) => (
+          <IssueDialog
+            line={line()}
+            issue={pickOf(line()).issue}
+            onSave={(issue) => { change(line(), { issue }); setIssueKey(''); }}
+            onClear={() => { change(line(), { issue: null }); setIssueKey(''); }}
+            onClose={() => setIssueKey('')}
+          />
+        )}
+      </Show>
+      <Show when={picking()}>
+        <PickingMode lines={lines()} pickOf={pickOf} isDone={isDone} onSetPicked={setPicked} onClose={() => setPicking(false)} />
+      </Show>
     </div>
   );
 }

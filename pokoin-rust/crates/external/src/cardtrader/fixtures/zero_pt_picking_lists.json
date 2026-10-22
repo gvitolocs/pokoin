@@ -1,0 +1,11 @@
+[
+  {
+    "ptId": 300, "name": "Week 42", "variant": "default", "numOrders": 1, "numArticles": 3,
+    "orders": [{ "ptOrderId": 80 }], "createdAt": "2026-10-19T08:00:00.000Z", "sortingFields": []
+  },
+  {
+    "ptId": "301", "name": "Zero 42", "variant": "cardtrader_zero", "numOrders": 2, "numArticles": 4,
+    "orders": [{ "ptOrderId": "80" }, { "ptOrderId": 81 }], "createdAt": "2026-10-19T09:00:00.000Z",
+    "sortingFields": [{ "field": "name", "direction": "asc" }]
+  }
+]

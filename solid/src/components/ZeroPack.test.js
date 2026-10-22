@@ -2,19 +2,91 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const pack = fs.readFileSync(new URL('./ZeroPack.jsx', import.meta.url), 'utf8');
-const page = fs.readFileSync(new URL('../pages/CardTraderZero.jsx', import.meta.url), 'utf8');
+const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
+const pack = read('./ZeroPack.jsx');
+const page = read('../pages/CardTraderZero.jsx');
+const list = read('./zero/ZeroList.jsx');
+const picking = read('./zero/PickingMode.jsx');
+const dialogs = read('./zero/ZeroDialogs.jsx');
+const bits = read('./zero/zero-bits.jsx');
+const css = read('../../../market/src/zero-pack.css');
 
-test('the current pack is two rows: Pick, then Picked', () => {
+test('the Cards view keeps two rows, Pick then Picked, keyed by lineKey', () => {
   assert.match(pack, /title="Pick"/);
   assert.match(pack, /title="Picked"/);
   assert.match(pack, /draggable="false"/);
-  assert.match(pack, /move\(action\.payload\.itemId, action\.to === 'picked'\)/);
+  assert.match(pack, /setPicked\(line, action\.to === 'picked' \? lineQuantity\(line\) : 0\)/);
+  assert.match(pack, /lineKey: lineKeyOf\(item\(\)\)/);
   assert.match(pack, /Mark picked/);
   assert.match(pack, /Undo/);
-  assert.match(pack, /props\.picked \? 'Nothing left to pick\.' : 'Drag a card down, or click Mark picked\.'/);
-  assert.match(pack, /Your location order matches the Power Tools position order/);
-  assert.match(page, /location box, then stock number from smaller to bigger/);
+  assert.match(pack, /'Nothing left to pick\.'/);
+  assert.doesNotMatch(pack, /places\.get\(item\.itemId\)/);
+  assert.match(pack, /groupLinesByGame/);
+});
+
+test('per-box lines show take N, N of M, also in, and picked x/y', () => {
+  assert.match(bits, /take \{quantity\(\)\}/);
+  assert.match(bits, /\{quantity\(\)\} of \{props\.item\.itemQuantity\}/);
+  assert.match(bits, /also in: \{props\.item\.alsoIn\.join\(', '\)\}/);
+  assert.match(pack, /picked \{pick\(\)\.picked\}\/\{quantity\(\)\}/);
+  assert.match(pack, /aria-pressed=/);
+});
+
+test('picked state is server first, saved with saveCardTraderZeroPick, never in preview', () => {
+  assert.match(pack, /saveCardTraderZeroPick\(token, body\)/);
+  assert.match(pack, /if \(props\.preview \|\| inFlight\.has\(lineKey\)\) return false;/);
+  assert.match(pack, /window\.addEventListener\('online', flushDirty\)/);
+  assert.match(pack, /takeLegacyPicked/);
+  assert.match(page, /preview=\{props\.preview\}/);
+});
+
+test('views, search, CSV, print, PT order, picking mode', () => {
+  assert.match(pack, />Cards<\/button>/);
+  assert.match(pack, />List<\/button>/);
+  assert.match(pack, /Start picking/);
+  assert.match(pack, /Export CSV/);
+  assert.match(pack, /window\.print\(\)/);
+  assert.match(pack, /Sort by PT order/);
+  assert.match(pack, /disabled=\{!ptComparable\(\)\}/);
+  assert.match(pack, /in a different place than in Power Tools/);
+  assert.match(pack, /Your picking order matches the Power Tools order/);
+  assert.match(pack, /Ct Zero closed/);
+  assert.match(pack, /step\(event\.shiftKey \? -1 : 1\)/);
+  assert.match(list, /nameEn/);
+  assert.match(list, /zero-print-box/);
+  assert.match(picking, /window\.removeEventListener\('keydown', onKey\)/);
+  assert.match(picking, /event\.key === 'Backspace'/);
+  assert.match(css, /@media print/);
+  assert.match(css, /break-inside: avoid/);
+});
+
+test('dialogs are labelled modals: quantity and issue', () => {
+  assert.match(dialogs, /role="dialog" aria-modal="true" aria-labelledby=\{props\.titleId\}/);
+  assert.match(dialogs, /What issue would you like to report\?/);
+  assert.match(dialogs, />All</);
+  assert.match(dialogs, />None</);
+  assert.match(dialogs, />Done</);
+  assert.match(pack, /issue: null/);
+});
+
+test('the page explains the game-first picking order and shows the refresh time', () => {
+  assert.match(page, /Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then the other games/);
+  assert.match(page, /Refreshed at \{refreshedAt\(\)\}/);
   assert.match(page, /<ShipmentPanel/);
   assert.match(page, /onSession=\{load\}/);
+});
+
+test('Power Tools locations are tagged, rejected saves surface, PT sort needs a comparable list', () => {
+  assert.match(bits, /title="Location from Power Tools"/);
+  assert.match(bits, /lineLocationFromPt\(props\.item\)/);
+  assert.match(pack, /<LocationText item=\{item\(\)\} \/>/);
+  assert.match(list, /<LocationText item=\{line\(\)\} \/>/);
+  assert.match(picking, /lineLocationFromPt\(line\(\)\)/);
+  assert.match(dialogs, /<LocationText item=\{props\.line\} \/>/);
+  assert.match(dialogs, /maxlength=\{ISSUE_NOTE_MAX\}/);
+  assert.match(pack, /pickSaveBody\(untrack\(orderId\), lineKey, entry, fields\)/);
+  assert.match(pack, /if \(retryableSaveError\(err\)\) return false;/);
+  assert.match(pack, /Not saved: /);
+  assert.match(pack, /const ptComparable = \(\) => order\(\)\.ptPicking\?\.comparable === true;/);
+  assert.match(pack, /title=\{ptSortTitle\(\)\}/);
 });
