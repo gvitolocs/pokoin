@@ -18,7 +18,6 @@ import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } 
 import ScanImage from '../ScanImage.jsx';
 import { getBearer } from '../../stores/auth.js';
 import RowThumb from './RowThumb.jsx';
-import PricerDialog from './PricerDialog.jsx';
 
 const STATUS_CHIPS = [
   { id: '', label: 'All' },
@@ -100,15 +99,7 @@ const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
 
 function MarketCell(props) {
   return (
-    <Switch
-      fallback={(
-        <span class="inv-mkt" title={props.value.title}>
-          {inventoryMarketLabel(props.value)}
-          {/* The CardTrader ask beside the net: the net is what a seller keeps. */}
-          <Show when={props.value.askLabel}><small class="inv-mkt-ask">ask {props.value.askLabel}</small></Show>
-        </span>
-      )}
-    >
+    <Switch fallback={<span class="inv-mkt" title={props.value.title}>{inventoryMarketLabel(props.value)}</span>}>
       <Match when={props.pending}><span class="inv-mkt is-pending">…</span></Match>
       <Match when={props.value == null}><span class="inv-mkt is-none">—</span></Match>
     </Switch>
@@ -208,7 +199,6 @@ export default function InventoryBoard(props) {
     setPricerSource(pricerSource() === id ? '' : id);
   }
   const pricerOn = () => Boolean(pricerSource()) || Boolean(props.autoMarketColumn);
-  const [pricerOpen, setPricerOpen] = createSignal(false);
 
   const facets = createMemo(() => inventoryFacets(props.rows));
   const summary = createMemo(() => summarizeLiveInventory(props.rows));
@@ -243,15 +233,10 @@ export default function InventoryBoard(props) {
 
   // Market comps for the current filtered rows while a pricer source is on.
   createEffect(
-    () => (pricerOn() ? { source: pricerSource(), rows: visibleRows(), previewComps: props.preview ? props.previewComps : null } : null),
+    () => (pricerOn() ? { source: pricerSource(), rows: visibleRows() } : null),
     (input) => {
       if (!input) {
         pricesKey = '';
-        return undefined;
-      }
-      // Layout preview: the fixture's answers, no request.
-      if (input.previewComps) {
-        setPrices({ [game().id]: input.previewComps });
         return undefined;
       }
       const { games, count, key } = priceRequest(input.source, input.rows);
@@ -363,23 +348,8 @@ export default function InventoryBoard(props) {
               </button>
             )}
           </For>
-          <button type="button" class="btn inv-pricer-open" onClick={() => setPricerOpen(true)} data-testid="pricer-open">
-            Pricer…
-          </button>
         </span>
       </div>
-      <PricerDialog
-        open={pricerOpen()}
-        onClose={() => setPricerOpen(false)}
-        rows={props.rows}
-        filteredRows={view()}
-        gameId={game().id}
-        preview={props.preview}
-        previewStrategies={props.previewStrategies}
-        previewComps={props.previewComps}
-        initial={{ source: pricerSource() === 'pokoin' ? 'pokoin' : 'cardtrader' }}
-        onApplied={() => props.onApplied?.()}
-      />
 
       <Switch>
         <Match when={mode() === 'stacks'}>
