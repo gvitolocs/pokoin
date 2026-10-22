@@ -25,3 +25,7 @@ pub const WPKN_CONTRACT_ADDRESS: &str = "0x91A17E2bddfF839078BD395482B38e4AC1527
 pub fn contract_address_reply() -> String {
     format!("BNB Chain wPKN contract address:\n{WPKN_CONTRACT_ADDRESS}")
 }
+pub mod hospital;
+pub mod social_text;
+pub mod x_client;
+pub mod youtube;

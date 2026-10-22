@@ -31,6 +31,10 @@ async fn run() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(command) = args.first() {
+        return run_command(command, &args[1..]).await;
+    }
     let config = Arc::new(Config::from_env()?);
     config.log_effective();
     if let Err(error) = tokio::fs::create_dir_all(&config.state_dir).await {
@@ -108,6 +112,33 @@ async fn run() -> anyhow::Result<()> {
     };
 
     let mut workers = Vec::new();
+    // Opt-in native OAuth listener. Bind before starting either gateway so a
+    // configuration/port failure cannot leave a partially started daemon.
+    if let Ok(raw) = std::env::var("POKO_BOT_OAUTH_ADDR") {
+        let addr = poko_bot::youtube::listener_addr(&raw)?;
+        let data_dir = std::env::var("POKO_BOT_DATA_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| config.state_dir.clone());
+        let youtube_config = poko_bot::youtube::YoutubeConfig::from_env(&data_dir)?;
+        let youtube = Arc::new(poko_bot::youtube::Youtube::new(
+            deps.http.clone(),
+            youtube_config,
+        ));
+        let app = poko_bot::youtube::router(youtube);
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let mut rx = shutdown_rx.clone();
+        workers.push(tokio::spawn(async move {
+            if axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = rx.changed().await;
+                })
+                .await
+                .is_err()
+            {
+                tracing::error!("YouTube OAuth listener stopped");
+            }
+        }));
+    }
     if config.telegram_enabled {
         match config.telegram_token.clone() {
             Some(token) => {
@@ -147,5 +178,62 @@ async fn run() -> anyhow::Result<()> {
         tracing::warn!(error = %error, "history snapshot on shutdown failed");
     }
     let _ = tokio::time::timeout(Duration::from_secs(2), health).await;
+    Ok(())
+}
+
+/// Explicit tools do not start Telegram or Discord, and never run implicitly at daemon startup.
+async fn run_command(command: &str, args: &[String]) -> anyhow::Result<()> {
+    use poko_bot::youtube::{Youtube, YoutubeConfig};
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .build()?;
+    match command {
+        "youtube-auth" => {
+            let config = YoutubeConfig::from_env(std::path::Path::new(
+                &std::env::var("POKO_BOT_DATA_DIR").unwrap_or_else(|_| "/var/lib/poko-bot".into()),
+            ))?;
+            let youtube = Youtube::new(http, config);
+            if args.is_empty() {
+                println!("{}", youtube.config.authorize_url()?);
+            } else if args.len() == 2 && args[0] == "--code-file" {
+                use std::os::unix::fs::PermissionsExt;
+                let path = std::path::Path::new(&args[1]);
+                anyhow::ensure!(
+                    std::fs::metadata(path)?.permissions().mode() & 0o077 == 0,
+                    "OAuth code file must have mode 0600"
+                );
+                let code = tokio::fs::read_to_string(path).await?;
+                let result = youtube.exchange_code(&code).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                anyhow::bail!("usage: poko-bot youtube-auth [--code-file /path/to/0600-file]");
+            }
+        }
+        "youtube-oauth-serve" => {
+            anyhow::ensure!(args.is_empty(), "youtube-oauth-serve takes no arguments");
+            let addr = poko_bot::youtube::listener_addr(
+                &std::env::var("POKO_BOT_OAUTH_ADDR").unwrap_or_else(|_| "127.0.0.1:8791".into()),
+            )?;
+            let config = YoutubeConfig::from_env(std::path::Path::new(
+                &std::env::var("POKO_BOT_DATA_DIR").unwrap_or_else(|_| "/var/lib/poko-bot".into()),
+            ))?;
+            let app = poko_bot::youtube::router(Arc::new(Youtube::new(http, config)));
+            let listener = tokio::net::TcpListener::bind(addr).await?;
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = tokio::signal::ctrl_c().await;
+                })
+                .await?;
+        }
+        "check-hospital-config" => {
+            anyhow::ensure!(args.is_empty(), "check-hospital-config takes no arguments");
+            anyhow::ensure!(
+                poko_bot::hospital::Hospital::from_env(http)?.is_some(),
+                "POKO_HOSPITAL_URL must explicitly name the P-OPS Rust endpoint"
+            );
+            println!("Hospital configuration valid (no request sent)");
+        }
+        _ => anyhow::bail!("unknown poko-bot command"),
+    }
     Ok(())
 }

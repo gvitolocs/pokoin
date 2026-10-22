@@ -1,0 +1,11 @@
+{
+  "captured_at_utc": "2026-10-22T19:48:20.170390+00:00",
+  "source": "p2 /opt/hermes-poko",
+  "method": "GET",
+  "path": "/oauth2callback?state=poko&error=access_denied",
+  "status": 400,
+  "headers": {
+    "content-type": "text/html; charset=utf-8"
+  },
+  "body": "<html><body style=\"font-family:sans-serif;max-width:42rem;margin:2rem\">\n<h1>Poko YouTube auth denied</h1>\n<pre style=\"background:#f4f4f4;padding:1rem;white-space:pre-wrap\">\nStep: callback\nError: access_denied\nToken path: /opt/hermes-poko/data/youtube-poko-token.json\nChannel expected: @pokoinpos\n</pre>\n<p>CLI fallback (paste code from address bar):</p>\n<pre style=\"background:#f4f4f4;padding:1rem\">\ncd /home/nez/Projects/Hermes\nnode --env-file=private/cityhop/.env.local scripts/poko-youtube-auth.js --code=PASTE_CODE\n</pre>\n</body></html>"
+}
