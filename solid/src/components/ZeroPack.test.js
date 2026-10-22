@@ -145,7 +145,7 @@ test('the page explains the game-first picking order and shows the refresh time'
   assert.match(page, /Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then the other games/);
   assert.match(page, /Refreshed at \{refreshedAt\(\)\}/);
   assert.match(page, /<ShipmentPanel/);
-  assert.match(page, /onSession=\{load\}/);
+  assert.match(page, /onSession=\{\(\) => load\(\{ refresh: true \}\)\}/);
 });
 
 test('Power Tools locations are tagged', () => {
@@ -158,4 +158,16 @@ test('Power Tools locations are tagged', () => {
 
 test('MyPokoin nav has Picked next to Collection', () => {
   assert.match(nav, /label: 'Collection'[^\n]*\n\s*\{ to: '\/mypokoin\/picked', label: 'Picked'/);
+});
+
+test('a big pack loads fast: lazy dialogs, print list only while printing, two-phase load', () => {
+  assert.match(pack, /lazy\(\(\) => import\('\.\/zero\/PickingMode\.jsx'\)\)/);
+  assert.match(pack, /lazy\(\(\) => import\('\.\/zero\/ZeroDialogs\.jsx'\)/);
+  assert.doesNotMatch(pack, /^import PickingMode/m);
+  assert.match(pack, /<Show when=\{printing\(\)\}><ZeroList \{\.\.\.rowProps\} groups=\{allGroups\(\)\} printOnly \/><\/Show>/);
+  assert.match(pack, /addEventListener\('beforeprint', startPrint\)/);
+  assert.match(page, /fetchCardTraderZero\(token, \{ powerTools: false, refresh \}\)/);
+  assert.match(page, /if \(inflight\) return inflight;/);
+  assert.match(page, /readLastPack\(storage\(\), authUid\(\)\)/);
+  assert.match(page, /load\(\{ refresh: true \}\)/);
 });

@@ -674,3 +674,11 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
 }
 .zero-tile .zero-split { justify-self: start; }
 .zero-tile-loc .zero-pt-tag { white-space: nowrap; }
+
+/* A 135-line pack: tiles and rows far off screen skip layout and paint until
+ * they scroll near. `auto` remembers each one's real size once rendered. */
+.zero-card { content-visibility: auto; contain-intrinsic-size: auto 330px; }
+.zero-row { content-visibility: auto; contain-intrinsic-size: auto 52px; }
+@media print {
+  .zero-card, .zero-row { content-visibility: visible; }
+}

@@ -94,6 +94,26 @@ export function previewPricer() {
   return { defaultSource: 'cardtrader', autoMarketColumn: false };
 }
 
+/**
+ * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
+ * the price check returns them: CardTrader numbers net of the commission
+ * (`ctMatchedPkn`) beside the ask (`ctMatchedGrossPkn`).
+ */
+export function previewComps() {
+  const comp = (ask, net, extra = {}) => ({
+    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: net, ctCheapestGrossPkn: ask, ctBasis: 'pro',
+    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' }, ...extra,
+  });
+  return {
+    '222410:NM:EN:': comp(460, 431.94, { pokoinCheapestPkn: 440 }),
+    '222302:SP:EN:': comp(2100, 1971.9),
+    '222314:NM:JP:': comp(1040, 976.56),
+    '502874:NM:EN:': comp(560, 525.84),
+    '502862:NM:IT:': comp(28, 25.56),
+    '484062:MP:EN:': comp(150, 140.85),
+  };
+}
+
 export function previewStrategies() {
   return [{
     id: 'preview-strategy-1',
@@ -187,8 +207,33 @@ const ZERO_LINES = [
   };
 });
 
+/**
+ * Local-only load test (dev server, or a build served on localhost): `?mypokoinPreview&previewLines=135` repeats the fixture
+ * to N lines, each with its own image URL, so a big pack can be measured.
+ */
+function previewLineCount() {
+  if (typeof window === 'undefined') return 0;
+  const host = window.location.hostname;
+  if (!import.meta.env?.DEV && host !== 'localhost' && host !== '127.0.0.1') return 0;
+  const n = Number(new URLSearchParams(window.location.search).get('previewLines'));
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), 1000) : 0;
+}
+
+function scaledZeroLines(count) {
+  const base = copy(ZERO_LINES);
+  return Array.from({ length: count }, (_, index) => {
+    const line = copy(base[index % base.length]);
+    const art = card(index).imageUrl || '';
+    line.itemId = String(80000 + index);
+    line.lineKey = line.listingId ? `${line.itemId}@${line.listingId}` : line.itemId;
+    line.imageUrl = art ? `${art}${art.includes('?') ? '&' : '?'}n=${index}` : '';
+    return line;
+  });
+}
+
 export function previewZero() {
-  const items = copy(ZERO_LINES);
+  const scaled = previewLineCount();
+  const items = scaled ? scaledZeroLines(scaled) : copy(ZERO_LINES);
   const units = items.reduce((sum, item) => sum + item.quantity, 0);
   const cents = items.reduce((sum, item) => sum + item.lineCents, 0);
   return {

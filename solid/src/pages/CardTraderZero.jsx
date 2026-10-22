@@ -19,7 +19,8 @@ import StockNav from '../components/StockNav.jsx';
 import { downloadCsv, PendingList, ShipmentPanel } from '../components/ZeroPack.jsx';
 import { PtSortDialog } from '../components/zero/ZeroDialogs.jsx';
 import ZeroSortBar from '../components/zero/ZeroSortBar.jsx';
-import { getBearer, signedIn } from '../stores/auth.js';
+import { readLastPack, writeLastPack } from '@market/zero-pick.js';
+import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import {
   allowMypokoinPreview,
   MYPOKOIN_PREVIEW_BANNER,
@@ -252,25 +253,71 @@ function ZeroDesk(props) {
     if ('smartLocations' in sorting) setSmartLocations(sorting.smartLocations !== false);
   }
 
-  async function load() {
-    setLoading(true);
-    setError('');
+  const [ptLoading, setPtLoading] = createSignal(false);
+  const [ptError, setPtError] = createSignal('');
+  const storage = () => {
     try {
-      const token = await getBearer();
-      const result = await fetchCardTraderZero(token);
-      setNotConnected(false);
-      setData(() => result);
-      takeSorting(result?.sorting);
-    } catch (err) {
-      if (err.body?.code === 'cardtrader_not_connected') setNotConnected(true);
-      else setError(err.message || 'CardTrader Zero list failed.');
-    } finally {
-      setLoading(false);
+      return window.localStorage;
+    } catch (_) {
+      return null;
     }
+  };
+  const remember = (result) => writeLastPack(storage(), authUid(), result);
+
+  /**
+   * Two phases: the pack without Power Tools first (it paints as soon as
+   * CardTrader answers), then the Power Tools overlay, which reuses the
+   * server's cached CardTrader orders. One load at a time: a second call
+   * joins the one in flight.
+   */
+  let inflight = null;
+  function load({ refresh = false } = {}) {
+    if (inflight) return inflight;
+    inflight = (async () => {
+      setLoading(true);
+      setError('');
+      setPtError('');
+      try {
+        const token = await getBearer();
+        const fast = await fetchCardTraderZero(token, { powerTools: false, refresh });
+        setNotConnected(false);
+        setData(() => fast);
+        takeSorting(fast?.sorting);
+        if (fast?.powerTools?.deferred !== true) {
+          remember(fast);
+          return;
+        }
+        setPtLoading(true);
+        try {
+          const full = await fetchCardTraderZero(token, { refresh });
+          setData(() => full);
+          takeSorting(full?.sorting);
+          remember(full);
+        } catch (err) {
+          remember(fast);
+          setPtError(err.message || 'Power Tools did not answer.');
+        } finally {
+          setPtLoading(false);
+        }
+      } catch (err) {
+        if (err.body?.code === 'cardtrader_not_connected') setNotConnected(true);
+        else setError(err.message || 'CardTrader Zero list failed.');
+      } finally {
+        setLoading(false);
+        inflight = null;
+      }
+    })();
+    return inflight;
   }
 
   createEffect(signedIn, (on) => {
     if (props.preview || !on) return undefined;
+    // Last pack of this seller paints at once; the fresh one replaces it.
+    const last = readLastPack(storage(), authUid());
+    if (last && !untrack(data)) {
+      setData(() => last);
+      takeSorting(last.sorting);
+    }
     load();
     let cancelled = false;
     getBearer()
@@ -475,6 +522,9 @@ function ZeroDesk(props) {
         <Show when={refreshedAt()}>
           <span class="zero-refreshed thread-meta">Refreshed at {refreshedAt()}</span>
         </Show>
+        <Show when={ptLoading()}>
+          <span class="zero-refreshed thread-meta" role="status">Loading Power Tools…</span>
+        </Show>
         <button
           class="btn ghost"
           type="button"
@@ -484,13 +534,16 @@ function ZeroDesk(props) {
         >
           Switch list
         </button>
-        <button class="btn ghost" type="button" onClick={load} disabled={loading() || notConnected() || props.preview}>
+        <button class="btn ghost" type="button" onClick={() => load({ refresh: true })} disabled={loading() || notConnected() || props.preview}>
           {loading() ? 'Reloading…' : 'Reload picking list'}
         </button>
         <button class="btn ghost" type="button" onClick={exportList} disabled={!data()}>Export</button>
       </StockNav>
       <p class="mypokoin-help">Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then the other games; inside a game by location box, then stack and position, then the order the copies were added to your inventory. Picking a card takes that copy out of your inventory; undo puts it back.</p>
       <Alert>{error()}</Alert>
+      <Show when={ptError()}>
+        <p class="ct-token-hint is-warn" role="status">Power Tools overlay not loaded: {ptError()}</p>
+      </Show>
 
       <Show when={notConnected()}>
         <EmptyDesk title="Connect CardTrader first" lede="The Zero list comes from your CardTrader seller orders. Paste your CardTrader API token in Settings.">
@@ -596,7 +649,7 @@ function ZeroDesk(props) {
 
       <Show when={!props.preview && !notConnected()}>
         <div id="zero-powertools">
-          <PowerToolsPanel overlay={data()?.powerTools} onSession={load} />
+          <PowerToolsPanel overlay={data()?.powerTools} onSession={() => load({ refresh: true })} />
         </div>
       </Show>
     </div>

@@ -18,13 +18,17 @@ import { resolveArtLayout } from '@market/art-cut.js';
 import {
   albumShade,
   deskTheme,
+  fullArtRowTheme,
+  peekFullArtShade,
   rememberCardBucket,
   rememberDeskIdentity,
   subscribeShadeBuckets,
   warmCardBucket,
+  warmFullArtShade,
 } from '@market/art-shade.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { compactQuery, suggestLiveReady } from '@market/compact-query.js';
+import { isMonoFullArt } from '@market/full-art.js';
 import { isPokemonGame, stripGamePrefix } from '@market/game.js';
 import { clipSuggestCollector, printingIdentity, suggestCardName, suggestTranslatedLine } from '@market/identity.js';
 import { sellerHref } from '@market/listing-meta.js';
@@ -271,6 +275,9 @@ function warmRows(rows, preloadRows = rows) {
     const card = row.card;
     if (!card.id || (live && live.isLiveStub(card))) continue;
     rememberDeskIdentity(card);
+    if (isPokemonGame() && isMonoFullArt({ ...card, name: suggestCardName(card, row.groupName) })) {
+      warmFullArtShade(card.id, thumbOf(card));
+    }
     const shade = albumShade(card);
     if (shade) {
       rememberCardBucket(card.id, shade);
@@ -1073,14 +1080,23 @@ function SuggestRow(props) {
     equals: (prev, next) => prev?.code === next?.code && prev?.label === next?.label,
   });
   const live = createMemo(() => Boolean(props.live && (props.live.isLiveStub(card()) || props.live.isLiveStub(props.printing))));
+  const fullArt = createMemo(() => Boolean(props.pokemon) && isMonoFullArt({ ...card(), name: englishName() }));
   const rowTheme = createMemo(() => {
     void props.shadeTick;
     const special = rarityRowTheme(card());
-    const delta = !special && prefersArtworkDelta(card()) ? deskTheme(card()) : null;
-    if (special?.shade) return special;
+    if (special) return special;
+    // Full Art: its own mono background colour, sampled from the thumb margins.
+    const mono = fullArt() ? fullArtRowTheme(peekFullArtShade(card().id)) : null;
+    if (mono) return mono;
+    const delta = prefersArtworkDelta(card()) ? deskTheme(card()) : null;
     if (delta) return { kind: 'delta', shade: delta.surface, raised: delta.surfaceRaised };
-    return special;
+    return null;
   });
+  const rowStyle = () => {
+    const theme = rowTheme();
+    if (theme?.stops) return { '--suggest-fa-a': theme.stops[0], '--suggest-fa-b': theme.stops[1], '--suggest-fa-c': theme.stops[2] };
+    return theme?.shade ? { '--suggest-shade': theme.shade, '--suggest-shade-raised': theme.raised } : undefined;
+  };
   const thumbLoading = () => (props.index >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined);
   const thumbPriority = () => (props.index < SUGGEST_THUMB_HIGH ? 'high' : 'low');
   const choose = () => {
@@ -1112,8 +1128,9 @@ function SuggestRow(props) {
             'is-rainbow': rowTheme()?.kind === 'rainbow',
             'is-gold': rowTheme()?.kind === 'gold',
             'is-ghost': rowTheme()?.kind === 'ghost',
+            'is-fullart': rowTheme()?.kind === 'fullart',
           }]}
-          style={rowTheme()?.shade ? { '--suggest-shade': rowTheme().shade, '--suggest-shade-raised': rowTheme().raised } : undefined}
+          style={rowStyle()}
         >
           <button type="button" class="suggest-main" onClick={choose}>
             <span class="suggest-set" aria-hidden="true">

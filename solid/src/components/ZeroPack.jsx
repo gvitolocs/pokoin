@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, flush, For, lazy, Loading, onSettled, Show, untrack } from 'solid-js';
 import { saveCardTraderZeroPick } from '@market/api.js';
 import {
   confirmPickEntry,
@@ -30,10 +30,13 @@ import '@market/zero-pack.css';
 import { createPointerDrag } from '../lib/pointer-drag.js';
 import { getBearer } from '../stores/auth.js';
 import { DeskPanel } from './Desk.jsx';
-import PickingMode from './zero/PickingMode.jsx';
-import { IssueDialog, SwapDialog } from './zero/ZeroDialogs.jsx';
 import ZeroList from './zero/ZeroList.jsx';
 import ZeroTile from './zero/ZeroTile.jsx';
+
+// Loaded on first use: most visits never open a dialog or picking mode.
+const PickingMode = lazy(() => import('./zero/PickingMode.jsx'));
+const IssueDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.IssueDialog })));
+const SwapDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.SwapDialog })));
 
 function day(value) {
   const parsed = value ? new Date(value) : null;
@@ -308,6 +311,18 @@ export function ShipmentPanel(props) {
   const [ptSort, setPtSort] = createSignal(false);
   const [issueKey, setIssueKey] = createSignal('');
   const [swapKey, setSwapKey] = createSignal('');
+  // The print list exists only while printing: on screen it doubled the DOM.
+  const [printing, setPrinting] = createSignal(false);
+  const startPrint = () => { setPrinting(true); flush(); };
+  const endPrint = () => setPrinting(false);
+  onSettled(() => {
+    window.addEventListener('beforeprint', startPrint);
+    window.addEventListener('afterprint', endPrint);
+    return () => {
+      window.removeEventListener('beforeprint', startPrint);
+      window.removeEventListener('afterprint', endPrint);
+    };
+  });
 
   const match = createMemo(() => pickingOrdersMatch(order().items));
   const ptComparable = () => order().ptPicking?.comparable === true;
@@ -422,7 +437,7 @@ export function ShipmentPanel(props) {
           onPointerCancel={pointer.onPointerCancel}
         />
       </div>
-      <ZeroList {...rowProps} groups={allGroups()} printOnly />
+      <Show when={printing()}><ZeroList {...rowProps} groups={allGroups()} printOnly /></Show>
     </>
   );
 
@@ -465,7 +480,7 @@ export function ShipmentPanel(props) {
         >
           Sort by PT order
         </button>
-        <button class="btn ghost" type="button" onClick={() => window.print()}>Print</button>
+        <button class="btn ghost" type="button" onClick={() => { startPrint(); window.print(); }}>Print</button>
         <div class="zero-search">
           <label class="ct-token-field">
             <span class="sr-only">Find a card in this shipment</span>
@@ -503,6 +518,7 @@ export function ShipmentPanel(props) {
         </DeskPanel>
       </Show>
       <Show when={view() === 'single'}>
+        <Loading fallback={null}>
         <PickingMode
           inline
           lines={lines()}
@@ -514,29 +530,30 @@ export function ShipmentPanel(props) {
           onSetPicked={setPicked}
           onClose={() => {}}
         />
-        <ZeroList {...rowProps} groups={allGroups()} printOnly />
+        </Loading>
+        <Show when={printing()}><ZeroList {...rowProps} groups={allGroups()} printOnly /></Show>
       </Show>
 
       <Show when={issueKey() && lineByKey(issueKey())}>
         {(line) => (
-          <IssueDialog
+          <Loading fallback={null}><IssueDialog
             line={line()}
             issue={pickOf(line()).issue}
             onSave={(issue) => { setIssue(line(), issue); setIssueKey(''); }}
             onClear={() => { setIssue(line(), null); setIssueKey(''); }}
             onClose={() => setIssueKey('')}
-          />
+          /></Loading>
         )}
       </Show>
       <Show when={swapKey() && lineByKey(swapKey())}>
         {(line) => (
-          <SwapDialog
+          <Loading fallback={null}><SwapDialog
             line={line()}
             copies={lineCopies(line())}
             busy={isBusy(line())}
             onChoose={(listingId) => { setSwapKey(''); onPick(line(), listingId); }}
             onClose={() => setSwapKey('')}
-          />
+          /></Loading>
         )}
       </Show>
     </div>

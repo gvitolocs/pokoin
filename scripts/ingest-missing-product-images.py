@@ -10,7 +10,9 @@ Never hotlink CardTrader from the SPA. Encode homepage webp here (not on
 the Pi). Set `POKOIN_INGEST_EXPANSION=World Championship Decks 2025` to
 refresh one set's singles from blueprint `image.url` / `show` (PNG or JPEG).
 After leftovers land, CLIP same-art groups those name buckets on nezopt 15T
-unless `POKOIN_SKIP_VERSION_MATCH=1`. Placeholder sweeps skip CLIP.
+unless `POKOIN_SKIP_VERSION_MATCH=1`, then reverse-holo pattern siblings join
+their base printing (`marketplace_join_reverse_pattern_versions`, foil
+overlays defeat CLIP). Placeholder sweeps skip CLIP.
 Set `POKOIN_INGEST_PLACEHOLDERS=1` to replace every leftover JPEG on the Pi
 that is still the 186×260 CardTrader logo (same key, full slug from the
 filename — `{ct_id}-{leftover-slug}.jpg` on CardTrader). CardTrader GET runs
@@ -627,6 +629,45 @@ def version_match_argv(expansion: str = "", ids: list[int] | None = None) -> lis
     return cmd
 
 
+# Reverse-holo patterns (Poké Ball / Master Ball / Energy / Gem Pack slot
+# 01-06) are the same card; CLIP misses them under the foil. A CLIP
+# re-cluster resets those printings, so join them again after every match.
+# scripts/sql/20261022_reverse_pattern_version_joins.sql
+REVERSE_PATTERN_JOIN_SQL = (
+    "SELECT count(*) AS joined_sets, coalesce(sum(moved_rows), 0) AS moved_rows"
+    " FROM public.marketplace_join_reverse_pattern_versions(true);"
+)
+
+
+def reverse_pattern_join_argv() -> list[str]:
+    return [
+        "docker",
+        "exec",
+        "-i",
+        PG_CONTAINER,
+        "psql",
+        "-U",
+        "pokoin_marketplace",
+        "-d",
+        "pokoin_marketplace",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-At",
+        "-c",
+        REVERSE_PATTERN_JOIN_SQL,
+    ]
+
+
+def join_reverse_pattern_versions() -> None:
+    result = subprocess.run(
+        reverse_pattern_join_argv(), capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        print("reverse-pattern join failed: " + (result.stderr or result.stdout).strip(), flush=True)
+        return
+    print("reverse-pattern join " + result.stdout.strip(), flush=True)
+
+
 def match_imported_version_sets(rows: list[dict]) -> None:
     if PLACEHOLDERS:
         return
@@ -642,6 +683,7 @@ def match_imported_version_sets(rows: list[dict]) -> None:
     env.setdefault("HIP_VISIBLE_DEVICES", "0")
     print("version match " + " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True, env=env)
+    join_reverse_pattern_versions()
 
 
 def main() -> int:

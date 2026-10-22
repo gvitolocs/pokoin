@@ -1096,9 +1096,17 @@ export function sellerApiGrantAction(token, body) {
   });
 }
 
-/** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
-export function fetchCardTraderZero(token) {
-  return getJson('/api/cardtrader-zero', {
+/**
+ * CardTrader Zero picking list (weekly merged shipment + Zero sales waiting
+ * for the next merge). `powerTools: false` answers without the Power Tools
+ * overlay (fast first paint); `refresh: true` skips the server's 60 s cache.
+ */
+export function fetchCardTraderZero(token, { powerTools = true, refresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (!powerTools) params.set('powertools', '0');
+  if (refresh) params.set('refresh', '1');
+  const query = params.toString();
+  return getJson(`/api/cardtrader-zero${query ? `?${query}` : ''}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

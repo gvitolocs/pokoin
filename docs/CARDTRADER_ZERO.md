@@ -312,6 +312,38 @@ Stored on Firestore `cardtrader_zero_picks/{uid}_{orderId}`, one top-level field
 `reset` deletes the doc (issues and Firestore counts only; Postgres picks are undone one
 by one). `GET /api/cardtrader-zero` reads it back, clamping `picked` to the line.
 
+### Speed
+
+A 135-line pack took 3.5–4.4 s (Pi log `slow_http_request`, 2026-10-22), and the
+page waited for it with nothing on screen. Now:
+
+- **Query flags.** `powertools=0` answers without any Power Tools call
+  (`powerTools.deferred: true`). `refresh=1` skips the per-seller cache.
+- **Two-phase page.** The page asks for `powertools=0` first and paints the pack,
+  then asks again for the Power Tools overlay. Before either answer it paints the
+  seller's last pack from `localStorage` (`pokoin.ctZero.last.<uid>`, kept 7 days,
+  at most 2 MB). One load runs at a time. Refresh sends `refresh=1`.
+- **Parallel reads.** The CardTrader and Power Tools integration docs are read once,
+  together. The CardTrader orders run beside Power Tools `user/order` and the picking
+  lists. Then the webhook allocations, blueprint games, picks and getArticlesToPick
+  run together, followed by one listing query.
+- **Batched Firestore.** Allocations and picks use Firestore `documents:batchGet`
+  (100 ids per request) instead of one GET per line.
+- **Bounded CardTrader paging.** Orders are read with `from` = 60 days ago. The
+  weekly merged `paid` order is at most a week old, so direct orders no seller ships
+  any more no longer cost pages.
+- **Cache.** The CardTrader orders and Power Tools reads are kept in-process for
+  60 s per seller. A refresh still reuses a read under 3 s old: the overlay request
+  right after it. One lock per seller makes concurrent requests share one fetch.
+  Picks, allocations and listing rows are never cached.
+- **Timings.** The response carries `Server-Timing` (`docs`, `ct_orders`,
+  `pt_orders`, `allocations`, `games`, `picks`, `pt_articles`, `listings`, `total`,
+  plus `ct_cache`/`pt_cache` on a hit). The API logs `zero_list_timing` with the
+  same steps.
+- **Rendering.** Tiles and rows use `content-visibility: auto`. The print-only list
+  is rendered only while printing. Picking mode and the dialogs load on first use,
+  and images decode async.
+
 ## Power Tools session
 
 Power Tools has no OAuth for third-party apps. Its own sign-in is Outseta

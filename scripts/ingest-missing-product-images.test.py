@@ -98,6 +98,11 @@ class VersionMatchArgvTests(unittest.TestCase):
     def test_empty_without_scope(self):
         self.assertEqual(ingest.version_match_argv("", []), [])
 
+    def test_reverse_pattern_join_applies_on_the_writer(self):
+        argv = ingest.reverse_pattern_join_argv()
+        self.assertEqual(argv[:4], ["docker", "exec", "-i", ingest.PG_CONTAINER])
+        self.assertIn("marketplace_join_reverse_pattern_versions(true)", argv[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

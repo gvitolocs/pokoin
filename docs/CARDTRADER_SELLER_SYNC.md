@@ -103,7 +103,12 @@ idempotency key, and what a retry, a crash or a replay does:
 | Reconcile push claim | `source_listing_id` compare-and-set `"" → ct:pending:link-<ms>` | a claimed listing is not a candidate | the claim stays; see in-doubt | the outbox push uses the same claim (`ct:pending:<event>`), so only one of them ever creates |
 | CardTrader `POST /products` | `user_data_field = pokoin:<listing id>` | refused: claim released, retried next run; in doubt: claim kept | in doubt | the next complete export links the product by `user_data_field`; a stale claim is released only when no product and no order names it |
 | Link back (`ct:<product id>`, `marketplace_cardtrader_product_links`) | `LINK_SQL` over the claim; link row `(seller_uid, ct_product_id)` | upsert | the next export links it by `user_data_field` | a product already linked to another listing is never relinked (`listing_linked_elsewhere`) |
+| Reprice while the create is in flight | the linked row's `price_pkn` vs the price the create sent | the copy leaves the product (an increment) | the next Pokoin edit or `cardtrader-fee-once` corrects the ask | after the link the reconcile detaches a repriced copy, which is pushed again at its new price (`group::settle_after_link`, `detachedAfterPush`); the outbox no longer creates products |
 | CardTrader sale → Pokoin stock | `cardtrader_webhook_events` seller + order + order item | the claim answers "already applied" | a failed decrement releases the claim | the reconcile records a missed sale with the same claim id |
+
+Every CardTrader write lists the gross-up of the Pokoin price, never the
+Pokoin price itself (that is already net, and CardTrader would take its fee
+twice): see [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21).
 
 Why the Vendetta copies of 2026-10-20 stayed paused: Pokoin's quote read only
 Pokémon tables, so Card Rails got no price for any Riftbound copy and listed
@@ -113,6 +118,126 @@ now reads the price store for every game (`priceSource:
 `job price-unpriced-listings --seller=<uid>` (dry run unless `--apply`) prices
 the existing ones. The TLA+ model is
 [`../specs/tla/listing-ct-sync`](../specs/tla/listing-ct-sync/README.md).
+
+## Identical copies are one CardTrader product (2026-10-21)
+
+A seller's copies with the same CardTrader characteristics and price are one
+CardTrader product whose quantity is the sum of theirs: same game, card
+(blueprint), condition, language, the finish their product carries
+(`push::push_foil`: `pokemon_reverse` for Pokémon, the game's `*_foil` for the
+others, read from `foil_state` too), first edition, signed, altered and Pokoin
+price. A graded slab (any of `graded`, `grading_company`, `grade`,
+`certification_id`) is never grouped. Where a copy is stored (box, stack,
+position) is not a CardTrader characteristic. Before this, every Pokoin
+listing was its own product, so Card Rails' 1× postings of one card stood on
+CardTrader as dozens of "1 of 1" rows (PeppeV's Spiderling, VEN 097/166).
+Code: `pokoin-rust/crates/external/src/cardtrader/group.rs`; migration
+`scripts/sql/133_cardtrader_grouped_products.sql` (the source is no longer
+unique per seller).
+
+- **Model.** Every member listing holds the product's source `ct:<id>`. The
+  product's `user_data_field` names one member (`pokoin:<id>`, the primary),
+  and the product-link row is the product's (`listing_id` = the primary).
+- **Push** (`link.rs` `push_unlisted`, the seller reconcile, every 10
+  minutes). It is the only create path now: the outbox no longer creates
+  Pokémon products itself (`listing_sync::outbox_pushes`).
+  - A candidate and its identical unlisted copies are claimed together under
+    one `ct:pending:link-<ms>` (one compare-and-set per listing), or, when
+    they join a product already on CardTrader, `ct:pending:join-<product>-<ms>`.
+  - If the group is already on CardTrader, its product gains their copies
+    (`POST /products/:id/increment`). Otherwise one product is created with
+    their sum.
+  - All of them are then linked over the shared claim (`LINK_GROUP_SQL`).
+  - A copy that changed while CardTrader answered is caught up
+    (`group::settle_after_link`): a quantity change is an increment, and a
+    copy repriced, taken off sale or deleted leaves the group (`DETACH_SQL`).
+  - An increment in doubt is taken as applied and never sent twice: a lost
+    one under-lists, a repeated one would over-list (D00008U). A join claim
+    left behind (a stop between the increment and the link) names its
+    product, so the stale-claim pass links it there instead of releasing it
+    into a second increment.
+  - A create in doubt keeps the shared claim. The reconcile links the whole
+    claim when the export shows the primary (`LINK_PENDING_GROUP_SQL`), and
+    takes off the product the copies its members no longer hold (sold or
+    removed on Pokoin meanwhile: `settledInDoubtCreate`).
+  - A stale claim is released or settled as a group: an export or an order
+    naming the primary names its siblings (`STALE_CLAIMS_SQL`,
+    `claim_members`).
+- **CardTrader sale** (webhook): the copies come from the group, the named
+  listing first, then the oldest. This is one locked statement
+  (`group::GROUP_DECREMENT_SQL`) that writes nothing unless the group holds
+  them all.
+  - The event doc records `allocations` `[{listingId, quantity}]`, and a
+    cancellation restores exactly those.
+  - If the primary has left the group, the product's current members answer.
+- **Reconcile quantity** (`sync_core::plan_inventory_reconcile`): CardTrader's
+  quantity is spread over the members (`group::distribute`). A shortfall comes
+  off the newest copies; a restock goes to the primary.
+  - A copy the group gains from CardTrader is only applied when no member
+    was written after the export (`groupRaiseDeferred` otherwise): the raise
+    lands on the primary, whose own row the per-row stale guard sees as old.
+  - A product being consolidated (an open
+    `marketplace_cardtrader_consolidations` row) keeps its quantity. When the
+    open rows cannot be read (migration 134 missing, a database error), every
+    product several listings share keeps its quantity that run
+    (`groupQuantitiesHeld` in the summary, a warning in the log).
+  - A vanished product removes every member.
+  - The mass-removal guard counts listings.
+  - A link row that cannot be written is an error item, never the end of the
+    run; a link row still naming a listing that moved off its product is
+    dropped before another product's row names it (`FREE_STALE_LINK_SQL`).
+- **Pokoin edits** (`update_listing`):
+  - A quantity change stays in the group (an increment of the change).
+  - A copy repriced or taken off sale leaves the group (`listing_sync::group_leave`):
+    - its copies come off the product (`quantityDelta`);
+    - its source is cleared, and the product's link row passes to another
+      member (`HAND_OVER_LINK_SQL`);
+    - the next reconcile pushes it into the group of its new price.
+  - The shared product is never repriced or deleted for one copy. A listing
+    alone on its product keeps the old rules: price `PUT`, delete when off sale.
+- **Pokoin sale:** `increment -n` on the product, deleted at 0, as before.
+- **Jobs:** `cardtrader-fee-once` and `cardtrader-pro-floor-reprice` write
+  each product once, counting it written only once CardTrader took it.
+  `cardtrader-fee-once` raises only products Pokoin pushed (`push` link
+  rows); `cardtrader-net-prices` nets only the seller's own (`import` /
+  `match`) unless `--origin=push`: the products Pokoin pushed keep their
+  CardTrader ask and Pokoin takes its net (the choice for PeppeV on
+  2026-10-22; `--example=<card>` works one card through). The reprice nets at the seller's own rate and VAT and leaves a
+  `ct_to_pokoin` seller's linked listings alone.
+- **Existing products:** `pokoin-api job cardtrader-group-products
+  --seller=<uid> [--keep=<product id>] [--max-groups=N] [--csv=…] [--log=…]
+  [--apply]`. A dry run unless `--apply`; `--keep` runs only the group that
+  product is in, `--max-groups` stops after N whole groups, and the dry run
+  with the same flags lists exactly those.
+  - Only products Pokoin pushed (a `push` link row or a `pokoin:` user data
+    field), grouped by blueprint, CardTrader's own properties as sent (Mint
+    and Near Mint stay apart), description and ask; folded into the one with
+    the most copies. Graded products are never folded; a group whose
+    CardTrader and Pokoin copies differ is skipped and reported, and so is
+    one with a seller order in the last two days.
+  - Per group, under the seller's reconcile lock (the API's Valkey): the kept
+    product gets an open `marketplace_cardtrader_consolidations` row
+    (migration 134), so the reconcile leaves its quantity alone; then per
+    duplicate, one at a time, its listings move to the kept product (one
+    transaction) and it is deleted. Its copies count only if the delete
+    succeeded, at the quantity CardTrader returned (else the export's); a 404
+    or a refused delete moves its listings back and counts nothing. Then the
+    kept product gains the counted copies and the row is closed.
+  - CardTrader never lists more copies than exist, and a stop between the
+    steps never loses copies: the open row holds the group until a rerun
+    finishes it from the journal.
+  - It stops at any error or 429, at most 5 writes a second.
+  - The journal (JSON lines, `$POKOIN_STATE_DIR` or
+    `~/.local/state/pokoin/ct-group-products-<uid>.jsonl`, persistent)
+    holds every product's id, copies, ask and properties: enough to undo a run.
+  - Replica estimate on 2026-10-21: PeppeV has 297 groups, 1,964 products
+    folding into 297 (1,667 deleted); 2,931 Pokoin-made products become
+    1,264. The job's own dry run reads the live export.
+- **Not covered:** the Zero pick list (`zero.rs`) still shows one member's
+  location per product. Scan Connect's own push (`push_and_link`) and a
+  CardTrader-only listing create a product without a claim. The reconcile
+  runs without the shared lock when Valkey is down (it does not push then).
+  The TLA+ model `specs/tla/listing-ct-sync` follows one copy, not a group.
 
 ## Pokoin edits of linked listings (2026-10-14)
 
@@ -133,9 +258,12 @@ get a write.
   nothing echoes back to CardTrader.
 - The outbox step (`listing_sync::edit_cardtrader`) reads
   `seller_integrations/{uid}__cardtrader` and sends:
-  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push
-    (200 PKN = €1, to the cent). It is absolute, so a write in doubt (no answer,
-    a 5xx) is retried by the outbox.
+  - **price**: `PUT /products/:id {"price": <eur>}`, converted like the push:
+    the gross-up of the Pokoin price at the seller's CardTrader rate (the
+    smallest whole-cent ask that nets it; 26 PKN direct → €0.14, see
+    [PRICING.md](PRICING.md#writing-to-cardtrader-the-fee-once-2026-10-21)).
+    It is absolute, so a write in doubt (no answer, a 5xx) is retried by the
+    outbox.
   - **quantity**: `POST /products/:id/increment` with the change
     (`delta_quantity: new − old`), never the new total: the same rule as a
     Pokoin sale (see "Never written back"). Example: CardTrader and Pokoin

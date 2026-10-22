@@ -372,6 +372,16 @@
   filter: brightness(1.12);
 }
 
+/* Full Art: the card's own mono background colour (art-shade fullArtRowTheme). */
+.suggest-row.is-fullart {
+  background: linear-gradient(100deg, var(--suggest-fa-a) 0%, var(--suggest-fa-b) 55%, var(--suggest-fa-c) 100%);
+}
+
+.suggest-row.is-fullart:hover,
+.suggest-row.is-fullart.is-active {
+  filter: brightness(1.12);
+}
+
 .suggest-main {
   display: grid;
   /* Set | thumb | name/set + aligned number column. */

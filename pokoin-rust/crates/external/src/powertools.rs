@@ -479,7 +479,11 @@ pub async fn disconnect_power_tools(firestore: &dyn FirestoreStore, uid: &str) -
 
 /// Session jwt for a connected seller, or '' when not connected.
 pub async fn decrypt_power_tools_session(firestore: &dyn FirestoreStore, uid: &str) -> ApiResult<String> {
-    let doc = read_power_tools_doc(firestore, uid).await?;
+    session_from_doc(&read_power_tools_doc(firestore, uid).await?)
+}
+
+/// The session of a Power Tools doc the caller already read ("" when none).
+pub fn session_from_doc(doc: &FirestoreDoc) -> ApiResult<String> {
     if !doc.exists || doc.data.get("enabled") != Some(&Value::Bool(true)) {
         return Ok(String::new());
     }

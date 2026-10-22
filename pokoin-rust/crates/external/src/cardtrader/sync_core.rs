@@ -80,6 +80,7 @@ pub fn empty_summary() -> Value {
         "supportedInventory": 0,
         "pokemonInventory": 0,
         "alreadyLinked": 0,
+        "consolidating": 0,
         "matchedExisting": 0,
         "imported": 0,
         "updated": 0,
@@ -217,6 +218,10 @@ pub struct NormalizedProduct {
     pub collector_number: String,
     /// expansion.name_en / expansion_name (Power Tools set hint).
     pub expansion_name: String,
+    /// CardTrader's own properties as sent, keys sorted (`{"condition":
+    /// "Mint", …}`): two products with the same value are the same thing on
+    /// CardTrader, whatever Pokoin maps them to (Mint and Near Mint are both NM).
+    pub properties_key: String,
 }
 
 pub fn normalize_product(product: &Value) -> NormalizedProduct {
@@ -296,6 +301,10 @@ pub fn normalize_product(product: &Value) -> NormalizedProduct {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        properties_key: props
+            .as_object()
+            .map(|map| serde_json::to_string(&map.iter().collect::<std::collections::BTreeMap<_, _>>()).unwrap_or_default())
+            .unwrap_or_default(),
     }
 }
 
@@ -572,28 +581,62 @@ pub enum Attachment {
 }
 
 pub struct AttachmentIndex {
+    /// One row per linked product: its oldest member, carrying the copies of
+    /// every member (several identical listings share one product,
+    /// cardtrader::group).
     pub by_source_id: HashMap<String, ListingRow>,
+    /// Every member listing of each linked product.
+    pub members: HashMap<String, Vec<ListingRow>>,
     pub by_listing_id: HashMap<String, ListingRow>,
     pub unlinked_by_facet: HashMap<String, Vec<ListingRow>>,
 }
 
 impl AttachmentIndex {
     pub fn build(listings: &[ListingRow]) -> Self {
-        let mut by_source_id = HashMap::new();
+        let mut members: HashMap<String, Vec<ListingRow>> = HashMap::new();
         let mut by_listing_id = HashMap::new();
         let mut unlinked_by_facet: HashMap<String, Vec<ListingRow>> = HashMap::new();
         for row in listings {
             let row = row.clone();
             by_listing_id.insert(row.id.clone(), row.clone());
             if is_ct_linked_source(&row.source_listing_id) {
-                by_source_id.insert(row.source_listing_id.clone(), row);
+                members.entry(row.source_listing_id.clone()).or_default().push(row);
             } else if row.status == "active" || row.status == "paused" || row.status.is_empty() {
                 let facet = listing_facet(&row);
                 unlinked_by_facet.entry(facet).or_default().push(row);
             }
         }
-        Self { by_source_id, by_listing_id, unlinked_by_facet }
+        let by_source_id = members.iter().map(|(source, rows)| (source.clone(), group_row(rows))).collect();
+        Self { by_source_id, members, by_listing_id, unlinked_by_facet }
     }
+}
+
+/// A product's members as one row: the oldest member, the copies of all, and
+/// `sold_out` only when every member is.
+fn group_row(rows: &[ListingRow]) -> ListingRow {
+    let mut oldest = rows
+        .iter()
+        .min_by(|a, b| a.created_ms.unwrap_or(i64::MAX).cmp(&b.created_ms.unwrap_or(i64::MAX)).then(a.id.cmp(&b.id)))
+        .cloned()
+        .unwrap_or_else(|| rows[0].clone());
+    if rows.len() > 1 {
+        oldest.quantity_available = rows.iter().map(|row| row.quantity_available.max(0)).sum();
+        if let Some(live) = rows.iter().find(|row| row.status == "active").or_else(|| rows.iter().find(|row| row.status == "paused")) {
+            oldest.status = live.status.clone();
+        }
+    }
+    oldest
+}
+
+fn members_of(rows: &[ListingRow], primary: &str) -> Vec<crate::cardtrader::group::Member> {
+    rows.iter()
+        .map(|row| crate::cardtrader::group::Member {
+            id: row.id.clone(),
+            quantity: row.quantity_available,
+            primary: row.id == primary,
+            created_ms: row.created_ms.unwrap_or(0),
+        })
+        .collect()
 }
 
 fn listing_facet(row: &ListingRow) -> String {
@@ -614,7 +657,8 @@ pub fn facet_key_of_row(row: &Value) -> String {
         &clean_text_value(row.get("card_id").or_else(|| row.get("cardId")).unwrap_or(&Value::Null), 80),
         &clean_text_value(row.get("condition").unwrap_or(&Value::Null), 20),
         &clean_text_value(row.get("language").unwrap_or(&Value::Null), 10),
-        row_bool(row, "reverse"),
+        // The finish its CardTrader product carries (foil_state included).
+        crate::cardtrader::push::push_foil(row) || row_bool(row, "reverse"),
         row_bool(row, "first_edition") || row_bool(row, "firstEdition"),
         row_bool(row, "signed"),
         row_bool(row, "altered"),
@@ -675,6 +719,9 @@ pub fn resolve_product_attachment(product: &NormalizedProduct, index: &mut Attac
 pub enum PlannedAction {
     Noop { product_id: String, listing_id: String },
     UpdateQty { product_id: String, listing_id: String, quantity: i64 },
+    /// CardTrader's quantity of a product several listings share, spread over
+    /// them (`group::distribute`): (listing id, its new quantity).
+    UpdateGroupQty { product_id: String, primary_id: String, changes: Vec<(String, i64)> },
     Link { product_id: String, listing_id: String },
     Import { product_id: String, card_id: String, listing_id: String },
     Remove { product_id: String, listing_id: String, source_id: String },
@@ -698,6 +745,23 @@ pub fn plan_inventory_reconcile(
     export_complete: bool,
     export_ok: bool,
 ) -> ReconcilePlan {
+    plan_inventory_reconcile_with(export, listings, link_missing, Some(&HashSet::new()), export_complete, export_ok)
+}
+
+/// [`plan_inventory_reconcile`], leaving the quantity of the products in
+/// `consolidating` alone (an open `job cardtrader-group-products` group:
+/// its members already hold copies CardTrader gets back only at the end).
+/// `None`: the open groups could not be read, so no product several listings
+/// share has its quantity touched this run (fail closed); a product of one
+/// listing still syncs.
+pub fn plan_inventory_reconcile_with(
+    export: &ProductsExport,
+    listings: &[ListingRow],
+    link_missing: &HashMap<String, bool>,
+    consolidating: Option<&HashSet<String>>,
+    export_complete: bool,
+    export_ok: bool,
+) -> ReconcilePlan {
     let (allow_destructive, gate_reason) = destructive_reconcile_gate(export_complete, export_ok, true);
     let mut summary = empty_summary();
     summary["inventory"] = json!(export.products.len());
@@ -707,8 +771,9 @@ pub fn plan_inventory_reconcile(
     // Planned imports and links must not dilute it (specs/tla/ct-reconcile),
     // and neither may rows already settled as sold out.
     let linked_before = index
-        .by_source_id
+        .members
         .iter()
+        .flat_map(|(source_id, rows)| rows.iter().map(move |row| (source_id, row)))
         .filter(|(source_id, row)| !settled_absent(row, &parse_ct_product_id(source_id), link_missing))
         .count();
     let mut pokoin_only_ids: HashSet<String> = HashSet::new();
@@ -749,7 +814,28 @@ pub fn plan_inventory_reconcile(
             }
             Attachment::AlreadyLinked { listing } => {
                 summary["alreadyLinked"].incr(1);
-                if listing.quantity_available != product.quantity {
+                let group = index.members.get(&source_id).filter(|rows| rows.len() > 1);
+                let held = match consolidating {
+                    Some(open) => open.contains(&product.id),
+                    None => group.is_some(),
+                };
+                if held {
+                    summary["consolidating"].incr(1);
+                    actions.push(PlannedAction::Noop { product_id: product.id.clone(), listing_id: listing.id.clone() });
+                } else if let Some(rows) = group {
+                    let primary = parse_pokoin_listing_id(&product.user_data_field);
+                    let changes = crate::cardtrader::group::distribute(&members_of(rows, &primary), product.quantity);
+                    if changes.is_empty() {
+                        actions.push(PlannedAction::Noop { product_id: product.id.clone(), listing_id: listing.id.clone() });
+                    } else {
+                        summary["updated"].incr(1);
+                        actions.push(PlannedAction::UpdateGroupQty {
+                            product_id: product.id.clone(),
+                            primary_id: if rows.iter().any(|row| row.id == primary) { primary } else { listing.id.clone() },
+                            changes,
+                        });
+                    }
+                } else if listing.quantity_available != product.quantity {
                     summary["updated"].incr(1);
                     actions.push(PlannedAction::UpdateQty {
                         product_id: product.id.clone(),
@@ -766,6 +852,7 @@ pub fn plan_inventory_reconcile(
                     index.unlinked_by_facet.insert(facet, Vec::new());
                 }
                 index.by_source_id.insert(source_id.clone(), listing.clone());
+                index.members.insert(source_id.clone(), vec![listing.clone()]);
                 if let Some(entry) = index.by_listing_id.get_mut(&listing.id) {
                     entry.source_listing_id = source_id.clone();
                 }
@@ -807,11 +894,16 @@ pub fn plan_inventory_reconcile(
         summary["unparsedRows"] = json!(unparsed_rows);
     }
     if allow_destructive {
-        let linked: Vec<(String, ListingRow)> = index
+        // Every member of a vanished product is removed, not only one.
+        let mut linked: Vec<(String, ListingRow)> = index
             .by_source_id
             .iter()
-            .map(|(source_id, row)| (source_id.clone(), row.clone()))
+            .flat_map(|(source_id, row)| match index.members.get(source_id) {
+                Some(rows) if !rows.is_empty() => rows.iter().map(|member| (source_id.clone(), member.clone())).collect::<Vec<_>>(),
+                _ => vec![(source_id.clone(), row.clone())],
+            })
             .collect();
+        linked.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
         for (source_id, listing) in linked {
             let product_id = parse_ct_product_id(&source_id);
             if product_id.is_empty() || seen_product_ids.contains(&product_id) {
@@ -1137,6 +1229,37 @@ mod tests {
 
     fn plan_of(products: &[Value], listings: &[Value], complete: bool) -> ReconcilePlan {
         plan_inventory_reconcile(&ProductsExport::from_rows(products), &rows(listings), &HashMap::new(), complete, true)
+    }
+
+    #[test]
+    fn a_group_is_spread_but_a_product_being_consolidated_is_left_alone() {
+        let a = "00000000-0000-0000-0000-00000000000a";
+        let products = [json!({"id": 9, "blueprint_id": 100, "game_id": 5, "quantity": 1, "user_data_field": format!("pokoin:{a}"),
+                               "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"}})];
+        let listings = [
+            json!({"id": a, "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T09:00:00Z"}),
+            json!({"id": "b", "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T10:00:00Z"}),
+        ];
+        let export = ProductsExport::from_rows(&products);
+        // One copy sold on CardTrader before its webhook: the newest member gives it.
+        let plan = plan_inventory_reconcile(&export, &rows(&listings), &HashMap::new(), true, true);
+        assert!(
+            matches!(&plan.actions[..], [PlannedAction::UpdateGroupQty { primary_id, changes, .. }] if primary_id == a && changes == &vec![("b".to_string(), 0)]),
+            "{:?}", plan.actions
+        );
+        // While `job cardtrader-group-products` folds duplicates into it, the
+        // members hold copies CardTrader only gets at the end: hands off.
+        let consolidating: HashSet<String> = ["9".to_string()].into();
+        let held = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), Some(&consolidating), true, true);
+        assert!(matches!(&held.actions[..], [PlannedAction::Noop { .. }]), "{:?}", held.actions);
+        assert_eq!(held.summary["consolidating"], 1);
+        // The open groups could not be read: every shared product is held,
+        // a product of one listing still takes CardTrader's quantity.
+        let unknown = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), None, true, true);
+        assert!(matches!(&unknown.actions[..], [PlannedAction::Noop { .. }]), "{:?}", unknown.actions);
+        let alone = [json!({"id": a, "card_id": "200", "quantity_available": 2, "status": "active", "source_listing_id": "ct:9"})];
+        let single = plan_inventory_reconcile_with(&export, &rows(&alone), &HashMap::new(), None, true, true);
+        assert!(matches!(&single.actions[..], [PlannedAction::UpdateQty { quantity: 1, .. }]), "{:?}", single.actions);
     }
 
     fn removed_ids(plan: &ReconcilePlan) -> Vec<String> {
