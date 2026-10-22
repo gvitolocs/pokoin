@@ -203,11 +203,13 @@ const ZERO_LINES = [
 });
 
 /**
- * Dev-only load test: `?mypokoinPreview&previewLines=135` repeats the fixture
+ * Local-only load test (dev server, or a build served on localhost): `?mypokoinPreview&previewLines=135` repeats the fixture
  * to N lines, each with its own image URL, so a big pack can be measured.
  */
 function previewLineCount() {
-  if (!import.meta.env?.DEV || typeof window === 'undefined') return 0;
+  if (typeof window === 'undefined') return 0;
+  const host = window.location.hostname;
+  if (!import.meta.env?.DEV && host !== 'localhost' && host !== '127.0.0.1') return 0;
   const n = Number(new URLSearchParams(window.location.search).get('previewLines'));
   return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), 1000) : 0;
 }
