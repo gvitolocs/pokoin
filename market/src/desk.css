@@ -1616,7 +1616,10 @@
   justify-content: flex-start;
 }
 
+/* The button fills what the LIST ON tile leaves, and the whole row once it
+   wraps, so a longer label ("… + CardTrader", "Listing…") never jumps. */
 .sell-targets-row .inventory-targets .list-btn {
+  flex: 1 0 auto;
   min-height: 2.6rem;
   margin-left: auto;
 }

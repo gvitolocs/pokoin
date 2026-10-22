@@ -4275,9 +4275,14 @@ a.era-link:focus-visible {
   align-items: end;
 }
 
+/* The list form sizes to its own desk column, not the viewport. Inline-size
+   containment also keeps a long row out of the desk grid's min-content, so
+   the form can never push the center column past the viewport. */
+.sell-form:not(.is-collapsed) { container: sell-form / inline-size; }
+
 .sell-options-row {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
   min-width: 0;
@@ -4296,23 +4301,34 @@ a.era-link:focus-visible {
 .sell-field.currency { width: 6.2rem; }
 .sell-field.qty { width: 4.2rem; }
 .sell-field.comment { width: 100%; margin-top: 0.2rem; }
+.sell-field.price { flex: 1 1 8rem; max-width: 18rem; }
+
+/* Narrow form: price takes its own line, currency + qty share the next. */
+@container sell-form (max-width: 24rem) {
+  .sell-field.price { flex-basis: 100%; max-width: none; }
+  .sell-row > .sell-field.currency { flex: 1 1 auto; width: auto; }
+  .sell-targets-row .inventory-targets .list-btn { flex-basis: 100%; }
+}
 
 .sell-location-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 0.65rem;
   margin: 0 0 0.75rem;
 }
 
+/* Location + slot stay together; the comment drops to its own line when
+   fewer than ~12rem are left beside them. */
 .sell-field.location-pick {
-  flex: 0 1 9rem;
-  width: 9rem;
-  max-width: 46%;
+  flex: 0 1 12rem;
+  width: 12rem;
+  max-width: calc(100% - 5rem);
   min-width: 0;
 }
 
 .sell-field.comment.comment-inline {
-  flex: 1 1 auto;
+  flex: 1 1 12rem;
   width: auto;
   margin-top: 0;
   min-width: 0;
@@ -4328,6 +4344,7 @@ a.era-link:focus-visible {
   font-size: 0.85rem;
   font-weight: 800;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 .sell-field.sell-pick {
   flex: 0 0 auto;
@@ -4502,7 +4519,8 @@ a.era-link:focus-visible {
 
 .sell-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.45rem;
   min-width: 0;
   margin: 0;
@@ -7218,7 +7236,7 @@ dialog.zoom:not([open]) {
 
 @media (max-width: 1100px) {
   .card-desk {
-    grid-template-columns: minmax(14rem, 18rem) 1fr;
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
     grid-template-areas:
       "art center"
       "deal deal"
@@ -7344,11 +7362,6 @@ dialog.zoom:not([open]) {
   .hero-deal .buy-btn {
     width: 100%;
     max-width: 100%;
-  }
-
-  .sell-options-row,
-  .sell-options-row .sell-chips {
-    flex-wrap: wrap;
   }
 
   .hero-deal .buy-btn {
