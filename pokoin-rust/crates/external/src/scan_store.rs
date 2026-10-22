@@ -1798,7 +1798,7 @@ pub async fn submit_batch(
                    first_edition, foil_state, graded, grading_company, grade, certification_id, seller_comment, source,
                    source_listing_id, card_name, card_image_url, set_name, collector_number, location, altered, status
                  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pokoin_scan_batch',$17,$18,$19,$20,$21,$22,$23,'inactive')
-                 on conflict (source_listing_id) where source = 'pokoin_scan_batch'
+                 on conflict (source_listing_id) where source = 'pokoin_scan_batch' and source_listing_id not like 'ct:%'
                  do update set
                    card_id = excluded.card_id, seller_name = excluded.seller_name, condition = excluded.condition,
                    language = excluded.language, price_pkn = excluded.price_pkn, quantity_available = excluded.quantity_available,
@@ -2144,6 +2144,20 @@ pub async fn mutate_batch(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_submit_key_is_unique_but_cardtrader_sources_are_shared() {
+        // Copies of one card share their CardTrader product's `ct:<id>` (and a
+        // push claim): scan_row_uidx covers only the submit key `scan:<item>`
+        // (migration 136), and the submit's ON CONFLICT names that same
+        // predicate, so Postgres infers the index before and after it.
+        let migration = include_str!("../../../../scripts/sql/136_scan_row_uidx_ct_groups.sql");
+        let predicate = "where source = 'pokoin_scan_batch' and source_listing_id not like 'ct:%'";
+        assert!(migration.contains(predicate));
+        assert!(migration.contains("create unique index marketplace_user_listings_scan_row_uidx"), "same name: the scan migration's if-not-exists stays a no-op");
+        assert!(include_str!("scan_store.rs").contains(&format!("on conflict (source_listing_id) {predicate}")));
+    }
+
     use super::*;
 
     #[test]
