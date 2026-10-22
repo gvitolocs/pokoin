@@ -537,7 +537,7 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
         "language": live::field(item, "language", 10).to_uppercase(),
         "reverse": finish == "reverse" || finish == "reverse_holo",
         "firstEdition": item["firstEdition"] == true || finish == "first_edition",
-        "foilState": if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else { "standard" },
+        "foilState": if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else if finish == "foil" { "foil" } else { "standard" },
         "signed": item["signed"] == true, "altered": item["altered"] == true,
         "status": if paused { "paused" } else { "active" },
         "shippingAvailable": price_pkn > 0.0,
@@ -845,7 +845,7 @@ pub fn update_patch(item: &Value) -> Result<Value, ApiError> {
         let finish = live::first(item, &["finish", "printing"], 40).to_lowercase().replace([' ', '-'], "_");
         patch["reverse"] = json!(finish == "reverse" || finish == "reverse_holo");
         patch["foilState"] =
-            json!(if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else { "standard" });
+            json!(if finish == "reverse" || finish == "reverse_holo" { "reverse" } else if finish == "holo" { "holo" } else if finish == "foil" { "foil" } else { "standard" });
         if finish == "first_edition" {
             patch["firstEdition"] = json!(true);
         }
@@ -1191,6 +1191,8 @@ mod tests {
         let holo = update_patch(&json!({"printing":"Holo"})).unwrap();
         assert_eq!(holo["foilState"], "holo");
         assert_eq!(holo["reverse"], false);
+        // A Card Rails "foil" (Riftbound, Magic) stays foil, never standard.
+        assert_eq!(update_patch(&json!({"printing":"Foil"})).unwrap()["foilState"], "foil");
         let first = update_patch(&json!({"printing":"First Edition"})).unwrap();
         assert_eq!(first["firstEdition"], true);
         assert!(first.get("foilState").is_some());
@@ -1326,6 +1328,8 @@ mod tests {
         assert_eq!(body["location"], "BIN-07");
         assert_eq!(body["targets"], json!({"pokoin":true,"cardtrader":false}));
         assert_eq!(body["marketplaceGame"], "pokemon");
+        let foil = listing_body(&json!({"identity": {"publicId": "801312"}, "pricePkn": 26, "quantity": 1, "finish": "foil"}), "s", "IT").unwrap();
+        assert_eq!(foil["foilState"], "foil");
     }
 
     #[test]

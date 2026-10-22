@@ -814,6 +814,21 @@ pub fn exported_listing_ids(export: &[NormalizedProduct]) -> Vec<String> {
 /// `source_listing_id` while the reconcile's own push is in flight. Starts with
 /// `ct:pending:` like the outbox's, so nothing treats it as a product id, and
 /// an in-doubt create is linked later by its `user_data_field`.
+/// The claim of copies joining a product already on CardTrader: it names the
+/// product, so a claim left behind by a stop between the increment and the
+/// link is linked to that product, never sent again (an increment is not
+/// idempotent; D00008U).
+pub fn join_pending_source(product_id: &str, stamp: i64) -> String {
+    format!("ct:pending:join-{product_id}-{stamp}")
+}
+
+/// The product a join claim names.
+pub fn join_target(source: &str) -> Option<&str> {
+    let rest = source.strip_prefix("ct:pending:join-")?;
+    let (product, stamp) = rest.split_once('-')?;
+    (!product.is_empty() && product.bytes().all(|b| b.is_ascii_digit()) && stamp.bytes().all(|b| b.is_ascii_digit())).then_some(product)
+}
+
 pub fn pending_source(stamp: i64) -> String {
     format!("ct:pending:link-{stamp}")
 }
@@ -975,7 +990,7 @@ pub async fn push_unlisted(
             // The product is listed at the ask that nets the Pokoin price
             // after this seller's commission (push::ct_ask_eur).
             if listing.is_object() {
-                listing["ctChannel"] = json!(channel.as_str());
+                listing["ctChannel"] = json!(channel.code());
             }
             let id = clean_text_value(listing.get("id").unwrap_or(&Value::Null), 80);
             if id.is_empty() {
@@ -1017,7 +1032,11 @@ pub async fn push_unlisted(
                 Err(_) => Vec::new(),
             };
             copies.insert(0, listing.clone());
-            let pending = pending_source(crate::time_util::now_ms());
+            let joining = groups.get(&key).cloned();
+            let pending = match &joining {
+                Some(product_id) => join_pending_source(product_id, crate::time_util::now_ms()),
+                None => pending_source(crate::time_util::now_ms()),
+            };
             let mut sent: Vec<group::Sent> = Vec::new();
             let mut reads: Vec<(String, String)> = Vec::new();
             for copy in &copies {
@@ -1054,7 +1073,7 @@ pub async fn push_unlisted(
                     let _ = db.write("pokemon", RELEASE_SQL, &[json!(copy_id), json!(pending), json!(read)]).await;
                 }
             };
-            if let Some(product_id) = groups.get(&key).cloned() {
+            if let Some(product_id) = joining {
                 // The group is on CardTrader already: add these copies to it.
                 // An increment is never sent twice: one in doubt is taken as
                 // applied (a lost increment under-lists, a repeated one would
@@ -1083,7 +1102,7 @@ pub async fn push_unlisted(
             } else {
                 let primary = copies.iter().find(|copy| row_id(copy) == sent[0].id).cloned().unwrap_or_else(|| listing.clone());
                 let mut body_listing = primary.clone();
-                body_listing["ctChannel"] = json!(channel.as_str());
+                body_listing["ctChannel"] = json!(channel.code());
                 body_listing["quantity_available"] = json!(total);
                 let game = push::listing_game(&body_listing);
                 let editable = push::blueprint(&card_id)
@@ -1174,6 +1193,22 @@ async fn release_stale_claims(
             return;
         }
     };
+    // A join claim left behind: its increment may have been applied, so it is
+    // taken as applied and linked to the product it names (still exported),
+    // never released into a second increment.
+    let exported: HashSet<&str> = export.iter().map(|product| product.id.as_str()).collect();
+    let mut joined: HashSet<String> = HashSet::new();
+    for (_, claim) in &stale {
+        let Some(product) = join_target(claim).filter(|product| exported.contains(product)) else { continue };
+        if !joined.insert(claim.clone()) {
+            continue;
+        }
+        match db.write("pokemon", LINK_GROUP_SQL, &[json!(seller_uid), json!(claim), json!(ct_source_listing_id(product))]).await {
+            Ok(rows) => out["staleJoinsLinked"] = json!(out["staleJoinsLinked"].as_i64().unwrap_or(0) + rows.len() as i64),
+            Err(error) => note_error(out, json!({ "reason": error.message })),
+        }
+    }
+    let stale: Vec<(String, String)> = stale.into_iter().filter(|(_, claim)| !joined.contains(claim)).collect();
     if stale.is_empty() {
         return;
     }
@@ -1456,6 +1491,17 @@ mod tests {
         assert!(LINK_GROUP_SQL.contains("source_listing_id = $2"));
         assert!(DETACH_SQL.contains("source_listing_id = $2") && DETACH_SQL.contains("set source_listing_id = ''"));
         assert!(sibling_candidates_sql().contains("listing.card_id = $3") && sibling_candidates_sql().contains("not like 'ct:%'"));
+    }
+
+    #[test]
+    fn a_join_claim_names_its_product_and_is_never_sent_twice() {
+        let claim = join_pending_source("123456", 1_761_000_000_000);
+        assert!(claim.starts_with("ct:pending:"), "still a claim: no push, no edit, not a product id");
+        assert_eq!(join_target(&claim), Some("123456"));
+        assert_eq!(crate::cardtrader::sync_core::parse_ct_product_id(&claim), "");
+        assert_eq!(join_target(&pending_source(5)), None);
+        assert_eq!(join_target("ct:pending:join--5"), None);
+        assert_eq!(join_target("ct:pending:join-12x-5"), None);
     }
 
     #[test]

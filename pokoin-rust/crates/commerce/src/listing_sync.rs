@@ -579,6 +579,12 @@ pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value
 pub const SIBLINGS_SQL: &str = "select count(*)::bigint from public.marketplace_user_listings where seller_uid = $1 and source_listing_id = $2 and id <> $3 and status in ('active', 'paused')";
 /// The listing leaves its group: no product until the reconcile pushes it again.
 pub const LEAVE_GROUP_SQL: &str = "update public.marketplace_user_listings set source_listing_id = '' where id = $1 and source_listing_id = $2";
+/// The product's link row named the listing that left: it passes to the
+/// oldest member still on the product (`$3` seller), or goes when none is.
+pub const HAND_OVER_LINK_SQL: &str = "with next as (select id from public.marketplace_user_listings where seller_uid = $3 and source_listing_id = $2 and id <> $1 and status in ('active', 'paused') order by created_at, id limit 1) \
+     update public.marketplace_cardtrader_product_links set listing_id = (select id from next), updated_at = now() \
+     where listing_id = $1 and 'ct:' || ct_product_id = $2 and exists (select 1 from next)";
+pub const DROP_LEFT_LINK_SQL: &str = "delete from public.marketplace_cardtrader_product_links where listing_id = $1 and 'ct:' || ct_product_id = $2";
 
 /// What one CardTrader write of an edit did.
 #[derive(Debug)]
@@ -956,6 +962,8 @@ mod tests {
         // Alone on its product: the old rules (price PUT, destroy off sale).
         assert_eq!(group_leave(&before, &repriced, 0), None);
         assert!(SIBLINGS_SQL.contains("id <> $3") && LEAVE_GROUP_SQL.contains("source_listing_id = $2"));
+        // The link row moves with the product, never left naming the leaver.
+        assert!(HAND_OVER_LINK_SQL.contains("where listing_id = $1") && DROP_LEFT_LINK_SQL.contains("listing_id = $1"));
     }
 
     #[test]
@@ -1161,13 +1169,14 @@ mod tests {
         }
         assert!(taken().is_empty());
 
-        // Price as the CardTrader ask that nets it (no stored channel and no
-        // known subscription date: EU Zero at the current 7.3 %, 300 PKN →
-        // €1.65, which nets €1.5030 = 301 PKN; €1.64 nets 299), quantity as the change.
+        // Price as the CardTrader ask that nets it (no stored channel, no known
+        // country or subscription date: outside the EU, Zero at the current
+        // 10 %, no VAT; 300 PKN → €1.67, which nets €1.503 = 301 PKN; €1.66
+        // nets 299), quantity as the change.
         let marks = MemoryMarks::default();
         let mut p = payload("7", json!({"pricePkn": 300, "quantityDelta": 2}));
         edit_cardtrader(&fs, &ct, &marks, "both", &mut p).await.unwrap();
-        assert_eq!(taken(), vec![r#"put:7:{"price":1.65}"#.to_string(), "increment:7:2".into()]);
+        assert_eq!(taken(), vec![r#"put:7:{"price":1.67}"#.to_string(), "increment:7:2".into()]);
         assert_eq!(p["steps"], json!({"cardtraderPrice": "updated", "cardtraderQuantity": "updated", "cardtraderEdit": "done"}));
         assert_eq!(marks.0.lock().unwrap()["cardtraderQuantity"], "updated");
 

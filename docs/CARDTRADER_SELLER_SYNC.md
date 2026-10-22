@@ -123,8 +123,11 @@ the existing ones. The TLA+ model is
 
 A seller's copies with the same CardTrader characteristics and price are one
 CardTrader product whose quantity is the sum of theirs: same game, card
-(blueprint), condition, language, finishes (reverse/foil, first edition,
-signed, altered, graded) and Pokoin price. Where a copy is stored (box, stack,
+(blueprint), condition, language, the finish their product carries
+(`push::push_foil`: `pokemon_reverse` for Pokémon, the game's `*_foil` for the
+others, read from `foil_state` too), first edition, signed, altered and Pokoin
+price. A graded slab (any of `graded`, `grading_company`, `grade`,
+`certification_id`) is never grouped. Where a copy is stored (box, stack,
 position) is not a CardTrader characteristic. Before this, every Pokoin
 listing was its own product, so Card Rails' 1× postings of one card stood on
 CardTrader as dozens of "1 of 1" rows (PeppeV's Spiderling, VEN 097/166).
@@ -139,7 +142,8 @@ unique per seller).
   minutes). It is the only create path now: the outbox no longer creates
   Pokémon products itself (`listing_sync::outbox_pushes`).
   - A candidate and its identical unlisted copies are claimed together under
-    one `ct:pending:link-<ms>` (one compare-and-set per listing).
+    one `ct:pending:link-<ms>` (one compare-and-set per listing), or, when
+    they join a product already on CardTrader, `ct:pending:join-<product>-<ms>`.
   - If the group is already on CardTrader, its product gains their copies
     (`POST /products/:id/increment`). Otherwise one product is created with
     their sum.
@@ -148,9 +152,14 @@ unique per seller).
     (`group::settle_after_link`): a quantity change is an increment, and a
     copy repriced, taken off sale or deleted leaves the group (`DETACH_SQL`).
   - An increment in doubt is taken as applied and never sent twice: a lost
-    one under-lists, a repeated one would over-list (D00008U).
+    one under-lists, a repeated one would over-list (D00008U). A join claim
+    left behind (a stop between the increment and the link) names its
+    product, so the stale-claim pass links it there instead of releasing it
+    into a second increment.
   - A create in doubt keeps the shared claim. The reconcile links the whole
-    claim when the export shows the primary (`LINK_PENDING_GROUP_SQL`).
+    claim when the export shows the primary (`LINK_PENDING_GROUP_SQL`), and
+    takes off the product the copies its members no longer hold (sold or
+    removed on Pokoin meanwhile: `settledInDoubtCreate`).
   - A stale claim is released or settled as a group: an export or an order
     naming the primary names its siblings (`STALE_CLAIMS_SQL`,
     `claim_members`).
@@ -164,40 +173,63 @@ unique per seller).
 - **Reconcile quantity** (`sync_core::plan_inventory_reconcile`): CardTrader's
   quantity is spread over the members (`group::distribute`). A shortfall comes
   off the newest copies; a restock goes to the primary.
+  - A copy the group gains from CardTrader is only applied when no member
+    was written after the export (`groupRaiseDeferred` otherwise): the raise
+    lands on the primary, whose own row the per-row stale guard sees as old.
+  - A product being consolidated (an open
+    `marketplace_cardtrader_consolidations` row) keeps its quantity.
   - A vanished product removes every member.
   - The mass-removal guard counts listings.
+  - A link row that cannot be written is an error item, never the end of the
+    run; a link row still naming a listing that moved off its product is
+    dropped before another product's row names it (`FREE_STALE_LINK_SQL`).
 - **Pokoin edits** (`update_listing`):
   - A quantity change stays in the group (an increment of the change).
   - A copy repriced or taken off sale leaves the group (`listing_sync::group_leave`):
     - its copies come off the product (`quantityDelta`);
-    - its source is cleared;
+    - its source is cleared, and the product's link row passes to another
+      member (`HAND_OVER_LINK_SQL`);
     - the next reconcile pushes it into the group of its new price.
   - The shared product is never repriced or deleted for one copy. A listing
     alone on its product keeps the old rules: price `PUT`, delete when off sale.
 - **Pokoin sale:** `increment -n` on the product, deleted at 0, as before.
 - **Jobs:** `cardtrader-fee-once` and `cardtrader-pro-floor-reprice` write
-  each product once.
+  each product once, counting it written only once CardTrader took it.
+  `cardtrader-fee-once` raises only products Pokoin pushed (`push` link
+  rows); `cardtrader-net-prices` nets only the seller's own (`import` /
+  `match`). The reprice nets at the seller's own rate and VAT and leaves a
+  `ct_to_pokoin` seller's linked listings alone.
 - **Existing products:** `pokoin-api job cardtrader-group-products
-  --seller=<uid> [--csv=…] [--log=…] [--apply]`. It folds the identical
-  products Pokoin made or linked into the one with the most copies. Hand-made
-  products are never touched, and a group whose CardTrader and Pokoin copies
-  differ is skipped and reported. A dry run unless `--apply`.
-  - It runs under the seller's reconcile lock, and per group, in order: a
-    journal `begin` line, then the Pokoin relink and link-row cleanup in one
-    transaction, then each duplicate deleted, then the kept product
-    incremented, then `end`.
-  - CardTrader never lists more copies than exist.
-  - It stops at any error or 429. A rerun first finishes a group the journal
-    left open.
-  - The journal (JSON lines, default `/var/tmp/pokoin-ct-group-products-<uid>.jsonl`)
-    holds every product's id, copies, ask and characteristics, which is
-    enough to undo a run.
-  - Dry run on 2026-10-21 (replica estimate): PeppeV has 297 groups, 1,964
-    products folding into 297 (1,667 deleted); 2,931 Pokoin-made products
-    become 1,264.
+  --seller=<uid> [--csv=…] [--log=…] [--apply]`. A dry run unless `--apply`.
+  - Only products Pokoin pushed (a `push` link row or a `pokoin:` user data
+    field), grouped by blueprint, CardTrader's own properties as sent (Mint
+    and Near Mint stay apart), description and ask; folded into the one with
+    the most copies. Graded products are never folded; a group whose
+    CardTrader and Pokoin copies differ is skipped and reported, and so is
+    one with a seller order in the last two days.
+  - Per group, under the seller's reconcile lock (the API's Valkey): the kept
+    product gets an open `marketplace_cardtrader_consolidations` row
+    (migration 134), so the reconcile leaves its quantity alone; then per
+    duplicate, one at a time, its listings move to the kept product (one
+    transaction) and it is deleted. Its copies count only if the delete
+    succeeded, at the quantity CardTrader returned (else the export's); a 404
+    or a refused delete moves its listings back and counts nothing. Then the
+    kept product gains the counted copies and the row is closed.
+  - CardTrader never lists more copies than exist, and a stop between the
+    steps never loses copies: the open row holds the group until a rerun
+    finishes it from the journal.
+  - It stops at any error or 429, at most 5 writes a second.
+  - The journal (JSON lines, `$POKOIN_STATE_DIR` or
+    `~/.local/state/pokoin/ct-group-products-<uid>.jsonl`, persistent)
+    holds every product's id, copies, ask and properties: enough to undo a run.
+  - Replica estimate on 2026-10-21: PeppeV has 297 groups, 1,964 products
+    folding into 297 (1,667 deleted); 2,931 Pokoin-made products become
+    1,264. The job's own dry run reads the live export.
 - **Not covered:** the Zero pick list (`zero.rs`) still shows one member's
-  location per product. The TLA+ model `specs/tla/listing-ct-sync` follows
-  one copy, not a group.
+  location per product. Scan Connect's own push (`push_and_link`) and a
+  CardTrader-only listing create a product without a claim. The reconcile
+  runs without the shared lock when Valkey is down (it does not push then).
+  The TLA+ model `specs/tla/listing-ct-sync` follows one copy, not a group.
 
 ## Pokoin edits of linked listings (2026-10-14)
 
