@@ -187,6 +187,24 @@ fn build_extension_search_term(body: &Value) -> SearchInput {
 }
 
 /// Plain collector number: "30C 039" -> "039" (Cardmarket prefixes the set code); "025/165" stays.
+fn bare_integer(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+static NUMBER_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+)(?:/\d+)?").unwrap());
+
+/// Whether a catalog number ("Holo Rare | 4/102", "039/L-P", "BS 4") carries `wanted` as one of
+/// its numbers (the numerator of a fraction counts; leading zeros do not).
+fn card_number_has(card_number: &str, wanted: u64) -> bool {
+    NUMBER_TOKEN
+        .captures_iter(card_number)
+        .filter_map(|caps| caps.get(1)?.as_str().parse::<u64>().ok())
+        .any(|n| n == wanted)
+}
+
 fn plain_collector_number(value: &str) -> String {
     let compact = compact_part(value);
     compact
@@ -352,13 +370,23 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
     let analytics_ms = analytics_started.elapsed().as_millis() as u64;
     let rank_started = std::time::Instant::now();
     let candidate_rows = rows.len();
-    let mut ranked = rank_autocomplete_entries(rows, &input.search_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
-    // The requested set wins against same-number siblings ("30th Celebration" before
-    // "30th Celebration Simplified Chinese"); the sort is stable, so rank order holds otherwise.
+    // A bare collector number ("4" from Cardmarket's "BS 4") never matches the catalog's "4/102"
+    // as a ranking term, so the real card scored like a same-set product and was dropped. Rank
+    // split requests on name + set and order by the number below instead.
+    let wanted_number = if split_terms.is_empty() { None } else { bare_integer(&plain_collector_number(&input.parts.collector_number)) };
+    let rank_term = match wanted_number {
+        Some(_) => term(format!("{} {}", compact_part(&input.parts.name), compact_part(&input.parts.expansion))),
+        None => input.search_term.clone(),
+    };
+    let mut ranked = rank_autocomplete_entries(rows, &rank_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    // Same number first, then the requested set ("30th Celebration" before "30th Celebration
+    // Simplified Chinese"); the sort is stable, so rank order holds within each group.
     let wanted_set = compact_part(&input.parts.expansion).to_lowercase();
-    if !wanted_set.is_empty() {
-        ranked.sort_by_key(|entry| compact_part(&js::string_or_empty(entry.row.get("set_name"))).to_lowercase() != wanted_set);
-    }
+    ranked.sort_by_key(|entry| {
+        let number_miss = wanted_number.is_some_and(|n| !card_number_has(&js::string_or_empty(entry.row.get("card_number")), n));
+        let set_miss = !wanted_set.is_empty() && compact_part(&js::string_or_empty(entry.row.get("set_name"))).to_lowercase() != wanted_set;
+        (number_miss, set_miss)
+    });
     let rank_ms = rank_started.elapsed().as_millis() as u64;
     out.insert("matches".into(), Value::Array(ranked.iter().map(|e| match_from_entry(e, &language)).collect()));
     if wants_debug {
@@ -380,6 +408,7 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
             json!({
                 "searchTerms": input.search_terms,
                 "splitTerms": split_terms,
+                "rankTerm": rank_term,
                 "candidateRows": candidate_rows,
                 "boostedRows": boosts.size(),
                 "candidateDurationMs": candidate_ms,
@@ -428,6 +457,19 @@ mod tests {
         assert_eq!(clean_extension_query(Some(&json!("Charizard ex Illus. Mitsuhiro Arita"))), "Charizard ex");
         let row = json!({ "card_id": "123", "rarity": "Rare | Holo", "name": "Mew ex", "card_number": "Rare | 151/165", "set_name": "151" });
         assert_eq!(marketplace_path_for_row(&row, "EN"), "/marketplace/en/cards/123/rare-holo-mew-ex-151-165-151");
+    }
+
+    #[test]
+    fn card_numbers_match_bare_integers() {
+        assert_eq!(bare_integer(&plain_collector_number("BS 4")), Some(4));
+        assert_eq!(bare_integer(&plain_collector_number("30C 039")), Some(39));
+        assert_eq!(bare_integer(&plain_collector_number("4/102")), None);
+        assert!(card_number_has("Holo Rare | 4/102", 4));
+        assert!(card_number_has("Shadowless | Holo Rare 4/102", 4));
+        assert!(card_number_has("039/L-P", 39));
+        assert!(card_number_has("BS 4", 4));
+        assert!(!card_number_has("Secret Rare | 102/100", 4));
+        assert!(!card_number_has("", 4));
     }
 
     #[test]
