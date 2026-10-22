@@ -178,9 +178,10 @@ pub const EU_VAT_BPS: [(&str, i128); 27] = [
 ];
 
 /// The VAT CardTrader (an Italian company) adds to a seller's commission: a
-/// private EU seller pays their own country's rate (PeppeV, Denmark: 25 %);
-/// a VAT-registered business pays none (reverse charge) unless it is Italian
-/// (22 %, a domestic sale); a seller outside the EU pays none. An unknown
+/// private EU seller pays their own country's rate (a Danish one: 25 %); a
+/// VAT-registered business pays none (reverse charge; PeppeV / Flareon99, a
+/// Danish business) unless it is Italian (22 %, a domestic sale; redshakkio);
+/// a seller outside the EU pays none. An unknown
 /// country pays none, with the outside-EU commission ([`tier_of`]): the
 /// costliest pair.
 pub fn vat_of(country: Option<&str>, business: bool) -> i128 {
@@ -505,15 +506,14 @@ fn flag(value: Option<&serde_json::Value>) -> Option<bool> {
 /// [`channel_from`] with only the stored flag (no database at hand).
 pub fn seller_channel(integration_data: &serde_json::Value) -> Channel {
     let zero = channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero;
-    plan_for(integration_data, zero, None, None)
+    plan_for(integration_data, zero, None)
 }
 
 /// The seller's own offers in the market book of the last week, by their
 /// CardTrader user id: whether CardTrader lets them sell through Zero.
 pub const SELLER_HUB_SQL: &str = "
     select bool_or(raw_metadata->'user'->>'can_sell_via_hub' = 'true') as hub, count(*)::int as offers,
-           max(coalesce(nullif(raw_metadata->'user'->>'country_code', ''), seller_country)) as country,
-           bool_or(raw_metadata->'user'->>'user_type' = 'pro') as pro
+           max(coalesce(nullif(raw_metadata->'user'->>'country_code', ''), seller_country)) as country
     from public.cardtrader_market_listing_snapshots
     where seller_account_id = $1 and last_seen_at >= now() - interval '7 days'";
 
@@ -542,13 +542,15 @@ fn today() -> String {
     crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms())
 }
 
-/// A business seller (VAT-registered): the integration's
-/// `metadata.vatRegistered` when set, else CardTrader's `pro` account type.
-fn business(integration_data: &serde_json::Value, pro: Option<bool>) -> bool {
-    flag(integration_data.pointer("/metadata/vatRegistered")).or(pro).unwrap_or(false)
+/// A VAT-registered business: only the integration's `metadata.vatRegistered`
+/// (`job cardtrader-fee-profile --vat-registered=true`). Unknown is private,
+/// the costlier case: a private seller pays VAT, a business mostly does not.
+/// CardTrader's `pro` account type is not proof of a VAT number.
+pub fn vat_registered(integration_data: &serde_json::Value) -> bool {
+    flag(integration_data.pointer("/metadata/vatRegistered")).unwrap_or(false)
 }
 
-fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&str>, pro: Option<bool>) -> Channel {
+fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&str>) -> Channel {
     let one_day_ready = integration_data.pointer("/metadata/oneDayReady") == Some(&serde_json::Value::Bool(true));
     let stored = integration_data
         .pointer("/metadata/country")
@@ -559,7 +561,7 @@ fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&s
     Channel::Plan(Plan {
         zero,
         tier: tier_of(one_day_ready, country, before_march_2026(integration_data), &today()),
-        vat_bps: vat_of(country, business(integration_data, pro)),
+        vat_bps: vat_of(country, vat_registered(integration_data)),
     })
 }
 
@@ -577,7 +579,7 @@ fn ct_user_id(integration_data: &serde_json::Value) -> String {
 pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &serde_json::Value) -> Channel {
     match db.read("pokemon").await {
         Ok(pool) => resolve_seller_channel_pool(&pool, integration_data).await,
-        Err(_) => plan_for(integration_data, channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero, None, None),
+        Err(_) => plan_for(integration_data, channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero, None),
     }
 }
 
@@ -586,19 +588,19 @@ pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &
 pub async fn resolve_seller_channel_pool(pool: &sqlx::PgPool, integration_data: &serde_json::Value) -> Channel {
     let stored = flag(integration_data.pointer("/metadata/user/can_sell_via_hub"));
     let id = ct_user_id(integration_data);
-    let (book, country, pro) = if id.is_empty() {
-        (None, None, None)
+    let (book, country) = if id.is_empty() {
+        (None, None)
     } else {
-        match sqlx::query_as::<_, (Option<bool>, i32, Option<String>, Option<bool>)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
-            Ok((hub, offers, country, pro)) => ((offers > 0).then_some(hub == Some(true)), country, if offers > 0 { pro } else { None }),
+        match sqlx::query_as::<_, (Option<bool>, i32, Option<String>)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
+            Ok((hub, offers, country)) => ((offers > 0).then_some(hub == Some(true)), country),
             Err(error) => {
                 tracing::warn!(%error, "seller channel: market book unavailable");
-                (None, None, None)
+                (None, None)
             }
         }
     };
     let zero = channel_from(stored, book) == Channel::Zero;
-    plan_for(integration_data, zero, country.as_deref(), pro)
+    plan_for(integration_data, zero, country.as_deref())
 }
 
 /// A connected seller's channel by uid, cached for an hour per process (the
@@ -756,18 +758,29 @@ mod tests {
 
     #[test]
     fn vat_follows_the_sellers_country_and_status() {
-        assert_eq!(vat_of(Some("DK"), false), 2_500, "PeppeV / Flareon99, private, Denmark");
+        assert_eq!(vat_of(Some("DK"), false), 2_500, "a private Danish seller");
+        assert_eq!(vat_of(Some("DK"), true), 0, "PeppeV / Flareon99: VAT-registered business in Denmark, reverse charge");
         assert_eq!(vat_of(Some("IT"), true), 2_200, "redshakkio, pro, Italy: a domestic sale");
         assert_eq!(vat_of(Some("DE"), true), 0, "an EU business outside Italy: reverse charge");
         assert_eq!(vat_of(Some("hu"), false), 2_700);
         assert_eq!(vat_of(Some("US"), false), 0);
         assert_eq!(vat_of(None, false), 0);
-        assert!(SELLER_HUB_SQL.contains("user_type"));
-        // Spiderling at PeppeV's own rate: €0.13 nets 13 − 1 × 1.25 = 11.75 c.
-        let peppev = Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_500 });
-        assert_eq!(R.net_cents(13.0, peppev), Some(11.75));
+        // Only the explicit flag makes a business; CardTrader's `pro` does not.
+        assert!(!SELLER_HUB_SQL.contains("user_type"));
+        assert!(vat_registered(&serde_json::json!({"metadata": {"vatRegistered": true}})));
+        assert!(!vat_registered(&serde_json::json!({"metadata": {}})));
+        // Spiderling at PeppeV's own rate (5 %, no VAT): €0.13 nets 13 − 1 = 12 c = 24 PKN.
+        let peppev_data = serde_json::json!({"metadata": {"user": {"id": 595699}, "vatRegistered": true, "country": "DK"}});
+        let peppev = seller_channel(&peppev_data);
+        let peppev = match peppev { Channel::Plan(plan) => Channel::Plan(Plan { zero: false, ..plan }), other => other };
+        assert_eq!(peppev.as_str(), "eu-pre2026-direct");
+        assert_eq!(R.net_cents(13.0, peppev), Some(12.0));
         assert_eq!(R.breakdown(24.0, peppev).unwrap()["askCents"], 13);
-        assert_eq!(R.describe(peppev)["vatPct"], 25.0);
+        assert_eq!(R.breakdown(26.0, peppev).unwrap()["askCents"], 14);
+        assert_eq!(R.describe(peppev)["vatPct"], 0.0);
+        assert_eq!(R.describe(peppev)["channel"], "eu-pre2026-direct");
+        // redshakkio: Italian, 22 % whether or not it is VAT-registered.
+        assert_eq!(vat_of(Some("IT"), false), vat_of(Some("IT"), true));
         // Unknown country: 7 % without VAT is dearer than any EU pair.
         let unknown = Channel::Plan(Plan { zero: false, tier: tier_of(false, None, false, "2026-10-22"), vat_bps: vat_of(None, false) });
         for (code, vat) in EU_VAT_BPS {

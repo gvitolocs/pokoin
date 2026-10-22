@@ -53,12 +53,24 @@ A connected seller's own sales use their own rate from CardTrader's full
 table (`ct_fees::Tier`, `Channel::Plan`): EU direct / Zero 5.0 / 7.0 % for
 subscriptions before March 2026 (kept by active sellers until 2026-12-31),
 5.3 / 7.3 % from March 2026; outside the EU 6 / 8 % (7 / 10 %); 1-Day Ready
-16.5 %. The country, Zero status and account type come from the seller's own offers
-in the market book (`country_code`, `can_sell_via_hub`, `user_type`). VAT on
-the commission is per seller (`ct_fees::vat_of`): a private EU seller pays
-their own country's rate (PeppeV, Denmark: 25 %); a VAT-registered business
-(`pro`, or `metadata.vatRegistered`) pays none outside Italy (reverse charge)
-and 22 % in Italy (redshakkio); outside the EU, none. An unknown country is
+16.5 %. The country and Zero status come from the seller's own offers in the market
+book (`country_code`, `can_sell_via_hub`). VAT on the commission is per seller
+(`ct_fees::vat_of`): a private EU seller pays their own country's rate (a
+Danish one: 25 %); a VAT-registered business pays none outside Italy (reverse
+charge) and 22 % in Italy (a domestic sale); outside the EU, none. Whether a
+seller is a VAT-registered business is only the integration's
+`metadata.vatRegistered` (`seller_integrations/{uid}__cardtrader`), set when the
+seller confirms it; unset is private, the costlier case. On 2026-10-22 PeppeV /
+Flareon99 (Denmark) confirmed a VAT-registered business: 5 % direct, no VAT.
+redshakkio (Italy) pays 22 % either way.
+
+```bash
+# on the Pi, with the API's environment: show the plan, then set the flag
+/srv/pokoin/rust/current job cardtrader-fee-profile --seller=<uid>
+/srv/pokoin/rust/current job cardtrader-fee-profile --seller=<uid> --vat-registered=true --apply
+```
+
+An unknown country is
 priced, at each price, at the worse of outside the EU (7 / 10 %, no VAT) and
 the EU at 27 % VAT (Hungary): on the 1-cent minimum the VAT costs more (a
 14 c ask nets 12.73 c, Denmark's 5 % + 25 % nets 12.75 c), on dearer cards
