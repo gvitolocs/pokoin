@@ -8,8 +8,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { game } from '@market/game.js';
-import { liveInventoryListings } from '@market/inventory-listings.js';
-import { pricerComp, pricerMatches, pricerSummary, pricerTarget } from '@market/pricer.js';
+import { liveInventoryListings, strategyMatchesListing } from '@market/inventory-listings.js';
 import { gamePrices, priceCheckGroups, priceCheckKey } from '@market/inventory-price.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, getBearer } from '../../stores/auth.js';
@@ -41,6 +40,33 @@ const EMPTY_STRATEGY = {
   language: '',
   enabled: true,
 };
+
+function summaryLine(strategy) {
+  const parts = [];
+  parts.push(strategy.source === 'pokoin' ? 'Pokoin' : 'CardTrader');
+  if (strategy.action === 'match') parts.push('match market');
+  if (strategy.action === 'undercut') parts.push(`undercut ${strategy.amountPct || 0}%${strategy.amountPkn ? ` − ${strategy.amountPkn} PKN` : ''}`);
+  if (strategy.action === 'premium') parts.push(`+${strategy.amountPct || 0}%${strategy.amountPkn ? ` + ${strategy.amountPkn} PKN` : ''}`);
+  if (strategy.minPkn) parts.push(`min ${strategy.minPkn} PKN`);
+  if (strategy.rounding === 'integer') parts.push('rounded');
+  if (strategy.condition) parts.push(strategy.condition);
+  if (strategy.language) parts.push(strategy.language);
+  return parts.join(' · ');
+}
+
+function targetFor(compPkn, strategy) {
+  if (!(Number(compPkn) > 0)) return null;
+  let target = Number(compPkn);
+  const pct = Number(strategy.amountPct) || 0;
+  const flat = Number(strategy.amountPkn) || 0;
+  if (strategy.action === 'undercut') target = target * (1 - pct / 100) - flat;
+  else if (strategy.action === 'premium') target = target * (1 + pct / 100) + flat;
+  if (strategy.rounding === 'integer') target = Math.round(target);
+  const min = Number(strategy.minPkn) || 0;
+  if (min > 0) target = Math.max(target, min);
+  if (!(target > 0)) return null;
+  return Math.round(target * 100) / 100;
+}
 
 function formatPknLite(value) {
   const n = Math.round((Number(value) || 0) * 100) / 100;
@@ -134,7 +160,7 @@ export default function PricingStrategies(props) {
       const token = await getBearer();
       const data = await fetchSellerListings(sellerUid(), token, { limit: 1000 });
       const rows = liveInventoryListings(data.listings || data.items || [])
-        .filter((row) => pricerMatches(strategy, row, game().id));
+        .filter((row) => strategyMatchesListing(strategy, row));
       // One price check per game: card ids are per game.
       const gameId = game().id;
       const comps = await fetchPriceChecksByGame(priceCheckGroups(rows.slice(0, 100), gameId), token);
@@ -147,11 +173,11 @@ export default function PricingStrategies(props) {
         // CardTrader: the cheapest professional seller with the same
         // condition, language and finish (the other games: the cheapest
         // CardTrader Zero ask in this condition or better), or no target.
-        // The same rule as the board's Pricer (market/src/pricer.js): basis,
-        // fee-exclusive CardTrader numbers, rounding and the floor.
-        const compPkn = pricerComp(comp, strategy);
+        const compPkn = strategy.source === 'pokoin'
+          ? (comp.pokoinCheapestPkn ?? comp.soldMedianPkn ?? null)
+          : (comp.ctMatchedPkn ?? null);
         const current = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
-        const target = pricerTarget(compPkn, strategy);
+        const target = targetFor(compPkn, strategy);
         return { row, current, compPkn, target };
       }).filter((entry) => entry.target != null && Math.abs(entry.target - entry.current) >= 0.01);
       setApplyState({ strategy, plan, done: false, progress: 0 });
@@ -287,7 +313,7 @@ export default function PricingStrategies(props) {
                 <div class={['ps-item', { 'is-off': strategy.enabled === false }]}>
                   <div class="ps-item-main">
                     <strong>{strategy.name}</strong>
-                    <span class="ps-item-sub">{pricerSummary(strategy)}</span>
+                    <span class="ps-item-sub">{summaryLine(strategy)}</span>
                   </div>
                   <div class="ps-item-actions">
                     <button type="button" class="btn ghost" disabled={Boolean(busy())} onClick={() => openApply(strategy)}>

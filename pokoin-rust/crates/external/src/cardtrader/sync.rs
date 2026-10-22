@@ -3,7 +3,7 @@
 //! gate, vanished-product sale evidence, checkout holds, and the
 //! one-day-ready asset mode are preserved exactly.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
@@ -455,30 +455,9 @@ pub async fn delist_ct_listing(db: &DbPools, listing_id: &str) -> ApiResult<Opti
     Ok(rows.first().cloned())
 }
 
-/// A push in doubt holds one `ct:pending:…` claim for every identical copy it
-/// sent (cardtrader::group); the product names only the primary. Linking the
-/// primary links the whole claim, quantities untouched: the product was made
-/// from their sum, and the next reconcile spreads any difference.
-const LINK_PENDING_GROUP_SQL: &str = r#"
-      with claim as (
-        select seller_uid, source_listing_id from public.marketplace_user_listings
-        where id = $1::uuid and source_listing_id like 'ct:pending:%'
-      )
-      update public.marketplace_user_listings as listing
-      set source_listing_id = $2, updated_at = now()
-      from claim
-      where listing.seller_uid = claim.seller_uid and listing.source_listing_id = claim.source_listing_id
-      returning listing.id, listing.source_listing_id, listing.quantity_available, listing.status, listing.card_id
-"#;
-
 /// `linkExistingListing` — attach a pokoin-only listing to the CT product.
 pub async fn link_existing_listing(db: &DbPools, listing_id: &str, product: &NormalizedProduct) -> ApiResult<Option<Value>> {
     let source_listing_id = ct_source_listing_id(&product.id);
-    let claimed = db.write("pokemon", LINK_PENDING_GROUP_SQL, &[json!(listing_id), json!(source_listing_id)]).await?;
-    if !claimed.is_empty() {
-        let id = listing_id.to_string();
-        return Ok(claimed.iter().find(|row| clean_text_value(row.get("id").unwrap_or(&Value::Null), 80) == id).or(claimed.first()).cloned());
-    }
     let qty = product.quantity.clamp(0, 999_999);
     let sql = if product.price_pkn.unwrap_or(0.0) > 0.0 {
         LINK_EXISTING_LISTING_SQL.replace("{price_sql}", ", price_pkn = $4")
@@ -893,7 +872,6 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
                 crate::cardtrader::link::PushBudget::from_env(),
                 products,
                 export_started_at.as_deref(),
-                channel,
             )
             .await,
         };
@@ -1125,21 +1103,6 @@ pub(crate) async fn reconcile_linked_listings(
                     summary["updated"].incr(1);
                     Ok(())
                 }
-                PlannedAction::UpdateGroupQty { product_id, primary_id, changes } => {
-                    record_missing_link(store, seller_uid, &link_missing, &product_by_id, product_id, primary_id, &mut summary).await?;
-                    let mut applied = 0;
-                    for (listing_id, quantity) in changes {
-                        if store.apply_quantity(listing_id, *quantity, export_started_at).await?.is_some() {
-                            applied += 1;
-                        } else {
-                            ensure_counter(&mut summary, "staleSkipped", 1);
-                        }
-                    }
-                    if applied > 0 {
-                        summary["updated"].incr(1);
-                    }
-                    Ok(())
-                }
                 PlannedAction::Link { product_id, listing_id } => {
                     if let Some(product) = product_by_id.get(product_id.as_str()) {
                         let updated = store.link_listing(listing_id, product).await?;
@@ -1241,7 +1204,6 @@ pub(crate) async fn reconcile_linked_listings(
                 sales = Some(sale_items_by_product(&orders));
             }
         }
-        let mut marked: HashSet<String> = HashSet::new();
         for (product_id, listing) in vanished {
             let verdict = classify_vanished_product(&product_id, listing.created_ms, sales.as_ref());
             match verdict {
@@ -1293,10 +1255,7 @@ pub(crate) async fn reconcile_linked_listings(
                 }
             }
             summary["removed"].incr(1);
-            // One link row per product, even when several listings shared it.
-            if marked.insert(product_id.clone()) {
-                store.upsert_link(seller_uid, &product_id, &listing.id, "", 0, "import", true).await?;
-            }
+            store.upsert_link(seller_uid, &product_id, &listing.id, "", 0, "import", true).await?;
         }
     }
 
