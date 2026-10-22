@@ -533,7 +533,7 @@ export default function ListingForm(props) {
         </Show>
       </div>
       <div class="sell-row">
-        <label class="sell-field grow">
+        <label class="sell-field grow price">
           Price
           <input
             inputmode="decimal"
