@@ -378,7 +378,10 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
         Some(_) => term(format!("{} {}", compact_part(&input.parts.name), compact_part(&input.parts.expansion))),
         None => input.search_term.clone(),
     };
-    let mut ranked = rank_autocomplete_entries(rows, &rank_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    // With a number to sort by, rank every candidate and cut to the limit only after the sort:
+    // the set's products and other numbers otherwise fill the top slots before the card is seen.
+    let rank_limit = if wanted_number.is_some() { candidate_rows.max(result_limit) } else { result_limit };
+    let mut ranked = rank_autocomplete_entries(rows, &rank_term, rank_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
     // Same number first, then the requested set ("30th Celebration" before "30th Celebration
     // Simplified Chinese"); the sort is stable, so rank order holds within each group.
     let wanted_set = compact_part(&input.parts.expansion).to_lowercase();
@@ -387,6 +390,7 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
         let set_miss = !wanted_set.is_empty() && compact_part(&js::string_or_empty(entry.row.get("set_name"))).to_lowercase() != wanted_set;
         (number_miss, set_miss)
     });
+    ranked.truncate(result_limit);
     let rank_ms = rank_started.elapsed().as_millis() as u64;
     out.insert("matches".into(), Value::Array(ranked.iter().map(|e| match_from_entry(e, &language)).collect()));
     if wants_debug {
