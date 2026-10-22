@@ -430,6 +430,128 @@ export function warmCardBucket(cardId, imageUrl) {
   img.src = url;
 }
 
+/**
+ * Full Art background colour: the dominant hue of the card's side margins,
+ * where the textured mono-colour background shows beside the Pokémon. The
+ * stored leftover `art_shade` is the caption tone (Guardians Rising Sylveon
+ * GX 140/145 stores grey #524c58 on a pink card), so it is not used here.
+ * `pixels` are [r, g, b] triples. Chromatic pixels vote by hue (12 bins,
+ * weighted by chroma); the winning bin and its neighbours are averaged. When
+ * fewer than half the margin is chromatic the background is silver / white /
+ * black (Hidden Fates SV49 Charizard GX: red wings cross a white margin), and
+ * the gray pixels alone are averaged.
+ */
+export function dominantShade(pixels) {
+  const list = Array.isArray(pixels) ? pixels.filter((px) => Array.isArray(px) && px.length >= 3) : [];
+  if (!list.length) return '';
+  const bins = new Array(12).fill(0);
+  const tagged = list.map((px) => {
+    const lch = hexToOklch(rgbToHex(px));
+    const chromatic = lch.c >= 0.035 && lch.l > 0.12;
+    const bin = chromatic ? Math.floor(lch.h / 30) % 12 : -1;
+    if (bin >= 0) bins[bin] += lch.c;
+    return { px, bin };
+  });
+  const chromaticCount = tagged.filter((t) => t.bin >= 0).length;
+  const average = (rows) => rgbToHex([0, 1, 2].map((k) => rows.reduce((sum, t) => sum + t.px[k], 0) / rows.length));
+  if (chromaticCount < list.length * 0.5) return average(tagged.filter((t) => t.bin < 0));
+  let best = 0;
+  let bestScore = -1;
+  for (let i = 0; i < 12; i += 1) {
+    const score = bins[i] + 0.5 * (bins[(i + 11) % 12] + bins[(i + 1) % 12]);
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  const near = (bin) => bin >= 0 && Math.min(Math.abs(bin - best), 12 - Math.abs(bin - best)) <= 1;
+  return average(tagged.filter((t) => near(t.bin)));
+}
+
+/**
+ * Suggest row gradient for a Full Art, same weight as the rainbow row:
+ * lit at the start, deeper through the middle. White titles stay ≥ 4.5:1.
+ */
+export function fullArtRowTheme(shade) {
+  const hex = String(shade || '').trim().toLowerCase();
+  if (!HEX.test(hex)) return null;
+  const source = hexToOklch(hex);
+  const neutral = source.c < 0.03;
+  const hue = neutral ? 0 : source.h;
+  const chroma = neutral ? 0 : clamp(source.c * 1.1, 0.07, 0.14);
+  const stop = (l, c) => {
+    let color = { l, c, h: hue };
+    for (let guard = 0; guard < 8 && contrastRatio(oklchToHex(color), '#ffffff') < 4.5; guard += 1) {
+      color = { ...color, l: color.l - 0.03 };
+    }
+    return oklchToHex(color);
+  };
+  return {
+    kind: 'fullart',
+    shade: '',
+    raised: '',
+    stops: [stop(0.44, chroma), stop(0.3, chroma * 0.8), stop(0.38, chroma)],
+  };
+}
+
+const FULL_ART_KEY = 'pokoin.fullArtShade.v1';
+const fullArtSlot = { current: null };
+const warmingFullArt = new Set();
+
+export function peekFullArtShade(cardId) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) return '';
+  const hex = String(loadJsonMap(FULL_ART_KEY, fullArtSlot)[id] || '');
+  return HEX.test(hex) ? hex : '';
+}
+
+function marginPixels(img) {
+  const ctx = sampleContext();
+  if (!ctx) return [];
+  ctx.clearRect(0, 0, 24, 32);
+  ctx.drawImage(img, 0, 0, 24, 32);
+  const pixels = [];
+  // Inside the card border, beside the Pokémon, above the attack text.
+  for (const x of [1, 20]) {
+    const data = ctx.getImageData(x, 6, 3, 20).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 200) pixels.push([data[i], data[i + 1], data[i + 2]]);
+    }
+  }
+  return pixels;
+}
+
+/** Sample a Full Art's suggest thumb once; rows repaint through the bucket listeners. */
+export function warmFullArtShade(cardId, imageUrl) {
+  const id = String(cardId || '').trim();
+  const url = String(imageUrl || '').trim();
+  if (!/^\d+$/.test(id) || !url || peekFullArtShade(id) || warmingFullArt.has(id)) return;
+  if (typeof Image === 'undefined') return;
+  warmingFullArt.add(id);
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    sampleQueue.push(() => {
+      warmingFullArt.delete(id);
+      try {
+        const hex = dominantShade(marginPixels(img));
+        if (!hex) return;
+        const map = loadJsonMap(FULL_ART_KEY, fullArtSlot);
+        map[id] = hex;
+        writeMap(FULL_ART_KEY, map);
+        notifyBuckets();
+      } catch {
+        /* canvas blocked */
+      }
+    });
+    scheduleSamples();
+  };
+  img.onerror = () => {
+    warmingFullArt.delete(id);
+  };
+  img.src = url;
+}
+
 /** The desk color is one of the 32 local palettes. An API theme is not
  * painted first: that was the baseline color flashing under the artwork. */
 export function deskTheme(card, visualTheme) {
