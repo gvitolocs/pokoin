@@ -186,6 +186,40 @@ fn build_extension_search_term(body: &Value) -> SearchInput {
     SearchInput { search_term, search_terms, parts, source: "structured_fields" }
 }
 
+/// Plain collector number: "30C 039" -> "039" (Cardmarket prefixes the set code); "025/165" stays.
+fn plain_collector_number(value: &str) -> String {
+    let compact = compact_part(value);
+    compact
+        .split_whitespace()
+        .filter(|token| token.chars().any(|c| c.is_ascii_digit()))
+        .last()
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// Terms tried only when the full structured term finds no candidates. The candidate search
+/// misses rows when a collector number and a set name share one term ("Pikachu 039 30th
+/// Celebration" finds nothing, while "Pikachu 039" and "Pikachu 30th Celebration" do), so
+/// search those halves; ranking still scores the rows against the full term.
+fn structured_fallback_terms(input: &SearchInput) -> Vec<String> {
+    if input.source != "structured_fields" {
+        return Vec::new();
+    }
+    let parts = &input.parts;
+    let name = compact_part(&parts.name);
+    let number = plain_collector_number(&parts.collector_number);
+    let expansion = compact_part(&parts.expansion);
+    if name.is_empty() || number.is_empty() || expansion.is_empty() {
+        return Vec::new();
+    }
+    let mut seen: HashSet<String> = input.search_terms.iter().cloned().collect();
+    [format!("{name} {number}"), format!("{name} {expansion}")]
+        .into_iter()
+        .map(term)
+        .filter(|t| !t.is_empty() && seen.insert(t.clone()))
+        .collect()
+}
+
 static NON_ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 
 fn slug_part(value: &str) -> String {
@@ -291,6 +325,18 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
             }
         }
     }
+    let fallback_terms = if rows.is_empty() { structured_fallback_terms(&input) } else { Vec::new() };
+    for term in &fallback_terms {
+        let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
+            .await
+            .map_err(|e| engine_error(&e, "Extension card search failed."))?;
+        for row in found {
+            let id = id_string(&row);
+            if !id.is_empty() && seen.insert(id) {
+                rows.push(row);
+            }
+        }
+    }
     let candidate_ms = candidate_started.elapsed().as_millis() as u64;
     let analytics_started = std::time::Instant::now();
     let boosts = analytics::analytics_boosts_for_rows(&ctx.pools.analytics(), &rows, None)
@@ -320,6 +366,7 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
             "debug".into(),
             json!({
                 "searchTerms": input.search_terms,
+                "fallbackTerms": fallback_terms,
                 "candidateRows": candidate_rows,
                 "boostedRows": boosts.size(),
                 "candidateDurationMs": candidate_ms,
@@ -368,5 +415,17 @@ mod tests {
         assert_eq!(clean_extension_query(Some(&json!("Charizard ex Illus. Mitsuhiro Arita"))), "Charizard ex");
         let row = json!({ "card_id": "123", "rarity": "Rare | Holo", "name": "Mew ex", "card_number": "Rare | 151/165", "set_name": "151" });
         assert_eq!(marketplace_path_for_row(&row, "EN"), "/marketplace/en/cards/123/rare-holo-mew-ex-151-165-151");
+    }
+
+    #[test]
+    fn structured_fallback_splits_number_and_set() {
+        let input = build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "30C 039", "expansion": "30th Celebration" }));
+        assert_eq!(input.search_term, "Pikachu 30C 039 30th Celebration");
+        assert_eq!(structured_fallback_terms(&input), vec!["Pikachu 039", "Pikachu 30th Celebration"]);
+        let plain = build_extension_search_term(&json!({ "name": "Umbreon V", "collectorNumber": "189/203", "expansion": "Evolving Skies" }));
+        assert_eq!(structured_fallback_terms(&plain), vec!["Umbreon V 189/203", "Umbreon V Evolving Skies"]);
+        // No fallback without both a number and a set, or for free-text queries.
+        assert!(structured_fallback_terms(&build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "039" }))).is_empty());
+        assert!(structured_fallback_terms(&build_extension_search_term(&json!({ "query": "Pikachu 039 30th Celebration", "collectorNumber": "039", "expansion": "30th Celebration" }))).is_empty());
     }
 }
