@@ -335,17 +335,34 @@ pub async fn zero(State(state): State<DomainState>, headers: HeaderMap) -> ApiRe
     Ok(json_response(200, list))
 }
 
-/// `POST /api/cardtrader-zero-pick` — picked count / issue of one Zero
-/// picking line (or `reset` the whole order), stored server-side.
-pub async fn zero_pick(
+/// `POST /api/cardtrader-zero-sort` — save the seller's picking sort
+/// (`{fields}` / `{reset: true}`) and `smartLocations`. No CardTrader or
+/// Power Tools call.
+pub async fn zero_sort(
     State(state): State<DomainState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     let payload = body_json(&body).await?;
-    let request = zero::parse_pick_request(&payload)?;
-    let out = zero::save_pick(state.firestore.as_ref(), &identity.uid, &request).await?;
+    let (current, _) = zero::read_settings(state.firestore.as_ref(), &identity.uid).await;
+    let next = zero::parse_sort_request(&payload, &current)?;
+    let out = zero::save_settings(state.firestore.as_ref(), &identity.uid, &next).await?;
+    Ok(json_response(200, out))
+}
+
+/// `POST /api/cardtrader-zero-pt-sort` — write the Pokoin picking order to
+/// the seller's Power Tools picking list (`updateSorting`). User-triggered
+/// only, throttled, never retried; `dryRun` reads without writing.
+pub async fn zero_pt_sort(
+    State(state): State<DomainState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let payload = body_json(&body).await?;
+    let request = zero::parse_pt_sort_request(&payload)?;
+    let out = zero::apply_pt_sort(state.firestore.as_ref(), &state.powertools, &identity.uid, &request).await?;
     Ok(json_response(200, out))
 }
 
@@ -710,22 +727,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zero_pick_requires_a_bearer_and_stores_the_line() {
+    async fn zero_sort_requires_a_bearer_saves_and_resets() {
         let state = DomainState::for_test();
-        let body = Bytes::from(r#"{"orderId":"9001","lineKey":"502@2","picked":1}"#);
-        let error = zero_pick(State(state.clone()), HeaderMap::new(), body.clone()).await.unwrap_err();
+        let body = Bytes::from(r#"{"fields":["cn.desc","game.asc"],"smartLocations":false}"#);
+        let error = zero_sort(State(state.clone()), HeaderMap::new(), body.clone()).await.unwrap_err();
         assert_eq!(error.status, 401);
 
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("Bearer test-u1"));
-        let response = zero_pick(State(state.clone()), headers.clone(), body).await.unwrap();
+        let response = zero_sort(State(state.clone()), headers.clone(), body).await.unwrap();
         assert_eq!(response.status(), 200);
-        let doc = state.firestore.get_doc(zero::PICKS_COLLECTION, "u1_9001").await.unwrap();
-        assert_eq!(doc.data[zero::pick_field_key("502@2")]["picked"], 1);
+        let doc = state.firestore.get_doc(zero::SETTINGS_COLLECTION, "u1").await.unwrap();
+        assert_eq!(doc.data["sortingFields"], json!(["cn.desc", "game.asc", "none", "none"]));
+        assert_eq!(doc.data["smartLocations"], false);
 
-        let bad = Bytes::from(r#"{"orderId":"x","lineKey":"1","picked":1}"#);
-        let error = zero_pick(State(state), headers, bad).await.unwrap_err();
-        assert_eq!(error.status, 400);
-        assert_eq!(error.code.as_deref(), Some("invalid_order"));
+        let duplicate = Bytes::from(r#"{"fields":["cn.desc","cn.asc"]}"#);
+        let error = zero_sort(State(state.clone()), headers.clone(), duplicate).await.unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("duplicate_sorting_field"));
+
+        let reset = Bytes::from(r#"{"reset":true}"#);
+        zero_sort(State(state.clone()), headers, reset).await.unwrap();
+        let doc = state.firestore.get_doc(zero::SETTINGS_COLLECTION, "u1").await.unwrap();
+        assert_eq!(doc.data["sortingFields"], json!(zero::DEFAULT_SORTING_FIELDS));
+        assert_eq!(doc.data["smartLocations"], false, "reset keeps smartLocations");
     }
 }

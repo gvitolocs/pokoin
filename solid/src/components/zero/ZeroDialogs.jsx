@@ -112,3 +112,42 @@ export function IssueDialog(props) {
     </ZeroDialog>
   );
 }
+
+/** "Picked from another box…": the identical copies this line could have come from. */
+export function SwapDialog(props) {
+  return (
+    <ZeroDialog titleId="zero-swap-title" title="Picked from another box" onClose={props.onClose}>
+      <p class="thread-meta">
+        {props.line.name} · sold copy in <LocationText item={props.line} />. Pick the box the copy actually came from:
+        that copy leaves your inventory and the sold one goes back on sale.
+      </p>
+      <div class="zero-swap-list">
+        <For each={props.copies}>
+          {(copy) => (
+            <button class="btn ghost" type="button" disabled={props.busy} onClick={() => props.onChoose(copy.listingId)}>
+              {copy.location || 'No location'}
+              <Show when={copy.quantityAvailable != null}> · {copy.quantityAvailable} available</Show>
+            </button>
+          )}
+        </For>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" onClick={props.onClose}>Cancel</button>
+      </div>
+    </ZeroDialog>
+  );
+}
+
+/** Confirmation before the one Power Tools write: the dry run's card count. */
+export function PtSortDialog(props) {
+  return (
+    <ZeroDialog titleId="zero-ptsort-title" title="Apply sort on CardTrader" onClose={props.onCancel}>
+      <p>Send this order ({props.count} cards) to CardTrader through Power Tools?</p>
+      <Show when={props.label}><p class="thread-meta">{props.label}</p></Show>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" onClick={props.onCancel} disabled={props.busy}>Cancel</button>
+        <button class="btn" type="button" onClick={props.onSend} disabled={props.busy}>{props.busy ? 'Sending…' : 'Send'}</button>
+      </div>
+    </ZeroDialog>
+  );
+}

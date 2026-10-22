@@ -23,7 +23,7 @@
     "rust_to_node_proxy": false
   },
   "counts": {
-    "implemented": 37,
+    "implemented": 38,
     "partial": 2,
     "unresolved": 3
   },
@@ -100,14 +100,24 @@
       "evidence": "picking-order/location-rank/build-zero-list unit tests"
     },
     {
-      "path": "/api/cardtrader-zero-pick",
+      "path": "/api/cardtrader-zero-sort",
       "methods": [
         "POST"
       ],
       "reference_file": null,
       "status": "implemented",
-      "rust": "src/routes/cardtrader.rs::zero_pick + src/cardtrader/zero.rs (parse_pick_request, save_pick)",
-      "evidence": "pick body validation / field key / picks round-trip unit tests + routes::cardtrader zero_pick 401/200/400 test"
+      "rust": "src/routes/cardtrader.rs::zero_sort + src/cardtrader/zero.rs (parse_sorting_fields, parse_sort_request, save_settings)",
+      "evidence": "shared fixture zero-sort-cases.json + sorting validation / settings unit tests + routes::cardtrader zero_sort 401/200/400 test"
+    },
+    {
+      "path": "/api/cardtrader-zero-pt-sort",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": null,
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::zero_pt_sort + src/cardtrader/zero.rs (pt_sort_items, apply_pt_sort) + powertools.rs::update_sorting",
+      "evidence": "pt_sort_items / request / throttle / error-mapping unit tests + fake Power Tools dry-run, write+read-back, recompute, count drift and error tests"
     },
     {
       "path": "/api/cardtrader-clean-listings",

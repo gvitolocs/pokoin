@@ -8,7 +8,8 @@ const TYPING = 'input, textarea, select, [contenteditable="true"]';
 /**
  * One card at a time, in picking order. Enter / Space marks the line fully
  * picked and moves to the next line still to pick; arrows walk; Backspace
- * unpicks; Escape closes.
+ * unpicks; Escape closes. `inline` is the "Single image" view: the same
+ * card on the page instead of a modal (no Close, no Escape).
  */
 export default function PickingMode(props) {
   let box;
@@ -34,20 +35,20 @@ export default function PickingMode(props) {
   function pickAndNext() {
     const current = untrack(index);
     const entry = props.lines[current];
-    if (!entry) return;
-    props.onSetPicked(entry, lineQuantity(entry));
+    if (!entry || props.isBusy?.(entry)) return;
+    if (!props.isDone(entry)) props.onSetPicked(entry, lineQuantity(entry));
     setIndex(nextOpen(current));
   }
 
   const go = (delta) => setIndex((at) => Math.max(0, Math.min(props.lines.length - 1, at + delta)));
   const unpick = () => {
     const entry = props.lines[untrack(index)];
-    if (entry) props.onSetPicked(entry, 0);
+    if (entry && !props.isBusy?.(entry) && props.pickOf(entry).picked) props.onSetPicked(entry, 0);
   };
 
   onSettled(() => {
     const opener = document.activeElement;
-    box?.focus();
+    if (!props.inline) box?.focus();
     const onKey = (event) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
@@ -58,26 +59,34 @@ export default function PickingMode(props) {
       else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') go(1);
       else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') go(-1);
       else if (event.key === 'Backspace') unpick();
-      else if (event.key === 'Escape') props.onClose();
+      else if (event.key === 'Escape' && !props.inline) props.onClose();
       else return;
       event.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
-      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+      if (!props.inline && opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
     };
   });
 
-  return (
-    <div class="modal-backdrop zero-picking-backdrop" role="presentation">
-      <div ref={box} class="zero-picking" role="dialog" aria-modal="true" aria-labelledby="zero-picking-title" tabindex="-1">
+  const card = () => (
+      <div
+        ref={box}
+        class={['zero-picking', { 'is-inline': Boolean(props.inline) }]}
+        role={props.inline ? 'region' : 'dialog'}
+        aria-modal={props.inline ? undefined : 'true'}
+        aria-labelledby="zero-picking-title"
+        tabindex="-1"
+      >
         <div class="zero-picking-head">
-          <h2 id="zero-picking-title">Picking</h2>
+          <h2 id="zero-picking-title">{props.inline ? 'Single image' : 'Picking'}</h2>
           <span class="zero-picking-progress" aria-live="polite">
             {index() + 1} / {props.lines.length} · {doneCount()} picked
           </span>
-          <button class="btn ghost" type="button" onClick={props.onClose}>Close</button>
+          <Show when={!props.inline}>
+            <button class="btn ghost" type="button" onClick={props.onClose}>Close</button>
+          </Show>
         </div>
         <Show when={line()}>
           <div class={['zero-picking-body', { 'is-done': props.isDone(line()) }]} data-line-key={lineKeyOf(line())}>
@@ -112,17 +121,28 @@ export default function PickingMode(props) {
               </div>
               <Show when={linePrice(line())}><p class="zero-card-price">{linePrice(line())}</p></Show>
               <Show when={line().powerTools?.bin}><p class="thread-meta">PT bin {line().powerTools.bin}</p></Show>
+              <Show when={props.noteOf?.(line())}><p class="zero-inventory-note" role="status">{props.noteOf(line())}</p></Show>
+              <Show when={props.errorOf?.(line())}><p class="zero-save-error" role="alert">{props.errorOf(line())}</p></Show>
             </div>
           </div>
         </Show>
         <div class="zero-picking-actions">
           <button class="btn ghost" type="button" onClick={() => go(-1)} disabled={index() <= 0}>Previous</button>
-          <button class="btn ghost" type="button" onClick={unpick}>Unpick</button>
-          <button class="btn" type="button" onClick={pickAndNext}>Picked, next</button>
+          <button class="btn ghost" type="button" onClick={unpick} disabled={!line() || props.isBusy?.(line()) || !pick().picked}>Unpick</button>
+          <button class="btn" type="button" onClick={pickAndNext} disabled={!line() || props.isBusy?.(line())}>
+            {line() && props.isBusy?.(line()) ? 'Saving…' : 'Picked, next'}
+          </button>
           <button class="btn ghost" type="button" onClick={() => go(1)} disabled={index() >= props.lines.length - 1}>Next</button>
         </div>
-        <p class="zero-picking-keys thread-meta">Enter or Space: picked, next · ← →: walk · Backspace: unpick · Esc: close</p>
+        <p class="zero-picking-keys thread-meta">
+          Enter or Space: picked, next · ← →: walk · Backspace: unpick{props.inline ? '' : ' · Esc: close'}
+        </p>
       </div>
-    </div>
+  );
+
+  return (
+    <Show when={!props.inline} fallback={card()}>
+      <div class="modal-backdrop zero-picking-backdrop" role="presentation">{card()}</div>
+    </Show>
   );
 }

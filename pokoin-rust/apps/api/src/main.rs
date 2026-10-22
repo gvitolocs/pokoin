@@ -629,7 +629,8 @@ fn external_fallback_router() -> Router {
         "/api/cardtrader-sync",
         "/api/cardtrader-assets",
         "/api/cardtrader-zero",
-        "/api/cardtrader-zero-pick",
+        "/api/cardtrader-zero-sort",
+        "/api/cardtrader-zero-pt-sort",
         "/api/cardtrader-clean-listings",
         "/api/cardtrader-webhook/{uid}",
         "/api/cardtrader-blueprint-listings",
@@ -697,6 +698,8 @@ fn commerce_fallback_router() -> Router {
         "/api/extension-download",
         "/api/money-request",
         "/api/earn-pkn",
+        "/api/cardtrader-zero-pick",
+        "/api/cardtrader-zero-picked",
     ])
 }
 

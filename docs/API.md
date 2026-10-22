@@ -62,7 +62,10 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardrails/connector` / `POST /api/seller-api/v1` | An app with a seller's `pkn_` grant: connect, locations, listings, stock, list, sales, webhook URL. Pokoin posts signed stock and order webhooks back |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 | `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
-| `POST /api/cardtrader-zero-pick` | Picked count / issue of one Zero picking line, or `reset` of the order; Firestore `cardtrader_zero_picks` ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `POST /api/cardtrader-zero-pick` | `action: pick\|undo` of one copy: Postgres `cardtrader_zero_picks`, finalize (empty copy leaves its box) or swap (picked identical copy −n, sold copy +n, both outbox events in one transaction); issues / `reset` / unlinked lines stay on Firestore ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `GET /api/cardtrader-zero-picked` | Seller's picked Zero copies, newest first, 100 a page (`offset`); not listings, never stock |
+| `POST /api/cardtrader-zero-sort` | Save the Zero picking sort (Power Tools sort model, ≤ 4 levels) and `smartLocations`; no CardTrader / Power Tools call |
+| `POST /api/cardtrader-zero-pt-sort` | User-triggered Apply sort: Power Tools `updateSorting` of the picking list (confirmed count, throttled, never retried; `dryRun` reads only) |
 | `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are

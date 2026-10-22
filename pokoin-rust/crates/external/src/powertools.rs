@@ -228,11 +228,14 @@ impl PowerToolsClient {
             return Err(ApiError::new(409, "Your Power Tools session expired. Sign in to Power Tools again.")
                 .with_code("powertools_session_expired"));
         }
-        if !(200..300).contains(&status) {
-            return Err(ApiError::new(502, format!("Power Tools {path} failed ({status})."))
-                .with_code("powertools_unavailable"));
-        }
         let text = response.text().await.unwrap_or_default();
+        if !(200..300).contains(&status) {
+            let payload: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            return Err(match pt_write_error(status, &text, &payload) {
+                Some(error) if error.status == 409 => error,
+                _ => ApiError::new(502, format!("Power Tools {path} failed ({status}).")).with_code("powertools_unavailable"),
+            });
+        }
         if text.trim().is_empty() {
             return Err(ApiError::new(502, format!("Power Tools {path} returned no JSON."))
                 .with_code("powertools_unavailable"));
@@ -276,8 +279,8 @@ impl PowerToolsClient {
     /// One picking list's pickings in Power Tools picking order
     /// (`PUT user/order/getArticlesToPick`). The body is `{pickingListId}`
     /// ONLY: sending `sortingFields` makes Power Tools re-sort AND SAVE that
-    /// sort on the seller's list. Pokoin never sends it, and never calls
-    /// `updateSorting` or any other Power Tools write.
+    /// sort on the seller's list. Pokoin never sends it; its only Power Tools
+    /// write is the seller's own Apply sort ([`Self::update_sorting`]).
     pub async fn fetch_articles_to_pick(&self, jwt: &str, picking_list_id: &Value) -> ApiResult<Value> {
         let body = json!({ "pickingListId": picking_list_id });
         match self.request(reqwest::Method::PUT, jwt, "user/order/getArticlesToPick", Some(&body)).await? {
@@ -286,6 +289,74 @@ impl PowerToolsClient {
                 .with_code("powertools_unavailable")),
         }
     }
+
+    /// WRITE. User-triggered only (`POST /api/cardtrader-zero-pt-sort`, after
+    /// the seller confirmed the count); never called by a read, a job, or a
+    /// retry. `PUT user/order/updateSorting {pickingListId, sortingFields,
+    /// items}` as Power Tools' own "Apply sort" sends it: `items` is the whole
+    /// sequence, each `{source, sourceArticleId, sourceOrderId}` only, and
+    /// Power Tools forwards the order to CardTrader.
+    pub async fn update_sorting(&self, jwt: &str, picking_list_id: &Value, sorting_fields: &Value, items: &Value) -> ApiResult<Value> {
+        let body = json!({ "pickingListId": picking_list_id, "sortingFields": sorting_fields, "items": items });
+        let path = "user/order/updateSorting";
+        let response = self
+            .http
+            .request(reqwest::Method::PUT, format!("{}/api/{path}", self.base))
+            .header("Accept", "application/json")
+            .header("Cookie", format!("jwt={jwt}"))
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| ApiError::new(502, format!("Power Tools {path} failed ({e}).")).with_code("powertools_unavailable"))?;
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        let payload: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        if let Some(error) = pt_write_error(status, &text, &payload) {
+            return Err(error);
+        }
+        Ok(payload)
+    }
+}
+
+/// The message of a Power Tools error answer (`message` / `error`, else the
+/// raw text), capped.
+fn pt_error_text(text: &str, payload: &Value) -> String {
+    let field = |key: &str| match payload.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Object(inner)) => inner.get("message").and_then(Value::as_str).unwrap_or_default().to_string(),
+        _ => String::new(),
+    };
+    let message = [field("message"), field("error")].into_iter().find(|s| !s.trim().is_empty()).unwrap_or_else(|| text.to_string());
+    message.chars().take(200).collect::<String>().trim().to_string()
+}
+
+/// A Power Tools write answer → the error to show, or None when it worked.
+/// 401/403: the session expired. A message about a token: Power Tools has no
+/// CardTrader account connected. `Invalid Picking List`: the list is gone.
+/// A 2xx carrying an `error` is an error too.
+pub fn pt_write_error(status: u16, text: &str, payload: &Value) -> Option<ApiError> {
+    if matches!(status, 401 | 403) {
+        return Some(
+            ApiError::new(409, "Your Power Tools session expired. Reconnect Power Tools.").with_code("powertools_session_expired"),
+        );
+    }
+    let ok = (200..300).contains(&status) && payload.get("error").map(|e| e.is_null() || *e == Value::Bool(false)).unwrap_or(true);
+    if ok {
+        return None;
+    }
+    let message = pt_error_text(text, payload);
+    let lower = message.to_lowercase();
+    if lower.contains("invalid picking list") {
+        return Some(ApiError::new(409, "Power Tools no longer has this picking list.").with_code("pt_picking_list_missing"));
+    }
+    if lower.contains("token") {
+        return Some(
+            ApiError::new(409, "Power Tools has no CardTrader account connected.").with_code("powertools_cardtrader_not_connected"),
+        );
+    }
+    let detail = if message.is_empty() { String::new() } else { format!(": {message}") };
+    Some(ApiError::new(502, format!("Power Tools updateSorting failed ({status}){detail}")).with_code("powertools_unavailable"))
 }
 
 /// Power Tools ids arrive as JSON strings or numbers: the trimmed string, the

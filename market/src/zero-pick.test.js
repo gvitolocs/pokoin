@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  alsoInLabels,
   confirmPickEntry,
+  dropUnsentPicks,
+  inventoryNote,
+  lineCopies,
+  lineSetText,
+  locationTakeText,
+  normalizeView,
+  pickActionBody,
+  rarityBadge,
   csvField,
   dirtyPickEntries,
   dropPickEntry,
@@ -224,4 +233,71 @@ test('save bodies always carry picked or issue; 4xx is final, network and 5xx re
   assert.equal(retryableSaveError({ status: 400 }), false);
   assert.equal(retryableSaveError({ status: 404 }), false);
   assert.deepEqual(dropPickEntry({ a: { picked: 1 }, b: { picked: 0 } }, 'a'), { b: { picked: 0 } });
+});
+
+test('views: PR A values migrate, images-vertical by default', () => {
+  assert.equal(normalizeView('cards'), 'images-vertical');
+  assert.equal(normalizeView('list'), 'list');
+  assert.equal(normalizeView(null), 'images-vertical');
+  assert.equal(normalizeView('single'), 'single');
+  assert.equal(normalizeView('images-horizontal'), 'images-horizontal');
+});
+
+test('pick body: the copy picked, the copy the sale took, the whole line', () => {
+  const line = { itemId: 7005, lineKey: '7005@L71', listingId: 'L71', quantity: 3 };
+  assert.deepEqual(pickActionBody({ orderId: 9042 }, line), {
+    orderId: '9042', itemId: '7005', lineKey: '7005@L71', listingId: 'L71', allocatedListingId: 'L71', quantity: 3, action: 'pick',
+  });
+  assert.equal(pickActionBody({ orderId: 1 }, line, 'pick', 'L99').listingId, 'L99');
+  assert.equal(pickActionBody({ orderId: 1 }, line, 'pick', 'L99').allocatedListingId, 'L71');
+  assert.equal(pickActionBody({ orderId: 1 }, line, 'undo').action, 'undo');
+  assert.equal(pickActionBody({ orderId: 1 }, { itemId: 5 }).allocatedListingId, '');
+});
+
+test('other copies: candidates first, never the own listing, string alsoIn has no ids', () => {
+  const line = {
+    listingId: 'L22',
+    alsoIn: ['binder·2·7'],
+    candidates: [
+      { listingId: 'L22', location: 'binder·1·4', quantityAvailable: 0 },
+      { listingId: 'L23', location: 'binder·2·7', quantityAvailable: 2 },
+      { listingId: 'L23', location: 'dup' },
+    ],
+  };
+  assert.deepEqual(lineCopies(line), [{ listingId: 'L23', location: 'binder·2·7', quantityAvailable: 2 }]);
+  assert.deepEqual(lineCopies({ listingId: 'L1', alsoIn: ['box·2'] }), []);
+  assert.deepEqual(lineCopies({ listingId: 'L1', alsoIn: [{ listingId: 'L2', location: 'box·2' }] }), [{ listingId: 'L2', location: 'box·2', quantityAvailable: null }]);
+  assert.deepEqual(alsoInLabels({ alsoIn: ['a', { location: 'b' }, ''] }), ['a', 'b']);
+});
+
+test('inventory notes', () => {
+  assert.equal(inventoryNote({ inventory: 'removed', action: 'pick' }), 'removed from inventory');
+  assert.equal(inventoryNote({ inventory: 'unchanged', action: 'pick' }), 'removed from inventory');
+  assert.equal(inventoryNote({ inventory: 'swapped', listingId: 'L23' }, [{ listingId: 'L23', location: 'binder·2·7' }]), 'swapped with binder·2·7');
+  assert.equal(inventoryNote({ inventory: 'restored', action: 'undo' }), 'back in inventory');
+  assert.equal(inventoryNote(null), '');
+});
+
+test('tile text: set line, location with take and availability, rarity badge', () => {
+  assert.equal(lineSetText({ collectorNumber: '208', expansionCode: '4ED', expansion: 'Fourth Edition' }), '# 208 - 4ED - Fourth Edition');
+  assert.equal(lineSetText({ collectorNumber: '41', expansion: 'Origins' }), '# 41 - Origins');
+  assert.equal(locationTakeText({ location: 'box·2', quantity: 2, quantityAvailable: 3 }), 'box·2: take 2 (3 available)');
+  assert.equal(locationTakeText({ location: 'box·2', quantity: 1 }), 'box·2: take 1');
+  assert.deepEqual(rarityBadge('Uncommon'), { short: 'U', long: 'Uncommon' });
+  assert.deepEqual(rarityBadge('Special Illustration Rare'), { short: 'SIR', long: 'Special Illustration Rare' });
+  assert.equal(rarityBadge('Double Rare').short, 'RR');
+  assert.equal(rarityBadge(''), null);
+});
+
+test('offline cache never replays a pick: only unsaved issues survive', () => {
+  const lines = [
+    { lineKey: 'a', quantity: 1, picked: 0, issue: null },
+    { lineKey: 'b', quantity: 1, picked: 0, issue: null },
+  ];
+  const cache = {
+    a: { picked: 1, issue: null, dirty: true },
+    b: { picked: 1, issue: { type: 'missing', note: '' }, dirty: true },
+    gone: { picked: 1, issue: null, dirty: true },
+  };
+  assert.deepEqual(dropUnsentPicks(cache, lines), { b: { picked: 0, issue: { type: 'missing', note: '' }, dirty: true } });
 });

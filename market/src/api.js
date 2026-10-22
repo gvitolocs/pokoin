@@ -1106,7 +1106,11 @@ export function fetchCardTraderZero(token) {
   });
 }
 
-/** `{ orderId, lineKey, picked?, issue? }` or `{ orderId, reset: true }`: Zero picking state, server side. */
+/**
+ * Zero picking state, server side. A pick moves inventory:
+ * `{ orderId, itemId, lineKey, listingId, allocatedListingId, quantity, action: 'pick' | 'undo' }`
+ * → `{ ok, pick, listings, inventory }`. Issues: `{ orderId, lineKey, issue }`.
+ */
 export function saveCardTraderZeroPick(token, body) {
   return getJson('/api/cardtrader-zero-pick', {
     method: 'POST',
@@ -1115,6 +1119,43 @@ export function saveCardTraderZeroPick(token, body) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
+  });
+}
+
+/** `{ fields, smartLocations }` or `{ reset: true }`: the seller's Zero picking sort, saved on Pokoin only. */
+export function saveCardTraderZeroSort(token, body) {
+  return getJson('/api/cardtrader-zero-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Power Tools write (user-triggered only): `{ orderId, listId, sequence, dryRun?, expectCount }`.
+ * Dry run → `{ dryRun, before, items }`; real → `{ before, after, applied }`.
+ */
+export function pushCardTraderZeroPtSort(token, body) {
+  return getJson('/api/cardtrader-zero-pt-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The seller's picked Zero copies (newest first): `{ rows }`. */
+export function fetchCardTraderZeroPicked(token) {
+  return getJson('/api/cardtrader-zero-picked', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
   });
 }
 

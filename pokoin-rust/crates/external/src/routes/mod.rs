@@ -28,7 +28,9 @@ pub fn router(state: DomainState) -> Router {
         .route("/api/cardtrader-sync", get(cardtrader::sync_status).post(cardtrader::sync_start))
         .route("/api/cardtrader-assets", get(cardtrader::assets))
         .route("/api/cardtrader-zero", get(cardtrader::zero))
-        .route("/api/cardtrader-zero-pick", post(cardtrader::zero_pick))
+        // `/api/cardtrader-zero-pick` and `-picked` move stock: pokoin-commerce.
+        .route("/api/cardtrader-zero-sort", post(cardtrader::zero_sort))
+        .route("/api/cardtrader-zero-pt-sort", post(cardtrader::zero_pt_sort))
         .route("/api/cardtrader-clean-listings", post(cardtrader::clean_listings))
         .route("/api/cardtrader-webhook/{uid}", post(cardtrader::webhook))
         .route("/api/cardtrader-blueprint-listings", get(cardtrader::blueprint_listings))

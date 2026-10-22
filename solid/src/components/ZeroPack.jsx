@@ -1,19 +1,19 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { saveCardTraderZeroPick } from '@market/api.js';
-import { inventoryListingHref } from '@market/inventory-listings.js';
 import {
   confirmPickEntry,
   dirtyPickEntries,
   dropPickEntry,
+  dropUnsentPicks,
   effectivePick,
   groupLinesByGame,
+  inventoryNote,
+  lineCopies,
   lineDone,
   lineKeyOf,
-  lineLocation,
-  lineLocationFromPt,
   lineMatches,
   lineQuantity,
-  migrateLegacyPicks,
+  pickActionBody,
   pickingOrdersMatch,
   pickSaveBody,
   readPickCache,
@@ -22,19 +22,18 @@ import {
   setPickEntry,
   sortByPtOrder,
   takeLegacyPicked,
-  VIEW_KEY,
   writePickCache,
   zeroPickCsv,
 } from '@market/zero-pick.js';
+import { DEFAULT_SORT_FIELDS, sortZeroLines } from '@market/zero-sort.js';
 import '@market/zero-pack.css';
 import { createPointerDrag } from '../lib/pointer-drag.js';
 import { getBearer } from '../stores/auth.js';
-import ScanImage from './ScanImage.jsx';
 import { DeskPanel } from './Desk.jsx';
 import PickingMode from './zero/PickingMode.jsx';
-import { IssueDialog, PickQuantityDialog } from './zero/ZeroDialogs.jsx';
+import { IssueDialog, SwapDialog } from './zero/ZeroDialogs.jsx';
 import ZeroList from './zero/ZeroList.jsx';
-import { FacetBadges, IssueBadge, lineImage, linePrice, LocationText, lineWhere, PtPlace, TakeBits } from './zero/zero-bits.jsx';
+import ZeroTile from './zero/ZeroTile.jsx';
 
 function day(value) {
   const parsed = value ? new Date(value) : null;
@@ -53,24 +52,10 @@ function storage() {
 
 const NO_STORAGE = { getItem: () => null, setItem() {}, removeItem() {} };
 
-function readView() {
-  try {
-    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'cards';
-  } catch (_) {
-    return 'cards';
-  }
-}
-
-function writeView(view) {
-  try {
-    window.localStorage.setItem(VIEW_KEY, view);
-  } catch (_) {
-    /* private mode: the view resets on reload */
-  }
-}
-
-function downloadCsv(order, cache) {
-  const blob = new Blob([zeroPickCsv(order, cache)], { type: 'text/csv;charset=utf-8' });
+/** Power Tools-style CSV of one shipment; unsaved issues overlay from the local cache. */
+export function downloadCsv(order, cache) {
+  const overlay = cache || readPickCache(storage() || NO_STORAGE, String(order.orderId));
+  const blob = new Blob([zeroPickCsv(order, overlay)], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -81,132 +66,19 @@ function downloadCsv(order, cache) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function powerToolsLine(pt) {
-  if (!pt) return '';
-  const parts = [];
-  if (pt.pickedQuantity != null) parts.push(`picked ${pt.pickedQuantity}`);
-  else if (pt.orderState) parts.push(pt.orderState);
-  if (pt.bin) parts.push(`bin ${pt.bin}`);
-  return parts.length ? `Power Tools: ${parts.join(' · ')}` : '';
+/** A read-only tile (the "waiting for the next merge" list). */
+export function ZeroLine(props) {
+  return <ZeroTile item={props.item} horizontal={props.horizontal} />;
 }
 
-/**
- * One pack line (one box of a CardTrader item). Without `onPick` it is a
- * read-only line (the "waiting for the next merge" list): no drag, no button.
- */
-export function ZeroLine(props) {
-  const item = () => props.item;
-  const location = () => lineLocation(item());
-  const quantity = () => lineQuantity(item());
-  const pick = () => props.pick || { picked: Number(item().picked) || 0, issue: item().issue || null };
-  const done = () => Boolean(props.done);
-  const pt = () => powerToolsLine(item().powerTools);
-  const price = () => linePrice(item());
-  const src = () => lineImage(item());
-  const interactive = () => Boolean(props.onPick);
-  return (
-    <article
-      class={['zero-card', {
-        'is-picked': done(),
-        'is-draggable': interactive(),
-        'has-issue': Boolean(pick().issue),
-        'is-match': Boolean(props.match),
-        'is-current': Boolean(props.current),
-      }]}
-      draggable="false"
-      data-zero-line={interactive() ? lineKeyOf(item()) : undefined}
-      onPointerDown={(event) => {
-        if (!interactive()) return;
-        props.onPointerDown?.(event, {
-          lineKey: lineKeyOf(item()),
-          image: src(),
-          label: item().name || '',
-        });
-      }}
-      onPointerMove={props.onPointerMove}
-      onPointerUp={props.onPointerUp}
-      onPointerCancel={props.onPointerCancel}
-    >
-      <div
-        class="zero-card-art"
-        onClick={() => {
-          if (!interactive() || props.consumeClick?.()) return;
-          props.onPick(item());
-        }}
-      >
-        <ScanImage
-          src={src()}
-          label={item().name}
-          letterClass="zero-card-fallback"
-          width="126"
-          height="176"
-        />
-        <span class={['zero-loc', { 'is-empty': !location() }]} title={lineLocationFromPt(item()) ? 'Location from Power Tools' : 'MyPokoin location'}>
-          <LocationText item={item()} />
-        </span>
-        <Show when={props.place != null}>
-          <span class="zero-place" title="Place in this pack, in picking order">{props.place}</span>
-        </Show>
-        <Show when={quantity() > 1}><span class="zero-qty">take {quantity()}</span></Show>
-        <Show when={done()}>
-          <span class="zero-card-check" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="36" height="36">
-              <path d="M5 12.5 10 17l9-10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </span>
-        </Show>
-      </div>
-      <div class="zero-card-body">
-        <strong class="thread-title">
-          <Show when={item().cardId} fallback={item().name}>
-            <a href={inventoryListingHref(item())} draggable="false">{item().name}</a>
-          </Show>
-        </strong>
-        <Show when={item().nameEn}><span class="thread-meta">{item().nameEn}</span></Show>
-        <Show when={lineWhere(item())}><span class="thread-meta">{lineWhere(item())}</span></Show>
-        <div class="zero-line-tags">
-          <FacetBadges item={item()} />
-          <TakeBits item={item()} />
-          <PtPlace item={item()} />
-          <IssueBadge issue={pick().issue} />
-        </div>
-        <Show when={price()}><span class="zero-card-price">{price()}</span></Show>
-        <Show when={props.error}><span class="zero-save-error" role="alert">{props.error}</span></Show>
-        <Show when={interactive()}>
-          <span class="zero-picked-count">picked {pick().picked}/{quantity()}</span>
-        </Show>
-        <Show when={!interactive() && pt()}><span class="zero-pt">{pt()}</span></Show>
-      </div>
-      <Show when={interactive()}>
-        <div class="zero-card-actions">
-          <button
-            class="btn ghost zero-move"
-            type="button"
-            draggable="false"
-            aria-pressed={pick().picked >= quantity() ? 'true' : 'false'}
-            onClick={() => props.onPick(item())}
-          >
-            <Show
-              when={quantity() > 1}
-              fallback={(
-                <Show when={pick().picked} fallback={<><span class="zero-move-full">Mark picked</span><span class="zero-move-short">Picked</span></>}>
-                  Undo
-                </Show>
-              )}
-            >
-              Picked {pick().picked}/{quantity()}
-            </Show>
-          </button>
-          <Show
-            when={pick().issue}
-            fallback={<button class="zero-issue-link" type="button" onClick={() => props.onIssue(item())}>Report issue</button>}
-          >
-            <button class="zero-issue-link" type="button" onClick={() => props.onClearIssue(item())}>Clear issue</button>
-          </Show>
-        </div>
-      </Show>
-    </article>
-  );
+const PICK_ERRORS = {
+  not_identical: 'That copy is not identical to the sold one.',
+  insufficient_quantity: 'That box has fewer copies than this line.',
+  allocated_copy_gone: 'The sold copy is no longer in your inventory, so this pick cannot be undone.',
+};
+
+function pickErrorMessage(err) {
+  return PICK_ERRORS[err?.body?.code] || err?.message || 'the server refused this change.';
 }
 
 function DropRow(props) {
@@ -219,9 +91,9 @@ function DropRow(props) {
       <DeskPanel flush title={props.title} extra={<span class="zero-progress">{props.hint}</span>}>
         <Show
           when={props.groups.length}
-          fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing picked yet. Drag a card down, or click Mark picked.' : 'Nothing left to pick.'}</p>}
+          fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing picked yet. Drag a card down, or click Pick.' : 'Nothing left to pick.'}</p>}
         >
-          <div class="zero-grid">
+          <div class={['zero-grid', { 'is-horizontal': props.horizontal }]}>
             <For each={props.groups}>
               {(group) => (
                 <>
@@ -231,22 +103,27 @@ function DropRow(props) {
                   </h3>
                   <For each={group.lines}>
                     {(entry) => (
-                      <ZeroLine
+                      <ZeroTile
                         item={entry.line}
+                        horizontal={props.horizontal}
+                        smartLocations={props.smartLocations}
                         place={props.places.get(lineKeyOf(entry.line))}
                         pick={props.pickOf(entry.line)}
                         done={props.isDone(entry.line)}
+                        busy={props.isBusy(entry.line)}
                         match={props.matches.has(lineKeyOf(entry.line))}
                         current={props.current === lineKeyOf(entry.line)}
+                        note={props.notes?.[lineKeyOf(entry.line)]}
                         error={props.errors?.[lineKeyOf(entry.line)]}
                         onPick={props.onPick}
+                        onUndo={props.onUndo}
+                        onSwap={props.onSwap}
                         onIssue={props.onIssue}
                         onClearIssue={props.onClearIssue}
                         onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
                         onPointerMove={props.onPointerMove}
                         onPointerUp={props.onPointerUp}
                         onPointerCancel={props.onPointerCancel}
-                        consumeClick={props.consumeClick}
                       />
                     )}
                   </For>
@@ -260,21 +137,46 @@ function DropRow(props) {
   );
 }
 
-/** Lines grouped under game headers; with "Sort by PT order" one Power Tools group. */
-function groupsFor(lines, byPt) {
-  if (!byPt) return groupLinesByGame(lines);
+/**
+ * Lines under game headers while the sort starts with Game (one header per
+ * game is then contiguous); any other sort is one "Picking order" group so
+ * headers never reorder the lines. "Sort by PT order" is one PT group.
+ */
+export function groupsFor(lines, mode) {
+  if (mode === 'game') return groupLinesByGame(lines);
   return lines.length ? [{
-    game: 'pt',
-    label: 'Power Tools order',
+    game: mode,
+    label: mode === 'pt' ? 'Power Tools order' : 'Picking order',
     lines: lines.map((line, index) => ({ line, place: index + 1 })),
     cards: lines.reduce((sum, line) => sum + lineQuantity(line), 0),
   }] : [];
 }
 
+/** Tiles of the read-only "waiting for the next merge" list, in the chosen sort and view. */
+export function PendingList(props) {
+  const lines = createMemo(() => sortZeroLines(props.items || [], props.sortFields || DEFAULT_SORT_FIELDS));
+  const groups = () => groupsFor(lines(), String(props.sortFields?.[0] || '').startsWith('game.') ? 'game' : 'sorted');
+  const places = createMemo(() => new Map(lines().map((line, index) => [lineKeyOf(line), index + 1])));
+  const readPick = (line) => ({ picked: Number(line?.picked) || 0, issue: line?.issue || null });
+  return (
+    <Show
+      when={props.view === 'list'}
+      fallback={(
+        <div class={['zero-grid', { 'is-horizontal': props.view === 'images-horizontal' }]}>
+          <For each={lines()}>{(item) => <ZeroLine item={item} horizontal={props.view === 'images-horizontal'} />}</For>
+        </div>
+      )}
+    >
+      <ZeroList groups={groups()} places={places()} pickOf={readPick} isDone={() => false} readOnly />
+    </Show>
+  );
+}
+
 /**
- * One weekly Zero shipment in the server's picking order. Picked copies and
- * issues are server state (POST /api/cardtrader-zero-pick); localStorage only
- * keeps unsaved changes until the next load or the `online` event.
+ * One weekly Zero shipment in the seller's sort. A pick moves inventory
+ * (POST /api/cardtrader-zero-pick with action pick / undo): it is sent once,
+ * with the button disabled until the answer, and never replayed from the
+ * offline cache. Issues keep the cache: unsaved ones retry on load / online.
  */
 export function ShipmentPanel(props) {
   const order = () => props.order;
@@ -283,21 +185,25 @@ export function ShipmentPanel(props) {
 
   let current = untrack(() => {
     const items = order().items;
-    let cache = reconcilePickCache(readPickCache(store(), orderId()), items);
-    const legacy = takeLegacyPicked(store(), orderId());
-    if (legacy) cache = migrateLegacyPicks(items, legacy, cache);
+    const cache = dropUnsentPicks(reconcilePickCache(readPickCache(store(), orderId()), items), items);
+    takeLegacyPicked(store(), orderId()); // old per-browser ticks never move inventory: dropped
     writePickCache(store(), orderId(), cache);
     return cache;
   });
   const [cache, setCache] = createSignal(current);
   const [errors, setErrors] = createSignal({});
+  const [notes, setNotes] = createSignal({});
+  const [busyKeys, setBusyKeys] = createSignal([]);
   const inFlight = new Set();
-  const setError = (lineKey, message) => setErrors((all) => {
+  const pickFlight = new Set();
+  const setKeyed = (setter) => (lineKey, message) => setter((all) => {
     const next = { ...all };
     if (message) next[lineKey] = message;
     else delete next[lineKey];
     return next;
   });
+  const setError = setKeyed(setErrors);
+  const setNote = setKeyed(setNotes);
 
   function commit(next) {
     current = next;
@@ -312,12 +218,13 @@ export function ShipmentPanel(props) {
     { defer: true },
   );
 
-  async function send(lineKey, fields) {
+  /** Saves an issue change (the only cached, retried write). */
+  async function send(lineKey) {
     if (props.preview || inFlight.has(lineKey)) return false;
     const entry = current[lineKey];
     if (!entry?.dirty) return true;
     const sent = { picked: entry.picked, issue: entry.issue };
-    const body = pickSaveBody(untrack(orderId), lineKey, entry, fields);
+    const body = pickSaveBody(untrack(orderId), lineKey, entry, ['issue']);
     inFlight.add(lineKey);
     try {
       const token = await getBearer();
@@ -327,19 +234,18 @@ export function ShipmentPanel(props) {
       return true;
     } catch (err) {
       if (retryableSaveError(err)) return false; // stays dirty: retried on the next load or when back online
-      // Rejected (4xx): drop the change, show the server value and why.
       if (current[lineKey] === entry) commit(dropPickEntry(current, lineKey));
       setError(lineKey, `Not saved: ${err.message || 'the server refused this change.'}`);
       return true;
     } finally {
       inFlight.delete(lineKey);
-      if (current[lineKey]?.dirty && current[lineKey] !== entry && navigator.onLine !== false) send(lineKey, ['picked', 'issue']);
+      if (current[lineKey]?.dirty && current[lineKey] !== entry && navigator.onLine !== false) send(lineKey);
     }
   }
 
   async function flushDirty() {
     for (const entry of dirtyPickEntries(current)) {
-      if (!(await send(entry.lineKey, ['picked', 'issue']))) break;
+      if (!(await send(entry.lineKey))) break;
     }
   }
 
@@ -351,20 +257,57 @@ export function ShipmentPanel(props) {
 
   const pickOf = (line) => effectivePick(line, cache());
   const isDone = (line) => lineDone(line, cache());
+  const isBusy = (line) => busyKeys().includes(lineKeyOf(line));
 
-  function change(line, fields) {
-    commit(setPickEntry(current, line, fields));
-    send(lineKeyOf(line), Object.keys(fields));
+  function setIssue(line, issue) {
+    commit(setPickEntry(current, line, { issue }));
+    send(lineKeyOf(line));
   }
-  const setPicked = (line, picked) => change(line, { picked });
 
-  /* ---- views and order ---- */
-  const [view, setViewSignal] = createSignal(readView());
-  const setView = (next) => { setViewSignal(next); writeView(next); };
+  /**
+   * Pick (or undo) a whole line. `listingId` is the copy physically taken:
+   * empty = the line's own listing; another identical copy = a swap.
+   */
+  async function runPick(line, action, listingId = '') {
+    const key = lineKeyOf(line);
+    if (pickFlight.has(key)) return; // a double click never sends twice
+    const body = pickActionBody(untrack(order), line, action, listingId);
+    const confirm = (inventory) => {
+      const entry = effectivePick(line, current);
+      commit({ ...current, [key]: { picked: action === 'undo' ? 0 : lineQuantity(line), issue: entry.issue, dirty: false } });
+      setNote(key, inventoryNote({ inventory, action, listingId: body.listingId }, lineCopies(line)));
+      setError(key, '');
+    };
+    if (props.preview) {
+      const swap = body.listingId !== body.allocatedListingId;
+      confirm(action === 'undo' ? 'restored' : swap ? 'swapped' : 'removed');
+      return;
+    }
+    pickFlight.add(key);
+    setBusyKeys((keys) => [...keys, key]);
+    try {
+      const token = await getBearer();
+      const data = await saveCardTraderZeroPick(token, body);
+      confirm(data?.inventory || (action === 'undo' ? 'restored' : 'removed'));
+    } catch (err) {
+      setError(key, `Not saved: ${pickErrorMessage(err)}`);
+    } finally {
+      pickFlight.delete(key);
+      setBusyKeys((keys) => keys.filter((other) => other !== key));
+    }
+  }
+
+  const onPick = (line, listingId = '') => runPick(line, 'pick', listingId);
+  const onUndo = (line) => runPick(line, 'undo');
+  const setPicked = (line, picked) => {
+    if (picked > 0 && !isDone(line)) onPick(line);
+    else if (picked === 0 && pickOf(line).picked) onUndo(line);
+  };
+
+  /* ---- order ---- */
   const [ptSort, setPtSort] = createSignal(false);
-  const [picking, setPicking] = createSignal(false);
-  const [qtyKey, setQtyKey] = createSignal('');
   const [issueKey, setIssueKey] = createSignal('');
+  const [swapKey, setSwapKey] = createSignal('');
 
   const match = createMemo(() => pickingOrdersMatch(order().items));
   const ptComparable = () => order().ptPicking?.comparable === true;
@@ -373,27 +316,23 @@ export function ShipmentPanel(props) {
     if (!order().ptPicking) return 'No Power Tools picking list for this shipment';
     return 'Some cards have no Power Tools position, so the Power Tools order is incomplete';
   };
-  const lines = createMemo(() => (ptSort() && ptComparable() ? sortByPtOrder(order().items) : order().items));
-  const places = createMemo(() => {
-    const map = new Map();
-    order().items.forEach((line, index) => map.set(lineKeyOf(line), index + 1));
-    return map;
-  });
+  const sortFields = () => props.sortFields || DEFAULT_SORT_FIELDS;
+  const sorted = createMemo(() => sortZeroLines(order().items, sortFields()));
+  const byPt = () => ptSort() && ptComparable();
+  const lines = createMemo(() => (byPt() ? sortByPtOrder(sorted()) : sorted()));
+  const groupMode = () => (byPt() ? 'pt' : String(sortFields()[0] || '').startsWith('game.') ? 'game' : 'sorted');
+  const places = createMemo(() => new Map(lines().map((line, index) => [lineKeyOf(line), index + 1])));
   const lineByKey = (key) => order().items.find((line) => lineKeyOf(line) === key);
   const openLines = () => lines().filter((line) => !isDone(line));
   const doneLines = () => lines().filter((line) => isDone(line));
-  const allGroups = () => groupsFor(lines(), ptSort() && ptComparable());
-  const openGroups = () => groupsFor(openLines(), ptSort() && ptComparable());
-  const doneGroups = () => groupsFor(doneLines(), ptSort() && ptComparable());
+  const allGroups = () => groupsFor(lines(), groupMode());
+  const openGroups = () => groupsFor(openLines(), groupMode());
+  const doneGroups = () => groupsFor(doneLines(), groupMode());
   const units = () => order().items.reduce((sum, line) => sum + lineQuantity(line), 0);
   const pickedUnits = () => order().items.reduce((sum, line) => sum + pickOf(line).picked, 0);
   const issues = () => order().items.filter((line) => pickOf(line).issue).length;
   const ptBin = () => order().ptPicking?.bin || order().items.find((line) => line.powerTools?.bin)?.powerTools.bin || '';
-
-  function onPick(line) {
-    if (lineQuantity(line) > 1) setQtyKey(lineKeyOf(line));
-    else setPicked(line, pickOf(line).picked ? 0 : 1);
-  }
+  const view = () => props.view || 'images-vertical';
 
   /* ---- search: highlight, not filter ---- */
   let root;
@@ -437,12 +376,55 @@ export function ShipmentPanel(props) {
     get matches() { return matchSet(); },
     get current() { return currentKey(); },
     get errors() { return errors(); },
+    get notes() { return notes(); },
+    get smartLocations() { return props.smartLocations; },
     pickOf,
     isDone,
+    isBusy,
     onPick,
+    onUndo,
+    onSwap: (line) => setSwapKey(lineKeyOf(line)),
     onIssue: (line) => setIssueKey(lineKeyOf(line)),
-    onClearIssue: (line) => change(line, { issue: null }),
+    onClearIssue: (line) => setIssue(line, null),
   };
+
+  const dropRows = (horizontal) => (
+    <>
+      <div class="zero-cards-view">
+        <DropRow
+          {...rowProps}
+          title="To pick"
+          hint={`${openLines().length} still to pick`}
+          groups={openGroups()}
+          horizontal={horizontal}
+          picked={false}
+          zone="pick"
+          over={hot('pick')}
+          setZone={pointer.setZone}
+          onPointerDown={pointer.onPointerDown}
+          onPointerMove={pointer.onPointerMove}
+          onPointerUp={pointer.onPointerUp}
+          onPointerCancel={pointer.onPointerCancel}
+        />
+        <DropRow
+          {...rowProps}
+          title="Picked"
+          hint={`${doneLines().length} picked`}
+          groups={doneGroups()}
+          horizontal={horizontal}
+          picked
+          zone="picked"
+          over={hot('picked')}
+          setZone={pointer.setZone}
+          onPointerDown={pointer.onPointerDown}
+          onPointerMove={pointer.onPointerMove}
+          onPointerUp={pointer.onPointerUp}
+          onPointerCancel={pointer.onPointerCancel}
+        />
+      </div>
+      <ZeroList {...rowProps} groups={allGroups()} printOnly />
+    </>
+  );
 
   return (
     <div class="zero-pack" ref={root}>
@@ -473,121 +455,89 @@ export function ShipmentPanel(props) {
       </Show>
 
       <div class="zero-toolbar">
-        <div class="zero-view-toggle" role="group" aria-label="View">
-          <button type="button" class={['inv-chip', { on: view() === 'cards' }]} aria-pressed={view() === 'cards'} onClick={() => setView('cards')}>Cards</button>
-          <button type="button" class={['inv-chip', { on: view() === 'list' }]} aria-pressed={view() === 'list'} onClick={() => setView('list')}>List</button>
-        </div>
-        <button class="btn" type="button" onClick={() => setPicking(true)} disabled={!order().items.length}>Start picking</button>
         <button
           type="button"
-          class={['inv-chip', { on: ptSort() && ptComparable() }]}
-          aria-pressed={ptSort() && ptComparable()}
+          class={['inv-chip', { on: byPt() }]}
+          aria-pressed={byPt()}
           disabled={!ptComparable()}
           title={ptSortTitle()}
           onClick={() => setPtSort((on) => !on)}
         >
           Sort by PT order
         </button>
-        <button class="btn ghost" type="button" onClick={() => downloadCsv(order(), current)}>Export CSV</button>
         <button class="btn ghost" type="button" onClick={() => window.print()}>Print</button>
+        <div class="zero-search">
+          <label class="ct-token-field">
+            <span class="sr-only">Find a card in this shipment</span>
+            <input
+              type="search"
+              placeholder="Find: name, set, number, location"
+              value={query()}
+              onInput={(event) => {
+                setQuery(event.target.value);
+                setHit(0);
+                window.requestAnimationFrame(() => reveal(currentKey()));
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                step(event.shiftKey ? -1 : 1);
+              }}
+            />
+          </label>
+          <Show when={query().trim()}>
+            <span class="zero-search-count" aria-live="polite">
+              {matchKeys().length ? `${Math.min(hit(), matchKeys().length - 1) + 1} of ${matchKeys().length}` : 'No match'}
+            </span>
+            <button class="btn ghost" type="button" onClick={() => step(-1)} disabled={!matchKeys().length}>Prev</button>
+            <button class="btn ghost" type="button" onClick={() => step(1)} disabled={!matchKeys().length}>Next</button>
+          </Show>
+        </div>
       </div>
 
-      <div class="zero-search">
-        <label class="ct-token-field">
-          <span class="sr-only">Find a card in this shipment</span>
-          <input
-            type="search"
-            placeholder="Find: name, set, number, location"
-            value={query()}
-            onInput={(event) => {
-              setQuery(event.target.value);
-              setHit(0);
-              window.requestAnimationFrame(() => reveal(currentKey()));
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              event.preventDefault();
-              step(event.shiftKey ? -1 : 1);
-            }}
-          />
-        </label>
-        <Show when={query().trim()}>
-          <span class="zero-search-count" aria-live="polite">
-            {matchKeys().length ? `${Math.min(hit(), matchKeys().length - 1) + 1} of ${matchKeys().length}` : 'No match'}
-          </span>
-          <button class="btn ghost" type="button" onClick={() => step(-1)} disabled={!matchKeys().length}>Prev</button>
-          <button class="btn ghost" type="button" onClick={() => step(1)} disabled={!matchKeys().length}>Next</button>
-        </Show>
-      </div>
-
-      <Show
-        when={view() === 'list'}
-        fallback={(
-          <>
-            <div class="zero-cards-view">
-              <DropRow
-                {...rowProps}
-                title="Pick"
-                hint={`${openLines().length} still to pick · picking order`}
-                groups={openGroups()}
-                picked={false}
-                zone="pick"
-                over={hot('pick')}
-                setZone={pointer.setZone}
-                onPointerDown={pointer.onPointerDown}
-                onPointerMove={pointer.onPointerMove}
-                onPointerUp={pointer.onPointerUp}
-                onPointerCancel={pointer.onPointerCancel}
-                consumeClick={pointer.consumeClick}
-              />
-              <DropRow
-                {...rowProps}
-                title="Picked"
-                hint={`${doneLines().length} picked`}
-                groups={doneGroups()}
-                picked
-                zone="picked"
-                over={hot('picked')}
-                setZone={pointer.setZone}
-                onPointerDown={pointer.onPointerDown}
-                onPointerMove={pointer.onPointerMove}
-                onPointerUp={pointer.onPointerUp}
-                onPointerCancel={pointer.onPointerCancel}
-                consumeClick={pointer.consumeClick}
-              />
-            </div>
-            <ZeroList {...rowProps} groups={allGroups()} printOnly />
-          </>
-        )}
-      >
+      <Show when={view() === 'images-vertical'}>{dropRows(false)}</Show>
+      <Show when={view() === 'images-horizontal'}>{dropRows(true)}</Show>
+      <Show when={view() === 'list'}>
         <DeskPanel flush title="Picking list" extra={<span class="zero-progress">{openLines().length} still to pick</span>}>
           <ZeroList {...rowProps} groups={allGroups()} />
         </DeskPanel>
       </Show>
-
-      <Show when={qtyKey() && lineByKey(qtyKey())}>
-        {(line) => (
-          <PickQuantityDialog
-            line={line()}
-            picked={pickOf(line()).picked}
-            onChange={(picked) => setPicked(line(), picked)}
-            onClose={() => setQtyKey('')}
-          />
-        )}
+      <Show when={view() === 'single'}>
+        <PickingMode
+          inline
+          lines={lines()}
+          pickOf={pickOf}
+          isDone={isDone}
+          isBusy={isBusy}
+          noteOf={(line) => notes()[lineKeyOf(line)]}
+          errorOf={(line) => errors()[lineKeyOf(line)]}
+          onSetPicked={setPicked}
+          onClose={() => {}}
+        />
+        <ZeroList {...rowProps} groups={allGroups()} printOnly />
       </Show>
+
       <Show when={issueKey() && lineByKey(issueKey())}>
         {(line) => (
           <IssueDialog
             line={line()}
             issue={pickOf(line()).issue}
-            onSave={(issue) => { change(line(), { issue }); setIssueKey(''); }}
-            onClear={() => { change(line(), { issue: null }); setIssueKey(''); }}
+            onSave={(issue) => { setIssue(line(), issue); setIssueKey(''); }}
+            onClear={() => { setIssue(line(), null); setIssueKey(''); }}
             onClose={() => setIssueKey('')}
           />
         )}
       </Show>
-      <Show when={picking()}>
-        <PickingMode lines={lines()} pickOf={pickOf} isDone={isDone} onSetPicked={setPicked} onClose={() => setPicking(false)} />
+      <Show when={swapKey() && lineByKey(swapKey())}>
+        {(line) => (
+          <SwapDialog
+            line={line()}
+            copies={lineCopies(line())}
+            busy={isBusy(line())}
+            onChoose={(listingId) => { setSwapKey(''); onPick(line(), listingId); }}
+            onClose={() => setSwapKey('')}
+          />
+        )}
       </Show>
     </div>
   );

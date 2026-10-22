@@ -524,3 +524,153 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
 .zero-pt-tag { font-size: 0.62rem; font-weight: 750; opacity: 0.8; }
 .zero-save-error { color: #ffabab; font-size: 0.72rem; overflow-wrap: anywhere; }
 @media print { .zero-save-error { display: none !important; } }
+
+/* v3: Power Tools picking page — views, sort bar, PT-style tiles */
+.zero-controls { display: grid; gap: 0.6rem; min-width: 0; }
+.zero-list-name { margin: 0; }
+.zero-view-toggle { flex-wrap: wrap; }
+.zero-toolbar .zero-search { flex: 1 1 18rem; }
+
+.zero-sort { display: grid; gap: 0.4rem; min-width: 0; }
+.zero-sort-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.zero-sort-label { color: var(--muted); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.zero-sort-level select {
+  min-width: 11rem;
+  max-width: 100%;
+  padding: 0.38rem 0.55rem;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: #121017;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.zero-sort-level select:disabled { opacity: 0.45; }
+.zero-sort-error { margin: 0; color: #ffabab; font-size: 0.82rem; }
+.zero-sort-hint { margin: 0; font-size: 0.75rem; }
+.zero-sort-note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0; }
+.zero-smart { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; font-size: 0.85rem; cursor: pointer; }
+.zero-smart input { width: 2.1rem; height: 1.1rem; accent-color: #3d8bff; }
+.zero-smart small { font-size: 0.74rem; }
+
+.zero-tile { align-content: start; }
+.zero-tile-head { display: grid; gap: 0.1rem; min-width: 0; }
+.zero-tile-name { font-size: 0.9rem; overflow-wrap: anywhere; }
+.zero-tile-name a { color: var(--text); text-decoration: none; }
+.zero-tile-name a:hover { color: var(--yellow); }
+.zero-tile-head .thread-meta { color: var(--muted); font-size: 0.72rem; overflow-wrap: anywhere; }
+.zero-tile-money { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.3rem; }
+.zero-bin {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--g5);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.zero-tile-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.zero-tile-badges .shop-cond { width: 34px; height: 24px; }
+.zero-tile-badges .inv-flag { width: 18px; height: 18px; border-radius: 50%; }
+.zero-rarity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.4rem 0.05rem 0.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+.zero-rarity b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: #2b2735;
+  color: var(--yellow);
+  font-size: 0.62rem;
+}
+.zero-comment { display: inline-flex; color: var(--yellow); cursor: help; }
+.zero-tile-loc {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  color: var(--yellow);
+  font-size: 0.78rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+.zero-tile-loc.is-empty { color: var(--muted); font-weight: 600; }
+.zero-pin { flex: none; margin-top: 0.1rem; }
+.zero-inventory-note { color: #8fd6a3; font-size: 0.72rem; font-weight: 650; }
+/* `stripe` opts out of the yellow lit button; Power Tools' Pick is blue. */
+.btn.stripe.zero-pick-main,
+.btn.stripe.zero-pick-main:not(:disabled),
+.btn.stripe.zero-pick-main:hover:not(:disabled) {
+  border-color: #3d8bff;
+  background: linear-gradient(#5c9dff, #2f7af0);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 24px -6px rgb(61 139 255 / 0.55);
+}
+.btn.stripe.zero-pick-main:not(:disabled):active { background: linear-gradient(#2f7af0, #5c9dff); }
+.zero-pick-main { width: 100%; justify-content: center; }
+.zero-report { width: 100%; justify-content: center; }
+.zero-box-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.zero-box-choice .btn { padding: 0.25rem 0.5rem; font-size: 0.72rem; }
+.zero-swap-list { display: grid; gap: 0.35rem; }
+.zero-swap-list .btn { justify-content: flex-start; }
+
+/* Images horizontal: one tile per row, art left / details right */
+.zero-grid.is-horizontal { grid-template-columns: minmax(0, 1fr); }
+.zero-tile.is-horizontal {
+  grid-template-columns: 7.5rem minmax(0, 1fr) minmax(9rem, 12rem);
+  grid-template-areas: "art head actions" "art body actions";
+  align-items: start;
+  gap: 0.4rem 0.9rem;
+}
+.zero-tile.is-horizontal .zero-tile-head { grid-area: head; }
+.zero-tile.is-horizontal .zero-card-art { grid-area: art; }
+.zero-tile.is-horizontal .zero-card-body { grid-area: body; }
+.zero-tile.is-horizontal .zero-card-actions { grid-area: actions; }
+@media (max-width: 720px) {
+  .zero-grid.is-horizontal { grid-template-columns: minmax(0, 1fr); }
+  .zero-tile.is-horizontal {
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    grid-template-areas: "art head" "art body" "actions actions";
+  }
+  .zero-sort-level select { min-width: 0; width: 100%; }
+  .zero-sort-level { flex: 1 1 45%; }
+}
+
+/* Single image view: the picking card inline, not a modal */
+.zero-picking.is-inline { width: 100%; max-height: none; overflow: visible; }
+
+/* MyPokoin → Picked */
+.zero-picked-table { display: grid; gap: 0.3rem; padding: 0.6rem 0.85rem 0.85rem; }
+.zero-picked-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) minmax(7rem, 1.2fr) minmax(6rem, 1fr) minmax(6rem, 1fr) minmax(6rem, 0.9fr) minmax(4.5rem, 0.7fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+.zero-picked-row > * { min-width: 0; overflow-wrap: anywhere; }
+.zero-picked-row.is-head { border: 0; color: var(--muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+.zero-picked-card { display: flex; align-items: center; gap: 0.55rem; }
+.zero-picked-card > span { display: grid; }
+.zero-picked-card a { color: var(--text); text-decoration: none; }
+.zero-picked-row .btn { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+@media (max-width: 900px) {
+  .zero-picked-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .zero-picked-row.is-head { display: none; }
+}
+.zero-tile .zero-split { justify-self: start; }
+.zero-tile-loc .zero-pt-tag { white-space: nowrap; }

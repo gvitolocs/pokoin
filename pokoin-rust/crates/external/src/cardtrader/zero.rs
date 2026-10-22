@@ -3,8 +3,11 @@
 //! item becomes one line per box its copies leave (webhook allocations, else
 //! the product's members); lines sort game, box, stack, position, then the
 //! date the copy entered the inventory (docs/CARDTRADER_ZERO.md). Power Tools
-//! is an optional read-only overlay of its own picking order; picked state
-//! lives on Firestore `cardtrader_zero_picks`.
+//! is an optional read-only overlay of its own picking order; the seller's
+//! sort is the Power Tools sort model (saved on `cardtrader_zero_settings`), and
+//! Apply sort is the one user-triggered Power Tools write. Picked counts come
+//! from Postgres `cardtrader_zero_picks` (pokoin-commerce moves the stock),
+//! with Firestore picks as the fallback and the issue store.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -521,6 +524,11 @@ fn make_line(item: &Value, row: Option<&Value>, listing_id: &str, quantity: i64,
         }
     }
     // created_at is selected as UTC ISO text; anything unparseable is null.
+    // The copy's own stock, for "(N available)"; null when unlinked.
+    line["quantityAvailable"] = row
+        .and_then(|r| i64_field(r, &["quantity_available"]))
+        .map(Value::from)
+        .unwrap_or(Value::Null);
     line["listedAt"] = row
         .filter(|r| listed_ms(r).is_some())
         .map(|r| json!(text(r.get("created_at"), 40)))
@@ -563,7 +571,58 @@ fn reconcile_allocations(allocations: &[Allocation], quantity: i64) -> Vec<(Stri
 }
 
 /// One CardTrader item → its picking lines (one per box it is taken from).
+/// Identical copies a line could also be picked from: the other members of
+/// its CardTrader product (members fallback, or a grouped product), the
+/// listing the item names first, then oldest; the line's own listing excluded;
+/// only rows still holding copies (`quantity_available > 0`, active or paused).
+fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
+    let own = text(line.get("listingId"), 80);
+    let named = text(line.get("namedListingId"), 80);
+    let mut product = text(line.get("productId"), 80);
+    if !index.members.contains_key(&product) {
+        product = index
+            .by_id
+            .get(&own)
+            .map(|row| parse_ct_product_id(&text(row.get("source_listing_id"), 160)))
+            .unwrap_or_default();
+    }
+    let Some(members) = index.members.get(&product) else { return Vec::new() };
+    let mut rows: Vec<&Value> = members
+        .iter()
+        .copied()
+        .filter(|row| text(row.get("id"), 80) != own)
+        .filter(|row| i64_field(row, &["quantity_available"]).unwrap_or(0) > 0)
+        .filter(|row| matches!(text(row.get("status"), 20).as_str(), "active" | "paused"))
+        .collect();
+    // Stable: members are oldest first already.
+    rows.sort_by_key(|row| named.is_empty() || text(row.get("id"), 80) != named);
+    rows.into_iter()
+        .map(|row| {
+            json!({
+                "listingId": text(row.get("id"), 80),
+                "location": text(row.get("location"), 120),
+                "quantityAvailable": i64_field(row, &["quantity_available"]).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
 fn split_item(item: &Value, index: &ListingIndex, allocations: Option<&Vec<Allocation>>) -> Vec<Value> {
+    let named = text(item.get("listingId"), 80);
+    split_item_lines(item, index, allocations)
+        .into_iter()
+        .map(|mut line| {
+            line["namedListingId"] = json!(named);
+            line["candidates"] = json!(line_candidates(&line, index));
+            if let Some(map) = line.as_object_mut() {
+                map.remove("namedListingId");
+            }
+            line
+        })
+        .collect()
+}
+
+fn split_item_lines(item: &Value, index: &ListingIndex, allocations: Option<&Vec<Allocation>>) -> Vec<Value> {
     let quantity = quantity_of(item);
     let named = text(item.get("listingId"), 80);
     if let Some(allocations) = allocations.filter(|rows| !rows.is_empty()) {
@@ -842,18 +901,345 @@ fn line_listed_ms(line: &Value) -> Option<i64> {
 }
 
 pub fn sort_for_picking(list: &mut Value) -> Value {
+    let defaults = default_sorting_fields();
+    sort_for_picking_with(list, &defaults)
+}
+
+/// [`sort_for_picking`] with the seller's sorting levels.
+pub fn sort_for_picking_with(list: &mut Value, fields: &[String]) -> Value {
     stamp_sort_locations(list);
+    let compare = |a: &Value, b: &Value| compare_with_fields(a, b, fields);
     if let Some(orders) = list.get_mut("weekly").and_then(Value::as_array_mut) {
         for order in orders.iter_mut() {
             if let Some(items) = order.get_mut("items").and_then(Value::as_array_mut) {
-                items.sort_by(compare_picking_lines);
+                items.sort_by(compare);
             }
         }
     }
     if let Some(items) = list.pointer_mut("/pending/items").and_then(Value::as_array_mut) {
-        items.sort_by(compare_picking_lines);
+        items.sort_by(compare);
     }
     list.clone()
+}
+
+// ------------------------------------------------------------ sort model
+
+/// Power Tools' picking sort values (level 0, category, is locked and not
+/// part of the list). Every value but `none` and `extras` takes `.asc`/`.desc`.
+pub const SORT_VALUES: [&str; 18] = [
+    "none",
+    "extras",
+    "game",
+    "location",
+    "cn",
+    "condition",
+    "language",
+    "comment",
+    "price",
+    "orderBin",
+    "color",
+    "releaseDate",
+    "set",
+    "releaseExpCode",
+    "product.expansion",
+    "product.rarity",
+    "product.enName",
+    "product.locName",
+];
+pub const MAX_SORT_LEVELS: usize = 4;
+/// Equal to PR A's fixed order: game, then location.
+pub const DEFAULT_SORTING_FIELDS: [&str; MAX_SORT_LEVELS] = ["game.asc", "location.asc", "none", "none"];
+
+pub fn default_sorting_fields() -> Vec<String> {
+    DEFAULT_SORTING_FIELDS.iter().map(|field| field.to_string()).collect()
+}
+
+/// `(name, descending)` of one level; None for `none`.
+fn sort_level(field: &str) -> Option<(&str, bool)> {
+    if field == "none" {
+        return None;
+    }
+    if field == "extras" {
+        return Some(("extras", false));
+    }
+    let (name, direction) = field.rsplit_once('.')?;
+    Some((name, direction == "desc"))
+}
+
+/// Validate a sorting list: at most four levels of known values, `none` only
+/// after the last real level, no field twice (whatever its direction). The
+/// answer is padded with `none` to four levels.
+pub fn parse_sorting_fields(raw: &Value) -> ApiResult<Vec<String>> {
+    let invalid = |message: &str| ApiError::bad_request(message).with_code("invalid_sorting_fields");
+    let Some(entries) = raw.as_array() else {
+        return Err(invalid("sortingFields must be a list."));
+    };
+    if entries.len() > MAX_SORT_LEVELS {
+        return Err(invalid("At most four sorting levels."));
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let mut ended = false;
+    for entry in entries {
+        let field = entry.as_str().map(str::trim).unwrap_or_default();
+        let known = match field {
+            "none" | "extras" => true,
+            _ => field
+                .rsplit_once('.')
+                .map(|(name, direction)| {
+                    matches!(direction, "asc" | "desc") && name != "none" && name != "extras" && SORT_VALUES.contains(&name)
+                })
+                .unwrap_or(false),
+        };
+        if !known {
+            return Err(ApiError::bad_request(format!("Unknown sorting field: {}", clean_text(Some(field), 40)))
+                .with_code("invalid_sorting_field"));
+        }
+        match sort_level(field) {
+            None => ended = true,
+            Some((name, _)) => {
+                if ended {
+                    return Err(invalid("none is only allowed after the last sorting level."));
+                }
+                if seen.iter().any(|done| done == name) {
+                    return Err(ApiError::bad_request(format!("{name} is sorted twice."))
+                        .with_code("duplicate_sorting_field"));
+                }
+                seen.push(name.to_string());
+            }
+        }
+        out.push(field.to_string());
+    }
+    out.resize(MAX_SORT_LEVELS, "none".to_string());
+    Ok(out)
+}
+
+/// Condition grade, NM first; unknown last.
+fn condition_rank(condition: &str) -> Option<u8> {
+    match condition.trim().to_lowercase().as_str() {
+        "nm" | "mint" | "near mint" => Some(0),
+        "sp" | "ex" | "slightly played" | "lp" => Some(1),
+        "mp" | "gd" | "moderately played" => Some(2),
+        "pl" | "lp-pl" | "played" | "hp" => Some(3),
+        "poor" | "po" => Some(4),
+        _ => None,
+    }
+}
+
+/// Rarity, common to rare (Pokémon then MTG ladders share the scale); unknown last.
+pub fn rarity_rank(rarity: &str) -> Option<u8> {
+    match rarity.trim().to_lowercase().as_str() {
+        "common" => Some(0),
+        "uncommon" => Some(1),
+        "rare" => Some(2),
+        "holo rare" | "rare holo" => Some(3),
+        "mythic" | "mythic rare" => Some(3),
+        "reverse holo" | "reverse holo rare" => Some(4),
+        "double rare" => Some(5),
+        "ultra rare" => Some(6),
+        "illustration rare" => Some(7),
+        "special illustration rare" => Some(8),
+        "hyper rare" | "secret rare" => Some(9),
+        "promo" => Some(10),
+        _ => None,
+    }
+}
+
+/// Present values first; present values compare by `cmp`, reversed when `desc`.
+fn present_first<T>(a: Option<T>, b: Option<T>, desc: bool, cmp: impl Fn(&T, &T) -> Ordering) -> Ordering {
+    match (a, b) {
+        (Some(x), Some(y)) => {
+            let order = cmp(&x, &y);
+            if desc { order.reverse() } else { order }
+        }
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn nonempty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
+/// Natural compare of one text field, blanks last in both directions.
+fn text_level(a: &Value, b: &Value, key: &str, desc: bool) -> Ordering {
+    present_first(nonempty(text(a.get(key), 240)), nonempty(text(b.get(key), 240)), desc, |x, y| natural_cmp(x, y))
+}
+
+/// The location level: located first (both directions), then box, stack
+/// (stacked before bare), position (positioned first), listed date, listing
+/// id. `desc` reverses box, stack, and position values only.
+fn location_level(a: &Value, b: &Value, desc: bool) -> Ordering {
+    let (location_a, source_a) = effective_location(a);
+    let (location_b, source_b) = effective_location(b);
+    let slot_a = rank_slot(&location_a, source_a);
+    let slot_b = rank_slot(&location_b, source_b);
+    let flip = |order: Ordering| if desc { order.reverse() } else { order };
+    location_a
+        .is_empty()
+        .cmp(&location_b.is_empty())
+        .then_with(|| flip(natural_cmp(&slot_a.box_name, &slot_b.box_name)))
+        .then_with(|| present_first(slot_a.stack, slot_b.stack, desc, |x, y| x.cmp(y)))
+        .then_with(|| present_first(slot_a.position, slot_b.position, desc, |x, y| x.cmp(y)))
+        .then_with(|| option_first(line_listed_ms(a), line_listed_ms(b)))
+        .then_with(|| {
+            let (id_a, id_b) = (text(a.get("listingId"), 80), text(b.get("listingId"), 80));
+            id_a.is_empty().cmp(&id_b.is_empty()).then_with(|| id_cmp(&id_a, &id_b))
+        })
+}
+
+fn game_level(a: &Value, b: &Value, desc: bool) -> Ordering {
+    let game_a = text(a.get("game"), 40).to_lowercase();
+    let game_b = text(b.get("game"), 40).to_lowercase();
+    let order = game_rank(&game_a).cmp(&game_rank(&game_b)).then_with(|| game_a.cmp(&game_b));
+    if desc { order.reverse() } else { order }
+}
+
+fn compare_level(a: &Value, b: &Value, name: &str, desc: bool) -> Ordering {
+    match name {
+        "game" => game_level(a, b, desc),
+        "location" => location_level(a, b, desc),
+        "cn" => text_level(a, b, "collectorNumber", desc),
+        "condition" => present_first(
+            condition_rank(&text(a.get("condition"), 20)),
+            condition_rank(&text(b.get("condition"), 20)),
+            desc,
+            |x, y| x.cmp(y),
+        ),
+        "language" => text_level(a, b, "language", desc),
+        "price" => present_first(
+            a.get("unitCents").and_then(Value::as_i64),
+            b.get("unitCents").and_then(Value::as_i64),
+            desc,
+            |x, y| x.cmp(y),
+        ),
+        "orderBin" => present_first(
+            nonempty(text(a.pointer("/powerTools/bin"), 80)),
+            nonempty(text(b.pointer("/powerTools/bin"), 80)),
+            desc,
+            |x, y| natural_cmp(x, y),
+        ),
+        "product.rarity" => present_first(
+            rarity_rank(&text(a.get("rarity"), 80)),
+            rarity_rank(&text(b.get("rarity"), 80)),
+            desc,
+            |x, y| x.cmp(y),
+        ),
+        "set" | "product.expansion" => text_level(a, b, "expansion", desc),
+        "product.enName" => {
+            let english = |line: &Value| nonempty(text(line.get("nameEn"), 240)).or_else(|| nonempty(text(line.get("name"), 240)));
+            present_first(english(a), english(b), desc, |x, y| natural_cmp(x, y))
+        }
+        "product.locName" => text_level(a, b, "name", desc),
+        // Lines carry these only when a source fills them; blanks go last.
+        "comment" | "color" | "releaseDate" | "releaseExpCode" | "extras" => text_level(a, b, name, desc),
+        _ => Ordering::Equal,
+    }
+}
+
+/// The seller's levels in order, then PR A's full default comparator, so the
+/// order is total.
+pub fn compare_with_fields(a: &Value, b: &Value, fields: &[String]) -> Ordering {
+    for field in fields {
+        let Some((name, desc)) = sort_level(field) else { continue };
+        let order = compare_level(a, b, name, desc);
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    compare_picking_lines(a, b)
+}
+
+// ------------------------------------------------------------ seller settings
+
+/// Firestore `cardtrader_zero_settings/{uid}`: `sortingFields`,
+/// `smartLocations`, `ptSortAt`, `updatedAt`.
+pub const SETTINGS_COLLECTION: &str = "cardtrader_zero_settings";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZeroSettings {
+    pub sorting_fields: Vec<String>,
+    pub smart_locations: bool,
+}
+
+impl Default for ZeroSettings {
+    fn default() -> Self {
+        Self { sorting_fields: default_sorting_fields(), smart_locations: true }
+    }
+}
+
+impl ZeroSettings {
+    /// A stored doc; an invalid stored sort falls back to the default.
+    pub fn from_doc(data: &Value) -> Self {
+        let sorting_fields = data
+            .get("sortingFields")
+            .and_then(|raw| parse_sorting_fields(raw).ok())
+            .unwrap_or_else(default_sorting_fields);
+        let smart_locations = data.get("smartLocations").and_then(Value::as_bool).unwrap_or(true);
+        Self { sorting_fields, smart_locations }
+    }
+
+    /// The `sorting` object of the API answers.
+    pub fn sorting_json(&self) -> Value {
+        json!({
+            "fields": self.sorting_fields,
+            "defaultFields": default_sorting_fields(),
+            "smartLocations": self.smart_locations,
+        })
+    }
+}
+
+pub async fn read_settings(firestore: &dyn crate::firebase::FirestoreStore, uid: &str) -> (ZeroSettings, Value) {
+    match firestore.get_doc(SETTINGS_COLLECTION, uid).await {
+        Ok(doc) if doc.exists => (ZeroSettings::from_doc(&doc.data), doc.data),
+        _ => (ZeroSettings::default(), json!({})),
+    }
+}
+
+/// `POST /api/cardtrader-zero-sort` body → the settings to save. `{reset:
+/// true}` restores the default sort; `fields` and `smartLocations` are each
+/// optional, the other keeps its saved value.
+pub fn parse_sort_request(body: &Value, current: &ZeroSettings) -> ApiResult<ZeroSettings> {
+    if !body.is_object() {
+        return Err(ApiError::bad_request("Send a JSON object.").with_code("invalid_body"));
+    }
+    let mut next = current.clone();
+    if body.get("reset") == Some(&Value::Bool(true)) {
+        next.sorting_fields = default_sorting_fields();
+    } else if let Some(fields) = body.get("fields").or_else(|| body.get("sortingFields")) {
+        next.sorting_fields = parse_sorting_fields(fields)?;
+    }
+    match body.get("smartLocations") {
+        None | Some(Value::Null) => {}
+        Some(Value::Bool(flag)) => next.smart_locations = *flag,
+        Some(_) => return Err(ApiError::bad_request("smartLocations must be true or false.").with_code("invalid_body")),
+    }
+    let touched = body.get("reset") == Some(&Value::Bool(true))
+        || body.get("fields").is_some()
+        || body.get("sortingFields").is_some()
+        || body.get("smartLocations").is_some_and(|v| !v.is_null());
+    if !touched {
+        return Err(ApiError::bad_request("Send fields, smartLocations, or reset.").with_code("invalid_body"));
+    }
+    Ok(next)
+}
+
+pub async fn save_settings(firestore: &dyn crate::firebase::FirestoreStore, uid: &str, settings: &ZeroSettings) -> ApiResult<Value> {
+    let now = crate::time_util::iso_from_ms(crate::time_util::now_ms());
+    firestore
+        .merge_doc(
+            SETTINGS_COLLECTION,
+            uid,
+            json!({
+                "uid": uid,
+                "sortingFields": settings.sorting_fields,
+                "smartLocations": settings.smart_locations,
+                "updatedAt": now,
+            }),
+        )
+        .await?;
+    Ok(json!({ "ok": true, "sorting": settings.sorting_json() }))
 }
 
 // ------------------------------------------------------------ Power Tools
@@ -1400,19 +1786,74 @@ pub async fn read_picks(firestore: &dyn crate::firebase::FirestoreStore, uid: &s
 
 /// Server picked state onto the weekly lines (picked clamped to the line).
 pub fn apply_picks(list: &mut Value, picks: &HashMap<String, Value>) {
+    apply_picks_with(list, picks, &HashMap::new())
+}
+
+/// Postgres `cardtrader_zero_picks` rows (state picked) per order id, then
+/// per line key.
+pub type PgPicks = HashMap<String, HashMap<String, Vec<Value>>>;
+
+const PICKS_SQL: &str = "select id, order_id, item_id, line_key, listing_id::text as listing_id, \
+       coalesce(allocated_listing_id::text, '') as allocated_listing_id, kind, quantity \
+     from public.cardtrader_zero_picks \
+     where seller_uid = $1 and order_id = any($2::text[]) and state = 'picked' order by id";
+
+/// Picked rows of the weekly orders. A missing table (migration not applied
+/// yet) or a failed read is no rows: the Firestore picks answer instead.
+pub async fn read_pg_picks(db: &crate::db::DbPools, uid: &str, list: &Value) -> PgPicks {
+    let order_ids: Vec<String> = list
+        .get("weekly")
+        .and_then(Value::as_array)
+        .map(|orders| orders.iter().map(|o| text(o.get("orderId"), 40)).filter(|id| !id.is_empty()).collect())
+        .unwrap_or_default();
+    if order_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows = db.query("pokemon", PICKS_SQL, &[json!(uid), json!(order_ids)]).await.unwrap_or_default();
+    group_pg_picks(&rows)
+}
+
+pub fn group_pg_picks(rows: &[Value]) -> PgPicks {
+    let mut out: PgPicks = HashMap::new();
+    for row in rows {
+        let order_id = text(row.get("order_id"), 40);
+        let line_key = text(row.get("line_key"), 200);
+        let pick = json!({
+            "id": row.get("id").cloned().unwrap_or(Value::Null),
+            "itemId": text(row.get("item_id"), 40),
+            "listingId": text(row.get("listing_id"), 80),
+            "allocatedListingId": text(row.get("allocated_listing_id"), 80),
+            "kind": text(row.get("kind"), 20),
+            "quantity": i64_field(row, &["quantity"]).unwrap_or(0).max(0),
+        });
+        out.entry(order_id).or_default().entry(line_key).or_default().push(pick);
+    }
+    out
+}
+
+/// [`apply_picks`] with Postgres picks: an order with any Postgres pick takes
+/// its picked counts from there (the line's `picks`); others keep the
+/// Firestore counts of orders picked before the inventory picks shipped.
+/// Issues always come from Firestore.
+pub fn apply_picks_with(list: &mut Value, picks: &HashMap<String, Value>, pg: &PgPicks) {
     let Some(orders) = list.get_mut("weekly").and_then(Value::as_array_mut) else { return };
     for order in orders.iter_mut() {
-        let doc = picks.get(&text(order.get("orderId"), 40));
+        let order_id = text(order.get("orderId"), 40);
+        let doc = picks.get(&order_id);
+        let pg_order = pg.get(&order_id);
         let mut picked_lines = 0;
         let mut issue_count = 0;
         for line in order.get_mut("items").and_then(Value::as_array_mut).into_iter().flatten() {
             let quantity = line.get("quantity").and_then(Value::as_i64).unwrap_or(0);
-            let entry = doc.and_then(|data| data.get(pick_field_key(&text(line.get("lineKey"), 200))));
-            let picked = entry
-                .and_then(|e| e.get("picked"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                .clamp(0, quantity.max(0));
+            let line_key = text(line.get("lineKey"), 200);
+            let entry = doc.and_then(|data| data.get(pick_field_key(&line_key)));
+            let pg_rows = pg_order.and_then(|lines| lines.get(&line_key)).cloned().unwrap_or_default();
+            let picked = match pg_order {
+                Some(_) => pg_rows.iter().map(|row| row["quantity"].as_i64().unwrap_or(0)).sum::<i64>(),
+                None => entry.and_then(|e| e.get("picked")).and_then(Value::as_i64).unwrap_or(0),
+            }
+            .clamp(0, quantity.max(0));
+            line["picks"] = json!(pg_rows);
             let issue = entry.and_then(|e| e.get("issue")).filter(|v| v.is_object()).cloned().unwrap_or(Value::Null);
             if quantity > 0 && picked >= quantity {
                 picked_lines += 1;
@@ -1426,6 +1867,232 @@ pub fn apply_picks(list: &mut Value, picks: &HashMap<String, Value>) {
         order["pickedLines"] = json!(picked_lines);
         order["issueCount"] = json!(issue_count);
     }
+}
+
+// ------------------------------------------------------------ Apply sort (Power Tools write)
+
+/// Seconds between two Power Tools sort writes of one seller.
+pub const PT_SORT_THROTTLE_MS: i64 = 15_000;
+const MAX_SEQUENCE: usize = 2_000;
+
+/// A validated `POST /api/cardtrader-zero-pt-sort` body.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PtSortRequest {
+    pub order_id: String,
+    /// The Power Tools picking list id, as the client got it (string or number).
+    pub list_id: Value,
+    /// CardTrader item ids (`sourceArticleId`) in the wanted order.
+    pub sequence: Vec<String>,
+    pub dry_run: bool,
+    pub expect_count: Option<usize>,
+}
+
+pub fn parse_pt_sort_request(body: &Value) -> ApiResult<PtSortRequest> {
+    if !body.is_object() {
+        return Err(ApiError::bad_request("Send a JSON object.").with_code("invalid_body"));
+    }
+    let order_id = id_text(body.get("orderId").unwrap_or(&Value::Null));
+    if order_id.is_empty() || order_id.len() > 40 || !order_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError::bad_request("orderId must be a CardTrader order id.").with_code("invalid_order"));
+    }
+    let list_id = body.get("listId").cloned().unwrap_or(Value::Null);
+    let list_text = id_text(&list_id);
+    if list_text.is_empty() || list_text.len() > 80 || !list_text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(ApiError::bad_request("listId must be a Power Tools picking list id.").with_code("invalid_list"));
+    }
+    let Some(raw) = body.get("sequence").and_then(Value::as_array) else {
+        return Err(ApiError::bad_request("sequence must be a list of item ids.").with_code("invalid_sequence"));
+    };
+    if raw.len() > MAX_SEQUENCE {
+        return Err(ApiError::bad_request("sequence is too long.").with_code("invalid_sequence"));
+    }
+    let mut sequence: Vec<String> = Vec::new();
+    for entry in raw {
+        let id = id_text(entry);
+        if id.is_empty() || id.len() > 40 {
+            return Err(ApiError::bad_request("sequence must be a list of item ids.").with_code("invalid_sequence"));
+        }
+        if !sequence.contains(&id) {
+            sequence.push(id);
+        }
+    }
+    let dry_run = body.get("dryRun") == Some(&Value::Bool(true));
+    let expect_count = match body.get("expectCount") {
+        None | Some(Value::Null) => None,
+        Some(value) => match value.as_u64() {
+            Some(n) => Some(n as usize),
+            None => return Err(ApiError::bad_request("expectCount must be a count.").with_code("invalid_body")),
+        },
+    };
+    if !dry_run && expect_count.is_none() {
+        return Err(ApiError::bad_request("expectCount is required to apply a sort.").with_code("invalid_body"));
+    }
+    Ok(PtSortRequest { order_id, list_id, sequence, dry_run, expect_count })
+}
+
+/// One Power Tools article of a picking list, deduplicated over its pickings.
+#[derive(Clone, Debug)]
+struct PtSortArticle {
+    key: String,
+    item_id: String,
+    picked: bool,
+    updated_ms: Option<i64>,
+    /// `{source, sourceArticleId, sourceOrderId}` exactly as Power Tools sent them.
+    entry: Value,
+}
+
+/// The list's articles in Power Tools order, one per article. An article is
+/// picked when every one of its pickings is `picked`.
+fn pt_sort_articles(articles_to_pick: &Value) -> Vec<PtSortArticle> {
+    let mut out: Vec<PtSortArticle> = Vec::new();
+    for picking in articles_to_pick.get("pickings").and_then(Value::as_array).into_iter().flatten() {
+        let article_id = id_text(picking.get("ptOrderArticleId").unwrap_or(&Value::Null));
+        let Some(article) = article_by_id(articles_to_pick, &article_id) else { continue };
+        let picked = clean_text(picking.get("articleState").and_then(Value::as_str), 40).eq_ignore_ascii_case("picked");
+        let key = if article_id.is_empty() {
+            format!(
+                "{}/{}",
+                id_text(article.get("sourceOrderId").unwrap_or(&Value::Null)),
+                id_text(article.get("sourceArticleId").unwrap_or(&Value::Null))
+            )
+        } else {
+            article_id
+        };
+        if let Some(existing) = out.iter_mut().find(|a| a.key == key) {
+            existing.picked = existing.picked && picked;
+            continue;
+        }
+        let pass = |name: &str| article.get(name).cloned().unwrap_or(Value::Null);
+        out.push(PtSortArticle {
+            key,
+            item_id: id_text(article.get("sourceArticleId").unwrap_or(&Value::Null)),
+            picked,
+            updated_ms: article
+                .get("updatedAt")
+                .or_else(|| picking.get("updatedAt"))
+                .and_then(Value::as_str)
+                .and_then(crate::time_util::ms_from_iso),
+            entry: json!({
+                "source": pass("source"),
+                "sourceArticleId": pass("sourceArticleId"),
+                "sourceOrderId": pass("sourceOrderId"),
+            }),
+        });
+    }
+    out
+}
+
+/// The `items` Power Tools' own Apply sort would send: picked articles by
+/// `updatedAt` ascending, then the to-pick articles in `sequence` order
+/// (those `sequence` misses keep Power Tools' order after them). Item ids in
+/// `sequence` that the list does not hold are a 409 `pt_sort_mismatch`.
+/// `sequence = None` is Power Tools' current order.
+pub fn pt_sort_items(articles_to_pick: &Value, sequence: Option<&[String]>) -> ApiResult<Vec<Value>> {
+    let articles = pt_sort_articles(articles_to_pick);
+    let mut picked: Vec<&PtSortArticle> = articles.iter().filter(|a| a.picked).collect();
+    picked.sort_by(|a, b| option_first(a.updated_ms, b.updated_ms));
+    let to_pick: Vec<&PtSortArticle> = articles.iter().filter(|a| !a.picked).collect();
+    let mut ordered: Vec<&PtSortArticle> = Vec::new();
+    if let Some(sequence) = sequence {
+        let unknown: Vec<&String> = sequence.iter().filter(|id| !articles.iter().any(|a| a.item_id == **id)).collect();
+        if !unknown.is_empty() {
+            let mut error = ApiError::conflict("Power Tools' picking list changed: reload the list.").with_code("pt_sort_mismatch");
+            error.problems = Some(json!({ "unknownIds": unknown }));
+            return Err(error);
+        }
+        for id in sequence {
+            for article in to_pick.iter().filter(|a| a.item_id == *id) {
+                if !ordered.iter().any(|done| done.key == article.key) {
+                    ordered.push(article);
+                }
+            }
+        }
+    }
+    for article in &to_pick {
+        if !ordered.iter().any(|done| done.key == article.key) {
+            ordered.push(article);
+        }
+    }
+    Ok(picked.into_iter().chain(ordered).map(|a| a.entry.clone()).collect())
+}
+
+/// Item ids of the list's to-pick articles, in Power Tools order.
+pub fn pt_to_pick_ids(articles_to_pick: &Value) -> Vec<String> {
+    pt_sort_articles(articles_to_pick).into_iter().filter(|a| !a.picked).map(|a| a.item_id).collect()
+}
+
+pub fn pt_item_ids(items: &[Value]) -> Vec<String> {
+    items.iter().map(|item| id_text(item.get("sourceArticleId").unwrap_or(&Value::Null))).collect()
+}
+
+/// The sort the list already has (kept unchanged on the write).
+pub fn pt_list_sorting_fields(articles_to_pick: &Value) -> Value {
+    articles_to_pick.get("sortingFields").filter(|v| !v.is_null()).cloned().unwrap_or(json!([]))
+}
+
+/// `true` when the last write was less than [`PT_SORT_THROTTLE_MS`] ago.
+pub fn pt_sort_throttled(settings_doc: &Value, now_ms: i64) -> bool {
+    settings_doc
+        .get("ptSortAt")
+        .and_then(Value::as_str)
+        .and_then(crate::time_util::ms_from_iso)
+        .is_some_and(|at| now_ms - at < PT_SORT_THROTTLE_MS && now_ms >= at)
+}
+
+/// `POST /api/cardtrader-zero-pt-sort`: reorder the seller's Power Tools
+/// picking list. User-triggered only; never retried.
+pub async fn apply_pt_sort(
+    firestore: &dyn crate::firebase::FirestoreStore,
+    powertools: &crate::powertools::PowerToolsClient,
+    uid: &str,
+    request: &PtSortRequest,
+) -> ApiResult<Value> {
+    let (_, settings_doc) = read_settings(firestore, uid).await;
+    let now = crate::time_util::now_ms();
+    if !request.dry_run {
+        if pt_sort_throttled(&settings_doc, now) {
+            return Err(ApiError::new(429, "Wait a few seconds before applying the sort again.").with_code("pt_sort_throttled"));
+        }
+        firestore
+            .merge_doc(SETTINGS_COLLECTION, uid, json!({ "uid": uid, "ptSortAt": crate::time_util::iso_from_ms(now) }))
+            .await?;
+    }
+    let jwt = crate::powertools::decrypt_power_tools_session(firestore, uid).await?;
+    if jwt.is_empty() {
+        return Err(ApiError::conflict("Connect Power Tools first.").with_code("powertools_not_connected"));
+    }
+    let expired = |error: ApiError| async move {
+        if error.code.as_deref() == Some("powertools_session_expired") {
+            crate::powertools::mark_session_expired(firestore, uid).await;
+        }
+        error
+    };
+    let fresh = match powertools.fetch_articles_to_pick(&jwt, &request.list_id).await {
+        Ok(payload) => payload,
+        Err(error) => return Err(expired(error).await),
+    };
+    let before = pt_item_ids(&pt_sort_items(&fresh, None)?);
+    let items = pt_sort_items(&fresh, Some(&request.sequence))?;
+    let requested = pt_item_ids(&items);
+    if let Some(expected) = request.expect_count {
+        if expected != items.len() {
+            let mut error = ApiError::conflict("Power Tools' picking list changed: reload the list.").with_code("pt_sort_count_changed");
+            error.problems = Some(json!({ "expectCount": expected, "count": items.len() }));
+            return Err(error);
+        }
+    }
+    if request.dry_run {
+        return Ok(json!({ "ok": true, "dryRun": true, "before": before, "items": requested }));
+    }
+    let sorting_fields = pt_list_sorting_fields(&fresh);
+    if let Err(error) = powertools.update_sorting(&jwt, &request.list_id, &sorting_fields, &json!(items)).await {
+        return Err(expired(error).await);
+    }
+    let after = match powertools.fetch_articles_to_pick(&jwt, &request.list_id).await {
+        Ok(payload) => pt_item_ids(&pt_sort_items(&payload, None)?),
+        Err(error) => return Err(expired(error).await),
+    };
+    Ok(json!({ "ok": true, "before": before, "after": after.clone(), "requested": requested.clone(), "applied": after == requested }))
 }
 
 // ------------------------------------------------------------ route
@@ -1511,6 +2178,7 @@ pub async fn zero_list(
             .await
             .unwrap_or_default()
     };
+    let (settings, _) = read_settings(firestore, uid).await;
     split_lines(&mut list, &rows, &allocations, &games);
 
     // Power Tools overlay; never fails the CardTrader list.
@@ -1566,9 +2234,9 @@ pub async fn zero_list(
         }
     }
     power_tools["picking"] = picking;
-    let picks = read_picks(firestore, uid, &list).await;
-    apply_picks(&mut list, &picks);
-    sort_for_picking(&mut list);
+    let (picks, pg_picks) = tokio::join!(read_picks(firestore, uid, &list), read_pg_picks(db, uid, &list));
+    apply_picks_with(&mut list, &picks, &pg_picks);
+    sort_for_picking_with(&mut list, &settings.sorting_fields);
     mark_pt_mismatches(&mut list);
     let ct_doc = crate::cardtrader::integration::read_integration_doc(firestore, uid).await?;
     let ct_user = ct_doc.data.pointer("/metadata/user").cloned().unwrap_or(json!({}));
@@ -1583,6 +2251,7 @@ pub async fn zero_list(
         "pending": list["pending"].clone(),
         "totals": list["totals"].clone(),
         "powerTools": power_tools,
+        "sorting": settings.sorting_json(),
     }))
 }
 
@@ -2275,5 +2944,446 @@ mod tests {
         assert_eq!(lone["weekly"][0]["items"][0]["gameSource"], "listing");
         assert_eq!(cardmarket_game(9), "");
         assert_eq!(cardmarket_game(13), "dragon_ball_super");
+    }
+
+    // ------------------------------------------------------------ sort model
+
+    #[test]
+    fn shared_sort_fixture_matches() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!("fixtures/zero-sort-cases.json")).unwrap();
+        assert!(cases.len() >= 8);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let parsed = parse_sorting_fields(&case["fields"]);
+            if let Some(code) = case.get("error").and_then(Value::as_str) {
+                assert_eq!(parsed.unwrap_err().code.as_deref(), Some(code), "{name}");
+                continue;
+            }
+            let fields = parsed.unwrap_or_else(|e| panic!("{name}: {}", e.message));
+            let mut lines = case["lines"].as_array().unwrap().clone();
+            lines.sort_by(|a, b| compare_with_fields(a, b, &fields));
+            assert_eq!(field(&lines, "lineKey"), case["expected"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>(), "{name}");
+            // Reversing the input changes nothing: the order is total.
+            let mut reversed = case["lines"].as_array().unwrap().clone();
+            reversed.reverse();
+            reversed.sort_by(|a, b| compare_with_fields(a, b, &fields));
+            assert_eq!(field(&reversed, "lineKey"), field(&lines, "lineKey"), "{name} reversed");
+        }
+    }
+
+    #[test]
+    fn default_fields_equal_the_fixed_comparator() {
+        let fields = default_sorting_fields();
+        let rows = vec![
+            line("pokemon", "box2·1", None, "5", "1"),
+            line("magic", "", Some("2026-09-01T00:00:00.000Z"), "", "2"),
+            line("", "box1", None, "7", "3"),
+            line("pokemon", "box2", Some("2026-09-01T00:00:00.000Z"), "8", "4"),
+            line("riftbound", "z·1·2", None, "9", "5"),
+            line("pokemon", "box2·1", Some("2026-08-01T00:00:00.000Z"), "10", "6"),
+        ];
+        for a in &rows {
+            for b in &rows {
+                assert_eq!(compare_with_fields(a, b, &fields), compare_picking_lines(a, b));
+            }
+        }
+    }
+
+    #[test]
+    fn sorting_fields_validation() {
+        assert_eq!(parse_sorting_fields(&json!([])).unwrap(), vec!["none"; 4]);
+        assert_eq!(
+            parse_sorting_fields(&json!(["product.rarity.desc", "extras"])).unwrap(),
+            vec!["product.rarity.desc", "extras", "none", "none"]
+        );
+        assert_eq!(parse_sorting_fields(&json!(["cn.asc", "none", "none"])).unwrap()[0], "cn.asc");
+        for (raw, code) in [
+            (json!("cn.asc"), "invalid_sorting_fields"),
+            (json!(["cn"]), "invalid_sorting_field"),
+            (json!(["none.asc"]), "invalid_sorting_field"),
+            (json!(["extras.asc"]), "invalid_sorting_field"),
+            (json!(["cn.up"]), "invalid_sorting_field"),
+            (json!([1]), "invalid_sorting_field"),
+            (json!(["cn.asc", "none", "game.asc"]), "invalid_sorting_fields"),
+            (json!(["game.asc", "game.desc"]), "duplicate_sorting_field"),
+            (json!(["set.asc", "product.expansion.asc"]), "invalid_sorting_field_never"),
+        ] {
+            let result = parse_sorting_fields(&raw);
+            if code == "invalid_sorting_field_never" {
+                assert!(result.is_ok(), "set and product.expansion are different Power Tools fields");
+                continue;
+            }
+            assert_eq!(result.unwrap_err().code.as_deref(), Some(code), "{raw}");
+        }
+        assert_eq!(rarity_rank("Common"), Some(0));
+        assert!(rarity_rank("Hyper Rare") > rarity_rank("Special Illustration Rare"));
+        assert_eq!(rarity_rank("Mythic"), Some(3));
+        assert_eq!(rarity_rank(""), None);
+    }
+
+    #[test]
+    fn sort_request_and_settings_doc() {
+        let current = ZeroSettings::default();
+        assert_eq!(current.sorting_fields, default_sorting_fields());
+        assert!(current.smart_locations);
+        let next = parse_sort_request(&json!({ "fields": ["price.desc"] }), &current).unwrap();
+        assert_eq!(next.sorting_fields, vec!["price.desc", "none", "none", "none"]);
+        assert!(next.smart_locations);
+        let off = parse_sort_request(&json!({ "smartLocations": false }), &next).unwrap();
+        assert_eq!(off.sorting_fields, next.sorting_fields);
+        assert!(!off.smart_locations);
+        let reset = parse_sort_request(&json!({ "reset": true }), &off).unwrap();
+        assert_eq!(reset.sorting_fields, default_sorting_fields());
+        assert!(!reset.smart_locations);
+        assert_eq!(parse_sort_request(&json!({}), &current).unwrap_err().code.as_deref(), Some("invalid_body"));
+        assert_eq!(
+            parse_sort_request(&json!({ "smartLocations": "no" }), &current).unwrap_err().code.as_deref(),
+            Some("invalid_body")
+        );
+        // A stored sort that no longer validates falls back to the default.
+        let stored = ZeroSettings::from_doc(&json!({ "sortingFields": ["cn.asc", "cn.desc"], "smartLocations": false }));
+        assert_eq!(stored.sorting_fields, default_sorting_fields());
+        assert!(!stored.smart_locations);
+        assert_eq!(
+            stored.sorting_json(),
+            json!({ "fields": DEFAULT_SORTING_FIELDS, "defaultFields": DEFAULT_SORTING_FIELDS, "smartLocations": false })
+        );
+    }
+
+    #[test]
+    fn saved_sort_orders_the_list() {
+        let mut list = build_zero_list(&[zero_order("1", "paid", vec![item("11", "101", 1, 300), item("12", "102", 1, 100)])]);
+        split_lines(&mut list, &[], &HashMap::new(), &HashMap::new());
+        sort_for_picking_with(&mut list, &["price.asc".to_string()]);
+        assert_eq!(field(&lines(&list), "itemId"), vec!["12", "11"]);
+        sort_for_picking_with(&mut list, &["price.desc".to_string()]);
+        assert_eq!(field(&lines(&list), "itemId"), vec!["11", "12"]);
+    }
+
+    #[test]
+    fn candidates_on_every_line_with_other_copies() {
+        const NAMED: &str = "00000000-0000-4000-8000-000000000030";
+        let mut rows = vec![
+            row(NAMED, "101", "box3·1", "2026-09-03T00:00:00.000Z"),
+            row("10", "101", "box1·1", "2026-09-01T00:00:00.000Z"),
+            row("20", "101", "box2·1", "2026-09-02T00:00:00.000Z"),
+            row("40", "101", "box4·1", "2026-09-04T00:00:00.000Z"),
+            row("50", "101", "box5·1", "2026-09-05T00:00:00.000Z"),
+            row("60", "101", "box6·1", "2026-09-06T00:00:00.000Z"),
+        ];
+        rows[0]["quantity_available"] = json!(2);
+        rows[3]["status"] = json!("paused");
+        rows[4]["quantity_available"] = json!(0);
+        rows[4]["status"] = json!("sold_out");
+        rows[5]["status"] = json!("inactive");
+        let mut named = item("11", "101", 2, 10);
+        named["user_data_field"] = json!(format!("pokoin:{NAMED}"));
+
+        // Members fallback: the line's own (named) copy excluded, then oldest;
+        // sold-out and inactive rows are not candidates. alsoIn is unchanged.
+        let mut list = build_zero_list(&[zero_order("1", "paid", vec![named.clone()])]);
+        split_lines(&mut list, &rows, &HashMap::new(), &HashMap::new());
+        let line = &lines(&list)[0];
+        assert_eq!(line["allocation"], "members");
+        assert_eq!(line["quantityAvailable"], 2);
+        assert_eq!(
+            line["candidates"],
+            json!([
+                { "listingId": "10", "location": "box1·1", "quantityAvailable": 1 },
+                { "listingId": "20", "location": "box2·1", "quantityAvailable": 1 },
+                { "listingId": "40", "location": "box4·1", "quantityAvailable": 1 },
+            ])
+        );
+        assert_eq!(line["alsoIn"], json!(["box1·1", "box2·1", "box4·1", "box5·1", "box6·1"]));
+
+        // An allocated (event) line of a grouped product: the named listing first.
+        let allocations = HashMap::from([("11".to_string(), vec![Allocation { listing_id: "20".into(), quantity: 2 }])]);
+        let mut event = build_zero_list(&[zero_order("1", "paid", vec![named])]);
+        split_lines(&mut event, &rows, &allocations, &HashMap::new());
+        let line = &lines(&event)[0];
+        assert_eq!(line["allocation"], "event");
+        assert_eq!(
+            line["candidates"].as_array().unwrap().iter().map(|c| c["listingId"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec![NAMED, "10", "40"]
+        );
+
+        // A single copy has none; an unlinked line has no quantityAvailable.
+        let mut single = build_zero_list(&[zero_order("1", "paid", vec![item("12", "102", 1, 10), item("13", "999", 1, 10)])]);
+        split_lines(&mut single, &[row("70", "102", "box7", "2026-09-01T00:00:00.000Z")], &HashMap::new(), &HashMap::new());
+        let out = lines(&single);
+        assert_eq!(out[0]["candidates"], json!([]));
+        assert_eq!(out[0]["quantityAvailable"], 1);
+        assert_eq!(out[1]["quantityAvailable"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn postgres_picks_win_per_order_and_firestore_stays_the_fallback() {
+        let store = MemoryFirestore::new();
+        let mut list = build_zero_list(&[
+            zero_order("1", "paid", vec![item("11", "101", 2, 10)]),
+            zero_order("2", "paid", vec![item("21", "201", 1, 10)]),
+        ]);
+        split_lines(&mut list, &[row("l1", "101", "a·1", "2026-09-01T00:00:00.000Z")], &HashMap::new(), &HashMap::new());
+        // Order 1 was ticked in Firestore before the deploy and in Postgres since.
+        store.seed(PICKS_COLLECTION, &picks_doc_id("u1", "1"), json!({ pick_field_key("11@l1"): { "picked": 2, "issue": { "type": "missing" } } })).await;
+        store.seed(PICKS_COLLECTION, &picks_doc_id("u1", "2"), json!({ pick_field_key("21"): { "picked": 1 } })).await;
+        let picks = read_picks(&store, "u1", &list).await;
+        let pg = group_pg_picks(&[json!({
+            "id": 7, "order_id": "1", "item_id": "11", "line_key": "11@l1", "listing_id": "l2",
+            "allocated_listing_id": "l1", "kind": "swap", "quantity": 1,
+        })]);
+        apply_picks_with(&mut list, &picks, &pg);
+        let first = &list["weekly"][0]["items"][0];
+        assert_eq!(first["picked"], 1, "Postgres count, not the Firestore 2");
+        assert_eq!(first["issue"]["type"], "missing", "issues stay in Firestore");
+        assert_eq!(first["picks"][0]["listingId"], "l2");
+        assert_eq!(first["picks"][0]["kind"], "swap");
+        let second = &list["weekly"][1]["items"][0];
+        assert_eq!(second["picked"], 1, "no Postgres rows: the Firestore count");
+        assert_eq!(second["picks"], json!([]));
+    }
+
+    // ------------------------------------------------------------ Apply sort
+
+    fn pt_list() -> Value {
+        json!({
+            "articleMap": {
+                "1": { "ptOrderArticleId": 1, "source": "Cardtrader", "sourceOrderId": 9001, "sourceArticleId": "501", "updatedAt": "2026-10-20T10:00:00.000Z" },
+                "2": { "ptOrderArticleId": 2, "source": "Cardtrader", "sourceOrderId": "9001", "sourceArticleId": 502 },
+                "3": { "ptOrderArticleId": 3, "source": "Cardtrader", "sourceOrderId": 9001, "sourceArticleId": "503" },
+                "4": { "ptOrderArticleId": 4, "source": "Cardtrader", "sourceOrderId": 9001, "sourceArticleId": "504", "updatedAt": "2026-10-20T09:00:00.000Z" },
+                "5": { "ptOrderArticleId": 5, "source": "Cardtrader", "sourceOrderId": 9001, "sourceArticleId": "505" },
+            },
+            "pickings": [
+                { "ptOrderArticleId": 3, "articleState": "toPick" },
+                { "ptOrderArticleId": 1, "articleState": "picked" },
+                { "ptOrderArticleId": 2, "articleState": "toPick" },
+                { "ptOrderArticleId": 2, "articleState": "picked" },
+                { "ptOrderArticleId": 4, "articleState": "picked" },
+                { "ptOrderArticleId": 5, "articleState": "toPick" },
+            ],
+            "sortingFields": [{ "field": "location", "direction": "asc" }],
+        })
+    }
+
+    #[test]
+    fn pt_sort_items_picked_first_then_sequence() {
+        let list = pt_list();
+        let current = pt_sort_items(&list, None).unwrap();
+        // Picked by updatedAt (504 then 501), then to-pick in PT order; 502
+        // has a to-pick picking left, so it is to pick, once.
+        assert_eq!(pt_item_ids(&current), vec!["504", "501", "503", "502", "505"]);
+        assert_eq!(pt_to_pick_ids(&list), vec!["503", "502", "505"]);
+        let items = pt_sort_items(&list, Some(&["505".into(), "502".into(), "502".into(), "501".into()])).unwrap();
+        // Unlisted 503 keeps PT order after the sequence; picked 501 stays in the picked block.
+        assert_eq!(pt_item_ids(&items), vec!["504", "501", "505", "502", "503"]);
+        // Only the three keys, exactly as Power Tools sent them.
+        assert_eq!(items[3], json!({ "source": "Cardtrader", "sourceArticleId": 502, "sourceOrderId": "9001" }));
+        let error = pt_sort_items(&list, Some(&["505".into(), "999".into()])).unwrap_err();
+        assert_eq!(error.status, 409);
+        assert_eq!(error.code.as_deref(), Some("pt_sort_mismatch"));
+        assert_eq!(error.problems, Some(json!({ "unknownIds": ["999"] })));
+        assert_eq!(pt_list_sorting_fields(&list), json!([{ "field": "location", "direction": "asc" }]));
+        assert_eq!(pt_list_sorting_fields(&json!({})), json!([]));
+    }
+
+    #[test]
+    fn pt_sort_request_validation_and_throttle() {
+        let ok = parse_pt_sort_request(&json!({ "orderId": 9001, "listId": 301, "sequence": ["1", 2, "1"], "expectCount": 3 })).unwrap();
+        assert_eq!(ok.sequence, vec!["1", "2"]);
+        assert_eq!(ok.list_id, json!(301));
+        assert!(!ok.dry_run);
+        assert!(parse_pt_sort_request(&json!({ "orderId": "1", "listId": "a", "sequence": [], "dryRun": true })).is_ok());
+        for (body, code) in [
+            (json!({ "orderId": "x", "listId": 1, "sequence": [], "expectCount": 0 }), "invalid_order"),
+            (json!({ "orderId": "1", "listId": "a b", "sequence": [], "expectCount": 0 }), "invalid_list"),
+            (json!({ "orderId": "1", "listId": 1, "sequence": "1", "expectCount": 0 }), "invalid_sequence"),
+            (json!({ "orderId": "1", "listId": 1, "sequence": [null], "expectCount": 0 }), "invalid_sequence"),
+            (json!({ "orderId": "1", "listId": 1, "sequence": [] }), "invalid_body"),
+        ] {
+            assert_eq!(parse_pt_sort_request(&body).unwrap_err().code.as_deref(), Some(code), "{body}");
+        }
+        let now = crate::time_util::ms_from_iso("2026-10-22T10:00:10.000Z").unwrap();
+        assert!(pt_sort_throttled(&json!({ "ptSortAt": "2026-10-22T10:00:00.000Z" }), now));
+        assert!(!pt_sort_throttled(&json!({ "ptSortAt": "2026-10-22T09:59:50.000Z" }), now));
+        assert!(!pt_sort_throttled(&json!({}), now));
+    }
+
+    #[test]
+    fn pt_write_errors_map_to_codes() {
+        use crate::powertools::pt_write_error;
+        let code = |status, text: &str| {
+            let payload: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+            pt_write_error(status, text, &payload).map(|e| (e.status, e.code.unwrap_or_default()))
+        };
+        assert_eq!(code(200, ""), None);
+        assert_eq!(code(200, r#"{"ok":true}"#), None);
+        assert_eq!(code(401, ""), Some((409, "powertools_session_expired".into())));
+        assert_eq!(code(403, ""), Some((409, "powertools_session_expired".into())));
+        assert_eq!(code(400, r#"{"error":"Cardtrader token missing"}"#), Some((409, "powertools_cardtrader_not_connected".into())));
+        assert_eq!(code(500, r#"{"message":"Invalid Picking List"}"#), Some((409, "pt_picking_list_missing".into())));
+        assert_eq!(code(200, r#"{"error":"Invalid Picking List"}"#), Some((409, "pt_picking_list_missing".into())));
+        assert_eq!(code(500, "boom"), Some((502, "powertools_unavailable".into())));
+    }
+
+    /// A fake Power Tools picking list. `getArticlesToPick` answers the list;
+    /// `updateSorting` records its body and, when `keeps`, reorders the
+    /// pickings as the items say. `update_status` != 200 answers that error.
+    async fn fake_pt_list(
+        list: Value,
+        keeps: bool,
+        update_status: u16,
+        update_answer: Value,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>) {
+        use axum::extract::Request;
+        let state = std::sync::Arc::new(std::sync::Mutex::new(list));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let app = axum::Router::new().fallback(move |request: Request| {
+            let state = state.clone();
+            let log = log.clone();
+            let update_answer = update_answer.clone();
+            async move {
+                let path = request.uri().path().to_string();
+                let bytes = axum::body::to_bytes(request.into_body(), 1 << 20).await.unwrap_or_default();
+                let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                log.lock().unwrap().push((path.clone(), body.clone()));
+                if path.ends_with("updateSorting") {
+                    if update_status != 200 {
+                        return (axum::http::StatusCode::from_u16(update_status).unwrap(), axum::Json(update_answer));
+                    }
+                    if keeps {
+                        let mut list = state.lock().unwrap();
+                        let order: Vec<String> = pt_item_ids(body["items"].as_array().unwrap());
+                        let map = list["articleMap"].clone();
+                        let rank = |picking: &Value| {
+                            let article = &map[id_text(&picking["ptOrderArticleId"])];
+                            order.iter().position(|id| *id == id_text(&article["sourceArticleId"])).unwrap_or(usize::MAX)
+                        };
+                        let mut pickings = list["pickings"].as_array().unwrap().clone();
+                        pickings.sort_by_key(rank);
+                        list["pickings"] = json!(pickings);
+                    }
+                    return (axum::http::StatusCode::OK, axum::Json(json!({ "ok": true })));
+                }
+                (axum::http::StatusCode::OK, axum::Json(state.lock().unwrap().clone()))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}"), seen)
+    }
+
+    const PT_KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    async fn connected_store() -> MemoryFirestore {
+        std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", PT_KEY);
+        let store = MemoryFirestore::new();
+        crate::powertools::store_power_tools_session(&store, "u1", "a.b.c", &json!({ "username": "seller" })).await.unwrap();
+        store
+    }
+
+    fn sort_request(sequence: &[&str], dry_run: bool, expect: Option<usize>) -> PtSortRequest {
+        PtSortRequest {
+            order_id: "9001".into(),
+            list_id: json!(301),
+            sequence: sequence.iter().map(|s| s.to_string()).collect(),
+            dry_run,
+            expect_count: expect,
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_sort_dry_run_writes_nothing() {
+        let store = connected_store().await;
+        let (base, seen) = fake_pt_list(pt_list(), true, 200, json!({})).await;
+        let client = crate::powertools::PowerToolsClient::new().with_base(base);
+        let out = apply_pt_sort(&store, &client, "u1", &sort_request(&["505", "503", "502"], true, None)).await.unwrap();
+        assert_eq!(out["dryRun"], true);
+        assert_eq!(out["before"], json!(["504", "501", "503", "502", "505"]));
+        assert_eq!(out["items"], json!(["504", "501", "505", "503", "502"]));
+        let calls = seen.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].0.ends_with("getArticlesToPick"));
+        assert_eq!(calls[0].1, json!({ "pickingListId": 301 }), "never sortingFields on the read");
+        // A dry run is not throttled and sets no throttle.
+        assert!(store.get_doc(SETTINGS_COLLECTION, "u1").await.unwrap().data.get("ptSortAt").is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_sort_writes_once_reads_back_and_throttles() {
+        let store = connected_store().await;
+        let (base, seen) = fake_pt_list(pt_list(), true, 200, json!({})).await;
+        let client = crate::powertools::PowerToolsClient::new().with_base(base);
+        let out = apply_pt_sort(&store, &client, "u1", &sort_request(&["505", "503", "502"], false, Some(5))).await.unwrap();
+        assert_eq!(out["before"], json!(["504", "501", "503", "502", "505"]));
+        assert_eq!(out["after"], json!(["504", "501", "505", "503", "502"]));
+        assert_eq!(out["applied"], true);
+        let calls = seen.lock().unwrap().clone();
+        assert_eq!(calls.iter().map(|(p, _)| p.rsplit('/').next().unwrap().to_string()).collect::<Vec<_>>(),
+            vec!["getArticlesToPick", "updateSorting", "getArticlesToPick"]);
+        let write = &calls[1].1;
+        assert_eq!(write["pickingListId"], 301);
+        assert_eq!(write["sortingFields"], json!([{ "field": "location", "direction": "asc" }]), "the list's sort, unchanged");
+        assert_eq!(write["items"].as_array().unwrap().len(), 5);
+        assert!(write["items"].as_array().unwrap().iter().all(|i| i.as_object().unwrap().len() == 3));
+
+        // A second write within 15 s is refused before any Power Tools call.
+        let error = apply_pt_sort(&store, &client, "u1", &sort_request(&["503"], false, Some(5))).await.unwrap_err();
+        assert_eq!(error.status, 429);
+        assert_eq!(error.code.as_deref(), Some("pt_sort_throttled"));
+        assert_eq!(seen.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn apply_sort_reports_when_power_tools_recomputes() {
+        let store = connected_store().await;
+        let (base, _) = fake_pt_list(pt_list(), false, 200, json!({})).await;
+        let client = crate::powertools::PowerToolsClient::new().with_base(base);
+        let out = apply_pt_sort(&store, &client, "u1", &sort_request(&["505"], false, Some(5))).await.unwrap();
+        assert_eq!(out["applied"], false);
+        assert_eq!(out["after"], out["before"]);
+    }
+
+    #[tokio::test]
+    async fn apply_sort_refuses_count_drift_and_maps_write_errors() {
+        let store = connected_store().await;
+        let (base, seen) = fake_pt_list(pt_list(), true, 200, json!({})).await;
+        let client = crate::powertools::PowerToolsClient::new().with_base(base);
+        let error = apply_pt_sort(&store, &client, "u1", &sort_request(&["505"], false, Some(4))).await.unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("pt_sort_count_changed"));
+        assert!(!seen.lock().unwrap().iter().any(|(p, _)| p.ends_with("updateSorting")));
+
+        for (status, answer, code) in [
+            (400, json!({ "error": "no cardtrader token" }), "powertools_cardtrader_not_connected"),
+            (400, json!({ "error": "Invalid Picking List" }), "pt_picking_list_missing"),
+            (500, json!({ "error": "boom" }), "powertools_unavailable"),
+            (401, json!({}), "powertools_session_expired"),
+        ] {
+            let store = connected_store().await;
+            let (base, seen) = fake_pt_list(pt_list(), true, status, answer).await;
+            let client = crate::powertools::PowerToolsClient::new().with_base(base);
+            let error = apply_pt_sort(&store, &client, "u1", &sort_request(&["505"], false, Some(5))).await.unwrap_err();
+            assert_eq!(error.code.as_deref(), Some(code));
+            // Never retried: one write, no read-back.
+            let calls = seen.lock().unwrap().clone();
+            assert_eq!(calls.iter().filter(|(p, _)| p.ends_with("updateSorting")).count(), 1);
+            assert_eq!(calls.len(), 2);
+            if code == "powertools_session_expired" {
+                let doc = crate::powertools::read_power_tools_doc(&store, "u1").await.unwrap();
+                assert!(doc.data["sessionExpiredAt"].is_string());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_sort_needs_a_power_tools_session() {
+        let store = MemoryFirestore::new();
+        let client = crate::powertools::PowerToolsClient::new().with_base("http://127.0.0.1:9".into());
+        let error = apply_pt_sort(&store, &client, "u1", &sort_request(&[], true, None)).await.unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("powertools_not_connected"));
     }
 }

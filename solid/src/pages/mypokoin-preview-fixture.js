@@ -121,8 +121,8 @@ export function previewCollection() {
 // Already in the contract's picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then other games;
 // inside a game by box (natural), stacked lines before the bare box, unlocated lines last.
 const ZERO_LINES = [
-  { itemId: 7001, game: 'magic', name: 'Lightning Bolt', expansion: 'Magic 2010', collectorNumber: '146', rarity: 'Common', location: 'binder·1·1', slot: { box: 'binder', stack: 1, position: 1 }, unitCents: 180, condition: 'NM', language: 'EN', picked: 1, pt: 1 },
-  { itemId: 7002, game: 'magic', name: 'Fulmine', nameEn: 'Lightning Bolt', expansion: 'Fourth Edition', collectorNumber: '208', rarity: 'Common', location: 'binder·1·4', slot: { box: 'binder', stack: 1, position: 4 }, unitCents: 250, condition: 'SP', language: 'IT', allocation: 'members', alsoIn: ['binder·2·7'], pt: 2 },
+  { itemId: 7001, game: 'magic', name: 'Lightning Bolt', expansion: 'Magic 2010', expansionCode: 'M10', collectorNumber: '146', rarity: 'Common', location: 'binder·1·1', slot: { box: 'binder', stack: 1, position: 1 }, unitCents: 180, condition: 'NM', language: 'EN', picked: 1, pt: 1 },
+  { itemId: 7002, listing: 'L22', game: 'magic', name: 'Fulmine', nameEn: 'Lightning Bolt', expansion: 'Fourth Edition', expansionCode: '4ED', collectorNumber: '208', rarity: 'Common', location: 'binder·1·4', slot: { box: 'binder', stack: 1, position: 4 }, unitCents: 250, condition: 'SP', language: 'IT', allocation: 'members', alsoIn: ['binder·2·7', 'binder·3·1'], candidates: [{ listingId: 'L22', location: 'binder·1·4', quantityAvailable: 0 }, { listingId: 'L23', location: 'binder·2·7', quantityAvailable: 2 }, { listingId: 'L24', location: 'binder·3·1', quantityAvailable: 1 }], available: 0, comment: 'Corner ding, priced as SP.', pt: 2 },
   { itemId: 7003, game: 'pokemon', card: 0, rarity: 'Common', location: 'box2·1', slot: { box: 'box2', stack: 1, position: null }, unitCents: 120, condition: 'NM', language: 'EN', firstEdition: true, pt: 3 },
   { itemId: 7004, game: 'pokemon', card: 1, rarity: 'Holo Rare', location: 'box10·1', slot: { box: 'box10', stack: 1, position: null }, unitCents: 18500, condition: 'MP', language: 'EN', pt: 5, mismatch: true },
   { itemId: 7011, game: 'pokemon', card: 5, rarity: 'Illustration Rare', location: '', locationSource: 'powertools', sortLocation: 'FUOCOBOMBA 001 - 2', slot: { box: 'FUOCOBOMBA 001', stack: 2, position: null }, unitCents: 760, condition: 'NM', language: 'EN', pt: 4, mismatch: true },
@@ -138,6 +138,11 @@ const ZERO_LINES = [
   return {
     itemId: line.itemId,
     lineKey: line.listing ? `${line.itemId}@${line.listing}` : String(line.itemId),
+    ...(line.listing ? { listingId: line.listing } : {}),
+    ...(line.expansionCode ? { expansionCode: line.expansionCode } : {}),
+    ...(line.candidates ? { candidates: line.candidates } : {}),
+    ...(line.available != null ? { quantityAvailable: line.available } : {}),
+    ...(line.comment ? { comment: line.comment } : {}),
     quantity,
     itemQuantity: line.itemQuantity || quantity,
     game: line.game,
@@ -189,6 +194,11 @@ export function previewZero() {
   return {
     oneDayReady: false,
     fetchedAt: '2026-10-22T09:41:00.000Z',
+    sorting: {
+      fields: ['game.asc', 'location.asc', 'none', 'none'],
+      defaultFields: ['game.asc', 'location.asc', 'none', 'none'],
+      smartLocations: true,
+    },
     cardtrader: { username: 'preview-seller' },
     powerTools: {
       connected: true,
@@ -223,6 +233,46 @@ export function previewZero() {
       },
       items,
     }],
+  };
+}
+
+// Picked Zero copies (GET /api/cardtrader-zero-picked rows): they left the inventory.
+const ZERO_PICKED = [
+  { id: 41, card: 3, itemId: '6901', listingId: 'L61', kind: 'finalize', locationFrom: 'box3·2·4', unitCents: 1450, condition: 'NM', language: 'EN', pickedAt: '2026-10-21T17:42:00.000Z' },
+  { id: 40, card: 1, itemId: '6902', listingId: 'L62', kind: 'swap', locationFrom: 'box1·1', unitCents: 18500, condition: 'MP', language: 'EN', pickedAt: '2026-10-21T17:40:00.000Z' },
+  { id: 39, card: 4, itemId: '6903', listingId: 'L63', kind: 'finalize', locationFrom: 'jp-binder·4', unitCents: 900, condition: 'NM', language: 'JP', reverse: true, quantity: 2, pickedAt: '2026-10-21T17:31:00.000Z' },
+  { id: 38, card: 0, itemId: '6904', listingId: 'L64', kind: 'finalize', locationFrom: 'box2·1', unitCents: 120, condition: 'NM', language: 'EN', firstEdition: true, pickedAt: '2026-10-14T16:05:00.000Z', orderId: '90420998', orderCode: 'Z-0998' },
+];
+
+export function previewZeroPicked() {
+  return {
+    rows: ZERO_PICKED.map((row) => {
+      const printing = card(row.card);
+      return {
+        id: row.id,
+        orderId: row.orderId || '90421042',
+        orderCode: row.orderCode || 'Z-1042',
+        itemId: row.itemId,
+        lineKey: `${row.itemId}@${row.listingId}`,
+        listingId: row.listingId,
+        kind: row.kind,
+        quantity: row.quantity || 1,
+        locationFrom: row.locationFrom,
+        cardId: printing.cardId,
+        name: printing.cardName,
+        expansion: printing.expansion,
+        collectorNumber: printing.collectorNumber,
+        condition: row.condition,
+        language: row.language,
+        reverse: Boolean(row.reverse),
+        firstEdition: Boolean(row.firstEdition),
+        imageUrl: printing.imageUrl,
+        game: 'pokemon',
+        unitCents: row.unitCents,
+        currency: 'EUR',
+        pickedAt: row.pickedAt,
+      };
+    }),
   };
 }
 
