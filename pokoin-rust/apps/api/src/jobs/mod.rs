@@ -106,9 +106,10 @@ fn accounts_firestore() -> Result<pokoin_accounts::firestore::Firestore> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 async fn redis_connection() -> Result<redis::aio::ConnectionManager> {
-    let host = std::env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("REDIS_PORT").unwrap_or_else(|_| "6380".into());
-    let client = redis::Client::open(format!("redis://{host}:{port}"))?;
+    // The API's own Valkey (VALKEY_URL / REDIS_URL, else host and port), so a
+    // job's seller lock is the one the API's reconcile takes.
+    let url = pokoin_config::Config::from_env().valkey_url.unwrap_or_else(|| "redis://127.0.0.1:6380".into());
+    let client = redis::Client::open(url)?;
     tokio::time::timeout(Duration::from_secs(5), client.get_connection_manager())
         .await
         .context("Redis connect timed out")?

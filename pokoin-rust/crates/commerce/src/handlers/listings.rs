@@ -1196,6 +1196,8 @@ pub(crate) async fn update_listing(
     let leave = sync::group_leave(&before, &row, siblings);
     if leave.is_some() {
         sqlx::query(sync::LEAVE_GROUP_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
+        sqlx::query(sync::HAND_OVER_LINK_SQL).bind(uuid).bind(&source).bind(&claims.uid).execute(&mut *tx).await?;
+        sqlx::query(sync::DROP_LEFT_LINK_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
     }
     let destroy = inactive && !source.is_empty() && leave.is_none();
     let edit = leave.or_else(|| sync::cardtrader_edit(&before, &row));

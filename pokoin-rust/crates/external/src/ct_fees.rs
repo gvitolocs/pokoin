@@ -75,6 +75,8 @@ pub enum Channel {
 pub struct Plan {
     pub zero: bool,
     pub tier: Tier,
+    /// VAT on the commission for this seller ([`vat_of`]), basis points.
+    pub vat_bps: i128,
 }
 
 /// CardTrader's seller commission table ("Payments, fees and refunds",
@@ -122,14 +124,17 @@ pub const EU_COUNTRIES: [&str; 27] = [
     "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
 ];
 
-/// The tier of a seller: 1-Day Ready, else by country (unknown is EU, where
-/// Pokoin sells) and by when the subscription started (`before_march_2026`,
+/// The tier of a seller: 1-Day Ready, else by country (unknown is outside the
+/// EU, the higher rate) and by when the subscription started (`before_march_2026`,
 /// honoured until [`LEGACY_RATE_UNTIL`]; `today` is `YYYY-MM-DD`).
 pub fn tier_of(one_day_ready: bool, country: Option<&str>, before_march_2026: bool, today: &str) -> Tier {
     if one_day_ready {
         return Tier::OneDayReady;
     }
-    let eu = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty()).is_none_or(|code| EU_COUNTRIES.contains(&code.as_str()));
+    // Unknown country: outside the EU, the higher rate (7 / 10 % against at
+    // most 5.3 / 7.3 % + 27 % VAT inside it), so a seller is never priced
+    // above what they net.
+    let eu = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty()).is_some_and(|code| EU_COUNTRIES.contains(&code.as_str()));
     let legacy = before_march_2026 && today <= LEGACY_RATE_UNTIL;
     match (eu, legacy) {
         (true, true) => Tier::EuBeforeMarch2026,
@@ -139,13 +144,41 @@ pub fn tier_of(one_day_ready: bool, country: Option<&str>, before_march_2026: bo
     }
 }
 
+/// Standard VAT rates of the EU member states (2026), basis points.
+pub const EU_VAT_BPS: [(&str, i128); 27] = [
+    ("AT", 2000), ("BE", 2100), ("BG", 2000), ("CY", 1900), ("CZ", 2100), ("DE", 1900), ("DK", 2500),
+    ("EE", 2400), ("ES", 2100), ("FI", 2550), ("FR", 2000), ("GR", 2400), ("HR", 2500), ("HU", 2700),
+    ("IE", 2300), ("IT", 2200), ("LT", 2100), ("LU", 1700), ("LV", 2100), ("MT", 1800), ("NL", 2100),
+    ("PL", 2300), ("PT", 2300), ("RO", 2100), ("SE", 2500), ("SI", 2200), ("SK", 2300),
+];
+
+/// The VAT CardTrader (an Italian company) adds to a seller's commission: a
+/// private EU seller pays their own country's rate (PeppeV, Denmark: 25 %);
+/// a VAT-registered business pays none (reverse charge) unless it is Italian
+/// (22 %, a domestic sale); a seller outside the EU pays none. An unknown
+/// country pays none, with the outside-EU commission ([`tier_of`]): the
+/// costliest pair.
+pub fn vat_of(country: Option<&str>, business: bool) -> i128 {
+    let Some(code) = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty()) else {
+        return 0;
+    };
+    let Some((_, rate)) = EU_VAT_BPS.iter().find(|(eu, _)| *eu == code) else {
+        return 0;
+    };
+    match (business, code.as_str()) {
+        (true, "IT") => *rate,
+        (true, _) => 0,
+        (false, _) => *rate,
+    }
+}
+
 impl Channel {
     pub fn as_str(self) -> &'static str {
         match self {
             Channel::Direct => "direct",
             Channel::Zero => "zero",
             Channel::Plan(Plan { tier: Tier::OneDayReady, .. }) => "1dr",
-            Channel::Plan(Plan { zero, tier }) => match (tier, zero) {
+            Channel::Plan(Plan { zero, tier, .. }) => match (tier, zero) {
                 (Tier::EuBeforeMarch2026, false) => "eu-pre2026-direct",
                 (Tier::EuBeforeMarch2026, true) => "eu-pre2026-zero",
                 (Tier::Eu, false) => "eu-direct",
@@ -159,10 +192,24 @@ impl Channel {
         }
     }
 
-    /// [`as_str`] back (a listing's stored `ctChannel`); unknown is Zero.
+    /// The channel as a listing stores it (`ctChannel`): [`as_str`], and for
+    /// a seller's plan its VAT (`eu-pre2026-direct@2500`).
+    pub fn code(self) -> String {
+        match self {
+            Channel::Plan(plan) => format!("{}@{}", self.as_str(), plan.vat_bps),
+            _ => self.as_str().to_string(),
+        }
+    }
+
+    /// [`code`] back (a listing's stored `ctChannel`); unknown is Zero. A plan
+    /// without its VAT (written before 2026-10-22) is at Italy's 22 %.
     pub fn parse(code: &str) -> Channel {
-        let plan = |zero, tier| Channel::Plan(Plan { zero, tier });
-        match code.trim() {
+        let (name, vat) = match code.trim().split_once('@') {
+            Some((name, vat)) => (name, vat.trim().parse::<i128>().ok().filter(|v| (0..=MAX_VAT_BPS).contains(v)).unwrap_or(2_200)),
+            None => (code.trim(), 2_200),
+        };
+        let plan = |zero, tier| Channel::Plan(Plan { zero, tier, vat_bps: vat });
+        match name {
             "direct" => Channel::Direct,
             "1dr" => plan(false, Tier::OneDayReady),
             "eu-pre2026-direct" => plan(false, Tier::EuBeforeMarch2026),
@@ -288,6 +335,14 @@ impl FeeRule {
         }
     }
 
+    /// The VAT on the commission: the seller's own for a plan.
+    pub fn vat_for(&self, channel: Channel) -> i128 {
+        match channel {
+            Channel::Plan(plan) => plan.vat_bps,
+            _ => self.vat_bps,
+        }
+    }
+
     pub fn pct(&self, channel: Channel) -> f64 {
         self.rate_bps(channel) as f64 / 100.0
     }
@@ -300,7 +355,7 @@ impl FeeRule {
             return None;
         }
         let ask = ask_pkn.round() as i128;
-        let net = net_scaled(ask, self.rate_bps(channel), self.vat_bps, self.min_fee_pkn);
+        let net = net_scaled(ask, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn);
         (net > 0).then(|| (net as f64 / SCALE as f64 * 100.0).round() / 100.0)
     }
 
@@ -310,7 +365,7 @@ impl FeeRule {
             return None;
         }
         let ask = (ask_cents * PKN_PER_CENT as f64).round() as i128;
-        let net = net_scaled(ask, self.rate_bps(channel), self.vat_bps, self.min_fee_pkn);
+        let net = net_scaled(ask, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn);
         (net > 0).then(|| net as f64 / SCALE as f64 / PKN_PER_CENT as f64)
     }
 
@@ -320,7 +375,7 @@ impl FeeRule {
         if !(price_pkn.is_finite() && price_pkn >= 1.0 && price_pkn <= MAX_PRICE_PKN as f64) {
             return None;
         }
-        Some(gross_cents(price_pkn.round() as i128, self.rate_bps(channel), self.vat_bps, self.min_fee_pkn))
+        Some(gross_cents(price_pkn.round() as i128, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn))
     }
 
     /// [`gross_cents`] in euro, for a CardTrader write.
@@ -335,8 +390,9 @@ impl FeeRule {
         let cents = self.gross_cents(price_pkn, channel)?;
         let ask = cents * PKN_PER_CENT;
         let rate = self.rate_bps(channel);
-        let fee = fee_bps(ask, rate, self.min_fee_pkn) * (BPS + self.vat_bps);
-        let net = net_scaled(ask, rate, self.vat_bps, self.min_fee_pkn);
+        let vat = self.vat_for(channel);
+        let fee = fee_bps(ask, rate, self.min_fee_pkn) * (BPS + vat);
+        let net = net_scaled(ask, rate, vat, self.min_fee_pkn);
         let to_cents = |scaled: i128| (scaled as f64 / SCALE as f64 / PKN_PER_CENT as f64 * 10_000.0).round() / 10_000.0;
         Some(serde_json::json!({
             "pricePkn": price_pkn.round(),
@@ -353,7 +409,7 @@ impl FeeRule {
     pub fn describe(&self, channel: Channel) -> serde_json::Value {
         serde_json::json!({
             "pct": self.pct(channel),
-            "vatPct": self.vat_bps as f64 / 100.0,
+            "vatPct": self.vat_for(channel) as f64 / 100.0,
             "minCents": self.min_fee_pkn as f64 / PKN_PER_CENT as f64,
             "channel": channel.as_str(),
         })
@@ -386,14 +442,15 @@ fn flag(value: Option<&serde_json::Value>) -> Option<bool> {
 /// [`channel_from`] with only the stored flag (no database at hand).
 pub fn seller_channel(integration_data: &serde_json::Value) -> Channel {
     let zero = channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero;
-    plan_for(integration_data, zero, None)
+    plan_for(integration_data, zero, None, None)
 }
 
 /// The seller's own offers in the market book of the last week, by their
 /// CardTrader user id: whether CardTrader lets them sell through Zero.
 pub const SELLER_HUB_SQL: &str = "
     select bool_or(raw_metadata->'user'->>'can_sell_via_hub' = 'true') as hub, count(*)::int as offers,
-           max(coalesce(nullif(raw_metadata->'user'->>'country_code', ''), seller_country)) as country
+           max(coalesce(nullif(raw_metadata->'user'->>'country_code', ''), seller_country)) as country,
+           bool_or(raw_metadata->'user'->>'user_type' = 'pro') as pro
     from public.cardtrader_market_listing_snapshots
     where seller_account_id = $1 and last_seen_at >= now() - interval '7 days'";
 
@@ -422,9 +479,25 @@ fn today() -> String {
     crate::time_util::utc_day_key_from_ms(crate::time_util::now_ms())
 }
 
-fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&str>) -> Channel {
+/// A business seller (VAT-registered): the integration's
+/// `metadata.vatRegistered` when set, else CardTrader's `pro` account type.
+fn business(integration_data: &serde_json::Value, pro: Option<bool>) -> bool {
+    flag(integration_data.pointer("/metadata/vatRegistered")).or(pro).unwrap_or(false)
+}
+
+fn plan_for(integration_data: &serde_json::Value, zero: bool, country: Option<&str>, pro: Option<bool>) -> Channel {
     let one_day_ready = integration_data.pointer("/metadata/oneDayReady") == Some(&serde_json::Value::Bool(true));
-    Channel::Plan(Plan { zero, tier: tier_of(one_day_ready, country, before_march_2026(integration_data), &today()) })
+    let stored = integration_data
+        .pointer("/metadata/country")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|code| !code.is_empty());
+    let country = country.or(stored);
+    Channel::Plan(Plan {
+        zero,
+        tier: tier_of(one_day_ready, country, before_march_2026(integration_data), &today()),
+        vat_bps: vat_of(country, business(integration_data, pro)),
+    })
 }
 
 fn ct_user_id(integration_data: &serde_json::Value) -> String {
@@ -441,7 +514,7 @@ fn ct_user_id(integration_data: &serde_json::Value) -> String {
 pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &serde_json::Value) -> Channel {
     match db.read("pokemon").await {
         Ok(pool) => resolve_seller_channel_pool(&pool, integration_data).await,
-        Err(_) => plan_for(integration_data, channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero, None),
+        Err(_) => plan_for(integration_data, channel_from(flag(integration_data.pointer("/metadata/user/can_sell_via_hub")), None) == Channel::Zero, None, None),
     }
 }
 
@@ -450,19 +523,19 @@ pub async fn resolve_seller_channel(db: &crate::db::DbPools, integration_data: &
 pub async fn resolve_seller_channel_pool(pool: &sqlx::PgPool, integration_data: &serde_json::Value) -> Channel {
     let stored = flag(integration_data.pointer("/metadata/user/can_sell_via_hub"));
     let id = ct_user_id(integration_data);
-    let (book, country) = if id.is_empty() {
-        (None, None)
+    let (book, country, pro) = if id.is_empty() {
+        (None, None, None)
     } else {
-        match sqlx::query_as::<_, (Option<bool>, i32, Option<String>)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
-            Ok((hub, offers, country)) => ((offers > 0).then_some(hub == Some(true)), country),
+        match sqlx::query_as::<_, (Option<bool>, i32, Option<String>, Option<bool>)>(SELLER_HUB_SQL).bind(&id).fetch_one(pool).await {
+            Ok((hub, offers, country, pro)) => ((offers > 0).then_some(hub == Some(true)), country, if offers > 0 { pro } else { None }),
             Err(error) => {
                 tracing::warn!(%error, "seller channel: market book unavailable");
-                (None, None)
+                (None, None, None)
             }
         }
     };
     let zero = channel_from(stored, book) == Channel::Zero;
-    plan_for(integration_data, zero, country.as_deref())
+    plan_for(integration_data, zero, country.as_deref(), pro)
 }
 
 /// A connected seller's channel by uid, cached for an hour per process (the
@@ -590,7 +663,7 @@ mod tests {
 
     #[test]
     fn the_full_cardtrader_table_by_country_subscription_and_one_day_ready() {
-        let at = |tier, zero| R.rate_bps(Channel::Plan(Plan { zero, tier }));
+        let at = |tier, zero| R.rate_bps(Channel::Plan(Plan { zero, tier, vat_bps: 2_200 }));
         assert_eq!((at(Tier::EuBeforeMarch2026, false), at(Tier::EuBeforeMarch2026, true)), (500, 700));
         assert_eq!((at(Tier::Eu, false), at(Tier::Eu, true)), (530, 730));
         assert_eq!((at(Tier::ExtraEuBeforeMarch2026, false), at(Tier::ExtraEuBeforeMarch2026, true)), (600, 800));
@@ -601,7 +674,7 @@ mod tests {
         assert_eq!(tier_of(false, Some("IT"), false, "2026-10-21"), Tier::Eu);
         assert_eq!(tier_of(false, Some("US"), true, "2026-10-21"), Tier::ExtraEuBeforeMarch2026);
         assert_eq!(tier_of(false, Some("GB"), false, "2026-10-21"), Tier::ExtraEu);
-        assert_eq!(tier_of(false, None, false, "2026-10-21"), Tier::Eu, "unknown country: EU");
+        assert_eq!(tier_of(false, None, false, "2026-10-21"), Tier::ExtraEu, "unknown country: the higher rate");
         assert_eq!(tier_of(false, Some("IT"), true, "2027-01-01"), Tier::Eu, "the old rate ends 2026-12-31");
         assert_eq!(tier_of(true, Some("IT"), true, "2026-10-21"), Tier::OneDayReady);
         // Unknown subscription date: the current (higher) rate.
@@ -609,11 +682,34 @@ mod tests {
         assert!(before_march_2026(&serde_json::json!({"metadata": {"feeEra": "before-2026-03"}})));
         assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": 595699}}})), "PeppeV confirmed");
         assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": "180405"}}})), "redshakkio confirmed");
-        for code in ["direct", "zero", "1dr", "eu-pre2026-direct", "eu-zero", "extra-eu-pre2026-zero", "extra-eu-direct"] {
-            assert_eq!(Channel::parse(code).as_str(), code);
+        for code in ["direct", "zero", "1dr@0", "eu-pre2026-direct@2500", "eu-zero@2200", "extra-eu-pre2026-zero@0", "extra-eu-direct@0"] {
+            assert_eq!(Channel::parse(code).code(), code);
         }
+        assert_eq!(Channel::parse("eu-pre2026-direct"), Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_200 }), "stored before the VAT");
         assert_eq!(Channel::parse("?"), Channel::Zero);
         assert!(SELLER_HUB_SQL.contains("country_code"));
+    }
+
+    #[test]
+    fn vat_follows_the_sellers_country_and_status() {
+        assert_eq!(vat_of(Some("DK"), false), 2_500, "PeppeV / Flareon99, private, Denmark");
+        assert_eq!(vat_of(Some("IT"), true), 2_200, "redshakkio, pro, Italy: a domestic sale");
+        assert_eq!(vat_of(Some("DE"), true), 0, "an EU business outside Italy: reverse charge");
+        assert_eq!(vat_of(Some("hu"), false), 2_700);
+        assert_eq!(vat_of(Some("US"), false), 0);
+        assert_eq!(vat_of(None, false), 0);
+        assert!(SELLER_HUB_SQL.contains("user_type"));
+        // Spiderling at PeppeV's own rate: €0.13 nets 13 − 1 × 1.25 = 11.75 c.
+        let peppev = Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_500 });
+        assert_eq!(R.net_cents(13.0, peppev), Some(11.75));
+        assert_eq!(R.breakdown(24.0, peppev).unwrap()["askCents"], 13);
+        assert_eq!(R.describe(peppev)["vatPct"], 25.0);
+        // Unknown country: 7 % without VAT is dearer than any EU pair.
+        let unknown = Channel::Plan(Plan { zero: false, tier: tier_of(false, None, false, "2026-10-22"), vat_bps: vat_of(None, false) });
+        for (code, vat) in EU_VAT_BPS {
+            let eu = Channel::Plan(Plan { zero: false, tier: tier_of(false, Some(code), false, "2026-10-22"), vat_bps: vat });
+            assert!(R.net_cents(1000.0, unknown).unwrap() <= R.net_cents(1000.0, eu).unwrap(), "{code}");
+        }
     }
 
     #[test]
@@ -622,7 +718,7 @@ mod tests {
         // is the commission at every EU rate, so the tier changes nothing.
         for tier in [Tier::EuBeforeMarch2026, Tier::Eu] {
             for zero in [false, true] {
-                let channel = Channel::Plan(Plan { zero, tier });
+                let channel = Channel::Plan(Plan { zero, tier, vat_bps: 2_200 });
                 assert_eq!(R.net_cents(13.0, channel), Some(11.78));
                 let row = R.breakdown(24.0, channel).unwrap();
                 assert_eq!((row["askCents"].as_i64(), row["buyerPaysCents"].as_i64()), (Some(13), Some(22)));
@@ -630,8 +726,8 @@ mod tests {
             }
         }
         // Dearer cards do feel the tier: a €10 ask nets €9.3534 at 5.3 % direct, €9.39 at 5 %.
-        let current = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::Eu })).unwrap();
-        let before = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026 })).unwrap();
+        let current = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::Eu, vat_bps: 2_200 })).unwrap();
+        let before = R.net_cents(1000.0, Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_200 })).unwrap();
         assert!((current - 935.34).abs() < 1e-6 && (before - 939.0).abs() < 1e-6);
     }
 

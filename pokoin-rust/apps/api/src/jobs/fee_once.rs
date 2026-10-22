@@ -8,6 +8,10 @@
 //! such product is set to the smallest whole-cent ask that nets the Pokoin
 //! price (`ct_fees::FeeRule::gross_cents`, `push::ct_ask_eur`).
 //!
+//! Only products Pokoin pushed (a `push` link row): an imported or matched
+//! product is the seller's own, and its ask is what Pokoin's price was netted
+//! from (`cardtrader-net-prices`), never the other way round.
+//!
 //! Never lowers an ask: a product whose ask already nets the Pokoin price
 //! (every CardTrader import, priced from its own ask) is left alone, so a
 //! rerun finds nothing to do. Only for sellers whose inventory link lets Pokoin
@@ -34,6 +38,12 @@ const LINKED_SQL: &str = r#"
     and listing.status = 'active'
     and listing.quantity_available > 0
     and listing.price_pkn > 0
+    and exists (
+      select 1 from public.marketplace_cardtrader_product_links as link
+      where link.seller_uid = listing.seller_uid
+        and 'ct:' || link.ct_product_id = listing.source_listing_id
+        and link.origin in ('push')
+    )
   order by listing.price_pkn desc, listing.id
 "#;
 
@@ -45,10 +55,10 @@ pub fn raise_to(current_cents: i128, price_pkn: f64, rule: ct_fees::FeeRule, cha
         return None;
     }
     let rate = rule.rate_bps(channel);
-    if current_cents > 0 && ct_fees::nets(current_cents, price, rate, rule.vat_bps, rule.min_fee_pkn) {
+    if current_cents > 0 && ct_fees::nets(current_cents, price, rate, rule.vat_for(channel), rule.min_fee_pkn) {
         return None;
     }
-    let target = ct_fees::gross_cents(price, rate, rule.vat_bps, rule.min_fee_pkn);
+    let target = ct_fees::gross_cents(price, rate, rule.vat_for(channel), rule.min_fee_pkn);
     (target > current_cents).then_some(target)
 }
 
@@ -176,6 +186,12 @@ pub(super) async fn run(options: &Options) -> Result<()> {
 mod tests {
     use super::*;
     use ct_fees::Channel::{Direct, Zero};
+
+    #[test]
+    fn only_pushed_products_are_raised() {
+        assert!(LINKED_SQL.contains("link.origin in ('push')"));
+        assert!(!LINKED_SQL.contains("'import'") && !LINKED_SQL.contains("'match'"));
+    }
 
     #[test]
     fn a_double_fee_ask_is_raised_and_a_netting_one_is_left_alone() {

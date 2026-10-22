@@ -21,16 +21,8 @@
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::cardtrader::sync_core::{facet_key, facet_key_of_row, NormalizedProduct};
+use crate::cardtrader::sync_core::{facet_key_of_row, NormalizedProduct};
 use crate::error::clean_text_value;
-
-fn truthy(row: &Value, keys: &[&str]) -> bool {
-    keys.iter().any(|key| match row.get(*key) {
-        Some(Value::Bool(flag)) => *flag,
-        Some(Value::String(text)) => text == "t" || text == "true",
-        _ => false,
-    })
-}
 
 fn number(row: &Value, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| match row.get(*key) {
@@ -40,8 +32,8 @@ fn number(row: &Value, keys: &[&str]) -> Option<f64> {
     })
 }
 
-/// Whole PKN: CardTrader prices are whole cents (2 PKN) and Pokoin prices
-/// are whole PKN, so two prices that print the same group together.
+/// The price to the hundredth of a PKN (a Pokoin price is whole PKN, so
+/// this only keeps two odd values apart).
 fn price_key(price_pkn: Option<f64>) -> String {
     match price_pkn.filter(|p| p.is_finite() && *p > 0.0) {
         Some(price) => format!("{}", (price * 100.0).round() as i64),
@@ -50,28 +42,33 @@ fn price_key(price_pkn: Option<f64>) -> String {
 }
 
 /// The group of a Pokoin listing row (snake or camel case): game, card,
-/// condition, language, every finish flag and the price. Not the location.
+/// condition, language, the finish its product gets (`push::push_foil`),
+/// first edition, signed, altered and the price. Not the location. A graded
+/// slab is never grouped: its key is its own listing.
 pub fn listing_group_key(row: &Value) -> String {
     let game = crate::cardtrader::push::listing_game(row);
-    let foil = truthy(row, &["foil", "holo"]);
+    if crate::cardtrader::push::is_graded(row) {
+        return format!("{game}|graded|{}", clean_text_value(row.get("id").unwrap_or(&Value::Null), 80));
+    }
     let price = number(row, &["price_pkn", "pricePkn"]);
-    format!("{game}|{}|{}|{}", facet_key_of_row(row), u8::from(foil), price_key(price))
+    format!("{game}|{}|{}", facet_key_of_row(row), price_key(price))
 }
 
-/// The group of a CardTrader product: blueprint, the same characteristics,
-/// and its ask.
+/// The group of a CardTrader product for the consolidation: its blueprint,
+/// CardTrader's own properties as sent (`properties_key`: Mint and Near Mint
+/// stay apart, though Pokoin calls both NM), graded, its description and its
+/// ask. A graded product is never folded into another.
 pub fn product_group_key(product: &NormalizedProduct) -> String {
-    let facets = facet_key(
-        &product.blueprint_id,
-        product.condition,
-        product.language,
-        product.reverse,
-        product.first_edition,
-        product.signed,
-        product.altered,
-        product.graded,
-    );
-    format!("{facets}|{}", price_key(product.price_pkn))
+    if product.graded {
+        return format!("graded|{}", product.id);
+    }
+    format!(
+        "{}|{}|{}|{}",
+        product.blueprint_id,
+        product.properties_key,
+        product.description.trim(),
+        price_key(product.price_pkn)
+    )
 }
 
 /// One member listing of a product: id, copies, and the primary flag.
@@ -146,15 +143,6 @@ pub fn distribute(members: &[Member], target: i64) -> Vec<(String, i64)> {
     changed
 }
 
-/// Members of a product, read for an update (`$1` seller, `$2` source).
-pub const GROUP_MEMBERS_SQL: &str = r#"
-      select id::text as id, quantity_available, status, price_pkn::float8 as price_pkn,
-             (extract(epoch from created_at) * 1000)::bigint as created_ms
-      from public.marketplace_user_listings
-      where seller_uid = $1 and source_listing_id = $2
-        and status in ('active', 'paused')
-"#;
-
 /// Take `$2` copies from the group `$4` of seller `$3` for one CardTrader
 /// order item, primary (`$1`) first then the oldest: one statement, every
 /// member row locked, nothing written unless the group holds `$2` copies.
@@ -217,7 +205,7 @@ pub fn settle_after_link(sent: &[Sent], linked: &[Value]) -> (i64, Vec<String>) 
         let status = clean_text_value(row.get("status").unwrap_or(&Value::Null), 20);
         let quantity = number(row, &["quantity_available"]).unwrap_or(0.0) as i64;
         let price = number(row, &["price_pkn"]).unwrap_or(0.0);
-        if crate::cardtrader::push::off_sale(&status) || quantity <= 0 || (price - member.price_pkn).abs() >= 0.5 {
+        if crate::cardtrader::push::off_sale(&status) || quantity <= 0 || (price - member.price_pkn).abs() >= 0.005 {
             delta -= member.quantity;
             detach.push(member.id.clone());
         } else {
@@ -359,6 +347,40 @@ mod tests {
     }
 
     #[test]
+    fn foil_by_foil_state_and_graded_slabs_never_merge() {
+        // Card Rails stores a Riftbound holo as foil_state='holo', reverse=false
+        // (seller_api listing_body; stock_csv likewise): it must not join the
+        // standard copies, or the product would carry the primary's finish.
+        let standard = json!({"card_id": "801312", "marketplace_game": "riftbound", "condition": "NM", "language": "EN",
+                              "price_pkn": 26, "foil_state": "standard", "reverse": false});
+        for finish in ["holo", "foil", "reverse"] {
+            let mut foil = standard.clone();
+            foil["foil_state"] = json!(finish);
+            assert_ne!(listing_group_key(&standard), listing_group_key(&foil), "{finish}");
+            let mut twin = foil.clone();
+            twin["location"] = json!("box-2");
+            assert_eq!(listing_group_key(&foil), listing_group_key(&twin));
+        }
+        // Pokémon: a holo is its own blueprint; only reverse is a product finish.
+        let pokemon = json!({"card_id": "1001", "condition": "NM", "language": "EN", "price_pkn": 40, "foil_state": "standard"});
+        let mut reverse = pokemon.clone();
+        reverse["foil_state"] = json!("reverse");
+        assert_ne!(listing_group_key(&pokemon), listing_group_key(&reverse));
+        // Two slabs of the same card and grade are two products.
+        let mut slab = pokemon.clone();
+        slab["id"] = json!("a");
+        slab["grading_company"] = json!("PSA");
+        slab["grade"] = json!("10");
+        let mut other = slab.clone();
+        other["id"] = json!("b");
+        assert_ne!(listing_group_key(&slab), listing_group_key(&other));
+        let mut flagged = pokemon.clone();
+        flagged["graded"] = json!(true);
+        flagged["id"] = json!("c");
+        assert!(listing_group_key(&flagged).contains("|graded|c"));
+    }
+
+    #[test]
     fn a_sale_takes_the_primary_then_the_oldest_and_never_more_than_the_group_holds() {
         let group = [m("c", 1, false, 30), m("a", 1, true, 50), m("b", 1, false, 10)];
         assert_eq!(allocate(&group, 2), Some(vec![("a".into(), 1), ("b".into(), 1)]));
@@ -462,6 +484,31 @@ mod tests {
         assert_eq!(merge.total, 4);
         assert_eq!(merge.pokoin_total, 4);
         assert_eq!(merge.relink, vec!["l1".to_string(), "l2".to_string()]);
+    }
+
+    #[test]
+    fn cardtraders_own_properties_and_description_keep_products_apart() {
+        let raw = |id: i64, condition: &str, description: &str, graded: bool| {
+            crate::cardtrader::sync_core::normalize_product(&json!({
+                "id": id, "blueprint_id": 400648, "quantity": 1, "price_cents": 13, "user_data_field": format!("pokoin:{id}"),
+                "description": description, "graded": graded,
+                "properties_hash": {"condition": condition, "riftbound_language": "en"},
+            }))
+        };
+        // Pokoin calls Mint and Near Mint both NM; on CardTrader they differ.
+        let mint = raw(1, "Mint", "", false);
+        let near_mint = raw(2, "Near Mint", "", false);
+        assert_eq!(mint.condition, near_mint.condition);
+        assert_ne!(product_group_key(&mint), product_group_key(&near_mint));
+        assert_eq!(product_group_key(&near_mint), product_group_key(&raw(3, "Near Mint", "", false)));
+        // A description is something the seller wrote: kept apart.
+        assert_ne!(product_group_key(&near_mint), product_group_key(&raw(4, "Near Mint", "corner ding", false)));
+        // Graded slabs are never folded.
+        assert_ne!(product_group_key(&raw(5, "Near Mint", "", true)), product_group_key(&raw(6, "Near Mint", "", true)));
+        // Property order does not matter.
+        let a = crate::cardtrader::sync_core::normalize_product(&json!({"id": 7, "properties_hash": {"a": 1, "b": 2}}));
+        let b = crate::cardtrader::sync_core::normalize_product(&json!({"id": 8, "properties_hash": {"b": 2, "a": 1}}));
+        assert_eq!(a.properties_key, b.properties_key);
     }
 
     #[test]

@@ -53,8 +53,14 @@ A connected seller's own sales use their own rate from CardTrader's full
 table (`ct_fees::Tier`, `Channel::Plan`): EU direct / Zero 5.0 / 7.0 % for
 subscriptions before March 2026 (kept by active sellers until 2026-12-31),
 5.3 / 7.3 % from March 2026; outside the EU 6 / 8 % (7 / 10 %); 1-Day Ready
-16.5 %. The country and Zero status come from the seller's own offers in the
-market book (`country_code`, `can_sell_via_hub`); the subscription date
+16.5 %. The country, Zero status and account type come from the seller's own offers
+in the market book (`country_code`, `can_sell_via_hub`, `user_type`). VAT on
+the commission is per seller (`ct_fees::vat_of`): a private EU seller pays
+their own country's rate (PeppeV, Denmark: 25 %); a VAT-registered business
+(`pro`, or `metadata.vatRegistered`) pays none outside Italy (reverse charge)
+and 22 % in Italy (redshakkio); outside the EU, none. An unknown country is
+priced as outside the EU at the current rate, the costliest pair. The
+subscription date
 comes from the integration's `metadata.feeEra` (`before-2026-03`), else
 `CARDTRADER_FEE_ERA`, else the current, higher rate. CardTrader shows no
 account date anywhere Pokoin reads, so this is set when the seller confirms

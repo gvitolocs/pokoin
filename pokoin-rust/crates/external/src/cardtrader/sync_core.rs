@@ -80,6 +80,7 @@ pub fn empty_summary() -> Value {
         "supportedInventory": 0,
         "pokemonInventory": 0,
         "alreadyLinked": 0,
+        "consolidating": 0,
         "matchedExisting": 0,
         "imported": 0,
         "updated": 0,
@@ -217,6 +218,10 @@ pub struct NormalizedProduct {
     pub collector_number: String,
     /// expansion.name_en / expansion_name (Power Tools set hint).
     pub expansion_name: String,
+    /// CardTrader's own properties as sent, keys sorted (`{"condition":
+    /// "Mint", …}`): two products with the same value are the same thing on
+    /// CardTrader, whatever Pokoin maps them to (Mint and Near Mint are both NM).
+    pub properties_key: String,
 }
 
 pub fn normalize_product(product: &Value) -> NormalizedProduct {
@@ -296,6 +301,10 @@ pub fn normalize_product(product: &Value) -> NormalizedProduct {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        properties_key: props
+            .as_object()
+            .map(|map| serde_json::to_string(&map.iter().collect::<std::collections::BTreeMap<_, _>>()).unwrap_or_default())
+            .unwrap_or_default(),
     }
 }
 
@@ -648,7 +657,8 @@ pub fn facet_key_of_row(row: &Value) -> String {
         &clean_text_value(row.get("card_id").or_else(|| row.get("cardId")).unwrap_or(&Value::Null), 80),
         &clean_text_value(row.get("condition").unwrap_or(&Value::Null), 20),
         &clean_text_value(row.get("language").unwrap_or(&Value::Null), 10),
-        row_bool(row, "reverse"),
+        // The finish its CardTrader product carries (foil_state included).
+        crate::cardtrader::push::push_foil(row) || row_bool(row, "reverse"),
         row_bool(row, "first_edition") || row_bool(row, "firstEdition"),
         row_bool(row, "signed"),
         row_bool(row, "altered"),
@@ -735,6 +745,20 @@ pub fn plan_inventory_reconcile(
     export_complete: bool,
     export_ok: bool,
 ) -> ReconcilePlan {
+    plan_inventory_reconcile_with(export, listings, link_missing, &HashSet::new(), export_complete, export_ok)
+}
+
+/// [`plan_inventory_reconcile`], leaving the quantity of the products in
+/// `consolidating` alone (an open `job cardtrader-group-products` group:
+/// its members already hold copies CardTrader gets back only at the end).
+pub fn plan_inventory_reconcile_with(
+    export: &ProductsExport,
+    listings: &[ListingRow],
+    link_missing: &HashMap<String, bool>,
+    consolidating: &HashSet<String>,
+    export_complete: bool,
+    export_ok: bool,
+) -> ReconcilePlan {
     let (allow_destructive, gate_reason) = destructive_reconcile_gate(export_complete, export_ok, true);
     let mut summary = empty_summary();
     summary["inventory"] = json!(export.products.len());
@@ -788,7 +812,10 @@ pub fn plan_inventory_reconcile(
             Attachment::AlreadyLinked { listing } => {
                 summary["alreadyLinked"].incr(1);
                 let group = index.members.get(&source_id).filter(|rows| rows.len() > 1);
-                if let Some(rows) = group {
+                if consolidating.contains(&product.id) {
+                    summary["consolidating"].incr(1);
+                    actions.push(PlannedAction::Noop { product_id: product.id.clone(), listing_id: listing.id.clone() });
+                } else if let Some(rows) = group {
                     let primary = parse_pokoin_listing_id(&product.user_data_field);
                     let changes = crate::cardtrader::group::distribute(&members_of(rows, &primary), product.quantity);
                     if changes.is_empty() {
@@ -1195,6 +1222,30 @@ mod tests {
 
     fn plan_of(products: &[Value], listings: &[Value], complete: bool) -> ReconcilePlan {
         plan_inventory_reconcile(&ProductsExport::from_rows(products), &rows(listings), &HashMap::new(), complete, true)
+    }
+
+    #[test]
+    fn a_group_is_spread_but_a_product_being_consolidated_is_left_alone() {
+        let a = "00000000-0000-0000-0000-00000000000a";
+        let products = [json!({"id": 9, "blueprint_id": 100, "game_id": 5, "quantity": 1, "user_data_field": format!("pokoin:{a}"),
+                               "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"}})];
+        let listings = [
+            json!({"id": a, "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T09:00:00Z"}),
+            json!({"id": "b", "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T10:00:00Z"}),
+        ];
+        let export = ProductsExport::from_rows(&products);
+        // One copy sold on CardTrader before its webhook: the newest member gives it.
+        let plan = plan_inventory_reconcile(&export, &rows(&listings), &HashMap::new(), true, true);
+        assert!(
+            matches!(&plan.actions[..], [PlannedAction::UpdateGroupQty { primary_id, changes, .. }] if primary_id == a && changes == &vec![("b".to_string(), 0)]),
+            "{:?}", plan.actions
+        );
+        // While `job cardtrader-group-products` folds duplicates into it, the
+        // members hold copies CardTrader only gets at the end: hands off.
+        let consolidating: HashSet<String> = ["9".to_string()].into();
+        let held = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), &consolidating, true, true);
+        assert!(matches!(&held.actions[..], [PlannedAction::Noop { .. }]), "{:?}", held.actions);
+        assert_eq!(held.summary["consolidating"], 1);
     }
 
     fn removed_ids(plan: &ReconcilePlan) -> Vec<String> {

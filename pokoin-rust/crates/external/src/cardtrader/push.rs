@@ -178,6 +178,33 @@ pub fn listing_game(listing: &Value) -> String {
     crate::db::normalize_game(if raw.is_empty() { "pokemon" } else { &raw })
 }
 
+/// The finish a listing's CardTrader product gets: `pokemon_reverse` for a
+/// Pokémon listing ([`product_body`]: `foil_state = 'reverse'` or `reverse`;
+/// a holo is its own blueprint), the game's `*_foil` for the others
+/// ([`other_game_foil`]). The group key and the twin facet read this, so two
+/// listings group only when their products would carry the same finish.
+pub fn push_foil(listing: &Value) -> bool {
+    if listing_game(listing) == "pokemon" {
+        first(listing, &["foilState", "foil_state"], 40).eq_ignore_ascii_case("reverse") || listing["reverse"] == true
+    } else {
+        other_game_foil(listing)
+    }
+}
+
+/// A graded slab (any grading field set): never grouped with another copy,
+/// each slab is its own CardTrader product.
+pub fn is_graded(listing: &Value) -> bool {
+    listing["graded"] == true
+        || listing["graded"] == "t"
+        || ["grading_company", "gradingCompany", "grade", "certification_id", "certificationId"]
+            .iter()
+            .any(|key| match &listing[*key] {
+                Value::String(text) => !text.trim().is_empty(),
+                Value::Number(_) => true,
+                _ => false,
+            })
+}
+
 /// A Pokoin listing's foil on a game other than Pokémon: imports store it as
 /// `reverse` (`foil_state = 'reverse'`), Card Rails as `foil`/`holo`.
 fn other_game_foil(listing: &Value) -> bool {
@@ -341,7 +368,7 @@ pub async fn push_product_outcome_on(
         };
         let mut listing = listing.clone();
         if listing.is_object() && listing.get("ctChannel").is_none() {
-            listing["ctChannel"] = json!(channel.as_str());
+            listing["ctChannel"] = json!(channel.code());
         }
         let token = integration::decrypt_integration_token(fs, uid).await?;
         Ok((token, product_body(&listing)?))
@@ -430,6 +457,17 @@ pub fn off_sale(status: &str) -> bool {
 /// Upsert the push link row (`marketplace_cardtrader_product_links`).
 pub async fn upsert_push_link(writer: &PgPool, uid: &str, listing: &Value, pushed: &Value, id: uuid::Uuid, seller: &str, qty: i32) -> ApiResult<()> {
     let bp = blueprint(&first(listing, &["cardId", "card_id"], 80)).map(|n| n.to_string()).unwrap_or_default();
+    let freed = sqlx::query(crate::cardtrader::sync::FREE_STALE_LINK_SQL)
+        .bind(if uid.is_empty() { seller } else { uid })
+        .bind(field(pushed, "productId", 80))
+        .bind(id)
+        .execute(writer)
+        .await;
+    if let Err(error) = freed {
+        if !is_missing_table(&error) {
+            return Err(error.into());
+        }
+    }
     let linked = sqlx::query(
         "insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, blueprint_id, last_ct_quantity, last_seen_at, origin, missing_from_ct, updated_at) \
          values ($1, $2, $3::uuid, $4, $5, now(), 'push', false, now()) \

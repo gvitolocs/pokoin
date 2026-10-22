@@ -16,7 +16,7 @@
 //! Cardmarket update works from.
 use super::Options;
 use anyhow::{bail, Context, Result};
-use pokoin_external::cardtrader::integration;
+use pokoin_external::cardtrader::{integration, link};
 use pokoin_external::price_check::{condition_key, pick_matched_ct, pro_floors};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -73,6 +73,11 @@ impl Repricing {
 /// The new price of one listing row against its blueprint's pro-floor groups:
 /// whole PKN (prices are shown as digits only), at least 1.
 pub fn plan_row(row: &Value, groups: &[Value]) -> Repricing {
+    plan_row_for(row, groups, pokoin_external::ct_fees::Channel::Direct)
+}
+
+/// [`plan_row`] netting the floor at the seller's own CardTrader rate.
+pub fn plan_row_for(row: &Value, groups: &[Value], channel: pokoin_external::ct_fees::Channel) -> Repricing {
     let condition = condition_key(row["condition"].as_str().unwrap_or("NM"));
     let language = row["language"].as_str().unwrap_or("").trim().to_uppercase();
     let (_, matched) = pick_matched_ct(
@@ -87,7 +92,7 @@ pub fn plan_row(row: &Value, groups: &[Value]) -> Repricing {
         id: row["id"].as_str().unwrap_or("").to_string(),
         old_pkn: row["price_pkn"].as_f64().unwrap_or(0.0),
         new_pkn: matched
-            .and_then(|pkn| rule.net_pkn(pkn, pokoin_external::ct_fees::Channel::Direct))
+            .and_then(|pkn| rule.net_pkn(pkn, channel))
             .map(|pkn| pkn.round().max(1.0)),
         ct_pkn: matched.map(|pkn| pkn.round().max(1.0)),
     }
@@ -152,6 +157,11 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     ct_ids.sort_unstable();
     ct_ids.dedup();
     let floors = pro_floors(&state.db, &ct_ids, &own_ct_seller).await?;
+    // Pokoin is set to what the seller nets at their own rate and VAT.
+    let channel = pokoin_external::ct_fees::resolve_seller_channel(&state.db, &doc.data).await;
+    // CardTrader → Pokoin sellers: CardTrader is the truth for linked products;
+    // neither the product nor its Pokoin copy is repriced here.
+    let ct_writes = link::edit_skip_reason(&doc).is_none();
 
     let plans: Vec<(Value, Repricing)> = rows
         .into_iter()
@@ -163,7 +173,7 @@ pub(super) async fn run(options: &Options) -> Result<()> {
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();
-            let plan = plan_row(&row, &groups);
+            let plan = plan_row_for(&row, &groups, channel);
             (row, plan)
         })
         .collect();
@@ -232,7 +242,7 @@ pub(super) async fn run(options: &Options) -> Result<()> {
     }
 
     if options.apply {
-        apply(&state, &seller, &plans, &mut summary).await?;
+        apply(&state, &seller, &plans, ct_writes, &mut summary).await?;
     }
     println!("cardtrader pro-floor reprice {summary}");
     Ok(())
@@ -242,6 +252,7 @@ async fn apply(
     state: &pokoin_external::DomainState,
     seller: &str,
     plans: &[(Value, Repricing)],
+    ct_writes: bool,
     summary: &mut Value,
 ) -> Result<()> {
     let bump = |summary: &mut Value, key: &str| summary[key] = json!(summary[key].as_i64().unwrap_or(0) + 1);
@@ -261,24 +272,44 @@ async fn apply(
     let mut cards: HashSet<String> = HashSet::new();
     // Identical copies share one product (cardtrader::group) and get the same
     // floor: CardTrader is written once per product.
+    // A product counts as written only once CardTrader took it; the copies of
+    // one it refused are left as they are.
     let mut written: HashSet<String> = HashSet::new();
+    let mut refused: HashSet<String> = HashSet::new();
     for (row, plan) in plans.iter().filter(|(_, plan)| plan.changes()) {
         let Some(new_pkn) = plan.new_pkn else { continue };
         let source = row["source_listing_id"].as_str().unwrap_or("");
-        let first_write = ct_product_id(source).is_some_and(|product_id| written.insert(product_id.to_string()));
+        if let Some(product_id) = ct_product_id(source) {
+            if !ct_writes {
+                bump(summary, "ctToPokoinSkipped");
+                continue;
+            }
+            if refused.contains(product_id) {
+                bump(summary, "ctFailed");
+                continue;
+            }
+        }
+        let first_write = ct_product_id(source).is_some_and(|product_id| !written.contains(product_id));
         if let (Some(product_id), Some(token), true) = (ct_product_id(source), token.as_deref(), first_write) {
             let started = Instant::now();
             // CardTrader keeps the floor itself; only Pokoin takes the net price.
             match state.cardtrader.update_product(token, product_id, json!({ "price": eur(plan.ct_pkn.unwrap_or(new_pkn)) })).await {
-                Ok(_) => bump(summary, "ctUpdated"),
+                Ok(_) => {
+                    written.insert(product_id.to_string());
+                    bump(summary, "ctUpdated");
+                }
                 // Gone from CardTrader: the reconcile settles the link; the
                 // Pokoin price still follows the rule.
-                Err(error) if error.code.as_deref() == Some("cardtrader_http_404") => bump(summary, "ctGone"),
+                Err(error) if error.code.as_deref() == Some("cardtrader_http_404") => {
+                    written.insert(product_id.to_string());
+                    bump(summary, "ctGone");
+                }
                 Err(error) if error.code.as_deref() == Some("cardtrader_http_429") => {
                     summary["stoppedBy"] = json!("rate_limited");
                     break;
                 }
                 Err(error) => {
+                    refused.insert(product_id.to_string());
                     bump(summary, "ctFailed");
                     note(summary, json!({ "listingId": plan.id, "ctProductId": product_id, "reason": error.message }));
                     continue;
@@ -344,6 +375,15 @@ mod tests {
         let plan = plan_row(&lp, &groups());
         assert_eq!(plan.new_pkn, Some(22.0));
         assert!(!plan.changes());
+    }
+
+    #[test]
+    fn the_floor_is_netted_at_the_sellers_own_rate() {
+        use pokoin_external::ct_fees::{Channel, Plan, Tier};
+        let reverse = json!({"id": "b", "condition": "NM", "language": "IT", "reverse": true, "first_edition": false, "price_pkn": 40.0});
+        // €3.09 less 5 % (15.45 c) and Danish VAT (25 %): €2.8969 = 579 PKN (580 at 22 %).
+        let dk = plan_row_for(&reverse, &groups(), Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_500 }));
+        assert_eq!((dk.new_pkn, dk.ct_pkn), (Some(579.0), Some(618.0)));
     }
 
     #[test]
