@@ -12,6 +12,7 @@ pub mod seller_api;
 pub mod seller_book;
 pub mod stripe;
 pub mod wallet;
+pub mod zero_picks;
 pub mod earn_pkn;
 
 use axum::http::{header, HeaderValue, StatusCode};

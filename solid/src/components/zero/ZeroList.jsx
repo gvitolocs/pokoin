@@ -1,11 +1,12 @@
 import { For, Show } from 'solid-js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
-import { lineKeyOf, lineLocation, lineQuantity } from '@market/zero-pick.js';
+import { lineCopies, lineKeyOf, lineLocation, lineQuantity } from '@market/zero-pick.js';
 import { FacetBadges, IssueBadge, linePrice, LocationText, lineWhere, PtPlace, TakeBits } from './zero-bits.jsx';
 
 /**
  * Compact picking table: every line in order under its game header.
- * Also the print layout (forced by @media print even in the Cards view).
+ * Also the print layout (forced by @media print even in the image views).
+ * `readOnly` drops the actions (the "waiting for the next merge" list).
  */
 export default function ZeroList(props) {
   return (
@@ -35,6 +36,8 @@ export default function ZeroList(props) {
                   const key = () => lineKeyOf(line());
                   const pick = () => props.pickOf(line());
                   const quantity = () => lineQuantity(line());
+                  const busy = () => Boolean(props.isBusy?.(line()));
+                  const done = () => props.isDone(line());
                   return (
                     <li
                       class={['zero-row', {
@@ -50,12 +53,26 @@ export default function ZeroList(props) {
                         <span class="zero-row-place">{props.places.get(key())}</span>
                         <strong class={{ 'is-empty': !lineLocation(line()) }}><LocationText item={line()} /></strong>
                         <TakeBits item={line()} />
+                        <Show when={!props.printOnly && !props.readOnly && props.smartLocations === false && !done() && lineCopies(line()).length}>
+                          <span class="zero-box-choice" role="group" aria-label="Picked from another box">
+                            <For each={lineCopies(line())}>
+                              {(copy) => (
+                                <button class="btn ghost" type="button" disabled={busy()} onClick={() => props.onPick(line(), copy.listingId)}>
+                                  Pick from {copy.location || 'No location'}
+                                </button>
+                              )}
+                            </For>
+                          </span>
+                        </Show>
                       </span>
                       <span class="zero-row-name">
                         <Show when={line().cardId} fallback={<strong>{line().name}</strong>}>
                           <a href={inventoryListingHref(line())}><strong>{line().name}</strong></a>
                         </Show>
                         <Show when={line().nameEn}><small>{line().nameEn}</small></Show>
+                        <Show when={!props.printOnly && props.notes?.[key()]}>
+                          <span class="zero-inventory-note" role="status">{props.notes[key()]}</span>
+                        </Show>
                         <Show when={!props.printOnly && props.errors?.[key()]}>
                           <span class="zero-save-error" role="alert">{props.errors[key()]}</span>
                         </Show>
@@ -69,16 +86,20 @@ export default function ZeroList(props) {
                       </span>
                       <span class="zero-row-price">{linePrice(line())}</span>
                       <span class="zero-row-picked">{pick().picked}/{quantity()}</span>
-                      <Show when={!props.printOnly}>
+                      <Show when={!props.printOnly && !props.readOnly}>
                         <span class="zero-row-actions">
                           <button
-                            class={['btn', 'ghost', 'zero-pick-btn', { on: props.isDone(line()) }]}
+                            class={['btn', 'zero-pick-btn', { ghost: done(), on: done() }]}
                             type="button"
-                            aria-pressed={pick().picked >= quantity() ? 'true' : 'false'}
-                            onClick={() => props.onPick(line())}
+                            disabled={busy()}
+                            aria-pressed={done() ? 'true' : 'false'}
+                            onClick={() => (done() ? props.onUndo(line()) : props.onPick(line()))}
                           >
-                            {quantity() > 1 ? `Pick ${pick().picked}/${quantity()}` : pick().picked ? 'Undo' : 'Pick'}
+                            {busy() ? 'Saving…' : done() ? 'Undo' : 'Pick'}
                           </button>
+                          <Show when={!done() && lineCopies(line()).length}>
+                            <button class="btn ghost" type="button" disabled={busy()} onClick={() => props.onSwap(line())}>Other box…</button>
+                          </Show>
                           <Show
                             when={pick().issue}
                             fallback={<button class="btn ghost" type="button" onClick={() => props.onIssue(line())}>Report issue</button>}

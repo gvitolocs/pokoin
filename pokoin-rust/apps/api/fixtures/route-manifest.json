@@ -1188,8 +1188,32 @@
   "methods": [
    "POST"
   ],
-  "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_pick; no Node origin)",
-  "purpose": "CardTrader Zero picking list picked state: per-line picked count and issue (missing, wrong condition/language/foil/first edition, other) for one weekly Zero order, or reset of the whole order. Stored on Firestore cardtrader_zero_picks/{uid}_{orderId}; GET /api/cardtrader-zero reads it back."
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/zero_picks.rs::zero_pick; no Node origin)",
+  "purpose": "CardTrader Zero pick of one copy: records which copy left the box in Postgres cardtrader_zero_picks and moves inventory (finalize clears the emptied copy's location; swap moves quantity from the picked identical copy to the copy the sale took, both outbox events in one transaction; undo reverses the row; replays are idempotent). PR A bodies (picked counts, issues, reset) and lines with no Pokoin listing stay on Firestore cardtrader_zero_picks/{uid}_{orderId} and never touch stock."
+ },
+ {
+  "path": "/api/cardtrader-zero-sort",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_sort; no Node origin)",
+  "purpose": "Save the seller's CardTrader Zero picking sort (Power Tools sort model: up to four levels such as game.asc, location.desc, cn.asc, product.rarity.asc) and smartLocations on Firestore cardtrader_zero_settings/{uid}. No CardTrader or Power Tools call."
+ },
+ {
+  "path": "/api/cardtrader-zero-pt-sort",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_pt_sort; no Node origin)",
+  "purpose": "User-triggered Apply sort: writes the Pokoin picking order to the seller's Power Tools picking list with PUT user/order/updateSorting (picked articles by updatedAt, then to-pick in the given sequence; the list's sortingFields unchanged), reads it back, and returns before/after so the UI can restore. dryRun reads only. Throttled to one write per 15 s; never retried."
+ },
+ {
+  "path": "/api/cardtrader-zero-picked",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/zero_picks.rs::zero_picked; no Node origin)",
+  "purpose": "The seller's picked CardTrader Zero copies (cardtrader_zero_picks state picked), newest first, 100 a page, joined with the listing for name, set, number, facets and image. Picked rows are not listings: never stock, never pushed."
  },
  {
   "path": "/api/powertools-connect",

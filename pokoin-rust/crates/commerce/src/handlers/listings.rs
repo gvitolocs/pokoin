@@ -729,7 +729,7 @@ async fn verify_nft(
 async fn metadata(state: &DomainState, card: &str) -> Value {
     sqlx::query_scalar::<_,Value>("select to_jsonb(v) from (select name, image_url, expansion_name, expansion_number from public.marketplace_card_versions where card_id = $1 limit 1) v").bind(card).fetch_optional(state.read_db()).await.ok().flatten().unwrap_or_else(||json!({}))
 }
-async fn finish_write(
+pub(crate) async fn finish_write(
     state: &DomainState,
     row: &Value,
     queued: bool,
@@ -994,6 +994,140 @@ async fn decrement_listing(
     let game = if game.is_empty() { "pokemon" } else { &game };
     Ok(json!({"listing":finish_write(state,&row,queued,game,seller).await?}))
 }
+/// The row a stock delta reads and returns, whole, under its row lock.
+const LOCK_ROW_SQL: &str = "select to_jsonb(v) from (select * from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update) v";
+/// Quantity never goes below 0 (the `where` refuses it). 0 is `sold_out`; a
+/// `sold_out` row that gets copies back is `active` again. Paused and inactive
+/// rows keep their status: the seller chose it.
+const DELTA_SQL: &str = "with written as (update public.marketplace_user_listings set \
+    quantity_available = quantity_available + $3, \
+    status = case when quantity_available + $3 <= 0 then 'sold_out' when status = 'sold_out' then 'active' else status end, \
+    updated_at = now() \
+  where id = $1 and seller_uid = $2 and quantity_available + $3 >= 0 returning *) \
+  select to_jsonb(written) as listing from written";
+/// Another copy still for sale on the same CardTrader product (product
+/// grouping): its product must not be destroyed with this copy.
+const SHARED_PRODUCT_SQL: &str = "select exists(select 1 from public.marketplace_user_listings where seller_uid = $1 and source_listing_id = $2 and id <> $3 and status not in ('inactive', 'sold_out') and quantity_available > 0)";
+
+/// Lock one listing of `seller` in the caller's transaction (the whole row).
+pub(crate) async fn lock_listing(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+) -> Result<Option<Value>, ApiError> {
+    Ok(sqlx::query_scalar::<_, Value>(LOCK_ROW_SQL).bind(id).bind(seller).fetch_optional(&mut **tx).await?)
+}
+
+/// What a stock delta does to one listing: the event `update_listing` would
+/// queue for a seller setting that quantity on the board.
+///
+/// - mutation from `sync::mutation` (`LISTING_SOLD` at 0,
+///   `LISTING_REACTIVATED` when a `sold_out` row comes back, else
+///   `LISTING_QUANTITY_CHANGED`);
+/// - at 0 a linked product is destroyed (`destroyCardtrader`), unless
+///   another copy still for sale shares it, which gets the change instead;
+/// - otherwise `cardtraderEdit` from `sync::cardtrader_edit(before, after)`:
+///   the change as an increment, never the total (a gone product settles as
+///   `gone` and the reconcile copies CardTrader's quantity, as for the board).
+pub fn stock_delta_event(before: &Value, after: &Value, seller: &str, delta: i64, shared: bool, now_ms: i64) -> Option<Value> {
+    let status = live::field(after, "status", 20);
+    let status_changed = status != live::field(before, "status", 20);
+    let body = if status_changed {
+        json!({ "quantityAvailable": after["quantity_available"], "status": status })
+    } else {
+        json!({ "quantityAvailable": after["quantity_available"] })
+    };
+    let mutation = sync::mutation(before, &body, if status_changed { &status } else { "" });
+    let source = live::field(before, "source_listing_id", 160);
+    let linked = !pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty();
+    let inactive = live::number(&after["quantity_available"]) <= 0.0;
+    let edit = if inactive && linked && shared {
+        Some(json!({ "productId": pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source), "quantityDelta": delta }))
+    } else {
+        sync::cardtrader_edit(before, after)
+    };
+    let game = live::field(after, "marketplace_game", 40);
+    sync::event(
+        after,
+        &json!({
+            "sellerUid": seller,
+            "game": if game.is_empty() { "pokemon".to_string() } else { game },
+            "mutation": mutation,
+            "destroyCardtrader": inactive && !source.is_empty() && !shared,
+            "sourceListingId": source,
+            "cardtraderEdit": edit,
+        }),
+        now_ms,
+    )
+}
+
+/// Apply `delta` copies to one listing inside the caller's transaction, with
+/// the listing.changed outbox event in that same transaction. 409
+/// `insufficient_quantity` when it would go below 0. Returns the row as
+/// written and whether the event was queued.
+pub(crate) async fn apply_stock_delta(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+    delta: i64,
+    now_ms: i64,
+) -> Result<(Value, bool), ApiError> {
+    let before = lock_listing(tx, seller, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
+    let after = sqlx::query_scalar::<_, Value>(DELTA_SQL)
+        .bind(id)
+        .bind(seller)
+        .bind(delta as i32)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| ApiError::conflict("Not enough quantity.").with_code("insufficient_quantity"))?;
+    let source = live::field(&before, "source_listing_id", 160);
+    let shared = if !source.is_empty() && live::number(&after["quantity_available"]) <= 0.0 {
+        sqlx::query_scalar::<_, bool>(SHARED_PRODUCT_SQL)
+            .bind(seller)
+            .bind(&source)
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?
+    } else {
+        false
+    };
+    let queued = sync::enqueue(tx, stock_delta_event(&before, &after, seller, delta, shared, now_ms)).await?;
+    Ok((after, queued))
+}
+
+/// Set one listing's location in the caller's transaction (no stock change),
+/// queued as `LISTING_UPDATED` like a board edit of the location.
+pub(crate) async fn set_location(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+    location: &str,
+    now_ms: i64,
+) -> Result<(Value, bool), ApiError> {
+    let row = sqlx::query_scalar::<_, Value>(
+        "with written as (update public.marketplace_user_listings set location = $3, updated_at = now() where id = $1 and seller_uid = $2 returning *) select to_jsonb(written) from written",
+    )
+    .bind(id)
+    .bind(seller)
+    .bind(location)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
+    let game = live::field(&row, "marketplace_game", 40);
+    let queued = sync::enqueue(
+        tx,
+        sync::event(
+            &row,
+            &json!({ "sellerUid": seller, "game": if game.is_empty() { "pokemon".to_string() } else { game }, "mutation": "LISTING_UPDATED" }),
+            now_ms,
+        ),
+    )
+    .await?;
+    Ok((row, queued))
+}
+
 fn update_values(id: &str, uid: &str, body: &Value) -> Result<(Vec<String>, Vec<Value>), ApiError> {
     let mut sets = vec!["updated_at = now()".into()];
     let mut values = vec![json!(id)];

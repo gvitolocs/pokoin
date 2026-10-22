@@ -1,7 +1,7 @@
 import { For, Show } from 'solid-js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import { formatOrderMoney } from '@market/order-status.js';
-import { issueLabel, lineFacets, lineLocation, lineLocationFromPt, lineQuantity } from '@market/zero-pick.js';
+import { alsoInLabels, issueLabel, lineFacets, lineLocation, lineLocationFromPt, lineQuantity } from '@market/zero-pick.js';
 
 export function lineImage(item) {
   return homepageDerivativeUrl(ownCatalogImage(
@@ -40,8 +40,8 @@ export function TakeBits(props) {
       <Show when={split()}>
         <span class="zero-split" title="This CardTrader line is split over several places">{quantity()} of {props.item.itemQuantity}</span>
       </Show>
-      <Show when={props.item.alsoIn?.length}>
-        <span class="zero-also">also in: {props.item.alsoIn.join(', ')}</span>
+      <Show when={alsoInLabels(props.item).length}>
+        <span class="zero-also">also in: {alsoInLabels(props.item).join(', ')}</span>
       </Show>
     </>
   );

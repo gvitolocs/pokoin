@@ -10,6 +10,21 @@ export const PICK_CACHE_KEY = 'pokoin.ctZero.picks.';
 export const LEGACY_PICKED_KEY = 'pokoin.ctZero.picked.';
 export const VIEW_KEY = 'pokoin.ctZero.view';
 
+/** Power Tools' four picking views; images-vertical is the default. */
+export const ZERO_VIEWS = [
+  { id: 'list', label: 'List' },
+  { id: 'images-vertical', label: 'Images vertical' },
+  { id: 'images-horizontal', label: 'Images horizontal' },
+  { id: 'single', label: 'Single image' },
+];
+
+/** A stored view, PR A's values migrated (`cards` → images-vertical). */
+export function normalizeView(raw) {
+  const value = String(raw || '');
+  if (ZERO_VIEWS.some((view) => view.id === value)) return value;
+  return 'images-vertical';
+}
+
 export const ISSUE_TYPES = [
   { id: 'missing', label: 'Missing' },
   { id: 'wrong_condition', label: 'Wrong condition' },
@@ -211,6 +226,117 @@ export function pickSaveBody(orderId, lineKey, entry, fields = []) {
     body[field] = field === 'issue' ? cleanIssue(entry?.issue) : Math.max(0, Math.floor(Number(entry?.picked) || 0));
   }
   return body;
+}
+
+/**
+ * Picks now move inventory, so they are never replayed from the offline
+ * cache: dirty entries keep only an unsaved issue; a dirty entry whose
+ * issue already matches the server (an old unsaved pick count) is dropped.
+ */
+export function dropUnsentPicks(cache = {}, lines = []) {
+  const byKey = new Map(lines.map((line) => [lineKeyOf(line), line]));
+  const next = {};
+  for (const [key, entry] of Object.entries(cache || {})) {
+    const line = byKey.get(key);
+    if (!line) continue;
+    if (!entry?.dirty) {
+      next[key] = entry;
+      continue;
+    }
+    if (sameIssue(entry.issue, line.issue)) continue;
+    next[key] = { ...entry, picked: clampPicked(line.picked, lineQuantity(line)) };
+  }
+  return next;
+}
+
+/** POST body of a pick / undo: the copy picked (`listingId`) and the copy the sale took. */
+export function pickActionBody(order, line, action = 'pick', listingId = '') {
+  const allocated = String(line?.listingId || '');
+  return {
+    orderId: String(order?.orderId ?? line?.orderId ?? ''),
+    itemId: String(line?.itemId ?? ''),
+    lineKey: lineKeyOf(line),
+    listingId: String(listingId || allocated),
+    allocatedListingId: allocated,
+    quantity: lineQuantity(line),
+    action: action === 'undo' ? 'undo' : 'pick',
+  };
+}
+
+/**
+ * Identical copies of this line in other boxes, `[{ listingId, location,
+ * quantityAvailable }]`: the server's `candidates` (smart locations off), or
+ * `alsoIn` entries that carry a listing id. Never the line's own listing.
+ */
+export function lineCopies(line) {
+  const own = String(line?.listingId || '');
+  const source = Array.isArray(line?.candidates) && line.candidates.length ? line.candidates : line?.alsoIn || [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of source) {
+    if (!entry || typeof entry !== 'object') continue;
+    const listingId = String(entry.listingId || '');
+    if (!listingId || listingId === own || seen.has(listingId)) continue;
+    seen.add(listingId);
+    const available = Number(entry.quantityAvailable);
+    out.push({
+      listingId,
+      location: String(entry.location || ''),
+      quantityAvailable: Number.isFinite(available) ? available : null,
+    });
+  }
+  return out;
+}
+
+/** `alsoIn` as display text (strings, or `{location}` objects). */
+export function alsoInLabels(line) {
+  return (line?.alsoIn || [])
+    .map((entry) => (entry && typeof entry === 'object' ? entry.location : entry))
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+}
+
+/** The pick result shown on the tile. */
+export function inventoryNote(result, copies = []) {
+  if (!result) return '';
+  // A finalize pick changes no quantity (the sale already took the copy): it left the inventory.
+  if (result.inventory === 'removed' || (result.inventory === 'unchanged' && result.action === 'pick')) return 'removed from inventory';
+  if (result.inventory === 'swapped') {
+    const box = copies.find((copy) => copy.listingId === result.listingId)?.location || result.location || 'another box';
+    return `swapped with ${box}`;
+  }
+  if (result.inventory === 'restored') return 'back in inventory';
+  return '';
+}
+
+/** "<location>: take N (M available)", the available part only when known. */
+export function locationTakeText(line) {
+  const location = lineLocation(line) || 'No location';
+  const available = Number(line?.quantityAvailable ?? line?.available);
+  const tail = Number.isFinite(available) && (line?.quantityAvailable ?? line?.available) != null ? ` (${available} available)` : '';
+  return `${location}: take ${lineQuantity(line)}${tail}`;
+}
+
+/** "# 41 - OGN - Origins"; the code part only when the line has one. */
+export function lineSetText(line) {
+  const parts = [];
+  if (line?.collectorNumber) parts.push(`# ${line.collectorNumber}`);
+  const code = String(line?.expansionCode || '').trim();
+  const expansion = String(line?.expansion || '').trim();
+  if (code && code !== expansion) parts.push(code);
+  if (expansion) parts.push(expansion);
+  return parts.join(' - ');
+}
+
+const RARITY_SHORT = { 'double rare': 'RR', mythic: 'M', 'mythic rare': 'M', promo: 'P' };
+
+/** `{ short, long }` for the rarity badge: "U Uncommon", "SIR Special Illustration Rare". */
+export function rarityBadge(rarity) {
+  const long = String(rarity || '').trim();
+  if (!long) return null;
+  const key = long.toLowerCase();
+  const short = RARITY_SHORT[key] || long.split(/[\s/-]+/).filter(Boolean).map((word) => word[0].toUpperCase()).join('');
+  return { short, long };
 }
 
 /** `[{ lineKey, picked, issue }]` still waiting for the server. */

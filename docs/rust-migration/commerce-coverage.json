@@ -460,14 +460,32 @@
       "unresolved": [
         "no live email delivery test"
       ]
+    },
+    {
+      "path": "/api/cardtrader-zero-pick",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "handlers::zero_picks::zero_pick: inventory picks in one transaction (finalize / swap / undo, idempotent on the cardtrader_zero_picks live index) through handlers::listings::apply_stock_delta and the listing outbox; PR A Firestore bodies delegate to pokoin_external::cardtrader::zero::save_pick.",
+      "verification": "plan_pick / plan_undo / body / stock_delta_event unit tests + tests/zero_picks_flow.rs (real Postgres: finalize, swap, undo, replay, concurrent double click, quantity floor, not_identical, issue untouched)"
+    },
+    {
+      "path": "/api/cardtrader-zero-picked",
+      "methods": [
+        "GET"
+      ],
+      "status": "implemented",
+      "implementation": "The seller's picked CardTrader Zero copies (cardtrader_zero_picks state picked), newest first, 100 a page, joined with the listing for name, set, number, facets and image. Picked rows are not listings: never stock, never pushed.",
+      "verification": "tests/zero_picks_flow.rs (real Postgres)"
     }
   ],
   "summary": {
-    "assignedRoutes": 28,
-    "implemented": 24,
+    "assignedRoutes": 30,
+    "implemented": 26,
     "partiallyImplemented": 4,
     "notImplemented": 0,
-    "routesWiredInRouter": 28,
+    "routesWiredInRouter": 30,
     "tests": "260 passed / 0 failed (229 unit + 31 integration)",
     "unresolvedItemCount": 47
   },

@@ -86,6 +86,7 @@ test('pages and redirects sit at the URLs links and bookmarks use', () => {
     '/careers': 'Careers',
     '/mypokoin/1dr': 'CardTraderOneDay',
     '/mypokoin/zero': 'CardTraderZero',
+    '/mypokoin/picked': 'ZeroPicked',
     '/mypokoin/spreadsheet': 'SellSpreadsheet',
     '/mypokoin/collection': 'Inventory',
     '/dashboard': 'SellerHome',
