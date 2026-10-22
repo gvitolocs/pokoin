@@ -54,11 +54,10 @@ pub fn raise_to(current_cents: i128, price_pkn: f64, rule: ct_fees::FeeRule, cha
     if price < 1 {
         return None;
     }
-    let rate = rule.rate_bps(channel);
-    if current_cents > 0 && ct_fees::nets(current_cents, price, rate, rule.vat_for(channel), rule.min_fee_pkn) {
+    if current_cents > 0 && rule.nets_at(current_cents, price, channel) {
         return None;
     }
-    let target = ct_fees::gross_cents(price, rate, rule.vat_for(channel), rule.min_fee_pkn);
+    let target = rule.gross_at(price, channel);
     (target > current_cents).then_some(target)
 }
 

@@ -177,7 +177,10 @@ unique per seller).
     was written after the export (`groupRaiseDeferred` otherwise): the raise
     lands on the primary, whose own row the per-row stale guard sees as old.
   - A product being consolidated (an open
-    `marketplace_cardtrader_consolidations` row) keeps its quantity.
+    `marketplace_cardtrader_consolidations` row) keeps its quantity. When the
+    open rows cannot be read (migration 134 missing, a database error), every
+    product several listings share keeps its quantity that run
+    (`groupQuantitiesHeld` in the summary, a warning in the log).
   - A vanished product removes every member.
   - The mass-removal guard counts listings.
   - A link row that cannot be written is an error item, never the end of the

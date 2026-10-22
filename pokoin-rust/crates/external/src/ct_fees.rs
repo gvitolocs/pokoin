@@ -97,6 +97,11 @@ pub enum Tier {
     ExtraEuBeforeMarch2026,
     ExtraEu,
     OneDayReady,
+    /// Country not known, subscription before March 2026: priced at the
+    /// worse of outside the EU (no VAT) and the EU at 27 % VAT ([`FeeRule`]).
+    UnknownCountryBeforeMarch2026,
+    /// Country not known, from March 2026.
+    UnknownCountry,
 }
 
 impl Tier {
@@ -111,9 +116,24 @@ impl Tier {
             (Tier::ExtraEu, false) => 700,
             (Tier::ExtraEu, true) => 1000,
             (Tier::OneDayReady, _) => 1650,
+            (Tier::UnknownCountryBeforeMarch2026, zero) => Tier::ExtraEuBeforeMarch2026.rate_bps(zero),
+            (Tier::UnknownCountry, zero) => Tier::ExtraEu.rate_bps(zero),
+        }
+    }
+
+    /// For an unknown country, the EU tier of the same era it is also priced
+    /// at (with the highest EU VAT).
+    pub fn eu_counterpart(self) -> Option<Tier> {
+        match self {
+            Tier::UnknownCountryBeforeMarch2026 => Some(Tier::EuBeforeMarch2026),
+            Tier::UnknownCountry => Some(Tier::Eu),
+            _ => None,
         }
     }
 }
+
+/// The highest standard VAT in the EU (Hungary), basis points.
+pub const MAX_EU_VAT_BPS: i128 = 2_700;
 
 /// The last day CardTrader keeps the pre-March-2026 rates for active sellers.
 pub const LEGACY_RATE_UNTIL: &str = "2026-12-31";
@@ -131,11 +151,16 @@ pub fn tier_of(one_day_ready: bool, country: Option<&str>, before_march_2026: bo
     if one_day_ready {
         return Tier::OneDayReady;
     }
-    // Unknown country: outside the EU, the higher rate (7 / 10 % against at
-    // most 5.3 / 7.3 % + 27 % VAT inside it), so a seller is never priced
-    // above what they net.
-    let eu = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty()).is_some_and(|code| EU_COUNTRIES.contains(&code.as_str()));
+    // Unknown country: the worse, at each price, of outside the EU (7 / 10 %,
+    // no VAT) and the EU at 27 % VAT: on a 1-cent minimum the EU's VAT costs
+    // more (14 c nets 12.73 c against 13 c), on a dearer card outside the EU
+    // does. A seller is never priced above what they net.
+    let code = country.map(|code| code.trim().to_uppercase()).filter(|code| !code.is_empty());
     let legacy = before_march_2026 && today <= LEGACY_RATE_UNTIL;
+    let Some(code) = code else {
+        return if legacy { Tier::UnknownCountryBeforeMarch2026 } else { Tier::UnknownCountry };
+    };
+    let eu = EU_COUNTRIES.contains(&code.as_str());
     match (eu, legacy) {
         (true, true) => Tier::EuBeforeMarch2026,
         (true, false) => Tier::Eu,
@@ -188,6 +213,10 @@ impl Channel {
                 (Tier::ExtraEu, false) => "extra-eu-direct",
                 (Tier::ExtraEu, true) => "extra-eu-zero",
                 (Tier::OneDayReady, _) => "1dr",
+                (Tier::UnknownCountryBeforeMarch2026, false) => "nocountry-pre2026-direct",
+                (Tier::UnknownCountryBeforeMarch2026, true) => "nocountry-pre2026-zero",
+                (Tier::UnknownCountry, false) => "nocountry-direct",
+                (Tier::UnknownCountry, true) => "nocountry-zero",
             },
         }
     }
@@ -220,6 +249,10 @@ impl Channel {
             "extra-eu-pre2026-zero" => plan(true, Tier::ExtraEuBeforeMarch2026),
             "extra-eu-direct" => plan(false, Tier::ExtraEu),
             "extra-eu-zero" => plan(true, Tier::ExtraEu),
+            "nocountry-pre2026-direct" => plan(false, Tier::UnknownCountryBeforeMarch2026),
+            "nocountry-pre2026-zero" => plan(true, Tier::UnknownCountryBeforeMarch2026),
+            "nocountry-direct" => plan(false, Tier::UnknownCountry),
+            "nocountry-zero" => plan(true, Tier::UnknownCountry),
             _ => Channel::Zero,
         }
     }
@@ -343,6 +376,38 @@ impl FeeRule {
         }
     }
 
+    /// The (rate, VAT) pairs an ask is priced at: one, or for an unknown
+    /// country two (outside the EU without VAT, the EU at 27 %), of which the
+    /// seller nets the lower.
+    fn pairs(&self, channel: Channel) -> ([(i128, i128); 2], usize) {
+        if let Channel::Plan(plan) = channel {
+            if let Some(eu) = plan.tier.eu_counterpart() {
+                return ([(plan.tier.rate_bps(plan.zero), 0), (eu.rate_bps(plan.zero), MAX_EU_VAT_BPS)], 2);
+            }
+        }
+        ([(self.rate_bps(channel), self.vat_for(channel)), (0, 0)], 1)
+    }
+
+    /// What the seller nets on an ask in whole PKN, scaled (the lower of the
+    /// pairs).
+    pub fn net_scaled_at(&self, ask_pkn: i128, channel: Channel) -> i128 {
+        let (pairs, n) = self.pairs(channel);
+        pairs[..n].iter().map(|(rate, vat)| net_scaled(ask_pkn, *rate, *vat, self.min_fee_pkn)).min().unwrap_or(0)
+    }
+
+    /// Whether an ask in whole cents nets a whole-PKN price (at every pair).
+    pub fn nets_at(&self, cents: i128, price_pkn: i128, channel: Channel) -> bool {
+        let (pairs, n) = self.pairs(channel);
+        pairs[..n].iter().all(|(rate, vat)| nets(cents, price_pkn, *rate, *vat, self.min_fee_pkn))
+    }
+
+    /// The smallest whole-cent ask that nets a whole-PKN price: net grows with
+    /// the ask, so it is the largest of the pairs' own gross-ups.
+    pub fn gross_at(&self, price_pkn: i128, channel: Channel) -> i128 {
+        let (pairs, n) = self.pairs(channel);
+        pairs[..n].iter().map(|(rate, vat)| gross_cents(price_pkn, *rate, *vat, self.min_fee_pkn)).max().unwrap_or(0)
+    }
+
     pub fn pct(&self, channel: Channel) -> f64 {
         self.rate_bps(channel) as f64 / 100.0
     }
@@ -355,7 +420,7 @@ impl FeeRule {
             return None;
         }
         let ask = ask_pkn.round() as i128;
-        let net = net_scaled(ask, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn);
+        let net = self.net_scaled_at(ask, channel);
         (net > 0).then(|| (net as f64 / SCALE as f64 * 100.0).round() / 100.0)
     }
 
@@ -365,7 +430,7 @@ impl FeeRule {
             return None;
         }
         let ask = (ask_cents * PKN_PER_CENT as f64).round() as i128;
-        let net = net_scaled(ask, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn);
+        let net = self.net_scaled_at(ask, channel);
         (net > 0).then(|| net as f64 / SCALE as f64 / PKN_PER_CENT as f64)
     }
 
@@ -375,7 +440,7 @@ impl FeeRule {
         if !(price_pkn.is_finite() && price_pkn >= 1.0 && price_pkn <= MAX_PRICE_PKN as f64) {
             return None;
         }
-        Some(gross_cents(price_pkn.round() as i128, self.rate_bps(channel), self.vat_for(channel), self.min_fee_pkn))
+        Some(self.gross_at(price_pkn.round() as i128, channel))
     }
 
     /// [`gross_cents`] in euro, for a CardTrader write.
@@ -389,10 +454,8 @@ impl FeeRule {
     pub fn breakdown(&self, price_pkn: f64, channel: Channel) -> Option<serde_json::Value> {
         let cents = self.gross_cents(price_pkn, channel)?;
         let ask = cents * PKN_PER_CENT;
-        let rate = self.rate_bps(channel);
-        let vat = self.vat_for(channel);
-        let fee = fee_bps(ask, rate, self.min_fee_pkn) * (BPS + vat);
-        let net = net_scaled(ask, rate, vat, self.min_fee_pkn);
+        let net = self.net_scaled_at(ask, channel);
+        let fee = ask * SCALE - net;
         let to_cents = |scaled: i128| (scaled as f64 / SCALE as f64 / PKN_PER_CENT as f64 * 10_000.0).round() / 10_000.0;
         Some(serde_json::json!({
             "pricePkn": price_pkn.round(),
@@ -674,7 +737,8 @@ mod tests {
         assert_eq!(tier_of(false, Some("IT"), false, "2026-10-21"), Tier::Eu);
         assert_eq!(tier_of(false, Some("US"), true, "2026-10-21"), Tier::ExtraEuBeforeMarch2026);
         assert_eq!(tier_of(false, Some("GB"), false, "2026-10-21"), Tier::ExtraEu);
-        assert_eq!(tier_of(false, None, false, "2026-10-21"), Tier::ExtraEu, "unknown country: the higher rate");
+        assert_eq!(tier_of(false, None, false, "2026-10-21"), Tier::UnknownCountry, "unknown country: the worse of outside and inside the EU");
+        assert_eq!(tier_of(false, Some(" "), true, "2026-10-21"), Tier::UnknownCountryBeforeMarch2026);
         assert_eq!(tier_of(false, Some("IT"), true, "2027-01-01"), Tier::Eu, "the old rate ends 2026-12-31");
         assert_eq!(tier_of(true, Some("IT"), true, "2026-10-21"), Tier::OneDayReady);
         // Unknown subscription date: the current (higher) rate.
@@ -682,7 +746,7 @@ mod tests {
         assert!(before_march_2026(&serde_json::json!({"metadata": {"feeEra": "before-2026-03"}})));
         assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": 595699}}})), "PeppeV confirmed");
         assert!(before_march_2026(&serde_json::json!({"metadata": {"user": {"id": "180405"}}})), "redshakkio confirmed");
-        for code in ["direct", "zero", "1dr@0", "eu-pre2026-direct@2500", "eu-zero@2200", "extra-eu-pre2026-zero@0", "extra-eu-direct@0"] {
+        for code in ["nocountry-direct@0", "nocountry-pre2026-zero@0", "direct", "zero", "1dr@0", "eu-pre2026-direct@2500", "eu-zero@2200", "extra-eu-pre2026-zero@0", "extra-eu-direct@0"] {
             assert_eq!(Channel::parse(code).code(), code);
         }
         assert_eq!(Channel::parse("eu-pre2026-direct"), Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_200 }), "stored before the VAT");
@@ -710,6 +774,44 @@ mod tests {
             let eu = Channel::Plan(Plan { zero: false, tier: tier_of(false, Some(code), false, "2026-10-22"), vat_bps: vat });
             assert!(R.net_cents(1000.0, unknown).unwrap() <= R.net_cents(1000.0, eu).unwrap(), "{code}");
         }
+    }
+
+    #[test]
+    fn an_unknown_country_nets_no_more_than_any_known_seller_at_every_price() {
+        let unknown = |zero| Channel::Plan(Plan { zero, tier: tier_of(false, None, false, "2026-10-22"), vat_bps: vat_of(None, false) });
+        // Every known pairing a seller can have (private and business, every
+        // country, inside and outside the EU), current subscriptions.
+        let mut known = Vec::new();
+        for zero in [false, true] {
+            for (code, vat) in EU_VAT_BPS {
+                for business_vat in [vat, 0] {
+                    known.push((zero, Channel::Plan(Plan { zero, tier: tier_of(false, Some(code), false, "2026-10-22"), vat_bps: business_vat })));
+                }
+            }
+            known.push((zero, Channel::Plan(Plan { zero, tier: Tier::ExtraEu, vat_bps: 0 })));
+        }
+        for cents in [10.0, 14.0, 19.0, 1000.0] {
+            for (zero, channel) in &known {
+                assert!(R.net_cents(cents, unknown(*zero)).unwrap() <= R.net_cents(cents, *channel).unwrap() + 1e-9, "{cents} c, {}", channel.code());
+            }
+        }
+        // The figures: 1.27 c minimum at 10 c, 14 c and 19 c direct (7 % of 19 c
+        // is 1.33 c: outside the EU wins there); €10 direct is 7 %, Zero 10 %.
+        assert_eq!(R.net_cents(10.0, unknown(false)), Some(8.73));
+        assert_eq!(R.net_cents(14.0, unknown(false)), Some(12.73));
+        assert_eq!(R.net_cents(19.0, unknown(false)), Some(17.67));
+        assert_eq!(R.net_cents(1000.0, unknown(false)), Some(930.0));
+        assert_eq!(R.net_cents(1000.0, unknown(true)), Some(900.0));
+        // Danish 5 % + 25 % at 14 c nets 12.75 c: more than unknown's 12.73 c.
+        let dk = Channel::Plan(Plan { zero: false, tier: Tier::EuBeforeMarch2026, vat_bps: 2_500 });
+        assert_eq!(R.net_cents(14.0, dk), Some(12.75));
+        // The gross-up is the smallest ask netting the price at both pairs.
+        for price in 1..400i128 {
+            let cents = R.gross_at(price, unknown(false));
+            assert!(R.nets_at(cents, price, unknown(false)));
+            assert!(cents == 1 || !R.nets_at(cents - 1, price, unknown(false)), "{price}");
+        }
+        assert_eq!(R.breakdown(24.0, unknown(false)).unwrap()["feeCents"], 1.27);
     }
 
     #[test]

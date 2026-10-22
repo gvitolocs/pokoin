@@ -745,17 +745,20 @@ pub fn plan_inventory_reconcile(
     export_complete: bool,
     export_ok: bool,
 ) -> ReconcilePlan {
-    plan_inventory_reconcile_with(export, listings, link_missing, &HashSet::new(), export_complete, export_ok)
+    plan_inventory_reconcile_with(export, listings, link_missing, Some(&HashSet::new()), export_complete, export_ok)
 }
 
 /// [`plan_inventory_reconcile`], leaving the quantity of the products in
 /// `consolidating` alone (an open `job cardtrader-group-products` group:
 /// its members already hold copies CardTrader gets back only at the end).
+/// `None`: the open groups could not be read, so no product several listings
+/// share has its quantity touched this run (fail closed); a product of one
+/// listing still syncs.
 pub fn plan_inventory_reconcile_with(
     export: &ProductsExport,
     listings: &[ListingRow],
     link_missing: &HashMap<String, bool>,
-    consolidating: &HashSet<String>,
+    consolidating: Option<&HashSet<String>>,
     export_complete: bool,
     export_ok: bool,
 ) -> ReconcilePlan {
@@ -812,7 +815,11 @@ pub fn plan_inventory_reconcile_with(
             Attachment::AlreadyLinked { listing } => {
                 summary["alreadyLinked"].incr(1);
                 let group = index.members.get(&source_id).filter(|rows| rows.len() > 1);
-                if consolidating.contains(&product.id) {
+                let held = match consolidating {
+                    Some(open) => open.contains(&product.id),
+                    None => group.is_some(),
+                };
+                if held {
                     summary["consolidating"].incr(1);
                     actions.push(PlannedAction::Noop { product_id: product.id.clone(), listing_id: listing.id.clone() });
                 } else if let Some(rows) = group {
@@ -1243,9 +1250,16 @@ mod tests {
         // While `job cardtrader-group-products` folds duplicates into it, the
         // members hold copies CardTrader only gets at the end: hands off.
         let consolidating: HashSet<String> = ["9".to_string()].into();
-        let held = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), &consolidating, true, true);
+        let held = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), Some(&consolidating), true, true);
         assert!(matches!(&held.actions[..], [PlannedAction::Noop { .. }]), "{:?}", held.actions);
         assert_eq!(held.summary["consolidating"], 1);
+        // The open groups could not be read: every shared product is held,
+        // a product of one listing still takes CardTrader's quantity.
+        let unknown = plan_inventory_reconcile_with(&export, &rows(&listings), &HashMap::new(), None, true, true);
+        assert!(matches!(&unknown.actions[..], [PlannedAction::Noop { .. }]), "{:?}", unknown.actions);
+        let alone = [json!({"id": a, "card_id": "200", "quantity_available": 2, "status": "active", "source_listing_id": "ct:9"})];
+        let single = plan_inventory_reconcile_with(&export, &rows(&alone), &HashMap::new(), None, true, true);
+        assert!(matches!(&single.actions[..], [PlannedAction::UpdateQty { quantity: 1, .. }]), "{:?}", single.actions);
     }
 
     fn removed_ids(plan: &ReconcilePlan) -> Vec<String> {

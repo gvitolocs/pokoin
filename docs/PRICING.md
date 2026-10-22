@@ -59,7 +59,10 @@ the commission is per seller (`ct_fees::vat_of`): a private EU seller pays
 their own country's rate (PeppeV, Denmark: 25 %); a VAT-registered business
 (`pro`, or `metadata.vatRegistered`) pays none outside Italy (reverse charge)
 and 22 % in Italy (redshakkio); outside the EU, none. An unknown country is
-priced as outside the EU at the current rate, the costliest pair. The
+priced, at each price, at the worse of outside the EU (7 / 10 %, no VAT) and
+the EU at 27 % VAT (Hungary): on the 1-cent minimum the VAT costs more (a
+14 c ask nets 12.73 c, Denmark's 5 % + 25 % nets 12.75 c), on dearer cards
+the outside-EU rate does. The gross-up is the larger of the two asks. The
 subscription date
 comes from the integration's `metadata.feeEra` (`before-2026-03`), else
 `CARDTRADER_FEE_ERA`, else the current, higher rate. CardTrader shows no

@@ -989,8 +989,10 @@ pub(crate) trait ReconcileStore: Send + Sync {
     /// Products `job cardtrader-group-products` is folding duplicates into
     /// (an open row in `marketplace_cardtrader_consolidations`): their
     /// quantity is left alone until the job closes them.
-    fn consolidating<'a>(&'a self, _seller_uid: &'a str) -> BoxFuture<'a, HashSet<String>> {
-        Box::pin(async { HashSet::new() })
+    /// `Err` when they cannot be read (the table missing included): the
+    /// caller then holds every shared product's quantity.
+    fn consolidating<'a>(&'a self, _seller_uid: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
+        Box::pin(async { Ok(HashSet::new()) })
     }
     /// Whether any member of a product (`source`) was written after the
     /// export was taken: then the export may predate a sale or an edit, and a
@@ -1029,11 +1031,11 @@ impl ReconcileStore for PgReconcileStore<'_> {
         Box::pin(load_seller_listings(self.0, seller_uid))
     }
 
-    fn consolidating<'a>(&'a self, seller_uid: &'a str) -> BoxFuture<'a, HashSet<String>> {
+    fn consolidating<'a>(&'a self, seller_uid: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
         Box::pin(async move {
             match self.0.write("pokemon", OPEN_CONSOLIDATIONS_SQL, &[json!(seller_uid)]).await {
-                Ok(rows) => rows.iter().map(|row| clean_text_value(row.get("kept_product_id").unwrap_or(&Value::Null), 80)).collect(),
-                Err(_) => HashSet::new(),
+                Ok(rows) => Ok(rows.iter().map(|row| clean_text_value(row.get("kept_product_id").unwrap_or(&Value::Null), 80)).collect()),
+                Err(error) => Err(error.message),
             }
         })
     }
@@ -1143,12 +1145,25 @@ pub(crate) async fn reconcile_linked_listings(
     let listings = store.seller_listings(seller_uid).await?;
     let link_missing = store.link_missing_flags(seller_uid).await?;
 
-    let consolidating = store.consolidating(seller_uid).await;
-    let plan = plan_inventory_reconcile_with(export, &listings, &link_missing, &consolidating, true, true);
+    // Fail closed: open consolidations that cannot be read hold every shared
+    // product's quantity for this run (migration 134 not applied, a database
+    // error), so a group mid-consolidation never loses copies.
+    let consolidating = match store.consolidating(seller_uid).await {
+        Ok(open) => Some(open),
+        Err(error) => {
+            tracing::warn!(seller_uid, %error, "cardtrader reconcile: open consolidations unreadable; group quantities held");
+            None
+        }
+    };
+    let plan = plan_inventory_reconcile_with(export, &listings, &link_missing, consolidating.as_ref(), true, true);
+    let mut summary_note = consolidating.is_none().then_some("open_consolidations_unreadable");
     let quantity_of: HashMap<&str, i64> = listings.iter().map(|row| (row.id.as_str(), row.quantity_available)).collect();
     let mut summary = plan.summary.clone();
     for key in APPLIED_COUNTERS {
         summary[key] = json!(0);
+    }
+    if let Some(note) = summary_note.take() {
+        summary["groupQuantitiesHeld"] = json!(note);
     }
     if !import_new {
         // Pokoin → CardTrader only: CardTrader-only products stay off Pokoin.
@@ -1766,6 +1781,8 @@ mod tests {
         writes: Mutex<Vec<String>>,
         /// `group_written_after` answers this.
         fresh_group: std::sync::atomic::AtomicBool,
+        /// `consolidating` fails (migration 134 missing, a database error).
+        markers_unreadable: std::sync::atomic::AtomicBool,
     }
 
     impl MemoryStore {
@@ -1787,6 +1804,11 @@ mod tests {
     }
 
     impl ReconcileStore for MemoryStore {
+        fn consolidating<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
+            let broken = self.markers_unreadable.load(std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move { if broken { Err("relation does not exist".to_string()) } else { Ok(HashSet::new()) } })
+        }
+
         fn group_written_after<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str) -> BoxFuture<'a, bool> {
             let fresh = self.fresh_group.load(std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move { fresh })
@@ -2029,6 +2051,14 @@ mod tests {
             .unwrap();
         assert!(store.take_writes().contains(&format!("quantity {a}=2")));
         assert!(GROUP_WRITTEN_AFTER_SQL.contains("updated_at > $3::timestamptz"));
+
+        // The open consolidations cannot be read: the shared product is held.
+        let store = MemoryStore { listings: Mutex::new(members()), markers_unreadable: true.into(), ..Default::default() };
+        let out = reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, started, false, &|_| {})
+            .await
+            .unwrap();
+        assert_eq!(out["summary"]["groupQuantitiesHeld"], "open_consolidations_unreadable");
+        assert!(!store.take_writes().iter().any(|w| w.starts_with("quantity")));
     }
 
     #[tokio::test]
