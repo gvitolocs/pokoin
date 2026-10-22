@@ -55,9 +55,11 @@ Each weekly order adds `ptPicking`, `pickedLines`, and `issueCount`; top-level
 
 ### One line per box
 
-Since one CardTrader product carries all of a seller's identical copies
-(`source_listing_id = ct:<productId>` on every member), a 5-copy sale can leave from
-five boxes. Each CardTrader item becomes one line per box:
+Without product grouping each Pokoin listing has its own CardTrader product, so an item
+maps to one listing (`listing` below). With grouping (PR #494, reverted in #495 and being
+re-landed), one CardTrader product carries all of a seller's identical copies
+(`source_listing_id = ct:<productId>` on every member), and a 5-copy sale can leave from
+five boxes. Both work: each CardTrader item becomes one line per box:
 
 1. **`event`**: the sale's webhook event doc `cardtrader_webhook_events/{uid}_{order}_{item}`
    lists `allocations: [{listingId, quantity}]` (the copies the decrement took: the named
