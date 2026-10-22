@@ -110,7 +110,10 @@ subscriptions before March 2026 (guaranteed to active sellers until
   `pokoin-api job cardtrader-net-prices --seller=<uid> [--csv=…] [--apply]`: one
   `/products/export` read, the target always computed from the CardTrader
   ask (a rerun changes nothing), compare-and-set per listing, nothing
-  written to CardTrader.
+  written to CardTrader. Only the seller's own products (`import`, `match`);
+  `--origin=push` does the products Pokoin pushed instead: they keep their
+  CardTrader ask and Pokoin takes its net (PeppeV, 2026-10-22: Spiderling
+  stays €0.13 on CardTrader, 5 % without VAT, Pokoin 24 PKN).
 
 ## Writing to CardTrader: the fee once (2026-10-21)
 
