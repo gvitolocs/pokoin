@@ -1203,6 +1203,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/extension/privacy/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension/privacy",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/email-preferences/",
       "destination": "/market/index.html"
     },
