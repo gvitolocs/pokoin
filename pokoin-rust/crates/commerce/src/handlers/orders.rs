@@ -3182,6 +3182,41 @@ pub fn decrypt_shipping_snapshot(state: &DomainState, stored: &Value) -> Result<
     }
 }
 
+/// Stripe form for the server-priced marketplace order, including shipping
+/// and any PKN discount already applied to the charge.
+fn order_checkout_form(
+    site: &str,
+    order_id: &str,
+    buyer_uid: &str,
+    charge_cents: i64,
+    discount_pkn: i64,
+    now_ms: i64,
+) -> Vec<(String, String)> {
+    vec![
+        ("mode".into(), "payment".into()),
+        ("expires_at".into(), (now_ms / 1000 + 31 * 60).to_string()),
+        (
+            "success_url".into(),
+            format!("{site}/orders/{order_id}?status=success"),
+        ),
+        ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
+        ("line_items[0][quantity]".into(), "1".into()),
+        ("line_items[0][price_data][currency]".into(), "eur".into()),
+        (
+            "line_items[0][price_data][unit_amount]".into(),
+            charge_cents.to_string(),
+        ),
+        (
+            "line_items[0][price_data][product_data][name]".into(),
+            format!("Pokoin order {order_id}"),
+        ),
+        ("metadata[kind]".into(), "marketplace_order_eur".into()),
+        ("metadata[pokoinOrderId]".into(), order_id.to_string()),
+        ("metadata[pokoinUid]".into(), buyer_uid.to_string()),
+        ("metadata[discountPkn]".into(), discount_pkn.to_string()),
+    ]
+}
+
 pub async fn create_order_checkout_session(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
@@ -3329,35 +3364,14 @@ pub async fn create_order_checkout_session(
             .public_site_url
             .trim_end_matches('/')
             .to_string();
-        let form: Vec<(String, String)> = vec![
-            ("mode".into(), "payment".into()),
-            (
-                "expires_at".into(),
-                (state.now_ms() / 1000 + 31 * 60).to_string(),
-            ),
-            (
-                "success_url".into(),
-                format!("{site}/orders/{order_id}?status=success"),
-            ),
-            ("cancel_url".into(), format!("{site}/cart?status=cancelled")),
-            ("line_items[0][quantity]".into(), "1".into()),
-            ("line_items[0][price_data][currency]".into(), "eur".into()),
-            (
-                "line_items[0][price_data][unit_amount]".into(),
-                charge_cents.to_string(),
-            ),
-            (
-                "line_items[0][price_data][product_name]".into(),
-                format!("Pokoin order {order_id}"),
-            ),
-            ("metadata[kind]".into(), "marketplace_order_eur".into()),
-            ("metadata[pokoinOrderId]".into(), order_id.clone()),
-            ("metadata[pokoinUid]".into(), claims.uid.clone()),
-            (
-                "metadata[discountPkn]".into(),
-                held_discount_pkn.to_string(),
-            ),
-        ];
+        let form = order_checkout_form(
+            &site,
+            &order_id,
+            &claims.uid,
+            charge_cents,
+            held_discount_pkn,
+            state.now_ms(),
+        );
 
         let session = stripe.create_checkout_session(form).await?;
         let session_id = session
@@ -3509,6 +3523,57 @@ fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn order_checkout_sends_stripe_product_data_and_the_server_charge() {
+        // Inspect the encoded HTTP form rather than a separate test fixture.
+        // Stripe rejects price_data.product_name before creating a session.
+        for (charge_cents, discount_pkn) in [(321, 0), (271, 100)] {
+            let form = order_checkout_form(
+                "https://pokoin.com",
+                "order-123",
+                "buyer-123",
+                charge_cents,
+                discount_pkn,
+                1_700_000_000_000,
+            );
+            let request = reqwest::Client::new()
+                .post("https://api.stripe.com/v1/checkout/sessions")
+                .form(&form)
+                .build()
+                .unwrap();
+            assert_eq!(
+                request.headers()["content-type"],
+                "application/x-www-form-urlencoded"
+            );
+            let body = std::str::from_utf8(request.body().unwrap().as_bytes().unwrap()).unwrap();
+            let url = reqwest::Url::parse(&format!("https://example.test/?{body}")).unwrap();
+            let fields: HashMap<String, String> = url.query_pairs().into_owned().collect();
+            assert_eq!(
+                fields["line_items[0][price_data][product_data][name]"],
+                "Pokoin order order-123"
+            );
+            assert!(!fields.contains_key("line_items[0][price_data][product_name]"));
+            assert_eq!(
+                fields["line_items[0][price_data][unit_amount]"],
+                charge_cents.to_string()
+            );
+            assert_eq!(fields["line_items[0][price_data][currency]"], "eur");
+            assert_eq!(fields["line_items[0][quantity]"], "1");
+            assert_eq!(fields["metadata[discountPkn]"], discount_pkn.to_string());
+            assert_eq!(fields["metadata[pokoinUid]"], "buyer-123");
+            assert_eq!(fields["metadata[pokoinOrderId]"], "order-123");
+            assert_eq!(
+                fields["success_url"],
+                "https://pokoin.com/orders/order-123?status=success"
+            );
+            assert_eq!(
+                fields["cancel_url"],
+                "https://pokoin.com/cart?status=cancelled"
+            );
+            assert_eq!(fields["expires_at"], "1700001860");
+        }
+    }
 
     #[test]
     fn eur_parcels_preserve_seller_gross_and_wait_for_actual_fees() {
