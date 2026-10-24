@@ -145,6 +145,7 @@ export function mergePrintingFields(existing = {}, incoming = {}) {
     'productType',
     'rarity',
     'name',
+    'langScans',
   ]) {
     const prev = existing?.[key];
     const next = incoming?.[key];

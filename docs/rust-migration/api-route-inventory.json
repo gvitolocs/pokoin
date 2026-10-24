@@ -3112,6 +3112,94 @@
     }
   },
   {
+    "path": "/api/cardtrader-zero-pick",
+    "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/zero_picks.rs::zero_pick; no Node origin)",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "CardTrader Zero pick of one copy: records which copy left the box in Postgres cardtrader_zero_picks and moves inventory (finalize clears the emptied copy's location; swap moves quantity from the picked identical copy to the copy the sale took, both outbox events in one transaction; undo reverses the row; replays are idempotent). PR A bodies (picked counts, issues, reset) and lines with no Pokoin listing stay on Firestore cardtrader_zero_picks/{uid}_{orderId} and never touch stock.",
+    "auth": "Required Firebase bearer token; picks belong to the bearer uid.",
+    "params": {
+      "body": "{ orderId, itemId, lineKey, listingId, allocatedListingId?, quantity 1..999, action: pick|undo, orderCode?, unitCents?, currency? } -> { ok, pick, listings, inventory: removed|swapped|restored|unchanged }; 409 not_identical / insufficient_quantity / allocated_copy_gone. Or PR A's { orderId, lineKey, picked?, issue? } / { orderId, reset: true }."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardtrader-zero-sort",
+    "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_sort; no Node origin)",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Save the seller's CardTrader Zero picking sort (Power Tools sort model: up to four levels such as game.asc, location.desc, cn.asc, product.rarity.asc) and smartLocations on Firestore cardtrader_zero_settings/{uid}. No CardTrader or Power Tools call.",
+    "auth": "Required Firebase bearer token; settings belong to the bearer uid.",
+    "params": {
+      "query": "none",
+      "body": "{ fields: [<= 4 sort values], smartLocations?: bool } or { reset: true }; 400 invalid_sorting_fields / invalid_sorting_field / duplicate_sorting_field. -> { ok, sorting: { fields, defaultFields, smartLocations } }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardtrader-zero-pt-sort",
+    "file": "new (native Rust: pokoin-rust/crates/external/src/routes/cardtrader.rs::zero_pt_sort; no Node origin)",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "User-triggered Apply sort: writes the Pokoin picking order to the seller's Power Tools picking list with PUT user/order/updateSorting (picked articles by updatedAt, then to-pick in the given sequence; the list's sortingFields unchanged), reads it back, and returns before/after so the UI can restore. dryRun reads only. Throttled to one write per 15 s; never retried.",
+    "auth": "Required Firebase bearer token; uses the bearer's stored Power Tools session.",
+    "params": {
+      "query": "none",
+      "body": "{ orderId, listId, sequence: [itemId], dryRun?, expectCount } -> { ok, before, after, requested, applied } or { ok, dryRun, before, items }; 409 pt_sort_mismatch / pt_sort_count_changed / powertools_session_expired / powertools_cardtrader_not_connected / pt_picking_list_missing; 429 pt_sort_throttled; 502 other."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Power Tools"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardtrader-zero-picked",
+    "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/zero_picks.rs::zero_picked; no Node origin)",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "The seller's picked CardTrader Zero copies (cardtrader_zero_picks state picked), newest first, 100 a page, joined with the listing for name, set, number, facets and image. Picked rows are not listings: never stock, never pushed.",
+    "auth": "Required Firebase bearer token; rows of the bearer uid.",
+    "params": {
+      "query": "offset? -> { rows, nextOffset }",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Postgres"
+      ]
+    }
+  },
+  {
     "path": "/api/powertools-connect",
     "file": "powertools-connect.js",
     "methods": [

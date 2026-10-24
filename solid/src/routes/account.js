@@ -17,6 +17,7 @@ const ConnectCardRails = lazy(() => import('../pages/ConnectCardRails.jsx'));
 const Auth = lazy(() => import('../pages/Auth.jsx'));
 const CardTraderZero = lazy(() => import('../pages/CardTraderZero.jsx'));
 const CardTraderOneDay = lazy(() => import('../pages/CardTraderOneDay.jsx'));
+const ZeroPicked = lazy(() => import('../pages/ZeroPicked.jsx'));
 const Messages = lazy(() => import('../pages/Messages.jsx'));
 const Conversation = lazy(() => import('../pages/Messages.jsx').then((m) => ({ default: m.Conversation })));
 const Inventory = lazy(() => import('../pages/Inventory.jsx'));
@@ -39,6 +40,7 @@ export default [
   { path: '/connect/cardrails', component: ConnectCardRails },
   { path: '/auth', component: Auth },
   { path: '/mypokoin/zero', component: CardTraderZero },
+  { path: '/mypokoin/picked', component: ZeroPicked },
   { path: '/mypokoin/1dr', component: CardTraderOneDay },
   { path: '/messages', component: Messages },
   { path: '/messages/:username', component: Conversation },

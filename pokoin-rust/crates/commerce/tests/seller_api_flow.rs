@@ -365,8 +365,9 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
       {"id":"it","identity":{"publicId":"741592"},"condition":"NM","language":"IT"},
       {"id":"en","identity":{"publicId":"741592"},"condition":"NM","language":"EN"},
       {"id":"absent","identity":{"publicId":"2"},"condition":"NM","language":"IT"}]})).await;
-    assert_eq!(quotes["prices"][0]["minEurCents"],19);assert_eq!(quotes["prices"][0]["priceSource"],"sold_exact_30d");
-    assert_eq!(quotes["prices"][1]["minEurCents"],22);assert_eq!(quotes["prices"][1]["priceSource"],"cardtrader_tile_minimum");
+    // Net of CardTrader's commission: €0.19 sold nets €0.1778, €0.22 tile nets €0.2066.
+    assert_eq!(quotes["prices"][0]["minEurCents"],18);assert_eq!(quotes["prices"][0]["priceSource"],"sold_exact_30d");
+    assert_eq!(quotes["prices"][1]["minEurCents"],21);assert_eq!(quotes["prices"][1]["priceSource"],"cardtrader_tile_minimum");
     assert_eq!(quotes["prices"][2]["minEurCents"],Value::Null);
 
     // Unpriced stock is inventory, never a free public sale; retries and restocks preserve it.
@@ -386,6 +387,39 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     let (status,restock)=connector(&app,&token,json!({"action":"stock","listingId":id,"targetQuantity":2})).await;
     assert_eq!(status,StatusCode::OK,"{restock}");assert_eq!(restock["status"],"paused");
     assert!(sqlx::query("UPDATE marketplace_user_listings SET status='active' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.is_err());
+    // Pricing it puts it on sale: it was paused only for want of a price
+    // (the 2026-10-20 Card Rails Riftbound rows). Repeating it changes nothing.
+    let price_it = json!({"action":"update","listingId":id,"item":{"priceEurCents":120}});
+    let (status, priced) = connector(&app, &token, price_it.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{priced}");
+    assert_eq!((priced["changed"].clone(), priced["listing"]["status"].clone()), (json!(true), json!("active")), "{priced}");
+    let (_, repeat) = connector(&app, &token, price_it).await;
+    assert_eq!(repeat["changed"], false, "{repeat}");
+    // A listing the seller paused with a price on it stays paused when repriced.
+    sqlx::query("UPDATE marketplace_user_listings SET status='paused' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.unwrap();
+    let (_, held) = connector(&app, &token, json!({"action":"update","listingId":id,"item":{"priceEurCents":130}})).await;
+    assert_eq!(held["listing"]["status"], "paused", "{held}");
+
+    // --- list idempotency: a crash after the claim, and two attempts at once --
+    // A claimed key with no row (the process died before the insert) is
+    // created by the next attempt, not answered "in doubt" for ever.
+    let grant_uuid = uuid::Uuid::parse_str(&grant_id).unwrap();
+    sqlx::query("insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, 'crashed-claim')")
+        .bind(grant_uuid).execute(&pool).await.unwrap();
+    let copy = |key: &str, cents: i64| json!({"action":"list","idempotencyKey":key,"item":{
+        "identity":{"publicId":"741592","game":"pokemon"},"quantity":1,"priceEurCents":cents,"condition":"NM","language":"IT"}});
+    let (status, recovered) = connector(&app, &token, copy("crashed-claim", 150)).await;
+    assert_eq!((status, recovered["created"].clone()), (StatusCode::OK, json!(true)), "{recovered}");
+    let (_, replay) = connector(&app, &token, copy("crashed-claim", 150)).await;
+    assert_eq!((replay["listingId"].clone(), replay["created"].clone()), (recovered["listingId"].clone(), json!(false)));
+    // Two attempts with one key at once: one row, both answer it.
+    let (first, second) = tokio::join!(connector(&app, &token, copy("race-1", 160)), connector(&app, &token, copy("race-1", 160)));
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["listingId"], second.1["listingId"]);
+    assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where card_id = '741592' and price_pkn = 320").await, 1);
+    assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where card_id = '741592' and price_pkn = 300").await, 1);
+    assert_eq!(count(&pool, "select count(*) from public.seller_api_listing_keys where listing_id is null").await, 0);
 
     // --- update changes only what it carries; repeats change nothing --------
     let update = |item: Value, listing: &uuid::Uuid| {

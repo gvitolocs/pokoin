@@ -1096,9 +1096,70 @@ export function sellerApiGrantAction(token, body) {
   });
 }
 
-/** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
-export function fetchCardTraderZero(token) {
-  return getJson('/api/cardtrader-zero', {
+/**
+ * CardTrader Zero picking list (weekly merged shipment + Zero sales waiting
+ * for the next merge). `powerTools: false` answers without the Power Tools
+ * overlay (fast first paint); `refresh: true` skips the server's 60 s cache.
+ */
+export function fetchCardTraderZero(token, { powerTools = true, refresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (!powerTools) params.set('powertools', '0');
+  if (refresh) params.set('refresh', '1');
+  const query = params.toString();
+  return getJson(`/api/cardtrader-zero${query ? `?${query}` : ''}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/**
+ * Zero picking state, server side. A pick moves inventory:
+ * `{ orderId, itemId, lineKey, listingId, allocatedListingId, quantity, action: 'pick' | 'undo' }`
+ * → `{ ok, pick, listings, inventory }`. Issues: `{ orderId, lineKey, issue }`.
+ */
+export function saveCardTraderZeroPick(token, body) {
+  return getJson('/api/cardtrader-zero-pick', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** `{ fields, smartLocations }` or `{ reset: true }`: the seller's Zero picking sort, saved on Pokoin only. */
+export function saveCardTraderZeroSort(token, body) {
+  return getJson('/api/cardtrader-zero-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Power Tools write (user-triggered only): `{ orderId, listId, sequence, dryRun?, expectCount }`.
+ * Dry run → `{ dryRun, before, items }`; real → `{ before, after, applied }`.
+ */
+export function pushCardTraderZeroPtSort(token, body) {
+  return getJson('/api/cardtrader-zero-pt-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The seller's picked Zero copies (newest first): `{ rows }`. */
+export function fetchCardTraderZeroPicked(token) {
+  return getJson('/api/cardtrader-zero-picked', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2308,6 +2369,9 @@ export function cardFromAutocomplete(row = {}) {
     isMarketAvailable: row.isMarketAvailable === true,
     nationality: row.nationality || expansionNationality(row.set_name || row.set) || '',
     expansionSymbolUrl: row.expansionSymbolUrl || row.expansion_symbol_url || row.defaultSymbolUrl || row.symbolImageUrl || '',
+    // TCGdex scans of this printing per card language (lang-scans.js): the
+    // popup shows the French scan under French, as the desk does.
+    langScans: row.langScans || row.lang_scans || '',
     live,
   };
 }
@@ -3247,6 +3311,16 @@ export async function fetchPriceCheck(items, token, { game: gameId } = {}) {
     ...(gameId ? { game: gameId } : {}),
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+}
+
+/**
+ * One price check per `priceCheckGroups` group, in parallel:
+ * `{ [game]: prices }`, a failed game `null` so only its rows lack a comp.
+ */
+export async function fetchPriceChecksByGame(groups, token) {
+  const answers = await Promise.all((groups || []).map((group) => fetchPriceCheck(group.items, token, { game: group.game })
+    .then((data) => [group.game, data?.prices || {}], () => [group.game, null])));
+  return Object.fromEntries(answers);
 }
 
 export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId, order = '' } = {}) {

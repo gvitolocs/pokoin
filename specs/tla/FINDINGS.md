@@ -465,3 +465,39 @@ marker into `assert(F)` and requires it to fail.
 - **The Rust and JS themselves**: Logika checks Slang ports. Each port follows
   its source (comments name it), states its abstraction at the top, and each
   finding was reproduced by a failing test on the real code.
+
+## Card Rails → CardTrader listing sync (2026-10-20)
+
+[`listing-ct-sync/`](listing-ct-sync/README.md), written against origin/main
+`1259f2c2` after 1,482 Riftbound copies from Card Rails stayed paused and
+never reached CardTrader. TLC 2026.10.06, Java 21 on nezopt.
+
+| Config | Result | Distinct states | Depth |
+| --- | --- | --- | --- |
+| `listing-ct-sync/Model.cfg` | pass | 1,547,148 | 59 |
+| `listing-ct-sync/unquoted.cfg` | pass | 1,548,396 | 60 |
+| `listing-ct-sync/liveness.cfg` | pass (liveness) | 525,264 | 51 |
+| 5 `bugs/*.cfg` | each reports its counterexample on origin/main | | |
+| 1 `design/*.cfg` | reports the accepted residual | | |
+| 4 `witness/*.cfg` | each finds the behaviour reachable | | |
+
+Counts are from 2026-10-21, after the pricer write path (L7, L8) was added
+to the model; the 2026-10-20 model had 200,898 / 201,210 / 68,152 states.
+
+| # | Finding | How | Fix |
+| --- | --- | --- | --- |
+| L1 | A Riftbound (any non-Pokémon) listing is never a push candidate: `PUSH_CANDIDATES_WHERE` filtered Pokémon, and `product_body` only knows Pokémon properties. | TLC (`bugs/other-game-never-pushed.cfg`) | Candidates of every game; other games are created from their blueprint's `editable_properties` (`push::product_body_for_blueprint`); the outbox leaves them to the reconcile (`listing_sync::outbox_pushes`) so there is one create path. |
+| L2 | A copy Card Rails could not quote is listed `paused` at 0, and a later Seller API `update` with a price keeps it paused. The quote read only Pokémon tables, so every Riftbound copy was unquoted. | TLC (`bugs/paused-forever.cfg`) + mapping | `update` puts a listing paused at 0 on sale when it gets a price (`activate_priced`); `sold-prices` quotes every game from the price store (`facet_quote`); `job price-unpriced-listings` prices existing rows. |
+| L3 | An in-doubt CardTrader create that never happened keeps `ct:pending:…` for ever: the listing is never listed and never a candidate again. | TLC (`bugs/stuck-in-doubt-claim.cfg`) | `release_stale_claims`: after a complete export, a claim older than 15 minutes that no exported product and no seller order names goes back to `""`. |
+| L4 | A crash between the Seller API key claim and the insert left the key claimed and unbound; every retry answered `list_in_doubt` for ever. | TLC (`bugs/list-key-in-doubt.cfg`) | The key is bound in the insert's own transaction with a compare-and-set (`BIND_API_KEY_SQL`); a claimed, unbound key is safe to create again. |
+| L5 | A stale claim whose product sold before any export saw it, with the webhook lost, would be left for sale on Pokoin by L3's release. | TLC (while fixing L3) | `SETTLE_SOLD_CLAIMS_SQL` settles it sold out. |
+| L6 | The reconcile read only `pokemon_language` / `mtg_language` / `mtg_foil`: a French foil Riftbound product was EN non-foil, so it matched the wrong listing facets. | mapping | `normalize_product` reads any `*_language`, `*_foil`, `*_first_edition`. |
+| L7 | The push and the outbox edit listed the Pokoin price as the CardTrader ask. The Pokoin price is already net of CardTrader's commission, so CardTrader took it twice (Spiderling: Pokoin 26 PKN listed at €0.13 nets 24 PKN). | user report + TLC (`bugs/double-fee.cfg`, `FeeOnce`) + Verus (`lemma_listing_the_net_loses_the_fee`) | Every write lists the gross-up at the seller's own rate (`FeeRule::gross_cents`, `push::price_body`); `job cardtrader-fee-once` raises the products listed before. |
+| L8 | A reprice while the CardTrader create was in flight was lost: the edit of a `ct:pending:*` listing sends nothing and the link did not re-send, so CardTrader kept the create's old ask. | modelling the pricer write path for L7; TLC checks the fix (`FeeOnce` in `Model.cfg`) | The reconcile re-sent the new ask after `LINK_SQL`; since the grouping of identical copies (2026-10-21) a repriced copy leaves its product after the link and is pushed again at its new price (`group::settle_after_link`). |
+
+Spec correction: the first fixed run broke `NoDuplicateProduct` because time
+could pass the grace while the create request was still being sent; the
+15-minute grace is far longer than the client timeout, so the assumption
+(`LandsInGrace`) now covers a create being sent as well as one in flight.
+Accepted residual: `design/create-lands-after-grace.cfg` (CardTrader applying
+a create more than 15 minutes after it was sent would duplicate it).

@@ -16,8 +16,10 @@
 //! never return a fake success.
 
 pub mod crypto;
+pub mod ct_fees;
 pub mod db;
 pub mod error;
+pub mod facet_store;
 pub mod firebase;
 pub mod geo;
 pub mod powertools;
@@ -43,6 +45,7 @@ pub mod cardtrader_live;
 pub mod cardtrader {
     pub mod async_sync;
     pub mod client;
+    pub mod group;
     pub mod integration;
     pub mod link;
     pub mod push;

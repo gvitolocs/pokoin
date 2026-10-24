@@ -1,14 +1,42 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
-import { inventoryListingHref } from '@market/inventory-listings.js';
-import ScanImage from './ScanImage.jsx';
-import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
-import { formatOrderMoney } from '@market/order-status.js';
-import { pickingOrdersMatch } from '@market/zero-pick.js';
+import { createEffect, createMemo, createSignal, flush, For, lazy, Loading, onSettled, Show, untrack } from 'solid-js';
+import { saveCardTraderZeroPick } from '@market/api.js';
+import {
+  confirmPickEntry,
+  dirtyPickEntries,
+  dropPickEntry,
+  dropUnsentPicks,
+  effectivePick,
+  groupLinesByGame,
+  inventoryNote,
+  lineCopies,
+  lineDone,
+  lineKeyOf,
+  lineMatches,
+  lineQuantity,
+  pickActionBody,
+  pickingOrdersMatch,
+  pickSaveBody,
+  readPickCache,
+  reconcilePickCache,
+  retryableSaveError,
+  setPickEntry,
+  sortByPtOrder,
+  takeLegacyPicked,
+  writePickCache,
+  zeroPickCsv,
+} from '@market/zero-pick.js';
+import { DEFAULT_SORT_FIELDS, sortZeroLines } from '@market/zero-sort.js';
 import '@market/zero-pack.css';
 import { createPointerDrag } from '../lib/pointer-drag.js';
+import { getBearer } from '../stores/auth.js';
 import { DeskPanel } from './Desk.jsx';
+import ZeroList from './zero/ZeroList.jsx';
+import ZeroTile from './zero/ZeroTile.jsx';
 
-const PICKED_KEY = 'pokoin.ctZero.picked.';
+// Loaded on first use: most visits never open a dialog or picking mode.
+const PickingMode = lazy(() => import('./zero/PickingMode.jsx'));
+const IssueDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.IssueDialog })));
+const SwapDialog = lazy(() => import('./zero/ZeroDialogs.jsx').then((m) => ({ default: m.SwapDialog })));
 
 function day(value) {
   const parsed = value ? new Date(value) : null;
@@ -17,139 +45,43 @@ function day(value) {
     : '—';
 }
 
-/** Ticked lines per shipment, this browser only (a picking aid, not shared state). */
-function readPicked(orderId) {
+function storage() {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(PICKED_KEY + orderId) || '[]');
-    return new Set(Array.isArray(raw) ? raw.map(String) : []);
+    return window.localStorage;
   } catch (_) {
-    return new Set();
+    return null;
   }
 }
 
-function writePicked(orderId, picked) {
-  try {
-    if (picked.size) window.localStorage.setItem(PICKED_KEY + orderId, JSON.stringify([...picked]));
-    else window.localStorage.removeItem(PICKED_KEY + orderId);
-  } catch (_) {
-    /* private mode: ticks just don't survive a reload */
-  }
+const NO_STORAGE = { getItem: () => null, setItem() {}, removeItem() {} };
+
+/** Power Tools-style CSV of one shipment; unsaved issues overlay from the local cache. */
+export function downloadCsv(order, cache) {
+  const overlay = cache || readPickCache(storage() || NO_STORAGE, String(order.orderId));
+  const blob = new Blob([zeroPickCsv(order, overlay)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `zero-${String(order.code || order.orderId).replace(/[^\w.-]+/g, '_')}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function facets(item) {
-  return [
-    item.condition,
-    item.language,
-    item.reverse ? 'Reverse' : '',
-    item.firstEdition ? '1st ed.' : '',
-    item.signed ? 'Signed' : '',
-    item.altered ? 'Altered' : '',
-    item.graded ? 'Graded' : '',
-  ].filter(Boolean).join(' ');
-}
-
-function powerToolsLine(pt) {
-  if (!pt) return '';
-  const parts = [];
-  if (pt.pickedQuantity != null) parts.push(`picked ${pt.pickedQuantity}`);
-  else if (pt.orderState) parts.push(pt.orderState);
-  if (pt.bin) parts.push(`bin ${pt.bin}`);
-  return parts.length ? `Power Tools: ${parts.join(' · ')}` : '';
-}
-
-function lineImage(item) {
-  return homepageDerivativeUrl(ownCatalogImage(
-    { id: item?.cardId, name: item?.name || '' },
-    preferFullImage(item?.imageUrl || ''),
-  ));
-}
-
-/**
- * One pack line. Without `onMove` it is a
- * read-only line (the "waiting for the next merge" list): no drag, no button.
- */
+/** A read-only tile (the "waiting for the next merge" list). */
 export function ZeroLine(props) {
-  const item = () => props.item;
-  const location = () => item().location || item().powerTools?.location || '';
-  const fromPowerTools = () => !item().location && Boolean(item().powerTools?.location);
-  const where = () => [item().expansion, item().collectorNumber ? `#${item().collectorNumber}` : ''].filter(Boolean).join(' · ');
-  const pt = () => powerToolsLine(item().powerTools);
-  const ptPlace = () => (Number(item().powerTools?.position) > 0 ? `PT ${item().powerTools.position}` : '');
-  const price = () => (item().lineCents != null ? formatOrderMoney(item().lineCents, item().currency) : '');
-  const src = () => lineImage(item());
-  const interactive = () => Boolean(props.onMove);
-  return (
-    <article
-      class={['zero-card', { 'is-picked': Boolean(props.picked), 'is-draggable': interactive() }]}
-      draggable="false"
-      onPointerDown={(event) => {
-        if (!interactive()) return;
-        props.onPointerDown?.(event, {
-          itemId: item().itemId,
-          image: src(),
-          label: item().name || '',
-        });
-      }}
-      onPointerMove={props.onPointerMove}
-      onPointerUp={props.onPointerUp}
-      onPointerCancel={props.onPointerCancel}
-    >
-      <div
-        class="zero-card-art"
-        onClick={() => {
-          if (!interactive() || props.consumeClick?.()) return;
-          props.onMove(item().itemId, !props.picked);
-        }}
-      >
-        <ScanImage
-          src={src()}
-          label={item().name}
-          letterClass="zero-card-fallback"
-          width="126"
-          height="176"
-        />
-        <span class={['zero-loc', { 'is-empty': !location() }]} title={fromPowerTools() ? 'Location from Power Tools' : 'MyPokoin location'}>
-          {location() || 'No location'}
-          <Show when={fromPowerTools()}><small> PT</small></Show>
-        </span>
-        <Show when={props.place != null}>
-          <span class="zero-place" title="Place in this pack, by location">{props.place}</span>
-        </Show>
-        <Show when={item().quantity > 1}><span class="zero-qty">×{item().quantity}</span></Show>
-        <Show when={props.picked}>
-          <span class="zero-card-check" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="36" height="36">
-              <path d="M5 12.5 10 17l9-10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </span>
-        </Show>
-      </div>
-      <div class="zero-card-body">
-        <strong class="thread-title">
-          <Show when={item().cardId} fallback={item().name}>
-            <a href={inventoryListingHref(item())} draggable="false">{item().name}</a>
-          </Show>
-        </strong>
-        <Show when={where()}><span class="thread-meta">{where()}</span></Show>
-        <Show when={facets(item())}><span class="thread-meta">{facets(item())}</span></Show>
-        <Show when={price()}><span class="zero-card-price">{price()}</span></Show>
-        <Show when={ptPlace()}><span class="thread-meta">{ptPlace()}</span></Show>
-        <Show when={pt()}><span class="zero-pt">{pt()}</span></Show>
-      </div>
-      <Show when={interactive()}>
-        <button
-          class="btn ghost zero-move"
-          type="button"
-          draggable="false"
-          onClick={() => props.onMove(item().itemId, !props.picked)}
-        >
-          <Show when={props.picked} fallback={<><span class="zero-move-full">Mark picked</span><span class="zero-move-short">Picked</span></>}>
-            Undo
-          </Show>
-        </button>
-      </Show>
-    </article>
-  );
+  return <ZeroTile item={props.item} horizontal={props.horizontal} />;
+}
+
+const PICK_ERRORS = {
+  not_identical: 'That copy is not identical to the sold one.',
+  insufficient_quantity: 'That box has fewer copies than this line.',
+  allocated_copy_gone: 'The sold copy is no longer in your inventory, so this pick cannot be undone.',
+};
+
+function pickErrorMessage(err) {
+  return PICK_ERRORS[err?.body?.code] || err?.message || 'the server refused this change.';
 }
 
 function DropRow(props) {
@@ -160,60 +92,293 @@ function DropRow(props) {
       ref={(element) => props.setZone?.(props.zone, element)}
     >
       <DeskPanel flush title={props.title} extra={<span class="zero-progress">{props.hint}</span>}>
-        <div class="zero-grid">
-          <For
-            each={props.items}
-            fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing left to pick.' : 'Drag a card down, or click Mark picked.'}</p>}
-          >
-            {(item) => (
-              <ZeroLine
-                item={item}
-                place={props.places.get(item.itemId)}
-                picked={props.picked}
-                onMove={props.onMove}
-                onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
-                onPointerMove={props.onPointerMove}
-                onPointerUp={props.onPointerUp}
-                onPointerCancel={props.onPointerCancel}
-                consumeClick={props.consumeClick}
-              />
-            )}
-          </For>
-        </div>
+        <Show
+          when={props.groups.length}
+          fallback={<p class="zero-drop-empty">{props.picked ? 'Nothing picked yet. Drag a card down, or click Pick.' : 'Nothing left to pick.'}</p>}
+        >
+          <div class={['zero-grid', { 'is-horizontal': props.horizontal }]}>
+            <For each={props.groups}>
+              {(group) => (
+                <>
+                  <h3 class="zero-game-head">
+                    {group.label}
+                    <span>{group.cards} card{group.cards === 1 ? '' : 's'}</span>
+                  </h3>
+                  <For each={group.lines}>
+                    {(entry) => (
+                      <ZeroTile
+                        item={entry.line}
+                        horizontal={props.horizontal}
+                        smartLocations={props.smartLocations}
+                        place={props.places.get(lineKeyOf(entry.line))}
+                        pick={props.pickOf(entry.line)}
+                        done={props.isDone(entry.line)}
+                        busy={props.isBusy(entry.line)}
+                        match={props.matches.has(lineKeyOf(entry.line))}
+                        current={props.current === lineKeyOf(entry.line)}
+                        note={props.notes?.[lineKeyOf(entry.line)]}
+                        error={props.errors?.[lineKeyOf(entry.line)]}
+                        onPick={props.onPick}
+                        onUndo={props.onUndo}
+                        onSwap={props.onSwap}
+                        onIssue={props.onIssue}
+                        onClearIssue={props.onClearIssue}
+                        onPointerDown={(event, payload) => props.onPointerDown?.(event, payload, props.zone)}
+                        onPointerMove={props.onPointerMove}
+                        onPointerUp={props.onPointerUp}
+                        onPointerCancel={props.onPointerCancel}
+                      />
+                    )}
+                  </For>
+                </>
+              )}
+            </For>
+          </div>
+        </Show>
       </DeskPanel>
     </div>
   );
 }
 
-/** One weekly Zero shipment in picking order, with Pick / Picked drop rows. */
+/**
+ * Lines under game headers while the sort starts with Game (one header per
+ * game is then contiguous); any other sort is one "Picking order" group so
+ * headers never reorder the lines. "Sort by PT order" is one PT group.
+ */
+export function groupsFor(lines, mode) {
+  if (mode === 'game') return groupLinesByGame(lines);
+  return lines.length ? [{
+    game: mode,
+    label: mode === 'pt' ? 'Power Tools order' : 'Picking order',
+    lines: lines.map((line, index) => ({ line, place: index + 1 })),
+    cards: lines.reduce((sum, line) => sum + lineQuantity(line), 0),
+  }] : [];
+}
+
+/** Tiles of the read-only "waiting for the next merge" list, in the chosen sort and view. */
+export function PendingList(props) {
+  const lines = createMemo(() => sortZeroLines(props.items || [], props.sortFields || DEFAULT_SORT_FIELDS));
+  const groups = () => groupsFor(lines(), String(props.sortFields?.[0] || '').startsWith('game.') ? 'game' : 'sorted');
+  const places = createMemo(() => new Map(lines().map((line, index) => [lineKeyOf(line), index + 1])));
+  const readPick = (line) => ({ picked: Number(line?.picked) || 0, issue: line?.issue || null });
+  return (
+    <Show
+      when={props.view === 'list'}
+      fallback={(
+        <div class={['zero-grid', { 'is-horizontal': props.view === 'images-horizontal' }]}>
+          <For each={lines()}>{(item) => <ZeroLine item={item} horizontal={props.view === 'images-horizontal'} />}</For>
+        </div>
+      )}
+    >
+      <ZeroList groups={groups()} places={places()} pickOf={readPick} isDone={() => false} readOnly />
+    </Show>
+  );
+}
+
+/**
+ * One weekly Zero shipment in the seller's sort. A pick moves inventory
+ * (POST /api/cardtrader-zero-pick with action pick / undo): it is sent once,
+ * with the button disabled until the answer, and never replayed from the
+ * offline cache. Issues keep the cache: unsaved ones retry on load / online.
+ */
 export function ShipmentPanel(props) {
   const order = () => props.order;
-  const [picked, setPicked] = createSignal(readPicked(props.order.orderId));
-  const units = () => order().items.reduce((sum, item) => sum + item.quantity, 0);
-  const places = createMemo(() => {
-    const map = new Map();
-    order().items.forEach((item, index) => map.set(item.itemId, index + 1));
-    return map;
-  });
-  const open = () => order().items.filter((item) => !picked().has(item.itemId));
-  const doneItems = () => order().items.filter((item) => picked().has(item.itemId));
-  const match = () => (props.powerTools?.ok ? pickingOrdersMatch(order().items) : { comparable: false, equal: false });
-  const hot = (zone) => pointer.view().phase === 'dragging' && pointer.view().over === zone;
+  const orderId = () => String(order().orderId);
+  const store = () => storage() || NO_STORAGE;
 
-  function move(itemId, toPicked) {
-    const next = new Set(picked());
-    if (toPicked) next.add(itemId);
-    else next.delete(itemId);
-    writePicked(order().orderId, next);
-    setPicked(next);
+  let current = untrack(() => {
+    const items = order().items;
+    const cache = dropUnsentPicks(reconcilePickCache(readPickCache(store(), orderId()), items), items);
+    takeLegacyPicked(store(), orderId()); // old per-browser ticks never move inventory: dropped
+    writePickCache(store(), orderId(), cache);
+    return cache;
+  });
+  const [cache, setCache] = createSignal(current);
+  const [errors, setErrors] = createSignal({});
+  const [notes, setNotes] = createSignal({});
+  const [busyKeys, setBusyKeys] = createSignal([]);
+  const inFlight = new Set();
+  const pickFlight = new Set();
+  const setKeyed = (setter) => (lineKey, message) => setter((all) => {
+    const next = { ...all };
+    if (message) next[lineKey] = message;
+    else delete next[lineKey];
+    return next;
+  });
+  const setError = setKeyed(setErrors);
+  const setNote = setKeyed(setNotes);
+
+  function commit(next) {
+    current = next;
+    setCache(next);
+    writePickCache(store(), untrack(orderId), next);
+  }
+
+  // Fresh server data: server wins for every saved line.
+  createEffect(
+    () => order().items,
+    (items) => commit(reconcilePickCache(current, items)),
+    { defer: true },
+  );
+
+  /** Saves an issue change (the only cached, retried write). */
+  async function send(lineKey) {
+    if (props.preview || inFlight.has(lineKey)) return false;
+    const entry = current[lineKey];
+    if (!entry?.dirty) return true;
+    const sent = { picked: entry.picked, issue: entry.issue };
+    const body = pickSaveBody(untrack(orderId), lineKey, entry, ['issue']);
+    inFlight.add(lineKey);
+    try {
+      const token = await getBearer();
+      const data = await saveCardTraderZeroPick(token, body);
+      commit(confirmPickEntry(current, lineKey, sent, data?.line));
+      setError(lineKey, '');
+      return true;
+    } catch (err) {
+      if (retryableSaveError(err)) return false; // stays dirty: retried on the next load or when back online
+      if (current[lineKey] === entry) commit(dropPickEntry(current, lineKey));
+      setError(lineKey, `Not saved: ${err.message || 'the server refused this change.'}`);
+      return true;
+    } finally {
+      inFlight.delete(lineKey);
+      if (current[lineKey]?.dirty && current[lineKey] !== entry && navigator.onLine !== false) send(lineKey);
+    }
+  }
+
+  async function flushDirty() {
+    for (const entry of dirtyPickEntries(current)) {
+      if (!(await send(entry.lineKey))) break;
+    }
+  }
+
+  onSettled(() => {
+    flushDirty();
+    window.addEventListener('online', flushDirty);
+    return () => window.removeEventListener('online', flushDirty);
+  });
+
+  const pickOf = (line) => effectivePick(line, cache());
+  const isDone = (line) => lineDone(line, cache());
+  const isBusy = (line) => busyKeys().includes(lineKeyOf(line));
+
+  function setIssue(line, issue) {
+    commit(setPickEntry(current, line, { issue }));
+    send(lineKeyOf(line));
+  }
+
+  /**
+   * Pick (or undo) a whole line. `listingId` is the copy physically taken:
+   * empty = the line's own listing; another identical copy = a swap.
+   */
+  async function runPick(line, action, listingId = '') {
+    const key = lineKeyOf(line);
+    if (pickFlight.has(key)) return; // a double click never sends twice
+    const body = pickActionBody(untrack(order), line, action, listingId);
+    const confirm = (inventory) => {
+      const entry = effectivePick(line, current);
+      commit({ ...current, [key]: { picked: action === 'undo' ? 0 : lineQuantity(line), issue: entry.issue, dirty: false } });
+      setNote(key, inventoryNote({ inventory, action, listingId: body.listingId }, lineCopies(line)));
+      setError(key, '');
+    };
+    if (props.preview) {
+      const swap = body.listingId !== body.allocatedListingId;
+      confirm(action === 'undo' ? 'restored' : swap ? 'swapped' : 'removed');
+      return;
+    }
+    pickFlight.add(key);
+    setBusyKeys((keys) => [...keys, key]);
+    try {
+      const token = await getBearer();
+      const data = await saveCardTraderZeroPick(token, body);
+      confirm(data?.inventory || (action === 'undo' ? 'restored' : 'removed'));
+    } catch (err) {
+      setError(key, `Not saved: ${pickErrorMessage(err)}`);
+    } finally {
+      pickFlight.delete(key);
+      setBusyKeys((keys) => keys.filter((other) => other !== key));
+    }
+  }
+
+  const onPick = (line, listingId = '') => runPick(line, 'pick', listingId);
+  const onUndo = (line) => runPick(line, 'undo');
+  const setPicked = (line, picked) => {
+    if (picked > 0 && !isDone(line)) onPick(line);
+    else if (picked === 0 && pickOf(line).picked) onUndo(line);
+  };
+
+  /* ---- order ---- */
+  const [ptSort, setPtSort] = createSignal(false);
+  const [issueKey, setIssueKey] = createSignal('');
+  const [swapKey, setSwapKey] = createSignal('');
+  // The print list exists only while printing: on screen it doubled the DOM.
+  const [printing, setPrinting] = createSignal(false);
+  const startPrint = () => { setPrinting(true); flush(); };
+  const endPrint = () => setPrinting(false);
+  onSettled(() => {
+    window.addEventListener('beforeprint', startPrint);
+    window.addEventListener('afterprint', endPrint);
+    return () => {
+      window.removeEventListener('beforeprint', startPrint);
+      window.removeEventListener('afterprint', endPrint);
+    };
+  });
+
+  const match = createMemo(() => pickingOrdersMatch(order().items));
+  const ptComparable = () => order().ptPicking?.comparable === true;
+  const ptSortTitle = () => {
+    if (ptComparable()) return 'Reorder lines by their Power Tools position';
+    if (!order().ptPicking) return 'No Power Tools picking list for this shipment';
+    return 'Some cards have no Power Tools position, so the Power Tools order is incomplete';
+  };
+  const sortFields = () => props.sortFields || DEFAULT_SORT_FIELDS;
+  const sorted = createMemo(() => sortZeroLines(order().items, sortFields()));
+  const byPt = () => ptSort() && ptComparable();
+  const lines = createMemo(() => (byPt() ? sortByPtOrder(sorted()) : sorted()));
+  const groupMode = () => (byPt() ? 'pt' : String(sortFields()[0] || '').startsWith('game.') ? 'game' : 'sorted');
+  const places = createMemo(() => new Map(lines().map((line, index) => [lineKeyOf(line), index + 1])));
+  const lineByKey = (key) => order().items.find((line) => lineKeyOf(line) === key);
+  const openLines = () => lines().filter((line) => !isDone(line));
+  const doneLines = () => lines().filter((line) => isDone(line));
+  const allGroups = () => groupsFor(lines(), groupMode());
+  const openGroups = () => groupsFor(openLines(), groupMode());
+  const doneGroups = () => groupsFor(doneLines(), groupMode());
+  const units = () => order().items.reduce((sum, line) => sum + lineQuantity(line), 0);
+  const pickedUnits = () => order().items.reduce((sum, line) => sum + pickOf(line).picked, 0);
+  const issues = () => order().items.filter((line) => pickOf(line).issue).length;
+  const ptBin = () => order().ptPicking?.bin || order().items.find((line) => line.powerTools?.bin)?.powerTools.bin || '';
+  const view = () => props.view || 'images-vertical';
+
+  /* ---- search: highlight, not filter ---- */
+  let root;
+  const [query, setQuery] = createSignal('');
+  const [hit, setHit] = createSignal(0);
+  const matchKeys = createMemo(() => lines().filter((line) => lineMatches(line, query())).map(lineKeyOf));
+  const matchSet = createMemo(() => new Set(matchKeys()));
+  const currentKey = () => (matchKeys().length ? matchKeys()[Math.min(hit(), matchKeys().length - 1)] : '');
+
+  function reveal(key) {
+    if (!key || !root) return;
+    const nodes = [...root.querySelectorAll('[data-zero-line]')].filter((node) => node.dataset.zeroLine === key);
+    nodes.find((node) => node.offsetParent !== null)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function step(delta) {
+    const count = matchKeys().length;
+    if (!count) return;
+    const next = (Math.min(hit(), count - 1) + delta + count) % count;
+    setHit(next);
+    reveal(matchKeys()[next]);
   }
 
   const pointer = createPointerDrag({
     onMove(action) {
-      if (!action?.payload?.itemId || action.from === action.to) return;
-      move(action.payload.itemId, action.to === 'picked');
+      if (!action?.payload?.lineKey || action.from === action.to) return;
+      const line = lineByKey(action.payload.lineKey);
+      if (line) setPicked(line, action.to === 'picked' ? lineQuantity(line) : 0);
     },
   });
+  const hot = (zone) => pointer.view().phase === 'dragging' && pointer.view().over === zone;
 
   const title = () => [
     `Shipment ${order().code || order().orderId}`,
@@ -221,53 +386,176 @@ export function ShipmentPanel(props) {
     order().paidAt ? `merged ${day(order().paidAt)}` : '',
   ].filter(Boolean).join(' · ');
 
+  const rowProps = {
+    get places() { return places(); },
+    get matches() { return matchSet(); },
+    get current() { return currentKey(); },
+    get errors() { return errors(); },
+    get notes() { return notes(); },
+    get smartLocations() { return props.smartLocations; },
+    pickOf,
+    isDone,
+    isBusy,
+    onPick,
+    onUndo,
+    onSwap: (line) => setSwapKey(lineKeyOf(line)),
+    onIssue: (line) => setIssueKey(lineKeyOf(line)),
+    onClearIssue: (line) => setIssue(line, null),
+  };
+
+  const dropRows = (horizontal) => (
+    <>
+      <div class="zero-cards-view">
+        <DropRow
+          {...rowProps}
+          title="To pick"
+          hint={`${openLines().length} still to pick`}
+          groups={openGroups()}
+          horizontal={horizontal}
+          picked={false}
+          zone="pick"
+          over={hot('pick')}
+          setZone={pointer.setZone}
+          onPointerDown={pointer.onPointerDown}
+          onPointerMove={pointer.onPointerMove}
+          onPointerUp={pointer.onPointerUp}
+          onPointerCancel={pointer.onPointerCancel}
+        />
+        <DropRow
+          {...rowProps}
+          title="Picked"
+          hint={`${doneLines().length} picked`}
+          groups={doneGroups()}
+          horizontal={horizontal}
+          picked
+          zone="picked"
+          over={hot('picked')}
+          setZone={pointer.setZone}
+          onPointerDown={pointer.onPointerDown}
+          onPointerMove={pointer.onPointerMove}
+          onPointerUp={pointer.onPointerUp}
+          onPointerCancel={pointer.onPointerCancel}
+        />
+      </div>
+      <Show when={printing()}><ZeroList {...rowProps} groups={allGroups()} printOnly /></Show>
+    </>
+  );
+
   return (
-    <div class="zero-pack">
-      <p class="zero-pack-title">
-        {title()}
-        <span>{picked().size}/{order().items.length} picked · {units()} card{units() === 1 ? '' : 's'}</span>
-      </p>
+    <div class="zero-pack" ref={root}>
+      <div class="zero-pack-title">
+        <span>{title()}</span>
+        <span>
+          {doneLines().length}/{order().items.length} lines picked · {pickedUnits()}/{units()} card{units() === 1 ? '' : 's'}
+          <Show when={issues()}><strong class="zero-issue-count"> · {issues()} issue{issues() === 1 ? '' : 's'}</strong></Show>
+        </span>
+      </div>
+
+      <Show when={order().ptPicking || ptBin()}>
+        <p class="zero-pt-list">
+          <Show when={order().ptPicking?.listName}><span>Power Tools list: <strong>{order().ptPicking.listName}</strong></span></Show>
+          <Show when={order().ptPicking?.ctZeroClosed}><span class="zero-tag">Ct Zero closed</span></Show>
+          <Show when={ptBin()}><span>PT bin <strong>{ptBin()}</strong></span></Show>
+        </p>
+      </Show>
+
       <Show when={props.powerTools?.ok && order().items.length}>
         <p class={match().equal ? 'desk-ok' : 'ct-token-hint is-warn'} role="status">
           {match().equal
-            ? 'Your location order matches the Power Tools position order.'
+            ? 'Your picking order matches the Power Tools order.'
             : match().comparable
-              ? 'Your location order differs from the Power Tools position order.'
-              : 'Power Tools is connected, but this pack is missing a position on some cards.'}
+              ? `${match().mismatches} card${match().mismatches === 1 ? ' is' : 's are'} in a different place than in Power Tools.`
+              : 'Power Tools is connected, but some cards in this pack have no Power Tools position, so the orders cannot be compared.'}
         </p>
       </Show>
-      <DropRow
-        title="Pick"
-        hint={`${open().length} still to pick · location order`}
-        items={open()}
-        picked={false}
-        zone="pick"
-        over={hot('pick')}
-        places={places()}
-        onMove={move}
-        setZone={pointer.setZone}
-        onPointerDown={pointer.onPointerDown}
-        onPointerMove={pointer.onPointerMove}
-        onPointerUp={pointer.onPointerUp}
-        onPointerCancel={pointer.onPointerCancel}
-        consumeClick={pointer.consumeClick}
-      />
-      <DropRow
-        title="Picked"
-        hint={`${doneItems().length} picked`}
-        items={doneItems()}
-        picked
-        zone="picked"
-        over={hot('picked')}
-        places={places()}
-        onMove={move}
-        setZone={pointer.setZone}
-        onPointerDown={pointer.onPointerDown}
-        onPointerMove={pointer.onPointerMove}
-        onPointerUp={pointer.onPointerUp}
-        onPointerCancel={pointer.onPointerCancel}
-        consumeClick={pointer.consumeClick}
-      />
+
+      <div class="zero-toolbar">
+        <button
+          type="button"
+          class={['inv-chip', { on: byPt() }]}
+          aria-pressed={byPt()}
+          disabled={!ptComparable()}
+          title={ptSortTitle()}
+          onClick={() => setPtSort((on) => !on)}
+        >
+          Sort by PT order
+        </button>
+        <button class="btn ghost" type="button" onClick={() => { startPrint(); window.print(); }}>Print</button>
+        <div class="zero-search">
+          <label class="ct-token-field">
+            <span class="sr-only">Find a card in this shipment</span>
+            <input
+              type="search"
+              placeholder="Find: name, set, number, location"
+              value={query()}
+              onInput={(event) => {
+                setQuery(event.target.value);
+                setHit(0);
+                window.requestAnimationFrame(() => reveal(currentKey()));
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                step(event.shiftKey ? -1 : 1);
+              }}
+            />
+          </label>
+          <Show when={query().trim()}>
+            <span class="zero-search-count" aria-live="polite">
+              {matchKeys().length ? `${Math.min(hit(), matchKeys().length - 1) + 1} of ${matchKeys().length}` : 'No match'}
+            </span>
+            <button class="btn ghost" type="button" onClick={() => step(-1)} disabled={!matchKeys().length}>Prev</button>
+            <button class="btn ghost" type="button" onClick={() => step(1)} disabled={!matchKeys().length}>Next</button>
+          </Show>
+        </div>
+      </div>
+
+      <Show when={view() === 'images-vertical'}>{dropRows(false)}</Show>
+      <Show when={view() === 'images-horizontal'}>{dropRows(true)}</Show>
+      <Show when={view() === 'list'}>
+        <DeskPanel flush title="Picking list" extra={<span class="zero-progress">{openLines().length} still to pick</span>}>
+          <ZeroList {...rowProps} groups={allGroups()} />
+        </DeskPanel>
+      </Show>
+      <Show when={view() === 'single'}>
+        <Loading fallback={null}>
+        <PickingMode
+          inline
+          lines={lines()}
+          pickOf={pickOf}
+          isDone={isDone}
+          isBusy={isBusy}
+          noteOf={(line) => notes()[lineKeyOf(line)]}
+          errorOf={(line) => errors()[lineKeyOf(line)]}
+          onSetPicked={setPicked}
+          onClose={() => {}}
+        />
+        </Loading>
+        <Show when={printing()}><ZeroList {...rowProps} groups={allGroups()} printOnly /></Show>
+      </Show>
+
+      <Show when={issueKey() && lineByKey(issueKey())}>
+        {(line) => (
+          <Loading fallback={null}><IssueDialog
+            line={line()}
+            issue={pickOf(line()).issue}
+            onSave={(issue) => { setIssue(line(), issue); setIssueKey(''); }}
+            onClear={() => { setIssue(line(), null); setIssueKey(''); }}
+            onClose={() => setIssueKey('')}
+          /></Loading>
+        )}
+      </Show>
+      <Show when={swapKey() && lineByKey(swapKey())}>
+        {(line) => (
+          <Loading fallback={null}><SwapDialog
+            line={line()}
+            copies={lineCopies(line())}
+            busy={isBusy(line())}
+            onChoose={(listingId) => { setSwapKey(''); onPick(line(), listingId); }}
+            onClose={() => setSwapKey('')}
+          /></Loading>
+        )}
+      </Show>
     </div>
   );
 }

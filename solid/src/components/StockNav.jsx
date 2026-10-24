@@ -6,6 +6,7 @@ import { getBearer, signedIn } from '../stores/auth.js';
 const TABS = [
   { to: '/mypokoin', label: 'Listings', end: true, icon: 'M4 5h7v6H4zM13 5h7v6h-7zM4 13h7v6H4zM13 13h7v6h-7z' },
   { to: '/mypokoin/collection', label: 'Collection', end: true, icon: 'M6 4h9a2 2 0 0 1 2 2v14l-6.5-2.8L4 20V6a2 2 0 0 1 2-2z' },
+  { to: '/mypokoin/picked', label: 'Picked', end: true, icon: 'M4 7h16v12H4zM9 12.5l2 2 4-4.5M8 7V4h8v3' },
   { to: '/mypokoin/import', label: 'Export', end: true, icon: 'M12 4v10M8 10l4 4 4-4M5 19h14' },
   { to: '/mypokoin/spreadsheet', label: 'Spreadsheet', end: true, icon: 'M5 4h14v16H5zM5 9h14M5 14h14M10 4v16' },
   { to: '/sales', label: 'Sold history', icon: 'M5 12.5 9.5 17 19 7' },

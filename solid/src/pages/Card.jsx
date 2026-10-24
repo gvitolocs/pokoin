@@ -99,7 +99,7 @@ import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
 import { sellLanguages } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
-import { conditionChipSrc, conditionLabel, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
+import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
@@ -131,7 +131,7 @@ import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
-import { splitVaultOffers } from '@market/vault.js';
+import { isVaultOffer, splitVaultOffers, VAULT_DEAL_LINE } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
 import SoldPriceGraph from '../components/desk/SoldPriceGraph.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
@@ -173,19 +173,6 @@ function offerCopies(rows) {
  * React page resets by hand. The theme and the Poko desk card are cleared only
  * when the route itself unmounts, so a neighbour step never flashes untinted.
  */
-
-const LANGUAGE_NAMES = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['en'], { type: 'language' }) : null;
-const LANGUAGE_TAGS = { JP: 'ja', ZH: 'zh-Hans', ZHT: 'zh-Hant', KO: 'ko' };
-
-/** Deal language code (EN, JP, ZHT…) → "English", "Japanese", "Chinese (Traditional)…". */
-function languageName(code) {
-  const raw = String(code || '').toUpperCase();
-  try {
-    return LANGUAGE_NAMES?.of(LANGUAGE_TAGS[raw] || raw.toLowerCase()) || raw;
-  } catch {
-    return raw;
-  }
-}
 
 export default function Card() {
   const params = useParams();
@@ -1209,17 +1196,21 @@ function CardDesk(props) {
                     </Show>
                   </div>
                   <Show when={offersReady() && canBuy()}>
-                    <p class="deal-sold-by">
-                      Sold by{' '}
-                      <Show
-                        when={sellerHref(dealPick(), lang)}
-                        fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
-                      >
-                        <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
-                      </Show>
-                    </p>
-                    {/* The chips are pictures: say the grade and language in words ("Poor · French"). */}
-                    <p class="deal-what">{conditionLabel(dealPick()?.condition)} · {languageName(shownLang())}</p>
+                    {/* The Vault is Pokoin's own stock: say where it is, not the admin account's name. */}
+                    <Show
+                      when={!isVaultOffer(dealPick())}
+                      fallback={<p class="deal-sold-by is-vault">{VAULT_DEAL_LINE}</p>}
+                    >
+                      <p class="deal-sold-by">
+                        Sold by{' '}
+                        <Show
+                          when={sellerHref(dealPick(), lang)}
+                          fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
+                        >
+                          <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
+                        </Show>
+                      </p>
+                    </Show>
                   </Show>
                   <div class="deal-facets">
                     <div class="deal-facet-row" role="radiogroup" aria-label="Condition">

@@ -121,8 +121,8 @@ fn response(result: Result<Value, ApiError>, private: bool) -> Response {
         }
         Err(e) => {
             let mut v = json!({"error":e.message});
-            if e.code.as_deref() == Some("insufficient_quantity") {
-                v["code"] = json!("insufficient_quantity");
+            if let Some(code @ ("insufficient_quantity" | "GAME_CARD_MISMATCH")) = e.code.as_deref() {
+                v["code"] = json!(code);
             }
             (e.status, Json(v)).into_response()
         }
@@ -161,6 +161,118 @@ async fn seller_card_ids(
 ) -> Result<Option<Vec<String>>, ApiError> {
     let ids=sqlx::query_scalar::<_,String>("select distinct card_id from public.marketplace_user_listings where seller_uid = $1 and nullif(card_id, '') is not null").bind(seller).fetch_all(state.read_db()).await?;
     card_ids_in_catalog(state, &ids, game).await
+}
+/// Another catalog that holds a card id, with that card's name there.
+#[derive(Debug, Clone, PartialEq)]
+struct CatalogHolder {
+    game: &'static str,
+    name: String,
+}
+fn name_key(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+/// The game a new listing is stored under, from the game the client claimed,
+/// whether that game's catalog holds the card (`None`: it could not be
+/// checked), and the other catalogs that hold the same id.
+///
+/// The claim stands when its catalog holds the card, cannot be checked, or no
+/// catalog has the id at all (a lagging catalog must not block a listing).
+/// Otherwise the one other catalog that has the id under the listing's name
+/// wins. 200000000+ synthetic ids repeat across Cardmarket-only games, so the
+/// id alone never picks one, and a card no catalog vouches for is refused.
+fn pick_listing_game(
+    claimed: &str,
+    claimed_holds: Option<bool>,
+    others: &[CatalogHolder],
+    card: &str,
+    name: &str,
+) -> Result<String, ApiError> {
+    if claimed_holds != Some(false) || others.is_empty() {
+        return Ok(claimed.to_string());
+    }
+    let key = name_key(name);
+    let named: Vec<&CatalogHolder> = others
+        .iter()
+        .filter(|holder| key.is_empty() || name_key(&holder.name) == key)
+        .collect();
+    if let [only] = named.as_slice() {
+        return Ok(only.game.to_string());
+    }
+    Err(ApiError::bad_request(format!(
+        "Card {card} is not in the {claimed} catalog. Send the card's marketplaceGame."
+    ))
+    .with_code("GAME_CARD_MISMATCH"))
+}
+/// Every other mounted catalog that holds `id`, Pokémon first and then in
+/// `SATELLITE_GAMES` order; `None` when the probes did not finish in time.
+async fn other_catalog_holders(
+    state: &DomainState,
+    id: i64,
+    claimed: &str,
+) -> Option<Vec<CatalogHolder>> {
+    let games: Vec<&'static str> = std::iter::once(crate::game::POKEMON)
+        .chain(crate::game::SATELLITE_GAMES.iter().map(|(game, _)| *game))
+        .filter(|game| *game != claimed)
+        .collect();
+    let mut probes = tokio::task::JoinSet::new();
+    for game in games.iter().copied() {
+        let Some(pools) = state.game_pools(game).await else { continue };
+        probes.spawn(async move {
+            sqlx::query_scalar::<_, String>("select coalesce(name, '') from public.marketplace_search_candidates where card_id = $1 limit 1")
+                .bind(id)
+                .fetch_optional(&pools.read)
+                .await
+                .ok()
+                .flatten()
+                .map(|name| CatalogHolder { game, name })
+        });
+    }
+    let collect = async {
+        let mut hits = vec![];
+        while let Some(found) = probes.join_next().await {
+            if let Ok(Some(hit)) = found {
+                hits.push(hit);
+            }
+        }
+        hits
+    };
+    let mut hits = tokio::time::timeout(std::time::Duration::from_millis(1500), collect)
+        .await
+        .ok()?;
+    hits.sort_by_key(|hit| games.iter().position(|game| *game == hit.game));
+    Some(hits)
+}
+/// The claimed game, checked against the catalogs: a client's tag is a claim.
+/// Card Rails sent 41 Battle Spirits Saga cards tagged `pokemon` on
+/// 2026-10-16, and the stock board then priced and linked them as Pokémon.
+async fn listing_game(
+    state: &DomainState,
+    card: &str,
+    claimed: &str,
+    name: &str,
+) -> Result<String, ApiError> {
+    let Ok(id) = card.trim().parse::<i64>() else {
+        return Ok(claimed.to_string());
+    };
+    let claimed_holds = match card_ids_in_catalog(state, &[card.to_string()], claimed).await {
+        Ok(Some(ids)) => Some(!ids.is_empty()),
+        Ok(None) | Err(_) => None,
+    };
+    if claimed_holds != Some(false) {
+        return Ok(claimed.to_string());
+    }
+    let Some(others) = other_catalog_holders(state, id, claimed).await else {
+        tracing::warn!(card, claimed, "listing game check timed out; keeping the claimed game");
+        return Ok(claimed.to_string());
+    };
+    let game = pick_listing_game(claimed, claimed_holds, &others, card, name)?;
+    if game != claimed {
+        tracing::warn!(card, claimed, game = %game, "listing game corrected from the catalogs");
+    }
+    Ok(game)
 }
 fn read_sql(
     query: &HashMap<String, String>,
@@ -617,7 +729,7 @@ async fn verify_nft(
 async fn metadata(state: &DomainState, card: &str) -> Value {
     sqlx::query_scalar::<_,Value>("select to_jsonb(v) from (select name, image_url, expansion_name, expansion_number from public.marketplace_card_versions where card_id = $1 limit 1) v").bind(card).fetch_optional(state.read_db()).await.ok().flatten().unwrap_or_else(||json!({}))
 }
-async fn finish_write(
+pub(crate) async fn finish_write(
     state: &DomainState,
     row: &Value,
     queued: bool,
@@ -749,6 +861,26 @@ pub(crate) async fn create_listing(
     body: &Value,
     requested_game: &str,
 ) -> Result<Value, ApiError> {
+    create_listing_keyed(state, claims, body, requested_game, None).await
+}
+
+/// Binds a Seller API `list` idempotency key to the new row in the insert's
+/// own transaction: only while the key is still unbound (compare-and-set),
+/// so two attempts with one key never both commit a row, and a crash leaves
+/// either no row and an unbound key (the retry creates it) or both.
+pub(crate) const BIND_API_KEY_SQL: &str = "update public.seller_api_listing_keys set listing_id = $3 \
+     where grant_id = $1 and idempotency_key = $2 and listing_id is null";
+
+/// [`create_listing`] for a Seller API `list` call: `api_key` is the grant
+/// and idempotency key the row is bound to (see [`BIND_API_KEY_SQL`]). A key
+/// another attempt bound first answers `409 list_key_bound` and writes nothing.
+pub(crate) async fn create_listing_keyed(
+    state: &DomainState,
+    claims: &crate::Claims,
+    body: &Value,
+    requested_game: &str,
+    api_key: Option<(uuid::Uuid, &str)>,
+) -> Result<Value, ApiError> {
     let card = live::field(body, "cardId", 80);
     let price = live::number(&body["pricePkn"]);
     let qty = live::number(&body["quantityAvailable"]);
@@ -784,6 +916,7 @@ pub(crate) async fn create_listing(
     let g = live::field(body, "marketplaceGame", 40);
     let game =
         pokoin_api_common::game::normalize_game(if g.is_empty() { requested_game } else { &g });
+    let game = listing_game(state, &card, &game, &live::field(body, "cardName", 240)).await?;
     let values = create_values(body, &claims.uid, &game, &meta)?;
     let sql =
         format!("with written as ({CREATE_SQL}) select to_jsonb(written) as listing from written");
@@ -800,20 +933,27 @@ pub(crate) async fn create_listing(
         state.now_ms(),
     );
     let queued = sync::enqueue(&mut tx, event).await?;
+    if let Some((grant, key)) = api_key {
+        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
+            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
+        let bound = sqlx::query(BIND_API_KEY_SQL)
+            .bind(grant)
+            .bind(key)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if bound != 1 {
+            tx.rollback().await?;
+            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
+        }
+    }
     tx.commit().await?;
     let mut listing = finish_write(state, &row, queued, &game, &claims.uid).await?;
     if targets["cardtrader"] == true {
-        if queued {
-            cardtrader = json!({"ok":true,"pending":true});
-        } else {
-            match sync::push_listing(state, &claims.uid, &ct_listing(&row), true).await {
-                Ok(p) => {
-                    cardtrader = json!({"ok":true,"productId":p["productId"],"sourceListingId":p["sourceListingId"]});
-                    listing["sourceListingId"] = p["sourceListingId"].clone();
-                }
-                Err(e) => cardtrader = json!({"ok":false,"error":e.message}),
-            }
-        }
+        // The seller reconcile lists it, in one CardTrader product with its
+        // identical copies (cardtrader::group), queued or not.
+        cardtrader = json!({"ok":true,"pending":true});
     }
     listing["cardtrader"] = cardtrader;
     listing["targets"] = targets;
@@ -854,6 +994,140 @@ async fn decrement_listing(
     let game = if game.is_empty() { "pokemon" } else { &game };
     Ok(json!({"listing":finish_write(state,&row,queued,game,seller).await?}))
 }
+/// The row a stock delta reads and returns, whole, under its row lock.
+const LOCK_ROW_SQL: &str = "select to_jsonb(v) from (select * from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update) v";
+/// Quantity never goes below 0 (the `where` refuses it). 0 is `sold_out`; a
+/// `sold_out` row that gets copies back is `active` again. Paused and inactive
+/// rows keep their status: the seller chose it.
+const DELTA_SQL: &str = "with written as (update public.marketplace_user_listings set \
+    quantity_available = quantity_available + $3, \
+    status = case when quantity_available + $3 <= 0 then 'sold_out' when status = 'sold_out' then 'active' else status end, \
+    updated_at = now() \
+  where id = $1 and seller_uid = $2 and quantity_available + $3 >= 0 returning *) \
+  select to_jsonb(written) as listing from written";
+/// Another copy still for sale on the same CardTrader product (product
+/// grouping): its product must not be destroyed with this copy.
+const SHARED_PRODUCT_SQL: &str = "select exists(select 1 from public.marketplace_user_listings where seller_uid = $1 and source_listing_id = $2 and id <> $3 and status not in ('inactive', 'sold_out') and quantity_available > 0)";
+
+/// Lock one listing of `seller` in the caller's transaction (the whole row).
+pub(crate) async fn lock_listing(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+) -> Result<Option<Value>, ApiError> {
+    Ok(sqlx::query_scalar::<_, Value>(LOCK_ROW_SQL).bind(id).bind(seller).fetch_optional(&mut **tx).await?)
+}
+
+/// What a stock delta does to one listing: the event `update_listing` would
+/// queue for a seller setting that quantity on the board.
+///
+/// - mutation from `sync::mutation` (`LISTING_SOLD` at 0,
+///   `LISTING_REACTIVATED` when a `sold_out` row comes back, else
+///   `LISTING_QUANTITY_CHANGED`);
+/// - at 0 a linked product is destroyed (`destroyCardtrader`), unless
+///   another copy still for sale shares it, which gets the change instead;
+/// - otherwise `cardtraderEdit` from `sync::cardtrader_edit(before, after)`:
+///   the change as an increment, never the total (a gone product settles as
+///   `gone` and the reconcile copies CardTrader's quantity, as for the board).
+pub fn stock_delta_event(before: &Value, after: &Value, seller: &str, delta: i64, shared: bool, now_ms: i64) -> Option<Value> {
+    let status = live::field(after, "status", 20);
+    let status_changed = status != live::field(before, "status", 20);
+    let body = if status_changed {
+        json!({ "quantityAvailable": after["quantity_available"], "status": status })
+    } else {
+        json!({ "quantityAvailable": after["quantity_available"] })
+    };
+    let mutation = sync::mutation(before, &body, if status_changed { &status } else { "" });
+    let source = live::field(before, "source_listing_id", 160);
+    let linked = !pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty();
+    let inactive = live::number(&after["quantity_available"]) <= 0.0;
+    let edit = if inactive && linked && shared {
+        Some(json!({ "productId": pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source), "quantityDelta": delta }))
+    } else {
+        sync::cardtrader_edit(before, after)
+    };
+    let game = live::field(after, "marketplace_game", 40);
+    sync::event(
+        after,
+        &json!({
+            "sellerUid": seller,
+            "game": if game.is_empty() { "pokemon".to_string() } else { game },
+            "mutation": mutation,
+            "destroyCardtrader": inactive && !source.is_empty() && !shared,
+            "sourceListingId": source,
+            "cardtraderEdit": edit,
+        }),
+        now_ms,
+    )
+}
+
+/// Apply `delta` copies to one listing inside the caller's transaction, with
+/// the listing.changed outbox event in that same transaction. 409
+/// `insufficient_quantity` when it would go below 0. Returns the row as
+/// written and whether the event was queued.
+pub(crate) async fn apply_stock_delta(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+    delta: i64,
+    now_ms: i64,
+) -> Result<(Value, bool), ApiError> {
+    let before = lock_listing(tx, seller, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
+    let after = sqlx::query_scalar::<_, Value>(DELTA_SQL)
+        .bind(id)
+        .bind(seller)
+        .bind(delta as i32)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| ApiError::conflict("Not enough quantity.").with_code("insufficient_quantity"))?;
+    let source = live::field(&before, "source_listing_id", 160);
+    let shared = if !source.is_empty() && live::number(&after["quantity_available"]) <= 0.0 {
+        sqlx::query_scalar::<_, bool>(SHARED_PRODUCT_SQL)
+            .bind(seller)
+            .bind(&source)
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?
+    } else {
+        false
+    };
+    let queued = sync::enqueue(tx, stock_delta_event(&before, &after, seller, delta, shared, now_ms)).await?;
+    Ok((after, queued))
+}
+
+/// Set one listing's location in the caller's transaction (no stock change),
+/// queued as `LISTING_UPDATED` like a board edit of the location.
+pub(crate) async fn set_location(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    id: uuid::Uuid,
+    location: &str,
+    now_ms: i64,
+) -> Result<(Value, bool), ApiError> {
+    let row = sqlx::query_scalar::<_, Value>(
+        "with written as (update public.marketplace_user_listings set location = $3, updated_at = now() where id = $1 and seller_uid = $2 returning *) select to_jsonb(written) from written",
+    )
+    .bind(id)
+    .bind(seller)
+    .bind(location)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
+    let game = live::field(&row, "marketplace_game", 40);
+    let queued = sync::enqueue(
+        tx,
+        sync::event(
+            &row,
+            &json!({ "sellerUid": seller, "game": if game.is_empty() { "pokemon".to_string() } else { game }, "mutation": "LISTING_UPDATED" }),
+            now_ms,
+        ),
+    )
+    .await?;
+    Ok((row, queued))
+}
+
 fn update_values(id: &str, uid: &str, body: &Value) -> Result<(Vec<String>, Vec<Value>), ApiError> {
     let mut sets = vec!["updated_at = now()".into()];
     let mut values = vec![json!(id)];
@@ -1031,6 +1305,17 @@ pub(crate) async fn update_listing(
     .await?
     .unwrap_or_else(|| json!({}));
     let source = live::field(&before, "source_listing_id", 160);
+    // Identical copies on the same CardTrader product (cardtrader::group).
+    let siblings: i64 = if pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty() {
+        0
+    } else {
+        sqlx::query_scalar(sync::SIBLINGS_SQL)
+            .bind(&claims.uid)
+            .bind(&source)
+            .bind(uuid)
+            .fetch_one(&mut *tx)
+            .await?
+    };
     let mut builder = sqlx::query(&sql);
     for value in &values {
         builder = bind_json(builder, value);
@@ -1040,7 +1325,17 @@ pub(crate) async fn update_listing(
         .await?
         .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
     let row: Value = row.try_get("listing")?;
-    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":inactive&&!source.is_empty(),"sourceListingId":source,"cardtraderEdit":sync::cardtrader_edit(&before,&row)}),state.now_ms())).await?;
+    // A copy that goes off sale or changes price leaves its group; the
+    // product stays for the others.
+    let leave = sync::group_leave(&before, &row, siblings);
+    if leave.is_some() {
+        sqlx::query(sync::LEAVE_GROUP_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
+        sqlx::query(sync::HAND_OVER_LINK_SQL).bind(uuid).bind(&source).bind(&claims.uid).execute(&mut *tx).await?;
+        sqlx::query(sync::DROP_LEFT_LINK_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
+    }
+    let destroy = inactive && !source.is_empty() && leave.is_none();
+    let edit = leave.or_else(|| sync::cardtrader_edit(&before, &row));
+    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":destroy,"sourceListingId":source,"cardtraderEdit":edit}),state.now_ms())).await?;
     tx.commit().await?;
     let game = live::field(&row, "marketplace_game", 40);
     let listing = finish_write(
@@ -1051,7 +1346,7 @@ pub(crate) async fn update_listing(
         &claims.uid,
     )
     .await?;
-    if !queued && inactive && !source.is_empty() {
+    if !queued && destroy {
         let _ = sync::destroy_product(
             state,
             &claims.uid,
@@ -1992,5 +2287,58 @@ mod inventory_price_tests {
         assert!(valid_inventory_price(0.0,"paused"));assert!(valid_inventory_price(1.0,"active"));
         assert!(!valid_inventory_price(0.0,"active"));assert!(!valid_inventory_price(0.0,""));
         assert!(!valid_inventory_price(-1.0,"paused"));assert!(!valid_inventory_price(f64::NAN,"paused"));
+    }
+}
+
+#[cfg(test)]
+mod listing_game_tests {
+    use super::*;
+    fn holder(game: &'static str, name: &str) -> CatalogHolder {
+        CatalogHolder { game, name: name.into() }
+    }
+    /// 200001768 as the live catalogs hold it: one synthetic id, eight games.
+    fn shared_id() -> Vec<CatalogHolder> {
+        vec![
+            holder("weiss_schwarz", "ヴェイパーヘイズ役 楓"),
+            holder("final_fantasy", "Nu Mou"),
+            holder("force_of_will", "True Successor of Certo, Volga"),
+            holder("world_of_warcraft", "Divine Justice"),
+            holder("battle_spirits_saga", "Gladiator Squalo"),
+            holder("star_wars_destiny", "This Is Our Rebellion"),
+            holder("my_little_pony", "High Rollers, Let's go Bowling"),
+            holder("the_spoils", "Heirloom Incinerator"),
+        ]
+    }
+    #[test]
+    fn a_satellite_card_tagged_pokemon_is_stored_under_its_named_catalog() {
+        let game = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", "Gladiator Squalo");
+        assert_eq!(game.unwrap(), "battle_spirits_saga");
+        // Case and punctuation do not matter; the name still has to match.
+        let game = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", "gladiator  squalo!");
+        assert_eq!(game.unwrap(), "battle_spirits_saga");
+    }
+    #[test]
+    fn a_shared_id_without_a_matching_name_is_refused() {
+        for name in ["Pikachu", ""] {
+            let error = pick_listing_game("pokemon", Some(false), &shared_id(), "200001768", name).unwrap_err();
+            assert_eq!(error.status.as_u16(), 400);
+            assert_eq!(error.code.as_deref(), Some("GAME_CARD_MISMATCH"));
+        }
+    }
+    #[test]
+    fn one_other_holder_takes_the_card_even_without_a_name() {
+        let only = [holder("magic", "Sol Ring")];
+        assert_eq!(pick_listing_game("pokemon", Some(false), &only, "822658", "").unwrap(), "magic");
+    }
+    #[test]
+    fn the_claim_stands_when_its_catalog_holds_or_cannot_be_checked() {
+        for holds in [Some(true), None] {
+            assert_eq!(
+                pick_listing_game("pokemon", holds, &shared_id(), "200001768", "Gladiator Squalo").unwrap(),
+                "pokemon"
+            );
+        }
+        // No catalog knows the id: a lagging catalog must not block the listing.
+        assert_eq!(pick_listing_game("pokemon", Some(false), &[], "999999", "New card").unwrap(), "pokemon");
     }
 }

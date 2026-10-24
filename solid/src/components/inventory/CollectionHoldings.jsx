@@ -3,7 +3,7 @@ import {
   cancelListing,
   createListing,
   fetchOwnedCollection,
-  fetchPriceCheck,
+  fetchPriceChecksByGame,
   imageSrc,
   removeCollectionItem,
   requestNftShipping,
@@ -11,7 +11,7 @@ import {
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
 import { game } from '@market/game.js';
 import { inventoryBooks } from '@market/inventory-book.js';
-import { priceCheckItem } from '@market/inventory-price.js';
+import { gamePrices, priceCheckGroups, priceGame } from '@market/inventory-price.js';
 import ScanImage from '../ScanImage.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
 import { loadOwnerBook } from '../../lib/owner-book.js';
@@ -306,6 +306,7 @@ export default function CollectionHoldings(props) {
 
   const heldKey = createMemo(() => heldPhysical().map((entry) => [
     entry.holding.id,
+    priceGame(entry.holding, game().id),
     entry.holding.cardId || entry.holding.blueprintId || '',
     entry.holding.condition || '',
     entry.holding.language || '',
@@ -320,17 +321,18 @@ export default function CollectionHoldings(props) {
       let cancelled = false;
       (async () => {
         try {
-          const items = holdings.map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
-          if (!items.length) return;
+          // One price check per game: card ids are per game.
+          const gameId = untrack(game).id;
+          const groups = priceCheckGroups(holdings, gameId);
+          if (!groups.length) return;
           const token = await getBearer();
-          const data = await fetchPriceCheck(items.slice(0, 100), token);
+          const byGame = await fetchPriceChecksByGame(groups, token);
           if (cancelled) return;
-          const prices = data?.prices || {};
           const marks = {};
           const next = { ...untrack(asks) };
           for (const holding of holdings) {
             if (editedAsks.has(holding.id)) continue;
-            const ask = suggestedHoldingAsk(prices, holding);
+            const ask = suggestedHoldingAsk(gamePrices(byGame, holding, gameId), holding);
             if (!ask) continue;
             next[holding.id] = ask;
             marks[holding.id] = true;

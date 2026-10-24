@@ -229,6 +229,9 @@ pub fn router(state: DomainState) -> Router {
             "/api/earn-pkn",
             post(handlers::wallet::earn_pkn).options(earn_pkn_options),
         )
+        // CardTrader Zero picks: the copy that leaves the box leaves the inventory.
+        .route("/api/cardtrader-zero-pick", post(handlers::zero_picks::zero_pick))
+        .route("/api/cardtrader-zero-picked", get(handlers::zero_picks::zero_picked))
         .with_state(state)
 }
 
@@ -352,6 +355,8 @@ mod tests {
             ("POST", "/api/money-request"),
             ("POST", "/api/earn-pkn"),
             ("OPTIONS", "/api/earn-pkn"),
+            ("POST", "/api/cardtrader-zero-pick"),
+            ("GET", "/api/cardtrader-zero-picked"),
         ];
         for (method, path) in routes {
             let request = Request::builder()

@@ -26,7 +26,7 @@ ssh "$PI" "MODE=$MODE STAGE=$STAGE bash -s" <<'REMOTE'
 set -euo pipefail
 NODE_UNITS="pokoin-api-edge.service pokoin-card-images.service pokoin-ct-deals.service"
 NODE_TIMERS="pokoin-eur-orders-sweep.timer pokoin-referral-reconcile.timer pokoin-cardtrader-seller-reconcile.timer pokoin-meili-marketplace-delta.timer"
-RUST_TIMERS="pokoin-rust-job-eur-orders-sweep.timer pokoin-rust-job-referral-reconcile.timer pokoin-rust-job-cardtrader-seller-reconcile.timer pokoin-rust-job-search-delta.timer"
+RUST_TIMERS="pokoin-rust-job-eur-orders-sweep.timer pokoin-rust-job-referral-reconcile.timer pokoin-rust-job-cardtrader-seller-reconcile.timer pokoin-rust-job-search-delta.timer pokoin-rust-job-cardtrader-facet-prices.timer"
 ENV=/srv/pokoin/rust/pokoin-api.env
 BACKUP_ROOT=/srv/pokoin/rollbacks
 # The pokoin-data disk rule also wanted the Node CDN at boot. With Rust owning

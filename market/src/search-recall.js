@@ -1,11 +1,13 @@
 import { fetchSearch } from './api.js';
 import { compactQuery } from './compact-query.js';
 import { isPokemonGame } from './game.js';
+import { getSearchLang } from './locale.js';
 import { createRecallSearch, recallOrder } from './search-recall-core.js';
 import { loadSuggestEngine, peekSuggestEngine } from './suggest-engine-loader.js';
 
-async function recallLookups(query) {
+async function recallLookups(query, request = {}) {
   const raw = String(query || '').trim();
+  const lang = request?.lang || getSearchLang();
   let engine = peekSuggestEngine();
   if (!engine) {
     try {
@@ -16,7 +18,9 @@ async function recallLookups(query) {
   }
   let names = [];
   try {
-    names = engine.catalogRecall(raw) || [];
+    // Localized names recall their English identity (`evoli` → Eevee).
+    await engine.loadLocalizedNames?.(lang);
+    names = engine.catalogRecall(raw, { lang }) || [];
   } catch {
     names = [];
   }

@@ -3,7 +3,7 @@
 //! gate, vanished-product sale evidence, checkout holds, and the
 //! one-day-ready asset mode are preserved exactly.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
@@ -49,6 +49,20 @@ const UPSERT_PRODUCT_LINK_SQL: &str = r#"
           updated_at = now()
 "#;
 
+/// Before a link row names a listing: drop another product's row that still
+/// names it although the listing has moved off that product (a copy that left
+/// its group, a consolidated duplicate). The `listing_id` index is unique, so
+/// such a stale row made the upsert fail and abort the reconcile.
+pub const FREE_STALE_LINK_SQL: &str = r#"
+        delete from public.marketplace_cardtrader_product_links as link
+        where link.listing_id = $3::uuid
+          and not (link.seller_uid = $1 and link.ct_product_id = $2)
+          and not exists (
+            select 1 from public.marketplace_user_listings as listing
+            where listing.id = link.listing_id and listing.source_listing_id = 'ct:' || link.ct_product_id
+          )
+"#;
+
 const RECORD_SELLER_SYNC_SQL: &str = r#"
         insert into public.marketplace_cardtrader_seller_sync (
           seller_uid, last_sync_at, last_sync_ok, last_sync_incomplete,
@@ -91,6 +105,18 @@ const CARD_METADATA_MANY_SQL: &str = r#"
             coalesce(nullif(cdn_image_url, ''), nullif(preview_image_url, ''), nullif(image_url, ''), '') as card_image_url
           from public.marketplace_search_candidates
           where card_id::text = any($1::text[])
+"#;
+
+const OPEN_CONSOLIDATIONS_SQL: &str = r#"
+      select kept_product_id from public.marketplace_cardtrader_consolidations
+      where seller_uid = $1 and closed_at is null
+"#;
+
+const GROUP_WRITTEN_AFTER_SQL: &str = r#"
+      select exists (
+        select 1 from public.marketplace_user_listings
+        where seller_uid = $1 and source_listing_id = $2 and updated_at > $3::timestamptz
+      ) as fresh
 "#;
 
 const APPLY_CT_QUANTITY_SQL: &str = r#"
@@ -297,6 +323,11 @@ pub async fn upsert_product_link(
     origin: &str,
     missing_from_ct: bool,
 ) -> ApiResult<()> {
+    if let Err(error) = db.write("pokemon", FREE_STALE_LINK_SQL, &[json!(seller_uid), json!(ct_product_id), json!(listing_id)]).await {
+        if !error.is_table_missing() {
+            return Err(error);
+        }
+    }
     match db
         .write(
             "pokemon",
@@ -438,15 +469,58 @@ pub fn import_lock_key(seller_uid: &str, source_listing_id: &str) -> String {
     format!("ct-import:{seller_uid}:{source_listing_id}")
 }
 
+/// A product's Pokoin price: its CardTrader ask net of the commission the
+/// seller pays on it, whole PKN (prices are digits only).
+pub fn net_product_prices(products: &mut [NormalizedProduct], rule: crate::ct_fees::FeeRule, channel: crate::ct_fees::Channel) {
+    for product in products {
+        product.price_pkn = product
+            .price_pkn
+            .and_then(|gross| rule.net_pkn(gross, channel))
+            .map(|net| net.round().max(1.0));
+    }
+}
+
 /// `delistCtListing` — seller removed it on CardTrader: inactive, not sold.
 pub async fn delist_ct_listing(db: &DbPools, listing_id: &str) -> ApiResult<Option<Value>> {
     let rows = db.write("pokemon", DELIST_CT_LISTING_SQL, &[json!(listing_id)]).await?;
     Ok(rows.first().cloned())
 }
 
+/// A push in doubt holds one `ct:pending:…` claim for every identical copy it
+/// sent (cardtrader::group); the product names only the primary. Linking the
+/// primary links the whole claim, quantities untouched: the product was made
+/// from their sum, and the next reconcile spreads any difference.
+const LINK_PENDING_GROUP_SQL: &str = r#"
+      with claim as (
+        select seller_uid, source_listing_id from public.marketplace_user_listings
+        where id = $1::uuid and source_listing_id like 'ct:pending:%'
+      )
+      update public.marketplace_user_listings as listing
+      set source_listing_id = $2, updated_at = now()
+      from claim
+      where listing.seller_uid = claim.seller_uid and listing.source_listing_id = claim.source_listing_id
+      returning listing.id, listing.source_listing_id, listing.quantity_available, listing.status, listing.card_id
+"#;
+
 /// `linkExistingListing` — attach a pokoin-only listing to the CT product.
 pub async fn link_existing_listing(db: &DbPools, listing_id: &str, product: &NormalizedProduct) -> ApiResult<Option<Value>> {
     let source_listing_id = ct_source_listing_id(&product.id);
+    let claimed = db.write("pokemon", LINK_PENDING_GROUP_SQL, &[json!(listing_id), json!(source_listing_id)]).await?;
+    if !claimed.is_empty() {
+        let id = listing_id.to_string();
+        let copies: i64 = claimed
+            .iter()
+            .filter(|row| matches!(row.get("status").and_then(Value::as_str), Some("active") | Some("paused")))
+            .map(|row| row.get("quantity_available").and_then(Value::as_i64).unwrap_or(0).max(0))
+            .sum();
+        let mut row = claimed.iter().find(|row| clean_text_value(row.get("id").unwrap_or(&Value::Null), 80) == id).or(claimed.first()).cloned();
+        if let Some(row) = row.as_mut() {
+            // What the claimed copies hold now: a copy sold or removed on
+            // Pokoin while the create was in doubt is still on the product.
+            row["pendingGroupCopies"] = json!(copies);
+        }
+        return Ok(row);
+    }
     let qty = product.quantity.clamp(0, 999_999);
     let sql = if product.price_pkn.unwrap_or(0.0) > 0.0 {
         LINK_EXISTING_LISTING_SQL.replace("{price_sql}", ", price_pkn = $4")
@@ -804,6 +878,16 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         return reconcile_one_day_ready_assets(db, firestore, ct, &seller_uid, products, allow_destructive, gate_reason, &mut summary, &emit, &token).await;
     }
 
+    // Pokoin prices a CardTrader product at what the seller nets there, after
+    // CardTrader's commission (ct_fees, docs/PRICING.md): imports and links
+    // take that, never the CardTrader ask itself.
+    let channel = match ct_integration::read_integration_doc(firestore, &seller_uid).await {
+        Ok(doc) => crate::ct_fees::resolve_seller_channel(db, &doc.data).await,
+        Err(_) => crate::ct_fees::Channel::Zero,
+    };
+    let mut export = export;
+    net_product_prices(&mut export.products, crate::ct_fees::rule(), channel);
+    let products = &export.products;
     let direction = match direction {
         Some(direction) => direction,
         None => crate::cardtrader::link::read_direction(firestore, &seller_uid).await,
@@ -843,7 +927,17 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     if direction.pushes() {
         let pushed = match crate::cardtrader::link::push_gate(result["complete"] == true, exclusive) {
             Some(reason) => json!({ "blocked": reason, "pushed": 0 }),
-            None => crate::cardtrader::link::push_unlisted(db, ct, &token, &seller_uid, crate::cardtrader::link::PushBudget::from_env(), products).await,
+            None => crate::cardtrader::link::push_unlisted(
+                db,
+                ct,
+                &token,
+                &seller_uid,
+                crate::cardtrader::link::PushBudget::from_env(),
+                products,
+                export_started_at.as_deref(),
+                channel,
+            )
+            .await,
         };
         if pushed.get("error").is_some_and(|error| !error.is_null()) {
             result["summary"]["errors"].incr(1);
@@ -892,6 +986,20 @@ pub(crate) trait ReconcileStore: Send + Sync {
         meta: &'a Value,
     ) -> BoxFuture<'a, ApiResult<Option<Value>>>;
     fn delist<'a>(&'a self, listing_id: &'a str) -> BoxFuture<'a, ApiResult<Option<Value>>>;
+    /// Products `job cardtrader-group-products` is folding duplicates into
+    /// (an open row in `marketplace_cardtrader_consolidations`): their
+    /// quantity is left alone until the job closes them.
+    /// `Err` when they cannot be read (the table missing included): the
+    /// caller then holds every shared product's quantity.
+    fn consolidating<'a>(&'a self, _seller_uid: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
+        Box::pin(async { Ok(HashSet::new()) })
+    }
+    /// Whether any member of a product (`source`) was written after the
+    /// export was taken: then the export may predate a sale or an edit, and a
+    /// copy the group gains from it may not exist.
+    fn group_written_after<'a>(&'a self, _seller_uid: &'a str, _source: &'a str, _since: &'a str) -> BoxFuture<'a, bool> {
+        Box::pin(async { false })
+    }
     #[allow(clippy::too_many_arguments)]
     fn upsert_link<'a>(
         &'a self,
@@ -921,6 +1029,25 @@ pub(crate) struct PgReconcileStore<'d>(pub &'d DbPools);
 impl ReconcileStore for PgReconcileStore<'_> {
     fn seller_listings<'a>(&'a self, seller_uid: &'a str) -> BoxFuture<'a, ApiResult<Vec<ListingRow>>> {
         Box::pin(load_seller_listings(self.0, seller_uid))
+    }
+
+    fn consolidating<'a>(&'a self, seller_uid: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
+        Box::pin(async move {
+            match self.0.write("pokemon", OPEN_CONSOLIDATIONS_SQL, &[json!(seller_uid)]).await {
+                Ok(rows) => Ok(rows.iter().map(|row| clean_text_value(row.get("kept_product_id").unwrap_or(&Value::Null), 80)).collect()),
+                Err(error) => Err(error.message),
+            }
+        })
+    }
+
+    fn group_written_after<'a>(&'a self, seller_uid: &'a str, source: &'a str, since: &'a str) -> BoxFuture<'a, bool> {
+        Box::pin(async move {
+            match self.0.write("pokemon", GROUP_WRITTEN_AFTER_SQL, &[json!(seller_uid), json!(source), json!(since)]).await {
+                Ok(rows) => rows.first().and_then(|row| row.get("fresh")).and_then(Value::as_bool).unwrap_or(true),
+                // Unknown: refuse the raise.
+                Err(_) => true,
+            }
+        })
     }
 
     fn link_missing_flags<'a>(&'a self, seller_uid: &'a str) -> BoxFuture<'a, ApiResult<HashMap<String, bool>>> {
@@ -1018,10 +1145,25 @@ pub(crate) async fn reconcile_linked_listings(
     let listings = store.seller_listings(seller_uid).await?;
     let link_missing = store.link_missing_flags(seller_uid).await?;
 
-    let plan = plan_inventory_reconcile(export, &listings, &link_missing, true, true);
+    // Fail closed: open consolidations that cannot be read hold every shared
+    // product's quantity for this run (migration 134 not applied, a database
+    // error), so a group mid-consolidation never loses copies.
+    let consolidating = match store.consolidating(seller_uid).await {
+        Ok(open) => Some(open),
+        Err(error) => {
+            tracing::warn!(seller_uid, %error, "cardtrader reconcile: open consolidations unreadable; group quantities held");
+            None
+        }
+    };
+    let plan = plan_inventory_reconcile_with(export, &listings, &link_missing, consolidating.as_ref(), true, true);
+    let mut summary_note = consolidating.is_none().then_some("open_consolidations_unreadable");
+    let quantity_of: HashMap<&str, i64> = listings.iter().map(|row| (row.id.as_str(), row.quantity_available)).collect();
     let mut summary = plan.summary.clone();
     for key in APPLIED_COUNTERS {
         summary[key] = json!(0);
+    }
+    if let Some(note) = summary_note.take() {
+        summary["groupQuantitiesHeld"] = json!(note);
     }
     if !import_new {
         // Pokoin → CardTrader only: CardTrader-only products stay off Pokoin.
@@ -1073,6 +1215,37 @@ pub(crate) async fn reconcile_linked_listings(
                     summary["updated"].incr(1);
                     Ok(())
                 }
+                PlannedAction::UpdateGroupQty { product_id, primary_id, changes } => {
+                    record_missing_link(store, seller_uid, &link_missing, &product_by_id, product_id, primary_id, &mut summary).await?;
+                    // A copy the group gains from CardTrader is only real when no
+                    // member was written after the export: the raise lands on a
+                    // primary whose own row is old, so the per-row stale guard
+                    // cannot see a sale or an edit of another member.
+                    let raises = changes.iter().any(|(id, quantity)| *quantity > quantity_of.get(id.as_str()).copied().unwrap_or(0));
+                    let hold_raises = raises
+                        && match export_started_at {
+                            Some(since) => store.group_written_after(seller_uid, &ct_source_listing_id(product_id), since).await,
+                            None => false,
+                        };
+                    if hold_raises {
+                        ensure_counter(&mut summary, "groupRaiseDeferred", 1);
+                    }
+                    let mut applied = 0;
+                    for (listing_id, quantity) in changes {
+                        if hold_raises && *quantity > quantity_of.get(listing_id.as_str()).copied().unwrap_or(0) {
+                            continue;
+                        }
+                        if store.apply_quantity(listing_id, *quantity, export_started_at).await?.is_some() {
+                            applied += 1;
+                        } else {
+                            ensure_counter(&mut summary, "staleSkipped", 1);
+                        }
+                    }
+                    if applied > 0 {
+                        summary["updated"].incr(1);
+                    }
+                    Ok(())
+                }
                 PlannedAction::Link { product_id, listing_id } => {
                     if let Some(product) = product_by_id.get(product_id.as_str()) {
                         let updated = store.link_listing(listing_id, product).await?;
@@ -1082,7 +1255,21 @@ pub(crate) async fn reconcile_linked_listings(
                             return Ok(());
                         }
                         summary["matchedExisting"].incr(1);
-                        store.upsert_link(seller_uid, product_id, listing_id, &product.blueprint_id, product.quantity, "match", false).await?;
+                        // An in-doubt group create, linked now: the copies the
+                        // product holds beyond what its members still have were
+                        // sold or removed on Pokoin meanwhile; take them off.
+                        let mut quantity = product.quantity;
+                        let pending_copies = updated.as_ref().and_then(|row| row.get("pendingGroupCopies")).and_then(Value::as_i64);
+                        // Our own create (a pending claim) stays a push; a listing
+                        // matched to the seller's product is a match.
+                        let origin = if pending_copies.is_some() { "push" } else { "match" };
+                        if let Some(copies) = pending_copies {
+                            if copies < product.quantity && ct.increment_product(token, product_id, copies - product.quantity).await.is_ok() {
+                                ensure_counter(&mut summary, "settledInDoubtCreate", 1);
+                                quantity = copies;
+                            }
+                        }
+                        store.upsert_link(seller_uid, product_id, listing_id, &product.blueprint_id, quantity, origin, false).await?;
                     }
                     Ok(())
                 }
@@ -1174,6 +1361,7 @@ pub(crate) async fn reconcile_linked_listings(
                 sales = Some(sale_items_by_product(&orders));
             }
         }
+        let mut marked: HashSet<String> = HashSet::new();
         for (product_id, listing) in vanished {
             let verdict = classify_vanished_product(&product_id, listing.created_ms, sales.as_ref());
             match verdict {
@@ -1225,7 +1413,15 @@ pub(crate) async fn reconcile_linked_listings(
                 }
             }
             summary["removed"].incr(1);
-            store.upsert_link(seller_uid, &product_id, &listing.id, "", 0, "import", true).await?;
+            // One link row per product, even when several listings shared it.
+            if marked.insert(product_id.clone()) {
+                // A link row that cannot be written is one error, never the
+                // end of the run: the listings are already settled above.
+                if let Err(error) = store.upsert_link(seller_uid, &product_id, &listing.id, "", 0, "import", true).await {
+                    summary["errors"].incr(1);
+                    summary["errorItems"].as_array_mut().unwrap().push(json!({ "ctProductId": product_id, "reason": error.message }));
+                }
+            }
         }
     }
 
@@ -1558,6 +1754,21 @@ pub async fn with_last_sold(db: &DbPools, rows: Vec<Value>) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn imports_and_links_take_the_ask_net_of_the_commission() {
+        let product = |price: f64| {
+            let mut p = crate::cardtrader::sync_core::normalize_product(&json!({"id": 1, "blueprint_id": 400553, "quantity": 1}));
+            p.price_pkn = Some(price);
+            p
+        };
+        let mut products = vec![product(240.0), product(22.0), product(2.0)];
+        products.push({ let mut p = product(1.0); p.price_pkn = None; p });
+        net_product_prices(&mut products, crate::ct_fees::FeeRule::DEFAULT, crate::ct_fees::Channel::Zero);
+        let prices: Vec<Option<f64>> = products.iter().map(|p| p.price_pkn).collect();
+        // €1.20 → 220 PKN; €0.11 → 20; a 1-cent ask nets nothing; no price stays none.
+        assert_eq!(prices, vec![Some(220.0), Some(20.0), None, None]);
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -1568,6 +1779,10 @@ mod tests {
         listings: Mutex<Vec<ListingRow>>,
         links: Mutex<HashMap<String, bool>>,
         writes: Mutex<Vec<String>>,
+        /// `group_written_after` answers this.
+        fresh_group: std::sync::atomic::AtomicBool,
+        /// `consolidating` fails (migration 134 missing, a database error).
+        markers_unreadable: std::sync::atomic::AtomicBool,
     }
 
     impl MemoryStore {
@@ -1589,6 +1804,16 @@ mod tests {
     }
 
     impl ReconcileStore for MemoryStore {
+        fn consolidating<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<HashSet<String>, String>> {
+            let broken = self.markers_unreadable.load(std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move { if broken { Err("relation does not exist".to_string()) } else { Ok(HashSet::new()) } })
+        }
+
+        fn group_written_after<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str) -> BoxFuture<'a, bool> {
+            let fresh = self.fresh_group.load(std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move { fresh })
+        }
+
         fn seller_listings<'a>(&'a self, _: &'a str) -> BoxFuture<'a, ApiResult<Vec<ListingRow>>> {
             let rows: Vec<ListingRow> = self
                 .listings
@@ -1795,6 +2020,45 @@ mod tests {
         let second = run().await.unwrap();
         assert!(second["summary"].get("linksRecorded").is_none());
         assert!(!store.take_writes().iter().any(|w| w.starts_with("link-row")));
+    }
+
+    #[tokio::test]
+    async fn a_group_gains_a_copy_only_when_no_member_was_written_after_the_export() {
+        let ct = CardTraderClient::with_base("http://127.0.0.1:9".into());
+        let firestore = crate::firebase::MemoryFirestore::new();
+        let a = "00000000-0000-0000-0000-00000000000a";
+        let export = ProductsExport::from_rows(&[json!({"id": 9, "blueprint_id": 100, "game_id": 5, "quantity": 3,
+            "user_data_field": format!("pokoin:{a}"), "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"}})]);
+        let members = || {
+            vec![
+                listing_row(&json!({"id": a, "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T09:00:00Z"})),
+                listing_row(&json!({"id": "b", "card_id": "200", "quantity_available": 1, "status": "active", "source_listing_id": "ct:9", "created_at": "2026-10-20T10:00:00Z"})),
+            ]
+        };
+        let started = Some("2026-10-22T08:00:00Z");
+        // Member b was edited after the export: the export's 3 may predate a
+        // sale, so the primary does not take the extra copy.
+        let store = MemoryStore { listings: Mutex::new(members()), fresh_group: true.into(), ..Default::default() };
+        let out = reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, started, false, &|_| {})
+            .await
+            .unwrap();
+        assert_eq!(out["summary"]["groupRaiseDeferred"], 1);
+        assert!(!store.take_writes().iter().any(|w| w.starts_with("quantity")));
+        // Nothing written since: the primary takes it.
+        let store = MemoryStore { listings: Mutex::new(members()), ..Default::default() };
+        reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, started, false, &|_| {})
+            .await
+            .unwrap();
+        assert!(store.take_writes().contains(&format!("quantity {a}=2")));
+        assert!(GROUP_WRITTEN_AFTER_SQL.contains("updated_at > $3::timestamptz"));
+
+        // The open consolidations cannot be read: the shared product is held.
+        let store = MemoryStore { listings: Mutex::new(members()), markers_unreadable: true.into(), ..Default::default() };
+        let out = reconcile_linked_listings(&store, &firestore, &ct, "token", "seller", "Seller", "IT", &export, started, false, &|_| {})
+            .await
+            .unwrap();
+        assert_eq!(out["summary"]["groupQuantitiesHeld"], "open_consolidations_unreadable");
+        assert!(!store.take_writes().iter().any(|w| w.starts_with("quantity")));
     }
 
     #[tokio::test]

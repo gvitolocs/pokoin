@@ -51,3 +51,19 @@ test('the gold sparkles swap the desk scan to the verified reverse holo and back
   // SEO and drags keep the regular printing's scan.
   assert.match(page, /image=\{art\(\)\}/);
 });
+
+test('Best Deal says "Available in the Vault" for Vault stock and names every other seller', () => {
+  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  assert.match(deal, /when=\{!isVaultOffer\(dealPick\(\)\)\}/);
+  assert.match(deal, /fallback=\{<p class="deal-sold-by is-vault">\{VAULT_DEAL_LINE\}<\/p>\}/);
+  // Ordinary sellers keep "Sold by" and their shop link.
+  assert.match(deal, /Sold by\{' '\}/);
+  assert.match(deal, /sellerHref\(dealPick\(\), lang\)/);
+});
+
+test('Best Deal goes price, seller line, then the chips: no grade · language text line', () => {
+  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  assert.ok(deal.includes('deal-sold-by'));
+  assert.doesNotMatch(page, /deal-what/);
+  assert.doesNotMatch(deal, /languageName|conditionLabel/);
+});

@@ -18,13 +18,17 @@ import { resolveArtLayout } from '@market/art-cut.js';
 import {
   albumShade,
   deskTheme,
+  fullArtRowTheme,
+  peekFullArtShade,
   rememberCardBucket,
   rememberDeskIdentity,
   subscribeShadeBuckets,
   warmCardBucket,
+  warmFullArtShade,
 } from '@market/art-shade.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
-import { compactQuery } from '@market/compact-query.js';
+import { compactQuery, suggestLiveReady } from '@market/compact-query.js';
+import { isMonoFullArt } from '@market/full-art.js';
 import { isPokemonGame, stripGamePrefix } from '@market/game.js';
 import { clipSuggestCollector, printingIdentity, suggestCardName, suggestTranslatedLine } from '@market/identity.js';
 import { sellerHref } from '@market/listing-meta.js';
@@ -97,9 +101,21 @@ function loadSuggestEngineOnIntent() {
   afterPaint(() => loadSuggestEngine().catch(() => {}));
 }
 
-/** Same minimum as suggest-live SUGGEST_LIVE_MIN_CHARS (the popup opens at 3 compact chars). */
-const LIVE_MIN_CHARS = 3;
-const liveReady = (text) => (engine() ? engine().suggestLiveReady(text) : compactQuery(text).length >= LIVE_MIN_CHARS);
+/** Same minimum as suggest-live (3 compact chars, 2 for kanji / hangul / kana). */
+const liveReady = (text) => (engine() ? engine().suggestLiveReady(text) : suggestLiveReady(text));
+
+/**
+ * The search language's localized card names (localized-names.js): `evoli`
+ * under French ranks and recalls Eevee. Each language is a lazy chunk; the
+ * popup re-ranks once it lands.
+ */
+const [namesTick, setNamesTick] = createSignal(0);
+function ensureLocalizedNames(live, lang) {
+  if (!live || live.localizedNamesReady(lang)) return Promise.resolve();
+  return live.loadLocalizedNames(lang).then((ok) => {
+    if (ok) setNamesTick((tick) => tick + 1);
+  });
+}
 
 /** ARIA state attributes keep "false" (a bare false would drop the attribute). */
 const ariaBool = (value) => (value ? 'true' : 'false');
@@ -174,7 +190,7 @@ function flattenSuggestRows(groups) {
  * prewarmSuggest, so a warmed query hits exactly the same memo keys.
  */
 async function pageUniverse(live, text, { lang, print, signal, alive = () => true, onPage } = {}) {
-  for (const lookup of live.catalogRecall(text)) {
+  for (const lookup of live.catalogRecall(text, { lang })) {
     if (!alive()) return 'stopped';
     let offset = 0;
     let chunks = 0;
@@ -259,6 +275,9 @@ function warmRows(rows, preloadRows = rows) {
     const card = row.card;
     if (!card.id || (live && live.isLiveStub(card))) continue;
     rememberDeskIdentity(card);
+    if (isPokemonGame() && isMonoFullArt({ ...card, name: suggestCardName(card, row.groupName) })) {
+      warmFullArtShade(card.id, thumbOf(card));
+    }
     const shade = albumShade(card);
     if (shade) {
       rememberCardBucket(card.id, shade);
@@ -302,6 +321,7 @@ export function prewarmSuggest(text, { lang, printLang: print = 'all', tab = 'si
     entry = {
       data: (async () => {
         const live = await loadSuggestEngine();
+        await ensureLocalizedNames(live, lang);
         await Promise.all([
           pageUniverse(live, q, { lang, print }),
           ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang).catch(() => null)),
@@ -480,12 +500,16 @@ export default function SearchBox(props) {
     });
   });
 
+  createEffect(() => [engine(), searchLang()], ([live, lang]) => {
+    ensureLocalizedNames(live, lang);
+  });
+
   // Progressive network pool (use-progressive-suggest.js): pages of printings for
   // the current generation feed the suggest-live cache; stale pages are dropped.
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon() && searchTab() !== 'users'],
+    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon() && searchTab() !== 'users', namesTick()],
     ([live, typed, lang, print, kind, enabled]) => {
       if (!live || !enabled) {
         setProgressivePending(false);
@@ -640,7 +664,7 @@ export default function SearchBox(props) {
   // page (and its recall lookups) for a prefix nobody would open; the count
   // shows the suggest estimate until the real one lands, and Enter prefetches
   // on its own (goSearch).
-  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon()], ([isOpen, text, tab, lang, print, isPokemon]) => {
+  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon(), namesTick()], ([isOpen, text, tab, lang, print, isPokemon]) => {
     if (!isOpen || !isPokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -667,6 +691,7 @@ export default function SearchBox(props) {
     if (!live || !live.suggestLiveReady(text) || searchTab() === 'users') return [];
     epoch();
     liveTick();
+    namesTick();
     // The visitor's own order on top of the ranking: viewed names first among
     // names that start with the text, their era first within a name.
     const paint = (limit) => live.paintCatalogGroups(text, {
@@ -1025,7 +1050,7 @@ export default function SearchBox(props) {
             }}
             aria-hidden="true"
           >
-            <CardArt src={hoverSrc()} full={Boolean(hoverHero())} alt="" />
+            <CardArt src={hoverSrc()} full={Boolean(hoverHero())} langScans={hoverCard()?.langScans} alt="" />
           </div>
         </Portal>
       </Show>
@@ -1055,14 +1080,23 @@ function SuggestRow(props) {
     equals: (prev, next) => prev?.code === next?.code && prev?.label === next?.label,
   });
   const live = createMemo(() => Boolean(props.live && (props.live.isLiveStub(card()) || props.live.isLiveStub(props.printing))));
+  const fullArt = createMemo(() => Boolean(props.pokemon) && isMonoFullArt({ ...card(), name: englishName() }));
   const rowTheme = createMemo(() => {
     void props.shadeTick;
     const special = rarityRowTheme(card());
-    const delta = !special && prefersArtworkDelta(card()) ? deskTheme(card()) : null;
-    if (special?.shade) return special;
+    if (special) return special;
+    // Full Art: its own mono background colour, sampled from the thumb margins.
+    const mono = fullArt() ? fullArtRowTheme(peekFullArtShade(card().id)) : null;
+    if (mono) return mono;
+    const delta = prefersArtworkDelta(card()) ? deskTheme(card()) : null;
     if (delta) return { kind: 'delta', shade: delta.surface, raised: delta.surfaceRaised };
-    return special;
+    return null;
   });
+  const rowStyle = () => {
+    const theme = rowTheme();
+    if (theme?.stops) return { '--suggest-fa-a': theme.stops[0], '--suggest-fa-b': theme.stops[1], '--suggest-fa-c': theme.stops[2] };
+    return theme?.shade ? { '--suggest-shade': theme.shade, '--suggest-shade-raised': theme.raised } : undefined;
+  };
   const thumbLoading = () => (props.index >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined);
   const thumbPriority = () => (props.index < SUGGEST_THUMB_HIGH ? 'high' : 'low');
   const choose = () => {
@@ -1094,8 +1128,9 @@ function SuggestRow(props) {
             'is-rainbow': rowTheme()?.kind === 'rainbow',
             'is-gold': rowTheme()?.kind === 'gold',
             'is-ghost': rowTheme()?.kind === 'ghost',
+            'is-fullart': rowTheme()?.kind === 'fullart',
           }]}
-          style={rowTheme()?.shade ? { '--suggest-shade': rowTheme().shade, '--suggest-shade-raised': rowTheme().raised } : undefined}
+          style={rowStyle()}
         >
           <button type="button" class="suggest-main" onClick={choose}>
             <span class="suggest-set" aria-hidden="true">
@@ -1109,7 +1144,7 @@ function SuggestRow(props) {
               </span>
             </span>
             <Show when={thumb()} fallback={<span class="suggest-ph" />}>
-              <CardArt src={thumb()} alt="" loading={thumbLoading()} fetchPriority={thumbPriority()} dragCard={live() ? undefined : card()} />
+              <CardArt src={thumb()} langScans={card().langScans} alt="" loading={thumbLoading()} fetchPriority={thumbPriority()} dragCard={live() ? undefined : card()} />
             </Show>
             <span class="suggest-copy">
               <span class="suggest-number">{number()}</span>

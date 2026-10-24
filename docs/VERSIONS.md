@@ -378,3 +378,47 @@ To look for missed joins of other cards the same way, export the same-name pool
 (`review/2026-10-20-classic/export-pool.sql`), run `features` on it, then
 `match --cards ids.txt --pool pool.tsv --feats feats.bin --out match.tsv --top 6`: a card
 whose best score sits in another key (≥ 0.85 here) is a candidate for a sheet.
+
+### Reverse-holo pattern joins (22 October 2026)
+
+Giuseppe's report: Gem Pack Vol.6 (CBB6C) looked missing from versions. Lileep itself was
+fine (the six reverse holos 09-01..06/07 sit with Stellar Crown 005/142 in `v587906`, the
+SIR 09-07/07 with the Stellar Crown IR 145/142 in `v590098`), but across the catalogue the
+reverse-holo pattern blueprints CardTrader lists next to a card were often split from it:
+Black Bolt 049/086 vs its Poké Ball / Master Ball Reverse Holo, CSV9C 002/208 vs
+`CSV9C | Poké Ball Reverse | 002/208`, Ascended Heroes / MEGA Dream ex Energy and Ball &
+Rocket reverses, and Gem Pack slots whose six reverse holos landed on 3–4 keys (13 slots of
+Gem Pack Vol.5). The foil overlay drops CLIP under its thresholds.
+
+`scripts/sql/20261022_reverse_pattern_version_joins.sql` adds
+`marketplace_join_reverse_pattern_versions(p_apply)`. Same name + same set family (set
+name before ` - ` / `:`) + same printed n/m, with at least one reverse label, is one card;
+so are a Gem Pack slot's variants 01..06 (07 is the IR/SIR, another painting). It
+union-finds the version keys of those printings and folds them into one: pinned sources
+first, then the larger set; a singleton receiver becomes `reverse-pattern`. A key or chain
+that would add a second illustrator is skipped (D000095): CardTrader shipped the CSV10C
+Master Ball Reverse Porygon 172/222 with the Porygon2 173 scan, so CLIP filed it with
+Porygon2. First run: 178 receiving keys, 302 keys emptied, 466 printings moved.
+
+`scripts/match-imported-version-sets.sh` and the leftover ingest run it after every CLIP
+match, because re-clustering a name bucket resets those printings. A full
+`version-sets-pipeline.sh` pass does not yet; run the apply after it:
+
+```bash
+# nezopt writer only
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -v ON_ERROR_STOP=1 < scripts/sql/20261022_reverse_pattern_version_joins.sql
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -c "SELECT * FROM public.marketplace_join_reverse_pattern_versions();"      # plan
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -c "SELECT * FROM public.marketplace_join_reverse_pattern_versions(true);"  # apply
+```
+
+Backups of the first run: `version_reverse_pattern_join_20261022` (card_id, old version)
+and `version_reverse_pattern_join_20261022_sets` (version-set rows before the run).
+
+Not fixed by this, because the CardTrader scan itself is another card: Gem Pack Vol.6
+Clobbopus 22-01..07 shows Munkidori 27, Cufant 23-01..07 shows Fezandipiti 28, Castform
+Sunny Form SIR 10-07 is the Lileep SIR file, Appletun SIR 21-07 shows Okidogi 26-07. Their
+reverse holos now share one key per slot; they cannot join the real painting until the
+scan is right.

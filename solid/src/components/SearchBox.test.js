@@ -62,7 +62,14 @@ test('LEGEND/BREAK art is the full card rotated; full-bleed art skips the window
 test('desktop suggest hover shows the leftover JPEG beside the panel', () => {
   assert.match(box, /<Portal mount=\{document\.body\}>/);
   assert.match(box, /class="suggest-hover"/);
-  assert.match(box, /<CardArt src=\{hoverSrc\(\)\} full=\{Boolean\(hoverHero\(\)\)\} alt="" \/>/);
+  assert.match(box, /<CardArt src=\{hoverSrc\(\)\} full=\{Boolean\(hoverHero\(\)\)\} langScans=\{hoverCard\(\)\?\.langScans\} alt="" \/>/);
+});
+
+test('popup thumb and hover paint the card-language scan first, as the desk does', () => {
+  // Suggest printings carry langScans (pokoin-rust suggest.rs overlay_lang_scans);
+  // the artwork crop keeps the leftover its window was measured on.
+  assert.match(box, /<CardArt src=\{thumb\(\)\} langScans=\{card\(\)\.langScans\}/);
+  assert.match(box, /<CardArt\s+src=\{thumb\(\)\}\s+card=\{card\(\)\}[\s\S]*?cut=\{artLayout\(\) === 'window'/);
 });
 
 test('suggest thumbs preload into the LRU; the first rows load eagerly', () => {

@@ -1107,6 +1107,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/picked/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/picked",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/zero/",
       "destination": "/market/index.html"
     },
@@ -1192,6 +1200,14 @@
     },
     {
       "source": "/privacy",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension/privacy/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension/privacy",
       "destination": "/market/index.html"
     },
     {

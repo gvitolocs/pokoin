@@ -77,15 +77,34 @@ pub fn blueprint(card: &str) -> Option<i64> {
 }
 
 /// EUR price CardTrader gets for a PKN price (200 PKN = 1 EUR), to the cent.
-/// `None` when that is not a positive amount.
+/// `None` when that is not a positive amount. A plain conversion: a Pokoin
+/// price goes to CardTrader through [`ct_ask_eur`], never this.
 pub fn eur_price(pkn: f64) -> Option<f64> {
     let price = (pkn * 0.005 * 100.0).round() / 100.0;
     (price.is_finite() && price > 0.0).then_some(price)
 }
 
-/// CardTrader `PUT /products/:id` body for a Pokoin price edit.
-pub fn price_body(pkn: f64) -> Option<Value> {
-    eur_price(pkn).map(|price| json!({ "price": json_number(price) }))
+/// The CardTrader ask for a Pokoin price: the smallest whole-cent ask that,
+/// after the seller's CardTrader commission and its VAT, nets the Pokoin price
+/// (`ct_fees::FeeRule::gross_cents`). A Pokoin price is already net of the
+/// commission (docs/PRICING.md); listing it unchanged on CardTrader took the
+/// commission a second time (2026-10-21: Spiderling 26 PKN went up at €0.13
+/// and netted €0.1178; at €0.14 it nets €0.1278 = 26 PKN).
+pub fn ct_ask_eur(pkn: f64, channel: crate::ct_fees::Channel) -> Option<f64> {
+    crate::ct_fees::rule().gross_eur(pkn, channel).filter(|price| *price > 0.0)
+}
+
+/// The seller's CardTrader channel a listing carries for a write
+/// (`ctChannel`, set by whoever resolved it); Zero, the higher rate, when
+/// unknown, so a seller always nets at least the Pokoin price.
+pub fn listing_channel(listing: &Value) -> crate::ct_fees::Channel {
+    crate::ct_fees::Channel::parse(&first(listing, &["ctChannel"], 30))
+}
+
+/// CardTrader `PUT /products/:id` body for a Pokoin price edit: the ask that
+/// nets that price for this seller.
+pub fn price_body(pkn: f64, channel: crate::ct_fees::Channel) -> Option<Value> {
+    ct_ask_eur(pkn, channel).map(|price| json!({ "price": json_number(price) }))
 }
 
 /// CardTrader `POST /products` body for a Pokoin listing.
@@ -93,7 +112,8 @@ pub fn product_body(listing: &Value) -> ApiResult<Value> {
     let id = blueprint(&first(listing, &["cardId", "card_id"], 80))
         .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a CardTrader blueprint id."))?;
     let pkn = number(listing.get("pricePkn").or_else(|| listing.get("price_pkn")).unwrap_or(&Value::Null));
-    let price = eur_price(pkn).ok_or_else(|| ApiError::bad_request("CardTrader listing needs a positive EUR price."))?;
+    let price = ct_ask_eur(pkn, listing_channel(listing))
+        .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a positive EUR price."))?;
     let qty = number(
         listing
             .get("quantityAvailable")
@@ -152,6 +172,161 @@ pub fn product_body(listing: &Value) -> ApiResult<Value> {
     Ok(body)
 }
 
+/// A listing's game (`marketplace_game`); Pokémon when unset.
+pub fn listing_game(listing: &Value) -> String {
+    let raw = first(listing, &["marketplace_game", "marketplaceGame", "game"], 40);
+    crate::db::normalize_game(if raw.is_empty() { "pokemon" } else { &raw })
+}
+
+/// The finish a listing's CardTrader product gets: `pokemon_reverse` for a
+/// Pokémon listing ([`product_body`]: `foil_state = 'reverse'` or `reverse`;
+/// a holo is its own blueprint), the game's `*_foil` for the others
+/// ([`other_game_foil`]). The group key and the twin facet read this, so two
+/// listings group only when their products would carry the same finish.
+pub fn push_foil(listing: &Value) -> bool {
+    if listing_game(listing) == "pokemon" {
+        first(listing, &["foilState", "foil_state"], 40).eq_ignore_ascii_case("reverse") || listing["reverse"] == true
+    } else {
+        other_game_foil(listing)
+    }
+}
+
+/// A graded slab (any grading field set): never grouped with another copy,
+/// each slab is its own CardTrader product.
+pub fn is_graded(listing: &Value) -> bool {
+    listing["graded"] == true
+        || listing["graded"] == "t"
+        || ["grading_company", "gradingCompany", "grade", "certification_id", "certificationId"]
+            .iter()
+            .any(|key| match &listing[*key] {
+                Value::String(text) => !text.trim().is_empty(),
+                Value::Number(_) => true,
+                _ => false,
+            })
+}
+
+/// A Pokoin listing's foil on a game other than Pokémon: imports store it as
+/// `reverse` (`foil_state = 'reverse'`), Card Rails as `foil`/`holo`.
+fn other_game_foil(listing: &Value) -> bool {
+    listing["reverse"] == true
+        || matches!(
+            first(listing, &["foilState", "foil_state"], 40).to_lowercase().as_str(),
+            "reverse" | "foil" | "holo"
+        )
+}
+
+/// CardTrader's code for a Pokoin language among a blueprint's allowed values
+/// (Riftbound: `en`, `zh-CN`, `fr`, `kr`; Magic adds `zh-TW`, …).
+pub fn ct_language(language: &str, possible: &[Value]) -> Option<String> {
+    let wanted: &[&str] = match language.trim().to_uppercase().as_str() {
+        "" | "EN" => &["en"],
+        "IT" => &["it"],
+        "FR" => &["fr"],
+        "DE" => &["de"],
+        "ES" => &["es"],
+        "PT" => &["pt"],
+        "JP" | "JA" | "JPN" => &["jp", "ja"],
+        "KO" | "KR" => &["kr", "ko"],
+        "ZH" | "CN" | "ZHS" | "ZH-CN" => &["zh-CN", "zh"],
+        "ZHT" | "TW" | "ZH-TW" => &["zh-TW", "zht"],
+        "RU" => &["ru"],
+        "NL" => &["nl"],
+        "PL" => &["pl"],
+        "ID" => &["id"],
+        "TH" => &["th"],
+        "VI" => &["vi"],
+        _ => &[],
+    };
+    wanted.iter().find_map(|code| {
+        possible
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|value| value.eq_ignore_ascii_case(code))
+            .map(str::to_string)
+    })
+}
+
+/// CardTrader's condition for a Pokoin one among a blueprint's allowed values.
+pub fn ct_condition(condition: &str, possible: &[Value]) -> Option<String> {
+    let wanted: &[&str] = match condition.trim().to_uppercase().as_str() {
+        "M" | "MT" | "MINT" => &["Mint", "Near Mint"],
+        "SP" | "LP" | "EX" => &["Slightly Played"],
+        "MP" | "GD" => &["Moderately Played"],
+        "PL" | "HP" => &["Played", "Heavily Played"],
+        "PO" | "POOR" | "DMG" => &["Poor"],
+        _ => &["Near Mint"],
+    };
+    if possible.is_empty() {
+        return wanted.first().map(|value| value.to_string());
+    }
+    wanted.iter().find_map(|want| {
+        possible.iter().filter_map(Value::as_str).find(|value| value == want).map(str::to_string)
+    })
+}
+
+/// `POST /products` body for a listing of a game other than Pokémon, from
+/// its blueprint's `editable_properties` (`marketplace_<game>.cardtrader_blueprints`):
+/// only properties the blueprint has and values it allows (`riftbound_language`,
+/// `riftbound_foil`, `mtg_foil`, `first_edition`, …). A facet the blueprint
+/// cannot carry is refused, so nothing is created, rather than listed on
+/// CardTrader as another copy.
+pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiResult<Value> {
+    let mut body = product_body(listing)?;
+    let named = |test: &dyn Fn(&str) -> bool| {
+        editable.iter().find(|property| property["name"].as_str().is_some_and(|name| test(name)))
+    };
+    let possible = |property: &Value| property["possible_values"].as_array().cloned().unwrap_or_default();
+    let refuse = |what: &str| {
+        ApiError::bad_request(format!("CardTrader has no {what} for this card.")).with_code("cardtrader_facet_unsupported")
+    };
+    let mut properties = serde_json::Map::new();
+    let condition = field(listing, "condition", 20);
+    let condition = match named(&|name| name == "condition") {
+        Some(property) => ct_condition(&condition, &possible(property)).ok_or_else(|| refuse("such condition"))?,
+        None => ct_condition(&condition, &[]).unwrap_or_else(|| "Near Mint".into()),
+    };
+    properties.insert("condition".into(), json!(condition));
+    if let Some(property) = named(&|name| name.ends_with("_language")) {
+        let language = field(listing, "language", 10);
+        let code = ct_language(&language, &possible(property)).ok_or_else(|| refuse("such language"))?;
+        properties.insert(property["name"].as_str().unwrap_or_default().to_string(), json!(code));
+    }
+    let boolean = |property: &Value| property["type"] == "boolean";
+    let flags: [(bool, &dyn Fn(&str) -> bool, &str); 4] = [
+        (other_game_foil(listing), &|name: &str| name.ends_with("_foil"), "foil"),
+        (
+            listing["firstEdition"] == true || listing["first_edition"] == true,
+            &|name: &str| name == "first_edition" || name.ends_with("_first_edition"),
+            "first edition",
+        ),
+        (listing["signed"] == true, &|name: &str| name == "signed", "signed copy"),
+        (listing["altered"] == true, &|name: &str| name == "altered", "altered copy"),
+    ];
+    for (on, test, what) in flags {
+        if !on {
+            continue;
+        }
+        let property = named(test).filter(|property| boolean(property)).ok_or_else(|| refuse(what))?;
+        properties.insert(property["name"].as_str().unwrap_or_default().to_string(), json!(true));
+    }
+    body["properties"] = Value::Object(properties);
+    Ok(body)
+}
+
+/// The create body for any game: Pokémon's fixed properties, or the
+/// blueprint's own for the other games (`None` when its blueprint is unknown:
+/// refused, nothing is created).
+pub fn product_body_for_game(listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
+    if listing_game(listing) == "pokemon" {
+        return product_body(listing);
+    }
+    match editable {
+        Some(editable) => product_body_for_blueprint(listing, editable),
+        None => Err(ApiError::bad_request("CardTrader blueprint properties are unknown for this card.")
+            .with_code("cardtrader_blueprint_unknown")),
+    }
+}
+
 /// What a CardTrader create did, as far as Pokoin can know.
 #[derive(Debug)]
 pub enum PushOutcome {
@@ -166,6 +341,20 @@ pub enum PushOutcome {
 
 /// `pushListingToCardTrader`, telling a rejected create from one in doubt.
 pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient, uid: &str, listing: &Value) -> PushOutcome {
+    push_product_outcome_on(fs, ct, uid, listing, None).await
+}
+
+/// [`push_product_outcome`] with a pool of the shared database, so the
+/// seller's CardTrader channel comes from the market book
+/// (`ct_fees::resolve_seller_channel_pool`); without one it is the stored
+/// flag, else Zero.
+pub async fn push_product_outcome_on(
+    fs: &dyn FirestoreStore,
+    ct: &CardTraderClient,
+    uid: &str,
+    listing: &Value,
+    pool: Option<&PgPool>,
+) -> PushOutcome {
     let prepared = async {
         let doc = integration::read_integration_doc(fs, uid).await?;
         if integration::is_one_day_ready_integration(&doc) {
@@ -173,8 +362,16 @@ pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient
                 "CardTrader 1-Day Ready accounts are stocked by CardTrader. List this card on Pokoin only.",
             ));
         }
+        let channel = match pool {
+            Some(pool) => crate::ct_fees::resolve_seller_channel_pool(pool, &doc.data).await,
+            None => crate::ct_fees::seller_channel(&doc.data),
+        };
+        let mut listing = listing.clone();
+        if listing.is_object() && listing.get("ctChannel").is_none() {
+            listing["ctChannel"] = json!(channel.code());
+        }
         let token = integration::decrypt_integration_token(fs, uid).await?;
-        Ok((token, product_body(listing)?))
+        Ok((token, product_body(&listing)?))
     }
     .await;
     let (token, body) = match prepared {
@@ -187,7 +384,18 @@ pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient
 /// Create `listing` with a token the caller already holds (the reconcile's
 /// push pass). The caller has ruled out 1-Day Ready accounts.
 pub async fn create_with_token(ct: &CardTraderClient, token: &str, listing: &Value) -> PushOutcome {
-    match product_body(listing) {
+    create_with_token_for(ct, token, listing, None).await
+}
+
+/// [`create_with_token`] for any game: `editable` is the blueprint's
+/// `editable_properties` (required for the games other than Pokémon).
+pub async fn create_with_token_for(
+    ct: &CardTraderClient,
+    token: &str,
+    listing: &Value,
+    editable: Option<&[Value]>,
+) -> PushOutcome {
+    match product_body_for_game(listing, editable) {
         Ok(body) => create_body(ct, token, body).await,
         Err(error) => PushOutcome::Rejected(error),
     }
@@ -212,7 +420,19 @@ async fn create_body(ct: &CardTraderClient, token: &str, body: Value) -> PushOut
 
 /// `pushListingToCardTrader`: create the product with the seller's token.
 pub async fn push_product(fs: &dyn FirestoreStore, ct: &CardTraderClient, uid: &str, listing: &Value) -> ApiResult<Value> {
-    match push_product_outcome(fs, ct, uid, listing).await {
+    push_product_on(fs, ct, uid, listing, None).await
+}
+
+/// [`push_product`] with the shared database's pool (the seller's channel
+/// from the market book).
+pub async fn push_product_on(
+    fs: &dyn FirestoreStore,
+    ct: &CardTraderClient,
+    uid: &str,
+    listing: &Value,
+    pool: Option<&PgPool>,
+) -> ApiResult<Value> {
+    match push_product_outcome_on(fs, ct, uid, listing, pool).await {
         PushOutcome::Created(pushed) => Ok(pushed),
         PushOutcome::Rejected(error) | PushOutcome::InDoubt(error) => Err(error),
     }
@@ -237,6 +457,17 @@ pub fn off_sale(status: &str) -> bool {
 /// Upsert the push link row (`marketplace_cardtrader_product_links`).
 pub async fn upsert_push_link(writer: &PgPool, uid: &str, listing: &Value, pushed: &Value, id: uuid::Uuid, seller: &str, qty: i32) -> ApiResult<()> {
     let bp = blueprint(&first(listing, &["cardId", "card_id"], 80)).map(|n| n.to_string()).unwrap_or_default();
+    let freed = sqlx::query(crate::cardtrader::sync::FREE_STALE_LINK_SQL)
+        .bind(if uid.is_empty() { seller } else { uid })
+        .bind(field(pushed, "productId", 80))
+        .bind(id)
+        .execute(writer)
+        .await;
+    if let Err(error) = freed {
+        if !is_missing_table(&error) {
+            return Err(error.into());
+        }
+    }
     let linked = sqlx::query(
         "insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, blueprint_id, last_ct_quantity, last_seen_at, origin, missing_from_ct, updated_at) \
          values ($1, $2, $3::uuid, $4, $5, now(), 'push', false, now()) \
@@ -268,7 +499,7 @@ pub async fn push_and_link(
     uid: &str,
     listing: &Value,
 ) -> ApiResult<Value> {
-    let pushed = push_product(fs, ct, uid, listing).await?;
+    let pushed = push_product_on(fs, ct, uid, listing, Some(writer)).await?;
     let raw_id = field(listing, "id", 80);
     if raw_id.is_empty() {
         return Ok(pushed);
@@ -352,7 +583,8 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(body["blueprint_id"], json!(119));
-        assert_eq!(body["price"], json!(10));
+        // 2000 PKN net, unknown channel (Zero): €10.94 nets €10.0057.
+        assert_eq!(body["price"], json!(10.94));
         assert_eq!(body["quantity"], json!(3));
         assert_eq!(body["properties"]["condition"], json!("Slightly Played"));
         assert_eq!(body["properties"]["pokemon_language"], json!("jp"));
@@ -364,13 +596,63 @@ mod tests {
         assert!(product_body(&json!({ "cardId": "x", "pricePkn": 10 })).is_err());
     }
 
+    fn riftbound_props() -> Vec<Value> {
+        // Punching Poro 400553, from the nightly blueprint export.
+        serde_json::from_str(r#"[
+          {"name": "condition", "type": "string", "default_value": "Near Mint", "possible_values": ["Mint", "Near Mint", "Slightly Played", "Moderately Played", "Played", "Poor"]},
+          {"name": "signed", "type": "boolean", "default_value": "false", "possible_values": [true, false]},
+          {"name": "altered", "type": "boolean", "default_value": "false", "possible_values": [true, false]},
+          {"name": "riftbound_language", "type": "string", "default_value": "en", "possible_values": ["en", "zh-CN", "fr", "kr"]},
+          {"name": "riftbound_foil", "type": "boolean", "default_value": "false", "possible_values": [true, false]}
+        ]"#).unwrap()
+    }
+
+    #[test]
+    fn other_games_take_the_blueprint_properties() {
+        let listing = json!({"id": "l1", "card_id": "801106", "price_pkn": 240, "quantity_available": 1,
+                             "condition": "NM", "language": "EN", "foil_state": "standard", "reverse": false,
+                             "marketplace_game": "riftbound"});
+        let body = product_body_for_game(&listing, Some(&riftbound_props())).unwrap();
+        assert_eq!(body["blueprint_id"], json!(400553));
+        // 240 PKN net at Zero: listed at €1.31 (nets €1.2002).
+        assert_eq!(body["price"], json!(1.31));
+        assert_eq!(body["user_data_field"], json!("pokoin:l1"));
+        assert_eq!(body["properties"], json!({"condition": "Near Mint", "riftbound_language": "en"}));
+        let mut foil = listing.clone();
+        foil["foil_state"] = json!("foil");
+        foil["language"] = json!("KO");
+        foil["condition"] = json!("HP");
+        let body = product_body_for_game(&foil, Some(&riftbound_props())).unwrap();
+        assert_eq!(body["properties"], json!({"condition": "Played", "riftbound_language": "kr", "riftbound_foil": true}));
+        // Facets the blueprint cannot carry are refused: nothing is created.
+        let mut italian = listing.clone();
+        italian["language"] = json!("IT");
+        assert!(product_body_for_game(&italian, Some(&riftbound_props())).is_err());
+        let mut first = listing.clone();
+        first["first_edition"] = json!(true);
+        assert!(product_body_for_game(&first, Some(&riftbound_props())).is_err());
+        assert!(product_body_for_game(&listing, None).is_err(), "unknown blueprint");
+        // Pokémon keeps its fixed body with or without properties.
+        let pokemon = json!({"id": "p", "cardId": "238", "pricePkn": 200, "language": "IT"});
+        assert_eq!(listing_game(&pokemon), "pokemon");
+        assert_eq!(product_body_for_game(&pokemon, None).unwrap()["properties"]["pokemon_language"], json!("it"));
+        assert_eq!(ct_language("ZHT", &[json!("en"), json!("zh-TW")]).as_deref(), Some("zh-TW"));
+        assert_eq!(ct_condition("LP", &[]).as_deref(), Some("Slightly Played"));
+    }
+
     #[test]
     fn edit_price_uses_the_push_conversion() {
-        assert_eq!(price_body(200.0), Some(json!({ "price": 1 })));
-        assert_eq!(price_body(333.0), Some(json!({ "price": 1.67 })));
+        use crate::ct_fees::Channel::{Direct, Zero};
+        // 200 PKN net = €1.00: a direct seller lists at €1.07 (nets €1.0047), Zero at €1.10.
+        assert_eq!(price_body(200.0, Direct), Some(json!({ "price": 1.07 })));
+        assert_eq!(price_body(200.0, Zero), Some(json!({ "price": 1.1 })));
+        // Spiderling NM EN, 26 PKN: €0.14, not €0.13 (the fee counted once).
+        assert_eq!(price_body(26.0, Direct), Some(json!({ "price": 0.14 })));
         assert_eq!(eur_price(1.0), Some(0.01), "half a cent rounds up");
         assert_eq!(eur_price(0.5), None, "a quarter cent rounds to nothing");
-        assert_eq!(price_body(0.0), None);
-        assert_eq!(price_body(f64::NAN), None);
+        assert_eq!(price_body(0.0, Zero), None);
+        assert_eq!(price_body(f64::NAN, Zero), None);
+        assert_eq!(listing_channel(&json!({"ctChannel": "direct"})), Direct);
+        assert_eq!(listing_channel(&json!({})), Zero);
     }
 }
