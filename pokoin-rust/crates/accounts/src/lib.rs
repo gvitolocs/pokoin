@@ -68,6 +68,7 @@ pub const PORTED_ROUTES: &[&str] = &[
     "POST /api/auth-login",
     "POST /api/cardrails-authorize",
     "POST /api/cardrails-token",
+    "GET /api/cardrails-membership",
     "POST /api/ensure-username",
     "POST /api/signup-notification",
     "POST /api/register-email",
@@ -145,6 +146,10 @@ pub fn router(state: DomainState) -> Router {
         .route(
             "/api/cardrails-token",
             post(handlers::cardrails::cardrails_token),
+        )
+        .route(
+            "/api/cardrails-membership",
+            get(handlers::cardrails::cardrails_membership),
         )
         .route(
             "/api/ensure-username",
@@ -302,9 +307,9 @@ mod tests {
 
     #[test]
     fn every_assigned_route_is_accounted_for() {
-        // 42 ported + 0 unported = the 42 (method, path) pairs assigned to this
+        // 43 ported + 0 unported = the 43 (method, path) pairs assigned to this
         // worker; 9 more belong to the external photos/R2/social assistant worker.
-        assert_eq!(PORTED_ROUTES.len(), 42);
+        assert_eq!(PORTED_ROUTES.len(), 43);
         assert_eq!(UNPORTED_ROUTES.len(), 0);
         assert_eq!(EXTERNAL_ROUTES.len(), 9);
     }

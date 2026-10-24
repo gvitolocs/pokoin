@@ -433,3 +433,139 @@ async fn the_exchange_hands_card_rails_a_seller_grant_when_asked() {
     assert_eq!((status, answer.get("grant")), (StatusCode::OK, None));
     assert_eq!(answer["email"], "ash@pokoin.com");
 }
+
+// ---------------------------------------------------------------------------
+// Silver membership lookup (`GET /api/cardrails-membership`)
+// ---------------------------------------------------------------------------
+
+fn user_doc(uid: &str, fields: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "name": format!("projects/{TEST_PROJECT}/databases/(default)/documents/users/{uid}"),
+        "fields": fields,
+    })
+}
+
+async fn membership(
+    app: &axum::Router,
+    query: &str,
+    secret: Option<&str>,
+) -> (StatusCode, serde_json::Value, axum::http::HeaderMap) {
+    call(app, "GET", &format!("/api/cardrails-membership?{query}"), secret, None).await
+}
+
+#[tokio::test]
+async fn membership_requires_the_client_secret() {
+    let transport = ScriptedTransport::new();
+    let app = router(cardrails_state(&transport, Some(CLIENT_SECRET)));
+    let (status, error, _) = membership(&app, "uid=u1", Some("nope")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(error["error"], "invalid_client");
+    let (status, _, _) = membership(&app, "uid=u1", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Nothing reached Firestore or Identity Toolkit.
+    assert!(transport.requests_to("documents/users").is_empty());
+
+    let app = router(cardrails_state(&transport, None));
+    let (status, error, _) = membership(&app, "uid=u1", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error["error"], "not_configured");
+}
+
+#[tokio::test]
+async fn membership_needs_a_uid_or_an_email() {
+    let transport = ScriptedTransport::new();
+    let app = router(cardrails_state(&transport, Some(CLIENT_SECRET)));
+    let (status, error, _) = membership(&app, "", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(error["error"], "invalid_request");
+}
+
+#[tokio::test]
+async fn membership_answers_silver_by_role_or_unexpired_until() {
+    let transport = ScriptedTransport::new();
+    transport.on_json(
+        "documents/users/u-role",
+        200,
+        user_doc("u-role", serde_json::json!({ "role": { "stringValue": "silver" }, "email": { "stringValue": "Role@Example.com" } })),
+    );
+    transport.on_json(
+        "documents/users/u-until",
+        200,
+        user_doc("u-until", serde_json::json!({ "silverUntil": { "timestampValue": "2999-01-01T00:00:00Z" } })),
+    );
+    transport.on_json(
+        "documents/users/u-expired",
+        200,
+        user_doc("u-expired", serde_json::json!({ "role": { "stringValue": "user" }, "silverUntil": { "timestampValue": "2000-01-01T00:00:00Z" } })),
+    );
+    transport.on_json(
+        "documents/users/u-none",
+        404,
+        serde_json::json!({ "error": { "code": 404, "status": "NOT_FOUND", "message": "missing" } }),
+    );
+    let app = router(cardrails_state(&transport, Some(CLIENT_SECRET)));
+
+    let (status, body, headers) = membership(&app, "uid=u-role", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["uid"], "u-role");
+    assert_eq!(body["email"], "role@example.com");
+    assert_eq!(body["silver"], true);
+    assert_eq!(body["role"], "silver");
+    assert_eq!(body["silverUntil"], serde_json::Value::Null);
+    assert_eq!(body["profile"], true);
+    assert_eq!(headers.get("cache-control").and_then(|v| v.to_str().ok()), Some("no-store"));
+    assert!(headers.get("access-control-allow-origin").is_none());
+
+    let (status, body, _) = membership(&app, "uid=u-until", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["silver"], true);
+    assert_eq!(body["silverUntil"], "2999-01-01T00:00:00.000Z");
+    assert_eq!(body["role"], "");
+
+    let (status, body, _) = membership(&app, "uid=u-expired", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["silver"], false);
+    assert_eq!(body["silverUntil"], "2000-01-01T00:00:00.000Z");
+    assert_eq!(body["role"], "user");
+
+    let (status, body, _) = membership(&app, "uid=u-none", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["silver"], false);
+    assert_eq!(body["profile"], false);
+}
+
+#[tokio::test]
+async fn membership_resolves_an_email_through_identity_toolkit() {
+    let transport = ScriptedTransport::new();
+    transport.on_json(
+        "accounts:lookup",
+        200,
+        serde_json::json!({ "users": [{ "localId": "u-role", "email": "Role@Example.com" }] }),
+    );
+    transport.on_json(
+        "documents/users/u-role",
+        200,
+        user_doc("u-role", serde_json::json!({ "role": { "stringValue": "silver" } })),
+    );
+    let app = router(cardrails_state(&transport, Some(CLIENT_SECRET)));
+    let (status, body, _) = membership(&app, "email=Role%40Example.com", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["uid"], "u-role");
+    assert_eq!(body["email"], "role@example.com");
+    assert_eq!(body["silver"], true);
+    let lookups = transport.requests_to("accounts:lookup");
+    assert_eq!(lookups.len(), 1);
+    let payload: serde_json::Value = serde_json::from_slice(&lookups[0].body).unwrap();
+    assert_eq!(payload["email"], serde_json::json!(["role@example.com"]));
+}
+
+#[tokio::test]
+async fn membership_of_an_unknown_email_is_not_found() {
+    let transport = ScriptedTransport::new();
+    transport.on_json("accounts:lookup", 200, serde_json::json!({ "users": [] }));
+    let app = router(cardrails_state(&transport, Some(CLIENT_SECRET)));
+    let (status, error, _) = membership(&app, "email=nobody%40example.com", Some(CLIENT_SECRET)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error["error"], "user_not_found");
+    assert!(transport.requests_to("documents/users").is_empty());
+}

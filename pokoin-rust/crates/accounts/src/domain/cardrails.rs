@@ -109,6 +109,33 @@ pub fn cancel_url(state: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Silver membership answered to Card Rails
+// ---------------------------------------------------------------------------
+
+/// What `/api/cardrails-membership` says about a Pokoin account.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Membership {
+    pub silver: bool,
+    /// `users/{uid}.silverUntil` as epoch milliseconds, when set.
+    pub silver_until_ms: Option<i64>,
+    /// `users/{uid}.role`, lowercased (`""` when unset).
+    pub role: String,
+}
+
+/// The site's Silver rule (`unlock-silver`, the extension download):
+/// role `silver` or `admin`, or an unexpired `silverUntil`. A role of
+/// `silver` with an expired `silverUntil` still counts, as on the site.
+pub fn membership_from_profile(role: &str, silver_until_ms: Option<i64>, now_ms: i64) -> Membership {
+    let role = role.trim().to_ascii_lowercase();
+    let unexpired = silver_until_ms.map(|until| until > now_ms).unwrap_or(false);
+    Membership {
+        silver: role == "silver" || role == "admin" || unexpired,
+        silver_until_ms,
+        role,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Seller grant handed over with the identity
 // ---------------------------------------------------------------------------
 
@@ -558,5 +585,20 @@ mod tests {
             cancel_url(state),
             format!("{REDIRECT_SCHEME}?error=access_denied&state={state}")
         );
+    }
+
+    #[test]
+    fn membership_follows_the_site_silver_rule() {
+        let now = 1_000_000;
+        assert!(membership_from_profile("silver", None, now).silver);
+        assert!(membership_from_profile(" Silver ", Some(now - 1), now).silver);
+        assert!(membership_from_profile("admin", None, now).silver);
+        assert!(membership_from_profile("", Some(now + 1), now).silver);
+        assert!(!membership_from_profile("", Some(now), now).silver);
+        assert!(!membership_from_profile("", None, now).silver);
+        assert!(!membership_from_profile("gold", Some(now - 5), now).silver);
+        let m = membership_from_profile("", Some(now + 1), now);
+        assert_eq!(m.silver_until_ms, Some(now + 1));
+        assert_eq!(m.role, "");
     }
 }

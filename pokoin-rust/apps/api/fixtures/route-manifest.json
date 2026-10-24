@@ -24,6 +24,13 @@
   ],
   "file": "new (native Rust: crates/accounts/src/handlers/cardrails.rs; no Node origin)",
   "purpose": "Server-to-server Card Rails token exchange: atomically consumes the one-time code (single use), verifies the PKCE S256 verifier and returns { uid, email, email_verified }. Bearer POKOIN_CARDRAILS_CLIENT_SECRET."
+ }, {
+  "path": "/api/cardrails-membership",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: crates/accounts/src/handlers/cardrails.rs; no Node origin)",
+  "purpose": "Server-to-server Card Rails Silver lookup by uid or email: returns { uid, email, silver, silverUntil, role, profile } by the site's Silver rule, so Pokoin Silver members get Card Rails Pro. Bearer POKOIN_CARDRAILS_CLIENT_SECRET."
  },
  {
   "path": "/api/cardrails/connector",
