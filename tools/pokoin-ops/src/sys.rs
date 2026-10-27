@@ -34,12 +34,18 @@ pub fn rows(text: &str) -> Vec<Vec<String>> {
 }
 
 pub fn free_bytes(path: &Path) -> Result<u64> {
+    Ok(fs_stats(path)?.2)
+}
+
+/// (total, free incl. root-reserved, available to users) in bytes, as df computes them.
+pub fn fs_stats(path: &Path) -> Result<(u64, u64, u64)> {
     let c = CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| anyhow!("bad path"))?;
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         bail!("statvfs {}: {}", path.display(), std::io::Error::last_os_error());
     }
-    Ok(st.f_bavail as u64 * st.f_frsize as u64)
+    let f = st.f_frsize as u64;
+    Ok((st.f_blocks as u64 * f, st.f_bfree as u64 * f, st.f_bavail as u64 * f))
 }
 
 /// True when `path` is the root of a mounted filesystem (its device differs from its parent's).

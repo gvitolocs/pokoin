@@ -4,8 +4,11 @@
 mod backup;
 mod env;
 mod hc;
+mod health;
 mod mail;
+mod nezopt;
 mod notify;
+mod secretary;
 mod sentinel;
 mod sys;
 mod wal;

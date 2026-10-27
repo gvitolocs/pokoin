@@ -6,8 +6,13 @@
 //! A problem mails once it has been seen `confirm` runs in a row, again every
 //! POKOIN_SENTINEL_REMIND_S while it lasts, on escalation (warn → crit), and once when it
 //! clears. All of one run's changes go out in one mail.
+//!
+//! On nezopt it also watches what OnFailure= cannot see (`nezopt.rs`), posts the full
+//! snapshot to the Secretary app every run, and pushes each change into crit (and the
+//! recovery) there (`health.rs`).
 
-use crate::{env, hc, mail, sys};
+use crate::health::{self, Meta};
+use crate::{env, hc, mail, nezopt, secretary, sys};
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -39,11 +44,22 @@ pub struct Finding {
     pub sev: Sev,
     pub detail: String,
     pub confirm: u32,
+    /// Where it lands in the Secretary snapshot; derived from `key` when unset.
+    pub meta: Option<Meta>,
 }
 
 impl Finding {
-    fn new(key: impl Into<String>, sev: Sev, detail: impl Into<String>, confirm: u32) -> Self {
-        Finding { key: key.into(), sev, detail: detail.into(), confirm: confirm.max(1) }
+    pub fn new(key: impl Into<String>, sev: Sev, detail: impl Into<String>, confirm: u32) -> Self {
+        Finding { key: key.into(), sev, detail: detail.into(), confirm: confirm.max(1), meta: None }
+    }
+
+    pub fn with(mut self, meta: Meta) -> Self {
+        self.meta = Some(meta);
+        self
+    }
+
+    fn meta(&self) -> Meta {
+        self.meta.clone().unwrap_or_else(|| Meta::legacy(&self.key))
     }
 }
 
@@ -55,7 +71,7 @@ pub struct CheckOut {
     pub complete: bool,
 }
 
-fn check(prefix: &'static str, confirm: u32, f: impl FnOnce() -> Result<Vec<Finding>>) -> CheckOut {
+pub fn check(prefix: &'static str, confirm: u32, f: impl FnOnce() -> Result<Vec<Finding>>) -> CheckOut {
     match f() {
         Ok(findings) => CheckOut { prefix, findings, complete: true },
         Err(err) => CheckOut {
@@ -88,6 +104,17 @@ pub struct State {
     pub alerts: BTreeMap<String, AlertState>,
     #[serde(default)]
     pub metrics: Option<MetricsSample>,
+    /// Secretary snapshot: per check id, the current state and when it began.
+    #[serde(default)]
+    pub health: BTreeMap<String, health::Track>,
+    /// NRestarts / RestartCount per `unit:` / `container:` id.
+    #[serde(default)]
+    pub restarts: BTreeMap<String, health::RestartTrack>,
+    #[serde(default)]
+    pub k3s_last_run: i64,
+    /// Failed k3s Jobs first seen after the previous run, with when they were seen.
+    #[serde(default)]
+    pub k3s_new_failed: Vec<(String, i64)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -470,6 +497,22 @@ fn newest_dump_age_s(dir: &Path) -> Result<Option<u64>> {
     Ok(best)
 }
 
+/// Every finding as a snapshot row, one per check id.
+fn snapshot_items(outs: &[CheckOut]) -> Vec<health::Item> {
+    let items = outs
+        .iter()
+        .flat_map(|o| {
+            o.findings.iter().map(move |f| health::Item {
+                meta: f.meta(),
+                sev: f.sev,
+                detail: f.detail.clone(),
+                prefix: o.prefix.to_string(),
+            })
+        })
+        .collect();
+    health::merge(items)
+}
+
 pub fn eval_units(units: &[String], ignore: &Regex, scope: &str) -> Vec<Finding> {
     units
         .iter()
@@ -481,7 +524,7 @@ pub fn eval_units(units: &[String], ignore: &Regex, scope: &str) -> Vec<Finding>
         .collect()
 }
 
-fn run_checks(cfg: &Cfg, state: &mut State) -> Vec<CheckOut> {
+fn run_checks(cfg: &Cfg, state: &mut State, now: i64) -> Vec<CheckOut> {
     let mut outs = Vec::new();
     let psql_rows = |container: &str, sql: &str| -> Result<Vec<Vec<String>>> {
         Ok(sys::rows(&sys::psql(container, &cfg.pg_user, &cfg.pg_db, sql)?))
@@ -594,6 +637,9 @@ fn run_checks(cfg: &Cfg, state: &mut State) -> Vec<CheckOut> {
         }
         Ok(out)
     }));
+    if cfg.role == Role::Nezopt {
+        outs.extend(nezopt::checks(cfg, &nezopt::NezCfg::from_env(), state, now));
+    }
     if let Some(peer) = &cfg.peer_tcp {
         outs.push(check("peer", 2, || {
             let addr = peer.to_socket_addrs()?.next().ok_or_else(|| anyhow!("cannot resolve {peer}"))?;
@@ -611,8 +657,8 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
     let path = env::state_dir().join(format!("sentinel-{}.json", if role == Role::Pi { "pi" } else { "nezopt" }));
     let mut state: State = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let prev = state.alerts.clone();
-    let outs = run_checks(&cfg, &mut state);
     let now = chrono::Utc::now().timestamp();
+    let outs = run_checks(&cfg, &mut state, now);
     let (next, events) = plan(&prev, &outs, now, cfg.remind_s);
 
     let active: Vec<String> = next.iter().filter(|(_, s)| s.sev != Sev::Ok).map(|(k, s)| format!("{} {k}: {}", s.sev.label(), s.detail)).collect();
@@ -621,11 +667,50 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
             println!("{:4} {} — {}", f.sev.label(), f.key, f.detail);
         }
     }
+    // The Secretary snapshot and its pushes (nezopt only).
+    let host = env::hostname();
+    let snap = (role == Role::Nezopt).then(|| {
+        let items = snapshot_items(&outs);
+        let incomplete: BTreeSet<String> = outs.iter().filter(|o| !o.complete).map(|o| o.prefix.to_string()).collect();
+        let (tracks, pushes) = health::track(&state.health, &items, &incomplete, now);
+        let snap = health::snapshot(&host, now, nezopt::metrics(), &items, &tracks);
+        println!("snapshot: {} checks, {} (overall {})", items.len(), health::summary(&items), snap.overall);
+        for i in items.iter().filter(|i| i.sev != Sev::Ok) {
+            println!("  {:4} {} [{}] {}", health::state_str(i.sev), i.meta.id, i.meta.group, i.detail);
+        }
+        (snap, tracks, pushes)
+    });
+
     if dry_run {
         for e in &events {
             println!("event {:?} {}", e.kind, e.key);
         }
+        if let Some((snap, _, pushes)) = &snap {
+            for p in pushes {
+                println!("push {:?} {} — {}", p.kind, p.dedup_key(&host), p.title(&host));
+            }
+            if env::get("POKOIN_SENTINEL_PRINT_SNAPSHOT").is_some() {
+                println!("{}", serde_json::to_string_pretty(snap)?);
+            }
+        }
         return Ok(());
+    }
+
+    if let Some((snap, mut tracks, pushes)) = snap {
+        let client = secretary::Client::from_env();
+        match client.post("/v1/system/health", &serde_json::to_value(&snap)?) {
+            Ok(_) => {}
+            Err(err) => secretary::log_err("POST /v1/system/health", &err),
+        }
+        let mut failed = Vec::new();
+        for p in &pushes {
+            if let Err(err) = client.notify(&p.title(&host), &p.detail, &p.dedup_key(&host)) {
+                secretary::log_err(&format!("notify {}", p.id), &err);
+                failed.push(p.clone());
+            }
+        }
+        health::undelivered(&mut tracks, &state.health, &failed, now);
+        state.health = tracks;
     }
 
     let mut delivered = true;
