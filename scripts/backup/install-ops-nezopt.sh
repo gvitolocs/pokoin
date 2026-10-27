@@ -2,7 +2,7 @@
 # Installs pokoin-ops pieces on nezopt as user units (no sudo). Each step is a host
 # change that needs Giuseppe's OK first (docs/BACKUPS_AND_ALERTS.md).
 #
-#   scripts/backup/install-ops-nezopt.sh alerts          # notify@, OnFailure + dead-man drop-ins, sentinel
+#   scripts/backup/install-ops-nezopt.sh alerts          # notify@, OnFailure for all services, dead-man drop-ins, sentinel
 #   scripts/backup/install-ops-nezopt.sh slot-cap        # writer max_slot_wal_keep_size = 50GB (reload only)
 #   scripts/backup/install-ops-nezopt.sh backups         # nightly pg_dump, wal-g mirror, monthly restore tests
 set -euo pipefail
@@ -32,6 +32,14 @@ alerts() {
     say "wrote $cfg/alerts.env; add the healthchecks ping key when the project exists"
   fi
   install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$units/"
+  # OnFailure for every user service, the notifier's recursion guard, and the uptime-mail opt-out.
+  install -D -m 644 "$ops/service.d-90-alert.conf" "$units/service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-notify@.service.d-90-alert.conf" "$units/pokoin-notify@.service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-uptime-mail.service.d-90-alert.conf" "$units/pokoin-uptime-mail.service.d/90-alert.conf"
+  if [[ ! -f "$cfg/expected-active.txt" ]]; then
+    install -m 644 "$ops/expected-active.txt.example" "$cfg/expected-active.txt"
+    say "wrote $cfg/expected-active.txt (units/containers the sentinel expects to be running)"
+  fi
   for u in pokoin-all-cardtrader-daily.service pokoin-site-map-refresh.service pokoin-overflow-sync.service \
            pokoin-shipping-rates-sync.service pokoin-uptime-mail.service; do
     dropin "$u"

@@ -1,0 +1,43 @@
+# Units and containers that must always be running on nezopt. `pokoin-ops sentinel --role nezopt`
+# reports each one as crit when it is not active/running (Secretary "Server health").
+# Format: `name.service` = user unit, `system:name.service` = system unit, `container:name`.
+# Source: services-inventory.md 2026-10-27 (KEEP+ALERT long-running units).
+
+# Lucina
+lucina-rs.service
+lucina-media.service
+lucina-memo.service
+lucina-diagnostics.service
+lucina-pokemon.service
+lucina-presence.service
+secretary-maps.service
+secretary-nclient.service
+cloudflared-lucina-link.service
+container:lucina-nez
+
+# AI
+dsh-remote.service
+# dsh-harness-backend.service  # on-demand: harness-gateway starts it and it stops when idle
+flareon-honcho-mcp.service
+
+# Pokoin
+ctcm-deals-worker.service
+ctcm-peer1-tunnel.service
+nezopt-cardscan.service
+battlescan-fast-tunnel.service
+pokoin-scan-pi-tunnel.service
+pokoin-newsroom.service
+gh-runner-pokoin-scanner.service
+container:pokoin-k3s
+container:pokoin-marketplace-postgres-15t
+
+# CardRails
+cardrails-api-tunnel.service
+gh-runner-CardRailsAndroid.service
+gh-runner-CardRailsIOS.service
+container:cardrails-api
+container:cardrails-postgres
+
+# Homelab
+nezopt-dashboard.service
+nezopt-metrics-bridge.service
