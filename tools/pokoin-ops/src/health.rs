@@ -31,7 +31,7 @@ pub fn group_for(name: &str) -> &'static str {
     } else if has(&["cardrails"]) {
         "CardRails"
     } else if has(&[
-        "pokoin-", "poko-", "ctcm-", "upworkpkn-", "nezopt-cardscan", "marketplace-", "battlescan-", "price-book",
+        "pokoin-", "poko-", "oracle-poko-", "ctcm-", "upworkpkn-", "nezopt-cardscan", "marketplace-", "battlescan-", "price-book",
         "tcgprices-", "tcgcsv-", "card-lang",
     ]) {
         "Pokoin"
@@ -633,7 +633,8 @@ mod tests {
             ("upworkpkn-image-status", "Pokoin"), ("nezopt-cardscan", "Pokoin"), ("pokoin-k3s", "Pokoin"),
             ("cardrails-api", "CardRails"), ("gh-runner-CardRailsIOS", "CardRails"), ("gh-runner-pokoin-scanner", "Pokoin"),
             ("dsh-remote", "AI"), ("flareon-honcho-mcp", "AI"), ("codevira@cardvault", "AI"), ("llama-server-qwen", "AI"),
-            ("qwen-lane", "AI"), ("nezopt-dashboard", "Homelab"), ("ai-timers", "Other"),
+            ("qwen-lane", "AI"), ("nezopt-dashboard", "Homelab"), ("oracle-poko-tunnel", "Pokoin"),
+            ("oracle-honcho-tunnel", "Homelab"), ("ai-timers", "Other"),
         ] {
             assert_eq!(group_for(n), g, "{n}");
         }
