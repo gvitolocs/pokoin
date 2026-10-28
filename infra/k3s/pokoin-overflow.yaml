@@ -201,8 +201,10 @@ spec:
         - name: POKOIN_RUST_RELEASE
           value: nez-k3s
         # cdn.pokoin.com second origin (Cloudflare LB with the Pi): the
-        # nezopt leftover mirror, read-only. No fallback origin: the mirror is
-        # complete, and cdn.pokoin.com would route back here.
+        # nezopt leftover mirror, read-only. A miss falls back to the Pi's own CDN
+        # (never cdn.pokoin.com, which would route back here) through
+        # pokoin-pi-cdn-tunnel + the pokoin-pi-cdn-bridge container, e.g. a
+        # poko-video file the mirror has not copied yet (docs/NEZOPT_OVERFLOW.md).
         - name: POKOIN_CDN_ROOT
           value: /srv/pokoin/card-images/objects
         - name: POKOIN_CDN_NAME
@@ -210,7 +212,9 @@ spec:
         - name: POKOIN_CDN_BIND
           value: 0.0.0.0:8081
         - name: POKOIN_CDN_FALLBACK_ORIGIN
-          value: ''
+          value: http://172.31.250.15:18181
+        - name: POKOIN_CDN_FALLBACK_EXTRA_PREFIXES
+          value: poko-video/
         - name: MARKETPLACE_DATABASE_URL
           valueFrom:
             secretKeyRef:

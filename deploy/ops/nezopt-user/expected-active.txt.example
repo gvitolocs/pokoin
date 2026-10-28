@@ -26,6 +26,7 @@ ctcm-peer1-tunnel.service
 nezopt-cardscan.service
 battlescan-fast-tunnel.service
 pokoin-scan-pi-tunnel.service
+pokoin-pi-cdn-tunnel.service
 pokoin-newsroom.service
 gh-runner-pokoin-scanner.service
 container:pokoin-k3s

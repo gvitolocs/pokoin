@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# /usr/local/lib/pokoin/poko-video-notify: watches poko-video/ (recursively) and sends nezopt one
+# `video` notice per burst of finished files (close_write or a rename into place).
+set -uo pipefail
+dir="${POKO_VIDEO_DIR:-/srv/pokoin/card-images/objects/poko-video}"
+inotifywait -m -r -q -e close_write -e moved_to --format '%w%f' "$dir" | while read -r _; do
+  # Debounce: wait until 3 s pass without another event, so a batch upload is one notice.
+  while read -r -t 3 _; do :; done
+  /usr/local/lib/pokoin/pokoin-overflow-notify video
+done

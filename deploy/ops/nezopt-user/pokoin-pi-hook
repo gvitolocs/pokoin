@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ~/.local/bin/pokoin-pi-hook: forced command of the Pi's notify key in ~/.ssh/authorized_keys
+#   restrict,from="192.168.178.46",command="/home/nez/.local/bin/pokoin-pi-hook" ssh-ed25519 … pokoin-pi-notify
+# The Pi only says what changed; nezopt pulls with its own access. The key can do nothing else.
+#   release   a new Pi release or env file (Pi pokoin-overflow-notify.path) → pokoin-overflow-sync
+#   video     a file landed in poko-video/ (Pi poko-video-notify.service)  → poko-video-mirror
+# The stamp makes a run already in flight go again (nezopt-k3s.sh follow).
+set -euo pipefail
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+state="$HOME/.local/state/pokoin-overflow"
+case "${SSH_ORIGINAL_COMMAND:-${1:-}}" in
+  release) unit=pokoin-overflow-sync.service stamp=release ;;
+  video) unit=poko-video-mirror.service stamp=video ;;
+  *) echo "pokoin-pi-hook: expected release or video" >&2; exit 2 ;;
+esac
+mkdir -p "$state"
+touch "$state/$stamp.stamp"
+systemctl --user start --no-block "$unit"
+logger -t pokoin-pi-hook "$stamp from ${SSH_CLIENT%% *}: started $unit"
+echo "ok $stamp"

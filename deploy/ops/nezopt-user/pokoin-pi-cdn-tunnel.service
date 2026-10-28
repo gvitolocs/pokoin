@@ -1,0 +1,13 @@
+[Unit]
+Description=The Pi CDN (Pi 127.0.0.1:18081) on nezopt 127.0.0.1:18181, fallback origin of the k3s CDN
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Pods reach it through the pokoin-pi-cdn-bridge container (scripts/nezopt-k3s.sh network).
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ConnectTimeout=5 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:18181:127.0.0.1:18081 pi-home
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

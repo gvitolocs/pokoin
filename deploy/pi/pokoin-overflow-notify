@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# /usr/local/lib/pokoin/pokoin-overflow-notify release|video
+# Tells nezopt that something changed. The key in /etc/pokoin/overflow-notify only runs
+# nezopt's forced command (~/.local/bin/pokoin-pi-hook), which starts nezopt's own pull.
+set -uo pipefail
+dir="${POKOIN_NOTIFY_DIR:-/etc/pokoin/overflow-notify}"
+host="${POKOIN_NOTIFY_HOST:-nez@192.168.178.55}"
+ssh -F none -i "$dir/id_ed25519" -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$dir/known_hosts" "$host" "$1" \
+  || { echo "nezopt not notified ($1); its backstop timer catches up" >&2; exit 1; }
