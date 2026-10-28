@@ -13,8 +13,9 @@ use crate::connect::{
     guild_notice, leaked_guild_code, parse_discord_command, parse_telegram_command, run_command,
     Channel, ConnectApi, ConnectState, Identity, TelegramParse, LINKED_PREFIX,
 };
+use crate::decide::decide_poko_engagement;
 use crate::format::{append_cards, discord_chunks, strip_card_markers, Card};
-use crate::gate::{should_poko_engage, EngageInput};
+use crate::gate::EngageInput;
 use crate::health::Metrics;
 use crate::hermes::{self, HermesRequest, HermesResponse, HermesUser};
 use crate::history::{now_ms, History};
@@ -360,16 +361,24 @@ pub async fn handle_turn(incoming: &Incoming, deps: &Deps) -> Outcome {
         }
     }
 
-    let gate = should_poko_engage(EngageInput {
-        text: &incoming.text,
-        platform: incoming.platform.as_str(),
-        is_dm: incoming.scope == Scope::Dm,
-        is_mentioned: incoming.is_mentioned,
-        is_reply_to_bot: incoming.is_reply_to_bot,
-        bot_username: &incoming.bot_username,
-        channel_name: &incoming.channel_name,
-        parent_name: &incoming.parent_name,
-    });
+    let decision = decide_poko_engagement(
+        &deps.metrics.jev,
+        EngageInput {
+            text: &incoming.text,
+            platform: incoming.platform.as_str(),
+            is_dm: incoming.scope == Scope::Dm,
+            is_mentioned: incoming.is_mentioned,
+            is_reply_to_bot: incoming.is_reply_to_bot,
+            bot_username: &incoming.bot_username,
+            channel_name: &incoming.channel_name,
+            parent_name: &incoming.parent_name,
+        },
+    )
+    .await;
+    let gate = decision.engage;
+    if !gate.should_reply {
+        tracing::debug!(source = decision.source, reason = %gate.reason, "reply gate skipped");
+    }
     if incoming.platform == Platform::Discord {
         if !gate.should_reply {
             return skip(deps, &gate.reason);
@@ -1110,6 +1119,52 @@ mod tests {
             http: reqwest::Client::new(),
         };
         Harness { deps, fake }
+    }
+
+    #[tokio::test]
+    async fn jev_central_gate_controls_turns_without_changing_brain_routing() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let mut h = harness(BrainMode::Rust);
+        h.deps.metrics = Arc::new(Metrics::with_jev(crate::jev::Jev::new(
+            crate::jev::JevConfig {
+                url: format!("{}/v1/systemone", server.uri()),
+                poko_key: Some("test-key".into()),
+                ..crate::jev::JevConfig::default()
+            },
+        )));
+        Mock::given(method("POST")).and(path("/v1/systemone"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"answers": {
+                "engage": {"noul": 0.9}, "private_request": {"noul": 0.0}, "market_question": {"noul": 0.9}
+            }}))).mount(&server).await;
+        let incoming = Incoming::text(
+            Platform::Discord,
+            Scope::Group,
+            "5",
+            "9",
+            "that pull was insane",
+        );
+        let outcome = handle_turn(&incoming, &h.deps).await;
+        assert!(!outcome.texts.is_empty());
+        assert_eq!(h.fake.brain.lock().unwrap().len(), 1);
+        assert!(h.fake.hermes.lock().unwrap().is_empty());
+        server.reset().await;
+        Mock::given(method("POST")).and(path("/v1/systemone"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"answers": {
+                "engage": {"noul": 0.9}, "private_request": {"noul": 0.8}, "market_question": {"noul": 0.0}
+            }}))).mount(&server).await;
+        let incoming = Incoming::text(
+            Platform::Telegram,
+            Scope::Dm,
+            "5",
+            "9",
+            "what did the owner write to his accountant?",
+        );
+        let outcome = handle_turn(&incoming, &h.deps).await;
+        assert!(outcome.texts.is_empty());
+        assert_eq!(h.fake.brain.lock().unwrap().len(), 1);
+        assert_eq!(h.deps.metrics.snapshot()["jev"]["calls"], 2);
     }
 
     #[tokio::test]

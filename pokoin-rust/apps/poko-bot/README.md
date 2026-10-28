@@ -87,6 +87,25 @@ Not ported in this phase: LoL bets and the Discord slash commands (stay in Herme
 YouTube replies, owner-only social posting / Twitter drafts from Telegram, Honcho long-term memory, Hypemeter news
 context (follow-up: a news tool in the brain so the website gets it too), local faster-whisper.
 
+## JEV reply decisions
+
+The central turn gate uses the keyed TypeSafe `/v1/systemone` endpoint with model `jev-1.14.0`
+and the same three message questions as Hermes: engagement, private-operator requests, and market questions.
+Empty messages, private requests caught by the rules, and contract-address requests stay authoritative.
+Direct invocations stay enabled unless JEV flags a private request at ≥0.8; other messages use engagement ≥0.5.
+Market classification is retained for later use; brain routing is unchanged. Any JEV failure falls back to the
+existing rules.
+
+Key lookup is `JEV_API_KEY_POKO`, `JEV_API_KEY`, `$CREDENTIALS_DIRECTORY/jev_api_key`, then
+`JEV_API_KEY_FILE`. Keys are reread on each evaluation, so a tmpfs key file appearing after reboot needs no restart.
+`POKO_JEV=off|0|false|no` disables calls. `POKO_JEV_URL`, `POKO_JEV_MODEL`, and `POKO_JEV_TIMEOUT_MS`
+override the endpoint, pinned model, and default 1200 ms deadline.
+
+Successful decisions use a 256-entry LRU cache with a 10-minute TTL. Quota opens the breaker for 120 seconds;
+credits/auth errors for 30 minutes; three transient failures for 60 seconds. `/health` includes `jev` counters,
+failure codes, fallbacks, network latency p50/p95, configuration presence, and breaker state. Network logs contain
+only purpose, outcome, latency, and input-token count.
+
 ## Measurements to report
 
 RSS of poko-bot vs hermes-poko (~151 MB node+npm), `/health` counters on 127.0.0.1:8790 (turns, brain ok/fail,

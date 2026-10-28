@@ -13,6 +13,7 @@ pub struct Engage {
     pub reason: String,
 }
 
+#[derive(Clone, Copy)]
 pub struct EngageInput<'a> {
     pub text: &'a str,
     pub platform: &'a str,

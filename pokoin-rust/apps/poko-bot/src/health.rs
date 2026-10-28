@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 const SAMPLE_CAP: usize = 200;
 
 pub struct Metrics {
+    pub jev: crate::jev::Jev,
     started: Instant,
     pub telegram_enabled: AtomicBool,
     pub telegram_polling: AtomicBool,
@@ -37,7 +38,12 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new() -> Self {
+        Self::with_jev(crate::jev::Jev::new(crate::jev::JevConfig::default()))
+    }
+
+    pub fn with_jev(jev: crate::jev::Jev) -> Self {
         Self {
+            jev,
             started: Instant::now(),
             telegram_enabled: AtomicBool::new(false),
             telegram_polling: AtomicBool::new(false),
@@ -77,6 +83,7 @@ impl Metrics {
         let last = self.telegram_last_update_ms.load(Ordering::Relaxed);
         json!({
             "ok": true,
+            "jev": self.jev.snapshot(),
             "version": option_env!("POKO_BOT_BUILD_COMMIT").unwrap_or("dev"),
             "uptimeS": self.started.elapsed().as_secs(),
             "telegram": {
@@ -115,7 +122,7 @@ impl Default for Metrics {
     }
 }
 
-fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
+pub(crate) fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
     let mut samples = slot.lock().expect("latency");
     if samples.len() == SAMPLE_CAP {
         samples.pop_front();
@@ -123,7 +130,7 @@ fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
     samples.push_back(ms);
 }
 
-fn latency_json(slot: &Mutex<VecDeque<u64>>) -> Value {
+pub(crate) fn latency_json(slot: &Mutex<VecDeque<u64>>) -> Value {
     let samples = slot.lock().expect("latency");
     let mut sorted: Vec<u64> = samples.iter().copied().collect();
     sorted.sort_unstable();
