@@ -88,6 +88,7 @@ backups() {
 
 # Units that need the Pi: they skip while it is offline (ExecCondition), and pokoin-pi-health
 # (POKOIN_PI_UNITS / POKOIN_PI_CATCHUP_UNITS in pi.rs) starts them again when it is back.
+# Their restarts back off to 5 min (70-backoff.conf).
 PI_UNITS=(pokoin-overflow-sync.service poko-video-mirror.service pokoin-scan-pi-tunnel.service
           pokoin-honcho-pi-tunnel.service tcgprices-pi-reader-tunnel.service pokoin-pi-cdn-tunnel.service)
 
@@ -98,6 +99,7 @@ pi_follow() {
     "$ops/poko-video-mirror.service" "$ops/poko-video-mirror.timer" "$units/"
   for u in "${PI_UNITS[@]}"; do
     install -D -m 644 "$ops/pi-dependent.d-60-pi-up.conf" "$units/$u.d/60-pi-up.conf"
+    install -D -m 644 "$ops/pi-dependent.d-70-backoff.conf" "$units/$u.d/70-backoff.conf"
   done
   # The sync script and manifest copies the units run (also rewrites the sync unit and timer).
   "$repo/scripts/nezopt-k3s.sh" install
