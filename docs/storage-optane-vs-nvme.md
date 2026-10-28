@@ -128,11 +128,34 @@ nezopt really does use its swap: it wrote ~9 GB to swap in the first 23 minutes 
 - **What happened:** with the Optane enclosure plugged into the Pi 4 next to the Samsung root disk, the Pi browned out twice. There were hard reboots, XFS log recovery on `/srv/pokoin`, and `throttled=0x50005`.
 - **Recovery:** services came back each time (API 200, replica healthy, lag < 1 s).
 - **Lesson:** the Pi 4's USB ports share about 1.2 A, which can't power a second NVMe enclosure. Never hang a second drive off it without a powered hub.
-- **Open:** at last check the Samsung root disk was on the Genesys USB 2.0 hub (480 Mb/s), not on a blue port. Moving it back needs a clean shutdown.
+- **Open:** the Samsung root disk is on a Genesys USB 2.0 hub (`05e3:0610`), in what appears to be a black USB 2.0 port (`1-1.1`). Nothing is on the 5 Gbps bus.
+  This morning it ran at 5 Gbps as `2-1.4`, a blue port. Software can't renegotiate it, and a reboot at 12:11 in this layout came back at 480 Mb/s.
+  The fix: shut down cleanly, plug the Samsung straight into a blue port, and remove the hub.
+
+## Swap investigation (2026-10-28 ~13:45 UTC)
+
+nezopt swaps for two reasons:
+
+1. **Two services hit their own memory limits.**
+   - `lucina-android`: the Android emulator (`qemu-system-x86`, 3.19 GB RSS) runs in a container capped at 4 GB
+     (`android-compose.yml`). It has hit that cap 2,231 times, peaks at 4,096 MB, holds 418 MB in swap, and was the
+     biggest live swap writer (+109 MB in 15 s).
+   - `lucina-rs`: Lucina herself. Its unit sets `MemoryHigh=384M` and `MemoryMax=768M`, but its peak is 467 MB. It
+     has crossed `MemoryHigh` 6,971 times; each time it is throttled and pushed to swap (190k anon refaults, 115k major faults).
+2. **The kernel evicts idle memory.** Anonymous memory is a process's own RAM rather than cached file data. Normal
+   reclaim moves idle processes' anonymous memory to swap to keep the page cache for builds: about 100 idle SSH
+   session scopes, plus idle services such as paseo, cardscan and the dsh backend. Little of it comes back
+   (swap-in is mostly under 600 pages/s), so this part is harmless and cheap on the Optane.
+
+Memory pressure at the time: tasks were stalled 5% of the time over 60 s, and fully stalled 3.5%.
+
+Proposed fixes (not applied):
+- `lucina-android`: raise the container to 6 GB (`docker update --memory 6g --memory-swap 12g lucina-android` live,
+  plus `mem_limit` in `android-compose.yml`).
+- `lucina-rs`: `MemoryHigh=640M`, `MemoryMax=1G` in the unit, applied live with `systemctl --user set-property` (no restart).
 
 ## Follow-ups
 
-- **Unexplained swapping:** a 61 GB host with 40+ GB of page cache swapping out 9 GB points at per-cgroup memory limits (`MemoryHigh`/`--memory`) forcing their own swap. Faster swap hides it; find the limits.
 - **Optane cable:** if the Optane ever goes back on USB, use a known USB 3 cable and check for `uas` and SuperSpeed.
 
 Scripts and raw results: nezopt `~/scratch/optane-bench/` (`results-usb2/`, `results/`, `results-swap/`, `summary-usb2.txt`, `swapbench/`).
