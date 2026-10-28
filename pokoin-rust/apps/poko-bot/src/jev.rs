@@ -118,8 +118,8 @@ fn read_key(path: impl AsRef<std::path::Path>) -> Option<String> {
         .and_then(|s| nonempty(&s))
 }
 
+// The live API sends more fields beside `noul`; only `noul` is read (as in Hermes).
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Noul {
     pub noul: f64,
 }

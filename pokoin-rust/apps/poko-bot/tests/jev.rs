@@ -99,8 +99,6 @@ async fn malformed_answers_fall_back_exactly() {
         .remove("market_question");
     let mut wrong_type = answers(0.5, 0.0);
     wrong_type["answers"]["engage"] = json!({"choice":"yes"});
-    let mut mixed_type = answers(0.5, 0.0);
-    mixed_type["answers"]["engage"]["score"] = json!(1);
     let mut string_probability = answers(0.5, 0.0);
     string_probability["answers"]["engage"]["noul"] = json!("0.5");
     for body in [
@@ -108,7 +106,6 @@ async fn malformed_answers_fall_back_exactly() {
         answers(1.01, 0.0),
         answers(-0.1, 0.0),
         wrong_type,
-        mixed_type,
         string_probability,
         json!({}),
     ] {
@@ -450,4 +447,21 @@ async fn invalid_questions_never_request() {
         );
     }
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn extra_answer_fields_from_the_live_api_are_accepted() {
+    let server = MockServer::start().await;
+    let body = json!({"answers": {
+        "engage": {"noul": 0.9, "confidence": 0.9, "type": "noul"},
+        "private_request": {"noul": 0.02, "confidence": 0.98, "type": "noul"},
+        "market_question": {"noul": 0.1, "confidence": 0.9, "type": "noul"}
+    }, "model": "jev-1.14.0", "usage": {"input_tokens": 715, "output_tokens": 0}});
+    mount(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+    let jev = Jev::new(config(&server));
+    let mut input = EngageInput::new("anyone know how to withdraw PKN to my wallet?");
+    input.platform = "telegram";
+    let result = classify_poko_message(&jev, &input).await.unwrap();
+    assert_eq!(result.engage, 0.9);
+    assert_eq!(result.private_request, 0.02);
 }
