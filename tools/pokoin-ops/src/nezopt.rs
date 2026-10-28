@@ -191,6 +191,9 @@ pub fn checks(cfg: &Cfg, nz: &NezCfg, state: &mut State, now: i64) -> Vec<CheckO
                 let when = s.and_then(|s| s.get("ExecMainExitTimestamp")).filter(|w| !w.is_empty()).map_or("never".to_string(), |w| w.clone());
                 let (sev, detail) = if result == "success" {
                     (Sev::Ok, format!("last run ok ({when})"))
+                } else if result == "exec-condition" {
+                    // ExecCondition= said skip (e.g. the Pi is offline): not a failure.
+                    (Sev::Ok, format!("last run skipped by its ExecCondition ({when})"))
                 } else {
                     (Sev::Crit, format!("last run of {target} failed: {result} ({when})"))
                 };

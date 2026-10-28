@@ -90,8 +90,8 @@ fn mail_and_ping(unit: &str, user: bool, pushed: &mut Option<(String, String)>) 
     *pushed = Some((result.clone(), journal.clone()));
 
     let slug = hc::slug_for_unit(&hc::host_prefix(), unit);
-    let hc_ok = match hc::ping(&slug, hc::Kind::Fail, &mail::truncate(&journal, 8_000)) {
-        Ok(_) => true,
+    let hc_ok = match hc::ping_existing(&slug, hc::Kind::Fail, &mail::truncate(&journal, 8_000)) {
+        Ok(pinged) => pinged,
         Err(err) => {
             eprintln!("{err:#}");
             false
