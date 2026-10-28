@@ -344,11 +344,18 @@ pub fn checks(cfg: &Cfg, nz: &NezCfg, state: &mut State, now: i64) -> Vec<CheckO
         Ok(out)
     }));
     if let Some(t) = cpu_temp() {
-        let sev = health::temp_sev(t);
+        // Ryzen 7000 boosts to 95 °C by design: alert only on 15 minutes of sustained heat.
+        health::push_temp_sample(&mut state.temp_samples, now, t);
+        let (sev, m) = health::sustained_temp_sev(&state.temp_samples, now);
+        let detail = if sev == Sev::Ok {
+            format!("CPU Tctl {t:.1} °C (alerts after 15 min ≥ 90)")
+        } else {
+            format!("CPU Tctl {t:.1} °C, ≥ {m:.1} °C for 15 min (warn 90, crit 95)")
+        };
         let meta = Meta::new("deadman", "cpu-temp").group("Homelab");
         outs.push(CheckOut {
             prefix: "temp",
-            findings: vec![found("temp.cpu".into(), sev, format!("CPU Tctl {t:.1} °C (warn 90, crit 95)"), 1, meta)],
+            findings: vec![found("temp.cpu".into(), sev, detail, 1, meta)],
             complete: true,
         });
     }

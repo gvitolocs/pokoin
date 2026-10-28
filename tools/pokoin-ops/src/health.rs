@@ -526,7 +526,9 @@ pub fn disk_sev(free_pct: f64) -> Sev {
     }
 }
 
-/// Tctl in °C → state: ≥ 95 crit, ≥ 90 warn (the owner's limit).
+/// Tctl in °C → state: ≥ 95 crit, ≥ 90 warn (the owner's limit). The `temp.cpu` alert only
+/// applies it once the heat is sustained for 15 minutes (every 5-minute sample in that window),
+/// see [`sustained_temp_sev`].
 pub fn temp_sev(c: f64) -> Sev {
     if c >= 95.0 {
         Sev::Crit
@@ -535,6 +537,34 @@ pub fn temp_sev(c: f64) -> Sev {
     } else {
         Sev::Ok
     }
+}
+
+/// Tctl history kept in the sentinel state: 20 minutes, enough for the 15-minute window.
+pub const TEMP_KEEP_S: i64 = 20 * 60;
+const TEMP_WINDOW_S: i64 = 15 * 60;
+/// A longer gap between samples (a skipped 5-minute run) breaks the chain.
+const TEMP_MAX_GAP_S: i64 = 450;
+
+/// Appends a Tctl sample and drops the ones older than [`TEMP_KEEP_S`].
+pub fn push_temp_sample(samples: &mut Vec<(i64, f64)>, now: i64, c: f64) {
+    samples.push((now, c));
+    samples.retain(|&(ts, _)| ts >= now - TEMP_KEEP_S);
+}
+
+/// Severity of the CPU temperature over the last 15 minutes and the °C it was judged on.
+/// The window is the newest sample at or before `now - 15 min` (proof the heat started by then)
+/// plus every later one; with no such sample, or a gap over 7.5 min, it is not covered and stays
+/// ok on the current reading. Covered → `temp_sev` of the window minimum.
+pub fn sustained_temp_sev(samples: &[(i64, f64)], now: i64) -> (Sev, f64) {
+    let Some(&(last_ts, cur)) = samples.last() else { return (Sev::Ok, 0.0) };
+    let Some(anchor) = samples.iter().rposition(|&(ts, _)| ts <= now - TEMP_WINDOW_S) else { return (Sev::Ok, cur) };
+    let window = &samples[anchor..];
+    let gaps_ok = window.windows(2).all(|w| w[1].0 - w[0].0 <= TEMP_MAX_GAP_S) && now - last_ts <= TEMP_MAX_GAP_S;
+    if !gaps_ok {
+        return (Sev::Ok, cur);
+    }
+    let m = window.iter().map(|&(_, c)| c).fold(f64::INFINITY, f64::min);
+    (temp_sev(m), m)
 }
 
 /// expected-active.txt: `name.service` (user unit), `system:name.service`,
@@ -807,6 +837,46 @@ mod tests {
         assert_eq!(parse_mounts(mounts), vec!["/", "/home/nez/mnt/mybook"]);
         assert_eq!((disk_sev(11.0), disk_sev(9.9), disk_sev(4.9)), (Sev::Ok, Sev::Warn, Sev::Crit));
         assert_eq!((temp_sev(89.9), temp_sev(90.0), temp_sev(95.0)), (Sev::Ok, Sev::Warn, Sev::Crit));
+    }
+
+    fn every_5_min(now: i64, temps: &[f64]) -> Vec<(i64, f64)> {
+        let n = temps.len() as i64;
+        temps.iter().enumerate().map(|(i, &c)| (now - (n - 1 - i as i64) * 300, c)).collect()
+    }
+
+    #[test]
+    fn cpu_temp_alerts_only_when_sustained_15_min() {
+        let now = 1_800_000_000;
+        assert_eq!(sustained_temp_sev(&every_5_min(now, &[91.0, 92.0, 90.0, 93.0]), now), (Sev::Warn, 90.0));
+        assert_eq!(sustained_temp_sev(&every_5_min(now, &[91.0, 92.0, 89.9, 93.0]), now).0, Sev::Ok);
+        // 10 minutes of heat is not 15.
+        assert_eq!(sustained_temp_sev(&every_5_min(now, &[96.0, 96.0, 96.0]), now), (Sev::Ok, 96.0));
+        assert_eq!(sustained_temp_sev(&every_5_min(now, &[95.0, 96.0, 95.5, 99.0]), now), (Sev::Crit, 95.0));
+        assert_eq!(sustained_temp_sev(&every_5_min(now, &[96.0, 95.0, 94.0, 97.0]), now), (Sev::Warn, 94.0));
+        // A skipped run (600 s gap) breaks the chain.
+        let gap = [(now - 900, 92.0), (now - 300, 92.0), (now, 92.0)];
+        assert_eq!(sustained_temp_sev(&gap, now), (Sev::Ok, 92.0));
+        // Hot samples before the window start do not count.
+        let old = [(now - 1500, 100.0), (now - 900, 85.0), (now - 600, 92.0), (now - 300, 92.0), (now, 92.0)];
+        assert_eq!(sustained_temp_sev(&old, now), (Sev::Ok, 85.0));
+        // ... but the newest one at or before the start does, with a longer history.
+        let long = [(now - 1200, 85.0), (now - 900, 91.0), (now - 600, 92.0), (now - 300, 92.0), (now, 92.0)];
+        assert_eq!(sustained_temp_sev(&long, now), (Sev::Warn, 91.0));
+        assert_eq!(sustained_temp_sev(&[], now), (Sev::Ok, 0.0));
+    }
+
+    #[test]
+    fn temp_samples_keep_20_min() {
+        let now = 1_800_000_000;
+        let mut s = vec![(now - 1500, 99.0), (now - 1201, 99.0), (now - 1200, 91.0), (now - 600, 92.0)];
+        push_temp_sample(&mut s, now, 93.0);
+        assert_eq!(s, vec![(now - 1200, 91.0), (now - 600, 92.0), (now, 93.0)]);
+        // Steady 5-minute runs stay at 5 samples.
+        let mut s = Vec::new();
+        for i in 0..100 {
+            push_temp_sample(&mut s, now + i * 300, 90.0);
+        }
+        assert_eq!(s.len(), 5);
     }
 
     #[test]

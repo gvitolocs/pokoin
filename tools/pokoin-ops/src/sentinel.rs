@@ -115,6 +115,9 @@ pub struct State {
     /// Failed k3s Jobs first seen after the previous run, with when they were seen.
     #[serde(default)]
     pub k3s_new_failed: Vec<(String, i64)>,
+    /// CPU Tctl samples (unix seconds, °C) of the last 20 minutes, for the sustained-heat rule.
+    #[serde(default)]
+    pub temp_samples: Vec<(i64, f64)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -748,6 +751,14 @@ mod tests {
 
     fn f(key: &str, sev: Sev, confirm: u32) -> Finding {
         Finding::new(key, sev, "d", confirm)
+    }
+
+    #[test]
+    fn old_state_without_temp_samples_loads() {
+        let s: State = serde_json::from_str("{}").unwrap();
+        assert!(s.temp_samples.is_empty());
+        let s: State = serde_json::from_str(r#"{"k3s_last_run": 5, "temp_samples": [[10, 91.5]]}"#).unwrap();
+        assert_eq!((s.k3s_last_run, s.temp_samples), (5, vec![(10, 91.5)]));
     }
 
     #[test]
