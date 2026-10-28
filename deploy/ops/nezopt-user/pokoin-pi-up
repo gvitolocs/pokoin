@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ~/.local/bin/pokoin-pi-up: the ExecCondition= of every Pi-dependent nezopt unit
+# (pi-dependent.d-60-pi-up.conf). Exit 0 when the Pi's SSH port answers within 4 s, else 1:
+# systemd then skips the run instead of failing it, so a Pi outage sends no failure mail.
+# The one Pi alert comes from pokoin-pi-health.timer, which also starts the skipped
+# tunnels again when the Pi is back.
+timeout 4 bash -c "</dev/tcp/${POKOIN_PI_HOST:-192.168.178.46}/${POKOIN_PI_PORT:-22}" 2>/dev/null && exit 0
+echo "Pi ${POKOIN_PI_HOST:-192.168.178.46}:${POKOIN_PI_PORT:-22} unreachable: skipped (pokoin-pi-health tracks the outage)"
+exit 1

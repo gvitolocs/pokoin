@@ -5,6 +5,8 @@
 #   scripts/backup/install-ops-nezopt.sh alerts          # notify@, OnFailure for all services, dead-man drop-ins, sentinel
 #   scripts/backup/install-ops-nezopt.sh slot-cap        # writer max_slot_wal_keep_size = 50GB (reload only)
 #   scripts/backup/install-ops-nezopt.sh backups         # nightly pg_dump, wal-g mirror, monthly restore tests
+#   scripts/backup/install-ops-nezopt.sh pi-follow       # Pi offline = skip; pi-health; Pi notify hook; Pi CDN tunnel
+#   scripts/backup/install-ops-nezopt.sh pi-hooks-live   # after the Pi hooks run: sync/video timers become hourly backstops
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 ops="$repo/deploy/ops/nezopt-user"
@@ -84,9 +86,43 @@ backups() {
   systemctl --user list-timers 'pokoin-pgdump*' 'pokoin-backup-mirror*' 'pokoin-restore-test*' --no-pager
 }
 
+# Units that need the Pi: they skip while it is offline (ExecCondition), and pokoin-pi-health
+# (POKOIN_PI_UNITS / POKOIN_PI_CATCHUP_UNITS in pi.rs) starts them again when it is back.
+PI_UNITS=(pokoin-overflow-sync.service poko-video-mirror.service pokoin-scan-pi-tunnel.service
+          pokoin-honcho-pi-tunnel.service tcgprices-pi-reader-tunnel.service pokoin-pi-cdn-tunnel.service)
+
+pi_follow() {
+  install_bin
+  install -m 755 "$ops/pokoin-pi-up" "$ops/pokoin-pi-hook" "$HOME/.local/bin/"
+  install -m 644 "$ops/pokoin-pi-health.service" "$ops/pokoin-pi-health.timer" "$ops/pokoin-pi-cdn-tunnel.service" \
+    "$ops/poko-video-mirror.service" "$ops/poko-video-mirror.timer" "$units/"
+  for u in "${PI_UNITS[@]}"; do
+    install -D -m 644 "$ops/pi-dependent.d-60-pi-up.conf" "$units/$u.d/60-pi-up.conf"
+  done
+  # The sync script and manifest copies the units run (also rewrites the sync unit and timer).
+  "$repo/scripts/nezopt-k3s.sh" install
+  systemctl --user daemon-reload
+  "$HOME/.local/bin/pokoin-ops" pi-health
+  systemctl --user enable --now pokoin-pi-health.timer pokoin-pi-cdn-tunnel.service
+  systemctl --user restart poko-video-mirror.timer
+  say "next: the Pi side (scripts/install-pi-overflow-notify.sh, owner OK), then: $0 pi-hooks-live"
+}
+
+pi_hooks_live() {
+  local t
+  for t in pokoin-overflow-sync.timer poko-video-mirror.timer; do
+    install -D -m 644 "$ops/pi-hooks-live.timer.d-50-backstop.conf" "$units/$t.d/50-backstop.conf"
+  done
+  systemctl --user daemon-reload
+  systemctl --user restart pokoin-overflow-sync.timer poko-video-mirror.timer
+  systemctl --user list-timers pokoin-overflow-sync.timer poko-video-mirror.timer --no-pager
+}
+
 case "${1:-}" in
   alerts) alerts ;;
   slot-cap) slot_cap ;;
   backups) backups ;;
-  *) sed -n '2,8p' "$0"; exit 2 ;;
+  pi-follow) pi_follow ;;
+  pi-hooks-live) pi_hooks_live ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

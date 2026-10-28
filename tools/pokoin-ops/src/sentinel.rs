@@ -661,7 +661,13 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
     let mut state: State = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let prev = state.alerts.clone();
     let now = chrono::Utc::now().timestamp();
-    let outs = run_checks(&cfg, &mut state, now);
+    let mut outs = run_checks(&cfg, &mut state, now);
+    // The Pi being offline alerts once, from pi-health; its dependants stay quiet meanwhile.
+    if role == Role::Nezopt {
+        if let Some(since) = crate::pi::down_since() {
+            println!("pi-health: Pi offline since {since}; muted {} Pi-dependent finding(s)", crate::pi::mute(&mut outs, since, now));
+        }
+    }
     let (next, events) = plan(&prev, &outs, now, cfg.remind_s);
 
     let active: Vec<String> = next.iter().filter(|(_, s)| s.sev != Sev::Ok).map(|(k, s)| format!("{} {k}: {}", s.sev.label(), s.detail)).collect();
