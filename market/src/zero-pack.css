@@ -287,6 +287,34 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
 .zero-issue-badge { border-color: rgb(255 101 101 / 0.5); background: rgb(255 101 101 / 0.1); color: #ffabab; }
 .zero-also { flex-basis: 100%; color: var(--muted); font-size: 0.7rem; overflow-wrap: anywhere; }
 
+/* Reverse holo: glowing gold sparkles instead of a 'Reverse' pill, so it is not overlooked. */
+.zero-reverse {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.3rem;
+  border: 1px solid rgb(255 211 61 / 0.55);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(255 211 61 / 0.28), rgb(255 211 61 / 0.08) 70%);
+  box-shadow: 0 0 8px rgb(255 211 61 / 0.45), inset 0 0 4px rgb(255 211 61 / 0.25);
+  cursor: help;
+  vertical-align: middle;
+  animation: zero-reverse-glow 2.4s ease-in-out infinite;
+}
+.zero-reverse .reverse-sparkles {
+  width: 19px;
+  height: 19px;
+  filter: drop-shadow(0 0 3px rgb(255 210 61 / 0.9)) drop-shadow(0 0 7px rgb(255 210 61 / 0.45));
+}
+@keyframes zero-reverse-glow {
+  0%, 100% { box-shadow: 0 0 6px rgb(255 211 61 / 0.35), inset 0 0 4px rgb(255 211 61 / 0.2); filter: brightness(1); }
+  50% { box-shadow: 0 0 13px rgb(255 211 61 / 0.7), inset 0 0 6px rgb(255 211 61 / 0.35); filter: brightness(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zero-reverse { animation: none; }
+}
+
 .zero-picked-count { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 
 .zero-card.has-issue { border-color: rgb(255 101 101 / 0.45); }
@@ -517,6 +545,9 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
   .zero-print-box { display: block; width: 10pt; height: 10pt; border: 1pt solid #000; }
   .zero-game-head { margin: 6pt 0 0; font-size: 10pt; break-after: avoid; page-break-after: avoid; }
   .zero-facet, .zero-take, .zero-split, .zero-pt-place, .zero-issue-badge { border-color: #000 !important; font-size: 7pt; }
+  .zero-reverse { border-color: #000 !important; background: none !important; box-shadow: none !important; animation: none !important; filter: none !important; }
+  .zero-reverse .reverse-sparkles { width: 11pt; height: 11pt; filter: none !important; }
+  .zero-reverse .reverse-sparkles path { fill: #000; stroke: #000; }
   .zero-row a { text-decoration: none; }
 }
 

@@ -410,6 +410,16 @@ export function lineFacets(line) {
   ].filter(Boolean);
 }
 
+/** A reverse holo copy: tiles draw the glowing sparkles mark instead of a 'Reverse' pill. */
+export function lineIsReverse(line) {
+  return Boolean(line?.reverse);
+}
+
+/** lineFacets without 'Reverse', for views that draw the reverse mark. */
+export function lineTextFacets(line) {
+  return lineFacets({ ...line, reverse: false });
+}
+
 /** Where to pick: the Pokoin location, else the location the server ranked (a Power Tools name), else Power Tools'. */
 export function lineLocation(line) {
   return line?.location || line?.sortLocation || line?.powerTools?.location || '';

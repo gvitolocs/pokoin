@@ -6,6 +6,9 @@ import {
   dropUnsentPicks,
   inventoryNote,
   lineCopies,
+  lineFacets,
+  lineIsReverse,
+  lineTextFacets,
   lineSetText,
   locationTakeText,
   normalizeView,
@@ -323,4 +326,14 @@ test('the last pack is kept per seller for a week and never half-written', () =>
   const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
   assert.equal(readLastPack(broken, 'u1'), null);
   assert.equal(writeLastPack(broken, 'u1', pack), false);
+});
+
+test('reverse lines get the glowing mark; lineFacets still names Reverse for text callers', () => {
+  const line = { condition: 'NM', language: 'EN', reverse: true, firstEdition: true };
+  assert.deepEqual(lineFacets(line), ['NM', 'EN', 'Reverse', '1st ed.']);
+  assert.deepEqual(lineTextFacets(line), ['NM', 'EN', '1st ed.']);
+  assert.equal(lineIsReverse(line), true);
+  assert.equal(lineIsReverse({ foil: true }), false);
+  assert.equal(lineIsReverse(null), false);
+  assert.deepEqual(lineTextFacets({ foil: true }), ['Foil']);
 });
