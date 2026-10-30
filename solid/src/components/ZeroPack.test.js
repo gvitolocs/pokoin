@@ -171,3 +171,17 @@ test('a big pack loads fast: lazy dialogs, print list only while printing, two-p
   assert.match(page, /readLastPack\(storage\(\), authUid\(\)\)/);
   assert.match(page, /load\(\{ refresh: true \}\)/);
 });
+
+test('reverse holo is a glowing sparkles mark, not a Reverse text pill, on tiles and facet badges', () => {
+  assert.match(bits, /import ReverseSparkles from '\.\.\/desk\/ReverseSparkles\.jsx';/);
+  assert.match(bits, /<span class="zero-reverse" title="Reverse holo" aria-label="Reverse holo" role="img">\s*<ReverseSparkles \/>/);
+  assert.match(bits, /<Show when=\{lineIsReverse\(props\.item\)\}><ReverseMark \/><\/Show>/);
+  assert.match(bits, /<For each=\{lineTextFacets\(props\.item\)\}>/);
+  assert.doesNotMatch(bits, /lineFacets\(/);
+  assert.match(tile, /<Show when=\{lineIsReverse\(item\(\)\)\}><ReverseMark \/><\/Show>/);
+  assert.match(tile, /lineTextFacets\(\{ \.\.\.line, condition: '', language: '' \}\)/);
+  assert.doesNotMatch(tile, /lineFacets\(/);
+  assert.match(css, /\.zero-reverse \{[^}]*animation: zero-reverse-glow/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.zero-reverse \{ animation: none; \}/);
+  assert.match(css, /\.zero-reverse \.reverse-sparkles path \{ fill: #000;/);
+});
