@@ -76,6 +76,18 @@ artwork_result=0
 "${GPU_LEASE[@]}" --name catalog-artwork -- "$AI_PYTHON" scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
 (( artwork_result == 0 )) || result=1
 stage_args+=(--stage-result "artwork=$artwork_result")
+# Card pictures (BattleScan server-rs `scripts/daily-card-refresh.sh`, installed by its
+# install-card-refresh.sh): CDN faces that are a placeholder get the real picture from the
+# first source that has it, new and recovered cards are embedded into the scan index (swapped
+# after a health check) and an app catalog revision is staged. Skipped when not installed;
+# POKOIN_CARD_REFRESH=off skips it.
+cards_result=0
+CARD_REFRESH_BIN="${POKOIN_CARD_REFRESH_BIN:-/home/nez/.local/lib/card-refresh/current/daily-card-refresh.sh}"
+if [[ -x "$CARD_REFRESH_BIN" && "${POKOIN_CARD_REFRESH:-on}" != off ]]; then
+  DAILY="$POKOIN_CATALOG_RUN_ROOT" "$CARD_REFRESH_BIN" || cards_result=$?
+fi
+(( cards_result == 0 )) || result=1
+stage_args+=(--stage-result "cards=$cards_result")
 # Search stage removed 2026-10-06: it fed Meilisearch on pi-home, retired on
 # 2026-10-03 (_pipeline_health.js retired: ['meili', 'valkey']); every run since
 # failed with ConnectionRefused. sync-refreshed-catalogue-search.cjs is unused.
