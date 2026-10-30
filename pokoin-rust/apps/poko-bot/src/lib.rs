@@ -4,13 +4,17 @@
 pub mod api;
 pub mod config;
 pub mod connect;
+pub mod decide;
 pub mod discord;
 pub mod discord_context;
 pub mod format;
 pub mod gate;
+pub mod gateway_lock;
 pub mod health;
 pub mod hermes;
 pub mod history;
+pub mod invisible;
+pub mod jev;
 pub mod media;
 pub mod redact;
 pub mod telegram;

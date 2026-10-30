@@ -65,9 +65,46 @@ Fallback ladder: brain → Hermes HTTP (same message) → fixed apology. Service
   Discord replies ≤1,800 chars per message.
 - Short per-chat history (10 turns) kept in memory and snapshotted to `/var/lib/poko-bot/history.json`.
 
+Hermes Agent v0.22 (Oct 2026) behaviour, shared with Hermes Node:
+
+- **Gateway singleton lock** (`HERMES_GATEWAY_LOCK`, default on; `HERMES_GATEWAY_LOCK_DIR`, default
+  `$POKO_BOT_STATE_DIR/gateway-locks`). Before polling Telegram, poko-bot takes `telegram-<botId>.lock`, a JSON record
+  with the kernel boot id and a 30 s heartbeat. A record from another holder blocks polling only if it was written in
+  this boot and its heartbeat is under 90 s old, so recycled PIDs after a reboot never count. A deferred gateway retries
+  every 60 s; one that loses the lock stops polling and goes back to waiting. The record format is the same as Hermes
+  `src/gateway-lock.js`: point both at one directory and they cannot both poll the Poko token (e.g. a half-finished
+  `poko-switch`). A fresh record left by our own previous run never blocks us: same `HERMES_GATEWAY_INSTANCE`
+  (set it per deployment, e.g. `poko-bot` and `hermes-poko`), or same PID namespace with that PID gone.
+  `/health` shows `telegram.gatewayLock` (`held`, `deferred:<name>@<host>`, `lost`, `unguarded:<why>`).
+- **Bounded wait-out** (`POKO_BOT_TRANSIENT_WAIT_MS`, default `4000,12000`; empty disables). When the brain and the
+  Hermes fallback both fail only transiently (timeouts, 5xx/529, overload, connection resets), the turn keeps typing
+  and retries up to that many cycles before the apology. Auth, quota and validation errors are never retried.
+  `/health` counts `turns.transientWaits`.
+- **Invisible Unicode**: bidi overrides/isolates, Unicode tag characters and zero-width characters are stripped from
+  text and captions before the gate and the model see them (`turns.invisibleStripped`).
+
 Not ported in this phase: LoL bets and the Discord slash commands (stay in Hermes), news scout/newsroom, X webhook,
 YouTube replies, owner-only social posting / Twitter drafts from Telegram, Honcho long-term memory, Hypemeter news
 context (follow-up: a news tool in the brain so the website gets it too), local faster-whisper.
+
+## JEV reply decisions
+
+The central turn gate uses the keyed TypeSafe `/v1/systemone` endpoint with model `jev-1.14.0`
+and the same three message questions as Hermes: engagement, private-operator requests, and market questions.
+Empty messages, private requests caught by the rules, and contract-address requests stay authoritative.
+Direct invocations stay enabled unless JEV flags a private request at ≥0.8; other messages use engagement ≥0.5.
+Market classification is retained for later use; brain routing is unchanged. Any JEV failure falls back to the
+existing rules.
+
+Key lookup is `JEV_API_KEY_POKO`, `JEV_API_KEY`, `$CREDENTIALS_DIRECTORY/jev_api_key`, then
+`JEV_API_KEY_FILE`. Keys are reread on each evaluation, so a tmpfs key file appearing after reboot needs no restart.
+`POKO_JEV=off|0|false|no` disables calls. `POKO_JEV_URL`, `POKO_JEV_MODEL`, and `POKO_JEV_TIMEOUT_MS`
+override the endpoint, pinned model, and default 1200 ms deadline.
+
+Successful decisions use a 256-entry LRU cache with a 10-minute TTL. Quota opens the breaker for 120 seconds;
+credits/auth errors for 30 minutes; three transient failures for 60 seconds. `/health` includes `jev` counters,
+failure codes, fallbacks, network latency p50/p95, configuration presence, and breaker state. Network logs contain
+only purpose, outcome, latency, and input-token count.
 
 ## Measurements to report
 
