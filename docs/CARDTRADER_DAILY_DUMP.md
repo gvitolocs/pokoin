@@ -12,6 +12,7 @@ into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 | nezopt | `pokoin-cardtrader-listing-dump` (`pokoin-rust/apps/cardtrader-listing-dump`): order, resume, deadline, status, storage |
 | nezopt | `pokoin-cardtrader-price-cache` (`pokoin-rust/apps/cardtrader-price-cache`): those books → each game's price cache |
 | nezopt | `pokoin-cardtrader-sold` (`pokoin-rust/apps/cardtrader-sold`): those books → the sold graph of every game except Pokémon |
+| nezopt | `daily-card-refresh.sh` (BattleScan `server-rs`, `~/.local/lib/card-refresh/current`), the `cards` stage after artwork: CDN faces that are a placeholder get the real picture under the same key (same-card file, CardTrader full size, TCGdex, pokemontcg.io, Scryfall); new and recovered cards are embedded into the scan index, cards with no picture stay as rows that never match; the index is swapped after a health check; an app catalog revision is staged and published only with `CARDRAILS_CATALOG_AUTOPUBLISH=1` |
 | Oracle `pokoin-marketplace` | `pokoin-cardtrader-bridge` (`pokoin-rust/apps/cardtrader-bridge`): CardTrader GETs; the token never leaves Oracle |
 | both | `ctbook` (`pokoin-rust/crates/ctbook`): the `.ctb` book format and a CLI |
 
