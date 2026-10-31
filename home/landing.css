@@ -127,11 +127,12 @@ summary:focus-visible,
   gap: 10px;
   flex-shrink: 0;
 }
-/* Flat wordmark uses the generator's 1000-unit em at 42px (38px on mobile). */
+/* Landing wordmark preserves the original 1000-unit line box at 42px (38px on mobile). */
 .brand-logo {
   display: block;
-  width: 144.396px;
-  height: 46.62px;
+  width: 131.586px;
+  height: 42px;
+  overflow: visible;
   flex-shrink: 0;
 }
 #pokoin-wordmark-defs {
@@ -1092,8 +1093,8 @@ h2 {
     padding: 13px 6%;
   }
   .brand-logo {
-    width: 130.644px;
-    height: 42.18px;
+    width: 119.054px;
+    height: 38px;
   }
   .nav-account {
     display: none;
