@@ -97,6 +97,7 @@ export function productStructuredData(page) {
 }
 
 function sharedChrome(landing) {
+  const wordmark = landing.match(/<svg[^>]*id="pokoin-wordmark-defs"[\s\S]*?<\/svg>/)?.[0];
   const header = landing.match(/<header class="nav">[\s\S]*?<\/header>/)?.[0];
   const footer = landing.match(
     /<footer class="site-footer pad">[\s\S]*?<\/footer>/,
@@ -104,11 +105,12 @@ function sharedChrome(landing) {
   const cookie = landing.match(
     /<div\s+class="cookie-banner"[\s\S]*?<\/div>/,
   )?.[0];
-  if (!header || !footer || !cookie)
+  if (!wordmark || !header || !footer || !cookie)
     throw new Error(
-      "Product pages require the landing header, footer, and cookie notice.",
+      "Product pages require the landing wordmark, header, footer, and cookie notice.",
     );
   return {
+    wordmark,
     header: header
       .replace('href="/#scanner"', 'href="/features/card-scanner"')
       .replace('href="/#sell"', 'href="/features/seller-fees"')
@@ -161,7 +163,7 @@ function cards(paths, heading = "") {
 export function renderProductPage(page, options = {}) {
   const landing =
     options.landing ?? fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-  const { header, footer, cookie } = sharedChrome(landing);
+  const { wordmark, header, footer, cookie } = sharedChrome(landing);
   const url = `${ORIGIN}${page.path}`;
   const sections = page.sections || [];
   const breadcrumbs = pageBreadcrumbs(page);
@@ -196,8 +198,8 @@ export function renderProductPage(page, options = {}) {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${escapeHtml(page.title)}</title><meta name="description" content="${escapeHtml(page.description)}"><meta name="robots" content="index, follow, max-image-preview:large"><meta name="theme-color" content="#08080a"><meta name="author" content="Pokoin"><link rel="canonical" href="${url}"><link rel="icon" href="/favicon.ico"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Pokoin"><meta property="og:title" content="${escapeHtml(page.title)}"><meta property="og:description" content="${escapeHtml(page.description)}"><meta property="og:url" content="${url}"><meta property="og:image" content="${ORIGIN}/home/pokoin-product-1200x630.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Pokoin scanner, collection, inventory, marketplace, and Poko assistant"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(page.title)}"><meta name="twitter:description" content="${escapeHtml(page.description)}"><meta name="twitter:image" content="${ORIGIN}/home/pokoin-product-1200x630.png">
-<link rel="preload" href="/home/satoshi.woff2" as="font" type="font/woff2" crossorigin><script src="/home/landing-boot.js"></script><link rel="stylesheet" href="/home/landing.css?v=20261018-home-search"><link rel="stylesheet" href="/home/discovery.css?v=20261017-market-data"><script type="application/ld+json">${structured}</script></head>
-<body class="product-page"><a class="skip-link" href="#main">Skip to content</a>${header}
+<link rel="preload" href="/home/satoshi.woff2" as="font" type="font/woff2" crossorigin><script src="/home/landing-boot.js"></script><link rel="stylesheet" href="/home/landing.css?v=20261031-wordmark"><link rel="stylesheet" href="/home/discovery.css?v=20261017-market-data"><script type="application/ld+json">${structured}</script></head>
+<body class="product-page">${wordmark}<a class="skip-link" href="#main">Skip to content</a>${header}
 <main id="main"><section class="product-hero pad"><div class="wrap"><nav class="page-crumbs" aria-label="Breadcrumb"><ol>${breadcrumbs.map((item, index) => `<li>${index === breadcrumbs.length - 1 ? `<span aria-current="page">${escapeHtml(item.label)}</span>` : `<a href="${item.href}">${escapeHtml(item.label)}</a>`}</li>`).join("")}</ol></nav><div class="product-hero-layout${page.kind === "hub" ? " is-hub" : ""}"><div><p class="eyebrow">${escapeHtml(page.category)}</p><h1>${escapeHtml(page.headline)}</h1><p class="product-intro">${escapeHtml(page.intro)}</p><div class="button-row">${link(page.primary, "button button-yellow")}${link(page.secondary, "button button-outline")}</div><p class="review-line">By Pokoin · Reviewed <time datetime="${page.reviewed}">${dateLabel(page.reviewed)}</time>${page.kind === "comparison" ? " · Independent products; no affiliation implied." : ""}</p></div>${page.kind !== "hub" ? visual(page) : ""}</div></div></section>
 <div class="pad"><div class="wrap"><div class="answer-box"><span class="eyebrow">At a glance</span><p>${escapeHtml(page.answer)}</p></div>${page.cards ? `<section class="hub-resources" aria-label="Explore ${escapeHtml(page.label)}"><h2 class="hub-resource-title">${page.path === "/alternatives" ? "Compare the workflows" : page.path === "/learn" ? "Choose your walkthrough" : "Explore the toolkit"}</h2>${cards(page.cards)}</section>` : ""}</div></div>
 <div class="pad article-shell"><div class="wrap article-layout"><aside class="article-nav"><p class="eyebrow">On this page</p><nav aria-label="Page contents">${contents.map((item) => `<a href="#${item.id}">${escapeHtml(item.heading)}</a>`).join("")}</nav><a class="article-nav-all" href="/${page.path.split("/")[1]}">Explore ${page.kind === "comparison" ? "comparisons" : page.kind === "guide" ? "walkthroughs" : "Pokoin tools"} →</a></aside><article class="product-article">${page.competitorSummary ? `<section class="article-section"><h2>${escapeHtml(page.label)} at a glance</h2><p>${escapeHtml(page.competitorSummary)}</p><p class="article-source-link"><a href="#sources">Official sources and review details ↓</a></p></section>` : ""}${table}${sections.map((item, index) => `<section class="article-section" id="section-${index + 1}"><h2>${escapeHtml(item.heading)}</h2>${item.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}${item.links?.length ? `<div class="article-links">${item.links.map((item) => link(item)).join("")}</div>` : ""}</section>`).join("")}

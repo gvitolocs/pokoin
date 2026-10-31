@@ -73,6 +73,24 @@
       ]
     },
     {
+      "source": "/home/:font(satoshi.woff2|fredoka-wordmark.ttf)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/home/:image*\\.:ext(png|svg|ico|webp|gif|jpg|jpeg)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
       "source": "/working.html",
       "headers": [
         {
