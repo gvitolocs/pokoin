@@ -35,8 +35,12 @@ export function scanRowDuplicates(book, row) {
   return existingDuplicatesFor(bookIndex(book).get(key) || [], row, { origin: 'pokoin' });
 }
 
-/** "Already listed from Card Rails (qty 1)", or '' when nothing matches. */
+/** Name existing copies and up to two locations; '' when nothing matches. */
 export function scanDuplicateNote(book, row) {
   const matches = scanRowDuplicates(book, row);
-  return matches.length ? `Already listed from ${describeOrigins(matches)}` : '';
+  if (!matches.length) return '';
+  const locations = [...new Set(matches.map((match) => String(match.location ?? '').trim()).filter(Boolean))];
+  const more = locations.length > 2 ? ` +${locations.length - 2} more` : '';
+  const where = locations.length ? ` · ${locations.slice(0, 2).join(', ')}${more}` : '';
+  return `Already listed from ${describeOrigins(matches)}${where}`;
 }

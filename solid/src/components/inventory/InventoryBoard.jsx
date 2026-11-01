@@ -390,7 +390,7 @@ export default function InventoryBoard(props) {
             type="button"
             class={['inv-chip', 'inv-dup-chip', { on: duplicatesOnly() }]}
             aria-pressed={duplicatesOnly()}
-            title="Live listings of the same card, condition and language from more than one channel"
+            title="Same card, condition, language and finish from more than one channel, not stored in separate slots"
             onClick={() => setDuplicatesOnly(!duplicatesOnly())}
           >
             Possible duplicates · {duplicates().size}

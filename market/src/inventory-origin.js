@@ -24,20 +24,22 @@ const CARDMARKET_SOURCES = new Set(['powertools_csv_import', 'cardmarket_csv_imp
 
 /**
  * Origin of one listing row. An `origin` the API computed wins (it knows the
- * Card Rails connector keys); then `source`, then the source listing id
- * prefix. A `ct:` id alone says nothing: Pokoin rows pushed to CardTrader
- * carry one too.
+ * Card Rails connector keys); then an import `source`, then the Card Rails
+ * key, then the source listing id prefix. The import beats the key: Card Rails
+ * also binds keys to listings it pulled in from an existing CardTrader import,
+ * and those came from CardTrader. A `ct:` id alone says nothing: Pokoin rows
+ * pushed to CardTrader carry one too.
  */
 export function listingOrigin(row) {
   const given = String(row?.origin ?? '').trim().toLowerCase();
   if (given && ORIGINS.includes(given)) return given;
-  if (row?.cardrailsKey === true || row?.cardrails_key === true) return 'cardrails';
   const source = String(row?.source ?? '').trim().toLowerCase();
   const id = String(row?.sourceListingId ?? row?.source_listing_id ?? '').trim().toLowerCase();
   if (CARDTRADER_SOURCES.has(source)) return 'cardtrader';
   if (CARDMARKET_SOURCES.has(source)) return 'cardmarket';
   if (source === 'tcgplayer_csv_import') return 'tcgplayer';
   if (source === 'stock_csv_import') return 'csv';
+  if (row?.cardrailsKey === true || row?.cardrails_key === true) return 'cardrails';
   if (id.startsWith('pt:') || id.startsWith('cm:')) return 'cardmarket';
   if (id.startsWith('tp:')) return 'tcgplayer';
   return 'pokoin';
@@ -81,10 +83,23 @@ export function duplicateKey(row) {
 
 const qtyOf = (row) => Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
 
+/** Only a box·stack·position location identifies an exact physical slot. */
+export function exactSlot(row) {
+  const location = String(row?.location ?? '').trim().toLowerCase();
+  const match = /^([^·]+)·\d+·\d+$/.exec(location);
+  return match && match[1].trim() ? location : '';
+}
+
+export function provenSeparate(a, b) {
+  const slotA = exactSlot(a);
+  const slotB = exactSlot(b);
+  return Boolean(slotA && slotB && slotA !== slotB);
+}
+
 /**
- * Live rows grouped by `duplicateKey`; a group with two or more different
- * origins is a likely cross-channel duplicate. Every row of such a group maps
- * to `{ key, origins, others }` (others: the group's rows from other origins).
+ * Live rows grouped by `duplicateKey`; flag each row with another origin's
+ * copy unless their exact slots prove them separate. Flagged rows map to
+ * `{ key, origins, others }`, with only those possible duplicates in others.
  * Same-origin copies (three scans of one card) are not duplicates.
  */
 export function findCrossSourceDuplicates(rows) {
@@ -99,12 +114,12 @@ export function findCrossSourceDuplicates(rows) {
   }
   const out = new Map();
   for (const [key, group] of groups) {
-    const origins = ORIGINS.filter((origin) => group.some((entry) => entry.origin === origin));
-    if (origins.length < 2) continue;
     for (const { row, origin } of group) {
       const others = group
-        .filter((entry) => entry.origin !== origin)
+        .filter((entry) => entry.origin !== origin && !provenSeparate(row, entry.row))
         .map((entry) => ({ id: String(entry.row?.id ?? ''), origin: entry.origin, quantity: qtyOf(entry.row) }));
+      if (!others.length) continue;
+      const origins = ORIGINS.filter((id) => id === origin || others.some((entry) => entry.origin === id));
       out.set(String(row?.id ?? ''), { key, origins, others });
     }
   }
@@ -118,6 +133,7 @@ export function findCrossSourceDuplicates(rows) {
 export function existingDuplicatesFor(rows, candidate, { origin = 'pokoin' } = {}) {
   const key = duplicateKey(candidate);
   if (!key) return [];
+  // Scan Desk assigns the new row's location itself: a differing scan slot is not evidence of separate copies.
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => isLiveInventoryListing(row) && duplicateKey(row) === key && listingOrigin(row) !== origin);
 }

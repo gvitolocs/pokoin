@@ -4,6 +4,8 @@ import {
   describeOrigins,
   duplicateKey,
   existingDuplicatesFor,
+  exactSlot,
+  provenSeparate,
   findCrossSourceDuplicates,
   listingOrigin,
   ORIGIN_LABELS,
@@ -54,6 +56,64 @@ test('every origin has a label', () => {
 
 const base = { cardId: '220962', condition: 'NM', language: 'EN', status: 'active', quantityAvailable: 1 };
 const row = (id, extra = {}) => ({ id, ...base, ...extra });
+
+test('exactSlot accepts only a complete box, stack and position', () => {
+  assert.equal(exactSlot({ location: ' Box·6·31 ' }), 'box·6·31');
+  for (const location of ['box1·2', 'binder', 'BIN-07', 'FUOCOBOMBA 006 - 16', '', 'a·b·c', 'a·1·', '·1·2', 'a·1·2·3', ' ·1·2']) {
+    assert.equal(exactSlot({ location }), '', location);
+  }
+  assert.equal(exactSlot(null), '');
+  assert.equal(provenSeparate({ location: 'a·1·1' }, { location: 'a·2·2' }), true);
+  assert.equal(provenSeparate({ location: ' A·1·1 ' }, { location: 'a·1·1' }), false);
+  assert.equal(provenSeparate({ location: 'binder' }, { location: 'a·1·1' }), false);
+});
+
+test('production Ultra Ball copies in five separate slots are not flagged', () => {
+  const rows = ['6·31', '8·65', '1·11', '1·17', '2·21'].map((slot, i) => row(String(i), {
+    cardId: 'ultra-ball-146-159', language: 'IT',
+    location: `megaevoluzionietb·${slot}`, origin: i < 2 ? 'cardrails' : 'pokoin',
+  }));
+  assert.deepEqual(findCrossSourceDuplicates(rows), new Map());
+});
+
+test('the same exact slot from different origins stays flagged', () => {
+  const rows = [row('a', { origin: 'cardrails', location: ' Box·6·31 ' }), row('b', { location: 'box·6·31' })];
+  assert.deepEqual([...findCrossSourceDuplicates(rows).keys()], ['a', 'b']);
+});
+
+test('missing locations and free-form labels cannot prove separation from an exact slot', () => {
+  for (const location of [undefined, '', 'binder', 'box1·2', 'BIN-07', 'FUOCOBOMBA 006 - 16']) {
+    const rows = [row('a', { origin: 'cardrails', location: 'a·1·1' }), row('b', { location })];
+    assert.deepEqual([...findCrossSourceDuplicates(rows).keys()], ['a', 'b'], location);
+  }
+});
+
+test('mixed groups keep only each row’s possible duplicates and their origins', () => {
+  const rows = [
+    row('a', { origin: 'cardrails', location: 'a·1·1' }),
+    row('b', { origin: 'pokoin', location: 'a·2·2' }),
+    row('c', { origin: 'cardtrader' }),
+  ];
+  const dups = findCrossSourceDuplicates(rows);
+  assert.equal(dups.size, 3);
+  assert.deepEqual(dups.get('c').others, [
+    { id: 'a', origin: 'cardrails', quantity: 1 },
+    { id: 'b', origin: 'pokoin', quantity: 1 },
+  ]);
+  for (const id of ['a', 'b']) {
+    assert.deepEqual(dups.get(id).others, [{ id: 'c', origin: 'cardtrader', quantity: 1 }]);
+  }
+  assert.deepEqual(dups.get('a').origins, ['cardrails', 'cardtrader']);
+  assert.deepEqual(dups.get('b').origins, ['pokoin', 'cardtrader']);
+  assert.deepEqual(dups.get('c').origins, ['pokoin', 'cardrails', 'cardtrader']);
+  rows[2].location = 'a·1·1';
+  assert.deepEqual([...findCrossSourceDuplicates(rows).keys()], ['a', 'c']);
+});
+
+test('existingDuplicatesFor still warns across different exact slots', () => {
+  const existing = row('a', { origin: 'cardrails', location: 'a·1·1' });
+  assert.deepEqual(existingDuplicatesFor([existing], row('scan', { location: 'a·2·2' })), [existing]);
+});
 
 test('duplicateKey normalizes facets and needs a card id', () => {
   assert.equal(duplicateKey({ card_id: ' 220962 ' }), '220962|NM|EN|standard|');
@@ -148,4 +208,13 @@ test('filterInventoryRows filters by origin and duplicates', () => {
   assert.deepEqual(filterInventoryRows(rows, { duplicatesOnly: true, duplicates }).map((r) => r.id), ['a', 'b']);
   assert.deepEqual(filterInventoryRows(rows, { duplicatesOnly: true, duplicates: new Set(['c']) }).map((r) => r.id), ['c']);
   assert.equal(filterInventoryRows(rows, { duplicates }).length, 3);
+});
+
+test('an import source wins over a Card Rails key', () => {
+  const key = { cardrailsKey: true };
+  assert.equal(listingOrigin({ ...key, source: 'cardtrader_seller_import', sourceListingId: 'ct:1' }), 'cardtrader');
+  assert.equal(listingOrigin({ ...key, source: 'powertools_csv_import' }), 'cardmarket');
+  assert.equal(listingOrigin({ ...key, source: 'tcgplayer_csv_import' }), 'tcgplayer');
+  assert.equal(listingOrigin({ ...key, source: 'stock_csv_import' }), 'csv');
+  assert.equal(listingOrigin({ ...key, source: 'pokoin_user_listing', sourceListingId: 'ct:1' }), 'cardrails');
 });

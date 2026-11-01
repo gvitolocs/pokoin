@@ -7,12 +7,11 @@ pub const ORIGINS: [&str; 6] = ["pokoin", "cardrails", "cardtrader", "cardmarket
 /// The origin of one listing row. `cardrails_key`: the row was created by the
 /// Card Rails Seller API connector (a `cardrails:` key in
 /// `seller_api_listing_keys`), whose rows keep the default `source`.
-/// A `ct:` source listing id alone says nothing: Pokoin rows pushed to
-/// CardTrader carry one too.
+/// An import `source` beats the key: Card Rails also binds keys to listings
+/// it pulled in from an existing CardTrader import, and those came from
+/// CardTrader. A `ct:` source listing id alone says nothing: Pokoin rows
+/// pushed to CardTrader carry one too.
 pub fn listing_origin(source: &str, source_listing_id: &str, cardrails_key: bool) -> &'static str {
-    if cardrails_key {
-        return "cardrails";
-    }
     let source = source.trim().to_ascii_lowercase();
     let id = source_listing_id.trim().to_ascii_lowercase();
     match source.as_str() {
@@ -20,6 +19,7 @@ pub fn listing_origin(source: &str, source_listing_id: &str, cardrails_key: bool
         "powertools_csv_import" | "cardmarket_csv_import" => "cardmarket",
         "tcgplayer_csv_import" => "tcgplayer",
         "stock_csv_import" => "csv",
+        _ if cardrails_key => "cardrails",
         _ if id.starts_with("pt:") || id.starts_with("cm:") => "cardmarket",
         _ if id.starts_with("tp:") => "tcgplayer",
         _ => "pokoin",
@@ -35,6 +35,14 @@ mod tests {
         assert_eq!(listing_origin("pokoin_user_listing", "", true), "cardrails");
         assert_eq!(listing_origin("pokoin_user_listing", "ct:991", true), "cardrails");
         assert_eq!(listing_origin("", "", true), "cardrails");
+    }
+
+    #[test]
+    fn an_import_source_wins_over_the_card_rails_key() {
+        assert_eq!(listing_origin("cardtrader_seller_import", "ct:991", true), "cardtrader");
+        assert_eq!(listing_origin("powertools_csv_import", "pt:1", true), "cardmarket");
+        assert_eq!(listing_origin("tcgplayer_csv_import", "tp:1", true), "tcgplayer");
+        assert_eq!(listing_origin("stock_csv_import", "", true), "csv");
     }
 
     #[test]
