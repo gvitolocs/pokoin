@@ -29,6 +29,10 @@ mkdir -p "$(dirname "$LOCK")" "$DEPLOY" "$UNITS"
 exec 9>>"$LOCK"
 flock -n 9 || { echo "deploy-cardtrader-daily-checkout: waiting for the running job" >&2; flock 9; }
 
+previous_commit=""
+if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
+  previous_commit="$(git -C "$SRC" rev-parse HEAD)"
+fi
 if ! git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$REPO" worktree prune
   git -C "$REPO" worktree add -q --detach "$SRC" "$COMMIT"
@@ -36,6 +40,17 @@ fi
 git -C "$SRC" checkout -q --detach --force "$COMMIT"
 git -C "$SRC" clean -q -ffdx
 [[ "$(git -C "$SRC" rev-parse HEAD)" == "$COMMIT" ]] || die "checkout is not at ${COMMIT:0:12}"
+
+# Refuse a checkout whose external prerequisites are missing before installing units.
+# Keep the preflight diagnostics in the journal and restore the previous job code.
+if ! bash "$SRC/scripts/cardtrader-daily-preflight.sh"; then
+  if [[ -n "$previous_commit" ]]; then
+    git -C "$SRC" checkout -q --detach --force "$previous_commit" \
+      || die "preflight failed; could not restore $previous_commit"
+    die "preflight failed; restored ${previous_commit:0:12}; units unchanged"
+  fi
+  die "preflight failed; no previous checkout to restore; units unchanged"
+fi
 
 for file in "$UNIT.service" "$UNIT.timer"; do
   install -m 0644 "$SRC/deploy/systemd/$file" "$UNITS/$file"

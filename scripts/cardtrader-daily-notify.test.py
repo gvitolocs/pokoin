@@ -17,7 +17,7 @@ notify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(notify)
 START = "2026-10-01T23:00:10Z"
 FRESH = {"state": "fresh", "dumpDay": "2026-10-01", "sourceTimestamp": "2026-10-02T02:27:50+00:00", "printings": 62125}
-STAGES = dict.fromkeys(["catalog", "pictures", "picture-sync", "artwork", "search", "dump"], 0)
+STAGES = dict.fromkeys(["preflight", "catalog", "pictures", "picture-sync", "artwork", "search", "dump"], 0)
 
 
 class DailySummaryTest(unittest.TestCase):
@@ -54,6 +54,12 @@ class DailySummaryTest(unittest.TestCase):
         self.assertIn("price analytics: fresh", result["message"])
         self.assertIn("Failed stages: catalog", result["message"])
         self.assertIn("Catalogue failures: pokoin_dragon_ball_super", result["message"])
+
+    def test_preflight_failure_is_named_without_hiding_successful_dump(self):
+        result = self.summary(1, {**STAGES, "preflight": 1})
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["rawDumpComplete"])
+        self.assertIn("Failed stages: preflight.", result["message"])
 
     def test_dump_stopped_at_deadline_is_reported_as_failed(self):
         self.listing.update({"completed": 1200, "stoppedAtDeadline": True, "maxSeconds": 36000})
@@ -171,6 +177,57 @@ class DailySummaryTest(unittest.TestCase):
             self.assertTrue(run.call_args.kwargs["capture_output"])
             self.assertIn("--event-key", run.call_args.args[0])
 
+    def test_deploy_preflight_failure_restores_previous_commit_before_units(self):
+        fixture = pathlib.Path(self.folder.name)
+        deploy = fixture / "deploy"
+        checkout = deploy / "cardtrader-daily"
+        (checkout / "scripts").mkdir(parents=True)
+        (checkout / "scripts/cardtrader-daily-preflight.sh").write_text(
+            'echo "ERROR [pictures,artwork] /nonexistent: missing executable"\nexit 1\n')
+        state = fixture / "head"
+        state.write_text("oldcommit1234")
+        log = fixture / "commands"
+        bin_dir = fixture / "mock-bin"
+        bin_dir.mkdir()
+        git = bin_dir / "git"
+        git.write_text("""#!/usr/bin/env python3
+import os, pathlib, sys
+args = sys.argv[1:]
+state = pathlib.Path(os.environ['TEST_HEAD'])
+with open(os.environ['TEST_COMMANDS'], 'a') as log:
+    log.write(' '.join(args) + '\\n')
+if 'checkout' in args:
+    state.write_text(args[-1])
+elif '--path-format=absolute' in args:
+    print(os.environ['TEST_COMMON'])
+elif 'rev-parse' in args:
+    if 'HEAD' in args: print(state.read_text())
+    elif '--git-dir' in args: print('.git')
+    else: print('newcommit1234')
+""")
+        git.chmod(0o755)
+        # Any attempted unit installation is a test failure, never a host operation.
+        for tool in ['install', 'systemctl']:
+            executable = bin_dir / tool
+            executable.write_text('#!/bin/sh\necho unexpected-unit-operation >> "$TEST_COMMANDS"\nexit 99\n')
+            executable.chmod(0o755)
+        common = fixture / "common" / ".git"
+        common.mkdir(parents=True)
+        env = {**os.environ, "PATH": str(bin_dir) + ":" + os.environ["PATH"],
+               "TEST_HEAD": str(state), "TEST_COMMANDS": str(log), "TEST_COMMON": str(common),
+               "POKOIN_DEPLOY_DIR": str(deploy), "POKOIN_SYSTEMD_USER_DIR": str(fixture / "units"),
+               "POKOIN_CT_DAILY_LOCK": str(fixture / "daily.lock")}
+        result = subprocess.run(['bash', str(SCRIPTS / 'deploy-cardtrader-daily-checkout.sh')],
+                                env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('/nonexistent', result.stdout)
+        self.assertIn('restored oldcommit123; units unchanged', result.stderr)
+        self.assertEqual(state.read_text(), 'oldcommit1234')
+        commands = log.read_text()
+        self.assertIn('checkout -q --detach --force newcommit1234', commands)
+        self.assertIn('checkout -q --detach --force oldcommit1234', commands)
+        self.assertNotIn('unexpected-unit-operation', commands)
+
     def test_wrapper_keeps_import_exit_status_when_notification_fails(self):
         # Replace only the absolute Python runtime in the temporary fixture;
         # stub executables prevent catalogue/dump/network work.
@@ -180,6 +237,10 @@ class DailySummaryTest(unittest.TestCase):
         (repo / "scripts").mkdir(parents=True)
         script = repo / "scripts" / "run.sh"
         script.write_text(wrapper)
+        (repo / "scripts" / "cardtrader-daily-paths.sh").write_text(
+            (SCRIPTS / "cardtrader-daily-paths.sh").read_text())
+        (repo / "scripts" / "cardtrader-daily-preflight.sh").write_text(
+            'exit "${PREFLIGHT_EXIT:-0}"\n')
         bin_dir = pathlib.Path(self.folder.name) / "bin"
         bin_dir.mkdir()
         for executable, content in {
@@ -191,14 +252,17 @@ class DailySummaryTest(unittest.TestCase):
             path = bin_dir / executable
             path.write_text(content)
             path.chmod(0o755)
-        for import_exit in [0, 1]:
-            with self.subTest(import_exit=import_exit):
+        for import_exit, preflight_exit in [(0, 0), (1, 0), (0, 1)]:
+            with self.subTest(import_exit=import_exit, preflight_exit=preflight_exit):
                 env = {**os.environ, "PATH": str(bin_dir) + ":" + os.environ["PATH"],
                        "POKOIN_CATALOG_RUN_ROOT": str(self.root), "CATALOG_EXIT": str(import_exit),
+                       "PREFLIGHT_EXIT": str(preflight_exit),
+                       "POKOIN_GPU_LEASE": str(bin_dir / "dump"),
+                       "POKOIN_CARD_REFRESH": "off", "POKOIN_CT_SOLD": "off",
                        "POKOIN_CT_DUMP_BIN": str(bin_dir / "dump"),
                        "POKOIN_CT_PRICE_BIN": str(bin_dir / "prices")}
                 result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=5)
-                self.assertEqual(result.returncode, import_exit)
+                self.assertEqual(result.returncode, max(import_exit, preflight_exit))
                 self.assertIn("import result is unchanged", result.stderr)
 
 
