@@ -6,8 +6,8 @@
 #   scripts/match-imported-version-sets.sh --ids 790994
 set -euo pipefail
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
-PYTHON="${PYTHON:-/home/nez/Projects/ai-toolkit/venv/bin/python}"
-SCRIPT="${CLUSTER:-/home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py}"
+PYTHON="${PYTHON:-/home/nez/Projects/AI/ai-toolkit/venv/bin/python}"
+SCRIPT="${CLUSTER:-/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py}"
 "$PYTHON" "$SCRIPT" --refresh-candidates "$@"
 # Reverse-holo patterns are the same card; CLIP misses them under the foil
 # and a re-cluster resets them. Skip on --dry-run (nothing was applied).

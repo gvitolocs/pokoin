@@ -110,8 +110,8 @@ on the Pi):
 ```bash
 # tests → cluster every name → apply Oracle Postgres primary → SQL fixtures
 # (Pi replica follows; do not write version sets on the replica)
-/home/nez/Projects/pokemon-card-extension/scripts/version-sets-pipeline.sh --dry-run
-/home/nez/Projects/pokemon-card-extension/scripts/version-sets-pipeline.sh
+/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/version-sets-pipeline.sh --dry-run
+/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/version-sets-pipeline.sh
 ```
 
 `--reencode` rebuilds illustration-box CLIP (`scripts/out/artbox-clip.npz`).
@@ -137,8 +137,8 @@ scripts/match-imported-version-sets.sh --ids 790994
 One-name probe:
 
 ```bash
-HIP_VISIBLE_DEVICES=0 /home/nez/Projects/ai-toolkit/venv/bin/python \
-  /home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py \
+HIP_VISIBLE_DEVICES=0 /home/nez/Projects/AI/ai-toolkit/venv/bin/python \
+  /home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py \
   "Pikachu δ Delta Species" --dry-run
 ```
 
@@ -242,6 +242,105 @@ are never one `pokoin_version_sets` row for Pokémon / illustrated supporters
 separates them. Item trainers skip that split. JP/EN reprints of each
 painting stay together.
 
+
+---
+
+## Final stage: singletons that one painting claims (rules A and B)
+
+Added 2026-10-31 to `scripts/cluster-name-version-sets.py` (pokemon-card-extension), after every other stage and after `split_secret_regular_arts`.
+
+
+### Why
+
+A printing that no earlier stage grouped stayed a singleton even when its painting was
+obvious. Two causes:
+
+* Pokémon buckets refuse cluster-level pixel joins below 0.80, and a true reprint under a
+  different frame or foil often sits at 0.55-0.78 (Kyogre ex ADV-P 011 `541598` against
+  v247946; Ocean's Kyogre ex starter deck 006/016 `569140` against `229762`).
+* CLIP does not separate two paintings of one species by the same illustrator, so it
+  cannot be the deciding score there. The final stage lets pixels decide and uses CLIP only as
+  a floor.
+
+### The rules
+
+Run once per name bucket, on the finished groups. Only a **singleton** moves, and only onto an
+existing group (or onto another singleton, which makes a pair). Scores are the best
+member-to-member dot product of the face-weighted equalized pixel vectors, compared in
+thousandths. Singletons are decided one at a time in `card_id` order against the groups as they
+stand, so a printing that has just been joined is no longer a singleton.
+
+| | Rule A: the printing has a credit | Rule B: no credit |
+| --- | --- | --- |
+| target | pixel-best group whose credits are exactly the printing's (token set, so `Shin Nagasawa` = `Nagasawa Shin`) | pixel-best group of all, at most one distinct credit |
+| pixel | >= 0.50, or >= 0.70 when no CLIP score to the target | >= 0.65 |
+| margin | >= 0.05 over the second same-illustrator group | >= 0.12 over every other group |
+| CLIP | >= 0 when present | >= 0.70 when present |
+| rival | no other group closer in pixels by more than 0.10 | |
+
+Guards for both, read on the members of the group actually joined: no pinned printing, same
+`name_key` for every member, no same-set member with another secret/full-art flag or collector
+number, not an Energy card, not a pattern species (Vivillon, Scatterbug, Spewpa, Unown, Spinda,
+Alcremie, Flabébé, Floette, Florges, Deerling, Sawsbuck, Furfrou, Burmy, Shellos, Gastrodon,
+Basculin, Minior, Squawkabilly). Pinned printings never move and never receive a join, but still
+count as the nearest rival.
+
+Calibration (singleton audit, 297 labelled pairs): precision 99.5% over both rules, rule B
+48 of 48. The constants sit next to the other thresholds (`ILLUSTRATOR_*`, `CREDITLESS_*`).
+The decision mirrors the Verus kernel's `attach_decide`; `KernelOracleTests` replays a
+synthetic sweep through `verification/diff` and asserts both agree.
+
+### Credits
+
+The credit comes from `marketplace_blueprint_artists` (join on `card_id`). Rows with
+`source = 'same_artwork'` (`match_reason = 'clip_version_set'`, written by
+`marketplace_copy_same_art_artists`) are copies: they repeat the credit of a printing that was in
+the same version set, so they come from the grouping this stage is judging. The dump keeps them
+apart as `copied_credit` (a printing has `credit` or `copied_credit`, never both).
+
+* The **singleton's own** credit must be a real one. A printing whose only credit is a copy is
+  credit-less and falls under rule B. This keeps out the audit's one false join, Natu e-card
+  `490540`, which rode on a copy of its old group's credit.
+* The credits of the **target cluster's members** may be real or copied, both for rule A's "exactly
+  that one illustrator" match and for rule B's "not mixed" check. A copy there only corroborates a
+  real credit on the other side. Ocean's Kyogre ex starter deck `569140` (copy of Yasuki Watanabe)
+  and EX Crystal Guardians `229762` (real Yasuki Watanabe) therefore join by rule A, and not the
+  other way round: `569140` has no real credit of its own.
+
+At the time of writing 40,605 of 62,549 credits are copies.
+
+### Source values
+
+A group created or extended by rule A is stored with `pokoin_version_sets.source =
+'artbox-illustrator'`, by rule B only with `'artbox-pixel-orphan'`. They are reset and cleaned
+like `artcut` and are not pins, so the next pass recomputes them. To audit or roll back:
+
+```sql
+SELECT version, member_count FROM pokoin_version_sets
+ WHERE source IN ('artbox-illustrator', 'artbox-pixel-orphan');
+```
+
+Every run writes `scripts/out/orphan-joins.csv` (one row per join: pixel, margin, CLIP, target,
+rule) next to `version-groups.json`.
+
+### Caches
+
+`artbox-clip.npz` and `artbox-pixel.npz` now carry `(file name, size, mtime_ns)` per card. A
+leftover replaced in place (the 2026-10-19 HD upscales kept their names) is re-encoded. Caches
+written before the stamp are read as they are and migrated in place: an entry counts only if
+its file is not newer than the old cache file, which stays the cutoff for entries not yet stamped.
+`CLUSTER_SETS_OUT_DIR` redirects caches and outputs for a trial run.
+
+### `--split-secrets`
+
+Respects pins (`respect_pins=True`) and re-applies them afterwards (`apply_artbox_pins()`), so the
+Blacephalon GX pin (199/214 and 219/214 of one set) survives.
+
+### Applying without undoing live groups
+
+Do not assume a plain `--all` / `version-sets-pipeline.sh` apply is safe after a cache refresh. The 2026-11-01 dry run with fresh HD vectors would have joined 1,258 printings but split 573 live groups and undone 928 joins; its CLIP-stage additions were wrong in 2 of 13 sampled cases (Dhelmise SM53 vs Guardians Rising 59, Corviknight V SWSH 200 vs Battle Styles 156). So the 2026-10-31 fix was applied additively: only rule A/B joins whose target's live group equals the cluster they were judged against, plus the EN/JP pairs that `20261101_ex_era_ex_names.sql` moved into one name bucket (`20261101_version_artwork_joins.sql`, with a `.revert.sql`). Those 573 splits and the CLIP-stage additions are still unreviewed. Review them before running a full apply.
+
+After a by-hand apply, clear the touched keys from `marketplace_page_snapshots` (kind `version`), or the route keeps serving the old members until the hourly `build-lists-versions`.
 
 ---
 
