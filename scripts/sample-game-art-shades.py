@@ -6,7 +6,7 @@ their own database, because CardTrader ids collide across games. Decode
 uses every CPU; the illustration mean runs on the 7900 XTX. This does
 not load Qwen.
 
-  /home/nez/Projects/ai-toolkit/venv/bin/python \\
+  /home/nez/Projects/AI/ai-toolkit/venv/bin/python \\
     scripts/sample-game-art-shades.py --all
 """
 from __future__ import annotations

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs all supported catalogues, JPEG backfill and raw listing books on nezopt.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=scripts/cardtrader-daily-paths.sh
+source scripts/cardtrader-daily-paths.sh
 export POKOIN_CATALOG_RUN_ROOT="${POKOIN_CATALOG_RUN_ROOT:-/home/nez/data/pokoin-catalog-refresh/daily/$(date -u +%F)}"
 mkdir -p "$POKOIN_CATALOG_RUN_ROOT"
 run_started_at=$(date -u +%FT%TZ)
@@ -13,7 +15,8 @@ dump_pid=""
 # The unit runs the clean checkout ~/pokoin-deploy/cardtrader-daily, moved to origin/main
 # by scripts/deploy-cardtrader-daily-checkout.sh. The summary names its commit and how
 # many newer commits to the job's own files are waiting there (shared refs, no fetch).
-job_paths=(scripts/run-all-cardtrader-daily.sh scripts/refresh-all-cardtrader-catalogues.cjs
+job_paths=(scripts/cardtrader-daily-preflight.sh scripts/cardtrader-daily-paths.sh
+  scripts/run-all-cardtrader-daily.sh scripts/refresh-all-cardtrader-catalogues.cjs
   scripts/cardtrader-fetch-bridge.py scripts/refresh-all-cardtrader-pictures.py
   scripts/satellite-scan-ingest.py scripts/ingest-missing-product-images.py
   scripts/cardtrader-scan-fetch.py scripts/sync-catalog-pictures.py
@@ -34,7 +37,7 @@ notify() {
 
 # `systemctl stop`, a timeout or a shutdown sends SIGTERM to the whole unit. Still send
 # the summary, marked interrupted: the run killed at 06:44 UTC on 2026-10-15 sent nothing.
-# shellcheck disable=SC2317 # invoked by trap
+# shellcheck disable=SC2317,SC2329 # invoked by trap
 on_signal() {
   local sig="$1" code="$2"
   trap - TERM INT
@@ -46,13 +49,17 @@ on_signal() {
 trap 'on_signal TERM 143' TERM
 trap 'on_signal INT 130' INT
 
+preflight_result=0
+bash scripts/cardtrader-daily-preflight.sh || preflight_result=$?
+(( preflight_result == 0 )) || result=1
+stage_args+=(--stage-result "preflight=$preflight_result")
+
 catalog_result=0
 node scripts/refresh-all-cardtrader-catalogues.cjs --apply || catalog_result=$?
 (( catalog_result == 0 )) || result=1
 stage_args+=(--stage-result "catalog=$catalog_result")
 # Listing books: the Rust dump (docs/CARDTRADER_DAILY_DUMP.md) once installed,
 # else the Python one. Both write listing-dump-status.json for the notifier.
-DUMP_BIN="${POKOIN_CT_DUMP_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-listing-dump}"
 if [[ -x "$DUMP_BIN" ]]; then
   "$DUMP_BIN" &
 else
@@ -62,8 +69,7 @@ dump_pid=$!
 # GPU stages hold a VRAM lease (/home/nez/bin/gpu-lease): an unguarded GPU job
 # racing a Qwen load panicked amdgpu on 2026-10-06. They queue (up to 4 h) and
 # llama-server-qwen-watch yields Qwen while they wait.
-GPU_LEASE=("${POKOIN_GPU_LEASE:-/home/nez/bin/gpu-lease}" run --mb "${CATALOG_GPU_MB:-4000}" --wait 14400)
-AI_PYTHON="${POKOIN_AI_PYTHON:-/home/nez/Projects/ai-toolkit/venv/bin/python}"
+GPU_LEASE=("$GPU_LEASE_BIN" run --mb "${CATALOG_GPU_MB:-4000}" --wait 14400)
 pictures_result=0
 "${GPU_LEASE[@]}" --name catalog-pictures -- "$AI_PYTHON" scripts/refresh-all-cardtrader-pictures.py || pictures_result=$?
 (( pictures_result == 0 )) || result=1
@@ -82,7 +88,6 @@ stage_args+=(--stage-result "artwork=$artwork_result")
 # after a health check) and an app catalog revision is staged. Skipped when not installed;
 # POKOIN_CARD_REFRESH=off skips it.
 cards_result=0
-CARD_REFRESH_BIN="${POKOIN_CARD_REFRESH_BIN:-/home/nez/.local/lib/card-refresh/current/daily-card-refresh.sh}"
 if [[ -x "$CARD_REFRESH_BIN" && "${POKOIN_CARD_REFRESH:-on}" != off ]]; then
   DAILY="$POKOIN_CATALOG_RUN_ROOT" "$CARD_REFRESH_BIN" || cards_result=$?
 fi
@@ -99,7 +104,6 @@ stage_args+=(--stage-result "dump=$dump_result")
 # Price the books this run actually stored. A dump that stopped at its deadline
 # still has a price cache: only fetched expansions are in scope.
 prices_result=0
-PRICE_BIN="${POKOIN_CT_PRICE_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-price-cache}"
 if [[ -x "$PRICE_BIN" ]]; then
   "$PRICE_BIN" || prices_result=$?
 fi
@@ -108,7 +112,6 @@ stage_args+=(--stage-result "prices=$prices_result")
 # Sold graph of the other games, replayed from the stored books (docs/CARDTRADER_DAILY_DUMP.md
 # "Sold graph"). Pokémon's comes from the Oracle job. POKOIN_CT_SOLD=off skips it.
 sold_result=0
-SOLD_BIN="${POKOIN_CT_SOLD_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-sold}"
 if [[ -x "$SOLD_BIN" && "${POKOIN_CT_SOLD:-on}" != off ]]; then
   "$SOLD_BIN" || sold_result=$?
 fi

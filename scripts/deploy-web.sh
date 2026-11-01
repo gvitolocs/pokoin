@@ -21,7 +21,7 @@ V() { env -u VERCEL_TOKEN vercel "$@"; }
 
 REPO="$(git rev-parse --show-toplevel)"
 COMMIT="$(git -C "$REPO" rev-parse "${1:-HEAD}^{commit}")"
-CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/pokoin-web}"
+CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/Startup/Pokoin/pokoin-web}"
 # Gitignored files scripts/build-web.sh needs. Nothing else from any working tree is used.
 UNTRACKED_INPUTS=(download/extension.zip)
 
@@ -64,7 +64,7 @@ else
 fi
 
 # Canonical-checkout preflight (2026-09-19, Paseo isolation):
-# /home/nez/Projects/pokoin-web is the integration/deployment tree, not a dev
+# /home/nez/Projects/Startup/Pokoin/pokoin-web is the integration/deployment tree, not a dev
 # workspace. Staging below is `git archive` of $COMMIT plus the explicit
 # UNTRACKED_INPUTS allowlist, so a dirty tree can never change deployed
 # source — but dirt here means un-integrated agent work exists and the

@@ -15,7 +15,7 @@ MOD = SourceFileLoader(
 ).load_module()
 
 NVME_LEFTOVERS = Path("/home/nez/data/pokoin-leftovers/objects")
-NVME = Path("/home/nez/Projects/pokoin/PokoinTest/index/cdn_images")
+NVME = Path("/home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images")
 OBJECTS = Path("/home/nez/mnt/mybook/pokoin-pi-card-images/objects")
 
 

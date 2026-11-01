@@ -2,7 +2,7 @@
 """Match only today's new Pokemon artwork buckets on the nezopt GPU."""
 import importlib.util,os,pathlib,shutil,sys,time
 ROOT=pathlib.Path(os.environ.get("POKOIN_CATALOG_RUN_ROOT","/home/nez/data/pokoin-catalog-refresh/"+time.strftime("%Y-%m-%d",time.gmtime())))
-source=pathlib.Path("/home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py")
+source=pathlib.Path("/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py")
 sys.path.insert(0,str(source.parent))
 spec=importlib.util.spec_from_file_location("catalog_clip",source);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 outputs=ROOT/"clip";outputs.mkdir(exist_ok=True)

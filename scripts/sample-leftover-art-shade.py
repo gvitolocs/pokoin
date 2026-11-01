@@ -4,7 +4,7 @@
 Writes marketplace_leftover_art_shades on nezopt 15T. Same POKEMON_ART_CUT
 window as market/src/art-cut.js. Prefer sibling artcut/ crops when present.
 
-  /home/nez/Projects/BattleScan/.venv/bin/python \\
+  /home/nez/Projects/Startup/Pokoin/BattleScan/.venv/bin/python \\
     scripts/sample-leftover-art-shade.py
 """
 from __future__ import annotations

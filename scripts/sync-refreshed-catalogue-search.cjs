@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path');
-const base='/home/nez/Projects/cardvault/pokemon_card_vault';
+const base='/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault';
 const {Pool}=require(base+'/node_modules/pg');
 const {MARKETPLACE_MEILI_SYNC_SELECT,mapMarketplaceMeiliDoc}=require(base+'/api/_meili_document');
 const root=process.env.POKOIN_CATALOG_RUN_ROOT||'/home/nez/data/pokoin-catalog-refresh/'+new Date().toISOString().slice(0,10);

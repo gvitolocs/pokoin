@@ -3,7 +3,7 @@
 # Does not restart a running CardTrader dump. Does not touch the Pi public API.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="${CARDVAULT_SRC:-/home/nez/Projects/cardvault/pokemon_card_vault}"
+SRC="${CARDVAULT_SRC:-/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault}"
 HOST="${CARDTRADER_ORACLE_HOST:-pokoin-marketplace}"
 SSH_OPTS='-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20'
 REMOTE_ROOT=/home/ubuntu/cardtrader-oracle-api

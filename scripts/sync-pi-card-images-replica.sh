@@ -14,8 +14,8 @@ OBJECTS="$DEST/objects"
 RSYNC_URL="${RSYNC_URL:-rsync://192.168.178.46/card-images/}"
 
 LOCAL_SOURCES=(
-  /home/nez/Projects/pokoin/PokoinTest/index/cdn_images
-  /home/nez/Projects/pokoin/PokoinTest/index/cdn_images_delta
+  /home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images
+  /home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images_delta
   /home/nez/pokoincdn/cdn_images_digest/2026-08-30
   /home/nez/pokoincdn/cdn_images_digest/2026-08-31-jpg
 )

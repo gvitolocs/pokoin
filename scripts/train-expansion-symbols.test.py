@@ -3,5 +3,5 @@
 import os
 import runpy
 from pathlib import Path
-root = Path(os.environ.get("POKOIN_SCANNER_REPO", "/home/nez/Projects/pokoin-scanner"))
+root = Path(os.environ.get("POKOIN_SCANNER_REPO", "/home/nez/Projects/Startup/Pokoin/pokoin-scanner"))
 runpy.run_path(str(root / "training/symbols/train-expansion-symbols.test.py"), run_name="__main__")

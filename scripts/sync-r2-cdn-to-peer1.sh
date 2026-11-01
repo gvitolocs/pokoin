@@ -12,7 +12,7 @@ CONCURRENCY="${CONCURRENCY:-8}"
 for f in \
   /home/nez/secrets/deploy/cloudflare-r2.env \
   /home/nez/secrets/deploy/oci-free-stack/r2.env \
-  /home/nez/Projects/cardvault/pokemon_card_vault/.env
+  /home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/.env
 do
   if [[ -f "$f" ]]; then
     set -a
