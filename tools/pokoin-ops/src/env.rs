@@ -94,9 +94,32 @@ pub fn state_dir() -> PathBuf {
     }
 }
 
+/// Invalid immediate filters retain the legacy delivery path.
+pub fn immediate_regex(key: &str) -> Option<regex::Regex> {
+    parse_immediate_regex(key, std::env::var(key).ok().as_deref())
+}
+
+fn parse_immediate_regex(key: &str, value: Option<&str>) -> Option<regex::Regex> {
+    match regex::Regex::new(value?) {
+        Ok(re) => Some(re),
+        Err(err) => {
+            eprintln!("{key}: invalid regex; keeping legacy alerts: {err}");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_immediate_regex_keeps_legacy_behavior() {
+        assert!(parse_immediate_regex("TEST", None).is_none());
+        assert!(parse_immediate_regex("TEST", Some("[")).is_none());
+        assert!(parse_immediate_regex("TEST", Some("")).unwrap().is_match("anything"));
+        assert!(parse_immediate_regex("TEST", Some("^critical")).unwrap().is_match("critical.service"));
+    }
 
     #[test]
     fn parses_quotes_comments_and_export() {

@@ -2,6 +2,7 @@
 //! backups / restore tests. See docs/BACKUPS_AND_ALERTS.md.
 
 mod backup;
+mod digest;
 mod env;
 mod hc;
 mod health;
@@ -34,6 +35,11 @@ enum Cmd {
         /// The unit is a systemd --user unit.
         #[arg(long)]
         user: bool,
+    },
+    /// Mail the weekly summary of deferred alerts.
+    Digest {
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Ping a dead-man check: ok (default), start or fail.
     HcPing {
@@ -135,6 +141,7 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Digest { dry_run } => digest::run(dry_run),
         Cmd::HcProvision => hc::provision(),
         Cmd::Sentinel { role, dry_run } => sentinel::run(role, dry_run),
         Cmd::PiHealth { maintenance, reason, end_maintenance } => {
