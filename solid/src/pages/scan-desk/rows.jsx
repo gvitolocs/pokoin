@@ -302,7 +302,7 @@ export function QueueRow(props) {
             <ReplacePrinting onPick={pick} onClose={() => props.onReplaceDone()} seed={untrack(() => row().cardName)} />
           </Show>
           <Show when={duplicateNote()}>
-            <small class="scan-dup-note" role="note">{duplicateNote()}</small>
+            <small class="scan-dup-note" role="note" title={duplicateNote()}>{duplicateNote()}</small>
           </Show>
         </span>
       </span>

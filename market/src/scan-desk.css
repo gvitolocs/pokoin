@@ -896,8 +896,8 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 }
 .c-card strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-card em { font-style: normal; color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Same copy already listed from another channel (inventory-origin.js): a note, never a block. */
-.c-card .scan-dup-note { color: var(--scan-warn, #ffad4d); font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Same copy already listed from another channel (inventory-origin.js): a note, never a block. It wraps: the channel names are the point. */
+.c-card .scan-dup-note { color: var(--scan-warn, #ffad4d); font-size: 0.72rem; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
 /* Version control: small labelled select, same chrome as LANG — not a full-width fake row. */
 .c-version-wrap {
   display: inline-flex;
