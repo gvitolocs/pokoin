@@ -5,13 +5,6 @@
   font-style: normal;
   font-display: swap;
 }
-@font-face {
-  font-family: Fredoka;
-  src: url("fredoka-wordmark.ttf") format("truetype");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
 :root {
   --bg: #08080a;
   --surface: #131316;
@@ -134,36 +127,19 @@ summary:focus-visible,
   gap: 10px;
   flex-shrink: 0;
 }
-.brand-word {
-  display: flex;
-  align-items: baseline;
-  font-family: Fredoka, var(--font);
-  font-size: 42px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1;
+/* Landing wordmark preserves the original 1000-unit line box at 42px (38px on mobile). */
+.brand-logo {
+  display: block;
+  width: 131.586px;
+  height: 42px;
+  overflow: visible;
+  flex-shrink: 0;
 }
-.brand-coin {
-  display: inline-block;
-  width: 0.78em;
-  height: auto;
-  margin-inline: 0.02em;
-  align-self: center;
-  image-rendering: pixelated;
-}
-.brand-i {
-  position: relative;
-}
-.brand-i::after {
-  content: "";
+#pokoin-wordmark-defs {
   position: absolute;
-  left: 50%;
-  top: 0.17em;
-  width: 0.19em;
-  height: 0.19em;
-  border-radius: 50%;
-  background: var(--yellow);
-  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  overflow: hidden;
 }
 .nav-links {
   display: flex;
@@ -1116,8 +1092,9 @@ h2 {
   .nav {
     padding: 13px 6%;
   }
-  .brand-word {
-    font-size: 38px;
+  .brand-logo {
+    width: 119.054px;
+    height: 38px;
   }
   .nav-account {
     display: none;
