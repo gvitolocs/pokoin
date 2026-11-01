@@ -274,11 +274,17 @@ async fn listing_game(
     }
     Ok(game)
 }
+/// A listing the Card Rails Seller API connector created for its own seller.
+const CARDRAILS_KEY_SQL: &str = "exists (select 1 from public.seller_api_listing_keys k \
+join public.seller_api_grants g on g.id = k.grant_id \
+where k.listing_id = listings.id and g.seller_uid = listings.seller_uid \
+and k.idempotency_key like 'cardrails:%')";
 fn read_sql(
     query: &HashMap<String, String>,
     seller: &str,
     game: &str,
     catalog: Option<&[String]>,
+    cardrails: bool,
 ) -> (String, Vec<Value>) {
     let mut values = vec![];
     let mut clauses = vec![];
@@ -338,7 +344,14 @@ fn read_sql(
     // `order=price-desc`: MyPokoin opens on price high → low, so a first load
     // that paints its first page shows the rows that stay on top.
     let price = if query.get("order").map(String::as_str) == Some("price-desc") { "desc" } else { "asc" };
-    (format!("select to_jsonb(listings) as listing from public.marketplace_user_listings listings {} order by price_pkn {price}, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
+    // The owner's own book also says which rows the Card Rails connector
+    // created (their `source` stays the default): one semi-join, no per-row read.
+    let listing = if cardrails && own && !seller.is_empty() {
+        format!("to_jsonb(listings) || jsonb_build_object('cardrails_key', {CARDRAILS_KEY_SQL})")
+    } else {
+        "to_jsonb(listings)".to_string()
+    };
+    (format!("select {listing} as listing from public.marketplace_user_listings listings {} order by price_pkn {price}, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
 }
 pub async fn read_listings(
     state: &DomainState,
@@ -388,12 +401,21 @@ pub async fn read_listings(
     } else {
         None
     };
-    let (sql, values) = read_sql(query, &seller, game, catalog.as_deref());
-    let mut builder = sqlx::query(&sql);
-    for v in &values {
-        builder = bind_json(builder, v);
-    }
-    let rows = builder.fetch_all(state.read_db()).await?;
+    let read = |cardrails: bool| {
+        let (sql, values) = read_sql(query, &seller, game, catalog.as_deref(), cardrails);
+        async move {
+            let mut builder = sqlx::query(&sql);
+            for v in &values {
+                builder = bind_json(builder, v);
+            }
+            builder.fetch_all(state.read_db()).await
+        }
+    };
+    // Before migration 115 there are no seller API tables: no Card Rails flag.
+    let rows = match read(true).await {
+        Err(error) if crate::seller_api::is_missing_table(&error) => read(false).await?,
+        rows => rows?,
+    };
     let mut rows: Vec<Value> = rows
         .into_iter()
         .map(|r| r.try_get("listing"))
@@ -2193,7 +2215,7 @@ mod parity_tests {
             ("offset".into(), "7".into()),
         ]);
         let ids = vec!["801170".to_string()];
-        let (sql, values) = read_sql(&q, "u1", "riftbound", Some(&ids));
+        let (sql, values) = read_sql(&q, "u1", "riftbound", Some(&ids), true);
         assert!(sql.contains("or (coalesce(nullif(marketplace_game, ''), 'pokemon') = 'pokemon'"));
         assert!(sql.contains("listings.card_id = any($3::text[])"));
         assert_eq!(
@@ -2204,9 +2226,24 @@ mod parity_tests {
                 .clone()
         );
         let q = HashMap::from([("cardId".into(), "801170".into())]);
-        let (sql, values) = read_sql(&q, "", "riftbound", None);
+        let (sql, values) = read_sql(&q, "", "riftbound", None, true);
         assert!(!sql.contains("marketplace_game"));
+        assert!(!sql.contains("seller_api_listing_keys"));
         assert_eq!(values[0], "801170");
+    }
+    #[test]
+    fn only_the_owner_book_reads_the_card_rails_flag() {
+        let own = HashMap::from([("sellerUid".into(), "u1".into())]);
+        let (sql, values) = read_sql(&own, "u1", "pokemon", None, true);
+        assert!(sql.starts_with("select to_jsonb(listings) || jsonb_build_object('cardrails_key', exists ("));
+        assert!(sql.contains("k.listing_id = listings.id and g.seller_uid = listings.seller_uid"));
+        assert!(sql.contains("like 'cardrails:%'"));
+        assert_eq!(values[0], "u1");
+        let (sql, _) = read_sql(&own, "u1", "pokemon", None, false);
+        assert!(sql.starts_with("select to_jsonb(listings) as listing"));
+        let shop = HashMap::from([("sellerUsername".into(), "alice".into())]);
+        let (sql, _) = read_sql(&shop, "u1", "pokemon", None, true);
+        assert!(!sql.contains("cardrails_key"));
     }
     #[test]
     fn update_plan_has_node_defaults_and_zero_quantity_pause() {

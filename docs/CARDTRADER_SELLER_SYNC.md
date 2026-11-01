@@ -20,6 +20,11 @@ For every `marketplace_user_listings` row whose `source_listing_id` is
 `sold_out` rows remain in Postgres for audit/history but are excluded from the
 seller shop and inventory UI.
 
+Imported rows keep `source = 'cardtrader_seller_import'`; the inventory shows
+them with a CardTrader source tag and flags a live copy of the same card from
+another channel as a possible duplicate (read-only), see
+[INVENTORY_ORIGIN.md](INVENTORY_ORIGIN.md) (2026-11-01).
+
 ## Inventory link direction (2026-10-14)
 
 Connecting CardTrader links the two inventories; it is not a one-off import.

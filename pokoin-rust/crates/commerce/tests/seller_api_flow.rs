@@ -518,6 +518,18 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(moved["listing"]["externalKey"], "cardrails:cr_ext");
     assert!(moved["listing"]["signed"].is_boolean() && moved["listing"]["altered"].is_boolean());
 
+    // --- the owner's book names each row's origin ---------------------------
+    // Only a `cardrails:` key marks a connector row (docs/INVENTORY_ORIGIN.md);
+    // the `list:cr_1` copy and the hand-made row stay Pokoin.
+    run_sql(&pool, include_str!("../../../../scripts/sql/137_seller_api_listing_keys_listing_idx.sql")).await;
+    let (status, book) = call(&app, "GET", "/api/marketplace-listings?sellerUid=seller-1&nativeOnly=1&limit=500", "seller-1", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{book}");
+    let origin_of = |id: &Value| book["listings"].as_array().unwrap().iter().find(|l| &l["id"] == id).map(|l| l["origin"].clone());
+    assert_eq!(origin_of(&saved["listingId"]), Some(json!("cardrails")), "{book}");
+    assert_eq!(origin_of(&listed["listingId"]), Some(json!("pokoin")));
+    assert_eq!(origin_of(&json!(mine.to_string())), Some(json!("pokoin")));
+    assert!(!book.to_string().contains("cardrails_key"));
+
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;
     assert_eq!(status, StatusCode::CONFLICT, "a grant with no webhook URL has nothing to test");

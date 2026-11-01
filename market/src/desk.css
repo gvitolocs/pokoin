@@ -3516,6 +3516,44 @@
   font-size: 14px;
 }
 
+/* Where a listing came from (inventory-origin.js): quiet outline tags, one
+   tint per channel, and an amber "Possible duplicate" across channels. */
+.inv-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.inv-origin,
+.inv-dup {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--tag, var(--muted)) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tag, var(--muted)) 12%, transparent);
+  color: var(--tag, var(--muted));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+
+.inv-origin.is-pokoin { --tag: var(--muted); }
+.inv-origin.is-cardrails { --tag: #8fb3ff; }
+.inv-origin.is-cardtrader { --tag: #5fd0c4; }
+.inv-origin.is-cardmarket { --tag: #c39bff; }
+.inv-origin.is-tcgplayer { --tag: #7ed957; }
+.inv-origin.is-csv { --tag: #d9b38c; }
+.inv-dup { --tag: #ffad4d; cursor: help; }
+
+.inv-chip.inv-dup-chip.on {
+  background: #ffad4d;
+  border-color: #ffad4d;
+}
+
 @media (max-width: 860px) {
   .inv-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { fetchExactNameCards, imageSrc } from '@market/api.js';
-import { game, publicGamePath } from '@market/game.js';
+import { game, gameIdFromHost, publicGamePath } from '@market/game.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { flagSrc } from '@market/locale.js';
@@ -30,6 +30,10 @@ import { DRAFT_HOTKEY_LEGEND, dispatchDraftHotkey, draftLegendActive } from '@ma
 import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
 import ThumbZoom from '../../components/ThumbZoom.jsx';
 import { createLiveSuggest } from '../../lib/live-suggest.js';
+import { accountProfile } from '../../stores/account.js';
+import { authUser } from '../../stores/auth.js';
+import { scanOwnerBook } from './duplicate-book.js';
+import { scanDuplicateNote } from './duplicates.js';
 import { loadVersionSet } from './version-sets.js';
 import { watch } from './watch.js';
 
@@ -235,6 +239,12 @@ export function QueueRow(props) {
     props.onPick(id);
     props.onReplaceDone();
   };
+  // The same copy already listed from Card Rails / CardTrader / Cardmarket:
+  // a warning only, the submit is unchanged (docs/INVENTORY_ORIGIN.md).
+  const duplicateNote = createMemo(() => scanDuplicateNote(
+    scanOwnerBook(authUser()?.uid || accountProfile()?.uid || '', gameIdFromHost()),
+    row(),
+  ));
 
   return (
     <div
@@ -290,6 +300,9 @@ export function QueueRow(props) {
           </Show>
           <Show when={props.replacing && !unidentified()}>
             <ReplacePrinting onPick={pick} onClose={() => props.onReplaceDone()} seed={untrack(() => row().cardName)} />
+          </Show>
+          <Show when={duplicateNote()}>
+            <small class="scan-dup-note" role="note">{duplicateNote()}</small>
           </Show>
         </span>
       </span>

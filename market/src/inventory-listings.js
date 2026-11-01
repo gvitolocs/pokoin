@@ -5,6 +5,7 @@
  */
 
 import { game, gameIdFromPath, gamePublicPath, knownGameId, publicGamePath } from './game.js';
+import { listingOrigin } from './inventory-origin.js';
 import { stackPosToIndex } from './scan-model.js';
 
 export function isLiveInventoryListing(row) {
@@ -90,9 +91,16 @@ function inventoryRowHaystack(row) {
     .join(' ');
 }
 
-/** PowerTools-style client filters: text query, status, condition, language. */
-export function filterInventoryRows(rows, { query = '', status = '', condition = '', language = '' } = {}) {
+/**
+ * PowerTools-style client filters: text query, status, condition, language,
+ * origin (inventory-origin.js ids), and `duplicatesOnly` with `duplicates`
+ * (the findCrossSourceDuplicates map, or a Set of listing ids).
+ */
+export function filterInventoryRows(rows, {
+  query = '', status = '', condition = '', language = '', origin = '', duplicatesOnly = false, duplicates = null,
+} = {}) {
   const list = Array.isArray(rows) ? rows : [];
+  const wantOrigin = String(origin || '').toLowerCase();
   const needle = String(query || '').trim().toLowerCase();
   const wantStatus = String(status || '').toLowerCase();
   const wantCondition = String(condition || '').toUpperCase();
@@ -111,6 +119,8 @@ export function filterInventoryRows(rows, { query = '', status = '', condition =
       const rowLanguage = String(row?.language || '').toUpperCase();
       if (rowLanguage !== wantLanguage) return false;
     }
+    if (wantOrigin && listingOrigin(row) !== wantOrigin) return false;
+    if (duplicatesOnly && !duplicates?.has?.(String(row?.id ?? ''))) return false;
     return true;
   });
 }
