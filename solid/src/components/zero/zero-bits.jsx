@@ -2,7 +2,6 @@ import { For, Show } from 'solid-js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import { formatOrderMoney } from '@market/order-status.js';
 import { alsoInLabels, issueLabel, lineIsReverse, lineLocation, lineLocationFromPt, lineQuantity, lineTextFacets } from '@market/zero-pick.js';
-import ReverseSparkles from '../desk/ReverseSparkles.jsx';
 
 export function lineImage(item) {
   return homepageDerivativeUrl(ownCatalogImage(
@@ -48,11 +47,11 @@ export function TakeBits(props) {
   );
 }
 
-/** Glowing gold sparkles on a reverse holo line, so the picker does not grab the plain copy. */
+/** A glowing gold capital R on a reverse holo line, so the picker does not grab the plain copy. */
 export function ReverseMark() {
   return (
     <span class="zero-reverse" title="Reverse holo" aria-label="Reverse holo" role="img">
-      <ReverseSparkles />
+      <span class="zero-reverse-r" aria-hidden="true">R</span>
     </span>
   );
 }
