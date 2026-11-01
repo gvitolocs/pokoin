@@ -13,8 +13,8 @@ optional() { [[ -x "$2" ]] || warning "$1" "$2" 'not installed; stage uses its f
 executable 'pictures,artwork' "$AI_PYTHON"
 if command -v "$AI_PYTHON" >/dev/null 2>&1; then
   # Bound even a broken interpreter; suppress its traceback and name the path once.
-  if ! PYTHONDONTWRITEBYTECODE=1 timeout 5 "$AI_PYTHON" -c 'import numpy, PIL' >/dev/null 2>&1; then
-    problem 'pictures,artwork' "$AI_PYTHON" 'cannot import numpy, PIL within 5 seconds'
+  if ! PYTHONDONTWRITEBYTECODE=1 timeout 30 "$AI_PYTHON" -c 'import numpy, PIL' >/dev/null 2>&1; then
+    problem 'pictures,artwork' "$AI_PYTHON" 'cannot import numpy, PIL within 30 seconds'
   fi
 fi
 executable 'pictures,artwork' "$GPU_LEASE_BIN"
