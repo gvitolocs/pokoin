@@ -9,7 +9,7 @@ import pathlib
 import subprocess
 import sys
 
-DEFAULT_NOTIFIER = "/home/nez/Projects/tcgprices/notify_flareon.py"
+DEFAULT_NOTIFIER = "/home/nez/Projects/Startup/Pokoin/tcgprices/notify_flareon.py"
 ANALYTICS_SQL = """
 select json_build_object(
   'dumpDay', observed_day, 'sourceTimestamp', max(refreshed_at),

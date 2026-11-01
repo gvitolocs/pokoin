@@ -76,12 +76,12 @@ CT_FETCH_WORKERS = int(os.environ.get("POKOIN_CT_FETCH_WORKERS", "4"))
 PG_CONTAINER = os.environ.get("POKOIN_MARKETPLACE_POSTGRES", "pokoin-marketplace-postgres-15t")
 VERSION_MATCH_PYTHON = os.environ.get(
     "POKOIN_VERSION_MATCH_PYTHON",
-    "/home/nez/Projects/ai-toolkit/venv/bin/python",
+    "/home/nez/Projects/AI/ai-toolkit/venv/bin/python",
 )
 VERSION_MATCH_SCRIPT = Path(
     os.environ.get(
         "POKOIN_VERSION_MATCH_SCRIPT",
-        "/home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py",
+        "/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py",
     )
 )
 REF = int(os.environ.get("HOMEPAGE_IMAGE_REFERENCE_WIDTH", "480"))  # 2026-10-20: thumbs are 480 px (catalog-image-cache.json thumbToken)

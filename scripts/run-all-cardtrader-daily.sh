@@ -52,7 +52,7 @@ node scripts/refresh-all-cardtrader-catalogues.cjs --apply || catalog_result=$?
 stage_args+=(--stage-result "catalog=$catalog_result")
 # Listing books: the Rust dump (docs/CARDTRADER_DAILY_DUMP.md) once installed,
 # else the Python one. Both write listing-dump-status.json for the notifier.
-DUMP_BIN="${POKOIN_CT_DUMP_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-listing-dump}"
+DUMP_BIN="${POKOIN_CT_DUMP_BIN:-/home/nez/services/pokoin-cardtrader/current/pokoin-cardtrader-listing-dump}"
 if [[ -x "$DUMP_BIN" ]]; then
   "$DUMP_BIN" &
 else
@@ -63,7 +63,7 @@ dump_pid=$!
 # racing a Qwen load panicked amdgpu on 2026-10-06. They queue (up to 4 h) and
 # llama-server-qwen-watch yields Qwen while they wait.
 GPU_LEASE=("${POKOIN_GPU_LEASE:-/home/nez/bin/gpu-lease}" run --mb "${CATALOG_GPU_MB:-4000}" --wait 14400)
-AI_PYTHON="${POKOIN_AI_PYTHON:-/home/nez/Projects/ai-toolkit/venv/bin/python}"
+AI_PYTHON="${POKOIN_AI_PYTHON:-/home/nez/Projects/AI/ai-toolkit/venv/bin/python}"
 pictures_result=0
 "${GPU_LEASE[@]}" --name catalog-pictures -- "$AI_PYTHON" scripts/refresh-all-cardtrader-pictures.py || pictures_result=$?
 (( pictures_result == 0 )) || result=1
@@ -99,7 +99,7 @@ stage_args+=(--stage-result "dump=$dump_result")
 # Price the books this run actually stored. A dump that stopped at its deadline
 # still has a price cache: only fetched expansions are in scope.
 prices_result=0
-PRICE_BIN="${POKOIN_CT_PRICE_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-price-cache}"
+PRICE_BIN="${POKOIN_CT_PRICE_BIN:-/home/nez/services/pokoin-cardtrader/current/pokoin-cardtrader-price-cache}"
 if [[ -x "$PRICE_BIN" ]]; then
   "$PRICE_BIN" || prices_result=$?
 fi
@@ -108,7 +108,7 @@ stage_args+=(--stage-result "prices=$prices_result")
 # Sold graph of the other games, replayed from the stored books (docs/CARDTRADER_DAILY_DUMP.md
 # "Sold graph"). Pokémon's comes from the Oracle job. POKOIN_CT_SOLD=off skips it.
 sold_result=0
-SOLD_BIN="${POKOIN_CT_SOLD_BIN:-/home/nez/pokoin-cardtrader/current/pokoin-cardtrader-sold}"
+SOLD_BIN="${POKOIN_CT_SOLD_BIN:-/home/nez/services/pokoin-cardtrader/current/pokoin-cardtrader-sold}"
 if [[ -x "$SOLD_BIN" && "${POKOIN_CT_SOLD:-on}" != off ]]; then
   "$SOLD_BIN" || sold_result=$?
 fi

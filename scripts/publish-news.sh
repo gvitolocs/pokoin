@@ -37,7 +37,7 @@ trap 'rm -rf "$WORK"' EXIT
 git archive origin/main | tar -x -C "$WORK"
 
 NEWS_EXPORT="${NEWS_EXPORT:-http://127.0.0.1:8789/api/poko/news?export=published}"
-NEWS_MEDIA_DIR="${NEWS_MEDIA_DIR:-/home/nez/Projects/Hermes/data/newsroom-media}"
+NEWS_MEDIA_DIR="${NEWS_MEDIA_DIR:-/home/nez/Projects/AI/Hermes/data/newsroom-media}"
 SHA="$(git rev-parse --short origin/main)"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 

@@ -175,7 +175,7 @@ class DailySummaryTest(unittest.TestCase):
         # Replace only the absolute Python runtime in the temporary fixture;
         # stub executables prevent catalogue/dump/network work.
         wrapper = (SCRIPTS / "run-all-cardtrader-daily.sh").read_text()
-        wrapper = wrapper.replace("/home/nez/Projects/ai-toolkit/venv/bin/python", "python3")
+        wrapper = wrapper.replace("/home/nez/Projects/AI/ai-toolkit/venv/bin/python", "python3")
         repo = pathlib.Path(self.folder.name) / "repo"
         (repo / "scripts").mkdir(parents=True)
         script = repo / "scripts" / "run.sh"

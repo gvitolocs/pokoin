@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-BOARD = Path("/home/nez/Projects/pokoin-web/market/public/review/ocr-expansions.json")
+BOARD = Path("/home/nez/Projects/Startup/Pokoin/pokoin-web/market/public/review/ocr-expansions.json")
 EXCLUSIVE = {
     "indonesian", "thai", "idth", "french", "german", "american", "product",
 }

@@ -13,8 +13,8 @@ DEST_OBJECTS="$NVME/objects"
 DEST_ARTCUT="$NVME/artcut"
 
 NVME_SEEDS=(
-  /home/nez/Projects/pokoin/PokoinTest/index/cdn_images
-  /home/nez/Projects/pokoin/PokoinTest/index/cdn_images_delta
+  /home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images
+  /home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images_delta
   /home/nez/pokoincdn/cdn_images_digest/2026-08-30
   /home/nez/pokoincdn/cdn_images_digest/2026-08-31-jpg
   /home/nez/data/pokoin-artwork-layout-objects

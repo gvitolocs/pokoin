@@ -14,10 +14,10 @@ touch /var/log/pokoin-uptime-mail.log
 chmod 755 /var/lib/pokoin-uptime
 if [ ! -f /etc/pokoin/uptime-mail.env ]; then
   umask 077
-  if [ -f /home/nez/Projects/cardvault/pokemon_card_vault/.env.local ]; then
+  if [ -f /home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/.env.local ]; then
     python3 - <<'PY'
 from pathlib import Path
-src = Path("/home/nez/Projects/cardvault/pokemon_card_vault/.env.local")
+src = Path("/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/.env.local")
 dest = Path("/etc/pokoin/uptime-mail.env")
 key = ""
 for line in src.read_text().splitlines():

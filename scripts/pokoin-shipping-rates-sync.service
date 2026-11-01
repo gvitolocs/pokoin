@@ -4,8 +4,8 @@ Documentation=https://packzoo.com/openapi.json
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/nez/Projects/pokoin-web
-ExecStart=/usr/bin/python3 /home/nez/Projects/pokoin-web/scripts/sync-shipping-rates.py
+WorkingDirectory=/home/nez/Projects/Startup/Pokoin/pokoin-web
+ExecStart=/usr/bin/python3 /home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/sync-shipping-rates.py
 Nice=10
 
 [Install]

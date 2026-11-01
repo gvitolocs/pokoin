@@ -15,7 +15,7 @@ Reads leftover scans from the NVMe leftover tree (one-time sync from 15T
 via scripts/sync-nvme-leftovers-from-15t.sh). JPEG decode on CPU threads;
 cream/gold batches on the 7900 XTX (HIP 0). Do not scandir mybook on a pass.
 
-  HIP_VISIBLE_DEVICES=0 /home/nez/Projects/ai-toolkit/venv/bin/python \\
+  HIP_VISIBLE_DEVICES=0 /home/nez/Projects/AI/ai-toolkit/venv/bin/python \\
     scripts/artwork-layout.py --repair-no-chrome --apply --gpu --workers 12
 """
 from __future__ import annotations
@@ -40,8 +40,8 @@ NVME_LEFTOVERS = Path(
 )
 NVME_OBJECT_ROOTS = [
     NVME_LEFTOVERS / "objects",
-    Path("/home/nez/Projects/pokoin/PokoinTest/index/cdn_images"),
-    Path("/home/nez/Projects/pokoin/PokoinTest/index/cdn_images_delta"),
+    Path("/home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images"),
+    Path("/home/nez/Projects/Startup/Pokoin/pokoin-hub/PokoinTest/index/cdn_images_delta"),
     Path("/home/nez/pokoincdn/cdn_images_digest/2026-08-30"),
     Path("/home/nez/data/pokoin-artwork-layout-objects"),
 ]
@@ -123,8 +123,8 @@ ANCIENT_TRAIT_OCR_RE = re.compile(
     re.I,
 )
 OCR_JSONLS = [
-    Path("/home/nez/Projects/pokoin-web/scripts/out/western-full-ocr-gpu.jsonl"),
-    Path("/home/nez/Projects/pokoin-web/scripts/out/western-full-ocr.jsonl"),
+    Path("/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-full-ocr-gpu.jsonl"),
+    Path("/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-full-ocr.jsonl"),
 ]
 YELLOW_BORDER = 0.40
 WHITE_PANEL = 0.40

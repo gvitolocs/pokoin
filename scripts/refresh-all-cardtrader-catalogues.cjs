@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs on nezopt. Oracle only supplies GET responses; all SQL and raw dumps stay here.
 const fs=require('node:fs'), path=require('node:path'), cp=require('node:child_process'), readline=require('node:readline');
-const sibling='/home/nez/Projects/cardvault/pokemon_card_vault';
+const sibling='/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault';
 const importer=require(sibling+'/scripts/cardtrader-multigame-import.js');
 const {Pool}=require(sibling+'/node_modules/pg');
 const apply=process.argv.includes('--apply');

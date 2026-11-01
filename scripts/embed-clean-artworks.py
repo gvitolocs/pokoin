@@ -14,7 +14,7 @@ Output: OUT/clean-clip.npy (rows × 512 float32, L2-normalised) and
 OUT/clean-clip.jsonl (one row per vector: artwork_id, variant, asset path).
 Matching against the gallery is done by tools/clean-art-match (Rust).
 
-  /home/nez/Projects/ai-toolkit/venv/bin/python scripts/embed-clean-artworks.py \
+  /home/nez/Projects/AI/ai-toolkit/venv/bin/python scripts/embed-clean-artworks.py \
     --dump /home/nez/mnt/mybook/datasets/tcg/artofpkm/catalog668-20261020 --out OUT
 """
 import argparse
