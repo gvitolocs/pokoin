@@ -12,7 +12,7 @@
 //! recovery) there (`health.rs`).
 
 use crate::health::{self, Meta};
-use crate::{env, hc, mail, nezopt, secretary, sys};
+use crate::{digest, env, hc, mail, nezopt, secretary, sys};
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -227,6 +227,24 @@ pub fn rollback(
         }
     }
     next
+}
+
+/// Split evaluated events without re-arming any previously alerted state.
+pub fn split_events(events: &[Event], prev: &BTreeMap<String, AlertState>, regex: Option<&Regex>) -> (Vec<Event>, Vec<Event>) {
+    let mut mailed = Vec::new();
+    let mut deferred = Vec::new();
+    for e in events {
+        let selected = regex.is_none_or(|re| re.is_match(&e.key) && match e.kind {
+            EventKind::Resolved => prev.get(&e.key).is_some_and(|s| s.sev == Sev::Crit && s.alerted),
+            _ => e.sev == Sev::Crit,
+        });
+        if selected {
+            mailed.push(e.clone());
+        } else if matches!(e.kind, EventKind::Firing | EventKind::Escalated) {
+            deferred.push(e.clone());
+        }
+    }
+    (mailed, deferred)
 }
 
 pub fn render(events: &[Event], active: &BTreeMap<String, AlertState>, now: i64) -> (String, String) {
@@ -669,6 +687,11 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
         }
     }
     let (next, events) = plan(&prev, &outs, now, cfg.remind_s);
+    let immediate = env::immediate_regex("POKOIN_SENTINEL_IMMEDIATE");
+    let (mail_events, digest_events) = split_events(&events, &prev, immediate.as_ref());
+    let mail_active = next.iter()
+        .filter(|(key, _)| immediate.as_ref().is_none_or(|re| re.is_match(key)))
+        .map(|(key, state)| (key.clone(), state.clone())).collect();
 
     let active: Vec<String> = next.iter().filter(|(_, s)| s.sev != Sev::Ok).map(|(k, s)| format!("{} {k}: {}", s.sev.label(), s.detail)).collect();
     for o in &outs {
@@ -687,12 +710,27 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
         for i in items.iter().filter(|i| i.sev != Sev::Ok) {
             println!("  {:4} {} [{}] {}", health::state_str(i.sev), i.meta.id, i.meta.group, i.detail);
         }
+        let pushes = if immediate.is_some() {
+            mail_events.iter().map(|e| {
+                let meta = outs.iter().flat_map(|o| &o.findings).find(|f| f.key == e.key)
+                    .map(|f| f.meta()).unwrap_or_else(|| Meta::legacy(&e.key));
+                health::Push {
+                    kind: if e.kind == EventKind::Resolved { health::PushKind::Recovered } else { health::PushKind::Crit },
+                    id: meta.id, name: meta.name, detail: e.detail.clone(),
+                }
+            }).collect()
+        } else {
+            pushes
+        };
         (snap, tracks, pushes)
     });
 
     if dry_run {
-        for e in &events {
+        for e in &mail_events {
             println!("event {:?} {}", e.kind, e.key);
+        }
+        for e in &digest_events {
+            println!("digest {:?} {}", e.kind, e.key);
         }
         if let Some((snap, _, pushes)) = &snap {
             for p in pushes {
@@ -723,20 +761,24 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
     }
 
     let mut delivered = true;
-    if !events.is_empty() {
-        let (subject, body) = render(&events, &next, now);
+    if !mail_events.is_empty() {
+        let (subject, body) = render(&mail_events, &mail_active, now);
         if let Err(err) = mail::send(&mail::subject(&subject), &body) {
             eprintln!("{err:#}");
             delivered = false;
         }
     }
-    state.alerts = if delivered { next } else { rollback(&prev, next, &events) };
+    state.alerts = if delivered { next } else { rollback(&prev, next, &mail_events) };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(&state)?)?;
     std::fs::rename(&tmp, &path)?;
+    // Only durable consumed events go into the digest, including when mail failed.
+    for e in &digest_events {
+        digest::record("check", &e.key, e.sev.label(), &e.detail);
+    }
 
     let slug = hc::slug_for_unit(&hc::host_prefix(), "pokoin-sentinel.service");
     let summary = if active.is_empty() { "all clear".to_string() } else { active.join("\n") };
@@ -757,6 +799,57 @@ mod tests {
 
     fn f(key: &str, sev: Sev, confirm: u32) -> Finding {
         Finding::new(key, sev, "d", confirm)
+    }
+
+    #[test]
+    fn immediate_split_and_rollback_only_mailed_events() {
+        let re = Regex::new("^urgent").unwrap();
+        let findings = vec![f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1), f("other.crit", Sev::Crit, 1)];
+        let (next, events) = plan(&BTreeMap::new(), &[out("urgent", findings)], 100, 1000);
+        let (mailed, deferred) = split_events(&events, &BTreeMap::new(), Some(&re));
+        assert_eq!(mailed.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), vec!["urgent.crit"]);
+        assert_eq!(deferred.len(), 2);
+        let rolled = rollback(&BTreeMap::new(), next, &mailed);
+        assert!(!rolled["urgent.crit"].alerted);
+        assert!(rolled["urgent.warn"].alerted);
+        assert!(rolled["other.crit"].alerted);
+        let (_, retry) = plan(&rolled, &[out("urgent", vec![f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1), f("other.crit", Sev::Crit, 1)])], 200, 1000);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0].key, "urgent.crit");
+        let (legacy, deferred) = split_events(&events, &BTreeMap::new(), None);
+        assert_eq!(legacy, events);
+        assert!(deferred.is_empty());
+    }
+
+    #[test]
+    fn split_drops_unmatched_reminders_and_only_resolves_mailed_crit() {
+        let re = Regex::new("^urgent").unwrap();
+        let (mut prev, _) = plan(&BTreeMap::new(), &[out("urgent", vec![
+            f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1),
+            f("urgent.unalerted", Sev::Crit, 1), f("other.crit", Sev::Crit, 1),
+        ])], 100, 1000);
+        prev.get_mut("urgent.unalerted").unwrap().alerted = false;
+        let events: Vec<_> = prev.keys().map(|key| Event {
+            kind: EventKind::Resolved, key: key.clone(), sev: Sev::Ok, detail: "cleared".into(), since: 0,
+        }).collect();
+        let (mailed, deferred) = split_events(&events, &prev, Some(&re));
+        assert_eq!(mailed.len(), 1);
+        assert_eq!(mailed[0].key, "urgent.crit");
+        assert!(deferred.is_empty());
+        let reminder = Event { kind: EventKind::Reminder, key: "other.crit".into(), sev: Sev::Crit, detail: "d".into(), since: 0 };
+        let (mailed, deferred) = split_events(&[reminder], &prev, Some(&re));
+        assert!(mailed.is_empty() && deferred.is_empty());
+        let escalated = Event { kind: EventKind::Escalated, key: "other.crit".into(), sev: Sev::Crit, detail: "d".into(), since: 0 };
+        assert_eq!(split_events(&[escalated], &prev, Some(&re)).1.len(), 1);
+    }
+
+    #[test]
+    fn existing_alerts_are_not_replayed_when_filter_is_enabled() {
+        let findings = || vec![f("urgent.crit", Sev::Crit, 1), f("other.warn", Sev::Warn, 1)];
+        let (prev, _) = plan(&BTreeMap::new(), &[out("urgent", findings())], 100, 1000);
+        let (_, events) = plan(&prev, &[out("urgent", findings())], 200, 1000);
+        let (mailed, deferred) = split_events(&events, &prev, Some(&Regex::new("^urgent").unwrap()));
+        assert!(mailed.is_empty() && deferred.is_empty());
     }
 
     #[test]

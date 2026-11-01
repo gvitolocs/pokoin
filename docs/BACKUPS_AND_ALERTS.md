@@ -44,6 +44,38 @@ replica's BusyBox. Zero API latency cost:
 - Its background work runs with `Nice`, `IOSchedulingClass=idle` and `CPUQuota`, and the
   base backup is rate-limited (`WALG_DISK_RATE_LIMIT` 30 MB/s, network 12 MB/s).
 
+### What mails and what waits
+
+The immediate filters are opt-in. With them unset, failure mail, Secretary pushes,
+healthchecks failure pings and sentinel reminders keep their existing behavior.
+An invalid regex is logged and falls back to that behavior.
+
+- `POKOIN_NOTIFY_IMMEDIATE`: regex on the full unit name. Matching units use the
+  existing mail/cooldown, Secretary and healthchecks `/fail` path. Other failures
+  only enter the digest with their systemd Result.
+- `POKOIN_NOTIFY_BOOT_GRACE_S`: uptime grace in seconds (default 600). With the
+  notify filter enabled, all failures during this grace or while the relevant system
+  or user manager reports `stopping` only enter the digest, even matching units.
+- `POKOIN_SENTINEL_IMMEDIATE`: regex on the check key. Only matching critical
+  firing, escalation and reminder events mail; matching recoveries mail only when
+  the previous alert was critical and alerted. Secretary event pushes follow the
+  same selection; the full health snapshot stays unchanged. Other firing and
+  escalation events enter the digest; other reminders and recoveries are dropped.
+  Existing alerted state is preserved rather than replayed.
+
+`pokoin-ops digest` mails deferred events grouped by key, with still-failing sentinel
+keys first and counts, first/last UTC times and the latest detail. It shows at most
+100 keys. Unit entries use `unit.user.<unit>` or `unit.system.<unit>` to match the
+sentinel keys. The log is `digest.jsonl` (0600) in the sentinel state directory;
+a successful send replaces `digest.jsonl.sent`, while a failed send keeps the log
+for retry. Empty logs send nothing. `pokoin-ops digest --dry-run` prints the mail
+without sending or changing files.
+
+The alerts installers include `pokoin-digest.service` and `pokoin-digest.timer`
+for the nezopt user manager and the Pi system manager. The timer runs Monday at
+07:00 UTC with `Persistent=true`, catching up after downtime. No installation or
+host changes happen by merging these files.
+
 ### Trade-offs to know
 
 - **A 20–40 min `pg_dump` of `pokoin_marketplace` on a hot standby.**
@@ -64,7 +96,7 @@ replica's BusyBox. Zero API latency cost:
 
 ## 3. Verified in this branch
 
-- `cargo test` passes 31 unit tests: alert state machine, thresholds, retention,
+- `cargo test` passes 75 unit tests: alert state machine, thresholds, retention,
   COPY row counter, WAL ordering, slug coverage, age + zstd round trip.
 - `tools/pokoin-ops/tests/e2e-backup.sh` runs against a throwaway Postgres 17.11-alpine.
   It shows that the dump refuses a primary, that the files are encrypted, that the restore

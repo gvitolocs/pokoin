@@ -29,12 +29,12 @@ alerts() {
       | "${SSH[@]}" 'umask 077; mkdir -p /etc/pokoin && cat > /etc/pokoin/alerts.env'
   fi
   say "units"
-  for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer; do put "$ops/$f" "/tmp/$f"; done
+  for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer pokoin-digest.service pokoin-digest.timer; do put "$ops/$f" "/tmp/$f"; done
   put "$ops/pokoin-rust-job@.service.d-alerts.conf" /tmp/rust-job-alerts.conf
   put "$ops/pokoin-pi-watchdog.service.d-alerts.conf" /tmp/watchdog-alerts.conf
   "${SSH[@]}" 'bash -s' <<'REMOTE'
 set -euo pipefail
-for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer; do
+for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer pokoin-digest.service pokoin-digest.timer; do
   install -m 644 "/tmp/$f" "/etc/systemd/system/$f" && rm "/tmp/$f"
 done
 install -D -m 644 /tmp/rust-job-alerts.conf /etc/systemd/system/pokoin-rust-job@.service.d/alerts.conf
@@ -42,8 +42,8 @@ install -D -m 644 /tmp/watchdog-alerts.conf /etc/systemd/system/pokoin-pi-watchd
 rm /tmp/rust-job-alerts.conf /tmp/watchdog-alerts.conf
 systemctl daemon-reload
 pokoin-ops sentinel --role pi --dry-run
-systemctl enable --now pokoin-sentinel.timer
-systemctl list-timers pokoin-sentinel.timer --no-pager
+systemctl enable --now pokoin-sentinel.timer pokoin-digest.timer
+systemctl list-timers pokoin-sentinel.timer pokoin-digest.timer --no-pager
 REMOTE
 }
 

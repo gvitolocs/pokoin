@@ -1,0 +1,10 @@
+[Unit]
+Description=Pokoin weekly deferred alert digest on Monday
+
+[Timer]
+OnCalendar=Mon 07:00 UTC
+Persistent=true
+Unit=pokoin-digest.service
+
+[Install]
+WantedBy=timers.target

@@ -33,11 +33,12 @@ alerts() {
     ( umask 077; printf 'POKOIN_HC_PING_KEY=\nPOKOIN_HC_SLUG_PREFIX=nezopt-\n' >"$cfg/alerts.env" )
     say "wrote $cfg/alerts.env; add the healthchecks ping key when the project exists"
   fi
-  install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$units/"
+  install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$ops/pokoin-digest.service" "$ops/pokoin-digest.timer" "$units/"
   # OnFailure for every user service, the notifier's recursion guard, and the uptime-mail opt-out.
   install -D -m 644 "$ops/service.d-90-alert.conf" "$units/service.d/90-alert.conf"
   install -D -m 644 "$ops/pokoin-notify@.service.d-90-alert.conf" "$units/pokoin-notify@.service.d/90-alert.conf"
   install -D -m 644 "$ops/pokoin-uptime-mail.service.d-90-alert.conf" "$units/pokoin-uptime-mail.service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-digest.service.d-90-alert.conf" "$units/pokoin-digest.service.d/90-alert.conf"
   if [[ ! -f "$cfg/expected-active.txt" ]]; then
     install -m 644 "$ops/expected-active.txt.example" "$cfg/expected-active.txt"
     say "wrote $cfg/expected-active.txt (units/containers the sentinel expects to be running)"
@@ -48,8 +49,8 @@ alerts() {
   done
   systemctl --user daemon-reload
   "$HOME/.local/bin/pokoin-ops" sentinel --role nezopt --dry-run
-  systemctl --user enable --now pokoin-sentinel.timer
-  systemctl --user list-timers pokoin-sentinel.timer --no-pager
+  systemctl --user enable --now pokoin-sentinel.timer pokoin-digest.timer
+  systemctl --user list-timers pokoin-sentinel.timer pokoin-digest.timer --no-pager
 }
 
 slot_cap() {
