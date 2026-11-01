@@ -5,6 +5,34 @@
 parallel the raw listing books of every live game, one book per expansion,
 into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 
+## Local preflight and path fixes
+
+`scripts/cardtrader-daily-preflight.sh` checks local prerequisites in seconds,
+without network requests, GPU work or writes. It refuses missing required
+executables (including GPU lease, Node, Docker and transfer tools), unreadable
+CardVault importer/pg files or artwork script/caches, inaccessible image/output
+directories, and an AI Python that cannot `import numpy, PIL` within five seconds.
+Each problem names its path and affected stages. Shared runtime defaults live in
+`scripts/cardtrader-daily-paths.sh`; `POKOIN_AI_PYTHON` and the existing binary
+path overrides apply to both the runner and preflight. Missing optional dump,
+price, sold or card-refresh executables produce warnings; missing notification
+code also warns because delivery remains best effort. These local checks do not
+verify remote hosts, database contents, running containers or GPU/model health.
+
+The checkout deploy runs preflight before installing units. Failure restores
+the previous checkout commit when one existed and leaves units unchanged. The
+nightly runner records `preflight=<exit code>` first, marks the overall run failed
+if needed, and continues the other stages so independent work can still succeed.
+The notifier prints the summary (including failed stages) to the journal before
+its delivery status, so the existing OnFailure mail includes it even when chat
+delivery is pending.
+
+**Commit every nightly-job path fix.** The deploy script force-checks out
+`origin/main` by default and cleans the deployed checkout; edits made only there
+will be erased at the next deploy. The 2026-10-27 project reorganisation requires
+the grouped `~/Projects/Startup/Pokoin/…` and `~/Projects/AI/…` paths, and Rust
+binaries default to `~/services/pokoin-cardtrader/current/…`.
+
 ## Pieces
 
 | Where | What |
@@ -19,7 +47,7 @@ into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 The dump starts the bridge over ssh and talks one JSON line per request and
 reply (the protocol of the Python originals, `scripts/dump-all-cardtrader-listings.py`
 and `scripts/cardtrader-fetch-bridge.py`, which stay as the fallback: the run
-script uses the Python dump when `/home/nez/pokoin-cardtrader/current` is missing).
+script uses the Python dump when `/home/nez/services/pokoin-cardtrader/current` is missing).
 
 ## Behaviour
 
@@ -168,7 +196,7 @@ scripts/deploy-cardtrader-dump.sh   # clean origin/main checkout on nezopt
 ```
 
 It builds the binaries, installs the bridge on Oracle (checks glibc ≤ 2.35
-and a dry start), and switches `/home/nez/pokoin-cardtrader/current`. Rollback:
+and a dry start), and switches `/home/nez/services/pokoin-cardtrader/current`. Rollback:
 point `current` at the previous release, or remove it to fall back to Python.
 
 ### Job code (the scripts)
