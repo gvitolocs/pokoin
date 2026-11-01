@@ -75,6 +75,14 @@ create table public.marketplace_user_listings (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+drop table if exists public.marketplace_cardtrader_product_links;
+create table public.marketplace_cardtrader_product_links (
+  seller_uid text not null,
+  ct_product_id text not null,
+  listing_id uuid not null unique,
+  origin text not null default 'import',
+  primary key (seller_uid, ct_product_id)
+);
 create or replace function public.refresh_marketplace_blueprint_price_summary(text)
   returns void language sql as 'select';
 ";
@@ -517,6 +525,104 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(moved["changed"], true, "{moved}");
     assert_eq!(moved["listing"]["externalKey"], "cardrails:cr_ext");
     assert!(moved["listing"]["signed"].is_boolean() && moved["listing"]["altered"].is_boolean());
+
+    // --- a copy of CardTrader stock the shelf already has ------------------
+    // The CardTrader import listed product 456705610; a tool holding the same
+    // CardTrader stock lists its copy of it. Pokoin answers the imported
+    // listing instead of creating a second one (the 2026-10-22 duplicates).
+    let imported: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available, language, \
+           source, source_listing_id, location) \
+         values ('806382', 'seller-1', 'IT', 8767, 1, 'JP', 'cardtrader_seller_import', 'ct:456705610', 'HYPERBEAM BINDER·1') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let pushed: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available) \
+         values ('806384', 'seller-1', 'IT', 900, 1) returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, origin) values ('seller-1', '777', $1, 'push')")
+        .bind(pushed).execute(&pool).await.unwrap();
+    let ct_copy = |key: &str, product: Value| json!({"action":"list","channel":"pokoin","idempotencyKey":key,"item":{
+        "identity":{"publicId":"806382","game":"pokemon"},"quantity":1,"priceEurCents":4793,"condition":"NM","language":"JP",
+        "ctProductId":product}});
+    let (status, matched) = connector(&app, &token, ct_copy("cardrails:cr_ct1", json!(456705610))).await;
+    assert_eq!(status, StatusCode::OK, "{matched}");
+    assert_eq!(
+        (matched["listingId"].clone(), matched["created"].clone(), matched["matched"].clone()),
+        (json!(imported.to_string()), json!(false), json!("cardtrader_product")),
+    );
+    // The retry answers the same listing through its now-bound key.
+    let (_, again) = connector(&app, &token, ct_copy("cardrails:cr_ct1", json!("456705610"))).await;
+    assert_eq!((again["listingId"].clone(), again["created"].clone()), (json!(imported.to_string()), json!(false)));
+    // A product linked by a push (no import id) matches too.
+    let (_, linked) = connector(&app, &token, ct_copy("cardrails:cr_ct2", json!("777"))).await;
+    assert_eq!(linked["listingId"], pushed.to_string(), "{linked}");
+    // No price, quantity or location was overwritten, and nothing new exists.
+    assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where card_id = '806382'").await, 1);
+    assert_eq!(count(&pool, "select price_pkn::bigint from public.marketplace_user_listings where card_id = '806382'").await, 8767);
+    // Another seller's import of that product is not this seller's shelf.
+    sqlx::query("update public.marketplace_user_listings set seller_uid = 'seller-2' where id = $1").bind(imported).execute(&pool).await.unwrap();
+    let (_, own) = connector(&app, &token, ct_copy("cardrails:cr_ct3", json!(456705610))).await;
+    assert_eq!(own["created"], true, "{own}");
+    assert_ne!(own["listingId"], imported.to_string());
+    sqlx::query("update public.marketplace_user_listings set seller_uid = 'seller-1' where id = $1").bind(imported).execute(&pool).await.unwrap();
+    // A copy of a product the shelf does not have yet carries the product's
+    // id, so the CardTrader import adopts it instead of adding a second one.
+    let (_, fresh) = connector(&app, &token, ct_copy("cardrails:cr_ct4", json!("888"))).await;
+    assert_eq!(fresh["created"], true, "{fresh}");
+    let fresh_id = uuid::Uuid::parse_str(fresh["listingId"].as_str().unwrap()).unwrap();
+    let source: String = sqlx::query_scalar("select source_listing_id from public.marketplace_user_listings where id = $1")
+        .bind(fresh_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(source, "ct:888");
+    // 137: the database refuses a second shape of one product, whatever writes it.
+    run_sql(&pool, include_str!("../../../../scripts/sql/137_listing_external_identity.sql")).await;
+    let import_too = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'cardtrader_seller_import', 'ct:888')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(import_too.unwrap_err().to_string().contains("listing_ct_identity_taken"));
+    let second_import = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'cardtrader_seller_import', 'ct:456705610')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(second_import.is_err(), "one live import per product");
+    let native_too = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'ct:456705610')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(native_too.unwrap_err().to_string().contains("listing_ct_identity_taken"));
+    // Grouped Pokoin copies may still share their product (133).
+    sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'ct:888')",
+    )
+    .execute(&pool)
+    .await
+    .expect("a second grouped copy");
+    // Another key of this grant cannot become the same listing.
+    let (status, taken) = connector(&app, &token, ct_copy("cardrails:cr_ct5", json!(456705610))).await;
+    assert_eq!((status, taken["code"].clone()), (StatusCode::CONFLICT, json!("ct_product_listed")), "{taken}");
+
+    // `listings` names each listing's CardTrader product, so the tool can
+    // pair its copies with them before it lists anything.
+    let (_, page) = connector(&app, &token, json!({"action":"listings","limit":500})).await;
+    let entries = page["listings"].as_array().unwrap();
+    let product_of = |id: &uuid::Uuid| entries.iter().find(|l| l["listingId"] == id.to_string()).map(|l| l["ctProductId"].clone());
+    assert_eq!(product_of(&imported), Some(json!("456705610")));
+    assert_eq!(product_of(&pushed), Some(json!("777")));
+    let plain = entries.iter().find(|l| l["externalKey"] == "list:cr_1").expect("the first listed card");
+    assert_eq!(plain["ctProductId"], Value::Null);
 
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;

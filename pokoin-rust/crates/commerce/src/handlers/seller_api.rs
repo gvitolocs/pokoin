@@ -369,6 +369,52 @@ async fn external_keys(state: &DomainState, grant: uuid::Uuid, listing_ids: &[uu
     }
 }
 
+/// The CardTrader products these listings are linked to, by listing id
+/// (`marketplace_cardtrader_product_links`: imported, pushed or matched).
+async fn ct_product_links(state: &DomainState, seller_uid: &str, listing_ids: &[uuid::Uuid]) -> HashMap<String, String> {
+    if listing_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows: Result<Vec<(uuid::Uuid, String)>, _> = sqlx::query_as(
+        "select listing_id, ct_product_id from public.marketplace_cardtrader_product_links \
+         where seller_uid = $1 and listing_id = any($2)",
+    )
+    .bind(seller_uid)
+    .bind(listing_ids)
+    .fetch_all(state.write_db())
+    .await;
+    match rows {
+        Ok(rows) => rows.into_iter().map(|(id, product)| (id.to_string(), product)).collect(),
+        Err(error) => {
+            // Never fails the page over this: the source id still names imports.
+            tracing::warn!(error = %error, "CardTrader product lookup failed for a cardrails listings page");
+            HashMap::new()
+        }
+    }
+}
+
+/// A CardTrader product id as digits, or `None`.
+fn ct_product_digits(raw: &str) -> Option<String> {
+    let id = raw.trim();
+    (!id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()) && id.trim_start_matches('0') != "")
+        .then(|| id.to_string())
+}
+
+/// The CardTrader product a listing is: its import id (`ct:<product>`), else
+/// its product link. A tool that holds the same CardTrader stock matches its
+/// copies on this, so the same card is never listed twice.
+fn listing_ct_product(row: &Value, links: &HashMap<String, String>) -> Option<String> {
+    live::field(row, "source_listing_id", 80)
+        .strip_prefix("ct:")
+        .and_then(ct_product_digits)
+        .or_else(|| links.get(&live::field(row, "id", 80)).and_then(|id| ct_product_digits(id)))
+}
+
+/// The CardTrader product a tool's item says it is (`ctProductId`).
+fn item_ct_product(item: &Value) -> Option<String> {
+    ct_product_digits(&live::first(item, &["ctProductId", "cardtraderProductId"], 24))
+}
+
 fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &HashMap<String, String>) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
     let last_sold_min_eur_cents = blueprint_id_of(&row["card_id"]).and_then(|blueprint_id| {
@@ -428,9 +474,17 @@ async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Va
     let ids: Vec<uuid::Uuid> =
         rows.iter().filter_map(|row| uuid::Uuid::parse_str(&live::field(row, "id", 80)).ok()).collect();
     let external = external_keys(state, grant.id, &ids).await;
+    let links = ct_product_links(state, &grant.seller_uid, &ids).await;
     let sold = last_sold_minimums(state, &rows).await;
     Ok(json!({
-        "listings": rows.iter().map(|row| tool_listing(row, &sold, &external)).collect::<Vec<_>>(),
+        "listings": rows
+            .iter()
+            .map(|row| {
+                let mut listing = tool_listing(row, &sold, &external);
+                listing["ctProductId"] = listing_ct_product(row, &links).map(Value::String).unwrap_or(Value::Null);
+                listing
+            })
+            .collect::<Vec<_>>(),
         "cursor": next.unwrap_or(Value::Null),
     }))
 }
@@ -560,6 +614,12 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
     let game = live::field(identity, "game", 40);
     if !game.is_empty() {
         body["marketplaceGame"] = json!(game);
+    }
+    // A copy of a CardTrader product is that product on Pokoin too: the same
+    // `ct:<product>` id the CardTrader import and the reconcile key on, so the
+    // import adopts this listing instead of adding a second one (137).
+    if let Some(product) = item_ct_product(item) {
+        body["sourceListingId"] = json!(format!("ct:{product}"));
     }
     Ok(body)
 }
@@ -706,6 +766,23 @@ async fn sold_prices(state:&DomainState,grant:&Grant,body:&Value)->Result<Value,
     Ok(json!({"prices":prices,"windowDays":LAST_SOLD_WINDOW_DAYS}))
 }
 
+/// The seller's listing on the shelf for this CardTrader product: the import
+/// (`source_listing_id = 'ct:<product>'`) first, else a product link.
+async fn shelf_listing_for_ct_product(state: &DomainState, seller_uid: &str, product: &str) -> Result<Option<uuid::Uuid>, ApiError> {
+    sqlx::query_scalar(
+        "select l.id from public.marketplace_user_listings l \
+         where l.seller_uid = $1 and l.status in ('active', 'paused', 'sold_out') \
+           and (l.source_listing_id = 'ct:' || $2 or exists (select 1 from public.marketplace_cardtrader_product_links k \
+                where k.seller_uid = $1 and k.ct_product_id = $2 and k.listing_id = l.id)) \
+         order by (l.source_listing_id = 'ct:' || $2) desc, l.created_at limit 1",
+    )
+    .bind(seller_uid)
+    .bind(product)
+    .fetch_optional(state.write_db())
+    .await
+    .map_err(api::store_error)
+}
+
 /// Create a listing from a tool's item, at most once per idempotency key.
 ///
 /// The key row is claimed first (`seller_api_listing_keys`), and the listing
@@ -744,6 +821,40 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     let (name, country) = seller_profile(state, &grant.seller_uid).await;
     // A refused item never claims its key.
     let listing_body = listing_body(&body["item"], if name.is_empty() { "Pokoin seller" } else { &name }, &country)?;
+    // The item is a CardTrader product this seller's shelf already has (the
+    // CardTrader import listed it): answer that listing, never a second one.
+    // Before 2026-10-23 a tool holding the same CardTrader stock re-listed
+    // every copy (12,115 duplicate listings for one seller on 2026-10-22).
+    if let Some(product) = item_ct_product(&body["item"]) {
+        if let Some(id) = shelf_listing_for_ct_product(state, &grant.seller_uid, &product).await? {
+            let claimed: Option<Option<uuid::Uuid>> = sqlx::query_scalar(
+                "insert into public.seller_api_listing_keys (grant_id, idempotency_key, listing_id) values ($1, $2, $3) \
+                 on conflict (grant_id, idempotency_key) do update set listing_id = excluded.listing_id \
+                 where seller_api_listing_keys.listing_id is null returning listing_id",
+            )
+            .bind(grant.id)
+            .bind(&key)
+            .bind(id)
+            .fetch_optional(db)
+            .await
+            .map_err(|error| match error.as_database_error().and_then(|e| e.constraint()) {
+                // Another item of this tool already is that listing (137).
+                Some("seller_api_listing_keys_listing_uidx") => ApiError::conflict(
+                    "Another item of this tool is already this CardTrader product's listing.",
+                )
+                .with_code("ct_product_listed"),
+                _ => api::store_error(error),
+            })?;
+            // Another attempt bound the key first: that listing.
+            let id = match claimed.flatten() {
+                Some(id) => id,
+                None => bound().await?.unwrap_or(id),
+            };
+            let mut answer = existing(id);
+            answer["matched"] = json!("cardtrader_product");
+            return Ok(answer);
+        }
+    }
     sqlx::query(
         "insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, $2) \
          on conflict (grant_id, idempotency_key) do nothing",
@@ -1167,6 +1278,25 @@ mod tests {
         assert_eq!(listing["externalKey"], Value::Null);
         assert_eq!(listing["signed"], false);
         assert_eq!(listing["altered"], false);
+    }
+
+    #[test]
+    fn a_listing_names_its_cardtrader_product_from_the_import_or_the_link() {
+        let imported = json!({"id": "l1", "source_listing_id": "ct:456705610"});
+        let links: HashMap<String, String> = HashMap::from([("l2".to_string(), "99".to_string())]);
+        assert_eq!(listing_ct_product(&imported, &links).as_deref(), Some("456705610"));
+        assert_eq!(listing_ct_product(&json!({"id": "l2", "source_listing_id": ""}), &links).as_deref(), Some("99"));
+        assert_eq!(listing_ct_product(&json!({"id": "l3", "source_listing_id": "ct:abc"}), &links), None);
+        assert_eq!(listing_ct_product(&json!({"id": "l3"}), &HashMap::new()), None);
+        assert_eq!(item_ct_product(&json!({"ctProductId": 456705610})).as_deref(), Some("456705610"));
+        assert_eq!(item_ct_product(&json!({"ctProductId": "456705610"})).as_deref(), Some("456705610"));
+        assert_eq!(item_ct_product(&json!({"ctProductId": "0"})), None);
+        assert_eq!(item_ct_product(&json!({"ctProductId": "12; drop"})), None);
+        assert_eq!(item_ct_product(&json!({})), None);
+        let copy = json!({"identity":{"publicId":"806382"},"quantity":1,"priceEurCents":4793,"ctProductId":456705610});
+        assert_eq!(listing_body(&copy, "s", "IT").unwrap()["sourceListingId"], "ct:456705610");
+        let scan = json!({"identity":{"publicId":"806382"},"quantity":1,"priceEurCents":4793});
+        assert_eq!(listing_body(&scan, "s", "IT").unwrap().get("sourceListingId"), None);
     }
 
     #[test]
