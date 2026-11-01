@@ -212,6 +212,7 @@ def main(argv=None):
     summary["delivery"] = "delivered" if delivered else "pending"
     write_json(event_path, summary)
     write_json(args.run_root / "notification-status.json", summary)
+    print(summary["message"])
     print(f"CardTrader notification {summary['delivery']}; update status {summary['status']}.")
     return 0 if delivered else 1
 

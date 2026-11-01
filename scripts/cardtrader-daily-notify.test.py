@@ -169,6 +169,23 @@ class DailySummaryTest(unittest.TestCase):
         self.assertEqual(payload["eventKey"], "cardtrader:2026-10-01:" + START)
         self.assertEqual(len(list((self.root / "notification-outbox").glob("*.json"))), 1)
 
+    def test_failed_stages_reach_journal_with_delivery_status_and_exit_codes_unchanged(self):
+        args = ["--run-root", str(self.root), "--started-at", START, "--exit-code", "1",
+                "--stage-result", "preflight=1", "--stage-result", "catalog=1",
+                "--stage-result", "dump=0"]
+        for delivered in [False, True]:
+            output = io.StringIO()
+            with self.subTest(delivered=delivered), \
+                    patch.object(notify, "probe_analytics", return_value=FRESH), \
+                    patch.object(notify, "send_summary", return_value=delivered), \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(notify.main(args), 0 if delivered else 1)
+            payload = json.loads((self.root / "notification-status.json").read_text())
+            status = "delivered" if delivered else "pending"
+            self.assertEqual(output.getvalue(), payload["message"] + "\n" +
+                             f"CardTrader notification {status}; update status partial.\n")
+            self.assertIn("Failed stages: preflight, catalog.", output.getvalue())
+
     def test_delivery_uses_bounded_shared_notifier_and_captures_private_output(self):
         with patch.object(notify.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 1, "private chat", "token error")
