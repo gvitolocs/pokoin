@@ -54,6 +54,7 @@ import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
+import { claimRows, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
   FIELD_LABEL,
   loadStoppedPositions,
@@ -1101,17 +1102,22 @@ function ScanDeskDesk() {
       .filter((row) => {
         if (!row.cardId || priceTouched.has(row.id)) return false;
         const signature = facetSignature(row);
-        if (row.pricePkn == null) return !pricesAsked.has(`${row.id}:${signature}`);
+        if (row.pricePkn == null) return !pricesAsked.has(priceKey(row.id, signature));
         return row.priceSuggested === true && suggestedFor.get(row.id) !== signature;
       })
       .slice(0, 12);
     if (!want.length) return undefined;
-    for (const row of want) {
-      const signature = facetSignature(row);
-      pricesAsked.add(`${row.id}:${signature}`);
-      suggestedFor.set(row.id, signature);
-    }
+    // A cancelled or failed run releases the rows it did not price, so the next run asks again.
+    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
+    claimRows(want, books);
+    const settled = new Set();
     let cancelled = false;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      releaseUnsettled(want, settled, books);
+    };
     (async () => {
       // Sold-comps slices once per printing (4 in flight, docs "once per printing").
       const queue = [...new Set(want.map((row) => String(row.cardId)))]
@@ -1136,6 +1142,7 @@ function ScanDeskDesk() {
           lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
           // Fresh rows race only with an empty price; stale suggested rows overwrite.
           if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
+          settled.add(row.id);
           patchRows([row.id], patch, { record: false });
         } else {
           cheapestIds.add(String(row.cardId));
@@ -1146,7 +1153,10 @@ function ScanDeskDesk() {
       const byId = await fetchCheapestPricePknMap([...cheapestIds]);
       for (const row of want) {
         if (cancelled) return;
+        if (settled.has(row.id)) continue;
         const pkn = byId[String(row.cardId)];
+        // No comps and no listing: settled without a price, never retried.
+        settled.add(row.id);
         if (pkn > 0) {
           const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
           lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
@@ -1154,8 +1164,13 @@ function ScanDeskDesk() {
           patchRows([row.id], patch, { record: false });
         }
       }
-    })().catch(() => {});
-    return () => { cancelled = true; };
+    })().catch(() => {
+      if (!cancelled) release();
+    });
+    return () => {
+      cancelled = true;
+      release();
+    };
   });
 
   watch(() => [list(), images()], ([rowsNow, shots]) => {
