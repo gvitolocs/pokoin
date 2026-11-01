@@ -4,7 +4,6 @@ import { exportStockCsv, fetchPricingStrategies } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
 import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
-import { formatPknNumber } from '@market/pkn.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
 import '@market/export-preview.css';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
@@ -109,7 +108,7 @@ function InventoryDesk(props) {
     equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab
       && a.collectionTab === b.collectionTab && a.locationName === b.locationName,
   });
-  // PKN opt-out sellers read their prices in local currency.
+  // Sellers read their prices in local currency.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
   const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
   // A first load paints page by page; its totals wait for the whole book.
@@ -259,7 +258,7 @@ function InventoryDesk(props) {
     return [
       { value: summary.listings, label: LISTING_METRICS[0] },
       { value: summary.cards, label: LISTING_METRICS[1] },
-      { value: `${formatPknNumber(summary.listedPkn)} PKN`, label: LISTING_METRICS[2] },
+      { value: formatPrice(summary.listedPkn), label: LISTING_METRICS[2] },
       { value: paused, label: LISTING_METRICS[3] },
     ];
   };

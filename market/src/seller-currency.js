@@ -1,21 +1,21 @@
 /**
- * Sellers who opt out of PKN payments (Profile → Seller setup → "Get paid in
- * PKN") price and read their listings in their local currency: the card-page
- * list tile, the scan desk and MyPokoin default to it. Listings are still
- * stored in PKN (1 PKN = €0.005) — this only changes what the seller types
- * and sees. Buyers of those sellers pay by card (pokoin-rust/crates/commerce/src/handlers/seller.rs).
+ * Sellers price and read listings in their local currency regardless of PKN
+ * payment preferences. Listings remain stored in PKN (1 PKN = €0.005).
  */
 import { currencyForCountry, currencyFromLocale, fiatFromPkn, formatFiatFromPkn, formatLocalFromPkn, formatPkn, formatPknNumber, listingPriceToPkn, localAndPknFromPkn } from './pkn.js';
 
-/** 'PKN' for PKN-accepting sellers, else the ship-from country's currency. */
-export function sellerListCurrency(settings) {
-  if (!settings || settings.acceptsPkn !== false) return 'PKN';
-  return currencyForCountry(settings.shipFromCountry) || 'EUR';
+/**
+ * Ship-from country's currency, falling back to the known country, then
+ * browser locale and EUR. Payment preferences do not change the price unit.
+ */
+export function sellerListCurrency(settings, fallbackCountry) {
+  const country = settings?.shipFromCountry || fallbackCountry;
+  return (country ? currencyForCountry(country) : currencyFromLocale()) || 'EUR';
 }
 
-/** Stored PKN → the seller's price label: 2642 PKN, or €13.21 (2642 PKN). */
-export function formatSellerPrice(pkn, currency = 'PKN') {
-  return currency === 'PKN' ? formatPkn(pkn) : formatLocalFromPkn(pkn, currency);
+/** Stored PKN → the seller's local price label, without a PKN amount. */
+export function formatSellerPrice(pkn, currency = sellerListCurrency()) {
+  return formatFiatFromPkn(pkn, currency === 'PKN' ? sellerListCurrency() : currency) || '';
 }
 
 /**

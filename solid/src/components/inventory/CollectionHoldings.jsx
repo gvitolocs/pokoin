@@ -9,6 +9,7 @@ import {
   requestNftShipping,
 } from '@market/api.js';
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
+import { formatSellerPrice, pknFromPriceInput, priceInputFromPkn } from '@market/seller-currency.js';
 import { game } from '@market/game.js';
 import { inventoryBooks } from '@market/inventory-book.js';
 import { gamePrices, priceCheckGroups, priceGame } from '@market/inventory-price.js';
@@ -37,9 +38,7 @@ function cardLabel(row) {
 }
 
 function listingMeta(listing) {
-  const price = Number(listing?.pricePkn ?? listing?.price_pkn ?? 0);
   return [
-    Number.isFinite(price) && price > 0 ? `${price} PKN` : null,
     listing?.condition,
     listing?.language,
     Number(listing?.quantityAvailable ?? listing?.quantity_available) > 1
@@ -99,18 +98,16 @@ function HoldingRow(props) {
             <span>Ask</span>
             <span class="collection-ask-field">
               <input
-                inputmode="numeric"
+                inputmode="decimal"
                 class={{ 'is-suggested': Boolean(props.suggested) }}
-                value={props.ask}
+                value={priceInputFromPkn(props.ask, props.currency)}
                 placeholder="0"
                 aria-label={`Ask price for ${cardLabel(row())}`}
-                onInput={(event) => {
-                  const value = event.target.value.replace(/[^\d]/g, '');
-                  event.target.value = value;
-                  props.onAsk(row().id, value);
+                onChange={(event) => {
+                  props.onAsk(row().id, pknFromPriceInput(event.target.value, props.currency) ?? '');
                 }}
               />
-              <em class="collection-ask-unit">{props.currency || 'PKN'}</em>
+              <em class="collection-ask-unit">{props.currency || sellerCurrency()}</em>
             </span>
           </label>
         </Show>
@@ -143,7 +140,7 @@ function ListedRow(props) {
   const listing = () => props.entry.listing;
   const row = () => props.entry.holding || listing();
   const name = () => cardLabel(row());
-  const chips = () => listingMeta(listing()).filter((part) => !String(part).endsWith(' PKN'));
+  const chips = () => listingMeta(listing());
   const price = () => Number(listing()?.pricePkn ?? listing()?.price_pkn ?? 0);
   return (
     <article
@@ -161,7 +158,7 @@ function ListedRow(props) {
         <Show when={setLine(row())}><span class="thread-meta">{setLine(row())}</span></Show>
         <FacetChips chips={['Listed', ...chips()]} />
         <Show when={Number.isFinite(price()) && price() > 0}>
-          <p class="collection-tile-price">{price()} {props.currency || 'PKN'}</p>
+          <p class="collection-tile-price">{formatSellerPrice(price(), props.currency || sellerCurrency())}</p>
         </Show>
         <button type="button" class="btn ghost collection-move" disabled={props.busy} onClick={() => props.onHold(props.entry)}>
           ← Hold
@@ -352,7 +349,7 @@ export default function CollectionHoldings(props) {
   async function listHolding(holding) {
     const price = Number(asks()[holding.id] || 0);
     if (!Number.isInteger(price) || price <= 0) {
-      setError(`Set an ask in PKN before listing ${cardLabel(holding)}.`);
+      setError(`Set an ask in ${sellerCurrency()} before listing ${cardLabel(holding)}.`);
       return;
     }
     if (props.preview) {
@@ -374,7 +371,7 @@ export default function CollectionHoldings(props) {
       setRows((current) => (current || []).map((row) => (
         row.id === holding.id ? { ...row, listingId: listing.id } : row
       )));
-      setMessage(`${cardLabel(holding)} is listed at ${price} PKN.`);
+      setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
       return;
     }
     const shipFrom = String(sellerSettings()?.shipFromCountry || '').trim().toUpperCase();
@@ -415,7 +412,7 @@ export default function CollectionHoldings(props) {
         row.id === holding.id ? { ...row, listingId: listing.id } : row
       )));
     }
-    setMessage(`${cardLabel(holding)} is listed at ${price} PKN.`);
+    setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
   }
 
   async function holdListing(entry) {

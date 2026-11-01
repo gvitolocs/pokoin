@@ -1,10 +1,19 @@
 // Scan desk price suggestions: the default listing price follows the row's
 // facets (condition, language, reverse finish, 1st edition) from sold comps
 // slices (`marketplace-card-sales?slices=1`), relaxing the condition first and
-// then the language (English preferred) when a facet has no sold data, with
+// then language tiers (KO → JP → European → EN → other) when a facet has no sold data, with
 // the cheapest listed PKN as the floor. Spec: docs/SCAN_LISTING_WORKFLOW.md.
 
-import { pknFromPriceInput } from './seller-currency.js';
+import { pknFromPriceInput, priceInputFromPkn } from './seller-currency.js';
+
+// Each array is one tier; an empty tier accepts all remaining languages.
+export const PRICE_LANGUAGE_FALLBACK = [
+  ['KO'],
+  ['JP'],
+  ['IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU'],
+  ['EN'],
+  [],
+];
 
 export const SCAN_CONDITIONS = ['NM', 'SP', 'MP', 'PL', 'Poor'];
 
@@ -48,7 +57,9 @@ function conditionDistance(condition, want) {
 
 /**
  * Best sold-comps median for the facets, relaxing: finish/1st → condition
- * (nearest grade) → language (English first). Graded slices never apply.
+ * (nearest grade) → language (KO → JP → European → EN → other, skipping
+ * the own language). Within each tier, nearest condition then freshness wins.
+ * Graded slices never apply.
  * Returns the median PKN or null when the printing has no usable slices.
  */
 export function suggestPriceFromSlices(slices, facets = {}) {
@@ -62,25 +73,17 @@ export function suggestPriceFromSlices(slices, facets = {}) {
       && Boolean(s.reverse) === reverse && Boolean(s.firstEdition) === firstEdition,
     (s) => s.condition === condition && s.language === language,
     (s) => s.language === language,
-    (s) => s.condition === condition,
-    () => true,
+    ...PRICE_LANGUAGE_FALLBACK.map((tier) => (s) => (
+      s.language !== language && (!tier.length || tier.includes(s.language))
+    )),
   ];
   for (let i = 0; i < rungs.length; i += 1) {
     const hits = pool.filter(rungs[i]);
     if (!hits.length) continue;
-    if (i === 2) {
-      hits.sort((a, b) => (
-        conditionDistance(a.condition, condition) - conditionDistance(b.condition, condition)
-        || byFreshness(a, b)
-      ));
-    } else if (i >= 3) {
-      hits.sort((a, b) => (
-        (b.language === 'EN' ? 1 : 0) - (a.language === 'EN' ? 1 : 0)
-        || byFreshness(a, b)
-      ));
-    } else {
-      hits.sort(byFreshness);
-    }
+    hits.sort(i >= 2 ? (a, b) => (
+      conditionDistance(a.condition, condition) - conditionDistance(b.condition, condition)
+      || byFreshness(a, b)
+    ) : byFreshness);
     return Number(hits[0].medianPkn);
   }
   return null;
@@ -97,7 +100,9 @@ export function suggestPriceFromSlices(slices, facets = {}) {
 export function priceFieldCommit(row = {}, raw = '', currency = 'PKN') {
   const value = String(raw ?? '').trim();
   if (value === '') return { action: 'default' };
-  // Sellers who opted out of PKN type their local currency; rows store PKN.
+  // Untouched text: a fiat cent can be coarser than 1 PKN, so never re-save it.
+  if (!row.priceSuggested && value === priceInputFromPkn(row.pricePkn, currency)) return { action: 'keep' };
+  // Sellers type their local currency; rows store PKN.
   const pricePkn = currency === 'PKN' ? Number(value) : pknFromPriceInput(value, currency);
   if (!Number.isFinite(pricePkn) || pricePkn <= 0) return { action: 'restore' };
   if (pricePkn === Number(row.pricePkn) && !row.priceSuggested) return { action: 'keep' };

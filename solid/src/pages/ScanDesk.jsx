@@ -77,7 +77,7 @@ import { usePageTitle } from './tools/board.jsx';
 function ScanDeskDesk() {
   const location = useLocation();
   const uid = () => authUser()?.uid || accountProfile()?.uid || '';
-  // Sellers who opted out of PKN payments price the queue in local currency.
+  // Sellers price the queue in their local currency.
   const priceCurrency = () => sellerCurrency();
   const [session, setSession] = createSignal(null);
   const [batch, setBatch] = createSignal(null);
@@ -1506,7 +1506,7 @@ function ScanDeskDesk() {
           <span role="columnheader">Location</span>
           <span role="columnheader">Qty</span>
           <Show when={submitIntent() === 'list'}>
-            <span role="columnheader">Price{priceCurrency() !== 'PKN' ? ` · ${priceCurrency()}` : ''}</span>
+            <span role="columnheader">Price · {priceCurrency()}</span>
           </Show>
           <span role="columnheader">State</span>
           <span role="columnheader" class="c-remove" aria-label="Remove" />

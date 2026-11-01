@@ -27,7 +27,7 @@ import {
 } from '@market/scan-model.js';
 import { priceFieldCommit } from '@market/scan-pricing.js';
 import { DRAFT_HOTKEY_LEGEND, dispatchDraftHotkey, draftLegendActive } from '@market/scan-shortcuts.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { formatSellerPrice, priceInputFromPkn, sellerListCurrency } from '@market/seller-currency.js';
 import ThumbZoom from '../../components/ThumbZoom.jsx';
 import { createLiveSuggest } from '../../lib/live-suggest.js';
 import { loadVersionSet } from './version-sets.js';
@@ -230,7 +230,7 @@ export function QueueRow(props) {
   const thumbArt = createMemo(() => thumbFor(row().cardId, row().cardName, row().imageUrl));
   const zoomSrc = () => thumbArt().hero || thumbArt().thumb;
   const remapLang = () => remapListingLanguage(row().language, props.preferredLanguage);
-  const currency = () => props.priceCurrency || 'PKN';
+  const currency = () => props.priceCurrency || sellerListCurrency();
   const pick = (id) => {
     props.onPick(id);
     props.onReplaceDone();
