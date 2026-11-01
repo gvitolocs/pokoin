@@ -14,7 +14,12 @@ export function parseListAmount(value) {
   if (typeof value === 'number') {
     return value;
   }
-  return Number(String(value || '').replace(/,/g, '').trim());
+  const text = String(value || '').trim();
+  // Decimal comma ("13,73", "1.234,5"): sellers type local prices this way. "1,234" stays thousands.
+  if (/^(\d+|\d{1,3}(\.\d{3})+),\d{1,2}$/.test(text)) {
+    return Number(text.replace(/\./g, '').replace(',', '.'));
+  }
+  return Number(text.replace(/,/g, ''));
 }
 
 /** toLocaleString builds a new Intl.NumberFormat per call; reuse one per digit setting. */

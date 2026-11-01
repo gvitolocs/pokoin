@@ -6,7 +6,6 @@ import {
   createListing,
   fetchPriceCheck,
   fetchSellerBoxSlots,
-  formatPkn,
   formatPknNumber,
   publicCardId,
   saveSellerSettings,
@@ -105,7 +104,7 @@ export default function ListingForm(props) {
   let currencyManual = false;
   let boxTouched = false;
   let formEl;
-  const [currency, setCurrency] = createSignal(blank.currency);
+  const [currency, setCurrency] = createSignal(untrack(sellerCurrency));
   const [qty, setQty] = createSignal(blank.qty);
   const [condition, setCondition] = createSignal(blank.condition);
   const [language, setLanguage] = createSignal(blank.language);
@@ -156,7 +155,8 @@ export default function ListingForm(props) {
   const isEditing = () => Boolean(editingId());
 
   function applyFields(next) {
-    const listIn = currencyManual ? next.currency : untrack(sellerCurrency);
+    // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
+    const listIn = untrack(currencyManual ? currency : sellerCurrency);
     setPrice(listIn === next.currency || !next.price
       ? next.price
       : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
@@ -563,7 +563,7 @@ export default function ListingForm(props) {
               setCurrency(event.currentTarget.value);
             }}
           >
-            <For each={LIST_CURRENCIES}>
+            <For each={[...new Set([...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()])]}>
               {(code) => <option value={code} selected={code === currency()}>{code}</option>}
             </For>
           </select>
@@ -603,19 +603,12 @@ export default function ListingForm(props) {
           />
         </div>
       </Show>
-      <Show
-        when={sellerCurrency() !== 'PKN'}
-        fallback={(
-          <Show when={currency() !== 'PKN' && listedPkn()}>
-            <p class="sell-pkn-eq">Lists at {formatPkn(listedPkn())}</p>
-          </Show>
-        )}
-      >
-        <p class="sell-pkn-eq">
-          {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())} · ` : ''}
-          Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
-        </p>
-      </Show>
+      <p class="sell-pkn-eq">
+        {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())}` : ''}
+        <Show when={sellerSettings()?.acceptsPkn === false}>
+          {listedPkn() ? ' · ' : ''}Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
+        </Show>
+      </p>
       <div class="sell-options-row">
         <div class="sell-field sell-pick condition-pick">
           <span class="sr-only">Condition</span>
