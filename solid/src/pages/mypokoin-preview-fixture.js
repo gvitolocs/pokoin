@@ -48,14 +48,19 @@ function copy(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// `origin` as the owner's book read sends it (inventory-origin.js).
+// Pikachu (list-1/list-8) stays flagged (box1·2 and no location).
+// Snorlax (list-4/list-9) has two origins in separate exact slots: no flag.
 const LISTINGS = [
-  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z' },
-  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z' },
-  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z' },
-  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1', listedAt: '2026-10-05T00:00:00.000Z' },
-  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z' },
-  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z' },
-  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z' },
+  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z', origin: 'cardrails' },
+  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z', origin: 'cardmarket' },
+  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1·1', listedAt: '2026-10-05T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-8', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 450, status: 'active', location: '', listedAt: '2026-10-09T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-9', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 620, status: 'active', location: 'binder·1·2', listedAt: '2026-10-10T00:00:00.000Z', origin: 'cardrails' },
 ];
 
 const HELD = [

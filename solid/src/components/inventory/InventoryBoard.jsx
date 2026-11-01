@@ -13,6 +13,7 @@ import {
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
+import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
 import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import ScanImage from '../ScanImage.jsx';
@@ -147,6 +148,25 @@ function CondChip(props) {
 }
 
 /**
+ * Where the listing came from, plus the cross-channel duplicate warning.
+ * Read-only: the seller decides what to do with a flagged pair.
+ */
+function OriginTags(props) {
+  const origin = () => listingOrigin(props.row);
+  const dup = () => props.duplicates?.get(String(props.row?.id ?? ''));
+  return (
+    <span class="inv-tags">
+      <span class={`inv-origin is-${origin()}`} title={`Listed from ${originLabel(origin())}`}>{originLabel(origin())}</span>
+      <Show when={dup()}>
+        {(entry) => (
+          <span class="inv-dup" title={`Also listed from ${describeOrigins(entry().others)}`}>Possible duplicate</span>
+        )}
+      </Show>
+    </span>
+  );
+}
+
+/**
  * Storage-box link inside a table row anchor. Its own component, so the
  * nested anchor is inserted into the row after parsing, as React did.
  */
@@ -167,6 +187,7 @@ function ListingTile(props) {
         <span class="thread-meta">{[setName(), collector() ? `#${collector()}` : ''].filter(Boolean).join(' · ')}</span>
         <span class="collection-tile-price">{props.formatPrice(row()?.pricePkn ?? row()?.price_pkn)}</span>
         <RowStatus status={row()?.status} />
+        <OriginTags row={row()} duplicates={props.duplicates} />
       </span>
     </a>
   );
@@ -191,6 +212,8 @@ export default function InventoryBoard(props) {
   const [status, setStatus] = createSignal('');
   const [condition, setCondition] = createSignal('');
   const [language, setLanguage] = createSignal('');
+  const [origin, setOrigin] = createSignal('');
+  const [duplicatesOnly, setDuplicatesOnly] = createSignal(false);
   const [sort, setSort] = createSignal('price-down');
   const [mode, setMode] = createSignal(readBoardMode());
   function chooseMode(next) {
@@ -211,14 +234,25 @@ export default function InventoryBoard(props) {
   const [pricerOpen, setPricerOpen] = createSignal(false);
 
   const facets = createMemo(() => inventoryFacets(props.rows));
+  const origins = createMemo(() => originFacets(props.rows));
+  // One pass over the whole book; rows look their flag up by id.
+  const duplicates = createMemo(() => findCrossSourceDuplicates(props.rows));
   const summary = createMemo(() => summarizeLiveInventory(props.rows));
   const view = createMemo(() => sortInventoryRows(
-    filterInventoryRows(props.rows, { query: query(), status: status(), condition: condition(), language: language() }),
+    filterInventoryRows(props.rows, {
+      query: query(),
+      status: status(),
+      condition: condition(),
+      language: language(),
+      origin: origin(),
+      duplicatesOnly: duplicatesOnly() && duplicates().size > 0,
+      duplicates: duplicates(),
+    }),
     sort(),
   ));
   // Filter the full book, but mount only one page, as the seller shop does.
   const [page, setPage] = createSignal(() => {
-    query(); status(); condition(); language(); sort(); mode();
+    query(); status(); condition(); language(); origin(); duplicatesOnly(); sort(); mode();
     return 1;
   });
   let board;
@@ -345,6 +379,23 @@ export default function InventoryBoard(props) {
             <For each={facets().languages}>{(key) => <option value={key}>{key}</option>}</For>
           </select>
         </Show>
+        <Show when={origins().length > 1}>
+          <select class="inv-select" value={origin()} onChange={(event) => setOrigin(event.target.value)} aria-label="Source">
+            <option value="">Any source</option>
+            <For each={origins()}>{(entry) => <option value={entry.id}>{`${entry.label} (${entry.count})`}</option>}</For>
+          </select>
+        </Show>
+        <Show when={duplicates().size > 0}>
+          <button
+            type="button"
+            class={['inv-chip', 'inv-dup-chip', { on: duplicatesOnly() }]}
+            aria-pressed={duplicatesOnly()}
+            title="Same card, condition, language and finish from more than one channel, not stored in separate slots"
+            onClick={() => setDuplicatesOnly(!duplicatesOnly())}
+          >
+            Possible duplicates · {duplicates().size}
+          </button>
+        </Show>
         <select class="inv-select inv-sort" value={sort()} onChange={(event) => setSort(event.target.value)} aria-label="Sort">
           <For each={INVENTORY_SORTS}>{(key) => <option value={key}>{SORT_LABELS[key] || key}</option>}</For>
         </select>
@@ -417,6 +468,7 @@ export default function InventoryBoard(props) {
                           <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
                           <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
                           <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
+                          <OriginTags row={row} duplicates={duplicates()} />
                         </a>
                       )}
                     </For>
@@ -463,6 +515,7 @@ export default function InventoryBoard(props) {
                                 {collector ? `#${collector}` : ''}
                                 {flag ? `${collector ? ' · ' : ''}${flag.code.toUpperCase()}` : ''}
                               </span>
+                              <OriginTags row={row} duplicates={duplicates()} />
                             </span>
                             <CondChip condition={row?.condition} />
                             <span class="inv-qty num">{qty(row)}×</span>
@@ -482,7 +535,7 @@ export default function InventoryBoard(props) {
         <Match when={mode() === 'grid'}>
           <Show when={view().length} fallback={<p class="inv-empty">No listings match the current filters.</p>}>
             <div class="collection-tile-grid inv-grid">
-              <For each={pageEntries()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} />}</For>
+              <For each={pageEntries()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} duplicates={duplicates()} />}</For>
             </div>
           </Show>
         </Match>
@@ -521,6 +574,7 @@ export default function InventoryBoard(props) {
                           {setName}{collector ? `${setName ? ' · ' : ''}#${collector}` : ''}
                           <Show when={loc}><LocLink loc={loc} /></Show>
                         </span>
+                        <OriginTags row={row} duplicates={duplicates()} />
                       </span>
                     </span>
                     <span class="inv-cond">

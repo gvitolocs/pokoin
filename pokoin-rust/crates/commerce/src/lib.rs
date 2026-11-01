@@ -35,6 +35,7 @@ pub mod firestore;
 pub mod game;
 pub mod handlers;
 pub mod listing_live;
+pub mod listing_origin;
 pub mod listing_sync;
 /// TCGplayer sync box: job queue, device, price rule, orders. No portal driver.
 pub mod channel_sync;
