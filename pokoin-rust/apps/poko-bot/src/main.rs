@@ -38,7 +38,7 @@ async fn run() -> anyhow::Result<()> {
     }
     let history_path = config.state_dir.join("history.json");
     let history = Arc::new(History::load(&history_path));
-    let metrics = Arc::new(Metrics::new());
+    let metrics = Arc::new(Metrics::with_jev(poko_bot::jev::Jev::from_env()));
     metrics.telegram_enabled.store(
         config.telegram_enabled,
         std::sync::atomic::Ordering::Relaxed,

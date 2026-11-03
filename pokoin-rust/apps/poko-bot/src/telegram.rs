@@ -17,6 +17,7 @@ use frankenstein::{AsyncTelegramApi, Error};
 use tokio::sync::watch;
 
 use crate::format::telegram_html;
+use crate::gateway_lock::{self, Acquire, GatewayLock};
 use crate::history::now_ms;
 use crate::media::{audio_too_long_text, classify_voice_transcription_error, voice_failure_text};
 use crate::redact::redact;
@@ -28,6 +29,62 @@ const PHOTO_MAX: u64 = 4_000_000;
 const POLL_TIMEOUT: u32 = 50;
 
 pub async fn run(token: String, deps: Deps, mut shutdown: watch::Receiver<bool>) {
+    loop {
+        // Host-wide singleton: never poll a token another live gateway holds
+        // (409 ping-pong between poko-bot and Node Hermes during poko-switch).
+        let lock = loop {
+            if *shutdown.borrow() {
+                return;
+            }
+            match gateway_lock::acquire(
+                &deps.config.gateway_lock_dir,
+                deps.config.gateway_lock_enabled,
+                "poko-bot",
+                &token,
+            )
+            .await
+            {
+                Acquire::Acquired(lock) => {
+                    deps.metrics.set_gateway_lock("held".into());
+                    break Some(lock);
+                }
+                Acquire::Unguarded(reason) => {
+                    deps.metrics.set_gateway_lock(format!("unguarded:{reason}"));
+                    break None;
+                }
+                Acquire::Held(holder) => {
+                    deps.metrics
+                        .set_gateway_lock(format!("deferred:{}@{}", holder.name, holder.hostname));
+                    tracing::warn!(
+                        holder = %holder.holder,
+                        name = %holder.name,
+                        host = %holder.hostname,
+                        "telegram polling deferred: another gateway holds this bot"
+                    );
+                    if !sleep_or_stop(&mut shutdown, gateway_lock::RETRY.as_secs()).await {
+                        return;
+                    }
+                }
+            }
+        };
+        let stopped = poll(&token, &deps, &mut shutdown, lock.as_ref()).await;
+        if let Some(lock) = lock {
+            lock.release();
+        }
+        if stopped {
+            return;
+        }
+    }
+}
+
+/// Polls until shutdown (returns true) or until the gateway lock is lost (false).
+async fn poll(
+    token: &str,
+    deps: &Deps,
+    shutdown: &mut watch::Receiver<bool>,
+    lock: Option<&GatewayLock>,
+) -> bool {
+    let token = token.to_string();
     let client = frankenstein::reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(70))
@@ -39,14 +96,14 @@ pub async fn run(token: String, deps: Deps, mut shutdown: watch::Receiver<bool>)
         .build();
     let me = loop {
         if *shutdown.borrow() {
-            return;
+            return true;
         }
         match startup(&bot, &token).await {
             Ok(user) => break user,
             Err(error) => {
                 tracing::warn!(error = %redact(&error.to_string(), &token), "telegram startup failed");
-                if !sleep_or_stop(&mut shutdown, 5).await {
-                    return;
+                if !sleep_or_stop(shutdown, 5).await {
+                    return true;
                 }
             }
         }
@@ -62,8 +119,14 @@ pub async fn run(token: String, deps: Deps, mut shutdown: watch::Receiver<bool>)
         .allowed_updates(vec![AllowedUpdate::Message])
         .build();
     let locks = Arc::new(ChatLocks::new());
+    let mut stopped = true;
     loop {
         if *shutdown.borrow() {
+            break;
+        }
+        if lock.is_some_and(GatewayLock::is_lost) {
+            deps.metrics.set_gateway_lock("lost".into());
+            stopped = false;
             break;
         }
         let result = tokio::select! {
@@ -100,12 +163,12 @@ pub async fn run(token: String, deps: Deps, mut shutdown: watch::Receiver<bool>)
             Err(error) => {
                 if is_conflict(&error) {
                     tracing::warn!("telegram getUpdates conflict; another poller is running");
-                    if !sleep_or_stop(&mut shutdown, 30).await {
+                    if !sleep_or_stop(shutdown, 30).await {
                         break;
                     }
                 } else {
                     tracing::warn!(error = %redact(&error.to_string(), &token), "telegram getUpdates failed");
-                    if !sleep_or_stop(&mut shutdown, 5).await {
+                    if !sleep_or_stop(shutdown, 5).await {
                         break;
                     }
                 }
@@ -115,6 +178,7 @@ pub async fn run(token: String, deps: Deps, mut shutdown: watch::Receiver<bool>)
     deps.metrics
         .telegram_polling
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    stopped
 }
 
 async fn startup(bot: &Bot, token: &str) -> Result<frankenstein::types::User, Error> {
