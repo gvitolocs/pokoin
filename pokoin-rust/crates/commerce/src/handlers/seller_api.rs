@@ -869,6 +869,8 @@ async fn price_listed_item(
     .await
     {
         out["pricePkn"] = json!(row.0);
+        // The euro price of that PKN price, rounded as `price-quote` does.
+        out["priceEurCents"] = json!((row.0 / PKN_PER_EUR_CENT as f64).round());
         out["status"] = json!(row.1);
     }
     out
@@ -1297,7 +1299,7 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         return Err(ApiError::forbidden("This token is not a Card Rails grant.").with_code("seller_api/wrong-scope"));
     }
     let body = parse_json_body(bytes)?;
-    let out = match text_field(&body, &["action"], 20).as_str() {
+    let out = match action_of(&body).as_str() {
         "connect" | "info" => connect(state, &grant).await?,
         "scan-settings" => scan_settings(state, &grant).await?,
         "pricing-groups" => pricing_groups(state, &grant).await?,
@@ -1320,6 +1322,20 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         _ => return Err(ApiError::bad_request("Unknown action.").with_code("seller_api/unknown-action")),
     };
     Ok(private_json(out))
+}
+
+/// Every connector action (`connector` dispatches on these).
+const ACTIONS: [&str; 17] = [
+    "connect", "info", "scan-settings", "pricing-groups", "price-quote", "pricing-strategy-save",
+    "pricing-strategy-delete", "locations", "webhook", "listings", "stock", "list", "update", "unlist",
+    "sold-prices", "sales", "events",
+];
+
+/// The action a connector call names. Long enough for every action: at 20
+/// characters `pricing-strategy-save` and `pricing-strategy-delete` were cut
+/// and answered "Unknown action." (found by CardRails, 2026-11-05).
+fn action_of(body: &Value) -> String {
+    text_field(body, &["action"], 64)
 }
 
 /// `POST /api/cardrails/connector`
@@ -1634,6 +1650,24 @@ mod listings_limit_tests {
 mod pricing_tests {
     use super::*;
     use crate::handlers::pricer::BatchPricing;
+
+    #[test]
+    fn every_action_name_reaches_the_dispatch_whole() {
+        for name in ACTIONS {
+            assert_eq!(action_of(&json!({ "action": name })), name, "{name} must not be cut");
+        }
+        assert_eq!(action_of(&json!({"action": "pricing-strategy-save"})), "pricing-strategy-save");
+        assert_eq!(action_of(&json!({"action": "pricing-strategy-delete"})), "pricing-strategy-delete");
+        // Every dispatched name is listed (so the test above covers it).
+        let source = include_str!("seller_api.rs");
+        let dispatch = source.split("let out = match action_of(&body).as_str() {").nth(1).unwrap().split("_ => return Err").next().unwrap();
+        for arm in dispatch.lines().filter_map(|line| line.trim().strip_prefix('"')) {
+            for name in arm.split(" | ").map(|part| part.trim_matches(|c| c == '"' || c == ' ')) {
+                let name = name.split('"').next().unwrap();
+                assert!(ACTIONS.contains(&name), "{name} is dispatched but not in ACTIONS");
+            }
+        }
+    }
 
     #[test]
     fn a_list_call_names_its_pricing_per_item_or_per_batch() {

@@ -142,7 +142,7 @@ equal to the cent, list on Pokoin either:
   comp exists; otherwise it stays paused.
 - An item sent with a price keeps it.
 - The response adds `pricingGroupId` | `pricingStrategyId`, `priced`,
-  `pricePkn`, `status`, and `pricingError` if pricing failed. The listing
+  `pricePkn`, `priceEurCents` (`round(pricePkn / 2)`), `status`, and `pricingError` if pricing failed. The listing
   exists either way.
 
 Pokoin tests: `crates/commerce/src/handlers/seller_api.rs` (`pricing_tests`),

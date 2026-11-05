@@ -334,6 +334,18 @@ priced from the Pricer tab. Unpriced rows are not pushed to CardTrader at
 submit (CardTrader needs a price); they reach CardTrader later only if the
 seller pushes them.
 
+**Per row (2026-11-05).** One batch can mix strategies: the seller selects
+rows and picks a strategy, a group, "Batch default" or "No pricing" in the
+pricer pop-up. The choice is the row's `pricing` (`scan_items.pricing`,
+scripts/sql/138: `{ "groupId" }`, `{ "strategyId" }`, `{ "none": true }`, or
+null for the batch's), set through the item patch (`pricing`) and returned in
+the item view. At submit each row is priced by its own choice, else the
+batch's (`scan_connect::row_pricing`); a row set to "none" needs its own
+price. Every group a row names is checked and locked, each created listing
+joins the group its row names, and the result lists
+`rowPricing: [{ listingId, itemId, priced, groupId | strategyId }]`. The desk
+then calls `applyPricing` once per group and once per strategy.
+
 ## Files
 
 | Path | Role |
