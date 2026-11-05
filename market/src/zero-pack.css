@@ -317,6 +317,37 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
   .zero-reverse { animation: none; }
 }
 
+/* Foil (any game but Pokémon): a holographic pill naming the finish, as hard to miss as the R. */
+.zero-foil {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  height: 1.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgb(255 255 255 / 0.55);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff6ec4, #f9d423, #7afcff, #a18cd1);
+  background-size: 220% 220%;
+  color: #17120a;
+  cursor: help;
+  vertical-align: middle;
+  animation: zero-foil-shimmer 3s ease-in-out infinite;
+}
+.zero-foil-text {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+@keyframes zero-foil-shimmer {
+  0%, 100% { background-position: 0% 50%; box-shadow: 0 0 6px rgb(122 252 255 / 0.35); }
+  50% { background-position: 100% 50%; box-shadow: 0 0 12px rgb(255 110 196 / 0.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zero-foil { animation: none; }
+}
+
 .zero-picked-count { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 
 .zero-card.has-issue { border-color: rgb(255 101 101 / 0.45); }
@@ -549,6 +580,8 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
   .zero-facet, .zero-take, .zero-split, .zero-pt-place, .zero-issue-badge { border-color: #000 !important; font-size: 7pt; }
   .zero-reverse { border-color: #000 !important; background: none !important; box-shadow: none !important; animation: none !important; filter: none !important; }
   .zero-reverse-r { color: #000 !important; font-size: 9pt; text-shadow: none !important; }
+  .zero-foil { border-color: #000 !important; background: none !important; box-shadow: none !important; animation: none !important; }
+  .zero-foil-text { color: #000 !important; font-size: 9pt; }
   .zero-row a { text-decoration: none; }
 }
 

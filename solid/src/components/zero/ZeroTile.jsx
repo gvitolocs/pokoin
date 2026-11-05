@@ -4,6 +4,7 @@ import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } 
 import {
   alsoInLabels,
   lineCopies,
+  lineIsFoil,
   lineIsReverse,
   lineKeyOf,
   lineLocation,
@@ -15,7 +16,7 @@ import {
   rarityBadge,
 } from '@market/zero-pick.js';
 import ScanImage from '../ScanImage.jsx';
-import { IssueBadge, lineImage, linePrice, PtPlace, ReverseMark } from './zero-bits.jsx';
+import { FoilMark, IssueBadge, lineImage, linePrice, PtPlace, ReverseMark } from './zero-bits.jsx';
 
 function PinIcon() {
   return (
@@ -126,6 +127,7 @@ export default function ZeroTile(props) {
             />
           </Show>
           <Show when={lineIsReverse(item())}><ReverseMark /></Show>
+          <Show when={lineIsFoil(item())}><FoilMark item={item()} /></Show>
           <For each={extraFacets(item())}>{(facet) => <span class="zero-facet">{facet}</span>}</For>
           <PtPlace item={item()} />
           <IssueBadge issue={pick().issue} />

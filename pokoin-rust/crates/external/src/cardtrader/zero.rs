@@ -150,9 +150,63 @@ fn item_rarity(item: &Value, props: &Value) -> String {
         .unwrap_or_default()
 }
 
+/// The first property whose name ends with `suffix` and holds a value
+/// (`riftbound_language`, `fow_first_edition`, …), in name order so the pick
+/// never depends on map order.
+fn game_property<'a>(props: &'a Value, suffix: &str) -> Option<&'a Value> {
+    let map = props.as_object()?;
+    let mut keys: Vec<&String> = map.keys().filter(|key| key.ends_with(suffix)).collect();
+    keys.sort();
+    keys.into_iter().map(|key| &map[key]).find(|value| !value.is_null())
+}
+
+/// One foil property value as the label a picker sees: `""` for a plain copy,
+/// "Foil" for a boolean foil, the finish itself for Flesh and Blood's
+/// `fab_foil_new` ("Rainbow Foil", "Cold Foil", …; "Regular" is plain).
+fn foil_label(value: &Value) -> String {
+    match value {
+        Value::Bool(true) => "Foil".to_string(),
+        Value::Number(_) if truthy(value) => "Foil".to_string(),
+        Value::String(raw) => {
+            let text = clean_text(Some(raw), 40);
+            match text.to_lowercase().as_str() {
+                "" | "false" | "0" | "no" | "regular" | "normal" | "non-foil" | "nonfoil" | "non foil" => String::new(),
+                "true" | "1" | "yes" | "foil" => "Foil".to_string(),
+                _ => text,
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// The finish of a CardTrader item: `(reverse, finish)`. Every game names its
+/// own facet (CardTrader blueprint `editable_properties`): Pokémon's
+/// `pokemon_reverse` is a reverse holo (its holo is its own blueprint); the
+/// others carry a foil — `mtg_foil`, `riftbound_foil`, `lorcana_foil`,
+/// `onepiece_foil`, `dragonball_foil`, `starwars_foil`, `union_arena_foil`,
+/// `sorcery_foil` (booleans) and `fab_foil_new` (a finish name). Reading only
+/// Pokémon's and Magic's keys showed every Riftbound foil as a plain copy on
+/// the picking list. `finish` is "" for a plain copy.
+fn item_finish(props: &Value) -> (bool, String) {
+    let reverse = props.get("pokemon_reverse").map(truthy).unwrap_or(false);
+    let finish = props
+        .as_object()
+        .map(|map| {
+            let mut keys: Vec<&String> = map
+                .keys()
+                .filter(|key| *key == "foil" || key.ends_with("_foil") || key.ends_with("_foil_new"))
+                .collect();
+            keys.sort();
+            keys.into_iter().map(|key| foil_label(&map[key])).find(|label| !label.is_empty()).unwrap_or_default()
+        })
+        .unwrap_or_default();
+    (reverse, finish)
+}
+
 /// `zeroItemRow` — one CT order item as a picking-list line.
 pub fn zero_item_row(order: &Value, item: &Value) -> Value {
     let props = props_of(item);
+    let (reverse, finish) = item_finish(&props);
     let product_id = clean_text(
         item.get("product_id")
             .or_else(|| item.get("productId"))
@@ -172,6 +226,7 @@ pub fn zero_item_row(order: &Value, item: &Value) -> Value {
         .get("pokemon_language")
         .or_else(|| props.get("mtg_language"))
         .or_else(|| props.get("language"))
+        .or_else(|| game_property(&props, "_language"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     // Blank stays blank: an empty CardTrader language is the print language
@@ -224,11 +279,12 @@ pub fn zero_item_row(order: &Value, item: &Value) -> Value {
         "collectorNumber": clean_text_value(props.get("collector_number").or_else(|| props.get("collectorNumber")).unwrap_or(&Value::Null), 40),
         "condition": if condition_raw.is_empty() { json!("") } else { json!(ct_condition_to_pokoin(condition_raw)) },
         "language": if language_raw.is_empty() { json!("") } else { json!(ct_language_to_pokoin(language_raw)) },
-        "reverse": props.get("pokemon_reverse").map(truthy).unwrap_or(false)
-            || props.get("mtg_foil").map(truthy).unwrap_or(false)
-            || props.get("foil").map(truthy).unwrap_or(false),
+        "reverse": reverse,
+        "foil": !finish.is_empty(),
+        "finish": finish,
         "firstEdition": props.get("pokemon_first_edition").map(truthy).unwrap_or(false)
-            || props.get("first_edition").map(truthy).unwrap_or(false),
+            || props.get("first_edition").map(truthy).unwrap_or(false)
+            || game_property(&props, "_first_edition").map(truthy).unwrap_or(false),
         "signed": props.get("signed").map(truthy).unwrap_or(false),
         "altered": props.get("altered").map(truthy).unwrap_or(false),
         "graded": item.get("graded").map(|v| truthy(v) || *v == json!(1)).unwrap_or(false) && item.get("graded") != Some(&json!("false")),
@@ -2592,6 +2648,126 @@ mod tests {
         assert_eq!(row["condition"], "");
         assert_eq!(row["game"], "");
         assert_eq!(row["rarity"], "");
+    }
+
+    /// One CardTrader order item of `game_id` with `props` as its
+    /// `properties_hash` (the shape the Orders API returns).
+    fn game_item(game_id: i64, props: Value) -> Value {
+        json!({
+            "id": "1", "product_id": "2", "quantity": 1, "game_id": game_id,
+            "seller_price": { "cents": 46, "currency": "EUR" },
+            "properties_hash": props,
+        })
+    }
+
+    fn finish_of(game_id: i64, props: Value) -> (Value, Value, Value) {
+        let row = zero_item_row(&json!({ "id": "9" }), &game_item(game_id, props));
+        (row["reverse"].clone(), row["foil"].clone(), row["finish"].clone())
+    }
+
+    /// Every game CardTrader sells for Pokoin, with the facet names from the
+    /// nightly blueprint export (`editable_properties`, 2026-11-05).
+    #[test]
+    fn foil_is_read_per_game() {
+        let plain = (json!(false), json!(false), json!(""));
+        let foil = (json!(false), json!(true), json!("Foil"));
+        // The reported bug: Unleashed #074 Frigid Jewel, ordered foil.
+        assert_eq!(finish_of(22, json!({ "condition": "Near Mint", "riftbound_language": "en", "riftbound_foil": true })), foil);
+        assert_eq!(finish_of(22, json!({ "condition": "Near Mint", "riftbound_language": "en", "riftbound_foil": false })), plain);
+        for (game_id, key) in [
+            (1, "mtg_foil"),
+            (9, "dragonball_foil"),
+            (15, "onepiece_foil"),
+            (18, "lorcana_foil"),
+            (20, "starwars_foil"),
+            (21, "union_arena_foil"),
+            (24, "sorcery_foil"),
+        ] {
+            let mut props = json!({ "condition": "Near Mint" });
+            props[key] = json!(true);
+            assert_eq!(finish_of(game_id, props.clone()), foil, "{key}");
+            props[key] = json!("true");
+            assert_eq!(finish_of(game_id, props.clone()), foil, "{key} as text");
+            props[key] = json!(false);
+            assert_eq!(finish_of(game_id, props), plain, "{key} false");
+        }
+        // Flesh and Blood names the finish.
+        assert_eq!(finish_of(6, json!({ "fab_foil_new": "Rainbow Foil" })), (json!(false), json!(true), json!("Rainbow Foil")));
+        assert_eq!(finish_of(6, json!({ "fab_foil_new": "Cold Foil" })), (json!(false), json!(true), json!("Cold Foil")));
+        assert_eq!(finish_of(6, json!({ "fab_foil_new": "Regular" })), plain);
+        // Pokémon: a reverse holo is the glowing R, never a foil.
+        assert_eq!(finish_of(5, json!({ "pokemon_language": "it", "pokemon_reverse": true })), (json!(true), json!(false), json!("")));
+        assert_eq!(finish_of(5, json!({ "pokemon_language": "it", "pokemon_reverse": false })), plain);
+        // Games with no finish facet on CardTrader stay plain.
+        for (game_id, props) in [
+            (4, json!({ "yugioh_language": "it", "first_edition": true })),
+            (8, json!({ "digimon_language": "jp" })),
+            (10, json!({ "vanguard_language": "en" })),
+            (23, json!({ "gundam_language": "en" })),
+            (26, json!({ "palworld_language": "en" })),
+        ] {
+            assert_eq!(finish_of(game_id, props), plain, "game {game_id}");
+        }
+        // The legacy `properties` field reads the same way.
+        let mut legacy = game_item(18, Value::Null);
+        legacy["properties"] = json!({ "lorcana_foil": true });
+        assert_eq!(zero_item_row(&json!({}), &legacy)["finish"], "Foil");
+    }
+
+    #[test]
+    fn language_and_first_edition_are_read_per_game() {
+        let row = |game_id: i64, props: Value| zero_item_row(&json!({ "id": "9" }), &game_item(game_id, props));
+        assert_eq!(row(22, json!({ "riftbound_language": "fr", "riftbound_foil": true }))["language"], "FR");
+        assert_eq!(row(15, json!({ "onepiece_language": "jp" }))["language"], "JP");
+        assert_eq!(row(18, json!({ "lorcana_language": "de" }))["language"], "DE");
+        assert_eq!(row(4, json!({ "yugioh_language": "it" }))["language"], "IT");
+        assert_eq!(row(6, json!({ "fab_language": "en" }))["language"], "EN");
+        assert_eq!(row(1, json!({ "mtg_language": "jp" }))["language"], "JP");
+        assert_eq!(row(5, json!({ "pokemon_language": "kr" }))["language"], ct_language_to_pokoin("kr"));
+        assert_eq!(row(4, json!({ "yugioh_language": "en", "first_edition": true }))["firstEdition"], true);
+        assert_eq!(row(5, json!({ "pokemon_first_edition": true }))["firstEdition"], true);
+        assert_eq!(row(0, json!({ "fow_first_edition": true }))["firstEdition"], true);
+        assert_eq!(row(22, json!({ "riftbound_language": "en" }))["firstEdition"], false);
+    }
+
+    #[test]
+    fn foil_survives_the_split_into_lines() {
+        // A foil item keeps its finish on every line it is split into, and
+        // only takes copies from its own (foil) CardTrader product.
+        let mut foil = game_item(22, json!({ "condition": "Near Mint", "riftbound_language": "en", "riftbound_foil": true }));
+        foil["id"] = json!("11");
+        foil["product_id"] = json!("101");
+        foil["quantity"] = json!(2);
+        let mut plain = game_item(22, json!({ "condition": "Near Mint", "riftbound_language": "en", "riftbound_foil": false }));
+        plain["id"] = json!("12");
+        plain["product_id"] = json!("102");
+        let mut list = build_zero_list(&[zero_order("1", "paid", vec![foil, plain])]);
+        let rows = [
+            row("lf1", "101", "FOIL·1", "2026-09-01T00:00:00.000Z"),
+            row("lf2", "101", "FOIL·2", "2026-09-02T00:00:00.000Z"),
+            row("lp1", "102", "PLAIN·1", "2026-08-01T00:00:00.000Z"),
+        ];
+        let allocations = HashMap::from([(
+            "11".to_string(),
+            vec![
+                Allocation { listing_id: "lf1".into(), quantity: 1 },
+                Allocation { listing_id: "lf2".into(), quantity: 1 },
+            ],
+        )]);
+        split_lines(&mut list, &rows, &allocations, &HashMap::new());
+        let items = list["weekly"][0]["items"].as_array().unwrap();
+        let foil_lines: Vec<&Value> = items.iter().filter(|line| line["itemId"] == "11").collect();
+        assert_eq!(foil_lines.len(), 2);
+        for line in &foil_lines {
+            assert_eq!((line["foil"].clone(), line["finish"].clone()), (json!(true), json!("Foil")));
+            assert!(line["location"].as_str().unwrap().starts_with("FOIL"), "{line}");
+            for candidate in line["candidates"].as_array().unwrap() {
+                assert!(candidate["listingId"].as_str().unwrap().starts_with("lf"), "{candidate}");
+            }
+        }
+        let plain_line = items.iter().find(|line| line["itemId"] == "12").unwrap();
+        assert_eq!((plain_line["foil"].clone(), plain_line["location"].clone()), (json!(false), json!("PLAIN·1")));
+        assert!(plain_line["candidates"].as_array().unwrap().is_empty());
     }
 
     #[test]
