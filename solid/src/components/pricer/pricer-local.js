@@ -133,17 +133,24 @@ export function compLookup(comps) {
 }
 
 /**
- * `applyPricing({ groupId, dryRun })` on fixture rows and price-check
- * answers (`comps` keyed like the board's price check). Answers the server's
- * shape, plus `state` (lastApplied stamped) and `rows` (repriced) unless dry.
+ * `applyPricing` on fixture rows and price-check answers (`comps` keyed like
+ * the board's price check): `{ groupId }` (the group's strategy over its
+ * listings, or over `listingIds` among them) or `{ strategyId, listingIds }`
+ * (the picked listings), with `dryRun`. Answers the server's shape, plus
+ * `state` (a group's lastApplied stamped) and `rows` (repriced) unless dry.
  */
-export function applyGroup(state, rows, comps, { groupId, dryRun }, now = new Date()) {
-  const group = state.groups.find((entry) => entry.id === groupId);
-  if (!group) fail('That group no longer exists.');
-  const strategy = state.strategies.find((entry) => entry.id === group.strategyId);
-  if (!strategy) fail('The group has no strategy.');
-  const members = new Set(state.pairs.filter(([, id]) => id === groupId).map(([listingId]) => listingId));
-  const scopedRows = (rows || []).filter((row) => members.has(str(row?.id)));
+export function applyPricingLocal(state, rows, comps, { groupId, strategyId, listingIds, dryRun }, now = new Date()) {
+  const group = groupId ? state.groups.find((entry) => entry.id === groupId) : null;
+  if (groupId && !group) fail('That group no longer exists.');
+  const strategy = state.strategies.find((entry) => entry.id === (group ? group.strategyId : strategyId));
+  if (!strategy) fail(group ? 'The group has no strategy.' : 'That strategy no longer exists.');
+  const picked = Array.isArray(listingIds) ? new Set(listingIds.map(str)) : null;
+  if (!group && !picked) fail('Pick the listings to price.');
+  const members = group ? new Set(state.pairs.filter(([, id]) => id === groupId).map(([listingId]) => listingId)) : null;
+  const scopedRows = (rows || []).filter((row) => {
+    const id = str(row?.id);
+    return (!members || members.has(id)) && (!picked || picked.has(id));
+  });
   const compFor = compLookup(comps);
   // planReprice prices with strategyComp, so the plan follows the strategy's toggles.
   const result = planReprice(scopedRows, compFor, strategy);
@@ -181,6 +188,7 @@ export function applyGroup(state, rows, comps, { groupId, dryRun }, now = new Da
     return { ...row, pricePkn: entry.target, ...(entry.activate ? { status: 'active' } : {}) };
   });
   const changed = plan.filter((entry) => Math.abs(entry.target - entry.current) >= 0.01).length;
+  if (!group) return { ...answer, state, rows: nextRows };
   const groups = state.groups.map((entry) => (entry.id === groupId
     ? {
       ...entry,

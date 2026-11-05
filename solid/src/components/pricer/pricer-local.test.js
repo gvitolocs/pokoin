@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { previewComps, previewGroups, previewListings, previewStrategies } from '../../pages/mypokoin-preview-fixture.js';
-import { applyGroup, deleteGroup, deleteStrategy, saveGroup, saveStrategy, snapshot } from './pricer-local.js';
+import { applyPricingLocal, deleteGroup, deleteStrategy, saveGroup, saveStrategy, snapshot } from './pricer-local.js';
 
 const fixture = () => ({ strategies: previewStrategies(), groups: previewGroups().groups, pairs: previewGroups().memberships });
 
@@ -56,7 +56,7 @@ test('strategies: unique names, and a strategy in use is refused', () => {
 test('apply plans with the fixture comps and, when not dry, reprices the rows', () => {
   const state = fixture();
   const rows = previewListings();
-  const dry = applyGroup(state, rows, previewComps(), { groupId: 'preview-group-1', dryRun: true });
+  const dry = applyPricingLocal(state, rows, previewComps(), { groupId: 'preview-group-1', dryRun: true });
   assert.equal(dry.dryRun, true);
   assert.equal(dry.scoped, 3);
   assert.equal('rows' in dry, false);
@@ -65,7 +65,7 @@ test('apply plans with the fixture comps and, when not dry, reprices the rows', 
   assert.deepEqual([pikachu.compPkn, pikachu.askPkn, pikachu.target, pikachu.current], [431.94, 460, 410, 420]);
   const mewtwo = dry.plan.find((entry) => entry.listingId === 'preview-list-3');
   assert.equal(mewtwo.activate, true, 'paused Mewtwo goes on sale');
-  const done = applyGroup(state, rows, previewComps(), { groupId: 'preview-group-1', dryRun: false }, new Date('2026-11-04T10:00:00Z'));
+  const done = applyPricingLocal(state, rows, previewComps(), { groupId: 'preview-group-1', dryRun: false }, new Date('2026-11-04T10:00:00Z'));
   assert.equal(done.applied, dry.plan.length);
   assert.equal(done.rows.find((row) => row.id === 'preview-list-1').pricePkn, 410);
   assert.equal(done.rows.find((row) => row.id === 'preview-list-3').status, 'active');
@@ -73,6 +73,22 @@ test('apply plans with the fixture comps and, when not dry, reprices the rows', 
   assert.equal(group.lastAppliedAt, '2026-11-04T10:00:00.000Z');
   assert.equal(group.lastApplied.trigger, 'manual');
   // Sold median: the fixture has no sold comps, so nothing is guessed.
-  const sold = applyGroup(state, rows, previewComps(), { groupId: 'preview-group-3', dryRun: true });
+  const sold = applyPricingLocal(state, rows, previewComps(), { groupId: 'preview-group-3', dryRun: true });
   assert.deepEqual([sold.plan.length, sold.noComp], [0, 1]);
+});
+
+test('selective apply: a strategy over picked listings, or a group over picked members', () => {
+  const state = fixture();
+  const rows = previewListings();
+  const picked = ['preview-list-1', 'preview-list-5', 'preview-list-8'];
+  const dry = applyPricingLocal(state, rows, previewComps(), { strategyId: 'preview-strategy-1', listingIds: picked, dryRun: true });
+  assert.equal(dry.scoped, 3, 'grouped or not, the picked listings are priced');
+  assert.deepEqual(dry.plan.map((entry) => entry.listingId).sort(), picked.slice().sort());
+  const done = applyPricingLocal(state, rows, previewComps(), { strategyId: 'preview-strategy-1', listingIds: picked, dryRun: false });
+  assert.equal(done.rows.find((row) => row.id === 'preview-list-5').pricePkn, 24);
+  assert.equal(done.rows.find((row) => row.id === 'preview-list-2').pricePkn, 1800, 'other listings keep their price');
+  assert.equal(done.state, state, 'no group is stamped');
+  const groupPart = applyPricingLocal(state, rows, previewComps(), { groupId: 'preview-group-1', listingIds: ['preview-list-1', 'preview-list-4'], dryRun: true });
+  assert.deepEqual(groupPart.plan.map((entry) => entry.listingId), ['preview-list-1'], 'only members of the group');
+  assert.throws(() => applyPricingLocal(state, rows, previewComps(), { strategyId: 'preview-strategy-1', dryRun: true }), /Pick the listings/);
 });

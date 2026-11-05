@@ -20,6 +20,8 @@ import ScanImage from '../ScanImage.jsx';
 import { getBearer } from '../../stores/auth.js';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from '../pricer/NewGroupForm.jsx';
+import PricerPopup from '../pricer/PricerPopup.jsx';
+import { TagIcon } from '../pricer/icons.jsx';
 import {
   allSelected,
   groupFilter,
@@ -192,8 +194,9 @@ function ListingTile(props) {
 
 /**
  * The board's selection: "N selected", select every filtered listing, take
- * them out of their group, or move them into one ("Add to group ▾" menu with
- * a New group mini-form). Moving takes a card out of its old group.
+ * them out of their group, move them into one ("Add to group ▾" menu with a
+ * New group mini-form; moving takes a card out of its old group), or price
+ * them ("Price selected": the pricer pop-up).
  */
 function SelectionBar(props) {
   const pricing = props.pricing;
@@ -268,7 +271,7 @@ function SelectionBar(props) {
       >
         <button
           type="button"
-          class="btn"
+          class="btn ghost"
           aria-haspopup="true"
           aria-expanded={String(menuOpen())}
           disabled={busy()}
@@ -310,6 +313,9 @@ function SelectionBar(props) {
           </div>
         </Show>
       </div>
+      <button type="button" class="btn pricer-price-btn" disabled={busy()} onClick={() => props.onPrice()}>
+        <TagIcon size={18} /> Price selected
+      </button>
     </div>
   );
 }
@@ -357,6 +363,8 @@ export default function InventoryBoard(props) {
   const [selected, setSelected] = createSignal(new Set());
   const [actionLine, setActionLine] = createSignal('');
   const [actionError, setActionError] = createSignal('');
+  // The listings the "Price selected" pop-up prices (null: closed).
+  const [priceIds, setPriceIds] = createSignal(null);
   const memberships = () => props.pricing?.memberships() || new Map();
   const groupName = (row) => {
     const id = memberships().get(String(row?.id ?? ''));
@@ -512,7 +520,7 @@ export default function InventoryBoard(props) {
         <Show when={origins().length > 1}>
           <select class="inv-select" value={origin()} onChange={(event) => setOrigin(event.target.value)} aria-label="Source">
             <option value="">Any source</option>
-            <For each={origins()}>{(entry) => <option value={entry.id}>{`${entry.label} (${entry.count})`}</option>}</For>
+            <For each={origins()} keyed={(entry) => entry.id}>{(entry) => <option value={entry().id}>{`${entry().label} (${entry().count})`}</option>}</For>
           </select>
         </Show>
         <Show when={props.pricing?.groups().length}>
@@ -566,7 +574,28 @@ export default function InventoryBoard(props) {
             setSelected(new Set());
             setActionLine(line);
           }}
+          onPrice={() => {
+            setActionLine('');
+            setPriceIds([...selected()]);
+          }}
         />
+      </Show>
+      <Show when={props.pricing && priceIds()}>
+        {(ids) => (
+          <PricerPopup
+            mode="board"
+            count={ids().length}
+            listingIds={ids()}
+            pricing={props.pricing}
+            strategies={props.pricing.strategies()}
+            groups={props.pricing.groups()}
+            onApplied={() => {
+              setSelected(new Set());
+              props.onApplied?.();
+            }}
+            onClose={() => setPriceIds(null)}
+          />
+        )}
       </Show>
       <Alert>{actionError()}</Alert>
       <Show when={actionLine()}><p class="ct-connect-ok pricer-result-line" role="status">{actionLine()}</p></Show>

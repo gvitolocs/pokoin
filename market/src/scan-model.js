@@ -264,9 +264,10 @@ export function stackKey(row = {}) {
 }
 
 /**
- * Same reasons as `scan_connect::submit_problem`. `priced`: the batch names a
- * pricing group or strategy, so a row with no price is listed paused and
- * priced on load instead of blocking the submit.
+ * Same reasons as `scan_connect::submit_problem`. `priced`: the row is priced
+ * on load (its own pricing choice, else the batch's group or strategy), so
+ * with no price it is listed paused instead of blocking the submit. A boolean
+ * for every row, or `(row) => boolean` per row.
  */
 export function rowProblem(row, { intent = 'list', priced = false } = {}) {
   if (!row || row.status !== 'active') return '';
@@ -275,7 +276,7 @@ export function rowProblem(row, { intent = 'list', priced = false } = {}) {
     return 'needs_review';
   }
   if (row.graded && (!row.gradingCompany || !row.grade)) return 'grading_incomplete';
-  if (intent !== 'collection' && !priced) {
+  if (intent !== 'collection' && !(typeof priced === 'function' ? priced(row) : priced)) {
     const price = Number(row.pricePkn);
     if (row.pricePkn == null || !Number.isFinite(price) || price <= 0) return 'no_price';
   }

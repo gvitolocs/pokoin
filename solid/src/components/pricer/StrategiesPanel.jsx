@@ -1,11 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import {
-  DEFAULT_STRATEGY,
   isAllExact,
   MATCH_ANY,
   MATCH_EXACT,
   nameProblem,
-  normalizeStrategy,
   PRICER_ACTIONS,
   PRICER_BASES,
   PRICER_MATCHES,
@@ -14,11 +12,16 @@ import {
   strategySummary,
 } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
-import { exampleLead, exampleSteps, NO_OFFER, uniqueCopyName, usedByLine } from './pricer-ui.js';
+import {
+  draftChanged,
+  exampleLead,
+  exampleSteps,
+  NO_OFFER,
+  strategyDraft,
+  uniqueCopyName,
+  usedByLine,
+} from './pricer-ui.js';
 
-const blank = () => ({ ...DEFAULT_STRATEGY, match: { ...DEFAULT_STRATEGY.match } });
-/** A stored strategy in the editor: every field, the name as typed. */
-const editable = (strategy) => ({ ...normalizeStrategy(strategy), name: String(strategy?.name || '') });
 const numberInput = (value) => (value === '' ? '' : Number(value));
 
 /**
@@ -29,7 +32,12 @@ export default function StrategiesPanel(props) {
   const pricing = props.pricing;
   const first = untrack(() => pricing.strategies()[0] || null);
   const [selectedId, setSelectedId] = createSignal(first?.id || '');
-  const [draft, setDraft] = createSignal(editable(first || blank()));
+  const [draft, setDraft] = createSignal(strategyDraft(first));
+  // What the draft was opened as: the saved strategy, or the empty form for
+  // a new one (a duplicate is new, so it starts unsaved).
+  const [baseline, setBaseline] = createSignal(strategyDraft(first));
+  // A strategy (or 'new' / 'back') waiting for "Discard and open" while the draft is unsaved.
+  const [pending, setPending] = createSignal(null);
   const [touched, setTouched] = createSignal(false);
   const [busy, setBusy] = createSignal('');
   const [error, setError] = createSignal('');
@@ -39,14 +47,47 @@ export default function StrategiesPanel(props) {
   const usedBy = () => stored()?.groupNames || [];
   const problem = () => nameProblem(draft().name, draft().id, pricing.strategies(), 'strategy');
   const example = createMemo(() => exampleSteps(draft(), props.exampleComp));
+  const unsaved = createMemo(() => draftChanged(draft(), baseline()));
 
   function open(strategy) {
     setSelectedId(strategy?.id || '');
-    setDraft(editable(strategy || blank()));
+    setDraft(strategyDraft(strategy));
+    setBaseline(strategyDraft(strategy));
+    setPending(null);
     setTouched(false);
     setError('');
     setSaved('');
   }
+
+  /** Open another strategy, a new one, or go back; with unsaved edits, ask first. */
+  function leaveTo(target) {
+    if (unsaved()) {
+      setPending({ target });
+      return;
+    }
+    go(target);
+  }
+
+  function go(target) {
+    if (target === 'back') {
+      setPending(null);
+      props.onBack?.();
+    } else open(target === 'new' ? null : target);
+  }
+
+  function discard() {
+    setDraft(baseline());
+    setPending(null);
+    setTouched(false);
+    setError('');
+  }
+
+  const pendingName = () => {
+    const target = pending()?.target;
+    if (target === 'back') return 'go back to the pricing groups';
+    if (target === 'new') return 'start a new strategy';
+    return `open “${target?.name || 'that strategy'}”`;
+  };
 
   // Opened before the strategies arrived: show the first one once they do.
   createEffect(() => pricing.strategies()[0]?.id || '', (id) => {
@@ -63,6 +104,8 @@ export default function StrategiesPanel(props) {
     const copy = { ...draft(), id: '', name: uniqueCopyName(draft().name, pricing.strategies()) };
     setSelectedId('');
     setDraft(copy);
+    setBaseline(strategyDraft(null));
+    setPending(null);
     setTouched(true);
     setSaved('');
     setError('');
@@ -77,7 +120,9 @@ export default function StrategiesPanel(props) {
       const id = await pricing.saveStrategy(draft());
       const next = pricing.strategies().find((entry) => entry.id === id);
       setSelectedId(id);
-      setDraft(editable(next || { ...draft(), id }));
+      setDraft(strategyDraft(next || { ...draft(), id }));
+      setBaseline(strategyDraft(next || { ...draft(), id }));
+      setPending(null);
       setTouched(false);
       setSaved('Saved.');
     } catch (err) {
@@ -105,13 +150,13 @@ export default function StrategiesPanel(props) {
 
   return (
     <div class="pricer-tab pricer-strategies">
-      <button type="button" class="pricer-back" onClick={() => props.onBack?.()}>← Pricing groups</button>
+      <button type="button" class="pricer-back" onClick={() => leaveTo('back')}>← Pricing groups</button>
       <div class="mypokoin-panel-head">
         <div>
           <h2>Strategies</h2>
           <p class="mypokoin-help">A strategy is a named rule for how to price. Groups and batch uploads pick one by name.</p>
         </div>
-        <button type="button" class="btn" onClick={() => open(null)}>New strategy</button>
+        <button type="button" class="btn" onClick={() => leaveTo('new')}>New strategy</button>
       </div>
       <Alert>{pricing.error()}</Alert>
 
@@ -129,7 +174,7 @@ export default function StrategiesPanel(props) {
                       type="button"
                       class={['pricer-group-item', { on: entry().id === selectedId() && entry().id === draft().id }]}
                       aria-pressed={String(entry().id === selectedId() && entry().id === draft().id)}
-                      onClick={() => open(entry())}
+                      onClick={() => (entry().id === draft().id ? undefined : leaveTo(entry()))}
                     >
                       <strong>{entry().name}</strong>
                       <span class="pricer-group-sub">{entry().summary || strategySummary(entry())}</span>
@@ -143,7 +188,23 @@ export default function StrategiesPanel(props) {
         </div>
 
         <section class="mypokoin-card pricer-panel" aria-label="Edit strategy">
-          <h3 class="pricer-editor-title">{draft().id ? 'Edit strategy' : 'New strategy'}</h3>
+          <div class="pricer-editor-head">
+            <h3 class="pricer-editor-title">{draft().id ? 'Edit strategy' : 'New strategy'}</h3>
+            <Show when={unsaved()}>
+              <span class="pricer-unsaved" role="status">Unsaved changes</span>
+            </Show>
+          </div>
+          <Show when={pending()}>
+            <div class="pricer-confirm-leave" role="alertdialog" aria-label="Unsaved changes">
+              <p>
+                “{draft().name.trim() || 'This strategy'}” has unsaved changes. Discard them and {pendingName()}?
+              </p>
+              <div class="pricer-form-actions">
+                <button type="button" class="btn pricer-danger" onClick={() => go(pending().target)}>Discard and continue</button>
+                <button type="button" class="btn ghost" onClick={() => setPending(null)}>Keep editing</button>
+              </div>
+            </div>
+          </Show>
           <label class="ps-field pricer-name-field">
             <span>Name</span>
             <input
@@ -313,6 +374,10 @@ export default function StrategiesPanel(props) {
               </button>
             </Show>
             <button type="button" class="btn ghost" disabled={Boolean(busy())} onClick={duplicate}>Duplicate</button>
+            <Show when={unsaved()}>
+              <button type="button" class="btn ghost" disabled={Boolean(busy())} onClick={discard}>Discard</button>
+              <span class="pricer-unsaved">Unsaved changes</span>
+            </Show>
             <button type="button" class="btn" disabled={Boolean(busy()) || (touched() && Boolean(problem()))} onClick={save}>
               {busy() === 'save' ? 'Saving…' : 'Save'}
             </button>

@@ -211,7 +211,13 @@ function CandidateAlts(props) {
 const FLAG_FIELDS = ['firstEdition', 'signed', 'altered'];
 const FLAG_SHORT = { firstEdition: '1st', signed: 'S', altered: 'A' };
 
-/** One queue row. `row` is the live row; `priceOnLoad`: the batch has pricing. */
+/**
+ * One queue row. `row` is the live row; `priceOnLoad`: the row is priced when
+ * the batch loads (its own pricing choice, else the batch's). `picked` /
+ * `onTogglePick`: the row's checkbox (rows to price together);
+ * `pricingChip` (`{ label, kind }`) / `onPricingChip`: the row's pricing
+ * choice under the price, opening the pricer pop-up for this row.
+ */
 export function QueueRow(props) {
   const row = () => props.row;
   const unpricedOnLoad = () => Boolean(props.priceOnLoad) && !(Number(row().pricePkn) > 0);
@@ -249,7 +255,7 @@ export function QueueRow(props) {
 
   return (
     <div
-      class={['scan-row', { focused: props.focused, selected: props.selected, done: row().status === 'submitted' }]}
+      class={['scan-row', { focused: props.focused, selected: props.selected, picked: props.picked, done: row().status === 'submitted' }]}
       role="row"
       aria-selected={String(Boolean(props.focused || props.selected))}
       data-row={row().id}
@@ -258,7 +264,20 @@ export function QueueRow(props) {
         props.onFocus(event);
       }}
     >
-      <span class="c-num">{props.index + 1}</span>
+      <span class="c-num">
+        <Show when={props.onTogglePick} fallback={props.index + 1}>
+          <label class="c-pick">
+            <input
+              type="checkbox"
+              tabindex={-1}
+              checked={Boolean(props.picked)}
+              aria-label={`Select ${row().cardName || 'row'} for pricing`}
+              onChange={() => props.onTogglePick()}
+            />
+            <span>{props.index + 1}</span>
+          </label>
+        </Show>
+      </span>
       <span class="c-identity">
         <span
           class="c-art"
@@ -427,8 +446,9 @@ export function QueueRow(props) {
               // as the placeholder: leaving the field empty keeps it.
               // With batch pricing an unpriced row is priced when the batch loads.
               class={{ 'price-on-load': unpricedOnLoad() }}
+              // The thin space keeps the italic "d" inside the right-aligned field.
               placeholder={unpricedOnLoad()
-                ? 'on load'
+                ? 'on load\u2009'
                 : row().priceSuggested && row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
               onFocus={(e) => {
                 // Clicking in is the only thing that empties a suggested price;
@@ -450,6 +470,24 @@ export function QueueRow(props) {
                 if (e.key === 'Enter') e.currentTarget.blur();
               }}
             />
+          </Show>
+          <Show when={props.pricingChip}>
+            {(chip) => (
+              <button
+                type="button"
+                class={['c-pricing-chip', `is-${chip().kind}`]}
+                tabindex={-1}
+                disabled={props.closed}
+                title={chip().kind === 'own' ? 'This row’s own pricing · change it' : chip().kind === 'none' ? 'No pricing for this row · change it' : 'Batch default · change it for this row'}
+                aria-label={`Pricing: ${chip().label}. Change it for this row`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.onPricingChip?.();
+                }}
+              >
+                {chip().label}
+              </button>
+            )}
           </Show>
         </span>
       </Show>

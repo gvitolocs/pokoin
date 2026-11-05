@@ -20,6 +20,10 @@ import {
   SAMPLE_COMP,
   selectionState,
   selectRows,
+  showsSwitches,
+  strategyDraft,
+  draftChanged,
+  strategyTile,
   toggleSelected,
   unchangedMembers,
   unchangedMarket,
@@ -177,7 +181,7 @@ test('the board and the Pricer tab share one pricing store from the desk', () =>
   const desk = read('../../pages/Inventory.jsx');
   assert.match(desk, /const pricing = createPricing\(/);
   assert.match(desk, /<PricerTab\s+pricing=\{pricing\}/);
-  assert.match(desk, /pricing=\{pricing\}\s+\/>/);
+  assert.match(desk, /pricing=\{pricing\}\s+onApplied=/);
   const board = read('../inventory/InventoryBoard.jsx');
   assert.doesNotMatch(board, /Pricer[D]ialog|Pricer…/);
   assert.match(board, /aria-label="Group"/);
@@ -210,4 +214,50 @@ test('a change hides the old plan in the same flush: the plan is keyed, not clea
   const tab = read('./PricerTab.jsx');
   assert.match(tab, /state && state\.key === planKey\(\) \? state\[field\] : null/);
   assert.doesNotMatch(tab, /setPlan\(null\)/);
+});
+
+test('strategy tiles: action icon, source, rule chips and switch chips', () => {
+  const exact = { condition: true, language: true, finish: true, firstEdition: true };
+  const undercut = { source: 'cardtrader', basis: 'offers', match: exact, feeExclusive: true, action: 'undercut', amountPct: 5, rounding: 'integer', minPkn: 1 };
+  assert.deepEqual(strategyTile(undercut), {
+    icon: 'undercut', source: 'CardTrader', sold: false, rules: ['−5%', 'whole PKN', 'min 1', 'net of fees'], switches: ['All exact'], allExact: true,
+  });
+  const language = strategyTile({ ...undercut, match: { condition: true, language: true, finish: false, firstEdition: false }, action: 'match', feeExclusive: false, minPkn: 0, rounding: 'none' });
+  assert.deepEqual([language.icon, language.rules, language.switches, language.allExact], ['match', ['Match', 'CardTrader ask'], ['Condition', 'Language'], false]);
+  const any = strategyTile({ ...undercut, match: { condition: false, language: false, finish: false, firstEdition: false } });
+  assert.deepEqual(any.switches, ['Any copy']);
+  const sold = strategyTile({ source: 'cardtrader', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 2, rounding: 'up', minPkn: 0 });
+  assert.deepEqual([sold.icon, sold.sold, sold.rules, sold.switches], ['premium', true, ['+10% + 2 PKN', 'round up', 'net of fees'], []]);
+  const pokoin = strategyTile({ source: 'pokoin', basis: 'offers', action: 'undercut', amountPct: 0, amountPkn: 3 });
+  assert.deepEqual([pokoin.source, pokoin.rules, pokoin.switches], ['Pokoin', ['− 3 PKN'], ['Cheapest Pokoin ask']]);
+});
+
+test('the editor opens every strategy shape with the right switches', () => {
+  const on = { condition: true, language: true, finish: true, firstEdition: true };
+  const off = { condition: false, language: false, finish: false, firstEdition: false };
+  assert.deepEqual(strategyDraft({ id: 's1', name: 'Old exact', basis: 'matched' }).match, on);
+  assert.equal(strategyDraft({ id: 's1', basis: 'matched' }).basis, 'offers');
+  assert.deepEqual(strategyDraft({ id: 's2', name: 'Old cheapest', basis: 'cheapest' }).match, off);
+  assert.deepEqual(strategyDraft({ id: 's3', name: 'Bare' }).match, on);
+  const partial = { condition: true, language: true, finish: false, firstEdition: false };
+  assert.deepEqual(strategyDraft({ id: 's4', basis: 'offers', match: partial }).match, partial);
+  const sold = strategyDraft({ id: 's5', basis: 'sold', match: { ...off, language: true } });
+  assert.deepEqual([sold.basis, sold.match], ['sold', { ...off, language: true }]);
+  assert.equal(showsSwitches(sold), false);
+  assert.equal(showsSwitches(strategyDraft({ basis: 'offers', source: 'pokoin' })), false);
+  assert.equal(showsSwitches(strategyDraft({ basis: 'offers', match: partial })), true);
+  assert.equal(strategyDraft({ name: '  Spaced  ' }).name, '  Spaced  ', 'the name as typed');
+  assert.deepEqual(strategyDraft(null).match, on, 'a new strategy starts all exact');
+});
+
+test('draftChanged: false for a freshly opened strategy, true after one switch flips', () => {
+  const stored = { id: 's1', name: 'Undercut 5%', source: 'cardtrader', basis: 'offers', action: 'undercut', amountPct: 5, rounding: 'integer', minPkn: 1, activatePaused: true };
+  const draft = strategyDraft(stored);
+  assert.equal(draftChanged(draft, strategyDraft(stored)), false);
+  assert.equal(draftChanged(draft, stored), false, 'against the stored shape too');
+  assert.equal(draftChanged({ ...draft, match: { ...draft.match, finish: false } }, stored), true);
+  assert.equal(draftChanged({ ...draft, amountPct: 6 }, stored), true);
+  assert.equal(draftChanged({ ...draft, name: 'Undercut 5% ' }, stored), false, 'trailing spaces are not a change');
+  assert.equal(draftChanged({ ...draft, name: 'Undercut 6%' }, stored), true);
+  assert.equal(draftChanged(strategyDraft(null), strategyDraft(null)), false);
 });

@@ -347,3 +347,14 @@ test('merged quantity growth shifts the following slots; submitted rows still co
   assert.equal(next.box1.stack, 6);
   assert.equal(next.box1.startPosition, 1);
 });
+
+test('priced can be decided per row (a row\'s own pricing choice)', () => {
+  const ready = { status: 'active', cardId: '1', recognitionState: 'matched', quantity: 1 };
+  const own = { ...ready, id: 'a', pricing: { strategyId: 's1' } };
+  const none = { ...ready, id: 'b', pricing: { none: true } };
+  const priced = (row) => Boolean(row.pricing?.strategyId);
+  assert.equal(rowProblem(own, { priced }), '');
+  assert.equal(rowProblem(none, { priced }), 'no_price');
+  const counts = batchCounts({ a: own, b: none }, { priced });
+  assert.deepEqual([counts.noPrice, counts.ready], [1, false]);
+});

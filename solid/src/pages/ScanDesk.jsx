@@ -7,6 +7,7 @@ import {
   fetchExactNameCards,
   fetchPricingStrategies,
   fetchSellerBoxSlots,
+  savePricingGroup,
   imageSrc,
 } from '@market/api.js';
 import {
@@ -57,7 +58,19 @@ import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
 import { claimRows, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
-import { batchHasPricing, pricingApplyBody, pricingFailedLine, pricingResultLine } from './scan-desk/pricing.js';
+import {
+  pricingApplyBodies,
+  pricingChoiceValue,
+  pricingFailedLine,
+  pricingResultLine,
+  rowIsPriced,
+  rowOwnPricing,
+  rowPricingChip,
+  rowPricingPatch,
+  sumPricingAnswers,
+} from './scan-desk/pricing.js';
+import PricerPopup from '../components/pricer/PricerPopup.jsx';
+import { TagIcon } from '../components/pricer/icons.jsx';
 import { allowScanPreview, previewScanDesk, SCAN_PREVIEW_BANNER, SCAN_PREVIEW_ERROR } from './scan-desk/preview-fixture.js';
 import {
   FIELD_LABEL,
@@ -105,6 +118,10 @@ function ScanDeskDesk(props) {
   const [error, setError] = createSignal('');
   const [focusId, setFocusId] = createSignal('');
   const [selection, setSelection] = createSignal(new Set());
+  /** Rows ticked to price together ("Price selected"); separate from the shift-range selection. */
+  const [picked, setPicked] = createSignal(new Set());
+  /** Row ids the pricer pop-up sets a pricing choice for (null: closed). */
+  const [pricingFor, setPricingFor] = createSignal(null);
   const [toasts, setToasts] = createSignal([]);
   const [stackFull, setStackFull] = createSignal(false);
   let stackFullTimer = null;
@@ -322,9 +339,9 @@ function ScanDeskDesk(props) {
   const occupiedAbs = createMemo(() => occupiedAbsForScanBoxes(list(), boxStockRows()));
   const slots = createMemo(() => boxSlots(list(), { occupiedAbs: occupiedAbs() }));
   const defaults = () => batch()?.defaults || DEFAULTS;
-  /** Listing with a pricing group or strategy: unpriced rows are priced on load. */
-  const batchPriced = () => submitIntent() === 'list' && batchHasPricing(defaults());
-  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent(), priced: batchPriced() }));
+  /** Listing, and the row's own pricing choice or the batch's names a group or strategy: an unpriced row is priced on load. */
+  const rowPriced = (row) => submitIntent() === 'list' && rowIsPriced(row, defaults());
+  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent(), priced: rowPriced }));
   const phaseInfo = createMemo(() => phaseText(sessionPhase(session(), now(), serverOffset()), session()));
   const closed = () => Boolean(batch() && batch().status !== 'open');
   const stockUid = uid;
@@ -777,6 +794,57 @@ function ScanDeskDesk(props) {
     return row ? [row.id] : [];
   };
 
+  function togglePicked(id) {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** The pricer pop-up's marked tile: the rows' shared own choice, else none marked. */
+  const pricingCurrent = createMemo(() => {
+    const ids = pricingFor();
+    if (!ids?.length) return null;
+    // With in-flight edits: a choice just made marks its tile at once.
+    const live = displayRows();
+    const keys = new Set(ids.map((id) => JSON.stringify(rowOwnPricing(live[id]))));
+    if (keys.size !== 1) return null;
+    const own = rowOwnPricing(live[ids[0]]);
+    if (!own) return { kind: 'batch' };
+    if (own.none) return { kind: 'none' };
+    return own.groupId ? { kind: 'group', id: own.groupId } : { kind: 'strategy', id: own.strategyId };
+  });
+
+  /** "Batch default" tile: the batch's choice by name. */
+  const batchPricingLabel = () => {
+    if (!pricingChoiceValue(defaults())) return 'No pricing';
+    return rowPricingChip({}, defaults(), pricingData()).label;
+  };
+
+  function choosePricing(choice) {
+    const ids = pricingFor() || [];
+    setPricingFor(null);
+    setPicked(new Set());
+    if (ids.length) patchRows(ids, { pricing: rowPricingPatch(choice) }, { label: 'Pricing' });
+  }
+
+  /** "New group…" in the pop-up: the group exists, the Pricing choices list it. */
+  async function createPricingGroup(input) {
+    if (fixture) {
+      const id = `preview-group-${Date.now().toString(36)}`;
+      setPricingData((current) => ({
+        ...current,
+        groups: [...(current?.groups || []), { id, ...input, listingCount: 0, lastAppliedAt: null, lastApplied: null }],
+      }));
+      return id;
+    }
+    const data = await savePricingGroup({ group: input }, await token());
+    await loadPricing();
+    return data.groupId;
+  }
+
   function move(delta) {
     const rowsNow = list();
     if (!rowsNow.length) return;
@@ -984,7 +1052,7 @@ function ScanDeskDesk(props) {
     const row = focused();
     if (!row) return;
     const intent = submitIntent();
-    const problem = rowProblem(row, { intent, priced: batchPriced() });
+    const problem = rowProblem(row, { intent, priced: rowPriced });
     if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed && row.cardId) {
       patchRows([row.id], { confirm: true }, { label: 'Confirm' });
     } else if (problem === 'no_printing') {
@@ -1039,7 +1107,7 @@ function ScanDeskDesk(props) {
         move(cmd.delta);
         return;
       case 'nextAttention': {
-        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent(), priced: batchPriced() });
+        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent(), priced: rowPriced });
         if (i >= 0) setFocusId(list()[i].id);
         return;
       }
@@ -1133,7 +1201,7 @@ function ScanDeskDesk(props) {
       // The confirm dialog's button has focus, so Enter there is a native click.
       const cmd = shortcutFor(event, {
         helpOpen: helpOpen(),
-        modalOpen: confirmOpen() || Boolean(replaceFor()),
+        modalOpen: confirmOpen() || Boolean(replaceFor()) || Boolean(pricingFor()),
         draftActive: Boolean(draft()),
       });
       if (!cmd) return;
@@ -1313,16 +1381,24 @@ function ScanDeskDesk(props) {
       if (data.cardtrader && data.cardtrader.ok === false) {
         setError(data.cardtrader.error || 'Listed on Pokoin; CardTrader push had errors.');
       }
-      // Batch pricing runs once on the created listings; the submit stands
-      // whatever happens here.
-      const pricingBody = pricingApplyBody(data.result);
-      if (pricingBody) {
+      // Pricing runs once per group and once per strategy the rows named
+      // (`rowPricing`); the submit stands whatever happens here.
+      const pricingBodies = pricingApplyBodies(data.result);
+      if (pricingBodies.length) {
         setPricingNote({ text: 'Pricing the new listings…', failed: false });
-        try {
-          setPricingNote({ text: pricingResultLine(await applyPricing(pricingBody, await token())), failed: false });
-        } catch (_) {
-          setPricingNote({ text: pricingFailedLine(pricingBody), failed: true });
+        const answers = [];
+        const failed = [];
+        for (const body of pricingBodies) {
+          try {
+            answers.push(await applyPricing(body, await token()));
+          } catch (_) {
+            failed.push(body);
+          }
         }
+        const lines = [];
+        if (answers.length) lines.push(pricingResultLine(sumPricingAnswers(answers)));
+        if (failed.length) lines.push(pricingFailedLine(failed));
+        setPricingNote({ text: lines.join('. '), failed: failed.length > 0 });
       }
       rememberActiveSession('');
       const snapshot = await scanApi.batch(t, b.id);
@@ -1571,6 +1647,30 @@ function ScanDeskDesk(props) {
         </Show>
       </div>
 
+      <Show when={picked().size && !closed() && submitIntent() === 'list'}>
+        <div class="scan-pick-bar" role="region" aria-label="Rows selected for pricing">
+          <strong>{picked().size} selected</strong>
+          <button type="button" class="btn scan-pick-price" onClick={() => setPricingFor([...picked()])}>
+            <TagIcon size={17} /> Price selected
+          </button>
+          <button type="button" class="btn ghost" onClick={() => setPicked(new Set())}>Clear</button>
+        </div>
+      </Show>
+      <Show when={pricingFor()}>
+        {(ids) => (
+          <PricerPopup
+            mode="rows"
+            count={ids().length}
+            strategies={pricingData()?.strategies || []}
+            groups={pricingData()?.groups || []}
+            current={pricingCurrent()}
+            batchLabel={batchPricingLabel()}
+            onChoose={choosePricing}
+            onCreateGroup={createPricingGroup}
+            onClose={() => setPricingFor(null)}
+          />
+        )}
+      </Show>
       <div
         class={['scan-queue', { 'intent-collection': submitIntent() === 'collection' }]}
         role="grid"
@@ -1579,7 +1679,21 @@ function ScanDeskDesk(props) {
         ref={(el) => { queueEl = el; }}
       >
         <div class="scan-row scan-row-head" role="row">
-          <span role="columnheader">#</span>
+          <span role="columnheader" class="c-num">
+            <Show when={!closed() && submitIntent() === 'list' && list().length} fallback="#">
+              <label class="c-pick">
+                <input
+                  type="checkbox"
+                  tabindex={-1}
+                  aria-label="Select every row for pricing"
+                  checked={list().length > 0 && list().every((row) => picked().has(row.id))}
+                  prop:indeterminate={picked().size > 0 && !list().every((row) => picked().has(row.id))}
+                  onChange={(event) => setPicked(event.currentTarget.checked ? new Set(list().map((row) => row.id)) : new Set())}
+                />
+                <span>#</span>
+              </label>
+            </Show>
+          </span>
           <span role="columnheader" class="c-card-head">Card</span>
           <span role="columnheader">Lang</span>
           <span role="columnheader">Cond</span>
@@ -1607,8 +1721,12 @@ function ScanDeskDesk(props) {
               index={index()}
               focused={row().id === focusId()}
               selected={selection().has(row().id)}
-              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent(), priced: batchPriced() })}
-              priceOnLoad={batchPriced()}
+              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent(), priced: rowPriced })}
+              priceOnLoad={rowPriced(row())}
+              picked={picked().has(row().id)}
+              onTogglePick={!closed() && submitIntent() === 'list' ? () => togglePicked(row().id) : undefined}
+              pricingChip={submitIntent() === 'list' ? rowPricingChip(row(), defaults(), pricingData()) : null}
+              onPricingChip={() => setPricingFor([row().id])}
               image={images()[row().id]}
               closed={closed()}
               hidePrice={submitIntent() === 'collection'}

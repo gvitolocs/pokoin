@@ -87,12 +87,13 @@ export default function StockNav(props) {
       </header>
       <Show when={props.metrics?.length}>
         <div class="mypokoin-metrics">
-          <For each={props.metrics}>
+          {/* Keyed by label: the tiles keep their DOM when only the numbers change. */}
+          <For each={props.metrics} keyed={(metric) => metric.label}>
             {(metric) => (
               <div class="mypokoin-metric">
-                <strong>{metric.value}</strong>
-                <span>{metric.label}</span>
-                <Show when={metric.hint}><small>{metric.hint}</small></Show>
+                <strong>{metric().value}</strong>
+                <span>{metric().label}</span>
+                <Show when={metric().hint}><small>{metric().hint}</small></Show>
               </div>
             )}
           </For>

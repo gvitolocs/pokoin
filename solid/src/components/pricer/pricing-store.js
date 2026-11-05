@@ -132,10 +132,13 @@ export function createPricing(options = {}) {
     await settle(await deletePricingStrategy(id, token));
   }
 
-  /** applyPricing({ groupId, dryRun }). A real apply refreshes groups and the board. */
+  /**
+   * applyPricing({ groupId, listingIds?, dryRun } | { strategyId, listingIds, dryRun }).
+   * A real apply refreshes groups and the board.
+   */
   async function apply(body) {
     if (preview) {
-      const answer = local.applyGroup(previewState, untrack(() => options.rows?.() || []), options.previewComps || {}, body);
+      const answer = local.applyPricingLocal(previewState, untrack(() => options.rows?.() || []), options.previewComps || {}, body);
       if (!body.dryRun) {
         options.setRows?.(answer.rows);
         commitPreview(answer.state);

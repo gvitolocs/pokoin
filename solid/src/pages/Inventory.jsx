@@ -443,6 +443,7 @@ function InventoryDesk(props) {
             preview={props.preview}
             previewComps={props.preview ? previewComps() : undefined}
             pricing={pricing}
+            onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
           />
         </Match>
       </Switch>

@@ -37,7 +37,17 @@ const ROWS = [
  * select's `fetchPricingStrategies` answer.
  */
 export function previewScanDesk(now = Date.now()) {
-  const groups = previewGroups().groups;
+  // As fetchPricingStrategies answers: groups with their card count,
+  // strategies with the groups that use them.
+  const { groups: rawGroups, memberships } = previewGroups();
+  const groups = rawGroups.map((group) => ({
+    ...group,
+    listingCount: memberships.filter(([, groupId]) => groupId === group.id).length,
+  }));
+  const strategies = previewStrategies().map((strategy) => ({
+    ...strategy,
+    groupNames: groups.filter((group) => group.strategyId === strategy.id).map((group) => group.name),
+  }));
   const location = 'box1';
   const items = ROWS.map(([cardId, cardName, setName, collectorNumber, imageUrl, pricePkn], index) => ({
     id: `preview-scan-${index + 1}`,
@@ -98,6 +108,6 @@ export function previewScanDesk(now = Date.now()) {
         image_url: item.imageUrl,
       }],
     }])),
-    pricing: { strategies: previewStrategies(), groups },
+    pricing: { strategies, groups },
   };
 }

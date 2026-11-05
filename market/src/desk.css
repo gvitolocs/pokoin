@@ -5074,3 +5074,365 @@ html.is-pointer-dragging body {
     transition: none;
   }
 }
+
+/* Pricer pop-up ("Price selected"): strategy and group tiles, preview */
+
+.pricer-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 16px 16px;
+  overflow-y: auto;
+  background: rgb(0 0 0 / 0.62);
+}
+
+.pricer-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 100%);
+  max-height: 88vh;
+  border: 1px solid var(--g5);
+  border-radius: 18px;
+  background: #121118;
+  color: var(--text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
+}
+
+.pricer-modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--g4);
+}
+
+.pricer-modal-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgb(255 211 61 / 0.12);
+  color: var(--yellow);
+}
+
+.pricer-modal-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pricer-modal-title h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.pricer-modal-lede {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.pricer-icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pricer-icon-btn:hover {
+  background: var(--g2);
+}
+
+.pricer-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+}
+
+.pricer-modal-section {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.pricer-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.pricer-tile-grid.is-compact {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.pricer-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 44px;
+  padding: 12px 14px;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #0f0e13;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.pricer-tile:hover:not(:disabled) {
+  border-color: var(--yellow);
+  background: var(--g2);
+}
+
+.pricer-tile:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.pricer-tile.on {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.08);
+}
+
+.pricer-tile:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pricer-tile.is-new {
+  border-style: dashed;
+}
+
+.pricer-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.pricer-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--yellow);
+}
+
+.pricer-tile-icon.is-undercut {
+  color: #7ed957;
+}
+
+.pricer-tile-icon.is-premium {
+  color: #ff9f6b;
+}
+
+.pricer-source {
+  padding: 2px 8px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pricer-tile-name {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.pricer-tile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pricer-tile-chips:empty {
+  display: none;
+}
+
+.pricer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--g3);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.pricer-chip.is-switch {
+  border: 1px solid var(--g5);
+  background: transparent;
+  color: var(--muted);
+}
+
+.pricer-chip.is-exact {
+  border-color: rgb(255 211 61 / 0.5);
+  background: rgb(255 211 61 / 0.1);
+  color: var(--yellow);
+}
+
+.pricer-tile-meta,
+.pricer-tile-used {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pricer-popup-form {
+  padding: 12px;
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+}
+
+.pricer-popup-form .ps-field input,
+.pricer-popup-form .ps-field select {
+  min-height: 44px;
+}
+
+.pricer-popup-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pricer-popup-counts {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pricer-popup-counts strong {
+  color: var(--yellow);
+  font-size: 1.1em;
+}
+
+.pricer-on-sale {
+  color: #7ed957;
+}
+
+.pricer-popup-actions {
+  justify-content: flex-end;
+}
+
+.pricer-popup-actions .btn,
+.pricer-price-btn,
+.scan-pick-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+
+@media (max-width: 480px) {
+  .pricer-modal-backdrop {
+    padding: 0;
+  }
+
+  .pricer-modal {
+    width: 100%;
+    max-height: none;
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .pricer-modal-head {
+    padding: 12px 12px 10px;
+  }
+
+  .pricer-modal-body {
+    padding: 12px;
+  }
+
+  .pricer-tile-grid,
+  .pricer-tile-grid.is-compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pricer-popup-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pricer-tile {
+    transition: none;
+  }
+}
+
+/* Strategy editor: unsaved edits */
+
+.pricer-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.pricer-unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgb(255 173 77 / 0.55);
+  border-radius: 999px;
+  background: rgb(255 173 77 / 0.1);
+  color: #ffad4d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pricer-unsaved::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pricer-confirm-leave {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgb(255 173 77 / 0.55);
+  border-radius: 12px;
+  background: rgb(255 173 77 / 0.08);
+}
+
+.pricer-confirm-leave p {
+  margin: 0;
+  font-size: 0.9rem;
+}

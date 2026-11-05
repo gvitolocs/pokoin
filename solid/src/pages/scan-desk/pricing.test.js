@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   batchHasPricing,
-  pricingApplyBody,
+  effectiveRowPricing,
+  pricingApplyBodies,
   pricingChoicePatch,
   pricingChoiceValue,
   pricingFailedLine,
   pricingHint,
   pricingOptions,
   pricingResultLine,
+  rowIsPriced,
+  rowOwnPricing,
+  rowPricingChip,
+  rowPricingPatch,
+  sumPricingAnswers,
 } from './pricing.js';
 
 test('select value and defaults patch round-trip', () => {
@@ -48,12 +54,48 @@ test('hint names the group only for a group', () => {
   );
 });
 
-test('apply body comes from the submit result', () => {
+test('apply bodies: one per group with every listing that joined it, one per strategy for unpriced rows', () => {
+  const rowPricing = [
+    { listingId: 'l1', itemId: 'i1', priced: false, groupId: 'g1' },
+    { listingId: 'l2', itemId: 'i2', priced: true, groupId: 'g1' },
+    { listingId: 'l3', itemId: 'i3', priced: false, strategyId: 's1' },
+    { listingId: 'l4', itemId: 'i4', priced: true, strategyId: 's1' },
+    { listingId: 'l5', itemId: 'i5', priced: false, strategyId: 's2' },
+    { listingId: null, itemId: 'i6', priced: false, groupId: 'g1' },
+  ];
+  assert.deepEqual(pricingApplyBodies({ rowPricing }), [
+    { groupId: 'g1', listingIds: ['l1', 'l2'] },
+    { strategyId: 's1', listingIds: ['l3'] },
+    { strategyId: 's2', listingIds: ['l5'] },
+  ]);
+  assert.deepEqual(pricingApplyBodies({ rowPricing: [{ listingId: 'l4', priced: true, strategyId: 's1' }] }), []);
+  // An answer from before rowPricing: the batch's choice over every created listing.
   const created = [{ listingId: 'l1' }, { listingId: null }, { listingId: 'l2' }];
-  assert.deepEqual(pricingApplyBody({ pricing: { groupId: 'g1' }, created }), { groupId: 'g1', listingIds: ['l1', 'l2'] });
-  assert.deepEqual(pricingApplyBody({ pricing: { strategyId: 's1' }, created }), { strategyId: 's1', listingIds: ['l1', 'l2'] });
-  assert.equal(pricingApplyBody({ pricing: null, created }), null);
-  assert.equal(pricingApplyBody({ pricing: { groupId: 'g1' }, created: [] }), null);
+  assert.deepEqual(pricingApplyBodies({ pricing: { groupId: 'g1' }, created }), [{ groupId: 'g1', listingIds: ['l1', 'l2'] }]);
+  assert.deepEqual(pricingApplyBodies({ pricing: null, created }), []);
+  assert.deepEqual(sumPricingAnswers([{ applied: 2, activated: 1, noComp: 0, failed: [] }, { applied: 1, activated: 1, noComp: 2, failed: [{ listingId: 'x' }] }]),
+    { applied: 3, activated: 2, noComp: 2, failed: [{ listingId: 'x' }] });
+});
+
+test('a row is priced by its own choice, else the batch default; none opts out', () => {
+  const batch = { pricingGroupId: 'g1' };
+  assert.equal(rowOwnPricing({ pricing: null }), null);
+  assert.deepEqual(rowOwnPricing({ pricing: { strategyId: ' s1 ' } }), { strategyId: 's1' });
+  assert.deepEqual(rowOwnPricing({ pricing: { none: true, groupId: 'g1' } }), { none: true });
+  assert.deepEqual(effectiveRowPricing({}, batch), { groupId: 'g1' });
+  assert.deepEqual(effectiveRowPricing({ pricing: { strategyId: 's1' } }, batch), { strategyId: 's1' });
+  assert.equal(effectiveRowPricing({ pricing: { none: true } }, batch), null);
+  assert.equal(rowIsPriced({}, {}), false);
+  assert.equal(rowIsPriced({ pricing: { strategyId: 's1' } }, {}), true);
+  const data = { strategies: [{ id: 's1', name: 'Undercut 5%' }], groups: [{ id: 'g1', name: 'Bulk', strategyId: 's1' }] };
+  assert.deepEqual(rowPricingChip({}, batch, data), { label: 'Bulk', kind: 'batch' });
+  assert.deepEqual(rowPricingChip({ pricing: { strategyId: 's1' } }, batch, data), { label: 'Undercut 5%', kind: 'own' });
+  assert.deepEqual(rowPricingChip({ pricing: { none: true } }, batch, data), { label: 'None', kind: 'none' });
+  assert.deepEqual(rowPricingChip({}, {}, data), { label: 'No pricing', kind: 'batch' });
+  assert.equal(rowPricingPatch({ kind: 'batch' }), null);
+  assert.deepEqual(rowPricingPatch({ kind: 'none' }), { none: true });
+  assert.deepEqual(rowPricingPatch({ kind: 'group', id: 'g1' }), { groupId: 'g1' });
+  assert.deepEqual(rowPricingPatch({ kind: 'strategy', id: 's1' }), { strategyId: 's1' });
 });
 
 test('result and failure lines', () => {
@@ -62,6 +104,6 @@ test('result and failure lines', () => {
     'Priced 3 cards · 2 put on sale · 1 has no market price',
   );
   assert.equal(pricingResultLine({ applied: 1, activated: 0, noComp: 4, failed: [{}] }), 'Priced 1 card · 0 put on sale · 4 have no market price · 1 failed');
-  assert.equal(pricingFailedLine({ groupId: 'g1' }), 'Pricing failed. They are in the group and can be priced from the Pricer tab.');
-  assert.equal(pricingFailedLine({ strategyId: 's1' }), 'Pricing failed. Unpriced cards are paused and can be priced from the Pricer tab.');
+  assert.equal(pricingFailedLine([{ groupId: 'g1' }]), 'Pricing failed for 1 choice. Cards in a group stay there and can be priced from the Pricer tab.');
+  assert.equal(pricingFailedLine([{ strategyId: 's1' }, { strategyId: 's2' }]), 'Pricing failed for 2 choices. Unpriced cards are paused and can be priced from the Pricer tab.');
 });

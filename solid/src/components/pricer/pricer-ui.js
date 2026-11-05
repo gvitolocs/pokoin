@@ -4,6 +4,8 @@
  */
 // Relative, not @market: node --test loads this module without Vite's alias.
 import {
+  DEFAULT_STRATEGY,
+  isAllExact,
   matchKey,
   normalizeStrategy,
   PRICER_MATCHES,
@@ -259,4 +261,78 @@ export function appliedLine(answer) {
   if (activated) parts.push(`put ${activated} on sale`);
   if (failed) parts.push(`${failed} failed`);
   return `${parts.join(' · ')}.`;
+}
+
+const SWITCH_CHIP = { condition: 'Condition', language: 'Language', finish: 'Finish', firstEdition: '1st ed.' };
+const ROUNDING_CHIP = { integer: 'whole PKN', down: 'round down', up: 'round up' };
+
+/**
+ * What a strategy tile in the pricer pop-up shows (Pokoin and Card Rails
+ * draw the same tile from it): `icon` the action ('match' "=", 'undercut'
+ * arrow down, 'premium' arrow up), `source` the market's name, `sold` for a
+ * sold-median strategy (calendar), `rules` the rule chips, and `switches`
+ * the CardTrader offer switches: "All exact", the ones that are on, or
+ * "Any copy" (`allExact` styles the first).
+ */
+export function strategyTile(input) {
+  const strategy = normalizeStrategy(input);
+  const pct = num(strategy.amountPct);
+  const flat = num(strategy.amountPkn);
+  const rules = [];
+  if (strategy.action === 'undercut') {
+    rules.push([strategy.amountPct > 0 ? `−${pct}%` : '', strategy.amountPkn > 0 ? `− ${flat} PKN` : ''].filter(Boolean).join(' ') || 'Undercut');
+  } else if (strategy.action === 'premium') {
+    rules.push([strategy.amountPct > 0 ? `+${pct}%` : '', strategy.amountPkn > 0 ? `+ ${flat} PKN` : ''].filter(Boolean).join(' ') || 'Above');
+  } else {
+    rules.push('Match');
+  }
+  if (ROUNDING_CHIP[strategy.rounding]) rules.push(ROUNDING_CHIP[strategy.rounding]);
+  if (strategy.minPkn > 0) rules.push(`min ${num(strategy.minPkn)}`);
+  const cardtrader = strategy.source === 'cardtrader';
+  if (cardtrader) rules.push(strategy.feeExclusive ? 'net of fees' : 'CardTrader ask');
+  const sold = strategy.basis === 'sold';
+  let switches = [];
+  if (!sold && cardtrader) {
+    if (isAllExact(strategy.match)) switches = ['All exact'];
+    else {
+      switches = Object.keys(SWITCH_CHIP).filter((id) => strategy.match[id]).map((id) => SWITCH_CHIP[id]);
+      if (!switches.length) switches = ['Any copy'];
+    }
+  } else if (!sold) {
+    switches = ['Cheapest Pokoin ask'];
+  }
+  return {
+    icon: strategy.action,
+    source: cardtrader ? 'CardTrader' : 'Pokoin',
+    sold,
+    rules,
+    switches,
+    allExact: !sold && cardtrader && isAllExact(strategy.match),
+  };
+}
+
+/**
+ * A strategy as the editor opens it: every field as the server reads it
+ * (`normalizeStrategy`: a saved `match`, else the old basis — 'cheapest'
+ * all off, 'matched' or none all on), the name as typed. No strategy: the
+ * new-strategy form (`DEFAULT_STRATEGY`).
+ */
+export function strategyDraft(strategy) {
+  const source = strategy || { ...DEFAULT_STRATEGY, match: { ...DEFAULT_STRATEGY.match } };
+  return { ...normalizeStrategy(source), name: String(source.name || '') };
+}
+
+const comparable = (draft) => {
+  const { id: _id, ...rest } = normalizeStrategy(draft);
+  return JSON.stringify(rest);
+};
+
+/** The draft differs from what it was opened as (any field, the switches included). */
+export function draftChanged(draft, saved) {
+  return comparable(draft) !== comparable(saved);
+}
+
+/** The editor shows the offer switches: CardTrader current offers only. */
+export function showsSwitches(draft) {
+  return draft?.basis !== 'sold' && draft?.source !== 'pokoin';
 }
