@@ -153,31 +153,73 @@ Listing €0.13 instead (the old push) nets 11.78 c = 24 PKN: 2 PKN short.
 - The integer core (PKN, basis points, 10⁻⁸ PKN) is proved with Verus:
   `pokoin-rust/verus/README.md`.
 
-## The Pricer (Listings toolbar)
+## The Pricer (MyPokoin → Pricer, rebuilt 2026-11-04)
 
-**Pricer…** on the Listings board opens a dialog on the same saved
-strategies as the Pricing page (`users/{uid}` `pricingStrategies`, through
-`/api/pricing-strategies`), not a second model:
+The seller picks listings into **pricing groups**, and each group is priced
+by one **named strategy**.
 
-- **Source**: CardTrader, or Pokoin (the cheapest Pokoin ask, else the sold
-  median). eBay and TCGplayer are shown, not offered yet.
-- **Basis**: same card and facets (`ctMatchedPkn`), cheapest offer, sold
-  median. **Fee-exclusive** (default on) prices from the net; off, from the
-  CardTrader ask.
-- **Action**: match, undercut or premium, by % and by a fixed PKN amount.
-  **Rounding**: none, whole PKN (nearest), down, up. **Minimum** price:
-  rounding never goes below it; a target at or below 0 is skipped.
-- **Scope**: the board's current view or all listings, game, live or paused,
-  condition, language; "put paused listings on sale" sets them active.
-  Sold-out and removed listings are never repriced.
+- **Strategies** (`users/{uid}.pricingStrategies`, at most 50) are named
+  rules for *how* to price. They have no scope. Names are required and unique
+  per seller, ignoring case. The fields are:
+  - **Source**: CardTrader, or Pokoin (the cheapest Pokoin ask, else the sold
+    median).
+  - **Basis**: same card and facets (`ctMatchedPkn`), cheapest copy, or sold
+    median (30 days). **Fee-exclusive** (on by default) prices from what the
+    seller nets on CardTrader; off, it prices from the CardTrader ask.
+  - **Action**: match, undercut or above, by % and by a fixed PKN amount.
+  - **Rounding**: exact (cents), nearest, down or up to whole PKN.
+  - **Never below**: a minimum that rounding never goes under. A target at or
+    below 0 is skipped.
+  - **Put paused listings on sale** when they get a price.
 
-Preview fetches the comps per game in chunks of 100 and lists the old price,
-the new one, the comp and the CardTrader ask; Apply writes each listing with
-`updateListing` (4 at a time). A CardTrader-linked listing then reaches
-CardTrader through the outbox edit at the gross-up. The planning code is
-`market/src/pricer.js` (tests in `pricer.test.js`); the server validates
-`basis`, `feeExclusive`, `status`, `game` and the roundings in
-`crates/external/src/pricing.rs`.
+  A strategy that a group uses can't be deleted (409 `strategy_in_use`).
+- **Pricing groups** (Postgres `seller_pricing_groups` and
+  `seller_pricing_group_members`, `scripts/sql/138_seller_pricing_groups.sql`,
+  at most 200) are named sets of listings picked on the Listings board, with
+  "Add to group" on the selection bar. A listing is in at most one group:
+  adding it to another group moves it, and deleting the listing takes it out.
+  A group has one strategy and an optional **Reprice every day** switch.
+- **Apply** (`POST /api/marketplace-pricing-groups/apply`, with `dryRun` for
+  the plan shown first) prices the group's live and paused listings:
+  1. It reads the same market comps as the board's price check, net of the
+     seller's own CardTrader commission.
+  2. It plans each listing: the comp, the strategy's target, and whether the
+     listing goes on sale. Listings with no comp are counted, never guessed;
+     sold-out and removed listings are skipped.
+  3. It writes each change through the seller's own listing update, so a
+     CardTrader-linked listing reaches CardTrader through the outbox edit at
+     the gross-up.
+
+  The group keeps a summary of its last apply (`last_applied`, with a trigger
+  of `apply`, `daily` or `batch`).
+- **Daily**: `pokoin-api job pricing-groups-daily [--dry-run]`
+  (`deploy/systemd/pokoin-rust-job-pricing-groups-daily.timer`, 05:15 UTC,
+  after the 04:30 price-store refill) applies every group with the daily
+  switch on, oldest apply first. It writes by default. A failing group is
+  counted and the run goes on.
+- **One rule, three places**: `market/src/pricer.js` (web, tests in
+  `pricer.test.js`), `crates/external/src/pricing.rs` (server) and the
+  rounding-and-floor core `ct_fees::floor_price_rounded`, which Verus proves
+  never goes under the minimum in any rounding mode
+  (`pokoin-rust/verus/README.md`). The web uses the same fixed-point
+  arithmetic, and both test files use the same examples.
+- **Migration**: on the first read after the deploy, a strategy saved with a
+  scope (game, live/paused, condition, language) becomes a group of the same
+  name, holding the listings that scope took at that moment. A strategy
+  without a scope keeps its rule and gets no group. Names that clashed get a
+  " (2)" suffix.
+
+Routes: `GET/POST/DELETE /api/marketplace-pricing-strategies` (strategies,
+groups and board defaults), `GET/POST/DELETE /api/marketplace-pricing-groups`
+(groups and moves: `{ group }`, `{ groupId, add }`, `{ remove }`), and
+`POST /api/marketplace-pricing-groups/apply`. Card Rails picks a group or a
+strategy per batch through the connector (docs/SELLER_API.md, "Batch
+pricing").
+
+**Batch upload.** A Scan desk batch can pick a group or a strategy before it
+loads. Unpriced cards are listed paused at 0 and priced once by `applyPricing`
+after submit. A group keeps them for later applies or the daily job. See
+[SCAN_CONNECT.md](SCAN_CONNECT.md) "Batch pricing" for details.
 
 ## Games other than Pokémon
 

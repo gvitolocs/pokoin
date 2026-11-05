@@ -160,6 +160,31 @@ pub fn facet_cents(asks: &[Ask], language: &str, condition: &str, finish: bool) 
     (cheapest, matched)
 }
 
+/// The cheapest ask, in EUR cents, sharing the attributes `m` asks for with
+/// the listing (the price file has no first edition, so that toggle is
+/// ignored): its language, its finish, and its condition or a better one.
+/// [`facet_cents`] is the all-on case and is used for it. An attribute the
+/// listing does not state matches nothing when it is asked for.
+pub fn facet_cents_by(asks: &[Ask], language: &str, condition: &str, finish: bool, m: crate::price_check::Match) -> Option<u32> {
+    if m.condition && m.language && m.finish {
+        return facet_cents(asks, language, condition, finish).1;
+    }
+    let lang = lang_code(language);
+    let cond = condition_index(condition);
+    if (m.language && lang.is_none()) || (m.condition && cond.is_none()) {
+        return None;
+    }
+    asks.iter()
+        .filter(|ask| ask.cents > 0)
+        .filter(|ask| {
+            split_variant(ask.variant).is_some_and(|(l, c, f)| {
+                (!m.language || Some(l) == lang) && (!m.condition || cond.is_some_and(|cond| c <= cond)) && (!m.finish || f == finish)
+            })
+        })
+        .map(|ask| ask.cents)
+        .min()
+}
+
 /// EUR cents → PKN (1 PKN = €0.005).
 pub fn pkn_from_cents(cents: u32) -> f64 {
     f64::from(cents) * 2.0

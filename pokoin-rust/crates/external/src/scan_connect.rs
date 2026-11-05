@@ -59,7 +59,62 @@ pub fn default_batch_defaults() -> Value {
         "startPosition": 1,
         "quantity": 1,
         "mergeRepeats": true,
+        "pricingGroupId": "",
+        "pricingStrategyId": "",
     })
+}
+
+/// A pricing group or strategy id as batch defaults keep it: trimmed, at
+/// most 40 chars of `[A-Za-z0-9_-]`; anything else is "".
+pub fn clean_pricing_id(value: Option<&Value>) -> String {
+    let text = value.and_then(Value::as_str).unwrap_or("").trim();
+    if text.len() <= 40 && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        text.to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// The batch's pricing choice from its defaults: `{ groupId }`,
+/// `{ strategyId }` or `null`. The group wins when both are set.
+/// A row's own pricing choice (`scan_items.pricing`, scripts/sql/138):
+/// `{ groupId }`, `{ strategyId }`, `{ none: true }` (leave this row
+/// unpriced), or `null` (the batch's choice). Anything else is `null`.
+pub fn clean_row_pricing(value: &Value) -> Value {
+    if value.get("none") == Some(&Value::Bool(true)) || value.as_str() == Some("none") {
+        return json!({ "none": true });
+    }
+    let group = clean_pricing_id(value.get("groupId"));
+    if !group.is_empty() {
+        return json!({ "groupId": group });
+    }
+    let strategy = clean_pricing_id(value.get("strategyId"));
+    if !strategy.is_empty() {
+        return json!({ "strategyId": strategy });
+    }
+    Value::Null
+}
+
+/// What prices a row at submit: its own choice, else the batch's
+/// (`batch_pricing`); `null` when neither, or when the row says none.
+pub fn row_pricing(row: &Value, batch: &Value) -> Value {
+    match clean_row_pricing(row.get("pricing").unwrap_or(&Value::Null)) {
+        Value::Null => batch.clone(),
+        own if own.get("none").is_some() => Value::Null,
+        own => own,
+    }
+}
+
+pub fn batch_pricing(defaults: &Value) -> Value {
+    let group = clean_pricing_id(defaults.get("pricingGroupId"));
+    if !group.is_empty() {
+        return json!({ "groupId": group });
+    }
+    let strategy = clean_pricing_id(defaults.get("pricingStrategyId"));
+    if !strategy.is_empty() {
+        return json!({ "strategyId": strategy });
+    }
+    Value::Null
 }
 
 /// `cleanText` — control characters become spaces, then trim + cap.
@@ -209,6 +264,21 @@ pub fn normalize_defaults(input: &Value, base: &Value) -> Value {
         }
     };
 
+    let pricing_of = |key: &str| -> String {
+        if has(&src, key) { clean_pricing_id(src.get(key)) } else { clean_pricing_id(base_obj.get(key)) }
+    };
+    let mut pricing_group_id = pricing_of("pricingGroupId");
+    let mut pricing_strategy_id = pricing_of("pricingStrategyId");
+    if !pricing_group_id.is_empty() && !pricing_strategy_id.is_empty() {
+        // Only a strategy sent over a batch with a group: the strategy
+        // replaces it. Otherwise (both sent, or only a group) the group wins.
+        if has(&src, "pricingStrategyId") && !has(&src, "pricingGroupId") {
+            pricing_group_id.clear();
+        } else {
+            pricing_strategy_id.clear();
+        }
+    }
+
     json!({
         "game": if has(&src, "game") {
             pick(&GAMES, src.get("game").and_then(Value::as_str).unwrap_or_default(), &str_of("game", "pokemon"))
@@ -237,6 +307,8 @@ pub fn normalize_defaults(input: &Value, base: &Value) -> Value {
         "mergeRepeats": if has(&src, "mergeRepeats") {
             src.get("mergeRepeats") != Some(&Value::Bool(false))
         } else { base_obj.get("mergeRepeats").and_then(Value::as_bool).unwrap_or(true) },
+        "pricingGroupId": pricing_group_id,
+        "pricingStrategyId": pricing_strategy_id,
     })
 }
 
@@ -938,14 +1010,25 @@ pub fn parse_item_patch(patch: &Value) -> ApiResult<Vec<(String, Value)>> {
             json!(clean_scan_text(src.get("sellerComment").and_then(Value::as_str).unwrap_or_default(), 500)),
         ));
     }
+    if has("pricing") {
+        let raw = src.get("pricing").unwrap_or(&Value::Null);
+        let clean = clean_row_pricing(raw);
+        if clean.is_null() && !raw.is_null() {
+            return Err(ApiError::bad_request("pricing must be a group, a strategy, none or null."));
+        }
+        out.push(("pricing".into(), clean));
+    }
     if src.get("confirm") == Some(&Value::Bool(true)) {
         out.push(("reviewed".into(), json!(true)));
     }
     Ok(out)
 }
 
-/// `submitProblem` — `""` means the row may be submitted.
-pub fn submit_problem(row: &Value, intent: &str) -> &'static str {
+/// `submitProblem` — `""` means the row may be submitted. With
+/// `batch_priced` (the batch names a pricing group or strategy) a row with
+/// no price is listed paused at 0 and priced after submit, so it is no
+/// problem.
+pub fn submit_problem(row: &Value, intent: &str, batch_priced: bool) -> &'static str {
     if row.get("status").and_then(Value::as_str) != Some("active") {
         return "";
     }
@@ -967,13 +1050,18 @@ pub fn submit_problem(row: &Value, intent: &str) -> &'static str {
     if !(1..=99).contains(&quantity) {
         return "bad_quantity";
     }
-    if intent != "collection" {
+    if intent != "collection" && !batch_priced {
         let price = row_f64(row, "price_pkn").unwrap_or(0.0);
         if !price.is_finite() || price <= 0.0 {
             return "no_price";
         }
     }
     ""
+}
+
+/// Whether a row has a sellable price (> 0 PKN).
+pub fn row_priced(row: &Value) -> bool {
+    row_f64(row, "price_pkn").is_some_and(|price| price.is_finite() && price > 0.0)
 }
 
 /// A numeric row column as an integer. Rows are typed like node-pg
@@ -995,7 +1083,7 @@ pub fn row_f64(row: &Value, column: &str) -> Option<f64> {
 
 /// `itemView`.
 pub fn item_view(row: &Value) -> Value {
-    json!({
+    let mut view = json!({
         "id": row.get("id"),
         "batchId": row.get("batch_id"),
         "seq": row_i64(row, "seq").unwrap_or(0),
@@ -1037,7 +1125,10 @@ pub fn item_view(row: &Value) -> Value {
         "listingId": row.get("listing_id").cloned().unwrap_or(Value::Null),
         "timings": row.get("timings").cloned().unwrap_or(json!({})),
         "updatedAt": row.get("updated_at").cloned().unwrap_or(Value::Null),
-    })
+    });
+    // The row's own pricing choice (`row_pricing`); null = the batch's.
+    view["pricing"] = clean_row_pricing(row.get("pricing").unwrap_or(&Value::Null));
+    view
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,14 +1394,82 @@ mod tests {
         assert!(parse_item_patch(&json!({"condition": "XX"})).is_err());
 
         let ready = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1, "price_pkn": 5.0});
-        assert_eq!(submit_problem(&ready, "list"), "");
+        assert_eq!(submit_problem(&ready, "list", false), "");
         let no_price = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1});
-        assert_eq!(submit_problem(&no_price, "list"), "no_price");
-        assert_eq!(submit_problem(&no_price, "collection"), "");
+        assert_eq!(submit_problem(&no_price, "list", false), "no_price");
+        assert_eq!(submit_problem(&no_price, "collection", false), "");
         let unreviewed = json!({"status": "active", "card_id": "77", "recognition_state": "ambiguous", "quantity": 1, "price_pkn": 5.0});
-        assert_eq!(submit_problem(&unreviewed, "list"), "needs_review");
+        assert_eq!(submit_problem(&unreviewed, "list", false), "needs_review");
         let no_printing = json!({"status": "active", "recognition_state": "matched", "quantity": 1, "price_pkn": 5.0});
-        assert_eq!(submit_problem(&no_printing, "list"), "no_printing");
+        assert_eq!(submit_problem(&no_printing, "list", false), "no_printing");
+    }
+
+    #[test]
+    fn submit_problem_with_batch_pricing() {
+        let no_price = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1});
+        assert_eq!(submit_problem(&no_price, "list", true), "");
+        let zero = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1, "price_pkn": "0"});
+        assert_eq!(submit_problem(&zero, "list", false), "no_price");
+        assert_eq!(submit_problem(&zero, "list", true), "");
+        assert!(!row_priced(&zero));
+        assert!(row_priced(&json!({"price_pkn": "12.50"})));
+        // The other rules still hold for a priced batch.
+        let unreviewed = json!({"status": "active", "card_id": "77", "recognition_state": "unmatched", "quantity": 1});
+        assert_eq!(submit_problem(&unreviewed, "list", true), "needs_review");
+        let no_printing = json!({"status": "active", "recognition_state": "matched", "quantity": 1});
+        assert_eq!(submit_problem(&no_printing, "list", true), "no_printing");
+        let graded = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1, "graded": true});
+        assert_eq!(submit_problem(&graded, "list", true), "grading_incomplete");
+        let bad_qty = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 0});
+        assert_eq!(submit_problem(&bad_qty, "list", true), "bad_quantity");
+    }
+
+    #[test]
+    fn defaults_pricing_ids() {
+        let base = default_batch_defaults();
+        assert_eq!(base["pricingGroupId"], "");
+        assert_eq!(base["pricingStrategyId"], "");
+        // Trimmed and kept.
+        let group = normalize_defaults(&json!({"pricingGroupId": "  grp_1-a "}), &base);
+        assert_eq!(group["pricingGroupId"], "grp_1-a");
+        assert_eq!(group["pricingStrategyId"], "");
+        // Bad characters, too long, or not a string → "".
+        for bad in [json!("a b"), json!("x;drop"), json!("é"), json!("a".repeat(41)), json!(12), json!(null), json!(true)] {
+            let out = normalize_defaults(&json!({"pricingStrategyId": bad}), &base);
+            assert_eq!(out["pricingStrategyId"], "", "{bad}");
+        }
+        assert_eq!(normalize_defaults(&json!({"pricingStrategyId": "a".repeat(40)}), &base)["pricingStrategyId"], "a".repeat(40));
+        // Both sent: the group wins.
+        let both = normalize_defaults(&json!({"pricingGroupId": "g1", "pricingStrategyId": "s1"}), &base);
+        assert_eq!(both["pricingGroupId"], "g1");
+        assert_eq!(both["pricingStrategyId"], "");
+        // Both sent, group empty: the strategy stays.
+        let strategy = normalize_defaults(&json!({"pricingGroupId": "", "pricingStrategyId": "s1"}), &group);
+        assert_eq!(strategy["pricingGroupId"], "");
+        assert_eq!(strategy["pricingStrategyId"], "s1");
+        // Unsent keys keep the base value.
+        let kept = normalize_defaults(&json!({"condition": "LP"}), &group);
+        assert_eq!(kept["pricingGroupId"], "grp_1-a");
+        assert_eq!(kept["pricingStrategyId"], "");
+        let kept = normalize_defaults(&json!({"condition": "LP"}), &strategy);
+        assert_eq!(kept["pricingStrategyId"], "s1");
+        // A base without the keys (an older batch) reads as "".
+        let old = normalize_defaults(&json!({"condition": "LP"}), &json!({"game": "pokemon"}));
+        assert_eq!(old["pricingGroupId"], "");
+        assert_eq!(old["pricingStrategyId"], "");
+        // Only one key sent over a base with the other: at most one survives.
+        let swapped = normalize_defaults(&json!({"pricingStrategyId": "s2"}), &group);
+        assert_eq!(swapped["pricingGroupId"], "");
+        assert_eq!(swapped["pricingStrategyId"], "s2");
+        let regrouped = normalize_defaults(&json!({"pricingGroupId": "g2"}), &strategy);
+        assert_eq!(regrouped["pricingGroupId"], "g2");
+        assert_eq!(regrouped["pricingStrategyId"], "");
+        // The batch's pricing choice.
+        assert_eq!(batch_pricing(&group), json!({"groupId": "grp_1-a"}));
+        assert_eq!(batch_pricing(&strategy), json!({"strategyId": "s1"}));
+        assert_eq!(batch_pricing(&base), Value::Null);
+        assert_eq!(batch_pricing(&json!({"pricingGroupId": "g", "pricingStrategyId": "s"})), json!({"groupId": "g"}));
+        assert_eq!(batch_pricing(&json!({"pricingGroupId": "bad id"})), Value::Null);
     }
 
     #[test]
@@ -1356,5 +1515,35 @@ mod tests {
         assert_eq!(captured_at_server(1000.0, -5000.0, 5000, 2000), 2000);
         assert_eq!(captured_at_server(f64::NAN, 0.0, 5000, 0), 5000);
         assert_eq!(captured_at_server(1000.0, 1e18, 5000, 0), 5000);
+    }
+}
+
+#[cfg(test)]
+mod row_pricing_tests {
+    use super::*;
+
+    #[test]
+    fn a_row_overrides_its_batch_pricing() {
+        let batch = json!({"groupId": "pg_bulk"});
+        assert_eq!(row_pricing(&json!({}), &batch), batch, "no choice: the batch's");
+        assert_eq!(row_pricing(&json!({"pricing": null}), &batch), batch);
+        assert_eq!(row_pricing(&json!({"pricing": {"strategyId": "st_b"}}), &batch), json!({"strategyId": "st_b"}));
+        assert_eq!(row_pricing(&json!({"pricing": {"none": true}}), &batch), Value::Null, "this row stays unpriced");
+        assert_eq!(row_pricing(&json!({"pricing": {"groupId": "bad id!"}}), &batch), batch, "an unusable choice is no choice");
+        assert_eq!(row_pricing(&json!({"pricing": {"groupId": "pg_x"}}), &Value::Null), json!({"groupId": "pg_x"}));
+        // The patch: group, strategy, none, or back to the batch's (null).
+        let patch = |value: Value| parse_item_patch(&json!({ "pricing": value }));
+        assert_eq!(patch(json!({"groupId": "pg_x"})).unwrap(), vec![("pricing".to_string(), json!({"groupId": "pg_x"}))]);
+        assert_eq!(patch(json!({"strategyId": "st_b"})).unwrap(), vec![("pricing".to_string(), json!({"strategyId": "st_b"}))]);
+        assert!(patch(json!({"pricingGroupId": "pg_x"})).is_err(), "a row names groupId, not the batch key");
+        assert_eq!(patch(json!("none")).unwrap(), vec![("pricing".to_string(), json!({"none": true}))]);
+        assert_eq!(patch(Value::Null).unwrap(), vec![("pricing".to_string(), Value::Null)]);
+        assert!(patch(json!({"groupId": "x y"})).is_err());
+        assert_eq!(item_view(&json!({"pricing": {"strategyId": "st_b"}}))["pricing"], json!({"strategyId": "st_b"}));
+        // A row priced by its own choice may be submitted without a price.
+        let row = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1, "pricing": {"strategyId": "st_b"}});
+        assert_eq!(submit_problem(&row, "list", !row_pricing(&row, &Value::Null).is_null()), "");
+        let none = json!({"status": "active", "card_id": "77", "recognition_state": "matched", "quantity": 1, "pricing": {"none": true}});
+        assert_eq!(submit_problem(&none, "list", !row_pricing(&none, &batch).is_null()), "no_price");
     }
 }

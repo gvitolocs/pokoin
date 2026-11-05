@@ -174,6 +174,121 @@ pub fn floor_price(target_scaled: i128, whole: bool, floor_pkn_scaled: i128) -> 
     }
 }
 
+/// The pricer's rounding modes (`ct_fees::Rounding`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Rounding {
+    Exact,
+    Nearest,
+    Down,
+    Up,
+}
+
+/// Round down to whole PKN (floor division, as `div_euclid`).
+pub open spec fn down_spec(x: int) -> int {
+    (x / 100_000_000) * 100_000_000
+}
+
+/// Round up to whole PKN (ceiling division).
+pub open spec fn up_spec(x: int) -> int {
+    ((x + 99_999_999) / 100_000_000) * 100_000_000
+}
+
+pub open spec fn rounded_spec(x: int, rounding: Rounding) -> int {
+    match rounding {
+        Rounding::Exact => x,
+        Rounding::Nearest => round_spec(x) * 100_000_000,
+        Rounding::Down => down_spec(x),
+        Rounding::Up => up_spec(x),
+    }
+}
+
+/// Production `x.div_euclid(SCALE)`: floor division, written without a
+/// negative numerator.
+fn div_euclid_scale(x: i128) -> (q: i128)
+    requires
+        -100_000_000_000_000_000_000 <= x <= 100_000_000_000_000_000_000,
+    ensures
+        q == x as int / 100_000_000,
+        -1_000_000_000_000 <= q <= 1_000_000_000_000,
+{
+    proof {
+        vstd::arithmetic::div_mod::lemma_fundamental_div_mod(x as int, 100_000_000);
+        vstd::arithmetic::div_mod::lemma_mod_bound(x as int, 100_000_000);
+    }
+    if x >= 0 {
+        x / SCALE
+    } else {
+        let n = -x + SCALE - 1;
+        let q = n / SCALE;
+        proof {
+            vstd::arithmetic::div_mod::lemma_fundamental_div_mod(n as int, 100_000_000);
+            vstd::arithmetic::div_mod::lemma_mod_bound(n as int, 100_000_000);
+        }
+        -q
+    }
+}
+
+/// Down and up stay on their side of the target and move less than 1 PKN.
+pub proof fn lemma_rounding_moves_less_than_one_pkn(x: int)
+    ensures
+        down_spec(x) <= x,
+        x - down_spec(x) < 100_000_000,
+        up_spec(x) >= x,
+        up_spec(x) - x < 100_000_000,
+{
+    let y = x + 99_999_999;
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod(x, 100_000_000);
+    vstd::arithmetic::div_mod::lemma_mod_bound(x, 100_000_000);
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod(y, 100_000_000);
+    vstd::arithmetic::div_mod::lemma_mod_bound(y, 100_000_000);
+    vstd::arithmetic::mul::lemma_mul_is_commutative(x / 100_000_000, 100_000_000);
+    vstd::arithmetic::mul::lemma_mul_is_commutative(y / 100_000_000, 100_000_000);
+}
+
+/// The pricer's last step for every rounding mode, never under the floor.
+pub fn floor_price_rounded(target_scaled: i128, rounding: Rounding, floor_pkn_scaled: i128) -> (r: i128)
+    requires
+        -100_000_000_000_000_000_000 <= target_scaled <= 100_000_000_000_000_000_000,
+    ensures
+        r >= floor_pkn_scaled,
+        r == floor_pkn_scaled || r == rounded_spec(target_scaled as int, rounding),
+        rounding == Rounding::Down ==> rounded_spec(target_scaled as int, rounding) <= target_scaled
+            && target_scaled - rounded_spec(target_scaled as int, rounding) < 100_000_000,
+        rounding == Rounding::Up ==> rounded_spec(target_scaled as int, rounding) >= target_scaled
+            && rounded_spec(target_scaled as int, rounding) - target_scaled < 100_000_000,
+{
+    proof { lemma_rounding_moves_less_than_one_pkn(target_scaled as int); }
+    let rounded = match rounding {
+        Rounding::Exact => target_scaled,
+        Rounding::Nearest => {
+            let p = round_pkn(target_scaled);
+            assert(-1_000_000_000_001 <= p <= 1_000_000_000_001) by (nonlinear_arith)
+                requires p == (target_scaled as int + 50_000_000) / 100_000_000,
+                    -100_000_000_000_000_000_000 <= target_scaled <= 100_000_000_000_000_000_000;
+            p * SCALE
+        },
+        Rounding::Down => div_euclid_scale(target_scaled) * SCALE,
+        Rounding::Up => {
+            let q = div_euclid_scale(-target_scaled);
+            proof {
+                // ceil(x / S) == -floor(-x / S)
+                let y = target_scaled as int + 99_999_999;
+                vstd::arithmetic::div_mod::lemma_fundamental_div_mod(-target_scaled as int, 100_000_000);
+                vstd::arithmetic::div_mod::lemma_mod_bound(-target_scaled as int, 100_000_000);
+                vstd::arithmetic::div_mod::lemma_fundamental_div_mod(y, 100_000_000);
+                vstd::arithmetic::div_mod::lemma_mod_bound(y, 100_000_000);
+                assert(-q == y / 100_000_000);
+            }
+            -q * SCALE
+        },
+    };
+    if rounded < floor_pkn_scaled {
+        floor_pkn_scaled
+    } else {
+        rounded
+    }
+}
+
 /// `fee_once::raise_to`: the ask to set, or 0 when the current ask already
 /// nets the price. A current ask is never lowered, and a raised one nets the
 /// price at the smallest cent that does.

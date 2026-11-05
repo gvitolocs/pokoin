@@ -1117,6 +1117,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/pricer/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/pricer",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/settings/",
       "destination": "/market/index.html"
     },

@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 use crate::error::{clean_text, json_response, ApiError, ApiResult};
 use crate::powertools as pt;
 use crate::pricing;
+use crate::pricing_store;
+use crate::pricing_strategies;
 use crate::routes::util::{body_json, query_first, require_token};
 use crate::state::DomainState;
 use crate::time_util;
@@ -100,30 +102,92 @@ pub async fn disconnect(State(state): State<DomainState>, headers: HeaderMap) ->
     Ok(json_response(200, json!({ "ok": true, "status": status })))
 }
 
-/// Read + sanitize `users/{uid}` pricer state.
-async fn read_profile(state: &DomainState, uid: &str) -> ApiResult<Value> {
-    let doc = state.firestore.get_doc("users", uid).await?;
-    let data = if doc.exists { doc.data } else { json!({}) };
-    let now = time_util::iso_from_ms(time_util::now_ms());
-    let mut strategies = Vec::new();
-    if let Some(rows) = data.get("pricingStrategies").and_then(Value::as_array) {
-        for row in rows {
-            strategies.push(pricing::sanitize_strategy(row, Some(row), &now)?);
+/// The seller's strategies as stored, upgraded to named strategies without
+/// scope (`pricing::upgrade_stored_strategy`), and the raw user document.
+async fn read_strategies(state: &DomainState, uid: &str) -> ApiResult<(Value, Vec<Value>)> {
+    pricing_strategies::read(state.firestore.as_ref(), uid).await
+}
+
+async fn write_strategies(state: &DomainState, uid: &str, strategies: &[Value], extra: Value) -> ApiResult<()> {
+    pricing_strategies::write(state.firestore.as_ref(), uid, strategies, extra).await
+}
+
+/// Once per seller: every strategy saved with a scope (game, live/paused,
+/// condition, language) becomes a pricing group of the same name, holding
+/// the listings that scope takes today, and loses its `legacyScope`.
+/// Strategies without a scope get no group. Idempotent: the scope is
+/// dropped only after its group is written.
+async fn migrate_scoped_strategies(state: &DomainState, uid: &str, strategies: &mut [Value]) -> ApiResult<bool> {
+    if !strategies.iter().any(|s| s.get("legacyScope").is_some()) {
+        return Ok(false);
+    }
+    let db = state.db.writer()?;
+    let rows = pricing_store::seller_rows(&db, uid).await?;
+    let mut groups = pricing_store::list_groups(&db, uid).await?;
+    let snapshot: Vec<Value> = strategies.to_vec();
+    for strategy in strategies.iter_mut() {
+        let Some(scope) = strategy.get("legacyScope").cloned() else { continue };
+        let base = strategy["name"].as_str().unwrap_or("Strategy").to_string();
+        let mut name = base.clone();
+        let mut n = 2;
+        while groups.iter().any(|g| g["name"].as_str().is_some_and(|other| other.to_lowercase() == name.to_lowercase())) {
+            name = format!("{base} ({n})");
+            n += 1;
+        }
+        let group = pricing::sanitize_group(&json!({ "name": name, "strategyId": strategy["id"] }), None, &snapshot, &groups)?;
+        pricing_store::upsert_group(&db, uid, &group).await?;
+        let ids: Vec<uuid::Uuid> = rows
+            .iter()
+            .filter(|row| pricing::legacy_scope_matches(&scope, row))
+            .filter_map(|row| uuid::Uuid::parse_str(row["id"].as_str()?).ok())
+            .collect();
+        pricing_store::add_members(&db, uid, group["id"].as_str().unwrap_or(""), &ids).await?;
+        groups.push(group);
+        if let Some(object) = strategy.as_object_mut() {
+            object.remove("legacyScope");
         }
     }
+    Ok(true)
+}
+
+/// Strategies (each with its one-line summary and the groups using it),
+/// groups and pricer settings.
+async fn read_profile(state: &DomainState, uid: &str) -> ApiResult<Value> {
+    let (data, mut strategies) = read_strategies(state, uid).await?;
+    if migrate_scoped_strategies(state, uid, &mut strategies).await? {
+        write_strategies(state, uid, &strategies, json!({ "pricingMigratedAt": time_util::iso_from_ms(time_util::now_ms()) })).await?;
+    }
+    let groups = match state.db.writer() {
+        Ok(db) => pricing_store::list_groups(&db, uid).await?,
+        Err(_) => Vec::new(),
+    };
+    let strategies: Vec<Value> = strategies
+        .into_iter()
+        .map(|mut strategy| {
+            strategy["summary"] = json!(pricing::strategy_summary(&strategy));
+            strategy["groupNames"] = json!(groups
+                .iter()
+                .filter(|g| g["strategyId"] == strategy["id"])
+                .map(|g| g["name"].clone())
+                .collect::<Vec<_>>());
+            strategy
+        })
+        .collect();
     Ok(json!({
         "strategies": strategies,
+        "groups": groups,
         "pricerSettings": pricing::sanitize_settings(data.get("pricerSettings")),
     }))
 }
 
-/// `GET /api/marketplace-pricing-strategies`.
+/// `GET /api/marketplace-pricing-strategies` — strategies, groups, settings.
 pub async fn strategies_get(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     Ok(json_response(200, read_profile(&state, &identity.uid).await?))
 }
 
-/// `POST /api/marketplace-pricing-strategies`.
+/// `POST /api/marketplace-pricing-strategies` — `{ strategy }` creates or
+/// edits a named strategy, `{ pricerSettings }` saves the board defaults.
 pub async fn strategies_post(
     State(state): State<DomainState>,
     headers: HeaderMap,
@@ -131,72 +195,114 @@ pub async fn strategies_post(
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     let payload = body_json(&body).await?;
-    let mut patch = serde_json::Map::new();
+    let mut extra = serde_json::Map::new();
     if let Some(settings) = payload.get("pricerSettings") {
-        patch.insert("pricerSettings".into(), pricing::sanitize_settings(Some(settings)));
+        extra.insert("pricerSettings".into(), pricing::sanitize_settings(Some(settings)));
     }
+    let mut saved_id = Value::Null;
     if let Some(strategy) = payload.get("strategy") {
-        let current = read_profile(&state, &identity.uid).await?;
-        let rows = current.get("strategies").and_then(Value::as_array).cloned().unwrap_or_default();
-        let provided_id = clean_text(strategy.get("id").and_then(Value::as_str), 40);
-        let existing = rows
-            .iter()
-            .find(|row| clean_text(row.get("id").and_then(Value::as_str), 40) == provided_id && !provided_id.is_empty())
-            .cloned();
-        let now = time_util::iso_from_ms(time_util::now_ms());
-        let sanitized = pricing::sanitize_strategy(strategy, existing.as_ref(), &now)?;
-        let mut next: Vec<Value> = rows
-            .iter()
-            .filter(|row| row.get("id") != sanitized.get("id"))
-            .cloned()
-            .collect();
-        next.push(sanitized);
-        patch.insert("pricingStrategies".into(), Value::Array(next));
-    }
-    if patch.is_empty() {
+        let (saved, _) = pricing_strategies::save(state.firestore.as_ref(), &identity.uid, strategy, Value::Object(extra)).await?;
+        saved_id = saved["id"].clone();
+    } else if extra.is_empty() {
         return Err(ApiError::bad_request("strategy or pricerSettings body required."));
+    } else {
+        extra.insert("updatedAt".into(), json!(time_util::iso_from_ms(time_util::now_ms())));
+        state.firestore.merge_doc("users", &identity.uid, Value::Object(extra)).await?;
     }
-    patch.insert(
-        "updatedAt".into(),
-        json!(time_util::iso_from_ms(time_util::now_ms())),
-    );
-    state
-        .firestore
-        .merge_doc("users", &identity.uid, Value::Object(patch))
-        .await?;
-    Ok(json_response(200, read_profile(&state, &identity.uid).await?))
+    let mut profile = read_profile(&state, &identity.uid).await?;
+    profile["savedId"] = saved_id;
+    Ok(json_response(200, profile))
 }
 
-/// `DELETE /api/marketplace-pricing-strategies?id=...`.
+/// `DELETE /api/marketplace-pricing-strategies?id=...` — refused (409
+/// `strategy_in_use`) while a group uses it.
 pub async fn strategies_delete(
     State(state): State<DomainState>,
     headers: HeaderMap,
     uri: Uri,
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
-    let id = query_first(&uri, "id").unwrap_or_default();
-    let id = clean_text(Some(&id), 40);
+    let id = clean_text(Some(&query_first(&uri, "id").unwrap_or_default()), 40);
     if id.is_empty() {
         return Err(ApiError::bad_request("Strategy id is required."));
     }
-    let current = read_profile(&state, &identity.uid).await?;
-    let rows = current.get("strategies").and_then(Value::as_array).cloned().unwrap_or_default();
-    let next: Vec<Value> = rows
-        .into_iter()
-        .filter(|row| row.get("id").and_then(Value::as_str) != Some(id.as_str()))
-        .collect();
-    state
-        .firestore
-        .merge_doc(
-            "users",
-            &identity.uid,
-            json!({
-                "pricingStrategies": next,
-                "updatedAt": time_util::iso_from_ms(time_util::now_ms()),
-            }),
-        )
-        .await?;
-    Ok(json_response(200, json!({ "strategies": next })))
+    pricing_strategies::delete(state.firestore.as_ref(), &state.db.writer()?, &identity.uid, &id).await?;
+    Ok(json_response(200, read_profile(&state, &identity.uid).await?))
+}
+
+/// `GET /api/marketplace-pricing-groups` — `{ groups, memberships:
+/// [[listingId, groupId]] }`.
+pub async fn groups_get(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let db = state.db.writer()?;
+    let groups = pricing_store::list_groups(&db, &identity.uid).await?;
+    let memberships = pricing_store::memberships(&db, &identity.uid).await?;
+    Ok(json_response(200, json!({ "groups": groups, "memberships": memberships })))
+}
+
+/// `POST /api/marketplace-pricing-groups` — `{ group: { id?, name,
+/// strategyId, autoDaily } }` creates or edits a group; with `add` (listing
+/// ids) a new group starts with those listings. `{ groupId, add, remove }`
+/// moves listings: `add` into the group (out of any other), `remove` out of
+/// their group.
+pub async fn groups_post(State(state): State<DomainState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let uid = identity.uid.as_str();
+    let payload = body_json(&body).await?;
+    let db = state.db.writer()?;
+    let mut group_id = clean_text(payload.get("groupId").and_then(Value::as_str), 40);
+    if let Some(input) = payload.get("group") {
+        let (_, strategies) = read_strategies(&state, uid).await?;
+        let groups = pricing_store::list_groups(&db, uid).await?;
+        let id = clean_text(input.get("id").and_then(Value::as_str), 40);
+        let existing = groups.iter().find(|g| !id.is_empty() && g["id"] == id.as_str()).cloned();
+        if !id.is_empty() && existing.is_none() {
+            return Err(ApiError::not_found("Pricing group not found.").with_code("pricing_group_unknown"));
+        }
+        if existing.is_none() && groups.len() >= pricing::MAX_GROUPS {
+            return Err(ApiError::bad_request(format!("You can keep up to {} groups.", pricing::MAX_GROUPS)));
+        }
+        let others: Vec<Value> = groups.iter().filter(|g| g["id"] != id.as_str() || id.is_empty()).cloned().collect();
+        let group = pricing::sanitize_group(input, existing.as_ref(), &strategies, &others)?;
+        pricing_store::upsert_group(&db, uid, &group).await?;
+        group_id = group["id"].as_str().unwrap_or("").to_string();
+    }
+    let add = pricing_store::listing_ids(payload.get("add").unwrap_or(&Value::Null));
+    let remove = pricing_store::listing_ids(payload.get("remove").unwrap_or(&Value::Null));
+    let mut added = 0;
+    if !add.is_empty() {
+        if pricing_store::group(&db, uid, &group_id).await?.is_none() {
+            return Err(ApiError::not_found("Pricing group not found.").with_code("pricing_group_unknown"));
+        }
+        added = pricing_store::add_members(&db, uid, &group_id, &add).await?;
+    }
+    let removed = pricing_store::remove_members(&db, uid, &remove).await?;
+    if payload.get("group").is_none() && add.is_empty() && remove.is_empty() {
+        return Err(ApiError::bad_request("group, add or remove body required."));
+    }
+    let groups = pricing_store::list_groups(&db, uid).await?;
+    let memberships = pricing_store::memberships(&db, uid).await?;
+    Ok(json_response(200, json!({
+        "groupId": if group_id.is_empty() { Value::Null } else { json!(group_id) },
+        "added": added, "removed": removed, "groups": groups, "memberships": memberships,
+    })))
+}
+
+/// `DELETE /api/marketplace-pricing-groups?id=pg_…` — its listings leave it
+/// and keep their prices.
+pub async fn groups_delete(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let id = clean_text(Some(&query_first(&uri, "id").unwrap_or_default()), 40);
+    if id.is_empty() {
+        return Err(ApiError::bad_request("Group id is required."));
+    }
+    let db = state.db.writer()?;
+    if !pricing_store::delete_group(&db, &identity.uid, &id).await? {
+        return Err(ApiError::not_found("Pricing group not found.").with_code("pricing_group_unknown"));
+    }
+    let groups = pricing_store::list_groups(&db, &identity.uid).await?;
+    let memberships = pricing_store::memberships(&db, &identity.uid).await?;
+    Ok(json_response(200, json!({ "groups": groups, "memberships": memberships })))
 }
 
 /// `GET /api/marketplace-price-check` — per-listing market comps.

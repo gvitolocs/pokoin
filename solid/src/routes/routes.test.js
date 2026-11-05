@@ -89,6 +89,8 @@ test('pages and redirects sit at the URLs links and bookmarks use', () => {
     '/mypokoin/picked': 'ZeroPicked',
     '/mypokoin/spreadsheet': 'SellSpreadsheet',
     '/mypokoin/collection': 'Inventory',
+    '/mypokoin/pricer': 'Inventory',
+    '/mypokoin/settings': 'Inventory',
     '/dashboard': 'SellerHome',
     '/dashboard/scan': 'ScanDesk',
     '/scan': 'Scan',

@@ -1243,3 +1243,29 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 /* Editable queue-row quantity (ported from #127). */
 .c-qty input { text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Batch pricing: group or strategy the batch is priced with on load. */
+/* Last control of the defaults row: it shrinks before the row wraps. */
+.scan-defaults-row > .sd-pricing { flex: 0 1 auto; min-width: 0; }
+.sd-pricing select { width: 15rem; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+.sd-pricing-manage { font-size: 0.78rem; color: var(--yellow); white-space: nowrap; }
+.sd-pricing-hint { margin: 0; font-size: 0.75rem; color: var(--muted); }
+@media (max-width: 720px) {
+  .scan-defaults-row > .sd-pricing { flex: 1 1 100%; }
+  .sd-pricing select { flex: 1 1 auto; width: auto; min-height: 44px; }
+}
+.c-price input.price-on-load::placeholder { color: var(--muted); font-style: italic; font-size: 0.78rem; }
+.scan-pricing-note { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--muted); }
+.scan-pricing-note.bad { color: var(--scan-bad); }
+
+/* Dev / localhost layout preview (`?scanPreview`). */
+.scan-desk .scan-preview-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 211 61 / 0.35);
+  border-radius: 12px;
+  background: rgb(255 211 61 / 0.08);
+  color: var(--yellow);
+  font-size: 0.85rem;
+  font-weight: 650;
+}

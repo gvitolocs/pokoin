@@ -303,6 +303,37 @@ node --test scripts/scan-connect.test.cjs && node scripts/scanner-ui.test.cjs we
 The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 `SCAN_DEV_FAKE_AUTH=1` and refuses `NODE_ENV=production`.
 
+## Batch pricing (2026-11-04)
+
+The Scan desk batch settings bar has a Pricing select filled from the seller's
+pricing strategies and groups (`/api/marketplace-pricing-strategies`). Options: "Add to a
+group" (each group, shown as "<group name> · <strategy name>"), "Price once with
+a strategy" (each strategy), or "No pricing (unpriced cards stay paused)". A
+"Manage pricing" link goes to `/mypokoin/pricer`.
+
+The choice is saved in the batch defaults as `pricingGroupId` or
+`pricingStrategyId` (trimmed, at most 40 chars of `[A-Za-z0-9_-]`, anything
+else becomes ""; at most one is set: when both are sent the group wins). On
+submit (intent `list` with the Pokoin target), when the batch names a group or
+a strategy, a row with no price is no longer refused (`no_price`): it is listed
+paused at 0 PKN, the same state Card Rails uses for unpriced stock. Priced rows
+go live as before. With a group, `submit_batch` adds every created listing to
+that group (`seller_pricing_group_members`) in the same transaction. If the
+group no longer exists (or is not the seller's), submit fails with 409
+`pricing_group_unknown` before writing anything.
+
+The submit result has `pricing`: `{ "groupId": … }`, `{ "strategyId": … }` or
+`null`, plus each created `listingId`. After a successful submit the desk calls
+`applyPricing` once with the created listing ids and the group or strategy. It
+prices them from market comps; paused cards with a comp go on sale when the
+strategy's "put paused listings on sale" (`activatePaused`) is on; cards with no
+market price stay paused (in the group, for a group). The desk shows "Priced N
+cards · M put on sale · K have no market price". If that call fails the submit
+still stands: the desk says the cards are in the group (or paused) and can be
+priced from the Pricer tab. Unpriced rows are not pushed to CardTrader at
+submit (CardTrader needs a price); they reach CardTrader later only if the
+seller pushes them.
+
 ## Files
 
 | Path | Role |

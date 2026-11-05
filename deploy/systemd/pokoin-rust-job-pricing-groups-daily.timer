@@ -1,0 +1,14 @@
+[Unit]
+Description=Pokoin native job pricing-groups-daily (reprice the pricing groups set to every day)
+
+[Timer]
+# After the 04:30 UTC CardTrader price-store refill
+# (pokoin-rust-job-cardtrader-facet-prices.timer), so groups price from
+# fresh comps.
+OnCalendar=*-*-* 05:15:00 UTC
+RandomizedDelaySec=5min
+Persistent=true
+Unit=pokoin-rust-job@pricing-groups-daily.service
+
+[Install]
+WantedBy=timers.target

@@ -98,6 +98,19 @@ test('row problems mirror the server submit rules', () => {
   assert.equal(batchCounts({ a: row('a', { pricePkn: null }) }, { intent: 'list' }).ready, false);
 });
 
+test('batch pricing lets unpriced rows through and keeps the other rules', () => {
+  assert.equal(rowProblem(row('a', { pricePkn: null }), { priced: true }), '');
+  assert.equal(rowProblem(row('a', { pricePkn: 0 }), { priced: true }), '');
+  assert.equal(rowProblem(row('a', { pricePkn: 0 })), 'no_price');
+  assert.equal(rowProblem(row('a', { cardId: '', pricePkn: null }), { priced: true }), 'no_printing');
+  assert.equal(rowProblem(row('a', { recognitionState: 'unmatched', pricePkn: null }), { priced: true }), 'needs_review');
+  const counts = batchCounts({ a: row('a', { pricePkn: null }), b: row('b') }, { intent: 'list', priced: true });
+  assert.equal(counts.noPrice, 0);
+  assert.equal(counts.ready, true);
+  assert.equal(nextAttentionIndex([row('a', { pricePkn: null })], -1, { priced: true }), -1);
+  assert.equal(nextAttentionIndex([row('a', { pricePkn: null })], -1), 0);
+});
+
 test('stack key matches the CardVault vectors', () => {
   const base = { cardId: '220962', condition: 'NM', language: 'IT', foilState: 'standard', firstEdition: false, signed: false, altered: false, graded: false, gradingCompany: '', grade: '', location: 'Box A12' };
   assert.equal(stackKey(base), '220962|NM|IT|standard|0|0|0|0|||box a12');

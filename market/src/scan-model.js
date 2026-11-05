@@ -263,15 +263,19 @@ export function stackKey(row = {}) {
   ].join('|');
 }
 
-/** Same reasons as CardVault `_scan_connect.submitProblem`. */
-export function rowProblem(row, { intent = 'list' } = {}) {
+/**
+ * Same reasons as `scan_connect::submit_problem`. `priced`: the batch names a
+ * pricing group or strategy, so a row with no price is listed paused and
+ * priced on load instead of blocking the submit.
+ */
+export function rowProblem(row, { intent = 'list', priced = false } = {}) {
   if (!row || row.status !== 'active') return '';
   if (!/^\d+$/.test(String(row.cardId || ''))) return 'no_printing';
   if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed) {
     return 'needs_review';
   }
   if (row.graded && (!row.gradingCompany || !row.grade)) return 'grading_incomplete';
-  if (intent !== 'collection') {
+  if (intent !== 'collection' && !priced) {
     const price = Number(row.pricePkn);
     if (row.pricePkn == null || !Number.isFinite(price) || price <= 0) return 'no_price';
   }
@@ -285,7 +289,7 @@ export const PROBLEM_LABEL = {
   no_price: 'Needs a price',
 };
 
-export function batchCounts(rows, { intent = 'list' } = {}) {
+export function batchCounts(rows, { intent = 'list', priced = false } = {}) {
   const counts = { rows: 0, cards: 0, needsReview: 0, noPrinting: 0, noPrice: 0, blocked: 0, merged: 0 };
   const all = rows || {};
   for (const row of Object.values(all)) {
@@ -294,7 +298,7 @@ export function batchCounts(rows, { intent = 'list' } = {}) {
     if (row.status !== 'active') continue;
     counts.rows += 1;
     counts.cards += Number(row.quantity) || 0;
-    const problem = rowProblem(row, { intent });
+    const problem = rowProblem(row, { intent, priced });
     if (problem) counts.blocked += 1;
     if (problem === 'needs_review') counts.needsReview += 1;
     if (problem === 'no_printing') counts.noPrinting += 1;
@@ -331,11 +335,11 @@ export function submitLabel(counts, { intent = 'list', targets } = {}) {
 }
 
 /** Index of the next row after `from` that blocks submit, wrapping once. */
-export function nextAttentionIndex(list, from = -1, { intent = 'list' } = {}) {
+export function nextAttentionIndex(list, from = -1, { intent = 'list', priced = false } = {}) {
   const n = list.length;
   for (let step = 1; step <= n; step += 1) {
     const i = (from + step + n) % n;
-    if (rowProblem(list[i], { intent })) return i;
+    if (rowProblem(list[i], { intent, priced })) return i;
   }
   return -1;
 }

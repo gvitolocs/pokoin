@@ -211,9 +211,10 @@ function CandidateAlts(props) {
 const FLAG_FIELDS = ['firstEdition', 'signed', 'altered'];
 const FLAG_SHORT = { firstEdition: '1st', signed: 'S', altered: 'A' };
 
-/** One queue row. `row` is the live row. */
+/** One queue row. `row` is the live row; `priceOnLoad`: the batch has pricing. */
 export function QueueRow(props) {
   const row = () => props.row;
+  const unpricedOnLoad = () => Boolean(props.priceOnLoad) && !(Number(row().pricePkn) > 0);
   const stateLabel = () => {
     const r = row();
     if (r.status === 'submitted') return props.hidePrice ? 'Collected' : 'Listed';
@@ -424,7 +425,11 @@ export function QueueRow(props) {
               value={priceInputFromPkn(row().pricePkn, currency())}
               // While a suggested price is cleared for typing, it stays visible
               // as the placeholder: leaving the field empty keeps it.
-              placeholder={row().priceSuggested && row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
+              // With batch pricing an unpriced row is priced when the batch loads.
+              class={{ 'price-on-load': unpricedOnLoad() }}
+              placeholder={unpricedOnLoad()
+                ? 'on load'
+                : row().priceSuggested && row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
               onFocus={(e) => {
                 // Clicking in is the only thing that empties a suggested price;
                 // switching versions re-suggests instead.

@@ -1,0 +1,37 @@
+{
+  "about": "Shared pricer examples: every implementation of the pricer rule (market/src/pricer.js, pokoin-rust/crates/external/src/pricing.rs, and any copy in another repo) must turn each comp + strategy into exactly this compPkn and target. null = no price.",
+  "comps": {
+    "spiderling": {
+      "ctMatchedPkn": 25.56, "ctMatchedGrossPkn": 28, "ctCheapestPkn": 13.5, "ctCheapestGrossPkn": 15,
+      "soldMedianPkn": 30, "soldMedianGrossPkn": 33, "pokoinCheapestPkn": 40,
+      "ctMatch": {
+        "CLFE": { "grossPkn": 28, "pkn": 25.56 },
+        "CLF": { "grossPkn": 28, "pkn": 25.56 },
+        "CL": { "grossPkn": 20, "pkn": 18.2 },
+        "L": { "grossPkn": 18, "pkn": 16.38 },
+        "": { "grossPkn": 15, "pkn": 13.5 }
+      }
+    },
+    "beforeToggles": { "ctMatchedPkn": 25.56, "ctMatchedGrossPkn": 28, "ctCheapestPkn": 13.5 },
+    "pokoinOnlySold": { "soldMedianPkn": 30 },
+    "empty": {}
+  },
+  "cases": [
+    { "comp": "spiderling", "strategy": { "rounding": "integer", "minPkn": 1 }, "compPkn": 25.56, "target": 26 },
+    { "comp": "spiderling", "strategy": { "feeExclusive": false, "rounding": "integer" }, "compPkn": 28, "target": 28 },
+    { "comp": "spiderling", "strategy": { "match": { "condition": true, "language": true, "finish": false, "firstEdition": false }, "action": "undercut", "amountPct": 5, "rounding": "down" }, "compPkn": 18.2, "target": 17 },
+    { "comp": "spiderling", "strategy": { "match": { "condition": false, "language": true, "finish": false, "firstEdition": false }, "rounding": "up" }, "compPkn": 16.38, "target": 17 },
+    { "comp": "spiderling", "strategy": { "match": { "condition": true, "language": false, "finish": false, "firstEdition": false } }, "compPkn": null, "target": null },
+    { "comp": "spiderling", "strategy": { "basis": "cheapest", "action": "premium", "amountPct": 20, "amountPkn": 1 }, "compPkn": 13.5, "target": 17.2 },
+    { "comp": "spiderling", "strategy": { "basis": "sold", "match": { "condition": false } }, "compPkn": 30, "target": 30 },
+    { "comp": "spiderling", "strategy": { "source": "pokoin" }, "compPkn": 40, "target": 40 },
+    { "comp": "pokoinOnlySold", "strategy": { "source": "pokoin" }, "compPkn": 30, "target": 30 },
+    { "comp": "beforeToggles", "strategy": { "rounding": "integer" }, "compPkn": 25.56, "target": 26 },
+    { "comp": "beforeToggles", "strategy": { "match": { "condition": false, "language": false, "finish": false, "firstEdition": false } }, "compPkn": 13.5, "target": 13.5 },
+    { "comp": "beforeToggles", "strategy": { "match": { "condition": true, "language": false, "finish": false, "firstEdition": false } }, "compPkn": null, "target": null },
+    { "comp": "spiderling", "strategy": { "action": "undercut", "amountPct": 90, "minPkn": 5, "rounding": "down" }, "compPkn": 25.56, "target": 5 },
+    { "comp": "spiderling", "strategy": { "action": "undercut", "amountPkn": 30 }, "compPkn": 25.56, "target": null },
+    { "comp": "spiderling", "strategy": { "rounding": "none", "action": "premium", "amountPct": 3.3 }, "compPkn": 25.56, "target": 26.4 },
+    { "comp": "empty", "strategy": {}, "compPkn": null, "target": null }
+  ]
+}
