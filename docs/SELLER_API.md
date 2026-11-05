@@ -68,7 +68,7 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | `sold-prices` | `items` (≤ 500, id, identity.publicId, condition, language, printing, firstEdition) | `{ prices: [{ itemId, publicId, minEurCents, priceSource }], windowDays: 30 }`; exact sold facets first, CardTrader tile minimum if absent, null if neither exists |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
 | `list` | `item`, `idempotencyKey`, `channel?`, `pricingGroupId?` / `pricingStrategyId?` (also per item) | `{ confirmed: true, listingId, stockMode: "absolute", created }`, plus `pricingGroupId` / `pricingStrategyId`, `priced`, `pricePkn`, `status`, `pricingError?` when the call named pricing |
-| `update` | `listingId`, `item` (any of `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
+| `update` | `listingId`, `item` (any of `pricePkn` (exact, wins over cents), `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
 | `unlist` | `listingId`, `channel?` | `{ confirmed: true, listingId, changed }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
 | `events` | `cursor?` | `{ events: [envelope], cursor, more }` — everything |

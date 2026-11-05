@@ -1064,7 +1064,19 @@ async fn seller_listing_row(state: &DomainState, seller_uid: &str, id: uuid::Uui
 pub fn update_patch(item: &Value) -> Result<Value, ApiError> {
     let given = |key: &str| item.get(key).is_some_and(|value| !value.is_null());
     let mut patch = json!({});
-    if given("priceEurCents") {
+    // An exact PKN price wins over euro cents, as in `list`: an odd PKN
+    // price has no exact cent (docs/pricer-cardrails-contract.md).
+    if given("pricePkn") {
+        let pkn = live::number(&item["pricePkn"]);
+        if !pkn.is_finite() || pkn < 0.0 {
+            return Err(ApiError::bad_request("This item has no valid price."));
+        }
+        if pkn <= 0.0 {
+            patch["status"] = json!("paused");
+        } else {
+            patch["pricePkn"] = json!((pkn * 100.0).round() / 100.0);
+        }
+    } else if given("priceEurCents") {
         let cents = live::number(&item["priceEurCents"]);
         if !cents.is_finite() {
             return Err(ApiError::bad_request("This item has no valid price."));
@@ -1429,6 +1441,16 @@ mod tests {
         assert_eq!(listing["externalKey"], Value::Null);
         assert_eq!(listing["signed"], false);
         assert_eq!(listing["altered"], false);
+    }
+
+    #[test]
+    fn update_takes_an_exact_pkn_price_over_euro_cents() {
+        assert_eq!(update_patch(&json!({"pricePkn": 27})).unwrap()["pricePkn"], 27.0, "an odd PKN price stays exact");
+        assert_eq!(update_patch(&json!({"pricePkn": 27, "priceEurCents": 13})).unwrap()["pricePkn"], 27.0, "pricePkn wins");
+        assert_eq!(update_patch(&json!({"priceEurCents": 13})).unwrap()["pricePkn"], 26.0);
+        assert_eq!(update_patch(&json!({"pricePkn": 0})).unwrap()["status"], "paused");
+        assert!(update_patch(&json!({"pricePkn": -1})).is_err());
+        assert!(update_patch(&json!({"pricePkn": "x"})).is_err());
     }
 
     #[test]
