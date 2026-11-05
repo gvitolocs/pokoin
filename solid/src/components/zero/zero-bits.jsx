@@ -1,7 +1,17 @@
 import { For, Show } from 'solid-js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import { formatOrderMoney } from '@market/order-status.js';
-import { alsoInLabels, issueLabel, lineIsReverse, lineLocation, lineLocationFromPt, lineQuantity, lineTextFacets } from '@market/zero-pick.js';
+import {
+  alsoInLabels,
+  issueLabel,
+  lineFinishLabel,
+  lineIsFoil,
+  lineIsReverse,
+  lineLocation,
+  lineLocationFromPt,
+  lineQuantity,
+  lineTextFacets,
+} from '@market/zero-pick.js';
 
 export function lineImage(item) {
   return homepageDerivativeUrl(ownCatalogImage(
@@ -47,6 +57,16 @@ export function TakeBits(props) {
   );
 }
 
+/** A holographic pill naming the finish on a foil line, so the picker does not grab the plain copy. */
+export function FoilMark(props) {
+  const label = () => lineFinishLabel(props.item);
+  return (
+    <span class="zero-foil" title={label()} aria-label={label()} role="img">
+      <span class="zero-foil-text" aria-hidden="true">{label()}</span>
+    </span>
+  );
+}
+
 /** A glowing gold capital R on a reverse holo line, so the picker does not grab the plain copy. */
 export function ReverseMark() {
   return (
@@ -60,6 +80,7 @@ export function FacetBadges(props) {
   return (
     <span class="zero-facets">
       <Show when={lineIsReverse(props.item)}><ReverseMark /></Show>
+      <Show when={lineIsFoil(props.item)}><FoilMark item={props.item} /></Show>
       <For each={lineTextFacets(props.item)}>{(facet) => <span class="zero-facet">{facet}</span>}</For>
     </span>
   );

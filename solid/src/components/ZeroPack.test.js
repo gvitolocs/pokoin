@@ -186,3 +186,12 @@ test('reverse holo is a glowing capital R mark, not a Reverse text pill, on tile
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.zero-reverse \{ animation: none; \}/);
   assert.match(css, /\.zero-reverse-r \{ color: #000 !important; font-size: 9pt; text-shadow: none !important; \}/);
 });
+test('foil is a rainbow mark, not a Foil text pill, on tiles and facet badges', () => {
+  assert.match(bits, /<span class="zero-foil" title=\{label\(\)\} aria-label=\{label\(\)\} role="img">\s*<span class="zero-foil-text" aria-hidden="true">\{label\(\)\}<\/span>\s*<\/span>/);
+  assert.match(bits, /<Show when=\{lineIsFoil\(props\.item\)\}><FoilMark item=\{props\.item\} \/><\/Show>/);
+  assert.match(tile, /<Show when=\{lineIsFoil\(item\(\)\)\}><FoilMark item=\{item\(\)\} \/><\/Show>/);
+  assert.match(css, /\.zero-foil \{[^}]*animation: zero-foil-shimmer/);
+  assert.match(css, /\.zero-foil-text \{[^}]*font-weight: 800/);
+  assert.match(css, /\.zero-foil-text \{ color: #000 !important; font-size: 9pt; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.zero-foil \{ animation: none; \}/);
+});

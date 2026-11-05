@@ -402,7 +402,7 @@ export function lineFacets(line) {
     line?.condition,
     line?.language,
     line?.reverse ? 'Reverse' : '',
-    line?.foil ? 'Foil' : '',
+    lineFinishLabel(line),
     line?.firstEdition ? '1st ed.' : '',
     line?.signed ? 'Signed' : '',
     line?.altered ? 'Altered' : '',
@@ -410,14 +410,24 @@ export function lineFacets(line) {
   ].filter(Boolean);
 }
 
+/** A foil copy (any game but Pokémon): views draw the foil mark instead of a 'Foil' pill. */
+export function lineIsFoil(line) {
+  return Boolean(line?.foil);
+}
+
+/** The finish to show on a foil line ("Foil", "Rainbow Foil", "Cold Foil"…); '' when not foil. */
+export function lineFinishLabel(line) {
+  return line?.foil ? String(line.finish || '').trim() || 'Foil' : '';
+}
+
 /** A reverse holo copy: tiles draw the glowing sparkles mark instead of a 'Reverse' pill. */
 export function lineIsReverse(line) {
   return Boolean(line?.reverse);
 }
 
-/** lineFacets without 'Reverse', for views that draw the reverse mark. */
+/** lineFacets without 'Reverse' and the finish, for views that draw those marks. */
 export function lineTextFacets(line) {
-  return lineFacets({ ...line, reverse: false });
+  return lineFacets({ ...line, reverse: false, foil: false });
 }
 
 /** Where to pick: the Pokoin location, else the location the server ranked (a Power Tools name), else Power Tools'. */
@@ -479,7 +489,7 @@ export function zeroPickCsv(order, cache = {}) {
       line.condition || '',
       line.lineCents != null ? (Number(line.lineCents) / 100).toFixed(2) : '',
       '',
-      line.reverse ? 'Reverse' : line.foil ? 'Foil' : '',
+      line.reverse ? 'Reverse' : lineFinishLabel(line),
       line.signed ? 'true' : 'false',
       line.altered ? 'true' : 'false',
       pick.issue?.type || '',
