@@ -16,7 +16,7 @@ own Rust toolchain through rustup). No root is needed.
 
 The `exec` functions are the production integer core of
 `crates/external/src/ct_fees.rs` (`fee_bps`, `net_scaled`, `round_pkn`,
-`nets`, `gross_cents`, `floor_price`) and `apps/api/src/jobs/fee_once.rs`
+`nets`, `gross_cents`, `floor_price`, `floor_price_rounded`) and `apps/api/src/jobs/fee_once.rs`
 (`raise_to`), with the same names and arithmetic. Keep them in step: a
 change to one is a change to both. Units: prices in whole PKN (2 PKN = 1
 cent), rates in basis points, results in 10⁻⁸ PKN. Bounds: asks up to 10¹²
@@ -24,7 +24,7 @@ PKN, prices up to 10⁹ PKN, rates up to 30 %, VAT up to 50 %, a 1–2 cent
 minimum fee. Production refuses anything outside them (`MAX_ASK_PKN`,
 `MAX_PRICE_PKN`, `MAX_RATE_BPS`, `MAX_VAT_BPS`).
 
-Result on 2026-10-21: **40 verified, 0 errors**. Proved:
+Result on 2026-11-04: **45 verified, 0 errors**. Proved:
 
 | Property | Where |
 | --- | --- |
@@ -37,6 +37,7 @@ Result on 2026-10-21: **40 verified, 0 errors**. Proved:
 | Fee counted once: listing the (already net) Pokoin price as the CardTrader ask never nets it (the 2026-10-21 bug) | `lemma_listing_the_net_loses_the_fee` |
 | Fee counted once: one cent below the gross-up ask does not net the price | `lemma_fee_once` |
 | The pricer's rounding never takes a price under the configured minimum | `floor_price` postcondition |
+| The pricer's rounding (exact, nearest, down, up) never takes a price under the minimum; down/up move less than 1 PKN | `floor_price_rounded` postconditions, `lemma_rounding_moves_less_than_one_pkn` |
 | `fee_once` never lowers a CardTrader ask; a raised ask nets the price at the smallest cent | `raise_to` postconditions |
 | Two pushes that read the same source: only the first claim succeeds (one CardTrader create per listing) | `lemma_one_claim_wins` |
 | A listing with a pending claim is not claimed again | `lemma_pending_is_not_a_candidate` |

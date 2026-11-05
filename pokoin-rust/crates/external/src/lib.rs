@@ -27,6 +27,8 @@ pub mod powertools_games;
 pub mod price_book;
 pub mod price_check;
 pub mod pricing;
+pub mod pricing_store;
+pub mod pricing_strategies;
 pub mod r2;
 pub mod redis;
 pub mod redirects;

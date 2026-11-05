@@ -98,6 +98,19 @@ test('row problems mirror the server submit rules', () => {
   assert.equal(batchCounts({ a: row('a', { pricePkn: null }) }, { intent: 'list' }).ready, false);
 });
 
+test('batch pricing lets unpriced rows through and keeps the other rules', () => {
+  assert.equal(rowProblem(row('a', { pricePkn: null }), { priced: true }), '');
+  assert.equal(rowProblem(row('a', { pricePkn: 0 }), { priced: true }), '');
+  assert.equal(rowProblem(row('a', { pricePkn: 0 })), 'no_price');
+  assert.equal(rowProblem(row('a', { cardId: '', pricePkn: null }), { priced: true }), 'no_printing');
+  assert.equal(rowProblem(row('a', { recognitionState: 'unmatched', pricePkn: null }), { priced: true }), 'needs_review');
+  const counts = batchCounts({ a: row('a', { pricePkn: null }), b: row('b') }, { intent: 'list', priced: true });
+  assert.equal(counts.noPrice, 0);
+  assert.equal(counts.ready, true);
+  assert.equal(nextAttentionIndex([row('a', { pricePkn: null })], -1, { priced: true }), -1);
+  assert.equal(nextAttentionIndex([row('a', { pricePkn: null })], -1), 0);
+});
+
 test('stack key matches the CardVault vectors', () => {
   const base = { cardId: '220962', condition: 'NM', language: 'IT', foilState: 'standard', firstEdition: false, signed: false, altered: false, graded: false, gradingCompany: '', grade: '', location: 'Box A12' };
   assert.equal(stackKey(base), '220962|NM|IT|standard|0|0|0|0|||box a12');
@@ -333,4 +346,15 @@ test('merged quantity growth shifts the following slots; submitted rows still co
   const next = Object.fromEntries(nextBoxPositions(list));
   assert.equal(next.box1.stack, 6);
   assert.equal(next.box1.startPosition, 1);
+});
+
+test('priced can be decided per row (a row\'s own pricing choice)', () => {
+  const ready = { status: 'active', cardId: '1', recognitionState: 'matched', quantity: 1 };
+  const own = { ...ready, id: 'a', pricing: { strategyId: 's1' } };
+  const none = { ...ready, id: 'b', pricing: { none: true } };
+  const priced = (row) => Boolean(row.pricing?.strategyId);
+  assert.equal(rowProblem(own, { priced }), '');
+  assert.equal(rowProblem(none, { priced }), 'no_price');
+  const counts = batchCounts({ a: own, b: none }, { priced });
+  assert.deepEqual([counts.noPrice, counts.ready], [1, false]);
 });

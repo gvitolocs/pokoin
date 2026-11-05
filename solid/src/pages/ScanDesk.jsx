@@ -1,10 +1,13 @@
 import { createMemo, createSignal, flush, For, onSettled, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import {
+  applyPricing,
   fetchCardSales,
   fetchCheapestPricePknMap,
   fetchExactNameCards,
+  fetchPricingStrategies,
   fetchSellerBoxSlots,
+  savePricingGroup,
   imageSrc,
 } from '@market/api.js';
 import {
@@ -56,6 +59,20 @@ import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from '.
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
 import { claimRows, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
+  pricingApplyBodies,
+  pricingChoiceValue,
+  pricingFailedLine,
+  pricingResultLine,
+  rowIsPriced,
+  rowOwnPricing,
+  rowPricingChip,
+  rowPricingPatch,
+  sumPricingAnswers,
+} from './scan-desk/pricing.js';
+import PricerPopup from '../components/pricer/PricerPopup.jsx';
+import { TagIcon } from '../components/pricer/icons.jsx';
+import { allowScanPreview, previewScanDesk, SCAN_PREVIEW_BANNER, SCAN_PREVIEW_ERROR } from './scan-desk/preview-fixture.js';
+import {
   FIELD_LABEL,
   loadStoppedPositions,
   loadVersionSet,
@@ -74,22 +91,37 @@ import { usePageTitle } from './tools/board.jsx';
  * batch to inventory or the collection. Behaviour follows the React desk
  * line by line; `watch` stands in for useEffect with explicit deps.
  */
-function ScanDeskDesk() {
+/**
+ * The desk. `preview` (`?scanPreview`, dev / localhost only): fixture state
+ * from `previewScanDesk`, every server call refused before it is sent, batch
+ * defaults (the Pricing select included) changed locally.
+ */
+function ScanDeskDesk(props) {
   const location = useLocation();
+  const fixture = props.preview ? previewScanDesk() : null;
+  if (fixture) {
+    // Each row's version set is its own western printing: no catalog request,
+    // and nothing to remap to.
+    for (const item of fixture.items) versionSetCache.set(item.cardId, fixture.versionSets[item.cardId]);
+  }
   const uid = () => authUser()?.uid || accountProfile()?.uid || '';
   // Sellers price the queue in their local currency.
   const priceCurrency = () => sellerCurrency();
-  const [session, setSession] = createSignal(null);
-  const [batch, setBatch] = createSignal(null);
+  const [session, setSession] = createSignal(fixture?.session ?? null);
+  const [batch, setBatch] = createSignal(fixture?.batch ?? null);
   const [pairing, setPairing] = createSignal(null);
   const [idleDisconnectNote, setIdleDisconnectNote] = createSignal(false);
   const [serverOffset, setServerOffset] = createSignal(0);
-  const [rows, setRows] = createSignal({});
+  const [rows, setRows] = createSignal(fixture ? applyItems({}, fixture.items) : {});
   const [pending, setPending] = createSignal({});
   const [streamStatus, setStreamStatus] = createSignal('connecting');
   const [error, setError] = createSignal('');
   const [focusId, setFocusId] = createSignal('');
   const [selection, setSelection] = createSignal(new Set());
+  /** Rows ticked to price together ("Price selected"); separate from the shift-range selection. */
+  const [picked, setPicked] = createSignal(new Set());
+  /** Row ids the pricer pop-up sets a pricing choice for (null: closed). */
+  const [pricingFor, setPricingFor] = createSignal(null);
   const [toasts, setToasts] = createSignal([]);
   const [stackFull, setStackFull] = createSignal(false);
   let stackFullTimer = null;
@@ -100,6 +132,10 @@ function ScanDeskDesk() {
   const [problems, setProblems] = createSignal({});
   /** Finalize intent: list → listings+ownership; collection → ownership only. */
   const [submitIntent, setSubmitIntent] = createSignal('list');
+  /** `fetchPricingStrategies` answer for the Pricing select (null until loaded). */
+  const [pricingData, setPricingData] = createSignal(fixture?.pricing ?? null);
+  /** One line after submit: what batch pricing did, or that it failed. */
+  const [pricingNote, setPricingNote] = createSignal({ text: '', failed: false });
   const [now, setNow] = createSignal(Date.now());
   const [images, setImages] = createSignal({});
   // Bumped to re-run the price suggestion effect for a row whose price field was emptied.
@@ -137,7 +173,7 @@ function ScanDeskDesk() {
 
   // ---------------------------------------------------------------- session
 
-  const token = (force = false) => getBearer(force);
+  const token = (force = false) => (props.preview ? Promise.reject(new Error(SCAN_PREVIEW_ERROR)) : getBearer(force));
 
   async function startSession(batchId) {
     setError('');
@@ -173,14 +209,28 @@ function ScanDeskDesk() {
   }
 
   watch(() => [signedIn(), uid()], ([on, id]) => {
-    if (!on || !id) return;
+    if (props.preview || !on || !id) return;
     // A different account in this tab never sees the previous seller's batch.
     setSession(null);
     setBatch(null);
     setPairing(null);
     dispatch({ type: 'reset', items: [] });
     startSession();
+    loadPricing();
   });
+
+  async function loadPricing() {
+    if (fixture) {
+      setPricingData(fixture.pricing);
+      return;
+    }
+    try {
+      setPricingData(await fetchPricingStrategies(await token()));
+    } catch (_) {
+      /* the select still offers "No pricing"; a saved choice shows as not found */
+      setPricingData(null);
+    }
+  }
 
   onSettled(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -190,7 +240,7 @@ function ScanDeskDesk() {
   // ---------------------------------------------------------------- stream
 
   watch(() => [batch()?.id], ([batchId]) => {
-    if (!batchId) return undefined;
+    if (!batchId || props.preview) return undefined;
     const perf = perfSink();
     const handle = connectScanStream({
       batchId,
@@ -288,9 +338,11 @@ function ScanDeskDesk() {
   const list = createMemo(() => queueRows(displayRows()));
   const occupiedAbs = createMemo(() => occupiedAbsForScanBoxes(list(), boxStockRows()));
   const slots = createMemo(() => boxSlots(list(), { occupiedAbs: occupiedAbs() }));
-  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent() }));
-  const phaseInfo = createMemo(() => phaseText(sessionPhase(session(), now(), serverOffset()), session()));
   const defaults = () => batch()?.defaults || DEFAULTS;
+  /** Listing, and the row's own pricing choice or the batch's names a group or strategy: an unpriced row is priced on load. */
+  const rowPriced = (row) => submitIntent() === 'list' && rowIsPriced(row, defaults());
+  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent(), priced: rowPriced }));
+  const phaseInfo = createMemo(() => phaseText(sessionPhase(session(), now(), serverOffset()), session()));
   const closed = () => Boolean(batch() && batch().status !== 'open');
   const stockUid = uid;
 
@@ -391,7 +443,7 @@ function ScanDeskDesk() {
     () => [batch()?.id, defaults().location, closed(), stockUid()],
     ([batchId, location, isClosed, sellerUid]) => {
       const loc = String(location || '').trim();
-      if (isClosed || !batchId || !loc || !sellerUid) return undefined;
+      if (props.preview || isClosed || !batchId || !loc || !sellerUid) return undefined;
       const box = listingBox(loc);
       const key = `${batchId}|${box}`;
       if (boxStock.key === key) return undefined;
@@ -440,7 +492,7 @@ function ScanDeskDesk() {
   watch(
     () => [batch()?.id, defaults().location, closed(), stockUid()],
     ([batchId, location, isClosed, sellerUid]) => {
-      if (isClosed || !batchId || !sellerUid) return undefined;
+      if (props.preview || isClosed || !batchId || !sellerUid) return undefined;
       if (String(location || '').trim()) {
         locationSeeded = batchId;
         return undefined;
@@ -586,6 +638,19 @@ function ScanDeskDesk() {
       redoStack = [];
     }
     try {
+      if (props.preview) {
+        // The preview edits its fixture rows on the page.
+        const live = untrack(rows);
+        const { confirm: _confirm, ...fields } = changes;
+        dispatch({
+          type: 'items',
+          items: targets.map((row) => {
+            const base = live[row.id] || row;
+            return { ...base, ...optimistic, ...fields, seq: Number(base.seq || 0) + 1 };
+          }),
+        });
+        return;
+      }
       // Serialize per row: the version-switch patch (which clears the stale
       // price) must land before the follow-up price suggestion is sent, or the
       // server applies them out of order and wipes the fresh suggestion.
@@ -680,6 +745,8 @@ function ScanDeskDesk() {
       });
     }
     try {
+      // The preview keeps its defaults on the page only.
+      if (props.preview) return;
       const t = await token();
       const data = await scanApi.defaults(t, current.id, nextPatch);
       setBatch((prev) => ({ ...prev, ...data.batch }));
@@ -726,6 +793,57 @@ function ScanDeskDesk() {
     const row = focused();
     return row ? [row.id] : [];
   };
+
+  function togglePicked(id) {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** The pricer pop-up's marked tile: the rows' shared own choice, else none marked. */
+  const pricingCurrent = createMemo(() => {
+    const ids = pricingFor();
+    if (!ids?.length) return null;
+    // With in-flight edits: a choice just made marks its tile at once.
+    const live = displayRows();
+    const keys = new Set(ids.map((id) => JSON.stringify(rowOwnPricing(live[id]))));
+    if (keys.size !== 1) return null;
+    const own = rowOwnPricing(live[ids[0]]);
+    if (!own) return { kind: 'batch' };
+    if (own.none) return { kind: 'none' };
+    return own.groupId ? { kind: 'group', id: own.groupId } : { kind: 'strategy', id: own.strategyId };
+  });
+
+  /** "Batch default" tile: the batch's choice by name. */
+  const batchPricingLabel = () => {
+    if (!pricingChoiceValue(defaults())) return 'No pricing';
+    return rowPricingChip({}, defaults(), pricingData()).label;
+  };
+
+  function choosePricing(choice) {
+    const ids = pricingFor() || [];
+    setPricingFor(null);
+    setPicked(new Set());
+    if (ids.length) patchRows(ids, { pricing: rowPricingPatch(choice) }, { label: 'Pricing' });
+  }
+
+  /** "New group…" in the pop-up: the group exists, the Pricing choices list it. */
+  async function createPricingGroup(input) {
+    if (fixture) {
+      const id = `preview-group-${Date.now().toString(36)}`;
+      setPricingData((current) => ({
+        ...current,
+        groups: [...(current?.groups || []), { id, ...input, listingCount: 0, lastAppliedAt: null, lastApplied: null }],
+      }));
+      return id;
+    }
+    const data = await savePricingGroup({ group: input }, await token());
+    await loadPricing();
+    return data.groupId;
+  }
 
   function move(delta) {
     const rowsNow = list();
@@ -934,7 +1052,7 @@ function ScanDeskDesk() {
     const row = focused();
     if (!row) return;
     const intent = submitIntent();
-    const problem = rowProblem(row, { intent });
+    const problem = rowProblem(row, { intent, priced: rowPriced });
     if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed && row.cardId) {
       patchRows([row.id], { confirm: true }, { label: 'Confirm' });
     } else if (problem === 'no_printing') {
@@ -989,7 +1107,7 @@ function ScanDeskDesk() {
         move(cmd.delta);
         return;
       case 'nextAttention': {
-        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent() });
+        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent(), priced: rowPriced });
         if (i >= 0) setFocusId(list()[i].id);
         return;
       }
@@ -1083,7 +1201,7 @@ function ScanDeskDesk() {
       // The confirm dialog's button has focus, so Enter there is a native click.
       const cmd = shortcutFor(event, {
         helpOpen: helpOpen(),
-        modalOpen: confirmOpen() || Boolean(replaceFor()),
+        modalOpen: confirmOpen() || Boolean(replaceFor()) || Boolean(pricingFor()),
         draftActive: Boolean(draft()),
       });
       if (!cmd) return;
@@ -1097,7 +1215,8 @@ function ScanDeskDesk() {
   // ---------------------------------------------------------------- prices + images
 
   watch(() => [list(), closed(), submitIntent(), priceRetry()], ([rowsNow, isClosed, intent]) => {
-    if (isClosed || intent === 'collection') return undefined;
+    // The preview's unpriced rows stay unpriced: they show "on load".
+    if (props.preview || isClosed || intent === 'collection') return undefined;
     const want = rowsNow
       .filter((row) => {
         if (!row.cardId || priceTouched.has(row.id)) return false;
@@ -1174,6 +1293,7 @@ function ScanDeskDesk() {
   });
 
   watch(() => [list(), images()], ([rowsNow, shots]) => {
+    if (props.preview) return undefined;
     const wanted = rowsNow.filter((row) => row.hasImage && (row.recognitionState !== 'matched' || !row.cardId) && !shots[row.id]);
     if (!wanted.length) return undefined;
     let cancelled = false;
@@ -1234,6 +1354,11 @@ function ScanDeskDesk() {
   }
 
   async function submit(targets = pendingTargets) {
+    if (props.preview) {
+      setConfirmOpen(false);
+      setError(SCAN_PREVIEW_ERROR);
+      return;
+    }
     const b = batch();
     if (submitting() || !b?.id) return;
     const intent = submitIntent();
@@ -1246,6 +1371,7 @@ function ScanDeskDesk() {
     pendingTargets = nextTargets;
     setSubmitting(true);
     setError('');
+    setPricingNote({ text: '', failed: false });
     try {
       const t = await token();
       const data = await scanApi.submit(t, b.id, submitKey, intent, nextTargets);
@@ -1254,6 +1380,25 @@ function ScanDeskDesk() {
       setProblems({});
       if (data.cardtrader && data.cardtrader.ok === false) {
         setError(data.cardtrader.error || 'Listed on Pokoin; CardTrader push had errors.');
+      }
+      // Pricing runs once per group and once per strategy the rows named
+      // (`rowPricing`); the submit stands whatever happens here.
+      const pricingBodies = pricingApplyBodies(data.result);
+      if (pricingBodies.length) {
+        setPricingNote({ text: 'Pricing the new listings…', failed: false });
+        const answers = [];
+        const failed = [];
+        for (const body of pricingBodies) {
+          try {
+            answers.push(await applyPricing(body, await token()));
+          } catch (_) {
+            failed.push(body);
+          }
+        }
+        const lines = [];
+        if (answers.length) lines.push(pricingResultLine(sumPricingAnswers(answers)));
+        if (failed.length) lines.push(pricingFailedLine(failed));
+        setPricingNote({ text: lines.join('. '), failed: failed.length > 0 });
       }
       rememberActiveSession('');
       const snapshot = await scanApi.batch(t, b.id);
@@ -1275,6 +1420,8 @@ function ScanDeskDesk() {
 
   async function newBatch() {
     submitKey = newSubmitKey();
+    setPricingNote({ text: '', failed: false });
+    loadPricing();
     pricesAsked = new Set();
     priceTouched = new Set();
     suggestedFor = new Map();
@@ -1302,6 +1449,9 @@ function ScanDeskDesk() {
 
   return (
     <div class="page desk scan-desk">
+      <Show when={props.preview}>
+        <p class="scan-preview-banner" role="status">{SCAN_PREVIEW_BANNER}</p>
+      </Show>
       <header class="scan-head">
         <div class="scan-head-title">
           <p class="page-kicker">Seller · Scan</p>
@@ -1398,6 +1548,9 @@ function ScanDeskDesk() {
             </section>
             <DefaultsBar
               defaults={defaults()}
+              showPricing={submitIntent() === 'list'}
+              pricing={pricingData()}
+              pricingHref={props.preview ? '/mypokoin/pricer?mypokoinPreview' : '/mypokoin/pricer'}
               boxes={recentBoxNames()}
               stackFull={stackFull()}
               onChange={setDefaults}
@@ -1419,8 +1572,13 @@ function ScanDeskDesk() {
           <p>
             {batch().submitResult?.intent === 'collection'
               ? `${batch().submitResult?.ownership ?? 0} collection records saved. None listed for sale.`
-              : `${batch().submitResult?.listings ?? 0} listings are live (also added to your collection).`}
+              : batch().submitResult?.paused
+                ? `${batch().submitResult?.listings ?? 0} listings added, ${batch().submitResult.paused} paused until priced (also added to your collection).`
+                : `${batch().submitResult?.listings ?? 0} listings are live (also added to your collection).`}
           </p>
+          <Show when={pricingNote().text}>
+            <p class={['scan-pricing-note', { bad: pricingNote().failed }]} role="status" data-testid="scan-pricing-note">{pricingNote().text}</p>
+          </Show>
           <div class="scan-done-actions">
             <a class="btn ghost" href={marketUrl('/mypokoin/collection')}>View collection</a>
             <Show when={batch().submitResult?.intent !== 'collection'}>
@@ -1489,6 +1647,30 @@ function ScanDeskDesk() {
         </Show>
       </div>
 
+      <Show when={picked().size && !closed() && submitIntent() === 'list'}>
+        <div class="scan-pick-bar" role="region" aria-label="Rows selected for pricing">
+          <strong>{picked().size} selected</strong>
+          <button type="button" class="btn scan-pick-price" onClick={() => setPricingFor([...picked()])}>
+            <TagIcon size={17} /> Price selected
+          </button>
+          <button type="button" class="btn ghost" onClick={() => setPicked(new Set())}>Clear</button>
+        </div>
+      </Show>
+      <Show when={pricingFor()}>
+        {(ids) => (
+          <PricerPopup
+            mode="rows"
+            count={ids().length}
+            strategies={pricingData()?.strategies || []}
+            groups={pricingData()?.groups || []}
+            current={pricingCurrent()}
+            batchLabel={batchPricingLabel()}
+            onChoose={choosePricing}
+            onCreateGroup={createPricingGroup}
+            onClose={() => setPricingFor(null)}
+          />
+        )}
+      </Show>
       <div
         class={['scan-queue', { 'intent-collection': submitIntent() === 'collection' }]}
         role="grid"
@@ -1497,7 +1679,21 @@ function ScanDeskDesk() {
         ref={(el) => { queueEl = el; }}
       >
         <div class="scan-row scan-row-head" role="row">
-          <span role="columnheader">#</span>
+          <span role="columnheader" class="c-num">
+            <Show when={!closed() && submitIntent() === 'list' && list().length} fallback="#">
+              <label class="c-pick">
+                <input
+                  type="checkbox"
+                  tabindex={-1}
+                  aria-label="Select every row for pricing"
+                  checked={list().length > 0 && list().every((row) => picked().has(row.id))}
+                  prop:indeterminate={picked().size > 0 && !list().every((row) => picked().has(row.id))}
+                  onChange={(event) => setPicked(event.currentTarget.checked ? new Set(list().map((row) => row.id)) : new Set())}
+                />
+                <span>#</span>
+              </label>
+            </Show>
+          </span>
           <span role="columnheader" class="c-card-head">Card</span>
           <span role="columnheader">Lang</span>
           <span role="columnheader">Cond</span>
@@ -1525,7 +1721,12 @@ function ScanDeskDesk() {
               index={index()}
               focused={row().id === focusId()}
               selected={selection().has(row().id)}
-              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent() })}
+              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent(), priced: rowPriced })}
+              priceOnLoad={rowPriced(row())}
+              picked={picked().has(row().id)}
+              onTogglePick={!closed() && submitIntent() === 'list' ? () => togglePicked(row().id) : undefined}
+              pricingChip={submitIntent() === 'list' ? rowPricingChip(row(), defaults(), pricingData()) : null}
+              onPricingChip={() => setPricingFor([row().id])}
               image={images()[row().id]}
               closed={closed()}
               hidePrice={submitIntent() === 'collection'}
@@ -1603,13 +1804,21 @@ function ScanDeskDesk() {
   );
 }
 
-/** /inventory/scan and /dashboard/scan. */
+/** /inventory/scan and /dashboard/scan; `?scanPreview` on dev / localhost is the fixture layout. */
 export default function ScanDesk() {
   const location = useLocation();
+  const [params] = useSearchParams();
   usePageTitle('Scan · Pokoin');
   return (
-    <RequireSignIn to={`/auth?from=${encodeURIComponent(location.pathname || '/inventory/scan')}`}>
-      <ScanDeskDesk />
-    </RequireSignIn>
+    <Show
+      when={untrack(() => allowScanPreview(params))}
+      fallback={(
+        <RequireSignIn to={`/auth?from=${encodeURIComponent(location.pathname || '/inventory/scan')}`}>
+          <ScanDeskDesk />
+        </RequireSignIn>
+      )}
+    >
+      <ScanDeskDesk preview />
+    </Show>
   );
 }

@@ -47,6 +47,7 @@ export default [
   { path: '/mypokoin/spreadsheet', component: SellSpreadsheet },
   { path: '/mypokoin/import', component: Inventory },
   { path: '/mypokoin/settings', component: Inventory },
+  { path: '/mypokoin/pricer', component: Inventory },
   { path: '/mypokoin/collection', component: Inventory },
   { path: '/mypokoin/location/:location', component: Inventory },
   { path: '/mypokoin', component: Inventory },

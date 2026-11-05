@@ -54,6 +54,10 @@ pub fn router(state: DomainState) -> Router {
                 .post(powertools::strategies_post)
                 .delete(powertools::strategies_delete),
         )
+        .route(
+            "/api/marketplace-pricing-groups",
+            get(powertools::groups_get).post(powertools::groups_post).delete(powertools::groups_delete),
+        )
         .route("/api/marketplace-price-check", get(powertools::price_check))
         // Recognition proxies.
         .route(

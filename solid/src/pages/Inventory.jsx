@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
-import { exportStockCsv, fetchPricingStrategies } from '@market/api.js';
+import { exportStockCsv } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
 import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
@@ -10,7 +10,9 @@ import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import CollectionHoldings from '../components/inventory/CollectionHoldings.jsx';
 import InventoryBoard from '../components/inventory/InventoryBoard.jsx';
 import LocationBoard from '../components/inventory/LocationBoard.jsx';
-import PricingStrategies, { PricerDefaults } from '../components/inventory/PricingStrategies.jsx';
+import PricerDefaults from '../components/inventory/PricerDefaults.jsx';
+import PricerTab from '../components/pricer/PricerTab.jsx';
+import { createPricing } from '../components/pricer/pricing-store.js';
 import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
@@ -20,6 +22,7 @@ import {
   previewListings,
   previewPricer,
   previewComps,
+  previewGroups,
   previewStrategies,
 } from './mypokoin-preview-fixture.js';
 import { loadOwnerBook } from '../lib/owner-book.js';
@@ -97,6 +100,7 @@ function tabOf(pathname) {
   return {
     importTab: path === '/mypokoin/import',
     settingsTab: path === '/mypokoin/settings',
+    pricerTab: path === '/mypokoin/pricer',
     collectionTab: path === '/mypokoin/collection',
     locationName,
   };
@@ -105,7 +109,7 @@ function tabOf(pathname) {
 function InventoryDesk(props) {
   const location = useLocation();
   const tab = createMemo(() => tabOf(location.pathname), {
-    equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab
+    equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab && a.pricerTab === b.pricerTab
       && a.collectionTab === b.collectionTab && a.locationName === b.locationName,
   });
   // Sellers read their prices in local currency.
@@ -122,7 +126,8 @@ function InventoryDesk(props) {
   const [previewBlob, setPreviewBlob] = createSignal(null);
   const [busy, setBusy] = createSignal('');
   const [collectionStats, setCollectionStats] = createSignal(null);
-  const selectedGame = game().id;
+  // Read once: the desk keeps the game it opened with.
+  const selectedGame = untrack(() => game().id);
   let paintedKey = '';
 
   // One identity for the listings load: the cached session uid and the
@@ -133,6 +138,17 @@ function InventoryDesk(props) {
   const [pricerDefaults, setPricerDefaults] = createSignal(
     props.preview ? previewPricer() : readCachedPricerSettings(untrack(listingsUid)),
   );
+
+  // Strategies, pricing groups and memberships: one source for the board and the Pricer tab.
+  const pricing = createPricing(props.preview
+    ? {
+      preview: true,
+      previewState: { strategies: previewStrategies(), groups: previewGroups().groups, pairs: previewGroups().memberships },
+      previewComps: previewComps(),
+      rows,
+      setRows: (next) => setRows(() => next),
+    }
+    : {});
 
   function readBook(uid, onUpdate, force = false) {
     return loadOwnerBook(uid, selectedGame, onUpdate, { force });
@@ -151,11 +167,13 @@ function InventoryDesk(props) {
 
   createEffect(
     () => ({ uid: listingsUid(), ...tab() }),
-    ({ uid, importTab, settingsTab, collectionTab, locationName }) => {
+    ({ uid, importTab, settingsTab, pricerTab, collectionTab, locationName }) => {
       document.title = collectionTab
         ? 'Collection · MyPokoin'
         : settingsTab
         ? 'Settings · MyPokoin'
+        : pricerTab
+        ? 'Pricer · MyPokoin'
         : locationName
         ? `${locationName} · MyPokoin`
         : (importTab ? 'Export · MyPokoin' : 'MyPokoin · Pokoin');
@@ -188,10 +206,9 @@ function InventoryDesk(props) {
     (uid) => {
       if (props.preview || !uid) return undefined;
       let cancelled = false;
-      getBearer()
-        .then((token) => fetchPricingStrategies(token))
+      pricing.refresh()
         .then((data) => {
-          if (cancelled) return;
+          if (cancelled || !data) return;
           const settings = data.pricerSettings || {};
           writeCachedPricerSettings(uid, settings);
           setPricerDefaults(() => settings);
@@ -236,7 +253,7 @@ function InventoryDesk(props) {
     downloadBlob(previewBlob(), `pokoin-stock-${previewFormat()}.csv`);
   }
 
-  const onListings = () => !tab().importTab && !tab().settingsTab && !tab().collectionTab;
+  const onListings = () => !tab().importTab && !tab().settingsTab && !tab().pricerTab && !tab().collectionTab;
   const locationName = () => tab().locationName;
   const metrics = () => {
     if (tab().collectionTab) {
@@ -335,7 +352,7 @@ function InventoryDesk(props) {
 
       <Show when={tab().collectionTab}><CollectionHoldings preview={props.preview} onStats={setCollectionStats} /></Show>
 
-      <Show when={!tab().importTab && !tab().collectionTab && !tab().settingsTab && rows() == null && !error()}>
+      <Show when={onListings() && rows() == null && !error()}>
         {/* First visit only (later visits paint the stored book): holds the
             footer below the fold so the board does not push it. */}
         <Show when={waitShown()} fallback={<div class="mypokoin-wait" aria-hidden="true" />}>
@@ -367,13 +384,6 @@ function InventoryDesk(props) {
             />
           </section>
           <section class="mypokoin-card">
-            <PricingStrategies
-              preview={props.preview}
-              previewStrategies={previewStrategies()}
-              onApplied={() => reload().catch(() => {})}
-            />
-          </section>
-          <section class="mypokoin-card">
             <div class="mypokoin-panel-head">
               <div>
                 <h2>Connections</h2>
@@ -400,6 +410,14 @@ function InventoryDesk(props) {
           </section>
         </div>
       </Show>
+      <Show when={tab().pricerTab}>
+        <PricerTab
+          pricing={pricing}
+          rows={rows() || []}
+          preview={props.preview}
+          onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
+        />
+      </Show>
       <Switch>
         <Match when={onListings() && rows() && !rows().length}>
           <EmptyDesk
@@ -423,9 +441,9 @@ function InventoryDesk(props) {
             defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
             preview={props.preview}
-            previewStrategies={props.preview ? previewStrategies() : undefined}
             previewComps={props.preview ? previewComps() : undefined}
-            onApplied={() => reload().catch(() => {})}
+            pricing={pricing}
+            onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
           />
         </Match>
       </Switch>

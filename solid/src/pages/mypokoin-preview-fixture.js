@@ -102,12 +102,26 @@ export function previewPricer() {
 /**
  * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
  * the price check returns them: CardTrader numbers net of the commission
- * (`ctMatchedPkn`) beside the ask (`ctMatchedGrossPkn`).
+ * (`…Pkn`) beside the ask (`…GrossPkn`), and `ctMatch`, the cheapest offer
+ * per toggle combination (`matchKey`: C condition, L language, F finish,
+ * E 1st edition). Looser toggles find cheaper copies; a combination that is
+ * missing has no offer right now.
  */
 export function previewComps() {
+  const offer = (ask) => ({ grossPkn: ask, pkn: Math.round(ask * 0.939 * 100) / 100 });
   const comp = (ask, net, extra = {}) => ({
-    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: net, ctCheapestGrossPkn: ask, ctBasis: 'pro',
-    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' }, ...extra,
+    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: Math.round(ask * 0.85 * 0.939 * 100) / 100, ctCheapestGrossPkn: Math.round(ask * 0.85 * 100) / 100,
+    ctBasis: 'pro',
+    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' },
+    ctMatch: {
+      CLFE: { grossPkn: ask, pkn: net },
+      CLF: offer(Math.round(ask * 0.97 * 100) / 100),
+      CL: offer(Math.round(ask * 0.94 * 100) / 100),
+      C: offer(Math.round(ask * 0.9 * 100) / 100),
+      L: offer(Math.round(ask * 0.88 * 100) / 100),
+      '': offer(Math.round(ask * 0.85 * 100) / 100),
+    },
+    ...extra,
   });
   return {
     '222410:NM:EN:': comp(460, 431.94, { pokoinCheapestPkn: 440 }),
@@ -119,20 +133,71 @@ export function previewComps() {
   };
 }
 
+/** Named strategies as the server stores them (no scope: groups pick one by name). */
 export function previewStrategies() {
-  return [{
-    id: 'preview-strategy-1',
-    name: 'Undercut CardTrader',
-    source: 'cardtrader',
-    action: 'undercut',
-    amountPct: 5,
-    amountPkn: 0,
-    minPkn: 1,
-    rounding: 'integer',
-    condition: '',
-    language: '',
-    enabled: true,
-  }];
+  const rule = {
+    source: 'cardtrader', basis: 'offers', match: { condition: true, language: true, finish: true, firstEdition: true },
+    feeExclusive: true, amountPkn: 0, rounding: 'integer', minPkn: 1,
+  };
+  return [
+    { ...rule, id: 'preview-strategy-1', name: 'Undercut 5% · CardTrader net', action: 'undercut', amountPct: 5, activatePaused: true },
+    {
+      ...rule,
+      id: 'preview-strategy-2',
+      name: 'Match CardTrader · same language',
+      match: { condition: false, language: true, finish: false, firstEdition: false },
+      feeExclusive: false,
+      action: 'match',
+      amountPct: 0,
+      activatePaused: false,
+    },
+    { ...rule, id: 'preview-strategy-3', name: 'Sold median +10%', basis: 'sold', action: 'premium', amountPct: 10, activatePaused: false },
+  ];
+}
+
+/**
+ * Pricing groups over the preview listings: one repriced daily, one applied
+ * by hand, one never applied. preview-list-8 is in no group.
+ */
+export function previewGroups() {
+  return {
+    groups: [
+      {
+        id: 'preview-group-1',
+        name: 'Base Set holos',
+        strategyId: 'preview-strategy-1',
+        autoDaily: true,
+        lastAppliedAt: '2026-11-03T05:00:00.000Z',
+        lastApplied: { changed: 2, activated: 1, noComp: 0, unchanged: 0, failed: 0, trigger: 'daily' },
+      },
+      {
+        id: 'preview-group-2',
+        name: 'Modern singles',
+        strategyId: 'preview-strategy-2',
+        autoDaily: false,
+        lastAppliedAt: '2026-10-28T17:20:00.000Z',
+        lastApplied: { changed: 3, activated: 0, noComp: 1, unchanged: 0, failed: 0, trigger: 'manual' },
+      },
+      {
+        id: 'preview-group-3',
+        name: 'Slow movers',
+        strategyId: 'preview-strategy-3',
+        autoDaily: false,
+        lastAppliedAt: null,
+        lastApplied: null,
+      },
+    ],
+    memberships: [
+      ['preview-list-1', 'preview-group-1'],
+      ['preview-list-2', 'preview-group-1'],
+      ['preview-list-3', 'preview-group-1'],
+      ['preview-list-4', 'preview-group-2'],
+      ['preview-list-5', 'preview-group-2'],
+      ['preview-list-6', 'preview-group-2'],
+      ['preview-list-9', 'preview-group-2'],
+      ['preview-list-7', 'preview-group-3'],
+    ],
+  };
 }
 
 export function previewCollection() {

@@ -184,6 +184,33 @@ pub fn comp(rows: &[FacetPrice], item: &PriceItem) -> (Option<f64>, Option<f64>)
     }
 }
 
+/// The ask of one toggle combination for one card's store rows, in PKN
+/// (`price_check::set_ct_matches`), by the rule of their basis.
+pub fn comp_by(rows: &[FacetPrice], item: &PriceItem, m: crate::price_check::Match) -> Option<f64> {
+    let first = rows.first()?;
+    match first.basis {
+        Basis::Pro => {
+            let groups: Vec<Value> = rows
+                .iter()
+                .map(|row| {
+                    json!({
+                        "condition": row.condition,
+                        "language": row.language,
+                        "reverse": row.foil,
+                        "firstEdition": row.first_edition,
+                        "minPkn": row.min_pkn,
+                    })
+                })
+                .collect();
+            crate::price_check::pick_ct_by(&groups, &item.condition, &item.language, item.reverse, item.first_edition, m)
+        }
+        Basis::Zero => {
+            let asks: Vec<Ask> = rows.iter().filter_map(zero_ask).collect();
+            price_book::facet_cents_by(&asks, &item.language, &item.condition, item.foil || item.reverse, m).map(price_book::pkn_from_cents)
+        }
+    }
+}
+
 /// A zero row back as the price file's ask, for `price_book::facet_cents`.
 fn zero_ask(row: &FacetPrice) -> Option<Ask> {
     let lang = price_book::lang_code(&row.language)?;
@@ -217,6 +244,12 @@ impl StoreHit {
     pub fn basis_of(&self, item: &PriceItem) -> Option<Basis> {
         let id = item.card_id.parse::<i64>().ok()?;
         self.by_card.get(&id)?.first().map(|row| row.basis)
+    }
+
+    /// The ask of one toggle combination for one price-check item, in PKN.
+    pub fn comp_by(&self, item: &PriceItem, m: crate::price_check::Match) -> Option<f64> {
+        let rows = item.card_id.parse::<i64>().ok().and_then(|id| self.by_card.get(&id)).map(Vec::as_slice).unwrap_or(&[]);
+        comp_by(rows, item, m)
     }
 
     /// `(cheapest, matched)` of one price-check item, in PKN.

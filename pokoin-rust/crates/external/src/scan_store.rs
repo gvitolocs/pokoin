@@ -836,7 +836,7 @@ pub const ITEM_COLUMNS: &str = "id, batch_id, seller_uid, scan_event_id, session
 recognition_state, recognition, defaults_version, defaults_snapshot, (image is not null) as has_image, timings, seq, position, \
 status, merged_into, reviewed, card_id, card_name, set_name, collector_number, image_url, nationality, condition, language, \
 foil_state, first_edition, signed, altered, graded, grading_company, grade, certification_id, location, quantity, price_pkn, \
-price_suggested, seller_comment, listing_id, updated_at";
+price_suggested, seller_comment, pricing, listing_id, updated_at";
 
 const MAX_BATCH_ROWS: i64 = 10_000;
 
@@ -1553,12 +1553,12 @@ pub async fn duplicate_item(db: &DbPools, seller_uid: &str, item_id: &str) -> Ap
            batch_id, seller_uid, recognition_state, recognition, defaults_snapshot, seq, position, status,
            reviewed, card_id, card_name, set_name, collector_number, image_url, nationality, condition, language,
            foil_state, first_edition, signed, altered, graded, grading_company, grade, certification_id, location,
-           quantity, price_pkn, price_suggested, seller_comment
+           quantity, price_pkn, price_suggested, seller_comment, pricing
          )
          select batch_id, seller_uid, 'manual', jsonb_build_object('copiedFrom', id), defaults_snapshot, $2, $3, 'active',
            true, card_id, card_name, set_name, collector_number, image_url, nationality, condition, language,
            foil_state, first_edition, signed, altered, graded, grading_company, grade, certification_id, location,
-           1, price_pkn, price_suggested, seller_comment
+           1, price_pkn, price_suggested, seller_comment, pricing
          from public.scan_items where id = $1::uuid
          returning {}",
         ITEM_COLUMNS
@@ -1696,8 +1696,33 @@ pub async fn discard_batch(db: &DbPools, seller_uid: &str, batch_id: &str) -> Ap
     Ok(json!({ "batch": rules::batch_view(&row_value(&updated)) }))
 }
 
+/// Put the batch's created listings in the seller's pricing group, moving
+/// them out of any other. Only a group of this seller, only this seller's
+/// listings, and an existing membership changes group only when it is the
+/// same seller's.
+const GROUP_MEMBERS_SQL: &str = "
+  insert into public.seller_pricing_group_members (listing_id, group_id, seller_uid)
+  select l.id, g.id, $1
+  from public.marketplace_user_listings l
+  join public.seller_pricing_groups g on g.id = $2 and g.seller_uid = $1
+  where l.id = any($3::uuid[]) and l.seller_uid = $1
+  on conflict (listing_id) do update set group_id = excluded.group_id, added_at = now()
+    where seller_pricing_group_members.seller_uid = excluded.seller_uid";
+
+/// The seller's pricing group, locked against a delete until commit.
+const GROUP_LOCK_SQL: &str =
+    "select id from public.seller_pricing_groups where id = $1 and seller_uid = $2 for key share";
+
+fn pricing_group_unknown() -> ApiError {
+    ApiError::conflict("That pricing group no longer exists; pick another one for this batch.")
+        .with_code("pricing_group_unknown")
+}
+
 /// `submitBatch` — validate, upsert non-purchasable listings, ownership, then
-/// activate + mark submitted in one transaction.
+/// activate + mark submitted in one transaction. When the batch defaults name
+/// a pricing group or strategy, a row without a price is listed paused at 0
+/// (priced after submit by `applyPricing`), and with a group every created
+/// listing joins it in the activating transaction.
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_batch(
     db: &DbPools,
@@ -1740,10 +1765,30 @@ pub async fn submit_batch(
     if rows.is_empty() {
         return Err(ApiError::conflict("Nothing to add.").with_code("empty_batch"));
     }
+    // Batch pricing only means something for listings written on Pokoin.
+    let pricing = if write_pokoin {
+        rules::batch_pricing(batch.get("defaults").unwrap_or(&Value::Null))
+    } else {
+        Value::Null
+    };
+    // Each row is priced by its own choice, else the batch's.
+    let row_pricing = |row: &Value| if write_pokoin { rules::row_pricing(row, &pricing) } else { Value::Null };
+    let mut pricing_groups: Vec<String> = rows
+        .iter()
+        .filter_map(|row| row_pricing(row).get("groupId").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    pricing_groups.sort();
+    pricing_groups.dedup();
+    for group_id in &pricing_groups {
+        let found = sqlx::query(GROUP_LOCK_SQL).bind(group_id).bind(seller_uid).fetch_optional(&mut *tx).await?;
+        if found.is_none() {
+            return Err(pricing_group_unknown());
+        }
+    }
     let problems: Vec<Value> = rows
         .iter()
         .filter_map(|row| {
-            let reason = rules::submit_problem(row, intent);
+            let reason = rules::submit_problem(row, intent, !row_pricing(row).is_null());
             if reason.is_empty() {
                 None
             } else {
@@ -1816,7 +1861,7 @@ pub async fn submit_batch(
             .bind(if seller_name.trim().is_empty() { "Pokoin seller" } else { seller_name })
             .bind(row.get("condition").and_then(Value::as_str).unwrap_or("NM"))
             .bind(row.get("language").and_then(Value::as_str).unwrap_or("EN"))
-            .bind(row.get("price_pkn").cloned().unwrap_or(Value::Null))
+            .bind(if rules::row_priced(row) { rules::row_f64(row, "price_pkn").unwrap_or(0.0) } else { 0.0 })
             .bind(row.get("quantity").and_then(Value::as_i64).unwrap_or(1))
             .bind(row.get("signed") == Some(&Value::Bool(true)))
             .bind(row.get("foil_state").and_then(Value::as_str) == Some("reverse"))
@@ -1915,17 +1960,31 @@ pub async fn submit_batch(
     if batch.get("status").and_then(Value::as_str) != Some("open") {
         return Err(ApiError::conflict("This batch is closed.").with_code("batch_closed"));
     }
+    for group_id in &pricing_groups {
+        let found = sqlx::query(GROUP_LOCK_SQL).bind(group_id).bind(seller_uid).fetch_optional(&mut *tx).await?;
+        if found.is_none() {
+            return Err(pricing_group_unknown());
+        }
+    }
+    let mut paused = 0usize;
     for entry in &created {
         if write_pokoin {
             if let Some(listing_id) = &entry.listing_id {
+                // Unpriced stock (only possible with batch pricing) is listed
+                // paused at 0, as Card Rails lists an unquoted copy.
+                let status = if rules::row_priced(&entry.row) { "active" } else { "paused" };
+                if status == "paused" {
+                    paused += 1;
+                }
                 let activated = sqlx::query(
                     "update public.marketplace_user_listings
-                       set status = 'active', updated_at = now()
+                       set status = $3, updated_at = now()
                      where id = $1::uuid and source = 'pokoin_scan_batch' and source_listing_id = $2 and status = 'inactive'
                      returning id",
                 )
                 .bind(listing_id)
                 .bind(format!("scan:{}", entry.item_id))
+                .bind(status)
                 .fetch_optional(&mut *tx)
                 .await?;
                 if activated.is_none() {
@@ -1944,9 +2003,39 @@ pub async fn submit_batch(
         .execute(&mut *tx)
         .await?;
     }
+    // Every created listing joins the group its row is priced by.
+    for group_id in &pricing_groups {
+        let ids: Vec<uuid::Uuid> = created
+            .iter()
+            .filter(|entry| row_pricing(&entry.row).get("groupId").and_then(Value::as_str) == Some(group_id.as_str()))
+            .filter_map(|entry| entry.listing_id.as_deref())
+            .filter_map(|id| uuid::Uuid::parse_str(id).ok())
+            .collect();
+        if !ids.is_empty() {
+            sqlx::query(GROUP_MEMBERS_SQL).bind(seller_uid).bind(group_id).bind(&ids).execute(&mut *tx).await?;
+        }
+    }
+    // What the desk prices after submit: each created listing and its pricing.
+    let row_pricings: Vec<Value> = created
+        .iter()
+        .filter_map(|entry| {
+            let chosen = row_pricing(&entry.row);
+            let listing = entry.listing_id.as_ref()?;
+            (!chosen.is_null()).then(|| {
+                let mut out = json!({ "listingId": listing, "itemId": entry.item_id, "priced": rules::row_priced(&entry.row) });
+                if let (Some(out), Some(chosen)) = (out.as_object_mut(), chosen.as_object()) {
+                    out.extend(chosen.clone());
+                }
+                out
+            })
+        })
+        .collect();
     let result = json!({
         "intent": intent,
         "targets": targets,
+        "pricing": pricing,
+        "rowPricing": row_pricings,
+        "paused": paused,
         "listings": if write_pokoin { created.len() } else { 0 },
         "ownership": ownership_count,
         "cards": created.iter().map(|entry| entry.quantity).sum::<i64>(),
@@ -1960,8 +2049,10 @@ pub async fn submit_batch(
         "submitKey": key,
     });
     // (item id, listing id, scan row) for the CardTrader push after commit.
+    // Unpriced rows wait for their price: CardTrader cannot list at 0.
     let created_rows: Vec<(String, Option<String>, Value)> = created
         .iter()
+        .filter(|entry| rules::row_priced(&entry.row))
         .map(|entry| (entry.item_id.clone(), entry.listing_id.clone(), entry.row.clone()))
         .collect();
     let updated = sqlx::query(
@@ -2165,6 +2256,26 @@ mod tests {
         assert_eq!(window_start(1_000_123, 600_000).unix_timestamp(), 600);
         assert_eq!(retry_after(rules::Limit { max: 1, window_ms: 600_000 }, 601_000), 599);
         assert!(retry_after(rules::Limit { max: 1, window_ms: 600_000 }, 599_000) >= 1);
+    }
+
+    #[test]
+    fn batch_group_members_only_touch_this_sellers_group() {
+        let sql = GROUP_MEMBERS_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
+        // The group must be this seller's ($1): another seller's id joins nothing.
+        assert!(sql.contains("join public.seller_pricing_groups g on g.id = $2 and g.seller_uid = $1"));
+        // Only this seller's listings, and only the ids this submit created.
+        assert!(sql.contains("where l.id = any($3::uuid[]) and l.seller_uid = $1"));
+        // A listing moves out of another group, never out of another seller's row.
+        assert!(sql.contains("on conflict (listing_id) do update set group_id = excluded.group_id"));
+        assert!(sql.ends_with("where seller_pricing_group_members.seller_uid = excluded.seller_uid"));
+        // Conflict target and columns are the migration's.
+        let migration = include_str!("../../../../scripts/sql/138_seller_pricing_groups.sql");
+        assert!(migration.contains("listing_id uuid primary key"));
+        assert!(migration.contains("seller_uid text not null"));
+        let lock = GROUP_LOCK_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(lock.contains("where id = $1 and seller_uid = $2"));
+        assert_eq!(pricing_group_unknown().status, 409);
+        assert_eq!(pricing_group_unknown().code.as_deref(), Some("pricing_group_unknown"));
     }
 
     #[test]

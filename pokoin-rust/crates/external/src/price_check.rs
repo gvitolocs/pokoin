@@ -326,6 +326,107 @@ pub fn pick_matched_ct(
     )
 }
 
+/// Which of a listing's attributes a CardTrader offer must share to price it
+/// (a pricer strategy's toggles, `pricing::Strategy` `match`): its condition
+/// (Pokémon: that condition; other games: that condition or better), its
+/// language, its finish (reverse / foil) and its first edition (Pokémon
+/// only). All on is the exact copy (`ctMatchedPkn`); all off, the cheapest
+/// copy of the card (`ctCheapestPkn`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Match {
+    pub condition: bool,
+    pub language: bool,
+    pub finish: bool,
+    pub first_edition: bool,
+}
+
+impl Match {
+    pub const EXACT: Match = Match { condition: true, language: true, finish: true, first_edition: true };
+    pub const ANY: Match = Match { condition: false, language: false, finish: false, first_edition: false };
+
+    /// `C`, `L`, `F`, `E` for each attribute that must match, in that order
+    /// (`""` any copy, `"CLFE"` exact): the key of a comp's `ctMatch` map.
+    pub fn key(self) -> String {
+        [(self.condition, 'C'), (self.language, 'L'), (self.finish, 'F'), (self.first_edition, 'E')]
+            .iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, letter)| *letter)
+            .collect()
+    }
+
+    pub fn from_key(key: &str) -> Match {
+        Match {
+            condition: key.contains('C'),
+            language: key.contains('L'),
+            finish: key.contains('F'),
+            first_edition: key.contains('E'),
+        }
+    }
+
+    /// Every combination, `ANY` first and `EXACT` last.
+    pub fn all() -> impl Iterator<Item = Match> {
+        (0u8..16).map(|bits| Match {
+            condition: bits & 8 != 0,
+            language: bits & 4 != 0,
+            finish: bits & 2 != 0,
+            first_edition: bits & 1 != 0,
+        })
+    }
+}
+
+/// The cheapest professional floor among `groups` that shares the attributes
+/// `m` asks for with the listing (the generalisation of [`pick_matched_ct`],
+/// which is its `EXACT` case and is used for it). An attribute the listing
+/// does not state (no condition, no language) matches any offer.
+pub fn pick_ct_by(groups: &[Value], condition: &str, language: &str, reverse: bool, first_edition: bool, m: Match) -> Option<f64> {
+    if m == Match::EXACT {
+        return pick_matched_ct(groups, condition, language, reverse, first_edition).1;
+    }
+    if m == Match::ANY {
+        return pick_matched_ct(groups, condition, language, reverse, first_edition).0;
+    }
+    let want_condition = CT_CONDITION_SETS.iter().find(|(key, _)| *key == condition).map(|(_, values)| *values);
+    let want_language: Option<Vec<String>> = CT_LANGUAGE_NAMES
+        .iter()
+        .find(|(key, _)| *key == language)
+        .map(|(_, values)| values.iter().map(|v| v.to_string()).collect())
+        .or_else(|| (!language.is_empty()).then(|| vec![language.to_lowercase()]));
+    let mut best = f64::INFINITY;
+    for group in groups {
+        let Some(min_pkn) = number(group.get("minPkn")).filter(|pkn| *pkn > 0.0) else { continue };
+        let group_condition = group.get("condition").and_then(Value::as_str).unwrap_or("").to_lowercase();
+        let group_language = group.get("language").and_then(Value::as_str).unwrap_or("").to_lowercase();
+        let cond_ok = !m.condition || want_condition.is_none_or(|set| set.iter().any(|entry| *entry == group_condition));
+        let lang_ok = !m.language
+            || want_language
+                .as_ref()
+                .is_none_or(|set| set.iter().any(|entry| *entry == group_language) || group_language == language.to_lowercase());
+        let finish_ok = !m.finish || (group.get("reverse") == Some(&Value::Bool(true))) == reverse;
+        let first_ok = !m.first_edition || (group.get("firstEdition") == Some(&Value::Bool(true))) == first_edition;
+        if cond_ok && lang_ok && finish_ok && first_ok && min_pkn < best {
+            best = min_pkn;
+        }
+    }
+    best.is_finite().then(|| (best * 1_000_000.0).round() / 1_000_000.0)
+}
+
+/// A comp's `ctMatch` map: for every combination of toggles (`Match::key`),
+/// the CardTrader ask that prices it (`grossPkn`) and what the seller nets
+/// at it (`pkn`, after `channel`'s commission). `ask(m)` is the ask for one
+/// combination; a one-of-a-kind copy (graded, signed, altered) has none but
+/// the cheapest copy, as `ctMatchedPkn`.
+pub fn set_ct_matches(comp: &mut Value, item: &PriceItem, channel: crate::ct_fees::Channel, ask: impl Fn(Match) -> Option<f64>) {
+    let rule = crate::ct_fees::rule();
+    let mut map = Map::new();
+    for m in Match::all() {
+        let gross = if m != Match::ANY && item.one_of_a_kind() { None } else { ask(m) };
+        if let Some(gross) = gross {
+            map.insert(m.key(), json!({ "grossPkn": gross, "pkn": rule.net_pkn(gross, channel) }));
+        }
+    }
+    comp["ctMatch"] = Value::Object(map);
+}
+
 fn day(value: &Value) -> String {
     match value {
         Value::String(text) => text.get(..10).unwrap_or("").to_string(),
@@ -542,6 +643,10 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
             });
         // The professional floor sells direct and through Zero alike.
         ct_fields(&mut comp, ct_cheapest, ct_matched, crate::ct_fees::Channel::Direct);
+        set_ct_matches(&mut comp, item, crate::ct_fees::Channel::Direct, |m| match &store {
+            Some(hit) => hit.comp_by(item, m),
+            None => pick_ct_by(&groups, &item.condition, &item.language, item.reverse, item.first_edition, m),
+        });
         // CardTrader sales: what their sellers netted.
         comp["soldMedianGrossPkn"] = json!(sold_median);
         comp["soldMedianPkn"] = json!(sold_median.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Direct)));
@@ -594,6 +699,11 @@ pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pok
         matched.map(crate::price_book::pkn_from_cents),
         crate::ct_fees::Channel::Zero,
     );
+    set_ct_matches(&mut comp, item, crate::ct_fees::Channel::Zero, |m| match (asks, card) {
+        (Some(asks), Some(card)) => crate::price_book::facet_cents_by(asks.card(card), &item.language, &item.condition, item.foil || item.reverse, m)
+            .map(crate::price_book::pkn_from_cents),
+        _ => None,
+    });
     comp
 }
 
@@ -657,6 +767,7 @@ pub fn store_game_comp(item: &PriceItem, hit: &crate::facet_store::StoreHit, pok
         "tcgplayerStatus": "unconfigured",
     });
     ct_fields(&mut comp, cheapest, matched, crate::ct_fees::Channel::Zero);
+    set_ct_matches(&mut comp, item, crate::ct_fees::Channel::Zero, |m| hit.comp_by(item, m));
     comp
 }
 
@@ -669,6 +780,12 @@ pub fn renet(comp: &mut Value, channel: crate::ct_fees::Channel) {
     ct_fields(comp, cheapest, matched, channel);
     if comp.get("soldMedianGrossPkn").is_some() {
         comp["soldMedianPkn"] = json!(sold.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel)));
+    }
+    if let Some(map) = comp.get_mut("ctMatch").and_then(Value::as_object_mut) {
+        for entry in map.values_mut() {
+            let gross = entry.get("grossPkn").and_then(Value::as_f64);
+            entry["pkn"] = json!(gross.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel)));
+        }
     }
 }
 
@@ -775,6 +892,20 @@ mod tests {
         assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, false).1, Some(20.0));
         assert_eq!(pick_matched_ct(&groups, "NM", "IT", true, false).1, Some(60.0));
         assert_eq!(pick_matched_ct(&groups, "NM", "IT", false, true).1, None);
+        // The strategy toggles: each attribute on its own.
+        let cl = Match { condition: true, language: true, ..Match::ANY };
+        assert_eq!(pick_ct_by(&groups, "NM", "IT", true, false, cl), Some(20.0), "finish off: the plain copy prices a reverse");
+        assert_eq!(pick_ct_by(&groups, "NM", "IT", true, false, Match { finish: true, ..cl }), Some(60.0));
+        assert_eq!(pick_ct_by(&groups, "NM", "IT", false, true, Match { finish: true, ..cl }), Some(20.0), "1st edition off");
+        assert_eq!(pick_ct_by(&groups, "NM", "IT", false, true, Match::EXACT), None);
+        let mixed = vec![
+            json!({"condition": "nm", "language": "english", "minPkn": 12.0}),
+            json!({"condition": "sp", "language": "italian", "minPkn": 5.0}),
+        ];
+        assert_eq!(pick_ct_by(&mixed, "NM", "IT", false, false, Match { language: true, ..Match::ANY }), Some(5.0));
+        assert_eq!(pick_ct_by(&mixed, "NM", "IT", false, false, Match { condition: true, ..Match::ANY }), Some(12.0));
+        assert_eq!(pick_ct_by(&mixed, "NM", "IT", false, false, Match::ANY), Some(5.0));
+        assert_eq!(pick_ct_by(&mixed, "NM", "IT", false, false, cl), None);
     }
 
     #[test]
@@ -837,6 +968,19 @@ mod tests {
         assert_eq!(comp("801148:NM:FR")["ctMatchedGrossPkn"], json!(100.0));
         assert_eq!(comp("801148:NM:EN")["ctCheapestGrossPkn"], json!(100.0));
         assert_eq!(comp("801148:NM:EN")["ctBasis"], "zero");
+        // The toggles' asks: same language only, same condition (or better)
+        // only, same finish only; the price file has no 1st edition.
+        let ask = |raw: &str, key: &str| comp(raw)["ctMatch"][key]["grossPkn"].clone();
+        assert_eq!(ask("801148:NM:EN", "CLFE"), json!(240.0));
+        assert_eq!(ask("801148:NM:EN", "CLF"), json!(240.0));
+        assert_eq!(ask("801148:NM:EN", "L"), json!(180.0));
+        assert_eq!(ask("801148:NM:EN", "LF"), json!(180.0));
+        assert_eq!(ask("801148:NM:EN", "C"), json!(100.0));
+        assert_eq!(ask("801148:NM:EN", ""), json!(100.0));
+        assert_eq!(ask("801148:NM:EN:H", "CL"), json!(240.0), "finish off: the plain copy prices a foil");
+        assert!(comp("801148:NM:EN")["ctMatch"]["CLFE"]["pkn"].as_f64().unwrap() < 240.0, "the net is after the commission");
+        assert_eq!(ask("801148:NM:EN:G", "CL"), Value::Null, "a one-of-a-kind copy has only the cheapest copy");
+        assert_eq!(ask("801148:NM:EN:G", ""), json!(100.0));
         // No such facet, a one-of-a-kind copy, another card, no file: no price.
         assert_eq!(comp("801148:NM:IT")["ctMatchedGrossPkn"], Value::Null);
         assert_eq!(comp("801148:NM:EN:G")["ctMatchedGrossPkn"], Value::Null);

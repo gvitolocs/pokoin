@@ -3270,7 +3270,51 @@ export function fetchSellerShop(username, {
   return request;
 }
 
-/** PowerTools pricing strategies + pricer defaults (users/{uid}). */
+/**
+ * Pricing groups: `{ groups, memberships: [[listingId, groupId]] }`
+ * (market/src/pricer.js, docs/PRICING.md "Pricer").
+ */
+export function fetchPricingGroups(token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Create or edit a group (`{ group: { id?, name, strategyId, autoDaily } }`,
+ * optionally `add` to start it with listings), or move listings
+ * (`{ groupId, add: [listingId], remove: [listingId] }`).
+ */
+export function savePricingGroup(body, token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function deletePricingGroup(id, token) {
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-pricing-groups?${params}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Plan or apply prices: `{ groupId }` (the group's strategy over its
+ * listings) or `{ strategyId, listingIds }`, with `dryRun: true` for the plan
+ * only. Answers `{ plan, scoped, noComp, unchanged, activated, applied, failed }`.
+ */
+export function applyPricing(body, token) {
+  return getJson('/api/marketplace-pricing-groups/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+/** Named pricing strategies, the groups, and the pricer defaults (users/{uid}). */
 export function fetchPricingStrategies(token) {
   return getJson('/api/marketplace-pricing-strategies', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

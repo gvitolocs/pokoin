@@ -129,6 +129,8 @@ pub fn router(state: DomainState) -> Router {
             post(handlers::seller_api::cardrails_connector),
         )
         .route("/api/seller-api/v1", post(handlers::seller_api::seller_api_v1))
+        // pricer: a pricing group (or a strategy on chosen listings) applied
+        .route("/api/marketplace-pricing-groups/apply", post(handlers::pricer::apply_post))
         // TCGplayer sync box: seller switch, and the device the box calls
         .route(
             "/api/channel-sync",

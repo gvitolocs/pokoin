@@ -58,20 +58,33 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | action | Body | Answer |
 | --- | --- | --- |
 | `connect` / `info` | — | `{ scope, client, accountRef, accountName, cardmarketLinked: false, webhookUrl, sharedSecret, locations }` |
-| `scan-settings` | — | `{ batchId, scanSettings }` — latest open (otherwise latest submitted) scan batch defaults, normalized for Card Rails; read-only and seller-scoped. Includes game, language, finish, condition, flags, quantity, merge policy and the exact location/stack/start position. |
+| `scan-settings` | — | `{ batchId, scanSettings }` — latest open (otherwise latest submitted) scan batch defaults, normalized for Card Rails; read-only and seller-scoped. Includes game, language, finish, condition, flags, quantity, merge policy and the exact location/stack/start position. Also `pricingGroupId` and `pricingStrategyId` (string or null, at most one set): the batch's pricing. |
+| `pricing-groups` | — | `{ groups: [{ id, name, strategyId, strategyName, summary, autoDaily, listingCount }], strategies: [{ id, name, summary }] }` — the seller's pricing groups and named strategies, for a tool's pricing picker before a batch is loaded |
+| `price-quote` | `items` (≤ 500, as `list`), `pricingGroupId?` / `pricingStrategyId?` (also per item) | `{ quotes: [{ itemId, strategyId, pricingGroupId, status, compPkn, askPkn, pricePkn, priceEurCents }], pknPerEurCent }`: what the pricer would price each row at; read-only. [pricer-cardrails-contract.md](pricer-cardrails-contract.md) |
+| `pricing-strategy-save` / `pricing-strategy-delete` | `strategy` / `id` | `{ strategy, strategies }` / `{ strategies }`: the account's named strategies, with the Pricer's checks |
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
 | `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, signed, altered, foilState, location, updatedAt, lastSoldMinEurCents, externalKey }], cursor }` |
 | `sold-prices` | `items` (≤ 500, id, identity.publicId, condition, language, printing, firstEdition) | `{ prices: [{ itemId, publicId, minEurCents, priceSource }], windowDays: 30 }`; exact sold facets first, CardTrader tile minimum if absent, null if neither exists |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
-| `list` | `item`, `idempotencyKey`, `channel?` | `{ confirmed: true, listingId, stockMode: "absolute", created }` |
-| `update` | `listingId`, `item` (any of `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
+| `list` | `item`, `idempotencyKey`, `channel?`, `pricingGroupId?` / `pricingStrategyId?` (also per item) | `{ confirmed: true, listingId, stockMode: "absolute", created }`, plus `pricingGroupId` / `pricingStrategyId`, `priced`, `pricePkn`, `status`, `pricingError?` when the call named pricing |
+| `update` | `listingId`, `item` (any of `pricePkn` (exact, wins over cents), `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
 | `unlist` | `listingId`, `channel?` | `{ confirmed: true, listingId, changed }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
 | `events` | `cursor?` | `{ events: [envelope], cursor, more }` — everything |
 
 Rules worth knowing:
 
+- **Batch pricing.** `list` may name a pricing group (`pricingGroupId`) or a
+  strategy alone (`pricingStrategyId`), on the item or for the whole call;
+  the item's choice wins, and a group wins over a strategy. An unknown id
+  answers `400 pricing_group_unknown` / `pricing_strategy_unknown` and claims
+  no key. With a group the new listing joins it (out of any other group);
+  an item sent unpriced (`status: "paused"`, price 0) is priced right away by
+  the strategy (docs/PRICING.md, "Pricer") and goes on sale when the strategy
+  says so and a market comp exists, else it stays paused. An item sent with a
+  price keeps it. A pricing failure never fails the `list`: the listing exists
+  and the answer carries `pricingError`.
 - **Stock is absolute.** `stock` sets the quantity; repeating the call changes
   nothing (`changed: false`). `0` pauses the listing, and stock returning to a
   listing that ran out puts it back on sale. A listing the seller paused with

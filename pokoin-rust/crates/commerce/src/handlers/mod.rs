@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod extension;
 pub mod listings;
 pub mod orders;
+pub mod pricer;
 pub mod seller;
 pub mod seller_api;
 pub mod seller_book;

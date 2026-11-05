@@ -105,12 +105,12 @@ fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
         q.first("marketplaceGame"),
     )
 }
-async fn auth(state: &DomainState, headers: &HeaderMap) -> Result<crate::Claims, ApiError> {
+pub(crate) async fn auth(state: &DomainState, headers: &HeaderMap) -> Result<crate::Claims, ApiError> {
     let token = crate::auth::bearer(headers.get("authorization").and_then(|h| h.to_str().ok()))
         .map_err(ApiError::from)?;
     state.verifier().verify(token).await.map_err(ApiError::from)
 }
-fn response(result: Result<Value, ApiError>, private: bool) -> Response {
+pub(crate) fn response(result: Result<Value, ApiError>, private: bool) -> Response {
     match result {
         Ok(v) => {
             if private {
@@ -610,7 +610,7 @@ pub(crate) async fn owner_book_stamp(read_db: &sqlx::PgPool, uid: &str) -> Resul
     .await?;
     Ok(format!("{count}:{}", super::seller::stamp_text(last)))
 }
-fn parse_body(headers: &HeaderMap, body: &Bytes) -> Result<Value, ApiError> {
+pub(crate) fn parse_body(headers: &HeaderMap, body: &Bytes) -> Result<Value, ApiError> {
     http::parse_body(headers, body)
         .map(|b| b.json().clone())
         .map_err(|_| ApiError::bad_request("Invalid JSON body."))

@@ -18,8 +18,23 @@ import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroup
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import ScanImage from '../ScanImage.jsx';
 import { getBearer } from '../../stores/auth.js';
+import { Alert } from '../Desk.jsx';
+import NewGroupForm from '../pricer/NewGroupForm.jsx';
+import PricerPopup from '../pricer/PricerPopup.jsx';
+import { TagIcon } from '../pricer/icons.jsx';
+import {
+  allSelected,
+  groupFilter,
+  moveResultLine,
+  movePlan,
+  NO_GROUP,
+  removeResultLine,
+  selectionState,
+  selectRows,
+  toggleSelected,
+} from '../pricer/pricer-ui.js';
+import { memoPrices, rememberPrices } from './price-memo.js';
 import RowThumb from './RowThumb.jsx';
-import PricerDialog from './PricerDialog.jsx';
 
 const STATUS_CHIPS = [
   { id: '', label: 'All' },
@@ -71,11 +86,6 @@ function writeBoardMode(next) {
   } catch (_) { /* private mode */ }
 }
 
-// Market comps of the rows on screen outlive a remount (tab switch, back
-// from a card desk): the column paints with the board instead of "…".
-const PRICE_MEMO_MS = 10 * 60_000;
-const priceMemo = new Map();
-
 /**
  * The price checks of the rows on screen, one per game: card ids are per game,
  * and a Riftbound or Magic card read from the Pokémon catalog has no comp.
@@ -83,17 +93,6 @@ const priceMemo = new Map();
 function priceRequest(source, rows) {
   const games = priceCheckGroups(rows, game().id);
   return { games, count: games.reduce((sum, group) => sum + group.items.length, 0), key: `${source}|${JSON.stringify(games)}` };
-}
-
-function memoPrices(key) {
-  const hit = priceMemo.get(key);
-  return hit && Date.now() - hit.at < PRICE_MEMO_MS ? hit.prices : null;
-}
-
-function rememberPrices(key, prices) {
-  priceMemo.delete(key);
-  priceMemo.set(key, { prices, at: Date.now() });
-  while (priceMemo.size > 24) priceMemo.delete(priceMemo.keys().next().value);
 }
 
 const qty = (row) => Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
@@ -193,6 +192,134 @@ function ListingTile(props) {
   );
 }
 
+/**
+ * The board's selection: "N selected", select every filtered listing, take
+ * them out of their group, move them into one ("Add to group ▾" menu with a
+ * New group mini-form; moving takes a card out of its old group), or price
+ * them ("Price selected": the pricer pop-up).
+ */
+function SelectionBar(props) {
+  const pricing = props.pricing;
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  let wrap;
+  const ids = () => [...props.selected];
+  const count = () => props.selected.size;
+  const inGroup = () => ids().some((id) => pricing.memberships().has(id));
+  const strategyName = (id) => pricing.strategies().find((entry) => entry.id === id)?.name || 'No strategy';
+
+  // Outside clicks and Escape close the menu.
+  createEffect(menuOpen, (open) => {
+    if (!open) return undefined;
+    const onDown = (event) => {
+      if (wrap && !wrap.contains(event.target)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  });
+
+  async function run(action) {
+    setBusy(true);
+    props.onError('');
+    try {
+      const line = await action();
+      setMenuOpen(false);
+      props.onDone(line);
+    } catch (err) {
+      props.onError(err.message || 'Could not change the groups.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const moveTo = (group) => run(async () => {
+    const plan = movePlan(ids(), pricing.memberships(), group.id);
+    const groups = pricing.groups();
+    await pricing.saveGroup({ groupId: group.id, add: ids() });
+    return moveResultLine(plan, groups, group.name);
+  });
+
+  const createWith = async (input) => {
+    const plan = movePlan(ids(), pricing.memberships(), '');
+    const groups = pricing.groups();
+    await pricing.saveGroup({ group: input, add: ids() });
+    setMenuOpen(false);
+    props.onDone(moveResultLine(plan, groups, input.name));
+  };
+
+  const removeAll = () => run(async () => {
+    const answer = await pricing.saveGroup({ remove: ids() });
+    return removeResultLine(answer.removed ?? count());
+  });
+
+  return (
+    <div class="pricer-selbar" role="region" aria-label="Selected listings">
+      <strong class="pricer-selbar-count">{count()} selected</strong>
+      <Show when={!allSelected(props.selected, props.filtered)}>
+        <button type="button" class="btn ghost" onClick={() => props.onSelectAll()}>
+          Select all {props.filtered.length} filtered
+        </button>
+      </Show>
+      <button type="button" class="btn ghost" onClick={() => props.onClear()}>Clear</button>
+      <button type="button" class="btn ghost" disabled={busy() || !inGroup()} onClick={removeAll}>Remove from group</button>
+      <div
+        class="pricer-menu-wrap"
+        ref={(node) => { wrap = node; }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setMenuOpen(false);
+        }}
+      >
+        <button
+          type="button"
+          class="btn ghost"
+          aria-haspopup="true"
+          aria-expanded={String(menuOpen())}
+          disabled={busy()}
+          onClick={() => setMenuOpen(!menuOpen())}
+        >
+          Add to group ▾
+        </button>
+        <Show when={menuOpen()}>
+          <div class="pricer-menu">
+            <p class="pricer-menu-head">Move {count()} {count() === 1 ? 'card' : 'cards'} to…</p>
+            <Show when={pricing.groups().length}>
+              <div role="menu" aria-label="Pricing groups">
+                <For each={pricing.groups()} keyed={(group) => group.id}>
+                  {(group) => (
+                    <button type="button" role="menuitem" class="pricer-menu-item" disabled={busy()} onClick={() => moveTo(group())}>
+                      <strong>{group().name}</strong> · {strategyName(group().strategyId)}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <Show
+              when={pricing.strategies().length}
+              fallback={(
+                <p class="mypokoin-help">
+                  A group needs a strategy: make one in <a href={props.pricerHref}>Pricer → Strategies</a> first.
+                </p>
+              )}
+            >
+              <NewGroupForm
+                class="pricer-menu-form"
+                idPrefix="board-new-group"
+                groups={pricing.groups()}
+                strategies={pricing.strategies()}
+                onCreate={createWith}
+              />
+            </Show>
+            <p class="pricer-hint">A card is in at most one group; moving it takes it out of the old one.</p>
+          </div>
+        </Show>
+      </div>
+      <button type="button" class="btn pricer-price-btn" disabled={busy()} onClick={() => props.onPrice()}>
+        <TagIcon size={18} /> Price selected
+      </button>
+    </div>
+  );
+}
+
 function LocLink(props) {
   const box = () => listingBox(props.loc) || props.loc;
   return (
@@ -220,7 +347,7 @@ export default function InventoryBoard(props) {
     setMode(next);
     writeBoardMode(next);
   }
-  const [pricerSource, setPricerSource] = createSignal(props.defaultSource || '');
+  const [pricerSource, setPricerSource] = createSignal(untrack(() => props.defaultSource) || '');
   let pricerChosen = false;
   // A cached book can paint before seller preferences arrive.
   createEffect(() => props.defaultSource, (source) => {
@@ -231,7 +358,18 @@ export default function InventoryBoard(props) {
     setPricerSource(pricerSource() === id ? '' : id);
   }
   const pricerOn = () => Boolean(pricerSource()) || Boolean(props.autoMarketColumn);
-  const [pricerOpen, setPricerOpen] = createSignal(false);
+  // Pricing groups: the Group filter, the row chips and the selection bar.
+  const [groupPick, setGroupPick] = createSignal('');
+  const [selected, setSelected] = createSignal(new Set());
+  const [actionLine, setActionLine] = createSignal('');
+  const [actionError, setActionError] = createSignal('');
+  // The listings the "Price selected" pop-up prices (null: closed).
+  const [priceIds, setPriceIds] = createSignal(null);
+  const memberships = () => props.pricing?.memberships() || new Map();
+  const groupName = (row) => {
+    const id = memberships().get(String(row?.id ?? ''));
+    return id ? props.pricing.groups().find((group) => group.id === id)?.name || '' : '';
+  };
 
   const facets = createMemo(() => inventoryFacets(props.rows));
   const origins = createMemo(() => originFacets(props.rows));
@@ -247,12 +385,12 @@ export default function InventoryBoard(props) {
       origin: origin(),
       duplicatesOnly: duplicatesOnly() && duplicates().size > 0,
       duplicates: duplicates(),
-    }),
+    }).filter(groupFilter(groupPick(), memberships())),
     sort(),
   ));
   // Filter the full book, but mount only one page, as the seller shop does.
   const [page, setPage] = createSignal(() => {
-    query(); status(); condition(); language(); origin(); duplicatesOnly(); sort(); mode();
+    query(); status(); condition(); language(); origin(); groupPick(); duplicatesOnly(); sort(); mode();
     return 1;
   });
   let board;
@@ -382,7 +520,14 @@ export default function InventoryBoard(props) {
         <Show when={origins().length > 1}>
           <select class="inv-select" value={origin()} onChange={(event) => setOrigin(event.target.value)} aria-label="Source">
             <option value="">Any source</option>
-            <For each={origins()}>{(entry) => <option value={entry.id}>{`${entry.label} (${entry.count})`}</option>}</For>
+            <For each={origins()} keyed={(entry) => entry.id}>{(entry) => <option value={entry().id}>{`${entry().label} (${entry().count})`}</option>}</For>
+          </select>
+        </Show>
+        <Show when={props.pricing?.groups().length}>
+          <select class="inv-select" value={groupPick()} onChange={(event) => setGroupPick(event.target.value)} aria-label="Group">
+            <option value="">Any group</option>
+            <option value={NO_GROUP}>No group</option>
+            <For each={props.pricing.groups()} keyed={(group) => group.id}>{(group) => <option value={group().id}>{group().name}</option>}</For>
           </select>
         </Show>
         <Show when={duplicates().size > 0}>
@@ -414,23 +559,46 @@ export default function InventoryBoard(props) {
               </button>
             )}
           </For>
-          <button type="button" class="btn inv-pricer-open" onClick={() => setPricerOpen(true)} data-testid="pricer-open">
-            Pricer…
-          </button>
         </span>
       </div>
-      <PricerDialog
-        open={pricerOpen()}
-        onClose={() => setPricerOpen(false)}
-        rows={props.rows}
-        filteredRows={view()}
-        gameId={game().id}
-        preview={props.preview}
-        previewStrategies={props.previewStrategies}
-        previewComps={props.previewComps}
-        initial={{ source: pricerSource() === 'pokoin' ? 'pokoin' : 'cardtrader' }}
-        onApplied={() => props.onApplied?.()}
-      />
+      <Show when={props.pricing && selected().size}>
+        <SelectionBar
+          pricing={props.pricing}
+          selected={selected()}
+          filtered={view()}
+          pricerHref={props.preview ? '/mypokoin/pricer?mypokoinPreview&view=strategies' : '/mypokoin/pricer?view=strategies'}
+          onSelectAll={() => setSelected(selectRows(selected(), view(), true))}
+          onClear={() => setSelected(new Set())}
+          onError={setActionError}
+          onDone={(line) => {
+            setSelected(new Set());
+            setActionLine(line);
+          }}
+          onPrice={() => {
+            setActionLine('');
+            setPriceIds([...selected()]);
+          }}
+        />
+      </Show>
+      <Show when={props.pricing && priceIds()}>
+        {(ids) => (
+          <PricerPopup
+            mode="board"
+            count={ids().length}
+            listingIds={ids()}
+            pricing={props.pricing}
+            strategies={props.pricing.strategies()}
+            groups={props.pricing.groups()}
+            onApplied={() => {
+              setSelected(new Set());
+              props.onApplied?.();
+            }}
+            onClose={() => setPriceIds(null)}
+          />
+        )}
+      </Show>
+      <Alert>{actionError()}</Alert>
+      <Show when={actionLine()}><p class="ct-connect-ok pricer-result-line" role="status">{actionLine()}</p></Show>
 
       <Switch>
         <Match when={mode() === 'stacks'}>
@@ -540,8 +708,19 @@ export default function InventoryBoard(props) {
           </Show>
         </Match>
         <Match when={true}>
-          <div class={['inv-table', { 'has-mkt': pricerOn() }]}>
-            <div class="inv-head" aria-hidden="true">
+          <div class={['inv-table', { 'has-mkt': pricerOn(), 'has-pick': Boolean(props.pricing) }]}>
+            <div class="inv-head">
+              <Show when={props.pricing}>
+                <label class="inv-pick">
+                  <input
+                    type="checkbox"
+                    aria-label="Select every listing on this page"
+                    checked={selectionState(selected(), pageEntries()) === 'all'}
+                    prop:indeterminate={selectionState(selected(), pageEntries()) === 'some'}
+                    onChange={(event) => setSelected(selectRows(selected(), pageEntries(), event.target.checked))}
+                  />
+                </label>
+              </Show>
               <span>Card</span>
               <span>Cond</span>
               <span>Lang</span>
@@ -564,8 +743,9 @@ export default function InventoryBoard(props) {
                 const collector = String(row?.collectorNumber || row?.collector_number || '').trim();
                 const loc = String(row?.location || '').trim();
                 const flag = listingLanguageFlag(row?.language);
-                return (
-                  <a class="inv-row" href={inventoryListingHref(row)}>
+                const id = String(row?.id ?? '');
+                const cells = (
+                  <>
                     <span class="inv-card">
                       <RowThumb row={row} />
                       <span class="inv-card-txt">
@@ -574,7 +754,12 @@ export default function InventoryBoard(props) {
                           {setName}{collector ? `${setName ? ' · ' : ''}#${collector}` : ''}
                           <Show when={loc}><LocLink loc={loc} /></Show>
                         </span>
-                        <OriginTags row={row} duplicates={duplicates()} />
+                        <span class="inv-row-tags">
+                          <OriginTags row={row} duplicates={duplicates()} />
+                          <Show when={groupName(row)}>
+                            {(name) => <span class="inv-group-chip" title={`Pricing group ${name()}`}>{name()}</span>}
+                          </Show>
+                        </span>
                       </span>
                     </span>
                     <span class="inv-cond">
@@ -592,7 +777,22 @@ export default function InventoryBoard(props) {
                     <span><RowStatus status={row?.status} /></span>
                     <span class="inv-date">{inventoryRowDate(row) || '—'}</span>
                     <span class="inv-chev" aria-hidden="true">›</span>
-                  </a>
+                  </>
+                );
+                return (
+                  <Show when={props.pricing} fallback={<a class="inv-row" href={inventoryListingHref(row)}>{cells}</a>}>
+                    <div class={['inv-row', 'has-pick', { 'is-picked': selected().has(id) }]}>
+                      <label class="inv-pick">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${row?.cardName || row?.name || 'listing'}`}
+                          checked={selected().has(id)}
+                          onChange={() => setSelected(toggleSelected(selected(), id))}
+                        />
+                      </label>
+                      <a class="inv-row-link" href={inventoryListingHref(row)}>{cells}</a>
+                    </div>
+                  </Show>
                 );
               }}
             </For>
