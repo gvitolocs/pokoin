@@ -91,6 +91,22 @@ gaps).
 | 20 | Multi-token name+artist (`pika yuka` → intersection) | **New** |
 | 21 | Popup count = corrected lookup, not max-over-junk (the 51 bug) | **New** |
 
+### Set badges and era words (2026-11-07)
+
+- The badge printed on a set chip (`3CPD`, `3CSC`, `s8a`) is an exact set alias:
+  `espeon 3cpd` → 30th Celebration Premium Deck Set. Generated from
+  `tools/expansion-symbols/symbols.tsv` with
+  `expansion-symbols emit-codes --symbols symbols.tsv --js ../../market/src/data/set-badge-codes.js`.
+  Only letter+digit badges of 3+ characters; anything that reads as a collector
+  number (`3c`, `sv4`) or a card name stays that.
+- Era words are typed set evidence in the scorer: `diamond`, `pearl`, `dp`,
+  `bw`, `xy`, `sm`, `swsh`, `sword`, `shield`, `sv`, `scarlet`, `violet`, and the
+  pairs `diamond pearl`, `black white`, `sun moon`, `sword shield`,
+  `scarlet violet`, `heartgold soulsilver`. `pikachu diamond` leads with DP-era
+  Pikachus. Generic halves (`sun`, `black`) only count as the pair.
+- The print chip stays a hard filter (owner, 2026-11-07): a Japanese print is
+  hidden under Western even when the query names its set.
+
 ## Known gaps / open edge cases (the honest list)
 
 G1. **Relaxed-tier hydration.** Chrome hydrates only best-hypothesis artist/set

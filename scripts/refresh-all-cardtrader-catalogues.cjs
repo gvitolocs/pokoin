@@ -23,6 +23,10 @@ function insertOnly(def,table){const start=def.indexOf('insert into public.'+tab
 async function project(pool,target,categories){
  if(target.cardtraderGameId===5){
   await pool.query("INSERT INTO pokoin_pokemon_expansions (expansion_id,game_id,code,name,normalized_name,compact_name,name_tokens) SELECT DISTINCT expansion_id,5,expansion->>'code',expansion->>'name',marketplace_search_normalize(expansion->>'name'),marketplace_search_compact(expansion->>'name'),marketplace_search_tokenize(expansion->>'name') FROM pokoin_pokemon_blueprints b WHERE expansion_id IS NOT NULL AND expansion->>'name' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM pokoin_pokemon_expansions e WHERE e.expansion_id=b.expansion_id) ON CONFLICT DO NOTHING");
+  // New expansions start as nationality 'unknown': classify them from their CardTrader language
+  // votes now, or JP/CN leftovers (30th Celebration Premium Deck Set) index as unknown and drop out
+  // of every print-filtered search and print flag.
+  await pool.query('select public.pokoin_refresh_expansion_nationality()');
 
   console.log('PROJECT names');
   await pool.query("insert into public.marketplace_card_names (name,normalized_name,compact_name,emoji,name_tokens,updated_at) select distinct name,marketplace_search_normalize(name),marketplace_search_compact(name),'',marketplace_search_tokenize(name),now() from public.pokoin_pokemon_blueprints where name<>'' AND NOT EXISTS(SELECT 1 FROM marketplace_card_names n WHERE n.name=pokoin_pokemon_blueprints.name) on conflict(name) do nothing");
