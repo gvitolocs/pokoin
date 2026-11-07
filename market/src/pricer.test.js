@@ -6,7 +6,13 @@ import {
   MATCH_EXACT,
   PRICER_BASES,
   PRICER_MATCHES,
+  PRICER_SOURCES,
+  effectiveMatch,
   isAllExact,
+  pricerBases,
+  sourceHasFees,
+  sourceSwitches,
+  switchNote,
   matchKey,
   matchSummary,
   floorPriceRounded,
@@ -168,8 +174,42 @@ test('summary line matches the server', () => {
   );
   assert.equal(
     strategySummary({ source: 'pokoin', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 2.5 }),
-    'Pokoin · sold median (30 days) · +10% + 2.5 PKN',
+    'Pokoin · sold median (90 days) · same condition and language · +10% + 2.5 PKN',
   );
+  assert.equal(strategySummary({ source: 'pokoin', action: 'match' }), 'Pokoin · cheapest Pokoin ask · match');
+  assert.equal(
+    strategySummary({ source: 'cardtrader', basis: 'sold', action: 'match', match: MATCH_ANY }),
+    'CardTrader · sold median (30 days) · any copy · net of CardTrader fees · match',
+  );
+  assert.equal(
+    strategySummary({ source: 'cardmarket', basis: 'avg7', action: 'undercut', amountPct: 3 }),
+    'Cardmarket · 7-day average · same finish · undercut 3%',
+  );
+  assert.equal(
+    strategySummary({ source: 'tcgplayer', action: 'match', rounding: 'up' }),
+    'TCGplayer · market price (USD → EUR) · same finish and 1st edition · match · rounded up',
+  );
+});
+
+test('each source has its bases and the toggles it can honour', () => {
+  assert.deepEqual(pricerBases('cardmarket').map((b) => b.id), ['trend', 'low', 'avg1', 'avg7', 'avg30']);
+  assert.deepEqual(pricerBases('tcgplayer').map((b) => b.id), ['market', 'low', 'mid']);
+  assert.deepEqual(pricerBases('nope').map((b) => b.id), ['offers', 'sold']);
+  assert.equal(normalizeStrategy({ source: 'cardmarket', basis: 'sold' }).basis, 'trend', 'not a Cardmarket basis: its default');
+  assert.equal(normalizeStrategy({ source: 'tcgplayer', basis: 'low' }).basis, 'low');
+  assert.equal(normalizeStrategy({ source: 'cardtrader', basis: 'trend' }).basis, 'offers');
+  assert.deepEqual(sourceSwitches('tcgplayer', 'market'), { condition: false, language: false, finish: true, firstEdition: true });
+  assert.deepEqual(sourceSwitches('pokoin', 'sold'), { condition: true, language: true, finish: false, firstEdition: false });
+  assert.deepEqual(sourceSwitches('pokoin', 'offers'), MATCH_ANY);
+  assert.deepEqual(sourceSwitches('cardtrader', 'sold'), MATCH_EXACT);
+  assert.deepEqual(
+    effectiveMatch({ source: 'tcgplayer', match: { condition: true, language: true, finish: false, firstEdition: true } }),
+    { condition: false, language: false, finish: false, firstEdition: true },
+  );
+  assert.equal(switchNote('cardmarket'), 'Not in Cardmarket’s data');
+  assert.equal(sourceHasFees('cardtrader'), true);
+  assert.equal(sourceHasFees('tcgplayer'), false);
+  assert.ok(!PRICER_SOURCES.flatMap((s) => pricerBases(s.id)).some((b) => /facet/i.test(`${b.label} ${b.hint}`)), 'no "facets" in the UI copy');
 });
 
 test('memberships, ungrouped listings and the last-apply line', () => {

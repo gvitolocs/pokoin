@@ -1,4 +1,5 @@
 import { createMemo, createSignal, createUniqueId, For, Match, onCleanup, onSettled, Show, Switch } from 'solid-js';
+import { normalizeStrategy } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from './NewGroupForm.jsx';
 import {
@@ -21,6 +22,12 @@ const setLine = (entry) => [entry.setName, entry.collectorNumber ? `#${entry.col
 /** One strategy as a tile: action icon, market, name, rule chips, switch chips, "Used by". */
 function StrategyTile(props) {
   const tile = createMemo(() => strategyTile(props.strategy));
+  // The basis beside the source name, except for CardTrader's current offers.
+  const basisText = () => {
+    const strategy = normalizeStrategy(props.strategy);
+    if (strategy.source === 'cardtrader' && strategy.basis === 'offers') return '';
+    return tile().basis ? ` · ${tile().basis}` : '';
+  };
   return (
     <button
       type="button"
@@ -31,7 +38,7 @@ function StrategyTile(props) {
     >
       <span class="pricer-tile-head">
         <span class={`pricer-tile-icon is-${tile().icon}`}><ActionIcon action={tile().icon} size={18} /></span>
-        <span class="pricer-source">{tile().source}</span>
+        <span class="pricer-source">{tile().source}{basisText()}</span>
       </span>
       <strong class="pricer-tile-name">{props.strategy.name}</strong>
       <span class="pricer-tile-chips">

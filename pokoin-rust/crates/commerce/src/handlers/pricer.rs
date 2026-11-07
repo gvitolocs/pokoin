@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use pokoin_external::firebase::FirestoreRest;
+use pokoin_external::pokoin_sold::{self, SoldFeed};
 use pokoin_external::pricing::{self, PlanOutcome};
 use pokoin_external::{facet_store, price_check, pricing_store};
 
@@ -70,12 +71,44 @@ async fn seller_channel(state: &DomainState, uid: &str) -> Option<pokoin_externa
     Some(pokoin_external::ct_fees::resolve_seller_channel_pool(state.read_db(), &doc.data).await)
 }
 
+/// Pokoin's own sold feed (the last 90 days of `marketplace_sales`), through
+/// the shared cache: one Firestore query per 10 minutes, the cached sales
+/// otherwise. Never fails the pricing — no client or a failed query just
+/// leaves the `pokoin` source `unavailable`.
+async fn pokoin_sales(state: &DomainState) -> SoldFeed {
+    if let Some(sales) = pokoin_sold::cached_fresh() {
+        return SoldFeed::Available(sales);
+    }
+    let fs = match state.firestore() {
+        Ok(fs) => fs,
+        Err(error) => {
+            tracing::warn!(error = %error, "pokoin sold feed: no Firestore client");
+            return SoldFeed::Unavailable;
+        }
+    };
+    let since = pokoin_sold::window_start_iso();
+    let query = crate::firestore::StructuredQuery::collection(pokoin_sold::SALES_COLLECTION)
+        .where_filter(crate::firestore::Filter::new(
+            "soldAt",
+            crate::firestore::FilterOp::GreaterThanOrEqual,
+            json!(since),
+        ))
+        .limit(pokoin_sold::MAX_SALES);
+    pokoin_sold::recent_from(async move {
+        fs.run_query(&query)
+            .await
+            .map_err(|error| pokoin_external::ApiError::new(500, error.to_string()))
+    })
+    .await
+}
+
 /// The comp of every row, by listing id: the price check of each game, the
 /// row's own facet key first, else the bare card id (as the web's
 /// `compFor`). A row with no numeric card id has none.
 pub async fn comps_for(state: &DomainState, uid: &str, rows: &[Value]) -> Result<HashMap<String, Value>, ApiError> {
     let pools = external_pools(state);
     let channel = seller_channel(state, uid).await;
+    let sales = pokoin_sales(state).await;
     let mut by_game: HashMap<String, Vec<(&Value, price_check::PriceItem)>> = HashMap::new();
     for row in rows {
         let item = facet_store::item_from_listing(row);
@@ -89,7 +122,7 @@ pub async fn comps_for(state: &DomainState, uid: &str, rows: &[Value]) -> Result
     for (game, entries) in by_game {
         for chunk in entries.chunks(CHUNK) {
             let items: Vec<price_check::PriceItem> = chunk.iter().map(|(_, item)| item.clone()).collect();
-            let mut prices = price_check::read_prices(&pools, &game, &items, uid).await.map_err(from_external)?;
+            let mut prices = price_check::read_prices(&pools, &game, &items, uid, sales.as_slice()).await.map_err(from_external)?;
             if let (Some(channel), Some(map)) = (channel, prices.as_object_mut()) {
                 for comp in map.values_mut() {
                     price_check::renet(comp, channel);

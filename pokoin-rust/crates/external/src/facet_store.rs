@@ -611,13 +611,13 @@ mod tests {
             "801108:PL:EN", "801110:NM:EN",
         ] {
             let item = &parse_items(raw)[0];
-            let live = crate::price_check::game_comp(item, Some(&asks), None);
+            let live = crate::price_check::game_comp(item, Some(&asks), None, &crate::price_sources::PageSources::empty("riftbound"));
             let (cheapest, matched) = hit.comp(item);
             let matched = matched.filter(|_| !item.one_of_a_kind());
             assert_eq!(json!(matched), live["ctMatchedGrossPkn"], "matched {raw}");
             assert_eq!(json!(cheapest), live["ctCheapestGrossPkn"], "cheapest {raw}");
             // And the store comp the price check returns nets the same.
-            let stored = crate::price_check::store_game_comp(item, &hit, None);
+            let stored = crate::price_check::store_game_comp(item, &hit, None, &crate::price_sources::PageSources::empty("riftbound"));
             assert_eq!(stored["ctMatchedPkn"], live["ctMatchedPkn"], "net {raw}");
         }
         assert_eq!(hit.comp(&parse_items("801106:NM:EN")[0]).1, Some(240.0));

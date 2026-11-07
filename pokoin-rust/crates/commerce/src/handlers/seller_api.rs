@@ -993,7 +993,8 @@ fn with_quote_defaults(item: &Value) -> Value {
 /// The CardTrader ask of the offer a strategy priced from (its toggles'
 /// `ctMatch` entry), for the tool to show beside the net.
 fn quote_ask(comp: &Value, strategy: &Value) -> Option<f64> {
-    if strategy["source"] == "pokoin" || strategy["basis"] == "sold" {
+    // Only CardTrader offers have an ask (an unknown source reads as CardTrader).
+    if !matches!(strategy["source"].as_str(), None | Some("cardtrader")) || strategy["basis"] == "sold" {
         return None;
     }
     let key = pokoin_external::pricing::strategy_match(strategy).key();

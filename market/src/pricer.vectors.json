@@ -14,6 +14,29 @@
     },
     "beforeToggles": { "ctMatchedPkn": 25.56, "ctMatchedGrossPkn": 28, "ctCheapestPkn": 13.5 },
     "pokoinOnlySold": { "soldMedianPkn": 30 },
+    "allSources": {
+      "ctMatchedPkn": 25.56, "ctMatchedGrossPkn": 28, "ctCheapestPkn": 13.5, "ctCheapestGrossPkn": 15,
+      "soldMedianPkn": 30, "soldMedianGrossPkn": 33, "pokoinCheapestPkn": 40,
+      "ctMatch": { "CLFE": { "grossPkn": 28, "pkn": 25.56 }, "": { "grossPkn": 15, "pkn": 13.5 } },
+      "sources": {
+        "cardtrader": { "sold": {
+          "": { "grossPkn": 33, "pkn": 30 },
+          "CLFE": { "grossPkn": 44, "pkn": 40.04 },
+          "CL": { "grossPkn": 36, "pkn": 32.76 }
+        } },
+        "pokoin": { "sold": {
+          "": { "grossPkn": 50, "pkn": 50, "sales": 3 },
+          "CL": { "grossPkn": 60, "pkn": 60, "sales": 1 }
+        } },
+        "cardmarket": { "asOf": "2026-11-06",
+          "trend": { "": { "eur": 0.12, "grossPkn": 24, "pkn": 24 }, "F": { "eur": 0.15, "grossPkn": 30, "pkn": 30 } },
+          "avg7": { "F": { "eur": 0.2, "grossPkn": 40, "pkn": 40 } }
+        },
+        "tcgplayer": { "asOf": "2026-11-06", "rateDay": "2026-11-06", "usdPerEur": 1.08,
+          "market": { "": { "usd": 0.25, "grossPkn": 46.3, "pkn": 46.3 }, "FE": { "usd": 0.3, "grossPkn": 55.56, "pkn": 55.56 } }
+        }
+      }
+    },
     "empty": {}
   },
   "cases": [
@@ -32,6 +55,25 @@
     { "comp": "spiderling", "strategy": { "action": "undercut", "amountPct": 90, "minPkn": 5, "rounding": "down" }, "compPkn": 25.56, "target": 5 },
     { "comp": "spiderling", "strategy": { "action": "undercut", "amountPkn": 30 }, "compPkn": 25.56, "target": null },
     { "comp": "spiderling", "strategy": { "rounding": "none", "action": "premium", "amountPct": 3.3 }, "compPkn": 25.56, "target": 26.4 },
-    { "comp": "empty", "strategy": {}, "compPkn": null, "target": null }
+    { "comp": "empty", "strategy": {}, "compPkn": null, "target": null },
+    { "comp": "allSources", "strategy": { "basis": "sold", "rounding": "integer", "minPkn": 1 }, "compPkn": 40.04, "target": 40 },
+    { "comp": "allSources", "strategy": { "basis": "sold", "feeExclusive": false, "match": { "condition": true, "language": true, "finish": false, "firstEdition": false }, "action": "undercut", "amountPct": 10 }, "compPkn": 36, "target": 32.4 },
+    { "comp": "allSources", "strategy": { "basis": "sold", "match": { "condition": false, "language": false, "finish": false, "firstEdition": false } }, "compPkn": 30, "target": 30 },
+    { "comp": "allSources", "strategy": { "basis": "sold", "match": { "condition": false, "language": true, "finish": false, "firstEdition": false } }, "compPkn": null, "target": null },
+    { "comp": "allSources", "strategy": { "source": "pokoin" }, "compPkn": 40, "target": 40 },
+    { "comp": "allSources", "strategy": { "source": "pokoin", "basis": "sold", "action": "premium", "amountPct": 5, "rounding": "integer" }, "compPkn": 60, "target": 63 },
+    { "comp": "allSources", "strategy": { "source": "pokoin", "basis": "sold", "match": { "condition": false, "language": false, "finish": true, "firstEdition": true } }, "compPkn": 50, "target": 50 },
+    { "comp": "allSources", "strategy": { "source": "pokoin", "basis": "sold", "match": { "condition": true, "language": false } }, "compPkn": null, "target": null },
+    { "comp": "allSources", "strategy": { "source": "cardmarket", "action": "undercut", "amountPkn": 1, "rounding": "down" }, "compPkn": 30, "target": 29 },
+    { "comp": "allSources", "strategy": { "source": "cardmarket", "match": { "finish": false } }, "compPkn": 24, "target": 24 },
+    { "comp": "allSources", "strategy": { "source": "cardmarket", "basis": "avg7", "match": { "condition": false, "language": false, "finish": false, "firstEdition": false } }, "compPkn": null, "target": null },
+    { "comp": "allSources", "strategy": { "source": "cardmarket", "basis": "avg7" }, "compPkn": 40, "target": 40 },
+    { "comp": "allSources", "strategy": { "source": "cardmarket", "basis": "sold" }, "compPkn": 30, "target": 30 },
+    { "comp": "allSources", "strategy": { "source": "tcgplayer", "rounding": "up" }, "compPkn": 55.56, "target": 56 },
+    { "comp": "allSources", "strategy": { "source": "tcgplayer", "feeExclusive": false, "match": { "condition": false, "language": false, "finish": false, "firstEdition": false } }, "compPkn": 46.3, "target": 46.3 },
+    { "comp": "allSources", "strategy": { "source": "tcgplayer", "match": { "finish": false } }, "compPkn": null, "target": null },
+    { "comp": "allSources", "strategy": { "source": "tcgplayer", "basis": "mid" }, "compPkn": null, "target": null },
+    { "comp": "spiderling", "strategy": { "source": "cardmarket" }, "compPkn": null, "target": null },
+    { "comp": "spiderling", "strategy": { "source": "pokoin", "basis": "sold" }, "compPkn": null, "target": null }
   ]
 }

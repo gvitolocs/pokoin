@@ -5009,6 +5009,20 @@ html.is-pointer-dragging body {
   margin-bottom: 2px;
 }
 
+/* A toggle this source's data cannot honour: shown off, muted, not clickable. */
+.pricer-toggle.is-off {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pricer-toggle.is-off:hover {
+  background: none;
+}
+
+.pricer-tab .pricer-toggle.is-off input[type='checkbox'] {
+  cursor: not-allowed;
+}
+
 /* The real checkbox stays focusable and clickable over the drawn switch. */
 .pricer-tab .pricer-toggle input[type='checkbox'] {
   position: absolute;

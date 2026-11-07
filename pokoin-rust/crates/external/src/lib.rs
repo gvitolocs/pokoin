@@ -24,8 +24,10 @@ pub mod firebase;
 pub mod geo;
 pub mod powertools;
 pub mod powertools_games;
+pub mod pokoin_sold;
 pub mod price_book;
 pub mod price_check;
+pub mod price_sources;
 pub mod pricing;
 pub mod pricing_store;
 pub mod pricing_strategies;
@@ -39,6 +41,7 @@ pub mod scan_store;
 pub mod social;
 pub mod state;
 pub mod supabase;
+pub mod tcgcsv;
 pub mod time_util;
 
 pub mod cardtrader_listings;

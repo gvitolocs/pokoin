@@ -7,16 +7,22 @@
  * A strategy (users/{uid}.pricingStrategies) is a named rule for HOW to
  * price, with no scope:
  *   name          required, unique per seller (ignoring case)
- *   source        'cardtrader' | 'pokoin'
- *   basis         'offers'   the cheapest current offer that shares with the
- *                            listing what `match` asks for (CardTrader); for
- *                            Pokoin, the cheapest Pokoin ask
- *                 'sold'     the 30-day sold median
+ *   source        'cardtrader' | 'pokoin' | 'cardmarket' | 'tcgplayer'
+ *   basis         one of the source's bases (`pricerBases`):
+ *                 CardTrader 'offers' (the cheapest current offer that shares
+ *                 with the listing what `match` asks for) | 'sold' (30-day
+ *                 sold median, same toggles); Pokoin 'offers' (the cheapest
+ *                 Pokoin ask) | 'sold' (Pokoin's own sales, 90 days);
+ *                 Cardmarket 'trend' | 'low' | 'avg1' | 'avg7' | 'avg30'
+ *                 (its daily price guide); TCGplayer 'market' | 'low' | 'mid'
+ *                 (USD at the day's ECB rate)
  *   match         { condition, language, finish, firstEdition }: one toggle
  *                 each, all on = "All exact" (saved 'matched' before
- *                 2026-11-05), all off = any copy (saved 'cheapest')
+ *                 2026-11-05), all off = any copy (saved 'cheapest'). Only
+ *                 the toggles the source honours count (`sourceSwitches`)
  *   feeExclusive  true: what a seller nets on CardTrader after its commission
- *                 (docs/PRICING.md); false: the CardTrader ask itself
+ *                 (docs/PRICING.md); false: the CardTrader ask itself. Only
+ *                 CardTrader numbers have fees
  *   action        'match' | 'undercut' | 'premium', by amountPct % and amountPkn PKN
  *   rounding      'none' (cents) | 'integer' (nearest) | 'down' | 'up'  (whole PKN)
  *   minPkn        never price below this (after rounding)
@@ -28,14 +34,51 @@
  */
 
 export const PRICER_SOURCES = [
-  { id: 'cardtrader', label: 'CardTrader' },
-  { id: 'pokoin', label: 'Pokoin' },
+  { id: 'cardtrader', label: 'CardTrader', hint: 'Offers and sales on CardTrader' },
+  { id: 'pokoin', label: 'Pokoin', hint: 'Listings and sales on Pokoin' },
+  { id: 'cardmarket', label: 'Cardmarket', hint: "Cardmarket's daily price guide" },
+  { id: 'tcgplayer', label: 'TCGplayer', hint: 'US prices, converted at the ECB rate' },
 ];
 
-export const PRICER_BASES = [
-  { id: 'offers', label: 'Current offers', hint: 'The cheapest copy for sale now' },
-  { id: 'sold', label: 'Sold median', hint: 'Last 30 days' },
-];
+/**
+ * Each source's bases, its default first (server: `pricing::source_bases`).
+ * `words` is the basis in a strategy summary (`pricing::source_words`).
+ */
+const SOURCE_BASES = {
+  cardtrader: [
+    { id: 'offers', label: 'Current offers', hint: 'The cheapest copy for sale now', words: 'current offers' },
+    { id: 'sold', label: 'Sold median', hint: 'Last 30 days', words: 'sold median (30 days)' },
+  ],
+  pokoin: [
+    { id: 'offers', label: 'Cheapest ask', hint: 'Other sellers’ listings now', words: 'cheapest Pokoin ask' },
+    { id: 'sold', label: 'Sold median', hint: 'Pokoin sales, last 90 days', words: 'sold median (90 days)' },
+  ],
+  cardmarket: [
+    { id: 'trend', label: 'Trend', hint: 'Cardmarket’s trend price', words: 'trend' },
+    { id: 'low', label: 'Lowest ask', hint: 'The cheapest copy for sale', words: 'lowest ask' },
+    { id: 'avg1', label: '1-day average', hint: 'Average sale price, last day', words: '1-day average' },
+    { id: 'avg7', label: '7-day average', hint: 'Average sale price, last 7 days', words: '7-day average' },
+    { id: 'avg30', label: '30-day average', hint: 'Average sale price, last 30 days', words: '30-day average' },
+  ],
+  tcgplayer: [
+    { id: 'market', label: 'Market price', hint: 'TCGplayer’s price from recent sales', words: 'market price (USD → EUR)' },
+    { id: 'low', label: 'Lowest listing', hint: 'The cheapest copy for sale', words: 'lowest listing (USD → EUR)' },
+    { id: 'mid', label: 'Mid price', hint: 'The middle of current listings', words: 'mid price (USD → EUR)' },
+  ],
+};
+
+/** The bases of a source (unknown: CardTrader's). */
+export function pricerBases(source) {
+  return SOURCE_BASES[source] || SOURCE_BASES.cardtrader;
+}
+
+/** CardTrader's and Pokoin's bases, as before sources had their own. */
+export const PRICER_BASES = SOURCE_BASES.cardtrader;
+
+/** Only CardTrader numbers have a seller fee to take off. */
+export function sourceHasFees(source) {
+  return (source || 'cardtrader') === 'cardtrader';
+}
 
 /**
  * The toggles of an 'offers' strategy: what a CardTrader offer must share
@@ -67,6 +110,33 @@ export function matchOf(strategy) {
 /** `''` (any copy) … `'CLFE'` (all exact). */
 export function matchKey(match) {
   return PRICER_MATCHES.filter(({ id }) => match?.[id]).map(({ letter }) => letter).join('');
+}
+
+/**
+ * The toggles a source's data can honour for a basis (server:
+ * `pricing::source_switches`): CardTrader all; Pokoin's sales condition and
+ * language (its cheapest ask is any copy); Cardmarket finish (regular or
+ * foil); TCGplayer finish and 1st edition. The rest stay saved, read as off.
+ */
+export function sourceSwitches(source, basis) {
+  const only = (...ids) => Object.fromEntries(PRICER_MATCHES.map(({ id }) => [id, ids.includes(id)]));
+  if (source === 'pokoin') return basis === 'sold' ? only('condition', 'language') : only();
+  if (source === 'cardmarket') return only('finish');
+  if (source === 'tcgplayer') return only('finish', 'firstEdition');
+  return { ...MATCH_EXACT };
+}
+
+/** Why a toggle is off for a source, for the editor. */
+export function switchNote(source) {
+  const label = PRICER_SOURCES.find((entry) => entry.id === source)?.label || 'This source';
+  return `Not in ${label}’s data`;
+}
+
+/** The toggles that count: the strategy's own, less those its source cannot honour. */
+export function effectiveMatch(input) {
+  const strategy = normalizeStrategy(input);
+  const can = sourceSwitches(strategy.source, strategy.basis);
+  return Object.fromEntries(PRICER_MATCHES.map(({ id }) => [id, strategy.match[id] && can[id]]));
 }
 
 /** All four toggles on. */
@@ -133,11 +203,13 @@ const cents = (value) => Math.round(value * 100) / 100;
  */
 export function normalizeStrategy(input = {}) {
   const raw = input || {};
+  const source = pick(String(raw.source || '').toLowerCase(), PRICER_SOURCES, 'cardtrader');
+  const bases = pricerBases(source);
   return {
     id: String(raw.id || ''),
     name: String(raw.name || '').trim().slice(0, 80),
-    source: pick(String(raw.source || '').toLowerCase(), PRICER_SOURCES, 'cardtrader'),
-    basis: String(raw.basis || '').toLowerCase() === 'sold' ? 'sold' : 'offers',
+    source,
+    basis: pick(String(raw.basis || '').toLowerCase(), bases, bases[0].id),
     match: matchOf(raw),
     feeExclusive: raw.feeExclusive !== false,
     action: pick(String(raw.action || '').toLowerCase(), PRICER_ACTIONS, 'match'),
@@ -173,18 +245,27 @@ function positive(value) {
  * The market number a strategy starts from, in PKN, or null (server:
  * `pricing::strategy_comp`). CardTrader numbers are fee-exclusive unless the
  * strategy asks for the ask itself (`…GrossPkn`; an older answer only has
- * the net, which is then used either way).
+ * the net, which is then used either way). Pokoin offers: the cheapest
+ * Pokoin ask, else CardTrader's sold median. Every other number is the
+ * comp's `sources[source][basis]` entry under the key of the toggles the
+ * source honours; an answer from before `sources` only has CardTrader's sold
+ * median, toggles ignored.
  */
 export function strategyComp(comp, input) {
   if (!comp) return null;
   const strategy = normalizeStrategy(input);
   const choose = (net, gross) => (strategy.feeExclusive ? positive(net) : positive(gross) ?? positive(net));
   const sold = () => choose(comp.soldMedianPkn, comp.soldMedianGrossPkn);
-  if (strategy.source === 'pokoin') {
-    if (strategy.basis === 'sold') return sold();
-    return positive(comp.pokoinCheapestPkn) ?? sold();
-  }
-  if (strategy.basis === 'sold') return sold();
+  const { source, basis } = strategy;
+  // undefined: an answer from before the `sources` block.
+  const fromSources = () => {
+    if (!comp.sources || typeof comp.sources !== 'object') return undefined;
+    const entry = comp.sources[source]?.[basis]?.[matchKey(effectiveMatch(strategy))];
+    return entry ? choose(entry.pkn, entry.grossPkn) : null;
+  };
+  if (source === 'pokoin' && basis === 'offers') return positive(comp.pokoinCheapestPkn) ?? sold();
+  if (source === 'cardtrader' && basis === 'sold') return fromSources() ?? (comp.sources ? null : sold());
+  if (source !== 'cardtrader') return fromSources() ?? null;
   const key = matchKey(strategy.match);
   // The offer of the strategy's toggles; no entry: no such offer.
   if (comp.ctMatch && typeof comp.ctMatch === 'object') {
@@ -285,11 +366,14 @@ const trimNumber = (value) => String(cents(value));
 /** One line describing a strategy (server: `pricing::strategy_summary`). */
 export function strategySummary(input) {
   const strategy = normalizeStrategy(input);
-  const parts = [strategy.source === 'pokoin' ? 'Pokoin' : 'CardTrader'];
-  if (strategy.basis === 'sold') parts.push('sold median (30 days)');
-  else if (strategy.source === 'pokoin') parts.push('cheapest Pokoin ask');
-  else parts.push(matchSummary(strategy.match));
-  if (strategy.source !== 'pokoin') parts.push(strategy.feeExclusive ? 'net of CardTrader fees' : 'CardTrader ask');
+  const { source, basis } = strategy;
+  const parts = [PRICER_SOURCES.find((entry) => entry.id === source).label];
+  // CardTrader's offers read as before: "CardTrader · all exact · …".
+  if (!(source === 'cardtrader' && basis === 'offers')) {
+    parts.push(pricerBases(source).find((entry) => entry.id === basis).words);
+  }
+  if (!(source === 'pokoin' && basis === 'offers')) parts.push(matchSummary(effectiveMatch(strategy)));
+  if (sourceHasFees(source)) parts.push(strategy.feeExclusive ? 'net of CardTrader fees' : 'CardTrader ask');
   const flat = (sign) => (strategy.amountPkn > 0 ? ` ${sign} ${trimNumber(strategy.amountPkn)} PKN` : '');
   if (strategy.action === 'undercut') parts.push(`undercut ${trimNumber(strategy.amountPct)}%${flat('−')}`);
   else if (strategy.action === 'premium') parts.push(`+${trimNumber(strategy.amountPct)}%${flat('+')}`);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { PRICER_SOURCES, pricerBases, strategyComp } from '../../../../market/src/pricer.js';
 import {
   allSelected,
   appliedLine,
@@ -29,6 +30,7 @@ import {
   unchangedMarket,
   uniqueCopyName,
   usedByLine,
+  withSource,
 } from './pricer-ui.js';
 
 const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -102,16 +104,46 @@ test('a duplicate gets a unique "copy" name, ignoring case', () => {
   assert.ok(uniqueCopyName('x'.repeat(100), []).length <= 80);
 });
 
-test('the example comp is the group\'s first comp with per-toggle offers, else the sample', () => {
+test('the example comp is the group\'s first comp with the strategy\'s source, else per-toggle offers, else the sample', () => {
   assert.equal(pickExampleComp(null), SAMPLE_COMP);
   const own = { ctMatch: { CLFE: { grossPkn: 460, pkn: 431.94 } } };
   assert.equal(pickExampleComp([null, { ctMatchedPkn: 10 }, own]), own);
   assert.equal(pickExampleComp([{ ctMatchedPkn: 10 }]), SAMPLE_COMP);
+  // A comp with the strategy's source in `sources` wins over one with only ctMatch.
+  const withSources = { ctMatch: { CLFE: { grossPkn: 100, pkn: 91.3 } }, sources: { cardmarket: { trend: { '': { eur: 1, grossPkn: 200, pkn: 200 } } } } };
+  assert.equal(pickExampleComp([own, withSources], { source: 'cardmarket' }), withSources);
+  assert.equal(pickExampleComp([own, withSources]), own, 'without a strategy: CardTrader, so ctMatch as today');
+  assert.equal(pickExampleComp([own, withSources], { source: 'cardmarket', basis: 'trend' }), withSources);
   // The sample has an offer for every toggle combination, cheaper as they loosen.
   assert.equal(Object.keys(SAMPLE_COMP.ctMatch).length, 16);
   assert.deepEqual(SAMPLE_COMP.ctMatch.CLFE, { grossPkn: 28, pkn: 25.56 });
   assert.ok(SAMPLE_COMP.ctMatch.CL.grossPkn < SAMPLE_COMP.ctMatch.CLFE.grossPkn);
   assert.ok(SAMPLE_COMP.ctMatch[''].grossPkn < SAMPLE_COMP.ctMatch.CL.grossPkn);
+});
+
+test('the sample comp prices every source and basis with the default toggles', () => {
+  for (const source of PRICER_SOURCES) {
+    for (const basis of pricerBases(source.id)) {
+      const comp = strategyComp(SAMPLE_COMP, { source: source.id, basis: basis.id });
+      assert.ok(comp != null && comp > 0, `${source.id} ${basis.id} has a number`);
+    }
+  }
+  // …and with the toggles off, for the sources that honour any.
+  const any = { condition: false, language: false, finish: false, firstEdition: false };
+  for (const source of PRICER_SOURCES) {
+    for (const basis of pricerBases(source.id)) {
+      const comp = strategyComp(SAMPLE_COMP, { source: source.id, basis: basis.id, match: any });
+      assert.ok(comp != null && comp > 0, `${source.id} ${basis.id} any copy has a number`);
+    }
+  }
+  // Cardmarket entries carry EUR, TCGplayer USD plus the day's rate.
+  assert.equal(SAMPLE_COMP.sources.cardmarket.trend.F.eur, 0.15);
+  assert.equal(SAMPLE_COMP.sources.cardmarket.asOf, '2026-11-07');
+  assert.equal(SAMPLE_COMP.sources.tcgplayer.market.FE.usd, 0.3);
+  assert.equal(SAMPLE_COMP.sources.tcgplayer.usdPerEur, 1.08);
+  assert.equal(SAMPLE_COMP.sources.tcgplayer.rateDay, '2026-11-07');
+  assert.equal(SAMPLE_COMP.sources.pokoin.sold.CL.pkn, 31);
+  assert.equal(Object.keys(SAMPLE_COMP.sources.cardtrader.sold).length, 16);
 });
 
 test('the worked example walks the mock-up: ask 28 → net 25.56 → −5% 24.28 → nearest 24', () => {
@@ -128,11 +160,28 @@ test('the worked example walks the mock-up: ask 28 → net 25.56 → −5% 24.28
     noOffer: false,
   });
   assert.deepEqual(exampleSteps({ source: 'pokoin', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 2, rounding: 'up' }), {
-    steps: ['Pokoin sold median 24.5', '+10% + 2 PKN 28.95', 'round up'],
-    target: 29,
+    steps: ['Pokoin sold median 31', '+10% + 2 PKN 36.1', 'round up'],
+    target: 37,
     noOffer: false,
   });
   assert.deepEqual(exampleSteps({ source: 'pokoin', basis: 'offers', action: 'match', rounding: 'none' }).steps, ['Pokoin ask 27']);
+  // Cardmarket and TCGplayer name their number in its own currency, converted to PKN.
+  assert.deepEqual(exampleSteps({ source: 'cardmarket', basis: 'trend', action: 'match', rounding: 'none' }), {
+    steps: ['Cardmarket trend €0.15 = 30 PKN'],
+    target: 30,
+    noOffer: false,
+  });
+  assert.deepEqual(exampleSteps({ source: 'cardmarket', basis: 'avg7', action: 'undercut', amountPct: 3, rounding: 'integer', minPkn: 1 }), {
+    steps: ['Cardmarket 7-day average €0.20 = 40 PKN', '−3% 38.8', 'nearest'],
+    target: 39,
+    noOffer: false,
+  });
+  assert.deepEqual(exampleSteps({ source: 'tcgplayer', basis: 'market', action: 'match', rounding: 'none' }), {
+    steps: ['TCGplayer market price $0.30 = 55.56 PKN at $1.08/€'],
+    target: 55.56,
+    noOffer: false,
+  });
+  assert.deepEqual(exampleSteps({ source: 'tcgplayer', basis: 'low', action: 'match', rounding: 'up', match: { condition: false, language: false, finish: false, firstEdition: false } }).steps, ['TCGplayer lowest listing $0.20 = 37.04 PKN at $1.08/€', 'round up']);
   assert.equal(exampleLead(['CardTrader ask 28', 'you net 25.56', '−5% 24.28', 'nearest']), 'CardTrader ask 28 → you net 25.56 → −5% 24.28 → nearest ');
   assert.equal(exampleLead(['CardTrader ask 28']), 'CardTrader ask 28 → ');
   // The floor wins and says so.
@@ -156,6 +205,8 @@ test('the worked example follows the toggles and says when no offer is like that
   assert.equal(NO_OFFER, 'No offer like that for this card right now');
   assert.equal(askFor(comp, { ...base, match: { condition: false, language: true, finish: false, firstEdition: false } }), 404.8);
   assert.equal(askFor(comp, { ...base, source: 'pokoin' }), null);
+  assert.equal(askFor(comp, { ...base, source: 'cardmarket' }), null, 'no ask beside a Cardmarket price');
+  assert.equal(askFor(comp, { ...base, basis: 'sold' }), null, 'no ask beside a sold median');
 });
 
 test('plan counts, the Apply label, unchanged members and the applied line', () => {
@@ -205,7 +256,7 @@ test('a card whose price does not change still shows its comp under the group st
   assert.deepEqual(unchangedMarket(comp, net), { compPkn: 25.56, askPkn: 28 });
   const any = { condition: false, language: false, finish: false, firstEdition: false };
   assert.deepEqual(unchangedMarket(comp, { ...net, match: any }), { compPkn: 20.09, askPkn: 22 });
-  assert.deepEqual(unchangedMarket(comp, { ...net, basis: 'sold' }), { compPkn: 30, askPkn: 32 });
+  assert.deepEqual(unchangedMarket(comp, { ...net, basis: 'sold' }), { compPkn: 30, askPkn: null }, 'only CardTrader offers have an ask beside the net');
   assert.deepEqual(unchangedMarket(null, net), { compPkn: null, askPkn: null });
   assert.deepEqual(unchangedMarket(comp, null), { compPkn: null, askPkn: null });
 });
@@ -216,20 +267,51 @@ test('a change hides the old plan in the same flush: the plan is keyed, not clea
   assert.doesNotMatch(tab, /setPlan\(null\)/);
 });
 
-test('strategy tiles: action icon, source, rule chips and switch chips', () => {
+test('strategy tiles: action icon, source, basis, rule chips and switch chips', () => {
   const exact = { condition: true, language: true, finish: true, firstEdition: true };
   const undercut = { source: 'cardtrader', basis: 'offers', match: exact, feeExclusive: true, action: 'undercut', amountPct: 5, rounding: 'integer', minPkn: 1 };
   assert.deepEqual(strategyTile(undercut), {
-    icon: 'undercut', source: 'CardTrader', sold: false, rules: ['−5%', 'whole PKN', 'min 1', 'net of fees'], switches: ['All exact'], allExact: true,
+    icon: 'undercut', source: 'CardTrader', basis: 'Current offers', sold: false, rules: ['−5%', 'whole PKN', 'min 1', 'net of fees'], switches: ['All exact'], allExact: true,
   });
   const language = strategyTile({ ...undercut, match: { condition: true, language: true, finish: false, firstEdition: false }, action: 'match', feeExclusive: false, minPkn: 0, rounding: 'none' });
   assert.deepEqual([language.icon, language.rules, language.switches, language.allExact], ['match', ['Match', 'CardTrader ask'], ['Condition', 'Language'], false]);
   const any = strategyTile({ ...undercut, match: { condition: false, language: false, finish: false, firstEdition: false } });
   assert.deepEqual(any.switches, ['Any copy']);
   const sold = strategyTile({ source: 'cardtrader', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 2, rounding: 'up', minPkn: 0 });
-  assert.deepEqual([sold.icon, sold.sold, sold.rules, sold.switches], ['premium', true, ['+10% + 2 PKN', 'round up', 'net of fees'], []]);
+  assert.deepEqual([sold.icon, sold.sold, sold.basis, sold.rules, sold.switches, sold.allExact], ['premium', true, 'Sold median', ['+10% + 2 PKN', 'round up', 'net of fees'], ['All exact'], true]);
   const pokoin = strategyTile({ source: 'pokoin', basis: 'offers', action: 'undercut', amountPct: 0, amountPkn: 3 });
-  assert.deepEqual([pokoin.source, pokoin.rules, pokoin.switches], ['Pokoin', ['− 3 PKN'], ['Cheapest Pokoin ask']]);
+  assert.deepEqual([pokoin.source, pokoin.basis, pokoin.rules, pokoin.switches, pokoin.allExact], ['Pokoin', 'Cheapest ask', ['− 3 PKN'], ['Cheapest Pokoin ask'], false]);
+  const pokoinSold = strategyTile({ source: 'pokoin', basis: 'sold', action: 'match', rounding: 'none' });
+  assert.deepEqual([pokoinSold.source, pokoinSold.basis, pokoinSold.sold, pokoinSold.switches], ['Pokoin', 'Sold median', true, ['All exact']], 'condition and language are honoured');
+});
+
+test('strategy tiles for the new sources: Cardmarket avg7, TCGplayer with an ignored toggle', () => {
+  const cardmarket = strategyTile({ source: 'cardmarket', basis: 'avg7', action: 'undercut', amountPct: 3, rounding: 'integer', minPkn: 1 });
+  assert.deepEqual(cardmarket, {
+    icon: 'undercut', source: 'Cardmarket', basis: '7-day average', sold: false,
+    rules: ['−3%', 'whole PKN', 'min 1'], switches: ['All exact'], allExact: true,
+  }, 'Cardmarket honours finish; all on reads All exact, and no fee chip');
+  const foilOff = strategyTile({ source: 'cardmarket', basis: 'trend', match: { condition: true, language: true, finish: false, firstEdition: true }, action: 'match', rounding: 'none' });
+  assert.deepEqual([foilOff.switches, foilOff.allExact, foilOff.rules], [['Any copy'], false, ['Match']]);
+  // The language toggle is saved on but TCGplayer cannot honour it: off, ignored.
+  const tcg = strategyTile({ source: 'tcgplayer', basis: 'market', match: { condition: false, language: true, finish: false, firstEdition: false }, action: 'match', rounding: 'up' });
+  assert.deepEqual(tcg, {
+    icon: 'match', source: 'TCGplayer', basis: 'Market price', sold: false,
+    rules: ['Match', 'round up', 'USD → EUR'], switches: ['Any copy'], allExact: false,
+  });
+  const tcgExact = strategyTile({ source: 'tcgplayer', basis: 'mid', action: 'premium', amountPct: 5, rounding: 'none', minPkn: 0 });
+  assert.deepEqual([tcgExact.basis, tcgExact.switches, tcgExact.allExact, tcgExact.rules], ['Mid price', ['All exact'], true, ['+5%', 'USD → EUR']]);
+});
+
+test('withSource keeps a basis the new source has, else its default; the toggles stay', () => {
+  const draft = { source: 'cardtrader', basis: 'sold', match: { condition: true, language: false, finish: true, firstEdition: false }, feeExclusive: true };
+  assert.deepEqual(withSource(draft, 'pokoin'), { ...draft, source: 'pokoin', basis: 'sold' });
+  assert.deepEqual(withSource(draft, 'cardmarket'), { ...draft, source: 'cardmarket', basis: 'trend' });
+  assert.deepEqual(withSource({ ...draft, basis: 'offers' }, 'tcgplayer'), { ...draft, basis: 'market', source: 'tcgplayer' }, 'offers is not a TCGplayer basis: its default market');
+  assert.deepEqual(withSource({ source: 'cardmarket', basis: 'avg7', match: { condition: false, language: false, finish: false, firstEdition: false } }, 'cardtrader'), {
+    source: 'cardtrader', basis: 'offers', match: { condition: false, language: false, finish: false, firstEdition: false },
+  }, 'avg7 is not a CardTrader basis: offers, and the saved toggles are untouched');
+  assert.equal(withSource({ source: 'pokoin', basis: 'sold' }, 'cardtrader').basis, 'sold');
 });
 
 test('the editor opens every strategy shape with the right switches', () => {
@@ -243,8 +325,10 @@ test('the editor opens every strategy shape with the right switches', () => {
   assert.deepEqual(strategyDraft({ id: 's4', basis: 'offers', match: partial }).match, partial);
   const sold = strategyDraft({ id: 's5', basis: 'sold', match: { ...off, language: true } });
   assert.deepEqual([sold.basis, sold.match], ['sold', { ...off, language: true }]);
-  assert.equal(showsSwitches(sold), false);
-  assert.equal(showsSwitches(strategyDraft({ basis: 'offers', source: 'pokoin' })), false);
+  assert.equal(showsSwitches(sold), true, 'a sold basis still shows the toggles');
+  assert.equal(showsSwitches(strategyDraft({ basis: 'offers', source: 'pokoin' })), false, 'Pokoin offers is any copy');
+  assert.equal(showsSwitches(strategyDraft({ basis: 'sold', source: 'pokoin' })), true);
+  assert.equal(showsSwitches(strategyDraft({ basis: 'avg7', source: 'cardmarket' })), true);
   assert.equal(showsSwitches(strategyDraft({ basis: 'offers', match: partial })), true);
   assert.equal(strategyDraft({ name: '  Spaced  ' }).name, '  Spaced  ', 'the name as typed');
   assert.deepEqual(strategyDraft(null).match, on, 'a new strategy starts all exact');
