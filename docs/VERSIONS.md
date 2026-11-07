@@ -126,7 +126,14 @@ in `scripts/out/artbox-pixel.npz`. `--apply-cached` writes
 
 New CardTrader leftovers: leftover ingest calls this for that expansion.
 Do not leave imported printings on singleton `v{card_id}` until a later
-`--all`. Incremental:
+`--all`. The daily job's `scripts/match-refreshed-pokemon-artwork.py` matches
+the day's imports and also re-tries printings from the last 60 days
+(`POKOIN_ARTWORK_LOOKBACK_DAYS`) that are still on a singleton and now have a
+leftover JPEG in `/home/nez/data/pokoin-leftovers/objects`. A scan recovered
+after the import day used to leave the printing alone for good: CN 30th
+Celebration 028/30th-P Espeon ex (ct 414196) never joined MEP 108 + JP 043.
+That directory is the current leftover store; the cluster script's default
+`PI_OBJECTS` (mybook replica) can lag it by weeks. Incremental:
 
 ```bash
 # from pokoin-web, after leftovers exist on the 15T replica

@@ -34,6 +34,8 @@ import {
   RARITY_ALIAS_COMPACT,
   RARITY_PHRASE_COMPACT,
   compactQuery,
+  eraPhraseAlias,
+  eraWordAlias,
   exactSetAlias,
   isModifierWord,
   maxDistance,
@@ -167,6 +169,24 @@ for (const row of ARTIST_POOL) {
   }
 }
 
+/** A set (or era) reading of a token, in the shape tokenEvidence checks. */
+function setInterp(raw, compact, alias, kind = 'alias') {
+  return {
+    field: 'set',
+    kind,
+    canonical: alias.setNames[0],
+    setToken: {
+      token: raw,
+      compact,
+      eraId: alias.eraId || '',
+      setNames: alias.setNames,
+      needles: alias.needles || [compact],
+      prefix: false,
+      slug: alias.slug || '',
+    },
+  };
+}
+
 /** Typed interpretations for one token, beyond its always-present name reading. */
 function tokenInterps(raw, compact) {
   const interps = [];
@@ -180,22 +200,9 @@ function tokenInterps(raw, compact) {
   if (art) {
     interps.push({ field: 'art', kind: 'alias', canonical: art });
   }
-  const setAlias = compact.length >= 2 ? exactSetAlias(raw) : null;
+  const setAlias = compact.length >= 2 ? exactSetAlias(raw) || eraWordAlias(raw) : null;
   if (setAlias?.setNames?.length) {
-    interps.push({
-      field: 'set',
-      kind: 'alias',
-      canonical: setAlias.setNames[0],
-      setToken: {
-        token: raw,
-        compact,
-        eraId: setAlias.eraId || '',
-        setNames: setAlias.setNames,
-        needles: setAlias.needles || [compact],
-        prefix: false,
-        slug: setAlias.slug || '',
-      },
-    });
+    interps.push(setInterp(raw, compact, setAlias));
   }
   const number = parseCollectorWord(raw);
   if (number) {
@@ -227,6 +234,16 @@ export function tokenizeQuery(raw) {
       const field = canon === 'illustration' ? 'art' : 'rarity';
       tokens[i].interps.push({ field, kind: 'phrase', canonical: canon });
       tokens[i + 1].interps.push({ field, kind: 'phrase', canonical: canon });
+    }
+    // Two-word era names (`sun moon`, `diamond pearl`): each word is evidence for the block.
+    const era = eraPhraseAlias(tokens[i].raw, tokens[i + 1].raw);
+    if (era) {
+      const compact = compactQuery(`${tokens[i].raw} ${tokens[i + 1].raw}`);
+      for (const token of [tokens[i], tokens[i + 1]]) {
+        if (!token.interps.some((interp) => interp.field === 'set' && interp.setToken?.eraId === era.eraId)) {
+          token.interps.push(setInterp(`${tokens[i].raw} ${tokens[i + 1].raw}`, compact, era, 'phrase'));
+        }
+      }
     }
   }
   return { raw: text, tokens };
