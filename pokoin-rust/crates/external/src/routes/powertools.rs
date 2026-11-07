@@ -320,7 +320,7 @@ pub async fn price_check(
     );
     // Comps net of this seller's own CardTrader commission when connected.
     let channel = crate::ct_fees::seller_channel_cached(state.firestore.as_ref(), &state.db, &identity.uid).await;
-    let payload = crate::price_check::handle_for(&state.db, &game, &items, &identity.uid, channel).await?;
+    let payload = crate::price_check::handle_for(&state.db, Some(state.firestore.as_ref()), &game, &items, &identity.uid, channel).await?;
     let mut response = json_response(200, payload);
     response
         .headers_mut()

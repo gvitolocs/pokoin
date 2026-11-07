@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Cardmarket price guide, every game → pokoin_marketplace.cardmarket_price_guide (docs/PRICING.md)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# pokoin_jobs login once migration 139 is applied; until then the binary falls
+# back to the writer container's own login (docker inspect).
+EnvironmentFile=-%h/.config/pokoin/cardmarket-prices.env
+ExecStart=%h/pokoin-cardmarket/current/pokoin-cardmarket-catalog guides --apply
+Nice=10
+TimeoutStartSec=45min

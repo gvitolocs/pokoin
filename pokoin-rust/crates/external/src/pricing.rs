@@ -18,14 +18,26 @@ use crate::ct_fees::{floor_price_rounded, Rounding, MAX_ASK_PKN, SCALE};
 pub use crate::price_check::Match;
 use crate::error::{clean_text, f64_field, ApiError, ApiResult};
 
-pub const SOURCES: [&str; 2] = ["pokoin", "cardtrader"];
+/// Where a strategy's market number comes from (market/src/pricer.js
+/// `PRICER_SOURCES`; docs/PRICING.md "Price sources").
+pub const SOURCES: [&str; 4] = ["cardtrader", "pokoin", "cardmarket", "tcgplayer"];
 pub const ACTIONS: [&str; 3] = ["match", "undercut", "premium"];
 pub const ROUNDINGS: [&str; 4] = ["none", "integer", "down", "up"];
-/// What a strategy prices from (market/src/pricer.js `PRICER_BASES`): the
-/// current offers (on CardTrader narrowed by the `match` toggles) or the
-/// 30-day sold median. Strategies saved before 2026-11-05 had `matched` (all
+/// What a CardTrader or Pokoin strategy prices from: the current offers (on
+/// CardTrader narrowed by the `match` toggles; on Pokoin the cheapest ask) or
+/// the sold median. Strategies saved before 2026-11-05 had `matched` (all
 /// toggles on) and `cheapest` (all off); both read as `offers`.
 pub const BASES: [&str; 2] = ["offers", "sold"];
+/// Cardmarket's price-guide columns: trend, the lowest ask, and the average
+/// sale price over 1, 7 and 30 days.
+pub const CARDMARKET_BASES: [&str; 5] = ["trend", "low", "avg1", "avg7", "avg30"];
+/// TCGplayer's prices (USD, converted at the day's ECB rate): market price,
+/// the lowest listing and the mid price.
+pub const TCGPLAYER_BASES: [&str; 3] = ["market", "low", "mid"];
+/// The rules a strategy was saved under. Before 2 (2026-11-07) a `sold`
+/// strategy ignored the toggles and a Pokoin `sold` one priced from
+/// CardTrader's sold median; `upgrade_stored_strategy` keeps those prices.
+pub const RULES_VERSION: u64 = 2;
 /// The scope a strategy had before groups (kept as `legacyScope` and
 /// turned into a group once, `migrate_strategies`).
 pub const LEGACY_STATUSES: [&str; 3] = ["", "active", "paused"];
@@ -147,7 +159,7 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, others: &[Valu
     }
     let source = word(input, "source", 20);
     if !SOURCES.contains(&source.as_str()) {
-        return Err(ApiError::bad_request("Pricer source must be pokoin or cardtrader."));
+        return Err(ApiError::bad_request("Pricer source must be cardtrader, pokoin, cardmarket or tcgplayer."));
     }
     let action = word(input, "action", 20);
     if !ACTIONS.contains(&action.as_str()) {
@@ -156,7 +168,7 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, others: &[Valu
     let rounding = word(input, "rounding", 20);
     let rounding = if ROUNDINGS.contains(&rounding.as_str()) { rounding } else { "none".to_string() };
     let raw_basis = word(input, "basis", 20);
-    let basis = if raw_basis == "sold" { "sold" } else { "offers" }.to_string();
+    let basis = basis_for(&source, &raw_basis).to_string();
     let toggles = match_of(input, &raw_basis);
     let created_at = {
         let created = clean_text(existing.get("createdAt").and_then(Value::as_str), 40);
@@ -184,9 +196,62 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, others: &[Valu
     if let Some(scope) = existing.get("legacyScope").filter(|scope| scope.is_object()) {
         out.insert("legacyScope".into(), scope.clone());
     }
+    out.insert("rules".into(), json!(RULES_VERSION));
     out.insert("createdAt".into(), json!(created_at));
     out.insert("updatedAt".into(), json!(now_iso));
     Ok(Value::Object(out))
+}
+
+/// A source's bases, its default first.
+pub fn source_bases(source: &str) -> &'static [&'static str] {
+    match source {
+        "cardmarket" => &CARDMARKET_BASES,
+        "tcgplayer" => &TCGPLAYER_BASES,
+        _ => &BASES,
+    }
+}
+
+/// `raw` if it is one of `source`'s bases, else that source's default (an
+/// old `matched` / `cheapest` reads as `offers`).
+pub fn basis_for(source: &str, raw: &str) -> &'static str {
+    let bases = source_bases(source);
+    bases.iter().copied().find(|basis| *basis == raw).unwrap_or(bases[0])
+}
+
+/// The toggles a source's data can honour for a basis (`sourceSwitches`):
+/// CardTrader knows every detail of its offers and sales; Pokoin's sales
+/// carry condition and language (its cheapest ask is any copy); Cardmarket's
+/// guide splits regular and foil only; TCGplayer prices each finish and 1st
+/// edition but has no condition or language. A toggle the source cannot
+/// honour stays saved and reads as off.
+pub fn source_switches(source: &str, basis: &str) -> Match {
+    match (source, basis) {
+        ("pokoin", "sold") => Match { condition: true, language: true, ..Match::ANY },
+        ("pokoin", _) => Match::ANY,
+        ("cardmarket", _) => Match { finish: true, ..Match::ANY },
+        ("tcgplayer", _) => Match { finish: true, first_edition: true, ..Match::ANY },
+        _ => Match::EXACT,
+    }
+}
+
+/// The toggles that count for this strategy: its own, less the ones its
+/// source cannot honour.
+pub fn effective_match(strategy: &Value) -> Match {
+    let (source, basis) = source_and_basis(strategy);
+    let (m, can) = (strategy_match(strategy), source_switches(source, basis));
+    Match {
+        condition: m.condition && can.condition,
+        language: m.language && can.language,
+        finish: m.finish && can.finish,
+        first_edition: m.first_edition && can.first_edition,
+    }
+}
+
+/// A stored strategy's source (unknown: CardTrader) and basis.
+fn source_and_basis(strategy: &Value) -> (&'static str, &'static str) {
+    let raw = word(strategy, "source", 20);
+    let source = SOURCES.iter().copied().find(|known| *known == raw).unwrap_or("cardtrader");
+    (source, basis_for(source, &word(strategy, "basis", 20)))
 }
 
 /// A strategy as stored before groups, read back: the rule is kept, its
@@ -199,6 +264,14 @@ pub fn upgrade_stored_strategy(stored: &Value, earlier: &[Value], now_iso: &str)
     }
     if !ACTIONS.contains(&word(stored, "action", 20).as_str()) {
         input["action"] = json!("match");
+    }
+    // Saved before RULES_VERSION 2: a sold median ignored the toggles (the
+    // `""` sold entry is that median), and Pokoin's "sold" was CardTrader's.
+    if stored.get("rules").and_then(Value::as_u64).unwrap_or(1) < RULES_VERSION && word(stored, "basis", 20) == "sold" {
+        if word(stored, "source", 20) == "pokoin" {
+            input["source"] = json!("cardtrader");
+        }
+        input["match"] = match_json(Match::ANY);
     }
     let base = clean_text(stored.get("name").and_then(Value::as_str), 74);
     let base = if base.is_empty() { "Strategy".to_string() } else { base };
@@ -310,8 +383,11 @@ pub fn match_summary(m: Match) -> String {
 /// strategy is not fee-exclusive (an answer without the ask: the net either
 /// way). CardTrader offers come from the comp's `ctMatch` entry of the
 /// strategy's toggles (no entry: no such offer); an answer from before
-/// `ctMatch` only knows the exact copy and the cheapest one. Pokoin: the
-/// cheapest Pokoin ask, else the sold median.
+/// `ctMatch` only knows the exact copy and the cheapest one. Pokoin offers:
+/// the cheapest Pokoin ask, else CardTrader's sold median. Every other
+/// number comes from the comp's `sources[source][basis]` entry under the key
+/// of the toggles the source honours (`effective_match`); an answer from
+/// before `sources` has only CardTrader's sold median, toggles ignored.
 pub fn strategy_comp(comp: &Value, strategy: &Value) -> Option<f64> {
     let fee_exclusive = strategy.get("feeExclusive") != Some(&Value::Bool(false));
     let choose = |net: Option<&Value>, gross: Option<&Value>| {
@@ -322,15 +398,24 @@ pub fn strategy_comp(comp: &Value, strategy: &Value) -> Option<f64> {
         }
     };
     let sold = || choose(comp.get("soldMedianPkn"), comp.get("soldMedianGrossPkn"));
-    let basis = word(strategy, "basis", 20);
-    if strategy.get("source").and_then(Value::as_str) == Some("pokoin") {
-        if basis == "sold" {
-            return sold();
-        }
-        return positive(comp.get("pokoinCheapestPkn")).or_else(sold);
-    }
-    if basis == "sold" {
-        return sold();
+    let (source, basis) = source_and_basis(strategy);
+    let key = effective_match(strategy).key();
+    // `None`: an answer from before the `sources` block.
+    let from_sources = || {
+        let sources = comp.get("sources").filter(|sources| sources.is_object())?;
+        Some(
+            sources
+                .get(source)
+                .and_then(|by_basis| by_basis.get(basis))
+                .and_then(|by_key| by_key.get(&key))
+                .and_then(|entry| choose(entry.get("pkn"), entry.get("grossPkn"))),
+        )
+    };
+    match (source, basis) {
+        ("pokoin", "offers") => return positive(comp.get("pokoinCheapestPkn")).or_else(sold),
+        ("cardtrader", "sold") => return from_sources().unwrap_or_else(sold),
+        ("cardtrader", _) => {}
+        _ => return from_sources().flatten(),
     }
     let m = strategy_match(strategy);
     if let Some(map) = comp.get("ctMatch").and_then(Value::as_object) {
@@ -423,15 +508,17 @@ pub fn plan_update(target: f64, activate: bool) -> Value {
 pub fn strategy_summary(strategy: &Value) -> String {
     let get = |key: &str| strategy.get(key).and_then(Value::as_str).unwrap_or("");
     let num = |key: &str| f64_field(strategy, &[key]).unwrap_or(0.0);
-    let mut parts = vec![if get("source") == "pokoin" { "Pokoin" } else { "CardTrader" }.to_string()];
-    if get("basis") == "sold" {
-        parts.push("sold median (30 days)".into());
-    } else if get("source") == "pokoin" {
-        parts.push("cheapest Pokoin ask".into());
-    } else {
-        parts.push(match_summary(strategy_match(strategy)));
+    let (source, basis) = source_and_basis(strategy);
+    let (label, number) = source_words(source, basis);
+    let mut parts = vec![label.to_string()];
+    // CardTrader's offers read as before: "CardTrader · all exact · …".
+    if !(source == "cardtrader" && basis == "offers") {
+        parts.push(number.to_string());
     }
-    if get("source") != "pokoin" {
+    if !(source == "pokoin" && basis == "offers") {
+        parts.push(match_summary(effective_match(strategy)));
+    }
+    if source == "cardtrader" {
         parts.push(if strategy.get("feeExclusive") == Some(&Value::Bool(false)) { "CardTrader ask" } else { "net of CardTrader fees" }.to_string());
     }
     let flat = |sign: &str| if num("amountPkn") > 0.0 { format!(" {sign} {} PKN", trim_number(num("amountPkn"))) } else { String::new() };
@@ -450,6 +537,24 @@ pub fn strategy_summary(strategy: &Value) -> String {
         parts.push(format!("min {} PKN", trim_number(num("minPkn"))));
     }
     parts.join(" · ")
+}
+
+/// A source's name and its number in words (`sourceWords`).
+pub fn source_words(source: &str, basis: &str) -> (&'static str, &'static str) {
+    match (source, basis) {
+        ("pokoin", "sold") => ("Pokoin", "sold median (90 days)"),
+        ("pokoin", _) => ("Pokoin", "cheapest Pokoin ask"),
+        ("cardmarket", "low") => ("Cardmarket", "lowest ask"),
+        ("cardmarket", "avg1") => ("Cardmarket", "1-day average"),
+        ("cardmarket", "avg7") => ("Cardmarket", "7-day average"),
+        ("cardmarket", "avg30") => ("Cardmarket", "30-day average"),
+        ("cardmarket", _) => ("Cardmarket", "trend"),
+        ("tcgplayer", "low") => ("TCGplayer", "lowest listing (USD → EUR)"),
+        ("tcgplayer", "mid") => ("TCGplayer", "mid price (USD → EUR)"),
+        ("tcgplayer", _) => ("TCGplayer", "market price (USD → EUR)"),
+        (_, "sold") => ("CardTrader", "sold median (30 days)"),
+        _ => ("CardTrader", "current offers"),
+    }
 }
 
 fn trim_number(value: f64) -> String {
@@ -496,7 +601,7 @@ mod tests {
         }
         let err = |input: Value, others: &[Value]| sanitize_strategy(&input, None, others, now()).unwrap_err();
         assert_eq!(err(json!({"source": "pokoin", "action": "match"}), &[]).code.as_deref(), Some("strategy_name_required"));
-        assert_eq!(err(json!({"name": "x", "source": "ebay", "action": "match"}), &[]).message, "Pricer source must be pokoin or cardtrader.");
+        assert_eq!(err(json!({"name": "x", "source": "ebay", "action": "match"}), &[]).message, "Pricer source must be cardtrader, pokoin, cardmarket or tcgplayer.");
         assert_eq!(err(json!({"name": "x", "source": "pokoin", "action": "nuke"}), &[]).message, "Strategy action must be match, undercut or premium.");
         let taken = err(json!({"name": " undercut 5% ", "source": "pokoin", "action": "match"}), &[ok.clone()]);
         assert_eq!((taken.status, taken.code.as_deref()), (409, Some("strategy_name_taken")));
@@ -539,6 +644,83 @@ mod tests {
         let twin = upgrade_stored_strategy(&json!({"id": "st_2", "name": "riftbound PAUSED", "source": "x", "action": "y"}), &[up.clone()], now());
         assert_eq!((twin["name"].clone(), twin["source"].clone(), twin["action"].clone()), (json!("riftbound PAUSED (2)"), json!("cardtrader"), json!("match")));
         assert_eq!(upgrade_stored_strategy(&json!({"id": "st_3"}), &[], now())["name"], "Strategy");
+    }
+
+    #[test]
+    fn a_sold_strategy_saved_before_rules_2_keeps_its_price() {
+        let exact = json!({"condition": true, "language": true, "finish": true, "firstEdition": true});
+        let any = json!({"condition": false, "language": false, "finish": false, "firstEdition": false});
+        let old = |source: &str| json!({"id": "st_s", "name": "Sold", "source": source, "basis": "sold", "action": "match", "match": exact});
+        // CardTrader sold ignored the toggles: now "any copy", whose entry is that median.
+        let ct = upgrade_stored_strategy(&old("cardtrader"), &[], now());
+        assert_eq!((ct["source"].clone(), ct["basis"].clone(), ct["match"].clone(), ct["rules"].clone()), (json!("cardtrader"), json!("sold"), any.clone(), json!(2)));
+        // Pokoin "sold" was CardTrader's sold median.
+        let pk = upgrade_stored_strategy(&old("pokoin"), &[], now());
+        assert_eq!((pk["source"].clone(), pk["basis"].clone(), pk["match"].clone()), (json!("cardtrader"), json!("sold"), any.clone()));
+        // Saved under rules 2: read as saved.
+        let mut new = old("pokoin");
+        new["rules"] = json!(2);
+        let kept = upgrade_stored_strategy(&new, &[], now());
+        assert_eq!((kept["source"].clone(), kept["match"].clone()), (json!("pokoin"), exact.clone()));
+        // Offers strategies are untouched.
+        let offers = upgrade_stored_strategy(&json!({"id": "st_o", "name": "O", "source": "cardtrader", "action": "match", "match": exact}), &[], now());
+        assert_eq!(offers["match"], exact);
+    }
+
+    #[test]
+    fn each_source_has_its_bases_and_switches() {
+        let saved = |source: &str, basis: &str| {
+            sanitize_strategy(&json!({"name": "s", "source": source, "basis": basis, "action": "match"}), None, &[], now()).unwrap()
+        };
+        assert_eq!(saved("cardmarket", "avg7")["basis"], "avg7");
+        assert_eq!(saved("cardmarket", "sold")["basis"], "trend", "not a Cardmarket basis: its default");
+        assert_eq!(saved("tcgplayer", "")["basis"], "market");
+        assert_eq!(saved("tcgplayer", "low")["basis"], "low");
+        assert_eq!(saved("pokoin", "matched")["basis"], "offers");
+        assert_eq!(saved("cardtrader", "trend")["basis"], "offers");
+        assert_eq!(saved("cardtrader", "sold")["rules"], 2);
+        // The toggles stay as saved; only those the source honours count.
+        let all = json!({"source": "tcgplayer", "basis": "mid"});
+        assert_eq!(effective_match(&all), Match { finish: true, first_edition: true, ..Match::ANY });
+        assert_eq!(effective_match(&json!({"source": "cardmarket"})), Match { finish: true, ..Match::ANY });
+        assert_eq!(effective_match(&json!({"source": "pokoin", "basis": "sold"})), Match { condition: true, language: true, ..Match::ANY });
+        assert_eq!(effective_match(&json!({"source": "pokoin"})), Match::ANY);
+        assert_eq!(effective_match(&json!({"source": "cardtrader", "basis": "sold"})), Match::EXACT);
+        assert_eq!(effective_match(&json!({"source": "x"})), Match::EXACT, "unknown source: CardTrader");
+        assert_eq!(
+            effective_match(&json!({"source": "tcgplayer", "match": {"condition": true, "language": true, "finish": false, "firstEdition": true}})),
+            Match { first_edition: true, ..Match::ANY }
+        );
+    }
+
+    #[test]
+    fn the_comp_comes_from_the_sources_block() {
+        let comp = json!({
+            "soldMedianPkn": 30, "soldMedianGrossPkn": 33, "pokoinCheapestPkn": 40,
+            "sources": {
+                "cardtrader": {"sold": {"": {"grossPkn": 33, "pkn": 30}, "CLFE": {"grossPkn": 44, "pkn": 40.04}}},
+                "pokoin": {"sold": {"CL": {"grossPkn": 60, "pkn": 60, "sales": 1}}},
+                "cardmarket": {"asOf": "2026-11-06", "trend": {"": {"eur": 0.12, "grossPkn": 24, "pkn": 24}, "F": {"eur": 0.15, "grossPkn": 30, "pkn": 30}}},
+                "tcgplayer": {"usdPerEur": 1.08, "market": {"FE": {"usd": 0.3, "grossPkn": 55.56, "pkn": 55.56}}},
+            },
+        });
+        let s = |v: Value| strategy_comp(&comp, &v);
+        assert_eq!(s(json!({"basis": "sold"})), Some(40.04), "CardTrader sold honours the toggles now");
+        assert_eq!(s(json!({"basis": "sold", "feeExclusive": false})), Some(44.0));
+        assert_eq!(s(json!({"basis": "sold", "match": {"condition": false, "language": false, "finish": false, "firstEdition": false}})), Some(30.0));
+        assert_eq!(s(json!({"basis": "sold", "match": {"condition": false}})), None, "no sale with those details: no price");
+        assert_eq!(s(json!({"source": "pokoin", "basis": "sold"})), Some(60.0));
+        assert_eq!(s(json!({"source": "pokoin"})), Some(40.0));
+        assert_eq!(s(json!({"source": "cardmarket"})), Some(30.0));
+        assert_eq!(s(json!({"source": "cardmarket", "match": {"finish": false}})), Some(24.0));
+        assert_eq!(s(json!({"source": "cardmarket", "basis": "avg30"})), None);
+        assert_eq!(s(json!({"source": "tcgplayer", "feeExclusive": false})), Some(55.56));
+        assert_eq!(s(json!({"source": "tcgplayer", "match": {"firstEdition": false}})), None);
+        // An answer from before the block: CardTrader's sold median, nothing else.
+        let old = json!({"soldMedianPkn": 30, "pokoinCheapestPkn": 40});
+        assert_eq!(strategy_comp(&old, &json!({"basis": "sold"})), Some(30.0));
+        assert_eq!(strategy_comp(&old, &json!({"source": "cardmarket"})), None);
+        assert_eq!(strategy_comp(&old, &json!({"source": "pokoin", "basis": "sold"})), None);
     }
 
     #[test]
@@ -675,7 +857,20 @@ mod tests {
         );
         assert_eq!(
             strategy_summary(&json!({"source": "pokoin", "basis": "sold", "action": "premium", "amountPct": 10, "amountPkn": 2.5})),
-            "Pokoin · sold median (30 days) · +10% + 2.5 PKN"
+            "Pokoin · sold median (90 days) · same condition and language · +10% + 2.5 PKN"
+        );
+        assert_eq!(strategy_summary(&json!({"source": "pokoin", "action": "match"})), "Pokoin · cheapest Pokoin ask · match");
+        assert_eq!(
+            strategy_summary(&json!({"source": "cardtrader", "basis": "sold", "action": "match", "match": {"condition": false, "language": false, "finish": false, "firstEdition": false}})),
+            "CardTrader · sold median (30 days) · any copy · net of CardTrader fees · match"
+        );
+        assert_eq!(
+            strategy_summary(&json!({"source": "cardmarket", "basis": "avg7", "action": "undercut", "amountPct": 3})),
+            "Cardmarket · 7-day average · same finish · undercut 3%"
+        );
+        assert_eq!(
+            strategy_summary(&json!({"source": "tcgplayer", "action": "match", "rounding": "up"})),
+            "TCGplayer · market price (USD → EUR) · same finish and 1st edition · match · rounded up"
         );
     }
 }

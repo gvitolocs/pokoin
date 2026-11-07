@@ -1,15 +1,15 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import {
-  isAllExact,
-  MATCH_ANY,
-  MATCH_EXACT,
   nameProblem,
   PRICER_ACTIONS,
-  PRICER_BASES,
   PRICER_MATCHES,
   PRICER_ROUNDINGS,
   PRICER_SOURCES,
+  pricerBases,
+  sourceHasFees,
+  sourceSwitches,
   strategySummary,
+  switchNote,
 } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
 import {
@@ -17,9 +17,13 @@ import {
   exampleLead,
   exampleSteps,
   NO_OFFER,
+  pickExampleComp,
+  SAMPLE_COMP,
+  showsSwitches,
   strategyDraft,
   uniqueCopyName,
   usedByLine,
+  withSource,
 } from './pricer-ui.js';
 
 const numberInput = (value) => (value === '' ? '' : Number(value));
@@ -46,8 +50,30 @@ export default function StrategiesPanel(props) {
   const stored = createMemo(() => pricing.strategies().find((entry) => entry.id === draft().id) || null);
   const usedBy = () => stored()?.groupNames || [];
   const problem = () => nameProblem(draft().name, draft().id, pricing.strategies(), 'strategy');
-  const example = createMemo(() => exampleSteps(draft(), props.exampleComp));
+  // The worked example's comp: the group's comp when it has the draft's source, else the sample.
+  const example = createMemo(() => exampleSteps(draft(), pickExampleComp([props.exampleComp, SAMPLE_COMP], draft())));
   const unsaved = createMemo(() => draftChanged(draft(), baseline()));
+  // The toggles this source's data can honour, and the block's title.
+  const switches = () => sourceSwitches(draft().source, draft().basis);
+  const togglesTitle = () => {
+    if (draft().basis === 'sold') return 'Compare with sales that have';
+    if (draft().source === 'cardtrader') return 'Compare with offers that have';
+    return 'Use the price for';
+  };
+  const allExactOn = () => PRICER_MATCHES.every(({ id }) => switches()[id] !== true || draft().match[id] === true);
+  /** "All exact" sets only the honoured toggles; the others keep their saved value. */
+  const setAllExact = (on) => {
+    const match = { ...draft().match };
+    for (const { id } of PRICER_MATCHES) if (switches()[id] === true) match[id] = on;
+    edit({ match });
+  };
+  const basisHint = () => {
+    const { source, basis } = draft();
+    if (source === 'cardmarket') return 'From Cardmarket’s public price guide, refreshed daily. Prices are what buyers pay on Cardmarket, before its fees.';
+    if (source === 'tcgplayer') return 'TCGplayer prices are in US dollars. Pokoin converts them at the European Central Bank’s rate of the day (2 PKN = 1 euro cent).';
+    if (source === 'pokoin' && basis === 'sold') return 'Sales on Pokoin in the last 90 days.';
+    return '';
+  };
 
   function open(strategy) {
     setSelectedId(strategy?.id || '');
@@ -229,7 +255,8 @@ export default function StrategiesPanel(props) {
                     type="button"
                     class={['inv-chip', { on: draft().source === entry.id }]}
                     aria-pressed={String(draft().source === entry.id)}
-                    onClick={() => edit({ source: entry.id })}
+                    title={entry.hint}
+                    onClick={() => edit(withSource(draft(), entry.id))}
                   >
                     {entry.label}
                   </button>
@@ -237,7 +264,7 @@ export default function StrategiesPanel(props) {
               </For>
             </div>
             <div class="pricer-bases" role="radiogroup" aria-label="Start from">
-              <For each={PRICER_BASES}>
+              <For each={pricerBases(draft().source)}>
                 {(entry) => (
                   <label class={['pricer-basis', { on: draft().basis === entry.id }]}>
                     <input
@@ -255,47 +282,55 @@ export default function StrategiesPanel(props) {
                 )}
               </For>
             </div>
-            <Show when={draft().basis === 'offers'}>
-              <Show
-                when={draft().source === 'cardtrader'}
-                fallback={<p class="pricer-hint">Pokoin: the cheapest Pokoin ask for the card.</p>}
-              >
-                <div class="pricer-toggles" role="group" aria-labelledby="pricer-toggles-title">
-                  <p class="pricer-toggles-title" id="pricer-toggles-title">Compare with offers that have</p>
-                  <label class="pricer-toggle is-all">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      checked={isAllExact(draft().match)}
-                      onChange={(event) => edit({ match: { ...(event.target.checked ? MATCH_EXACT : MATCH_ANY) } })}
-                    />
-                    <span class="pricer-switch" aria-hidden="true" />
-                    <span>
-                      <strong>All exact</strong>
-                      <small>Every toggle below</small>
-                    </span>
-                  </label>
-                  <For each={PRICER_MATCHES}>
-                    {(entry) => (
-                      <label class="pricer-toggle">
+            <Show when={basisHint()}>
+              <p class="pricer-hint">{basisHint()}</p>
+            </Show>
+            <Show
+              when={showsSwitches(draft())}
+              fallback={<p class="pricer-hint">Pokoin: the cheapest Pokoin ask for the card, any copy.</p>}
+            >
+              <div class="pricer-toggles" role="group" aria-labelledby="pricer-toggles-title">
+                <p class="pricer-toggles-title" id="pricer-toggles-title">{togglesTitle()}</p>
+                <label class="pricer-toggle is-all">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={allExactOn()}
+                    onChange={(event) => setAllExact(event.target.checked)}
+                  />
+                  <span class="pricer-switch" aria-hidden="true" />
+                  <span>
+                    <strong>All exact</strong>
+                    <small>Every toggle below</small>
+                  </span>
+                </label>
+                <For each={PRICER_MATCHES}>
+                  {(entry) => {
+                    // A function: `For` renders each row once, the source can change after.
+                    const honoured = () => switches()[entry.id] === true;
+                    return (
+                      <label class={['pricer-toggle', { 'is-off': !honoured() }]}>
                         <input
                           type="checkbox"
                           role="switch"
-                          checked={draft().match[entry.id] === true}
+                          disabled={!honoured()}
+                          checked={!honoured() ? false : draft().match[entry.id] === true}
                           onChange={(event) => edit({ match: { ...draft().match, [entry.id]: event.target.checked } })}
                         />
                         <span class="pricer-switch" aria-hidden="true" />
                         <span>
                           <strong>{entry.label}</strong>
-                          <Show when={entry.hint}><small>{entry.hint}</small></Show>
+                          <Show when={honoured()} fallback={<small>{switchNote(draft().source)}</small>}>
+                            <Show when={entry.hint}><small>{entry.hint}</small></Show>
+                            </Show>
                         </span>
                       </label>
-                    )}
-                  </For>
-                </div>
-              </Show>
+                    );
+                  }}
+                </For>
+              </div>
             </Show>
-            <Show when={draft().source === 'cardtrader'}>
+            <Show when={sourceHasFees(draft().source)}>
               <label class="ps-field ps-check">
                 <input type="checkbox" checked={draft().feeExclusive} onChange={(event) => edit({ feeExclusive: event.target.checked })} />
                 <span>Net of CardTrader fees (what you would net there)</span>

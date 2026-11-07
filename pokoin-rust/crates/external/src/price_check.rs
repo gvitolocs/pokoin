@@ -5,10 +5,14 @@
 //! from the professional-seller floor below; the other games from the
 //! CardRails price file (`crate::price_book`), as the extension does.
 
+use std::collections::HashMap;
+
 use serde_json::{json, Map, Value};
 
 use crate::db::DbPools;
 use crate::error::{clean_text, ApiError, ApiResult};
+use crate::pokoin_sold::PokoinSale;
+use crate::price_sources::{self, PageSources};
 
 pub const MAX_ITEMS: usize = 100;
 
@@ -517,22 +521,32 @@ fn pokoin_cheapest(rows: &[Value], card_id: &str) -> Option<f64> {
         .and_then(|row| number(row.get("min_pkn")))
 }
 
-/// `readPrices` — per-item comps keyed by public card id, for one game.
-pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
+/// `readPrices` — per-item comps keyed by public card id, for one game. The
+/// comp's `sources` block (CardTrader sold, Pokoin sold, Cardmarket,
+/// TCGplayer) is attached from the page's feeds; `pokoin_sales` is Pokoin's
+/// own sold feed (loaded by the caller, `None` = unavailable).
+pub async fn read_prices(
+    db: &DbPools,
+    game: &str,
+    items: &[PriceItem],
+    exclude_seller_uid: &str,
+    pokoin_sales: Option<&[PokoinSale]>,
+) -> ApiResult<Value> {
     let game = crate::db::normalize_game(game);
     if game != "pokemon" {
-        return read_game_prices(db, &game, items, exclude_seller_uid).await;
+        return read_game_prices(db, &game, items, exclude_seller_uid, pokoin_sales).await;
     }
     let ids = unique_card_ids(items);
     if ids.is_empty() {
         return Ok(json!({}));
     }
     let numeric_ids: Vec<i64> = ids.iter().filter_map(|id| id.parse::<i64>().ok()).collect();
-    // The card → blueprint map, the page's own Pokoin asks and the price
-    // store answer independently: one round trip of wall time, not three.
+    // The card → blueprint map, the page's own Pokoin asks, the price store
+    // and the Cardmarket run answer independently: one round trip of wall
+    // time, not four.
     let mapping_params = [json!(numeric_ids)];
     let pokoin_params = [json!(ids), json!(exclude_seller_uid), json!("pokemon")];
-    let (mapping, pokoin_rows, store) = tokio::join!(
+    let (mapping, pokoin_rows, store, cm_run) = tokio::join!(
         db.query(
             "pokemon",
             "select card_id, ct_id from public.marketplace_search_candidates where card_id = any($1::bigint[])",
@@ -540,6 +554,7 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         ),
         db.query("pokemon", POKOIN_CHEAPEST_SQL, &pokoin_params),
         store_lookup(db, "pokemon", &numeric_ids),
+        price_sources::fetch_cm_run(db, "pokemon"),
     );
     let (mapping, pokoin_rows) = (mapping?, pokoin_rows?);
     let mut blueprint_by_card: Vec<(String, String)> = Vec::new();
@@ -579,24 +594,50 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         None => pro_floors(db, &ct_ids, &[]).await?,
     };
 
-    let sold_sql = "
-        select blueprint_id,
-               percentile_cont(0.5) within group (order by median_pkn) as sold_median_pkn
-        from public.cardtrader_sold_daily
-        where blueprint_id = any($1::bigint[])
-          and observed_day >= current_date - 30
-          and sold_qty > 0
-          and median_pkn > 0
-        group by blueprint_id";
-    let sold_params = [json!(ct_ids)];
+    // The new price sources, one bulk query per feed, concurrently with the
+    // listed history. None of them can fail the price check.
     let listed_sql = listed_bulk_sql();
     let listed_params = [json!(ct_ids), json!(from), json!(to)];
-    let (sold_rows, listed_rows) = tokio::join!(
-        db.query("pokemon", sold_sql, &sold_params),
+    let table = crate::powertools_games::catalogs()
+        .into_iter()
+        .find(|(g, _)| g == "pokemon")
+        .map(|(_, table)| table)
+        .unwrap_or_else(|| "public.cardtrader_pokemon_blueprints".to_string());
+    let (ct_sold, listed_rows, cm_products, tcg) = tokio::join!(
+        price_sources::fetch_ct_sold(db, "pokemon", &ct_ids),
         db.query("pokemon", &listed_sql, &listed_params),
+        price_sources::fetch_cm_products(db, "pokemon", &table, &ct_ids),
+        price_sources::fetch_tcg(db, "pokemon", &numeric_ids),
     );
-    let sold_rows = sold_rows?;
     let listed_rows = listed_rows.unwrap_or_default();
+    let cardmarket = match (cm_run, cm_products) {
+        (Some(as_of), Some(products)) => {
+            let mut product_ids: Vec<i64> = products.values().flatten().copied().collect();
+            product_ids.sort_unstable();
+            product_ids.dedup();
+            match price_sources::fetch_cm_guide(db, "pokemon", &product_ids).await {
+                Some(guide) => price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
+                    as_of,
+                    products_by_blueprint: products,
+                    guide_by_product: guide,
+                }),
+                None => price_sources::CardmarketOutcome::Unavailable,
+            }
+        }
+        _ => price_sources::CardmarketOutcome::Unavailable,
+    };
+    let blueprint_map: HashMap<String, i64> = blueprint_by_card
+        .iter()
+        .filter_map(|(card, ct)| ct.parse::<i64>().ok().map(|bp| (card.clone(), bp)))
+        .collect();
+    let sources = PageSources {
+        game: "pokemon".to_string(),
+        blueprint_by_card: blueprint_map,
+        ct_sold,
+        pokoin_sales,
+        cardmarket,
+        tcg,
+    };
 
     let mut prices = Map::new();
     for item in items {
@@ -616,12 +657,10 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         };
         let ct_matched = ct_matched.filter(|_| !item.one_of_a_kind());
         let pokoin_cheapest = pokoin_cheapest(&pokoin_rows, &item.card_id);
-        let sold_median = ct_id.as_ref().and_then(|ct_id| {
-            sold_rows
-                .iter()
-                .find(|row| row.get("blueprint_id").map(text_of).as_deref() == Some(ct_id.as_str()))
-                .and_then(|row| number(row.get("sold_median_pkn")))
-        });
+        let sold_median = ct_id
+            .as_ref()
+            .and_then(|ct_id| ct_id.parse::<i64>().ok())
+            .and_then(|bp| sources.ct_sold.as_ref().and_then(|rows| price_sources::sold_median_of(rows, bp)));
         let listed_days: Vec<Value> = ct_id
             .as_ref()
             .map(|ct_id| {
@@ -636,10 +675,7 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
                 "pokoinCheapestPkn": pokoin_cheapest,
                 "ctBasis": "pro",
                 "ctAsOf": store.as_ref().map(|hit| hit.refreshed_at.clone()),
-                "soldMedianPkn": sold_median,
                 "cardtraderListed": cardtrader_source(&listed_days, None),
-                "tcgplayer": [],
-                "tcgplayerStatus": "unconfigured",
             });
         // The professional floor sells direct and through Zero alike.
         ct_fields(&mut comp, ct_cheapest, ct_matched, crate::ct_fees::Channel::Direct);
@@ -650,6 +686,7 @@ pub async fn read_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_
         // CardTrader sales: what their sellers netted.
         comp["soldMedianGrossPkn"] = json!(sold_median);
         comp["soldMedianPkn"] = json!(sold_median.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Direct)));
+        price_sources::attach(&mut comp, item, crate::ct_fees::Channel::Direct, &sources);
         prices.insert(price_check_key(item), comp.clone());
         prices.insert(item.card_id.clone(), comp);
     }
@@ -673,7 +710,13 @@ pub fn ct_fields(comp: &mut Value, cheapest: Option<f64>, matched: Option<f64>, 
 /// One comp of a game other than Pokémon. CardTrader asks come from the
 /// game's price file: the cheapest CardTrader Zero copy of the listing's
 /// language and finish in its condition or better (`price_book::facet_cents`).
-pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pokoin_cheapest: Option<f64>) -> Value {
+/// The `sources` block comes from the page's feeds (`sources`).
+pub fn game_comp(
+    item: &PriceItem,
+    asks: Option<&crate::price_book::CtAsks>,
+    pokoin_cheapest: Option<f64>,
+    sources: &PageSources,
+) -> Value {
     let card = item.card_id.parse::<u32>().ok();
     let (cheapest, matched) = match (asks, card) {
         (Some(asks), Some(card)) => crate::price_book::facet_cents(
@@ -688,10 +731,7 @@ pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pok
     let mut comp = json!({
         "pokoinCheapestPkn": pokoin_cheapest,
         "ctBasis": "zero",
-        "soldMedianPkn": Value::Null,
         "cardtraderListed": cardtrader_source(&[], Some(if asks.is_some() { "empty" } else { "unavailable" })),
-        "tcgplayer": [],
-        "tcgplayerStatus": "unconfigured",
     });
     ct_fields(
         &mut comp,
@@ -704,26 +744,103 @@ pub fn game_comp(item: &PriceItem, asks: Option<&crate::price_book::CtAsks>, pok
             .map(crate::price_book::pkn_from_cents),
         _ => None,
     });
+    // CardTrader sales of this game's blueprint, net of the Zero fee.
+    let sold_median = sources.ct_sold.as_ref().and_then(|rows| {
+        sources
+            .blueprint_by_card
+            .get(&item.card_id)
+            .copied()
+            .and_then(|bp| price_sources::sold_median_of(rows, bp))
+    });
+    comp["soldMedianGrossPkn"] = json!(sold_median);
+    comp["soldMedianPkn"] = json!(sold_median.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Zero)));
+    price_sources::attach(&mut comp, item, crate::ct_fees::Channel::Zero, sources);
     comp
 }
 
-async fn read_game_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude_seller_uid: &str) -> ApiResult<Value> {
+async fn read_game_prices(
+    db: &DbPools,
+    game: &str,
+    items: &[PriceItem],
+    exclude_seller_uid: &str,
+    pokoin_sales: Option<&[PokoinSale]>,
+) -> ApiResult<Value> {
     let ids = unique_card_ids(items);
     if ids.is_empty() {
         return Ok(json!({}));
     }
-    // Pokoin listings of every game live in the shared database.
+    // Pokoin listings of every game live in the shared database; the card →
+    // blueprint map lives in the game's own database.
     let numeric_ids: Vec<i64> = ids.iter().filter_map(|id| id.parse::<i64>().ok()).collect();
     let pokoin_params = [json!(ids), json!(exclude_seller_uid), json!(game)];
-    let (pokoin_rows, store) = tokio::join!(
+    let mapping_params = [json!(numeric_ids)];
+    let (pokoin_rows, store, mapping, cm_run) = tokio::join!(
         db.query("pokemon", POKOIN_CHEAPEST_SQL, &pokoin_params),
         store_lookup(db, game, &numeric_ids),
+        db.query(
+            game,
+            "select card_id, ct_id from public.marketplace_search_candidates where card_id = any($1::bigint[])",
+            &mapping_params,
+        ),
+        price_sources::fetch_cm_run(db, game),
     );
     let pokoin_rows = pokoin_rows?;
+    // A mapping failure never fails the price check: the sources that need
+    // blueprint ids then report `empty`.
+    let mapping = mapping.unwrap_or_default();
+    let mut blueprint_by_card: HashMap<String, i64> = HashMap::new();
+    for row in &mapping {
+        if let (Some(card_id), Some(ct_id)) = (
+            row.get("card_id").map(text_of),
+            row.get("ct_id").filter(|value| !value.is_null()).map(text_of),
+        ) {
+            if let Ok(blueprint) = ct_id.parse::<i64>() {
+                blueprint_by_card.insert(card_id, blueprint);
+            }
+        }
+    }
+    let mut ct_ids: Vec<i64> = blueprint_by_card.values().copied().collect();
+    ct_ids.sort_unstable();
+    ct_ids.dedup();
+    let table = crate::powertools_games::catalogs()
+        .into_iter()
+        .find(|(g, _)| g == game)
+        .map(|(_, table)| table)
+        .unwrap_or_default();
+    // The new price sources, one bulk query per feed, concurrently.
+    let (ct_sold, cm_products, tcg) = tokio::join!(
+        price_sources::fetch_ct_sold(db, game, &ct_ids),
+        price_sources::fetch_cm_products(db, game, &table, &ct_ids),
+        price_sources::fetch_tcg(db, game, &numeric_ids),
+    );
+    let cardmarket = match (cm_run, cm_products) {
+        (Some(as_of), Some(products)) => {
+            let mut product_ids: Vec<i64> = products.values().flatten().copied().collect();
+            product_ids.sort_unstable();
+            product_ids.dedup();
+            match price_sources::fetch_cm_guide(db, game, &product_ids).await {
+                Some(guide) => price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
+                    as_of,
+                    products_by_blueprint: products,
+                    guide_by_product: guide,
+                }),
+                None => price_sources::CardmarketOutcome::Unavailable,
+            }
+        }
+        _ => price_sources::CardmarketOutcome::Unavailable,
+    };
+    let sources = PageSources {
+        game: game.to_string(),
+        blueprint_by_card,
+        ct_sold,
+        pokoin_sales,
+        cardmarket,
+        tcg,
+    };
     let mut prices = Map::new();
     if let Some(hit) = store {
         for item in items {
-            let comp = store_game_comp(item, &hit, pokoin_cheapest(&pokoin_rows, &item.card_id));
+            let comp = store_game_comp(item, &hit, pokoin_cheapest(&pokoin_rows, &item.card_id), &sources);
             prices.insert(price_check_key(item), comp.clone());
             prices.insert(item.card_id.clone(), comp);
         }
@@ -733,7 +850,7 @@ async fn read_game_prices(db: &DbPools, game: &str, items: &[PriceItem], exclude
     // cached per API process.
     let asks = crate::price_book::ct_asks(game).await;
     for item in items {
-        let comp = game_comp(item, asks.as_deref(), pokoin_cheapest(&pokoin_rows, &item.card_id));
+        let comp = game_comp(item, asks.as_deref(), pokoin_cheapest(&pokoin_rows, &item.card_id), &sources);
         prices.insert(price_check_key(item), comp.clone());
         prices.insert(item.card_id.clone(), comp);
     }
@@ -754,26 +871,40 @@ async fn store_lookup(db: &DbPools, game: &str, card_ids: &[i64]) -> Option<crat
 
 /// [`game_comp`] from the price store: the same comp, plus when the store
 /// was refilled (`ctAsOf`).
-pub fn store_game_comp(item: &PriceItem, hit: &crate::facet_store::StoreHit, pokoin_cheapest: Option<f64>) -> Value {
+pub fn store_game_comp(
+    item: &PriceItem,
+    hit: &crate::facet_store::StoreHit,
+    pokoin_cheapest: Option<f64>,
+    sources: &PageSources,
+) -> Value {
     let (cheapest, matched) = hit.comp(item);
     let matched = matched.filter(|_| !item.one_of_a_kind());
     let mut comp = json!({
         "pokoinCheapestPkn": pokoin_cheapest,
         "ctBasis": "zero",
         "ctAsOf": hit.refreshed_at,
-        "soldMedianPkn": Value::Null,
         "cardtraderListed": cardtrader_source(&[], Some("empty")),
-        "tcgplayer": [],
-        "tcgplayerStatus": "unconfigured",
     });
     ct_fields(&mut comp, cheapest, matched, crate::ct_fees::Channel::Zero);
     set_ct_matches(&mut comp, item, crate::ct_fees::Channel::Zero, |m| hit.comp_by(item, m));
+    // CardTrader sales of this game's blueprint, net of the Zero fee.
+    let sold_median = sources.ct_sold.as_ref().and_then(|rows| {
+        sources
+            .blueprint_by_card
+            .get(&item.card_id)
+            .copied()
+            .and_then(|bp| price_sources::sold_median_of(rows, bp))
+    });
+    comp["soldMedianGrossPkn"] = json!(sold_median);
+    comp["soldMedianPkn"] = json!(sold_median.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Zero)));
+    price_sources::attach(&mut comp, item, crate::ct_fees::Channel::Zero, sources);
     comp
 }
 
 /// A comp's net fields again with the seller's own CardTrader channel (what
 /// this seller would net at those asks): the column and the pricer price a
-/// seller's listing by their own commission, not the market basis's.
+/// seller's listing by their own commission, not the market basis's. The
+/// `sources.cardtrader.sold` entries are renetted from their `grossPkn` too.
 pub fn renet(comp: &mut Value, channel: crate::ct_fees::Channel) {
     let gross = |key: &str| comp.get(key).and_then(Value::as_f64);
     let (cheapest, matched, sold) = (gross("ctCheapestGrossPkn"), gross("ctMatchedGrossPkn"), gross("soldMedianGrossPkn"));
@@ -787,18 +918,37 @@ pub fn renet(comp: &mut Value, channel: crate::ct_fees::Channel) {
             entry["pkn"] = json!(gross.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel)));
         }
     }
+    if let Some(sold) = comp
+        .get_mut("sources")
+        .and_then(Value::as_object_mut)
+        .and_then(|sources| sources.get_mut("cardtrader"))
+        .and_then(|cardtrader| cardtrader.get_mut("sold"))
+        .and_then(Value::as_object_mut)
+    {
+        for entry in sold.values_mut() {
+            let gross = entry.get("grossPkn").and_then(Value::as_f64);
+            entry["pkn"] = json!(gross.and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, channel)).map(price_sources::round2));
+        }
+    }
 }
 
-/// [`handle`] for a connected seller: comps net of that seller's own
-/// commission (`channel`, `ct_fees::seller_channel_cached`).
+/// [`handle_for`] for a connected seller: comps net of that seller's own
+/// commission (`channel`, `ct_fees::seller_channel_cached`), with Pokoin's
+/// own sold feed loaded through `firestore` when given.
+#[allow(clippy::result_large_err)]
 pub async fn handle_for(
     db: &DbPools,
+    firestore: Option<&dyn crate::firebase::FirestoreStore>,
     game: &str,
     raw_items: &str,
     exclude_seller_uid: &str,
     channel: Option<crate::ct_fees::Channel>,
 ) -> ApiResult<Value> {
-    let mut payload = handle(db, game, raw_items, exclude_seller_uid).await?;
+    let sales = match firestore {
+        Some(store) => crate::pokoin_sold::recent(store).await,
+        None => crate::pokoin_sold::SoldFeed::Unavailable,
+    };
+    let mut payload = handle_inner(db, game, raw_items, exclude_seller_uid, sales.as_slice()).await?;
     if let (Some(channel), Some(prices)) = (channel, payload["prices"].as_object_mut()) {
         for comp in prices.values_mut() {
             renet(comp, channel);
@@ -809,13 +959,24 @@ pub async fn handle_for(
 
 /// Handler helper: validate + read.
 pub async fn handle(db: &DbPools, game: &str, raw_items: &str, exclude_seller_uid: &str) -> ApiResult<Value> {
+    handle_inner(db, game, raw_items, exclude_seller_uid, None).await
+}
+
+#[allow(clippy::result_large_err)]
+async fn handle_inner(
+    db: &DbPools,
+    game: &str,
+    raw_items: &str,
+    exclude_seller_uid: &str,
+    pokoin_sales: Option<&[PokoinSale]>,
+) -> ApiResult<Value> {
     let items = parse_items(raw_items);
     if items.is_empty() {
         return Err(ApiError::bad_request(
             clean_text(Some("items query param required (cardId[:COND:LANG], max 100)."), 200),
         ));
     }
-    let prices = read_prices(db, game, &items, exclude_seller_uid).await?;
+    let prices = read_prices(db, game, &items, exclude_seller_uid, pokoin_sales).await?;
     let count = prices.as_object().map(|map| map.len()).unwrap_or(0);
     Ok(json!({ "prices": prices, "source": "pokoin+cardtrader", "count": count }))
 }
@@ -959,7 +1120,7 @@ mod tests {
             bytes.extend_from_slice(&row.cents.to_le_bytes());
         }
         let asks = CtAsks::parse(&bytes).unwrap();
-        let comp = |raw: &str| game_comp(&parse_items(raw)[0], Some(&asks), None);
+        let comp = |raw: &str| game_comp(&parse_items(raw)[0], Some(&asks), None, &crate::price_sources::PageSources::empty("riftbound"));
         // NM is priced by NM copies only; SP by the cheaper SP copy.
         assert_eq!(comp("801148:NM:EN")["ctMatchedGrossPkn"], json!(240.0));
         assert_eq!(comp("801148:SP:EN")["ctMatchedGrossPkn"], json!(180.0));
@@ -990,7 +1151,7 @@ mod tests {
         assert_eq!(comp("801148:NM:EN")["ctMatchedPkn"], json!(219.5));
         assert_eq!(comp("801148:NM:EN")["ctFee"]["pct"], json!(7.0));
         assert_eq!(comp("801148:NM:EN:G")["ctMatchedPkn"], Value::Null);
-        let none = game_comp(&parse_items("801148:NM:EN")[0], None, Some(30.0));
+        let none = game_comp(&parse_items("801148:NM:EN")[0], None, Some(30.0), &crate::price_sources::PageSources::empty("riftbound"));
         assert_eq!(none["ctMatchedGrossPkn"], Value::Null);
         assert_eq!(none["pokoinCheapestPkn"], json!(30.0));
         assert_eq!(none["cardtraderListed"]["status"], "unavailable");
@@ -1027,5 +1188,163 @@ mod tests {
         assert_eq!(source["days"][0]["listingCount"], 2);
         assert_eq!(cardtrader_source(&[], None)["status"], "empty");
         assert_eq!(cardtrader_source(&[], Some("unavailable"))["status"], "unavailable");
+    }
+
+    #[test]
+    fn renet_renets_the_cardtrader_sold_entries_from_their_gross() {
+        let mut comp = json!({
+            "ctMatch": { "CLFE": { "grossPkn": 2000.0, "pkn": 1829.2 } },
+            "sources": {
+                "cardtrader": { "sold": {
+                    "": { "grossPkn": 2000.0, "pkn": 1829.2 },
+                    "CLFE": { "grossPkn": 2000.0, "pkn": 1829.2 },
+                } },
+                "pokoin": { "sold": { "": { "grossPkn": 300.0, "pkn": 300.0, "sales": 4 } } },
+            },
+        });
+        renet(&mut comp, crate::ct_fees::Channel::Direct);
+        let rule = crate::ct_fees::rule();
+        let direct = rule.net_pkn(2000.0, crate::ct_fees::Channel::Direct).map(price_sources::round2);
+        assert_eq!(comp["sources"]["cardtrader"]["sold"][""]["pkn"], json!(direct));
+        assert_eq!(comp["sources"]["cardtrader"]["sold"]["CLFE"]["pkn"], json!(direct));
+        assert_eq!(comp["sources"]["cardtrader"]["sold"]["CLFE"]["grossPkn"], json!(2000.0), "the gross stays");
+        assert_eq!(comp["sources"]["pokoin"]["sold"][""]["pkn"], json!(300.0), "only cardtrader.sold is renetted");
+        assert_eq!(comp["ctMatch"]["CLFE"]["pkn"], json!(1878.0));
+    }
+
+    /// The full comp of a Pokémon item, built the way `read_prices` builds it,
+    /// with every source available.
+    #[test]
+    fn pokemon_comp_json_shape() {
+        use crate::pokoin_sold::PokoinSale;
+        use crate::price_sources::{CardmarketFeed, CardmarketOutcome, CtSoldRow, PageSources, TcgFeed, TcgOutcome};
+        use std::collections::HashMap;
+        let rows = vec![
+            CtSoldRow { blueprint_id: 100, condition: "NM".into(), language: "EN".into(), reverse: false, first_edition: false, graded: false, median_pkn: 123.4 },
+            CtSoldRow { blueprint_id: 100, condition: "NM".into(), language: "EN".into(), reverse: true, first_edition: false, graded: false, median_pkn: 200.0 },
+        ];
+        let sales = vec![PokoinSale { card_id: "200".into(), condition: "NM".into(), language: "EN".into(), price_pkn: 300.0 }];
+        let cm = CardmarketOutcome::Feed(CardmarketFeed {
+            as_of: "2026-11-06".into(),
+            products_by_blueprint: HashMap::from([(100, vec![11])]),
+            guide_by_product: HashMap::from([(
+                11,
+                crate::price_sources::GuideRow { day: "2026-11-06".into(), trend: Some(1.23), trend_foil: Some(5.0), low: Some(1.0), ..Default::default() },
+            )]),
+        });
+        let tcg = TcgOutcome::Feed(TcgFeed {
+            rows_by_card: HashMap::from([(200, vec![crate::tcgcsv::TcgRow {
+                card_id: 200, product_id: 1, category_id: 3, subtype: "Normal".into(),
+                market: Some(1.5), low: Some(1.0), mid: Some(1.2), as_of: "2026-11-06".into(),
+            }])]),
+            rate: 1.0812,
+            rate_day: "2026-11-06".into(),
+            as_of: "2026-11-06".into(),
+        });
+        let sources = PageSources {
+            game: "pokemon".into(),
+            blueprint_by_card: HashMap::from([("200".to_string(), 100)]),
+            ct_sold: Some(rows),
+            pokoin_sales: Some(&sales),
+            cardmarket: cm,
+            tcg,
+        };
+        let item = parse_items("200:NM:EN")[0].clone();
+        let mut comp = json!({
+            "pokoinCheapestPkn": 90.0,
+            "ctBasis": "pro",
+            "cardtraderListed": cardtrader_source(&[], Some("empty")),
+        });
+        ct_fields(&mut comp, Some(100.0), Some(123.4), crate::ct_fees::Channel::Direct);
+        set_ct_matches(&mut comp, &item, crate::ct_fees::Channel::Direct, |m| match m.key().as_str() {
+            "" => Some(100.0),
+            "CLFE" => Some(123.4),
+            _ => None,
+        });
+        comp["soldMedianGrossPkn"] = json!(price_sources::sold_median_of(sources.ct_sold.as_ref().unwrap(), 100));
+        comp["soldMedianPkn"] = json!(comp["soldMedianGrossPkn"].as_f64().and_then(|pkn| crate::ct_fees::rule().net_pkn(pkn, crate::ct_fees::Channel::Direct)));
+        price_sources::attach(&mut comp, &item, crate::ct_fees::Channel::Direct, &sources);
+        let printed = serde_json::to_string_pretty(&comp).unwrap();
+        eprintln!("pokemon comp:\n{printed}");
+        assert_eq!(comp["sources"]["cardtrader"]["sold"][""]["grossPkn"], json!(161.7));
+        assert_eq!(comp["sources"]["cardtrader"]["sold"]["CLFE"]["grossPkn"], json!(123.4));
+        assert_eq!(comp["sources"]["pokoin"]["sold"]["CL"]["sales"], json!(1));
+        assert_eq!(comp["sources"]["cardmarket"]["trend"]["F"]["grossPkn"], json!(246.0));
+        assert_eq!(comp["sources"]["tcgplayer"]["market"][""]["grossPkn"], json!(277.47));
+        assert_eq!(comp["sourceStatus"]["cardtraderSold"], json!("available"));
+        assert_eq!(comp["tcgplayerStatus"], json!("available"));
+        assert_eq!(comp["tcgplayer"][0]["subtype"], json!("Normal"));
+    }
+
+    /// The full comp of a Magic item, built the way `read_game_prices` builds
+    /// it (price file + sources).
+    #[test]
+    fn magic_comp_json_shape() {
+        use crate::price_book::{Ask, CtAsks};
+        use crate::price_sources::{CardmarketFeed, CardmarketOutcome, CtSoldRow, PageSources, TcgFeed, TcgOutcome};
+        use std::collections::HashMap;
+        // Riftbound 801148: EN NM 1.20, EN NM foil 6.00 (from the price file test above).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"PKP3");
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&6u16.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        let rows: [Ask; 2] = [
+            Ask { card_id: 801148, variant: 1, cents: 120 },
+            Ask { card_id: 801148, variant: 1 + 128, cents: 600 },
+        ];
+        bytes.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        for row in rows {
+            bytes.extend_from_slice(&row.card_id.to_le_bytes());
+            bytes.push(7);
+            bytes.push(row.variant);
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&row.cents.to_le_bytes());
+        }
+        let asks = CtAsks::parse(&bytes).unwrap();
+        let sold = vec![
+            CtSoldRow { blueprint_id: 400574, condition: "NM".into(), language: "EN".into(), reverse: false, first_edition: false, graded: false, median_pkn: 240.0 },
+            CtSoldRow { blueprint_id: 400574, condition: "NM".into(), language: "EN".into(), reverse: true, first_edition: false, graded: false, median_pkn: 1200.0 },
+        ];
+        let cm = CardmarketOutcome::Feed(CardmarketFeed {
+            as_of: "2026-11-06".into(),
+            products_by_blueprint: HashMap::from([(400574, vec![77, 78])]),
+            guide_by_product: HashMap::from([
+                (77, crate::price_sources::GuideRow { day: "2026-11-06".into(), trend: Some(0.61), trend_foil: Some(2.5), ..Default::default() }),
+                (78, crate::price_sources::GuideRow { day: "2026-11-06".into(), trend: Some(0.9), ..Default::default() }),
+            ]),
+        });
+        let tcg = TcgOutcome::Feed(TcgFeed {
+            rows_by_card: HashMap::from([(801148, vec![
+                crate::tcgcsv::TcgRow { card_id: 801148, product_id: 9, category_id: 1, subtype: "Normal".into(), market: Some(0.75), low: Some(0.5), mid: Some(0.6), as_of: "2026-11-06".into() },
+                crate::tcgcsv::TcgRow { card_id: 801148, product_id: 10, category_id: 1, subtype: "Foil".into(), market: Some(3.0), low: Some(2.5), mid: Some(2.8), as_of: "2026-11-06".into() },
+            ])]),
+            rate: 1.0812,
+            rate_day: "2026-11-06".into(),
+            as_of: "2026-11-06".into(),
+        });
+        let sources = PageSources {
+            game: "riftbound".into(),
+            blueprint_by_card: HashMap::from([("801148".to_string(), 400574)]),
+            ct_sold: Some(sold),
+            pokoin_sales: None,
+            cardmarket: cm,
+            tcg,
+        };
+        let item = parse_items("801148:NM:EN:H")[0].clone(); // a foil Magic item
+        let comp = game_comp(&item, Some(&asks), Some(30.0), &sources);
+        let printed = serde_json::to_string_pretty(&comp).unwrap();
+        eprintln!("magic comp:\n{printed}");
+        assert_eq!(comp["ctMatchedGrossPkn"], json!(1200.0), "the foil ask of the price file");
+        assert_eq!(comp["soldMedianGrossPkn"], json!(720.0), "median of 240 and 1200");
+        assert_eq!(comp["sources"]["cardtrader"]["sold"]["F"]["grossPkn"], json!(1200.0), "foil rows live in `reverse`");
+        assert_eq!(comp["sources"]["cardtrader"]["sold"]["CLFE"]["grossPkn"], json!(1200.0));
+        assert_eq!(comp["sources"]["cardmarket"]["trend"]["F"]["eur"], json!(2.5), "foil item: the foil value");
+        assert_eq!(comp["sources"]["cardmarket"]["trend"][""]["eur"], json!(0.61), "min of what exists over both products");
+        assert_eq!(comp["sources"]["tcgplayer"]["market"]["F"]["usd"], json!(3.0), "Foil row for a foil item");
+        assert_eq!(comp["sources"]["tcgplayer"]["market"][""]["usd"], json!(0.75));
+        assert_eq!(comp["sourceStatus"]["pokoinSold"], json!("unavailable"), "no sales feed threaded");
+        assert_eq!(comp["tcgplayer"].as_array().unwrap().len(), 2, "the raw quotes array");
     }
 }

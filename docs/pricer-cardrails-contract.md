@@ -1,10 +1,10 @@
 # Card Rails ↔ Pokoin: one pricer (contract)
 
 Agreed between the Pokoin and CardRails sessions on 2026-11-05, on the
-owner's request for "the same pricer on Pokoin and CardRails". It is
-implemented on the Pokoin branch `pricer-rebuild` and **not deployed** until
-that branch is merged and deployed. CardRails does not deploy its side
-before that.
+owner's request for "the same pricer on Pokoin and CardRails". Live since
+2026-11-06 (Pokoin PR #526). The price sources of 2026-11-07 (Cardmarket,
+TCGplayer, Pokoin sold, CardTrader sold with switches) are on the Pokoin
+branch `pricer-sources` and not deployed until it is merged.
 
 - **One engine, on Pokoin.** CardRails keeps no copy of the rules. It reads
   the strategies of the connected Pokoin account and asks Pokoin for prices
@@ -32,17 +32,34 @@ before that.
   "summary": "CardTrader · all exact · net of CardTrader fees · undercut 5% · whole PKN · min 1 PKN" }
 ```
 
-- `source`: `cardtrader` | `pokoin` (the cheapest Pokoin ask, else the sold median).
-- `basis`: `offers` (the current offers) | `sold` (the 30-day sold median).
-- `match`: the per-detail switches for CardTrader offers. An offer prices a
-  card only if it has the same condition (other games: that condition or
-  better), language, finish (reverse/foil) and 1st edition (Pokémon only),
-  for each switch that is on. **All exact** = all four on; all off = any copy
-  of the card. Signed, altered and graded copies are never CardTrader comps.
+- `source` and `basis` (price sources, 2026-11-07; docs/PRICING.md "Price
+  sources"). The first basis of each source is its default; a basis the
+  source does not have is saved as that default.
+
+  | `source` | `basis` | The number | Switches it honours |
+  | --- | --- | --- | --- |
+  | `cardtrader` | `offers` | the cheapest current offer | condition, language, finish, 1st edition |
+  | `cardtrader` | `sold` | the 30-day sold median | condition, language, finish, 1st edition |
+  | `pokoin` | `offers` | the cheapest Pokoin ask, else CardTrader's sold median | none (any copy) |
+  | `pokoin` | `sold` | Pokoin's own sold median, 90 days | condition, language |
+  | `cardmarket` | `trend` · `low` · `avg1` · `avg7` · `avg30` | Cardmarket's daily price guide: trend, lowest ask, average sale price over 1/7/30 days (EUR) | finish (regular or foil) |
+  | `tcgplayer` | `market` · `low` · `mid` | TCGplayer's market price, lowest listing, mid price (USD → EUR at the ECB rate of the day) | finish, 1st edition |
+- `match`: the per-detail switches. A comp prices a card only if it has the
+  same condition (other games: that condition or better), language, finish
+  (reverse/foil) and 1st edition (Pokémon only), for each switch that is on
+  **and that the source honours** (table above). A switch the source cannot
+  honour stays saved as sent and counts as off; show it greyed out ("Not in
+  Cardmarket’s data"). **All exact** = all four on; all off = any copy of
+  the card. Signed, altered and graded copies are never CardTrader comps.
   Strategies saved before 2026-11-05 with `basis: "matched"` read as all on;
   `basis: "cheapest"` reads as all off.
+- `rules`: `2` on every strategy saved since 2026-11-07 (Pokoin sets it;
+  ignored on save). Before 2, a `sold` strategy ignored the switches and a
+  Pokoin `sold` one priced from CardTrader's sold median; Pokoin reads such a
+  strategy as CardTrader `sold` with every switch off, which is the same price.
 - `feeExclusive`: price from what the seller nets on CardTrader after its
-  commission (at their own rate when connected), not from the ask.
+  commission (at their own rate when connected), not from the ask. Only
+  CardTrader numbers have fees; the other sources ignore it.
 - `action`: `match` | `undercut` | `premium`, by `amountPct` (0–90) % and
   `amountPkn` PKN.
 - `rounding`: `none` (cents) | `integer` (nearest PKN) | `down` | `up`.
@@ -98,7 +115,9 @@ Response:
 
 - `itemId` is echoed as sent. Quotes come back in the order of `items`.
 - `compPkn`: the market number the strategy started from (net of fees when
-  `feeExclusive`). `askPkn`: the CardTrader ask of that offer.
+  `feeExclusive`), in PKN for every source (Cardmarket's EUR × 200,
+  TCGplayer's USD at the day's ECB rate × 200). `askPkn`: the CardTrader ask
+  of that offer, CardTrader offers only (null otherwise).
 - `pricePkn`: the strategy's price. `priceEurCents` = `round(pricePkn / 2)`
   (half away from zero).
 - `status`, which explains a null price:

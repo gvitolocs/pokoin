@@ -5,10 +5,13 @@
 // Relative, not @market: node --test loads this module without Vite's alias.
 import {
   DEFAULT_STRATEGY,
-  isAllExact,
+  effectiveMatch,
   matchKey,
   normalizeStrategy,
   PRICER_MATCHES,
+  PRICER_SOURCES,
+  pricerBases,
+  sourceSwitches,
   strategyComp,
   strategyExample,
 } from '../../../../market/src/pricer.js';
@@ -19,7 +22,10 @@ export const NO_GROUP = '__none';
 /**
  * The comp the strategy editor's example uses when the seller has none
  * loaded: CardTrader ask 28 / net 25.56 for the exact copy, cheaper as the
- * toggles loosen, for every toggle combination (`ctMatch` keys).
+ * toggles loosen, for every toggle combination (`ctMatch` keys), plus a
+ * `sources` block with a number for every source, basis and toggle
+ * combination the sources honour (Cardmarket in EUR, TCGplayer in USD at
+ * $1.08/€, converted to PKN).
  */
 export const SAMPLE_COMP = (() => {
   const ctMatch = {};
@@ -29,7 +35,47 @@ export const SAMPLE_COMP = (() => {
     const ask = 28 - (4 - on) * 1.5;
     ctMatch[matchKey(match)] = { grossPkn: ask, pkn: Math.round(ask * 0.913 * 100) / 100 };
   }
-  return { ctMatch, soldMedianPkn: 24.5, soldMedianGrossPkn: 26.1, pokoinCheapestPkn: 27 };
+  const pknEntry = (pkn) => ({ grossPkn: pkn, pkn });
+  const eurPkn = (eur) => Math.round(eur * 200 * 100) / 100;
+  const usdPkn = (usd) => Math.round(((usd * 200) / 1.08) * 100) / 100;
+  // CardTrader sold: every toggle combination, looser is cheaper.
+  const ctSold = {};
+  for (let bits = 0; bits < 16; bits += 1) {
+    const match = Object.fromEntries(PRICER_MATCHES.map(({ id }, index) => [id, Boolean(bits & (1 << index))]));
+    const on = Object.values(match).filter(Boolean).length;
+    const gross = Math.round((26.1 - (4 - on) * 1.2) * 100) / 100;
+    ctSold[matchKey(match)] = { grossPkn: gross, pkn: Math.round(gross * 0.913 * 100) / 100 };
+  }
+  // Pokoin's own sales honour condition and language.
+  const pokoinSold = { '': pknEntry(28), C: pknEntry(30), L: pknEntry(30), CL: pknEntry(31) };
+  // Cardmarket's price guide honours finish; prices are EUR (2 PKN = 1 cent).
+  const cardmarket = { asOf: '2026-11-07' };
+  for (const [basis, [plain, foil]] of Object.entries({
+    trend: [0.12, 0.15], low: [0.1, 0.13], avg1: [0.14, 0.18], avg7: [0.16, 0.2], avg30: [0.17, 0.22],
+  })) {
+    cardmarket[basis] = {
+      '': { eur: plain, grossPkn: eurPkn(plain), pkn: eurPkn(plain) },
+      F: { eur: foil, grossPkn: eurPkn(foil), pkn: eurPkn(foil) },
+    };
+  }
+  // TCGplayer honours finish and 1st edition; prices are USD at the day's ECB rate.
+  const tcgplayer = { asOf: '2026-11-07', rateDay: '2026-11-07', usdPerEur: 1.08 };
+  const tcgKeys = ['', 'F', 'E', 'FE'];
+  for (const [basis, usds] of Object.entries({
+    market: [0.25, 0.28, 0.27, 0.3], low: [0.2, 0.22, 0.21, 0.24], mid: [0.26, 0.29, 0.28, 0.32],
+  })) {
+    tcgplayer[basis] = {};
+    usds.forEach((usd, index) => {
+      tcgplayer[basis][tcgKeys[index]] = { usd, grossPkn: usdPkn(usd), pkn: usdPkn(usd) };
+    });
+  }
+  return {
+    ctMatch,
+    soldMedianPkn: 24.5,
+    soldMedianGrossPkn: 26.1,
+    pokoinCheapestPkn: 27,
+    sources: { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, tcgplayer },
+  };
 })();
 
 const idOf = (row) => String(row?.id ?? row ?? '');
@@ -137,24 +183,29 @@ const positive = (value) => {
 
 /**
  * The comp of the strategy editor's worked example: the first of `comps`
- * (the selected group's cards) with a CardTrader offer per toggle
- * combination (`ctMatch`), else SAMPLE_COMP.
+ * (the selected group's cards) with the strategy's source in its `sources`
+ * block, else the first with a CardTrader offer per toggle combination
+ * (`ctMatch`), else SAMPLE_COMP.
  */
-export function pickExampleComp(comps) {
-  return (comps || []).find((comp) => comp?.ctMatch && typeof comp.ctMatch === 'object') || SAMPLE_COMP;
+export function pickExampleComp(comps, input) {
+  const source = normalizeStrategy(input).source;
+  const list = comps || [];
+  return list.find((comp) => comp?.sources && typeof comp.sources === 'object' && comp.sources[source])
+    || list.find((comp) => comp?.ctMatch && typeof comp.ctMatch === 'object')
+    || SAMPLE_COMP;
 }
 
 /**
  * The CardTrader ask beside a strategy's comp: the offer of its toggles
- * (`ctMatch`), or the sold median's gross; null for Pokoin.
+ * (`ctMatch`). Null for every other source and basis — only CardTrader
+ * offers have an ask beside the net.
  */
 export function askFor(comp, input) {
   const strategy = normalizeStrategy(input);
-  if (!comp || strategy.source === 'pokoin') return null;
-  if (strategy.basis === 'sold') return positive(comp.soldMedianGrossPkn);
+  if (strategy.source !== 'cardtrader' || strategy.basis !== 'offers') return null;
   const key = matchKey(strategy.match);
-  if (comp.ctMatch && typeof comp.ctMatch === 'object') return positive(comp.ctMatch[key]?.grossPkn);
-  return key === 'CLFE' ? positive(comp.ctMatchedGrossPkn) : key === '' ? positive(comp.ctCheapestGrossPkn) : null;
+  if (comp?.ctMatch && typeof comp.ctMatch === 'object') return positive(comp.ctMatch[key]?.grossPkn);
+  return key === 'CLFE' ? positive(comp?.ctMatchedGrossPkn) : key === '' ? positive(comp?.ctCheapestGrossPkn) : null;
 }
 
 const num = (value) => String(Math.round(value * 100) / 100);
@@ -165,19 +216,37 @@ export const NO_OFFER = 'No offer like that for this card right now';
 /**
  * The worked example on one comp as steps: `{ steps: [text], target,
  * noOffer }`, e.g. "CardTrader ask 28", "you net 25.56", "−5% 24.28",
- * "nearest", target 24. It follows the strategy's toggles: no offer with
- * those toggles is `noOffer`, never a guess.
+ * "nearest", target 24; "Cardmarket trend €0.15 = 30 PKN"; "TCGplayer
+ * market $0.30 = 55.56 PKN at $1.08/€". It follows the strategy's toggles:
+ * no number for them is `noOffer`, never a guess.
  */
 export function exampleSteps(input, comp = SAMPLE_COMP) {
   const strategy = normalizeStrategy(input);
   const steps = [];
   const value = strategyComp(comp, strategy);
-  if (strategy.source === 'pokoin') {
-    if (value != null) steps.push(`Pokoin ${strategy.basis === 'sold' ? 'sold median' : 'ask'} ${num(value)}`);
+  const { source, basis } = strategy;
+  if (source === 'pokoin') {
+    if (value != null) steps.push(`Pokoin ${basis === 'sold' ? 'sold median' : 'ask'} ${num(value)}`);
+  } else if (source === 'cardmarket' || source === 'tcgplayer') {
+    if (value != null) {
+      const label = PRICER_SOURCES.find((entry) => entry.id === source)?.label || source;
+      // "Cardmarket 7-day average", "TCGplayer market price": the basis as the editor names it.
+      const named = `${label} ${(pricerBases(source).find((entry) => entry.id === basis)?.label || basis).toLowerCase()}`;
+      const entry = comp?.sources?.[source]?.[basis]?.[matchKey(effectiveMatch(strategy))];
+      if (source === 'cardmarket') {
+        const eur = entry?.eur != null ? `€${Number(entry.eur).toFixed(2)}` : null;
+        steps.push(eur ? `${named} ${eur} = ${num(value)} PKN` : `${named} ${num(value)} PKN`);
+      } else {
+        const usd = entry?.usd != null ? `$${Number(entry.usd).toFixed(2)}` : null;
+        const rate = comp?.sources?.tcgplayer?.usdPerEur;
+        const at = rate != null ? ` at $${num(rate)}/€` : '';
+        steps.push(usd ? `${named} ${usd} = ${num(value)} PKN${at}` : `${named} ${num(value)} PKN`);
+      }
+    }
   } else {
     const ask = askFor(comp, strategy) ?? value;
     if (value != null) {
-      steps.push(`CardTrader ${strategy.basis === 'sold' ? 'sold median' : 'ask'} ${num(ask)}`);
+      steps.push(`CardTrader ${basis === 'sold' ? 'sold median' : 'ask'} ${num(ask)}`);
       if (strategy.feeExclusive && value !== ask) steps.push(`you net ${num(value)}`);
     }
   }
@@ -269,10 +338,13 @@ const ROUNDING_CHIP = { integer: 'whole PKN', down: 'round down', up: 'round up'
 /**
  * What a strategy tile in the pricer pop-up shows (Pokoin and Card Rails
  * draw the same tile from it): `icon` the action ('match' "=", 'undercut'
- * arrow down, 'premium' arrow up), `source` the market's name, `sold` for a
- * sold-median strategy (calendar), `rules` the rule chips, and `switches`
- * the CardTrader offer switches: "All exact", the ones that are on, or
- * "Any copy" (`allExact` styles the first).
+ * arrow down, 'premium' arrow up), `source` the source's label, `basis` the
+ * basis's label, `sold` for a sold-median strategy (calendar), `rules` the
+ * rule chips ('net of fees' / 'CardTrader ask' only for CardTrader,
+ * 'USD → EUR' for TCGplayer), and `switches` the toggles the source honours:
+ * "All exact" when every honoured toggle is on, else the on ones, else
+ * "Any copy"; Pokoin's cheapest ask is always "Cheapest Pokoin ask"
+ * (`allExact` styles "All exact").
  */
 export function strategyTile(input) {
   const strategy = normalizeStrategy(input);
@@ -288,26 +360,30 @@ export function strategyTile(input) {
   }
   if (ROUNDING_CHIP[strategy.rounding]) rules.push(ROUNDING_CHIP[strategy.rounding]);
   if (strategy.minPkn > 0) rules.push(`min ${num(strategy.minPkn)}`);
-  const cardtrader = strategy.source === 'cardtrader';
-  if (cardtrader) rules.push(strategy.feeExclusive ? 'net of fees' : 'CardTrader ask');
+  if (strategy.source === 'cardtrader') rules.push(strategy.feeExclusive ? 'net of fees' : 'CardTrader ask');
+  if (strategy.source === 'tcgplayer') rules.push('USD → EUR');
   const sold = strategy.basis === 'sold';
-  let switches = [];
-  if (!sold && cardtrader) {
-    if (isAllExact(strategy.match)) switches = ['All exact'];
-    else {
-      switches = Object.keys(SWITCH_CHIP).filter((id) => strategy.match[id]).map((id) => SWITCH_CHIP[id]);
-      if (!switches.length) switches = ['Any copy'];
-    }
-  } else if (!sold) {
+  const can = sourceSwitches(strategy.source, strategy.basis);
+  const eff = effectiveMatch(strategy);
+  const honoured = PRICER_MATCHES.filter(({ id }) => can[id]);
+  const allExact = honoured.length > 0 && honoured.every(({ id }) => eff[id] === true);
+  let switches;
+  if (strategy.source === 'pokoin' && strategy.basis === 'offers') {
     switches = ['Cheapest Pokoin ask'];
+  } else if (allExact) {
+    switches = ['All exact'];
+  } else {
+    switches = honoured.filter(({ id }) => eff[id]).map(({ id }) => SWITCH_CHIP[id]);
+    if (!switches.length) switches = ['Any copy'];
   }
   return {
     icon: strategy.action,
-    source: cardtrader ? 'CardTrader' : 'Pokoin',
+    source: PRICER_SOURCES.find((entry) => entry.id === strategy.source)?.label || strategy.source,
+    basis: pricerBases(strategy.source).find((entry) => entry.id === strategy.basis)?.label || strategy.basis,
     sold,
     rules,
     switches,
-    allExact: !sold && cardtrader && isAllExact(strategy.match),
+    allExact,
   };
 }
 
@@ -332,7 +408,18 @@ export function draftChanged(draft, saved) {
   return comparable(draft) !== comparable(saved);
 }
 
-/** The editor shows the offer switches: CardTrader current offers only. */
+/**
+ * A source change in the editor: the basis stays when the new source has it,
+ * else the new source's default (its first basis). The toggles (`match`)
+ * are never rewritten.
+ */
+export function withSource(draft, source) {
+  const bases = pricerBases(source);
+  const basis = bases.some((entry) => entry.id === draft?.basis) ? draft.basis : bases[0].id;
+  return { ...(draft || {}), source, basis };
+}
+
+/** The editor shows the toggles for every source and basis but Pokoin's cheapest ask. */
 export function showsSwitches(draft) {
-  return draft?.basis !== 'sold' && draft?.source !== 'pokoin';
+  return !(draft?.source === 'pokoin' && draft?.basis === 'offers');
 }

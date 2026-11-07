@@ -100,12 +100,65 @@ export function previewPricer() {
 }
 
 /**
+ * The `sources` block of a preview comp, like `allSources` in
+ * market/src/pricer.vectors.json: every source and basis with a number for
+ * each toggle combination the source honours. Cardmarket entries carry
+ * `eur`, TCGplayer `usd` plus the day's `usdPerEur` / `rateDay`
+ * (2 PKN = 1 euro cent, so 1 EUR = 200 PKN and 1 USD = 200 / usdPerEur PKN).
+ */
+function sourcesFor(ask) {
+  const eurOf = (pkn) => Math.round((pkn / 200) * 100) / 100;
+  const usdOf = (pkn) => Math.round(((pkn / 200) * 1.08) * 100) / 100;
+  const pknEntry = (pkn) => ({ grossPkn: pkn, pkn });
+  // CardTrader sold: every toggle combination, looser is cheaper.
+  const ctSold = {};
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    const gross = Math.round((ask * 1.05 - (4 - on) * 2) * 100) / 100;
+    ctSold[key] = { grossPkn: gross, pkn: Math.round(gross * 0.939 * 100) / 100 };
+  }
+  // Pokoin's own sales honour condition and language.
+  const pokoinSold = {
+    '': pknEntry(Math.round(ask * 0.9 * 100) / 100),
+    C: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    L: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    CL: pknEntry(Math.round(ask * 0.98 * 100) / 100),
+  };
+  // Cardmarket's price guide honours finish; prices are EUR.
+  const cardmarket = { asOf: '2026-11-07' };
+  for (const [basis, [plain, foil]] of Object.entries({
+    trend: [0.9, 1], low: [0.8, 0.85], avg1: [0.92, 0.98], avg7: [0.94, 1.02], avg30: [0.96, 1.05],
+  })) {
+    const plainPkn = Math.round(ask * plain * 100) / 100;
+    const foilPkn = Math.round(ask * foil * 100) / 100;
+    cardmarket[basis] = {
+      '': { eur: eurOf(plainPkn), grossPkn: plainPkn, pkn: plainPkn },
+      F: { eur: eurOf(foilPkn), grossPkn: foilPkn, pkn: foilPkn },
+    };
+  }
+  // TCGplayer honours finish and 1st edition; prices are USD at the ECB rate of the day.
+  const tcgplayer = { asOf: '2026-11-07', rateDay: '2026-11-07', usdPerEur: 1.08 };
+  const tcgKeys = ['', 'F', 'E', 'FE'];
+  for (const [basis, factors] of Object.entries({
+    market: [0.95, 1, 0.98, 1.05], low: [0.85, 0.9, 0.88, 0.95], mid: [0.92, 0.97, 0.95, 1.02],
+  })) {
+    tcgplayer[basis] = {};
+    factors.forEach((factor, index) => {
+      const pkn = Math.round(ask * factor * 100) / 100;
+      tcgplayer[basis][tcgKeys[index]] = { usd: usdOf(pkn), grossPkn: pkn, pkn };
+    });
+  }
+  return { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, tcgplayer };
+}
+
+/**
  * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
  * the price check returns them: CardTrader numbers net of the commission
  * (`…Pkn`) beside the ask (`…GrossPkn`), and `ctMatch`, the cheapest offer
  * per toggle combination (`matchKey`: C condition, L language, F finish,
  * E 1st edition). Looser toggles find cheaper copies; a combination that is
- * missing has no offer right now.
+ * missing has no offer right now. `sources` carries the other markets' numbers.
  */
 export function previewComps() {
   const offer = (ask) => ({ grossPkn: ask, pkn: Math.round(ask * 0.939 * 100) / 100 });
@@ -113,6 +166,8 @@ export function previewComps() {
     ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: Math.round(ask * 0.85 * 0.939 * 100) / 100, ctCheapestGrossPkn: Math.round(ask * 0.85 * 100) / 100,
     ctBasis: 'pro',
     ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' },
+    pokoinCheapestPkn: Math.round(ask * 0.96 * 100) / 100,
+    sources: sourcesFor(ask),
     ctMatch: {
       CLFE: { grossPkn: ask, pkn: net },
       CLF: offer(Math.round(ask * 0.97 * 100) / 100),
@@ -152,6 +207,34 @@ export function previewStrategies() {
       activatePaused: false,
     },
     { ...rule, id: 'preview-strategy-3', name: 'Sold median +10%', basis: 'sold', action: 'premium', amountPct: 10, activatePaused: false },
+    {
+      id: 'preview-strategy-4',
+      name: 'Cardmarket trend −3%',
+      source: 'cardmarket',
+      basis: 'trend',
+      match: { condition: true, language: true, finish: true, firstEdition: true },
+      feeExclusive: false,
+      action: 'undercut',
+      amountPct: 3,
+      amountPkn: 0,
+      rounding: 'integer',
+      minPkn: 1,
+      activatePaused: false,
+    },
+    {
+      id: 'preview-strategy-5',
+      name: 'TCGplayer market',
+      source: 'tcgplayer',
+      basis: 'market',
+      match: { condition: true, language: true, finish: true, firstEdition: true },
+      feeExclusive: false,
+      action: 'match',
+      amountPct: 0,
+      amountPkn: 0,
+      rounding: 'up',
+      minPkn: 1,
+      activatePaused: false,
+    },
   ];
 }
 

@@ -4,6 +4,7 @@ mod eur;
 mod facet_prices;
 mod fee_once;
 mod fee_profile;
+mod fx_rates;
 mod group_products;
 mod net_prices;
 mod pricing_groups;
@@ -72,6 +73,7 @@ pub async fn run(name: &str) -> Result<()> {
         "cardtrader-fee-profile" => fee_profile::run(&options).await,
         "cardtrader-group-products" => group_products::run(&options).await,
         "pricing-groups-daily" => pricing_groups::run(&options).await,
+        "fx-rates-daily" => fx_rates::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),

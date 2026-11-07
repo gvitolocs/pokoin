@@ -250,6 +250,24 @@ pub trait FirestoreStore: Send + Sync {
         fields: Value,
     ) -> futures_util::future::BoxFuture<'a, ApiResult<bool>>;
 
+    /// One structured query: the docs of `collection` whose string `field`
+    /// is >= `value`, at most `limit` of them (a `runQuery` with one
+    /// `GREATER_THAN_OR_EQUAL` field filter). The default errors, so stores
+    /// that cannot query keep compiling; the REST and in-memory stores
+    /// implement it.
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let _ = (collection, field, value, limit);
+        Box::pin(async move {
+            Err(ApiError::new(501, "This Firestore store cannot run queries.").with_code("firestore_query_unsupported"))
+        })
+    }
+
     /// False only for the in-memory test store. Production [`crate::state::DomainState`]
     /// construction refuses a non-durable store, so no handler can answer a
     /// credential-less MemoryFirestore "success" in production.
@@ -363,6 +381,34 @@ impl FirestoreStore for MemoryFirestore {
             deep_merge(entry, &fields);
             Ok(true)
 })
+    }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let collection = collection.to_string();
+        let field = field.to_string();
+        let value = value.to_string();
+        let docs = self.docs.clone();
+        Box::pin(async move {
+            let guard = docs.read().await;
+            let out: Vec<FirestoreDoc> = guard
+                .iter()
+                .filter(|((doc_collection, _), _)| doc_collection == &collection)
+                .filter(|(_, data)| {
+                    data.get(field.as_str())
+                        .and_then(Value::as_str)
+                        .is_some_and(|stored| stored >= value.as_str())
+                })
+                .take(limit as usize)
+                .map(|(_, data)| FirestoreDoc { exists: true, data: data.clone() })
+                .collect();
+            Ok(out)
+        })
     }
 }
 
@@ -711,6 +757,56 @@ impl FirestoreStore for FirestoreRest {
             self.merge_doc(collection, id, fields).await?;
             Ok(true)
 })
+    }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            let token = self.access_token().await?;
+            let url = format!(
+                "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents:runQuery",
+                self.project_id
+            );
+            let body = json!({
+                "structuredQuery": {
+                    "from": [{ "collectionId": collection }],
+                    "where": {
+                        "fieldFilter": {
+                            "field": { "fieldPath": field },
+                            "op": "GREATER_THAN_OR_EQUAL",
+                            "value": { "stringValue": value },
+                        }
+                    },
+                    "limit": limit,
+                }
+            });
+            let response = self
+                .http
+                .post(&url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await?;
+            let status = response.status();
+            let payload: Value = response.json().await?;
+            if !status.is_success() {
+                return Err(ApiError::new(
+                    502,
+                    format!("Firestore runQuery failed ({status}): {payload}"),
+                ));
+            }
+            let entries = payload.as_array().cloned().unwrap_or_default();
+            Ok(entries
+                .iter()
+                .filter_map(|entry| entry.get("document"))
+                .map(|doc| FirestoreDoc { exists: true, data: Self::unflatten(doc) })
+                .collect())
+        })
     }
 }
 

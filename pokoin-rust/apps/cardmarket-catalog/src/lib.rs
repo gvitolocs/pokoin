@@ -6,6 +6,7 @@
 //! pokoin-cardmarket-catalog prices [--game battle_spirits_saga] [--file guide.json] [--apply]
 //! pokoin-cardmarket-catalog links  --game weiss_schwarz --urls harvest.json [--generated] [--apply]
 //!                                   [--jp-twins [--images dir] [--max-art-distance 18] [--apply-jp]]
+//! pokoin-cardmarket-catalog guides [--game <slug>] [--apply]
 //! ```
 //!
 //! `match` only reads the database. It pairs Cardmarket singles with catalog
@@ -19,6 +20,14 @@
 //! `marketplace_card_daily_median` (EUR × 200 PKN), which set desks and tiles
 //! read. Without `--apply` it reports coverage only.
 //!
+//! `guides` loads Cardmarket's daily price guide for every game (or one
+//! `--game`, see `guides.rs`) into `pokoin_marketplace.cardmarket_price_guide`
+//! (migration 139) as change-only history: a row is written only when a
+//! product's values differ from its newest stored row on or before that day,
+//! and `cardmarket_price_guide_runs` records the load. Without `--apply` it is
+//! a dry run — the statements execute (real counts) and the transaction rolls
+//! back. One JSON line is printed per game.
+//!
 //! `links` pairs printings with Cardmarket product pages (`links.rs`) and
 //! writes `<cache>/raw/cardmarket-links.json`. `--urls` is the harvested pages
 //! as a JSON array of `{id, url}` (`sqlite3 -json cardmarket-links.sqlite
@@ -30,6 +39,7 @@
 
 pub mod db;
 pub mod game;
+pub mod guides;
 pub mod links;
 pub mod matcher;
 pub mod sources;
@@ -68,7 +78,11 @@ pub fn pkn(eur: f64) -> f64 {
 
 struct Options {
     command: String,
-    game: game::Game,
+    /// The `match`/`prices`/`links` game; `None` for `guides`, which runs over
+    /// the `guides::GUIDE_GAMES` registry instead.
+    game: Option<game::Game>,
+    /// `guides --game <slug>`: only that registry game (validated in `options`).
+    guide_slug: Option<String>,
     cache: PathBuf,
     refresh: bool,
     apply: bool,
@@ -81,20 +95,30 @@ struct Options {
     max_art_distance: u32,
 }
 
+/// The cache root: `$POKOIN_CATALOG_DIR`, else `~/pokoin-catalogs`.
+fn cache_root() -> PathBuf {
+    std::env::var("POKOIN_CATALOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+                .join("pokoin-catalogs")
+        })
+}
+
 fn options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
-    if !matches!(command.as_str(), "match" | "prices" | "links") {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
+    if !matches!(command.as_str(), "match" | "prices" | "links" | "guides") {
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
     }
-    let mut slug = "battle_spirits_saga".to_string();
+    let mut slug: Option<String> = None;
     let mut cache = None;
     let (mut refresh, mut apply, mut file) = (false, false, None);
     let (mut urls, mut generated) = (None, false);
     let (mut jp_twins, mut apply_jp, mut images, mut max_art_distance) = (false, false, None, twins::MAX_DISTANCE);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--game" => slug = args.next().ok_or("--game needs a slug")?,
+            "--game" => slug = Some(args.next().ok_or("--game needs a slug")?),
             "--cache" => cache = Some(PathBuf::from(args.next().ok_or("--cache needs a dir")?)),
             "--file" => file = Some(PathBuf::from(args.next().ok_or("--file needs a path")?)),
             "--urls" => urls = Some(PathBuf::from(args.next().ok_or("--urls needs a path")?)),
@@ -113,20 +137,27 @@ fn options() -> Result<Options, String> {
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    let game =
-        game::by_slug(&slug).ok_or_else(|| format!("no Cardmarket table for game {slug}"))?;
-    let cache = cache.unwrap_or_else(|| {
-        let root = std::env::var("POKOIN_CATALOG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
-                    .join("pokoin-catalogs")
-            });
-        root.join(game.slug)
-    });
+    let (game, guide_slug, cache) = if command == "guides" {
+        // `guides` does not need a `game::by_slug` game: it runs over the
+        // guide registry (`guides::GUIDE_GAMES`), cached under `guides/<slug>`.
+        if let Some(slug) = &slug {
+            if guides::guide_game(slug).is_none() {
+                return Err(format!("unknown guide game {slug}"));
+            }
+        }
+        let cache = cache.unwrap_or_else(|| cache_root().join("guides"));
+        (None, slug, cache)
+    } else {
+        let slug = slug.unwrap_or_else(|| "battle_spirits_saga".to_string());
+        let game =
+            game::by_slug(&slug).ok_or_else(|| format!("no Cardmarket table for game {slug}"))?;
+        let cache = cache.unwrap_or_else(|| cache_root().join(game.slug));
+        (Some(game), None, cache)
+    };
     Ok(Options {
         command,
         game,
+        guide_slug,
         cache,
         refresh,
         apply,
@@ -145,6 +176,7 @@ pub async fn run() -> Result<i32, String> {
     match o.command.as_str() {
         "match" => run_match(&o).await,
         "links" => run_links(&o).await,
+        "guides" => run_guides(&o).await,
         _ => run_prices(&o).await,
     }
 }
@@ -154,7 +186,10 @@ fn match_path(cache: &Path) -> PathBuf {
 }
 
 async fn run_match(o: &Options) -> Result<i32, String> {
-    let game = &o.game;
+    let game = o
+        .game
+        .as_ref()
+        .ok_or_else(|| format!("{} needs a known --game", o.command))?;
     if game.expansions.is_empty() {
         return Err(format!("{} has no expansion table; use the links command", game.slug));
     }
@@ -375,7 +410,10 @@ fn report_twins(jp: &twins::JpOutcome, dir: &Path, scans: usize, max: u32) {
 }
 
 async fn run_links(o: &Options) -> Result<i32, String> {
-    let game = &o.game;
+    let game = o
+        .game
+        .as_ref()
+        .ok_or_else(|| format!("{} needs a known --game", o.command))?;
     let harvest: Vec<links::Harvest> = match &o.urls {
         Some(path) => {
             let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -541,7 +579,10 @@ async fn run_links(o: &Options) -> Result<i32, String> {
 }
 
 async fn run_prices(o: &Options) -> Result<i32, String> {
-    let game = &o.game;
+    let game = o
+        .game
+        .as_ref()
+        .ok_or_else(|| format!("{} needs a known --game", o.command))?;
     let (path, guide) =
         sources::price_guide(&o.cache, game.cardmarket_game, o.file.as_deref()).await?;
     let day =
@@ -606,6 +647,111 @@ async fn run_prices(o: &Options) -> Result<i32, String> {
         .map_err(|e| e.to_string())?;
     println!("stored {stored} price-guide rows for {day}; {upserted} display prices set, {removed} stale removed");
     Ok(0)
+}
+
+/// Keep only the newest 3 cached `price_guide_<idGame>-*.json` files of one
+/// game (they are large; Magic's is ~30 MB). The day is in the file name, so
+/// a name sort is oldest first.
+fn prune_guide_cache(cache: &Path, cardmarket_game: i64) {
+    let dir = sources::raw_dir(cache).join("cardmarket").join("price-guide");
+    let prefix = format!("price_guide_{cardmarket_game}-");
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with(&prefix) && n.ends_with(".json"))
+                    .unwrap_or(false)
+            })
+            .collect(),
+        Err(_) => return,
+    };
+    files.sort();
+    if files.len() > 3 {
+        for old in &files[..files.len() - 3] {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+}
+
+/// One JSON line per game; a failing game does not stop the others, but the
+/// process exits 1 when any game failed.
+async fn run_guides(o: &Options) -> Result<i32, String> {
+    let games: Vec<&'static guides::GuideGame> = match &o.guide_slug {
+        Some(slug) => vec![guides::guide_game(slug)
+            .ok_or_else(|| format!("unknown guide game {slug}"))?],
+        None => guides::GUIDE_GAMES.iter().collect(),
+    };
+    let mut failed = false;
+    for g in games {
+        match run_guide(o, g).await {
+            Ok(line) => println!("{}", serde_json::to_string(&line).map_err(|e| e.to_string())?),
+            Err(error) => {
+                failed = true;
+                eprintln!("{}: {error}", g.slug);
+                println!(
+                    "{}",
+                    json!({"game": g.slug, "idGame": g.cardmarket_game, "apply": o.apply, "error": error})
+                );
+            }
+        }
+    }
+    Ok(if failed { 1 } else { 0 })
+}
+
+async fn run_guide(o: &Options, g: &'static guides::GuideGame) -> Result<serde_json::Value, String> {
+    let cache = o.cache.join(g.slug);
+    let (_path, guide) = sources::price_guide(&cache, g.cardmarket_game, None).await?;
+    prune_guide_cache(&cache, g.cardmarket_game);
+    let day = chrono::NaiveDate::parse_from_str(
+        guide
+            .created_at
+            .get(..10)
+            .ok_or_else(|| format!("price guide createdAt {} has no day", guide.created_at))?,
+        "%Y-%m-%d",
+    )
+    .map_err(|e| format!("price guide createdAt {}: {e}", guide.created_at))?;
+    // The products this game's catalog references (read-only on the game's db).
+    let catalog = db::connect(&g.database(), true).await?;
+    let referenced = db::referenced_products(&catalog, &g.catalog_table())
+        .await
+        .map_err(|e| format!("referenced products of {}: {e}", g.catalog_table()))?;
+    let kept = guides::filter_rows(&guide.rows, &referenced);
+    guides::sanity_check(referenced.len(), kept.len())?;
+    let rows: Vec<PriceGuide> = kept.into_iter().cloned().collect();
+    // Writable even for a dry run: a read-only session rejects the insert into
+    // the permanent table, and without --apply the transaction rolls back.
+    let write = db::connect("pokoin_marketplace", false).await?;
+    if !db::has_table(&write, "public.cardmarket_price_guide")
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(
+            "public.cardmarket_price_guide is missing: apply scripts/sql/139_pricer_sources.sql"
+                .into(),
+        );
+    }
+    let (products, changed) = db::store_guide_changes(
+        &write,
+        g.slug,
+        g.cardmarket_game,
+        &day.to_string(),
+        &rows,
+        o.apply,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(json!({
+        "game": g.slug,
+        "idGame": g.cardmarket_game,
+        "day": day.to_string(),
+        "guideRows": guide.rows.len(),
+        "referenced": referenced.len(),
+        "products": products,
+        "changed": changed,
+        "apply": o.apply,
+    }))
 }
 
 #[cfg(test)]

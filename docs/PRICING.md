@@ -161,11 +161,16 @@ by one **named strategy**.
 - **Strategies** (`users/{uid}.pricingStrategies`, at most 50) are named
   rules for *how* to price. They have no scope. Names are required and unique
   per seller, ignoring case. The fields are:
-  - **Source**: CardTrader, or Pokoin (the cheapest Pokoin ask, else the sold
-    median).
-  - **Basis**: same card and facets (`ctMatchedPkn`), cheapest copy, or sold
-    median (30 days). **Fee-exclusive** (on by default) prices from what the
-    seller nets on CardTrader; off, it prices from the CardTrader ask.
+  - **Source and basis**: CardTrader (current offers, or the 30-day sold
+    median), Pokoin (the cheapest Pokoin ask, or Pokoin's own 90-day sold
+    median), Cardmarket (its price guide: trend, lowest ask, 1/7/30-day
+    averages) or TCGplayer (market, lowest listing, mid, in USD converted at
+    the day's ECB rate). See "Price sources" below.
+  - **Switches**: same condition, language, finish, 1st edition, and "All
+    exact". Only the switches the source's data can honour count; the rest
+    are greyed out and stay saved. **Fee-exclusive** (on by default) prices
+    from what the seller nets on CardTrader; off, it prices from the
+    CardTrader ask. Only CardTrader numbers have fees.
   - **Action**: match, undercut or above, by % and by a fixed PKN amount.
   - **Rounding**: exact (cents), nearest, down or up to whole PKN.
   - **Never below**: a minimum that rounding never goes under. A target at or
@@ -215,6 +220,39 @@ groups and board defaults), `GET/POST/DELETE /api/marketplace-pricing-groups`
 `POST /api/marketplace-pricing-groups/apply`. Card Rails picks a group or a
 strategy per batch through the connector (docs/SELLER_API.md, "Batch
 pricing").
+
+### Price sources (2026-11-07)
+
+Every price-check comp carries a `sources` block next to the CardTrader
+offers (`ctMatch`). Each entry is keyed by the switches the source honours
+(`price_check::Match::key`, letters C L F E; `""` = any copy) and holds
+`grossPkn` and `pkn` (net of fees for CardTrader, equal otherwise). A feed
+that fails, is not configured or is stale is left out and named in
+`sourceStatus`; the rest of the comp is unchanged.
+
+| Source | Data | Freshness | Switches |
+| --- | --- | --- | --- |
+| CardTrader sold | `cardtrader_sold_daily` in each game's database, last 30 days, median of the daily medians. The any-copy entry includes graded sales (as `soldMedianPkn` always did); the others leave them out. | Nightly | condition (other games: or better), language, finish, 1st edition |
+| Pokoin sold | Firestore `marketplace_sales`, last 90 days, voided sales left out; EUR sales at 2 PKN per cent. Cached for 10 minutes per API process. | Live, 10-minute cache | condition, language |
+| Cardmarket | Cardmarket's public price guide (`price_guide_<idGame>.json`) for every game: `pokoin-cardmarket-catalog guides --apply` (nezopt timer `pokoin-cardmarket-guides`, 02:45 UTC) stores the products our catalogs reference (`card_market_ids`) in `pokoin_marketplace.cardmarket_price_guide`, a row only when a product's values change, and one `cardmarket_price_guide_runs` row per game and day. The pricer uses a game's guide while its last run is at most 4 days old. Regular and foil columns; the lowest value when a card has several Cardmarket products. | Daily | finish |
+| TCGplayer | The TCGCSV store (docs/TCGCSV_PRICES.md) through `pokoin_product_links`; market, low and mid of each subtype. USD → EUR at the newest ECB rate (`fx_rates_daily`, `pokoin-api job fx-rates-daily`, 16:30 UTC), used while it is at most 10 days old; the comp shows `usdPerEur` and `rateDay`. | Daily | finish (Pokémon: reverse holo), 1st edition |
+
+Cardmarket idGames (measured from the overlap of our `card_market_ids` with
+each guide): Pokémon 6, Magic 1, Yu-Gi-Oh! 3, Flesh and Blood 16, Digimon 17,
+Dragon Ball Super 13, Vanguard 8, One Piece 18, Lorcana 19, Star Wars
+Unlimited 21, Riftbound 22, Cyberpunk 23, Gundam 24, Sorcery 25, and the
+Cardmarket-only games Final Fantasy 9, Star Wars Destiny 15, Weiss Schwarz
+10, Force of Will 7, World of Warcraft 2, Battle Spirits Saga 20, My Little
+Pony 12, The Spoils 5. Union Arena, Palworld and Dragoborne have no
+Cardmarket ids yet.
+
+Strategies saved before these sources (`rules` below 2) keep their price: a
+`sold` strategy reads with every switch off, which is the old median, and a
+Pokoin `sold` strategy, which priced from CardTrader's sold median, reads as
+CardTrader `sold`.
+
+Not built, the owner's call: eBay (the sold API needs eBay's approval; page
+scraping is against its terms) and Cardmarket listings scraped by CTCMDeals.
 
 **Batch upload.** A Scan desk batch can pick a group or a strategy before it
 loads. Unpriced cards are listed paused at 0 and priced once by `applyPricing`
