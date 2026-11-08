@@ -1261,7 +1261,21 @@ pub async fn marketplace_listings_patch(
             ));
         }
         let body = parse_body(&headers, &bytes)?;
-        update_listing(&state, &claims, &id, &body).await
+        // A price typed by hand on a grouped listing takes it out of its
+        // group, in the write's transaction under the row lock (the rule of a
+        // Card Rails `update`; specs/tla/price-ownership), so the next Apply
+        // or daily run never overwrites it. `pricingGroupId: null` takes it out
+        // at any price. The edit never joins a group.
+        let guard = super::pricer::GroupGuard::Manual { named: super::pricer::named_group(&body), may_join: false };
+        let (mut listing, outcome) = update_listing_guarded(&state, &claims, &id, &body, &guard).await?;
+        if let Some(object) = listing.as_object_mut() {
+            // `{ id, name }` of the group the edit took the listing out of.
+            object.insert(
+                "leftPricingGroup".into(),
+                outcome.left.map(|(id, name)| json!({ "id": id, "name": name })).unwrap_or(Value::Null),
+            );
+        }
+        Ok(listing)
     }
     .await;
     let mut out = response(result, false);
@@ -1279,6 +1293,19 @@ pub(crate) async fn update_listing(
     id: &str,
     body: &Value,
 ) -> Result<Value, ApiError> {
+    Ok(update_listing_guarded(state, claims, id, body, &super::pricer::GroupGuard::None).await?.0)
+}
+
+/// [`update_listing`] with what it does about the listing's pricing group,
+/// decided and applied in the same transaction, under the row lock
+/// (`pricer::apply_guard`).
+pub(crate) async fn update_listing_guarded(
+    state: &DomainState,
+    claims: &crate::Claims,
+    id: &str,
+    body: &Value,
+    guard: &super::pricer::GroupGuard,
+) -> Result<(Value, super::pricer::GroupOutcome), ApiError> {
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|_| ApiError::not_found("Listing not found for this seller."))?;
     let existing=sqlx::query_scalar::<_,Value>("select to_jsonb(v) from (select seller_uid, card_id, quantity_available, reserve_available, source, source_listing_id from public.marketplace_user_listings where id = $1 limit 1) v").bind(uuid).fetch_optional(state.read_db()).await?.ok_or_else(||ApiError::not_found("Listing not found for this seller."))?;
@@ -1326,6 +1353,7 @@ pub(crate) async fn update_listing(
     .fetch_optional(&mut *tx)
     .await?
     .unwrap_or_else(|| json!({}));
+    let outcome = super::pricer::apply_guard(&mut tx, &claims.uid, uuid, live::number(&before["price_pkn"]), body, guard).await?;
     let source = live::field(&before, "source_listing_id", 160);
     // Identical copies on the same CardTrader product (cardtrader::group).
     let siblings: i64 = if pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty() {
@@ -1377,7 +1405,7 @@ pub(crate) async fn update_listing(
         )
         .await;
     }
-    Ok(listing)
+    Ok((listing, outcome))
 }
 pub async fn marketplace_listings_other(
     State(state): State<DomainState>,

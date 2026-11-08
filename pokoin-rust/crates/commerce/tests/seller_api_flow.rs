@@ -32,52 +32,7 @@ use pokoin_commerce::config::CommerceConfig;
 use pokoin_commerce::state::DomainState;
 use pokoin_commerce::{listing_sync, seller_api};
 
-const LISTINGS_SQL: &str = "
-drop table if exists public.seller_api_listing_keys, public.seller_webhook_deliveries,
-  public.seller_api_events, public.seller_api_grants, public.marketplace_outbox,
-  public.marketplace_user_listings cascade;
-create table public.marketplace_user_listings (
-  id uuid primary key default gen_random_uuid(),
-  card_id text not null,
-  seller_uid text not null,
-  seller_name text not null default 'Pokoin seller',
-  seller_country text not null default 'EU',
-  seller_reputation_label text not null default 'New',
-  condition text not null default 'NM',
-  language text not null default 'EN',
-  price_pkn numeric not null check (price_pkn > 0),
-  quantity_available integer not null default 1 check (quantity_available >= 0),
-  signed boolean not null default false,
-  reverse boolean not null default false,
-  first_edition boolean not null default false,
-  foil_state text not null default 'standard',
-  variant_state text not null default '',
-  sealed boolean not null default false,
-  graded boolean not null default false,
-  grading_company text,
-  grade text,
-  certification_id text,
-  shipping_available boolean not null default true,
-  reserve_available boolean not null default false,
-  nft_available boolean not null default false,
-  seller_comment text not null default '',
-  source text not null default 'pokoin_user_listing',
-  source_listing_id text not null default '',
-  status text not null default 'active' check (status in ('active', 'paused', 'inactive', 'sold_out')),
-  card_name text not null default '',
-  card_image_url text not null default '',
-  set_name text not null default '',
-  collector_number text not null default '',
-  location text not null default '',
-  altered boolean not null default false,
-  marketplace_game text not null default 'pokemon',
-  photo_urls text[] not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create or replace function public.refresh_marketplace_blueprint_price_summary(text)
-  returns void language sql as 'select';
-";
+const LISTINGS_SQL: &str = include_str!("sql/flow_listings.sql");
 
 struct UidToken;
 #[async_trait]
@@ -151,6 +106,8 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
         .execute(&pool).await.unwrap();
     run_sql(&pool, include_str!("../../../../scripts/sql/096_marketplace_outbox.sql")).await;
     run_sql(&pool, include_str!("../../../../scripts/sql/115_seller_api_grants.sql")).await;
+    run_sql(&pool, "drop table if exists public.seller_pricing_group_members, public.seller_pricing_groups cascade;").await;
+    run_sql(&pool, include_str!("../../../../scripts/sql/138_seller_pricing_groups.sql")).await;
     let mine: uuid::Uuid = sqlx::query_scalar(
         "insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, price_pkn, quantity_available, location, card_name) \
          values ('220962', 'seller-1', 'alice', 'IT', 400, 3, 'BIN-07', 'Espurr') returning id",
@@ -529,6 +486,8 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(origin_of(&listed["listingId"]), Some(json!("pokoin")));
     assert_eq!(origin_of(&json!(mine.to_string())), Some(json!("pokoin")));
     assert!(!book.to_string().contains("cardrails_key"));
+
+    // The pricing-group rules (one pricer) are price_ownership_flow.rs.
 
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;

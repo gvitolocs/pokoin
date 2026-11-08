@@ -16,6 +16,12 @@ branch `pricer-sources` and not deployed until it is merged.
   are looked up per card in its own game, so `pricing-groups` sends no `games`.
 - **Endpoint:** the existing connector, `POST /api/cardrails/connector`
   (or `/api/seller-api/v1`), `Authorization: Bearer pkn_…` with a Card Rails grant.
+- **One pricer when connected** (owner, 2026-11-08). When Card Rails is
+  connected to a Pokoin account, Pokoin prices and Card Rails mirrors: every
+  pulled listing says which pricing group prices it, a manual price takes a
+  listing out of its group in both apps, and an unpriced item with no choice
+  is priced by the account default. Connected sellers leave CardTrader
+  listing to Pokoin's own CardTrader sync.
 
 ## The strategy object
 
@@ -149,12 +155,125 @@ equal to the cent, list on Pokoin either:
   - a strategy a group uses can't be deleted (409 `strategy_in_use`, the
     message names the groups).
 
+### Price ownership invariants (model-checked)
+
+`specs/tla/price-ownership` models one listing with every writer
+interleaving: group runs (Apply, daily), the MyPokoin edit and Pricer
+board, Card Rails' `update`, pull and CardTrader import, Pokoin's
+CardTrader sync and `list`. TLC checks these on every interleaving, and
+each has a connector test of the same name in
+`crates/commerce/tests/price_ownership_flow.rs`:
+
+| Name | Rule |
+| --- | --- |
+| PO1 `OneOwner` | A listing is priced by its group or by the seller, never both: a typed price is never held inside a group. |
+| PO2 `ManualPriceKept` | A group run never overwrites a price the seller typed, until the listing rejoins a group. A run's write holds only while the listing is still in that group, checked under the listing's row lock. |
+| PO3 `NoPriceNoChange` | An edit with no new price and no group named changes neither the price nor the group. |
+| PO4 `NoPingPong` | Card Rails' CardTrader import and the pull never flip a row's price. |
+| PO5 `PriceMyselfHonoured` | After "Price myself" or a typed price, the listing is out of any group until put back, even at the same price. |
+| PO6 `ListNeverRefused` | `list` never refuses over a bad account default. |
+| PO7 `UnpricedStaysPaused` | An item no group prices and the seller did not price stays paused at 0. |
+| PO8 `CardRailsConverges` | Once nothing else happens, a pull brings Card Rails' row to Pokoin's price and group. |
+
+What they need from Card Rails, each shown by a failing `bugs/*.cfg` when
+left out:
+- **Send a price only when the seller changed it in that edit.** Without
+  this, R5 resends the cached price after an overnight re-price and breaks
+  PO3.
+- **Send `pricingGroupId: null` with a price the seller typed, and for
+  "Price myself".** Without it, "Price myself" at the same price looks like
+  a resend and breaks PO5.
+- **Never write a price into a Pokoin-linked row from the CardTrader
+  import.** Without this, R6 breaks PO4.
+
+What they need from Pokoin:
+- **One transaction per manual write.** The group move and the price write
+  happen together, under the listing's row lock (`pricer::apply_guard`).
+- **Guarded runs.** A run writes a price only while the listing is still in
+  its group (`pricer::write_run_price`). Without this, PO2 breaks
+  (`bugs/unguarded-run.cfg`).
+- **Locked board moves.** Pricer-board adds and removes take the same row
+  locks.
+- **The MyPokoin form sends a price only when the seller changed it.** It
+  then sends it with `pricingGroupId: null`. Without this, PO3 and PO5 break
+  (`bugs/form-resends-stale.cfg`).
+
+`pricer::group_move` is checked against the model's own rule table
+(`conformance/move-table.txt`, printed by TLC) by
+`group_move_matches_the_model_table`.
+
+### `listings` / `update` (existing): pricing on the pull
+
+Every listing of a `listings` page, and the `listing` of an `update`
+answer, carries its pricing group:
+
+```json
+{ "listingId": "…", "pricePkn": 26, "priceEurCents": 13, …,
+  "pricingGroupId": "pg_…", "pricingGroupName": "Riftbound bulk",
+  "pricingStrategyId": "st_…", "pricingStrategyName": "Undercut 5% · CardTrader net",
+  "pricingAutoDaily": true }
+```
+
+- In no group: all four ids and names are `null` and `pricingAutoDaily` is
+  `false`. The seller prices that listing.
+- While `pricingGroupId` is set, Pokoin prices the listing (on Apply, and
+  every day when `pricingAutoDaily`). Card Rails shows "Priced by Pokoin ·
+  <pricingGroupName>", locks its price field and mirrors `pricePkn`.
+- `pricingStrategyName` is `null` when the group's strategy was deleted (the
+  group prices nothing until it gets another) or the names could not be read.
+- `listings` reads the groups of the whole page in one query.
+
+### `update` (existing): a manual price leaves the group
+
+```json
+{ "action": "update", "listingId": "…", "item": { "pricePkn": 30 } }
+```
+
+- A price in the item (`pricePkn`, or `priceEurCents` > 0) that differs from
+  the listing's current price takes it out of its group. Otherwise the
+  group's next Apply, or the daily `pricing-groups-daily` run, would
+  overwrite it.
+- Resending the price the listing already has is not a manual price, and the
+  group stays (PO3). For a listing priced by Pokoin, send no price unless the
+  seller changed it, and send a changed price with `pricingGroupId: null`
+  (PO5: "Price myself" at the same price is only visible through `null`).
+- An `update` with no price, or price 0 (which pauses), keeps both the price
+  and the group.
+- `item.pricingGroupId`:
+  - the listing's own group: it stays in it, even with a new price (the next
+    apply may change that price);
+  - another of the seller's groups: it moves there and keeps its price until
+    that group's next apply. An unknown id → 400 `pricing_group_unknown`, and
+    nothing is written;
+  - `null` or `""`: it leaves its group even without a price ("Price myself"
+    at the same price).
+- The group move and the price write are one transaction under the
+  listing's row lock, so no group run or board move lands between them (PO1,
+  PO2).
+- The response adds `leftPricingGroupId` (string | null): the group this
+  update took the listing out of. `changed` is also `true` when only the
+  group moved; repeating the same update answers `changed: false`.
+- MyPokoin follows the same rule: a new price typed in the listing edit
+  (`PATCH /api/marketplace-listings`) takes the listing out of its group, and
+  the answer carries `leftPricingGroup: { id, name } | null`. The form sends a
+  price only when the seller changed it, with `pricingGroupId: null`, which
+  the edit also honours without a price. Pokoin's own Apply and daily run
+  never take listings out of groups, and never write a listing that left
+  (`left` in the apply result counts those).
+
 ### `list` (existing): pricing on arrival
 
 - `pricingGroupId` / `pricingStrategyId` per item or for the call, with the
   same precedence as `price-quote`. An unknown id → 400
   `pricing_group_unknown` / `pricing_strategy_unknown` before the key is
   claimed.
+- **The account default** (2026-11-08): an item sent unpriced
+  (`status: "paused"`, price 0) with no choice on the item or the call is
+  priced by the seller's account default, the `pricingGroupId` /
+  `pricingStrategyId` of `scan-settings`. With no default, or one whose group
+  or strategy no longer exists, the item stays paused at 0 as before, and the
+  `list` is never refused for it. A priced item with no choice keeps its price
+  and joins no group.
 - With a group, the new listing joins it, moving out of any other group.
 - An item sent unpriced (`status: "paused"`, price 0) is priced right away by
   the strategy. It goes live when the strategy's `activatePaused` is on and a
@@ -162,7 +281,14 @@ equal to the cent, list on Pokoin either:
 - An item sent with a price keeps it.
 - The response adds `pricingGroupId` | `pricingStrategyId`, `priced`,
   `pricePkn`, `priceEurCents` (`round(pricePkn / 2)`), `status`, and `pricingError` if pricing failed. The listing
-  exists either way.
+  exists either way. It also adds `pricingFromAccountDefault` (bool): `true`
+  when the account default chose the pricing.
 
-Pokoin tests: `crates/commerce/src/handlers/seller_api.rs` (`pricing_tests`),
-`crates/external/src/pricing.rs`, `crates/external/tests/scan_batch_pricing_flow.rs`.
+Pokoin tests:
+- `crates/commerce/src/handlers/seller_api.rs`: `pricing_tests`, `tool_listing_says_which_group_prices_it`;
+- `crates/commerce/src/handlers/pricer.rs`: the `po*` tests and `group_move_matches_the_model_table`;
+- `crates/commerce/tests/price_ownership_flow.rs`: one test per invariant, PO1–PO8;
+- `crates/external/src/pricing.rs` and `crates/external/tests/scan_batch_pricing_flow.rs`;
+- `market/src/pricing-group-note.test.js`.
+
+Model: `specs/tla/price-ownership`.
