@@ -13,7 +13,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
-import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
+import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox } from '@market/inventory-listings.js';
@@ -102,6 +102,8 @@ export default function ListingForm(props) {
   const blank = untrack(() => blankListingForm(props.card));
   const [price, setPrice] = createSignal(blank.price);
   let priceManual = Boolean(untrack(() => props.editing?.id));
+  // The seller typed a price in this edit (an edit sends the price only then).
+  let priceTyped = false;
   let priceFocused = false;
   let currencyManual = false;
   let boxTouched = false;
@@ -197,6 +199,7 @@ export default function ListingForm(props) {
   createEffect(resetKey, () => {
     const editing = untrack(() => props.editing);
     const row = untrack(card);
+    priceTyped = false;
     if (editing?.id) {
       applyFields(listingFormFromOffer(editing, row));
       priceManual = true;
@@ -433,9 +436,11 @@ export default function ListingForm(props) {
         setName: props.identity.set,
         collectorNumber: props.identity.number,
       };
+      const { pricePkn: _typedPrice, ...editFields } = fields;
       const saved = editing
         ? await updateListing(id, {
-          ...fields,
+          ...editFields,
+          ...editPriceFields(amount, props.editing?.pricePkn ?? props.editing?.price_pkn, priceTyped),
           sellerUid: uid() || props.editing?.sellerUid,
           status: 'active',
         }, token)
@@ -573,6 +578,7 @@ export default function ListingForm(props) {
               const next = event.currentTarget.value;
               setPrice(next);
               priceManual = next.trim() !== '';
+              priceTyped = true;
             }}
           />
         </label>

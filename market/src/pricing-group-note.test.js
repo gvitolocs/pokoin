@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groupPriceNote, leftGroupLine, listingPricingGroup } from './pricing-group-note.js';
+import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from './pricing-group-note.js';
+
+test('an edit sends a price only when the seller changed it, as "price myself"', () => {
+  // PO3: another field edited, the price the form read is not resent.
+  assert.deepEqual(editPriceFields(400, 410, false), {});
+  // Typed the price it already has: nothing to send.
+  assert.deepEqual(editPriceFields(410, 410, true), {});
+  // PO5: a new price, with pricingGroupId null.
+  assert.deepEqual(editPriceFields(420, 410, true), { pricePkn: 420, pricingGroupId: null });
+  // An unpriced listing given a price.
+  assert.deepEqual(editPriceFields(20, 0, true), { pricePkn: 20, pricingGroupId: null });
+  assert.deepEqual(editPriceFields(NaN, 410, true), {});
+  assert.deepEqual(editPriceFields(0, 410, true), {});
+});
 
 const data = {
   groups: [{ id: 'pg_1', name: 'Riftbound bulk', strategyId: 'st_a' }, { id: 'pg_2', name: '' }],

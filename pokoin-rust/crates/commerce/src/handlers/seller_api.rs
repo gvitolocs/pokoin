@@ -1281,8 +1281,17 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     }
     // A manual price takes the listing out of its pricing group, unless the
     // item names that group (`item.pricingGroupId`); `pricingGroupId: null`
-    // takes it out at any price, another group id moves it there.
+    // takes it out at any price, another group id moves it there. The move
+    // is decided and applied in the write's transaction, under the row lock
+    // (`pricer::apply_guard`; specs/tla/price-ownership).
     let uid = grant.seller_uid.as_str();
+    let named = super::pricer::named_group(&body["item"]);
+    if let Some(group) = named.as_deref().filter(|g| !g.is_empty()) {
+        // An unknown group is refused before anything is written.
+        super::pricer::BatchPricing::Group(group.to_string()).check(state, uid).await?;
+    }
+    // What the guard would do as the listing reads now: a call that changes
+    // no field and moves no group writes nothing (a retry re-queues nothing).
     let current = pokoin_external::pricing_store::listing_groups(state.write_db(), uid, &[uuid])
         .await
         .map_err(super::pricer::from_external)?
@@ -1290,29 +1299,14 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
         .next()
         .and_then(|(_, group)| group["id"].as_str().map(str::to_string));
     let manual = super::pricer::is_manual_price(live::number(&row["price_pkn"]), patch.get("pricePkn").map(live::number));
-    let named = super::pricer::named_group(&body["item"]);
     let movement = super::pricer::group_move(current.as_deref(), named.as_deref(), manual);
-    // The membership moves before the price is written: a retry after a
-    // failed write still finds the price unwritten and the group already left.
-    let left = match &movement {
-        super::pricer::GroupMove::Keep => None,
-        super::pricer::GroupMove::Leave => {
-            pokoin_external::pricing_store::remove_members(state.write_db(), uid, &[uuid])
-                .await
-                .map_err(super::pricer::from_external)?;
-            current.clone()
-        }
-        super::pricer::GroupMove::Join(group) => {
-            super::pricer::BatchPricing::Group(group.clone()).check(state, uid).await?;
-            pokoin_external::pricing_store::add_members(state.write_db(), uid, group, &[uuid])
-                .await
-                .map_err(super::pricer::from_external)?;
-            None
-        }
-    };
-    let changed = patch_differs(&row, &patch);
-    let row = if changed {
-        super::listings::update_listing(state, &seller_claims(grant), &uuid.to_string(), &patch).await?;
+    let differs = patch_differs(&row, &patch);
+    let mut outcome = super::pricer::GroupOutcome::default();
+    let row = if differs || movement != super::pricer::GroupMove::Keep {
+        let guard = super::pricer::GroupGuard::Manual { named, may_join: true };
+        outcome = super::listings::update_listing_guarded(state, &seller_claims(grant), &uuid.to_string(), &patch, &guard)
+            .await?
+            .1;
         // The marketplace update returns its public shape; read the raw row
         // back for the tool's listing shape.
         sqlx::query_scalar::<_, Value>("select to_jsonb(l) from public.marketplace_user_listings l where id = $1")
@@ -1328,9 +1322,9 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     Ok(json!({
         "confirmed": true,
         "listingId": id,
-        "changed": changed || movement != super::pricer::GroupMove::Keep,
+        "changed": differs || outcome.moved,
         // The group this update took the listing out of, else null.
-        "leftPricingGroupId": left,
+        "leftPricingGroupId": outcome.left.map(|(id, _)| id),
         "listing": tool_listing(&row, &sold, &external, &pricing),
     }))
 }

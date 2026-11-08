@@ -4,6 +4,21 @@
  * docs/pricer-cardrails-contract.md). These lines tell the seller so.
  */
 
+/**
+ * The price fields of a listing edit: the price only when the seller changed
+ * it in this edit (typed a price that differs from the listing's), and then
+ * with `pricingGroupId: null` ("I price this myself"). Resending the price
+ * the form read when it opened would undo an overnight re-price and take the
+ * listing out of its group (specs/tla/price-ownership, PO3 NoPriceNoChange,
+ * PO5 PriceMyselfHonoured).
+ */
+export function editPriceFields(amountPkn, originalPkn, typed) {
+  const amount = Number(amountPkn);
+  if (!typed || !Number.isFinite(amount) || amount <= 0) return {};
+  if (Number.isFinite(Number(originalPkn)) && Math.abs(amount - Number(originalPkn)) < 0.005) return {};
+  return { pricePkn: amount, pricingGroupId: null };
+}
+
 /** The group (`{ id, name }`) a listing is in, from fetchPricingGroups' answer, or null. */
 export function listingPricingGroup(data, listingId) {
   const id = String(listingId ?? '');

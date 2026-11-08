@@ -144,7 +144,10 @@ pub async fn comps_for(state: &DomainState, uid: &str, rows: &[Value]) -> Result
 
 /// The plan for `rows` under `strategy`, and with `apply` its changes
 /// written. Returns `{ plan, scoped, noComp, unchanged, applied, failed }`.
-pub async fn run_plan(state: &DomainState, uid: &str, rows: &[Value], strategy: &Value, apply: bool) -> Result<Value, ApiError> {
+/// `group`: the group being applied. Each write then holds only while the
+/// listing is still in it (a manual price that took it out meanwhile wins:
+/// PO2 ManualPriceKept); such a listing is counted in `left`.
+pub async fn run_plan(state: &DomainState, uid: &str, rows: &[Value], strategy: &Value, apply: bool, group: Option<&str>) -> Result<Value, ApiError> {
     let comps = comps_for(state, uid, rows).await?;
     let mut plan = Vec::new();
     let (mut no_comp, mut unchanged, mut scoped) = (0, 0, 0);
@@ -167,14 +170,15 @@ pub async fn run_plan(state: &DomainState, uid: &str, rows: &[Value], strategy: 
         scoped += 1;
     }
     let mut applied = 0;
+    let mut left = 0;
     let mut failed = Vec::new();
     if apply {
-        let claims = crate::Claims { uid: uid.to_string(), ..Default::default() };
         for entry in &plan {
             let id = entry["listingId"].as_str().unwrap_or("");
             let update = pricing::plan_update(entry["target"].as_f64().unwrap_or(0.0), entry["activate"] == true);
-            match super::listings::update_listing(state, &claims, id, &update).await {
-                Ok(_) => applied += 1,
+            match write_run_price(state, uid, group, id, &update).await {
+                Ok(true) => applied += 1,
+                Ok(false) => left += 1,
                 Err(error) => failed.push(json!({ "listingId": id, "error": error.message })),
             }
         }
@@ -182,7 +186,7 @@ pub async fn run_plan(state: &DomainState, uid: &str, rows: &[Value], strategy: 
     let activated = plan.iter().filter(|entry| entry["activate"] == true).count();
     Ok(json!({
         "plan": plan, "scoped": scoped, "noComp": no_comp, "unchanged": unchanged,
-        "activated": activated, "applied": applied, "failed": failed, "dryRun": !apply,
+        "activated": activated, "applied": applied, "left": left, "failed": failed, "dryRun": !apply,
     }))
 }
 
@@ -206,7 +210,7 @@ pub async fn apply_group(state: &DomainState, uid: &str, group_id: &str, only: O
         let keep: std::collections::HashSet<String> = only.iter().map(Uuid::to_string).collect();
         rows.retain(|row| row["id"].as_str().is_some_and(|id| keep.contains(id)));
     }
-    let mut out = run_plan(state, uid, &rows, &strategy, apply).await?;
+    let mut out = run_plan(state, uid, &rows, &strategy, apply, Some(group_id)).await?;
     if apply {
         let count = |key: &str| out[key].as_u64().unwrap_or(0) as usize;
         let summary = pricing_store::applied_summary(
@@ -233,7 +237,7 @@ pub async fn apply_strategy(state: &DomainState, uid: &str, strategy_id: &str, i
         .cloned()
         .ok_or_else(|| ApiError::bad_request("Pick one of your strategies.").with_code("pricing_strategy_unknown"))?;
     let rows = pricing_store::listing_rows(state.write_db(), uid, ids).await.map_err(from_external)?;
-    let mut out = run_plan(state, uid, &rows, &strategy, apply).await?;
+    let mut out = run_plan(state, uid, &rows, &strategy, apply, None).await?;
     out["strategyId"] = json!(strategy_id);
     Ok(out)
 }
@@ -293,6 +297,21 @@ impl BatchPricing {
     }
 }
 
+/// One write of a run (`RunWrite` in specs/tla/price-ownership): the planned
+/// `update` of a listing, through the seller's own listing update. With a
+/// `group`, it holds only while the listing is still in that group, checked
+/// under the row lock; `Ok(false)` when the listing left it (PO2
+/// ManualPriceKept: a manual price that took it out meanwhile wins).
+pub async fn write_run_price(state: &DomainState, uid: &str, group: Option<&str>, listing_id: &str, update: &Value) -> Result<bool, ApiError> {
+    let claims = crate::Claims { uid: uid.to_string(), ..Default::default() };
+    let guard = group.map_or(GroupGuard::None, |g| GroupGuard::Run(g.to_string()));
+    match super::listings::update_listing_guarded(state, &claims, listing_id, update, &guard).await {
+        Ok(_) => Ok(true),
+        Err(error) if error.code.as_deref() == Some("pricing_group_left") => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// A price the seller set by hand: positive, and not the price the listing
 /// already has. A write that resends the price it read (a whole-form edit, a
 /// tool resending its mirror) is not one. Prices compare to the cent of a PKN.
@@ -337,6 +356,113 @@ pub fn group_move(current: Option<&str>, named: Option<&str>, manual_price: bool
         Some(id) => GroupMove::Join(id.to_string()),
         None if manual_price && current.is_some() => GroupMove::Leave,
         None => GroupMove::Keep,
+    }
+}
+
+/// What a listing write does about the listing's pricing group. It is
+/// decided and applied in the write's own transaction, under the listing's
+/// row lock, so a run, a hand-made price and a board move on one listing
+/// never interleave (specs/tla/price-ownership: `GuardedRun`, `AtomicManual`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum GroupGuard {
+    /// Not about groups (stock, unlist, CardTrader sync).
+    None,
+    /// A group run's price: written only while the listing is still in that
+    /// group (PO2 ManualPriceKept). Otherwise the write is refused with
+    /// `pricing_group_left` and the run counts it as left.
+    Run(String),
+    /// A hand-made write (MyPokoin edit, Card Rails `update`): the group it
+    /// names (`named_group`), and whether naming another group joins it.
+    Manual { named: Option<String>, may_join: bool },
+}
+
+/// What a [`GroupGuard`] did: the group (`id`, `name`) the listing left, and
+/// whether its membership changed at all.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GroupOutcome {
+    pub left: Option<(String, String)>,
+    pub moved: bool,
+}
+
+/// Apply `guard` to listing `id` inside a transaction that already holds the
+/// listing's row lock; `stored_pkn` is its price read under that lock.
+pub async fn apply_guard(
+    tx: &mut sqlx::PgConnection,
+    uid: &str,
+    id: Uuid,
+    stored_pkn: f64,
+    body: &Value,
+    guard: &GroupGuard,
+) -> Result<GroupOutcome, ApiError> {
+    let (named, may_join) = match guard {
+        GroupGuard::None => return Ok(GroupOutcome::default()),
+        GroupGuard::Run(group) => {
+            let still: bool = sqlx::query_scalar(
+                "select exists(select 1 from public.seller_pricing_group_members \
+                 where listing_id = $1 and group_id = $2 and seller_uid = $3)",
+            )
+            .bind(id)
+            .bind(group)
+            .bind(uid)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !still {
+                return Err(ApiError::conflict("This listing left the pricing group.").with_code("pricing_group_left"));
+            }
+            return Ok(GroupOutcome::default());
+        }
+        GroupGuard::Manual { named, may_join } => (named.clone(), *may_join),
+    };
+    let price = body.get("pricePkn").map(crate::listing_live::number).filter(|pkn| pkn.is_finite() && *pkn > 0.0);
+    if named.is_none() && price.is_none() {
+        // No price and no group named: nothing to decide (PO3).
+        return Ok(GroupOutcome::default());
+    }
+    // A database without the pricing tables (a test of another feature) has no groups.
+    let grouped: bool = sqlx::query_scalar("select to_regclass('public.seller_pricing_group_members') is not null")
+        .fetch_one(&mut *tx)
+        .await?;
+    if !grouped {
+        return Ok(GroupOutcome::default());
+    }
+    let current: Option<(String, String)> = sqlx::query_as(
+        "select m.group_id, g.name from public.seller_pricing_group_members m \
+         join public.seller_pricing_groups g on g.id = m.group_id and g.seller_uid = m.seller_uid \
+         where m.listing_id = $1 and m.seller_uid = $2",
+    )
+    .bind(id)
+    .bind(uid)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let movement = group_move(current.as_ref().map(|(g, _)| g.as_str()), named.as_deref(), is_manual_price(stored_pkn, price));
+    match movement {
+        GroupMove::Keep => Ok(GroupOutcome::default()),
+        GroupMove::Join(_) if !may_join => Ok(GroupOutcome::default()),
+        GroupMove::Leave => {
+            sqlx::query("delete from public.seller_pricing_group_members where listing_id = $1 and seller_uid = $2")
+                .bind(id)
+                .bind(uid)
+                .execute(&mut *tx)
+                .await?;
+            Ok(GroupOutcome { left: current, moved: true })
+        }
+        GroupMove::Join(group) => {
+            let joined = sqlx::query(
+                "insert into public.seller_pricing_group_members (listing_id, group_id, seller_uid) \
+                 select $1, g.id, $3 from public.seller_pricing_groups g where g.id = $2 and g.seller_uid = $3 \
+                 on conflict (listing_id) do update set group_id = excluded.group_id, added_at = now() \
+                   where seller_pricing_group_members.seller_uid = excluded.seller_uid",
+            )
+            .bind(id)
+            .bind(&group)
+            .bind(uid)
+            .execute(&mut *tx)
+            .await?;
+            if joined.rows_affected() == 0 {
+                return Err(ApiError::bad_request("Unknown pricing group.").with_code("pricing_group_unknown"));
+            }
+            Ok(GroupOutcome { left: None, moved: true })
+        }
     }
 }
 
@@ -400,8 +526,52 @@ mod tests {
         assert_eq!(BatchPricing::from_fields(&json!({"pricingGroupId": null, "pricingStrategyId": ""})), BatchPricing::None);
     }
 
+    /// Conformance with the TLA+ model: every row TLC printed from the
+    /// model's rule (specs/tla/price-ownership/Rules.tla, via MoveTable.tla)
+    /// is what `group_move` and `is_manual_price` answer.
     #[test]
-    fn only_a_new_positive_price_is_a_manual_price() {
+    fn group_move_matches_the_model_table() {
+        let table = include_str!("../../../../../specs/tla/price-ownership/conformance/move-table.txt");
+        let model = include_str!("../../../../../specs/tla/price-ownership/Model.tla");
+        assert!(model.contains("EXTENDS Naturals, TLC, Rules"), "Model.tla checks this same rule");
+        let (mut moves, mut manuals) = (0, 0);
+        for line in table.lines().filter(|line| line.starts_with("<<")) {
+            let cells: Vec<&str> = line
+                .trim_start_matches("<<")
+                .trim_end_matches(">>")
+                .split(", ")
+                .map(|cell| cell.trim_matches('"'))
+                .collect();
+            match cells[0] {
+                "move" => {
+                    let current = (cells[1] != "none").then_some(cells[1]);
+                    let named = match cells[2] {
+                        "absent" => None,
+                        "null" => Some(""),
+                        group => Some(group),
+                    };
+                    let expected = match cells[4] {
+                        "keep" => GroupMove::Keep,
+                        "leave" => GroupMove::Leave,
+                        "join" => GroupMove::Join(cells[2].to_string()),
+                        other => panic!("unknown move {other}"),
+                    };
+                    assert_eq!(group_move(current, named, cells[3] == "TRUE"), expected, "{line}");
+                    moves += 1;
+                }
+                "manual" => {
+                    let (p, stored): (f64, f64) = (cells[1].parse().unwrap(), cells[2].parse().unwrap());
+                    assert_eq!(is_manual_price(stored, Some(p)), cells[3] == "TRUE", "{line}");
+                    manuals += 1;
+                }
+                other => panic!("unknown row {other}"),
+            }
+        }
+        assert_eq!((moves, manuals), (24, 16), "the whole table was read");
+    }
+
+    #[test]
+    fn po3_only_a_new_positive_price_is_a_manual_price() {
         assert!(is_manual_price(400.0, Some(500.0)));
         assert!(is_manual_price(0.0, Some(20.0)), "pricing an unpriced listing by hand");
         assert!(!is_manual_price(400.0, Some(400.0)), "the same price resent");
@@ -412,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn a_write_names_a_group_none_or_nothing() {
+    fn po5_a_write_names_a_group_null_or_nothing() {
         assert_eq!(named_group(&json!({})), None);
         assert_eq!(named_group(&json!({"pricingGroupId": null})), Some(String::new()));
         assert_eq!(named_group(&json!({"pricingGroupId": " pg_1 "})), Some("pg_1".into()));
@@ -420,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn a_manual_price_leaves_the_group_unless_the_write_names_it() {
+    fn po1_po5_a_manual_price_leaves_the_group_unless_the_write_names_it() {
         // A manual price on a grouped listing: out of the group.
         assert_eq!(group_move(Some("pg_1"), None, true), GroupMove::Leave);
         // No price, or the same price: the group stays.

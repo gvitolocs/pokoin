@@ -204,11 +204,26 @@ by one **named strategy**.
   counted and the run goes on.
 - **A manual price leaves the group** (2026-11-08). A new price typed by
   hand on a grouped listing (the listing edit in MyPokoin, or a Card Rails
-  `update`) takes the listing out of its group first, so Apply and the daily
-  run never overwrite it. Resending the same price, or a write with no price,
-  keeps the group. The edit form says so under the price and after saving.
-  The rule is `pricer::group_move`; the connector fields are in
-  docs/pricer-cardrails-contract.md.
+  `update`) takes the listing out of its group in the same transaction, so
+  Apply and the daily run never overwrite it.
+  - Resending the same price, or a write with no price, keeps the group.
+    `pricingGroupId: null` takes the listing out even at the same price.
+  - A run's write holds only while the listing is still in the group, checked
+    under the row lock. A listing that left is counted in `left`, not
+    written.
+  - The edit form sends a price only when the seller changed it, and says so
+    under the price and after saving.
+  - The rule is `pricer::group_move`, and its invariants PO1–PO8 are
+    model-checked in `specs/tla/price-ownership`:
+    - PO1 `OneOwner`;
+    - PO2 `ManualPriceKept`;
+    - PO3 `NoPriceNoChange`;
+    - PO4 `NoPingPong`;
+    - PO5 `PriceMyselfHonoured`;
+    - PO6 `ListNeverRefused`;
+    - PO7 `UnpricedStaysPaused`;
+    - PO8 `CardRailsConverges`.
+  - Connector fields and the table: docs/pricer-cardrails-contract.md.
 - **One rule, three places**: `market/src/pricer.js` (web, tests in
   `pricer.test.js`), `crates/external/src/pricing.rs` (server) and the
   rounding-and-floor core `ct_fees::floor_price_rounded`, which Verus proves

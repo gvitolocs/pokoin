@@ -32,52 +32,7 @@ use pokoin_commerce::config::CommerceConfig;
 use pokoin_commerce::state::DomainState;
 use pokoin_commerce::{listing_sync, seller_api};
 
-const LISTINGS_SQL: &str = "
-drop table if exists public.seller_api_listing_keys, public.seller_webhook_deliveries,
-  public.seller_api_events, public.seller_api_grants, public.marketplace_outbox,
-  public.marketplace_user_listings cascade;
-create table public.marketplace_user_listings (
-  id uuid primary key default gen_random_uuid(),
-  card_id text not null,
-  seller_uid text not null,
-  seller_name text not null default 'Pokoin seller',
-  seller_country text not null default 'EU',
-  seller_reputation_label text not null default 'New',
-  condition text not null default 'NM',
-  language text not null default 'EN',
-  price_pkn numeric not null check (price_pkn > 0),
-  quantity_available integer not null default 1 check (quantity_available >= 0),
-  signed boolean not null default false,
-  reverse boolean not null default false,
-  first_edition boolean not null default false,
-  foil_state text not null default 'standard',
-  variant_state text not null default '',
-  sealed boolean not null default false,
-  graded boolean not null default false,
-  grading_company text,
-  grade text,
-  certification_id text,
-  shipping_available boolean not null default true,
-  reserve_available boolean not null default false,
-  nft_available boolean not null default false,
-  seller_comment text not null default '',
-  source text not null default 'pokoin_user_listing',
-  source_listing_id text not null default '',
-  status text not null default 'active' check (status in ('active', 'paused', 'inactive', 'sold_out')),
-  card_name text not null default '',
-  card_image_url text not null default '',
-  set_name text not null default '',
-  collector_number text not null default '',
-  location text not null default '',
-  altered boolean not null default false,
-  marketplace_game text not null default 'pokemon',
-  photo_urls text[] not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create or replace function public.refresh_marketplace_blueprint_price_summary(text)
-  returns void language sql as 'select';
-";
+const LISTINGS_SQL: &str = include_str!("sql/flow_listings.sql");
 
 struct UidToken;
 #[async_trait]
@@ -123,18 +78,6 @@ async fn drain(state: &DomainState) {
 
 async fn count(pool: &PgPool, sql: &str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.expect("count")
-}
-
-/// A live seller-1 listing at `price` PKN.
-async fn priced_listing(pool: &PgPool, price: i32) -> uuid::Uuid {
-    sqlx::query_scalar(
-        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, price_pkn, quantity_available, card_name) \
-         values ('220962', 'seller-1', 'alice', 'IT', $1, 2, 'Espurr') returning id",
-    )
-    .bind(price)
-    .fetch_one(pool)
-    .await
-    .expect("listing")
 }
 
 #[tokio::test]
@@ -544,97 +487,7 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(origin_of(&json!(mine.to_string())), Some(json!("pokoin")));
     assert!(!book.to_string().contains("cardrails_key"));
 
-    // --- one pricer: the pull names the group, a manual price leaves it ------
-    // (docs/pricer-cardrails-contract.md; no Firestore here, so strategy
-    // names read as null and a group's apply answers a pricingError.)
-    run_sql(&pool, "insert into public.seller_pricing_groups (id, seller_uid, name, strategy_id, auto_daily) values
-        ('pg_bulk', 'seller-1', 'Riftbound bulk', 'st_gone', true), ('pg_rare', 'seller-1', 'Rares', 'st_gone', false),
-        ('pg_theirs', 'seller-2', 'Theirs', 'st_x', false);").await;
-    let (a, b, c) = (priced_listing(&pool, 400).await, priced_listing(&pool, 400).await, priced_listing(&pool, 400).await);
-    sqlx::query("insert into public.seller_pricing_group_members (listing_id, group_id, seller_uid) select unnest($1::uuid[]), 'pg_bulk', 'seller-1'")
-        .bind(vec![a, b, c]).execute(&pool).await.unwrap();
-    let group_of = |id: uuid::Uuid| {
-        let pool = pool.clone();
-        async move {
-            sqlx::query_scalar::<_, String>("select group_id from public.seller_pricing_group_members where listing_id = $1")
-                .bind(id).fetch_optional(&pool).await.unwrap()
-        }
-    };
-    let (_, page) = connector(&app, &token, json!({"action":"listings","limit":500})).await;
-    let entry = |id: &uuid::Uuid| page["listings"].as_array().unwrap().iter().find(|l| l["listingId"] == id.to_string()).cloned().unwrap();
-    let pulled = entry(&a);
-    assert_eq!(
-        (pulled["pricingGroupId"].clone(), pulled["pricingGroupName"].clone(), pulled["pricingStrategyId"].clone(), pulled["pricingAutoDaily"].clone()),
-        (json!("pg_bulk"), json!("Riftbound bulk"), json!("st_gone"), json!(true)),
-        "{pulled}"
-    );
-    assert_eq!(pulled["pricingStrategyName"], Value::Null);
-    let ungrouped = page["listings"].as_array().unwrap().iter().find(|l| l["listingId"] == saved["listingId"]).unwrap();
-    assert_eq!((ungrouped["pricingGroupId"].clone(), ungrouped["pricingAutoDaily"].clone()), (Value::Null, json!(false)));
-
-    // A new price by hand: out of the group, the price is the seller's.
-    let (status, manual) = connector(&app, &token, update(json!({"priceEurCents":250}), &a)).await;
-    assert_eq!(status, StatusCode::OK, "{manual}");
-    assert_eq!((manual["leftPricingGroupId"].clone(), manual["listing"]["pricingGroupId"].clone()), (json!("pg_bulk"), Value::Null), "{manual}");
-    assert_eq!((manual["changed"].clone(), manual["listing"]["pricePkn"].clone()), (json!(true), json!(500)));
-    assert_eq!(group_of(a).await, None);
-    // A price with the group named: it stays in it.
-    let (_, kept) = connector(&app, &token, update(json!({"pricePkn":410,"pricingGroupId":"pg_bulk"}), &b)).await;
-    assert_eq!((kept["leftPricingGroupId"].clone(), kept["listing"]["pricingGroupId"].clone()), (Value::Null, json!("pg_bulk")), "{kept}");
-    assert_eq!(kept["listing"]["pricePkn"], 410);
-    // No price, or the price it already has: price and group stay.
-    let (_, moved) = connector(&app, &token, update(json!({"location":"BIN-30"}), &c)).await;
-    assert_eq!((moved["changed"].clone(), moved["listing"]["pricingGroupId"].clone(), moved["listing"]["pricePkn"].clone()), (json!(true), json!("pg_bulk"), json!(400)), "{moved}");
-    let (_, same) = connector(&app, &token, update(json!({"pricePkn":400,"location":"BIN-30"}), &c)).await;
-    assert_eq!((same["changed"].clone(), same["leftPricingGroupId"].clone(), same["listing"]["pricingGroupId"].clone()), (json!(false), Value::Null, json!("pg_bulk")), "{same}");
-    // Another of the seller's groups moves it; repeating changes nothing.
-    let (_, other_group) = connector(&app, &token, update(json!({"pricingGroupId":"pg_rare"}), &c)).await;
-    assert_eq!((other_group["changed"].clone(), other_group["listing"]["pricingGroupName"].clone()), (json!(true), json!("Rares")), "{other_group}");
-    let (_, again) = connector(&app, &token, update(json!({"pricingGroupId":"pg_rare"}), &c)).await;
-    assert_eq!(again["changed"], false, "{again}");
-    // Another seller's group does not exist for this grant: nothing is written.
-    let (status, refused) = connector(&app, &token, update(json!({"pricingGroupId":"pg_theirs","pricePkn":999}), &c)).await;
-    assert_eq!((status, refused["code"].clone()), (StatusCode::BAD_REQUEST, json!("pricing_group_unknown")), "{refused}");
-    assert_eq!(group_of(c).await.as_deref(), Some("pg_rare"));
-    assert_eq!(count(&pool, &format!("select price_pkn::bigint from public.marketplace_user_listings where id = '{c}'")).await, 400);
-    // `pricingGroupId: null` ("Price myself"): out at the same price.
-    let (_, myself) = connector(&app, &token, update(json!({"pricingGroupId":null}), &c)).await;
-    assert_eq!((myself["leftPricingGroupId"].clone(), myself["listing"]["pricePkn"].clone()), (json!("pg_rare"), json!(400)), "{myself}");
-    assert_eq!(group_of(c).await, None);
-
-    // MyPokoin's listing edit follows the same rule.
-    let edit = |id: uuid::Uuid| format!("/api/marketplace-listings?id={id}");
-    let (status, resent) = call(&app, "PATCH", &edit(b), "seller-1", json!({"pricePkn":410,"quantityAvailable":2})).await;
-    assert_eq!(status, StatusCode::OK, "{resent}");
-    assert_eq!(resent["leftPricingGroup"], Value::Null, "the form resent the price it read");
-    assert_eq!(group_of(b).await.as_deref(), Some("pg_bulk"));
-    let (status, typed) = call(&app, "PATCH", &edit(b), "seller-1", json!({"pricePkn":420,"quantityAvailable":2})).await;
-    assert_eq!(status, StatusCode::OK, "{typed}");
-    assert_eq!(typed["leftPricingGroup"], json!({"id":"pg_bulk","name":"Riftbound bulk"}), "{typed}");
-    assert_eq!(group_of(b).await, None);
-    assert_eq!(count(&pool, &format!("select price_pkn::bigint from public.marketplace_user_listings where id = '{b}'")).await, 420);
-
-    // --- list: an unpriced item with no choice takes the account default ----
-    let unpriced_item = |key: &str| json!({"action":"list","idempotencyKey":key,"item":{
-        "identity":{"publicId":"741592","game":"pokemon"},"quantity":1,"priceEurCents":0,"status":"paused","condition":"NM","language":"IT"}});
-    let (_, none) = connector(&app, &token, unpriced_item("acct-none")).await;
-    assert!(none.get("pricingGroupId").is_none(), "no default yet: it stays unpriced, {none}");
-    run_sql(&pool, "update public.scan_batches set defaults = defaults || '{\"pricingGroupId\":\"pg_bulk\"}' where seller_uid = 'seller-1'").await;
-    let (status, defaulted) = connector(&app, &token, unpriced_item("acct-default")).await;
-    assert_eq!(status, StatusCode::OK, "{defaulted}");
-    assert_eq!((defaulted["pricingGroupId"].clone(), defaulted["pricingFromAccountDefault"].clone()), (json!("pg_bulk"), json!(true)), "{defaulted}");
-    let joined = uuid::Uuid::parse_str(defaulted["listingId"].as_str().unwrap()).unwrap();
-    assert_eq!(group_of(joined).await.as_deref(), Some("pg_bulk"));
-    // The item's own choice still wins, and a priced item keeps its price and no group.
-    let (_, own) = connector(&app, &token, json!({"action":"list","idempotencyKey":"acct-own","pricingGroupId":"pg_rare","item":unpriced_item("x")["item"].clone()})).await;
-    assert_eq!((own["pricingGroupId"].clone(), own["pricingFromAccountDefault"].clone()), (json!("pg_rare"), json!(false)), "{own}");
-    let (_, priced) = connector(&app, &token, copy("acct-priced", 170)).await;
-    assert!(priced.get("pricingGroupId").is_none(), "{priced}");
-    // A default whose group is gone is no default: never refused, stays paused.
-    run_sql(&pool, "update public.scan_batches set defaults = defaults || '{\"pricingGroupId\":\"pg_deleted\"}' where seller_uid = 'seller-1'").await;
-    let (status, stale) = connector(&app, &token, unpriced_item("acct-stale")).await;
-    assert_eq!(status, StatusCode::OK, "{stale}");
-    assert!(stale.get("pricingGroupId").is_none(), "{stale}");
+    // The pricing-group rules (one pricer) are price_ownership_flow.rs.
 
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;

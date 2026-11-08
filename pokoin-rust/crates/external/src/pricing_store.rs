@@ -99,14 +99,29 @@ pub async fn listing_groups(db: &PgPool, uid: &str, ids: &[Uuid]) -> ApiResult<V
     Ok(sqlx::query_as::<_, (String, Value)>(LISTING_GROUPS_SQL).bind(uid).bind(ids).fetch_all(db).await?)
 }
 
+/// The listings' row locks, taken in id order, serialise a board move with
+/// a manual price and a run's write on the same listing (each holds that
+/// lock: specs/tla/price-ownership).
 const ADD_SQL: &str = "
+  with locked as (
+    select l.id from public.marketplace_user_listings l
+    where l.id = any($3::uuid[]) and l.seller_uid = $1
+    order by l.id for update)
   insert into public.seller_pricing_group_members (listing_id, group_id, seller_uid)
-  select l.id, g.id, $1
-  from public.marketplace_user_listings l
+  select locked.id, g.id, $1
+  from locked
   join public.seller_pricing_groups g on g.id = $2 and g.seller_uid = $1
-  where l.id = any($3::uuid[]) and l.seller_uid = $1
   on conflict (listing_id) do update set group_id = excluded.group_id, added_at = now()
     where seller_pricing_group_members.seller_uid = excluded.seller_uid";
+
+const REMOVE_SQL: &str = "
+  with locked as (
+    select l.id from public.marketplace_user_listings l
+    where l.id = any($2::uuid[]) and l.seller_uid = $1
+    order by l.id for update)
+  delete from public.seller_pricing_group_members m
+  using locked
+  where m.listing_id = locked.id and m.seller_uid = $1";
 
 /// Put the seller's own listings in a group, moving them out of any other.
 /// Ids that are not this seller's listings are ignored. Returns how many
@@ -124,7 +139,7 @@ pub async fn remove_members(db: &PgPool, uid: &str, ids: &[Uuid]) -> ApiResult<u
     if ids.is_empty() {
         return Ok(0);
     }
-    let done = sqlx::query("delete from public.seller_pricing_group_members where seller_uid = $1 and listing_id = any($2::uuid[])")
+    let done = sqlx::query(REMOVE_SQL)
         .bind(uid)
         .bind(ids)
         .execute(db)
@@ -239,6 +254,11 @@ mod tests {
         // A listing only joins a group of its own seller, and a move never
         // takes another seller's membership row.
         assert!(ADD_SQL.contains("l.seller_uid = $1") && ADD_SQL.contains("g.seller_uid = $1"));
+        // Board moves take the listings' row locks, in id order.
+        for sql in [ADD_SQL, REMOVE_SQL] {
+            assert!(sql.contains("order by l.id for update"), "{sql}");
+            assert!(sql.contains("l.seller_uid = $1"));
+        }
         assert!(ADD_SQL.contains("where seller_pricing_group_members.seller_uid = excluded.seller_uid"));
         assert!(UPSERT_SQL.contains("where seller_pricing_groups.seller_uid = excluded.seller_uid"));
         // A listing's group is read only from its own seller's rows.
