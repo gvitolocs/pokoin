@@ -619,3 +619,120 @@ Spec choices that the facts do not settle are listed in
 connector choice is nondeterministic, the k3s replicas are one connector, the
 k3s → Pi fallback is not modelled, and the watchdog bound and `DeadTTL` are one
 period each.
+
+## Price ownership: one pricer when Card Rails is connected (`price-ownership`, 2026-11-08)
+
+The owner asked for this model before PR #530 lands ("Yes, spec first"). It
+covers one listing with every writer interleaving:
+- group runs (Apply, daily);
+- market moves;
+- the MyPokoin edit and the Pricer board;
+- Card Rails `update`, its pull and its own CardTrader import;
+- Pokoin's CardTrader sync (link, push, price edits);
+- `list` (item choice, call choice, account default, none).
+
+Card Rails is modelled with the agreed behaviour. Invariants PO1–PO7 and the
+liveness property PO8 are listed in [`price-ownership/README.md`](price-ownership/README.md).
+
+Bounds: two groups, prices 1..2, one market move, two Card Rails edits, one
+MyPokoin edit, two runs, one Card Rails CardTrader import, one board move.
+
+TLC 2026.10.06 ran on nezopt through `verify-gate` with
+`TMPDIR=~/scratch/...`. The state files no longer fit in `/tmp`: the first run
+filled the 31 GB tmpfs at prices 1..3.
+
+| Config | Result | Distinct states | Depth |
+| --- | --- | --- | --- |
+| `price-ownership/Model.cfg` | pass, PO1–PO7 | 6,687,319 | 19 |
+| `price-ownership/default-gone.cfg` | pass, PO1–PO7 | 6,217,379 | 19 |
+| `price-ownership/liveness.cfg` | pass, PO8 | 598,279 | 15 |
+| 7 `bugs/*.cfg` | each reports its violation | | |
+| 4 `witness/*.cfg` | each finds the behaviour reachable | | |
+| two-step manual write (not kept as a config) | pass, PO1–PO7 | 18,203,172 | |
+
+### PO-A: a run overwrote a manual price that left its group meanwhile (TLC, `bugs/unguarded-run.cfg`)
+
+As #530 was first pushed, `run_plan` read the group's rows, and then wrote
+each planned price unconditionally. Card Rails' `update` or a MyPokoin edit
+could take a listing out of the group between that read and that write. The
+run's write then replaced the seller's price. This is a 5-state trace that
+violates `ManualPriceKept`.
+
+Fixed in two places:
+- `pricer::write_run_price` writes through `update_listing_guarded` with
+  `GroupGuard::Run(group)`. The guard checks the membership in the write's
+  own transaction, under the listing's row lock, and refuses with
+  `pricing_group_left`. The run counts such a listing in `left`.
+- Pricer-board add and remove now take the same row locks (`ADD_SQL`,
+  `REMOVE_SQL`, in id order).
+
+Test: `price_ownership_flow::po2_manual_price_kept_a_run_never_writes_a_listing_that_left`.
+
+### PO-B: the MyPokoin edit form resent the price it read (TLC, `bugs/form-resends-stale.cfg`)
+
+This is R5's twin inside Pokoin. `ListingForm.jsx` sent `pricePkn` on every
+save, using the price read when the form opened. After an overnight
+re-price, a quantity-only edit sent the old price. Under the new rule that is
+a manual price, so the listing left its group at the stale price. This
+violates `NoPriceNoChange`.
+
+Fixed: `editPriceFields` (`market/src/pricing-group-note.js`) sends the
+price only when the seller typed a different one, together with
+`pricingGroupId: null`. The PATCH route honours `null` even without a price.
+
+Tests: `pricing-group-note.test.js` and `price_ownership_flow::po3_*`.
+
+### PO-C: "Price myself" at the same price needs `pricingGroupId: null` (TLC, `bugs/price-myself-same-price.cfg`)
+
+A resend and "Price myself" at the same price are indistinguishable without
+`null`. The listing stays in its group, which violates
+`PriceMyselfHonoured`. This confirms the rule "resending the same price
+keeps the group" as long as both clients send `null` with every price the
+seller changed.
+- The contract now says this, and the MyPokoin form does it.
+- Card Rails must do it (reported to the Card Rails session).
+
+Test: `price_ownership_flow::po5_*`.
+
+### Reproduced, Card Rails side and before #530
+
+- `bugs/pre-530-manual-wiped.cfg`: before #530, a manual price stayed in its
+  group and the next run overwrote it (`ManualPriceKept`).
+- `bugs/r5-stale-resend.cfg` (R5): Card Rails resent its cached price on
+  every edit. After a re-price, an edit of another field detached the listing
+  at the stale price (`NoPriceNoChange`).
+- `bugs/r6-import-pingpong.cfg` (R6): Card Rails' CardTrader import wrote the
+  ask into a Pokoin-linked row, and the pull wrote Pokoin's price back
+  (`NoPingPong`). This is fixed by the agreed behaviour: the import never
+  writes the price of a linked row.
+- `bugs/naive-default.cfg`: a `list` that refused over a deleted account
+  default would break `ListNeverRefused`. #530 never refuses.
+
+### Design checked, not changed
+
+- **Two-step manual write.** The group move and the price write as two
+  steps also satisfy PO1–PO7 once runs are guarded (18.2M states). #530
+  still does both in one transaction under the row lock
+  (`pricer::apply_guard`): it is simpler to reason about and needs no
+  retry rule.
+- **Pokoin's CardTrader link** (`link_existing_listing`) writes the
+  product's net price once, when it links an unlinked listing. That is the
+  seller's own CardTrader price, not a group run's. Already-linked products
+  change quantity only, so the CardTrader sync never ping-pongs with groups.
+
+### Spec correction
+
+The first run stopped with "variable `sneaky` is not defined" on the R5 and
+form configs. `sneaky' = sneaky \/ (…)` parses as `(sneaky' = sneaky) \/ (…)`.
+This is a precedence slip in the spec, not a code finding: TLC stopped
+instead of passing silently. It is parenthesised now, and every config was
+re-run.
+
+### Conformance
+
+`Rules.tla` (`Move`, `IsManual`) is the rule both the model and the code
+use:
+- `MoveTable.tla` prints it for every input into
+  `conformance/move-table.txt` (40 rows);
+- `pricer::group_move_matches_the_model_table` asserts that `group_move` and
+  `is_manual_price` agree on every row.

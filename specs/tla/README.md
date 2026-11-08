@@ -10,6 +10,7 @@ and a README that maps every action to the Rust code with `file:line`.
 | [`eur-fulfilment/`](eur-fulfilment/README.md) | EUR orders: reservation, Stripe webhook, buyer cancel, sweep, fulfilment lease, CardTrader buy-through |
 | [`listing-ct-sync/`](listing-ct-sync/README.md) | Card Rails `list` → Pokoin listing → one CardTrader product: key binding, pricing, reconcile push, in-doubt claims, webhook replay |
 | [`edge-coalesce/`](edge-coalesce/README.md) | Edge request coalescing (PR #307): FlightGuard, leader panic/hang-up/timeout, re-election, stale refresh |
+| [`price-ownership/`](price-ownership/README.md) | One pricer when Card Rails is connected: group runs, MyPokoin edits, the Pricer board, Card Rails `update`/pull/CardTrader import, Pokoin's CardTrader sync and `list` on one listing's price and group (PO1–PO8); `Rules.tla` is checked against `pricer::group_move` row by row |
 | [`serving/`](serving/README.md) | cdn.pokoin.com serving path: name bindings vs cloud-init reboots, origin-gated tunnel connectors, sentinel detection, image-memo recovery (serving pipeline D1–D5) |
 
 [`FINDINGS.md`](FINDINGS.md) records every counterexample TLC found, whether
