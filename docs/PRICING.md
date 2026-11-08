@@ -202,6 +202,13 @@ by one **named strategy**.
   after the 04:30 price-store refill) applies every group with the daily
   switch on, oldest apply first. It writes by default. A failing group is
   counted and the run goes on.
+- **A manual price leaves the group** (2026-11-08). A new price typed by
+  hand on a grouped listing (the listing edit in MyPokoin, or a Card Rails
+  `update`) takes the listing out of its group first, so Apply and the daily
+  run never overwrite it. Resending the same price, or a write with no price,
+  keeps the group. The edit form says so under the price and after saving.
+  The rule is `pricer::group_move`; the connector fields are in
+  docs/pricer-cardrails-contract.md.
 - **One rule, three places**: `market/src/pricer.js` (web, tests in
   `pricer.test.js`), `crates/external/src/pricing.rs` (server) and the
   rounding-and-floor core `ct_fees::floor_price_rounded`, which Verus proves

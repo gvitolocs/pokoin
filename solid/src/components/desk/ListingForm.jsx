@@ -5,6 +5,7 @@ import {
   cardHref,
   createListing,
   fetchPriceCheck,
+  fetchPricingGroups,
   fetchSellerBoxSlots,
   formatPknNumber,
   publicCardId,
@@ -12,6 +13,7 @@ import {
   updateListing,
 } from '@market/api.js';
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
+import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox } from '@market/inventory-listings.js';
@@ -153,6 +155,22 @@ export default function ListingForm(props) {
   const langKey = createMemo(() => listLangs().join(','));
   const editingId = createMemo(() => props.editing?.id || '');
   const isEditing = () => Boolean(editingId());
+  // The pricing group of the listing being edited: a new price takes it out.
+  const [priceGroup, setPriceGroup] = createSignal(null);
+  createEffect(editingId, (id) => {
+    setPriceGroup(null);
+    if (!id) return;
+    (async () => {
+      try {
+        const token = await getBearer();
+        if (!token) return;
+        const data = await fetchPricingGroups(token);
+        if (untrack(editingId) === id) setPriceGroup(listingPricingGroup(data, id));
+      } catch {
+        // Never block the form over the note.
+      }
+    })();
+  });
 
   function applyFields(next) {
     // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
@@ -439,6 +457,10 @@ export default function ListingForm(props) {
         setError(saved.cardtrader.error || 'CardTrader push failed.');
       } else if (saved?.listing === null && saved?.cardtrader?.ok) {
         setDone('Listed on CardTrader.');
+      } else if (editing && leftGroupLine(saved)) {
+        // The new price took the listing out of its pricing group.
+        setDone(`Listing updated. ${leftGroupLine(saved)}`);
+        setPriceGroup(null);
       } else {
         setDone(editing ? 'Listing updated.' : 'Listing created.');
       }
@@ -584,6 +606,9 @@ export default function ListingForm(props) {
           </button>
         </Show>
       </div>
+      <Show when={priceGroup()}>
+        <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
+      </Show>
       <Show when={!isEditing()}>
         <div class="sell-targets-row">
           <InventoryTargets

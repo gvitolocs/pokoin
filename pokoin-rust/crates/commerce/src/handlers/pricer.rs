@@ -293,6 +293,53 @@ impl BatchPricing {
     }
 }
 
+/// A price the seller set by hand: positive, and not the price the listing
+/// already has. A write that resends the price it read (a whole-form edit, a
+/// tool resending its mirror) is not one. Prices compare to the cent of a PKN.
+pub fn is_manual_price(stored_pkn: f64, new_pkn: Option<f64>) -> bool {
+    match new_pkn {
+        Some(pkn) if pkn.is_finite() && pkn > 0.0 => !(stored_pkn.is_finite() && (stored_pkn - pkn).abs() < 0.005),
+        _ => false,
+    }
+}
+
+/// The group a listing write names in `pricingGroupId`: `None` when the key
+/// is absent, `Some("")` for an explicit `null` or empty id ("price it
+/// myself"), else the trimmed id.
+pub fn named_group(item: &Value) -> Option<String> {
+    match item.get("pricingGroupId")? {
+        Value::Null => Some(String::new()),
+        Value::String(id) => Some(id.trim().chars().take(40).collect()),
+        _ => None,
+    }
+}
+
+/// What a listing write does to the listing's pricing group.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GroupMove {
+    Keep,
+    /// Out of its group: the price is the seller's from now on.
+    Leave,
+    /// Into this group (out of any other).
+    Join(String),
+}
+
+/// One rule for every hand-made write (a Card Rails `update`, an edit in
+/// MyPokoin): a manual price takes the listing out of its group, or the next
+/// Apply or the daily `pricing-groups-daily` run overwrites it, unless the
+/// same write names that group. Naming another group moves the listing there;
+/// naming none (`pricingGroupId: null`) takes it out at any price.
+pub fn group_move(current: Option<&str>, named: Option<&str>, manual_price: bool) -> GroupMove {
+    match named {
+        Some("") if current.is_some() => GroupMove::Leave,
+        Some("") => GroupMove::Keep,
+        Some(id) if current == Some(id) => GroupMove::Keep,
+        Some(id) => GroupMove::Join(id.to_string()),
+        None if manual_price && current.is_some() => GroupMove::Leave,
+        None => GroupMove::Keep,
+    }
+}
+
 /// `POST /api/marketplace-pricing-groups/apply` — `{ groupId | strategyId,
 /// listingIds?, dryRun }`. A dry run returns the plan; otherwise the plan is
 /// written and the result says what was applied and what failed.
@@ -351,5 +398,42 @@ mod tests {
             "the group wins"
         );
         assert_eq!(BatchPricing::from_fields(&json!({"pricingGroupId": null, "pricingStrategyId": ""})), BatchPricing::None);
+    }
+
+    #[test]
+    fn only_a_new_positive_price_is_a_manual_price() {
+        assert!(is_manual_price(400.0, Some(500.0)));
+        assert!(is_manual_price(0.0, Some(20.0)), "pricing an unpriced listing by hand");
+        assert!(!is_manual_price(400.0, Some(400.0)), "the same price resent");
+        assert!(!is_manual_price(400.0, Some(400.001)));
+        assert!(!is_manual_price(400.0, None), "no price in the write");
+        assert!(!is_manual_price(400.0, Some(0.0)), "0 pauses, it is not a price");
+        assert!(!is_manual_price(400.0, Some(f64::NAN)));
+    }
+
+    #[test]
+    fn a_write_names_a_group_none_or_nothing() {
+        assert_eq!(named_group(&json!({})), None);
+        assert_eq!(named_group(&json!({"pricingGroupId": null})), Some(String::new()));
+        assert_eq!(named_group(&json!({"pricingGroupId": " pg_1 "})), Some("pg_1".into()));
+        assert_eq!(named_group(&json!({"pricingGroupId": 7})), None);
+    }
+
+    #[test]
+    fn a_manual_price_leaves_the_group_unless_the_write_names_it() {
+        // A manual price on a grouped listing: out of the group.
+        assert_eq!(group_move(Some("pg_1"), None, true), GroupMove::Leave);
+        // No price, or the same price: the group stays.
+        assert_eq!(group_move(Some("pg_1"), None, false), GroupMove::Keep);
+        // The write names the group it is in: it stays, whatever the price.
+        assert_eq!(group_move(Some("pg_1"), Some("pg_1"), true), GroupMove::Keep);
+        // Another group: it moves there.
+        assert_eq!(group_move(Some("pg_1"), Some("pg_2"), true), GroupMove::Join("pg_2".into()));
+        assert_eq!(group_move(None, Some("pg_2"), false), GroupMove::Join("pg_2".into()));
+        // `pricingGroupId: null`: out, even without a price.
+        assert_eq!(group_move(Some("pg_1"), Some(""), false), GroupMove::Leave);
+        assert_eq!(group_move(None, Some(""), true), GroupMove::Keep);
+        // Not grouped: nothing to leave.
+        assert_eq!(group_move(None, None, true), GroupMove::Keep);
     }
 }

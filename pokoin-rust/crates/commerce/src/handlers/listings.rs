@@ -1261,7 +1261,27 @@ pub async fn marketplace_listings_patch(
             ));
         }
         let body = parse_body(&headers, &bytes)?;
-        update_listing(&state, &claims, &id, &body).await
+        // A price typed by hand on a grouped listing takes it out of its
+        // group before the write (the rule of a Card Rails `update`), so the
+        // next Apply or daily run never overwrites it. A refused body leaves
+        // the group alone.
+        let left = match group_left_by_price(&state, &claims.uid, &id, &body).await {
+            Some(group) => {
+                update_values(&id, &claims.uid, &body)?;
+                let uuid = uuid::Uuid::parse_str(&id).map_err(|_| ApiError::not_found("Listing not found for this seller."))?;
+                pokoin_external::pricing_store::remove_members(state.write_db(), &claims.uid, &[uuid])
+                    .await
+                    .map_err(super::pricer::from_external)?;
+                Some(group)
+            }
+            None => None,
+        };
+        let mut listing = update_listing(&state, &claims, &id, &body).await?;
+        if let Some(object) = listing.as_object_mut() {
+            // `{ id, name }` of the group the edit took the listing out of.
+            object.insert("leftPricingGroup".into(), left.unwrap_or(Value::Null));
+        }
+        Ok(listing)
     }
     .await;
     let mut out = response(result, false);
@@ -1273,6 +1293,38 @@ pub async fn marketplace_listings_patch(
     }
     out
 }
+/// The pricing group (`{ id, name }`) a seller's own edit takes this listing
+/// out of: a new positive `pricePkn` on a grouped listing, unless the body
+/// names that group (`pricer::group_move`). `None` when nothing leaves; a
+/// failed lookup leaves the membership as it is.
+async fn group_left_by_price(state: &DomainState, uid: &str, id: &str, body: &Value) -> Option<Value> {
+    let price = body.get("pricePkn").map(live::number).filter(|pkn| pkn.is_finite() && *pkn > 0.0)?;
+    let uuid = uuid::Uuid::parse_str(id).ok()?;
+    let row = sqlx::query_as::<_, (f64, Option<String>, Option<String>)>(
+        "select l.price_pkn::float8, g.id, g.name from public.marketplace_user_listings l \
+         left join public.seller_pricing_group_members m on m.listing_id = l.id and m.seller_uid = l.seller_uid \
+         left join public.seller_pricing_groups g on g.id = m.group_id and g.seller_uid = m.seller_uid \
+         where l.id = $1 and l.seller_uid = $2",
+    )
+    .bind(uuid)
+    .bind(uid)
+    .fetch_optional(state.write_db())
+    .await;
+    let (stored, group_id, name) = match row {
+        Ok(row) => row?,
+        Err(error) => {
+            tracing::warn!(error = %error, "pricing-group lookup failed for a listing edit");
+            return None;
+        }
+    };
+    let group_id = group_id?;
+    let manual = super::pricer::is_manual_price(stored, Some(price));
+    match super::pricer::group_move(Some(&group_id), super::pricer::named_group(body).as_deref(), manual) {
+        super::pricer::GroupMove::Leave => Some(json!({ "id": group_id, "name": name })),
+        _ => None,
+    }
+}
+
 pub(crate) async fn update_listing(
     state: &DomainState,
     claims: &crate::Claims,

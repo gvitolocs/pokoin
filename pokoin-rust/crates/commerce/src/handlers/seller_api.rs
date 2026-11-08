@@ -379,7 +379,55 @@ async fn external_keys(state: &DomainState, grant: uuid::Uuid, listing_ids: &[uu
     }
 }
 
-fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &HashMap<String, String>) -> Value {
+/// Each listing's pricing group, keyed by listing id, as the tool shows it
+/// ("Priced by Pokoin · <group>", price field locked). One query for the
+/// page; the seller's strategies are read once, and only when a listing is
+/// grouped. A failed read never fails the page: the fields stay null.
+async fn listing_pricing(state: &DomainState, uid: &str, ids: &[uuid::Uuid]) -> HashMap<String, Value> {
+    let rows = match pokoin_external::pricing_store::listing_groups(state.write_db(), uid, ids).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "pricing-group lookup failed for a cardrails listings page");
+            return HashMap::new();
+        }
+    };
+    if rows.is_empty() {
+        return HashMap::new();
+    }
+    let strategies = super::pricer::seller_strategies(uid).await.unwrap_or_else(|error| {
+        tracing::warn!(error = %error.message, "strategy names unavailable for a cardrails listings page");
+        Vec::new()
+    });
+    rows.into_iter().map(|(id, group)| (id, pricing_view(&group, &strategies))).collect()
+}
+
+/// A grouped listing's pricing fields. `pricingStrategyName` is null when
+/// the group's strategy was deleted (or the names could not be read).
+fn pricing_view(group: &Value, strategies: &[Value]) -> Value {
+    let strategy = strategies.iter().find(|s| s["id"] == group["strategyId"]);
+    json!({
+        "pricingGroupId": group["id"],
+        "pricingGroupName": group["name"],
+        "pricingStrategyId": group["strategyId"],
+        "pricingStrategyName": strategy.map(|s| s["name"].clone()).unwrap_or(Value::Null),
+        "pricingAutoDaily": group["autoDaily"] == true,
+    })
+}
+
+/// A listing in no group: the seller prices it.
+fn no_pricing() -> Value {
+    json!({
+        "pricingGroupId": null, "pricingGroupName": null, "pricingStrategyId": null,
+        "pricingStrategyName": null, "pricingAutoDaily": false,
+    })
+}
+
+fn tool_listing(
+    row: &Value,
+    sold: &HashMap<SoldVariantKey, i64>,
+    external: &HashMap<String, String>,
+    pricing: &HashMap<String, Value>,
+) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
     let last_sold_min_eur_cents = blueprint_id_of(&row["card_id"]).and_then(|blueprint_id| {
         let key = (
@@ -391,7 +439,7 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
         );
         sold.get(&key).copied()
     });
-    json!({
+    let mut out = json!({
         "listingId": row["id"],
         "cardId": row["card_id"],
         "game": if live::field(row, "marketplace_game", 40).is_empty() { json!("pokemon") } else { row["marketplace_game"].clone() },
@@ -418,7 +466,14 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
         // The tool item this listing was created from (`list`'s
         // idempotency key on this grant); null when Pokoin did not make it.
         "externalKey": external.get(&live::field(row, "id", 80)).map(|key| json!(key)).unwrap_or(Value::Null),
-    })
+    });
+    // Its pricing group: while it is in one, Pokoin prices it
+    // (docs/pricer-cardrails-contract.md, "Pricing on the pull").
+    let group = pricing.get(&live::field(row, "id", 80)).cloned().unwrap_or_else(no_pricing);
+    if let (Some(out), Some(group)) = (out.as_object_mut(), group.as_object()) {
+        out.extend(group.clone());
+    }
+    out
 }
 
 /// The seller's live and sold-out listings, keyset-paged by id.
@@ -439,8 +494,9 @@ async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Va
         rows.iter().filter_map(|row| uuid::Uuid::parse_str(&live::field(row, "id", 80)).ok()).collect();
     let external = external_keys(state, grant.id, &ids).await;
     let sold = last_sold_minimums(state, &rows).await;
+    let pricing = listing_pricing(state, &grant.seller_uid, &ids).await;
     Ok(json!({
-        "listings": rows.iter().map(|row| tool_listing(row, &sold, &external)).collect::<Vec<_>>(),
+        "listings": rows.iter().map(|row| tool_listing(row, &sold, &external, &pricing)).collect::<Vec<_>>(),
         "cursor": next.unwrap_or(Value::Null),
     }))
 }
@@ -755,8 +811,15 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     // A refused item never claims its key.
     let listing_body = listing_body(&body["item"], if name.is_empty() { "Pokoin seller" } else { &name }, &country)?;
     // An unknown group or strategy is refused before the key is claimed.
-    let pricing = list_pricing(body);
+    let unpriced = listing_body["status"] == "paused" && live::number(&listing_body["pricePkn"]) <= 0.0;
+    let mut pricing = list_pricing(body);
     pricing.check(state, &grant.seller_uid).await?;
+    let from_account = pricing == super::pricer::BatchPricing::None && unpriced;
+    if from_account {
+        // No choice on the item or the call: the account default prices an
+        // unpriced item. A priced item keeps its price and no group.
+        pricing = account_default_pricing(state, grant).await;
+    }
     sqlx::query(
         "insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, $2) \
          on conflict (grant_id, idempotency_key) do nothing",
@@ -808,10 +871,11 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     });
     // The listing exists and the key is bound: pricing never undoes that.
     if pricing != super::pricer::BatchPricing::None {
-        let unpriced = listing_body["status"] == "paused" && live::number(&listing_body["pricePkn"]) <= 0.0;
         let priced = price_listed_item(state, &grant.seller_uid, &pricing, id, unpriced).await;
         if let Some(object) = out.as_object_mut() {
             object.extend(priced.as_object().cloned().unwrap_or_default());
+            // Priced by the seller's account default, not the item or the call.
+            object.insert("pricingFromAccountDefault".into(), json!(from_account));
         }
     }
     Ok(out)
@@ -823,6 +887,32 @@ fn list_pricing(body: &Value) -> super::pricer::BatchPricing {
     match super::pricer::BatchPricing::from_fields(&body["item"]) {
         super::pricer::BatchPricing::None => super::pricer::BatchPricing::from_fields(body),
         chosen => chosen,
+    }
+}
+
+/// The seller's account default (`scan-settings`' `pricingGroupId` /
+/// `pricingStrategyId`), for an unpriced `list` item with no choice of its
+/// own or on the call. A default whose group or strategy is gone, or that
+/// cannot be read, is no default: the item stays paused at 0, as with none.
+async fn account_default_pricing(state: &DomainState, grant: &Grant) -> super::pricer::BatchPricing {
+    use super::pricer::BatchPricing;
+    let settings = match scan_settings(state, grant).await {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "account default pricing unreadable for a cardrails list");
+            return BatchPricing::None;
+        }
+    };
+    let pricing = BatchPricing::from_fields(&settings["scanSettings"]);
+    if pricing == BatchPricing::None {
+        return pricing;
+    }
+    match pricing.check(state, &grant.seller_uid).await {
+        Ok(()) => pricing,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "account default pricing no longer exists; the item stays unpriced");
+            BatchPricing::None
+        }
     }
 }
 
@@ -1189,6 +1279,37 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     if !matches!(live::field(&row, "status", 20).as_str(), "active" | "paused" | "sold_out") {
         return Err(ApiError::conflict("This listing was removed on Pokoin.").with_code("listing_removed"));
     }
+    // A manual price takes the listing out of its pricing group, unless the
+    // item names that group (`item.pricingGroupId`); `pricingGroupId: null`
+    // takes it out at any price, another group id moves it there.
+    let uid = grant.seller_uid.as_str();
+    let current = pokoin_external::pricing_store::listing_groups(state.write_db(), uid, &[uuid])
+        .await
+        .map_err(super::pricer::from_external)?
+        .into_iter()
+        .next()
+        .and_then(|(_, group)| group["id"].as_str().map(str::to_string));
+    let manual = super::pricer::is_manual_price(live::number(&row["price_pkn"]), patch.get("pricePkn").map(live::number));
+    let named = super::pricer::named_group(&body["item"]);
+    let movement = super::pricer::group_move(current.as_deref(), named.as_deref(), manual);
+    // The membership moves before the price is written: a retry after a
+    // failed write still finds the price unwritten and the group already left.
+    let left = match &movement {
+        super::pricer::GroupMove::Keep => None,
+        super::pricer::GroupMove::Leave => {
+            pokoin_external::pricing_store::remove_members(state.write_db(), uid, &[uuid])
+                .await
+                .map_err(super::pricer::from_external)?;
+            current.clone()
+        }
+        super::pricer::GroupMove::Join(group) => {
+            super::pricer::BatchPricing::Group(group.clone()).check(state, uid).await?;
+            pokoin_external::pricing_store::add_members(state.write_db(), uid, group, &[uuid])
+                .await
+                .map_err(super::pricer::from_external)?;
+            None
+        }
+    };
     let changed = patch_differs(&row, &patch);
     let row = if changed {
         super::listings::update_listing(state, &seller_claims(grant), &uuid.to_string(), &patch).await?;
@@ -1203,11 +1324,14 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     };
     let sold = last_sold_minimums(state, std::slice::from_ref(&row)).await;
     let external = external_keys(state, grant.id, &[uuid]).await;
+    let pricing = listing_pricing(state, uid, &[uuid]).await;
     Ok(json!({
         "confirmed": true,
         "listingId": id,
-        "changed": changed,
-        "listing": tool_listing(&row, &sold, &external),
+        "changed": changed || movement != super::pricer::GroupMove::Keep,
+        // The group this update took the listing out of, else null.
+        "leftPricingGroupId": left,
+        "listing": tool_listing(&row, &sold, &external, &pricing),
     }))
 }
 
@@ -1414,12 +1538,12 @@ mod tests {
         // Exact facet match: picked up.
         let sold: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), false, false), 1250)]);
-        assert_eq!(tool_listing(&row, &sold, &none)["lastSoldMinEurCents"], 1250);
+        assert_eq!(tool_listing(&row, &sold, &none, &HashMap::new())["lastSoldMinEurCents"], 1250);
         // No row for this exact variant (e.g. only a reverse sold): omitted, not guessed.
         let other: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), true, false), 1250)]);
-        assert_eq!(tool_listing(&row, &other, &none)["lastSoldMinEurCents"], Value::Null);
-        assert_eq!(tool_listing(&row, &HashMap::new(), &none)["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &other, &none, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &HashMap::new(), &none, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
     }
 
     #[test]
@@ -1432,16 +1556,40 @@ mod tests {
             "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
         });
         let external: HashMap<String, String> = HashMap::from([("l1".to_string(), "cardrails:cr_9".to_string())]);
-        let listing = tool_listing(&row, &HashMap::new(), &external);
+        let listing = tool_listing(&row, &HashMap::new(), &external, &HashMap::new());
         assert_eq!(listing["externalKey"], "cardrails:cr_9");
         assert_eq!(listing["signed"], true);
         assert_eq!(listing["altered"], false);
         // A row without the flag columns and without a key: booleans false, key null.
         let bare = json!({"id": "l2", "card_id": "1"});
-        let listing = tool_listing(&bare, &HashMap::new(), &HashMap::new());
+        let listing = tool_listing(&bare, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(listing["externalKey"], Value::Null);
         assert_eq!(listing["signed"], false);
         assert_eq!(listing["altered"], false);
+    }
+
+    #[test]
+    fn tool_listing_says_which_group_prices_it() {
+        let row = json!({"id": "l1", "card_id": "1", "price_pkn": 38.0});
+        // In no group: every pricing field null, so the tool shows its own price.
+        let listing = tool_listing(&row, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(
+            (listing["pricingGroupId"].clone(), listing["pricingGroupName"].clone(), listing["pricingStrategyId"].clone()),
+            (Value::Null, Value::Null, Value::Null)
+        );
+        assert_eq!((listing["pricingStrategyName"].clone(), listing["pricingAutoDaily"].clone()), (Value::Null, json!(false)));
+        let strategies = [json!({"id": "st_a", "name": "Undercut 5%"})];
+        let group = json!({"id": "pg_1", "name": "Riftbound bulk", "strategyId": "st_a", "autoDaily": true});
+        let pricing = HashMap::from([("l1".to_string(), pricing_view(&group, &strategies))]);
+        let listing = tool_listing(&row, &HashMap::new(), &HashMap::new(), &pricing);
+        assert_eq!(listing["pricingGroupId"], "pg_1");
+        assert_eq!(listing["pricingGroupName"], "Riftbound bulk");
+        assert_eq!(listing["pricingStrategyId"], "st_a");
+        assert_eq!(listing["pricingStrategyName"], "Undercut 5%");
+        assert_eq!(listing["pricingAutoDaily"], true);
+        assert_eq!(listing["pricePkn"], 38.0, "the price is still the listing's own");
+        // A deleted strategy: the group still prices nothing until it gets one.
+        assert_eq!(pricing_view(&group, &[])["pricingStrategyName"], Value::Null);
     }
 
     #[test]

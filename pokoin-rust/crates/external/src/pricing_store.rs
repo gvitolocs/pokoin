@@ -83,6 +83,22 @@ pub async fn memberships(db: &PgPool, uid: &str) -> ApiResult<Vec<(String, Strin
     .await?)
 }
 
+const LISTING_GROUPS_SQL: &str = "
+  select m.listing_id::text, jsonb_build_object(
+    'id', g.id, 'name', g.name, 'strategyId', g.strategy_id, 'autoDaily', g.auto_daily)
+  from public.seller_pricing_group_members m
+  join public.seller_pricing_groups g on g.id = m.group_id and g.seller_uid = m.seller_uid
+  where m.seller_uid = $1 and m.listing_id = any($2::uuid[])";
+
+/// `[listingId, { id, name, strategyId, autoDaily }]` for the listings among
+/// `ids` that are in one of the seller's groups, in one query.
+pub async fn listing_groups(db: &PgPool, uid: &str, ids: &[Uuid]) -> ApiResult<Vec<(String, Value)>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(sqlx::query_as::<_, (String, Value)>(LISTING_GROUPS_SQL).bind(uid).bind(ids).fetch_all(db).await?)
+}
+
 const ADD_SQL: &str = "
   insert into public.seller_pricing_group_members (listing_id, group_id, seller_uid)
   select l.id, g.id, $1
@@ -225,6 +241,8 @@ mod tests {
         assert!(ADD_SQL.contains("l.seller_uid = $1") && ADD_SQL.contains("g.seller_uid = $1"));
         assert!(ADD_SQL.contains("where seller_pricing_group_members.seller_uid = excluded.seller_uid"));
         assert!(UPSERT_SQL.contains("where seller_pricing_groups.seller_uid = excluded.seller_uid"));
+        // A listing's group is read only from its own seller's rows.
+        assert!(LISTING_GROUPS_SQL.contains("m.seller_uid = $1") && LISTING_GROUPS_SQL.contains("g.seller_uid = m.seller_uid"));
     }
 
     #[test]

@@ -16,6 +16,12 @@ branch `pricer-sources` and not deployed until it is merged.
   are looked up per card in its own game, so `pricing-groups` sends no `games`.
 - **Endpoint:** the existing connector, `POST /api/cardrails/connector`
   (or `/api/seller-api/v1`), `Authorization: Bearer pkn_…` with a Card Rails grant.
+- **One pricer when connected** (owner, 2026-11-08). When Card Rails is
+  connected to a Pokoin account, Pokoin prices and Card Rails mirrors: every
+  pulled listing says which pricing group prices it, a manual price takes a
+  listing out of its group in both apps, and an unpriced item with no choice
+  is priced by the account default. Connected sellers leave CardTrader
+  listing to Pokoin's own CardTrader sync.
 
 ## The strategy object
 
@@ -149,12 +155,73 @@ equal to the cent, list on Pokoin either:
   - a strategy a group uses can't be deleted (409 `strategy_in_use`, the
     message names the groups).
 
+### `listings` / `update` (existing): pricing on the pull
+
+Every listing of a `listings` page, and the `listing` of an `update`
+answer, carries its pricing group:
+
+```json
+{ "listingId": "…", "pricePkn": 26, "priceEurCents": 13, …,
+  "pricingGroupId": "pg_…", "pricingGroupName": "Riftbound bulk",
+  "pricingStrategyId": "st_…", "pricingStrategyName": "Undercut 5% · CardTrader net",
+  "pricingAutoDaily": true }
+```
+
+- In no group: all four ids and names are `null` and `pricingAutoDaily` is
+  `false`. The seller prices that listing.
+- While `pricingGroupId` is set, Pokoin prices the listing (on Apply, and
+  every day when `pricingAutoDaily`). Card Rails shows "Priced by Pokoin ·
+  <pricingGroupName>", locks its price field and mirrors `pricePkn`.
+- `pricingStrategyName` is `null` when the group's strategy was deleted (the
+  group prices nothing until it gets another) or the names could not be read.
+- `listings` reads the groups of the whole page in one query.
+
+### `update` (existing): a manual price leaves the group
+
+```json
+{ "action": "update", "listingId": "…", "item": { "pricePkn": 30 } }
+```
+
+- A price in the item (`pricePkn`, or `priceEurCents` > 0) that differs from
+  the listing's current price takes it out of its group. Otherwise the
+  group's next Apply, or the daily `pricing-groups-daily` run, would
+  overwrite it.
+- Resending the price the listing already has is not a manual price, and the
+  group stays. For a listing priced by Pokoin, send no price unless the seller
+  chose "Price myself".
+- An `update` with no price, or price 0 (which pauses), keeps both the price
+  and the group.
+- `item.pricingGroupId`:
+  - the listing's own group: it stays in it, even with a new price (the next
+    apply may change that price);
+  - another of the seller's groups: it moves there and keeps its price until
+    that group's next apply. An unknown id → 400 `pricing_group_unknown`, and
+    nothing is written;
+  - `null` or `""`: it leaves its group even without a price ("Price myself"
+    at the same price).
+- The group is left before the price is written, so a retried `update` never
+  leaves a manual price in a group.
+- The response adds `leftPricingGroupId` (string | null): the group this
+  update took the listing out of. `changed` is also `true` when only the
+  group moved; repeating the same update answers `changed: false`.
+- MyPokoin follows the same rule: a new price typed in the listing edit
+  (`PATCH /api/marketplace-listings`) takes the listing out of its group, and
+  the answer carries `leftPricingGroup: { id, name } | null`. Pokoin's own
+  Apply and daily run never take listings out of groups.
+
 ### `list` (existing): pricing on arrival
 
 - `pricingGroupId` / `pricingStrategyId` per item or for the call, with the
   same precedence as `price-quote`. An unknown id → 400
   `pricing_group_unknown` / `pricing_strategy_unknown` before the key is
   claimed.
+- **The account default** (2026-11-08): an item sent unpriced
+  (`status: "paused"`, price 0) with no choice on the item or the call is
+  priced by the seller's account default, the `pricingGroupId` /
+  `pricingStrategyId` of `scan-settings`. With no default, or one whose group
+  or strategy no longer exists, the item stays paused at 0 as before, and the
+  `list` is never refused for it. A priced item with no choice keeps its price
+  and joins no group.
 - With a group, the new listing joins it, moving out of any other group.
 - An item sent unpriced (`status: "paused"`, price 0) is priced right away by
   the strategy. It goes live when the strategy's `activatePaused` is on and a
@@ -162,7 +229,11 @@ equal to the cent, list on Pokoin either:
 - An item sent with a price keeps it.
 - The response adds `pricingGroupId` | `pricingStrategyId`, `priced`,
   `pricePkn`, `priceEurCents` (`round(pricePkn / 2)`), `status`, and `pricingError` if pricing failed. The listing
-  exists either way.
+  exists either way. It also adds `pricingFromAccountDefault` (bool): `true`
+  when the account default chose the pricing.
 
-Pokoin tests: `crates/commerce/src/handlers/seller_api.rs` (`pricing_tests`),
-`crates/external/src/pricing.rs`, `crates/external/tests/scan_batch_pricing_flow.rs`.
+Pokoin tests: `crates/commerce/src/handlers/seller_api.rs` (`pricing_tests`,
+`tool_listing_says_which_group_prices_it`), `crates/commerce/src/handlers/pricer.rs`
+(`group_move`, `is_manual_price`), `crates/commerce/tests/seller_api_flow.rs`
+(the "one pricer" and account-default sections), `crates/external/src/pricing.rs`,
+`crates/external/tests/scan_batch_pricing_flow.rs`, `market/src/pricing-group-note.test.js`.
