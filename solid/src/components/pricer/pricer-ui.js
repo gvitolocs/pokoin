@@ -5,9 +5,12 @@
 // Relative, not @market: node --test loads this module without Vite's alias.
 import {
   DEFAULT_STRATEGY,
+  EUR_CONTEXT,
   effectiveMatch,
+  formatLocal,
   matchKey,
   normalizeStrategy,
+  pknToLocal,
   PRICER_MATCHES,
   PRICER_SOURCES,
   pricerBases,
@@ -24,8 +27,8 @@ export const NO_GROUP = '__none';
  * loaded: CardTrader ask 28 / net 25.56 for the exact copy, cheaper as the
  * toggles loosen, for every toggle combination (`ctMatch` keys), plus a
  * `sources` block with a number for every source, basis and toggle
- * combination the sources honour (Cardmarket in EUR, TCGplayer in USD at
- * $1.08/€, converted to PKN).
+ * combination the sources honour (Cardmarket and our own scan of its sellers
+ * in EUR, TCGplayer in USD at $1.08/€, converted to PKN).
  */
 export const SAMPLE_COMP = (() => {
   const ctMatch = {};
@@ -58,6 +61,17 @@ export const SAMPLE_COMP = (() => {
       F: { eur: foil, grossPkn: eurPkn(foil), pkn: eurPkn(foil) },
     };
   }
+  // Our own walk of Cardmarket's listing pages honours all four toggles and
+  // separates the two kinds of seller; prices are EUR, a private ask cheaper.
+  const cardmarketoffers = { asOf: '2026-11-07', pro: {}, private: {} };
+  for (let bits = 0; bits < 16; bits += 1) {
+    const match = Object.fromEntries(PRICER_MATCHES.map(({ id }, index) => [id, Boolean(bits & (1 << index))]));
+    const on = Object.values(match).filter(Boolean).length;
+    for (const [seller, top, step] of [['pro', 0.3, 0.02], ['private', 0.2, 0.015]]) {
+      const eur = Math.round((top - (4 - on) * step) * 100) / 100;
+      cardmarketoffers[seller][matchKey(match)] = { eur, grossPkn: eurPkn(eur), pkn: eurPkn(eur) };
+    }
+  }
   // TCGplayer honours finish and 1st edition; prices are USD at the day's ECB rate.
   const tcgplayer = { asOf: '2026-11-07', rateDay: '2026-11-07', usdPerEur: 1.08 };
   const tcgKeys = ['', 'F', 'E', 'FE'];
@@ -74,7 +88,7 @@ export const SAMPLE_COMP = (() => {
     soldMedianPkn: 24.5,
     soldMedianGrossPkn: 26.1,
     pokoinCheapestPkn: 27,
-    sources: { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, tcgplayer },
+    sources: { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, cardmarketoffers, tcgplayer },
   };
 })();
 
@@ -215,58 +229,63 @@ export const NO_OFFER = 'No offer like that for this card right now';
 
 /**
  * The worked example on one comp as steps: `{ steps: [text], target,
- * noOffer }`, e.g. "CardTrader ask 28", "you net 25.56", "−5% 24.28",
- * "nearest", target 24; "Cardmarket trend €0.15 = 30 PKN"; "TCGplayer
- * market $0.30 = 55.56 PKN at $1.08/€". It follows the strategy's toggles:
- * no number for them is `noOffer`, never a guess.
+ * noOffer }`, e.g. "CardTrader ask €0.14", "you net €0.13", "−5% €0.12",
+ * "nearest", target 24 PKN; "Cardmarket trend €0.15"; "Cardmarket sellers
+ * professional offer €0.30"; "TCGplayer market $0.30 = €0.28 at $1.08/€".
+ * Money renders in the seller's currency (`ctx`);
+ * the EUR/USD source numbers stay only where they explain a conversion.
+ * `target` stays PKN for the caller to render. It follows the strategy's
+ * toggles: no number for them is `noOffer`, never a guess.
  */
-export function exampleSteps(input, comp = SAMPLE_COMP) {
+export function exampleSteps(input, comp = SAMPLE_COMP, ctx = EUR_CONTEXT) {
   const strategy = normalizeStrategy(input);
+  const money = (value) => formatLocal(pknToLocal(value, ctx), ctx);
   const steps = [];
   const value = strategyComp(comp, strategy);
   const { source, basis } = strategy;
   if (source === 'pokoin') {
-    if (value != null) steps.push(`Pokoin ${basis === 'sold' ? 'sold median' : 'ask'} ${num(value)}`);
-  } else if (source === 'cardmarket' || source === 'tcgplayer') {
+    if (value != null) steps.push(`Pokoin ${basis === 'sold' ? 'sold median' : 'ask'} ${money(value)}`);
+  } else if (source === 'cardmarket' || source === 'cardmarketoffers' || source === 'tcgplayer') {
     if (value != null) {
       const label = PRICER_SOURCES.find((entry) => entry.id === source)?.label || source;
       // "Cardmarket 7-day average", "TCGplayer market price": the basis as the editor names it.
       const named = `${label} ${(pricerBases(source).find((entry) => entry.id === basis)?.label || basis).toLowerCase()}`;
       const entry = comp?.sources?.[source]?.[basis]?.[matchKey(effectiveMatch(strategy))];
-      if (source === 'cardmarket') {
+      if (source === 'cardmarket' || source === 'cardmarketoffers') {
         const eur = entry?.eur != null ? `€${Number(entry.eur).toFixed(2)}` : null;
-        steps.push(eur ? `${named} ${eur} = ${num(value)} PKN` : `${named} ${num(value)} PKN`);
+        // Both are EUR: under a EUR display the number needs no conversion.
+        steps.push(eur && ctx.code !== 'EUR' ? `${named} ${eur} = ${money(value)}` : `${named} ${money(value)}`);
       } else {
         const usd = entry?.usd != null ? `$${Number(entry.usd).toFixed(2)}` : null;
         const rate = comp?.sources?.tcgplayer?.usdPerEur;
         const at = rate != null ? ` at $${num(rate)}/€` : '';
-        steps.push(usd ? `${named} ${usd} = ${num(value)} PKN${at}` : `${named} ${num(value)} PKN`);
+        steps.push(usd && ctx.code !== 'USD' ? `${named} ${usd} = ${money(value)}${at}` : `${named} ${money(value)}`);
       }
     }
   } else {
     const ask = askFor(comp, strategy) ?? value;
     if (value != null) {
-      steps.push(`CardTrader ${basis === 'sold' ? 'sold median' : 'ask'} ${num(ask)}`);
-      if (strategy.feeExclusive && value !== ask) steps.push(`you net ${num(value)}`);
+      steps.push(`CardTrader ${basis === 'sold' ? 'sold median' : 'ask'} ${money(ask)}`);
+      if (strategy.feeExclusive && value !== ask) steps.push(`you net ${money(value)}`);
     }
   }
   if (value == null) return { steps, target: null, noOffer: true };
   const example = strategyExample(value, strategy);
   if (!example) return { steps, target: null, noOffer: false };
-  const flat = strategy.amountPkn > 0 ? ` ${num(strategy.amountPkn)} PKN` : '';
-  if (strategy.action === 'undercut') steps.push(`−${num(strategy.amountPct)}%${flat ? ` −${flat}` : ''} ${num(example.adjusted)}`);
-  else if (strategy.action === 'premium') steps.push(`+${num(strategy.amountPct)}%${flat ? ` +${flat}` : ''} ${num(example.adjusted)}`);
+  const flat = strategy.amountPkn > 0 ? ` ${money(strategy.amountPkn)}` : '';
+  if (strategy.action === 'undercut') steps.push(`−${num(strategy.amountPct)}%${flat ? ` −${flat}` : ''} ${money(example.adjusted)}`);
+  else if (strategy.action === 'premium') steps.push(`+${num(strategy.amountPct)}%${flat ? ` +${flat}` : ''} ${money(example.adjusted)}`);
   const rounding = { integer: 'nearest', down: 'round down', up: 'round up' }[strategy.rounding];
   if (rounding) steps.push(rounding);
   if (example.target != null && strategy.minPkn > 0 && example.target === strategy.minPkn && example.adjusted < strategy.minPkn) {
-    steps.push(`never below ${num(strategy.minPkn)}`);
+    steps.push(`never below ${money(strategy.minPkn)}`);
   }
   return { steps, target: example.target, noOffer: false };
 }
 
 /**
  * The example's steps as one line ending where the target goes: a rounding
- * or floor step reads into the target ("… → nearest 24 PKN").
+ * or floor step reads into the target ("… → nearest €0.12").
  */
 export function exampleLead(steps) {
   const list = steps || [];
@@ -281,10 +300,9 @@ export function usedByLine(groupNames) {
   return names.length ? `Used by ${names.join(', ')}` : 'Not used by any group';
 }
 
-/** PKN amounts in the Pricer: digits only, at most two decimals (D000014). */
-export function pkn(value) {
-  const number = Math.round((Number(value) || 0) * 100) / 100;
-  return `${Number.isInteger(number) ? number : number.toFixed(2)} PKN`;
+/** Pricer money: stored PKN shown in the seller's currency, never PKN (D000014). */
+export function pkn(value, ctx = EUR_CONTEXT) {
+  return formatLocal(pknToLocal(value, ctx), ctx);
 }
 
 /** Plan entries whose price moves, and those that go on sale. */
@@ -333,7 +351,7 @@ export function appliedLine(answer) {
 }
 
 const SWITCH_CHIP = { condition: 'Condition', language: 'Language', finish: 'Finish', firstEdition: '1st ed.' };
-const ROUNDING_CHIP = { integer: 'whole PKN', down: 'round down', up: 'round up' };
+const ROUNDING_CHIP = { integer: 'nearest', down: 'round down', up: 'round up' };
 
 /**
  * What a strategy tile in the pricer pop-up shows (Pokoin and Card Rails
@@ -346,20 +364,21 @@ const ROUNDING_CHIP = { integer: 'whole PKN', down: 'round down', up: 'round up'
  * "Any copy"; Pokoin's cheapest ask is always "Cheapest Pokoin ask"
  * (`allExact` styles "All exact").
  */
-export function strategyTile(input) {
+export function strategyTile(input, ctx = EUR_CONTEXT) {
   const strategy = normalizeStrategy(input);
+  const money = (value) => formatLocal(pknToLocal(value, ctx), ctx);
   const pct = num(strategy.amountPct);
-  const flat = num(strategy.amountPkn);
+  const flat = money(strategy.amountPkn);
   const rules = [];
   if (strategy.action === 'undercut') {
-    rules.push([strategy.amountPct > 0 ? `−${pct}%` : '', strategy.amountPkn > 0 ? `− ${flat} PKN` : ''].filter(Boolean).join(' ') || 'Undercut');
+    rules.push([strategy.amountPct > 0 ? `−${pct}%` : '', strategy.amountPkn > 0 ? `− ${flat}` : ''].filter(Boolean).join(' ') || 'Undercut');
   } else if (strategy.action === 'premium') {
-    rules.push([strategy.amountPct > 0 ? `+${pct}%` : '', strategy.amountPkn > 0 ? `+ ${flat} PKN` : ''].filter(Boolean).join(' ') || 'Above');
+    rules.push([strategy.amountPct > 0 ? `+${pct}%` : '', strategy.amountPkn > 0 ? `+ ${flat}` : ''].filter(Boolean).join(' ') || 'Above');
   } else {
     rules.push('Match');
   }
   if (ROUNDING_CHIP[strategy.rounding]) rules.push(ROUNDING_CHIP[strategy.rounding]);
-  if (strategy.minPkn > 0) rules.push(`min ${num(strategy.minPkn)}`);
+  if (strategy.minPkn > 0) rules.push(`min ${money(strategy.minPkn)}`);
   if (strategy.source === 'cardtrader') rules.push(strategy.feeExclusive ? 'net of fees' : 'CardTrader ask');
   if (strategy.source === 'tcgplayer') rules.push('USD → EUR');
   const sold = strategy.basis === 'sold';

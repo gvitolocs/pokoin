@@ -145,6 +145,7 @@ function InventoryDesk(props) {
       preview: true,
       previewState: { strategies: previewStrategies(), groups: previewGroups().groups, pairs: previewGroups().memberships },
       previewComps: previewComps(),
+      pricerSettings: previewPricer(),
       rows,
       setRows: (next) => setRows(() => next),
     }
@@ -380,7 +381,13 @@ function InventoryDesk(props) {
             <PricerDefaults
               preview={props.preview}
               settings={pricerDefaults()}
-              onSaved={(next) => setPricerDefaults(() => next)}
+              onSaved={(next, rate) => {
+                setPricerDefaults(() => next);
+                // The pricer's money labels follow a settings save at once;
+                // the answer carries the fresh rate for a new currency.
+                pricing.setPricerSettings(() => next);
+                if (rate !== undefined) pricing.setCurrencyRate(() => rate);
+              }}
             />
           </section>
           <section class="mypokoin-card">

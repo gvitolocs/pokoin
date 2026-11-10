@@ -7,6 +7,8 @@
 //! pokoin-cardmarket-catalog links  --game weiss_schwarz --urls harvest.json [--generated] [--apply]
 //!                                   [--jp-twins [--images dir] [--max-art-distance 18] [--apply-jp]]
 //! pokoin-cardmarket-catalog guides [--game <slug>] [--apply]
+//! pokoin-cardmarket-catalog tcgnotify --file dump.json [--apply]
+//! pokoin-cardmarket-catalog cm-offers --file minimums.jsonl [--apply]
 //! ```
 //!
 //! `match` only reads the database. It pairs Cardmarket singles with catalog
@@ -28,6 +30,25 @@
 //! a dry run — the statements execute (real counts) and the transaction rolls
 //! back. One JSON line is printed per game.
 //!
+//! `tcgnotify` loads a TCGNotify dump (`--file`) into
+//! `pokoin_marketplace.tcgnotify_price_guide` (migration 140), the cheapest
+//! Cardmarket ask per product. The pricer prefers it over the official guide's
+//! `low` basis and keeps the guide for every other basis and all foil values.
+//! Game and day come from each product, so one dump writes several runs.
+//! Without `--apply` it is a dry run, like `guides`.
+//!
+//! `cm-offers` loads the Cardmarket facet minima a CTCMDeals harvest left
+//! behind (`--file`: `worker/data/cm_offers/minimums.jsonl`, or its
+//! `latest.json`) into `pokoin_marketplace.cardmarket_offer_minimums`
+//! (migration 141): the cheapest offer a professional or a private seller
+//! made, per product, language, condition, finish, first edition and seller
+//! type, with the moment it was seen. Neither the official guide nor
+//! TCGNotify separates sellers, so this is the only Cardmarket number that
+//! says what the competition charges. One row per facet, newest observation
+//! wins; a facet that found no offers is skipped, and so is any record whose
+//! product id, facet code, price or timestamp is not usable. Without
+//! `--apply` it is a dry run, like `guides`.
+//!
 //! `links` pairs printings with Cardmarket product pages (`links.rs`) and
 //! writes `<cache>/raw/cardmarket-links.json`. `--urls` is the harvested pages
 //! as a JSON array of `{id, url}` (`sqlite3 -json cardmarket-links.sqlite
@@ -37,12 +58,14 @@
 //! `--jp-twins` gives Japanese printings their English twin's page (`twins.rs`);
 //! `--apply-jp` writes those to `pokoin_printing_cm_links` (migration 130).
 
+pub mod cm_offers;
 pub mod db;
 pub mod game;
 pub mod guides;
 pub mod links;
 pub mod matcher;
 pub mod sources;
+pub mod tcgnotify;
 pub mod twins;
 
 use std::collections::HashMap;
@@ -108,8 +131,8 @@ fn cache_root() -> PathBuf {
 fn options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
-    if !matches!(command.as_str(), "match" | "prices" | "links" | "guides") {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
+    if !matches!(command.as_str(), "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers") {
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
     }
     let mut slug: Option<String> = None;
     let mut cache = None;
@@ -147,6 +170,14 @@ fn options() -> Result<Options, String> {
         }
         let cache = cache.unwrap_or_else(|| cache_root().join("guides"));
         (None, slug, cache)
+    } else if command == "tcgnotify" {
+        // The game comes from each product's Cardmarket URL, not a flag.
+        let cache = cache.unwrap_or_else(|| cache_root().join("tcgnotify"));
+        (None, None, cache)
+    } else if command == "cm-offers" {
+        // A harvest file is a finished answer per facet: no game, no cache.
+        let cache = cache.unwrap_or_else(|| cache_root().join("cm-offers"));
+        (None, None, cache)
     } else {
         let slug = slug.unwrap_or_else(|| "battle_spirits_saga".to_string());
         let game =
@@ -177,6 +208,8 @@ pub async fn run() -> Result<i32, String> {
         "match" => run_match(&o).await,
         "links" => run_links(&o).await,
         "guides" => run_guides(&o).await,
+        "tcgnotify" => run_tcgnotify(&o).await,
+        "cm-offers" => run_cm_offers(&o).await,
         _ => run_prices(&o).await,
     }
 }
@@ -673,6 +706,95 @@ fn prune_guide_cache(cache: &Path, cardmarket_game: i64) {
             let _ = std::fs::remove_file(old);
         }
     }
+}
+
+/// Load a TCGNotify dump (`--file`: the merged `/api/products` walk, either a
+/// bare array or one page) into `tcgnotify_price_guide` (migration 140). The
+/// game and day come from each product, so one dump writes several runs. One
+/// JSON line per game and day; a failing group does not stop the others.
+async fn run_tcgnotify(o: &Options) -> Result<i32, String> {
+    let path = o.file.as_ref().ok_or("tcgnotify needs --file <dump.json>")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (asks, skipped) = tcgnotify::parse_dump(&value)?;
+    if asks.is_empty() {
+        return Err(format!("{}: no usable products ({skipped} skipped)", path.display()));
+    }
+    let mut groups: HashMap<(String, String), Vec<tcgnotify::Ask>> = HashMap::new();
+    for ask in asks {
+        groups.entry((ask.game.clone(), ask.day.clone())).or_default().push(ask);
+    }
+    // Writable even for a dry run: a read-only session rejects the insert into
+    // the permanent table, and without --apply the transaction rolls back.
+    let write = db::connect("pokoin_marketplace", false).await?;
+    if !db::has_table(&write, "public.tcgnotify_price_guide")
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(
+            "tcgnotify_price_guide is not migrated; apply scripts/sql/140_tcgnotify_price_guide.sql".into(),
+        );
+    }
+    let mut keys: Vec<(String, String)> = groups.keys().cloned().collect();
+    keys.sort();
+    let mut failed = false;
+    for (game, day) in keys {
+        let rows = &groups[&(game.clone(), day.clone())];
+        match db::store_asks(&write, &game, &day, rows, o.apply).await {
+            Ok((products, changed)) => println!(
+                "{}",
+                json!({"game": game, "day": day, "apply": o.apply,
+                       "products": products, "changed": changed})
+            ),
+            Err(error) => {
+                failed = true;
+                eprintln!("{game} {day}: {error}");
+                println!("{}", json!({"game": game, "day": day, "apply": o.apply, "error": error.to_string()}));
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!("skipped {skipped} products with no id, day or known game");
+    }
+    Ok(if failed { 1 } else { 0 })
+}
+
+/// Load one CTCMDeals harvest (`--file`: the run's `minimums.jsonl`, or its
+/// `latest.json` index) into `cardmarket_offer_minimums` (migration 141): one
+/// row per product facet, the newest observation only, so the pricer can quote
+/// what a professional Cardmarket seller asks without asking Cardmarket again.
+/// One JSON line, dry run without `--apply`, like `guides`.
+async fn run_cm_offers(o: &Options) -> Result<i32, String> {
+    let path = o.file.as_ref().ok_or("cm-offers needs --file <minimums.jsonl>")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (minimums, skipped) = cm_offers::parse_minimums(&text)?;
+    if minimums.is_empty() {
+        return Err(format!(
+            "{}: no usable facet minimum ({} records skipped)",
+            path.display(),
+            skipped
+        ));
+    }
+    // Writable even for a dry run: a read-only session rejects the insert into
+    // the permanent table, and without --apply the transaction rolls back.
+    let write = db::connect("pokoin_marketplace", false).await?;
+    if !db::has_table(&write, "public.cardmarket_offer_minimums")
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(
+            "cardmarket_offer_minimums is not migrated; apply scripts/sql/141_cardmarket_offer_minimums.sql".into(),
+        );
+    }
+    let (facets, changed) = db::store_offer_minimums(&write, &minimums, o.apply)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!(
+        "{}",
+        json!({"apply": o.apply, "facets": facets, "changed": changed, "skipped": skipped})
+    );
+    Ok(0)
 }
 
 /// One JSON line per game; a failing game does not stop the others, but the

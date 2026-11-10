@@ -31,8 +31,8 @@ const setLine = (row) => {
 function Market(props) {
   return (
     <Show when={props.compPkn != null} fallback="—">
-      {pkn(props.compPkn)}
-      <Show when={props.askPkn && props.askPkn !== props.compPkn}><small>ask {pkn(props.askPkn)}</small></Show>
+      {pkn(props.compPkn, props.ctx)}
+      <Show when={props.askPkn && props.askPkn !== props.compPkn}><small>ask {pkn(props.askPkn, props.ctx)}</small></Show>
     </Show>
   );
 }
@@ -246,10 +246,10 @@ function GroupPanel(props) {
                     </td>
                     <td>{condLang(entry)}</td>
                     <td>{statusLabel(entry.status)}</td>
-                    <td class="num"><Market compPkn={entry.compPkn} askPkn={entry.askPkn} /></td>
-                    <td class="num">{entry.current ? pkn(entry.current) : '—'}</td>
+                    <td class="num"><Market compPkn={entry.compPkn} askPkn={entry.askPkn} ctx={pricing.currencyCtx()} /></td>
+                    <td class="num">{entry.current ? pkn(entry.current, pricing.currencyCtx()) : '—'}</td>
                     <td class="num pricer-new">
-                      {pkn(entry.target)}
+                      {pkn(entry.target, pricing.currencyCtx())}
                       <Show when={entry.activate}><small>goes on sale</small></Show>
                     </td>
                   </tr>
@@ -276,9 +276,10 @@ function GroupPanel(props) {
                       <Market
                         compPkn={unchangedMarket(pricing.compFor(row), strategy()).compPkn}
                         askPkn={unchangedMarket(pricing.compFor(row), strategy()).askPkn}
+                        ctx={pricing.currencyCtx()}
                       />
                     </td>
-                    <td class="num">{pkn(row.pricePkn ?? row.price_pkn)}</td>
+                    <td class="num">{pkn(row.pricePkn ?? row.price_pkn, pricing.currencyCtx())}</td>
                     <td class="num">No change</td>
                   </tr>
                 )}
@@ -436,7 +437,7 @@ export default function PricerTab(props) {
               <section class="mypokoin-card pricer-empty">
                 <strong>Make a strategy first</strong>
                 <p class="mypokoin-help">
-                  A strategy is a named rule for how to price, like “undercut CardTrader by 5%, never below 1 PKN”.
+                  A strategy is a named rule for how to price, like “undercut CardTrader by 5%, never below {pkn(1, pricing.currencyCtx())}”.
                   Every group is priced by one.
                 </p>
                 <button type="button" class="btn" onClick={() => showView('strategies')}>Open Strategies</button>

@@ -243,7 +243,7 @@ groups and board defaults), `GET/POST/DELETE /api/marketplace-pricing-groups`
 strategy per batch through the connector (docs/SELLER_API.md, "Batch
 pricing").
 
-### Price sources (2026-11-07)
+### Price sources (2026-11-10)
 
 Every price-check comp carries a `sources` block next to the CardTrader
 offers (`ctMatch`). Each entry is keyed by the switches the source honours
@@ -256,8 +256,61 @@ that fails, is not configured or is stale is left out and named in
 | --- | --- | --- | --- |
 | CardTrader sold | `cardtrader_sold_daily` in each game's database, last 30 days, median of the daily medians. The any-copy entry includes graded sales (as `soldMedianPkn` always did); the others leave them out. | Nightly | condition (other games: or better), language, finish, 1st edition |
 | Pokoin sold | Firestore `marketplace_sales`, last 90 days, voided sales left out; EUR sales at 2 PKN per cent. Cached for 10 minutes per API process. | Live, 10-minute cache | condition, language |
-| Cardmarket | Cardmarket's public price guide (`price_guide_<idGame>.json`) for every game: `pokoin-cardmarket-catalog guides --apply` (nezopt timer `pokoin-cardmarket-guides`, 02:45 UTC) stores the products our catalogs reference (`card_market_ids`) in `pokoin_marketplace.cardmarket_price_guide`, a row only when a product's values change, and one `cardmarket_price_guide_runs` row per game and day. The pricer uses a game's guide while its last run is at most 4 days old. Regular and foil columns; the lowest value when a card has several Cardmarket products. | Daily | finish |
+| Cardmarket | Cardmarket's public price guide (`price_guide_<idGame>.json`) for every game: `pokoin-cardmarket-catalog guides --apply` (nezopt timer `pokoin-cardmarket-guides`, 02:45 UTC) stores the products our catalogs reference (`card_market_ids`) in `pokoin_marketplace.cardmarket_price_guide`, a row only when a product's values change, and one `cardmarket_price_guide_runs` row per game and day. The pricer uses a game's guide while its last run is at most 4 days old. Regular and foil columns; the lowest value when a card has several Cardmarket products. `low` is overridden by TCGNotify's ask when that feed is loaded (below). | Daily | finish |
+| Cardmarket sellers (`cardmarketoffers`) | The offers we capture ourselves by walking Cardmarket through CTCMDeals: `harvest-cm-offers.js` records the cheapest professional and cheapest private offer of each facet it asks, `pokoin-cardmarket-catalog cm-offers --file <minimums.jsonl> --apply` (migration `scripts/sql/141_cardmarket_offer_minimums.sql`) keeps the newest observation of each facet in `pokoin_marketplace.cardmarket_offer_minimums`, euros at 2 PKN per cent. Bases `pro` (professional or powerseller) and `private`. The pricer uses a facet while its own `observed_at` is at most 7 days old. Coverage is only what has been scanned. | Per scan, on demand | condition, language, finish (Pokémon: reverse holo), 1st edition |
 | TCGplayer | The TCGCSV store (docs/TCGCSV_PRICES.md) through `pokoin_product_links`; market, low and mid of each subtype. USD → EUR at the newest ECB rate (`fx_rates_daily`, `pokoin-api job fx-rates-daily`, 16:30 UTC), used while it is at most 10 days old; the comp shows `usdPerEur` and `rateDay`. | Daily | finish (Pokémon: reverse holo), 1st edition |
+
+**TCGNotify over the guide's `low`.** TCGNotify (tcgnotify.com, our own
+Cardmarket tracker) publishes a global `min_price` per product: the cheapest
+current listing across languages, the same number the guide calls `low`. Its
+`id` is the Cardmarket idProduct, so it joins the existing `card_market_ids`
+crosswalk with no new mapping. `pokoin-cardmarket-catalog tcgnotify --file
+<dump.json> --apply` (migration `scripts/sql/140_tcgnotify_price_guide.sql`)
+stores it in `pokoin_marketplace.tcgnotify_price_guide`, change-only and keyed
+by the product's own `updated_at` day, plus one `tcgnotify_price_guide_runs`
+row per game and day. The pricer prefers it while that run is at most 4 days
+old, independently of the guide's run, and it also covers products the guide
+has never priced. Only `low` is taken: the dump's `low_price`, `high_price`
+and both foil fields are zero on every row, so trend, the 1/7/30-day averages
+and every foil value stay with the official guide, as does `asOf`. A missing
+table, a stale run or a query error leaves the guide untouched. Games:
+Pokémon, Lorcana, Riftbound. The ingest reads a dump file; a daily walker
+still needs a TCGNotify credential (web session cookie or mobile JWT).
+
+**Cardmarket's seller floor.** The guide and TCGNotify answer with one
+global number per product: neither separates professional from private sellers,
+and neither knows a condition or a language. The scanned offers answer the
+question the price check cannot otherwise answer — what does the cheapest
+professional seller want for this NM Italian copy right now, and what does a
+private one want. CTCMDeals (the Cardmarket walking engine,
+`worker/scripts/harvest-cm-offers.js`) opens a product's offer pages through our
+own session, and `worker/lib/offerStore.js` appends, for every facet asked
+(condition × language × finish × 1st edition × seller type), the cheapest offer
+with the number of offers behind it and whether the page walk finished.
+`pokoin-cardmarket-catalog cm-offers --file minimums.jsonl --apply` stores
+those minima in `pokoin_marketplace.cardmarket_offer_minimums`, one row per
+facet and seller type, keyed by the Cardmarket `idProduct` already in
+`card_market_ids`; a facet is rewritten only by a newer `observed_at`.
+
+The comp entry is `sources.cardmarketoffers`: `asOf`, then one map per seller
+type, `pro` and `private`, each keyed like every other source. `""` is the
+cheapest facet the scan touched at all, `"CLFE"` the cheapest facet agreeing
+with the item on all four attributes, and a partial key the cheapest facet
+agreeing on the switches that are on. Every value carries the facet it came
+from (`condition`, `language`, `finish`, `firstEdition`), its `offers` count
+and `countsComplete`, so a reader can tell what question the number answers.
+
+Cardmarket's condition facet is the *worst* grade the query accepts, so an `NM`
+facet means NM or better, and a `*` facet is an unfiltered mix: it answers a
+switch that is off and never one that is on. A graded, signed or altered copy
+is no scanned facet's copy, so like the other sources it keeps only `""`. The
+feed has its own `sourceStatus` key, so an unmigrated table, an old scan or a
+query error leaves the guide and TCGNotify untouched and says `unavailable`
+instead of inventing a price. Coverage is exactly what has been harvested: a
+scan asked with `--finish '*' --first-edition '*'` stores no exact finish or
+edition, so those switches stay unanswered until the walk asks them or the
+captured offers are regrouped by the finish and edition each row already
+carries.
 
 Cardmarket idGames (measured from the overlap of our `card_market_ids` with
 each guide): Pokémon 6, Magic 1, Yu-Gi-Oh! 3, Flesh and Blood 16, Digimon 17,
@@ -274,7 +327,10 @@ Pokoin `sold` strategy, which priced from CardTrader's sold median, reads as
 CardTrader `sold`.
 
 Not built, the owner's call: eBay (the sold API needs eBay's approval; page
-scraping is against its terms) and Cardmarket listings scraped by CTCMDeals.
+scraping is against its terms). Cardmarket listings scraped by CTCMDeals stood
+on that list until 2026-11-10, when the owner reversed the call: keeping what
+the walk passes is the point, and the seller floor above is the first thing
+built from it.
 
 **Batch upload.** A Scan desk batch can pick a group or a strategy before it
 loads. Unpriced cards are listed paused at 0 and priced once by `applyPricing`

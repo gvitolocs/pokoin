@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 
 use crate::error::{clean_text, json_response, ApiError, ApiResult};
 use crate::powertools as pt;
+use crate::price_sources;
 use crate::pricing;
 use crate::pricing_store;
 use crate::pricing_strategies;
@@ -173,10 +174,26 @@ async fn read_profile(state: &DomainState, uid: &str) -> ApiResult<Value> {
             strategy
         })
         .collect();
+    let settings = pricing::sanitize_settings(data.get("pricerSettings"));
+    // The edge converts PKN to this currency; without a fresh rate the web
+    // falls back to EUR rather than label a wrong number.
+    let currency = settings["currency"].as_str().unwrap_or("EUR");
+    let currency_rate = if currency == "EUR" {
+        json!({ "rate": 1.0, "day": "" })
+    } else {
+        state
+            .db
+            .query("pokemon", price_sources::CURRENCY_RATE_SQL, &[json!(currency)])
+            .await
+            .ok()
+            .and_then(|rows| rows.first().cloned())
+            .unwrap_or(Value::Null)
+    };
     Ok(json!({
         "strategies": strategies,
         "groups": groups,
-        "pricerSettings": pricing::sanitize_settings(data.get("pricerSettings")),
+        "pricerSettings": settings,
+        "currencyRate": currency_rate,
     }))
 }
 

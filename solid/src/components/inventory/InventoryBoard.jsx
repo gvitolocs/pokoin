@@ -42,10 +42,13 @@ const STATUS_CHIPS = [
   { id: 'paused', label: 'Paused' },
 ];
 
-// TCGplayer retains its source USD quotes separately from PKN asks.
+// TCGplayer retains its source USD quotes separately from PKN asks. The two
+// Cardmarket chips are the sellers we scanned ourselves, not its price guide.
 const PRICER_SOURCES = [
   { id: 'pokoin', label: 'Pokoin', enabled: true },
   { id: 'cardtrader', label: 'CardTrader', enabled: true },
+  { id: 'cardmarketpro', label: 'Cardmarket · pro', enabled: true },
+  { id: 'cardmarketprivate', label: 'Cardmarket · private', enabled: true },
   { id: 'ebay', label: 'eBay', enabled: false },
   { id: 'tcgplayer', label: 'TCGPlayer · USD', enabled: true },
 ];

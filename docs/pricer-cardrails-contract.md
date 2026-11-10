@@ -49,6 +49,7 @@ branch `pricer-sources` and not deployed until it is merged.
   | `pokoin` | `offers` | the cheapest Pokoin ask, else CardTrader's sold median | none (any copy) |
   | `pokoin` | `sold` | Pokoin's own sold median, 90 days | condition, language |
   | `cardmarket` | `trend` · `low` · `avg1` · `avg7` · `avg30` | Cardmarket's daily price guide: trend, lowest ask, average sale price over 1/7/30 days (EUR) | finish (regular or foil) |
+  | `cardmarketoffers` | `pro` · `private` | The cheapest professional (or powerseller) / private Cardmarket offer we scanned ourselves, per condition, language, finish and 1st edition (EUR); only what has been harvested, at most 7 days old | condition, language, finish, 1st edition |
   | `tcgplayer` | `market` · `low` · `mid` | TCGplayer's market price, lowest listing, mid price (USD → EUR at the ECB rate of the day) | finish, 1st edition |
 - `match`: the per-detail switches. A comp prices a card only if it has the
   same condition (other games: that condition or better), language, finish

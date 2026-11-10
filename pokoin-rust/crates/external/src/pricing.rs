@@ -20,7 +20,7 @@ use crate::error::{clean_text, f64_field, ApiError, ApiResult};
 
 /// Where a strategy's market number comes from (market/src/pricer.js
 /// `PRICER_SOURCES`; docs/PRICING.md "Price sources").
-pub const SOURCES: [&str; 4] = ["cardtrader", "pokoin", "cardmarket", "tcgplayer"];
+pub const SOURCES: [&str; 5] = ["cardtrader", "pokoin", "cardmarket", "cardmarketoffers", "tcgplayer"];
 pub const ACTIONS: [&str; 3] = ["match", "undercut", "premium"];
 pub const ROUNDINGS: [&str; 4] = ["none", "integer", "down", "up"];
 /// What a CardTrader or Pokoin strategy prices from: the current offers (on
@@ -31,9 +31,19 @@ pub const BASES: [&str; 2] = ["offers", "sold"];
 /// Cardmarket's price-guide columns: trend, the lowest ask, and the average
 /// sale price over 1, 7 and 30 days.
 pub const CARDMARKET_BASES: [&str; 5] = ["trend", "low", "avg1", "avg7", "avg30"];
+/// The two kinds of seller Cardmarket separates, as our own walk of its
+/// listing pages recorded them: a professional (or powerseller) and a private
+/// one. The guide cannot tell them apart.
+pub const CARDMARKET_OFFER_BASES: [&str; 2] = ["pro", "private"];
 /// TCGplayer's prices (USD, converted at the day's ECB rate): market price,
 /// the lowest listing and the mid price.
 pub const TCGPLAYER_BASES: [&str; 3] = ["market", "low", "mid"];
+/// The pricer's display and input currencies (market/src/pricer.js
+/// `PRICER_CURRENCIES`): two-decimal currencies the ECB reference rates cover.
+/// PKN stays the unit of the comps, the storage and the listing writes.
+pub const CURRENCIES: [&str; 14] = [
+    "EUR", "USD", "GBP", "DKK", "SEK", "NOK", "PLN", "CZK", "CHF", "HUF", "RON", "BGN", "CAD", "AUD",
+];
 /// The rules a strategy was saved under. Before 2 (2026-11-07) a `sold`
 /// strategy ignored the toggles and a Pokoin `sold` one priced from
 /// CardTrader's sold median; `upgrade_stored_strategy` keeps those prices.
@@ -159,7 +169,7 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, others: &[Valu
     }
     let source = word(input, "source", 20);
     if !SOURCES.contains(&source.as_str()) {
-        return Err(ApiError::bad_request("Pricer source must be cardtrader, pokoin, cardmarket or tcgplayer."));
+        return Err(ApiError::bad_request("Pricer source must be cardtrader, pokoin, cardmarket, cardmarketoffers or tcgplayer."));
     }
     let action = word(input, "action", 20);
     if !ACTIONS.contains(&action.as_str()) {
@@ -206,6 +216,7 @@ pub fn sanitize_strategy(input: &Value, existing: Option<&Value>, others: &[Valu
 pub fn source_bases(source: &str) -> &'static [&'static str] {
     match source {
         "cardmarket" => &CARDMARKET_BASES,
+        "cardmarketoffers" => &CARDMARKET_OFFER_BASES,
         "tcgplayer" => &TCGPLAYER_BASES,
         _ => &BASES,
     }
@@ -219,11 +230,12 @@ pub fn basis_for(source: &str, raw: &str) -> &'static str {
 }
 
 /// The toggles a source's data can honour for a basis (`sourceSwitches`):
-/// CardTrader knows every detail of its offers and sales; Pokoin's sales
-/// carry condition and language (its cheapest ask is any copy); Cardmarket's
-/// guide splits regular and foil only; TCGplayer prices each finish and 1st
-/// edition but has no condition or language. A toggle the source cannot
-/// honour stays saved and reads as off.
+/// CardTrader knows every detail of its offers and sales, and so does our own
+/// walk of Cardmarket's listing pages; Pokoin's sales carry condition and
+/// language (its cheapest ask is any copy); Cardmarket's guide splits regular
+/// and foil only; TCGplayer prices each finish and 1st edition but has no
+/// condition or language. A toggle the source cannot honour stays saved and
+/// reads as off.
 pub fn source_switches(source: &str, basis: &str) -> Match {
     match (source, basis) {
         ("pokoin", "sold") => Match { condition: true, language: true, ..Match::ANY },
@@ -293,14 +305,18 @@ pub fn upgrade_stored_strategy(stored: &Value, earlier: &[Value], now_iso: &str)
         .expect("an upgraded strategy has a unique name, a source and an action")
 }
 
-/// `sanitizeSettings` — `{ defaultSource, autoMarketColumn }`.
+/// `sanitizeSettings` — `{ defaultSource, autoMarketColumn, currency }`.
+/// `currency` is what the pricer shows and accepts; an unknown one reads EUR.
 pub fn sanitize_settings(input: Option<&Value>) -> Value {
     let raw = input.unwrap_or(&Value::Null);
     let source = word(raw, "defaultSource", 20);
     let default_source = if SOURCES.contains(&source.as_str()) { source } else { "cardtrader".to_string() };
+    let currency = word(raw, "currency", 3).to_uppercase();
+    let currency = if CURRENCIES.contains(&currency.as_str()) { currency } else { "EUR".to_string() };
     json!({
         "defaultSource": default_source,
         "autoMarketColumn": raw.get("autoMarketColumn") == Some(&Value::Bool(true)),
+        "currency": currency,
     })
 }
 
@@ -549,6 +565,8 @@ pub fn source_words(source: &str, basis: &str) -> (&'static str, &'static str) {
         ("cardmarket", "avg7") => ("Cardmarket", "7-day average"),
         ("cardmarket", "avg30") => ("Cardmarket", "30-day average"),
         ("cardmarket", _) => ("Cardmarket", "trend"),
+        ("cardmarketoffers", "private") => ("Cardmarket sellers", "cheapest private offer"),
+        ("cardmarketoffers", _) => ("Cardmarket sellers", "cheapest professional offer"),
         ("tcgplayer", "low") => ("TCGplayer", "lowest listing (USD → EUR)"),
         ("tcgplayer", "mid") => ("TCGplayer", "mid price (USD → EUR)"),
         ("tcgplayer", _) => ("TCGplayer", "market price (USD → EUR)"),
@@ -601,7 +619,7 @@ mod tests {
         }
         let err = |input: Value, others: &[Value]| sanitize_strategy(&input, None, others, now()).unwrap_err();
         assert_eq!(err(json!({"source": "pokoin", "action": "match"}), &[]).code.as_deref(), Some("strategy_name_required"));
-        assert_eq!(err(json!({"name": "x", "source": "ebay", "action": "match"}), &[]).message, "Pricer source must be cardtrader, pokoin, cardmarket or tcgplayer.");
+        assert_eq!(err(json!({"name": "x", "source": "ebay", "action": "match"}), &[]).message, "Pricer source must be cardtrader, pokoin, cardmarket, cardmarketoffers or tcgplayer.");
         assert_eq!(err(json!({"name": "x", "source": "pokoin", "action": "nuke"}), &[]).message, "Strategy action must be match, undercut or premium.");
         let taken = err(json!({"name": " undercut 5% ", "source": "pokoin", "action": "match"}), &[ok.clone()]);
         assert_eq!((taken.status, taken.code.as_deref()), (409, Some("strategy_name_taken")));
@@ -674,6 +692,9 @@ mod tests {
         };
         assert_eq!(saved("cardmarket", "avg7")["basis"], "avg7");
         assert_eq!(saved("cardmarket", "sold")["basis"], "trend", "not a Cardmarket basis: its default");
+        assert_eq!(saved("cardmarketoffers", "")["basis"], "pro", "a professional floor by default");
+        assert_eq!(saved("cardmarketoffers", "private")["basis"], "private");
+        assert_eq!(saved("cardmarketoffers", "trend")["basis"], "pro", "the guide's columns are not seller types");
         assert_eq!(saved("tcgplayer", "")["basis"], "market");
         assert_eq!(saved("tcgplayer", "low")["basis"], "low");
         assert_eq!(saved("pokoin", "matched")["basis"], "offers");
@@ -683,6 +704,8 @@ mod tests {
         let all = json!({"source": "tcgplayer", "basis": "mid"});
         assert_eq!(effective_match(&all), Match { finish: true, first_edition: true, ..Match::ANY });
         assert_eq!(effective_match(&json!({"source": "cardmarket"})), Match { finish: true, ..Match::ANY });
+        assert_eq!(effective_match(&json!({"source": "cardmarketoffers"})), Match::EXACT, "a scanned facet answers all four");
+        assert_eq!(effective_match(&json!({"source": "cardmarketoffers", "basis": "private"})), Match::EXACT);
         assert_eq!(effective_match(&json!({"source": "pokoin", "basis": "sold"})), Match { condition: true, language: true, ..Match::ANY });
         assert_eq!(effective_match(&json!({"source": "pokoin"})), Match::ANY);
         assert_eq!(effective_match(&json!({"source": "cardtrader", "basis": "sold"})), Match::EXACT);
@@ -701,6 +724,9 @@ mod tests {
                 "cardtrader": {"sold": {"": {"grossPkn": 33, "pkn": 30}, "CLFE": {"grossPkn": 44, "pkn": 40.04}}},
                 "pokoin": {"sold": {"CL": {"grossPkn": 60, "pkn": 60, "sales": 1}}},
                 "cardmarket": {"asOf": "2026-11-06", "trend": {"": {"eur": 0.12, "grossPkn": 24, "pkn": 24}, "F": {"eur": 0.15, "grossPkn": 30, "pkn": 30}}},
+                "cardmarketoffers": {"asOf": "2026-11-10",
+                    "pro": {"": {"eur": 0.2, "grossPkn": 40, "pkn": 40}, "CL": {"eur": 0.25, "grossPkn": 50, "pkn": 50}, "CLFE": {"eur": 0.3, "grossPkn": 60, "pkn": 60}},
+                    "private": {"CLFE": {"eur": 0.1, "grossPkn": 20, "pkn": 20}}},
                 "tcgplayer": {"usdPerEur": 1.08, "market": {"FE": {"usd": 0.3, "grossPkn": 55.56, "pkn": 55.56}}},
             },
         });
@@ -714,6 +740,12 @@ mod tests {
         assert_eq!(s(json!({"source": "cardmarket"})), Some(30.0));
         assert_eq!(s(json!({"source": "cardmarket", "match": {"finish": false}})), Some(24.0));
         assert_eq!(s(json!({"source": "cardmarket", "basis": "avg30"})), None);
+        assert_eq!(s(json!({"source": "cardmarketoffers"})), Some(60.0), "professional by default, all four toggles on");
+        assert_eq!(s(json!({"source": "cardmarketoffers", "basis": "private"})), Some(20.0));
+        assert_eq!(s(json!({"source": "cardmarketoffers", "match": {"finish": false, "firstEdition": false}})), Some(50.0));
+        assert_eq!(s(json!({"source": "cardmarketoffers", "match": {"condition": false, "language": false, "finish": false, "firstEdition": false}})), Some(40.0));
+        assert_eq!(s(json!({"source": "cardmarketoffers", "basis": "private", "match": {"condition": false}})), None, "no private facet answers: no price, never the pro one");
+        assert_eq!(s(json!({"source": "cardmarketoffers", "basis": "trend"})), Some(60.0), "an unknown basis reads as the source's default");
         assert_eq!(s(json!({"source": "tcgplayer", "feeExclusive": false})), Some(55.56));
         assert_eq!(s(json!({"source": "tcgplayer", "match": {"firstEdition": false}})), None);
         // An answer from before the block: CardTrader's sold median, nothing else.
@@ -846,11 +878,13 @@ mod tests {
 
     #[test]
     fn settings_and_summary() {
-        assert_eq!(sanitize_settings(None), json!({"defaultSource": "cardtrader", "autoMarketColumn": false}));
+        assert_eq!(sanitize_settings(None), json!({"defaultSource": "cardtrader", "autoMarketColumn": false, "currency": "EUR"}));
         assert_eq!(
             sanitize_settings(Some(&json!({"defaultSource": "POKOIN", "autoMarketColumn": "yes"}))),
-            json!({"defaultSource": "pokoin", "autoMarketColumn": false})
+            json!({"defaultSource": "pokoin", "autoMarketColumn": false, "currency": "EUR"})
         );
+        assert_eq!(sanitize_settings(Some(&json!({"currency": "dkk"})))["currency"], json!("DKK"));
+        assert_eq!(sanitize_settings(Some(&json!({"currency": "XYZ"})))["currency"], json!("EUR"));
         assert_eq!(
             strategy_summary(&json!({"source": "cardtrader", "action": "undercut", "amountPct": 5, "rounding": "integer", "minPkn": 1})),
             "CardTrader · all exact · net of CardTrader fees · undercut 5% · whole PKN · min 1 PKN"
@@ -871,6 +905,14 @@ mod tests {
         assert_eq!(
             strategy_summary(&json!({"source": "tcgplayer", "action": "match", "rounding": "up"})),
             "TCGplayer · market price (USD → EUR) · same finish and 1st edition · match · rounded up"
+        );
+        assert_eq!(
+            strategy_summary(&json!({"source": "cardmarketoffers", "action": "undercut", "amountPct": 2})),
+            "Cardmarket sellers · cheapest professional offer · all exact · undercut 2%"
+        );
+        assert_eq!(
+            strategy_summary(&json!({"source": "cardmarketoffers", "basis": "private", "action": "match", "match": {"condition": true, "language": true, "finish": false, "firstEdition": false}})),
+            "Cardmarket sellers · cheapest private offer · same condition and language · match"
         );
     }
 }

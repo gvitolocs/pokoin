@@ -1,5 +1,5 @@
 import { createMemo, createSignal, createUniqueId, For, Match, onCleanup, onSettled, Show, Switch } from 'solid-js';
-import { normalizeStrategy } from '@market/pricer.js';
+import { EUR_CONTEXT, normalizeStrategy } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from './NewGroupForm.jsx';
 import {
@@ -21,7 +21,7 @@ const setLine = (entry) => [entry.setName, entry.collectorNumber ? `#${entry.col
 
 /** One strategy as a tile: action icon, market, name, rule chips, switch chips, "Used by". */
 function StrategyTile(props) {
-  const tile = createMemo(() => strategyTile(props.strategy));
+  const tile = createMemo(() => strategyTile(props.strategy, props.ctx));
   // The basis beside the source name, except for CardTrader's current offers.
   const basisText = () => {
     const strategy = normalizeStrategy(props.strategy);
@@ -94,10 +94,13 @@ function GroupTile(props) {
  *   `onChoose({ kind: 'strategy' | 'group' | 'batch' | 'none', id })`; no
  *   price is written. Props: current (the choice to mark), batchLabel,
  *   onChoose, onCreateGroup(input) → the new group's id.
- * Both: count, strategies, groups, onClose().
+ * Both: count, strategies, groups, onClose(); `ctx` (or the shared store's)
+ * is the seller's currency context for every money label.
  */
 export default function PricerPopup(props) {
   const titleId = createUniqueId();
+  // Board mode carries the shared store's context; rows mode gets one as a prop.
+  const ctx = () => props.ctx || props.pricing?.currencyCtx() || EUR_CONTEXT;
   const rows = () => props.mode === 'rows';
   const [step, setStep] = createSignal(null);
   const [plan, setPlan] = createSignal(null);
@@ -297,6 +300,7 @@ export default function PricerPopup(props) {
                     {(entry) => (
                       <StrategyTile
                         strategy={entry()}
+                        ctx={ctx()}
                         pressable={rows()}
                         on={isCurrent('strategy', entry().id)}
                         disabled={Boolean(busy())}
@@ -375,12 +379,12 @@ export default function PricerPopup(props) {
                                   <tr>
                                     <td><strong>{entry.cardName || 'Listing'}</strong><small>{setLine(entry)}</small></td>
                                     <td class="num">
-                                      {entry.current ? pkn(entry.current) : '—'} → <span class="pricer-new">{pkn(entry.target)}</span>
+                                      {entry.current ? pkn(entry.current, ctx()) : '—'} → <span class="pricer-new">{pkn(entry.target, ctx())}</span>
                                       <Show when={entry.activate}><small class="pricer-on-sale">goes on sale</small></Show>
                                     </td>
                                     <td class="num">
-                                      {entry.compPkn != null ? pkn(entry.compPkn) : '—'}
-                                      <Show when={entry.askPkn && entry.askPkn !== entry.compPkn}><small>ask {pkn(entry.askPkn)}</small></Show>
+                                      {entry.compPkn != null ? pkn(entry.compPkn, ctx()) : '—'}
+                                      <Show when={entry.askPkn && entry.askPkn !== entry.compPkn}><small>ask {pkn(entry.askPkn, ctx())}</small></Show>
                                     </td>
                                   </tr>
                                 )}

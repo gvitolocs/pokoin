@@ -1,14 +1,17 @@
-import { createSignal, Show } from 'solid-js';
+import { createEffect, createSignal, For, Show } from 'solid-js';
 import { savePricingStrategies } from '@market/api.js';
+import { PRICER_CURRENCIES } from '@market/pricer.js';
 import { getBearer } from '../../stores/auth.js';
 
-const DEFAULT_PRICER = { defaultSource: 'cardtrader', autoMarketColumn: false };
+const DEFAULT_PRICER = { defaultSource: 'cardtrader', autoMarketColumn: false, currency: 'EUR' };
 
 /** Pricer defaults editor (MyPokoin settings tab). */
 export default function PricerDefaults(props) {
-  // Writable derived: follows `settings` whenever the parent loads new ones.
-  const [draft, setDraft] = createSignal(() => props.settings || DEFAULT_PRICER);
+  const [draft, setDraft] = createSignal(props.settings || DEFAULT_PRICER);
   const [saved, setSaved] = createSignal(false);
+  // Follow the parent whenever it loads new settings (a cached copy may
+  // predate `currency`: it reads EUR).
+  createEffect(() => setDraft(props.settings ? { ...DEFAULT_PRICER, ...props.settings } : DEFAULT_PRICER));
 
   async function save(next) {
     setDraft(next);
@@ -21,7 +24,7 @@ export default function PricerDefaults(props) {
     }
     const token = await getBearer();
     const data = await savePricingStrategies({ pricerSettings: next }, token);
-    props.onSaved?.(data.pricerSettings || next);
+    props.onSaved?.(data.pricerSettings || next, data.currencyRate ?? null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -34,6 +37,13 @@ export default function PricerDefaults(props) {
           <option value="cardtrader">CardTrader</option>
           <option value="pokoin">Pokoin</option>
         </select>
+      </label>
+      <label class="ps-field">
+        <span>Currency</span>
+        <select value={draft().currency || 'EUR'} onChange={(event) => save({ ...draft(), currency: event.target.value })}>
+          <For each={PRICER_CURRENCIES}>{(code) => <option value={code}>{code}</option>}</For>
+        </select>
+        <small>The pricer shows and accepts prices in this currency.</small>
       </label>
       <label class="ps-field ps-check">
         <input

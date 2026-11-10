@@ -610,17 +610,36 @@ pub async fn read_prices(
         price_sources::fetch_tcg(db, "pokemon", &numeric_ids),
     );
     let listed_rows = listed_rows.unwrap_or_default();
+    let mut product_ids: Vec<i64> = cm_products
+        .iter()
+        .flat_map(|products| products.values().flatten().copied())
+        .collect();
+    product_ids.sort_unstable();
+    product_ids.dedup();
+    // The scanned seller offers join through the same crosswalk as the
+    // guide, but they are not part of the guide's feed: a stale or missing daily
+    // download says nothing about a scan of the listing pages.
+    let cm_floors = match (
+        &cm_products,
+        price_sources::fetch_cm_floors(db, "pokemon", &product_ids).await,
+    ) {
+        (Some(products), Some(minimums)) => Some(price_sources::CmFloorGroups {
+            products_by_blueprint: products.clone(),
+            minimums_by_product: minimums,
+        }),
+        _ => None,
+    };
     let cardmarket = match (cm_run, cm_products) {
         (Some(as_of), Some(products)) => {
-            let mut product_ids: Vec<i64> = products.values().flatten().copied().collect();
-            product_ids.sort_unstable();
-            product_ids.dedup();
             match price_sources::fetch_cm_guide(db, "pokemon", &product_ids).await {
-                Some(guide) => price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
-                    as_of,
-                    products_by_blueprint: products,
-                    guide_by_product: guide,
-                }),
+                Some(mut guide) => {
+                    price_sources::overlay_tcgnotify_low(db, "pokemon", &product_ids, &mut guide).await;
+                    price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
+                        as_of,
+                        products_by_blueprint: products,
+                        guide_by_product: guide,
+                    })
+                }
                 None => price_sources::CardmarketOutcome::Unavailable,
             }
         }
@@ -636,6 +655,7 @@ pub async fn read_prices(
         ct_sold,
         pokoin_sales,
         cardmarket,
+        cm_floors,
         tcg,
     };
 
@@ -813,17 +833,33 @@ async fn read_game_prices(
         price_sources::fetch_cm_products(db, game, &table, &ct_ids),
         price_sources::fetch_tcg(db, game, &numeric_ids),
     );
+    let mut product_ids: Vec<i64> = cm_products
+        .iter()
+        .flat_map(|products| products.values().flatten().copied())
+        .collect();
+    product_ids.sort_unstable();
+    product_ids.dedup();
+    let cm_floors = match (
+        &cm_products,
+        price_sources::fetch_cm_floors(db, game, &product_ids).await,
+    ) {
+        (Some(products), Some(minimums)) => Some(price_sources::CmFloorGroups {
+            products_by_blueprint: products.clone(),
+            minimums_by_product: minimums,
+        }),
+        _ => None,
+    };
     let cardmarket = match (cm_run, cm_products) {
         (Some(as_of), Some(products)) => {
-            let mut product_ids: Vec<i64> = products.values().flatten().copied().collect();
-            product_ids.sort_unstable();
-            product_ids.dedup();
             match price_sources::fetch_cm_guide(db, game, &product_ids).await {
-                Some(guide) => price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
-                    as_of,
-                    products_by_blueprint: products,
-                    guide_by_product: guide,
-                }),
+                Some(mut guide) => {
+                    price_sources::overlay_tcgnotify_low(db, game, &product_ids, &mut guide).await;
+                    price_sources::CardmarketOutcome::Feed(price_sources::CardmarketFeed {
+                        as_of,
+                        products_by_blueprint: products,
+                        guide_by_product: guide,
+                    })
+                }
                 None => price_sources::CardmarketOutcome::Unavailable,
             }
         }
@@ -835,6 +871,7 @@ async fn read_game_prices(
         ct_sold,
         pokoin_sales,
         cardmarket,
+        cm_floors,
         tcg,
     };
     let mut prices = Map::new();
@@ -1247,6 +1284,7 @@ mod tests {
             ct_sold: Some(rows),
             pokoin_sales: Some(&sales),
             cardmarket: cm,
+            cm_floors: None,
             tcg,
         };
         let item = parse_items("200:NM:EN")[0].clone();
@@ -1330,6 +1368,7 @@ mod tests {
             ct_sold: Some(sold),
             pokoin_sales: None,
             cardmarket: cm,
+            cm_floors: None,
             tcg,
         };
         let item = parse_items("801148:NM:EN:H")[0].clone(); // a foil Magic item

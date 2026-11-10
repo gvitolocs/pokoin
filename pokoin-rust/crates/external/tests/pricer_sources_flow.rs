@@ -1,7 +1,8 @@
 //! The `sources` block of a price-check comp against a real Postgres: the
 //! CardTrader sold rows query, the Cardmarket guide tables and the FX rate
-//! from the production migration (`scripts/sql/139_pricer_sources.sql`), and
-//! the TCGCSV store pointed at the same database.
+//! from the production migration (`scripts/sql/139_pricer_sources.sql`), the
+//! TCGNotify overlay (`scripts/sql/140_tcgnotify_price_guide.sql`), and the
+//! TCGCSV store pointed at the same database.
 //!
 //! ```text
 //! docker run -d --rm --name pokoin-pricer-sources-test-pg -e POSTGRES_PASSWORD=test \
@@ -21,13 +22,15 @@ use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 
 const MIGRATION: &str = include_str!("../../../../scripts/sql/139_pricer_sources.sql");
+const MIGRATION_TCGNOTIFY: &str = include_str!("../../../../scripts/sql/140_tcgnotify_price_guide.sql");
 
 const SCHEMA: &str = "
 drop table if exists public.marketplace_search_candidates, public.marketplace_user_listings,
   public.cardtrader_facet_price_runs, public.cardtrader_facet_prices,
   public.cardtrader_blueprint_daily_analytics, public.cardtrader_sold_daily,
   public.cardtrader_pokemon_blueprints, public.pokoin_product_links, public.latest_prices,
-  public.cardmarket_price_guide, public.cardmarket_price_guide_runs, public.fx_rates_daily cascade;
+  public.cardmarket_price_guide, public.cardmarket_price_guide_runs, public.fx_rates_daily,
+  public.tcgnotify_price_guide, public.tcgnotify_price_guide_runs cascade;
 create table public.marketplace_search_candidates (card_id bigint primary key, ct_id bigint);
 create table public.marketplace_user_listings (
   card_id text not null, seller_uid text not null, status text not null default 'active',
@@ -94,6 +97,7 @@ async fn read_prices_attaches_every_source_from_the_real_tables() {
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("connect");
     sqlx::raw_sql(SCHEMA).execute(&pool).await.expect("schema");
     sqlx::raw_sql(MIGRATION).execute(&pool).await.expect("migration 139");
+    sqlx::raw_sql(MIGRATION_TCGNOTIFY).execute(&pool).await.expect("migration 140");
     sqlx::raw_sql(DATA).execute(&pool).await.expect("data");
 
     let db = DbPools::lazy(pool.clone(), pool.clone());
@@ -122,6 +126,7 @@ async fn read_prices_attaches_every_source_from_the_real_tables() {
     assert_eq!(comp["sourceStatus"]["pokoinSold"], json!("unavailable"));
 
     // Cardmarket guide: newest row per product, min positive over products.
+    // No TCGNotify run has been loaded, so `low` is still the guide's.
     let cm = &comp["sources"]["cardmarket"];
     assert_eq!(cm["asOf"], json!(today()));
     assert_eq!(cm["trend"]["F"]["eur"], json!(1.23), "regular: min(1.23, 2.0)");
@@ -155,4 +160,62 @@ async fn read_prices_attaches_every_source_from_the_real_tables() {
     let rev: &Value = &prices["200:NM:EN:R"];
     assert_eq!(rev["sources"]["cardtrader"]["sold"]["F"]["grossPkn"], json!(200.0));
     assert_eq!(rev["sources"]["tcgplayer"]["market"]["F"]["usd"], json!(4.0));
+
+    // A loaded TCGNotify run wins `low` and nothing else. Product 11 has an
+    // older row too (change-only history); product 12 is delisted (null ask).
+    sqlx::raw_sql(
+        "insert into public.tcgnotify_price_guide_runs values ('pokemon', current_date, 2, 2);
+         insert into public.tcgnotify_price_guide (game, id_product, day, min_price) values
+           ('pokemon', 11, current_date - 3, 9.99),
+           ('pokemon', 11, current_date, 0.75),
+           ('pokemon', 12, current_date, null);",
+    )
+    .execute(&pool)
+    .await
+    .expect("tcgnotify rows");
+    let prices = price_check::read_prices(&db, "pokemon", &items, "", None).await.expect("read_prices");
+    let cm = &prices["200:NM:EN:"]["sources"]["cardmarket"];
+    assert_eq!(cm["low"]["F"]["eur"], json!(0.75), "the newest ask, not the older 9.99");
+    assert_eq!(cm["low"]["F"]["grossPkn"], json!(150.0));
+    assert_eq!(cm["low"][""]["eur"], json!(0.5), "product 12 has no ask: its guide low_foil stands");
+    assert_eq!(cm["trend"]["F"]["eur"], json!(1.23), "TCGNotify publishes no trend");
+    assert_eq!(cm["trend"][""]["eur"], json!(1.23), "min(1.23, 5.0): the foil value is untouched");
+    assert_eq!(cm["asOf"], json!(today()), "the guide's run day: a basis is overridden, not the feed");
+    assert_eq!(prices["200:NM:EN:"]["sourceStatus"]["cardmarket"], json!("available"));
+
+    // A product the official guide never priced still gets a `low` from here.
+    sqlx::raw_sql(
+        "update public.cardtrader_pokemon_blueprints set card_market_ids = '[\"11\", \"12\", \"13\"]' where id = 100;
+         insert into public.tcgnotify_price_guide (game, id_product, day, min_price)
+           values ('pokemon', 13, current_date, 0.4);",
+    )
+    .execute(&pool)
+    .await
+    .expect("uncovered product");
+    let prices = price_check::read_prices(&db, "pokemon", &items, "", None).await.expect("read_prices");
+    let cm = &prices["200:NM:EN:"]["sources"]["cardmarket"];
+    assert_eq!(cm["low"]["F"]["eur"], json!(0.4), "min(0.75, 0.4) over the three products");
+    assert_eq!(cm["low"][""]["eur"], json!(0.4));
+    assert_eq!(cm["trend"]["F"]["eur"], json!(1.23), "product 13 has no trend to contribute");
+
+    // A run older than four days is not trusted: back to the guide alone.
+    sqlx::raw_sql("update public.tcgnotify_price_guide_runs set day = current_date - 10 where game = 'pokemon'")
+        .execute(&pool)
+        .await
+        .expect("stale run");
+    let prices = price_check::read_prices(&db, "pokemon", &items, "", None).await.expect("read_prices");
+    let cm = &prices["200:NM:EN:"]["sources"]["cardmarket"];
+    assert_eq!(cm["low"]["F"]["eur"], json!(1.0));
+    assert_eq!(cm["low"][""]["eur"], json!(0.5));
+
+    // Migration 140 not applied at all: the comp still reads, on the guide.
+    sqlx::raw_sql("drop table public.tcgnotify_price_guide, public.tcgnotify_price_guide_runs")
+        .execute(&pool)
+        .await
+        .expect("drop tcgnotify");
+    let prices = price_check::read_prices(&db, "pokemon", &items, "", None).await.expect("read_prices");
+    let cm = &prices["200:NM:EN:"]["sources"]["cardmarket"];
+    assert_eq!(cm["low"]["F"]["eur"], json!(1.0));
+    assert_eq!(cm["low"][""]["eur"], json!(0.5));
+    assert_eq!(prices["200:NM:EN:"]["sourceStatus"]["cardmarket"], json!("available"));
 }

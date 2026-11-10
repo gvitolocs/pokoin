@@ -96,7 +96,7 @@ export function previewListings() {
 }
 
 export function previewPricer() {
-  return { defaultSource: 'cardtrader', autoMarketColumn: false };
+  return { defaultSource: 'cardtrader', autoMarketColumn: false, currency: 'EUR' };
 }
 
 /**
@@ -149,7 +149,18 @@ function sourcesFor(ask) {
       tcgplayer[basis][tcgKeys[index]] = { usd: usdOf(pkn), grossPkn: pkn, pkn };
     });
   }
-  return { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, tcgplayer };
+  // Our own walk of Cardmarket's listing pages honours all four toggles and
+  // separates the two kinds of seller; prices are EUR, a private ask cheaper.
+  const cardmarketoffers = { asOf: '2026-11-07', pro: {}, private: {} };
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    for (const [seller, factor] of [['pro', 1.02], ['private', 0.82]]) {
+      const pkn = Math.round((ask * factor - (4 - on) * 2) * 100) / 100;
+      cardmarketoffers[seller][key] = { eur: eurOf(pkn), grossPkn: pkn, pkn, offers: on + 1, countsComplete: true };
+    }
+  }
+  return { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, cardmarketoffers, tcgplayer };
 }
 
 /**
@@ -232,6 +243,20 @@ export function previewStrategies() {
       amountPct: 0,
       amountPkn: 0,
       rounding: 'up',
+      minPkn: 1,
+      activatePaused: false,
+    },
+    {
+      id: 'preview-strategy-6',
+      name: 'Undercut Cardmarket pro sellers 2%',
+      source: 'cardmarketoffers',
+      basis: 'pro',
+      match: { condition: true, language: true, finish: true, firstEdition: true },
+      feeExclusive: false,
+      action: 'undercut',
+      amountPct: 2,
+      amountPkn: 0,
+      rounding: 'integer',
       minPkn: 1,
       activatePaused: false,
     },

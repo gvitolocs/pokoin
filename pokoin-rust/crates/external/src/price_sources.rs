@@ -1,7 +1,7 @@
 //! The `sources` block of a price-check comp: CardTrader sold, Pokoin's own
-//! sold, Cardmarket's price guide and TCGplayer quotes — one independent feed
-//! each, all games, all three comp builders (`read_prices`, `game_comp`,
-//! `store_game_comp`).
+//! sold, Cardmarket's price guide, Cardmarket's scanned seller offers and
+//! TCGplayer quotes — one independent feed each, all games, all three comp
+//! builders (`read_prices`, `game_comp`, `store_game_comp`).
 //!
 //! ```jsonc
 //! "sources": {
@@ -10,6 +10,10 @@
 //!   "cardmarket": { "asOf": "2026-11-06",
 //!                   "trend": { "<key>": { "eur": 1.23, "grossPkn": 246, "pkn": 246 } },
 //!                   "low": { … }, "avg1": { … }, "avg7": { … }, "avg30": { … } },
+//!   "cardmarketoffers": { "asOf": "2026-11-10",
+//!                   "pro":     { "<key>": { "eur": 20.0, "grossPkn": 4000, "pkn": 4000,
+//!                                          "condition": "NM", "language": "IT", … } },
+//!                   "private": { "<key>": { … } } },
 //!   "tcgplayer":  { "asOf": "2026-11-06", "rateDay": "2026-11-06", "usdPerEur": 1.0812,
 //!                   "market": { "<key>": { "usd": 1.5, "grossPkn": 277.47, "pkn": 277.47 } },
 //!                   "low": { … }, "mid": { … } }
@@ -17,11 +21,11 @@
 //! ```
 //!
 //! `<key>` is `Match::key()` (`C`, `L`, `F`, `E` in that order, `""` = any
-//! copy) restricted to the letters the source honours: CardTrader sold all
-//! 16, Pokoin sold `C`/`L`, Cardmarket `F`, TCGplayer `F`/`E`. Only keys with
-//! a value are present; a source with no value at all is omitted and its
-//! `sourceStatus` is `empty`. A one-of-a-kind item (graded/signed/altered)
-//! gets only the `""` key in every source.
+//! copy) restricted to the letters the source honours: CardTrader sold and
+//! Cardmarket offers all 16, Pokoin sold `C`/`L`, Cardmarket `F`, TCGplayer
+//! `F`/`E`. Only keys with a value are present; a source with no value at all
+//! is omitted and its `sourceStatus` is `empty`. A one-of-a-kind item
+//! (graded/signed/altered) gets only the `""` key in every source.
 //!
 //! Every feed is independent: a query error, a missing table, a missing env
 //! var or stale data never fails the price check — the source is omitted with
@@ -436,6 +440,68 @@ pub async fn fetch_cm_guide(db: &DbPools, game: &str, product_ids: &[i64]) -> Op
     }
 }
 
+/// TCGNotify's last fresh run day, or `None`. Independent of the official
+/// guide's run: either feed being stale leaves the other in place.
+pub const TCGNOTIFY_RUN_SQL: &str =
+    "select max(day)::text as day from public.tcgnotify_price_guide_runs where game = $1 and day >= current_date - 4";
+
+/// The newest ask per product (change-only history), in the `"pokemon"` pool.
+pub const TCGNOTIFY_LOW_SQL: &str = "select g.id_product, g.min_price::float8 as min_price \
+     from unnest($2::bigint[]) p(id) \
+     cross join lateral ( \
+       select * from public.tcgnotify_price_guide g \
+       where g.game = $1 and g.id_product = p.id order by g.day desc limit 1 \
+     ) g";
+
+/// TCGNotify's cheapest ask wins the `low` basis; the official guide keeps
+/// every other basis and all foil values, which TCGNotify does not publish.
+/// A missing table, a stale run or a query error leaves the guide untouched.
+/// `asOf` stays the guide's run day — this overrides a basis, not the feed.
+pub async fn overlay_tcgnotify_low(
+    db: &DbPools,
+    game: &str,
+    product_ids: &[i64],
+    guide: &mut HashMap<i64, GuideRow>,
+) {
+    if product_ids.is_empty() {
+        return;
+    }
+    let day = match db.query("pokemon", TCGNOTIFY_RUN_SQL, &[json!(game)]).await {
+        Ok(rows) => match rows.first().and_then(|row| row.get("day")).and_then(Value::as_str) {
+            Some(day) if !day.is_empty() => day.to_string(),
+            _ => return,
+        },
+        Err(error) => {
+            if !error.is_table_missing() {
+                tracing::warn!(game, error = %error, "tcgnotify run query failed; keeping the official guide");
+            }
+            return;
+        }
+    };
+    let rows = match db.query("pokemon", TCGNOTIFY_LOW_SQL, &[json!(game), json!(product_ids)]).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            if !error.is_table_missing() {
+                tracing::warn!(game, error = %error, "tcgnotify ask query failed; keeping the official guide");
+            }
+            return;
+        }
+    };
+    for row in &rows {
+        let (Some(product), Some(price)) = (int(row.get("id_product")), float(row.get("min_price"))) else {
+            continue;
+        };
+        if price <= 0.0 {
+            continue;
+        }
+        let entry = guide.entry(product).or_default();
+        entry.low = Some(price);
+        if entry.day.is_empty() {
+            entry.day = day.clone();
+        }
+    }
+}
+
 /// The `sources.cardmarket` value of one item, or `None` (status `empty`).
 /// Per basis: `regular` = min positive value over the card's products, `foil`
 /// = min positive foil value; key `"F"` is the foil value for a foil item,
@@ -485,12 +551,218 @@ pub fn cardmarket_source(feed: &CardmarketFeed, blueprint_id: Option<i64>, item:
     Some(Value::Object(out))
 }
 
+// ------------------------------------------------- Cardmarket scanned offers
+
+/// One facet minimum a CTCMDeals scan read off Cardmarket's listing page
+/// (`cardmarket_offer_minimums`, migration 141). A listing page is filtered
+/// by worst acceptable condition, language, finish, first edition and seller
+/// type, so a facet answers exactly one question — "what is the cheapest
+/// offer from this kind of seller that is at least this good" — and is not an
+/// answer to any other.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CmFloor {
+    /// `pro` (professional or powerseller) or `private`.
+    pub seller_type: String,
+    /// Cardmarket's `minCondition` facet: `NM`, `SP`, `MP`, `PL`, `Poor` or
+    /// `*` (unfiltered, so a mix of grades).
+    pub condition: String,
+    /// Pokoin's language key, or `*`.
+    pub language: String,
+    /// `Y`, `N` or `*`: Pokémon reverse holo, the other games' foil.
+    pub finish: String,
+    pub first_edition: String,
+    /// EUR cents at 2 PKN per cent.
+    pub min_pkn: f64,
+    pub offers: i64,
+    /// False when the scan stopped on a full page, so offers it never reached
+    /// could be cheaper.
+    pub counts_complete: Option<bool>,
+    /// The day the scan saw it.
+    pub day: String,
+}
+
+/// A page's floors and the crosswalk they join through. They live apart from
+/// the guide feed because they age per facet, not per daily run: a scan done
+/// on Tuesday is not made wrong by a guide download that failed on Wednesday.
+#[derive(Debug, Default)]
+pub struct CmFloorGroups {
+    pub products_by_blueprint: HashMap<i64, Vec<i64>>,
+    pub minimums_by_product: HashMap<i64, Vec<CmFloor>>,
+}
+
+/// How old a scanned facet may be to still be quoted. Cardmarket's own guide
+/// is trusted for 4 days and CardTrader's live listings for 3; these sit
+/// between, because a harvest is a walk of real pages, done on demand rather
+/// than by a nightly timer.
+pub const CM_FLOOR_MAX_AGE_DAYS: i64 = 7;
+
+/// Both seller types: the number the guide's `low` and TCGNotify's ask cannot
+/// give, because neither separates who is selling.
+pub fn cm_floor_sql() -> String {
+    format!(
+        "select m.cm_product_id, m.seller_type, m.condition, m.language, m.finish, m.first_edition, \
+         m.min_cents::float8 * 2 as min_pkn, coalesce(m.offers, 0)::int as offers, \
+         m.counts_complete, m.observed_at::date::text as day \
+       from public.cardmarket_offer_minimums m \
+       where m.cm_product_id = any($1::bigint[]) \
+         and m.observed_at::date >= current_date - {CM_FLOOR_MAX_AGE_DAYS}"
+    )
+}
+
+/// The newest scanned facet minimum per Cardmarket product, `"pokemon"` pool.
+pub async fn fetch_cm_floors(db: &DbPools, game: &str, product_ids: &[i64]) -> Option<HashMap<i64, Vec<CmFloor>>> {
+    if product_ids.is_empty() {
+        return Some(HashMap::new());
+    }
+    match db.query("pokemon", &cm_floor_sql(), &[json!(product_ids)]).await {
+        Ok(rows) => {
+            let mut map: HashMap<i64, Vec<CmFloor>> = HashMap::new();
+            for row in &rows {
+                let Some(product) = int(row.get("cm_product_id")) else {
+                    continue;
+                };
+                map.entry(product).or_default().push(CmFloor {
+                    seller_type: text(row.get("seller_type")),
+                    condition: text(row.get("condition")),
+                    language: text(row.get("language")),
+                    finish: text(row.get("finish")),
+                    first_edition: text(row.get("first_edition")),
+                    min_pkn: float(row.get("min_pkn")).unwrap_or_default(),
+                    offers: int(row.get("offers")).unwrap_or_default() as i64,
+                    counts_complete: row.get("counts_complete").and_then(Value::as_bool),
+                    day: text(row.get("day")),
+                });
+            }
+            Some(map)
+        }
+        Err(error) => {
+            if error.is_table_missing() {
+                tracing::warn!("cardmarket_offer_minimums is not migrated; cardmarket offer floors unavailable");
+            } else {
+                tracing::warn!(game, error = %error, "cardmarket offer minimums query failed; offer floors unavailable");
+            }
+            None
+        }
+    }
+}
+
+/// Whether a captured facet answers the question the item asks. An item that
+/// does not name a condition or language accepts any facet; one that names it
+/// accepts only a facet filtered the same way, since `minCondition` is the
+/// *worst* grade acceptable and a `*` facet is a mix of grades.
+fn facet_agrees(captured: &str, wanted: Option<&str>) -> bool {
+    match wanted {
+        None => true,
+        Some(want) => captured.eq_ignore_ascii_case(want),
+    }
+}
+
+/// The same for a yes-or-no facet. A `*` facet mixed both copies, so it
+/// answers neither a reverse nor a regular one.
+fn flag_agrees(captured: &str, wanted: bool) -> bool {
+    captured != "*" && (captured == "Y") == wanted
+}
+
+/// One floor as a comp: the price and the facet it was filtered at, so a
+/// reader can tell what question the number answers.
+fn cm_floor_value(floor: &CmFloor) -> Value {
+    json!({
+        "eur": round2(floor.min_pkn / 200.0),
+        "grossPkn": floor.min_pkn,
+        "pkn": floor.min_pkn,
+        "offers": floor.offers,
+        "countsComplete": floor.counts_complete,
+        "condition": floor.condition,
+        "language": floor.language,
+        "finish": floor.finish,
+        "firstEdition": floor.first_edition,
+    })
+}
+
+/// The cheapest of a set of facets, by PKN.
+fn lowest_floor<'a>(rows: impl IntoIterator<Item = &'a CmFloor>) -> Option<&'a CmFloor> {
+    rows.into_iter().min_by(|a, b| a.min_pkn.total_cmp(&b.min_pkn))
+}
+
+/// Does a captured facet answer `m`'s question about this item? A toggle that
+/// is off asks nothing, so a `*` facet answers it; a toggle that is on needs a
+/// facet filtered the same way. An item that names no condition or language
+/// cannot be contradicted by either.
+fn floor_matches(floor: &CmFloor, item: &PriceItem, game: &str, m: Match) -> bool {
+    let condition = (!item.condition.is_empty()).then_some(item.condition.as_str());
+    let language = (!item.language.is_empty()).then_some(item.language.as_str());
+    (!m.condition || facet_agrees(&floor.condition, condition))
+        && (!m.language || facet_agrees(&floor.language, language))
+        && (!m.finish || flag_agrees(&floor.finish, item_finish(item, game)))
+        && (!m.first_edition || flag_agrees(&floor.first_edition, item.first_edition))
+}
+
+/// One seller type's map: every `Match` key, each the cheapest fresh facet
+/// that answers it. A graded, signed or altered copy is no scanned facet's
+/// copy, so like the other sources it gets only `""`.
+fn cm_floor_map(floors: &[&CmFloor], item: &PriceItem, game: &str, seller: &str) -> Map<String, Value> {
+    let of_seller: Vec<&CmFloor> = floors.iter().copied().filter(|floor| floor.seller_type == seller).collect();
+    let mut map = Map::new();
+    for m in Match::all() {
+        if m != Match::ANY && item.one_of_a_kind() {
+            continue;
+        }
+        let answering = of_seller
+            .iter()
+            .copied()
+            .filter(|floor| m == Match::ANY || floor_matches(floor, item, game, m));
+        let Some(best) = lowest_floor(answering) else { continue };
+        map.insert(m.key(), cm_floor_value(best));
+    }
+    map
+}
+
+/// The `sources.cardmarketoffers` value of one item, or `None` (status
+/// `empty`): nothing fresh was scanned for this card's products. `pro` and
+/// `private` are the two seller types Cardmarket separates, each holding every
+/// `Match` key: `""` is the cheapest facet scanned at all, `"CLFE"` the
+/// cheapest facet agreeing with the item on all four attributes. Every value
+/// carries the facet it came from, so a mixed `*` scan is never mistaken for
+/// an exact one.
+pub fn cm_offers_source(groups: &CmFloorGroups, blueprint_id: Option<i64>, item: &PriceItem, game: &str) -> Option<Value> {
+    let products = groups.products_by_blueprint.get(&blueprint_id?)?;
+    let floors: Vec<&CmFloor> = products
+        .iter()
+        .filter_map(|product| groups.minimums_by_product.get(product))
+        .flatten()
+        .filter(|floor| floor.min_pkn > 0.0)
+        .collect();
+    if floors.is_empty() {
+        return None;
+    }
+    let mut out = Map::new();
+    out.insert(
+        "asOf".into(),
+        json!(floors.iter().map(|floor| floor.day.as_str()).max().unwrap_or("")),
+    );
+    for seller in ["pro", "private"] {
+        let map = cm_floor_map(&floors, item, game, seller);
+        if !map.is_empty() {
+            out.insert(seller.into(), Value::Object(map));
+        }
+    }
+    if out.len() <= 1 {
+        return None; // only asOf: no facet had a price
+    }
+    Some(Value::Object(out))
+}
+
 // ----------------------------------------------------------------- TCGplayer
 
 /// The newest EUR→USD reference rate, fresh only within 10 days. Runs in the
 /// `"pokemon"` pool.
 pub const FX_SQL: &str = "select day::text as day, rate::float8 as rate from public.fx_rates_daily \
      where base = 'EUR' and quote = 'USD' and day >= current_date - 10 order by day desc limit 1";
+
+/// The newest EUR→`$1` reference rate for the pricer's display currency
+/// (`pricerSettings.currency`), fresh only within 10 days. `"pokemon"` pool.
+pub const CURRENCY_RATE_SQL: &str = "select day::text as day, rate::float8 as rate from public.fx_rates_daily \
+     where base = 'EUR' and quote = $1 and day >= current_date - 10 order by day desc limit 1";
 
 /// The TCGplayer feed of one page.
 #[derive(Debug)]
@@ -638,6 +910,9 @@ pub struct PageSources<'a> {
     pub ct_sold: Option<Vec<CtSoldRow>>,
     pub pokoin_sales: Option<&'a [PokoinSale]>,
     pub cardmarket: CardmarketOutcome,
+    /// What Cardmarket sellers asked, per facet and seller type, as the
+    /// CTCMDeals scans saw it. `None` when that query could not answer.
+    pub cm_floors: Option<CmFloorGroups>,
     pub tcg: TcgOutcome,
 }
 
@@ -650,6 +925,7 @@ impl<'a> PageSources<'a> {
             ct_sold: None,
             pokoin_sales: None,
             cardmarket: CardmarketOutcome::Unavailable,
+            cm_floors: None,
             tcg: TcgOutcome::Unconfigured,
         }
     }
@@ -709,6 +985,21 @@ pub fn attach(comp: &mut Value, item: &PriceItem, channel: Channel, src: &PageSo
         },
     };
     status.insert("cardmarket".into(), json!(cm_status));
+
+    // Cardmarket's scanned offers: what the last walk of the listing page saw
+    // professional and private sellers ask. Independent of the guide, which
+    // cannot say who is selling.
+    let floor_status = match &src.cm_floors {
+        None => "unavailable",
+        Some(groups) => match cm_offers_source(groups, blueprint_id, item, game) {
+            Some(value) => {
+                sources.insert("cardmarketoffers".into(), value);
+                "available"
+            }
+            None => "empty",
+        },
+    };
+    status.insert("cardmarketoffers".into(), json!(floor_status));
 
     // TCGplayer. The raw quotes array and the status are always set (the
     // array empty when the feed cannot answer).
@@ -1076,7 +1367,7 @@ mod tests {
         assert_eq!(comp["sources"], json!({}), "no source had a value: an empty block, still a new answer");
         assert_eq!(
             comp["sourceStatus"],
-            json!({ "cardtraderSold": "unavailable", "pokoinSold": "unavailable", "cardmarket": "unavailable", "tcgplayer": "unconfigured" })
+            json!({ "cardtraderSold": "unavailable", "pokoinSold": "unavailable", "cardmarket": "unavailable", "cardmarketoffers": "unavailable", "tcgplayer": "unconfigured" })
         );
         assert_eq!(comp["tcgplayer"], json!([]));
         assert_eq!(comp["tcgplayerStatus"], json!("unconfigured"));
@@ -1106,6 +1397,7 @@ mod tests {
             ct_sold: Some(rows),
             pokoin_sales: Some(&sales),
             cardmarket: CardmarketOutcome::Feed(feed),
+            cm_floors: None,
             tcg: TcgOutcome::Feed(tcg_feed),
         };
         let item = parse_items("200:NM:EN")[0].clone();
@@ -1127,7 +1419,252 @@ mod tests {
         assert_eq!(comp["tcgplayerStatus"], json!("available"));
         assert_eq!(
             comp["sourceStatus"],
-            json!({ "cardtraderSold": "available", "pokoinSold": "available", "cardmarket": "available", "tcgplayer": "available" })
+            json!({ "cardtraderSold": "available", "pokoinSold": "available", "cardmarket": "available", "cardmarketoffers": "unavailable", "tcgplayer": "available" })
         );
+    }
+
+    // The scanned Cardmarket offers: the cheapest professional and private
+    // offer per facet, as a CTCMDeals walk of the listing pages left it.
+    // The fixtures are Dialga (Call of Legends CL3, Cardmarket idProduct
+    // 279646) from the live 2026-11-10 scan: the `*` facets are what the run
+    // recorded, and the `N`/`Y` ones are the same page's 14 captured offers
+    // regrouped (€20.00 mirmex regular, €5.88 JeffPesos-GTCorciano reverse).
+    fn floor(condition: &str, language: &str, finish: &str, first_edition: &str, cents: i64) -> CmFloor {
+        CmFloor {
+            seller_type: "pro".into(),
+            condition: condition.into(),
+            language: language.into(),
+            finish: finish.into(),
+            first_edition: first_edition.into(),
+            min_pkn: cents as f64 * 2.0,
+            offers: 1,
+            counts_complete: Some(true),
+            day: "2026-11-10".into(),
+        }
+    }
+
+    fn private_floor(condition: &str, language: &str, finish: &str, first_edition: &str, cents: i64) -> CmFloor {
+        CmFloor { seller_type: "private".into(), ..floor(condition, language, finish, first_edition, cents) }
+    }
+
+    /// Blueprint 100 = the card, product 279646 = its Cardmarket page.
+    fn dialga(floors: Vec<CmFloor>) -> CmFloorGroups {
+        CmFloorGroups {
+            products_by_blueprint: HashMap::from([(100, vec![279646])]),
+            minimums_by_product: HashMap::from([(279646, floors)]),
+        }
+    }
+
+    fn seller_map(groups: &CmFloorGroups, key: &str, game: &str, seller: &str) -> Value {
+        let value = cm_offers_source(groups, Some(100), &parse_items(key)[0], game)
+            .unwrap_or_else(|| panic!("{key}: no scanned offer at all"));
+        value[seller].clone()
+    }
+
+    fn pro(groups: &CmFloorGroups, key: &str, game: &str) -> Value {
+        seller_map(groups, key, game, "pro")
+    }
+
+    fn private_offers(groups: &CmFloorGroups, key: &str, game: &str) -> Value {
+        seller_map(groups, key, game, "private")
+    }
+
+    #[test]
+    fn a_scanned_facet_prices_the_copy_it_was_filtered_at() {
+        let groups = dialga(vec![
+            floor("NM", "IT", "N", "N", 2000),
+            floor("NM", "IT", "*", "*", 2000),
+            floor("SP", "IT", "*", "*", 588),
+        ]);
+        let value = cm_offers_source(&groups, Some(100), &parse_items("200:NM:IT")[0], "pokemon").unwrap();
+        assert_eq!(value["asOf"], json!("2026-11-10"));
+        let map = value["pro"].as_object().unwrap();
+        assert_eq!(map["CLFE"]["eur"], json!(20.0), "the exact copy");
+        assert_eq!(map["CLFE"]["grossPkn"], json!(4000.0), "2 PKN per cent");
+        assert_eq!(map["CLFE"]["finish"], json!("N"), "the facet the answer was filtered at is stated");
+        assert_eq!(map[""]["eur"], json!(5.88), "any copy: the cheapest facet scanned at all");
+        assert_eq!(map[""]["condition"], json!("SP"));
+        assert_eq!(map["C"]["eur"], json!(20.0), "condition only: a mixed finish still answers");
+    }
+
+    #[test]
+    fn a_condition_facet_is_the_worst_grade_accepted_not_the_grade_itself() {
+        // The SP facet was Cardmarket's `minCondition=3` page: SP-or-better,
+        // so it answers an SP item and is not an answer for an NM one.
+        let groups = dialga(vec![floor("SP", "IT", "N", "N", 588), floor("NM", "IT", "N", "N", 2000)]);
+        assert_eq!(pro(&groups, "200:SP:IT", "pokemon")["CLFE"]["eur"], json!(5.88));
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")["CLFE"]["eur"], json!(20.0));
+        let poor = pro(&groups, "200:Poor:IT", "pokemon");
+        assert!(poor.get("CLFE").is_none(), "no facet was scanned at Poor; the SP one is not an answer to it");
+        assert!(poor.get("C").is_none());
+        assert_eq!(poor[""]["eur"], json!(5.88), "any copy still takes the cheapest scanned");
+    }
+
+    #[test]
+    fn a_reverse_holo_floor_never_answers_a_plain_copy_or_the_other_way_round() {
+        let groups = dialga(vec![floor("NM", "IT", "N", "N", 2000), floor("NM", "IT", "Y", "N", 2400)]);
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")["CLFE"]["eur"], json!(20.0));
+        assert_eq!(pro(&groups, "200:NM:IT:R", "pokemon")["CLFE"]["eur"], json!(24.0));
+        // A scan that did not filter finish mixed both copies: it answers
+        // condition and language, but neither finish exactly.
+        let mixed = dialga(vec![floor("NM", "IT", "*", "N", 2000)]);
+        for key in ["200:NM:IT", "200:NM:IT:R"] {
+            let value = pro(&mixed, key, "pokemon");
+            assert!(value.get("CLFE").is_none(), "{key}: a mixed finish is not an exact comp");
+            assert!(value.get("F").is_none(), "{key}");
+            assert_eq!(value["CL"]["eur"], json!(20.0), "{key}: the toggles that are off ask nothing");
+            assert_eq!(value[""]["eur"], json!(20.0), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_floor_in_another_language_is_another_answer() {
+        let groups = dialga(vec![floor("NM", "IT", "N", "N", 2000), floor("NM", "EN", "N", "N", 1500)]);
+        let value = pro(&groups, "200:NM:IT", "pokemon");
+        assert_eq!(value["CLFE"]["eur"], json!(20.0));
+        assert_eq!(value["CLFE"]["language"], json!("IT"));
+        assert_eq!(pro(&groups, "200:NM:EN", "pokemon")["CLFE"]["eur"], json!(15.0));
+        // A card only ever scanned in Italian and English gives a French
+        // seller nothing exact to compare against, but still the cheapest seen.
+        let value = pro(&groups, "200:NM:FR", "pokemon");
+        assert!(value.get("CLFE").is_none());
+        assert!(value.get("L").is_none());
+        assert_eq!(value["C"]["eur"], json!(15.0), "condition only: either language answers");
+        assert_eq!(value[""]["eur"], json!(15.0));
+    }
+
+    #[test]
+    fn the_any_copy_key_takes_the_cheapest_facet_scanned() {
+        let groups = dialga(vec![floor("NM", "IT", "N", "N", 2000), floor("SP", "EN", "Y", "N", 588)]);
+        // No condition and no language asked, but the item is still a plain
+        // non-first-edition copy, so the exact key cannot take the reverse.
+        let value = pro(&groups, "200", "pokemon");
+        assert_eq!(value[""]["eur"], json!(5.88), "any copy: any facet answers");
+        assert_eq!(value["CLFE"]["eur"], json!(20.0));
+    }
+
+    #[test]
+    fn the_finish_facet_of_other_games_is_foil_not_reverse_holo() {
+        // A foil Magic facet answers a foil item; `item_finish` is the switch.
+        let groups = dialga(vec![floor("NM", "EN", "Y", "N", 900), floor("NM", "EN", "N", "N", 300)]);
+        assert_eq!(pro(&groups, "200:NM:EN:H", "magic")["CLFE"]["eur"], json!(9.0));
+        assert_eq!(pro(&groups, "200:NM:EN", "magic")["CLFE"]["eur"], json!(3.0));
+        // The same rows in Pokémon read the reverse flag, so `H` alone is
+        // still a regular copy there.
+        assert_eq!(pro(&groups, "200:NM:EN:H", "pokemon")["CLFE"]["eur"], json!(3.0));
+        assert_eq!(pro(&groups, "200:NM:EN:R", "pokemon")["CLFE"]["eur"], json!(9.0));
+    }
+
+    #[test]
+    fn first_edition_facets_stay_apart() {
+        let groups = dialga(vec![floor("NM", "IT", "N", "Y", 3000), floor("NM", "IT", "N", "N", 2000)]);
+        assert_eq!(pro(&groups, "200:NM:IT:F", "pokemon")["CLFE"]["eur"], json!(30.0));
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")["CLFE"]["eur"], json!(20.0));
+        assert_eq!(pro(&groups, "200:NM:IT:F", "pokemon")["CLF"]["eur"], json!(20.0), "edition off: either answers");
+    }
+
+    #[test]
+    fn professional_and_private_offers_are_separate_answers() {
+        let groups = dialga(vec![
+            floor("NM", "IT", "N", "N", 2000),
+            private_floor("NM", "IT", "N", "N", 1200),
+            private_floor("SP", "IT", "N", "N", 400),
+        ]);
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")["CLFE"]["eur"], json!(20.0));
+        assert_eq!(private_offers(&groups, "200:NM:IT", "pokemon")["CLFE"]["eur"], json!(12.0), "a private ask is not a pro floor");
+        assert_eq!(private_offers(&groups, "200:NM:IT", "pokemon")[""]["eur"], json!(4.0));
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")[""]["eur"], json!(20.0), "the pro side never borrows a private offer");
+        // Only one seller type scanned: the other is simply absent, not zero.
+        let only_private = dialga(vec![private_floor("NM", "IT", "N", "N", 1200)]);
+        let value = cm_offers_source(&only_private, Some(100), &parse_items("200:NM:IT")[0], "pokemon").unwrap();
+        assert!(value.get("pro").is_none());
+        assert_eq!(value["private"]["CLFE"]["eur"], json!(12.0));
+    }
+
+    #[test]
+    fn a_graded_signed_or_altered_copy_gets_only_the_any_copy_key() {
+        // The scan walks raw copies: Cardmarket's own facets of that page were
+        // filtered `isSigned=N`, `isAltered=N`, and a slab is not a comp. Like
+        // the other sources, such an item keeps `""` and nothing else.
+        let groups = dialga(vec![floor("NM", "IT", "N", "N", 2000), private_floor("NM", "IT", "N", "N", 1200)]);
+        for key in ["200:NM:IT:G", "200:NM:IT:S", "200:NM:IT:A", "200:NM:IT:RFHGSA"] {
+            for seller in ["pro", "private"] {
+                let value = seller_map(&groups, key, "pokemon", seller);
+                assert_eq!(value.as_object().unwrap().len(), 1, "{key} {seller}");
+                assert!(value.get("CLFE").is_none(), "{key} {seller}");
+                assert!(value.get("").is_some(), "{key} {seller}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_card_the_scan_never_walked_has_no_offers_at_all() {
+        let groups = dialga(vec![floor("NM", "IT", "N", "N", 2000)]);
+        let item = parse_items("200:NM:IT")[0].clone();
+        assert_eq!(cm_offers_source(&groups, None, &item, "pokemon"), None, "no Cardmarket product for the card");
+        let unscanned = CmFloorGroups {
+            products_by_blueprint: HashMap::from([(100, vec![424242])]),
+            minimums_by_product: groups.minimums_by_product.clone(),
+        };
+        assert_eq!(cm_offers_source(&unscanned, Some(100), &item, "pokemon"), None, "the product was never scanned");
+        assert_eq!(cm_offers_source(&CmFloorGroups::default(), Some(100), &item, "pokemon"), None);
+        let no_price = dialga(vec![CmFloor { min_pkn: 0.0, ..floor("NM", "IT", "N", "N", 2000) }]);
+        assert_eq!(cm_offers_source(&no_price, Some(100), &item, "pokemon"), None, "a facet with no offer is not a zero");
+    }
+
+    #[test]
+    fn several_products_of_one_card_give_the_cheapest_floor_and_the_newest_scan() {
+        let mut magcargo = floor("NM", "IT", "N", "N", 1000);
+        magcargo.day = "2026-11-08".into();
+        let groups = CmFloorGroups {
+            products_by_blueprint: HashMap::from([(100, vec![279646, 279259])]),
+            minimums_by_product: HashMap::from([
+                (279646, vec![floor("NM", "IT", "N", "N", 2000)]),
+                (279259, vec![magcargo]),
+            ]),
+        };
+        let value = cm_offers_source(&groups, Some(100), &parse_items("200:NM:IT")[0], "pokemon").unwrap();
+        assert_eq!(value["pro"]["CLFE"]["eur"], json!(10.0), "the cheapest professional copy of the card");
+        assert_eq!(value["asOf"], json!("2026-11-10"), "the newest of the two scans, not the one used");
+    }
+
+    #[test]
+    fn a_scan_that_stopped_short_says_so() {
+        let groups = dialga(vec![CmFloor { counts_complete: Some(false), ..floor("NM", "IT", "N", "N", 2000) }]);
+        assert_eq!(pro(&groups, "200:NM:IT", "pokemon")["CLFE"]["countsComplete"], json!(false));
+    }
+
+    #[test]
+    fn attach_reports_the_scanned_offers_apart_from_the_guide() {
+        let src = PageSources {
+            game: "pokemon".into(),
+            blueprint_by_card: HashMap::from([("200".to_string(), 100)]),
+            ct_sold: None,
+            pokoin_sales: None,
+            cardmarket: CardmarketOutcome::Unavailable,
+            cm_floors: Some(dialga(vec![floor("NM", "IT", "N", "N", 2000), private_floor("NM", "IT", "N", "N", 1200)])),
+            tcg: TcgOutcome::Unconfigured,
+        };
+        let mut comp = json!({});
+        attach(&mut comp, &parse_items("200:NM:IT")[0], Channel::Direct, &src);
+        assert_eq!(comp["sources"]["cardmarketoffers"]["pro"]["CLFE"]["grossPkn"], json!(4000.0));
+        assert_eq!(comp["sources"]["cardmarketoffers"]["private"]["CLFE"]["grossPkn"], json!(2400.0));
+        assert_eq!(comp["sourceStatus"]["cardmarketoffers"], json!("available"));
+        assert_eq!(comp["sources"].as_object().unwrap().len(), 1, "the guide is its own source; a stale download says nothing about a scan");
+        assert_eq!(comp["sourceStatus"]["cardmarket"], json!("unavailable"));
+        // No table, no rows: unavailable, and never a zero.
+        let mut comp = json!({});
+        let mut none = PageSources::empty("pokemon");
+        none.cm_floors = None;
+        attach(&mut comp, &parse_items("200:NM:IT")[0], Channel::Direct, &none);
+        assert_eq!(comp["sourceStatus"]["cardmarketoffers"], json!("unavailable"));
+        // A card with a blueprint but no scanned product: empty, not a zero.
+        let mut comp = json!({});
+        let mut unscanned = PageSources::empty("pokemon");
+        unscanned.blueprint_by_card = HashMap::from([("200".to_string(), 100)]);
+        unscanned.cm_floors = Some(CmFloorGroups::default());
+        attach(&mut comp, &parse_items("200:NM:IT")[0], Channel::Direct, &unscanned);
+        assert_eq!(comp["sourceStatus"]["cardmarketoffers"], json!("empty"));
+        assert!(comp["sources"].get("cardmarketoffers").is_none());
     }
 }

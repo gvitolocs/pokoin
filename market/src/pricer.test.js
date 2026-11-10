@@ -5,11 +5,16 @@ import {
   MATCH_ANY,
   MATCH_EXACT,
   PRICER_BASES,
+  PRICER_CURRENCIES,
   PRICER_MATCHES,
   PRICER_SOURCES,
+  currencyContext,
   effectiveMatch,
+  formatLocal,
   isAllExact,
+  localToPkn,
   pricerBases,
+  pknToLocal,
   sourceHasFees,
   sourceSwitches,
   switchNote,
@@ -167,14 +172,14 @@ test('the plan prices paused rows, puts them on sale and counts the rest', () =>
   assert.equal(keepPaused.plan[0].activate, false);
 });
 
-test('summary line matches the server', () => {
+test('the summary line reads the server rules with money in the display currency', () => {
   assert.equal(
     strategySummary({ source: 'cardtrader', action: 'undercut', amountPct: 5, rounding: 'integer', minPkn: 1 }),
-    'CardTrader · all exact · net of CardTrader fees · undercut 5% · whole PKN · min 1 PKN',
+    'CardTrader · all exact · net of CardTrader fees · undercut 5% · nearest · min €0.01',
   );
   assert.equal(
     strategySummary({ source: 'pokoin', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 2.5 }),
-    'Pokoin · sold median (90 days) · same condition and language · +10% + 2.5 PKN',
+    'Pokoin · sold median (90 days) · same condition and language · +10% + €0.01',
   );
   assert.equal(strategySummary({ source: 'pokoin', action: 'match' }), 'Pokoin · cheapest Pokoin ask · match');
   assert.equal(
@@ -189,19 +194,70 @@ test('summary line matches the server', () => {
     strategySummary({ source: 'tcgplayer', action: 'match', rounding: 'up' }),
     'TCGplayer · market price (USD → EUR) · same finish and 1st edition · match · rounded up',
   );
+  assert.equal(
+    strategySummary({ source: 'cardmarketoffers', action: 'undercut', amountPct: 2 }),
+    'Cardmarket sellers · cheapest professional offer · all exact · undercut 2%',
+  );
+  assert.equal(
+    strategySummary({ source: 'cardmarketoffers', basis: 'private', action: 'match', match: { condition: true, language: true, finish: false, firstEdition: false } }),
+    'Cardmarket sellers · cheapest private offer · same condition and language · match',
+  );
+});
+
+test('the display currencies mirror the server and convert at the edge', () => {
+  assert.deepEqual(PRICER_CURRENCIES, ['EUR', 'USD', 'GBP', 'DKK', 'SEK', 'NOK', 'PLN', 'CZK', 'CHF', 'HUF', 'RON', 'BGN', 'CAD', 'AUD']);
+  assert.deepEqual(currencyContext({ currency: 'EUR' }, null), { code: 'EUR', rate: 1 });
+  assert.deepEqual(currencyContext({}, undefined), { code: 'EUR', rate: 1 });
+  assert.deepEqual(currencyContext({ currency: 'XXX' }, { rate: 2, day: '2026-11-07' }), { code: 'EUR', rate: 1 }, 'an unknown code reads EUR');
+  assert.deepEqual(currencyContext({ currency: 'DKK' }, { rate: 7.46, day: '2026-11-07' }), { code: 'DKK', rate: 7.46 });
+  // No fresh rate: EUR, never a wrong number under a DKK label.
+  assert.deepEqual(currencyContext({ currency: 'DKK' }, null), { code: 'EUR', rate: 1 });
+  assert.deepEqual(currencyContext({ currency: 'GBP' }, { rate: 0, day: '' }), { code: 'EUR', rate: 1 });
+  const eur = currencyContext({ currency: 'EUR' });
+  assert.equal(pknToLocal(200, eur), 1, 'rate 1: 2 PKN = 1 euro cent');
+  assert.equal(localToPkn(1, eur), 200);
+  const dkk = currencyContext({ currency: 'DKK' }, { rate: 7.46, day: '2026-11-07' });
+  assert.equal(pknToLocal(200, dkk), 7.46);
+  for (const value of [0, 1, 25.56, 200, 2642]) {
+    assert.ok(Math.abs(localToPkn(pknToLocal(value, dkk), dkk) - value) < 1e-9, `round trip at rate 7.46: ${value}`);
+    assert.ok(Math.abs(localToPkn(pknToLocal(value, eur), eur) - value) < 1e-9, `round trip at rate 1: ${value}`);
+  }
+  assert.equal(formatLocal(pknToLocal(30, eur), eur), '€0.15');
+  assert.equal(formatLocal(pknToLocal(200, dkk), dkk), '7.46 DKK');
+  assert.equal(formatLocal(pknToLocal(200, { code: 'USD', rate: 1.08 }), { code: 'USD', rate: 1.08 }), '$1.08');
+});
+
+test('a summary renders its money in DKK under a DKK context', () => {
+  const dkk = currencyContext({ currency: 'DKK' }, { rate: 7.5, day: '2026-11-07' });
+  assert.equal(
+    strategySummary({ source: 'pokoin', basis: 'sold', action: 'premium', amountPct: 10, amountPkn: 40, minPkn: 200 }, dkk),
+    'Pokoin · sold median (90 days) · same condition and language · +10% + 1.50 DKK · min 7.50 DKK',
+  );
+  assert.equal(
+    strategySummary({ source: 'cardtrader', action: 'undercut', amountPct: 5, amountPkn: 40, rounding: 'integer', minPkn: 200 }, dkk),
+    'CardTrader · all exact · net of CardTrader fees · undercut 5% − 1.50 DKK · nearest · min 7.50 DKK',
+  );
 });
 
 test('each source has its bases and the toggles it can honour', () => {
   assert.deepEqual(pricerBases('cardmarket').map((b) => b.id), ['trend', 'low', 'avg1', 'avg7', 'avg30']);
+  assert.deepEqual(pricerBases('cardmarketoffers').map((b) => b.id), ['pro', 'private']);
   assert.deepEqual(pricerBases('tcgplayer').map((b) => b.id), ['market', 'low', 'mid']);
   assert.deepEqual(pricerBases('nope').map((b) => b.id), ['offers', 'sold']);
   assert.equal(normalizeStrategy({ source: 'cardmarket', basis: 'sold' }).basis, 'trend', 'not a Cardmarket basis: its default');
+  assert.equal(normalizeStrategy({ source: 'cardmarketoffers' }).basis, 'pro', 'a professional floor by default');
+  assert.equal(normalizeStrategy({ source: 'cardmarketoffers', basis: 'private' }).basis, 'private');
+  assert.equal(normalizeStrategy({ source: 'cardmarketoffers', basis: 'trend' }).basis, 'pro', "the guide's columns are not seller types");
+  assert.equal(normalizeStrategy({ source: 'CARDMARKETOFFERS', basis: 'PRIVATE' }).source, 'cardmarketoffers');
   assert.equal(normalizeStrategy({ source: 'tcgplayer', basis: 'low' }).basis, 'low');
   assert.equal(normalizeStrategy({ source: 'cardtrader', basis: 'trend' }).basis, 'offers');
   assert.deepEqual(sourceSwitches('tcgplayer', 'market'), { condition: false, language: false, finish: true, firstEdition: true });
   assert.deepEqual(sourceSwitches('pokoin', 'sold'), { condition: true, language: true, finish: false, firstEdition: false });
   assert.deepEqual(sourceSwitches('pokoin', 'offers'), MATCH_ANY);
   assert.deepEqual(sourceSwitches('cardtrader', 'sold'), MATCH_EXACT);
+  assert.deepEqual(sourceSwitches('cardmarketoffers', 'pro'), MATCH_EXACT, 'a scanned offer answers all four');
+  assert.deepEqual(sourceSwitches('cardmarketoffers', 'private'), MATCH_EXACT);
+  assert.deepEqual(effectiveMatch({ source: 'cardmarketoffers' }), MATCH_EXACT);
   assert.deepEqual(
     effectiveMatch({ source: 'tcgplayer', match: { condition: true, language: true, finish: false, firstEdition: true } }),
     { condition: false, language: false, finish: false, firstEdition: true },
@@ -209,6 +265,7 @@ test('each source has its bases and the toggles it can honour', () => {
   assert.equal(switchNote('cardmarket'), 'Not in Cardmarket’s data');
   assert.equal(sourceHasFees('cardtrader'), true);
   assert.equal(sourceHasFees('tcgplayer'), false);
+  assert.equal(sourceHasFees('cardmarketoffers'), false, 'a Cardmarket ask is not a CardTrader fee');
   assert.ok(!PRICER_SOURCES.flatMap((s) => pricerBases(s.id)).some((b) => /facet/i.test(`${b.label} ${b.hint}`)), 'no "facets" in the UI copy');
 });
 

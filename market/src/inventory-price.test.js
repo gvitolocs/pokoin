@@ -148,6 +148,67 @@ test('missing, null, zero and invalid TCGplayer quotes stay unavailable', () => 
   assert.equal(inventoryMarketLabel(null), '—');
 });
 
+const scanned = { sources: { cardmarketoffers: {
+  asOf: '2026-11-10',
+  pro: {
+    '': { pkn: 40, eur: 0.2, offers: 9, countsComplete: true, condition: 'SP', language: 'EN', finish: '*', firstEdition: '*' },
+    CLFE: { pkn: 60, eur: 0.3, offers: 3, countsComplete: true, condition: 'NM', language: 'IT', finish: 'N', firstEdition: 'N' },
+  },
+  private: { CLFE: { pkn: 20, eur: 0.1, offers: 1, countsComplete: true, condition: 'NM', language: 'IT', finish: 'N', firstEdition: 'N' } },
+} } };
+const ita = { cardId: '824942', condition: 'NM', language: 'IT' };
+
+test('the two Cardmarket chips read the professional and the private offer separately', () => {
+  const pro = inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketpro');
+  assert.equal(pro.value, 60);
+  assert.equal(inventoryMarketLabel(pro), '60 PKN');
+  assert.match(pro.title, /Cheapest professional or powerseller Cardmarket offer with this card's condition, language, finish and 1st edition, as listed\./);
+  assert.match(pro.title, /3 offers seen\./);
+  assert.match(pro.title, /The other kind of seller asks 20 PKN\./);
+  assert.match(pro.title, /Scanned 2026-11-10; kept 7 days\.$/);
+  const priv = inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketprivate');
+  assert.equal(priv.value, 20);
+  assert.match(priv.title, /Cheapest private Cardmarket offer/);
+  assert.match(priv.title, /1 offer seen\./);
+  assert.match(priv.title, /The other kind of seller asks 60 PKN\./);
+});
+
+test('a one-of-a-kind copy reads only the cheapest offer scanned, never the exact-copy key', () => {
+  const anyOnly = { sources: { cardmarketoffers: { asOf: '2026-11-10', pro: { '': { pkn: 40, offers: 9 } } } } };
+  const exactOnly = { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 60 } } } } };
+  for (const flag of [{ graded: true }, { signed: true }, { altered: true }]) {
+    const value = inventoryMarketValue({ 824942: anyOnly }, { ...ita, ...flag }, 'cardmarketpro');
+    assert.equal(value.value, 40);
+    assert.match(value.title, /any copy/);
+    assert.doesNotMatch(value.title, /1st edition/);
+    assert.doesNotMatch(value.title, /The other kind of seller/);
+    assert.equal(inventoryMarketValue({ 824942: exactOnly }, { ...ita, ...flag }, 'cardmarketpro'), null);
+  }
+  assert.equal(inventoryMarketValue({ 824942: exactOnly }, ita, 'cardmarketpro').value, 60);
+});
+
+test('an unscanned card, seller type or facet has no Cardmarket price at all', () => {
+  // The scan asked `*` for the finish, so no facet agrees on all four yet.
+  const star = { sources: { cardmarketoffers: { asOf: '2026-11-10', pro: { '': { pkn: 40 } } } } };
+  assert.equal(inventoryMarketValue({ 824942: star }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketprivate').value, 20);
+  assert.equal(inventoryMarketValue({ 824942: { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 60 } } } } } }, ita, 'cardmarketprivate'), null);
+  assert.equal(inventoryMarketValue({ 824942: { ctMatchedPkn: 500 } }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({ 824942: { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 0 } } } } } }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({}, ita, 'cardmarketpro'), null);
+});
+
+test('a scan that stopped short says the price is an upper bound', () => {
+  const short = { sources: { cardmarketoffers: {
+    pro: { CLFE: { pkn: 60, offers: 2, countsComplete: false } },
+  } } };
+  const value = inventoryMarketValue({ 824942: short }, ita, 'cardmarketpro');
+  assert.equal(value.value, 60);
+  assert.match(value.title, /The scan stopped before the last page, so this is an upper bound\./);
+  assert.doesNotMatch(value.title, /Scanned/);
+  assert.doesNotMatch(inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketpro').title, /upper bound/);
+});
+
 test('Pokoin sold fallback is explicitly attributed to CardTrader inferred sales', () => {
   const value = inventoryMarketValue({ 824942: { soldMedianPkn: 20000 } }, row, 'pokoin');
   assert.equal(value.value, 20000);

@@ -31,12 +31,16 @@
  * A pricing group (`seller_pricing_groups`) is a named set of listings the
  * seller picked, priced by one strategy, on Apply or every day (autoDaily).
  * A listing is in at most one group.
+ *
+ * Money is stored in PKN; the user surface shows and accepts the seller's
+ * currency only (`currencyContext`, `pknToLocal`, `localToPkn`).
  */
 
 export const PRICER_SOURCES = [
   { id: 'cardtrader', label: 'CardTrader', hint: 'Offers and sales on CardTrader' },
   { id: 'pokoin', label: 'Pokoin', hint: 'Listings and sales on Pokoin' },
   { id: 'cardmarket', label: 'Cardmarket', hint: "Cardmarket's daily price guide" },
+  { id: 'cardmarketoffers', label: 'Cardmarket sellers', hint: 'Professional and private offers we scanned on Cardmarket' },
   { id: 'tcgplayer', label: 'TCGplayer', hint: 'US prices, converted at the ECB rate' },
 ];
 
@@ -59,6 +63,10 @@ const SOURCE_BASES = {
     { id: 'avg1', label: '1-day average', hint: 'Average sale price, last day', words: '1-day average' },
     { id: 'avg7', label: '7-day average', hint: 'Average sale price, last 7 days', words: '7-day average' },
     { id: 'avg30', label: '30-day average', hint: 'Average sale price, last 30 days', words: '30-day average' },
+  ],
+  cardmarketoffers: [
+    { id: 'pro', label: 'Professional offer', hint: 'The cheapest professional or powerseller offer we scanned', words: 'cheapest professional offer' },
+    { id: 'private', label: 'Private offer', hint: 'The cheapest private seller offer we scanned', words: 'cheapest private offer' },
   ],
   tcgplayer: [
     { id: 'market', label: 'Market price', hint: 'TCGplayer’s price from recent sales', words: 'market price (USD → EUR)' },
@@ -114,9 +122,10 @@ export function matchKey(match) {
 
 /**
  * The toggles a source's data can honour for a basis (server:
- * `pricing::source_switches`): CardTrader all; Pokoin's sales condition and
- * language (its cheapest ask is any copy); Cardmarket finish (regular or
- * foil); TCGplayer finish and 1st edition. The rest stay saved, read as off.
+ * `pricing::source_switches`): CardTrader all, and so does our own walk of
+ * Cardmarket's listing pages; Pokoin's sales condition and language (its
+ * cheapest ask is any copy); Cardmarket's guide finish (regular or foil);
+ * TCGplayer finish and 1st edition. The rest stay saved, read as off.
  */
 export function sourceSwitches(source, basis) {
   const only = (...ids) => Object.fromEntries(PRICER_MATCHES.map(({ id }) => [id, ids.includes(id)]));
@@ -162,11 +171,54 @@ export const PRICER_ACTIONS = [
 ];
 
 export const PRICER_ROUNDINGS = [
-  { id: 'integer', label: 'Nearest PKN' },
+  { id: 'integer', label: 'Nearest' },
   { id: 'down', label: 'Round down' },
   { id: 'up', label: 'Round up' },
   { id: 'none', label: 'Exact' },
 ];
+
+/**
+ * The pricer's display and input currencies (server: `pricing::CURRENCIES`):
+ * two-decimal currencies the ECB reference rates cover. PKN stays the unit
+ * of the comps, the storage and the listing writes; only the edge converts.
+ */
+export const PRICER_CURRENCIES = [
+  'EUR', 'USD', 'GBP', 'DKK', 'SEK', 'NOK', 'PLN', 'CZK', 'CHF', 'HUF', 'RON', 'BGN', 'CAD', 'AUD',
+];
+
+/** What summaries and the editor render before a settings answer arrives. */
+export const EUR_CONTEXT = Object.freeze({ code: 'EUR', rate: 1 });
+
+/**
+ * The seller's currency and its ECB rate (units per 1 EUR). Without a fresh
+ * rate a non-EUR setting reads EUR: never a wrong number under a local label.
+ */
+export function currencyContext(settings, currencyRate) {
+  const code = String(settings?.currency || '').toUpperCase();
+  if (code === 'EUR' || !PRICER_CURRENCIES.includes(code)) return { ...EUR_CONTEXT };
+  const rate = Number(currencyRate?.rate);
+  if (!Number.isFinite(rate) || rate <= 0) return { ...EUR_CONTEXT };
+  return { code, rate };
+}
+
+/** Stored PKN → the seller's currency (2 PKN = 1 euro cent, × the rate). */
+export function pknToLocal(pkn, ctx = EUR_CONTEXT) {
+  return ((Number(pkn) || 0) * ctx.rate) / 200;
+}
+
+/** What the seller typed, in their currency → PKN to store. */
+export function localToPkn(local, ctx = EUR_CONTEXT) {
+  return ((Number(local) || 0) * 200) / ctx.rate;
+}
+
+const CURRENCY_SIGNS = { EUR: '€', USD: '$', GBP: '£' };
+
+/** A local amount with its symbol or code, two decimals ("€0.15", "7.50 DKK"). */
+export function formatLocal(amount, ctx = EUR_CONTEXT) {
+  const value = Math.round((Number(amount) || 0) * 100) / 100;
+  const sign = CURRENCY_SIGNS[ctx.code];
+  return sign ? `${sign}${value.toFixed(2)}` : `${value.toFixed(2)} ${ctx.code}`;
+}
 
 /** A new strategy's starting point. */
 export const DEFAULT_STRATEGY = {
@@ -363,8 +415,11 @@ export function planUpdate(entry) {
 
 const trimNumber = (value) => String(cents(value));
 
-/** One line describing a strategy (server: `pricing::strategy_summary`). */
-export function strategySummary(input) {
+/**
+ * One line describing a strategy (server: `pricing::strategy_summary`, which
+ * stays in PKN); money renders in the seller's currency, EUR by default.
+ */
+export function strategySummary(input, ctx = EUR_CONTEXT) {
   const strategy = normalizeStrategy(input);
   const { source, basis } = strategy;
   const parts = [PRICER_SOURCES.find((entry) => entry.id === source).label];
@@ -374,13 +429,14 @@ export function strategySummary(input) {
   }
   if (!(source === 'pokoin' && basis === 'offers')) parts.push(matchSummary(effectiveMatch(strategy)));
   if (sourceHasFees(source)) parts.push(strategy.feeExclusive ? 'net of CardTrader fees' : 'CardTrader ask');
-  const flat = (sign) => (strategy.amountPkn > 0 ? ` ${sign} ${trimNumber(strategy.amountPkn)} PKN` : '');
+  const money = (pkn) => formatLocal(pknToLocal(pkn, ctx), ctx);
+  const flat = (sign) => (strategy.amountPkn > 0 ? ` ${sign} ${money(strategy.amountPkn)}` : '');
   if (strategy.action === 'undercut') parts.push(`undercut ${trimNumber(strategy.amountPct)}%${flat('−')}`);
   else if (strategy.action === 'premium') parts.push(`+${trimNumber(strategy.amountPct)}%${flat('+')}`);
   else parts.push('match');
-  const rounding = { integer: 'whole PKN', down: 'rounded down', up: 'rounded up' }[strategy.rounding];
+  const rounding = { integer: 'nearest', down: 'rounded down', up: 'rounded up' }[strategy.rounding];
   if (rounding) parts.push(rounding);
-  if (strategy.minPkn > 0) parts.push(`min ${trimNumber(strategy.minPkn)} PKN`);
+  if (strategy.minPkn > 0) parts.push(`min ${money(strategy.minPkn)}`);
   return parts.join(' · ');
 }
 

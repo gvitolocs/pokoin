@@ -5,9 +5,9 @@ import { applyPricingLocal, deleteGroup, deleteStrategy, saveGroup, saveStrategy
 
 const fixture = () => ({ strategies: previewStrategies(), groups: previewGroups().groups, pairs: previewGroups().memberships });
 
-test('the preview fixture: five named strategies, three groups, one daily, one never applied', () => {
+test('the preview fixture: six named strategies, three groups, one daily, one never applied', () => {
   const data = snapshot(fixture());
-  assert.deepEqual(data.strategies.map((entry) => entry.name), ['Undercut 5% · CardTrader net', 'Match CardTrader · same language', 'Sold median +10%', 'Cardmarket trend −3%', 'TCGplayer market']);
+  assert.deepEqual(data.strategies.map((entry) => entry.name), ['Undercut 5% · CardTrader net', 'Match CardTrader · same language', 'Sold median +10%', 'Cardmarket trend −3%', 'TCGplayer market', 'Undercut Cardmarket pro sellers 2%']);
   for (const strategy of previewStrategies()) {
     for (const scope of ['condition', 'language', 'enabled', 'game', 'status']) assert.equal(scope in strategy, false, scope);
   }
@@ -17,6 +17,7 @@ test('the preview fixture: five named strategies, three groups, one daily, one n
   assert.deepEqual(data.strategies[0].groupNames, ['Base Set holos']);
   assert.match(data.strategies[0].summary, /all exact · net of CardTrader fees · undercut 5%/);
   assert.match(data.strategies[1].summary, /same language/);
+  assert.match(data.strategies[5].summary, /Cardmarket sellers · cheapest professional offer · all exact · undercut 2%/);
   const listed = new Set(previewListings().map((row) => row.id));
   assert.ok(data.memberships.every(([id]) => listed.has(id)));
 });
@@ -47,10 +48,10 @@ test('strategies: unique names, and a strategy in use is refused', () => {
   const state = fixture();
   assert.throws(() => saveStrategy(state, { name: 'match cardtrader · SAME language' }), /already have a strategy/);
   const saved = saveStrategy(state, { name: 'Match CardTrader copy', source: 'pokoin' });
-  assert.equal(saved.state.strategies.length, 6);
+  assert.equal(saved.state.strategies.length, 7);
   assert.throws(() => deleteStrategy(state, 'preview-strategy-1'), (err) => err.code === 'strategy_in_use' && /Base Set holos/.test(err.message));
   const unused = deleteStrategy(saved.state, saved.savedId);
-  assert.equal(unused.strategies.length, 5);
+  assert.equal(unused.strategies.length, 6);
 });
 
 test('apply plans with the fixture comps and, when not dry, reprices the rows', () => {

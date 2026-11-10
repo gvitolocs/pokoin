@@ -49,6 +49,7 @@ import { shortcutFor } from '@market/scan-shortcuts.js';
 import { facetSignature, scanFacets, suggestPriceFromSlices } from '@market/scan-pricing.js';
 import { connectScanStream } from '@market/scan-stream.js';
 import { gameIdFromHost } from '@market/game.js';
+import { currencyContext } from '@market/pricer.js';
 import { marketUrl } from '@market/punchouts.js';
 import '@market/scan-desk.css';
 import InventoryTargets from '../components/desk/InventoryTargets.jsx';
@@ -1663,6 +1664,7 @@ function ScanDeskDesk(props) {
             count={ids().length}
             strategies={pricingData()?.strategies || []}
             groups={pricingData()?.groups || []}
+            ctx={currencyContext(pricingData()?.pricerSettings, pricingData()?.currencyRate)}
             current={pricingCurrent()}
             batchLabel={batchPricingLabel()}
             onChoose={choosePricing}

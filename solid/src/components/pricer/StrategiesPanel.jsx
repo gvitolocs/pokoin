@@ -1,6 +1,8 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import {
+  localToPkn,
   nameProblem,
+  pknToLocal,
   PRICER_ACTIONS,
   PRICER_MATCHES,
   PRICER_ROUNDINGS,
@@ -18,6 +20,7 @@ import {
   exampleSteps,
   NO_OFFER,
   pickExampleComp,
+  pkn,
   SAMPLE_COMP,
   showsSwitches,
   strategyDraft,
@@ -29,11 +32,36 @@ import {
 const numberInput = (value) => (value === '' ? '' : Number(value));
 
 /**
+ * A money field in the seller's currency; the draft keeps PKN. While focused
+ * the raw text stays put — a half-typed "0." must not round-trip through PKN.
+ */
+function MoneyInput(props) {
+  const [text, setText] = createSignal(null);
+  const local = () => String(Math.round(pknToLocal(props.value, props.ctx) * 100) / 100);
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min="0"
+      step="0.01"
+      value={text() == null ? local() : text()}
+      onFocus={() => setText(local())}
+      onBlur={() => setText(null)}
+      onInput={(event) => {
+        setText(event.target.value);
+        props.onValue(event.target.value === '' ? 0 : localToPkn(Number(event.target.value), props.ctx));
+      }}
+    />
+  );
+}
+
+/**
  * Pricer → Strategies: the seller's named pricing rules and their editor.
  * A strategy says how to price, never which cards: groups pick one by name.
  */
 export default function StrategiesPanel(props) {
   const pricing = props.pricing;
+  const ctx = () => pricing.currencyCtx();
   const first = untrack(() => pricing.strategies()[0] || null);
   const [selectedId, setSelectedId] = createSignal(first?.id || '');
   const [draft, setDraft] = createSignal(strategyDraft(first));
@@ -51,13 +79,13 @@ export default function StrategiesPanel(props) {
   const usedBy = () => stored()?.groupNames || [];
   const problem = () => nameProblem(draft().name, draft().id, pricing.strategies(), 'strategy');
   // The worked example's comp: the group's comp when it has the draft's source, else the sample.
-  const example = createMemo(() => exampleSteps(draft(), pickExampleComp([props.exampleComp, SAMPLE_COMP], draft())));
+  const example = createMemo(() => exampleSteps(draft(), pickExampleComp([props.exampleComp, SAMPLE_COMP], draft()), ctx()));
   const unsaved = createMemo(() => draftChanged(draft(), baseline()));
   // The toggles this source's data can honour, and the block's title.
   const switches = () => sourceSwitches(draft().source, draft().basis);
   const togglesTitle = () => {
     if (draft().basis === 'sold') return 'Compare with sales that have';
-    if (draft().source === 'cardtrader') return 'Compare with offers that have';
+    if (draft().source === 'cardtrader' || draft().source === 'cardmarketoffers') return 'Compare with offers that have';
     return 'Use the price for';
   };
   const allExactOn = () => PRICER_MATCHES.every(({ id }) => switches()[id] !== true || draft().match[id] === true);
@@ -70,7 +98,8 @@ export default function StrategiesPanel(props) {
   const basisHint = () => {
     const { source, basis } = draft();
     if (source === 'cardmarket') return 'From Cardmarket’s public price guide, refreshed daily. Prices are what buyers pay on Cardmarket, before its fees.';
-    if (source === 'tcgplayer') return 'TCGplayer prices are in US dollars. Pokoin converts them at the European Central Bank’s rate of the day (2 PKN = 1 euro cent).';
+    if (source === 'cardmarketoffers') return 'Asking prices we scanned on Cardmarket ourselves, kept for 7 days. A professional offer is a shop or powerseller, a private one an individual seller. Only the cards the scan has walked have a number.';
+    if (source === 'tcgplayer') return 'TCGplayer prices are in US dollars. Pokoin converts them at the European Central Bank’s rate of the day.';
     if (source === 'pokoin' && basis === 'sold') return 'Sales on Pokoin in the last 90 days.';
     return '';
   };
@@ -203,7 +232,8 @@ export default function StrategiesPanel(props) {
                       onClick={() => (entry().id === draft().id ? undefined : leaveTo(entry()))}
                     >
                       <strong>{entry().name}</strong>
-                      <span class="pricer-group-sub">{entry().summary || strategySummary(entry())}</span>
+                      {/* The server's `summary` stays in PKN; the seller reads their own currency. */}
+                      <span class="pricer-group-sub">{strategySummary(entry(), ctx())}</span>
                       <span class="pricer-group-sub">{usedByLine(entry().groupNames)}</span>
                     </button>
                   </li>
@@ -362,9 +392,8 @@ export default function StrategiesPanel(props) {
                     onInput={(event) => edit({ amountPct: numberInput(event.target.value) })} />
                 </label>
                 <label class="ps-field">
-                  <span>and PKN</span>
-                  <input type="number" inputMode="decimal" min="0" step="1" value={draft().amountPkn}
-                    onInput={(event) => edit({ amountPkn: numberInput(event.target.value) })} />
+                  <span>and {ctx().code}</span>
+                  <MoneyInput value={draft().amountPkn} ctx={ctx()} onValue={(amountPkn) => edit({ amountPkn })} />
                 </label>
               </Show>
               <label class="ps-field">
@@ -374,9 +403,8 @@ export default function StrategiesPanel(props) {
                 </select>
               </label>
               <label class="ps-field">
-                <span>Never below (PKN)</span>
-                <input type="number" inputMode="decimal" min="0" step="1" value={draft().minPkn}
-                  onInput={(event) => edit({ minPkn: numberInput(event.target.value) })} />
+                <span>Never below ({ctx().code})</span>
+                <MoneyInput value={draft().minPkn} ctx={ctx()} onValue={(minPkn) => edit({ minPkn })} />
               </label>
             </div>
             <label class="ps-field ps-check">
@@ -390,7 +418,7 @@ export default function StrategiesPanel(props) {
             {' '}
             <Show when={!example().noOffer} fallback={<span>{NO_OFFER}</span>}>
               {exampleLead(example().steps)}
-              <strong>{example().target == null ? 'no price' : `${example().target} PKN`}</strong>
+              <strong>{example().target == null ? 'no price' : pkn(example().target, ctx())}</strong>
             </Show>
           </p>
 
