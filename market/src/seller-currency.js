@@ -19,6 +19,17 @@ export function formatSellerPrice(pkn, currency = sellerListCurrency()) {
 }
 
 /**
+ * A PKN valuation (Assets preview) in the viewer's currency only, never PKN.
+ * An unknown currency or missing rate falls back to EUR; zero reads as 0.
+ */
+export function formatAssetsValue(pkn, currency = sellerListCurrency()) {
+  const value = Number.isFinite(Number(pkn)) ? Number(pkn) : 0;
+  const shown = formatSellerPrice(value, currency) || formatFiatFromPkn(value, 'EUR');
+  if (shown) return shown;
+  return String(currency).toUpperCase() === 'DKK' ? '0 DKK' : String(currency).toUpperCase() === 'USD' ? '$0' : '€0';
+}
+
+/**
  * Buyer-facing listing price. Sellers who take card payments only show the
  * buyer's local currency first, PKN in brackets: €13.21 (2642 PKN).
  */

@@ -53,3 +53,10 @@ test('BuySell sits right after the market icon, in the footer and in the phone m
   assert.match(chrome, /<AppLink to="\/buysell">BuySell<\/AppLink>/);
   assert.match(menu, /<Row to="\/buysell" mark="buysell" label="BuySell"/);
 });
+
+test('Assets nav preview prints the viewer-currency value, not PKN', () => {
+  const src = read('./NavPreviews.jsx');
+  assert.match(src, /formatAssetsValue\(last\(\), sellerCurrency\(\)\)/);
+  assert.doesNotMatch(src, /formatPknNumber/);
+  assert.doesNotMatch(src, /\} PKN/);
+});
