@@ -3673,6 +3673,34 @@ a.era-link:focus-visible {
   .shop-split { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Inside the one-tile desk every panel is flat; the Vault is the exception
+   and sits in its own slightly raised box (tokens follow the desk tint). */
+html:root:root .card-page.flutter-page .card-desk .vault-panel {
+  box-sizing: border-box;
+  background: var(--g3);
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  padding: 0.95rem 0.7rem 0.7rem; /* top matches .shop-terminal so the header rows share a baseline */
+}
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel {
+  background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
+  border-color: var(--desk-border);
+}
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel {
+  background: #241540;
+  border-color: #5a3058;
+}
+/* Same header band as the Shop column row so the two baselines line up. */
+.vault-panel .vault-title {
+  display: flex;
+  flex: 1;
+  box-sizing: border-box;
+  min-height: calc(1.7rem + 0.45rem + 1px);
+  padding: 0.1rem 0.15rem 0.35rem;
+  border-bottom: 1px solid var(--g5);
+  font-size: 0.72rem;
+}
+
 /* Phones: an empty (or still loading) Vault takes no room, no title and no
    gap; it appears once stock is known. Desktop keeps the empty panel. */
 @media (max-width: 720px) {
@@ -4829,6 +4857,18 @@ span.shop-flag {
   gap: 0.3rem;
   padding: 0.1rem 0.15rem 0.35rem;
   border-bottom: 1px solid var(--g5);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Icon + word label shared by the Shop header's Seller and the Vault title. */
+.shop-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;

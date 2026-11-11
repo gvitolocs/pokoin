@@ -6,7 +6,7 @@ import { isPriceSort, menuStep, nextPriceSort, priceArrow, SHOP_SORTS } from '@m
 import { SHOP_ICO } from '@market/shop-icons.js';
 import { dismissWhileOpen } from './ListingLangPick.jsx';
 
-function Ico(props) {
+export function Ico(props) {
   return (
     <svg viewBox="0 0 24 24" width={props.size || 16} height={props.size || 16} aria-hidden="true">
       <path fill="currentColor" fill-rule="evenodd" d={SHOP_ICO[props.name]} />
@@ -128,7 +128,7 @@ export default function ShopHeader(props) {
   const sortLabel = () => SHOP_SORTS.find((row) => row.value === props.sort)?.label || 'Sort';
   return (
     <div class="shop-header" role="group" aria-label="Shop filters">
-      <span class="shop-hcell shop-hseller">
+      <span class="shop-hcell shop-hseller shop-label">
         <Ico name="seller" />
         <span>Seller</span>
       </span>

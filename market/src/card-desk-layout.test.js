@@ -68,3 +68,25 @@ test('an empty Vault is hidden on phones only', () => {
   // The only rule that targets .is-empty on the Vault is the phone one.
   assert.equal(css.split('.vault-panel.is-empty').length - 1, 1);
 });
+
+test('the Vault is its own bordered, raised box inside the flat desk tile; Shop stays transparent', () => {
+  assert.match(css, /\.card-desk \.shop-panel \{\s*background: transparent;\s*border-color: transparent;/);
+  const box = css.match(/\.card-desk \.vault-panel \{([^}]*)\}/);
+  assert.ok(box);
+  assert.match(box[1], /background:\s*var\(--g3\)/);
+  assert.match(box[1], /border:\s*1px solid var\(--g5\)/);
+  assert.match(box[1], /padding:/);
+  assert.doesNotMatch(box[1], /box-shadow/);
+  assert.match(css, /desk-tinted:root:root \.card-page\.flutter-page \.card-desk \.vault-panel \{\s*background: color-mix\(in srgb, var\(--desk-surface\) 93%, #fff\);\s*border-color: var\(--desk-border\)/);
+});
+
+test('the Vault title shares the Seller label style', () => {
+  const label = css.match(/\.shop-label \{([^}]*)\}/);
+  assert.ok(label);
+  for (const rule of [/font-size:\s*0\.72rem/, /font-weight:\s*700/, /letter-spacing:\s*0\.03em/, /text-transform:\s*uppercase/, /gap:\s*0\.35rem/]) {
+    assert.match(label[1], rule);
+  }
+  const header = css.match(/\.shop-header \{([^}]*)\}/)[1];
+  assert.match(header, /font-size:\s*0\.72rem/);
+  assert.match(header, /letter-spacing:\s*0\.03em/);
+});

@@ -87,5 +87,9 @@ test('the Shop panel starts with the column-header filters and keeps an accessib
 test('the Vault panel carries is-empty from the Vault memo, so phones can hide it until stock is known', () => {
   assert.match(page, /class=\{\['panel shop-panel vault-panel', \{ 'is-empty': !split\(\)\.vault\.length \}\]\}/);
   // Still rendered (not wrapped in a Show), so desktop keeps the empty panel.
-  assert.match(page, /<h2>Vault<\/h2>/);
+  assert.match(page, /<h2 class="shop-label vault-title">\s*<Ico name="vault" \/>\s*<span>Vault<\/span>\s*<\/h2>/);
+  assert.match(page, /import ShopHeader, \{ Ico \} from '..\/components\/desk\/ShopHeader\.jsx'/);
+  // The Seller label in the Shop header uses the same class.
+  const header = fs.readFileSync(new URL('../components/desk/ShopHeader.jsx', import.meta.url), 'utf8');
+  assert.match(header, /shop-hseller shop-label/);
 });
