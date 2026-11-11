@@ -203,6 +203,12 @@ html.signed-in .account-out {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* `.button span` (19px, line-height 1) is meant for the arrow; on the name it
+   made the text oversized and, with overflow: hidden, cut the descenders. */
+.button .account-in {
+  font-size: inherit;
+  line-height: 1.5;
+}
 .account-in:empty::before {
   content: var(--account-name, "My Pokoin");
 }
@@ -425,11 +431,17 @@ html.signed-in .account-out {
   position: absolute;
   left: 8%;
   right: 8%;
-  top: 45%;
+  top: 0;
+  height: 100%;
+  animation: scan 5s ease-in-out infinite;
+}
+.scan-line::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
   height: 2px;
   background: #fff4ba;
   box-shadow: 0 0 15px var(--yellow);
-  animation: scan 5s ease-in-out infinite;
 }
 .floating-tag {
   position: absolute;
@@ -708,7 +720,7 @@ html.signed-in .account-out {
 @keyframes scan {
   0%,
   100% {
-    top: 25%;
+    transform: translateY(25%);
     opacity: 0;
   }
   20%,
@@ -716,7 +728,7 @@ html.signed-in .account-out {
     opacity: 0.8;
   }
   50% {
-    top: 75%;
+    transform: translateY(75%);
   }
 }
 h2 {
