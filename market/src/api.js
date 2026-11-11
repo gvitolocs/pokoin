@@ -25,6 +25,7 @@ import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.j
 import { withGameQuery, withGameQueryFor, isPokemonGame, gameHeadersForUrl, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
+import { cardmarketChoices } from './cardmarket-matches.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { SCAN_API_BASE, scanIdentifyUrl } from './scan-live.js';
 import { getSearchLang } from './locale.js';
@@ -2946,6 +2947,17 @@ export async function fetchCardmarketRedirect(card) {
   }
   const data = await getJson(`/api/cardmarket-redirect?${params}`);
   return data.url || data.redirect || data.href || '';
+}
+
+/** Every stored verified Cardmarket product for the card, and what the redirect opens (cardmarket-matches.js). */
+export async function fetchCardmarketMatches(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const leftover = leftoverBlueprintId(card);
+  const params = new URLSearchParams({ id });
+  if (leftover && leftover !== id) {
+    params.set('blueprintId', leftover);
+  }
+  return cardmarketChoices(await getJson(`/api/cardmarket-matches?${params}`));
 }
 
 /** CardTrader leftover blueprint. Never a public card_id (those 404 on cardtrader.com). */

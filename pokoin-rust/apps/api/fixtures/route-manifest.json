@@ -66,6 +66,14 @@
   "purpose": "Resolve a marketplace blueprint to a Cardmarket product/search URL and redirect, or return JSON when requested."
  },
  {
+  "path": "/api/cardmarket-matches",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: crates/external/src/routes/redirects.rs; no Node origin)",
+  "purpose": "Every stored verified Cardmarket product for a card (printing link, verified link, parsing, in that order) plus the URL /api/cardmarket-redirect opens, for the card desk CM chooser."
+ },
+ {
   "path": "/api/cardmarket-scrape-observation",
   "methods": [
    "POST",
