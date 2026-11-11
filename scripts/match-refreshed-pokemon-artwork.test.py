@@ -35,5 +35,17 @@ class LateScanTest(unittest.TestCase):
             self.assertEqual(mod.late_scan_ids([], objects), [])
 
 
+class DeviceTest(unittest.TestCase):
+    def test_default_hides_the_gpu_before_clip_loads(self):
+        env = {"HIP_VISIBLE_DEVICES": "0"}
+        self.assertEqual(mod.select_device(env), "cpu")
+        self.assertEqual(env, {"HIP_VISIBLE_DEVICES": "", "CUDA_VISIBLE_DEVICES": ""})
+
+    def test_gpu_opt_in_leaves_the_environment_alone(self):
+        env = {"POKOIN_ARTWORK_DEVICE": "gpu"}
+        self.assertEqual(mod.select_device(env), "gpu")
+        self.assertEqual(env, {"POKOIN_ARTWORK_DEVICE": "gpu"})
+
+
 if __name__ == "__main__":
     unittest.main()

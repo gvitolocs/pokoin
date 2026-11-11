@@ -219,6 +219,11 @@ checks that the unit's `WorkingDirectory` is that checkout. Rollback: run it
 with the previous sha. The nightly summary names the job's commit and how many
 newer commits to the job's files on `origin/main` are not deployed yet.
 
+### Artwork stage device
+
+The `artwork` stage (`match-refreshed-pokemon-artwork.py`) runs CLIP on the CPU by default, without a GPU lease; `POKOIN_ARTWORK_DEVICE=gpu` opts back into the GPU (with the lease) and `cpu` hides the card by setting `HIP_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES` empty before torch loads.
+From 2026-11-08 the local Qwen server holds 21.5 GB of the 23.5 GB card, and this job segfaulted in `libamdhip64.so` every night on the GPU; it embeds about a hundred images, so the CPU is enough.
+
 ## Nightly summary
 
 `scripts/cardtrader-daily-notify.py` runs at the end of the job (~00:55 UTC).

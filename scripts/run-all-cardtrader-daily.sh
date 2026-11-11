@@ -79,7 +79,13 @@ python3 scripts/sync-catalog-pictures.py || picture_sync_result=$?
 (( picture_sync_result == 0 )) || result=1
 stage_args+=(--stage-result "picture-sync=$picture_sync_result")
 artwork_result=0
-"${GPU_LEASE[@]}" --name catalog-artwork -- "$AI_PYTHON" scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
+# The artwork stage runs CLIP on the CPU by default (POKOIN_ARTWORK_DEVICE=gpu opts in):
+# on the GPU it segfaulted in libamdhip64 every night from 2026-11-08, with Qwen holding the card.
+if [[ "${POKOIN_ARTWORK_DEVICE:-cpu}" == gpu ]]; then
+  "${GPU_LEASE[@]}" --name catalog-artwork -- "$AI_PYTHON" scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
+else
+  "$AI_PYTHON" scripts/match-refreshed-pokemon-artwork.py || artwork_result=$?
+fi
 (( artwork_result == 0 )) || result=1
 stage_args+=(--stage-result "artwork=$artwork_result")
 # Card pictures (BattleScan server-rs `scripts/daily-card-refresh.sh`, installed by its
