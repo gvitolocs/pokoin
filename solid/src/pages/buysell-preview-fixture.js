@@ -1,5 +1,5 @@
 /**
- * Layout preview for BuySell: the card-page "Buy offers" tile and /buysell.
+ * Layout preview for BuySell: the card-page offer bar and /buysell.
  * Same switch as the MyPokoin desks (mypokoin-preview-fixture.js): the URL has
  * ?mypokoinPreview and the build is DEV or the host is localhost / 127.0.0.1.
  * Production hosts never take this path. Nothing here calls the API; offers

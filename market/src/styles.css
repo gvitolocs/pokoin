@@ -2731,7 +2731,6 @@ html.desk-tinted #root {
 html.desk-tinted .card-page .panel,
 html.desk-tinted .card-page .sell-form,
 html.desk-tinted .card-page .add-panel,
-html.desk-tinted .card-page .buy-tile,
 html.desk-tinted .card-page .reserve-blurb {
   background: var(--desk-surface);
   border-color: var(--desk-border);
@@ -11188,59 +11187,111 @@ img.is-lang-scan {
 
 .cart-toast a { color: var(--yellow); font-weight: 800; }
 
-/* BuySell: buy offers tile under Best Deal, and the page that lists them. */
+/* BuySell: the offer bar in Best Deal, and the page that lists them. */
 .buysell-ico {
   vertical-align: -0.16em;
   flex: 0 0 auto;
 }
 
-.hero-deal .buy-tile {
-  flex: none;
+.hero-deal .deal-actions {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
-  padding: 1.1rem 1.2rem 1.15rem;
+  gap: 0.6rem;
+  margin-top: auto;
 }
 
-.buy-tile .add-head h2 {
-  display: inline-flex;
+.hero-deal .deal-actions .buy-btn {
+  margin-top: 0;
+}
+
+.hero-deal .deal-actions .deal-none {
+  margin: 0;
+}
+
+/* Offer bar: the best buy offer, same size as Add to cart, above it. Opens the offer form in place. */
+.offer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.offer-wrap.is-above {
+  order: -1;
+}
+
+.offer-bar {
+  display: flex;
+  align-items: stretch;
+  min-height: 3rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  overflow: hidden;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.offer-bar-price {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  padding: 0 0.7rem;
+  color: #fff;
 }
 
-.buy-best {
-  display: grid;
-  gap: 0.2rem;
-  text-align: center;
+.offer-bar-price .buysell-ico {
+  flex: none;
+  color: var(--yellow);
 }
 
-.hero-deal .buy-px {
-  font-size: clamp(1.6rem, 2.8vw, 2rem);
-  margin: 0;
-}
-
-.buy-count,
-.buy-none,
-.buy-note {
-  margin: 0;
+.offer-bar-label {
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-align: center;
 }
 
-.buy-others {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.35rem 0.4rem;
+.offer-bar-amount,
+.offer-bar-none {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.buy-other {
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.72rem;
+.offer-bar-amount {
+  color: var(--yellow);
+}
+
+.offer-bar-btn {
+  flex: none;
+  padding: 0 0.8rem;
+  border: 0;
+  border-left: 1px solid var(--g5);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.offer-bar-btn:hover,
+.offer-bar-btn:focus-visible,
+.offer-bar-btn[aria-expanded='true'] {
+  background: var(--g3);
+  color: var(--yellow);
+}
+
+.offer-open {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.offer-open-head {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .offer-bar-label {
+    display: none;
+  }
 }
 
 .buy-form {

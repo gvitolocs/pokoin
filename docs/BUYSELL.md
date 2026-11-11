@@ -32,9 +32,9 @@ buys it through the cart. In the UI the buyer's thing is an *offer*; the API nou
 | `DELETE /{id}` | yes | Cancel. |
 | `POST /{id}/sell` | yes | Sell now: `{ quantity }` → `201 { listing_id, buy_order }`. `403 own_buy_order`, `409 not_open`, `409 quantity_exceeds_remaining`. |
 
-Each book row carries `best_order_id` and `best_remaining`, the copies left on that one order. The card tile's Sell
+Each book row carries `best_order_id` and `best_remaining`, the copies left on that one order. The card page's Sell
 now needs both: it caps the quantity at `best_remaining` (the row's `quantity` is the total over all its orders and
-can be larger). Without `best_order_id` the tile hides Sell now (the board and the Sell to buyers tab always have ids).
+can be larger). Without `best_order_id` the offer bar hides Sell now (the board and the Sell to buyers tab always have ids).
 
 Errors are `{ "error": "<code>", "code": "<code>" }`; `duplicate_buy_order` also carries the existing order's `id`.
 `POST` needs the `days` key (`null` is until cancelled) and takes an optional `buyer_name`, the buyer's public
@@ -43,9 +43,13 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 ## Where the UI lives
 
 - `market/src/buy-orders.js`: client calls and the pure helpers (tested in `buy-orders.test.js`).
-- `solid/src/components/desk/BuyOrdersTile.jsx`: the "Buy offers" panel under Best Deal on the card page. It
-  follows the desk's condition and language, loads after the listings, and hides itself if the book request fails.
-- `solid/src/components/buysell/SellNowForm.jsx`: the Sell now flow shared by the tile and the page.
+- `solid/src/components/desk/OfferBar.jsx`: the offer bar inside the Best Deal panel, directly above Add to cart (or at
+  the bottom of the panel when nobody lists the card). It is as big as Add to cart and shows `Offer <best price>` for the
+  panel's condition and language (`No offers yet` when there is none) with a `Make offer` / `Beat offer` button. The button
+  opens the offer form in the panel; with a live best offer the form also offers Sell now. Posting or selling collapses
+  it and refetches the book. The book loads after the listings; if the request fails the bar is not drawn. The labels and
+  the prefilled price (best offer plus 1%, at least 1 PKN) come from `offerBarModel` / `offerPrefill` in `buy-orders.js`.
+- `solid/src/components/buysell/SellNowForm.jsx`: the Sell now flow shared by the offer bar and the page.
 - `solid/src/pages/BuySell.jsx`: `/buysell` with tabs Wanted, My offers (`?tab=mine`), Sell to buyers (`?tab=sell`).
 - Navigation: the two-arrows icon (`market/src/buysell-icon.js`) in Chrome, the phone menu and the footer.
 - Edge: `/buysell` is an SPA prefix in `scripts/write-cloudflare-web-routing.mjs` and has rewrites in `vercel.json`.

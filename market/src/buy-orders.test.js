@@ -3,6 +3,9 @@ import test from 'node:test';
 import {
   BUY_ORDER_LANGS,
   bestBid,
+  beatStepPkn,
+  offerBarModel,
+  offerPrefill,
   buyerNameOf,
   bidsByCondition,
   crossesAsk,
@@ -122,4 +125,22 @@ test('the language list is the API list (price_export::LANGUAGES) and the form n
 test('buyerNameOf drops the seller fallback name', () => {
   assert.equal(buyerNameOf(' Mira '), 'Mira');
   assert.equal(buyerNameOf('Pokoin seller'), '');
+});
+
+test('offerBarModel says Make offer without an offer and Beat offer with one', () => {
+  assert.deepEqual(offerBarModel(null), { hasOffer: false, button: 'Make offer', title: 'No offers yet' });
+  assert.equal(offerBarModel(selectionBid(book, { condition: 'PL', language: 'EN' })).button, 'Make offer');
+  const nm = offerBarModel(selectionBid(book, { condition: 'NM', language: 'EN' }));
+  assert.deepEqual(nm, { hasOffer: true, button: 'Beat offer', title: '4 wanted · 3 buyers' });
+  assert.equal(offerBarModel({ best_price_pkn: 50, quantity: 1, orders: 1 }).title, '1 wanted · 1 buyer');
+});
+
+test('offerPrefill is one step above the best offer, empty without one', () => {
+  assert.equal(beatStepPkn(50), 1);
+  assert.equal(beatStepPkn(4200), 42);
+  assert.equal(beatStepPkn(0), 1);
+  assert.equal(offerPrefill({ best_price_pkn: 50 }), '51');
+  assert.equal(offerPrefill({ best_price_pkn: 4200 }), '4242');
+  assert.equal(offerPrefill(null), '');
+  assert.equal(offerPrefill({ best_price_pkn: 'x' }), '');
 });

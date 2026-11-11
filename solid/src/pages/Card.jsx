@@ -126,7 +126,7 @@ import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
-import BuyOrdersTile from '../components/desk/BuyOrdersTile.jsx';
+import OfferBar from '../components/desk/OfferBar.jsx';
 import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
@@ -1270,39 +1270,41 @@ function CardDesk(props) {
                       </div>
                     </Show>
                   </div>
-                  {/* Once offers load, no fake grey button: say why there is nothing to add. */}
-                  <Show
-                    when={canBuy()}
-                    fallback={offersReady()
-                      ? <p class="deal-none">No Pokoin seller has this card right now.</p>
-                      : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
-                  >
-                    <button
-                      class="btn buy-btn"
-                      type="button"
-                      onClick={() => {
-                        const row = card();
-                        track(Action.buyIntent, row);
-                        addToCart(cartItemFromOffer(row, snapshot(dealPick())));
-                        navigate('/cart');
-                      }}
+                  <div class="deal-actions">
+                    {/* Once offers load, no fake grey button: say why there is nothing to add. */}
+                    <Show
+                      when={canBuy()}
+                      fallback={offersReady()
+                        ? <p class="deal-none">No Pokoin seller has this card right now.</p>
+                        : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
                     >
-                      Add to cart
-                    </button>
-                  </Show>
+                      <button
+                        class="btn buy-btn"
+                        type="button"
+                        onClick={() => {
+                          const row = card();
+                          track(Action.buyIntent, row);
+                          addToCart(cartItemFromOffer(row, snapshot(dealPick())));
+                          navigate('/cart');
+                        }}
+                      >
+                        Add to cart
+                      </button>
+                    </Show>
+                    <OfferBar
+                      card={card()}
+                      cardId={cardId}
+                      ready={offersReady()}
+                      above={canBuy()}
+                      condition={shownCond()}
+                      language={shownLang()}
+                      languages={allDealLangs()}
+                      pinned={pinnedCurrency()}
+                      askFor={(cond, lang) => matchDeal(nativeLive(), lang, cond, card())?.pricePkn}
+                      onBuyNow={() => document.querySelector('.hero-deal .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                    />
+                  </div>
                 </section>
-                <BuyOrdersTile
-                  card={card()}
-                  cardId={cardId}
-                  ready={offersReady()}
-                  condition={shownCond()}
-                  language={shownLang()}
-                  languages={allDealLangs()}
-                  pinned={pinnedCurrency()}
-                  askFor={(cond, lang) => matchDeal(nativeLive(), lang, cond, card())?.pricePkn}
-                  onCondition={setDealCond}
-                  onBuyNow={() => document.querySelector('.hero-deal .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
-                />
               </div>
 
               <div class="shop-split">

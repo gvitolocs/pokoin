@@ -238,3 +238,35 @@ export function crossesAsk(pricePkn, lowestAskPkn) {
 export function offerPriceLabel(pricePkn) {
   return formatPkn(pricePkn);
 }
+
+/** The smallest step above an offer: 1% rounded up to a whole PKN, at least 1 PKN (1 PKN is EUR 0.005). */
+export function beatStepPkn(pricePkn) {
+  const price = Number(pricePkn);
+  if (!Number.isFinite(price) || price <= 0) return 1;
+  return Math.max(1, Math.ceil(price * 0.01));
+}
+
+/** The form's starting price for a selection: one step above the best offer, '' when there is none. */
+export function offerPrefill(bid) {
+  const price = Number(bid?.best_price_pkn);
+  if (!Number.isFinite(price) || price <= 0) return '';
+  return String(price + beatStepPkn(price));
+}
+
+/**
+ * What the card-page offer bar says for one selection (`bid` is selectionBid()):
+ * `button` is the right segment, `title` the hover/aria text on the price part.
+ */
+export function offerBarModel(bid) {
+  const price = Number(bid?.best_price_pkn);
+  if (!bid || !Number.isFinite(price) || price <= 0) {
+    return { hasOffer: false, button: 'Make offer', title: 'No offers yet' };
+  }
+  const wanted = Number(bid.quantity) || 0;
+  const buyers = Number(bid.orders) || 0;
+  return {
+    hasOffer: true,
+    button: 'Beat offer',
+    title: `${wanted} wanted · ${buyers} ${buyers === 1 ? 'buyer' : 'buyers'}`,
+  };
+}
