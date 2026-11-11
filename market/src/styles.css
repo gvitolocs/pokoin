@@ -2853,6 +2853,28 @@ html.desk-tinted.desk-ghost .card-page .asset-header.shaded {
   transition: none;
 }
 
+/* Flat card desk (experiment): every panel under the title tile is
+   transparent and borderless; the title tile keeps its color and loses its
+   border. The border stays 1px but transparent so nothing shifts. The
+   doubled :root outranks the desk-tinted/rainbow rules above. Card page only. */
+html:root:root .card-page.flutter-page .panel,
+html:root:root .card-page.flutter-page .sell-form,
+html:root:root .card-page.flutter-page .add-panel,
+html:root:root .card-page.flutter-page .reserve-blurb,
+html:root:root .card-page.flutter-page .shop-panel {
+  background: transparent;
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+html:root:root .card-page.flutter-page .asset-header,
+html:root:root .card-page.flutter-page .asset-header.shaded {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
 .rarity-kind {
   display: inline-block;
   margin-left: 0.45rem;
