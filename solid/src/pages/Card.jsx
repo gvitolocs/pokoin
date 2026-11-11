@@ -131,6 +131,7 @@ import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
+import ShopHeader from '../components/desk/ShopHeader.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
 import { isVaultOffer, splitVaultOffers } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
@@ -1305,7 +1306,7 @@ function CardDesk(props) {
               </div>
 
               <div class="shop-split">
-              <section class="panel shop-panel vault-panel">
+              <section class={['panel shop-panel vault-panel', { 'is-empty': !split().vault.length }]}>
                 <header class="panel-head shop-head">
                   <h2>Vault</h2>
                 </header>
@@ -1339,51 +1340,46 @@ function CardDesk(props) {
                   </ShopList>
                 </Show>
               </section>
-              <section class="panel shop-panel shop-terminal">
-                <header class="panel-head shop-head">
-                  <h2>Shop</h2>
-                  <Show when={shop.offers.length}>
-                    <div class="shop-tools">
-                      <label class="sort">
-                        Condition
-                        <select value={condition()} onChange={(event) => setCondition(event.currentTarget.value)}>
-                          <For each={CONDITIONS}>
-                            {(row) => <option value={row.value} selected={row.value === condition()}>{row.label}</option>}
-                          </For>
-                        </select>
-                      </label>
-                      <Show when={languages().length}>
-                        <label class="sort">
-                          Language
-                          <select value={language()} onChange={(event) => setLanguage(event.currentTarget.value)}>
-                            <option value="" selected={!language()}>Any</option>
-                            <For each={languages()}>
-                              {(code) => <option value={code} selected={code === language()}>{code}</option>}
-                            </For>
-                          </select>
-                        </label>
-                      </Show>
-                      <label class="sort">
-                        Sort
-                        <select value={offerSort()} onChange={(event) => setOfferSort(event.currentTarget.value)}>
-                          <option value="price" selected={offerSort() === 'price'}>Lowest price</option>
-                          <option value="price-desc" selected={offerSort() === 'price-desc'}>Highest price</option>
-                          <option value="qty" selected={offerSort() === 'qty'}>Most quantity</option>
-                          <option value="seller" selected={offerSort() === 'seller'}>Seller</option>
-                        </select>
-                      </label>
-                    </div>
-                  </Show>
-                </header>
+              <section class="panel shop-panel shop-terminal" aria-label="Shop">
+                <h2 class="sr-only">Shop</h2>
+                <Show when={split().shop.length || condition() || language()}>
+                  <ShopHeader
+                    condition={condition()}
+                    language={language()}
+                    languages={languages()}
+                    sort={offerSort()}
+                    onCondition={setCondition}
+                    onLanguage={setLanguage}
+                    onSort={setOfferSort}
+                  />
+                </Show>
                 <Show when={shopError()}><p class="sell-msg error">{shopError()}</p></Show>
                 <Show
                   when={split().shop.length}
                   fallback={(
                     <div class="empty-shop">
                       <Show when={offersReady()} fallback={<p class="status"> </p>}>
-                        <p class="status">No Pokoin listings for this card yet.</p>
-                        <Show when={salesSeries()?.lastMedianPkn}>
-                          <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
+                        <Show
+                          when={condition() || language()}
+                          fallback={(
+                            <>
+                              <p class="status">No Pokoin listings for this card yet.</p>
+                              <Show when={salesSeries()?.lastMedianPkn}>
+                                <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
+                              </Show>
+                            </>
+                          )}
+                        >
+                          <p class="status">
+                            No listings match these filters.{' '}
+                            <button
+                              type="button"
+                              class="shop-clear"
+                              onClick={() => { setCondition(''); setLanguage(''); }}
+                            >
+                              Clear filters
+                            </button>
+                          </p>
                         </Show>
                       </Show>
                     </div>

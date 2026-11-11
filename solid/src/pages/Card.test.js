@@ -92,3 +92,25 @@ test('the offer bar sits above Add to cart and its settings open in a body porta
   // Prices go through the listing form's conversion helpers, not a second one.
   assert.match(bar, /offerPricePkn\(price\(\), cur\(\)\)/);
 });
+
+test('the Shop panel starts with the column-header filters and keeps an accessible name', () => {
+  const shop = page.slice(page.indexOf('class="panel shop-panel shop-terminal"'), page.indexOf('<ShopList offers={split().shop}'));
+  assert.match(shop, /aria-label="Shop"/);
+  assert.match(shop, /<h2 class="sr-only">Shop<\/h2>/);
+  assert.doesNotMatch(shop, /<select/);
+  assert.match(shop, /<Show when=\{split\(\)\.shop\.length \|\| condition\(\) \|\| language\(\)\}>\s*<ShopHeader/);
+  // The header drives the same state the three selects drove.
+  assert.match(shop, /onCondition=\{setCondition\}/);
+  assert.match(shop, /onLanguage=\{setLanguage\}/);
+  assert.match(shop, /onSort=\{setOfferSort\}/);
+  // Filters that hide every row keep the header and offer a way out.
+  assert.match(shop, /No listings match these filters\./);
+  assert.match(shop, /Clear filters/);
+  assert.match(shop, /No Pokoin listings for this card yet\./);
+});
+
+test('the Vault panel carries is-empty from the Vault memo, so phones can hide it until stock is known', () => {
+  assert.match(page, /class=\{\['panel shop-panel vault-panel', \{ 'is-empty': !split\(\)\.vault\.length \}\]\}/);
+  // Still rendered (not wrapped in a Show), so desktop keeps the empty panel.
+  assert.match(page, /<h2>Vault<\/h2>/);
+});

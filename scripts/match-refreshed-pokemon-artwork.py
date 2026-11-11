@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Match today's new Pokemon artwork buckets on the nezopt GPU.
+"""Match today's new Pokemon artwork buckets (CLIP, on the CPU by default).
+
+POKOIN_ARTWORK_DEVICE=cpu (default) hides the GPU from torch; =gpu opts in. The
+GPU run segfaulted in libamdhip64 every night from 2026-11-08, once the local
+Qwen server held 21.5 GB of the card.
+
 
 Also re-tries recent printings still alone on their singleton version whose
 scan has landed since: a JPEG recovered after the import day (the card-pictures
@@ -38,7 +43,20 @@ def late_scan_ids(ct_ids,objects):
  scanned=scanned_ct_ids(entry.name for entry in os.scandir(objects))
  return [ct_id for ct_id in ct_ids if ct_id in scanned]
 
+def select_device(env=None):
+ """Hide the GPU from torch unless POKOIN_ARTWORK_DEVICE=gpu. Must run before the CLIP module imports torch."""
+ env=os.environ if env is None else env
+ mode=env.get("POKOIN_ARTWORK_DEVICE","cpu").strip().lower() or "cpu"
+ if mode=="gpu":
+  print("artwork device: gpu (POKOIN_ARTWORK_DEVICE=gpu, GPU left visible)",flush=True)
+ else:
+  mode="cpu"
+  env["HIP_VISIBLE_DEVICES"]="";env["CUDA_VISIBLE_DEVICES"]=""
+  print("artwork device: cpu (default; the GPU segfaulted on a nearly full card since 2026-11-08, set POKOIN_ARTWORK_DEVICE=gpu to opt in)",flush=True)
+ return mode
+
 def main():
+ select_device()
  ROOT=pathlib.Path(os.environ.get("POKOIN_CATALOG_RUN_ROOT","/home/nez/data/pokoin-catalog-refresh/"+time.strftime("%Y-%m-%d",time.gmtime())))
  source=pathlib.Path("/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py")
  sys.path.insert(0,str(source.parent))
