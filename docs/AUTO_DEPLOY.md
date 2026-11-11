@@ -61,23 +61,32 @@ rm ~/scratch/pokoin-auto-deploy/pause               # resumes
 
 Pause before a manual deploy or a risky merge. A run already in progress finishes.
 
-## Install and enable (the owner runs these)
+## Install, enable, pause, uninstall (the owner runs these)
 
-The units are in `deploy/systemd/` and point at the canonical checkout `/home/nez/Projects/pokoin-web`; edit the paths if it
-lives elsewhere. Nothing is installed by the repo.
+Nothing is installed by the repo. The units hold no absolute path: the service runs an installed copy of the script,
+`ExecStart=%h/.local/bin/pokoin-auto-deploy-rust`, with `POKOIN_AUTODEPLOY_REPO=%h/pokoin-deploy/auto-deploy-repo`. The reason
+for the copy: the build script checks out commits in `~/pokoin-deploy/rust-release`, and a bash script must not execute from a
+file its own run replaces. The planning repo is a dedicated clone used to fetch and to diff paths between commits; the build
+never switches it. (The script moves its checkout to the tip right before the build so the tip's own build script runs. The
+build and deploy then work in `~/pokoin-deploy/rust-release`, so deploy and sync run the scripts of the commit being deployed.)
+The script never creates the planning repo: if it is missing it exits 2 and prints the `git clone` command.
 
 ```bash
-mkdir -p ~/.config/systemd/user ~/scratch/pokoin-auto-deploy
-cp deploy/systemd/pokoin-rust-auto-deploy.{service,path,timer} ~/.config/systemd/user/
-systemd-analyze --user verify ~/.config/systemd/user/pokoin-rust-auto-deploy.service
-systemctl --user daemon-reload
-scripts/auto-deploy-rust.sh --dry-run                    # read the plan first
-systemctl --user enable --now pokoin-rust-auto-deploy.timer pokoin-rust-auto-deploy.path
+scripts/install-auto-deploy-rust.sh            # script to ~/.local/bin, clone the planning repo if missing, units to
+                                               # ~/.config/systemd/user/, daemon-reload, and create the pause file
+pokoin-auto-deploy-rust --dry-run              # read the plan first (needs POKOIN_AUTODEPLOY_REPO=~/pokoin-deploy/auto-deploy-repo)
+rm ~/scratch/pokoin-auto-deploy/pause          # a fresh install is paused until you remove this file
+systemctl --user enable --now pokoin-rust-auto-deploy.timer    # printed by the installer, never run by it
 ```
 
-The `.path` unit fires when `refs/remotes/origin/main` or `packed-refs` change in the canonical checkout, which only happens
-when something fetches there. The `.timer` (every 15 minutes) is the trigger that fetches, through the script. Switch off:
-`systemctl --user disable --now pokoin-rust-auto-deploy.timer pokoin-rust-auto-deploy.path`.
+`--no-pause` installs without creating the pause file. Pause again with `echo why > ~/scratch/pokoin-auto-deploy/pause`.
+Switch off: `systemctl --user disable --now pokoin-rust-auto-deploy.timer`. Remove everything:
+`scripts/install-auto-deploy-rust.sh --uninstall` (disables the timer, removes the units and the installed script; keeps the
+planning clone, the state dir and the pause file).
+
+The `.timer` (every 15 minutes) is the only trigger. There is no `.path` unit: nothing fetches `origin/main` on its own, so a
+path unit on the remote-tracking ref would never fire reliably. The script does the fetch. After a script change, run the
+installer again to refresh the installed copy.
 
 ## Roll back
 
@@ -87,5 +96,5 @@ redeploy the bad sha's successor before you have looked.
 
 ## Test
 
-`bash scripts/auto-deploy-rust.test.sh` runs the script against a throwaway repo with fake build, deploy and sync commands. No
-network.
+`bash scripts/auto-deploy-rust.test.sh` runs the script against a throwaway repo with fake build, deploy and sync commands, and
+from a path outside any git repo. No network.
