@@ -3199,27 +3199,6 @@ select.collector-badge.version-badge option {
   flex-wrap: nowrap;
 }
 
-.shop-tools {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.45rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.shop-tools .sort {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  font-size: 0.78rem;
-}
-
-.shop-tools .sort select {
-  margin-left: 0.3rem;
-  max-width: 10.5rem;
-}
-
 .shop-trash {
   width: 2rem;
   height: 2rem;
@@ -4832,6 +4811,127 @@ span.shop-flag {
     justify-self: end;
   }
 }
+/* Card page Shop header: the column headers are the filters. On desktop the
+   rows of .shop-terminal and this header share one grid (seller | tags +
+   condition + language | price | qty | actions); the tag / condition / flag
+   cells inside the facets column have fixed tracks so the chips line up under
+   their buttons. The menus are absolute under their button: the panel and the
+   desk tile do not clip (overflow stays visible). */
+.shop-header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.15rem 0.35rem;
+  border-bottom: 1px solid var(--g5);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.shop-hcell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.shop-hseller,
+.shop-hqty { display: none; }
+
+.shop-hmenu { position: relative; display: inline-flex; }
+
+.shop-hbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  height: 1.7rem;
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shop-hbtn:hover,
+.shop-hbtn:focus-visible,
+.shop-hmenu.is-open > .shop-hbtn {
+  border-color: var(--g5);
+  color: var(--text);
+  outline: none;
+}
+
+.shop-hbtn.is-active { color: var(--yellow); }
+
+.shop-hbtn img {
+  width: 1.55rem;
+  height: 1.1rem;
+  object-fit: contain;
+}
+
+.shop-hbtn img:not(.shop-cond) {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.shop-hlist { min-width: 9rem; }
+.shop-hlist.is-end { left: auto; right: 0; }
+.shop-hlist em { margin-left: auto; font-style: normal; color: var(--yellow); }
+.shop-hlist button { width: 100%; }
+.shop-hlist button:focus-visible { outline: 1px solid var(--yellow); }
+
+.shop-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--yellow);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (min-width: 721px) {
+  .shop-header,
+  .shop-terminal .shop-row:not(.is-profile) {
+    display: grid;
+    grid-template-columns: minmax(9rem, 1.6fr) minmax(0, 1.3fr) minmax(5.5rem, 1fr) minmax(2.5rem, 0.5fr) 4.25rem;
+    column-gap: 1rem;
+  }
+  .shop-hseller,
+  .shop-hqty { display: inline-flex; }
+  .shop-hfacets,
+  .shop-terminal .shop-row:not(.is-profile) .shop-facets {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2.6rem 2.6rem;
+    column-gap: 0.4rem;
+    justify-content: stretch;
+    justify-items: start;
+    align-items: center;
+  }
+  .shop-terminal .shop-row:not(.is-profile) .shop-facets .shop-txt { justify-self: end; }
+  .shop-hfacets .shop-hbtn { justify-self: start; margin-left: -0.35rem; }
+  .shop-hsort { grid-column: 5; justify-self: end; }
+  .shop-hlist.is-end { right: 0; }
+}
+
+@media (max-width: 720px) {
+  .shop-header {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+  .shop-hfacets { display: contents; }
+  .shop-hfacet-txt { display: none; }
+  .shop-hsort { margin-left: auto; }
+}
+
 .shop-act { text-align: right; color: var(--muted); }
 
 .ct-qty {
@@ -7329,8 +7429,6 @@ dialog.zoom:not([open]) {
     padding: 0.1rem 0.28rem;
   }
 
-  /* Phone shop tile: "Shop" is the title row; the filters sit on one row
-     under it, each label a small caption above its select. */
   .shop-head {
     flex-wrap: wrap;
     row-gap: 0.55rem;
@@ -7338,36 +7436,6 @@ dialog.zoom:not([open]) {
 
   .shop-head > h2 {
     flex: 1 0 100%;
-  }
-
-  .shop-head > .shop-tools {
-    flex: 1 1 100%;
-    align-items: end;
-    justify-content: stretch;
-    gap: 0.4rem;
-  }
-
-  .shop-tools .sort {
-    display: grid;
-    flex: 1 1 auto;
-    gap: 0.2rem;
-    min-width: 0;
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .shop-tools .sort select {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    margin-left: 0;
-    color: var(--text);
-    font-size: 0.78rem;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
   }
 
   .hero-art-col {

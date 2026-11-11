@@ -49,3 +49,11 @@ test('card desk is one tile, its inner panels are flat, the title tile is border
   // Related cards is a plain .panel outside the desk: the shared rule is untouched.
   assert.match(css, /\n\.panel \{\s*background:\s*var\(--g2\);\s*border:\s*1px solid var\(--g5\)/);
 });
+
+test('the Shop header shares the desktop row grid, never wraps on phones, and the old select styles are gone', () => {
+  assert.match(css, /\.shop-header,\n\s*\.shop-terminal \.shop-row:not\(\.is-profile\) \{[^}]*grid-template-columns:\s*minmax\(9rem, 1\.6fr\) minmax\(0, 1\.3fr\) minmax\(5\.5rem, 1fr\) minmax\(2\.5rem, 0\.5fr\) 4\.25rem/);
+  assert.match(css, /\.shop-hseller,\n\s*\.shop-hqty \{ display: none; \}/);
+  const phone = css.slice(css.indexOf('.shop-header {\n    flex-wrap: nowrap;'));
+  assert.match(phone.slice(0, 120), /flex-wrap:\s*nowrap/);
+  assert.doesNotMatch(css, /\.shop-tools/);
+});
