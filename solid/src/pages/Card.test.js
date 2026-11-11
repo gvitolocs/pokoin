@@ -68,3 +68,27 @@ test('Best Deal goes price, seller line, then the chips: no grade · language te
   assert.doesNotMatch(page, /deal-what/);
   assert.doesNotMatch(deal, /languageName|conditionLabel/);
 });
+
+test('Best Deal flips its two-line price: local currency large, PKN small; nothing else flips', () => {
+  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  assert.match(deal, /<PriceStack flip parts=\{buyerParts\(dealPick\(\)\?\.pricePkn/);
+  const stack = fs.readFileSync(new URL('../components/PriceStack.jsx', import.meta.url), 'utf8');
+  assert.match(stack, /stackOrder\(props\.parts, props\.flip\)/);
+  for (const file of ['../components/CardTile.jsx', '../components/desk/ShopListing.jsx']) {
+    assert.doesNotMatch(fs.readFileSync(new URL(file, import.meta.url), 'utf8'), /<PriceStack[^>]*\bflip\b/);
+  }
+});
+
+test('the offer bar sits above Add to cart and its settings open in a body portal popup', () => {
+  assert.match(page, /<OfferBar[\s\S]*above=\{canBuy\(\)\}/);
+  const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
+  assert.match(bar, /aria-label="Offer settings"[\s\S]*aria-haspopup="dialog"/);
+  assert.match(bar, /<Portal mount=\{document\.body\}>/);
+  assert.match(bar, /event\.key === 'Escape'/);
+  assert.match(bar, /pointerdown/);
+  assert.match(bar, /gear\?\.focus\(\)/);
+  // The settings form is in the popup only: nothing expands inside the panel.
+  assert.doesNotMatch(bar, /offer-open"/);
+  // Prices go through the listing form's conversion helpers, not a second one.
+  assert.match(bar, /offerPricePkn\(price\(\), cur\(\)\)/);
+});

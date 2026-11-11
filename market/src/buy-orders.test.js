@@ -3,6 +3,13 @@ import test from 'node:test';
 import {
   BUY_ORDER_LANGS,
   bestBid,
+  beatPricePkn,
+  defaultOfferSettings,
+  offerBody,
+  offerPriceInput,
+  offerPriceLabel,
+  offerPricePkn,
+  offerSummary,
   beatStepPkn,
   offerBarModel,
   offerPrefill,
@@ -16,6 +23,7 @@ import {
   orderStateLabel,
   validateBuyOrder,
 } from './buy-orders.js';
+import { formatFiatFromPkn, listingPriceToPkn } from './pkn.js';
 
 const book = [
   { condition: 'NM', language: 'EN', reverse: false, first_edition: false, best_price_pkn: 120, quantity: 3, orders: 2 },
@@ -143,4 +151,52 @@ test('offerPrefill is one step above the best offer, empty without one', () => {
   assert.equal(offerPrefill({ best_price_pkn: 4200 }), '4242');
   assert.equal(offerPrefill(null), '');
   assert.equal(offerPrefill({ best_price_pkn: 'x' }), '');
+});
+
+test('the offer price field converts with the listing form helpers and round-trips', () => {
+  // 0.98 DKK → PKN → shown again as 0.98 DKK (the listing form's own 2-decimal rounding).
+  const pkn = offerPricePkn('0.98', 'DKK');
+  assert.equal(pkn, listingPriceToPkn('0.98', 'DKK'));
+  assert.equal(offerPriceInput(pkn, 'DKK'), '0.98');
+  for (const typed of ['0.98', '2.64', '15', '123.45']) {
+    for (const currency of ['DKK', 'EUR', 'USD']) {
+      assert.equal(offerPriceInput(offerPricePkn(typed, currency), currency), String(Number(typed)), `${typed} ${currency}`);
+    }
+  }
+  // Decimal comma, as sellers type it.
+  assert.equal(offerPricePkn('2,64', 'DKK'), offerPricePkn('2.64', 'DKK'));
+  // PKN is PKN.
+  assert.equal(offerPricePkn('120', 'PKN'), 120);
+  assert.equal(offerPriceInput(120, 'PKN'), '120');
+  assert.equal(offerPricePkn('', 'DKK'), null);
+  assert.equal(offerPricePkn('abc', 'EUR'), null);
+});
+
+test('prefill, labels and Beat offer text use the visitor currency', () => {
+  const bid = { best_price_pkn: 100 };
+  assert.equal(beatPricePkn(bid), 101);
+  assert.equal(beatPricePkn(null), null);
+  assert.equal(offerPriceInput(beatPricePkn(bid), 'DKK'), '3.79');
+  assert.equal(offerPriceLabel(101, 'DKK'), formatFiatFromPkn(101, 'DKK')); // the label formatter the listing form's "Lists at" uses
+  assert.equal(offerPriceLabel(101, 'PKN'), '101 PKN');
+  assert.equal(offerPriceLabel(101, 'USD'), '$0.51');
+  const settings = defaultOfferSettings({ condition: 'NM', language: 'en' });
+  assert.deepEqual(settings, { quantity: '1', condition: 'NM', language: 'EN', days: '30', reverse: false, firstEdition: false });
+  assert.equal(offerSummary(101, settings, 'DKK'), 'Offer 3.83 DKK for 1 copy, Near Mint, EN, 30 days');
+  assert.equal(
+    offerSummary(101, { ...settings, quantity: '3', days: 'null', reverse: true }, 'PKN'),
+    'Offer 101 PKN for 3 copies, Near Mint, EN, Until cancelled, Reverse',
+  );
+  assert.deepEqual(defaultOfferSettings({ condition: 'XX', language: 'zz' }), { ...settings });
+});
+
+test('offerBody carries the settings and null days for until cancelled', () => {
+  const settings = { ...defaultOfferSettings({ condition: 'SP', language: 'JP' }), days: 'null', firstEdition: true };
+  const body = offerBody({ cardId: 7, pricePkn: 55, settings, buyerName: 'Ann', card: { name: 'Mew', set: 'Fossil', number: '5/62' } });
+  assert.equal(body.card_id, '7');
+  assert.equal(body.days, null);
+  assert.equal(body.first_edition, true);
+  assert.equal(body.reverse, false);
+  assert.equal(body.quantity, 1);
+  assert.equal(validateBuyOrder(body).ok, true);
 });

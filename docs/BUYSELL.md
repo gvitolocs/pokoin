@@ -44,12 +44,31 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 
 - `market/src/buy-orders.js`: client calls and the pure helpers (tested in `buy-orders.test.js`).
 - `solid/src/components/desk/OfferBar.jsx`: the offer bar inside the Best Deal panel, directly above Add to cart (or at
-  the bottom of the panel when nobody lists the card). It is as big as Add to cart and shows `Offer <best price>` for the
-  panel's condition and language (`No offers yet` when there is none) with a `Make offer` / `Beat offer` button. The button
-  opens the offer form in the panel; with a live best offer the form also offers Sell now. Posting or selling collapses
-  it and refetches the book. The book loads after the listings; if the request fails the bar is not drawn. The labels and
-  the prefilled price (best offer plus 1%, at least 1 PKN) come from `offerBarModel` / `offerPrefill` in `buy-orders.js`.
-- `solid/src/components/buysell/SellNowForm.jsx`: the Sell now flow shared by the offer bar and the page.
+  the bottom of the panel when nobody lists the card). It is as big as Add to cart and has three segments:
+  `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Nothing ever expands inside the panel; only the one-line
+  confirmation or error under the bar changes its height.
+  - **Beat offer** (an offer exists for the selection) is one press: it posts one step above the best offer
+    (`beatPricePkn`: 1%, rounded up, at least 1 PKN) with the offer settings. Its `title` says exactly what it posts
+    ("Offer 3.83 DKK for 1 copy, Near Mint, EN, 30 days"), it is disabled while the request runs, and success shows
+    "Offer posted at <price>." with **Undo**, which cancels that order and refetches. Signed-out visitors go to sign-in.
+    `duplicate_buy_order` shows "You already have an offer on this card. Change it in the settings." and opens the popup.
+  - **Make offer** (no offer yet) and the **gear** open the settings popup with the price field focused. The popup is a
+    portal in `<body>`, anchored to the bar (a bottom sheet at 720px and below), closing on Escape, a click outside and its
+    own close button, with focus moving in and returning to the gear. It holds price, copies, condition, language, Open for,
+    Reverse / 1st Ed., the "listing already available" note, Post offer, Cancel and, when a live best offer that is not the
+    visitor's own exists, Sell now.
+  - **Settings** (copies, condition, language, days, Reverse, 1st Ed.) live in memory for the page and drive Beat offer.
+    Defaults: 1 copy, the Best Deal's condition and language, 30 days. A new condition or language chip clears the two
+    settings that follow the chips.
+  - **Currency:** the price field is in the visitor's display currency (`buyerCurrency(pinned)`: the `?currency=` pin, else
+    the account country's), labelled "Price (DKK)". `offerPricePkn` / `offerPriceInput` in `buy-orders.js` wrap
+    `listingPriceToPkn` and `priceInputFromPkn`, the listing form's own conversion, so the two forms agree. Labels and
+    notes use `offerPriceLabel` (the listing form's "Lists at" formatter); a PKN display currency shows PKN.
+  - The book loads after the listings (props.ready); if the request fails the bar is not drawn.
+- Best Deal's two-line price is flipped (`PriceStack flip`, order in `market/src/price-stack.js`): the local currency is the
+  large yellow figure and the PKN amount the small line above it. A single price is unchanged. Tiles, shop rows, search and
+  cart keep the old order.
+- `solid/src/components/buysell/SellNowForm.jsx`: the Sell now flow shared by the offer bar popup and the page.
 - `solid/src/pages/BuySell.jsx`: `/buysell` with tabs Wanted, My offers (`?tab=mine`), Sell to buyers (`?tab=sell`).
 - Navigation: the two-arrows icon (`market/src/buysell-icon.js`) in Chrome, the phone menu and the footer.
 - Edge: `/buysell` is an SPA prefix in `scripts/write-cloudflare-web-routing.mjs` and has rewrites in `vercel.json`.

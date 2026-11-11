@@ -4,7 +4,8 @@
 
 import { getJson } from './api.js';
 import { CONDITIONS, LIST_LANGS } from './card-desk.js';
-import { formatPkn } from './pkn.js';
+import { formatFiatFromPkn, formatPkn, listingPriceToPkn } from './pkn.js';
+import { priceInputFromPkn } from './seller-currency.js';
 
 export const BUY_ORDER_DAYS = [
   { value: 1, label: '1 day' },
@@ -234,11 +235,6 @@ export function crossesAsk(pricePkn, lowestAskPkn) {
   return Number.isFinite(offer) && Number.isFinite(ask) && offer > 0 && ask > 0 && offer >= ask;
 }
 
-/** "120 PKN" for a price, '' when there is none. */
-export function offerPriceLabel(pricePkn) {
-  return formatPkn(pricePkn);
-}
-
 /** The smallest step above an offer: 1% rounded up to a whole PKN, at least 1 PKN (1 PKN is EUR 0.005). */
 export function beatStepPkn(pricePkn) {
   const price = Number(pricePkn);
@@ -268,5 +264,75 @@ export function offerBarModel(bid) {
     hasOffer: true,
     button: 'Beat offer',
     title: `${wanted} wanted · ${buyers} ${buyers === 1 ? 'buyer' : 'buyers'}`,
+  };
+}
+
+/** The visitor's offer settings before they change anything: 1 copy, the desk's condition and language, 30 days. */
+export function defaultOfferSettings({ condition, language } = {}) {
+  return {
+    quantity: '1',
+    condition: CONDITION_VALUES.includes(condition) ? condition : 'NM',
+    language: BUY_ORDER_LANGS.includes(String(language || '').toUpperCase()) ? String(language).toUpperCase() : 'EN',
+    days: String(DEFAULT_BUY_ORDER_DAYS),
+    reverse: false,
+    firstEdition: false,
+  };
+}
+
+/** A price in the currency the offer form uses: "2.64 DKK" for a local currency, "120 PKN" for PKN; '' when there is none. */
+export function offerPriceLabel(pricePkn, currency = 'PKN') {
+  return String(currency || 'PKN').toUpperCase() === 'PKN' ? formatPkn(pricePkn) : formatFiatFromPkn(pricePkn, currency);
+}
+
+/**
+ * What the price field holds for a PKN price in the visitor's currency. The same
+ * helper the listing form fills its price input with (priceInputFromPkn).
+ */
+export function offerPriceInput(pricePkn, currency = 'PKN') {
+  return priceInputFromPkn(pricePkn, String(currency || 'PKN').toUpperCase());
+}
+
+/**
+ * What the visitor typed, in their currency, as the `price_pkn` the API takes:
+ * the listing form's own conversion (listingPriceToPkn), null when it is not a price.
+ */
+export function offerPricePkn(raw, currency = 'PKN') {
+  return listingPriceToPkn(raw, String(currency || 'PKN').toUpperCase());
+}
+
+/** The PKN price Beat offer posts: one step above the best offer; null when there is no offer. */
+export function beatPricePkn(bid) {
+  const price = Number(bid?.best_price_pkn);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return price + beatStepPkn(price);
+}
+
+/** The exact sentence on Beat offer: "Offer 2.64 DKK for 1 copy, Near Mint, EN, 30 days". */
+export function offerSummary(pricePkn, settings, currency = 'PKN') {
+  const copies = Number(settings?.quantity) || 1;
+  const condition = CONDITIONS.find((row) => row.value === settings?.condition)?.label || settings?.condition || '';
+  const days = BUY_ORDER_DAYS.find((row) => String(row.value) === String(settings?.days))?.label || `${settings?.days} days`;
+  const parts = [`${copies} ${copies === 1 ? 'copy' : 'copies'}`, condition, String(settings?.language || ''), days];
+  if (settings?.reverse) parts.push('Reverse');
+  if (settings?.firstEdition) parts.push('1st Ed.');
+  return `Offer ${offerPriceLabel(pricePkn, currency)} for ${parts.join(', ')}`;
+}
+
+/** The POST body for an offer. `card` carries the display fields the book keeps. */
+export function offerBody({ cardId, pricePkn, settings, buyerName = '', card = {} }) {
+  return {
+    card_id: String(cardId || ''),
+    condition: settings.condition,
+    language: settings.language,
+    reverse: Boolean(settings.reverse),
+    first_edition: Boolean(settings.firstEdition),
+    price_pkn: pricePkn,
+    quantity: Number(settings.quantity),
+    days: settings.days === 'null' ? null : Number(settings.days),
+    buyer_name: buyerName,
+    card_name: card.name || '',
+    card_image_url: card.imageUrl || '',
+    set_name: card.set || '',
+    collector_number: card.number || '',
   };
 }

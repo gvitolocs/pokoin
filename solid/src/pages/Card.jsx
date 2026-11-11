@@ -1194,7 +1194,7 @@ function CardDesk(props) {
                   </div>
                   <div class={canBuy() ? 'prod-px' : 'prod-px oos'}>
                     <Show when={offersReady() && canBuy()} fallback="—">
-                      <PriceStack parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
+                      <PriceStack flip parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
                     </Show>
                   </div>
                   <Show when={offersReady() && canBuy()}>
