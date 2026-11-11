@@ -79,6 +79,31 @@ pub fn router(state: DomainState) -> Router {
                 .head(handlers::listings::marketplace_listings_other)
                 .fallback(handlers::listings::marketplace_listings_other),
         )
+        // BuySell buy orders (non-binding offers; Sell now lists at the offer price)
+        .route(
+            "/api/marketplace-buy-orders",
+            get(handlers::buy_orders::book).post(handlers::buy_orders::create),
+        )
+        .route(
+            "/api/marketplace-buy-orders/board",
+            get(handlers::buy_orders::board),
+        )
+        .route(
+            "/api/marketplace-buy-orders/mine",
+            get(handlers::buy_orders::mine),
+        )
+        .route(
+            "/api/marketplace-buy-orders/for-my-listings",
+            get(handlers::buy_orders::for_my_listings),
+        )
+        .route(
+            "/api/marketplace-buy-orders/{id}",
+            axum::routing::patch(handlers::buy_orders::patch).delete(handlers::buy_orders::cancel),
+        )
+        .route(
+            "/api/marketplace-buy-orders/{id}/sell",
+            post(handlers::buy_orders::sell),
+        )
         .route(
             "/api/marketplace-listings-csv",
             get(handlers::listings::marketplace_listings_csv_get)
@@ -310,6 +335,23 @@ mod tests {
             ("PATCH", "/api/marketplace-listings"),
             ("GET", "/api/marketplace-listings-csv"),
             ("POST", "/api/marketplace-listings-csv"),
+            ("GET", "/api/marketplace-buy-orders"),
+            ("POST", "/api/marketplace-buy-orders"),
+            ("GET", "/api/marketplace-buy-orders/board"),
+            ("GET", "/api/marketplace-buy-orders/mine"),
+            ("GET", "/api/marketplace-buy-orders/for-my-listings"),
+            (
+                "PATCH",
+                "/api/marketplace-buy-orders/00000000-0000-4000-8000-00000000000a",
+            ),
+            (
+                "DELETE",
+                "/api/marketplace-buy-orders/00000000-0000-4000-8000-00000000000a",
+            ),
+            (
+                "POST",
+                "/api/marketplace-buy-orders/00000000-0000-4000-8000-00000000000a/sell",
+            ),
             ("POST", "/api/marketplace-cart"),
             ("POST", "/api/marketplace-watchlist"),
             ("GET", "/api/marketplace-cart-sync"),
@@ -389,6 +431,35 @@ mod tests {
             .unwrap();
         let response = router(state()).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn every_authenticated_buy_order_endpoint_requires_a_bearer() {
+        let id = "00000000-0000-4000-8000-00000000000a";
+        for (method, path) in [
+            ("GET", "/api/marketplace-buy-orders/mine".to_string()),
+            (
+                "GET",
+                "/api/marketplace-buy-orders/for-my-listings".to_string(),
+            ),
+            ("POST", "/api/marketplace-buy-orders".to_string()),
+            ("PATCH", format!("/api/marketplace-buy-orders/{id}")),
+            ("DELETE", format!("/api/marketplace-buy-orders/{id}")),
+            ("POST", format!("/api/marketplace-buy-orders/{id}/sell")),
+        ] {
+            let request = Request::builder()
+                .method(method)
+                .uri(&path)
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap();
+            let response = router(state()).oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path}"
+            );
+        }
     }
 
     #[tokio::test]

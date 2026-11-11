@@ -97,7 +97,7 @@ fn query_map(uri: &Uri) -> HashMap<String, String> {
     }
     map
 }
-fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
+pub(crate) fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
     let q = http::Query::from_uri(uri);
     pokoin_api_common::game::parse_game_from_request(
         &http::header_pairs(headers),
@@ -903,6 +903,54 @@ pub(crate) async fn create_listing_keyed(
     requested_game: &str,
     api_key: Option<(uuid::Uuid, &str)>,
 ) -> Result<Value, ApiError> {
+    let draft = match prepare_listing(state, claims, body, requested_game).await? {
+        Prepared::CardtraderOnly(result) => return Ok(result),
+        Prepared::Insert(draft) => draft,
+    };
+    let mut tx = state.write_db().begin().await?;
+    let (row, queued) = insert_listing(state, &mut tx, claims, &draft).await?;
+    if let Some((grant, key)) = api_key {
+        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
+            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
+        let bound = sqlx::query(BIND_API_KEY_SQL)
+            .bind(grant)
+            .bind(key)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if bound != 1 {
+            tx.rollback().await?;
+            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
+        }
+    }
+    tx.commit().await?;
+    finish_created(state, claims, &row, queued, &draft).await
+}
+
+/// A listing that passed every check and is ready to insert.
+pub(crate) struct ListingDraft {
+    values: Vec<Value>,
+    game: String,
+    targets: Value,
+}
+
+pub(crate) enum Prepared {
+    /// CardTrader-only create: pushed, no Pokoin row.
+    CardtraderOnly(Value),
+    Insert(ListingDraft),
+}
+
+/// Every check `POST /api/marketplace-listings` makes before it writes: the
+/// body, seller country, price and quantity, reserve and NFT rights, the
+/// catalog game. Reads only; a caller with its own transaction inserts the
+/// draft with [`insert_listing`].
+pub(crate) async fn prepare_listing(
+    state: &DomainState,
+    claims: &crate::Claims,
+    body: &Value,
+    requested_game: &str,
+) -> Result<Prepared, ApiError> {
     let card = live::field(body, "cardId", 80);
     let price = live::number(&body["pricePkn"]);
     let qty = live::number(&body["quantityAvailable"]);
@@ -922,7 +970,6 @@ pub(crate) async fn create_listing_keyed(
         require_reserve(state, claims).await?;
     }
     let targets = sync::targets(&body["targets"]);
-    let mut cardtrader = json!({"ok":true,"skipped":true,"reason":"not_requested"});
     if targets["pokoin"] == false && targets["cardtrader"] == true {
         let pushed = sync::push_listing(state, &claims.uid, body, false).await;
         let cardtrader = match pushed {
@@ -931,7 +978,9 @@ pub(crate) async fn create_listing_keyed(
             }
             Err(e) => json!({"ok":false,"error":e.message}),
         };
-        return Ok(json!({"listing":null,"cardtrader":cardtrader,"targets":targets}));
+        return Ok(Prepared::CardtraderOnly(
+            json!({"listing":null,"cardtrader":cardtrader,"targets":targets}),
+        ));
     }
     verify_nft(state, &claims.uid, body, qty as i64, reserve).await?;
     let meta = metadata(state, &card).await;
@@ -940,45 +989,55 @@ pub(crate) async fn create_listing_keyed(
         pokoin_api_common::game::normalize_game(if g.is_empty() { requested_game } else { &g });
     let game = listing_game(state, &card, &game, &live::field(body, "cardName", 240)).await?;
     let values = create_values(body, &claims.uid, &game, &meta)?;
+    Ok(Prepared::Insert(ListingDraft {
+        values,
+        game,
+        targets,
+    }))
+}
+
+/// Insert a prepared listing and queue its sync event in `tx`. Returns the
+/// new row and whether an outbox event was queued.
+pub(crate) async fn insert_listing(
+    state: &DomainState,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claims: &crate::Claims,
+    draft: &ListingDraft,
+) -> Result<(Value, bool), ApiError> {
     let sql =
         format!("with written as ({CREATE_SQL}) select to_jsonb(written) as listing from written");
-    let mut tx = state.write_db().begin().await?;
     let mut builder = sqlx::query(&sql);
-    for value in &values {
+    for value in &draft.values {
         builder = bind_json(builder, value);
     }
-    let row = builder.fetch_one(&mut *tx).await?;
+    let row = builder.fetch_one(&mut **tx).await?;
     let row: Value = row.try_get("listing")?;
     let event = sync::event(
         &row,
-        &json!({"game":game,"sellerUid":claims.uid,"mutation":"LISTING_CREATED","wantsCardtrader":targets["cardtrader"],"cardtraderListing":if targets["cardtrader"]==true{ct_listing(&row)}else{Value::Null}}),
+        &json!({"game":draft.game,"sellerUid":claims.uid,"mutation":"LISTING_CREATED","wantsCardtrader":draft.targets["cardtrader"],"cardtraderListing":if draft.targets["cardtrader"]==true{ct_listing(&row)}else{Value::Null}}),
         state.now_ms(),
     );
-    let queued = sync::enqueue(&mut tx, event).await?;
-    if let Some((grant, key)) = api_key {
-        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
-            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
-        let bound = sqlx::query(BIND_API_KEY_SQL)
-            .bind(grant)
-            .bind(key)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        if bound != 1 {
-            tx.rollback().await?;
-            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
-        }
-    }
-    tx.commit().await?;
-    let mut listing = finish_write(state, &row, queued, &game, &claims.uid).await?;
-    if targets["cardtrader"] == true {
-        // The seller reconcile lists it, in one CardTrader product with its
-        // identical copies (cardtrader::group), queued or not.
-        cardtrader = json!({"ok":true,"pending":true});
-    }
-    listing["cardtrader"] = cardtrader;
-    listing["targets"] = targets;
+    let queued = sync::enqueue(tx, event).await?;
+    Ok((row, queued))
+}
+
+/// After the commit: caches, price summary, and the response a create returns.
+pub(crate) async fn finish_created(
+    state: &DomainState,
+    claims: &crate::Claims,
+    row: &Value,
+    queued: bool,
+    draft: &ListingDraft,
+) -> Result<Value, ApiError> {
+    let mut listing = finish_write(state, row, queued, &draft.game, &claims.uid).await?;
+    // The seller reconcile lists it, in one CardTrader product with its
+    // identical copies (cardtrader::group), queued or not.
+    listing["cardtrader"] = if draft.targets["cardtrader"] == true {
+        json!({"ok":true,"pending":true})
+    } else {
+        json!({"ok":true,"skipped":true,"reason":"not_requested"})
+    };
+    listing["targets"] = draft.targets.clone();
     Ok(listing)
 }
 async fn decrement_listing(
