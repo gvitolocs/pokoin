@@ -1,0 +1,157 @@
+# CI for the Pokoin Rust API (pokoin-rust/). docs/CI.md.
+# `rust-gate` is the single required check. Nothing here deploys, uses a secret, or runs on a self-hosted runner.
+name: rust-ci
+on:
+  pull_request:
+    paths: ['pokoin-rust/**', '.github/workflows/rust-ci.yml', 'scripts/check-fast']
+  push:
+    branches: [main]
+    paths: ['pokoin-rust/**', '.github/workflows/rust-ci.yml', 'scripts/check-fast']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: never
+  # Smaller test binaries: the debug build of this workspace is very large (docs/RUST_RUNTIME.md, Build disk).
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  test:
+    # Same gate as scripts/build-pokoin-rust-release.sh: cargo test --workspace --locked, no database
+    # (the *_flow tests skip themselves without POKOIN_TEST_DATABASE_URL).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: pokoin-rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('pokoin-rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Toolchain
+        run: |
+          if compgen -G 'rust-toolchain*' > /dev/null; then
+            rustup toolchain install --profile minimal --component rustfmt --component clippy --no-self-update
+          else
+            rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+            rustup default stable
+          fi
+          rustc --version
+      - name: cargo test --workspace --locked
+        run: cargo test --workspace --locked
+
+  changed:
+    # scripts/check-fast on the diff: rustfmt and clippy fail only on lines this change added or modified
+    # (the workspace has old fmt and clippy debt on main). Tests run in the `test` job, so they are off here.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      POKOIN_CHECK_MIN_FREE_GB: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('pokoin-rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Toolchain
+        run: |
+          if compgen -G 'pokoin-rust/rust-toolchain*' > /dev/null; then
+            (cd pokoin-rust && rustup toolchain install --profile minimal --component rustfmt --component clippy --no-self-update)
+          else
+            rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+            rustup default stable
+          fi
+          rustc --version
+      - name: scripts/check-fast
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base="origin/$BASE_REF"
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base="HEAD^"
+          fi
+          scripts/check-fast --base "$base" --no-test
+
+  flow-db:
+    # Informational until green, like Lucina's non-gating tiers; rust-gate does not wait for it.
+    # Known red on main: seller_api_flow in pokoin-commerce fails against a real Postgres.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: pokoin-rust
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      POKOIN_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('pokoin-rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Toolchain
+        run: |
+          if compgen -G 'rust-toolchain*' > /dev/null; then
+            rustup toolchain install --profile minimal --no-self-update
+          else
+            rustup toolchain install stable --profile minimal --no-self-update
+            rustup default stable
+          fi
+      - name: flow tests against Postgres 17
+        # --test takes a glob; --no-fail-fast so one red binary does not hide the others.
+        run: cargo test --workspace --locked --no-fail-fast --test '*_flow'
+
+  rust-gate:
+    needs: [test, changed]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          TEST: ${{ needs.test.result }}
+          CHANGED: ${{ needs.changed.result }}
+        run: |
+          echo "test=$TEST changed=$CHANGED"
+          if [ "$TEST" != success ]; then echo "::error::cargo test --workspace failed"; exit 1; fi
+          if [ "$CHANGED" != success ]; then echo "::error::scripts/check-fast found something new in the changed lines"; exit 1; fi
