@@ -2853,15 +2853,36 @@ html.desk-tinted.desk-ghost .card-page .asset-header.shaded {
   transition: none;
 }
 
-/* Flat card desk (experiment): every panel under the title tile is
-   transparent and borderless; the title tile keeps its color and loses its
-   border. The border stays 1px but transparent so nothing shifts. The
-   doubled :root outranks the desk-tinted/rainbow rules above. Card page only. */
-html:root:root .card-page.flutter-page .panel,
-html:root:root .card-page.flutter-page .sell-form,
-html:root:root .card-page.flutter-page .add-panel,
-html:root:root .card-page.flutter-page .reserve-blurb,
-html:root:root .card-page.flutter-page .shop-panel {
+/* One-tile card desk (experiment): the whole .card-desk grid is a single
+   large tile with the normal panel look (tinted desks colour it like a panel);
+   the panels inside it are transparent and borderless so it reads as one
+   surface. Related cards and the sections below keep the shared .panel look.
+   The border stays 1px but transparent so nothing shifts. The doubled :root
+   outranks the desk-tinted/rainbow rules above. The title tile stays
+   separate, keeps its color and loses its border. Card page only. */
+html:root:root .card-page.flutter-page .card-desk {
+  box-sizing: border-box;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  padding: 0.95rem 1rem 1rem;
+}
+
+html.desk-tinted:root:root .card-page.flutter-page .card-desk {
+  background: var(--desk-surface);
+  border-color: var(--desk-border);
+}
+
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk {
+  background: #1a1030;
+  border-color: #5a3058;
+}
+
+html:root:root .card-page.flutter-page .card-desk .panel,
+html:root:root .card-page.flutter-page .card-desk .sell-form,
+html:root:root .card-page.flutter-page .card-desk .add-panel,
+html:root:root .card-page.flutter-page .card-desk .reserve-blurb,
+html:root:root .card-page.flutter-page .card-desk .shop-panel {
   background: transparent;
   border-color: transparent;
   outline: none;

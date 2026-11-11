@@ -20,17 +20,24 @@ test('extension side-panel desk clips chrome and keeps the version select shrink
   assert.match(css, /html\.is-extension-desk \.art-num-row \{[^}]*2\.25rem minmax\(0,\s*1fr\) 2\.25rem/);
 });
 
-test('card desk panels are transparent and borderless, the title tile keeps its background and has no border', () => {
+test('card desk is one tile, its inner panels are flat, the title tile is borderless and Related cards keeps the panel look', () => {
   const rule = (selector) => {
     const at = css.indexOf(selector);
     assert.notEqual(at, -1, selector);
     return css.slice(css.indexOf('{', at), css.indexOf('}', at));
   };
   const flat = 'html:root:root .card-page.flutter-page';
+  const tile = rule(`${flat} .card-desk {`);
+  assert.match(tile, /background:\s*var\(--g2\)/);
+  assert.match(tile, /border:\s*1px solid var\(--g5\)/);
+  assert.match(tile, /padding:/);
+  assert.match(rule('html.desk-tinted:root:root .card-page.flutter-page .card-desk {'), /background:\s*var\(--desk-surface\)/);
   for (const cls of ['.panel', '.sell-form', '.add-panel', '.reserve-blurb', '.shop-panel']) {
-    assert.ok(css.includes(`${flat} ${cls}`), cls);
+    assert.ok(css.includes(`${flat} .card-desk ${cls}`), cls);
+    // Only inside the desk: the flat rule never targets a bare card-page panel.
+    assert.ok(!css.includes(`${flat} ${cls}`), `${cls} must stay scoped to .card-desk`);
   }
-  const panels = rule(`${flat} .shop-panel {`);
+  const panels = rule(`${flat} .card-desk .shop-panel {`);
   assert.match(panels, /background:\s*transparent/);
   assert.match(panels, /border-color:\s*transparent/);
   assert.match(panels, /box-shadow:\s*none/);
@@ -39,6 +46,6 @@ test('card desk panels are transparent and borderless, the title tile keeps its 
   assert.match(head, /border-color:\s*transparent/);
   assert.match(head, /box-shadow:\s*none/);
   assert.doesNotMatch(head, /background/);
-  // Scoped to the card page: the shared .panel rule is untouched.
+  // Related cards is a plain .panel outside the desk: the shared rule is untouched.
   assert.match(css, /\n\.panel \{\s*background:\s*var\(--g2\);\s*border:\s*1px solid var\(--g5\)/);
 });
