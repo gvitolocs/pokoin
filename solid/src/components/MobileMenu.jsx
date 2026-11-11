@@ -4,6 +4,7 @@ import { accountHeading } from '@market/auth-session.js';
 import { catalogLinks } from '@market/catalog-links.js';
 import { authAnchorRel, marketUrl } from '@market/punchouts.js';
 import Avatar from './Avatar.jsx';
+import BuySellIcon from './buysell/BuySellIcon.jsx';
 import { gameHref } from '@market/game.js';
 
 // Phone drawer behind the burger:
@@ -66,7 +67,7 @@ function Row(props) {
   return (
     <li>
       <MenuLink class="mm-row" to={props.to} onClick={props.onClose}>
-        <span class="mm-row-icon"><Glyph d={props.icon} /></span>
+        <span class="mm-row-icon"><Show when={props.mark === 'buysell'} fallback={<Glyph d={props.icon} />}><BuySellIcon size={20} /></Show></span>
         <span class="mm-row-label">{props.label}</span>
         <Show when={props.meta}><span class="mm-row-meta">{props.meta}</span></Show>
         <svg class="mm-row-chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -140,6 +141,7 @@ export default function MobileMenu(props) {
         <h2 id="mm-shop">Shop</h2>
         <ul>
           <Row to="/marketplace" icon={ICO.market} label="Marketplace" onClose={close} />
+          <Row to="/buysell" mark="buysell" label="BuySell" onClose={close} />
           <Row to="/marketplace/explore" icon={ICO.explore} label="Explore" onClose={close} />
           <Show when={props.competitive}>
             <Row to="/marketplace/competitive" icon={ICO.trophy} label="Competitive" onClose={close} />

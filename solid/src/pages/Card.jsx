@@ -126,13 +126,14 @@ import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
+import OfferBar from '../components/desk/OfferBar.jsx';
 import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import ShopHeader, { Ico } from '../components/desk/ShopHeader.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
-import { isVaultOffer, splitVaultOffers, VAULT_DEAL_LINE } from '@market/vault.js';
+import { isVaultOffer, splitVaultOffers } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
 import SoldPriceGraph from '../components/desk/SoldPriceGraph.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
@@ -314,7 +315,8 @@ function CardDesk(props) {
     if (!next) return;
     const prefixed = publicGamePath(next, game().id) || next;
     if (cleanPath(prefixed) === cleanPath(here)) return;
-    navigate(prefixed, { replace: true, scroll: false });
+    // The query rides along: the canonical redirect must not drop ?mypokoinPreview (or any other switch).
+    navigate(`${prefixed}${untrack(() => location.search)}`, { replace: true, scroll: false });
   }
 
   function showCard(data) {
@@ -1193,15 +1195,12 @@ function CardDesk(props) {
                   </div>
                   <div class={canBuy() ? 'prod-px' : 'prod-px oos'}>
                     <Show when={offersReady() && canBuy()} fallback="—">
-                      <PriceStack parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
+                      <PriceStack flip parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
                     </Show>
                   </div>
                   <Show when={offersReady() && canBuy()}>
-                    {/* The Vault is Pokoin's own stock: say where it is, not the admin account's name. */}
-                    <Show
-                      when={!isVaultOffer(dealPick())}
-                      fallback={<p class="deal-sold-by is-vault">{VAULT_DEAL_LINE}</p>}
-                    >
+                    {/* The Vault is Pokoin's own stock: no seller line, and never the admin account's name. */}
+                    <Show when={!isVaultOffer(dealPick())}>
                       <p class="deal-sold-by">
                         Sold by{' '}
                         <Show
@@ -1269,26 +1268,40 @@ function CardDesk(props) {
                       </div>
                     </Show>
                   </div>
-                  {/* Once offers load, no fake grey button: say why there is nothing to add. */}
-                  <Show
-                    when={canBuy()}
-                    fallback={offersReady()
-                      ? <p class="deal-none">No Pokoin seller has this card right now.</p>
-                      : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
-                  >
-                    <button
-                      class="btn buy-btn"
-                      type="button"
-                      onClick={() => {
-                        const row = card();
-                        track(Action.buyIntent, row);
-                        addToCart(cartItemFromOffer(row, snapshot(dealPick())));
-                        navigate('/cart');
-                      }}
+                  <div class="deal-actions">
+                    {/* Once offers load, no fake grey button: say why there is nothing to add. */}
+                    <Show
+                      when={canBuy()}
+                      fallback={offersReady()
+                        ? <p class="deal-none">No Pokoin seller has this card right now.</p>
+                        : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
                     >
-                      Add to cart
-                    </button>
-                  </Show>
+                      <button
+                        class="btn buy-btn"
+                        type="button"
+                        onClick={() => {
+                          const row = card();
+                          track(Action.buyIntent, row);
+                          addToCart(cartItemFromOffer(row, snapshot(dealPick())));
+                          navigate('/cart');
+                        }}
+                      >
+                        Add to cart
+                      </button>
+                    </Show>
+                    <OfferBar
+                      card={card()}
+                      cardId={cardId}
+                      ready={offersReady()}
+                      above={canBuy()}
+                      condition={shownCond()}
+                      language={shownLang()}
+                      languages={allDealLangs()}
+                      pinned={pinnedCurrency()}
+                      askFor={(cond, lang) => matchDeal(nativeLive(), lang, cond, card())?.pricePkn}
+                      onBuyNow={() => document.querySelector('.hero-deal .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                    />
+                  </div>
                 </section>
               </div>
 

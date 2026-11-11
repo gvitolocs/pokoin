@@ -117,6 +117,7 @@ export const APP = {
   cardscan: route('/scan'),
   health: route('/health'),
   buy: route('/buy'),
+  buysell: route('/buysell'),
   admin: route('/admin'),
   earn: route('/earn'),
   about: route('/about'),

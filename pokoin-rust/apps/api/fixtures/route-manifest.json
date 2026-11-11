@@ -1349,5 +1349,55 @@
   ],
   "file": "news-stats.js",
   "purpose": "Admin-only Pokoin News reading stats for /news/dashboard: CTR, views, readers, scroll depth, time on page per article, per day and per card position."
+ },
+ {
+  "path": "/api/marketplace-buy-orders",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::book and ::create; no Node origin)",
+  "purpose": "BuySell buy orders. GET (public, cache 15s): the live book for one card, one row per condition/language/reverse/first-edition tuple with best_price_pkn, best_order_id, quantity, orders; never exposes the buyer. POST: place a non-binding standing offer (card_id, condition, language, reverse?, first_edition?, price_pkn, quantity 1-10, days 1/7/30/60/90 or null, display fields); locks no funds."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/board",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::board; no Node origin)",
+  "purpose": "Public board of live buy orders across cards for the game, newest first (sort=recent) or highest price first (sort=price), keyset paged."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/mine",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::mine; no Node origin)",
+  "purpose": "The signed-in buyer's own buy orders in any state (open, filled, expired, cancelled), newest first, max 200, each with its fills and their listing status."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/for-my-listings",
+  "methods": [
+   "GET"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::for_my_listings; no Node origin)",
+  "purpose": "Live buy orders by other buyers whose game, card, condition, language, reverse and first-edition equal one of the caller's active listings, highest price first, max 200, with my_listing_id and my_price_pkn."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/:id",
+  "methods": [
+   "PATCH",
+   "DELETE"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::patch and ::cancel; no Node origin)",
+  "purpose": "Owner only (404 for others). PATCH changes price_pkn, quantity (not below counted fills) and days while the order is open or expired. DELETE cancels it; idempotent."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/:id/sell",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::sell; no Node origin)",
+  "purpose": "Sell now: create a normal listing at the order's price (same validation as POST /api/marketplace-listings) and record a fill; emails the buyer. Moves no money; the buyer buys the listing through the cart. 403 own_buy_order, 409 not_open | quantity_exceeds_remaining."
  }
 ]

@@ -30,6 +30,9 @@
   --ct-blue: #5bbad5;
   --cm-blue: #1a4f9c;
   --vt-green: #007782;
+  /* BuySell mark: buy arrow in the site gold, sell arrow in the CardTrader blue. */
+  --buysell-buy: var(--yellow);
+  --buysell-sell: var(--ct-blue);
   --border: #5c5c5c;
   --font: Satoshi, ui-sans-serif, system-ui, sans-serif;
   --max: 80rem;
@@ -11343,3 +11346,439 @@ img.is-lang-scan {
 }
 
 .cart-toast a { color: var(--yellow); font-weight: 800; }
+
+/* BuySell: the offer bar in Best Deal, and the page that lists them. */
+.buysell-ico {
+  vertical-align: -0.16em;
+  flex: 0 0 auto;
+}
+
+.buysell-ico .bs-buy { fill: var(--buysell-buy); }
+.buysell-ico .bs-sell { fill: var(--buysell-sell); }
+
+/* Header: the BuySell mark keeps its two colours at rest; hover and the active ring are the other icons' own. */
+.icon-nav a.buysell-link {
+  color: var(--buysell-buy);
+}
+
+.page-title .buysell-title-ico {
+  margin-right: 0.35em;
+  vertical-align: -0.04em;
+}
+
+.hero-deal .deal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: auto;
+}
+
+.hero-deal .deal-actions .buy-btn {
+  margin-top: 0;
+}
+
+.hero-deal .deal-actions .deal-none {
+  margin: 0;
+}
+
+/* Offer bar: the best buy offer, same size as Add to cart, above it. Opens the offer form in place. */
+.offer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.offer-wrap.is-above {
+  order: -1;
+}
+
+.offer-bar {
+  container-type: inline-size;
+  display: flex;
+  align-items: stretch;
+  min-height: 3rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  overflow: hidden;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.offer-bar-price {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.7rem;
+  color: #fff;
+}
+
+.offer-bar-price .buysell-ico {
+  flex: none;
+}
+
+.offer-bar-label {
+  color: var(--muted);
+}
+
+.offer-bar-amount,
+.offer-bar-none {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.offer-bar-amount {
+  color: var(--yellow);
+}
+
+.offer-bar-btn {
+  flex: none;
+  padding: 0 0.8rem;
+  border: 0;
+  border-left: 1px solid var(--g5);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.offer-bar-btn:hover,
+.offer-bar-btn:focus-visible,
+.offer-bar-btn[aria-expanded='true'] {
+  background: var(--g3);
+  color: var(--yellow);
+}
+
+.offer-bar-none-short {
+  display: none;
+}
+
+/* A narrow bar (the desktop column) drops the word Offer and shortens "No offers yet" before it would truncate or wrap. */
+@container (max-width: 300px) {
+  .offer-bar-label {
+    display: none;
+  }
+
+  .offer-bar-none-long {
+    display: none;
+  }
+
+  .offer-bar-none-short {
+    display: inline;
+  }
+
+  .offer-bar-price {
+    padding: 0 0.45rem 0 0.6rem;
+    gap: 0.3rem;
+  }
+
+  .offer-bar-btn {
+    padding: 0 0.65rem;
+  }
+
+  .offer-bar-amount {
+    font-size: 0.9em;
+  }
+}
+
+.offer-bar-gear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--g5);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.offer-bar-gear:hover,
+.offer-bar-gear:focus-visible,
+.offer-bar-gear[aria-expanded='true'] {
+  background: var(--g3);
+  color: var(--yellow);
+}
+
+.offer-bar-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Settings popup: a floating panel anchored to the bar, in <body> so no panel overflow clips it. */
+.offer-pop {
+  position: fixed;
+  z-index: 1500;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #14121a;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+}
+
+.offer-scrim {
+  display: none;
+}
+
+.offer-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.offer-open-head {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.offer-pop-close {
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.offer-pop-close:hover,
+.offer-pop-close:focus-visible {
+  background: var(--g3);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .offer-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1499;
+    background: rgb(0 0 0 / 55%);
+  }
+
+  .offer-pop {
+    inset: auto 0 0 0;
+    width: auto;
+    max-height: 88vh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.buy-form {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.buy-toggles {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.buy-toggle {
+  min-width: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  border-color: var(--g5);
+}
+
+.buy-cross {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+.sell-now {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.sell-now-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.sell-now-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.buysell-how {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.buysell-how li {
+  counter-increment: how;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+  font-size: 0.85rem;
+}
+
+.buysell-how li::before {
+  content: counter(how);
+  display: inline-block;
+  margin-right: 0.5rem;
+  color: var(--buysell-buy);
+  font-weight: 800;
+}
+
+.buysell-how li:nth-child(2)::before {
+  color: var(--buysell-sell);
+}
+
+.buysell-fine {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.buysell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.buysell-tabs,
+.buysell-sort {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.buysell-tabs button,
+.buysell-sort button {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.buysell-tabs button.on,
+.buysell-sort button.on {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.buysell-tabs button.on {
+  box-shadow: inset 0 -2px 0 var(--buysell-sell);
+}
+
+.buysell-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.buysell-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g2);
+}
+
+.buysell-row img.buysell-thumb {
+  width: 3.4rem;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.buysell-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.buysell-main strong,
+.buysell-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buysell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.buysell-meta .shop-cond {
+  height: 1.3rem;
+  width: auto;
+}
+
+.buysell-meta .deal-flag {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.buysell-side {
+  display: grid;
+  justify-items: end;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.buysell-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.buysell-group {
+  margin: 1.1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 720px) {
+  .buysell-row {
+    grid-template-columns: 3rem 1fr;
+  }
+
+  .buysell-side {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: space-between;
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+  }
+}

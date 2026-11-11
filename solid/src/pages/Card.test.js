@@ -52,10 +52,11 @@ test('the gold sparkles swap the desk scan to the verified reverse holo and back
   assert.match(page, /image=\{art\(\)\}/);
 });
 
-test('Best Deal says "Available in the Vault" for Vault stock and names every other seller', () => {
+test('Best Deal shows no seller line for Vault stock and names every other seller', () => {
   const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
   assert.match(deal, /when=\{!isVaultOffer\(dealPick\(\)\)\}/);
-  assert.match(deal, /fallback=\{<p class="deal-sold-by is-vault">\{VAULT_DEAL_LINE\}<\/p>\}/);
+  assert.doesNotMatch(deal, /Available in the Vault|VAULT_DEAL_LINE|is-vault/);
+  assert.doesNotMatch(deal, /<Show\s+when=\{!isVaultOffer\(dealPick\(\)\)\}\s+fallback=/);
   // Ordinary sellers keep "Sold by" and their shop link.
   assert.match(deal, /Sold by\{' '\}/);
   assert.match(deal, /sellerHref\(dealPick\(\), lang\)/);
@@ -66,6 +67,34 @@ test('Best Deal goes price, seller line, then the chips: no grade · language te
   assert.ok(deal.includes('deal-sold-by'));
   assert.doesNotMatch(page, /deal-what/);
   assert.doesNotMatch(deal, /languageName|conditionLabel/);
+});
+
+test('Best Deal flips its two-line price: local currency large, PKN small; nothing else flips', () => {
+  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  assert.match(deal, /<PriceStack flip parts=\{buyerParts\(dealPick\(\)\?\.pricePkn/);
+  const stack = fs.readFileSync(new URL('../components/PriceStack.jsx', import.meta.url), 'utf8');
+  assert.match(stack, /stackOrder\(props\.parts, props\.flip\)/);
+  for (const file of ['../components/CardTile.jsx', '../components/desk/ShopListing.jsx']) {
+    assert.doesNotMatch(fs.readFileSync(new URL(file, import.meta.url), 'utf8'), /<PriceStack[^>]*\bflip\b/);
+  }
+});
+
+test('the offer bar sits above Add to cart and its settings open in a body portal popup', () => {
+  assert.match(page, /<OfferBar[\s\S]*above=\{canBuy\(\)\}/);
+  const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
+  assert.match(bar, /aria-label="Define offer"\s+title="Define offer"\s+aria-haspopup="dialog"/);
+  assert.match(bar, /<h3 class="offer-open-head">Define offer<\/h3>/);
+  assert.match(bar, /role="dialog"\s+aria-label="Define offer"/);
+  assert.match(bar, /Change it in Define offer\./);
+  assert.doesNotMatch(bar, /Offer settings|in the settings/);
+  assert.match(bar, /<Portal mount=\{document\.body\}>/);
+  assert.match(bar, /event\.key === 'Escape'/);
+  assert.match(bar, /pointerdown/);
+  assert.match(bar, /gear\?\.focus\(\)/);
+  // The settings form is in the popup only: nothing expands inside the panel.
+  assert.doesNotMatch(bar, /offer-open"/);
+  // Prices go through the listing form's conversion helpers, not a second one.
+  assert.match(bar, /offerPricePkn\(price\(\), cur\(\)\)/);
 });
 
 test('the Shop panel starts with the column-header filters and keeps an accessible name', () => {
