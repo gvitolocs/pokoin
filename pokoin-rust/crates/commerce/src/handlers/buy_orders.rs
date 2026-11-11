@@ -396,7 +396,8 @@ fn next_cursor(row: &Value, by_price: bool) -> String {
 // ------------------------------------------------------------ public reads
 
 /// `GET /api/marketplace-buy-orders?card_id=` — the book for one card: one
-/// row per condition/language/finish with live orders. Never names a buyer.
+/// row per condition/language/finish with live orders. `best_remaining` is the
+/// copies left on the `best_order_id` order alone. Never names a buyer.
 pub async fn book(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> Response {
     let result: Result<Value, ApiError> = async {
         let card_id = http::Query::from_uri(&uri).first("card_id").map(|raw| live::text(&json!(raw), 80)).unwrap_or_default();
@@ -406,7 +407,7 @@ pub async fn book(State(state): State<DomainState>, headers: HeaderMap, uri: Uri
         let game = listings::request_game(&headers, &uri);
         let sql = format!(
             "{}select to_jsonb(v) from (select condition, language, reverse, first_edition, \
-               max(price_pkn) as best_price_pkn, (array_agg(id order by price_pkn desc, created_at asc, id))[1] as best_order_id, sum(remaining)::int as quantity, count(*)::int as orders \
+               max(price_pkn) as best_price_pkn, (array_agg(id order by price_pkn desc, created_at asc, id))[1] as best_order_id,                (array_agg(remaining order by price_pkn desc, created_at asc, id))[1] as best_remaining, sum(remaining)::int as quantity, count(*)::int as orders \
              from orders where state = 'open' group by condition, language, reverse, first_edition \
              order by max(price_pkn) desc, condition, language, reverse, first_edition) v",
             derived("o.marketplace_game = $1 and o.card_id = $2 and o.status = 'open'")

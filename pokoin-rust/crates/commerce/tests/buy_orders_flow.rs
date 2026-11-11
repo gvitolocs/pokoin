@@ -278,6 +278,7 @@ async fn buy_orders_book_board_sell_and_withdraw() {
         (json!(100), json!(2), json!(1))
     );
     assert_eq!(rows[0]["best_order_id"], a.as_str());
+    assert_eq!(rows[0]["best_remaining"], 2);
     assert_eq!(
         (rows[0]["reverse"].clone(), rows[0]["first_edition"].clone()),
         (json!(false), json!(false))
@@ -354,6 +355,10 @@ async fn buy_orders_book_board_sell_and_withdraw() {
         (json!(150), json!(3), json!(2))
     );
     assert_eq!(rows[0]["best_order_id"], b.as_str());
+    assert_eq!(
+        rows[0]["best_remaining"], 1,
+        "the best order alone, not the facet total of 3"
+    );
     // Highest price first on the board's price sort, newest first on recent.
     assert_eq!(
         board_ids(&app, "?sort=price").await,
@@ -367,6 +372,7 @@ async fn buy_orders_book_board_sell_and_withdraw() {
     let t1 = create(&app, "buyer-1", order_body("tie", "NM", "EN", 50.0, 1)).await;
     let _t2 = create(&app, "buyer-2", order_body("tie", "NM", "EN", 50.0, 1)).await;
     assert_eq!(book(&app, "tie").await[0]["best_order_id"], t1.as_str());
+    assert_eq!(book(&app, "tie").await[0]["best_remaining"], 1);
 
     // --- expiry hides it everywhere public and reports `expired`.
     sqlx::query("update public.marketplace_buy_orders set expires_at = now() - interval '1 minute' where id = $1::uuid").bind(&b).execute(&pool).await.unwrap();
@@ -377,6 +383,7 @@ async fn buy_orders_book_board_sell_and_withdraw() {
         (json!(100), json!(1))
     );
     assert_eq!(rows[0]["best_order_id"], a.as_str());
+    assert_eq!(rows[0]["best_remaining"], 2);
     assert!(board_ids(&app, "?limit=60").await.contains(&a));
     assert!(!board_ids(&app, "?limit=60").await.contains(&b));
     let (status, error) = sell(&app, "seller-1", &b, 1).await;
@@ -630,6 +637,12 @@ async fn buy_orders_book_board_sell_and_withdraw() {
         3,
         "A has 2 left, C has 1"
     );
+    for row in book(&app, "202").await {
+        if row["best_order_id"] == a.as_str() {
+            assert_eq!(row["best_remaining"], 2, "A is partly filled");
+        }
+        assert!(row["best_remaining"].as_i64().unwrap() <= row["quantity"].as_i64().unwrap());
+    }
 
     // --- the other rules, in the contract's order.
     let (status, error) = sell(&app, "buyer-1", &a, 1).await;

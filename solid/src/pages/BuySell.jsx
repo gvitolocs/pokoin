@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
 import {
   BUY_ORDER_DAYS,
@@ -22,6 +22,8 @@ import RequireSignIn from '../components/RequireSignIn.jsx';
 import SellNowForm from '../components/buysell/SellNowForm.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import { getBearer } from '../stores/auth.js';
+import { allowMypokoinPreview } from './mypokoin-preview-fixture.js';
+import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine } from './buysell-preview-fixture.js';
 
 const TABS = [
   { id: 'wanted', label: 'Wanted' },
@@ -63,7 +65,7 @@ function OfferTitle(props) {
   );
 }
 
-function Wanted() {
+function Wanted(props) {
   const [sort, setSort] = createSignal('recent');
   const [items, setItems] = createSignal(null);
   const [next, setNext] = createSignal('');
@@ -78,7 +80,9 @@ function Wanted() {
     setLoading(true);
     setError('');
     try {
-      const data = await fetchBuyBoard({ limit: BOARD_PAGE, sort: sort(), before: reset ? '' : next() });
+      const data = props.preview
+        ? previewBoard(sort())
+        : await fetchBuyBoard({ limit: BOARD_PAGE, sort: sort(), before: reset ? '' : next() });
       if (mine !== seq) return;
       const rows = Array.isArray(data?.items) ? data.items : [];
       setItems((current) => (reset || !current ? rows : [...current, ...rows]));
@@ -126,7 +130,7 @@ function Wanted() {
                 </OfferTitle>
                 <span class="buysell-side">
                   <strong>{formatPkn(item.price_pkn)}</strong>
-                  <SellNowForm order={item} onDone={() => load(true)} />
+                  <SellNowForm order={item} preview={props.preview} onDone={() => load(true)} />
                   <AppLink to={cardPath(item.card_id)}>Card page</AppLink>
                 </span>
               </article>
@@ -174,7 +178,7 @@ function OfferEditor(props) {
     setBusy(true);
     setError('');
     try {
-      await updateBuyOrder(props.order.id, body, await getBearer());
+      if (!props.preview) await updateBuyOrder(props.order.id, body, await getBearer());
       props.onDone(true);
     } catch (err) {
       setError(errorMessage(err));
@@ -203,7 +207,7 @@ function OfferEditor(props) {
   );
 }
 
-function MyOffers() {
+function MyOffers(props) {
   const [items, setItems] = createSignal(null);
   const [error, setError] = createSignal('');
   const [editing, setEditing] = createSignal('');
@@ -212,7 +216,7 @@ function MyOffers() {
 
   async function load() {
     try {
-      const data = await fetchMyBuyOrders(await getBearer());
+      const data = props.preview ? previewMine() : await fetchMyBuyOrders(await getBearer());
       setItems(Array.isArray(data?.items) ? data.items : []);
       setError('');
     } catch (err) {
@@ -229,7 +233,7 @@ function MyOffers() {
     if (!window.confirm('Cancel this offer?')) return;
     setBusyId(order.id);
     try {
-      await cancelBuyOrder(order.id, await getBearer());
+      if (!props.preview) await cancelBuyOrder(order.id, await getBearer());
       await load();
     } catch (err) {
       setError(errorMessage(err));
@@ -264,11 +268,13 @@ function MyOffers() {
                         {order.remaining} of {order.quantity} still wanted
                         {group.state === 'open' ? ` · ${expiryLabel(order.expires_at, now())}` : ''}
                       </span>
-                      <For each={order.fills || []}>
+                      <For each={(order.fills || []).filter((fill) => fill.listing_status === 'active' || fill.listing_status === 'sold_out')}>
                         {(fill) => (
                           <span class="buysell-meta">
-                            {fill.quantity} listed at {formatPkn(fill.price_pkn)}
-                            <AppLink to={cardPath(order.card_id)}>Buy now</AppLink>
+                            {fill.quantity} {fill.listing_status === 'sold_out' ? 'sold' : 'listed'} at {formatPkn(fill.price_pkn)}
+                            <Show when={fill.listing_status === 'active'}>
+                              <AppLink to={cardPath(order.card_id)}>Buy now</AppLink>
+                            </Show>
                           </span>
                         )}
                       </For>
@@ -283,6 +289,7 @@ function MyOffers() {
                     <Show when={editing() === order.id}>
                       <OfferEditor
                         order={order}
+                        preview={props.preview}
                         defaultDays="keep"
                         onDone={(saved) => {
                           setEditing('');
@@ -301,14 +308,14 @@ function MyOffers() {
   );
 }
 
-function SellToBuyers() {
+function SellToBuyers(props) {
   const [items, setItems] = createSignal(null);
   const [error, setError] = createSignal('');
   const [now] = createSignal(Date.now());
 
   async function load() {
     try {
-      const data = await fetchBuyOrdersForMyListings(await getBearer());
+      const data = props.preview ? previewForMyListings() : await fetchBuyOrdersForMyListings(await getBearer());
       setItems(Array.isArray(data?.items) ? data.items : []);
       setError('');
     } catch (err) {
@@ -342,7 +349,7 @@ function SellToBuyers() {
                 </OfferTitle>
                 <span class="buysell-side">
                   <strong>{formatPkn(item.price_pkn)}</strong>
-                  <SellNowForm order={item} fromPath="/buysell?tab=sell" onDone={load} />
+                  <SellNowForm order={item} fromPath="/buysell?tab=sell" preview={props.preview} onDone={load} />
                 </span>
               </article>
             )}
@@ -357,6 +364,7 @@ function SellToBuyers() {
 export default function BuySell() {
   const location = useLocation();
   const [params, setParams] = useSearchParams();
+  const preview = untrack(() => allowMypokoinPreview(params));
   const tab = () => (TABS.some((row) => row.id === params.tab) ? params.tab : 'wanted');
   const here = () => `${location.pathname}${location.search}`;
 
@@ -370,6 +378,7 @@ export default function BuySell() {
         title="BuySell"
         lede="Say what you will pay for a card. Anyone who has it can sell it to you."
       />
+      <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
       <ol class="buysell-how">
         <li>Make an offer on any card and choose how long it stays open.</li>
         <li>A seller who has the card can accept it with Sell now.</li>
@@ -393,9 +402,13 @@ export default function BuySell() {
           </For>
         </div>
       </div>
-      <Show when={tab() === 'wanted'}><Wanted /></Show>
-      <Show when={tab() === 'mine'}><RequireSignIn from={here()}><MyOffers /></RequireSignIn></Show>
-      <Show when={tab() === 'sell'}><RequireSignIn from={here()}><SellToBuyers /></RequireSignIn></Show>
+      <Show when={tab() === 'wanted'}><Wanted preview={preview} /></Show>
+      <Show when={tab() === 'mine'}>
+        <Show when={preview} fallback={<RequireSignIn from={here()}><MyOffers /></RequireSignIn>}><MyOffers preview /></Show>
+      </Show>
+      <Show when={tab() === 'sell'}>
+        <Show when={preview} fallback={<RequireSignIn from={here()}><SellToBuyers /></RequireSignIn>}><SellToBuyers preview /></Show>
+      </Show>
     </div>
   );
 }

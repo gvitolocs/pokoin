@@ -1,4 +1,5 @@
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
+import { MISSING_CARD_SRC } from '@market/missing-card.js';
 import ScanImage from '../ScanImage.jsx';
 
 /**
@@ -6,10 +7,14 @@ import ScanImage from '../ScanImage.jsx';
  * stale or missing scan, so the catalog leftover image for the printing wins.
  */
 export default function RowThumb(props) {
-  const src = () => homepageDerivativeUrl(ownCatalogImage(
-    { id: props.row?.cardId || props.row?.card_id, name: props.row?.cardName || props.row?.name || '' },
-    preferFullImage(props.row?.cardImageUrl || props.row?.card_image_url || ''),
-  ));
+  const src = () => {
+    const advertised = props.row?.cardImageUrl || props.row?.card_image_url || '';
+    if (advertised === MISSING_CARD_SRC) return advertised;
+    return homepageDerivativeUrl(ownCatalogImage(
+      { id: props.row?.cardId || props.row?.card_id, name: props.row?.cardName || props.row?.name || '' },
+      preferFullImage(advertised),
+    ));
+  };
   const name = () => props.row?.cardName || props.row?.name || 'Listing';
   return (
     <ScanImage

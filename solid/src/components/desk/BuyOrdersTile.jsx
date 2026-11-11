@@ -1,15 +1,17 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import { imageSrc } from '@market/api.js';
 import {
   BUY_ORDER_DAYS,
   DEFAULT_BUY_ORDER_DAYS,
   MAX_BUY_ORDER_QUANTITY,
   bidsByCondition,
+  buyerNameOf,
   createBuyOrder,
   crossesAsk,
   errorMessage,
   fetchBuyBook,
+  offerLanguages,
   selectionBid,
   validateBuyOrder,
 } from '@market/buy-orders.js';
@@ -20,9 +22,13 @@ import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js'
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { formatPkn, parseListAmount } from '@market/pkn.js';
 import { authFrom } from '@market/punchouts.js';
+import { sellerNameOf } from '@market/auth-session.js';
 import { useGameNavigate } from '../../lib/game-navigate.js';
 import { whenIdle } from '../../lib/idle.js';
-import { getBearer, signedIn } from '../../stores/auth.js';
+import { authUser, getBearer, signedIn } from '../../stores/auth.js';
+import { profile } from '../../stores/session.js';
+import { allowMypokoinPreview } from '../../pages/mypokoin-preview-fixture.js';
+import { BUYSELL_PREVIEW_BANNER, previewBook } from '../../pages/buysell-preview-fixture.js';
 import { buyerParts } from '../../stores/buyer.js';
 import PriceStack from '../PriceStack.jsx';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
@@ -41,6 +47,8 @@ const conditionLabel = (value) => CONDITION_ROWS.find((row) => row.value === val
 export default function BuyOrdersTile(props) {
   const navigate = useGameNavigate();
   const location = useLocation();
+  const [params] = useSearchParams();
+  const preview = untrack(() => allowMypokoinPreview(params));
   const [book, setBook] = createSignal(null);
   const [forming, setForming] = createSignal(false);
   const [price, setPrice] = createSignal('');
@@ -58,6 +66,10 @@ export default function BuyOrdersTile(props) {
   function loadBook(id) {
     const seq = fetchSeq + 1;
     fetchSeq = seq;
+    if (preview) {
+      setBook(() => previewBook(untrack(() => props.language)).book);
+      return Promise.resolve();
+    }
     return fetchBuyBook(id).then(
       (data) => {
         if (seq === fetchSeq) setBook(() => (Array.isArray(data?.book) ? data.book : []));
@@ -79,6 +91,7 @@ export default function BuyOrdersTile(props) {
   onCleanup(() => { fetchSeq += 1; });
 
   const bid = createMemo(() => selectionBid(book(), { condition: props.condition, language: props.language }));
+  const formLangs = createMemo(() => offerLanguages([...(props.languages || []), props.language]));
   const others = createMemo(() => bidsByCondition(book(), props.language).filter((row) => row.condition !== props.condition));
   const offersReverse = () => listingFoilOptions(game().id).some((row) => row.value === 'reverse');
   const offersFirstEd = () => listingExtraChips(game().id).some((row) => row.key === 'firstEd');
@@ -91,12 +104,12 @@ export default function BuyOrdersTile(props) {
   const fromPath = () => `${location.pathname}${location.search}`;
 
   function openForm() {
-    if (!signedIn()) {
+    if (!preview && !signedIn()) {
       navigate(authFrom(fromPath()));
       return;
     }
     setFormCond(props.condition || 'NM');
-    setFormLang(props.language || 'EN');
+    setFormLang(formLangs().includes(String(props.language || '').toUpperCase()) ? String(props.language).toUpperCase() : 'EN');
     setError('');
     setCreated(false);
     setForming(true);
@@ -114,6 +127,7 @@ export default function BuyOrdersTile(props) {
       price_pkn: priceNumber(),
       quantity: Number(quantity()),
       days: days() === 'null' ? null : Number(days()),
+      buyer_name: buyerNameOf(sellerNameOf(authUser(), profile())),
       card_name: displayName(card) || card.name || '',
       card_image_url: imageSrc(card, 'grid') || '',
       set_name: ident.set || '',
@@ -122,6 +136,11 @@ export default function BuyOrdersTile(props) {
     const check = validateBuyOrder(body);
     if (!check.ok) {
       setError(Object.values(check.errors)[0]);
+      return;
+    }
+    if (preview) {
+      setForming(false);
+      setCreated(true);
       return;
     }
     setBusy(true);
@@ -151,6 +170,7 @@ export default function BuyOrdersTile(props) {
   return (
     <Show when={book()}>
       <section class="panel buy-tile" aria-label="Buy offers">
+        <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
         <div class="add-head">
           <h2><BuySellIcon /> Buy offers</h2>
         </div>
@@ -190,8 +210,9 @@ export default function BuyOrdersTile(props) {
         </Show>
         <Show when={bid()?.best_order_id}>
           <SellNowForm
-            order={{ id: bid().best_order_id, price_pkn: bid().best_price_pkn, remaining: bid().quantity }}
+            order={{ id: bid().best_order_id, price_pkn: bid().best_price_pkn, remaining: bid().best_remaining }}
             fromPath={fromPath()}
+            preview={preview}
             onDone={() => loadBook(String(props.cardId))}
           />
         </Show>
@@ -228,7 +249,7 @@ export default function BuyOrdersTile(props) {
               <label class="sell-field grow">
                 Language
                 <select value={formLang()} onChange={(event) => setFormLang(event.currentTarget.value)}>
-                  <For each={props.languages || []}>
+                  <For each={formLangs()}>
                     {(code) => <option value={code} selected={code === formLang()}>{code}</option>}
                   </For>
                 </select>

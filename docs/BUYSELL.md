@@ -32,8 +32,13 @@ buys it through the cart. In the UI the buyer's thing is an *offer*; the API nou
 | `DELETE /{id}` | yes | Cancel. |
 | `POST /{id}/sell` | yes | Sell now: `{ quantity }` → `201 { listing_id, buy_order }`. `403 own_buy_order`, `409 not_open`, `409 quantity_exceeds_remaining`. |
 
-The card tile's Sell now needs the id of the best order, so each book row may carry `best_order_id`; without it
-the tile hides Sell now (the board and the Sell to buyers tab always have ids).
+Each book row carries `best_order_id` and `best_remaining`, the copies left on that one order. The card tile's Sell
+now needs both: it caps the quantity at `best_remaining` (the row's `quantity` is the total over all its orders and
+can be larger). Without `best_order_id` the tile hides Sell now (the board and the Sell to buyers tab always have ids).
+
+Errors are `{ "error": "<code>", "code": "<code>" }`; `duplicate_buy_order` also carries the existing order's `id`.
+`POST` needs the `days` key (`null` is until cancelled) and takes an optional `buyer_name`, the buyer's public
+display name. Languages are the 16 codes of the price book (the listing form's `LIST_LANGS`); the form offers no other.
 
 ## Where the UI lives
 
@@ -44,3 +49,9 @@ the tile hides Sell now (the board and the Sell to buyers tab always have ids).
 - `solid/src/pages/BuySell.jsx`: `/buysell` with tabs Wanted, My offers (`?tab=mine`), Sell to buyers (`?tab=sell`).
 - Navigation: the two-arrows icon (`market/src/buysell-icon.js`) in Chrome, the phone menu and the footer.
 - Edge: `/buysell` is an SPA prefix in `scripts/write-cloudflare-web-routing.mjs` and has rewrites in `vercel.json`.
+
+## Preview
+
+`?mypokoinPreview` on a card page or on `/buysell` (the MyPokoin switch: dev build, or host `localhost` /
+`127.0.0.1`; never on a production host) shows fixture offers from `solid/src/pages/buysell-preview-fixture.js`
+without calling the API or signing in. Posting, Sell now, Edit and Cancel do nothing in preview.

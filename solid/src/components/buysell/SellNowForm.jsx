@@ -11,6 +11,7 @@ import AppLink from '../AppLink.jsx';
  * "Sell now" on a buy offer: asks how many copies, says what happens, then lists
  * the seller's card at the offer price. props.order = { id, price_pkn, remaining };
  * props.onDone(result) runs after a successful sale so the caller can refetch.
+ * props.preview skips sign-in and the API call (layout preview).
  */
 export default function SellNowForm(props) {
   const navigate = useGameNavigate();
@@ -28,7 +29,7 @@ export default function SellNowForm(props) {
   }
 
   function begin() {
-    if (!signedIn()) {
+    if (!props.preview && !signedIn()) {
       toSignIn();
       return;
     }
@@ -41,6 +42,11 @@ export default function SellNowForm(props) {
     const quantity = Number(qty());
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > remaining()) {
       setError(`Choose 1 to ${remaining()} copies.`);
+      return;
+    }
+    if (props.preview) {
+      setDone(true);
+      setOpen(false);
       return;
     }
     setBusy(true);

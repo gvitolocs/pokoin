@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BUY_ORDER_LANGS,
   bestBid,
+  buyerNameOf,
   bidsByCondition,
   crossesAsk,
   errorMessage,
   expiryLabel,
+  offerLanguages,
   selectionBid,
   orderStateLabel,
   validateBuyOrder,
@@ -63,6 +66,9 @@ test('validateBuyOrder mirrors the server rules', () => {
   assert.ok(validateBuyOrder({ ...good, condition: 'Mint' }).errors.condition);
   assert.ok(validateBuyOrder({ ...good, language: 'XX' }).errors.language);
   assert.ok(validateBuyOrder({ ...good, card_id: '' }).errors.card_id);
+  assert.ok(validateBuyOrder({ ...good, price_pkn: 2_000_000_000 }).errors.price_pkn);
+  const { days: _days, ...noDays } = good;
+  assert.ok(validateBuyOrder(noDays).errors.days, 'the API requires the days key');
 });
 
 test('errorMessage turns each code into a sentence', () => {
@@ -89,4 +95,31 @@ test('selectionBid takes the top price across variants and sums the copies', () 
   assert.equal(row.quantity, 4);
   assert.equal(row.orders, 3);
   assert.equal(selectionBid(book, { condition: 'PL', language: 'EN' }), null);
+});
+
+test('every error code the API returns has a plain sentence', () => {
+  const codes = [
+    'invalid_cursor', 'invalid_sort', 'not_editable', 'quantity_below_filled', 'buy_order_changed',
+    'nothing_to_update', 'rate_limited', 'invalid_body', 'invalid_card', 'invalid_condition',
+    'invalid_language', 'invalid_price', 'invalid_quantity', 'invalid_days', 'duplicate_buy_order',
+    'too_many_buy_orders', 'own_buy_order', 'not_open', 'quantity_exceeds_remaining', 'not_found',
+  ];
+  for (const code of codes) {
+    const text = errorMessage(new Error(code));
+    assert.notEqual(text, 'Something went wrong. Try again.', code);
+    assert.ok(!/_/.test(text), code);
+  }
+});
+
+test('the language list is the API list (price_export::LANGUAGES) and the form never offers another', () => {
+  assert.deepEqual(
+    [...BUY_ORDER_LANGS].sort(),
+    ['DE', 'EN', 'ES', 'FR', 'ID', 'IT', 'JP', 'KO', 'NL', 'PL', 'PT', 'RU', 'TH', 'VI', 'ZH', 'ZHT'],
+  );
+  assert.deepEqual(offerLanguages(['en', 'XX', 'jp', 'EN', '', null]), ['EN', 'JP']);
+});
+
+test('buyerNameOf drops the seller fallback name', () => {
+  assert.equal(buyerNameOf(' Mira '), 'Mira');
+  assert.equal(buyerNameOf('Pokoin seller'), '');
 });

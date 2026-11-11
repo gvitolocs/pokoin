@@ -16,6 +16,9 @@ export const BUY_ORDER_DAYS = [
 ];
 export const DEFAULT_BUY_ORDER_DAYS = 30;
 export const MAX_BUY_ORDER_QUANTITY = 10;
+export const MAX_BUY_ORDER_PRICE_PKN = 1_000_000_000;
+/** The language codes the API accepts (price_export::LANGUAGES): the listing form's list. */
+export const BUY_ORDER_LANGS = LIST_LANGS;
 
 const BASE = '/api/marketplace-buy-orders';
 const CONDITION_VALUES = CONDITIONS.map((row) => row.value).filter(Boolean);
@@ -77,6 +80,22 @@ export function sellIntoBuyOrder(id, quantity, token) {
     method: 'POST',
     body: JSON.stringify({ quantity }),
   }));
+}
+
+/** `codes` the form may offer: upper-case, unique and accepted by the API. */
+export function offerLanguages(codes) {
+  const seen = new Set();
+  for (const code of Array.isArray(codes) ? codes : []) {
+    const upper = String(code || '').trim().toUpperCase();
+    if (BUY_ORDER_LANGS.includes(upper)) seen.add(upper);
+  }
+  return [...seen];
+}
+
+/** The public display name sent as `buyer_name`; '' when the account only has the seller fallback. */
+export function buyerNameOf(name) {
+  const text = String(name || '').trim();
+  return text === 'Pokoin seller' ? '' : text;
 }
 
 /** The book row for one facet tuple, or null. */
@@ -160,20 +179,19 @@ export function expiryLabel(expiresAt, now = Date.now()) {
   return 'Less than an hour left';
 }
 
-/** Mirrors the server rules. `days` may be a number or null (until cancelled). */
+/** Mirrors the server rules. `days` is required: a number, or null for until cancelled. */
 export function validateBuyOrder(input = {}) {
   const errors = {};
   if (!String(input.card_id ?? input.cardId ?? '').trim()) errors.card_id = 'Pick a card.';
   if (!CONDITION_VALUES.includes(input.condition)) errors.condition = 'Choose a condition.';
-  if (!LIST_LANGS.includes(String(input.language || '').toUpperCase())) errors.language = 'Choose a language.';
+  if (!BUY_ORDER_LANGS.includes(String(input.language || '').toUpperCase())) errors.language = 'Choose a language.';
   const price = Number(input.price_pkn);
-  if (!Number.isFinite(price) || price <= 0) errors.price_pkn = 'Enter a price above 0 PKN.';
+  if (!Number.isFinite(price) || price <= 0 || price > MAX_BUY_ORDER_PRICE_PKN) errors.price_pkn = 'Enter a price above 0 PKN.';
   const quantity = Number(input.quantity);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_BUY_ORDER_QUANTITY) {
     errors.quantity = `Choose 1 to ${MAX_BUY_ORDER_QUANTITY} copies.`;
   }
-  const days = input.days === undefined ? DEFAULT_BUY_ORDER_DAYS : input.days;
-  if (!BUY_ORDER_DAYS.some((row) => row.value === days)) errors.days = 'Choose how long the offer stays open.';
+  if (!BUY_ORDER_DAYS.some((row) => row.value === input.days)) errors.days = 'Choose how long the offer stays open.';
   return { ok: Object.keys(errors).length === 0, errors };
 }
 
@@ -188,6 +206,15 @@ const ERROR_MESSAGES = {
   invalid_days: 'Choose how long the offer stays open.',
   invalid_condition: 'Choose a condition.',
   invalid_language: 'Choose a language.',
+  invalid_card: 'Pick a card.',
+  invalid_body: 'That request was not understood. Reload the page and try again.',
+  invalid_cursor: 'The list moved on. Reload to see the latest offers.',
+  invalid_sort: 'That sort is not available.',
+  not_editable: 'This offer is closed, so it can no longer be changed.',
+  quantity_below_filled: 'Sellers have already listed more copies than that. Choose a higher number.',
+  buy_order_changed: 'The buyer changed the price a moment ago. Check the new price and try again.',
+  nothing_to_update: 'Nothing was changed.',
+  rate_limited: 'Too many changes in a short time. Wait a minute and try again.',
   unauthorized: 'Sign in to continue.',
   not_found: 'This offer no longer exists.',
 };
