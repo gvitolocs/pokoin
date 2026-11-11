@@ -1309,6 +1309,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/buysell/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/buysell",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/earn/",
       "destination": "/market/index.html"
     },
