@@ -83,3 +83,9 @@ test('the Shop panel starts with the column-header filters and keeps an accessib
   assert.match(shop, /Clear filters/);
   assert.match(shop, /No Pokoin listings for this card yet\./);
 });
+
+test('the Vault panel carries is-empty from the Vault memo, so phones can hide it until stock is known', () => {
+  assert.match(page, /class=\{\['panel shop-panel vault-panel', \{ 'is-empty': !split\(\)\.vault\.length \}\]\}/);
+  // Still rendered (not wrapped in a Show), so desktop keeps the empty panel.
+  assert.match(page, /<h2>Vault<\/h2>/);
+});

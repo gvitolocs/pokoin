@@ -1293,7 +1293,7 @@ function CardDesk(props) {
               </div>
 
               <div class="shop-split">
-              <section class="panel shop-panel vault-panel">
+              <section class={['panel shop-panel vault-panel', { 'is-empty': !split().vault.length }]}>
                 <header class="panel-head shop-head">
                   <h2>Vault</h2>
                 </header>

@@ -57,3 +57,14 @@ test('the Shop header shares the desktop row grid, never wraps on phones, and th
   assert.match(phone.slice(0, 120), /flex-wrap:\s*nowrap/);
   assert.doesNotMatch(css, /\.shop-tools/);
 });
+
+test('an empty Vault is hidden on phones only', () => {
+  const rule = /\.card-page \.vault-panel\.is-empty \{\s*display:\s*none;\s*\}/;
+  const at = css.search(rule);
+  assert.notEqual(at, -1);
+  const before = css.slice(0, at);
+  const mq = before.lastIndexOf('@media');
+  assert.match(before.slice(mq, mq + 40), /@media \(max-width: 720px\)/);
+  // The only rule that targets .is-empty on the Vault is the phone one.
+  assert.equal(css.split('.vault-panel.is-empty').length - 1, 1);
+});

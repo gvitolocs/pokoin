@@ -3673,6 +3673,12 @@ a.era-link:focus-visible {
   .shop-split { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Phones: an empty (or still loading) Vault takes no room, no title and no
+   gap; it appears once stock is known. Desktop keeps the empty panel. */
+@media (max-width: 720px) {
+  .card-page .vault-panel.is-empty { display: none; }
+}
+
 .prod-layout {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 5fr) minmax(0, 4fr);
