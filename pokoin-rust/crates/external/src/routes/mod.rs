@@ -101,6 +101,7 @@ pub fn router(state: DomainState) -> Router {
         .route("/api/cardtrader-redirect", get(redirects::cardtrader))
         .route("/api/tcgplayer-redirect", get(redirects::tcgplayer))
         .route("/api/cardmarket-redirect", get(redirects::cardmarket))
+        .route("/api/cardmarket-matches", get(redirects::cardmarket_matches))
         // Social autoposter (external-owned; live sends need provider env).
         .route(
             "/api/social-autopost",

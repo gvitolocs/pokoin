@@ -1,8 +1,9 @@
-import { createSignal, Match, onSettled, Show, Switch } from 'solid-js';
+import { createEffect, createSignal, For, Match, onSettled, Show, Switch } from 'solid-js';
 import { useGameNavigate } from '../../lib/game-navigate.js';
 import {
   cardtraderPublicUrl,
   ebayHref,
+  fetchCardmarketMatches,
   fetchCardmarketRedirect,
   fetchCardtraderRedirect,
   fetchClientCountry,
@@ -12,6 +13,7 @@ import {
   vintedHref,
 } from '@market/api.js';
 import { game } from '@market/game.js';
+import { needsCardmarketChooser } from '@market/cardmarket-matches.js';
 import { cardmarketSearchUrl } from '@market/identity.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { SILVER_PRICE_PKN } from '@market/silver.js';
@@ -26,7 +28,20 @@ export default function SilverHead(props) {
   const navigate = useGameNavigate();
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal('');
+  // Two or more verified Cardmarket products (Prize Pack reprints, V1/V2 promos): the CM pill lists them.
+  const [cmChoices, setCmChoices] = createSignal([]);
   let country = '';
+  let cmWrap;
+
+  // Outside clicks close the Cardmarket chooser.
+  createEffect(() => cmChoices().length > 0, (open) => {
+    if (!open) return undefined;
+    const onDown = (event) => {
+      if (cmWrap && !cmWrap.contains(event.target)) setCmChoices([]);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  });
 
   onSettled(() => {
     let live = true;
@@ -75,8 +90,17 @@ export default function SilverHead(props) {
 
   async function openCardmarket() {
     setMessage('');
+    if (cmChoices().length) {
+      setCmChoices([]);
+      return;
+    }
+    const found = await fetchCardmarketMatches(props.card).catch(() => null);
+    if (needsCardmarketChooser(found)) {
+      setCmChoices(found.matches);
+      return;
+    }
     try {
-      const url = await fetchCardmarketRedirect(props.card).catch(() => '') || cardmarketSearchUrl(props.card, game().id);
+      const url = found?.primary || await fetchCardmarketRedirect(props.card).catch(() => '') || cardmarketSearchUrl(props.card, game().id);
       if (!url) throw new Error('Cardmarket did not return a URL.');
       openOffsite(url);
     } catch (err) {
@@ -146,7 +170,44 @@ export default function SilverHead(props) {
         <div class="silver-tools">
           <div class="silver-pills">
             <button class="silver-pill is-ct" type="button" onClick={openCardtrader}>CT</button>
-            <button class="silver-pill is-cm" type="button" onClick={openCardmarket}>CM</button>
+            <span
+              class="pricer-menu-wrap"
+              ref={(node) => { cmWrap = node; }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setCmChoices([]);
+              }}
+            >
+              <button
+                class="silver-pill is-cm"
+                type="button"
+                aria-haspopup="true"
+                aria-expanded={String(cmChoices().length > 0)}
+                onClick={openCardmarket}
+              >
+                CM
+              </button>
+              <Show when={cmChoices().length}>
+                <div class="pricer-menu">
+                  <p class="pricer-menu-head">This card is on Cardmarket {cmChoices().length} times</p>
+                  <div role="menu" aria-label="Cardmarket products">
+                    <For each={cmChoices()} keyed={(choice) => choice.url}>
+                      {(choice) => (
+                        <a
+                          role="menuitem"
+                          class="pricer-menu-item"
+                          href={choice().url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setCmChoices([])}
+                        >
+                          {choice().label}
+                        </a>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+            </span>
             <button class="silver-pill is-tp" type="button" onClick={openTcgplayer} aria-label="TCGplayer">TP</button>
             <button class="silver-pill is-vt" type="button" onClick={openVinted}>VT</button>
             <button class="silver-pill is-eb" type="button" onClick={openEbay} aria-label="Search eBay">
