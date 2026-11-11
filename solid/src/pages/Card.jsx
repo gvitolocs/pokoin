@@ -130,7 +130,7 @@ import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
-import ShopHeader from '../components/desk/ShopHeader.jsx';
+import ShopHeader, { Ico } from '../components/desk/ShopHeader.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
 import { isVaultOffer, splitVaultOffers, VAULT_DEAL_LINE } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
@@ -1295,7 +1295,10 @@ function CardDesk(props) {
               <div class="shop-split">
               <section class={['panel shop-panel vault-panel', { 'is-empty': !split().vault.length }]}>
                 <header class="panel-head shop-head">
-                  <h2>Vault</h2>
+                  <h2 class="shop-label vault-title">
+                    <Ico name="vault" />
+                    <span>Vault</span>
+                  </h2>
                 </header>
                 <Show
                   when={split().vault.length}
