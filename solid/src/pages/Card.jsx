@@ -126,6 +126,7 @@ import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
+import BuyOrdersTile from '../components/desk/BuyOrdersTile.jsx';
 import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
@@ -1289,6 +1290,18 @@ function CardDesk(props) {
                     </button>
                   </Show>
                 </section>
+                <BuyOrdersTile
+                  card={card()}
+                  cardId={cardId}
+                  ready={offersReady()}
+                  condition={shownCond()}
+                  language={shownLang()}
+                  languages={allDealLangs()}
+                  pinned={pinnedCurrency()}
+                  askFor={(cond, lang) => matchDeal(nativeLive(), lang, cond, card())?.pricePkn}
+                  onCondition={setDealCond}
+                  onBuyNow={() => document.querySelector('.hero-deal .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                />
               </div>
 
               <div class="shop-split">

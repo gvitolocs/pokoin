@@ -11,6 +11,7 @@ const Checkout = lazy(() => import('../pages/Checkout.jsx'));
 const Orders = lazy(() => import('../pages/Orders.jsx'));
 const Bought = lazy(() => import('../pages/Bought.jsx'));
 const Buy = lazy(() => import('../pages/Buy.jsx'));
+const BuySell = lazy(() => import('../pages/BuySell.jsx'));
 const Sales = lazy(() => import('../pages/Sales.jsx'));
 const Wallet = lazy(() => import('../pages/Wallet.jsx'));
 const Exchange = lazy(() => import('../pages/Exchange.jsx'));
@@ -25,6 +26,7 @@ export default [
   { path: '/orders', component: Orders },
   { path: '/bought', component: Bought },
   { path: '/buy', component: Buy },
+  { path: '/buysell', component: BuySell },
   { path: '/sales', component: Sales },
   { path: '/wallet', component: Wallet },
   { path: '/exchange', component: Exchange },

@@ -13,7 +13,7 @@ const games = Object.values(GAMES).map((game) => game.slug).filter(Boolean);
 
 const spa = [
   'about', 'admin', 'ambassador', 'ambassadorprogram', 'artwork', 'associate', 'auth',
-  'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
+  'bought', 'buy', 'buysell', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
   'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',
@@ -27,7 +27,7 @@ const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', '
 /** SPA prefixes that have child routes. Everything else is two static rewrites. */
 const SPA_WILDCARD = new Set([
   'marketplace', 'product', 'extension', 'messages', 'forum', 'mypokoin',
-  'inventory', 'join', 'dashboard',
+  'inventory', 'join', 'dashboard', 'buysell',
   ...games,
 ]);
 

@@ -2731,6 +2731,7 @@ html.desk-tinted #root {
 html.desk-tinted .card-page .panel,
 html.desk-tinted .card-page .sell-form,
 html.desk-tinted .card-page .add-panel,
+html.desk-tinted .card-page .buy-tile,
 html.desk-tinted .card-page .reserve-blurb {
   background: var(--desk-surface);
   border-color: var(--desk-border);
@@ -11186,3 +11187,258 @@ img.is-lang-scan {
 }
 
 .cart-toast a { color: var(--yellow); font-weight: 800; }
+
+/* BuySell: buy offers tile under Best Deal, and the page that lists them. */
+.buysell-ico {
+  vertical-align: -0.16em;
+  flex: 0 0 auto;
+}
+
+.hero-deal .buy-tile {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.1rem 1.2rem 1.15rem;
+}
+
+.buy-tile .add-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.buy-best {
+  display: grid;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.hero-deal .buy-px {
+  font-size: clamp(1.6rem, 2.8vw, 2rem);
+  margin: 0;
+}
+
+.buy-count,
+.buy-none,
+.buy-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.buy-others {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.4rem;
+}
+
+.buy-other {
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.buy-form {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.buy-toggles {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.buy-toggle {
+  min-width: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  border-color: var(--g5);
+}
+
+.buy-cross {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+.sell-now {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.sell-now-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.sell-now-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.buysell-how {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.buysell-how li {
+  counter-increment: how;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+  font-size: 0.85rem;
+}
+
+.buysell-how li::before {
+  content: counter(how);
+  display: inline-block;
+  margin-right: 0.5rem;
+  color: var(--yellow);
+  font-weight: 800;
+}
+
+.buysell-fine {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.buysell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.buysell-tabs,
+.buysell-sort {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.buysell-tabs button,
+.buysell-sort button {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.buysell-tabs button.on,
+.buysell-sort button.on {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.buysell-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.buysell-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g2);
+}
+
+.buysell-row img.buysell-thumb {
+  width: 3.4rem;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.buysell-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.buysell-main strong,
+.buysell-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buysell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.buysell-meta .shop-cond {
+  height: 1.3rem;
+  width: auto;
+}
+
+.buysell-meta .deal-flag {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.buysell-side {
+  display: grid;
+  justify-items: end;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.buysell-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.buysell-group {
+  margin: 1.1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 720px) {
+  .buysell-row {
+    grid-template-columns: 3rem 1fr;
+  }
+
+  .buysell-side {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: space-between;
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+  }
+}
