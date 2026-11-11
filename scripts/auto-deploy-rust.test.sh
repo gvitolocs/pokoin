@@ -197,4 +197,34 @@ run
 [ "$(state_last "$new")" = "$new failed verify" ] || fail "verify state: $(state_last "$new")"
 ok "release header that never matches: failed verify"
 
+# 12. no planning repo configured: exit 2, the clone command is printed, nothing runs, no state is created
+reset_calls
+rm -rf "$t/state2"
+rc=0
+out=$(T="$t" POKOIN_AUTODEPLOY_DIR="$t/state2" POKOIN_AUTODEPLOY_REPO="$t/no-such-clone" BUILD_CMD="$t/build" \
+  DEPLOY_CMD="$t/deploy" DEPLOY_CWD="$t" SYNC_CMD="$t/sync" STATUS_CMD="$t/status" bash "$script" 2>&1) || rc=$?
+[ "$rc" = 2 ] || fail "missing repo rc=$rc: $out"
+grep -q "git clone .* $t/no-such-clone" <<< "$out" || fail "missing repo: no clone command: $out"
+[ ! -e "$t/no-such-clone" ] || fail "missing repo: created the directory"
+[ ! -s "$t/calls" ] || fail "missing repo ran $(calls)"
+[ ! -e "$t/state2" ] || fail "missing repo created state"
+ok "missing planning repo: exit 2 with the git clone command, nothing run"
+
+# 13. executed from a path outside any git repo: needs the env, and then works
+mkdir "$t/outside"
+cp "$script" "$t/outside/pokoin-auto-deploy-rust"
+rc=0
+out=$(env -u POKOIN_AUTODEPLOY_REPO T="$t" POKOIN_AUTODEPLOY_DIR="$t/state2" BUILD_CMD="$t/build" DEPLOY_CMD="$t/deploy" \
+  DEPLOY_CWD="$t" SYNC_CMD="$t/sync" STATUS_CMD="$t/status" bash "$t/outside/pokoin-auto-deploy-rust" 2>&1) || rc=$?
+[ "$rc" = 2 ] || fail "outside repo without env rc=$rc: $out"
+grep -q "POKOIN_AUTODEPLOY_REPO" <<< "$out" || fail "outside repo: no hint: $out"
+[ ! -s "$t/calls" ] || fail "outside repo without env ran $(calls)"
+[ ! -e "$t/state2" ] || fail "outside repo without env created state"
+rc=0
+out=$(T="$t" POKOIN_AUTODEPLOY_DIR="$t/state2" POKOIN_AUTODEPLOY_REPO="$t/work" HEALTH_URL="file://$t/health" \
+  bash "$t/outside/pokoin-auto-deploy-rust" --dry-run 2>&1) || rc=$?
+[ "$rc" = 0 ] || fail "outside repo with env rc=$rc: $out"
+grep -q "decision:" <<< "$out" || fail "outside repo with env: no plan: $out"
+ok "script runs from outside any git repo when the planning repo is given"
+
 echo "all auto-deploy-rust tests passed"

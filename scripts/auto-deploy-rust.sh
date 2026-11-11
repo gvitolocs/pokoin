@@ -11,18 +11,39 @@
 #   --dry-run          print the plan (range, changed paths, decision) and run nothing; no fetch, no state change
 #   --status           last 10 state lines and whether the pause file exists
 #   --ack-migrations   the owner applied the migrations of that exact sha: let the next run deploy it
-# env: POKOIN_AUTODEPLOY_DIR (state, default ~/scratch/pokoin-auto-deploy), POKOIN_AUTODEPLOY_REPO (checkout to
-#   read, default the one this script lives in), POKOIN_DEPLOY_DIR (default ~/pokoin-deploy), GIT,
-#   BUILD_CMD (run with the sha), DEPLOY_CMD (run in DEPLOY_CWD, default $POKOIN_DEPLOY_DIR/rust-release),
-#   SYNC_CMD, STATUS_CMD (prints "rust release: releases/<sha12>, Pi: <sha12>"), HEALTH_URL (https URL whose
+# env: POKOIN_AUTODEPLOY_DIR (state, default ~/scratch/pokoin-auto-deploy), POKOIN_AUTODEPLOY_REPO (the planning
+#   clone: fetch and diff only; required unless this script lives in a git checkout; never created here, a missing
+#   one is exit 2 with the git clone command), POKOIN_DEPLOY_DIR (default ~/pokoin-deploy), GIT,
+#   BUILD_CMD (run with the sha; default the build script of the planning clone, which is moved to the tip first),
+#   DEPLOY_CMD (run in DEPLOY_CWD, default $POKOIN_DEPLOY_DIR/rust-release, where the build put the commit),
+#   SYNC_CMD and STATUS_CMD (default: scripts/nezopt-k3s.sh of DEPLOY_CWD, i.e. of the commit being deployed) (prints "rust release: releases/<sha12>, Pi: <sha12>"), HEALTH_URL (https URL whose
 #   x-pokoin-release header is the Pi's release; a file path or file:// URL holds the sha, for tests),
 #   HEALTH_WAIT_S (120), HEALTH_INTERVAL_S (5).
 # exit: 0 done / skipped / paused / stalled / busy, 1 a step failed, 2 cannot plan, 3 migration-pending.
 set -euo pipefail
 
-root=${POKOIN_AUTODEPLOY_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
-# A run lasts an hour and the checkout this file lives in moves with every merge: bash reads a script as it
-# goes, so run from a copy.
+clone_url=https://github.com/gvitolocs/pokoin.git
+if [[ -n "${POKOIN_AUTODEPLOY_REPO:-}" ]]; then
+  root=$POKOIN_AUTODEPLOY_REPO
+elif root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2> /dev/null); then
+  :
+else
+  echo "auto-deploy-rust: not inside a git checkout and POKOIN_AUTODEPLOY_REPO is not set" >&2
+  echo "  set POKOIN_AUTODEPLOY_REPO to the planning clone, e.g. \$HOME/pokoin-deploy/auto-deploy-repo" >&2
+  exit 2
+fi
+if [[ "${1:-}" != --status ]]; then
+  if [[ ! -d "$root" ]]; then
+    echo "auto-deploy-rust: planning repo $root does not exist. Create it with:" >&2
+    echo "  git clone $clone_url $root" >&2
+    exit 2
+  fi
+  if ! git -C "$root" rev-parse --git-dir > /dev/null 2>&1; then
+    echo "auto-deploy-rust: $root is not a git repository" >&2
+    exit 2
+  fi
+fi
+# A run lasts an hour: bash reads a script as it goes, so run from a copy.
 if [[ -z "${AUTODEPLOY_COPY:-}" ]]; then
   self=$(mktemp "${TMPDIR:-/tmp}/auto-deploy-rust.XXXXXX")
   cp "$0" "$self"
@@ -33,11 +54,14 @@ trap 'rm -f "$AUTODEPLOY_COPY"' EXIT
 st=${POKOIN_AUTODEPLOY_DIR:-$HOME/scratch/pokoin-auto-deploy}
 deploy_dir=${POKOIN_DEPLOY_DIR:-$HOME/pokoin-deploy}
 GIT=${GIT:-git}
+default_build=0
+if [[ -z "${BUILD_CMD:-}" ]]; then default_build=1; fi
 BUILD_CMD=${BUILD_CMD:-$root/scripts/build-pokoin-rust-release.sh}
+# The build puts the commit it builds into DEPLOY_CWD, so deploy and sync run that commit's own scripts.
 DEPLOY_CWD=${DEPLOY_CWD:-$deploy_dir/rust-release}
 DEPLOY_CMD=${DEPLOY_CMD:-scripts/deploy-pokoin-rust.sh}
-SYNC_CMD=${SYNC_CMD:-$root/scripts/nezopt-k3s.sh sync}
-STATUS_CMD=${STATUS_CMD:-$root/scripts/nezopt-k3s.sh status}
+SYNC_CMD=${SYNC_CMD:-$DEPLOY_CWD/scripts/nezopt-k3s.sh sync}
+STATUS_CMD=${STATUS_CMD:-$DEPLOY_CWD/scripts/nezopt-k3s.sh status}
 HEALTH_URL=${HEALTH_URL:-https://api.pokoin.com/healthz}
 HEALTH_WAIT_S=${HEALTH_WAIT_S:-120}
 HEALTH_INTERVAL_S=${HEALTH_INTERVAL_S:-5}
@@ -158,7 +182,7 @@ verify() { # sha: the Pi serves it, and the overflow shows the same release
     fi
     sleep "$HEALTH_INTERVAL_S"
   done
-  out=$(cd "$root" && bash -c "$STATUS_CMD" 2>&1) || true
+  out=$(cd "$DEPLOY_CWD" && bash -c "$STATUS_CMD" 2>&1) || true
   printf '%s\n' "$out" >> "$logf"
   if ! grep -E '^rust release:' <<< "$out" | grep -q "releases/${sha:0:12}"; then
     log "verify: overflow release is not ${sha:0:12}" | tee -a "$logf"
@@ -173,7 +197,10 @@ run_sha() { # tip: build, deploy, sync, verify; records the final state
   logf=$st/log/$tip.log
   : > "$logf"
   log "deploying $tip" | tee -a "$logf"
-  if ! step build "$root" "$BUILD_CMD" "$tip"; then
+  # the default build script is the planning clone's: move it to the tip so the tip's own build script runs
+  if [[ $default_build == 1 ]] && ! g checkout -q --detach "$tip" >> "$logf" 2>&1; then
+    failed_step=build
+  elif ! step build "$root" "$BUILD_CMD" "$tip"; then
     if grep -q "Not starting the build" "$logf"; then
       record "$tip" stalled "build refused: low disk"
       log "stalled: the build refused to start (disk); the next trigger retries" | tee -a "$logf"
@@ -181,7 +208,7 @@ run_sha() { # tip: build, deploy, sync, verify; records the final state
     fi
     failed_step=build
   elif ! step deploy "$DEPLOY_CWD" "$DEPLOY_CMD"; then failed_step=deploy
-  elif ! step sync "$root" "$SYNC_CMD"; then failed_step=sync
+  elif ! step sync "$DEPLOY_CWD" "$SYNC_CMD"; then failed_step=sync
   elif ! verify "$tip"; then failed_step=verify
   fi
   if [[ -n "$failed_step" ]]; then
