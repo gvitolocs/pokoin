@@ -82,7 +82,11 @@ test('Best Deal flips its two-line price: local currency large, PKN small; nothi
 test('the offer bar sits above Add to cart and its settings open in a body portal popup', () => {
   assert.match(page, /<OfferBar[\s\S]*above=\{canBuy\(\)\}/);
   const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
-  assert.match(bar, /aria-label="Offer settings"[\s\S]*aria-haspopup="dialog"/);
+  assert.match(bar, /aria-label="Define offer"\s+title="Define offer"\s+aria-haspopup="dialog"/);
+  assert.match(bar, /<h3 class="offer-open-head">Define offer<\/h3>/);
+  assert.match(bar, /role="dialog"\s+aria-label="Define offer"/);
+  assert.match(bar, /Change it in Define offer\./);
+  assert.doesNotMatch(bar, /Offer settings|in the settings/);
   assert.match(bar, /<Portal mount=\{document\.body\}>/);
   assert.match(bar, /event\.key === 'Escape'/);
   assert.match(bar, /pointerdown/);

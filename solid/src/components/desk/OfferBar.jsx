@@ -50,7 +50,7 @@ const SHEET_QUERY = '(max-width: 720px)';
  * The offer bar inside the card desk's Best Deal panel, above Add to cart:
  * `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Beat offer posts one
  * step above the best offer with the visitor's settings in one press; Make offer
- * and the gear open the settings popup (price, copies, condition, language,
+ * and the gear open the Define offer popup (price, copies, condition, language,
  * duration, Reverse / 1st Ed., Sell now). Nothing expands inside the panel. The
  * book loads after the listings (props.ready); a failed request renders nothing.
  * Prices are typed and shown in the visitor's display currency.
@@ -280,7 +280,7 @@ export default function OfferBar(props) {
         return;
       }
       if (String(err.message) === 'duplicate_buy_order') {
-        setError('You already have an offer on this card. Change it in the settings.');
+        setError('You already have an offer on this card. Change it in Define offer.');
         if (!fromPopup) openPopupKeepError();
         return;
       }
@@ -379,7 +379,8 @@ export default function OfferBar(props) {
             type="button"
             class="offer-bar-gear"
             ref={(el) => { gear = el; }}
-            aria-label="Offer settings"
+            aria-label="Define offer"
+            title="Define offer"
             aria-haspopup="dialog"
             aria-expanded={open() ? 'true' : 'false'}
             onClick={() => (open() ? closePopup() : openPopup())}
@@ -406,11 +407,11 @@ export default function OfferBar(props) {
               ref={(el) => { popup = el; }}
               class="offer-pop"
               role="dialog"
-              aria-label="Offer settings"
+              aria-label="Define offer"
               style={popupStyle()}
             >
               <div class="offer-pop-head">
-                <h3 class="offer-open-head">Offer settings</h3>
+                <h3 class="offer-open-head">Define offer</h3>
                 <button type="button" class="offer-pop-close" aria-label="Close" onClick={closePopup}>×</button>
               </div>
               <Show when={canSellNow()}>
