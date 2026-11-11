@@ -314,7 +314,8 @@ function CardDesk(props) {
     if (!next) return;
     const prefixed = publicGamePath(next, game().id) || next;
     if (cleanPath(prefixed) === cleanPath(here)) return;
-    navigate(prefixed, { replace: true, scroll: false });
+    // The query rides along: the canonical redirect must not drop ?mypokoinPreview (or any other switch).
+    navigate(`${prefixed}${untrack(() => location.search)}`, { replace: true, scroll: false });
   }
 
   function showCard(data) {

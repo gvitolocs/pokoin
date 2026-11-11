@@ -81,7 +81,7 @@ export default function BuyOrdersTile(props) {
   }
 
   createEffect(
-    () => (props.ready && props.cardId ? String(props.cardId) : ''),
+    () => ((preview || props.ready) && props.cardId ? String(props.cardId) : ''),
     (id) => {
       if (!id) return undefined;
       setBook(null);
