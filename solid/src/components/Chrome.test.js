@@ -44,3 +44,10 @@ test('satellite eras and set icons stay off the Pokémon catalogs', () => {
   assert.match(sets, /satelliteGroups/);
   assert.match(sets, /pokemon\s*\?\s*groupExpansions/);
 });
+
+test('Assets nav preview prints the viewer-currency value, not PKN', () => {
+  const src = read('./NavPreviews.jsx');
+  assert.match(src, /formatAssetsValue\(last\(\), sellerCurrency\(\)\)/);
+  assert.doesNotMatch(src, /formatPknNumber/);
+  assert.doesNotMatch(src, /\} PKN/);
+});

@@ -100,3 +100,16 @@ test('local prices accept a decimal comma', () => {
   assert.equal(pknFromPriceInput('1.500,5', 'EUR'), 300100);
   assert.equal(pknFromPriceInput('1,500', 'EUR'), 300000);
 });
+
+test('Assets preview value is local currency only, with EUR fallback and no NaN', async () => {
+  const { formatAssetsValue } = await import('./seller-currency.js');
+  const dkk = formatAssetsValue(65110, 'DKK');
+  assert.match(dkk, /DKK$/);
+  assert.doesNotMatch(dkk, /PKN/);
+  assert.equal(formatAssetsValue(65110, 'GBP'), formatAssetsValue(65110, 'EUR'));
+  assert.match(formatAssetsValue(65110, 'EUR'), /^€/);
+  for (const bad of [0, undefined, NaN, null, '']) {
+    const out = formatAssetsValue(bad, 'DKK');
+    assert.ok(out && !/NaN|PKN/.test(out), String(out));
+  }
+});

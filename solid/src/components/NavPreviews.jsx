@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, Show, untrack } from 'solid-js';
-import { fetchPortfolioHistory, formatPknNumber } from '@market/api.js';
+import { fetchPortfolioHistory } from '@market/api.js';
 import { listConversations } from '@market/chat-client.js';
 import { openThread } from '@market/chat-dock-store.js';
 import { chatPersonName } from '@market/chat-format.js';
@@ -7,9 +7,11 @@ import { GAMES, game, gamePreviewHref } from '@market/game.js';
 import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
 import { sparkline } from '@market/portfolio-sparkline.js';
 import { DASHBOARD_SCAN } from '@market/punchouts.js';
+import { formatAssetsValue } from '@market/seller-currency.js';
 import { chatDock } from '../lib/chat-dock-loader.js';
 import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
+import { sellerCurrency } from '../stores/buyer.js';
 
 /**
  * Header hover cards. One lazy
@@ -121,7 +123,7 @@ export function DashboardPreview() {
           <p>{signedIn() ? 'Scan cards to start the graph.' : 'Sign in to see your collection.'}</p>
         </Show>
         <Show when={points()}>
-          <p class="nav-preview-total">{formatPknNumber(last())} PKN</p>
+          <p class="nav-preview-total">{formatAssetsValue(last(), sellerCurrency())}</p>
           <svg viewBox="0 0 260 88" width="260" height="88" aria-hidden="true">
             <polyline points={points()} fill="none" stroke="#ffd33d" stroke-width="2.5" />
           </svg>
