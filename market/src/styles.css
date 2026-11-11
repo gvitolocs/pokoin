@@ -30,6 +30,9 @@
   --ct-blue: #5bbad5;
   --cm-blue: #1a4f9c;
   --vt-green: #007782;
+  /* BuySell mark: buy arrow in the site gold, sell arrow in the CardTrader blue. */
+  --buysell-buy: var(--yellow);
+  --buysell-sell: var(--ct-blue);
   --border: #5c5c5c;
   --font: Satoshi, ui-sans-serif, system-ui, sans-serif;
   --max: 80rem;
@@ -11193,6 +11196,19 @@ img.is-lang-scan {
   flex: 0 0 auto;
 }
 
+.buysell-ico .bs-buy { fill: var(--buysell-buy); }
+.buysell-ico .bs-sell { fill: var(--buysell-sell); }
+
+/* Header: the BuySell mark keeps its two colours at rest; hover and the active ring are the other icons' own. */
+.icon-nav a.buysell-link {
+  color: var(--buysell-buy);
+}
+
+.page-title .buysell-title-ico {
+  margin-right: 0.35em;
+  vertical-align: -0.04em;
+}
+
 .hero-deal .deal-actions {
   display: flex;
   flex-direction: column;
@@ -11243,7 +11259,6 @@ img.is-lang-scan {
 
 .offer-bar-price .buysell-ico {
   flex: none;
-  color: var(--yellow);
 }
 
 .offer-bar-label {
@@ -11470,8 +11485,12 @@ img.is-lang-scan {
   content: counter(how);
   display: inline-block;
   margin-right: 0.5rem;
-  color: var(--yellow);
+  color: var(--buysell-buy);
   font-weight: 800;
+}
+
+.buysell-how li:nth-child(2)::before {
+  color: var(--buysell-sell);
 }
 
 .buysell-fine {
@@ -11512,6 +11531,10 @@ img.is-lang-scan {
 .buysell-sort button.on {
   border-color: var(--yellow);
   color: var(--yellow);
+}
+
+.buysell-tabs button.on {
+  box-shadow: inset 0 -2px 0 var(--buysell-sell);
 }
 
 .buysell-list {

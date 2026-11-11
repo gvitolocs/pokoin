@@ -19,6 +19,7 @@ import { formatPkn } from '@market/pkn.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import AppLink from '../components/AppLink.jsx';
 import RequireSignIn from '../components/RequireSignIn.jsx';
+import BuySellIcon from '../components/buysell/BuySellIcon.jsx';
 import SellNowForm from '../components/buysell/SellNowForm.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import { getBearer } from '../stores/auth.js';
@@ -375,7 +376,7 @@ export default function BuySell() {
   return (
     <div class="page desk buysell">
       <PageHead
-        title="BuySell"
+        title={<><BuySellIcon class="buysell-title-ico" size="0.85em" />BuySell</>}
         lede="Say what you will pay for a card. Anyone who has it can sell it to you."
       />
       <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>

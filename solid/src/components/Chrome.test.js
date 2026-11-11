@@ -47,8 +47,9 @@ test('satellite eras and set icons stay off the Pokémon catalogs', () => {
 
 test('BuySell sits right after the market icon, in the footer and in the phone menu', () => {
   const menu = read('./MobileMenu.jsx');
-  assert.match(chrome, /buysell: BUYSELL_ICON/);
-  assert.match(chrome, /<\/NavHover>\s*<AppLink to="\/buysell" aria-label="BuySell"><Svg d=\{ICO\.buysell\} \/><\/AppLink>\s*<NavHover id="messages"/);
+  assert.match(chrome, /<BuySellIcon size=\{20\} \/>/);
+  assert.doesNotMatch(chrome, /buysell: BUYSELL_ICON/);
+  assert.match(chrome, /<\/NavHover>\s*<AppLink class="buysell-link" to="\/buysell" aria-label="BuySell"><BuySellIcon size=\{20\} \/><\/AppLink>\s*<NavHover id="messages"/);
   assert.match(chrome, /<AppLink to="\/buysell">BuySell<\/AppLink>/);
-  assert.match(menu, /<Row to="\/buysell" icon=\{ICO\.buysell\} label="BuySell"/);
+  assert.match(menu, /<Row to="\/buysell" mark="buysell" label="BuySell"/);
 });

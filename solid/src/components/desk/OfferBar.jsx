@@ -354,7 +354,7 @@ export default function OfferBar(props) {
         <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
         <div class="offer-bar" ref={(el) => { bar = el; }}>
           <span class="offer-bar-price" title={barModel().title} aria-label={barModel().title}>
-            <BuySellIcon />
+            <BuySellIcon size="1.3em" />
             <Show when={barModel().hasOffer} fallback={(
               <span class="offer-bar-none">
                 <span class="offer-bar-none-long">No offers yet</span>
