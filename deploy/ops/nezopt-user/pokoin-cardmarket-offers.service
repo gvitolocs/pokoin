@@ -1,0 +1,16 @@
+[Unit]
+Description=Weekly Cardmarket seller offers → pokoin_marketplace.cardmarket_offer_minimums (docs/PRICING.md)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# pokoin_jobs login once migration 139 is applied; until then the binary falls
+# back to the writer container's own login (docker inspect).
+EnvironmentFile=-%h/.config/pokoin/cardmarket-prices.env
+# Set CM_OFFER_MINIMUMS_FILE in that file to read another harvest.
+Environment=CM_OFFER_MINIMUMS_FILE=%h/Projects/Startup/Pokoin/CTCMDeals/worker/data/cm_offers/minimums.jsonl
+# --max-file-age-days 8: a missing or older file means the walk stopped; fail loudly.
+ExecStart=%h/pokoin-cardmarket/current/pokoin-cardmarket-catalog cm-offers --file ${CM_OFFER_MINIMUMS_FILE} --max-file-age-days 8 --apply
+Nice=10
+TimeoutStartSec=45min

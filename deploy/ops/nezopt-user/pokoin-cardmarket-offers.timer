@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Cardmarket seller offers load
+# The CTCMDeals walk runs all week; this ingests what it has by Monday.
+
+[Timer]
+OnCalendar=Mon *-*-* 03:15:00 UTC
+Persistent=true
+Unit=pokoin-cardmarket-offers.service
+
+[Install]
+WantedBy=timers.target

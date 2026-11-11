@@ -257,7 +257,7 @@ that fails, is not configured or is stale is left out and named in
 | CardTrader sold | `cardtrader_sold_daily` in each game's database, last 30 days, median of the daily medians. The any-copy entry includes graded sales (as `soldMedianPkn` always did); the others leave them out. | Nightly | condition (other games: or better), language, finish, 1st edition |
 | Pokoin sold | Firestore `marketplace_sales`, last 90 days, voided sales left out; EUR sales at 2 PKN per cent. Cached for 10 minutes per API process. | Live, 10-minute cache | condition, language |
 | Cardmarket | Cardmarket's public price guide (`price_guide_<idGame>.json`) for every game: `pokoin-cardmarket-catalog guides --apply` (nezopt timer `pokoin-cardmarket-guides`, 02:45 UTC) stores the products our catalogs reference (`card_market_ids`) in `pokoin_marketplace.cardmarket_price_guide`, a row only when a product's values change, and one `cardmarket_price_guide_runs` row per game and day. The pricer uses a game's guide while its last run is at most 4 days old. Regular and foil columns; the lowest value when a card has several Cardmarket products. `low` is overridden by TCGNotify's ask when that feed is loaded (below). | Daily | finish |
-| Cardmarket sellers (`cardmarketoffers`) | The offers we capture ourselves by walking Cardmarket through CTCMDeals: `harvest-cm-offers.js` records the cheapest professional and cheapest private offer of each facet it asks, `pokoin-cardmarket-catalog cm-offers --file <minimums.jsonl> --apply` (migration `scripts/sql/141_cardmarket_offer_minimums.sql`) keeps the newest observation of each facet in `pokoin_marketplace.cardmarket_offer_minimums`, euros at 2 PKN per cent. Bases `pro` (professional or powerseller) and `private`. The pricer uses a facet while its own `observed_at` is at most 7 days old. Coverage is only what has been scanned. | Per scan, on demand | condition, language, finish (Pokémon: reverse holo), 1st edition |
+| Cardmarket sellers (`cardmarketoffers`) | The offers we capture ourselves by walking Cardmarket through CTCMDeals: `harvest-cm-offers.js` records the cheapest professional and cheapest private offer of each facet it asks, `pokoin-cardmarket-catalog cm-offers --file <minimums.jsonl> --apply` (migration `scripts/sql/141_cardmarket_offer_minimums.sql`) keeps the newest observation of each facet in `pokoin_marketplace.cardmarket_offer_minimums`, euros at 2 PKN per cent. Bases `pro` (professional or powerseller) and `private`. The pricer uses a facet while its own `observed_at` is at most 15 days old. The walk runs all week and nezopt timer `pokoin-cardmarket-offers` ingests it Mondays 03:15 UTC. Coverage is only what has been scanned. | Weekly | condition, language, finish (Pokémon: reverse holo), 1st edition |
 | TCGplayer | The TCGCSV store (docs/TCGCSV_PRICES.md) through `pokoin_product_links`; market, low and mid of each subtype. USD → EUR at the newest ECB rate (`fx_rates_daily`, `pokoin-api job fx-rates-daily`, 16:30 UTC), used while it is at most 10 days old; the comp shows `usdPerEur` and `rateDay`. | Daily | finish (Pokémon: reverse holo), 1st edition |
 
 **TCGNotify over the guide's `low`.** TCGNotify (tcgnotify.com, our own
@@ -291,6 +291,15 @@ with the number of offers behind it and whether the page walk finished.
 those minima in `pokoin_marketplace.cardmarket_offer_minimums`, one row per
 facet and seller type, keyed by the Cardmarket `idProduct` already in
 `card_market_ids`; a facet is rewritten only by a newer `observed_at`.
+
+The walk is continuous: CTCMDeals revisits each product about every 7 days, and
+Pokoin ingests once a week (nezopt timer `pokoin-cardmarket-offers`, Mondays
+03:15 UTC, `Persistent=true`, file from `CM_OFFER_MINIMUMS_FILE`, default
+`~/Projects/Startup/Pokoin/CTCMDeals/worker/data/cm_offers/minimums.jsonl`). The
+unit passes `--max-file-age-days 8`, so a missing file or one not written for 8
+days (the walk stopped) fails the run and `OnFailure` notifies. A facet can be
+7 days old when it is ingested and must stay usable until the next ingest, so
+the pricer's window (`CM_FLOOR_MAX_AGE_DAYS`) is 7 + 7 + 1 day of slack = 15 days.
 
 The comp entry is `sources.cardmarketoffers`: `asOf`, then one map per seller
 type, `pro` and `private`, each keyed like every other source. `""` is the

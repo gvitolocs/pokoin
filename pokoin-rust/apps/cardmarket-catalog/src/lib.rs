@@ -116,6 +116,8 @@ struct Options {
     apply_jp: bool,
     images: Option<PathBuf>,
     max_art_distance: u32,
+    /// `cm-offers --max-file-age-days N`: refuse a harvest file older than that.
+    max_file_age_days: Option<u64>,
 }
 
 /// The cache root: `$POKOIN_CATALOG_DIR`, else `~/pokoin-catalogs`.
@@ -132,13 +134,14 @@ fn options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
     if !matches!(command.as_str(), "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers") {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--max-file-age-days N] [--apply]".into());
     }
     let mut slug: Option<String> = None;
     let mut cache = None;
     let (mut refresh, mut apply, mut file) = (false, false, None);
     let (mut urls, mut generated) = (None, false);
     let (mut jp_twins, mut apply_jp, mut images, mut max_art_distance) = (false, false, None, twins::MAX_DISTANCE);
+    let mut max_file_age_days = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--game" => slug = Some(args.next().ok_or("--game needs a slug")?),
@@ -154,6 +157,13 @@ fn options() -> Result<Options, String> {
                     .next()
                     .and_then(|v| v.parse().ok())
                     .ok_or("--max-art-distance needs a number of bits")?
+            }
+            "--max-file-age-days" => {
+                max_file_age_days = Some(
+                    args.next()
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--max-file-age-days needs a number of days")?,
+                )
             }
             "--refresh" => refresh = true,
             "--apply" => apply = true,
@@ -199,6 +209,7 @@ fn options() -> Result<Options, String> {
         apply_jp,
         images,
         max_art_distance,
+        max_file_age_days,
     })
 }
 
@@ -760,6 +771,23 @@ async fn run_tcgnotify(o: &Options) -> Result<i32, String> {
     Ok(if failed { 1 } else { 0 })
 }
 
+/// Fails when `path` is missing or was last written more than `max_days` days
+/// before `now`: the weekly ingest must not store a harvest whose walk stopped.
+fn check_file_age(path: &Path, max_days: u64, now: std::time::SystemTime) -> Result<(), String> {
+    let modified = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let age = now.duration_since(modified).unwrap_or_default();
+    if age > std::time::Duration::from_secs(max_days * 86_400) {
+        return Err(format!(
+            "{}: last written {} days ago, more than {max_days}; the harvest walk has stopped",
+            path.display(),
+            age.as_secs() / 86_400
+        ));
+    }
+    Ok(())
+}
+
 /// Load one CTCMDeals harvest (`--file`: the run's `minimums.jsonl`, or its
 /// `latest.json` index) into `cardmarket_offer_minimums` (migration 141): one
 /// row per product facet, the newest observation only, so the pricer can quote
@@ -767,6 +795,9 @@ async fn run_tcgnotify(o: &Options) -> Result<i32, String> {
 /// One JSON line, dry run without `--apply`, like `guides`.
 async fn run_cm_offers(o: &Options) -> Result<i32, String> {
     let path = o.file.as_ref().ok_or("cm-offers needs --file <minimums.jsonl>")?;
+    if let Some(max_days) = o.max_file_age_days {
+        check_file_age(path, max_days, std::time::SystemTime::now())?;
+    }
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let (minimums, skipped) = cm_offers::parse_minimums(&text)?;
     if minimums.is_empty() {
@@ -879,6 +910,21 @@ async fn run_guide(o: &Options, g: &'static guides::GuideGame) -> Result<serde_j
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_age_check_rejects_missing_and_stale_files() {
+        let dir = std::env::temp_dir().join(format!("cm-offers-age-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("minimums.jsonl");
+        assert!(check_file_age(&file, 8, std::time::SystemTime::now()).is_err());
+        std::fs::write(&file, "{}\n").unwrap();
+        let now = std::time::SystemTime::now();
+        assert!(check_file_age(&file, 8, now).is_ok());
+        let day = std::time::Duration::from_secs(86_400);
+        assert!(check_file_age(&file, 8, now + day * 7).is_ok());
+        assert!(check_file_age(&file, 8, now + day * 9).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn row(trend: Option<f64>, avg7: Option<f64>, trend_foil: Option<f64>) -> PriceGuide {
         PriceGuide {

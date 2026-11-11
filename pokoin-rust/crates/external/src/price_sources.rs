@@ -591,10 +591,16 @@ pub struct CmFloorGroups {
 }
 
 /// How old a scanned facet may be to still be quoted. Cardmarket's own guide
-/// is trusted for 4 days and CardTrader's live listings for 3; these sit
-/// between, because a harvest is a walk of real pages, done on demand rather
-/// than by a nightly timer.
-pub const CM_FLOOR_MAX_AGE_DAYS: i64 = 7;
+/// is trusted for 4 days and CardTrader's live listings for 3. The harvest
+/// walks Cardmarket all week, so a facet can already be 7 days old when the
+/// weekly ingest stores it, and it has to survive the 7 days until the next
+/// ingest: 7 + 7 + 1 day of slack = 15.
+pub const CM_FLOOR_MAX_AGE_DAYS: i64 = 15;
+
+/// The age test `cm_floor_sql` applies to `observed_at`, in days.
+pub fn cm_floor_is_fresh(age_days: i64) -> bool {
+    age_days <= CM_FLOOR_MAX_AGE_DAYS
+}
 
 /// Both seller types: the number the guide's `low` and TCGNotify's ask cannot
 /// give, because neither separates who is selling.
@@ -1666,5 +1672,13 @@ mod tests {
         attach(&mut comp, &parse_items("200:NM:IT")[0], Channel::Direct, &unscanned);
         assert_eq!(comp["sourceStatus"]["cardmarketoffers"], json!("empty"));
         assert!(comp["sources"].get("cardmarketoffers").is_none());
+    }
+
+    #[test]
+    fn cm_floor_window_covers_a_weekly_ingest() {
+        assert!(cm_floor_is_fresh(14));
+        assert!(cm_floor_is_fresh(15));
+        assert!(!cm_floor_is_fresh(16));
+        assert!(cm_floor_sql().ends_with("current_date - 15"));
     }
 }
