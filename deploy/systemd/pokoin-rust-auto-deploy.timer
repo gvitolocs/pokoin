@@ -1,0 +1,10 @@
+[Unit]
+Description=Every 15 minutes: fetch origin and deploy the Pokoin Rust API if main changed it (docs/AUTO_DEPLOY.md)
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
