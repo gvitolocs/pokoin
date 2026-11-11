@@ -1,6 +1,7 @@
 //! Route handlers. One module per route family.
 
 pub mod addresses;
+pub mod buy_orders;
 pub mod cart;
 pub mod channel_sync;
 pub mod crypto;
