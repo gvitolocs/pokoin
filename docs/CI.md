@@ -5,7 +5,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Tier | Runs | Where | Decides |
 | --- | --- | --- | --- |
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
-| GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `test` and `changed` | GitHub, on pull requests and pushes to `main` that touch `pokoin-rust/` | Whether the PR may merge, once the owner makes it a required check |
+| GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
 
@@ -53,15 +53,22 @@ Delete the shared target when it grows past about 40 GB. Do not run `cargo test 
 
 ## GitHub: `rust-ci.yml`
 
-Triggers: `pull_request` and `push` to `main`, only when `pokoin-rust/**`, the workflow or `scripts/check-fast` change. Permissions are `contents: read`, there are no secrets and no deploy step, and actions are pinned by commit SHA.
+Triggers: every `pull_request` and every `push` to `main`, with no `paths` filter. Permissions are `contents: read`, there are no secrets and no deploy step, and actions are pinned by commit SHA.
 
-- `test`: `cargo test --workspace --locked` without a database, as in the release gate
-- `changed`: `scripts/check-fast --no-test` against the PR's base branch (or the push's previous commit). On the runner `diffgate`, `actionlint` and `gitleaks` are not installed, so they show as `SKIPPED`
-- `flow-db`: the `*_flow` binaries against Postgres 17, informational
-- `rust-gate`: runs always; fails unless `test` and `changed` both succeeded. This is the one required check
+Cost: `gvitolocs/pokoin` is a public repository, so standard GitHub-hosted runners (`ubuntu-24.04`) use no billed minutes. If the repository is made private, every run counts against the plan's included minutes (then per-minute billing), so the `test` and `flow-db` jobs (up to 90 minutes each) would cost real money; revisit the timeouts, the cache and whether `flow-db` should run at all.
+
+- `changes`: `git diff --name-only` against the PR's merge base (or the push's previous commit) with full history. Output `rust=true` when `pokoin-rust/**`, `.github/workflows/rust-ci.yml` or `scripts/check-fast*` changed, else `rust=false`
+- `test`: only when `rust=true`. `cargo test --workspace --locked` without a database, as in the release gate
+- `changed`: only when `rust=true`. `scripts/check-fast --no-test` against the PR's base branch (or the push's previous commit). On the runner `diffgate`, `actionlint` and `gitleaks` are not installed, so they show as `SKIPPED`
+- `flow-db`: only when `rust=true`. The `*_flow` binaries against Postgres 17, informational (`continue-on-error`)
+- `rust-gate`: always runs. Passes at once when `rust=false` (nothing to check). Otherwise passes only when `test` and `changed` both succeeded. A failed or cancelled `changes` job fails it. It prints one line saying which case applied. This is the one required check
 
 ### Making `rust-gate` required (owner, in GitHub)
 
-Settings, Branches (or Rulesets), `main`: require status checks to pass and add `rust-gate`. Do this only after one green run of the workflow on a PR.
+Because `rust-gate` always runs, requiring it cannot block front-end PRs. Do this only AFTER this workflow is on `main`: before that, no PR gets the check from a base that has it and GitHub waits for a status that may never come.
 
-Catch: because of the `paths` filter, a PR that touches nothing under `pokoin-rust/` never starts the workflow, and GitHub then waits for the required `rust-gate` forever. Either drop the `paths` filter from `rust-ci.yml` (the jobs then run on every PR, and `changed` is quick when nothing under `pokoin-rust/` moved) before requiring the check, or keep merging non-Rust PRs by an admin override.
+1. Merge the PR that adds `.github/workflows/rust-ci.yml` and confirm `rust-gate` is green on a later PR.
+2. Settings, Branches, Add branch protection rule (or Rulesets, New branch ruleset) for `main`.
+3. Tick "Require status checks to pass before merging".
+4. Search for `rust-gate` and select it (it appears only after it has run once in the last week).
+5. Save. Do not add `test`, `changed` or `flow-db`; they are skipped on non-Rust PRs and a skipped required check counts as passed only through `rust-gate`.
