@@ -203,6 +203,12 @@ html.signed-in .account-out {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* `.button span` (19px, line-height 1) is meant for the arrow; on the name it
+   made the text oversized and, with overflow: hidden, cut the descenders. */
+.button .account-in {
+  font-size: inherit;
+  line-height: 1.5;
+}
 .account-in:empty::before {
   content: var(--account-name, "My Pokoin");
 }
