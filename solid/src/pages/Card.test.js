@@ -52,10 +52,11 @@ test('the gold sparkles swap the desk scan to the verified reverse holo and back
   assert.match(page, /image=\{art\(\)\}/);
 });
 
-test('Best Deal says "Available in the Vault" for Vault stock and names every other seller', () => {
+test('Best Deal shows no seller line for Vault stock and names every other seller', () => {
   const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
   assert.match(deal, /when=\{!isVaultOffer\(dealPick\(\)\)\}/);
-  assert.match(deal, /fallback=\{<p class="deal-sold-by is-vault">\{VAULT_DEAL_LINE\}<\/p>\}/);
+  assert.doesNotMatch(deal, /Available in the Vault|VAULT_DEAL_LINE|is-vault/);
+  assert.doesNotMatch(deal, /<Show\s+when=\{!isVaultOffer\(dealPick\(\)\)\}\s+fallback=/);
   // Ordinary sellers keep "Sold by" and their shop link.
   assert.match(deal, /Sold by\{' '\}/);
   assert.match(deal, /sellerHref\(dealPick\(\), lang\)/);

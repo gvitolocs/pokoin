@@ -132,7 +132,7 @@ import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
-import { isVaultOffer, splitVaultOffers, VAULT_DEAL_LINE } from '@market/vault.js';
+import { isVaultOffer, splitVaultOffers } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
 import SoldPriceGraph from '../components/desk/SoldPriceGraph.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
@@ -1198,11 +1198,8 @@ function CardDesk(props) {
                     </Show>
                   </div>
                   <Show when={offersReady() && canBuy()}>
-                    {/* The Vault is Pokoin's own stock: say where it is, not the admin account's name. */}
-                    <Show
-                      when={!isVaultOffer(dealPick())}
-                      fallback={<p class="deal-sold-by is-vault">{VAULT_DEAL_LINE}</p>}
-                    >
+                    {/* The Vault is Pokoin's own stock: no seller line, and never the admin account's name. */}
+                    <Show when={!isVaultOffer(dealPick())}>
                       <p class="deal-sold-by">
                         Sold by{' '}
                         <Show
