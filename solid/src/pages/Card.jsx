@@ -122,7 +122,7 @@ import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
 import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
-import { soldGraphTone } from '@market/sold-graph.js';
+import { soldSeriesColor } from '@market/sold-graph.js';
 import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -729,33 +729,53 @@ function CardDesk(props) {
     // The grade and the language both sold, just never together.
     return pickedCond() || pickedLang() ? `No ${pickedLabel()} sales yet` : '';
   };
-  // Comparison: the facet the desk opened on stays on the graph, and a chip the
-  // visitor presses is drawn over it. Same language: each grade in its own
-  // colour (Near Mint green, Moderately Played yellow…). Another language: the
-  // second palette (light blue, magenta…), so it cannot be mistaken for a grade
-  // of the first.
-  const [baseFacet, setBaseFacet] = createSignal(null);
+  // Comparison: every condition / language / Reverse combination the visitor
+  // picks stays on the graph, each line in its own colour with its own legend
+  // entry, until they take it off there. The first language keeps the grade
+  // colours (Near Mint green, Moderately Played yellow…); each further language
+  // gets its own palette (light blue, magenta…), so a language is never read as
+  // a grade; Reverse is the same colour, dashed.
+  const GRAPH_PICKS_MAX = 8;
+  const facetKey = (facet) => `${facet.cond}|${facet.lang}|${facet.reverse ? 'r' : ''}`;
+  const facetLabel = (facet) => [facet.cond, facet.lang, facet.reverse ? (game().id === 'pokemon' ? 'Reverse' : 'Foil') : ''].filter(Boolean).join(' · ');
+  const [graphPicks, setGraphPicks] = createSignal([]);
   createEffect(
-    () => (offersReady() && !condAny() && !langAny() ? `${shownCond()}|${shownLang()}` : ''),
+    () => (offersReady() && pickedCond() && pickedLang() ? facetKey({ cond: pickedCond(), lang: pickedLang(), reverse: dealReverse() }) : ''),
     (key) => {
-      if (!key || untrack(baseFacet)) return;
-      const [cond, code] = key.split('|');
-      setBaseFacet({ cond, lang: code });
+      if (!key) return;
+      const list = untrack(graphPicks);
+      if (list.some((facet) => facetKey(facet) === key)) return;
+      const [cond, code, flag] = key.split('|');
+      setGraphPicks([...list, { cond, lang: code, reverse: flag === 'r' }].slice(-GRAPH_PICKS_MAX));
     },
   );
-  const graphUnder = () => {
-    const base = baseFacet();
-    const cond = pickedCond();
-    const code = pickedLang();
-    // Nothing to compare while the pick is the default itself, or "any".
-    if (!base || !cond || !code || (cond === base.cond && code === base.lang)) return null;
-    const view = soldGraphView(salesSlices() || [], { ...salesFilterState(), condition: base.cond, language: base.lang });
-    const has = (view.filters.conditions || []).includes(base.cond)
-      && languagesForNationality(salesNationality(), view.filters.languages).includes(base.lang);
-    const days = has && Array.isArray(view.series?.days) ? view.series.days : [];
-    return days.length ? { days, tone: soldGraphTone(base.cond), label: `${base.cond} · ${base.lang}`, alt: false } : null;
+  /** The palette of a language is its place among the languages picked so far. */
+  const facetColor = (facet) => {
+    const order = [...new Set(graphPicks().map((row) => row.lang))];
+    return soldSeriesColor(facet.cond, Math.max(0, order.indexOf(facet.lang)));
   };
-  const graphAlt = () => Boolean(baseFacet() && pickedLang() && pickedLang() !== baseFacet().lang);
+  const currentFacet = () => (pickedCond() && pickedLang() ? { cond: pickedCond(), lang: pickedLang(), reverse: dealReverse() } : null);
+  const graphColor = () => (currentFacet() ? facetColor(currentFacet()) : '');
+  const graphOverlays = () => {
+    const now = currentFacet() ? facetKey(currentFacet()) : '';
+    return graphPicks()
+      .filter((facet) => facetKey(facet) !== now)
+      .map((facet) => {
+        const view = soldGraphView(salesSlices() || [], {
+          ...salesFilterState(), condition: facet.cond, language: facet.lang, reverse: facet.reverse,
+        });
+        // The view falls back to every grade or language when the facet never
+        // sold (or only sold the other finish): that is not this facet's line.
+        const has = (view.filters.conditions || []).includes(facet.cond)
+          && languagesForNationality(salesNationality(), view.filters.languages).includes(facet.lang)
+          && Boolean(view.flags?.reverse) === Boolean(facet.reverse);
+        const days = has && Array.isArray(view.series?.days) ? view.series.days : [];
+        return { key: facetKey(facet), days, color: facetColor(facet), label: facetLabel(facet), dashed: facet.reverse };
+      })
+      .filter((row) => row.days.length);
+  };
+  const removeGraphPick = (key) => setGraphPicks(graphPicks().filter((facet) => facetKey(facet) !== key));
+  const graphPickedLabel = () => (currentFacet() ? facetLabel(currentFacet()) : pickedLabel());
   // The graph's axis is in the visitor's currency, like its tooltip: how many
   // units of it one PKN is. 1 while the currency is unknown, so the axis is PKN.
   const graphAxisFactor = () => fiatFromPkn(1, buyerCurrency(pinnedCurrency()) || 'PKN') || 1;
@@ -1365,9 +1385,12 @@ function CardDesk(props) {
               <div class="desk-graph">
                 <SoldPriceGraph
                   series={graphSeries()}
-                  under={graphUnder()}
-                  alt={graphAlt()}
-                  pickedLabel={pickedLabel()}
+                  overlays={graphOverlays()}
+                  color={graphColor()}
+                  dashed={Boolean(currentFacet()?.reverse)}
+                  pickedLabel={graphPickedLabel()}
+                  onRemoveOverlay={removeGraphPick}
+                  hideUnits
                   emptyLabel={graphEmptyLabel()}
                   filters={graphFilters()}
                   chips={salesView().chips}
@@ -1423,7 +1446,7 @@ function CardDesk(props) {
                 </div>
                 <div class="band-main">
                   <div class="band-price">
-                    {/* Once offers load, no fake grey button and no dash: say why there is nothing to buy. */}
+                    {/* Nothing to buy is the dash in the price slot, as it always was: no sentence in its place. */}
                     <Show
                       when={offersReady() && !canBuy()}
                       fallback={(
@@ -1450,14 +1473,15 @@ function CardDesk(props) {
                         </>
                       )}
                     >
-                      {/* A pressed facet with nothing listed is not "no seller" when other facets are listed. */}
-                      <Show
-                        when={nativeLive().length}
-                        fallback={<p class="deal-none">No Pokoin seller has this card right now.</p>}
+                      {/* The same dash whether nobody sells the card at all or only not this pick; the hover text says which. */}
+                      <div
+                        class="prod-px oos"
+                        title={nativeLive().length
+                          ? `No ${pickedLabel()}${dealReverse() ? ' reverse' : ''} listing right now`
+                          : 'No Pokoin seller has this card right now'}
                       >
-                        {/* The chips already say what is picked: the price slot just shows there is no price. */}
-                        <div class="prod-px oos" title={`No ${pickedLabel()}${dealReverse() ? ' reverse' : ''} listing right now`}>—</div>
-                      </Show>
+                        —
+                      </div>
                     </Show>
                   </div>
                   <div class="deal-facets">

@@ -48,6 +48,28 @@ export function soldConditionLabel(code) {
   return SOLD_CONDITION_LABELS[code] || code;
 }
 
+/**
+ * Line colours for the desk graph when several series are compared. One palette
+ * per language, in the order the languages were picked: the first keeps the
+ * grade colours (the same greens, gold, copper and red as the single graph),
+ * and every colour of the first three palettes is different from every other,
+ * so a language is never read as a grade. A fourth language reuses the second
+ * palette, a fifth the third, and so on.
+ */
+export const SOLD_SERIES_PALETTES = [
+  { NM: '#147a3f', SP: '#3dcf74', MP: '#ffd33d', PL: '#b87333', Poor: '#e44545' },
+  { NM: '#5fb8e8', SP: '#38d6c4', MP: '#e45fd0', PL: '#a78bfa', Poor: '#ff8fb1' },
+  { NM: '#ff9f43', SP: '#f4f4f5', MP: '#2563eb', PL: '#84cc16', Poor: '#9ca3af' },
+];
+
+export function soldSeriesColor(condition, languageIndex = 0) {
+  const index = Math.max(0, Math.trunc(Number(languageIndex) || 0));
+  const palette = index < SOLD_SERIES_PALETTES.length
+    ? SOLD_SERIES_PALETTES[index]
+    : SOLD_SERIES_PALETTES[1 + ((index - 1) % (SOLD_SERIES_PALETTES.length - 1))];
+  return palette[String(condition || '').trim()] || '#f3f4f7';
+}
+
 /** Line/fill tone for the desk graph. All stays white; MP keeps gold. */
 export function soldGraphTone(condition) {
   const key = String(condition || '').trim();

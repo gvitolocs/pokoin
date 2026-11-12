@@ -136,10 +136,18 @@ export default function SoldPriceGraph(props) {
   const conditions = () => (Array.isArray(props.filters?.conditions) ? props.filters.conditions : []);
   const languages = () => (Array.isArray(props.filters?.languages) ? props.filters.languages : []);
   const tone = () => soldGraphTone(soldFilterValue(conditions(), props.condition));
-  // props.under = { days, tone, label, alt }: the default series, kept on the
-  // graph under the picked one so the two can be compared. props.alt paints the
-  // picked series in the second palette (a different language than the default).
-  const under = () => (Array.isArray(props.under?.days) ? props.under.days : []);
+  // props.overlays = [{ key, days, color, label, dashed }]: every other series
+  // the visitor picked, drawn under the current one on the same scale and dates.
+  // props.color paints the current series; props.onRemoveOverlay(key) takes one off.
+  const overlays = () => (Array.isArray(props.overlays) ? props.overlays : []).filter((row) => Array.isArray(row?.days) && row.days.length);
+  // The line colour drives its fill and its hover guide.
+  const lineStyle = () => (props.color
+    ? {
+      '--sold-line': props.color,
+      '--sold-fill': `color-mix(in srgb, ${props.color} 16%, transparent)`,
+      '--sold-guide': `color-mix(in srgb, ${props.color} 45%, transparent)`,
+    }
+    : undefined);
 
   const plot = createMemo(() => {
     const rows = days();
@@ -150,35 +158,51 @@ export default function SoldPriceGraph(props) {
     // The default top padding clears a row of menus. Linked to the desk chips
     // there is only one small caption line, so the plot starts right under it.
     // A comparison adds a legend line above the plot, so it needs the room.
+    const others = overlays();
     const pad = bare()
-      ? { ...SOLD_GRAPH_PAD, t: under().length ? 30 : 12 }
+      ? { ...SOLD_GRAPH_PAD, t: others.length ? 30 : 12 }
       : (props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD);
     // The axis is drawn in the unit the tooltip already uses: `axisFactor` units
     // of the visitor's currency per PKN (1, or absent, keeps a PKN axis).
     const factor = Number(props.axisFactor) > 0 ? Number(props.axisFactor) : 1;
-    // The series under comparison shares the scale and the dates, so the two
-    // lines can be read against each other.
-    const base = under();
+    // Every series shares one scale and one date range, so the lines can be
+    // read against each other.
+    const every = [...rows, ...others.flatMap((row) => row.days)];
     const dayMs = (row) => Date.parse(`${row.day}T00:00:00Z`);
-    const values = [...rows, ...base].map((row) => (Number(row.medianPkn) || 0) * factor);
+    const values = every.map((row) => (Number(row.medianPkn) || 0) * factor);
     const scale = soldGraphScale(Math.max(0, ...values), { minStep: factor === 1 ? 10 : 0.01 });
-    const start = Math.min(...[...rows, ...base].map(dayMs));
-    const end = Math.max(...[...rows, ...base].map(dayMs));
+    const start = Math.min(...every.map(dayMs));
+    const end = Math.max(...every.map(dayMs));
     const range = Math.max(1, end - start);
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
     const dateLocale = soldDateLocale();
-    const single = rows.length + base.length === 1 || range <= 1;
+    const single = every.length === 1 || range <= 1;
     const place = (row) => [
       pad.l + (single ? plotW / 2 : ((dayMs(row) - start) / range) * plotW),
       soldGraphY((Number(row.medianPkn) || 0) * factor, scale.max, pad.t, plotH),
     ];
+    const join = (pts) => pts.map(([x, y]) => `${x},${y}`).join(' ');
+    // A series only has a point on a day it sold. Between two sales the line
+    // runs straight; before its first sale and after its last one the price is
+    // carried flat to the edge of the range (dashed, because it is not a sale),
+    // so no line starts or stops in the middle of the chart.
+    const carry = (pts) => {
+      if (!pts.length || single) return { lead: '', tail: '' };
+      const first = pts[0];
+      const last = pts[pts.length - 1];
+      return {
+        lead: first[0] > pad.l + 0.5 ? join([[pad.l, first[1]], first]) : '',
+        tail: last[0] < pad.l + plotW - 0.5 ? join([last, [pad.l + plotW, last[1]]]) : '',
+      };
+    };
     const points = rows.map(place);
-    const line = points.map(([x, y]) => `${x},${y}`).join(' ');
-    const first = points[0];
-    const last = points[points.length - 1];
-    const firstDay = [...rows, ...base].reduce((a, b) => (dayMs(a) <= dayMs(b) ? a : b));
-    const lastDay = [...rows, ...base].reduce((a, b) => (dayMs(a) >= dayMs(b) ? a : b));
+    const line = join(points);
+    const ends = carry(points);
+    const firstDay = every.reduce((a, b) => (dayMs(a) <= dayMs(b) ? a : b));
+    const lastDay = every.reduce((a, b) => (dayMs(a) >= dayMs(b) ? a : b));
+    const left = ends.lead ? pad.l : points[0][0];
+    const right = ends.tail ? pad.l + plotW : points[points.length - 1][0];
     return {
       width,
       height,
@@ -189,9 +213,14 @@ export default function SoldPriceGraph(props) {
       dateLocale,
       points,
       line,
-      underLine: base.map(place).map(([x, y]) => `${x},${y}`).join(' '),
-      // The fill sits under its own line only, not across dates the series has no sales for.
-      area: `${first[0]},${pad.t + plotH} ${line} ${last[0]},${pad.t + plotH}`,
+      lead: ends.lead,
+      tail: ends.tail,
+      others: others.map((row) => {
+        const pts = row.days.map(place);
+        return { key: row.key, color: row.color, dashed: Boolean(row.dashed), line: join(pts), ...carry(pts), solo: pts.length === 1 ? pts[0] : null };
+      }),
+      // The fill follows the line across the whole range it is drawn for.
+      area: `${left},${pad.t + plotH} ${ends.lead ? `${pad.l},${points[0][1]} ` : ''}${line}${ends.tail ? ` ${pad.l + plotW},${points[points.length - 1][1]}` : ''} ${right},${pad.t + plotH}`,
       firstLabel: formatSoldDay(firstDay.day, dateLocale),
       lastLabel: formatSoldDay(lastDay.day, dateLocale),
     };
@@ -269,7 +298,8 @@ export default function SoldPriceGraph(props) {
   return (
     <section
       ref={(el) => { wrap = el; }}
-      class={['panel sold-graph', `is-${tone()}`, { 'is-alt': props.alt }]}
+      class={['panel sold-graph', `is-${tone()}`, { 'is-dashed-line': props.dashed }]}
+      style={lineStyle()}
       aria-label="Daily sold median"
       aria-busy={!days().length && props.series == null ? 'true' : undefined}
       onPointerMove={moveHover}
@@ -293,7 +323,7 @@ export default function SoldPriceGraph(props) {
         reverseLabel={props.reverseLabel}
         firstEdition={props.firstEdition}
         graded={props.graded}
-        unitsLabel={unitsLabel()}
+        unitsLabel={props.hideUnits ? '' : unitsLabel()}
         linkedLabel={props.linkedLabel}
         bare={bare()}
         onCondition={(value) => props.onCondition(value)}
@@ -305,12 +335,32 @@ export default function SoldPriceGraph(props) {
       <Show when={!days().length && props.series != null}>
         <p class="sold-graph-empty">{props.emptyLabel || 'No sold-card analytics yet for this printing.'}</p>
       </Show>
-      {/* Which line is which, in the lines' own colours. */}
-      <Show when={plot() && under().length}>
-        <p class="sold-graph-legend">
-          <span class={['sold-graph-key', `u-${props.under?.tone || 'all'}`, { 'u-alt': props.under?.alt }]}>{props.under?.label}</span>
-          <span class="sold-graph-key is-picked">{props.pickedLabel}</span>
-        </p>
+      {/* Which line is which, in the lines' own colours. Each overlay can be taken off on its own. */}
+      <Show when={plot() && overlays().length}>
+        <div
+          class="sold-graph-legend"
+          onPointerDown={stopSoldPointer}
+          onPointerMove={stopSoldPointer}
+          onPointerUp={stopSoldPointer}
+        >
+          <span class={['sold-graph-key is-picked', { 'is-dashed': props.dashed }]}>{props.pickedLabel}</span>
+          <For each={overlays()}>
+            {(row) => (
+              <span class={['sold-graph-key', { 'is-dashed': row.dashed }]} style={{ '--key-line': row.color }}>
+                {row.label}
+                <button
+                  type="button"
+                  class="sold-graph-key-x"
+                  aria-label={`Remove ${row.label} from the graph`}
+                  title={`Remove ${row.label}`}
+                  onClick={() => props.onRemoveOverlay?.(row.key)}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+          </For>
+        </div>
       </Show>
       <Show when={plot()}>
         {(geo) => (
@@ -346,15 +396,21 @@ export default function SoldPriceGraph(props) {
                   </g>
                 )}
               </For>
-              {/* The default series first, so the picked one is drawn over it. */}
-              <Show when={geo().underLine}>
-                <polyline
-                  points={geo().underLine}
-                  class={['sold-graph-under', `u-${props.under?.tone || 'all'}`, { 'u-alt': props.under?.alt }]}
-                />
-              </Show>
+              {/* The other picked series first, so the current one is drawn over them. */}
+              <For each={geo().others}>
+                {(row) => (
+                  <g class={['sold-graph-under', { 'is-dashed': row.dashed }]} style={{ '--under-line': row.color }}>
+                    <Show when={row.lead}><polyline points={row.lead} class="sold-graph-carry" /></Show>
+                    <polyline points={row.line} />
+                    <Show when={row.tail}><polyline points={row.tail} class="sold-graph-carry" /></Show>
+                    <Show when={row.solo}><circle cx={row.solo[0]} cy={row.solo[1]} r="3" class="sold-graph-under-dot" /></Show>
+                  </g>
+                )}
+              </For>
               <polygon points={geo().area} class="sold-graph-fill" />
+              <Show when={geo().lead}><polyline points={geo().lead} class="sold-graph-line sold-graph-carry" /></Show>
               <polyline points={geo().line} class="sold-graph-line" />
+              <Show when={geo().tail}><polyline points={geo().tail} class="sold-graph-line sold-graph-carry" /></Show>
               <Show when={activePt()}>
                 <line
                   x1={activePt()?.[0]}
@@ -389,7 +445,7 @@ export default function SoldPriceGraph(props) {
               >
                 <strong>{price()}</strong>
                 <span>{formatSoldDay(active()?.day, geo().dateLocale)}</span>
-                <Show when={Number(active()?.soldQty || active()?.sampleCount) > 0}>
+                <Show when={!props.hideUnits && Number(active()?.soldQty || active()?.sampleCount) > 0}>
                   <span>{formatSoldSampleCount(active()?.soldQty || active()?.sampleCount)}</span>
                 </Show>
                 <Show when={active()?.comments?.[0]}><em>{active()?.comments?.[0]}</em></Show>

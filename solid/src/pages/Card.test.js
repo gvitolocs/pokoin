@@ -106,8 +106,9 @@ test('Best Deal is one horizontal band: label and marketplace links above, price
   assert.ok(band.indexOf('class="deal-facets"') < band.indexOf('class="band-actions"'), 'chips before the buy side');
   const actions = band.slice(band.indexOf('class="band-actions"'));
   assert.ok(actions.indexOf('<OfferBar') < actions.indexOf('class="btn buy-btn"'), 'the offer bar sits left of Add to cart');
-  // With no Pokoin seller the price slot says so and the buy side stays.
-  assert.match(band, /<p class="deal-none">No Pokoin seller has this card right now\.<\/p>/);
+  // With no Pokoin seller the price slot shows the dash, never a sentence, and the buy side stays.
+  assert.doesNotMatch(band, /class="deal-none"/);
+  assert.match(band, /class="prod-px oos"[\s\S]*: 'No Pokoin seller has this card right now'\}\s*>\s*—\s*<\/div>/);
   assert.match(band, /when=\{!offersReady\(\) \|\| canBuy\(\)\}/);
   assert.doesNotMatch(band, /hero-deal|deal-actions|deal-book/);
 });
@@ -270,28 +271,30 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(page, /return \{ \.\.\.series, days: \[\], soldQty: 0, sampleCount: 0 \};/);
 });
 
-test('the sold graph compares the picked facet with the one the desk opened on', () => {
-  // The first facet shown is remembered once and stays on the graph.
-  assert.match(page, /const \[baseFacet, setBaseFacet\] = createSignal\(null\);/);
-  assert.match(page, /if \(!key \|\| untrack\(baseFacet\)\) return;/);
-  // Nothing is compared while the pick is the default itself, or "any".
-  assert.match(page, /if \(!base \|\| !cond \|\| !code \|\| \(cond === base\.cond && code === base\.lang\)\) return null;/);
-  // Another language than the default's switches the picked line to the second palette.
-  assert.match(page, /const graphAlt = \(\) => Boolean\(baseFacet\(\) && pickedLang\(\) && pickedLang\(\) !== baseFacet\(\)\.lang\);/);
-  assert.match(page, /under=\{graphUnder\(\)\}\s*alt=\{graphAlt\(\)\}\s*pickedLabel=\{pickedLabel\(\)\}/);
+test('the sold graph overlays every facet the visitor picks, each removable on its own', () => {
+  // Every concrete pick (condition, language, Reverse) joins the set once; "any" adds nothing.
+  assert.match(page, /const \[graphPicks, setGraphPicks\] = createSignal\(\[\]\);/);
+  assert.match(page, /if \(list\.some\(\(facet\) => facetKey\(facet\) === key\)\) return;/);
+  assert.match(page, /\.slice\(-GRAPH_PICKS_MAX\)\);/);
+  // The current pick is the graph's own series; all the others are overlays.
+  assert.match(page, /\.filter\(\(facet\) => facetKey\(facet\) !== now\)/);
+  // A facet that never sold falls back to every grade in the sales view: that is not its line.
+  assert.match(page, /&& Boolean\(view\.flags\?\.reverse\) === Boolean\(facet\.reverse\);/);
+  assert.match(page, /const removeGraphPick = \(key\) => setGraphPicks\(graphPicks\(\)\.filter\(\(facet\) => facetKey\(facet\) !== key\)\);/);
+  assert.match(page, /overlays=\{graphOverlays\(\)\}\s*color=\{graphColor\(\)\}\s*dashed=\{Boolean\(currentFacet\(\)\?\.reverse\)\}\s*pickedLabel=\{graphPickedLabel\(\)\}\s*onRemoveOverlay=\{removeGraphPick\}\s*hideUnits/);
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
-  // Both series share one scale and one date range, and the default is drawn first (underneath).
-  assert.match(graph, /const values = \[\.\.\.rows, \.\.\.base\]\.map/);
-  assert.ok(graph.indexOf('class={[\'sold-graph-under\'') < graph.indexOf('class="sold-graph-line"'));
-  assert.match(graph, /class=\{\['panel sold-graph', `is-\$\{tone\(\)\}`, \{ 'is-alt': props\.alt \}\]\}/);
-  const css = fs.readFileSync(new URL('../../../market/src/styles.css', import.meta.url), 'utf8');
-  // The grade colours and the second palette never share a colour.
-  const colours = (prefix) => [...css.matchAll(new RegExp(`${prefix}\\.is-(nm|sp|mp|pl|poor) \\{\\s*--sold-line: ([^;]+);`, 'g'))].map((m) => m[2].trim());
-  const first = colours('\\n\\.sold-graph');
-  const second = colours('\\.sold-graph\\.is-alt');
-  assert.equal(first.length, 5);
-  assert.equal(second.length, 5);
-  assert.equal(new Set([...first, ...second]).size, 10);
+  // All series share one scale and one date range, and the overlays are drawn first (underneath).
+  assert.match(graph, /const every = \[\.\.\.rows, \.\.\.others\.flatMap\(\(row\) => row\.days\)\];/);
+  assert.ok(graph.indexOf('<For each={geo().others}>') < graph.indexOf('<polygon points={geo().area} class="sold-graph-fill" />'));
+  // Each overlay has its own legend entry with a remove button.
+  assert.match(graph, /class="sold-graph-key-x"[\s\S]*onClick=\{\(\) => props\.onRemoveOverlay\?\.\(row\.key\)\}/);
+  // A series is carried flat to both edges of the range, as its own dashed segments: dots stay on real sales.
+  assert.match(graph, /lead: first\[0\] > pad\.l \+ 0\.5 \? join\(\[\[pad\.l, first\[1\]\], first\]\) : '',/);
+  assert.match(graph, /tail: last\[0\] < pad\.l \+ plotW - 0\.5 \? join\(\[last, \[pad\.l \+ plotW, last\[1\]\]\]\) : '',/);
+  assert.match(graph, /class="sold-graph-line sold-graph-carry"/);
+  // No unit counts on the desk graph: not under it and not in the tooltip.
+  assert.match(graph, /unitsLabel=\{props\.hideUnits \? '' : unitsLabel\(\)\}/);
+  assert.match(graph, /when=\{!props\.hideUnits && Number\(active\(\)\?\.soldQty \|\| active\(\)\?\.sampleCount\) > 0\}/);
 });
 
 test("See all opens the full Shop in place, as the desk's last row", () => {
