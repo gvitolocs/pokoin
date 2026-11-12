@@ -3674,21 +3674,17 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   }
 }
 
-/* What the sold graph plots, in the chips' words; it sits where the graph's
-   own menus used to be. */
-.sold-graph-scope {
-  z-index: 4;
-  margin: 0;
-  height: 1.7rem;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Linked to the desk chips and with no toggle of its own, the graph keeps
+   nothing above the plot: the unit count sits on the date line at its foot. */
+.sold-graph-filters.is-bare {
+  top: auto;
+  bottom: 0.1rem;
+  justify-content: center;
+  pointer-events: none;
+}
+.sold-graph-filters.is-bare .sold-graph-units {
+  margin: 0 auto;
+  height: 1.2rem;
 }
 
 /* Every chip can be pressed now (it also drives the graph), so an unlisted one
