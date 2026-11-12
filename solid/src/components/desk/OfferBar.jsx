@@ -74,6 +74,7 @@ export default function OfferBar(props) {
   const buy = props.buy;
   const preview = buy.preview;
   const book = buy.book;
+  const loading = () => book() == null;
   const [open, setOpen] = createSignal(false);
   const [pos, setPos] = createSignal('');
   // Settings the visitor changed in the popup; everything else follows the desk's chips.
@@ -363,26 +364,31 @@ export default function OfferBar(props) {
   const popupStyle = () => pos();
 
   return (
-    <Show when={book()}>
-      <div class={['offer-wrap', { 'is-above': props.above }]}>
+    // The bar is on the page from the first paint, at its final size: until the
+    // book is known its price is a skeleton and its buttons wait. It used to
+    // mount only when the book answered, which moved the band on every load.
+    <>
+      <div class={['offer-wrap', { 'is-above': props.above, 'is-loading': loading() }]} aria-busy={loading() ? 'true' : undefined}>
         <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
         <div class="offer-bar" ref={(el) => { bar = el; }}>
-          <span class="offer-bar-price" title={barModel().title} aria-label={barModel().title}>
+          <span class="offer-bar-price" title={loading() ? undefined : barModel().title} aria-label={loading() ? 'Loading offers' : barModel().title}>
             <BuySellIcon size="1.3em" />
-            <Show when={barModel().hasOffer} fallback={(
-              <span class="offer-bar-none">
-                <span class="offer-bar-none-long">No offers yet</span>
-                <span class="offer-bar-none-short">No offers</span>
-              </span>
-            )}>
-              <span class="offer-bar-label">Offer</span>
-              <span class="offer-bar-amount">{priceText()}</span>
+            <Show when={!loading()} fallback={<span class="offer-bar-skel" aria-hidden="true" />}>
+              <Show when={barModel().hasOffer} fallback={(
+                <span class="offer-bar-none">
+                  <span class="offer-bar-none-long">No offers yet</span>
+                  <span class="offer-bar-none-short">No offers</span>
+                </span>
+              )}>
+                <span class="offer-bar-label">Offer</span>
+                <span class="offer-bar-amount">{priceText()}</span>
+              </Show>
             </Show>
           </span>
           <button
             type="button"
             class="offer-bar-btn"
-            disabled={busy()}
+            disabled={busy() || loading()}
             title={model().hasOffer ? beatText() : undefined}
             aria-label={model().hasOffer ? `Beat offer. ${beatText()}` : undefined}
             onClick={main}
@@ -397,6 +403,7 @@ export default function OfferBar(props) {
             title="Define offer"
             aria-haspopup="dialog"
             aria-expanded={open() ? 'true' : 'false'}
+            disabled={loading()}
             onClick={() => (open() ? closePopup() : openPopup())}
           >
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d={GEAR_ICON} /></svg>
@@ -563,6 +570,6 @@ export default function OfferBar(props) {
           </Portal>
         </Show>
       </div>
-    </Show>
+    </>
   );
 }

@@ -12,8 +12,28 @@ import {
   listingTotal,
   seeAllListings,
   seeAllOffers,
+  deskOfferRows,
 } from './deal-book.js';
 import { VAULT_SELLER_UID } from './vault.js';
+
+test('the Buy offers cell lists the picked language first, then the other languages, never an empty cell over real offers', () => {
+  const book = [
+    { condition: 'SP', language: 'EN', best_price_pkn: 900, quantity: 1, orders: 1, best_order_id: 'en-sp' },
+    { condition: 'NM', language: 'EN', best_price_pkn: 1000, quantity: 2, orders: 1, best_order_id: 'en-nm' },
+    { condition: 'NM', language: 'JP', best_price_pkn: 5000, quantity: 1, orders: 1, best_order_id: 'jp-nm' },
+    { condition: 'MP', language: 'DE', best_price_pkn: 2000, quantity: 1, orders: 1, best_order_id: 'de-mp' },
+  ];
+  const key = (rows) => rows.map((row) => `${row.language}:${row.condition}`);
+  // EN picked: its two rows by price, then the others by price.
+  assert.deepEqual(key(deskOfferRows(book, { language: 'EN', max: 0 })), ['EN:NM', 'EN:SP', 'JP:NM', 'DE:MP']);
+  assert.deepEqual(key(deskOfferRows(book, { language: 'en' })), ['EN:NM', 'EN:SP', 'JP:NM'], 'capped at three');
+  // IT picked, nothing in IT: the offers that exist are still shown (this was "0 of 2" over an empty cell).
+  const only = [book[0], book[1]];
+  assert.deepEqual(key(deskOfferRows(only, { language: 'IT' })), ['EN:NM', 'EN:SP']);
+  assert.equal(deskOfferRows(only, { language: 'IT' })[0].best_order_id, 'en-nm', 'the row names its order, so its owner can delete it');
+  assert.deepEqual(deskOfferRows([], { language: 'IT' }), []);
+  assert.deepEqual(deskOfferRows(null, { language: 'IT' }), []);
+});
 
 const EN_NM = { language: 'EN', condition: 'NM' };
 

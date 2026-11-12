@@ -25,7 +25,39 @@ import {
   withHouseOffer,
   HOUSE_OFFER_PKN,
   offerUnit,
+  BOOK_CACHE_KEY,
+  readBookCache,
+  writeBookCache,
 } from './buy-orders.js';
+
+test('the last book of a card is kept on the device for the next paint', () => {
+  const data = new Map();
+  const storage = { getItem: (key) => (data.has(key) ? data.get(key) : null), setItem: (key, value) => data.set(key, String(value)) };
+  const rows = [{ condition: 'NM', language: 'EN', best_price_pkn: 40, quantity: 1, orders: 1 }];
+  const t0 = 1_800_000_000_000;
+  assert.equal(readBookCache('42', { storage, now: t0 }), null, 'nothing stored yet');
+  writeBookCache('42', rows, { storage, now: t0 });
+  assert.deepEqual(readBookCache('42', { storage, now: t0 + 60_000 }), rows);
+  assert.deepEqual(readBookCache(42, { storage, now: t0 + 60_000 }), rows, 'a numeric id reads the same entry');
+  // An empty book is a real answer and is kept; a book older than 30 minutes is not painted.
+  writeBookCache('43', [], { storage, now: t0 });
+  assert.deepEqual(readBookCache('43', { storage, now: t0 + 1 }), []);
+  assert.equal(readBookCache('42', { storage, now: t0 + 31 * 60_000 }), null);
+  assert.equal(readBookCache('42', { storage, now: t0 - 5 }), null, 'a clock that went back does not trust the entry');
+  // Bounded: only the 40 most recent cards are kept.
+  for (let i = 0; i < 60; i += 1) writeBookCache(`c${i}`, rows, { storage, now: t0 + 1000 + i });
+  const kept = Object.keys(JSON.parse(data.get(BOOK_CACHE_KEY)));
+  assert.equal(kept.length, 40);
+  assert.ok(kept.includes('c59') && !kept.includes('c0') && !kept.includes('42'));
+  // Broken or blocked storage never throws and never invents a book.
+  data.set(BOOK_CACHE_KEY, '{not json');
+  assert.equal(readBookCache('c59', { storage, now: t0 }), null);
+  const blocked = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+  assert.equal(readBookCache('1', { storage: blocked }), null);
+  assert.doesNotThrow(() => writeBookCache('1', rows, { storage: blocked }));
+  assert.doesNotThrow(() => writeBookCache('1', 'nope', { storage }));
+  assert.equal(readBookCache('', { storage }), null);
+});
 
 test('every selection starts at the house offer of 1 PKN, shown in the visitor currency', () => {
   assert.equal(HOUSE_OFFER_PKN, 1);

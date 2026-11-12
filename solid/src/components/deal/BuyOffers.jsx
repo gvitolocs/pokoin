@@ -1,8 +1,9 @@
 import { createSignal, For, Show } from 'solid-js';
-import { buyOfferRows, buyOfferSellable, buyOfferTotal, dealBookCount, seeAllOffers } from '@market/deal-book.js';
+import { buyOfferSellable, buyOfferTotal, dealBookCount, deskOfferRows, seeAllOffers } from '@market/deal-book.js';
 import { conditionChipSrc, conditionLabel } from '@market/listing-meta.js';
+import { flagSrc } from '@market/locale.js';
 import { errorMessage, HOUSE_OFFER_PKN, offerPriceLabel } from '@market/buy-orders.js';
-import { buyerCurrency, buyerParts } from '../../stores/buyer.js';
+import { buyerCurrency } from '../../stores/buyer.js';
 import AppLink from '../AppLink.jsx';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
 
@@ -24,13 +25,13 @@ import BuySellIcon from '../buysell/BuySellIcon.jsx';
  */
 export default function BuyOffers(props) {
   const book = () => props.buy.book();
-  const rows = () => (Array.isArray(book()) ? buyOfferRows(book(), { language: props.language, max: props.max }) : []);
+  const rows = () => (Array.isArray(book()) ? deskOfferRows(book(), { language: props.language, max: props.max }) : []);
+  const sameLang = (row) => String(row.language || '').toUpperCase() === String(props.language || '').toUpperCase();
+  const isMine = (row) => Boolean(row.best_order_id) && props.buy.mine().includes(row.best_order_id);
   const total = () => buyOfferTotal(book());
   const hidden = () => seeAllOffers(book(), rows());
-  const wantPrice = (row) => {
-    const parts = buyerParts(row.best_price_pkn, true, props.pinned);
-    return parts.local || parts.pkn || '';
-  };
+  // The same label the offer bar uses, so a sub-cent offer reads the same in both places.
+  const wantPrice = (row) => offerPriceLabel(row.best_price_pkn, buyerCurrency(props.pinned) || 'PKN');
   const [cancelling, setCancelling] = createSignal('');
   const [cancelError, setCancelError] = createSignal('');
   async function cancelOffer(id) {
@@ -46,7 +47,19 @@ export default function BuyOffers(props) {
     }
   }
   return (
-    <Show when={Array.isArray(book())}>
+    <Show
+      when={Array.isArray(book())}
+      fallback={(
+        // Until the book is known the cell is already there, at its final size,
+        // with three placeholder rows: the desk does not move when it answers.
+        <section class="panel desk-cell cell-offers is-loading" aria-label="Buy offers" aria-busy="true">
+          <h2 class="cell-title">
+            <span class="shop-label"><BuySellIcon size="14" />Buy offers</span>
+          </h2>
+          <div class="cell-rows cell-skel" aria-hidden="true"><span /><span /><span /></div>
+        </section>
+      )}
+    >
       <section class="panel desk-cell cell-offers" aria-label="Buy offers">
         <h2 class="cell-title">
           <span class="shop-label"><BuySellIcon size="14" />Buy offers</span>
@@ -76,7 +89,7 @@ export default function BuyOffers(props) {
           <div class="cell-rows">
             <For each={rows()}>
               {(row) => (
-                <div class={['deal-offer', { 'is-current': row.condition === props.condition }]}>
+                <div class={['deal-offer', { 'is-current': row.condition === props.condition && sameLang(row), 'is-mine': isMine(row) }]}>
                   <button
                     type="button"
                     class="deal-offer-cond"
@@ -89,7 +102,14 @@ export default function BuyOffers(props) {
                   >
                     <img class="shop-cond" src={conditionChipSrc(row.condition)} alt="" width="40" height="28" draggable="false" />
                   </button>
-                  <span class="deal-offer-want">{`${row.quantity} ${conditionLabel(row.condition).toLowerCase()} wanted`}</span>
+                  {/* An offer in another language than the chips' says which. */}
+                  <Show when={!sameLang(row)}>
+                    <span class="deal-offer-lang" title={row.language}>
+                      <img class="deal-flag" src={flagSrc(row.language)} alt="" width="18" height="18" />
+                      {row.language}
+                    </span>
+                  </Show>
+                  <span class="deal-offer-want">{isMine(row) ? `Your offer · ${row.quantity} wanted` : `${row.quantity} ${conditionLabel(row.condition).toLowerCase()} wanted`}</span>
                   <span class="deal-offer-px">{wantPrice(row)}</span>
                   <Show when={buyOfferSellable(row, props.buy.mine())}>
                     <button
@@ -97,22 +117,28 @@ export default function BuyOffers(props) {
                       class="deal-offer-sell"
                       title={`Sell into the ${conditionLabel(row.condition)} offer`}
                       aria-label={`Sell into the ${conditionLabel(row.condition)} offer`}
-                      onClick={() => props.buy.pickSell(row.condition)}
+                      onClick={() => {
+                        // The Sell now form follows the chips: move them to this row's facet first.
+                        if (!sameLang(row)) props.onCondition?.(row);
+                        props.buy.pickSell(row.condition);
+                      }}
                     >
                       Sell
                     </button>
                   </Show>
-                  {/* The visitor's own offer is the row's best one: it can be taken back right here. */}
-                  <Show when={row.best_order_id && props.buy.mine().includes(row.best_order_id)}>
+                  {/* The visitor's own offer is the row's best one: a red cross takes it back right here. */}
+                  <Show when={isMine(row)}>
                     <button
                       type="button"
-                      class="deal-offer-sell deal-offer-cancel"
-                      title="Cancel your offer"
-                      aria-label={`Cancel your ${conditionLabel(row.condition)} offer`}
+                      class="deal-offer-cancel"
+                      title="Delete your offer"
+                      aria-label={`Delete your ${conditionLabel(row.condition)} ${row.language} offer`}
                       disabled={cancelling() === row.best_order_id}
                       onClick={() => cancelOffer(row.best_order_id)}
                     >
-                      Cancel
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
                     </button>
                   </Show>
                 </div>

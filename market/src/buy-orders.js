@@ -47,6 +47,61 @@ export function fetchBuyBook(cardId, options = {}) {
   return getJson(`${BASE}?${params}`, { cache: 'no-store', signal: options.signal });
 }
 
+/**
+ * The last book each card answered with, kept on the device so a reload paints
+ * the offer bar and the Buy offers cell at once instead of after the request.
+ * The book is public (it never names a buyer) and is always asked for again;
+ * the stored copy only fills the moment before that answer. Bounded: the 40
+ * most recent cards, each for 30 minutes.
+ */
+export const BOOK_CACHE_KEY = 'pokoin.buybook.v1';
+const BOOK_CACHE_MAX = 40;
+const BOOK_CACHE_MS = 30 * 60 * 1000;
+
+function bookStore(storage) {
+  if (storage) return storage;
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readBookEntries(store) {
+  try {
+    const all = JSON.parse(store.getItem(BOOK_CACHE_KEY) || '{}');
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+/** The stored book for `cardId`, or null when there is none or it is too old. */
+export function readBookCache(cardId, { storage, now = Date.now() } = {}) {
+  const store = bookStore(storage);
+  const id = String(cardId || '');
+  if (!store || !id) return null;
+  const hit = readBookEntries(store)[id];
+  if (!hit || !Array.isArray(hit.book)) return null;
+  const age = now - Number(hit.at);
+  return age >= 0 && age < BOOK_CACHE_MS ? hit.book : null;
+}
+
+/** Remembers `book` for `cardId`, dropping the oldest cards past the cap. */
+export function writeBookCache(cardId, book, { storage, now = Date.now() } = {}) {
+  const store = bookStore(storage);
+  const id = String(cardId || '');
+  if (!store || !id || !Array.isArray(book)) return;
+  try {
+    const all = readBookEntries(store);
+    all[id] = { at: now, book };
+    const kept = Object.keys(all)
+      .sort((a, b) => Number(all[b]?.at) - Number(all[a]?.at))
+      .slice(0, BOOK_CACHE_MAX);
+    store.setItem(BOOK_CACHE_KEY, JSON.stringify(Object.fromEntries(kept.map((key) => [key, all[key]]))));
+  } catch (_) { /* a full or blocked store only costs the instant paint */ }
+}
+
 /** The public board of open offers. `before` is the cursor the last page returned as `next`. */
 export function fetchBuyBoard({ limit = 24, sort = 'recent', before = '' } = {}, options = {}) {
   const params = new URLSearchParams({ limit: String(limit), sort });

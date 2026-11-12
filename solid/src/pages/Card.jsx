@@ -693,6 +693,23 @@ function CardDesk(props) {
     const missing = [cond ? '' : pickedCond(), code ? '' : pickedLang()].filter(Boolean);
     return missing.length ? `${parts.join(' · ')} (no ${missing.join(' · ')} sales yet)` : parts.join(' · ');
   };
+  // The graph plots exactly what the chips pick. The sales view falls back to
+  // every condition (or language) when the picked one never sold, which drew
+  // other grades' sales and their unit count under a "PO" pick. A pick with no
+  // sales of its own is an empty graph that says so.
+  const graphMissing = () => {
+    const filters = graphFilters();
+    return [
+      pickedCond() && !(filters.conditions || []).includes(pickedCond()) ? pickedCond() : '',
+      pickedLang() && !(filters.languages || []).includes(pickedLang()) ? pickedLang() : '',
+    ].filter(Boolean);
+  };
+  const graphSeries = () => {
+    const series = salesSeries();
+    if (series == null || !graphMissing().length) return series;
+    return { ...series, days: [], soldQty: 0, sampleCount: 0 };
+  };
+  const graphEmptyLabel = () => (graphMissing().length ? `No ${graphMissing().join(' · ')} sales yet` : '');
   // The graph's axis is in the visitor's currency, like its tooltip: how many
   // units of it one PKN is. 1 while the currency is unknown, so the axis is PKN.
   const graphAxisFactor = () => fiatFromPkn(1, buyerCurrency(pinnedCurrency()) || 'PKN') || 1;
@@ -1304,7 +1321,8 @@ function CardDesk(props) {
 
               <div class="desk-graph">
                 <SoldPriceGraph
-                  series={salesSeries()}
+                  series={graphSeries()}
+                  emptyLabel={graphEmptyLabel()}
                   filters={graphFilters()}
                   chips={salesView().chips}
                   condition={salesCondition()}
