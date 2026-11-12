@@ -3665,6 +3665,15 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   margin-left: 0.6rem;
 }
 
+/* The band ends on its chips: the desk's flat-panel padding under them only
+   pushed the graph caption away from the selection it describes. */
+@media (min-width: 721px) {
+  html:root:root .card-page.flutter-page .card-desk .desk-band {
+    padding-top: 0.4rem;
+    padding-bottom: 0;
+  }
+}
+
 /* What the sold graph plots, in the chips' words; it sits where the graph's
    own menus used to be. */
 .sold-graph-scope {

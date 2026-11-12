@@ -139,7 +139,9 @@ export default function SoldPriceGraph(props) {
     if (!rows.length || !box) return null;
     const width = box.w;
     const height = box.h;
-    const pad = SOLD_GRAPH_PAD;
+    // The default top padding clears a row of menus. Linked to the desk chips
+    // there is only one small caption line, so the plot starts right under it.
+    const pad = props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD;
     const values = rows.map((row) => Number(row.medianPkn) || 0);
     const scale = soldGraphScale(Math.max(0, ...values));
     const start = Date.parse(`${rows[0].day}T00:00:00Z`);
