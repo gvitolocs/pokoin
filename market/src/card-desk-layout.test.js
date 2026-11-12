@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { DEAL_BOOK_PHONE_MAX_WIDTH } from './deal-book.js';
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
 
@@ -58,26 +59,23 @@ test('the Shop header shares the desktop row grid, never wraps on phones, and th
   assert.doesNotMatch(css, /\.shop-tools/);
 });
 
-test('an empty Vault is hidden on phones only', () => {
-  const rule = /\.card-page \.vault-panel\.is-empty \{\s*display:\s*none;\s*\}/;
-  const at = css.search(rule);
-  assert.notEqual(at, -1);
-  const before = css.slice(0, at);
-  const mq = before.lastIndexOf('@media');
-  assert.match(before.slice(mq, mq + 40), /@media \(max-width: 720px\)/);
-  // The only rule that targets .is-empty on the Vault is the phone one.
-  assert.equal(css.split('.vault-panel.is-empty').length - 1, 1);
+test('the Vault has no hiding rule any more: an empty one is not rendered at all', () => {
+  // Replaces the phone-only `.is-empty` display rule: the row is now conditional
+  // markup, so there is no empty box to hide at any width (see Card.test.js for
+  // the `<Show when={split().vault.length}>` pin).
+  assert.doesNotMatch(css, /vault-panel\.is-empty/);
+  assert.doesNotMatch(css, /\.vault-panel \{[^}]*display:\s*none/);
 });
 
-test('the Vault is its own bordered, raised box inside the flat desk tile; Shop stays transparent', () => {
+test('the Vault and the listing cells are their own bordered, raised boxes inside the flat desk tile; Shop stays transparent', () => {
   assert.match(css, /\.card-desk \.shop-panel \{\s*background: transparent;\s*border-color: transparent;/);
-  const box = css.match(/\.card-desk \.vault-panel \{([^}]*)\}/);
-  assert.ok(box);
+  const box = css.match(/\.card-desk \.vault-panel,\s*[^{]*\.desk-cell \{([^}]*)\}/);
+  assert.ok(box, 'the raised box rule must cover both the Vault and the two cells');
   assert.match(box[1], /background:\s*var\(--g3\)/);
   assert.match(box[1], /border:\s*1px solid var\(--g5\)/);
   assert.match(box[1], /padding:/);
   assert.doesNotMatch(box[1], /box-shadow/);
-  assert.match(css, /desk-tinted:root:root \.card-page\.flutter-page \.card-desk \.vault-panel \{\s*background: color-mix\(in srgb, var\(--desk-surface\) 93%, #fff\);\s*border-color: var\(--desk-border\)/);
+  assert.match(css, /desk-tinted:root:root \.card-page\.flutter-page \.card-desk \.vault-panel,\s*[^{]*\.desk-cell \{\s*background: color-mix\(in srgb, var\(--desk-surface\) 93%, #fff\);\s*border-color: var\(--desk-border\)/);
 });
 
 test('the Vault title shares the Seller label style', () => {
@@ -89,4 +87,154 @@ test('the Vault title shares the Seller label style', () => {
   const header = css.match(/\.shop-header \{([^}]*)\}/)[1];
   assert.match(header, /font-size:\s*0\.72rem/);
   assert.match(header, /letter-spacing:\s*0\.03em/);
+});
+
+test('the desk is one grid: art for the whole height, then band, graph, the two cells beside each other, and the sell strip', () => {
+  const desk = css.match(/\n\.card-desk \{([^}]*)\}/)[1];
+  assert.match(desk, /display:\s*grid/);
+  assert.match(desk, /grid-template-columns:\s*300px minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(desk, /grid-template-areas:\s*"art band band"\s*"art graph graph"\s*"art cheap offers"\s*"art form form"/);
+  // Only the graph row is elastic: it absorbs what the card column has left.
+  assert.match(desk, /grid-template-rows:\s*auto 1fr auto auto/);
+  // An empty named area still costs a track and a gap, so the two optional rows
+  // (Vault, full Shop) must stay out of the map and place themselves instead.
+  assert.doesNotMatch(desk, /vault|shop/, 'Vault and Shop must not be declared grid areas');
+
+  const area = (cls, name) => {
+    const at = css.indexOf(`\n${cls} {`);
+    assert.notEqual(at, -1, cls);
+    assert.match(css.slice(at, css.indexOf('}', at)), new RegExp(`grid-area: ${name}`), `${cls} grid-area`);
+  };
+  area('.hero-art-col', 'art');
+  area('.desk-band', 'band');
+  area('.desk-graph', 'graph');
+  area('.desk-form', 'form');
+  area('.cell-cheap', 'cheap');
+  area('.cell-offers', 'offers');
+
+  // The optional rows span every column, as rows of their own.
+  assert.match(css, /\.card-desk > \.vault-panel,\s*\.card-desk > \.shop-terminal \{\s*grid-column: 1 \/ -1/);
+});
+
+test('rows size to their content: the cells keep three row slots and only the graph stretches', () => {
+  // The band hugs its content; the two cells stretch to each other so they stay level.
+  const band = css.indexOf('\n.desk-band {');
+  assert.match(css.slice(band, css.indexOf('}', band)), /align-self:\s*start/, '.desk-band must not stretch');
+  for (const cls of ['.cell-cheap', '.cell-offers']) {
+    const at = css.indexOf(`\n${cls} {`);
+    assert.notEqual(at, -1, cls);
+    assert.doesNotMatch(css.slice(at, css.indexOf('}', at)), /align-self:\s*start/, `${cls} must stay level with its neighbour`);
+  }
+  // 0, 3 or 100 rows: the cell is three row slots tall on desktop, so the desk never grows with the market.
+  assert.match(
+    css,
+    /\.desk-cell \.cell-rows,\s*\.desk-cell \.empty-shop,\s*\.desk-cell \.cell-empty \{[^}]*min-height:\s*calc\(3 \* 2\.4rem/,
+  );
+  // The title is one line: no divider under it and See all inside it, not in a footer row.
+  const title = css.match(/\n\.desk-cell \.cell-title \{([^}]*)\}/)[1];
+  assert.doesNotMatch(title, /border-bottom/);
+  assert.match(css, /\.desk-cell \.cell-title \.cell-more \{[^}]*margin:\s*0 0 0 auto/);
+  // The sell strip is one line for everyone; the opened form leaves the desk rows for a full-width row.
+  assert.match(css, /\.desk-form:has\(> \.sell-form:not\(\.is-collapsed\)\) \{\s*grid-area: auto;\s*grid-column: 1 \/ -1/);
+  // The listing form is the tall one; the graph takes whatever height the row has.
+  const graph = css.match(/\.desk-graph \.sold-graph \{([^}]*)\}/)[1];
+  assert.match(graph, /flex:\s*1 1 auto/);
+  assert.match(graph, /max-height:\s*none/);
+  // The art column is the one element allowed to span rows, and its shortcuts
+  // sink to the bottom so the long left column ends on something.
+  assert.match(css, /\.hero-art-col \.art-panel \{[^}]*flex:\s*1/);
+  assert.match(css, /\.hero-art-col \.version-links \{[^}]*margin-top:\s*auto/);
+});
+
+test('the price band is one strip: a label line, then price + chips, then the buy side', () => {
+  const main = css.match(/\.band-main \{([^}]*)\}/)[1];
+  assert.match(main, /display:\s*flex/);
+  assert.match(main, /flex-wrap:\s*wrap/);
+  // The buy side always starts its own line, right-aligned: the band is two
+  // content lines at every desk width, never a price line the chips fall off.
+  const actions = css.match(/^\.band-actions \{([^}]*)\}/m)[1];
+  assert.match(actions, /flex:\s*1 1 100%/);
+  assert.match(actions, /justify-content:\s*flex-end/);
+  // The chips share the price line at any width: their base is zero, so they
+  // fold inside their own box instead of pushing the row count up.
+  const facets = css.match(/\.desk-band \.deal-facets \{([^}]*)\}/)[1];
+  assert.match(facets, /flex-direction:\s*row/);
+  assert.match(facets, /flex:\s*1 1 0/);
+  assert.match(facets, /min-width:\s*0/);
+  assert.doesNotMatch(facets, /width:\s*100%/);
+  // Both chip rows drop the rail's full-width grids: five images that fit, and a
+  // language row that folds (a western printing names nine codes).
+  const conds = css.match(/\.desk-band \.deal-facet-row\[aria-label="Condition"\] \{([^}]*)\}/)[1];
+  assert.match(conds, /grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*2\.6rem\)\)/);
+  const langs = css.match(/\.desk-band \.deal-facet-row\[aria-label="Language"\] \{([^}]*)\}/)[1];
+  assert.match(langs, /display:\s*flex/);
+  assert.match(langs, /flex-wrap:\s*wrap/);
+  // The buy side keeps the heights it had in the old column.
+  // The bar is a size container: in a content-sized flex line it needs a width
+  // of its own or it collapses to nothing (the signed-out desktop lost it that way).
+  assert.match(css, /\.band-actions \.offer-wrap \{ flex: none; width: 17rem; \}/);
+  // On desktop the band is one line (price, marketplace links, buy side) over the chips.
+  assert.match(css, /grid-template-areas:\s*"price head actions"\s*"facets facets facets"/);
+  assert.match(css, /\.desk-band \.band-main \{ display: contents; \}/);
+  // Narrower desks give the links their own line instead of sliding them under the bar.
+  assert.match(css, /\(min-width: 721px\) and \(max-width: 1279px\) \{[^}]*\{[^}]*"price actions"\s*"head head"\s*"facets facets"/);
+  assert.match(css, /\.band-actions \.buy-btn \{ width: auto;/);
+});
+
+test('phones restack the desk in the order the owner asked for', () => {
+  const at = css.indexOf('@media (max-width: 720px) {\n  .card-desk {\n    grid-template-columns: 1fr;');
+  assert.notEqual(at, -1, 'the phone restack must be the desk rule inside the 720 block');
+  const block = css.slice(at, css.indexOf('}', at));
+  assert.match(
+    block,
+    /grid-template-areas:\s*"art"\s*"band"\s*"cheap"\s*"offers"\s*"graph"\s*"form"/,
+  );
+  // The band cannot keep one line: price, chips, offer bar and cart each take a row.
+  assert.match(css, /\.desk-band \.band-main \{\s*flex-direction: column;\s*align-items: stretch;/);
+  assert.match(css, /\.desk-band \.band-actions \{[^}]*flex-direction: column;/);
+  // Stacked, neither box keeps the desktop line-splitting flex.
+  assert.match(css, /\.desk-band \.band-actions \{[^}]*flex:\s*none/);
+  assert.match(css, /\.desk-band \.deal-facets \{[^}]*flex:\s*none/);
+  // and the chips go back to the rail's full-width rows, inside this block.
+  assert.match(css.slice(at), /\.desk-band \.deal-facets \{[^}]*flex-direction:\s*column/);
+});
+
+test('the row cap deal-book.js counts with is the width the desk restacks at', () => {
+  assert.equal(DEAL_BOOK_PHONE_MAX_WIDTH, 720);
+  assert.match(css, /@media \(max-width: 720px\) \{\s*\n\s*\.card-desk \{\s*\n\s*grid-template-columns: 1fr/);
+});
+
+test('the listing cells are one line per row and the offer line shares their height', () => {
+  // The compact line is the Shop's own parts, laid out as a row of the cell.
+  const row = css.match(/\.cell-cheap \.shop-row \{([^}]*)\}/)[1];
+  assert.match(row, /display:\s*grid/);
+  assert.match(row, /grid-template-columns:\s*minmax\(0, 1fr\) auto auto auto/);
+  assert.match(row, /padding:\s*0/);
+  assert.match(row, /min-height:\s*2\.4rem/);
+  assert.match(css, /\.cell-cheap \.shop-offer \{[^}]*display: inline-flex/);
+  // One line per offer, and it is as tall as a listing line.
+  const offer = css.match(/\.deal-offer \{([^}]*)\}/)[1];
+  assert.match(offer, /min-height:\s*2\.4rem/);
+  assert.match(offer, /display:\s*flex/);
+});
+
+test('a narrow desktop keeps the graph readable: tightened filters, then the graph takes its row', () => {
+  // Half a desk is not enough for the overlay filter line at its desktop size.
+  const at = css.indexOf('@media (max-width: 1200px) {');
+  const tight = css.slice(at, css.indexOf('\n}', at));
+  assert.match(tight, /\.sold-graph-filters select \{[^}]*flex:\s*1 1 0/);
+  assert.match(tight, /\.sold-graph-filters select,\s*\.sold-graph-filters button,\s*\.sold-graph-units \{[^}]*font-size: 0\.64rem/);
+  const stack = css.slice(css.indexOf('@media (max-width: 1000px) {'));
+  assert.match(
+    stack,
+    /grid-template-areas:\s*"art band band"\s*"graph graph graph"\s*"cheap cheap cheap"\s*"offers offers offers"\s*"form form form"/,
+  );
+  // The art column stops spanning here: beside five stacked rows it would be one long strip.
+  assert.doesNotMatch(stack.slice(0, 600), /"art graph/);
+  // The phone restack (720) still wins over this one, so it must come later.
+  assert.ok(
+    css.indexOf('@media (max-width: 1000px) {')
+      < css.indexOf('@media (max-width: 720px) {\n  .card-desk {\n    grid-template-columns: 1fr;'),
+    'the 1000px stack must precede the phone restack so the phone wins below 720',
+  );
 });

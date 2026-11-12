@@ -3528,13 +3528,23 @@ a.era-link:focus-visible {
 
 .watch-btn:hover { filter: brightness(1.08); }
 
+/* The desk is one grid: the card on the left for the whole height, the price
+   band across the top, then the sold graph beside the listing form and the two
+   listing cells beside each other. The Vault and the full Shop are deliberately
+   NOT declared areas: a named area keeps its track and its gap even when nothing
+   renders in it, so the two optional rows auto-place as their own full-width row. */
 .card-desk {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
-    "art center deal"
-    "shop shop shop";
-  gap: 1rem;
+    "art band band"
+    "art graph graph"
+    "art cheap offers"
+    "art form form";
+  /* The graph row is the only elastic one: it takes whatever the card column
+     has left, so the right side ends level with the card and never on a void. */
+  grid-template-rows: auto 1fr auto auto;
+  gap: 0.65rem 1rem;
   align-items: stretch;
   margin-bottom: 2rem;
   min-width: 0;
@@ -3548,45 +3558,278 @@ a.era-link:focus-visible {
   min-height: 0;
 }
 
-.hero-center {
-  grid-area: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  min-height: 0;
-}
-
-.hero-deal {
-  grid-area: deal;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  min-height: 0;
-}
-
-.hero-art-col .art-panel,
-.hero-center .sell-form,
-.hero-deal .add-panel {
+/* The card is the only element that spans rows. It grows with the desk but the
+   scan keeps its own size: the version shortcuts sink to the bottom so the long
+   left column ends on something rather than on nothing. */
+.hero-art-col .art-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.hero-deal .add-panel {
-  gap: 1.2rem;
-  padding: 1.3rem 1.2rem 1.25rem;
+.hero-art-col .version-links {
+  margin-top: auto;
 }
 
-.hero-deal .prod-px {
-  font-size: clamp(2.05rem, 3.6vw, 2.65rem);
-  text-align: center;
-  margin: 0.15rem 0;
+.desk-graph {
+  grid-area: graph;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.desk-form {
+  grid-area: form;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The graph is the elastic one: the row is as tall as the listing form needs to
+   be, and the chart takes the difference instead of the cell showing dead space. */
+.desk-graph .sold-graph {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 12rem;
+  max-height: none;
+}
+
+.desk-form .sell-form {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A signed-out visitor's List-your-card is one line. The cell beside it is as
+   tall as the graph, so the line keeps the box and sits in its middle: the old
+   column let the panel hug its content and leave the rest of the row empty. */
+.desk-form .sell-form.is-collapsed {
+  flex: none;
+  align-self: stretch;
+}
+
+/* The sell strip: one line for everyone, signed in or not. The opened form is
+   too big for a desk row beside the card, so it leaves the named area and
+   auto-places as a full-width row of its own, like the Vault and the Shop. */
+html:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  box-sizing: border-box;
+  background: var(--g3);
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  padding: 0.4rem 0.7rem;
+}
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
+  border-color: var(--desk-border);
+}
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  background: #241540;
+  border-color: #5a3058;
+}
+.desk-form .sell-form.is-collapsed .add-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  margin: 0;
+}
+.desk-form .sell-form.is-collapsed h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.sell-strip-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-width: 0;
+}
+.sell-strip-actions {
+  display: inline-flex;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+.desk-form .sell-form.is-collapsed .sell-open {
+  min-height: 2rem;
+  padding: 0 0.9rem;
+  font-size: 0.82rem;
+}
+.desk-form:has(> .sell-form:not(.is-collapsed)) {
+  grid-area: auto;
+  grid-column: 1 / -1;
+}
+.sell-form .sell-close {
+  margin-left: 0.6rem;
+}
+
+/* The band ends on its chips: the desk's flat-panel padding under them only
+   pushed the graph caption away from the selection it describes. */
+@media (min-width: 721px) {
+  html:root:root .card-page.flutter-page .card-desk .desk-band {
+    padding-top: 0.4rem;
+    padding-bottom: 0;
+  }
+}
+
+/* What the sold graph plots, in the chips' words; it sits where the graph's
+   own menus used to be. */
+.sold-graph-scope {
+  z-index: 4;
+  margin: 0;
+  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Every chip can be pressed now (it also drives the graph), so an unlisted one
+   is dimmed but not dead, and a pressed one is ringed even with nothing to buy. */
+.desk-band .deal-chip.is-off { cursor: pointer; opacity: 0.45; }
+.desk-band .deal-chip.is-off.is-on { opacity: 0.8; filter: none; }
+.desk-band .deal-facet-row[aria-label="Finish"] { display: flex; width: auto; }
+.desk-band .deal-chip-reverse { display: inline-flex; align-items: center; gap: 0.3rem; }
+.desk-band .deal-chip-reverse svg { width: 14px; height: 14px; }
+
+/* Opened from the strip, the form is a full-width desk row: its five stacked
+   lines become two. Price, currency and quantity share a line with the facet
+   pickers and extras; location and comment share the next with the marketplace
+   switch and the List button. Notes and the graded fields keep full lines. */
+@media (min-width: 1001px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form {
+    display: grid;
+    grid-template-columns: minmax(20rem, 1fr) minmax(0, 1.6fr);
+    grid-template-areas:
+      "head head"
+      "price options"
+      "place targets";
+    align-items: end;
+    gap: 0.55rem 1rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > * {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    margin-bottom: 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head { grid-area: head; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head + .sell-row { grid-area: price; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-options-row { grid-area: options; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-location-row {
+    grid-area: place;
+    flex-wrap: nowrap;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .location-pick {
+    flex: 0 1 11rem;
+    min-width: 7rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .comment {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-targets-row { grid-area: targets; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-pkn-eq { order: 9; }
+
+  /* On one line with the price inputs, the pickers and extras take the inputs'
+     height and type size instead of their small stacked-form size. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row { align-items: stretch; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-field.sell-pick select,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button {
+    box-sizing: border-box;
+    height: 2.5rem;
+    font-size: 0.88rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips { align-items: center; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.95rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 8.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .listing-photo-add {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
+.cell-cheap {
+  grid-area: cheap;
+  min-width: 0;
+}
+
+.cell-offers {
+  grid-area: offers;
+  min-width: 0;
+}
+
+.card-desk > .vault-panel,
+.card-desk > .shop-terminal {
+  grid-column: 1 / -1;
+}
+
+/* Best Deal as one horizontal strip: label and marketplace links on their own
+   compact line, then two content lines that never become three — the price and
+   the chips share the first, the offer bar and the cart button take the second.
+   The chips fold inside their own box when the desk narrows, so the line count
+   stays the same from 1360px down to the width where the desk stacks. */
+.desk-band {
+  grid-area: band;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.7rem 0.9rem 0.75rem;
+}
+
+.band-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  min-width: 0;
+}
+
+.band-head .band-title {
+  margin: 0;
+  flex: none;
+}
+
+.band-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1rem;
+  min-width: 0;
+}
+
+.band-price {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: none;
+  min-width: 0;
+}
+
+.desk-band .prod-px {
+  font-size: clamp(1.5rem, 2.3vw, 2rem);
+  margin: 0;
+}
+
+.desk-band .px-stack {
+  align-items: flex-start;
+  line-height: 1.12;
+  gap: 0.1rem;
 }
 
 .deal-sold-by {
-  margin: -0.35rem 0 0;
-  text-align: center;
-  font-size: 0.95rem;
+  margin: 0;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -3601,29 +3844,84 @@ a.era-link:focus-visible {
   color: var(--yellow);
 }
 
-.hero-deal .px-stack {
+/* Best Deal with no Pokoin offer: a sentence in the price slot, not a dead button. */
+.desk-band .deal-none {
+  margin: 0;
+  max-width: 14rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* The two chip rows sit side by side in the band, so neither keeps the desk
+   rail's full width: five condition images, then the languages as they come. A
+   western printing names nine of them, so that row folds inside the band. */
+.desk-band .deal-facets {
+  flex: 1 1 0;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  width: 100%;
-  line-height: 1.15;
+  width: auto;
+  min-width: 0;
+  gap: 0.3rem 0.55rem;
+}
+
+.desk-band .deal-facet-row[aria-label="Condition"] {
+  width: auto;
+  grid-template-columns: repeat(5, minmax(0, 2.6rem));
   gap: 0.18rem;
 }
 
-.hero-deal .own-k {
-  margin: 0;
+.desk-band .deal-facet-row[aria-label="Language"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  width: auto;
+  gap: 0.18rem;
 }
 
-.hero-deal .buy-btn {
-  margin-top: auto;
+.desk-band .deal-chip {
+  padding: 0.25rem 0.42rem;
+  font-size: 0.76rem;
 }
 
-
-/* Best Deal with no Pokoin offer: a sentence, not a dead grey button. */
-.hero-deal .deal-none {
-  margin: auto 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.35;
+.desk-band .deal-chip .deal-flag {
+  width: 18px;
+  height: 18px;
 }
+
+/* The buy side always starts its own line, right-aligned, so the band is two
+   content lines at every desk width rather than a price line the chips fall off. */
+.band-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: 1 1 100%;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* The bar is a size container, so inside a content-sized flex line it has no
+   width of its own and would collapse to nothing: the band gives it one. The
+   page already carries the preview notice, so the bar's own copy is dropped. */
+.band-actions .offer-wrap { flex: none; width: 17rem; }
+
+/* Under 1280px the price, the marketplace links, the bar and the cart button no
+   longer fit one line: the links take a line of their own rather than slide
+   under the bar. */
+@media (min-width: 721px) and (max-width: 1279px) {
+  html:root .desk-band {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "price actions"
+      "head head"
+      "facets facets";
+  }
+}
+.band-actions .offer-wrap .seller-preview-banner { display: none; }
+.band-actions .buy-btn { width: auto; min-width: 9.5rem; }
 
 .hero-art-col .art-frame {
   flex: none;
@@ -3635,31 +3933,20 @@ a.era-link:focus-visible {
   aspect-ratio: 88 / 63;
 }
 
-.hero-center .sell-field.comment {
+.desk-form .sell-field.comment {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.hero-center .sell-field.comment textarea {
+.desk-form .sell-field.comment textarea {
   flex: 1;
   min-height: 4.5rem;
 }
 
-.hero-deal .add-panel .fee-lines {
-  margin-top: auto;
-}
-
-/* Vault (Pokoin's own stock) and Shop share the shop row half and half; narrower screens stack them, Vault first. */
-.shop-split {
-  grid-area: shop;
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 1rem;
-  min-width: 0;
-}
-.shop-split > .shop-panel { min-width: 0; }
+/* The Vault (Pokoin's own stock) and the full Shop are each a row of their own
+   under the desk grid: they auto-place, so an absent one costs no track. */
 /* The Vault is tighter than the Shop: no seller column, the fields close together. */
 .vault-panel .shop-row .shop-seller { display: none; }
 @media (min-width: 721px) {
@@ -3672,28 +3959,31 @@ a.era-link:focus-visible {
     grid-column: 4;
   }
 }
-@media (max-width: 1100px) {
-  .shop-split { grid-template-columns: minmax(0, 1fr); }
-}
 
 /* Inside the one-tile desk every panel is flat; the Vault is the exception
    and sits in its own slightly raised box (tokens follow the desk tint). */
-html:root:root .card-page.flutter-page .card-desk .vault-panel {
+/* Inside the one-tile desk every panel is flat; the Vault and the two listing
+   cells are the exception and sit in their own slightly raised boxes (tokens
+   follow the desk tint). */
+html:root:root .card-page.flutter-page .card-desk .vault-panel,
+html:root:root .card-page.flutter-page .card-desk .desk-cell {
   box-sizing: border-box;
   background: var(--g3);
   border: 1px solid var(--g5);
   border-radius: 12px;
   padding: 0.95rem 0.7rem 0.7rem; /* top matches .shop-terminal so the header rows share a baseline */
 }
-html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel {
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .desk-cell {
   background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
   border-color: var(--desk-border);
 }
-html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel {
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .desk-cell {
   background: #241540;
   border-color: #5a3058;
 }
-/* Same header band as the Shop column row so the two baselines line up. */
+/* Same header band as the Shop column row so the baselines line up. */
 .vault-panel .vault-title {
   display: flex;
   flex: 1;
@@ -3704,10 +3994,73 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   font-size: 0.72rem;
 }
 
-/* Phones: an empty (or still loading) Vault takes no room, no title and no
-   gap; it appears once stock is known. Desktop keeps the empty panel. */
-@media (max-width: 720px) {
-  .card-page .vault-panel.is-empty { display: none; }
+/* A list cell's title is one tight line: icon and name, the count, and See all
+   at the right end. No divider and no footer row: the rows start right under it. */
+html:root:root .card-page.flutter-page .card-desk .desk-cell {
+  padding: 0.5rem 0.7rem 0.55rem;
+}
+.desk-cell .cell-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0.15rem;
+  min-height: 1.4rem;
+  font-size: 0.72rem;
+}
+.desk-cell .cell-title .cell-count {
+  color: var(--muted);
+  font-weight: 700;
+}
+.desk-cell .cell-title .cell-more {
+  display: inline;
+  margin: 0 0 0 auto;
+  font-size: 0.76rem;
+}
+
+/* Desktop cells always keep three row slots, so 0, 3 or 100 listings give the
+   same desk height and the two cells stay level with each other. */
+@media (min-width: 721px) {
+  .desk-cell .cell-rows,
+  .desk-cell .empty-shop,
+  .desk-cell .cell-empty {
+    box-sizing: border-box;
+    min-height: calc(3 * 2.4rem + 2 * 0.25rem + 0.3rem);
+  }
+
+  /* The band is one line: price on the left, the marketplace links after it,
+     the offer bar and the cart button on the right; the chips take the line
+     under it. band-main's children join the band's own grid. */
+  .desk-band {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "price head actions"
+      "facets facets facets";
+    align-items: center;
+    gap: 0.45rem 1rem;
+    padding: 0.2rem 0.15rem 0;
+  }
+  .desk-band .band-main { display: contents; }
+  .desk-band .band-price { grid-area: price; }
+  .desk-band .band-head { grid-area: head; }
+  .desk-band .band-head .band-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .desk-band .band-actions {
+    grid-area: actions;
+    flex: none;
+    flex-wrap: nowrap;
+  }
+  .desk-band .deal-facets {
+    grid-area: facets;
+    flex: none;
+  }
 }
 
 .prod-layout {
@@ -3800,25 +4153,15 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   margin-bottom: 0.35rem;
 }
 
-.add-panel .add-head {
-  flex-wrap: wrap;
-  column-gap: 0.85rem;
-  row-gap: 0.55rem;
-  margin-bottom: 0;
-}
-
-.add-panel .add-head h2 {
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
 .silver-tools {
   text-align: right;
 }
 
-.hero-deal .silver-tools.is-locked {
-  flex: 1 0 100%;
-  text-align: center;
+/* The locked prompt is a compact link line in the band's head, next to the
+   label — the old deal column gave it a row of its own. */
+.band-head .silver-tools.is-locked {
+  flex: 0 1 auto;
+  text-align: left;
 }
 
 .silver-tools.is-pending {
@@ -4393,7 +4736,7 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   min-width: 0;
 }
 
-.hero-center .sell-field.comment.comment-inline {
+.desk-form .sell-field.comment.comment-inline {
   min-height: 0;
 }
 
@@ -7428,11 +7771,7 @@ dialog.zoom:not([open]) {
 
 @media (max-width: 1100px) {
   .card-desk {
-    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-    grid-template-areas:
-      "art center"
-      "deal deal"
-      "shop shop";
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr) minmax(0, 1fr);
   }
   .prod-layout {
     grid-template-columns: minmax(12rem, 16rem) 1fr;
@@ -7445,15 +7784,61 @@ dialog.zoom:not([open]) {
   }
 }
 
+/* Beside the listing form the graph cell is about half the desk, and its
+   overlay filter row is a single nowrap line of two selects. Tighten the line
+   before it starts cutting option text. */
+@media (max-width: 1200px) {
+  .sold-graph-filters {
+    left: 2.4rem;
+    right: 0.4rem;
+    gap: 0.14rem;
+  }
+
+  .sold-graph-filters select,
+  .sold-graph-filters button,
+  .sold-graph-units {
+    height: 1.5rem;
+    font-size: 0.64rem;
+  }
+
+  .sold-graph-filters select {
+    flex: 1 1 0;
+    padding: 0.1rem 0.3rem;
+  }
+
+  .sold-graph-filters button {
+    padding: 0.1rem 0.4rem;
+  }
+}
+
+/* Below 1000px even the tightened line is wider than half the desk, and a
+   half-desk listing cell cuts the price out of a compact Shop row. The rows
+   take the full desk and the art column stops spanning them, the way the desk
+   already behaved here: a column that ran beside five stacked rows would be
+   one long empty strip. */
+@media (max-width: 1000px) {
+  .card-desk {
+    grid-template-areas:
+      "art band band"
+      "graph graph graph"
+      "cheap cheap cheap"
+      "offers offers offers"
+      "form form form";
+    grid-template-rows: none;
+  }
+}
+
 /* Compact chrome, search suggest, and card desk share 720px. */
 @media (max-width: 720px) {
   .card-desk {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "deal"
       "art"
-      "shop"
-      "center";
+      "band"
+      "cheap"
+      "offers"
+      "graph"
+      "form";
   }
 
   .sold-graph-filters {
@@ -7493,42 +7878,68 @@ dialog.zoom:not([open]) {
     margin: 0 auto;
   }
   .hero-art-col .art-panel,
-  .hero-center .sell-form,
-  .hero-deal .add-panel {
+  .desk-form .sell-form {
     flex: none;
   }
 
-  .hero-deal .add-panel {
-    align-items: stretch;
+  /* The band cannot keep one line on a phone: price, chips, offer bar and the
+     cart button each take a row of their own. */
+  .desk-band {
     text-align: center;
   }
 
-  .hero-deal .add-head {
-    width: 100%;
+  .desk-band .band-head {
     text-align: left;
   }
 
-  .hero-deal .prod-px,
-  .hero-deal .own-k {
-    text-align: center;
+  .desk-band .band-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
   }
 
-  .hero-deal .deal-facet-row {
+  .desk-band .band-price {
+    align-items: center;
+  }
+
+  .desk-band .deal-facets {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 0.45rem;
+  }
+
+  .desk-band .deal-facet-row[aria-label="Condition"] {
+    grid-template-columns: repeat(auto-fit, minmax(3.4rem, 1fr));
+    width: 100%;
+    gap: 0.4rem;
+  }
+
+  .desk-band .deal-facet-row[aria-label="Language"] {
     justify-content: center;
-    gap: 0.45rem 0.4rem;
+    width: 100%;
+    gap: 0.4rem;
   }
 
+  .desk-band .deal-chip {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.82rem;
+  }
 
-  .hero-deal .buy-btn {
+  .desk-band .band-actions {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .desk-band .band-actions .buy-btn {
     width: 100%;
     max-width: 100%;
-  }
-
-  .hero-deal .buy-btn {
     display: flex;
     align-self: stretch;
-    margin-left: auto;
-    margin-right: auto;
   }
 }
 
@@ -7847,8 +8258,8 @@ dialog.zoom:not([open]) {
   }
 
   .promo-arrow {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
     top: 5.15rem;
   }
 
@@ -7956,12 +8367,6 @@ dialog.zoom:not([open]) {
   }
 
   .card-desk {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "art"
-      "deal"
-      "shop"
-      "center";
     gap: 0.75rem;
   }
 
@@ -8049,18 +8454,18 @@ dialog.zoom:not([open]) {
   }
 
   .art-nav {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .collector-badge {
-    height: 2.75rem;
+    height: 2.5rem;
     line-height: calc(2.75rem - 2px);
   }
 
   .set-shortcut {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .add-panel,
@@ -9025,10 +9430,6 @@ dialog.zoom:not([open]) {
     text-align: left;
     margin-left: 0;
     justify-content: flex-start;
-  }
-
-  .hero-deal .silver-tools.is-locked {
-    text-align: center;
   }
 }
 
@@ -11366,21 +11767,130 @@ img.is-lang-scan {
   vertical-align: -0.04em;
 }
 
-.hero-deal .deal-actions {
+/* The desk's two listing cells. The row count is not a CSS hide:
+ * deal-book.js caps the rows for the viewport (three on desktop, two on a
+ * phone) and the same number feeds the See all line, so a row that is cut is
+ * counted and one click away, never lost. */
+.desk-cell .cell-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  margin-top: auto;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-top: 0.3rem;
 }
 
-.hero-deal .deal-actions .buy-btn {
-  margin-top: 0;
-}
+.desk-cell .empty-shop { padding: 0.3rem 0.15rem 0; }
+.desk-cell .empty-shop .status { margin: 0; text-align: left; }
 
-.hero-deal .deal-actions .deal-none {
+.desk-cell .cell-empty {
   margin: 0;
+  padding: 0.3rem 0.15rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
+/* One line per listing: seller | facet | price and copies | cart, out of the
+   Shop's own parts. The full Shop row keeps its wrapping flex line. */
+.cell-cheap .shop-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  padding: 0;
+  border-bottom: 0;
+  min-height: 2.4rem;
+}
+
+.cell-cheap .shop-seller {
+  min-width: 0;
+}
+
+.cell-cheap .shop-offer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* A phone cell is one narrow column: the compact line splits in two, seller and
+   facet above, price, copies and cart below. */
+@media (max-width: 720px) {
+  .cell-cheap .shop-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0.3rem;
+  }
+}
+
+/* One line per offer: grade | best price | how many want it | Sell. */
+.deal-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.4rem;
+  padding: 0 0.25rem;
+  min-width: 0;
+  border-radius: 0.55rem;
+}
+
+.deal-offer-cond {
+  flex: none;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 0.55rem;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.deal-offer-cond:hover { border-color: rgb(255 211 61 / 0.45); }
+
+.deal-offer-cond .shop-cond {
+  width: 2.2rem;
+  height: 1.5rem;
+}
+
+.deal-offer-px {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deal-offer-want {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.deal-offer-sell {
+  flex: none;
+  height: 1.7rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--yellow);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.deal-offer-sell:hover,
+.deal-offer-sell:focus-visible {
+  border-color: var(--yellow);
+  outline: none;
+}
+
+/* The row whose grade the chips above already picked. */
+.deal-offer.is-current { background: rgb(255 211 61 / 0.07); }
+
+.deal-offer.is-current .deal-offer-cond { border-color: var(--yellow); }
 /* Offer bar: the best buy offer, same size as Add to cart, above it. Opens the offer form in place. */
 .offer-wrap {
   display: flex;

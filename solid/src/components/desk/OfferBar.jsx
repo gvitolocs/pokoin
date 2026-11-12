@@ -1,6 +1,6 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useLocation, useSearchParams } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
 import { imageSrc } from '@market/api.js';
 import {
   BUY_ORDER_DAYS,
@@ -12,7 +12,6 @@ import {
   crossesAsk,
   defaultOfferSettings,
   errorMessage,
-  fetchBuyBook,
   offerBarModel,
   offerBody,
   offerLanguages,
@@ -30,11 +29,9 @@ import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js'
 import { authFrom } from '@market/punchouts.js';
 import { sellerNameOf } from '@market/auth-session.js';
 import { useGameNavigate } from '../../lib/game-navigate.js';
-import { whenIdle } from '../../lib/idle.js';
 import { authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { profile } from '../../stores/session.js';
-import { allowMypokoinPreview } from '../../pages/mypokoin-preview-fixture.js';
-import { BUYSELL_PREVIEW_BANNER, previewBook } from '../../pages/buysell-preview-fixture.js';
+import { BUYSELL_PREVIEW_BANNER } from '../../pages/buysell-preview-fixture.js';
 import { buyerCurrency, buyerParts } from '../../stores/buyer.js';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
 import SellNowForm from '../buysell/SellNowForm.jsx';
@@ -52,17 +49,19 @@ const SHEET_QUERY = '(max-width: 720px)';
  * step above the best offer with the visitor's settings in one press; Make offer
  * and the gear open the Define offer popup (price, copies, condition, language,
  * duration, Reverse / 1st Ed., Sell now). Nothing expands inside the panel. The
- * book loads after the listings (props.ready); a failed request renders nothing.
- * Prices are typed and shown in the visitor's display currency.
- * props: card, cardId, ready, condition, language, languages, pinned, above,
+ * desk loads the one buy-order book (lib/buy-book.js) and hands it over as
+ * props.buy, shared with the book rows beside the bar; while the book is missing
+ * or the request failed, the bar is not drawn. Prices are typed and shown in the
+ * visitor's display currency.
+ * props: buy, card, condition, language, languages, pinned, above,
  * askFor(condition, language), onBuyNow().
  */
 export default function OfferBar(props) {
   const navigate = useGameNavigate();
   const location = useLocation();
-  const [params] = useSearchParams();
-  const preview = untrack(() => allowMypokoinPreview(params));
-  const [book, setBook] = createSignal(null);
+  const buy = props.buy;
+  const preview = buy.preview;
+  const book = buy.book;
   const [open, setOpen] = createSignal(false);
   const [pos, setPos] = createSignal('');
   // Settings the visitor changed in the popup; everything else follows the desk's chips.
@@ -72,41 +71,11 @@ export default function OfferBar(props) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const [notice, setNotice] = createSignal(null);
-  // Offers this visitor posted from this page: never offered back as Sell now.
-  const [mine, setMine] = createSignal([]);
 
   let bar;
   let gear;
   let popup;
   let priceInput;
-
-  let fetchSeq = 0;
-  function loadBook(id) {
-    const seq = fetchSeq + 1;
-    fetchSeq = seq;
-    if (preview) {
-      setBook(() => previewBook(untrack(() => props.language)).book);
-      return Promise.resolve();
-    }
-    return fetchBuyBook(id).then(
-      (data) => {
-        if (seq === fetchSeq) setBook(() => (Array.isArray(data?.book) ? data.book : []));
-      },
-      () => {
-        if (seq === fetchSeq) setBook(null);
-      },
-    );
-  }
-
-  createEffect(
-    () => ((preview || props.ready) && props.cardId ? String(props.cardId) : ''),
-    (id) => {
-      if (!id) return undefined;
-      setBook(null);
-      return whenIdle(() => { loadBook(id); });
-    },
-  );
-  onCleanup(() => { fetchSeq += 1; });
 
   // The chips are the source of truth for condition and language: a new chip pick clears those two settings.
   createEffect(
@@ -122,6 +91,19 @@ export default function OfferBar(props) {
     ...overrides(),
   }));
   const setSetting = (key, value) => setOverrides({ ...untrack(overrides), [key]: value });
+  // A Sell button in the book rows asks for a condition; the Sell now form lives in here.
+  createEffect(buy.sellPick, (condition) => {
+    if (!condition) return;
+    buy.pickSell('');
+    setSetting('condition', condition);
+    openPopup();
+  });
+  // The Buy offers cell with nothing to sell into names no condition: its Make
+  // offer opens the popup on the chips as they stand.
+  createEffect(buy.offerAsk, (ask) => {
+    if (!ask) return;
+    openPopup();
+  });
   const currency = () => buyerCurrency(props.pinned);
   const cur = () => currency() || 'PKN';
 
@@ -142,7 +124,7 @@ export default function OfferBar(props) {
   const typedPkn = () => offerPricePkn(price(), cur());
   const ask = () => props.askFor?.(settings().condition, settings().language);
   const crosses = () => crossesAsk(typedPkn(), ask());
-  const canSellNow = () => Boolean(target()?.best_order_id) && !mine().includes(target().best_order_id);
+  const canSellNow = () => Boolean(target()?.best_order_id) && !buy.mine().includes(target().best_order_id);
   const fromPath = () => `${location.pathname}${location.search}`;
 
   function prefill() {
@@ -271,9 +253,9 @@ export default function OfferBar(props) {
       }
       const created = await createBuyOrder(body, token);
       setOpen(false);
-      if (created?.id) setMine([...mine(), created.id]);
+      if (created?.id) buy.noteMine(created.id);
       setNotice({ text: posted, undoId: created?.id || '' });
-      await loadBook(String(props.cardId));
+      await buy.reload();
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(fromPath()));
@@ -336,9 +318,9 @@ export default function OfferBar(props) {
         return;
       }
       await cancelBuyOrder(id, token);
-      setMine(mine().filter((value) => value !== id));
+      buy.forgetMine(id);
       setNotice({ text: 'Offer cancelled.' });
-      await loadBook(String(props.cardId));
+      await buy.reload();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -423,7 +405,7 @@ export default function OfferBar(props) {
                     const sold = offerPriceLabel(target()?.best_price_pkn, cur());
                     setOpen(false);
                     setNotice({ text: `Listed at ${sold}. The buyer has been told.` });
-                    return loadBook(String(props.cardId));
+                    return buy.reload();
                   }}
                 />
               </Show>

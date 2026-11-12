@@ -15,7 +15,7 @@ import {
   Switch,
   untrack,
 } from 'solid-js';
-import { useLocation, useParams } from '@solidjs/router';
+import { useLocation, useParams, useSearchParams } from '@solidjs/router';
 import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   artistHref,
@@ -94,6 +94,8 @@ import {
 import { ownerGameChoice } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
+import { buyOfferSellable, dealBookRows } from '@market/deal-book.js';
+import { selectionBid } from '@market/buy-orders.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
 import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
@@ -124,6 +126,8 @@ import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
+import BuyOffers from '../components/deal/BuyOffers.jsx';
+import CheapestListings from '../components/deal/CheapestListings.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
 import OfferBar from '../components/desk/OfferBar.jsx';
@@ -140,6 +144,7 @@ import ExpansionMark from '../components/ExpansionMark.jsx';
 import PriceStack from '../components/PriceStack.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
+import { createBuyBook } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -148,6 +153,7 @@ import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 import { listingSelected } from '../lib/select-band.js';
 import { afterPaint } from '../lib/yield-nav.js';
+import { BUYSELL_PREVIEW_BANNER, previewListings, previewScale } from './buysell-preview-fixture.js';
 
 /** A hover / intent prefetch this recent counts as the desk's own first read. */
 const PREFETCH_FRESH_MS = 10_000;
@@ -221,8 +227,12 @@ function CardDesk(props) {
   const cardId = untrack(() => String(props.cardId));
   const lang = untrack(() => props.lang);
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const navigate = useGameNavigate();
   const pinnedCurrency = () => currencyFromSearch(location.search);
+  // The preview pile's row count, or 0 for a normal desk. Read once: the switch
+  // is a load-test dial, not something the desk reacts to.
+  const deskPreview = untrack(() => previewScale(searchParams));
 
   // First paint: URL stub + recent tile + remembered identity + the clicked tile.
   const stubCard = createMemo(() => {
@@ -258,8 +268,30 @@ function CardDesk(props) {
   const [offerSort, setOfferSort] = createSignal('price');
   const [condition, setCondition] = createSignal('');
   const [language, setLanguage] = createSignal('');
+  // The full Shop is the desk's last row and starts closed: See all in the
+  // listings cell opens it in place. Nothing in the URL names a Shop filter today,
+  // so there is no deep link that could ask for it open from the start.
+  const [shopOpen, setShopOpen] = createSignal(false);
+  // Both listing cells cap their rows by viewport — three on desktop, two on a phone —
+  // and the same cap decides the See all count, so it is a signal and not a CSS hide.
+  const [deskWidth, setDeskWidth] = createSignal(window.innerWidth);
+  createEffect(
+    () => deskWidth() > 0,
+    () => {
+      const onResize = () => setDeskWidth(window.innerWidth);
+      window.addEventListener('resize', onResize, { passive: true });
+      return () => window.removeEventListener('resize', onResize);
+    },
+  );
+  const deskRows = () => dealBookRows(deskWidth());
   const [dealLang, setDealLang] = createSignal('');
   const [dealCond, setDealCond] = createSignal('');
+  // The band chips are the desk's one selection: they pick the Best Deal and
+  // what the sold graph plots. A chip the visitor pressed is kept as pressed,
+  // listed or not; until then the desk shows the best facet that has a listing.
+  const [dealReverse, setDealReverse] = createSignal(false);
+  const [condPinned, setCondPinned] = createSignal(false);
+  const [langPinned, setLangPinned] = createSignal(false);
   const [listingBusy, setListingBusy] = createSignal(false);
   const [shopError, setShopError] = createSignal('');
   const [editingOffer, setEditingOffer] = createSignal(null);
@@ -357,10 +389,22 @@ function CardDesk(props) {
 
   // Network starts with the component, not after the first paint.
   // The tile's intent prefetch is this desk's listings read: adopt it.
+  // `?mypokoinPreview=100` is the pile the row caps are proven against: the desk
+  // paints that many fixture listings and asks the listings read for none.
   listingsSeq += 1;
-  refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
-    if (!disposed) setOffersReady(true);
-  });
+  if (deskPreview) {
+    // A store write is not allowed while the component is still being set up,
+    // so the fixture pile lands on the next microtask like a network answer.
+    queueMicrotask(() => {
+      if (disposed) return;
+      setOffers(previewListings(deskPreview, cardId));
+      setOffersReady(true);
+    });
+  } else {
+    refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
+      if (!disposed) setOffersReady(true);
+    });
+  }
   // Not painted from a peek: a stored copy of any age paints at once, and the
   // revalidated page merges in place through showCard.
   fetchCard(cardId, {
@@ -606,23 +650,46 @@ function CardDesk(props) {
   const nextNav = () => neighborWindow().next?.[0] || null;
   const nativeLive = createMemo(() => pricedOffers(shop.offers));
   const listedDealLangs = createMemo(() => listedDealLanguages(shop.offers, card()));
-  const shownLang = createMemo(() => resolveDealLanguage({
-    selected: dealLang() || 'EN',
-    listed: offersReady() ? listedDealLangs() : [],
-    country: sellerSettings()?.shipFromCountry,
-  }));
-  // The chosen grade when it is listed in the shown language, else the best one that is.
+  // With the Reverse chip on, only reverse listings can be the Best Deal.
+  const dealRows = createMemo(() => (dealReverse() ? nativeLive().filter((offer) => offer?.reverse) : nativeLive()));
+  const shownLang = createMemo(() => (langPinned() && dealLang()
+    ? String(dealLang()).toUpperCase()
+    : resolveDealLanguage({
+      selected: dealLang() || 'EN',
+      listed: offersReady() ? listedDealLangs() : [],
+      country: sellerSettings()?.shipFromCountry,
+    })));
+  // A pressed grade is kept as pressed. Before any press: the chosen grade when
+  // it is listed in the shown language, else the best one that is.
   const shownCond = createMemo(() => {
     const wanted = dealCond() || 'NM';
-    return offersReady() ? shownDealCondition(nativeLive(), shownLang(), wanted, card()) : wanted;
+    if (condPinned()) return wanted;
+    return offersReady() ? shownDealCondition(dealRows(), shownLang(), wanted, card()) : wanted;
   });
-  const dealPick = createMemo(() => (offersReady() ? matchDeal(nativeLive(), shownLang(), shownCond(), card()) : null));
+  const dealPick = createMemo(() => (offersReady() ? matchDeal(dealRows(), shownLang(), shownCond(), card()) : null));
+  // The sold graph plots what the chips picked. It has no menus of its own.
+  createEffect(() => [shownCond(), shownLang(), dealReverse()], ([cond, code, reverse]) => {
+    setSalesCondition(cond);
+    setSalesLanguage(code);
+    setSalesReverse(Boolean(reverse));
+  });
+  const showReverseChip = () => Boolean(salesView().chips?.reverse) || nativeLive().some((offer) => offer?.reverse);
+  /** What the graph is plotting, said in the chips' own words. */
+  const graphScope = () => {
+    const filters = graphFilters();
+    const cond = (filters.conditions || []).includes(shownCond()) ? shownCond() : '';
+    const code = (filters.languages || []).includes(shownLang()) ? shownLang() : '';
+    const parts = [cond || 'All conditions', code || 'All languages'];
+    if (salesReverse()) parts.push(game().id === 'pokemon' ? 'Reverse' : 'Foil');
+    const missing = [cond ? '' : shownCond(), code ? '' : shownLang()].filter(Boolean);
+    return missing.length ? `${parts.join(' · ')} (no ${missing.join(' · ')} sales yet)` : parts.join(' · ');
+  };
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
   const change72h = () => formatChange72h(salesSeries()?.change24hPct);
   const canBuy = () => Boolean(dealPick());
-  const listedCondSet = createMemo(() => new Set(listedDealConditions(nativeLive(), shownLang(), card()).map((row) => row.value)));
+  const listedCondSet = createMemo(() => new Set(listedDealConditions(dealRows(), shownLang(), card()).map((row) => row.value)));
   const listedLangSet = createMemo(() => new Set(listedDealLangs()));
   const allDealLangs = createMemo(() => {
     const row = card();
@@ -740,6 +807,59 @@ function CardDesk(props) {
     if (!uid) return [];
     return shop.offers.filter((row) => String(row.sellerUid || '') === uid).map((row) => row.id).filter(Boolean);
   });
+
+  // One book for the desk: the offer bar and the Best Deal rows read this signal.
+  const buy = createBuyBook({ cardId, ready: offersReady, language: shownLang });
+
+  /** The Shop row's cart path, so the book rows add listings the same way. */
+  function addListingToCart(offer, qty = 1) {
+    addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 });
+  }
+
+  function chooseDealLang(code) {
+    setDealLang(code);
+    writeDealLanguage(code, authUser()?.uid);
+  }
+
+  /** A Buy offers row is a request for a facet: pick it, adding the chip when the language is unlisted. */
+  // The sell strip's Sell now: the best open offer for the facet the chips
+  // picked, when there is one and it is not the visitor's own.
+  const sellNowRow = () => {
+    const book = buy.book();
+    if (!Array.isArray(book)) return null;
+    const row = selectionBid(book, { condition: shownCond(), language: shownLang() });
+    return row && buyOfferSellable(row, buy.mine()) ? row : null;
+  };
+  const sellNowNote = () => {
+    const row = sellNowRow();
+    if (!row) return '';
+    const parts = buyerParts(row.best_price_pkn, true, pinnedCurrency());
+    return `Best offer for ${shownCond()} · ${shownLang()} is ${parts.local || parts.pkn || ''}`;
+  };
+
+  function pickOfferCondition(row) {
+    if (row?.language) {
+      chooseDealLang(row.language);
+      setLangPinned(true);
+    }
+    if (row?.condition) pickDealCond(row.condition);
+  }
+
+  function pickDealCond(value) {
+    setDealCond(value);
+    setCondPinned(true);
+  }
+
+  /** See all: the Shop panel is the desk's own last row, and it starts closed. */
+  function scrollShop() {
+    const open = !shopOpen();
+    setShopOpen(open);
+    if (!open) return;
+    // The Vault is a .shop-panel too: the listings live in the Shop terminal one.
+    const panel = document.querySelector('.card-desk .shop-terminal');
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    panel?.querySelector('.shop-header')?.focus();
+  }
 
   async function cancelMine(ids) {
     const listingIds = (ids || []).filter(Boolean);
@@ -1011,6 +1131,12 @@ function CardDesk(props) {
               </Show>
             </header>
 
+            <Show when={deskPreview}>
+              {/* The preview notice is a note on the viewport, not a line in the
+                  band: it must never cost the desk a row. */}
+              <p class="desk-preview-note" role="status">{BUYSELL_PREVIEW_BANNER}</p>
+            </Show>
+
             <div class="card-desk">
               <div class="hero-art-col">
                 <section class="panel art-panel">
@@ -1145,7 +1271,7 @@ function CardDesk(props) {
                 </section>
               </div>
 
-              <div class="hero-center">
+              <div class="desk-graph">
                 <SoldPriceGraph
                   series={salesSeries()}
                   filters={graphFilters()}
@@ -1156,6 +1282,7 @@ function CardDesk(props) {
                   reverseLabel={game().id === 'pokemon' ? 'Reverse' : 'Foil'}
                   firstEdition={salesFirstEdition()}
                   graded={salesGraded()}
+                  linkedLabel={graphScope()}
                   onCondition={setSalesCondition}
                   onLanguage={setSalesLanguage}
                   onReverse={setSalesReverse}
@@ -1165,14 +1292,21 @@ function CardDesk(props) {
                   onPickDay={(day) => {
                     const traits = soldTraitsForGraphDay(salesSlices() || [], salesFilterState(), day);
                     if (!traits) return;
-                    setSalesCondition(traits.condition);
-                    setSalesLanguage(traits.language);
-                    setSalesReverse(Boolean(traits.reverse));
+                    // A plotted day moves the chips, and the chips move the graph.
+                    if (traits.condition) pickDealCond(traits.condition);
+                    if (traits.language) {
+                      setDealLang(traits.language);
+                      setLangPinned(true);
+                    }
+                    setDealReverse(Boolean(traits.reverse));
                     setSalesFirstEdition(Boolean(traits.firstEdition));
                     setSalesGraded(Boolean(traits.graded));
                   }}
                 />
                 <NativeSales cardId={cardId} />
+              </div>
+
+              <div class="desk-form">
                 <ListingForm
                   card={card()}
                   identity={identity()}
@@ -1184,52 +1318,71 @@ function CardDesk(props) {
                   editing={editingOffer()}
                   onCancelEdit={() => setEditingOffer(null)}
                   onListed={onListed}
+                  sellNowNote={sellNowNote()}
+                  onSellNow={sellNowRow() ? () => buy.pickSell(shownCond()) : undefined}
                 />
               </div>
 
-              <div class="hero-deal">
-                <section class="panel add-panel">
-                  <div class="add-head">
-                    <h2>Best Deal</h2>
-                    <SilverHead card={card()} fromPath={fromPath()} />
-                  </div>
-                  <div class={canBuy() ? 'prod-px' : 'prod-px oos'}>
-                    <Show when={offersReady() && canBuy()} fallback="—">
-                      <PriceStack flip parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
+              <section class="panel add-panel desk-band" aria-label="Best Deal">
+                <div class="band-head">
+                  <h2 class="shop-label band-title">Best Deal</h2>
+                  <SilverHead card={card()} fromPath={fromPath()} />
+                </div>
+                <div class="band-main">
+                  <div class="band-price">
+                    {/* Once offers load, no fake grey button and no dash: say why there is nothing to buy. */}
+                    <Show
+                      when={offersReady() && !canBuy()}
+                      fallback={(
+                        <>
+                          <div class={canBuy() ? 'prod-px' : 'prod-px oos'}>
+                            <Show when={offersReady() && canBuy()} fallback="—">
+                              <PriceStack flip parts={buyerParts(dealPick()?.pricePkn, dealPick()?.sellerAcceptsPkn, pinnedCurrency())} />
+                            </Show>
+                          </div>
+                          <Show when={offersReady() && canBuy()}>
+                            {/* The Vault is Pokoin's own stock: no seller line, and never the admin account's name. */}
+                            <Show when={!isVaultOffer(dealPick())}>
+                              <p class="deal-sold-by">
+                                Sold by{' '}
+                                <Show
+                                  when={sellerHref(dealPick(), lang)}
+                                  fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
+                                >
+                                  <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
+                                </Show>
+                              </p>
+                            </Show>
+                          </Show>
+                        </>
+                      )}
+                    >
+                      {/* A pressed facet with nothing listed is not "no seller" when other facets are listed. */}
+                      <Show
+                        when={nativeLive().length}
+                        fallback={<p class="deal-none">No Pokoin seller has this card right now.</p>}
+                      >
+                        <p class="deal-none">{`No ${shownCond()} · ${shownLang()}${dealReverse() ? ' reverse' : ''} listing right now.`}</p>
+                      </Show>
                     </Show>
                   </div>
-                  <Show when={offersReady() && canBuy()}>
-                    {/* The Vault is Pokoin's own stock: no seller line, and never the admin account's name. */}
-                    <Show when={!isVaultOffer(dealPick())}>
-                      <p class="deal-sold-by">
-                        Sold by{' '}
-                        <Show
-                          when={sellerHref(dealPick(), lang)}
-                          fallback={<span>{publicListingSellerName(dealPick()) || 'seller'}</span>}
-                        >
-                          <a href={gameHref(sellerHref(dealPick(), lang))}>{publicListingSellerName(dealPick()) || 'seller'}</a>
-                        </Show>
-                      </p>
-                    </Show>
-                  </Show>
                   <div class="deal-facets">
                     <div class="deal-facet-row" role="radiogroup" aria-label="Condition">
                       <For each={DEAL_CONDS}>
                         {(row) => {
                           const listedHere = () => listedCondSet().has(row.value);
                           const on = () => shownCond() === row.value;
-                          const ring = () => offersReady() && on() && canBuy();
-                          const dim = () => offersReady() && (on() ? !canBuy() : !listedHere());
+                          // Every grade can be pressed: it also picks what the graph plots.
+                          const dim = () => offersReady() && !listedHere();
                           return (
                             <button
                               type="button"
                               role="radio"
-                              class={['deal-chip', { 'is-on': ring(), 'is-off': dim() }]}
+                              class={['deal-chip', { 'is-on': on(), 'is-off': dim() }]}
                               aria-checked={on() ? 'true' : 'false'}
                               aria-label={row.label}
-                              title={listedHere() && (!on() || canBuy()) ? row.label : `${row.label} · none listed`}
-                              disabled={dim()}
-                              onClick={() => setDealCond(row.value)}
+                              title={listedHere() ? row.label : `${row.label} · none listed`}
+                              onClick={() => pickDealCond(row.value)}
                             >
                               <img class="shop-cond" src={conditionChipSrc(row.value)} alt="" width="40" height="28" draggable="false" />
                             </button>
@@ -1243,18 +1396,17 @@ function CardDesk(props) {
                           {(code) => {
                             const listedHere = () => listedLangSet().has(code);
                             const on = () => shownLang() === code;
-                            const ring = () => offersReady() && on() && canBuy();
-                            const dim = () => offersReady() && (on() ? !canBuy() : !listedHere());
+                            const dim = () => offersReady() && !listedHere();
                             return (
                               <button
                                 type="button"
                                 role="radio"
-                                class={['deal-chip', { 'is-on': ring(), 'is-off': dim() }]}
+                                class={['deal-chip', { 'is-on': on(), 'is-off': dim() }]}
                                 aria-checked={on() ? 'true' : 'false'}
                                 aria-label={code}
-                                title={listedHere() && (!on() || canBuy()) ? code : `${code} · none listed`}
-                                disabled={dim()}
+                                title={listedHere() ? code : `${code} · none listed`}
                                 onClick={() => {
+                                  setLangPinned(true);
                                   setDealLang(code);
                                   writeDealLanguage(code, authUser()?.uid);
                                 }}
@@ -1267,60 +1419,92 @@ function CardDesk(props) {
                         </For>
                       </div>
                     </Show>
-                  </div>
-                  <div class="deal-actions">
-                    {/* Once offers load, no fake grey button: say why there is nothing to add. */}
-                    <Show
-                      when={canBuy()}
-                      fallback={offersReady()
-                        ? <p class="deal-none">No Pokoin seller has this card right now.</p>
-                        : <span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
-                    >
-                      <button
-                        class="btn buy-btn"
-                        type="button"
-                        onClick={() => {
-                          const row = card();
-                          track(Action.buyIntent, row);
-                          addToCart(cartItemFromOffer(row, snapshot(dealPick())));
-                          navigate('/cart');
-                        }}
-                      >
-                        Add to cart
-                      </button>
+                    <Show when={showReverseChip()}>
+                      <div class="deal-facet-row" role="group" aria-label="Finish">
+                        <button
+                          type="button"
+                          class={['deal-chip', 'deal-chip-reverse', { 'is-on': dealReverse() }]}
+                          aria-pressed={dealReverse() ? 'true' : 'false'}
+                          title={dealReverse() ? 'Showing reverse only' : 'Show reverse only'}
+                          onClick={() => setDealReverse(!dealReverse())}
+                        >
+                          <ReverseSparkles />
+                          <span>{game().id === 'pokemon' ? 'Reverse' : 'Foil'}</span>
+                        </button>
+                      </div>
                     </Show>
+                  </div>
+                  <div class="band-actions">
                     <OfferBar
+                      buy={buy}
                       card={card()}
                       cardId={cardId}
-                      ready={offersReady()}
                       above={canBuy()}
                       condition={shownCond()}
                       language={shownLang()}
                       languages={allDealLangs()}
                       pinned={pinnedCurrency()}
                       askFor={(cond, lang) => matchDeal(nativeLive(), lang, cond, card())?.pricePkn}
-                      onBuyNow={() => document.querySelector('.hero-deal .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                      onBuyNow={() => document.querySelector('.desk-band .buy-btn')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
                     />
+                    {/* With nothing to buy the price slot already says so: no dead button beside it. */}
+                    <Show when={!offersReady() || canBuy()}>
+                      <Show
+                        when={canBuy()}
+                        fallback={<span class="btn ghost buy-btn" aria-hidden="true">Add to cart</span>}
+                      >
+                        <button
+                          class="btn buy-btn"
+                          type="button"
+                          onClick={() => {
+                            const row = card();
+                            track(Action.buyIntent, row);
+                            addToCart(cartItemFromOffer(row, snapshot(dealPick())));
+                            navigate('/cart');
+                          }}
+                        >
+                          Add to cart
+                        </button>
+                      </Show>
+                    </Show>
                   </div>
-                </section>
-              </div>
+                </div>
+              </section>
 
-              <div class="shop-split">
-              <section class={['panel shop-panel vault-panel', { 'is-empty': !split().vault.length }]}>
-                <header class="panel-head shop-head">
-                  <h2 class="shop-label vault-title">
-                    <Ico name="vault" />
-                    <span>Vault</span>
-                  </h2>
-                </header>
-                <Show
-                  when={split().vault.length}
-                  fallback={(
-                    <div class="empty-shop">
-                      <p class="status">{offersReady() ? 'Nothing in the Vault' : ' '}</p>
-                    </div>
-                  )}
-                >
+              <CheapestListings
+                rows={nativeLive()}
+                card={card()}
+                ready={offersReady()}
+                marketPrice={salesSeries()?.lastMedianPkn}
+                max={deskRows()}
+                open={shopOpen()}
+                mineIds={mineIds()}
+                listingBusy={listingBusy()}
+                onCart={addListingToCart}
+                onInspect={openZoom}
+                onEdit={(offer) => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
+                onCancel={(offer) => cancelMine([offer.id])}
+                onSeeAll={scrollShop}
+              />
+              <BuyOffers
+                buy={buy}
+                condition={shownCond()}
+                language={shownLang()}
+                pinned={pinnedCurrency()}
+                max={deskRows()}
+                onCondition={pickOfferCondition}
+              />
+
+              {/* Pokoin's own stock gets its own row, and only when there is some:
+                  an empty Vault is not a panel, at any width. */}
+              <Show when={split().vault.length}>
+                <section class="panel shop-panel vault-panel">
+                  <header class="panel-head shop-head">
+                    <h2 class="shop-label vault-title">
+                      <Ico name="vault" />
+                      <span>Vault</span>
+                    </h2>
+                  </header>
                   <ShopList offers={split().vault} deskCard={card()}>
                     <For each={split().vault}>
                       {(offer) => (
@@ -1333,7 +1517,7 @@ function CardDesk(props) {
                           dragOffers={shopDragOffers(split().vault, listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
-                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
+                          onCart={(qty) => addListingToCart(offer, qty)}
                           onInspect={openZoom}
                           onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
                           onCancel={() => cancelMine([offer.id])}
@@ -1341,75 +1525,77 @@ function CardDesk(props) {
                       )}
                     </For>
                   </ShopList>
-                </Show>
-              </section>
-              <section class="panel shop-panel shop-terminal" aria-label="Shop">
-                <h2 class="sr-only">Shop</h2>
-                <Show when={split().shop.length || condition() || language()}>
-                  <ShopHeader
-                    condition={condition()}
-                    language={language()}
-                    languages={languages()}
-                    sort={offerSort()}
-                    onCondition={setCondition}
-                    onLanguage={setLanguage}
-                    onSort={setOfferSort}
-                  />
-                </Show>
-                <Show when={shopError()}><p class="sell-msg error">{shopError()}</p></Show>
-                <Show
-                  when={split().shop.length}
-                  fallback={(
-                    <div class="empty-shop">
-                      <Show when={offersReady()} fallback={<p class="status"> </p>}>
-                        <Show
-                          when={condition() || language()}
-                          fallback={(
-                            <>
-                              <p class="status">No Pokoin listings for this card yet.</p>
-                              <Show when={salesSeries()?.lastMedianPkn}>
-                                <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
-                              </Show>
-                            </>
-                          )}
-                        >
-                          <p class="status">
-                            No listings match these filters.{' '}
-                            <button
-                              type="button"
-                              class="shop-clear"
-                              onClick={() => { setCondition(''); setLanguage(''); }}
-                            >
-                              Clear filters
-                            </button>
-                          </p>
+                </section>
+              </Show>
+              {/* See all opens the full Shop in place, as the desk's last row. */}
+              <Show when={shopOpen()}>
+                <section class="panel shop-panel shop-terminal" aria-label="Shop">
+                  <h2 class="sr-only">Shop</h2>
+                  <Show when={split().shop.length || condition() || language()}>
+                    <ShopHeader
+                      condition={condition()}
+                      language={language()}
+                      languages={languages()}
+                      sort={offerSort()}
+                      onCondition={setCondition}
+                      onLanguage={setLanguage}
+                      onSort={setOfferSort}
+                    />
+                  </Show>
+                  <Show when={shopError()}><p class="sell-msg error">{shopError()}</p></Show>
+                  <Show
+                    when={split().shop.length}
+                    fallback={(
+                      <div class="empty-shop">
+                        <Show when={offersReady()} fallback={<p class="status"> </p>}>
+                          <Show
+                            when={condition() || language()}
+                            fallback={(
+                              <>
+                                <p class="status">No Pokoin listings for this card yet.</p>
+                                <Show when={salesSeries()?.lastMedianPkn}>
+                                  <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
+                                </Show>
+                              </>
+                            )}
+                          >
+                            <p class="status">
+                              No listings match these filters.{' '}
+                              <button
+                                type="button"
+                                class="shop-clear"
+                                onClick={() => { setCondition(''); setLanguage(''); }}
+                              >
+                                Clear filters
+                              </button>
+                            </p>
+                          </Show>
                         </Show>
-                      </Show>
-                    </div>
-                  )}
-                >
-                  <ShopList offers={split().shop} deskCard={card()}>
-                    <For each={split().shop}>
-                      {(offer) => (
-                        <ShopListingRow
-                          offer={offer}
-                          card={card()}
-                          mine={mineIds().includes(offer.id)}
-                          selected={listingSelected().has(listingSelectId(offer))}
-                          dragOffers={shopDragOffers(split().shop, listingSelected(), offer)}
-                          listingBusy={listingBusy()}
-                          editing={editingOffer()?.id === offer.id}
-                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
-                          onInspect={openZoom}
-                          onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
-                          onCancel={() => cancelMine([offer.id])}
-                        />
-                      )}
-                    </For>
-                  </ShopList>
-                </Show>
-              </section>
-              </div>
+                      </div>
+                    )}
+                  >
+                    <ShopList offers={split().shop} deskCard={card()}>
+                      <For each={split().shop}>
+                        {(offer) => (
+                          <ShopListingRow
+                            offer={offer}
+                            card={card()}
+                            mine={mineIds().includes(offer.id)}
+                            selected={listingSelected().has(listingSelectId(offer))}
+                            dragOffers={shopDragOffers(split().shop, listingSelected(), offer)}
+                            listingBusy={listingBusy()}
+                            editing={editingOffer()?.id === offer.id}
+                            onCart={(qty) => addListingToCart(offer, qty)}
+                            onInspect={openZoom}
+                            onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
+                            onCancel={() => cancelMine([offer.id])}
+                          />
+                        )}
+                      </For>
+                    </ShopList>
+                  </Show>
+                </section>
+              </Show>
             </div>
 
             <Show when={later()}>
