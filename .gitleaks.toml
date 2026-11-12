@@ -1,0 +1,124 @@
+# Gitleaks policy for pokoin-web. See docs/SECRETS.md.
+#
+# Real credentials live in Infisical and never in this repository. Every entry
+# below suppresses a string that is public by construction or a test fixture.
+#
+# gitleaks matches `paths` and `regexes` of one allowlist entry with OR, so
+# adding `regexes` to an entry that already has `paths` does not narrow it: a
+# `paths` entry suppresses every rule over the whole file. Therefore `paths` is
+# used only for data/asset files that cannot hold a credential at all, and code
+# findings are suppressed by `regexTarget = "line"` entries anchored on the
+# surrounding identifier — a real secret elsewhere in the same file (or on a
+# line that does not name that identifier) is still reported.
+
+[extend]
+useDefault = true
+
+# Public image file keys of the marketplace site-map tiles, shipped to the
+# browser as-is by /marketplace. Data file, not a credential store.
+[[allowlists]]
+description = "public site-map image keys in a shipped data file"
+paths = ['''market/public/data/site-map-images\.json$''']
+
+# zstd compression dictionaries of card names baked into the Rust API binary.
+# Binary asset: name tokens read as high-entropy strings to the generic rule.
+[[allowlists]]
+description = "card-name compression dictionary asset"
+paths = ['''pokoin-rust/apps/api/assets/[^/]*\.dict$''']
+
+# The Firebase *web* config: initializeApp() options are sent to every browser
+# and are protected by the Firebase Auth domain allowlist, not by secrecy.
+# Not narrowed to an identifier because a global `apiKey:` line rule would hide
+# real apiKey credentials in every other file; the blast radius here is one
+# file whose whole contents are public by design. Service accounts and private
+# keys belong in Infisical, never in this file.
+[[allowlists]]
+description = "public Firebase web app config shipped to every browser"
+paths = ['''market/src/firebase-client\.js$''']
+
+# Browser storage keys (localStorage / IndexedDB names). Names of client-side
+# slots, not credentials; their contents are session hints only.
+[[allowlists]]
+description = "localStorage key name for the landing binder page"
+regexTarget = "line"
+regexes = ['''\bexport const LANDING_BINDER_KEY\b''']
+
+[[allowlists]]
+description = "localStorage key name for cached cart recommendation rails"
+regexTarget = "line"
+regexes = ['''\bconst RECS_KEY =''']
+
+[[allowlists]]
+description = "IndexedDB store name for stored artist albums"
+regexTarget = "line"
+regexes = ['''\bconst ARTIST_STORED_KEY =''']
+
+# Stripe price *lookup keys* are the public lookup names of Price objects
+# (visible in the Stripe dashboard and in checkout metadata); the secret is the
+# API key, which never appears in this array.
+[[allowlists]]
+description = "public Stripe price lookup key names of the PKN packages"
+regexTarget = "line"
+regexes = ['''\{\s*label: '[^']*', fiatCents: \d+, lookupKey: '[a-z0-9_]+' \},''']
+
+# #[cfg(test)] fixtures in pokoin-rust/crates/external/src/cardtrader/client.rs:
+# the header of these JWTs carries only `alg` and the payload only `sub`, with a
+# 12-char signature, i.e. not a verifiable token. Anchored on the token-cleaning
+# test helper and its two fixture locals, so a real token elsewhere in the file
+# (or on any other assertion) is still reported.
+[[allowlists]]
+description = "synthetic JWTs used by the clean_token unit test"
+regexTarget = "line"
+regexes = ['''\bclean_token\(''', '''\blet (wrapped|bounded) =''']
+
+# #[cfg(test)] fixture in cardtrader/zero.rs: a dummy 64-hex value pushed into
+# the environment to exercise token encryption of the fake-remote test harness.
+# Anchored on the set_var call of that key name, so a real key read from the
+# environment in production code is unaffected.
+[[allowlists]]
+description = "dummy CARDTRADER_TOKEN_ENCRYPTION_KEY set inside a test"
+regexTarget = "line"
+regexes = ['''std::env::set_var\("CARDTRADER_TOKEN_ENCRYPTION_KEY"''']
+
+# #[cfg(test)] seller-grant keys in accounts/src/domain/cardrails.rs and
+# accounts/tests/cardrails.rs: 32 lowercase hex chars assigned to a local `key`
+# by the grant-sealing tests. A real credential would not be a bare hex literal
+# in that statement shape, and any other leak in those files is still reported.
+[[allowlists]]
+description = "hex seller-grant test fixture in the cardrails tests"
+regexTarget = "line"
+regexes = ['''\blet key = "[0-9a-f]{32}";''']
+
+# Throwaway 2048-bit RSA test key: generated for the accounts test harness,
+# embedded on purpose so the suite is hermetic, and used only to sign the JWKS
+# responses the verifier rejects/matches in tests. Anchored on the constant name.
+[[allowlists]]
+description = "TEST_PRIVATE_KEY_PEM, a generated key used only by tests"
+regexTarget = "line"
+regexes = ['''\bpub const TEST_PRIVATE_KEY_PEM\b''']
+
+# #[cfg(test)] fixtures: a 32-char UTF-8 address-key test vector in
+# commerce/src/domain/address.rs, a leftover CDN file name in edge/src/cdn.rs,
+# and a Discord holder key of the shape `discord_<id>` in
+# accounts/src/domain/poko_bets.rs. Each anchored on its test identifier.
+[[allowlists]]
+description = "utf8_key address-parsing test vector"
+regexTarget = "line"
+regexes = ['''\blet utf8_key =''']
+
+[[allowlists]]
+description = "leftover CDN image file name asserted by a cdn.rs test"
+regexTarget = "line"
+regexes = ['''assert_eq!\(hit\.key, "[0-9]+_[A-Za-z0-9_-]+\.(jpg|jpeg|png|webp)"\);''']
+
+[[allowlists]]
+description = "discord_<user id> holder key of a poko_bets test"
+regexTarget = "line"
+regexes = ['''\bkey: "discord_[0-9]+"\.into\(\)''']
+
+# scripts/cardtrader-scan-fetch.test.py: the leftover image name (`<ct id>_<name>.jpg`)
+# that the mocked fetch tests store under. A CDN object key, not a credential.
+[[allowlists]]
+description = "leftover scan image file name used by the scan-fetch tests"
+regexTarget = "line"
+regexes = ['''\bkey="[0-9]+_[A-Za-z0-9-]+\.jpg"''']
