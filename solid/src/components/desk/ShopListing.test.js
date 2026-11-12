@@ -35,6 +35,19 @@ test('shop rows show message + cart icons and a qty picker; drags carry the pick
   assert.match(row, /writeListingDrag\(event, \{ \.\.\.mixed, qty: pick\(\), stock: choices\(\) \}\)/);
 });
 
+test('a compact book row is the same row on one line: no facets, no photos, no message', () => {
+  assert.match(row, /'is-compact': props\.compact/);
+  assert.match(row, /<Show when=\{photos\(\)\.length && !props\.compact\}>/);
+  assert.match(row, /!props\.anonymous && !props\.compact/);
+  // A single copy is the row's own space back; the picker above one is still there.
+  assert.match(row, /fallback=\{<Show when=\{!props\.compact\}><span class="ct-qty is-single"/);
+  const css = read('../../../../market/src/styles.css');
+  assert.match(css, /\.deal-book \.shop-row \{[^}]*height: var\(--deal-book-row\)/);
+  assert.match(css, /\.deal-book \.shop-offer \{[^}]*display: flex/);
+  // The list itself is not a grid: a heading and one line per listing, top down.
+  assert.match(css, /\.deal-book-list \{[^}]*display: flex/);
+});
+
 test('chat tags carry a qty stepper and a yellow qty badge', () => {
   const tag = read('../ChatListingTag.jsx');
   const stepper = read('../QtyStepper.jsx');

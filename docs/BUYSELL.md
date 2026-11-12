@@ -43,6 +43,15 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 ## Where the UI lives
 
 - `market/src/buy-orders.js`: client calls and the pure helpers (tested in `buy-orders.test.js`).
+- `solid/src/lib/buy-book.js`: the desk's one buy-order book. It loads `GET /api/marketplace-buy-book?card_id=` once,
+  after the listings and at idle, and hands the same signal to the offer bar and to the book rows, so the panel never
+  asks twice. It also keeps the ids posted from this page (`mine`): the book never names a buyer, so that list is what
+  stops your own offer coming back as Sell. If the request fails the book is `null` and neither surface is drawn;
+  `?mypokoinPreview` serves the fixture book and makes no request.
+- `market/src/deal-book.js`: what the Best Deal panel shows in the space left under its chips (tested in
+  `deal-book.test.js`) — which listings count as the other sellers of the picked facet, the `See all N listings`
+  count, which book rows show and in what order, and how many whole rows of each fit a measured height
+  (`DEAL_BOOK_METRICS`, the same numbers `styles.css` sizes `.deal-book` from).
 - `solid/src/components/desk/OfferBar.jsx`: the offer bar inside the Best Deal panel, directly above Add to cart (or at
   the bottom of the panel when nobody lists the card). It is as big as Add to cart and has three segments:
   `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Nothing ever expands inside the panel; only the one-line
@@ -64,7 +73,30 @@ display name. Languages are the 16 codes of the price book (the listing form's `
     the account country's), labelled "Price (DKK)". `offerPricePkn` / `offerPriceInput` in `buy-orders.js` wrap
     `listingPriceToPkn` and `priceInputFromPkn`, the listing form's own conversion, so the two forms agree. Labels and
     notes use `offerPriceLabel` (the listing form's "Lists at" formatter); a PKN display currency shows PKN.
-  - The book loads after the listings (props.ready); if the request fails the bar is not drawn.
+  - The book loads after the listings (`lib/buy-book.js`, at idle) once for the whole desk; if the request fails the book
+  is `null`, and with it the bar and the Buy offers rows.
+- **Book rows** (`solid/src/components/deal/DealBook.jsx`) fill the space the chips leave above the bar, between them and
+  `deal-actions`, with two blocks — **Other sellers** and **Buy offers**, each headed by a `.shop-label` (the seller
+  icon, the two-tone BuySell mark) and each rendering nothing at all when it has no row, so a card with neither looks
+  exactly as it did. `Other sellers` are the next-cheapest Pokoin listings of the facet the chips picked — never the
+  listing Best Deal shows, never Vault stock — drawn as real `ShopListingRow`s in `compact` mode, so the price, the
+  copies picker, the cart button and the own-listing edit/cancel actions are the Shop's, not a copy of them. Under them
+  `See all N listings` scrolls to the Shop panel and moves focus to its header row; it is hidden when Best Deal plus
+  these rows already cover every Pokoin listing. `Buy offers` is the book's `selectionBid` per grade for the picked
+  language, best price first: the grade chip picks that facet (`setDealCond`, `setDealLang`), the price follows the
+  bar's currency rule (`buyerParts(pkn, true, pinnedCurrency())`), the line says `N <grade> wanted`, and `Sell` — only
+  on a grade with a `best_order_id` the visitor did not post (`buyOfferSellable`) — opens the bar's Define offer popup
+  on that grade, where the existing Sell now form and its `best_remaining` cap live. Nothing expands inside the panel.
+- **The book never grows the panel.** Above 1100px the stretched column has spare height under the chips, so `.deal-book`
+  is the flex child that eats it (`flex: 1 1 0; min-height: 0; overflow: hidden`) — a scroll container contributes no
+  minimum height of its own, which is what keeps Best Deal from ever outgrowing the centre column — and `DealBook`
+  measures its `clientHeight` (plus `--deal-book-row/-gap/-head/-more/-block`, read back with `getComputedStyle` so CSS
+  and `DEAL_BOOK_METRICS` cannot drift) and asks `planDealBook()` for whole rows only: the two lists alternate, each
+  heading and the See all line is reserved before it is drawn, and a list with no row is dropped so the other takes the
+  space. The whole list is `.deal-book-list { display: flex }`, never a grid — a grid row takes the tallest cell, and a
+  row would then cost more than it is charged. At 1100px and below the desk stacks and nothing is measured:
+  `dealBookUncut()` caps each list at three rows, two at 720px and below, plus the See all line, so a stacked panel is
+  never clipped.
 - Best Deal's two-line price is flipped (`PriceStack flip`, order in `market/src/price-stack.js`): the local currency is the
   large yellow figure and the PKN amount the small line above it. A single price is unchanged. Tiles, shop rows, search and
   cart keep the old order.
@@ -77,4 +109,6 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 
 `?mypokoinPreview` on a card page or on `/buysell` (the MyPokoin switch: dev build, or host `localhost` /
 `127.0.0.1`; never on a production host) shows fixture offers from `solid/src/pages/buysell-preview-fixture.js`
-without calling the API or signing in. Posting, Sell now, Edit and Cancel do nothing in preview.
+without calling the API or signing in. Posting, Sell now, Edit and Cancel do nothing in preview. On the desk the
+fixture book feeds both surfaces at once — the offer bar and the Best Deal Buy offers rows — while Other sellers
+still comes from the card's real listings.
