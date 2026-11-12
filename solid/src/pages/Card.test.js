@@ -195,8 +195,9 @@ test('the desk loads one buy book and hands it to the bar and the Buy offers cel
   // What a sell intent opens instead, on the desk.
   assert.match(page, /import QuickSellDialog from '\.\.\/components\/buysell\/QuickSellDialog\.jsx'/);
   assert.match(page, /<Show when=\{buy\.sellPick\(\)\} keyed>/);
-  // `keyed` because every intent is a new target: the same row twice is a fresh dialog.
-  assert.match(page, /<QuickSellDialog\n\s+target=\{pick\(\)\}/);
+  // `keyed` because every intent is a new target: the same row twice is a fresh
+  // dialog, and a keyed Show hands the value itself, not an accessor.
+  assert.match(page, /<QuickSellDialog\n\s+target=\{pick\}/);
   assert.match(page, /card=\{sellCard\(\)\}\n\s+pinned=\{pinnedCurrency\(\)\}\n\s+preview=\{buy\.preview\}\n\s+fromPath=\{fromPath\(\)\}\n\s+onClose=\{buy\.closeSell\}\n\s+onDone=\{\(\) => buy\.reload\(\)\}/);
   // The book names nobody: the desk never passes a buyer name it does not have.
   assert.doesNotMatch(page.slice(page.indexOf('<QuickSellDialog'), page.indexOf('<QuickSellDialog') + 800), /buyerName=/);

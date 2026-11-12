@@ -1766,7 +1766,7 @@ function CardDesk(props) {
             <Show when={buy.sellPick()} keyed>
               {(pick) => (
                 <QuickSellDialog
-                  target={pick()}
+                  target={pick}
                   cardId={cardId}
                   card={sellCard()}
                   pinned={pinnedCurrency()}

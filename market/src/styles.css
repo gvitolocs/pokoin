@@ -12504,6 +12504,7 @@ img.is-lang-scan {
 /* The note is what the seller wrote, so it is body text, not label text. */
 .qs-field textarea {
   color: #fff;
+  font-family: inherit;
   font-size: 0.85rem;
   font-weight: 600;
 }
