@@ -317,15 +317,26 @@ pub fn build_seller_sale_email(order_id: &str, group: &SellerGroup) -> EmailMess
     }
 }
 
+/// Heading of the seller's private note in the buyer's email.
+pub const SELLER_NOTE_LABEL: &str = "Seller's note";
+/// The same note on a sale into Pokoin's starting offer goes to Pokoin.
+pub const HOUSE_NOTE_LABEL: &str = "Note to Pokoin";
+
 /// Email to a buyer whose open buy order a seller just listed into
 /// (BuySell "Sell now"). The listing is at the buyer's own price; nothing is
-/// charged until the buyer buys it through the cart.
+/// charged until the buyer buys it through the cart. `seller_note` is the
+/// seller's private note, already validated (folded, trimmed, plain); empty
+/// means the seller wrote nothing and the email reads exactly as it did
+/// before notes existed. `note_label` heads it, since the starting offer is
+/// addressed to Pokoin rather than to a member buyer.
 pub fn build_buy_order_fill_email(
     buyer_name: &str,
     card_name: &str,
     card_id: &str,
     price_pkn: f64,
     quantity: i64,
+    seller_note: &str,
+    note_label: &str,
 ) -> EmailMessage {
     let buyer = if buyer_name.trim().is_empty() {
         "there".to_string()
@@ -348,7 +359,7 @@ pub fn build_buy_order_fill_email(
         format!("{quantity} copies")
     };
     let subject = format!("A seller listed {card} at your offer price");
-    let text = [
+    let mut text_lines = vec![
         format!("Hi {buyer},"),
         String::new(),
         format!("A seller listed {copies} of {card} at your offer price of {price} each."),
@@ -357,15 +368,31 @@ pub fn build_buy_order_fill_email(
         String::new(),
         "Your offer moves no money. You only pay when you buy the listing through your cart."
             .to_string(),
-    ]
-    .join("\n");
+    ];
+    if !seller_note.is_empty() {
+        text_lines.push(String::new());
+        text_lines.push(format!("{note_label}:"));
+        text_lines.push(seller_note.to_string());
+    }
+    let text = text_lines.join("\n");
+    // A note is a block of its own, set off from the email's own words; with
+    // none the `{}` is empty and this is the byte-for-byte old body.
+    let note_block = if seller_note.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<p style=\"margin:16px 0;padding:12px 14px;border-left:4px solid #f5b301;background:#f8fafc\">\n        <strong>{note_label}</strong><br>\n        {}\n      </p>\n      ",
+            escape_html(seller_note).replace('\n', "<br>"),
+        )
+    };
     let html = format!(
-        "\n    <div style=\"font-family:Inter,Arial,sans-serif;line-height:1.6;color:#0f172a\">\n      <h1 style=\"margin:0 0 16px\">A seller listed a card you wanted</h1>\n      <p>Hi {},</p>\n      <p>A seller listed {} of <strong>{}</strong> at your offer price of {} each.</p>\n      <p><a href=\"{}\">Open the card and buy it</a></p>\n      <p style=\"color:#64748b;font-size:14px\">Your offer moves no money. You only pay when you buy the listing through your cart.</p>\n    </div>\n  ",
+        "\n    <div style=\"font-family:Inter,Arial,sans-serif;line-height:1.6;color:#0f172a\">\n      <h1 style=\"margin:0 0 16px\">A seller listed a card you wanted</h1>\n      <p>Hi {},</p>\n      <p>A seller listed {} of <strong>{}</strong> at your offer price of {} each.</p>\n      <p><a href=\"{}\">Open the card and buy it</a></p>\n      {}<p style=\"color:#64748b;font-size:14px\">Your offer moves no money. You only pay when you buy the listing through your cart.</p>\n    </div>\n  ",
         escape_html(&buyer),
         escape_html(&copies),
         escape_html(&card),
         escape_html(&price),
         escape_html(&url),
+        note_block,
     );
     EmailMessage {
         subject,
@@ -564,7 +591,15 @@ mod buy_order_email_tests {
 
     #[test]
     fn buy_order_fill_email_names_the_card_price_and_link() {
-        let message = build_buy_order_fill_email("Ash", "Pikachu <ex>", "202/1", 1250.0, 2);
+        let message = build_buy_order_fill_email(
+            "Ash",
+            "Pikachu <ex>",
+            "202/1",
+            1250.0,
+            2,
+            "",
+            SELLER_NOTE_LABEL,
+        );
         assert_eq!(
             message.subject,
             "A seller listed Pikachu <ex> at your offer price"
@@ -586,7 +621,7 @@ mod buy_order_email_tests {
 
     #[test]
     fn buy_order_fill_email_has_fallbacks() {
-        let message = build_buy_order_fill_email("  ", "", "77", 0.5, 1);
+        let message = build_buy_order_fill_email("  ", "", "77", 0.5, 1, "", SELLER_NOTE_LABEL);
         assert_eq!(
             message.subject,
             "A seller listed card 77 at your offer price"
@@ -594,5 +629,62 @@ mod buy_order_email_tests {
         assert!(message.text.contains("Hi there,"));
         assert!(message.text.contains("1 copy of card 77"));
         assert!(message.text.contains("0.5 PKN"));
+    }
+
+    /// What the buyer of a filled order was mailed before notes existed.
+    const NO_NOTE_TEXT: &str = "Hi Ash,\n\nA seller listed 2 copies of Pikachu at your offer price of 1250 PKN each.\n\nBuy it now before someone else does: https://pokoin.com/marketplace/en/cards/202\n\nYour offer moves no money. You only pay when you buy the listing through your cart.";
+    const NO_NOTE_HTML: &str = "\n    <div style=\"font-family:Inter,Arial,sans-serif;line-height:1.6;color:#0f172a\">\n      <h1 style=\"margin:0 0 16px\">A seller listed a card you wanted</h1>\n      <p>Hi Ash,</p>\n      <p>A seller listed 2 copies of <strong>Pikachu</strong> at your offer price of 1250 PKN each.</p>\n      <p><a href=\"https://pokoin.com/marketplace/en/cards/202\">Open the card and buy it</a></p>\n      <p style=\"color:#64748b;font-size:14px\">Your offer moves no money. You only pay when you buy the listing through your cart.</p>\n    </div>\n  ";
+
+    #[test]
+    fn an_email_without_a_note_is_the_old_one_exactly() {
+        let message =
+            build_buy_order_fill_email("Ash", "Pikachu", "202", 1250.0, 2, "", SELLER_NOTE_LABEL);
+        assert_eq!(
+            message.subject,
+            "A seller listed Pikachu at your offer price"
+        );
+        assert_eq!(message.text, NO_NOTE_TEXT);
+        assert_eq!(message.html, NO_NOTE_HTML);
+        assert!(!message.text.contains("note"));
+        assert!(!message.html.contains("note"));
+    }
+
+    #[test]
+    fn a_note_reaches_the_buyer_as_data_never_as_markup() {
+        let note = "<script>alert(\"x\")</script>\nline two";
+        let message =
+            build_buy_order_fill_email("Ash", "Pikachu", "202", 1250.0, 2, note, SELLER_NOTE_LABEL);
+        // The text part carries the note as the seller typed it, under its own
+        // heading after a blank line.
+        assert!(message
+            .text
+            .ends_with(&format!("\n{SELLER_NOTE_LABEL}:\n{note}")));
+        // The HTML part escapes it and turns its newlines into breaks.
+        assert!(message
+            .html
+            .contains("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;<br>line two"));
+        assert!(message.html.contains("<strong>Seller's note</strong>"));
+        assert!(!message.html.contains("<script>"));
+        // A block of its own, and the buy link is still there.
+        assert!(message.html.contains("border-left"));
+        assert!(message.html.contains("Open the card and buy it</a></p>"));
+    }
+
+    #[test]
+    fn the_starting_offer_note_is_headed_to_pokoin() {
+        let message = build_buy_order_fill_email(
+            "Pokoin",
+            "Clefable",
+            "777",
+            1.0,
+            2,
+            "packed in a sleeve",
+            HOUSE_NOTE_LABEL,
+        );
+        assert!(message
+            .text
+            .contains("\nNote to Pokoin:\npacked in a sleeve"));
+        assert!(message.html.contains("<strong>Note to Pokoin</strong>"));
+        assert!(!message.text.contains("Seller's note"));
     }
 }
