@@ -187,7 +187,13 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   // The cap is a viewport count, not a CSS hide, so See all counts what is cut.
   assert.match(page, /const deskRows = \(\) => dealBookRows\(deskWidth\(\)\)/);
   assert.match(page, /window\.addEventListener\('resize', onResize, \{ passive: true \}\)/);
-  assert.match(page, /import \{ dealBookRows \} from '@market\/deal-book\.js'/);
+  assert.match(page, /import \{ buyOfferSellable, dealBookRows \} from '@market\/deal-book\.js'/);
+  // The sell strip is the same one line signed in or out; the form opens from it.
+  assert.match(page, /sellNowNote=\{sellNowNote\(\)\}/);
+  assert.match(page, /onSellNow=\{sellNowRow\(\) \? \(\) => buy\.pickSell\(shownCond\(\)\) : undefined\}/);
+  const form = fs.readFileSync(new URL('../components/desk/ListingForm.jsx', import.meta.url), 'utf8');
+  assert.match(form, /const collapsed = \(\) => !isEditing\(\) && !opened\(\);/);
+  assert.match(form, /onClick=\{\(\) => setOpened\(false\)\}/);
 
   // Rows, price, quantity and cart are the Shop's own components.
   const rows = fs.readFileSync(new URL('../components/deal/CheapestListings.jsx', import.meta.url), 'utf8');
@@ -197,8 +203,10 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(rows, /<ShopListingRow[\s\S]*compact[\s\S]*showCard=\{false\}/);
   assert.match(rows, /See all \$\{count\(\)\} listings/);
   assert.match(rows, /aria-expanded=\{props\.open \? 'true' : 'false'\}/);
-  assert.match(rows, /No Pokoin listings for this card yet\./);
-  assert.match(rows, /<h2 class="shop-label cell-title">/);
+  assert.match(rows, /No listings yet\./);
+  // See all lives in the one-line title, not in a footer row under the rows.
+  assert.match(rows, /<h2 class="cell-title">[\s\S]*cell-more[\s\S]*<\/h2>/);
+  assert.doesNotMatch(rows.slice(rows.indexOf('</h2>')), /cell-more/);
 
   const cells = fs.readFileSync(new URL('../components/deal/BuyOffers.jsx', import.meta.url), 'utf8');
   assert.match(cells, /buyOfferRows\(book\(\), \{ language: props\.language, max: props\.max \}\)/);

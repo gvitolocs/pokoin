@@ -94,7 +94,8 @@ import {
 import { ownerGameChoice } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
-import { dealBookRows } from '@market/deal-book.js';
+import { buyOfferSellable, dealBookRows } from '@market/deal-book.js';
+import { selectionBid } from '@market/buy-orders.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
 import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
@@ -386,8 +387,13 @@ function CardDesk(props) {
   // paints that many fixture listings and asks the listings read for none.
   listingsSeq += 1;
   if (deskPreview) {
-    setOffers(previewListings(deskPreview, cardId));
-    setOffersReady(true);
+    // A store write is not allowed while the component is still being set up,
+    // so the fixture pile lands on the next microtask like a network answer.
+    queueMicrotask(() => {
+      if (disposed) return;
+      setOffers(previewListings(deskPreview, cardId));
+      setOffersReady(true);
+    });
   } else {
     refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
       if (!disposed) setOffersReady(true);
@@ -787,6 +793,21 @@ function CardDesk(props) {
   }
 
   /** A Buy offers row is a request for a facet: pick it, adding the chip when the language is unlisted. */
+  // The sell strip's Sell now: the best open offer for the facet the chips
+  // picked, when there is one and it is not the visitor's own.
+  const sellNowRow = () => {
+    const book = buy.book();
+    if (!Array.isArray(book)) return null;
+    const row = selectionBid(book, { condition: shownCond(), language: shownLang() });
+    return row && buyOfferSellable(row, buy.mine()) ? row : null;
+  };
+  const sellNowNote = () => {
+    const row = sellNowRow();
+    if (!row) return '';
+    const parts = buyerParts(row.best_price_pkn, true, pinnedCurrency());
+    return `Best offer for ${shownCond()} · ${shownLang()} is ${parts.local || parts.pkn || ''}`;
+  };
+
   function pickOfferCondition(row) {
     if (row?.language) chooseDealLang(row.language);
     if (row?.condition) setDealCond(row.condition);
@@ -1255,6 +1276,8 @@ function CardDesk(props) {
                   editing={editingOffer()}
                   onCancelEdit={() => setEditingOffer(null)}
                   onListed={onListed}
+                  sellNowNote={sellNowNote()}
+                  onSellNow={sellNowRow() ? () => buy.pickSell(shownCond()) : undefined}
                 />
               </div>
 

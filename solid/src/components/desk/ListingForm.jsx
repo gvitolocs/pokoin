@@ -516,10 +516,11 @@ export default function ListingForm(props) {
     }
   }
 
-  // A signed-out visitor came to buy: the sell form waits behind one button
-  // instead of being the biggest panel on the desk.
+  // Every visitor came to buy first, signed in or not: the sell form waits
+  // behind one strip instead of being the biggest panel on the desk. The strip
+  // is the same for both, so the desk has one layout.
   const [opened, setOpened] = createSignal(false);
-  const collapsed = () => authReady() && !signedIn() && !isEditing() && !opened();
+  const collapsed = () => !isEditing() && !opened();
 
   return (
     <Show
@@ -527,8 +528,16 @@ export default function ListingForm(props) {
       fallback={(
         <section class="panel sell-form is-collapsed">
           <div class="add-head">
-            <h2>Sell this card</h2>
-            <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            <h2>Have this card?</h2>
+            <Show when={props.sellNowNote}>
+              <span class="sell-strip-note">{props.sellNowNote}</span>
+            </Show>
+            <span class="sell-strip-actions">
+              <Show when={props.onSellNow}>
+                <button type="button" class="btn ghost sell-open sell-now" onClick={() => props.onSellNow()}>Sell now</button>
+              </Show>
+              <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            </span>
           </div>
         </section>
       )}
@@ -554,6 +563,11 @@ export default function ListingForm(props) {
             <Show when={isEditing()}>
               <button type="button" class="linkish sell-cancel-edit" onClick={() => props.onCancelEdit?.()}>
                 Cancel edit
+              </button>
+            </Show>
+            <Show when={!isEditing()}>
+              <button type="button" class="linkish sell-close" onClick={() => setOpened(false)}>
+                Close
               </button>
             </Show>
           </span>

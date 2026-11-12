@@ -28,16 +28,26 @@ export default function CheapestListings(props) {
       <h2 class="cell-title">
         <span class="shop-label"><Ico name="seller" size="14" />Cheapest listings</span>
         <span class="cell-count">{dealBookCount(rows().length, total())}</span>
+        <Show when={hidden()}>
+          {(count) => (
+            <button
+              type="button"
+              class="linkish cell-more"
+              aria-expanded={props.open ? 'true' : 'false'}
+              aria-label={props.open ? 'Hide the full shop' : `See all ${count()} listings`}
+              onClick={() => props.onSeeAll?.(count())}
+            >
+              {props.open ? 'Hide' : 'See all'}
+            </button>
+          )}
+        </Show>
       </h2>
       <Show
         when={rows().length}
         fallback={(
           <div class="empty-shop">
             <Show when={props.ready} fallback={<p class="status"> </p>}>
-              <p class="status">No Pokoin listings for this card yet.</p>
-              <Show when={props.marketPrice}>
-                <p class="status muted">The market price above is what it recently sold for, not an offer.</p>
-              </Show>
+              <p class="status">No listings yet.</p>
             </Show>
           </div>
         )}
@@ -60,18 +70,6 @@ export default function CheapestListings(props) {
             )}
           </For>
         </div>
-        <Show when={hidden()}>
-          {(count) => (
-            <button
-              type="button"
-              class="linkish cell-more"
-              aria-expanded={props.open ? 'true' : 'false'}
-              onClick={() => props.onSeeAll?.(count())}
-            >
-              {props.open ? 'Hide the full shop' : `See all ${count()} listings`}
-            </button>
-          )}
-        </Show>
       </Show>
     </section>
   );
