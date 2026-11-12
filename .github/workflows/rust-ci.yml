@@ -88,11 +88,21 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
           free -m
-      - name: cargo test --workspace --locked
-        # Fewer parallel rustc/linker processes keeps memory under the 16 GB runner limit.
+      - name: cargo test --workspace --locked --no-run
+        # Build and run are separate steps with their own timeouts, so a hang or a lost runner shows where it happened.
+        timeout-minutes: 40
         env:
           CARGO_BUILD_JOBS: 3
-        run: cargo test --workspace --locked
+        run: |
+          (while sleep 60; do echo "monitor $(date +%T) $(free -m | awk 'NR==2{print "mem_avail_mb="$7}') $(df -h / | awk 'NR==2{print "disk_avail="$4}')"; done) &
+          cargo test --workspace --locked --no-run
+      - name: cargo test --workspace --locked
+        timeout-minutes: 40
+        env:
+          CARGO_BUILD_JOBS: 3
+        run: |
+          (while sleep 60; do echo "monitor $(date +%T) $(free -m | awk 'NR==2{print "mem_avail_mb="$7}') $(df -h / | awk 'NR==2{print "disk_avail="$4}')"; done) &
+          cargo test --workspace --locked
 
   changed:
     needs: changes
