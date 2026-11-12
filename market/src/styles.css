@@ -3420,6 +3420,29 @@ select.collector-badge.version-badge option {
     0 0 32px rgb(255 211 61 / 0.36);
 }
 
+/* On the card desk More versions is a circled plus at the end of the set-icon
+   row: the same round slot as the icons beside it, in the link's own yellow. */
+.more-versions.more-versions-ico,
+.more-versions.more-versions-ico.is-solo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--yellow);
+}
+
+.more-versions.more-versions-ico:hover,
+.more-versions.more-versions-ico:focus-visible {
+  background: rgb(255 211 61 / 0.14);
+  box-shadow: 0 0 14px rgb(255 211 61 / 0.4);
+}
+
 .versions-section {
   margin-top: 1.6rem;
   scroll-margin-top: 5.5rem;

@@ -1207,7 +1207,7 @@ function CardDesk(props) {
                   />
                   <Show when={setShortcuts().length || showMoreVersions() || reverseScan()}>
                     <div class="set-link tight version-links">
-                      <Show when={setShortcuts().length || reverseScan()}>
+                      <Show when={setShortcuts().length || reverseScan() || showMoreVersions()}>
                         <div class="version-shortcuts">
                           <For each={setShortcuts()} keyed={(row) => String(row.id)}>
                             {(row) => {
@@ -1259,12 +1259,21 @@ function CardDesk(props) {
                               <ReverseSparkles />
                             </button>
                           </Show>
+                          {/* More versions is the last circle in the row: a plus, not a text pill under it. */}
+                          <Show when={showMoreVersions()}>
+                            <a
+                              class={['set-shortcut', 'more-versions', 'more-versions-ico', { 'is-solo': !setShortcuts().length && !reverseScan() }]}
+                              href={gameHref(versionsHref(card(), lang))}
+                              title="More versions"
+                              aria-label="More versions"
+                            >
+                              <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="9.6" />
+                                <path d="M12 7.6v8.8M7.6 12h8.8" />
+                              </svg>
+                            </a>
+                          </Show>
                         </div>
-                      </Show>
-                      <Show when={showMoreVersions()}>
-                        <a class={['more-versions', { 'is-solo': !setShortcuts().length && !reverseScan() }]} href={gameHref(versionsHref(card(), lang))}>
-                          More versions...
-                        </a>
                       </Show>
                     </div>
                   </Show>
