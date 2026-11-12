@@ -17,6 +17,23 @@ use crate::firebase::decode_jwt_segment;
 pub const CARDTRADER_API_BASE_URL: &str = "https://api.cardtrader.com/api/v2";
 pub const PKN_USDT_PRICE: f64 = 0.005;
 
+/// Total deadline of `/products/export`, headers and body. CardTrader's API
+/// reference asks for a read timeout of 120-180 s on this call.
+pub const EXPORT_TIMEOUT_SECS_DEFAULT: u64 = 180;
+
+/// `CARDTRADER_EXPORT_TIMEOUT_SECS`: whole seconds, clamped to 20-600;
+/// missing, empty or unparsable gives [`EXPORT_TIMEOUT_SECS_DEFAULT`].
+fn export_timeout_from(raw: Option<&str>) -> Duration {
+    let secs = raw
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(EXPORT_TIMEOUT_SECS_DEFAULT, |secs| secs.clamp(20, 600));
+    Duration::from_secs(secs)
+}
+
+fn export_timeout_from_env() -> Duration {
+    export_timeout_from(std::env::var("CARDTRADER_EXPORT_TIMEOUT_SECS").ok().as_deref())
+}
+
 /// CardTrader names a 1-Day Ready app "<user> 1-Day Ready App <stamp>".
 pub fn is_one_day_ready_name(name: &str) -> bool {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
@@ -178,6 +195,7 @@ pub fn safe_info_metadata(info: &Value) -> Value {
 pub struct CardTraderClient {
     base: String,
     http: reqwest::Client,
+    export_timeout: Duration,
 }
 
 impl Default for CardTraderClient {
@@ -198,6 +216,7 @@ impl CardTraderClient {
                 .timeout(Duration::from_secs(20))
                 .build()
                 .expect("reqwest client"),
+            export_timeout: export_timeout_from_env(),
         }
     }
 
@@ -209,7 +228,14 @@ impl CardTraderClient {
                 .timeout(Duration::from_secs(20))
                 .build()
                 .expect("reqwest client"),
+            export_timeout: export_timeout_from_env(),
         }
+    }
+
+    /// Test seam: the total deadline of the products export.
+    pub fn with_export_timeout(mut self, timeout: Duration) -> Self {
+        self.export_timeout = timeout;
+        self
     }
 
     pub fn base(&self) -> &str {
@@ -229,6 +255,19 @@ impl CardTraderClient {
     }
 
     async fn send(&self, path: &str, token: &str, method: Method, body: Option<Value>) -> ApiResult<Sent> {
+        self.send_with_timeout(path, token, method, body, None).await
+    }
+
+    /// [`send`](Self::send) with `timeout` replacing the client's 20 s total
+    /// deadline for this one request.
+    async fn send_with_timeout(
+        &self,
+        path: &str,
+        token: &str,
+        method: Method,
+        body: Option<Value>,
+        timeout: Option<Duration>,
+    ) -> ApiResult<Sent> {
         let clean_path = if path.starts_with('/') { path.to_string() } else { format!("/{path}") };
         let token = clean_token(token);
         let mut request = self
@@ -240,6 +279,9 @@ impl CardTraderClient {
             request = request
                 .header("Content-Type", "application/json")
                 .json(&payload);
+        }
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
         }
         // No answer: CardTrader may still have applied a write (TRANSPORT_ERROR).
         let response = request
@@ -267,7 +309,10 @@ impl CardTraderClient {
     /// [`ProductsExport`]: read whole into a `Value`, a 12,523-product export
     /// took the reconcile job from 25 MB to 1.77 GB on the Pi (2026-10-10).
     pub async fn fetch_products_export(&self, token: &str) -> ApiResult<ProductsExport> {
-        let sent = self.send("/products/export", token, Method::GET, None).await?;
+        let started = std::time::Instant::now();
+        let sent = self
+            .send_with_timeout("/products/export", token, Method::GET, None, Some(self.export_timeout))
+            .await?;
         let status = sent.response.status().as_u16();
         if status >= 400 {
             let text = sent.response.text().await.unwrap_or_default();
@@ -280,11 +325,15 @@ impl CardTraderClient {
             let reader = ChunkReader { chunks: reader, current: bytes::Bytes::new() };
             ProductsExport::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader))
         });
+        let mut transport_error = None;
         loop {
             let chunk = match response.chunk().await {
                 Ok(Some(chunk)) => Ok(chunk),
                 Ok(None) => break,
-                Err(error) => Err(error.to_string()),
+                Err(error) => {
+                    transport_error = Some(error.to_string());
+                    Err(error.to_string())
+                }
             };
             let failed = chunk.is_err();
             // A closed channel means the parser already gave up on the body.
@@ -293,8 +342,19 @@ impl CardTraderClient {
             }
         }
         drop(chunks);
-        match parser.await {
-            Ok(Ok(export)) => Ok(export),
+        let parsed = parser.await;
+        if let Some(error) = transport_error {
+            return Err(ApiError::new(502, format!("CardTrader request failed: {error}")).with_code(TRANSPORT_ERROR));
+        }
+        match parsed {
+            Ok(Ok(export)) => {
+                tracing::info!(
+                    products = export.rows(),
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "cardtrader products/export read"
+                );
+                Ok(export)
+            }
             Ok(Err(error)) => {
                 tracing::warn!("cardtrader products/export unreadable: {error}");
                 Err(ApiError::new(502, "CardTrader products/export did not return an array."))
@@ -634,6 +694,65 @@ mod tests {
         let rejected = serve(401, br#"{"error_code":"unauthorized"}"#.to_vec()).await;
         let error = rejected.fetch_products_export("token").await.unwrap_err();
         assert_eq!((error.status, error.code.as_deref()), (400, Some("cardtrader_token_rejected")));
+    }
+
+    #[test]
+    fn export_timeout_is_clamped() {
+        let secs = |raw| export_timeout_from(raw).as_secs();
+        assert_eq!(secs(None), 180);
+        assert_eq!(secs(Some("240")), 240);
+        assert_eq!(secs(Some(" 90 ")), 90);
+        assert_eq!(secs(Some("5")), 20);
+        assert_eq!(secs(Some("100000")), 600);
+        assert_eq!(secs(Some("abc")), 180);
+        assert_eq!(secs(Some("")), 180);
+    }
+
+    /// Answers `/products/export` after `delay` with a two-row array.
+    async fn serve_slow(delay: Duration) -> CardTraderClient {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().fallback(move || async move {
+            tokio::time::sleep(delay).await;
+            (axum::http::StatusCode::OK, br#"[{"id":1,"blueprint_id":2},{"id":3,"blueprint_id":4}]"#.to_vec())
+        });
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        CardTraderClient::with_base(format!("http://{address}"))
+    }
+
+    #[tokio::test]
+    async fn products_export_has_its_own_deadline() {
+        let slow = serve_slow(Duration::from_secs(1)).await.with_export_timeout(Duration::from_millis(300));
+        let started = std::time::Instant::now();
+        let error = slow.fetch_products_export("token").await.unwrap_err();
+        assert!(started.elapsed() < Duration::from_millis(900), "took {:?}", started.elapsed());
+        assert!(error.message.starts_with("CardTrader request failed"), "{}", error.message);
+        assert_eq!(error.code.as_deref(), Some(TRANSPORT_ERROR));
+
+        let patient = serve_slow(Duration::from_secs(1)).await.with_export_timeout(Duration::from_secs(5));
+        let export = patient.fetch_products_export("token").await.unwrap();
+        assert_eq!((export.products.len(), export.unparsed_rows), (2, 0));
+        assert_eq!(export.products[1].id, "3");
+    }
+
+    #[tokio::test]
+    async fn products_export_stalled_body_is_a_transport_error() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = socket.read(&mut request).await;
+            let head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 60\r\n\r\n[{\"id\":1,\"blueprint_id\":2},";
+            socket.write_all(head.as_bytes()).await.unwrap();
+            socket.flush().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        });
+        let ct = CardTraderClient::with_base(format!("http://{address}")).with_export_timeout(Duration::from_millis(300));
+        let error = ct.fetch_products_export("token").await.unwrap_err();
+        assert!(error.message.starts_with("CardTrader request failed"), "{}", error.message);
+        assert_eq!(error.code.as_deref(), Some(TRANSPORT_ERROR));
     }
 
     #[test]
