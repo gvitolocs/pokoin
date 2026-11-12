@@ -12536,3 +12536,59 @@ img.is-lang-scan {
   font-weight: 800;
 }
 .deal-offer-lang .deal-flag { width: 16px; height: 16px; }
+
+/* Comparing sold series on the card desk graph.
+   The default facet's line stays under the picked one. A pick in the default's
+   language keeps the grade colours; a pick in another language uses the second
+   palette, so a language is never mistaken for a grade. */
+.sold-graph.is-alt.is-nm { --sold-line: #5fb8e8; --sold-fill: rgb(95 184 232 / 0.16); --sold-guide: rgb(95 184 232 / 0.45); }
+.sold-graph.is-alt.is-sp { --sold-line: #38d6c4; --sold-fill: rgb(56 214 196 / 0.15); --sold-guide: rgb(56 214 196 / 0.42); }
+.sold-graph.is-alt.is-mp { --sold-line: #e45fd0; --sold-fill: rgb(228 95 208 / 0.15); --sold-guide: rgb(228 95 208 / 0.42); }
+.sold-graph.is-alt.is-pl { --sold-line: #a78bfa; --sold-fill: rgb(167 139 250 / 0.16); --sold-guide: rgb(167 139 250 / 0.42); }
+.sold-graph.is-alt.is-poor { --sold-line: #ff8fb1; --sold-fill: rgb(255 143 177 / 0.15); --sold-guide: rgb(255 143 177 / 0.42); }
+.sold-graph.is-alt.is-all { --sold-line: #9ad7f5; --sold-fill: rgb(154 215 245 / 0.14); --sold-guide: rgb(154 215 245 / 0.4); }
+
+.sold-graph-under {
+  fill: none;
+  stroke: var(--under-line, #f3f4f7);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+.u-all { --under-line: #f3f4f7; }
+.u-nm { --under-line: #147a3f; }
+.u-sp { --under-line: #3dcf74; }
+.u-mp { --under-line: var(--yellow); }
+.u-pl { --under-line: #b87333; }
+.u-poor { --under-line: #e44545; }
+
+.sold-graph-legend {
+  position: absolute;
+  z-index: 4;
+  top: 0.35rem;
+  left: 2.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.9rem;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.sold-graph-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+.sold-graph-key::before {
+  content: "";
+  width: 0.95rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--under-line, #f3f4f7);
+}
+.sold-graph-key.is-picked { color: inherit; }
+.sold-graph-key.is-picked::before { background: var(--sold-line, var(--yellow)); }

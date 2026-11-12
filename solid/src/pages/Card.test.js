@@ -270,6 +270,30 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(page, /return \{ \.\.\.series, days: \[\], soldQty: 0, sampleCount: 0 \};/);
 });
 
+test('the sold graph compares the picked facet with the one the desk opened on', () => {
+  // The first facet shown is remembered once and stays on the graph.
+  assert.match(page, /const \[baseFacet, setBaseFacet\] = createSignal\(null\);/);
+  assert.match(page, /if \(!key \|\| untrack\(baseFacet\)\) return;/);
+  // Nothing is compared while the pick is the default itself, or "any".
+  assert.match(page, /if \(!base \|\| !cond \|\| !code \|\| \(cond === base\.cond && code === base\.lang\)\) return null;/);
+  // Another language than the default's switches the picked line to the second palette.
+  assert.match(page, /const graphAlt = \(\) => Boolean\(baseFacet\(\) && pickedLang\(\) && pickedLang\(\) !== baseFacet\(\)\.lang\);/);
+  assert.match(page, /under=\{graphUnder\(\)\}\s*alt=\{graphAlt\(\)\}\s*pickedLabel=\{pickedLabel\(\)\}/);
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  // Both series share one scale and one date range, and the default is drawn first (underneath).
+  assert.match(graph, /const values = \[\.\.\.rows, \.\.\.base\]\.map/);
+  assert.ok(graph.indexOf('class={[\'sold-graph-under\'') < graph.indexOf('class="sold-graph-line"'));
+  assert.match(graph, /class=\{\['panel sold-graph', `is-\$\{tone\(\)\}`, \{ 'is-alt': props\.alt \}\]\}/);
+  const css = fs.readFileSync(new URL('../../../market/src/styles.css', import.meta.url), 'utf8');
+  // The grade colours and the second palette never share a colour.
+  const colours = (prefix) => [...css.matchAll(new RegExp(`${prefix}\\.is-(nm|sp|mp|pl|poor) \\{\\s*--sold-line: ([^;]+);`, 'g'))].map((m) => m[2].trim());
+  const first = colours('\\n\\.sold-graph');
+  const second = colours('\\.sold-graph\\.is-alt');
+  assert.equal(first.length, 5);
+  assert.equal(second.length, 5);
+  assert.equal(new Set([...first, ...second]).size, 10);
+});
+
 test("See all opens the full Shop in place, as the desk's last row", () => {
   assert.match(page, /const \[shopOpen, setShopOpen\] = createSignal\(false\)/);
   assert.match(page, /<Show when=\{shopOpen\(\)\}>\s*<section class="panel shop-panel shop-terminal"/);
