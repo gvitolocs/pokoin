@@ -3767,6 +3767,32 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-targets-row { grid-area: targets; }
   .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-pkn-eq { order: 9; }
 
+  /* Editing a listing has no marketplace switch: Save changes is the price
+     row's own button. The row's fields join the form's grid, so the first line
+     reads price, currency, quantity, the pickers, then Save changes at the right
+     end; location and comment take the whole second line. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: minmax(6rem, 9rem) 6rem 4rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "head head head head head"
+      "price cur qty options save"
+      "place place place place place";
+    column-gap: 0.6rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing > .add-head + .sell-row { display: contents; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.price { grid-area: price; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.currency { grid-area: cur; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.qty { grid-area: qty; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn {
+    grid-area: save;
+    width: auto;
+    height: 2.5rem;
+    min-height: 0;
+    margin: 0;
+    padding: 0 1.2rem;
+    white-space: nowrap;
+  }
+
   /* On one line with the price inputs, the pickers and extras take the inputs'
      height and type size instead of their small stacked-form size. */
   .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row { align-items: stretch; }
