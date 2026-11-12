@@ -46,21 +46,32 @@ test('last-day tip anchors inside the chart instead of overflowing right', () =>
   assert.deepEqual(soldGraphTipMods(160, 80, 320, pad), []);
 });
 
-test('sold y-axis is 0–50 by tens, 0–500, then 0–2500 by 500s', () => {
+test('sold y-axis is five 1–2–2.5–5 steps sized to the data, never under tens', () => {
   assert.deepEqual(soldGraphScale(22).ticks, [0, 10, 20, 30, 40, 50]);
   assert.equal(soldGraphScale(50).max, 50);
-  assert.deepEqual(soldGraphScale(51).ticks, [0, 100, 200, 300, 400, 500]);
-  assert.deepEqual(soldGraphScale(220).ticks, [0, 100, 200, 300, 400, 500]);
-  assert.deepEqual(soldGraphScale(633).ticks, [0, 500, 1000, 1500, 2000, 2500]);
+  assert.deepEqual(soldGraphScale(51).ticks, [0, 20, 40, 60, 80, 100]);
+  assert.deepEqual(soldGraphScale(220).ticks, [0, 50, 100, 150, 200, 250]);
+  assert.deepEqual(soldGraphScale(633).ticks, [0, 200, 400, 600, 800, 1000]);
   assert.deepEqual(soldGraphScale(2500).ticks, [0, 500, 1000, 1500, 2000, 2500]);
   assert.deepEqual(soldGraphScale(2501).ticks, [0, 1000, 2000, 3000, 4000, 5000]);
   assert.equal(soldGraphScale(0).max, 50);
 });
 
-test('60k PKN uses 0–125k by 25k, not a flat 0–500k axis', () => {
+test('the axis follows the data: the highest value always sits in the upper half', () => {
+  // 7,000 PKN used to land on a 0–50k axis and read as a flat line on the floor.
+  assert.deepEqual(soldGraphScale(7000).ticks, [0, 2000, 4000, 6000, 8000, 10000]);
+  // Above the 0–50 floor (the smallest axis, kept so a 22 PKN card is not drawn on a 0–25 one).
+  for (const max of [51, 99, 101, 260, 999, 5001, 7000, 12000, 26000, 50001, 90000, 400000, 1234567]) {
+    const scale = soldGraphScale(max);
+    assert.ok(scale.max >= max, `${max} fits under ${scale.max}`);
+    assert.ok(max / scale.max >= 0.5, `${max} uses at least half of a 0–${scale.max} axis`);
+  }
+});
+
+test('large values keep round ticks: 0–100k by 20k, 0–125k by 25k', () => {
   assert.deepEqual(soldGraphScale(50000).ticks, [0, 10000, 20000, 30000, 40000, 50000]);
-  assert.deepEqual(soldGraphScale(50001).ticks, [0, 25000, 50000, 75000, 100000, 125000]);
-  assert.deepEqual(soldGraphScale(60794).ticks, [0, 25000, 50000, 75000, 100000, 125000]);
+  assert.deepEqual(soldGraphScale(50001).ticks, [0, 20000, 40000, 60000, 80000, 100000]);
+  assert.deepEqual(soldGraphScale(60794).ticks, [0, 20000, 40000, 60000, 80000, 100000]);
   assert.deepEqual(soldGraphScale(125000).ticks, [0, 25000, 50000, 75000, 100000, 125000]);
   assert.deepEqual(soldGraphScale(125001).ticks, [0, 50000, 100000, 150000, 200000, 250000]);
   assert.equal(formatSoldAxisTick(25000), '25k');

@@ -147,29 +147,19 @@ export function activeSoldIndex(hover, dayCount) {
   return hover;
 }
 
-/** 0–50 by tens, 0–500, 0–2500, 0–5000, 0–50k, then 0–125k by 25k (2.5–5–10). */
+/**
+ * Five steps from zero, sized to the data: the smallest 1–2–2.5–5 step (times a
+ * power of ten, never under 10) whose fifth tick reaches the highest value. The
+ * line always uses at least half the plot's height, so 7,000 PKN reads on a
+ * 0–10,000 axis rather than lying flat on a 0–50k one.
+ */
 export function soldGraphScale(maxValue) {
   const max = Math.max(0, Number(maxValue) || 0);
   let step = 10;
-  while (step * 5 < max) {
-    if (step < 10000) {
-      if (step === 100) {
-        step = 500;
-      } else if (step === 500) {
-        step = 1000;
-      } else {
-        step *= 10;
-      }
-    } else {
-      const mag = 10 ** Math.floor(Math.log10(step));
-      const lead = step / mag;
-      if (lead < 2.5) {
-        step = 2.5 * mag;
-      } else if (lead < 5) {
-        step = 5 * mag;
-      } else {
-        step = 10 * mag;
-      }
+  for (let mag = 10; step * 5 < max; mag *= 10) {
+    for (const lead of [1, 2, 2.5, 5]) {
+      step = lead * mag;
+      if (step * 5 >= max) break;
     }
   }
   const top = step * 5;
