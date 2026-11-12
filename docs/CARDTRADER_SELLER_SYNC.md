@@ -359,6 +359,16 @@ when a product newly left the export. The export is parsed while it downloads
 and only the fields the reconcile reads are kept: read whole as JSON, a
 12,523-product export took the job to 1.77 GB on the 4 GB Pi (2026-10-10).
 
+2026-11-12: the export call (`/products/export`) has its own total timeout,
+180 s by default, matching CardTrader's documented 120-180 s read timeout for
+large collections. `CARDTRADER_EXPORT_TIMEOUT_SECS` (20-600) overrides it.
+Every other CardTrader call keeps the 20 s client timeout. The 20 s deadline
+failed the reconcile for a ~12,150-product seller on 2026-11-11 16:38-22:57 CET
+and again on 2026-11-12, because the export sometimes needs more than 20 s. A
+transport error while the body streams is now reported as a transport error,
+not as an export that is not an array, and each successful export logs its
+product count and read time.
+
 The sync ships in the Rust release (`scripts/deploy-pokoin-rust.sh`). The
 periodic run is the native job `pokoin-rust-job@cardtrader-seller-reconcile`
 (`deploy/systemd/pokoin-rust-job-cardtrader-seller-reconcile.timer`, installed
