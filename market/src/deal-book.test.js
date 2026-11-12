@@ -7,6 +7,7 @@ import {
   buyOfferRows,
   buyOfferSellable,
   dealBookMeasured,
+  dealBookPlan,
   dealBookRows,
   otherSellerRows,
   planDealBook,
@@ -176,4 +177,16 @@ test('the plan falls back to the shared row heights when the desk does not measu
   assert.deepEqual(got.sellers.map((row) => row.pricePkn), [200]);
   assert.equal(got.offers.length, 0, 'no book, no offers');
   assert.equal(got.more, 0, 'Best Deal and this row cover the card');
+});
+
+test('the plan follows the viewport: caps when the desk stacks, measured rows when it stretches', () => {
+  const rows = listings(100, 200, 300, 400, 500, 600, 700);
+  const book = ['NM', 'SP', 'MP', 'PL'].map((condition) => ({ condition, language: 'EN', best_price_pkn: 1000, quantity: 1, orders: 1 }));
+  const facet = { rows, deal: rows[0], book, ...EN_NM };
+  const shape = (p) => [p.sellers.length, p.offers.length, p.more];
+
+  assert.deepEqual(shape(dealBookPlan({ ...facet, width: 390, available: 0 })), [2, 2, 7], 'phone: two rows per list and the link');
+  assert.deepEqual(shape(dealBookPlan({ ...facet, width: 1000, available: 0 })), [3, 3, 7], 'no spare height to measure, so the caps decide');
+  assert.deepEqual(shape(dealBookPlan({ ...facet, width: 1000, available: 40 })), [3, 3, 7], 'a stacked panel is never clipped');
+  assert.deepEqual(shape(dealBookPlan({ ...facet, width: 1360, available: 0 })), [0, 0, 0], 'the measured desk waits for room');
 });

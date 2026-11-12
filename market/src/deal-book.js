@@ -2,7 +2,7 @@
  * The card desk's Best Deal book: the other sellers of the facet the chips
  * selected, the buy offers for it, and how many whole rows fit the spare height
  * of the column. Framework-free; solid/src/components/deal/DealBook.jsx renders
- * what planDealBook() returns, so nothing here touches the DOM.
+ * what dealBookPlan() returns, so nothing here touches the DOM.
  *
  * The book never grows the panel: it only fills what the stretched column leaves
  * free above the offer bar, and a list with no room renders no rows at all.
@@ -152,4 +152,36 @@ export function planDealBook({
     if (!plan.sellers.length) plan = pack([], offers, available, metrics, false);
   }
   return { ...plan, more: more(plan.sellers) };
+}
+
+/** The stacked desk has no spare height to measure: the caps alone decide the book. */
+export function dealBookUncut({
+  rows = [],
+  deal = null,
+  book = [],
+  language = '',
+  condition = '',
+  card = null,
+  max = DEAL_BOOK_MAX_ROWS,
+} = {}) {
+  const sellers = otherSellerRows({ rows, deal, language, condition, card, max });
+  const offers = buyOfferRows(book, { language, max });
+  return { sellers, offers, more: sellers.length ? seeAllListings({ rows, deal, shown: sellers }) : 0 };
+}
+
+/** The book for one viewport: measured whole rows where the column stretches, caps where it stacks. */
+export function dealBookPlan({
+  width = 0,
+  available = 0,
+  rows = [],
+  deal = null,
+  book = [],
+  language = '',
+  condition = '',
+  card = null,
+  metrics = DEAL_BOOK_METRICS,
+} = {}) {
+  const facet = { rows, deal, book, language, condition, card };
+  if (!dealBookMeasured(width)) return dealBookUncut({ ...facet, max: dealBookRows(width) });
+  return planDealBook({ ...facet, available, metrics });
 }
