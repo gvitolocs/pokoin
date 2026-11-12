@@ -3749,6 +3749,16 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
 .desk-band .deal-facet-row[aria-label="Finish"] { display: flex; width: auto; }
 .desk-band .deal-chip-reverse { display: inline-flex; align-items: center; gap: 0.3rem; }
 .desk-band .deal-chip-reverse svg { width: 14px; height: 14px; }
+/* Reverse, 1st Ed. and Graded carry no flag, so they get the height of the
+   flagged language chips beside them: an 18px flag, the padding and the border. */
+.desk-band .deal-facet-row[aria-label="Finish"] .deal-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(18px + 0.5rem + 4px);
+}
+@media (max-width: 720px) {
+  .desk-band .deal-facet-row[aria-label="Finish"] .deal-chip { min-height: calc(18px + 0.8rem + 4px); }
+}
 
 /* Opened from the strip, the form is a full-width desk row: its five stacked
    lines become two. Price, currency and quantity share a line with the facet

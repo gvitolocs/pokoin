@@ -218,6 +218,12 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(page, /linkedLabel=\{graphScope\(\)\}/);
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
   assert.match(graph, /<Show when=\{!props\.linkedLabel\}>\s*<SoldGraphFilter/);
+  // 1st Ed. and Graded are chips in the band's line, not toggles above the plot.
+  assert.match(page, /class=\{\['deal-chip', 'deal-chip-flag', \{ 'is-on': salesFirstEdition\(\) \}\]\}/);
+  assert.match(page, /class=\{\['deal-chip', 'deal-chip-flag', \{ 'is-on': salesGraded\(\) \}\]\}/);
+  assert.match(graph, /<Show when=\{props\.chips\.graded && !props\.linkedLabel\}>/);
+  assert.match(graph, /<Show when=\{props\.chips\.firstEdition && !props\.linkedLabel\}>/);
+  assert.match(graph, /const bare = \(\) => Boolean\(props\.linkedLabel\);/);
   // The sell strip is the same one line signed in or out; the form opens from it.
   assert.match(page, /sellNowNote=\{sellNowNote\(\)\}/);
   assert.match(page, /onSellNow=\{sellNowRow\(\) \? \(\) => buy\.pickSell\(shownCond\(\)\) : undefined\}/);

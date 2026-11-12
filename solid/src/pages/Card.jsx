@@ -1533,18 +1533,44 @@ function CardDesk(props) {
                         </For>
                       </div>
                     </Show>
-                    <Show when={showReverseChip()}>
+                    {/* Finish chips sit in the line with the others. 1st Ed. and Graded only
+                        render when the printing sold that variant; they scope the sold graph. */}
+                    <Show when={showReverseChip() || salesView().chips?.firstEdition || salesView().chips?.graded}>
                       <div class="deal-facet-row" role="group" aria-label="Finish">
-                        <button
-                          type="button"
-                          class={['deal-chip', 'deal-chip-reverse', { 'is-on': dealReverse() }]}
-                          aria-pressed={dealReverse() ? 'true' : 'false'}
-                          title={dealReverse() ? 'Showing reverse only' : 'Show reverse only'}
-                          onClick={() => setDealReverse(!dealReverse())}
-                        >
-                          <ReverseSparkles />
-                          <span>{game().id === 'pokemon' ? 'Reverse' : 'Foil'}</span>
-                        </button>
+                        <Show when={showReverseChip()}>
+                          <button
+                            type="button"
+                            class={['deal-chip', 'deal-chip-reverse', { 'is-on': dealReverse() }]}
+                            aria-pressed={dealReverse() ? 'true' : 'false'}
+                            title={dealReverse() ? 'Showing reverse only' : 'Show reverse only'}
+                            onClick={() => setDealReverse(!dealReverse())}
+                          >
+                            <ReverseSparkles />
+                            <span>{game().id === 'pokemon' ? 'Reverse' : 'Foil'}</span>
+                          </button>
+                        </Show>
+                        <Show when={salesView().chips?.firstEdition}>
+                          <button
+                            type="button"
+                            class={['deal-chip', 'deal-chip-flag', { 'is-on': salesFirstEdition() }]}
+                            aria-pressed={salesFirstEdition() ? 'true' : 'false'}
+                            title={salesFirstEdition() ? 'Graph shows 1st Edition sales' : 'Show 1st Edition sales on the graph'}
+                            onClick={() => setSalesFirstEdition(!salesFirstEdition())}
+                          >
+                            1st Ed.
+                          </button>
+                        </Show>
+                        <Show when={salesView().chips?.graded}>
+                          <button
+                            type="button"
+                            class={['deal-chip', 'deal-chip-flag', { 'is-on': salesGraded() }]}
+                            aria-pressed={salesGraded() ? 'true' : 'false'}
+                            title={salesGraded() ? 'Graph shows graded sales' : 'Show graded sales on the graph'}
+                            onClick={() => setSalesGraded(!salesGraded())}
+                          >
+                            Graded
+                          </button>
+                        </Show>
                       </div>
                     </Show>
                   </div>
