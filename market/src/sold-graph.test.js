@@ -19,7 +19,26 @@ import {
   soldUnitCount,
   formatSoldSampleCount,
   SOLD_GRAPH_PAD,
+  SOLD_SERIES_PALETTES,
+  soldSeriesColor,
 } from './sold-graph.js';
+
+test('compared sold series never share a colour across the first three languages', () => {
+  const grades = ['NM', 'SP', 'MP', 'PL', 'Poor'];
+  const colours = [0, 1, 2].flatMap((language) => grades.map((grade) => soldSeriesColor(grade, language)));
+  assert.equal(new Set(colours).size, 15);
+  // The first language keeps the grade colours of the single graph.
+  assert.equal(soldSeriesColor('NM', 0), '#147a3f');
+  assert.equal(soldSeriesColor('MP', 0), '#ffd33d');
+  // Another language is not a grade of the first: light blue and magenta, not green and yellow.
+  assert.equal(soldSeriesColor('NM', 1), '#5fb8e8');
+  assert.equal(soldSeriesColor('MP', 1), '#e45fd0');
+  // Past the third language the palettes repeat, never the first one.
+  assert.equal(soldSeriesColor('NM', 3), SOLD_SERIES_PALETTES[1].NM);
+  assert.equal(soldSeriesColor('NM', 4), SOLD_SERIES_PALETTES[2].NM);
+  assert.equal(soldSeriesColor('', 0), '#f3f4f7');
+  assert.equal(soldSeriesColor('NM', -3), '#147a3f');
+});
 
 test('nearest day prefers the last x when the pointer is on the right edge', () => {
   assert.equal(nearestSoldIndex([10, 160, 310], 318), 2);

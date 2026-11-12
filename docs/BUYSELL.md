@@ -94,8 +94,17 @@ display name. Languages are the 16 codes of the price book (the listing form's `
   `.shop-label` "Best Deal" and the marketplace pills at the top-left; the first content line the price stack (large
   local, small PKN, `Sold by …` under it) with the condition and language chips beside it; the second the offer bar and
   Add to cart, right-aligned. The chips fold inside their own box instead of pushing a third line, so the band is two
-  content lines at every desktop width. With no Pokoin listing the price slot says
-  `No Pokoin seller has this card right now.` and the action line still carries the offer bar.
+  content lines at every desktop width. With no Pokoin listing (for the card at all, or for the picked condition and
+  language) the price slot shows the dash `—`, never a sentence; its hover text says which. The action line still
+  carries the offer bar.
+- **The sold graph** (`solid/src/components/desk/SoldPriceGraph.jsx`) follows the chips and has no menus of its own.
+  Every condition / language / Reverse combination the visitor picks stays on it as its own line with a legend entry
+  and a remove button, up to eight; the current pick is the one with the fill and the tooltip. Colours come from
+  `soldSeriesColor` (`market/src/sold-graph.js`): the first language picked keeps the grade colours, each further
+  language its own palette, Reverse is the same colour dashed. A series only has a point on a day it sold; between
+  sales the line is straight, and before its first and after its last sale the price is carried flat to the edge of
+  the visible range as a faint dashed segment. A pick that never sold is an empty graph that says so. The graph shows
+  no unit counts.
 - **Cheapest listings** (`solid/src/components/deal/CheapestListings.jsx`) is the page's listing summary: the three
   cheapest Pokoin listings across *every* condition and language, the one the band shows included, drawn as real
   `ShopListingRow`s in `compact` mode, so the price, the copies picker, the cart button and the own-listing edit/cancel

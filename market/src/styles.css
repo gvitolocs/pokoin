@@ -12592,3 +12592,58 @@ img.is-lang-scan {
 }
 .sold-graph-key.is-picked { color: inherit; }
 .sold-graph-key.is-picked::before { background: var(--sold-line, var(--yellow)); }
+
+/* Several sold series on one graph. Each overlay brings its own colour
+   (--under-line / --key-line, set inline); Reverse is the same colour dashed.
+   A carried price (before a series' first sale, after its last) is a faint
+   dashed line: it is where the price stood, not a sale. */
+.sold-graph-under polyline {
+  fill: none;
+  stroke: var(--under-line, #f3f4f7);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+.sold-graph-under.is-dashed polyline { stroke-dasharray: 7 4; }
+.sold-graph-under-dot { fill: var(--under-line, #f3f4f7); }
+.sold-graph-under polyline.sold-graph-carry,
+.sold-graph-line.sold-graph-carry {
+  stroke-width: 1.4;
+  stroke-dasharray: 2 5;
+  opacity: 0.55;
+}
+
+.sold-graph-legend {
+  right: 2.85rem;
+  flex-wrap: nowrap;
+  gap: 0.2rem 0.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+.sold-graph-legend::-webkit-scrollbar { display: none; }
+.sold-graph-key { flex: none; white-space: nowrap; }
+.sold-graph-key::before { background: var(--key-line, #f3f4f7); }
+.sold-graph-key.is-dashed::before {
+  background: repeating-linear-gradient(90deg, var(--key-line, #f3f4f7) 0 4px, transparent 4px 7px);
+}
+.sold-graph-key-x {
+  margin-left: -0.1rem;
+  padding: 0 0.2rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sold-graph-key-x:hover,
+.sold-graph-key-x:focus-visible { color: #f87171; outline: none; }
+
+/* The current series is dashed too when it is the Reverse one, in the line and in its legend key. */
+.sold-graph.is-dashed-line .sold-graph-line:not(.sold-graph-carry) { stroke-dasharray: 7 4; }
+.sold-graph-key.is-picked.is-dashed::before {
+  background: repeating-linear-gradient(90deg, var(--sold-line, var(--yellow)) 0 4px, transparent 4px 7px);
+}
