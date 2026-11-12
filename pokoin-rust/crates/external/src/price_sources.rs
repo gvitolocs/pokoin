@@ -38,6 +38,7 @@ use serde_json::{json, Map, Value};
 
 use crate::ct_fees::Channel;
 use crate::db::DbPools;
+use crate::error::ApiError;
 use crate::pokoin_sold::PokoinSale;
 use crate::price_check::{Match, PriceItem};
 use crate::tcgcsv::{self, TcgRow};
@@ -553,12 +554,13 @@ pub fn cardmarket_source(feed: &CardmarketFeed, blueprint_id: Option<i64>, item:
 
 // ------------------------------------------------- Cardmarket scanned offers
 
-/// One facet minimum a CTCMDeals scan read off Cardmarket's listing page
-/// (`cardmarket_offer_minimums`, migration 141). A listing page is filtered
-/// by worst acceptable condition, language, finish, first edition and seller
-/// type, so a facet answers exactly one question — "what is the cheapest
-/// offer from this kind of seller that is at least this good" — and is not an
-/// answer to any other.
+/// One facet minimum, read off Cardmarket's listing page by the price engine's
+/// weekly walk (`cm_prices.current_minimums`) or by a CTCMDeals scan someone
+/// loaded by hand (`cardmarket_offer_minimums`, migration 141). A listing page
+/// is filtered by worst acceptable condition, language, finish, first edition
+/// and seller type, so a facet answers exactly one question — "what is the
+/// cheapest offer from this kind of seller that is at least this good" — and is
+/// not an answer to any other.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CmFloor {
     /// `pro` (professional or powerseller) or `private`.
@@ -577,7 +579,7 @@ pub struct CmFloor {
     /// False when the scan stopped on a full page, so offers it never reached
     /// could be cheaper.
     pub counts_complete: Option<bool>,
-    /// The day the scan saw it.
+    /// The day the source saw it.
     pub day: String,
 }
 
@@ -590,60 +592,207 @@ pub struct CmFloorGroups {
     pub minimums_by_product: HashMap<i64, Vec<CmFloor>>,
 }
 
-/// How old a scanned facet may be to still be quoted. Cardmarket's own guide
-/// is trusted for 4 days and CardTrader's live listings for 3; these sit
-/// between, because a harvest is a walk of real pages, done on demand rather
-/// than by a nightly timer.
+/// How old a hand-loaded scanned facet may be to still be quoted. The
+/// `cm-offers` load is run by hand, one harvest at a time, so a facet in this
+/// table can be weeks old and still be the newest answer anyone has; 7 days is
+/// as long as that is worth quoting. The price engine's own freshness rules are
+/// `CM_SNAPSHOT_MAX_AGE_DAYS` and `CM_SNAPSHOT_FACET_MAX_AGE_DAYS`.
 pub const CM_FLOOR_MAX_AGE_DAYS: i64 = 7;
 
+/// How old the price engine's published snapshot may be. The engine collects
+/// all week and publishes one snapshot on Monday, so during the week the
+/// published one *is* the answer; 8 days is that week plus a day of slack for
+/// a publish that lands a little late.
+pub const CM_SNAPSHOT_MAX_AGE_DAYS: i64 = 8;
+
+/// How old a facet inside the published snapshot may be. A walk starts the day
+/// after a publish and finishes before the next one, so a facet is up to 14
+/// days old by the time the following week's snapshot is read: 15 keeps that
+/// facet alive for its whole week without quoting a price two walks old.
+pub const CM_SNAPSHOT_FACET_MAX_AGE_DAYS: i64 = 15;
+
 /// Both seller types: the number the guide's `low` and TCGNotify's ask cannot
-/// give, because neither separates who is selling.
+/// give, because neither separates who is selling. The price engine's published
+/// snapshot, `cm_prices.current_minimums`: what its weekly walk saw, kept while
+/// the snapshot is the current one and the facet was seen in a walk less than
+/// `CM_SNAPSHOT_FACET_MAX_AGE_DAYS` ago. `observed_epoch` is only the merge
+/// stamp, never a quoted number.
+pub fn cm_engine_floor_sql() -> String {
+    format!(
+        "select m.cm_product_id, m.seller_type, m.condition, m.language, m.finish, m.first_edition, \
+         m.min_cents::float8 * 2 as min_pkn, coalesce(m.offers, 0)::int as offers, \
+         m.counts_complete, m.observed_at::date::text as day, \
+         extract(epoch from m.observed_at)::bigint as observed_epoch \
+       from cm_prices.current_minimums m \
+       where m.cm_product_id = any($1::bigint[]) \
+         and m.published_at::date >= current_date - {CM_SNAPSHOT_MAX_AGE_DAYS} \
+         and m.observed_at::date >= current_date - {CM_SNAPSHOT_FACET_MAX_AGE_DAYS}"
+    )
+}
+
+/// The same facets from the hand-loaded table, filled by the manual `cm-offers`
+/// harvest load: rows a scan wrote and nothing has refreshed since.
 pub fn cm_floor_sql() -> String {
     format!(
         "select m.cm_product_id, m.seller_type, m.condition, m.language, m.finish, m.first_edition, \
          m.min_cents::float8 * 2 as min_pkn, coalesce(m.offers, 0)::int as offers, \
-         m.counts_complete, m.observed_at::date::text as day \
+         m.counts_complete, m.observed_at::date::text as day, \
+         extract(epoch from m.observed_at)::bigint as observed_epoch \
        from public.cardmarket_offer_minimums m \
        where m.cm_product_id = any($1::bigint[]) \
          and m.observed_at::date >= current_date - {CM_FLOOR_MAX_AGE_DAYS}"
     )
 }
 
-/// The newest scanned facet minimum per Cardmarket product, `"pokemon"` pool.
+/// One quoted floor and the instant its facet was observed — the stamp the two
+/// sources are merged on, which `CmFloor` deliberately does not carry.
+#[derive(Clone, Debug, PartialEq)]
+struct QuotedFloor {
+    product: i64,
+    observed: i64,
+    floor: CmFloor,
+}
+
+fn quoted_floors(rows: &[Value]) -> Vec<QuotedFloor> {
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(product) = int(row.get("cm_product_id")) else { continue };
+        out.push(QuotedFloor {
+            product,
+            observed: int(row.get("observed_epoch")).unwrap_or_default(),
+            floor: CmFloor {
+                seller_type: text(row.get("seller_type")),
+                condition: text(row.get("condition")),
+                language: text(row.get("language")),
+                finish: text(row.get("finish")),
+                first_edition: text(row.get("first_edition")),
+                min_pkn: float(row.get("min_pkn")).unwrap_or_default(),
+                offers: int(row.get("offers")).unwrap_or_default(),
+                counts_complete: row.get("counts_complete").and_then(Value::as_bool),
+                day: text(row.get("day")),
+            },
+        });
+    }
+    out
+}
+
+/// A facet: product, seller type and the four listing filters.
+type FloorKey = (i64, String, String, String, String, String);
+
+fn floor_key(row: &QuotedFloor) -> FloorKey {
+    (
+        row.product,
+        row.floor.seller_type.clone(),
+        row.floor.condition.clone(),
+        row.floor.language.clone(),
+        row.floor.finish.clone(),
+        row.floor.first_edition.clone(),
+    )
+}
+
+/// The floors to quote: the engine's published snapshot first, the hand-loaded
+/// table behind it. A facet both sources have is quoted from whichever observed
+/// it later; at the same instant the engine's row stands, because it is the
+/// answer the weekly walk agreed on.
+fn merge_quoted_floors(engine: &[QuotedFloor], legacy: &[QuotedFloor]) -> HashMap<i64, Vec<CmFloor>> {
+    let mut best: HashMap<FloorKey, (i64, CmFloor)> = HashMap::new();
+    for row in engine.iter().chain(legacy) {
+        let key = floor_key(row);
+        // The engine went in first, so an equal observation keeps its row.
+        if let Some((seen, _)) = best.get(&key) {
+            if *seen >= row.observed {
+                continue;
+            }
+        }
+        best.insert(key, (row.observed, row.floor.clone()));
+    }
+    let mut out: HashMap<i64, Vec<CmFloor>> = HashMap::new();
+    for ((product, _, _, _, _, _), (_, floor)) in best {
+        out.entry(product).or_default().push(floor);
+    }
+    for floors in out.values_mut() {
+        floors.sort_by(|a, b| {
+            (&a.seller_type, &a.condition, &a.language, &a.finish, &a.first_edition).cmp(&(
+                &b.seller_type,
+                &b.condition,
+                &b.language,
+                &b.finish,
+                &b.first_edition,
+            ))
+        });
+    }
+    out
+}
+
+/// What one floor source's query gave back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FloorQuery {
+    Rows,
+    /// The source is not installed: no schema, no view, no table.
+    Missing,
+    /// Any other failure.
+    Failed,
+}
+
+/// A missing `cm_prices` schema arrives as `relation "cm_prices.current_minimums"
+/// does not exist` (42P01); `schema … does not exist` (3F000) is the same state
+/// reached another way. Both are "this source was never installed", which is
+/// what `is_table_missing` already reports.
+fn floor_query_outcome(error: &ApiError) -> FloorQuery {
+    if error.is_table_missing() {
+        FloorQuery::Missing
+    } else {
+        FloorQuery::Failed
+    }
+}
+
+/// The value for the page: `None` when a query failed — half a picture is worse
+/// than none — or when neither source is installed; the merged floors otherwise.
+fn cm_floor_outcome(
+    engine: FloorQuery,
+    legacy: FloorQuery,
+    floors: HashMap<i64, Vec<CmFloor>>,
+) -> Option<HashMap<i64, Vec<CmFloor>>> {
+    match (engine, legacy) {
+        (FloorQuery::Failed, _) | (_, FloorQuery::Failed) => None,
+        (FloorQuery::Missing, FloorQuery::Missing) => None,
+        _ => Some(floors),
+    }
+}
+
+/// The newest facet minimum per Cardmarket product, `"pokemon"` pool: the price
+/// engine's published snapshot merged with the hand-loaded scan table. The two
+/// queries run apart so that a database with only one of them still gives the
+/// floors it has.
 pub async fn fetch_cm_floors(db: &DbPools, game: &str, product_ids: &[i64]) -> Option<HashMap<i64, Vec<CmFloor>>> {
     if product_ids.is_empty() {
         return Some(HashMap::new());
     }
-    match db.query("pokemon", &cm_floor_sql(), &[json!(product_ids)]).await {
-        Ok(rows) => {
-            let mut map: HashMap<i64, Vec<CmFloor>> = HashMap::new();
-            for row in &rows {
-                let Some(product) = int(row.get("cm_product_id")) else {
-                    continue;
-                };
-                map.entry(product).or_default().push(CmFloor {
-                    seller_type: text(row.get("seller_type")),
-                    condition: text(row.get("condition")),
-                    language: text(row.get("language")),
-                    finish: text(row.get("finish")),
-                    first_edition: text(row.get("first_edition")),
-                    min_pkn: float(row.get("min_pkn")).unwrap_or_default(),
-                    offers: int(row.get("offers")).unwrap_or_default() as i64,
-                    counts_complete: row.get("counts_complete").and_then(Value::as_bool),
-                    day: text(row.get("day")),
-                });
-            }
-            Some(map)
-        }
+    let (engine, engine_floors) = match db.query("pokemon", &cm_engine_floor_sql(), &[json!(product_ids)]).await {
+        Ok(rows) => (FloorQuery::Rows, quoted_floors(&rows)),
         Err(error) => {
-            if error.is_table_missing() {
+            let outcome = floor_query_outcome(&error);
+            if outcome == FloorQuery::Missing {
+                tracing::warn!("cm_prices.current_minimums is not published; cardmarket offer floors use the hand-loaded table only");
+            } else {
+                tracing::warn!(game, error = %error, "cardmarket price engine floors query failed; offer floors unavailable");
+            }
+            (outcome, Vec::new())
+        }
+    };
+    let (legacy, legacy_floors) = match db.query("pokemon", &cm_floor_sql(), &[json!(product_ids)]).await {
+        Ok(rows) => (FloorQuery::Rows, quoted_floors(&rows)),
+        Err(error) => {
+            let outcome = floor_query_outcome(&error);
+            if outcome == FloorQuery::Missing {
                 tracing::warn!("cardmarket_offer_minimums is not migrated; cardmarket offer floors unavailable");
             } else {
                 tracing::warn!(game, error = %error, "cardmarket offer minimums query failed; offer floors unavailable");
             }
-            None
+            (outcome, Vec::new())
         }
-    }
+    };
+    cm_floor_outcome(engine, legacy, merge_quoted_floors(&engine_floors, &legacy_floors))
 }
 
 /// Whether a captured facet answers the question the item asks. An item that
@@ -1666,5 +1815,118 @@ mod tests {
         attach(&mut comp, &parse_items("200:NM:IT")[0], Channel::Direct, &unscanned);
         assert_eq!(comp["sourceStatus"]["cardmarketoffers"], json!("empty"));
         assert!(comp["sources"].get("cardmarketoffers").is_none());
+    }
+
+    // The two floor sources and their merge: the price engine's published
+    // snapshot, and the hand-loaded scan table that predates it.
+
+    /// A floor as one source's query returned it, at the given observation
+    /// instant. Only the two rows' order matters, so the epochs are small.
+    fn quoted(f: CmFloor, observed: i64) -> QuotedFloor {
+        QuotedFloor { product: 279646, observed, floor: f }
+    }
+
+    fn seen(day: &str, f: CmFloor) -> CmFloor {
+        CmFloor { day: day.into(), ..f }
+    }
+
+    #[test]
+    fn the_engine_sql_reads_the_published_snapshot_and_both_age_limits() {
+        let sql = cm_engine_floor_sql();
+        assert!(sql.contains("from cm_prices.current_minimums m"), "{sql}");
+        assert!(sql.contains(&format!("m.published_at::date >= current_date - {CM_SNAPSHOT_MAX_AGE_DAYS}")), "the snapshot must still be the published one: {sql}");
+        assert!(sql.contains(&format!("m.observed_at::date >= current_date - {CM_SNAPSHOT_FACET_MAX_AGE_DAYS}")), "and the facet must be from this walk: {sql}");
+        assert!(sql.contains("m.cm_product_id = any($1::bigint[])"), "only the page's products: {sql}");
+        assert!(sql.contains("m.min_cents::float8 * 2 as min_pkn"), "2 PKN per EUR cent: {sql}");
+        assert!(sql.contains("coalesce(m.offers, 0)::int as offers"), "{sql}");
+        assert!(sql.contains("extract(epoch from m.observed_at)::bigint as observed_epoch"), "the merge stamp: {sql}");
+    }
+
+    #[test]
+    fn the_legacy_sql_still_reads_the_hand_loaded_table() {
+        let sql = cm_floor_sql();
+        assert!(sql.contains("from public.cardmarket_offer_minimums m"), "{sql}");
+        assert!(!sql.contains("cm_prices"), "the hand-loaded table is public: {sql}");
+        assert!(sql.contains(&format!("m.observed_at::date >= current_date - {CM_FLOOR_MAX_AGE_DAYS}")), "the unchanged rule: {sql}");
+        assert!(!sql.contains("published_at"), "a hand load has no snapshot to age: {sql}");
+        assert!(sql.contains("m.min_cents::float8 * 2 as min_pkn"), "{sql}");
+        assert!(sql.contains("coalesce(m.offers, 0)::int as offers"), "{sql}");
+        assert!(sql.contains("m.observed_at::date::text as day"), "{sql}");
+        assert!(sql.contains("extract(epoch from m.observed_at)::bigint as observed_epoch"), "the merge stamp: {sql}");
+        for column in ["m.seller_type", "m.condition", "m.language", "m.finish", "m.first_edition", "m.counts_complete"] {
+            assert!(sql.contains(column), "{column} dropped from the legacy select: {sql}");
+        }
+    }
+
+    #[test]
+    fn the_published_snapshot_alone_is_quoted() {
+        let engine = vec![quoted(seen("2026-11-09", floor("NM", "IT", "N", "N", 2000)), 200)];
+        let merged = merge_quoted_floors(&engine, &[]);
+        assert_eq!(merged[&279646], vec![engine[0].floor.clone()], "day stays the day the facet was observed");
+    }
+
+    #[test]
+    fn the_hand_loaded_scan_alone_is_quoted() {
+        let legacy = vec![quoted(seen("2026-11-08", floor("NM", "IT", "N", "N", 2000)), 100)];
+        let merged = merge_quoted_floors(&[], &legacy);
+        assert_eq!(merged[&279646], vec![legacy[0].floor.clone()]);
+    }
+
+    #[test]
+    fn the_newer_observation_wins_whichever_source_it_came_from() {
+        let engine = vec![quoted(floor("NM", "IT", "N", "N", 2000), 200)];
+        let older = vec![quoted(floor("NM", "IT", "N", "N", 1500), 100)];
+        let newer = vec![quoted(seen("2026-11-11", floor("NM", "IT", "N", "N", 900)), 300)];
+        assert_eq!(merge_quoted_floors(&engine, &older)[&279646], vec![engine[0].floor.clone()], "the snapshot is the fresher answer");
+        assert_eq!(merge_quoted_floors(&engine, &newer)[&279646], vec![newer[0].floor.clone()], "a hand load newer than the snapshot is still the newer answer");
+    }
+
+    #[test]
+    fn an_equal_observation_keeps_the_engine_row() {
+        let engine = vec![quoted(floor("NM", "IT", "N", "N", 2000), 200)];
+        let legacy = vec![quoted(floor("NM", "IT", "N", "N", 1500), 200)];
+        assert_eq!(merge_quoted_floors(&engine, &legacy)[&279646], vec![engine[0].floor.clone()]);
+    }
+
+    #[test]
+    fn facets_are_merged_one_at_a_time_not_per_product() {
+        let engine = vec![
+            quoted(floor("NM", "IT", "N", "N", 2000), 200),
+            quoted(private_floor("NM", "IT", "N", "N", 1200), 200),
+            quoted(floor("NM", "EN", "N", "N", 2500), 200),
+        ];
+        let legacy = vec![
+            quoted(seen("2026-11-11", floor("NM", "IT", "N", "N", 1800)), 300),
+            quoted(private_floor("NM", "IT", "Y", "N", 3000), 100),
+        ];
+        let floors = &merge_quoted_floors(&engine, &legacy)[&279646];
+        assert_eq!(floors.len(), 4, "every facet of the product is kept");
+        assert_eq!(&floors[0], &engine[1].floor, "private Italian regular: the snapshot, tied on age");
+        assert_eq!(&floors[1], &legacy[1].floor, "private Italian reverse: only the hand load has it");
+        assert_eq!(&floors[2], &engine[2].floor, "English: only the snapshot has it");
+        assert_eq!(&floors[3], &legacy[0].floor, "pro Italian regular: the newer hand load");
+    }
+
+    #[test]
+    fn a_source_that_was_never_installed_is_missing_not_failed() {
+        for message in [
+            r#"error returned from database: relation "cm_prices.current_minimums" does not exist"#,
+            r#"error returned from database: schema "cm_prices" does not exist"#,
+        ] {
+            assert_eq!(floor_query_outcome(&ApiError::new(503, message)), FloorQuery::Missing, "{message}");
+        }
+        assert_eq!(floor_query_outcome(&ApiError::new(500, "permission denied for schema cm_prices")), FloorQuery::Failed);
+    }
+
+    #[test]
+    fn one_source_is_enough_but_a_failing_query_is_not() {
+        let floors = HashMap::from([(279646, vec![floor("NM", "IT", "N", "N", 2000)])]);
+        let legacy_only = cm_floor_outcome(FloorQuery::Missing, FloorQuery::Rows, floors.clone()).unwrap();
+        assert_eq!(legacy_only[&279646].len(), 1, "the engine is not published; the hand load is quoted");
+        assert!(cm_floor_outcome(FloorQuery::Rows, FloorQuery::Missing, floors.clone()).is_some(), "the hand load is not loaded; the snapshot is quoted");
+        assert!(cm_floor_outcome(FloorQuery::Missing, FloorQuery::Missing, floors.clone()).is_none(), "neither source exists");
+        assert!(cm_floor_outcome(FloorQuery::Failed, FloorQuery::Rows, floors.clone()).is_none(), "half a picture is worse than none");
+        assert!(cm_floor_outcome(FloorQuery::Rows, FloorQuery::Failed, floors.clone()).is_none());
+        assert!(cm_floor_outcome(FloorQuery::Rows, FloorQuery::Rows, floors.clone()).is_some());
     }
 }
