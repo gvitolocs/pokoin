@@ -136,7 +136,10 @@ function TrashIcon() {
 /**
  * One shop listing. Same markup and
  * drag payloads: a mixed desk pile when tiles and listings are selected, the
- * selected listings (`dragOffers`), else the row itself.
+ * selected listings (`dragOffers`), else the row itself. `compact` is the Best
+ * Deal book line: the seller, the price and the cart button only — the facet is
+ * already picked by the chips above, so no condition or language tags, no
+ * seller photos and no message button.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
@@ -252,6 +255,7 @@ export default function ShopListingRow(props) {
         'is-profile': props.showCard,
         'is-editing': props.editing,
         'is-selected': props.selected,
+        'is-compact': props.compact,
       }]}
       data-listing-id={listingSelectId(offer())}
       draggable="true"
@@ -262,11 +266,11 @@ export default function ShopListingRow(props) {
         when={props.showCard}
         fallback={(
           <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
-          <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
-            <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
-              {seller()}
-            </a>
-          </Show>
+            <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
+              <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
+                {seller()}
+              </a>
+            </Show>
           </Show>
         )}
       >
@@ -276,29 +280,31 @@ export default function ShopListingRow(props) {
           </a>
         </Show>
       </Show>
-      <span class="shop-facets">
-        <span class="shop-txt">
-          <For each={tags()}>
-            {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
-          </For>
+      <Show when={!props.compact}>
+        <span class="shop-facets">
+          <span class="shop-txt">
+            <For each={tags()}>
+              {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
+            </For>
+          </span>
+          <img
+            class={['shop-cond', `is-${tone()}`]}
+            src={conditionChipSrc(offer()?.condition)}
+            alt={cond()}
+            title={cond()}
+            width="40"
+            height="28"
+            draggable="false"
+          />
+          <Flag flag={language()} class="shop-flag shop-flag-lang" />
         </span>
-        <img
-          class={['shop-cond', `is-${tone()}`]}
-          src={conditionChipSrc(offer()?.condition)}
-          alt={cond()}
-          title={cond()}
-          width="40"
-          height="28"
-          draggable="false"
-        />
-        <Flag flag={language()} class="shop-flag shop-flag-lang" />
-      </span>
+      </Show>
       <span class="shop-offer">
         <span class="shop-px"><PriceStack parts={buyerParts(offer()?.pricePkn, offer()?.sellerAcceptsPkn)} /></span>
         <Show when={!props.mine}>
           <Show
             when={choices() > 1}
-            fallback={<span class="ct-qty is-single" aria-label="Quantity 1">1</span>}
+            fallback={<Show when={!props.compact}><span class="ct-qty is-single" aria-label="Quantity 1">1</span></Show>}
           >
             <label
               class="ct-qty"
@@ -328,7 +334,7 @@ export default function ShopListingRow(props) {
       <Show when={!props.mine}>
         <span class="shop-row-actions">
           {/* Vault rows (props.anonymous) never name or message the account behind them. */}
-          <Show when={reference().sellerUid && !props.anonymous}>
+          <Show when={reference().sellerUid && !props.anonymous && !props.compact}>
             <button
               type="button"
               class="shop-icon"
@@ -404,7 +410,7 @@ export default function ShopListingRow(props) {
           </button>
         </span>
       </Show>
-      <Show when={photos().length}>
+      <Show when={photos().length && !props.compact}>
         <span class="shop-photos">
           <For each={photos()}>
             {(url) => (

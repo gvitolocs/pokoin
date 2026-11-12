@@ -91,6 +91,13 @@ export default function OfferBar(props) {
     ...overrides(),
   }));
   const setSetting = (key, value) => setOverrides({ ...untrack(overrides), [key]: value });
+  // A Sell button in the book rows asks for a condition; the Sell now form lives in here.
+  createEffect(buy.sellPick, (condition) => {
+    if (!condition) return;
+    buy.pickSell('');
+    setSetting('condition', condition);
+    openPopup();
+  });
   const currency = () => buyerCurrency(props.pinned);
   const cur = () => currency() || 'PKN';
 

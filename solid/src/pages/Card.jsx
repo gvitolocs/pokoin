@@ -124,6 +124,7 @@ import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import DeskArtFrame, { Chevron, dragThisCard, isLandscapeDesk } from '../components/desk/DeskArtFrame.jsx';
+import DealBook from '../components/deal/DealBook.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
 import OfferBar from '../components/desk/OfferBar.jsx';
@@ -140,6 +141,7 @@ import ExpansionMark from '../components/ExpansionMark.jsx';
 import PriceStack from '../components/PriceStack.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
+import { createBuyBook } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -741,6 +743,31 @@ function CardDesk(props) {
     return shop.offers.filter((row) => String(row.sellerUid || '') === uid).map((row) => row.id).filter(Boolean);
   });
 
+  // One book for the desk: the offer bar and the Best Deal rows read this signal.
+  const buy = createBuyBook({ cardId, ready: offersReady, language: shownLang });
+
+  /** The Shop row's cart path, so the book rows add listings the same way. */
+  function addListingToCart(offer, qty = 1) {
+    addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 });
+  }
+
+  function chooseDealLang(code) {
+    setDealLang(code);
+    writeDealLanguage(code, authUser()?.uid);
+  }
+
+  /** A Buy offers row is a request for a facet: pick it, adding the chip when the language is unlisted. */
+  function pickOfferCondition(row) {
+    if (row?.language) chooseDealLang(row.language);
+    if (row?.condition) setDealCond(row.condition);
+  }
+
+  function scrollShop() {
+    const panel = document.querySelector('.card-desk .shop-panel');
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    panel?.querySelector('.shop-header')?.focus();
+  }
+
   async function cancelMine(ids) {
     const listingIds = (ids || []).filter(Boolean);
     if (!listingIds.length || listingBusy()) return;
@@ -1268,6 +1295,23 @@ function CardDesk(props) {
                       </div>
                     </Show>
                   </div>
+                  <DealBook
+                    buy={buy}
+                    rows={nativeLive()}
+                    deal={dealPick()}
+                    condition={shownCond()}
+                    language={shownLang()}
+                    card={card()}
+                    pinned={pinnedCurrency()}
+                    mineIds={mineIds()}
+                    listingBusy={listingBusy()}
+                    onCart={addListingToCart}
+                    onInspect={openZoom}
+                    onEdit={(offer) => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
+                    onCancel={(offer) => cancelMine([offer.id])}
+                    onCondition={pickOfferCondition}
+                    onSeeAll={scrollShop}
+                  />
                   <div class="deal-actions">
                     {/* Once offers load, no fake grey button: say why there is nothing to add. */}
                     <Show
@@ -1290,9 +1334,9 @@ function CardDesk(props) {
                       </button>
                     </Show>
                     <OfferBar
+                      buy={buy}
                       card={card()}
                       cardId={cardId}
-                      ready={offersReady()}
                       above={canBuy()}
                       condition={shownCond()}
                       language={shownLang()}
@@ -1333,7 +1377,7 @@ function CardDesk(props) {
                           dragOffers={shopDragOffers(split().vault, listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
-                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
+                          onCart={(qty) => addListingToCart(offer, qty)}
                           onInspect={openZoom}
                           onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
                           onCancel={() => cancelMine([offer.id])}
@@ -1399,7 +1443,7 @@ function CardDesk(props) {
                           dragOffers={shopDragOffers(split().shop, listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
-                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
+                          onCart={(qty) => addListingToCart(offer, qty)}
                           onInspect={openZoom}
                           onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
                           onCancel={() => cancelMine([offer.id])}

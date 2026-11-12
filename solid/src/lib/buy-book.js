@@ -20,6 +20,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   const preview = untrack(() => allowMypokoinPreview(params));
   const [book, setBook] = createSignal(null);
   const [mine, setMine] = createSignal([]);
+  const [sellPick, setSellPick] = createSignal('');
 
   let seq = 0;
   function load(id) {
@@ -61,5 +62,10 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     forgetMine(id) {
       setMine(mine().filter((value) => value !== id));
     },
+    /** The book rows name the condition they want to sell into; the bar owns the form. */
+    pickSell(condition) {
+      setSellPick(condition || '');
+    },
+    sellPick,
   };
 }

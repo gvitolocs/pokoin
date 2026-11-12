@@ -11381,6 +11381,152 @@ img.is-lang-scan {
   margin: 0;
 }
 
+/* Best Deal book: the other sellers of the facet the chips picked, and the buy
+   offers for it. market/src/deal-book.js counts whole rows out of these same
+   numbers, so a row has to cost exactly --deal-book-row plus --deal-book-gap and
+   the heading and the See all line exactly their own height: the gaps between
+   the parts of a list live INSIDE those boxes, never between them. */
+.hero-deal .deal-book {
+  --deal-book-row: 50px;
+  --deal-book-gap: 6px;
+  --deal-book-head: 20px;
+  --deal-book-more: 24px;
+  --deal-book-block: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--deal-book-block);
+  min-width: 0;
+}
+
+/* Only the three-column desk has spare height beside the centre column, and the
+   book is the child that eats it. A scroll container contributes no minimum
+   height of its own, so these lists can never make Best Deal taller than the
+   card in the middle; below 1101px the desk stacks, there is nothing to measure
+   and deal-book.js caps the rows instead. */
+@media (min-width: 1101px) {
+  .hero-deal .deal-book {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+.deal-book-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.deal-book-head {
+  height: var(--deal-book-head);
+  margin: 0;
+}
+
+.deal-book-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--deal-book-gap);
+  min-width: 0;
+}
+
+.deal-book-more {
+  height: var(--deal-book-more);
+  padding-top: var(--deal-book-gap);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+/* One line per listing: seller | price | copies | cart, out of the Shop's parts. */
+.deal-book .shop-row {
+  flex-wrap: nowrap;
+  height: var(--deal-book-row);
+  padding: 0;
+  border-bottom: 0;
+}
+
+.deal-book .shop-seller {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.deal-book .shop-offer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* One line per offer: grade | best price | how many want it | Sell. */
+.deal-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: var(--deal-book-row);
+  padding: 0 0.25rem;
+  min-width: 0;
+  border-radius: 0.55rem;
+}
+
+.deal-offer-cond {
+  flex: none;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 0.55rem;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.deal-offer-cond:hover { border-color: rgb(255 211 61 / 0.45); }
+
+.deal-offer-cond .shop-cond {
+  width: 2.2rem;
+  height: 1.5rem;
+}
+
+.deal-offer-px {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deal-offer-want {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.deal-offer-sell {
+  flex: none;
+  height: 1.7rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--yellow);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.deal-offer-sell:hover,
+.deal-offer-sell:focus-visible {
+  border-color: var(--yellow);
+  outline: none;
+}
+
+/* The row whose grade the chips above already picked. */
+.deal-offer.is-current { background: rgb(255 211 61 / 0.07); }
+
+.deal-offer.is-current .deal-offer-cond { border-color: var(--yellow); }
 /* Offer bar: the best buy offer, same size as Add to cart, above it. Opens the offer form in place. */
 .offer-wrap {
   display: flex;

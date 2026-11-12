@@ -15,7 +15,8 @@ test('shop listing line never adds to cart on row click — cart icon, buy-btn, 
   assert.match(row, /listingsReference/);
   assert.match(row, /writeListingDrag/);
   assert.match(row, /onInspect/);
-  assert.match(card, /onCart=\{\(qty\) => addToCart/);
+  assert.match(card, /onCart=\{\(qty\) => addListingToCart\(offer, qty\)\}/);
+  assert.match(card, /function addListingToCart\(offer, qty = 1\) \{\s*addToCart\(\{ \.\.\.cartItemFromOffer\(card\(\), snapshot\(offer\)\)/);
   assert.match(card, /onInspect=\{openZoom\}/);
   assert.match(seller, /onCart=\{\(qty\) =>/);
 });

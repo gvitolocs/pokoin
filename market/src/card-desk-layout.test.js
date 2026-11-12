@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { DEAL_BOOK_METRICS, DEAL_BOOK_WIDE_MIN_WIDTH } from './deal-book.js';
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
 
@@ -89,4 +90,39 @@ test('the Vault title shares the Seller label style', () => {
   const header = css.match(/\.shop-header \{([^}]*)\}/)[1];
   assert.match(header, /font-size:\s*0\.72rem/);
   assert.match(header, /letter-spacing:\s*0\.03em/);
+});
+
+test('the Best Deal book is measured in whole rows and can never outgrow the centre column', () => {
+  const measured = new RegExp(`@media \\(max-width: ${DEAL_BOOK_WIDE_MIN_WIDTH - 1}px\\) \\{[\\s\\S]{0,200}?\\.card-desk`);
+  assert.match(css, measured, 'the desk stacks one pixel below the width dealBookMeasured() starts measuring');
+  // styles.css sizes the book from the same numbers deal-book.js counts rows with.
+  const book = css.slice(css.indexOf('.hero-deal .deal-book {'));
+  for (const [key, value] of Object.entries(DEAL_BOOK_METRICS)) {
+    assert.match(book, new RegExp(`--deal-book-${key}:\\s*${value}px`), key);
+  }
+  // The heading, the rows and the See all line are gap-free siblings: each part
+  // costs exactly what planDealBook() charges for it, so nothing is ever clipped.
+  const list = css.match(/\.deal-book-list \{([^}]*)\}/)[1];
+  assert.doesNotMatch(list, /gap:/);
+  assert.match(css, /\.deal-book-head \{[^}]*height: var\(--deal-book-head\)/);
+  assert.match(css, /\.deal-book-rows \{[^}]*gap: var\(--deal-book-gap\)/);
+  assert.match(css, /\.deal-book-more \{[^}]*height: var\(--deal-book-more\)[^}]*padding-top: var\(--deal-book-gap\)/);
+  for (const selector of ['.deal-book .shop-row {', '.deal-offer {']) {
+    const at = css.indexOf(selector);
+    assert.notEqual(at, -1, selector);
+    assert.match(css.slice(at, css.indexOf('}', at)), /height: var\(--deal-book-row\)/, selector);
+  }
+  // Only the stretched panel clips: the stacked desk sizes its book to content,
+  // so a row there is never cut and never needs a scrollbar.
+  const stacked = book.slice(0, book.indexOf('@media'));
+  assert.doesNotMatch(stacked, /overflow:/);
+  assert.doesNotMatch(stacked, /flex:/);
+  const wide = book.slice(book.indexOf(`@media (min-width: ${DEAL_BOOK_WIDE_MIN_WIDTH}px)`));
+  assert.match(wide, /\.hero-deal \.deal-book \{\s*flex: 1 1 0;\s*min-height: 0;\s*overflow: hidden;/);
+  assert.match(wide, /overflow:\s*hidden/);
+});
+
+test('the Buy offers row shares one line box with the seller rows, so both lists count the same', () => {
+  assert.match(css, /\.deal-book \.shop-row \{[^}]*padding:\s*0/);
+  assert.match(css, /\.deal-book \.shop-seller \{[^}]*flex:\s*1 1 auto/);
 });

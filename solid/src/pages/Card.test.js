@@ -122,3 +122,34 @@ test('the Vault panel carries is-empty from the Vault memo, so phones can hide i
   const header = fs.readFileSync(new URL('../components/desk/ShopHeader.jsx', import.meta.url), 'utf8');
   assert.match(header, /shop-hseller shop-label/);
 });
+
+test('the desk loads one buy book and hands it to the bar and the Best Deal rows', () => {
+  assert.match(page, /const buy = createBuyBook\(\{ cardId, ready: offersReady, language: shownLang \}\)/);
+  assert.match(page, /<OfferBar\n\s*buy=\{buy\}/);
+  assert.doesNotMatch(page, /ready=\{offersReady\(\)\}/);
+  // The bar owns the only Sell now form: the rows ask it for a grade, they do not grow one.
+  const lib = fs.readFileSync(new URL('../lib/buy-book.js', import.meta.url), 'utf8');
+  assert.match(lib, /pickSell\(condition\) \{\s*setSellPick\(condition \|\| ''\);\s*\}/);
+  const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
+  assert.match(bar, /createEffect\(buy\.sellPick, \(condition\) => \{/);
+  assert.match(bar, /setSetting\('condition', condition\);\s*openPopup\(\)/);
+  assert.doesNotMatch(bar, /fetchBuyBook/);
+});
+
+test('the Best Deal book sits between the chips and the offer bar, fed by the desk listings', () => {
+  const book = page.slice(page.indexOf('<DealBook'), page.indexOf('<div class="deal-actions">'));
+  assert.ok(book.length > 40, 'the book is mounted above the actions');
+  for (const prop of ['rows={nativeLive()}', 'deal={dealPick()}', 'condition={shownCond()}', 'language={shownLang()}']) {
+    assert.ok(book.includes(prop), prop);
+  }
+  // Price, qty and cart come from the Shop row, and See all walks to the Shop panel.
+  assert.match(page, /onCart=\{addListingToCart\}/);
+  assert.match(page, /onSeeAll=\{scrollShop\}/);
+  assert.match(page, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+  const rows = fs.readFileSync(new URL('../components/deal/DealBook.jsx', import.meta.url), 'utf8');
+  assert.match(rows, /<Show when=\{sellers\(\)\.length\}>/);
+  assert.match(rows, /<Show when=\{offers\(\)\.length\}>/);
+  assert.match(rows, /See all \$\{total\(\)\} listings/);
+  assert.match(rows, /props\.buy\.pickSell\(row\.condition\)/);
+  assert.match(rows, /window\.getComputedStyle\(region\)/);
+});
