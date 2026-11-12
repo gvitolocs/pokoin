@@ -87,16 +87,26 @@ display name. Languages are the 16 codes of the price book (the listing form's `
   bar's currency rule (`buyerParts(pkn, true, pinnedCurrency())`), the line says `N <grade> wanted`, and `Sell` — only
   on a grade with a `best_order_id` the visitor did not post (`buyOfferSellable`) — opens the bar's Define offer popup
   on that grade, where the existing Sell now form and its `best_remaining` cap live. Nothing expands inside the panel.
-- **The book never grows the panel.** Above 1100px the stretched column has spare height under the chips, so `.deal-book`
-  is the flex child that eats it (`flex: 1 1 0; min-height: 0; overflow: hidden`) — a scroll container contributes no
-  minimum height of its own, which is what keeps Best Deal from ever outgrowing the centre column — and `DealBook`
-  measures its `clientHeight` (plus `--deal-book-row/-gap/-head/-more/-block`, read back with `getComputedStyle` so CSS
-  and `DEAL_BOOK_METRICS` cannot drift) and asks `planDealBook()` for whole rows only: the two lists alternate, each
-  heading and the See all line is reserved before it is drawn, and a list with no row is dropped so the other takes the
-  space. The whole list is `.deal-book-list { display: flex }`, never a grid — a grid row takes the tallest cell, and a
-  row would then cost more than it is charged. At 1100px and below the desk stacks and nothing is measured:
-  `dealBookUncut()` caps each list at three rows, two at 720px and below, plus the See all line, so a stacked panel is
-  never clipped.
+- **The book never grows the panel.** Above 1100px the desk stretches every column of the row to the tallest one, so
+  the Best Deal panel has spare height under the chips and `.deal-book` is the flex child that eats it
+  (`flex: 1 1 0; min-height: 0; overflow: hidden`). Stretching alone is not the rule: a flex item still contributes its
+  max-content height to a column container, so measuring `clientHeight` hands the book its own growth back and the
+  panel outruns the centre column (measured: panel 1553 against a centre of 1377 on a slack of 312). `DealBook.slack()`
+  therefore asks a different question — the panel's own fixed parts are summed from its children with the book
+  `display: none` (not squashed to `max-height: 0px`: Chrome reports the *used* value of the `margin-top: auto` that
+  pins `deal-actions` to the bottom, so a squashed void would be counted as the panel's height), the row line is the
+  tallest *other* desk column of the same row (`Math.abs(top - cell.top) <= 2` skips the Shop/Vault row below), and the
+  lists may take the difference. The same number is then written as the region's inline `max-height`, and whole rows
+  are counted out of `Math.min(slack, region.clientHeight)` — the slack is the ceiling, a shorter panel gets fewer
+  rows, and a panel that is already the tallest gets 0 and renders nothing. `--deal-book-row/-gap/-head/-more/-block`,
+  read back with `getComputedStyle` so CSS and `DEAL_BOOK_METRICS` cannot drift, decide how many rows that is: the two
+  lists alternate, each heading and the See all line is reserved before it is drawn, and a list with no row is dropped
+  so the other takes the space. The whole list is `.deal-book-list { display: flex }`, never a grid — a grid row takes
+  the tallest cell, and a row would then cost more than it is charged. A capped region does not resize when its content
+  grows, so the desk columns beside the panel are observed and new listings re-read the slack; an empty book leaves the
+  layout entirely, because as a flex child it would still cost the panel one row-gap. At 1100px and below the desk
+  stacks and nothing is measured: `dealBookUncut()` caps each list at three rows, two at 720px and below, plus the See
+  all line, so a stacked panel is never clipped.
 - Best Deal's two-line price is flipped (`PriceStack flip`, order in `market/src/price-stack.js`): the local currency is the
   large yellow figure and the PKN amount the small line above it. A single price is unchanged. Tiles, shop rows, search and
   cart keep the old order.
