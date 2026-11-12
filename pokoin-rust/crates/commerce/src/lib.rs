@@ -101,6 +101,10 @@ pub fn router(state: DomainState) -> Router {
             axum::routing::patch(handlers::buy_orders::patch).delete(handlers::buy_orders::cancel),
         )
         .route(
+            "/api/marketplace-buy-orders/house/sell",
+            post(handlers::buy_orders::sell_house),
+        )
+        .route(
             "/api/marketplace-buy-orders/{id}/sell",
             post(handlers::buy_orders::sell),
         )
@@ -340,6 +344,7 @@ mod tests {
             ("GET", "/api/marketplace-buy-orders/board"),
             ("GET", "/api/marketplace-buy-orders/mine"),
             ("GET", "/api/marketplace-buy-orders/for-my-listings"),
+            ("POST", "/api/marketplace-buy-orders/house/sell"),
             (
                 "PATCH",
                 "/api/marketplace-buy-orders/00000000-0000-4000-8000-00000000000a",
@@ -443,6 +448,10 @@ mod tests {
                 "/api/marketplace-buy-orders/for-my-listings".to_string(),
             ),
             ("POST", "/api/marketplace-buy-orders".to_string()),
+            (
+                "POST",
+                "/api/marketplace-buy-orders/house/sell".to_string(),
+            ),
             ("PATCH", format!("/api/marketplace-buy-orders/{id}")),
             ("DELETE", format!("/api/marketplace-buy-orders/{id}")),
             ("POST", format!("/api/marketplace-buy-orders/{id}/sell")),

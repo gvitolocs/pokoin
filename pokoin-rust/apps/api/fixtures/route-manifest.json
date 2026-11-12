@@ -1399,5 +1399,13 @@
   ],
   "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::sell; no Node origin)",
   "purpose": "Sell now: create a normal listing at the order's price (same validation as POST /api/marketplace-listings) and record a fill; emails the buyer. Moves no money; the buyer buys the listing through the cart. 403 own_buy_order, 409 not_open | quantity_exceeds_remaining."
+ },
+ {
+  "path": "/api/marketplace-buy-orders/house/sell",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: pokoin-rust/crates/commerce/src/handlers/buy_orders.rs::sell_house; no Node origin)",
+  "purpose": "Sell into Pokoin's starting offer: create a normal listing at 1 PKN (same validation as POST /api/marketplace-listings) for the card, condition and language in the body, and email Pokoin. There is no order row and no fill. Moves no money; Pokoin buys the listing through the cart."
  }
 ]
