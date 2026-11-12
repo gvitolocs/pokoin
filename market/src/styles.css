@@ -3687,10 +3687,20 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   height: 1.2rem;
 }
 
-/* Every chip can be pressed now (it also drives the graph), so an unlisted one
-   is dimmed but not dead, and a pressed one is ringed even with nothing to buy. */
-.desk-band .deal-chip.is-off { cursor: pointer; opacity: 0.45; }
-.desk-band .deal-chip.is-off.is-on { opacity: 0.8; filter: none; }
+/* Every chip is a live button (it also drives the graph), so none is greyed
+   out: an unlisted grade or language is drawn in full colour like the rest,
+   and only the yellow ring says which one is picked. Each sits in a faint
+   outline so it reads as a button before it is hovered. */
+.desk-band .deal-chip,
+.desk-band .deal-chip.is-off {
+  cursor: pointer;
+  opacity: 1;
+  filter: none;
+  border-color: rgb(255 255 255 / 0.12);
+}
+.desk-band .deal-chip:hover { border-color: rgb(255 211 61 / 0.45); }
+.desk-band .deal-chip.is-on,
+.desk-band .deal-chip.is-on:hover { border-color: var(--yellow); }
 .desk-band .deal-facet-row[aria-label="Finish"] { display: flex; width: auto; }
 .desk-band .deal-chip-reverse { display: inline-flex; align-items: center; gap: 0.3rem; }
 .desk-band .deal-chip-reverse svg { width: 14px; height: 14px; }
