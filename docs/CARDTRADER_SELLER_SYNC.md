@@ -333,7 +333,7 @@ https://api.pokoin.com/api/cardtrader-webhook/<firebase-uid>
 
 Registration health is stored as non-secret `webhookRegistration` metadata on
 the seller integration. Failures do not discard a valid encrypted token, but
-they are no longer silently forgotten. Every periodic run retries registration.
+they are no longer silently forgotten. As of 2026-11-12 every periodic run reads the app's `webhook_url` with `GET /info` and writes `PATCH /app` only when it is missing or different, or when the read fails. Before that the URL was rewritten on every run. `webhookRegistration.verifiedBy` says which of the two (`info` or `patch`) confirmed it.
 
 `pokoin-rust-job-cardtrader-seller-reconcile.timer` runs on `pi-home` ten
 minutes after the previous run ends (`OnUnitInactiveSec`; counted from the
