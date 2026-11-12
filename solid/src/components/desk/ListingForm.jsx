@@ -25,7 +25,7 @@ import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
 import { fiatFromPkn, LIST_CURRENCIES, listingPriceToPkn } from '@market/pkn.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { suggestPriceFromSlices } from '@market/scan-pricing.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { priceInputFromPkn } from '@market/seller-currency.js';
 import { Action, track } from '@market/track.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '@market/user-photos.js';
 import { authReady, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -296,9 +296,6 @@ export default function ListingForm(props) {
   });
 
   const hint = () => (!price() && graphPrice() ? graphPrice() : '');
-  const listedPkn = () => (price()
-    ? listingPriceToPkn(price(), currency())
-    : listingPriceToPkn(graphPrice(), currency()));
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
@@ -648,12 +645,12 @@ export default function ListingForm(props) {
           />
         </div>
       </Show>
-      <p class="sell-pkn-eq">
-        {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())}` : ''}
-        <Show when={sellerSettings()?.acceptsPkn === false}>
-          {listedPkn() ? ' · ' : ''}Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
-        </Show>
-      </p>
+      {/* The price field already shows what the card lists at; only the PKN-off notice keeps a line. */}
+      <Show when={sellerSettings()?.acceptsPkn === false}>
+        <p class="sell-pkn-eq">
+          Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
+        </p>
+      </Show>
       <div class="sell-options-row">
         <div class="sell-field sell-pick condition-pick">
           <span class="sr-only">Condition</span>

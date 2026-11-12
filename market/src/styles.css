@@ -3772,7 +3772,7 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
      reads price, currency, quantity, the pickers, then Save changes at the right
      end; location and comment take the whole second line. */
   .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
-    grid-template-columns: minmax(6rem, 9rem) 6rem 4rem minmax(0, 1fr) auto;
+    grid-template-columns: 5.5rem 6rem 4rem minmax(0, 1fr) auto;
     grid-template-areas:
       "head head head head head"
       "price cur qty options save"
@@ -3810,6 +3810,59 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
     width: 2.5rem;
     height: 2.5rem;
   }
+
+  /* The pickers and extras are one line, always: they never wrap under the
+     price. Each keeps its content width and the row sits at the inputs' foot. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-photos {
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row > * { flex: none; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { white-space: nowrap; }
+}
+
+/* A narrower desk gives the same line less room: the chips and the finish
+   picker tighten instead of dropping to a second line. */
+@media (min-width: 1001px) and (max-width: 1320px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-field.sell-pick select,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button {
+    font-size: 0.78rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.5rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn { padding-left: 0.4rem; padding-right: 0.4rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 6.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form { column-gap: 0.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) {
+    grid-template-columns: minmax(15rem, 0.7fr) minmax(0, 1.6fr);
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: 5.5rem 6rem 4rem minmax(0, 1fr) auto;
+    column-gap: 0.4rem;
+  }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn { padding: 0 0.8rem; }
+  /* Price, currency and quantity stay one line too: the price field gives way. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row { flex-wrap: nowrap; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row > .sell-field.price {
+    flex: 1 1 4.5rem;
+    min-width: 4.5rem;
+  }
+}
+
+/* The narrowest desk that still has the two-line form: one more notch tighter. */
+@media (min-width: 1001px) and (max-width: 1120px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips { gap: 0.22rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.38rem; font-size: 0.74rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 5.9rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .listing-photo-add { width: 2.2rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: 5rem 5.8rem 3.8rem minmax(0, 1fr) auto;
+  }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn { padding: 0 0.6rem; font-size: 0.86rem; }
 }
 
 .cell-cheap {
@@ -12396,4 +12449,29 @@ img.is-lang-scan {
     justify-items: start;
     text-align: left;
   }
+}
+
+/* The price is a few digits: its field is short in the opened desk form, so the
+   rest of the line has the room. */
+@media (min-width: 1001px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row { flex-wrap: nowrap; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row > .sell-field.price {
+    flex: 0 1 6.5rem;
+    min-width: 4.5rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) {
+    grid-template-columns: minmax(18.5rem, 0.55fr) minmax(0, 1.6fr);
+  }
+}
+
+/* In the edit line each field fills its own column and no more, so quantity
+   cannot run under the first picker; and a label never breaks into two lines. */
+@media (min-width: 1001px) {
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field input,
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form .sell-field { white-space: nowrap; }
 }
