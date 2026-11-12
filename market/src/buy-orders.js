@@ -137,9 +137,9 @@ export function cancelBuyOrder(id, token) {
 export const BUYER_MESSAGE_MAX = 240;
 const BUYER_MESSAGE_TOO_LONG = "That note is too long or has characters we can't send.";
 
-/** What the API is sent and what the counter counts: Windows breaks folded, ends trimmed. */
+/** What the API is sent and what the counter counts: Windows and old-Mac breaks (CRLF and a lone CR) folded to LF like the server, ends trimmed. */
 function buyerMessageText(text) {
-  return String(text ?? '').replace(/\r\n/g, '\n').trim();
+  return String(text ?? '').replace(/\r\n?/g, '\n').trim();
 }
 
 /** Control characters that survive as line breaks only: a tab or a NUL is not sendable. */

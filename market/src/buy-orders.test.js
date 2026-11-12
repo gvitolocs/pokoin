@@ -132,6 +132,15 @@ test('the sell bodies carry the note only when there is something to send', asyn
   assert.equal('buyer_message' in calls[5].body, false, 'the house sell sends no note when there is none');
 });
 
+test('a lone carriage return is folded to a line break like the server does', async () => {
+  assert.equal(buyerMessageError('a\rb'), '');
+  assert.equal(buyerMessageLength('a\rb'), 3);
+  const calls = await captureBodies(async () => {
+    await sellIntoBuyOrder('o1', 1, 'tok', 'a\rb');
+  });
+  assert.deepEqual(calls[0].body, { quantity: 1, buyer_message: 'a\nb' });
+});
+
 test('the offer unit of a surface that did not open the popup is the device choice', () => {
   const data = new Map([[OFFER_UNIT_KEY, 'PKN']]);
   const storage = { getItem: (key) => (data.has(key) ? data.get(key) : null) };

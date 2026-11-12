@@ -734,6 +734,17 @@ fn check_order(order: &Value, seller: &str, quantity: i64) -> Result<(), ApiErro
     .map_err(sell_error)
 }
 
+/// What a failed send may put in a log line: our own code and the HTTP status,
+/// never the provider's message, which can echo the email body (the seller's
+/// private note).
+fn mail_error_text(error: &ApiError) -> String {
+    format!(
+        "{} (status {})",
+        error.code.as_deref().unwrap_or("email_delivery_failed"),
+        error.status.as_u16()
+    )
+}
+
 /// Email the buyer that a seller listed at their price, with the seller's
 /// private note when there is one. Best effort.
 async fn email_buyer(
@@ -775,7 +786,7 @@ async fn email_buyer(
     )
     .await
     .map(|_| ())
-    .map_err(|error| error.message)
+    .map_err(|error| mail_error_text(&error))
 }
 
 /// `POST /api/marketplace-buy-orders/{id}/sell` — list into an open order at
@@ -937,7 +948,7 @@ async fn email_house(
     )
     .await
     .map(|_| ())
-    .map_err(|error| error.message)
+    .map_err(|error| mail_error_text(&error))
 }
 
 /// `POST /api/marketplace-buy-orders/house/sell` — list into Pokoin's
@@ -1012,6 +1023,18 @@ mod tests {
     use super::*;
 
     const ID: &str = "00000000-0000-4000-8000-00000000000a";
+
+    #[test]
+    fn a_mail_failure_log_text_never_carries_provider_text() {
+        let error = ApiError::new(
+            axum::http::StatusCode::BAD_GATEWAY,
+            "Rejected content: PRIVATE-NOTE-123",
+        )
+        .with_code("email_delivery_failed");
+        let text = mail_error_text(&error);
+        assert!(!text.contains("PRIVATE-NOTE-123"));
+        assert_eq!(text, "email_delivery_failed (status 502)");
+    }
 
     #[test]
     fn a_sale_into_the_starting_offer_is_always_one_pkn() {
