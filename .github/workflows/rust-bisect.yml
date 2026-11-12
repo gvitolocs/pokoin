@@ -1,0 +1,22 @@
+# TEMPORARY diagnostic: which crate's tests kill the runner. Deleted before merge.
+name: rust-bisect
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  crate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ["pokoin-api", "pokoin-accounts", "pokoin-db", "pokoin-media", "pokoin-sort", "pokoin-admin-api", "pokoin-api-common", "pokoin-config", "pokoin-assistant-api", "pokoin-auth", "pokoin-cache", "pokoin-catalog", "pokoin-search", "pokoin-catalog-api", "pokoin-commerce", "pokoin-external", "pokoin-edge", "pokoin-integrations", "pokoin-listings", "pokoin-inventory", "pokoin-marketplace", "pokoin-observability", "pokoin-search-api", "pokoin-shared-dictionary", "poko-eval", "poko-bot", "cardtrader-bridge", "cardtrader-listing-dump", "ctbook", "cardtrader-price-cache", "cardtrader-sold", "tcgplayer-match", "cardmarket-catalog", "tcgplayer-sync-box", "pokoin-sync"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cargo test -p ${{ matrix.pkg }} --locked
+        working-directory: pokoin-rust
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
+          CARGO_PROFILE_TEST_DEBUG: 0
