@@ -198,7 +198,15 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   // one is kept even with nothing listed, and the sold graph plots what they pick.
   assert.doesNotMatch(page, /class=\{\['deal-chip'[^\n]*\n(?:[^\n]*\n){0,6}[^\n]*disabled=\{dim\(\)\}/);
   assert.match(page, /if \(condPinned\(\)\) return wanted;/);
-  assert.match(page, /createEffect\(\(\) => \[shownCond\(\), shownLang\(\), dealReverse\(\)\]/);
+  assert.match(page, /createEffect\(\(\) => \[pickedCond\(\), pickedLang\(\), dealReverse\(\)\]/);
+  // Pressing the ringed chip again lets go of it: any condition, or any language.
+  assert.match(page, /const pickedCond = \(\) => \(condAny\(\) \? '' : shownCond\(\)\);/);
+  assert.match(page, /const pickedLang = \(\) => \(langAny\(\) \? '' : shownLang\(\)\);/);
+  assert.match(page, /onClick=\{\(\) => \(on\(\) \? setCondAny\(true\) : pickDealCond\(row\.value\)\)\}/);
+  assert.match(page, /onClick=\{\(\) => \(on\(\) \? setLangAny\(true\) : pickDealLang\(code, true\)\)\}/);
+  assert.match(page, /matchDeal\(dealRows\(\), pickedLang\(\), pickedCond\(\), card\(\)\)/);
+  // The graph's axis is in the visitor's currency, like its tooltip.
+  assert.match(page, /axisFactor=\{graphAxisFactor\(\)\}/);
   assert.match(page, /class=\{\['deal-chip', 'deal-chip-reverse', \{ 'is-on': dealReverse\(\) \}\]\}/);
   assert.match(page, /linkedLabel=\{graphScope\(\)\}/);
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
@@ -227,7 +235,14 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(cells, /buyOfferRows\(book\(\), \{ language: props\.language, max: props\.max \}\)/);
   assert.match(cells, /props\.buy\.pickSell\(row\.condition\)/);
   // Never an empty hole: no offers is one line that opens the Define offer popup.
-  assert.match(cells, /No buy offers yet/);
+  // With no buyer's offer the cell names Pokoin's starting offer and lets the seller sell into it.
+  assert.match(cells, /Pokoin buys it for \$\{offerPriceLabel\(HOUSE_OFFER_PKN, buyerCurrency\(props\.pinned\) \|\| 'PKN'\)\}/);
+  assert.match(cells, /props\.buy\.pickSell\(props\.condition\)/);
+  assert.match(page, /if \(!row\) return withHouseOffer\(null\);/);
+  const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
+  assert.match(bar, /const canSellNow = \(\) => Boolean\(target\(\)\?\.house\)/);
+  assert.match(bar, /sellToHouse\(\{\s*cardId: props\.cardId,/);
+  assert.match(bar, /const cur = \(\) => offerUnit\(unitChoice\(\), currency\(\)\);/);
   assert.match(cells, /props\.buy\.askOffer\(\)/);
   // A book that failed to load paints nothing, exactly like the bar.
   assert.match(cells, /<Show when=\{Array\.isArray\(book\(\)\)\}>/);

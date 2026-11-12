@@ -3801,6 +3801,44 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   grid-column: 1 / -1;
 }
 
+/* When Pokoin has the card in its Vault, the Vault takes the cell beside the
+   buy offers and the cheapest listings become the row under the desk rows: the
+   two swap places. With no Vault stock nothing changes. The Vault scrolls
+   inside the cell so a long one cannot stretch the desk. */
+@media (min-width: 1001px) {
+  .card-desk:has(> .vault-panel) > .vault-panel {
+    grid-area: cheap;
+    max-height: 11.5rem;
+    overflow-y: auto;
+  }
+  .card-desk:has(> .vault-panel) > .cell-cheap {
+    grid-area: auto;
+    grid-column: 1 / -1;
+  }
+}
+
+/* The "Offer posted · Undo" line (and an offer error) floats over the tile's
+   top padding instead of pushing the band taller: posting an offer must not
+   move the desk. */
+@media (min-width: 721px) {
+  .band-actions .offer-wrap { position: relative; }
+  .band-actions .offer-wrap > .sell-msg {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.15rem);
+    z-index: 5;
+    margin: 0;
+    padding: 0.1rem 0.5rem;
+    border-radius: 8px;
+    background: var(--g2);
+    white-space: nowrap;
+  }
+}
+
+.deal-offer-cancel { color: var(--muted); }
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible { color: #f87171; border-color: #f87171; }
+
 /* Best Deal as one horizontal strip: label and marketplace links on their own
    compact line, then two content lines that never become three — the price and
    the chips share the first, the offer bar and the cart button take the second.
@@ -12063,6 +12101,18 @@ img.is-lang-scan {
 
 .offer-scrim {
   display: none;
+}
+
+/* The price field's label line: the unit on the left, the switch to the other unit on the right. */
+.offer-unit-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.offer-unit-switch {
+  font-size: 0.74rem;
 }
 
 .offer-pop-head {

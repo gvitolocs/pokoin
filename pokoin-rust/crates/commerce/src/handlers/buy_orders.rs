@@ -845,11 +845,193 @@ pub async fn sell(
     }
 }
 
+// ------------------------------------------------------------ the starting offer
+
+/// Pokoin's own standing offer: every card, in every condition and language,
+/// at this price. It is not a row in `marketplace_buy_orders`; like every
+/// offer in version 1 it moves no money. Selling into it lists the card at
+/// this price and tells Pokoin, who buys it through the cart.
+pub const HOUSE_PRICE_PKN: f64 = 1.0;
+
+/// Where "a seller sold into the starting offer" is mailed.
+const HOUSE_BUYER_EMAIL: &str = crate::email::DEFAULT_EARN_PKN_TO;
+
+/// A validated `POST /api/marketplace-buy-orders/house/sell` body: a buy
+/// order's card, facets and display fields with the same cleaning and limits.
+/// The price and the duration are the house's, whatever the body says.
+pub fn parse_house_sale(body: &Value) -> Result<NewOrder, ApiError> {
+    if !body.is_object() {
+        return Err(bad("invalid_body"));
+    }
+    let mut fixed = body.clone();
+    fixed["price_pkn"] = json!(HOUSE_PRICE_PKN);
+    fixed["days"] = Value::Null;
+    if fixed.get("quantity").is_none_or(Value::is_null) {
+        fixed["quantity"] = json!(1);
+    }
+    parse_new_order(&fixed)
+}
+
+/// The listing body for a sale into the starting offer: `listing_body` over an
+/// order-shaped row, marked with its own source and no order id.
+pub fn house_listing_body(sale: &NewOrder, game: &str, seller: &Value) -> Value {
+    let order = json!({
+        "card_id": sale.card_id,
+        "condition": sale.condition,
+        "language": sale.language,
+        "reverse": sale.reverse,
+        "first_edition": sale.first_edition,
+        "price_pkn": HOUSE_PRICE_PKN,
+        "card_name": sale.card_name,
+        "card_image_url": sale.card_image_url,
+        "set_name": sale.set_name,
+        "collector_number": sale.collector_number,
+        "marketplace_game": game,
+    });
+    let mut body = listing_body(&order, sale.quantity, seller);
+    body["source"] = json!("buy_order_house");
+    body["sourceListingId"] = json!("");
+    body
+}
+
+/// Tell Pokoin a seller listed into the starting offer. Best effort.
+async fn email_house(state: &DomainState, sale: &NewOrder) -> Result<(), String> {
+    let message = notify::build_buy_order_fill_email(
+        "Pokoin",
+        &sale.card_name,
+        &sale.card_id,
+        HOUSE_PRICE_PKN,
+        sale.quantity,
+    );
+    crate::email::send_email(
+        state.http(),
+        crate::email::MARKETPLACE_FROM,
+        HOUSE_BUYER_EMAIL,
+        &message.subject,
+        &message.text,
+        &message.html,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| error.message)
+}
+
+/// `POST /api/marketplace-buy-orders/house/sell` — list into Pokoin's
+/// starting offer. The listing goes through the normal listing path, so every
+/// seller check of `POST /api/marketplace-listings` applies with the same
+/// error responses. There is no order row to lock and no fill to record.
+pub async fn sell_house(
+    State(state): State<DomainState>,
+    AuthedUser(claims): AuthedUser,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let result: Result<Value, ApiError> = async {
+        let payload: Value = serde_json::from_slice(&body).map_err(|_| bad("invalid_body"))?;
+        let sale = parse_house_sale(&payload)?;
+        throttle(&state, "buy-order-sell", &claims.uid).await?;
+        let game = listings::request_game(&headers, &uri);
+        let draft = match listings::prepare_listing(
+            &state,
+            &claims,
+            &house_listing_body(&sale, &game, &payload),
+            &game,
+        )
+        .await?
+        {
+            Prepared::Insert(draft) => draft,
+            Prepared::CardtraderOnly(_) => {
+                return Err(ApiError::internal(
+                    "Starting offer listings are Pokoin listings.",
+                ))
+            }
+        };
+
+        let mut tx = state.write_db().begin().await?;
+        let (row, queued) = listings::insert_listing(&state, &mut tx, &claims, &draft).await?;
+        let listing_id = live::field(&row, "id", 80);
+        if listing_id.is_empty() {
+            return Err(ApiError::internal("Pokoin did not confirm the listing."));
+        }
+        tx.commit().await?;
+
+        if let Err(error) = listings::finish_created(&state, &claims, &row, queued, &draft).await {
+            tracing::warn!(listing = %listing_id, error = %error.message, "starting offer listing committed; cache refresh failed");
+        }
+        let mailer = state.clone();
+        let mailed = sale.clone();
+        tokio::spawn(async move {
+            if let Err(error) = email_house(&mailer, &mailed).await {
+                tracing::warn!(error = %error, "starting offer email not sent");
+            }
+        });
+
+        Ok(json!({
+            "listing_id": listing_id,
+            "price_pkn": HOUSE_PRICE_PKN,
+            "quantity": sale.quantity,
+        }))
+    }
+    .await;
+    match result {
+        Ok(value) => created_json(value),
+        Err(error) => error_response(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const ID: &str = "00000000-0000-4000-8000-00000000000a";
+
+    #[test]
+    fn a_sale_into_the_starting_offer_is_always_one_pkn() {
+        // The body cannot name its own price or duration, and quantity defaults to 1.
+        let sale = parse_house_sale(&json!({
+            "card_id": "202", "condition": "sp", "language": "it", "price_pkn": 5000, "days": 7,
+            "card_name": "Pikachu",
+        }))
+        .unwrap();
+        assert_eq!(
+            (sale.price_pkn, sale.quantity, sale.days),
+            (HOUSE_PRICE_PKN, 1, None)
+        );
+        assert_eq!((sale.condition, sale.language.as_str()), ("SP", "IT"));
+        // The same validation as a buy order.
+        for (key, value, code) in [
+            ("card_id", json!(" "), "invalid_card"),
+            ("condition", json!("Mint"), "invalid_condition"),
+            ("language", json!("XX"), "invalid_language"),
+            ("quantity", json!(11), "invalid_quantity"),
+        ] {
+            let mut body = json!({ "card_id": "202", "condition": "NM", "language": "EN" });
+            body[key] = value;
+            let error = parse_house_sale(&body).unwrap_err();
+            assert_eq!(
+                (error.status, error.code.as_deref()),
+                (StatusCode::BAD_REQUEST, Some(code)),
+                "{key}"
+            );
+        }
+        assert!(parse_house_sale(&json!([])).is_err());
+
+        let listing = house_listing_body(
+            &sale,
+            "pokemon",
+            &json!({ "sellerComment": "sleeved", "pricePkn": 9 }),
+        );
+        assert_eq!(listing["pricePkn"], json!(HOUSE_PRICE_PKN));
+        assert_eq!(listing["source"], json!("buy_order_house"));
+        assert_eq!(listing["sourceListingId"], json!(""));
+        assert_eq!(listing["cardId"], json!("202"));
+        assert_eq!(listing["condition"], json!("SP"));
+        assert_eq!(listing["language"], json!("IT"));
+        assert_eq!(listing["quantityAvailable"], json!(1));
+        assert_eq!(listing["marketplaceGame"], json!("pokemon"));
+        assert_eq!(listing["sellerComment"], json!("sleeved"));
+    }
 
     fn body() -> Value {
         json!({

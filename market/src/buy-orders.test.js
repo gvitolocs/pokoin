@@ -24,6 +24,7 @@ import {
   validateBuyOrder,
   withHouseOffer,
   HOUSE_OFFER_PKN,
+  offerUnit,
 } from './buy-orders.js';
 
 test('every selection starts at the house offer of 1 PKN, shown in the visitor currency', () => {
@@ -43,7 +44,34 @@ test('every selection starts at the house offer of 1 PKN, shown in the visitor c
   // Beat offer on the floor is the smallest step above it, and the bar's amount is the floor converted.
   assert.equal(beatPricePkn(withHouseOffer(null)), 2);
   assert.equal(offerPriceLabel(HOUSE_OFFER_PKN, 'PKN'), '1 PKN');
-  assert.equal(offerPriceLabel(HOUSE_OFFER_PKN, 'USD'), formatFiatFromPkn(1, 'USD'));
+  assert.equal(offerPriceLabel(HOUSE_OFFER_PKN, 'USD'), '$0.005');
+});
+
+test('offers under ten cents keep their sub-cent digits, so 1 PKN and 2 PKN read differently', () => {
+  assert.equal(offerPriceLabel(1, 'USD'), '$0.005');
+  assert.equal(offerPriceLabel(2, 'USD'), '$0.01');
+  assert.equal(offerPriceLabel(3, 'EUR'), '€0.015');
+  assert.equal(offerPriceLabel(1, 'DKK'), '0.0375 DKK');
+  // From ten cents up the usual two decimals are enough and nothing changes.
+  assert.equal(offerPriceLabel(20, 'USD'), formatFiatFromPkn(20, 'USD'));
+  assert.equal(offerPriceLabel(101, 'DKK'), formatFiatFromPkn(101, 'DKK'));
+  // The price field round-trips: what it shows for 1 PKN is read back as 1 PKN, not 2.
+  for (const currency of ['USD', 'EUR', 'DKK']) {
+    for (const pkn of [1, 2, 3, 7, 19]) {
+      assert.equal(offerPricePkn(offerPriceInput(pkn, currency), currency), pkn, `${pkn} PKN in ${currency}`);
+    }
+  }
+  assert.equal(offerPriceInput(1, 'USD'), '0.005');
+  assert.equal(offerPriceInput(1, 'PKN'), '1');
+});
+
+test('the offer unit is the local currency unless the visitor chose PKN', () => {
+  assert.equal(offerUnit('', 'USD'), 'USD');
+  assert.equal(offerUnit('PKN', 'USD'), 'PKN');
+  assert.equal(offerUnit('pkn', 'dkk'), 'PKN');
+  assert.equal(offerUnit('', 'dkk'), 'DKK');
+  assert.equal(offerUnit('', ''), 'PKN', 'no currency yet: PKN');
+  assert.equal(offerUnit('EUR', 'USD'), 'USD', 'only PKN is a choice; anything else is the local currency');
 });
 import { formatFiatFromPkn, listingPriceToPkn } from './pkn.js';
 

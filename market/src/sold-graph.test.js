@@ -89,6 +89,26 @@ test('22 PKN sits mid-band on a 0–50 axis, not on the floor', () => {
   assert.equal(formatSoldAxisTick(100000), '100k');
 });
 
+test('a local-currency axis can step in cents, and its ticks are clean decimals', () => {
+  // 45 PKN is 1.69 DKK: a 0–2.5 axis by 0.5, not the PKN floor of 0–50.
+  assert.deepEqual(soldGraphScale(1.69, { minStep: 0.01 }).ticks, [0, 0.5, 1, 1.5, 2, 2.5]);
+  assert.deepEqual(soldGraphScale(0.21, { minStep: 0.01 }).ticks, [0, 0.05, 0.1, 0.15, 0.2, 0.25]);
+  assert.deepEqual(soldGraphScale(0.03, { minStep: 0.01 }).ticks, [0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+  assert.deepEqual(soldGraphScale(37.5, { minStep: 0.01 }).ticks, [0, 10, 20, 30, 40, 50]);
+  for (const max of [0.06, 0.3, 0.74, 1.69, 9.99, 12.4, 180]) {
+    const scale = soldGraphScale(max, { minStep: 0.01 });
+    assert.ok(scale.max >= max && max / scale.max >= 0.5, `${max} on 0–${scale.max}`);
+  }
+  // The PKN axis is unchanged without the option.
+  assert.deepEqual(soldGraphScale(22).ticks, [0, 10, 20, 30, 40, 50]);
+  assert.equal(formatSoldAxisTick(0.5), '0.5');
+  assert.equal(formatSoldAxisTick(0.05), '0.05');
+  assert.equal(formatSoldAxisTick(1.2), '1.2');
+  // A top under one unit is a real ceiling, not rounded up to 1.
+  assert.equal(soldGraphY(0.25, 0.25, 20, 120), 20);
+  assert.equal(Math.round(soldGraphY(0.125, 0.25, 20, 120)), 80);
+});
+
 test('sold-day labels follow the viewer locale, not MM/DD', () => {
   assert.equal(formatSoldDay('2026-09-03', 'en-US'), '09/03');
   assert.equal(formatSoldDay('2026-09-03', 'en-GB'), '03/09');

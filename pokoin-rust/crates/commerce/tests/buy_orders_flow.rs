@@ -949,3 +949,74 @@ async fn two_sells_for_the_last_copy_let_exactly_one_through() {
     statuses.sort_unstable();
     assert_eq!(statuses, [201, 409], "{first:?} {second:?}");
 }
+
+/// Pokoin's starting offer: any seller can list any card into it at 1 PKN,
+/// whatever price the body names, with no order row and no fill.
+#[tokio::test]
+async fn selling_into_the_starting_offer_lists_at_one_pkn() {
+    let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+        eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let (pool, app) = database(&url, "buy_orders_house").await;
+    let path = format!("{BASE}/house/sell");
+    let body = json!({
+        "card_id": "777", "condition": "sp", "language": "it", "reverse": true, "quantity": 2,
+        "price_pkn": 5000, "days": 90, "sellerCountry": "DK",
+        "card_name": "Clefable", "card_image_url": "https://img/clefable.jpg", "set_name": "Expedition", "collector_number": "41/165",
+    });
+
+    // A bearer is required, and the body is validated like a buy order.
+    let (status, _) = send(&app, "", "POST", &path, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let mut wrong = body.clone();
+    wrong["condition"] = json!("Mint");
+    let (status, error) = send(&app, "seller-1", "POST", &path, Some(wrong)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error_code(&error), "invalid_condition");
+
+    let (status, sold) = send(&app, "seller-1", "POST", &path, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{sold}");
+    assert_eq!(sold["price_pkn"], json!(1.0));
+    assert_eq!(sold["quantity"], json!(2));
+    let listing_id = sold["listing_id"].as_str().unwrap().to_string();
+    let (price, condition, language, reverse, source, source_id, quantity, seller, state, card): (f64, String, String, bool, String, String, i32, String, String, String) =
+        sqlx::query_as(
+            "select price_pkn::float8, condition, language, reverse, source, source_listing_id, quantity_available, seller_uid, status, card_id \
+             from public.marketplace_user_listings where id = $1::uuid",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(price, 1.0, "the body's 5000 PKN is ignored");
+    assert_eq!(
+        (condition.as_str(), language.as_str(), reverse),
+        ("SP", "IT", true)
+    );
+    assert_eq!(
+        (source.as_str(), source_id.as_str()),
+        ("buy_order_house", "")
+    );
+    assert_eq!(
+        (quantity, seller.as_str(), state.as_str(), card.as_str()),
+        (2, "seller-1", "active", "777")
+    );
+
+    // No order row and no fill: the starting offer is not in the book or the board.
+    let orders: i64 = sqlx::query_scalar("select count(*) from public.marketplace_buy_orders")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let fills: i64 = sqlx::query_scalar("select count(*) from public.marketplace_buy_order_fills")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((orders, fills), (0, 0));
+    assert!(book(&app, "777").await.is_empty());
+
+    // A second seller can sell the same card into it: it never fills up.
+    let (status, again) = send(&app, "seller-2", "POST", &path, Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    assert_ne!(again["listing_id"], sold["listing_id"]);
+}
