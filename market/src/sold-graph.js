@@ -153,27 +153,32 @@ export function activeSoldIndex(hover, dayCount) {
  * line always uses at least half the plot's height, so 7,000 PKN reads on a
  * 0–10,000 axis rather than lying flat on a 0–50k one.
  */
-export function soldGraphScale(maxValue) {
+export function soldGraphScale(maxValue, { minStep = 10 } = {}) {
   const max = Math.max(0, Number(maxValue) || 0);
-  let step = 10;
-  for (let mag = 10; step * 5 < max; mag *= 10) {
+  // `minStep` is the smallest step the axis may use: 10 for PKN, and a cent
+  // (0.01) when the axis is drawn in the visitor's currency, where a card that
+  // sold for a quarter must not sit on a 0–50 axis.
+  const floor = Number(minStep) > 0 ? Number(minStep) : 10;
+  let step = floor;
+  for (let mag = floor; step * 5 < max; mag *= 10) {
     for (const lead of [1, 2, 2.5, 5]) {
       step = lead * mag;
       if (step * 5 >= max) break;
     }
   }
-  const top = step * 5;
+  // Decimal steps pick up binary noise (0.1 * 3); six decimals is far below a cent.
+  const clean = (value) => Number(value.toFixed(6));
   return {
     min: 0,
-    max: top,
-    step,
-    ticks: [0, 1, 2, 3, 4, 5].map((n) => n * step),
+    max: clean(step * 5),
+    step: clean(step),
+    ticks: [0, 1, 2, 3, 4, 5].map((n) => clean(n * step)),
   };
 }
 
 export function soldGraphY(value, top, padT, plotH) {
   const v = Math.max(0, Number(value) || 0);
-  const ceiling = Math.max(Number(top) || 0, 1);
+  const ceiling = Number(top) > 0 ? Number(top) : 1;
   return padT + (1 - Math.min(v, ceiling) / ceiling) * plotH;
 }
 
@@ -182,8 +187,9 @@ export function formatSoldAxisTick(value) {
   if (n >= 10000 && n % 1000 === 0) {
     return `${n / 1000}k`;
   }
-  if (n >= 1000) {
-    return String(n);
+  // A local-currency axis has ticks under one unit: 0.05, 0.25, 1.5.
+  if (!Number.isInteger(n)) {
+    return String(Number(n.toFixed(3)));
   }
   return String(n);
 }

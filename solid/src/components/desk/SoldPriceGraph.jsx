@@ -148,8 +148,11 @@ export default function SoldPriceGraph(props) {
     const pad = bare()
       ? { ...SOLD_GRAPH_PAD, t: 12 }
       : (props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD);
-    const values = rows.map((row) => Number(row.medianPkn) || 0);
-    const scale = soldGraphScale(Math.max(0, ...values));
+    // The axis is drawn in the unit the tooltip already uses: `axisFactor` units
+    // of the visitor's currency per PKN (1, or absent, keeps a PKN axis).
+    const factor = Number(props.axisFactor) > 0 ? Number(props.axisFactor) : 1;
+    const values = rows.map((row) => (Number(row.medianPkn) || 0) * factor);
+    const scale = soldGraphScale(Math.max(0, ...values), { minStep: factor === 1 ? 10 : 0.01 });
     const start = Date.parse(`${rows[0].day}T00:00:00Z`);
     const end = Date.parse(`${rows[rows.length - 1].day}T00:00:00Z`);
     const range = Math.max(1, end - start);
@@ -160,7 +163,7 @@ export default function SoldPriceGraph(props) {
       const x = pad.l + (rows.length === 1 || range <= 1
         ? plotW / 2
         : ((Date.parse(`${row.day}T00:00:00Z`) - start) / range) * plotW);
-      return [x, soldGraphY(row.medianPkn, scale.max, pad.t, plotH)];
+      return [x, soldGraphY((Number(row.medianPkn) || 0) * factor, scale.max, pad.t, plotH)];
     });
     const line = points.map(([x, y]) => `${x},${y}`).join(' ');
     return {
