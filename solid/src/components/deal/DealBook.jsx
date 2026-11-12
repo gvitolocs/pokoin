@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, untrack } from 'solid-js';
 import { DEAL_BOOK_METRICS, buyOfferSellable, dealBookPlan } from '@market/deal-book.js';
 import { conditionChipSrc, conditionLabel } from '@market/listing-meta.js';
 import { buyerParts } from '../../stores/buyer.js';
@@ -47,21 +47,29 @@ export default function DealBook(props) {
       more: px('--deal-book-more', DEAL_BOOK_METRICS.more),
       block: px('--deal-book-block', DEAL_BOOK_METRICS.block),
     };
-    const cur = metrics();
+    // Reads inside an effect callback are not a tracking scope: this runs from
+    // the observer and the resize listener too, so it compares outside reactivity.
+    const cur = untrack(metrics);
     if (Object.keys(next).some((key) => next[key] !== cur[key])) setMetrics(next);
-    if (region.clientHeight !== available()) setAvailable(region.clientHeight);
+    const space = untrack(available);
+    if (region.clientHeight !== space) setAvailable(region.clientHeight);
   }
 
-  createEffect(() => {
-    measure();
-    const seen = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    if (region && seen) seen.observe(region);
-    window.addEventListener('resize', measure, { passive: true });
-    return () => {
-      window.removeEventListener('resize', measure);
-      seen?.disconnect();
-    };
-  });
+  // Solid 2 has no onMount: the compute reads nothing reactive, so this setup
+  // runs once after the first render and its cleanup on disposal.
+  createEffect(
+    () => region,
+    () => {
+      measure();
+      const seen = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+      if (region && seen) seen.observe(region);
+      window.addEventListener('resize', measure, { passive: true });
+      return () => {
+        window.removeEventListener('resize', measure);
+        seen?.disconnect();
+      };
+    },
+  );
 
   const plan = createMemo(() => dealBookPlan({
     width: width(),
