@@ -156,7 +156,9 @@ pub fn item_json(row: &Value) -> Value {
 }
 
 /// The buyer's own view: the item plus quantity, state and fills. With
-/// `only_seller` only that seller's fills are listed.
+/// `only_seller` only that seller's fills are listed, so a sell response never
+/// shows another seller's private note. Each fill carries the note the seller
+/// wrote to this buyer.
 pub fn mine_json(row: &Value, fills: &[Value], only_seller: Option<&str>) -> Value {
     let mut out = item_json(row);
     out["quantity"] = row["quantity"].clone();
@@ -171,6 +173,8 @@ pub fn mine_json(row: &Value, fills: &[Value], only_seller: Option<&str>) -> Val
                 "price_pkn": fill["price_pkn"],
                 "created_at": fill["created_at"],
                 "listing_status": fill["listing_status"],
+                // The seller's private note to this buyer; never anyone else's.
+                "seller_message": fill["seller_message"].as_str().unwrap_or_default(),
             })
         })
         .collect();
@@ -179,7 +183,7 @@ pub fn mine_json(row: &Value, fills: &[Value], only_seller: Option<&str>) -> Val
 }
 
 const FILLS_SQL: &str = "select to_jsonb(v) from (select f.buy_order_id::text as buy_order_id, f.listing_id::text as listing_id, \
-       f.seller_uid, f.quantity, f.price_pkn, f.created_at, coalesce(l.status, 'deleted') as listing_status \
+       f.seller_uid, f.quantity, f.price_pkn, f.created_at, f.seller_message, coalesce(l.status, 'deleted') as listing_status \
      from public.marketplace_buy_order_fills f \
      left join public.marketplace_user_listings l on l.id = f.listing_id \
      where f.buy_order_id = any($1) order by f.created_at, f.id) v";
@@ -730,8 +734,14 @@ fn check_order(order: &Value, seller: &str, quantity: i64) -> Result<(), ApiErro
     .map_err(sell_error)
 }
 
-/// Email the buyer that a seller listed at their price. Best effort.
-async fn email_buyer(state: &DomainState, order: &Value, quantity: i64) -> Result<(), String> {
+/// Email the buyer that a seller listed at their price, with the seller's
+/// private note when there is one. Best effort.
+async fn email_buyer(
+    state: &DomainState,
+    order: &Value,
+    quantity: i64,
+    seller_note: &str,
+) -> Result<(), String> {
     let firestore = state.firestore().map_err(|error| error.message)?;
     let buyer_uid = live::field(order, "buyer_uid", 160);
     let profile = crate::store::read_user(firestore, &buyer_uid)
@@ -752,6 +762,8 @@ async fn email_buyer(state: &DomainState, order: &Value, quantity: i64) -> Resul
         &live::field(order, "card_id", 80),
         live::number(&order["price_pkn"]),
         quantity,
+        seller_note,
+        notify::SELLER_NOTE_LABEL,
     );
     crate::email::send_email(
         state.http(),
@@ -768,7 +780,9 @@ async fn email_buyer(state: &DomainState, order: &Value, quantity: i64) -> Resul
 
 /// `POST /api/marketplace-buy-orders/{id}/sell` — list into an open order at
 /// its price. One transaction: lock the order, recount, create the listing
-/// through the listing path, record the fill.
+/// through the listing path, record the fill with the seller's optional note
+/// to the buyer. The note is nothing but data: not in the listing body, not in
+/// any public read, only on the fill and in the buyer's email.
 pub async fn sell(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
@@ -785,6 +799,8 @@ pub async fn sell(
             None | Some(Value::Null) => 1,
             Some(value) => rules::parse_quantity(value).map_err(bad)?,
         };
+        let seller_note =
+            rules::parse_buyer_message(&payload["buyer_message"]).map_err(bad)?;
         throttle(&state, "buy-order-sell", &claims.uid).await?;
 
         let first = fetch_order(state.write_db(), id).await?.ok_or_else(not_found)?;
@@ -812,13 +828,14 @@ pub async fn sell(
         let (row, queued) = listings::insert_listing(&state, &mut tx, &claims, &draft).await?;
         let listing_id = uuid::Uuid::parse_str(&live::field(&row, "id", 80)).map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
         sqlx::query(
-            "insert into public.marketplace_buy_order_fills (buy_order_id, listing_id, seller_uid, quantity, price_pkn) \
-             select o.id, $2, $3, $4, o.price_pkn from public.marketplace_buy_orders o where o.id = $1",
+            "insert into public.marketplace_buy_order_fills (buy_order_id, listing_id, seller_uid, quantity, price_pkn, seller_message) \
+             select o.id, $2, $3, $4, o.price_pkn, $5 from public.marketplace_buy_orders o where o.id = $1",
         )
         .bind(id)
         .bind(listing_id)
         .bind(&claims.uid)
         .bind(quantity as i32)
+        .bind(&seller_note)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -829,7 +846,7 @@ pub async fn sell(
         let mailer = state.clone();
         let mailed = order.clone();
         tokio::spawn(async move {
-            if let Err(error) = email_buyer(&mailer, &mailed, quantity).await {
+            if let Err(error) = email_buyer(&mailer, &mailed, quantity, &seller_note).await {
                 tracing::warn!(error = %error, "buy order fill email not sent");
             }
         });
@@ -894,14 +911,21 @@ pub fn house_listing_body(sale: &NewOrder, game: &str, seller: &Value) -> Value 
     body
 }
 
-/// Tell Pokoin a seller listed into the starting offer. Best effort.
-async fn email_house(state: &DomainState, sale: &NewOrder) -> Result<(), String> {
+/// Tell Pokoin a seller listed into the starting offer, with the seller's note
+/// to Pokoin when there is one. Best effort.
+async fn email_house(
+    state: &DomainState,
+    sale: &NewOrder,
+    seller_note: &str,
+) -> Result<(), String> {
     let message = notify::build_buy_order_fill_email(
         "Pokoin",
         &sale.card_name,
         &sale.card_id,
         HOUSE_PRICE_PKN,
         sale.quantity,
+        seller_note,
+        notify::HOUSE_NOTE_LABEL,
     );
     crate::email::send_email(
         state.http(),
@@ -919,7 +943,8 @@ async fn email_house(state: &DomainState, sale: &NewOrder) -> Result<(), String>
 /// `POST /api/marketplace-buy-orders/house/sell` — list into Pokoin's
 /// starting offer. The listing goes through the normal listing path, so every
 /// seller check of `POST /api/marketplace-listings` applies with the same
-/// error responses. There is no order row to lock and no fill to record.
+/// error responses. There is no order row to lock and no fill to record, so an
+/// optional `buyer_message` reaches Pokoin in the notification email alone.
 pub async fn sell_house(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
@@ -930,6 +955,8 @@ pub async fn sell_house(
     let result: Result<Value, ApiError> = async {
         let payload: Value = serde_json::from_slice(&body).map_err(|_| bad("invalid_body"))?;
         let sale = parse_house_sale(&payload)?;
+        let seller_note =
+            rules::parse_buyer_message(&payload["buyer_message"]).map_err(bad)?;
         throttle(&state, "buy-order-sell", &claims.uid).await?;
         let game = listings::request_game(&headers, &uri);
         let draft = match listings::prepare_listing(
@@ -962,7 +989,7 @@ pub async fn sell_house(
         let mailer = state.clone();
         let mailed = sale.clone();
         tokio::spawn(async move {
-            if let Err(error) = email_house(&mailer, &mailed).await {
+            if let Err(error) = email_house(&mailer, &mailed, &seller_note).await {
                 tracing::warn!(error = %error, "starting offer email not sent");
             }
         });
@@ -1215,5 +1242,46 @@ mod tests {
         let response =
             error_response(conflict("duplicate_buy_order").with_meta(json!({ "id": ID })));
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn a_note_shows_on_the_fill_that_carried_it() {
+        let row = json!({ "id": ID, "quantity": 2, "remaining": 1, "state": "open" });
+        let fills = [
+            json!({ "listing_id": "l1", "seller_uid": "s1", "seller_message": "ship Monday" }),
+            // A fill read before the column existed, or one with no note.
+            json!({ "listing_id": "l2", "seller_uid": "s2", "seller_message": "" }),
+            json!({ "listing_id": "l3", "seller_uid": "s3" }),
+        ];
+        let as_buyer = mine_json(&row, &fills, None);
+        assert_eq!(as_buyer["fills"][0]["seller_message"], "ship Monday");
+        assert_eq!(as_buyer["fills"][1]["seller_message"], "");
+        assert_eq!(as_buyer["fills"][2]["seller_message"], "");
+        let as_seller = mine_json(&row, &fills, Some("s2"));
+        assert_eq!(as_seller["fills"].as_array().unwrap().len(), 1);
+        assert_eq!(as_seller["fills"][0]["seller_message"], "");
+        assert!(
+            !mine_json(&row, &fills, Some("s2"))
+                .to_string()
+                .contains("ship Monday"),
+            "a seller never reads another seller's note"
+        );
+    }
+
+    #[test]
+    fn the_note_stays_out_of_the_starting_offer_listing_body() {
+        let payload = json!({
+            "card_id": "202", "condition": "NM", "language": "EN", "quantity": 1,
+            "sellerComment": "sleeved", "buyer_message": "ship Monday, please",
+        });
+        let sale = parse_house_sale(&payload).unwrap();
+        assert_eq!(
+            rules::parse_buyer_message(&payload["buyer_message"]).unwrap(),
+            "ship Monday, please"
+        );
+        let listing = house_listing_body(&sale, "pokemon", &payload);
+        assert_eq!(listing["sellerComment"], "sleeved");
+        assert!(listing.get("buyer_message").is_none());
+        assert!(!listing.to_string().contains("ship Monday"));
     }
 }
