@@ -81,10 +81,10 @@ function SoldGraphFilters(props) {
         <Show when={props.chips.reverse && !props.linkedLabel}>
           <SoldGraphToggle label={props.reverseLabel || 'Reverse'} pressed={props.reverse} onToggle={props.onReverse} />
         </Show>
-        <Show when={props.chips.firstEdition}>
+        <Show when={props.chips.firstEdition && !props.linkedLabel}>
           <SoldGraphToggle label="1st Ed." pressed={props.firstEdition} onToggle={props.onFirstEdition} />
         </Show>
-        <Show when={props.chips.graded}>
+        <Show when={props.chips.graded && !props.linkedLabel}>
           <SoldGraphToggle label="Graded" pressed={props.graded} onToggle={props.onGraded} />
         </Show>
         <Show when={!props.linkedLabel}>
@@ -123,9 +123,9 @@ export default function SoldPriceGraph(props) {
   const [size, setSize] = createSignal(null);
   const [hover, setHover] = createSignal(null);
   const days = createMemo(() => (Array.isArray(props.series?.days) ? props.series.days : []));
-  // Linked to the desk chips with no 1st Ed. / Graded toggle to show, nothing
-  // sits above the plot: it starts at the top and the unit count moves to the foot.
-  const bare = () => Boolean(props.linkedLabel) && !props.chips?.firstEdition && !props.chips?.graded;
+  // Linked to the desk chips (Reverse, 1st Ed. and Graded included), nothing sits
+  // above the plot: it starts at the top and the unit count moves to the foot.
+  const bare = () => Boolean(props.linkedLabel);
   const unitsLabel = () => {
     const series = props.series;
     const count = Number(series?.soldQty) > 0
