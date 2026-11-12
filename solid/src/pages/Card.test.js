@@ -286,6 +286,8 @@ test('the sold graph overlays every facet the visitor picks, each removable on i
   // All series share one scale and one date range, and the overlays are drawn first (underneath).
   assert.match(graph, /const every = \[\.\.\.rows, \.\.\.others\.flatMap\(\(row\) => row\.days\)\];/);
   assert.ok(graph.indexOf('<For each={geo().others}>') < graph.indexOf('<polygon points={geo().area} class="sold-graph-fill" />'));
+  // In the overlay view there is no fill under the current line: lines only.
+  assert.match(graph, /<Show when=\{!geo\(\)\.others\.length\}>\s*<polygon points=\{geo\(\)\.area\} class="sold-graph-fill" \/>\s*<\/Show>/);
   // Each overlay has its own legend entry with a remove button.
   assert.match(graph, /class="sold-graph-key-x"[\s\S]*onClick=\{\(\) => props\.onRemoveOverlay\?\.\(row\.key\)\}/);
   // A series is carried flat to both edges of the range, as its own dashed segments: dots stay on real sales.
