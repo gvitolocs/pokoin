@@ -763,7 +763,8 @@ function CardDesk(props) {
   }
 
   function scrollShop() {
-    const panel = document.querySelector('.card-desk .shop-panel');
+    // The Vault is a .shop-panel too: the listings live in the Shop terminal one.
+    const panel = document.querySelector('.card-desk .shop-terminal');
     panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     panel?.querySelector('.shop-header')?.focus();
   }
