@@ -146,10 +146,40 @@ test('the Best Deal book sits between the chips and the offer bar, fed by the de
   assert.match(page, /onCart=\{addListingToCart\}/);
   assert.match(page, /onSeeAll=\{scrollShop\}/);
   assert.match(page, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+  // The listings, not the Vault: both are .shop-panel, so See all names the terminal one.
+  assert.match(page, /document\.querySelector\('\.card-desk \.shop-terminal'\)/);
+  assert.match(page, /querySelector\('\.shop-header'\)\?\.focus\(\)/);
   const rows = fs.readFileSync(new URL('../components/deal/DealBook.jsx', import.meta.url), 'utf8');
   assert.match(rows, /<Show when=\{sellers\(\)\.length\}>/);
   assert.match(rows, /<Show when=\{offers\(\)\.length\}>/);
   assert.match(rows, /See all \$\{total\(\)\} listings/);
   assert.match(rows, /props\.buy\.pickSell\(row\.condition\)/);
   assert.match(rows, /window\.getComputedStyle\(region\)/);
+  // The slack is the tallest desk column of the same row minus the panel's own
+  // fixed parts (the desk stretches, so no box can be asked how tall it is), read
+  // with the book hidden — not squashed, which would keep the auto margin's void —
+  // and the same number caps the region: the lists can never measure a height they
+  // gave themselves.
+  assert.match(rows, /region\.style\.display = 'none';/);
+  assert.match(rows, /own \+= el\.getBoundingClientRect\(\)\.height;/);
+  assert.match(rows, /line = Math\.max\(line, box\.height\);/);
+  assert.match(rows, /if \(Math\.abs\(box\.top - top\) > 2\) continue;/);
+  assert.doesNotMatch(rows, /region\.style\.maxHeight = '0px'/);
+  assert.match(rows, /region\.style\.maxHeight = cap;/);
+  // An empty book must not cost the panel the row-gap around it: with nothing to
+  // give the measured column drops it from the layout. Where the caps decide (the
+  // stacked desk) it stays in, since there the rows do not come from the slack.
+  assert.match(rows, /const hide = !space && dealBookMeasured\(window\.innerWidth\);/);
+  assert.match(rows, /region\.style\.display = hide \? 'none' : '';/);
+  // Rows are counted out of the height the layout granted, which the cap bounds.
+  assert.match(rows, /const given = space \? Math\.min\(space, region\.clientHeight\) : 0;/);
+  assert.doesNotMatch(rows, /setAvailable\(region\.clientHeight\)/);
+  // The columns beside the panel are observed (a capped box stays put) and new
+  // data re-reads the slack: the listings arrive after the first paint.
+  assert.match(rows, /if \(other !== cell\) seen\.observe\(other\)/);
+  assert.match(rows, /props\.buy\.book\(\)\],\n\s*\(\) => measure\(\),/);
+  // Rows and book arrive after the first paint: the data re-reads the slack, and
+  // the columns beside the panel are observed because a capped box stays put.
+  assert.match(rows, /for \(const other of desk\.children\) if \(other !== cell\) seen\.observe\(other\);/);
+  assert.match(rows, /\(\) => \[props\.rows, props\.deal, props\.card, props\.language, props\.condition, props\.buy\.book\(\)\],\s*\(\) => measure\(\),/);
 });
