@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
-import { cancelBuyOrder, fetchBuyBook, fetchMyBuyOrders } from '@market/buy-orders.js';
+import { cancelBuyOrder, fetchBuyBook, fetchMyBuyOrders, readBookCache, writeBookCache } from '@market/buy-orders.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 import { previewBook, previewScale } from '../pages/buysell-preview-fixture.js';
 import { allowMypokoinPreview } from '../pages/mypokoin-preview-fixture.js';
@@ -23,7 +23,12 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   const [params] = useSearchParams();
   const preview = untrack(() => allowMypokoinPreview(params));
   const scale = untrack(() => previewScale(params));
-  const [book, setBook] = createSignal(null);
+  // A book this device saw for the card paints at once (a reload, a second
+  // visit); the request below still runs and replaces it. `loading` is true
+  // only while there is nothing at all to show, which the bar and the cell
+  // draw as a skeleton of their final size.
+  const stored = () => (preview || !cardId ? null : readBookCache(String(cardId)));
+  const [book, setBook] = createSignal(stored());
   const [mine, setMine] = createSignal([]);
   const [sellPick, setSellPick] = createSignal('');
   const [offerAsk, setOfferAsk] = createSignal(0);
@@ -39,7 +44,10 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     loadMine(id, run);
     return fetchBuyBook(id).then(
       (data) => {
-        if (run === seq) setBook(() => (Array.isArray(data?.book) ? data.book : []));
+        if (run !== seq) return;
+        const rows = Array.isArray(data?.book) ? data.book : [];
+        setBook(() => rows);
+        writeBookCache(id, rows);
       },
       () => {
         // A failed first read still leaves the desk silent about nothing: the
@@ -82,7 +90,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     () => ((preview || ready()) && cardId ? String(cardId) : ''),
     (id) => {
       if (!id) return undefined;
-      setBook(null);
+      setBook(() => stored());
       return whenIdle(() => { load(id); });
     },
   );
