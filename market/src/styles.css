@@ -12475,3 +12475,64 @@ img.is-lang-scan {
   }
   .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form .sell-field { white-space: nowrap; }
 }
+
+/* A steady card desk on load and reload.
+   - The page column is a viewport tall from the first frame, so the footer is
+     never on screen above content that is still arriving.
+   - The price slot keeps the height of a full price (PKN line, local line,
+     seller line) while it still shows the dash.
+   - The offer bar and the Buy offers cell are there from the first paint at
+     their final size, as skeletons, until the offer book is known. */
+.card-page.flutter-page { min-height: 100vh; }
+
+@media (min-width: 721px) {
+  .desk-band .band-price { min-height: 4.6rem; }
+}
+
+.offer-bar-skel,
+.cell-skel > span {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.05));
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.2s ease-in-out infinite;
+}
+.offer-bar-skel { width: 4.2rem; height: 1rem; }
+.cell-skel > span { height: 2.4rem; }
+.offer-wrap.is-loading .offer-bar-btn,
+.offer-wrap.is-loading .offer-bar-gear { opacity: 0.55; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .offer-bar-skel,
+  .cell-skel > span { animation: none; }
+}
+
+/* The visitor's own offer in the Buy offers cell: a red cross deletes it. An
+   offer in another language than the chips' carries its flag. */
+.deal-offer-cancel,
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid rgb(248 113 113 / 0.45);
+  border-radius: 8px;
+  background: rgb(248 113 113 / 0.1);
+  color: #f87171;
+  cursor: pointer;
+}
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible { background: rgb(248 113 113 / 0.22); border-color: #f87171; outline: none; }
+.deal-offer-cancel:disabled { opacity: 0.5; cursor: default; }
+.deal-offer.is-mine { background: rgb(255 211 61 / 0.05); }
+.deal-offer-lang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.deal-offer-lang .deal-flag { width: 16px; height: 16px; }

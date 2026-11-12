@@ -288,7 +288,7 @@ export default function SoldPriceGraph(props) {
         onGraded={(value) => props.onGraded(value)}
       />
       <Show when={!days().length && props.series != null}>
-        <p class="sold-graph-empty">No sold-card analytics yet for this printing.</p>
+        <p class="sold-graph-empty">{props.emptyLabel || 'No sold-card analytics yet for this printing.'}</p>
       </Show>
       <Show when={plot()}>
         {(geo) => (
