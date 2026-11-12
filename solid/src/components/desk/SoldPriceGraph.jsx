@@ -136,6 +136,10 @@ export default function SoldPriceGraph(props) {
   const conditions = () => (Array.isArray(props.filters?.conditions) ? props.filters.conditions : []);
   const languages = () => (Array.isArray(props.filters?.languages) ? props.filters.languages : []);
   const tone = () => soldGraphTone(soldFilterValue(conditions(), props.condition));
+  // props.under = { days, tone, label, alt }: the default series, kept on the
+  // graph under the picked one so the two can be compared. props.alt paints the
+  // picked series in the second palette (a different language than the default).
+  const under = () => (Array.isArray(props.under?.days) ? props.under.days : []);
 
   const plot = createMemo(() => {
     const rows = days();
@@ -145,27 +149,36 @@ export default function SoldPriceGraph(props) {
     const height = box.h;
     // The default top padding clears a row of menus. Linked to the desk chips
     // there is only one small caption line, so the plot starts right under it.
+    // A comparison adds a legend line above the plot, so it needs the room.
     const pad = bare()
-      ? { ...SOLD_GRAPH_PAD, t: 12 }
+      ? { ...SOLD_GRAPH_PAD, t: under().length ? 30 : 12 }
       : (props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD);
     // The axis is drawn in the unit the tooltip already uses: `axisFactor` units
     // of the visitor's currency per PKN (1, or absent, keeps a PKN axis).
     const factor = Number(props.axisFactor) > 0 ? Number(props.axisFactor) : 1;
-    const values = rows.map((row) => (Number(row.medianPkn) || 0) * factor);
+    // The series under comparison shares the scale and the dates, so the two
+    // lines can be read against each other.
+    const base = under();
+    const dayMs = (row) => Date.parse(`${row.day}T00:00:00Z`);
+    const values = [...rows, ...base].map((row) => (Number(row.medianPkn) || 0) * factor);
     const scale = soldGraphScale(Math.max(0, ...values), { minStep: factor === 1 ? 10 : 0.01 });
-    const start = Date.parse(`${rows[0].day}T00:00:00Z`);
-    const end = Date.parse(`${rows[rows.length - 1].day}T00:00:00Z`);
+    const start = Math.min(...[...rows, ...base].map(dayMs));
+    const end = Math.max(...[...rows, ...base].map(dayMs));
     const range = Math.max(1, end - start);
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
     const dateLocale = soldDateLocale();
-    const points = rows.map((row) => {
-      const x = pad.l + (rows.length === 1 || range <= 1
-        ? plotW / 2
-        : ((Date.parse(`${row.day}T00:00:00Z`) - start) / range) * plotW);
-      return [x, soldGraphY((Number(row.medianPkn) || 0) * factor, scale.max, pad.t, plotH)];
-    });
+    const single = rows.length + base.length === 1 || range <= 1;
+    const place = (row) => [
+      pad.l + (single ? plotW / 2 : ((dayMs(row) - start) / range) * plotW),
+      soldGraphY((Number(row.medianPkn) || 0) * factor, scale.max, pad.t, plotH),
+    ];
+    const points = rows.map(place);
     const line = points.map(([x, y]) => `${x},${y}`).join(' ');
+    const first = points[0];
+    const last = points[points.length - 1];
+    const firstDay = [...rows, ...base].reduce((a, b) => (dayMs(a) <= dayMs(b) ? a : b));
+    const lastDay = [...rows, ...base].reduce((a, b) => (dayMs(a) >= dayMs(b) ? a : b));
     return {
       width,
       height,
@@ -176,9 +189,11 @@ export default function SoldPriceGraph(props) {
       dateLocale,
       points,
       line,
-      area: `${pad.l},${pad.t + plotH} ${line} ${pad.l + plotW},${pad.t + plotH}`,
-      firstLabel: formatSoldDay(rows[0].day, dateLocale),
-      lastLabel: formatSoldDay(rows[rows.length - 1].day, dateLocale),
+      underLine: base.map(place).map(([x, y]) => `${x},${y}`).join(' '),
+      // The fill sits under its own line only, not across dates the series has no sales for.
+      area: `${first[0]},${pad.t + plotH} ${line} ${last[0]},${pad.t + plotH}`,
+      firstLabel: formatSoldDay(firstDay.day, dateLocale),
+      lastLabel: formatSoldDay(lastDay.day, dateLocale),
     };
   });
 
@@ -254,7 +269,7 @@ export default function SoldPriceGraph(props) {
   return (
     <section
       ref={(el) => { wrap = el; }}
-      class={['panel sold-graph', `is-${tone()}`]}
+      class={['panel sold-graph', `is-${tone()}`, { 'is-alt': props.alt }]}
       aria-label="Daily sold median"
       aria-busy={!days().length && props.series == null ? 'true' : undefined}
       onPointerMove={moveHover}
@@ -290,6 +305,13 @@ export default function SoldPriceGraph(props) {
       <Show when={!days().length && props.series != null}>
         <p class="sold-graph-empty">{props.emptyLabel || 'No sold-card analytics yet for this printing.'}</p>
       </Show>
+      {/* Which line is which, in the lines' own colours. */}
+      <Show when={plot() && under().length}>
+        <p class="sold-graph-legend">
+          <span class={['sold-graph-key', `u-${props.under?.tone || 'all'}`, { 'u-alt': props.under?.alt }]}>{props.under?.label}</span>
+          <span class="sold-graph-key is-picked">{props.pickedLabel}</span>
+        </p>
+      </Show>
       <Show when={plot()}>
         {(geo) => (
           <>
@@ -324,6 +346,13 @@ export default function SoldPriceGraph(props) {
                   </g>
                 )}
               </For>
+              {/* The default series first, so the picked one is drawn over it. */}
+              <Show when={geo().underLine}>
+                <polyline
+                  points={geo().underLine}
+                  class={['sold-graph-under', `u-${props.under?.tone || 'all'}`, { 'u-alt': props.under?.alt }]}
+                />
+              </Show>
               <polygon points={geo().area} class="sold-graph-fill" />
               <polyline points={geo().line} class="sold-graph-line" />
               <Show when={activePt()}>

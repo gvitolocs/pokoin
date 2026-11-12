@@ -122,6 +122,7 @@ import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
 import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
+import { soldGraphTone } from '@market/sold-graph.js';
 import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -709,7 +710,38 @@ function CardDesk(props) {
     if (series == null || !graphMissing().length) return series;
     return { ...series, days: [], soldQty: 0, sampleCount: 0 };
   };
-  const graphEmptyLabel = () => (graphMissing().length ? `No ${graphMissing().join(' · ')} sales yet` : '');
+  const graphEmptyLabel = () => {
+    if (graphMissing().length) return `No ${graphMissing().join(' · ')} sales yet`;
+    // The grade and the language both sold, just never together.
+    return pickedCond() || pickedLang() ? `No ${pickedLabel()} sales yet` : '';
+  };
+  // Comparison: the facet the desk opened on stays on the graph, and a chip the
+  // visitor presses is drawn over it. Same language: each grade in its own
+  // colour (Near Mint green, Moderately Played yellow…). Another language: the
+  // second palette (light blue, magenta…), so it cannot be mistaken for a grade
+  // of the first.
+  const [baseFacet, setBaseFacet] = createSignal(null);
+  createEffect(
+    () => (offersReady() && !condAny() && !langAny() ? `${shownCond()}|${shownLang()}` : ''),
+    (key) => {
+      if (!key || untrack(baseFacet)) return;
+      const [cond, code] = key.split('|');
+      setBaseFacet({ cond, lang: code });
+    },
+  );
+  const graphUnder = () => {
+    const base = baseFacet();
+    const cond = pickedCond();
+    const code = pickedLang();
+    // Nothing to compare while the pick is the default itself, or "any".
+    if (!base || !cond || !code || (cond === base.cond && code === base.lang)) return null;
+    const view = soldGraphView(salesSlices() || [], { ...salesFilterState(), condition: base.cond, language: base.lang });
+    const has = (view.filters.conditions || []).includes(base.cond)
+      && languagesForNationality(salesNationality(), view.filters.languages).includes(base.lang);
+    const days = has && Array.isArray(view.series?.days) ? view.series.days : [];
+    return days.length ? { days, tone: soldGraphTone(base.cond), label: `${base.cond} · ${base.lang}`, alt: false } : null;
+  };
+  const graphAlt = () => Boolean(baseFacet() && pickedLang() && pickedLang() !== baseFacet().lang);
   // The graph's axis is in the visitor's currency, like its tooltip: how many
   // units of it one PKN is. 1 while the currency is unknown, so the axis is PKN.
   const graphAxisFactor = () => fiatFromPkn(1, buyerCurrency(pinnedCurrency()) || 'PKN') || 1;
@@ -1322,6 +1354,9 @@ function CardDesk(props) {
               <div class="desk-graph">
                 <SoldPriceGraph
                   series={graphSeries()}
+                  under={graphUnder()}
+                  alt={graphAlt()}
+                  pickedLabel={pickedLabel()}
                   emptyLabel={graphEmptyLabel()}
                   filters={graphFilters()}
                   chips={salesView().chips}
