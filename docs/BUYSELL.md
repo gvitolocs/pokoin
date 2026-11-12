@@ -48,13 +48,13 @@ display name. Languages are the 16 codes of the price book (the listing form's `
   asks twice. It also keeps the ids posted from this page (`mine`): the book never names a buyer, so that list is what
   stops your own offer coming back as Sell. If the request fails the book is `null` and neither surface is drawn;
   `?mypokoinPreview` serves the fixture book and makes no request.
-- `market/src/deal-book.js`: what the Best Deal panel shows in the space left under its chips (tested in
-  `deal-book.test.js`) — which listings count as the other sellers of the picked facet, the `See all N listings`
-  count, which book rows show and in what order, and how many whole rows of each fit a measured height
-  (`DEAL_BOOK_METRICS`, the same numbers `styles.css` sizes `.deal-book` from).
-- `solid/src/components/desk/OfferBar.jsx`: the offer bar inside the Best Deal panel, directly above Add to cart (or at
-  the bottom of the panel when nobody lists the card). It is as big as Add to cart and has three segments:
-  `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Nothing ever expands inside the panel; only the one-line
+- `market/src/deal-book.js`: what the two listing cells show (tested in `deal-book.test.js`) — the three cheapest Pokoin
+  listings across *every* condition and language for the summary cell, the `See all N listings` count, which buy-order
+  rows show and in what order for the offers cell, and `DEAL_BOOK_PHONE_MAX_WIDTH`, the width the desk restacks at and
+  therefore the width below which each cell shows two rows instead of three.
+- `solid/src/components/desk/OfferBar.jsx`: the offer bar in the Best Deal band, on its action line beside Add to cart.
+  It is as big as Add to cart and has three segments:
+  `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Nothing ever expands inside the band; only the one-line
   confirmation or error under the bar changes its height.
   - **Beat offer** (an offer exists for the selection) is one press: it posts one step above the best offer
     (`beatPricePkn`: 1%, rounded up, at least 1 PKN) with the choices made in Define offer. Its `title` says exactly what it posts
@@ -75,38 +75,46 @@ display name. Languages are the 16 codes of the price book (the listing form's `
     notes use `offerPriceLabel` (the listing form's "Lists at" formatter); a PKN display currency shows PKN.
   - The book loads after the listings (`lib/buy-book.js`, at idle) once for the whole desk; if the request fails the book
   is `null`, and with it the bar and the Buy offers rows.
-- **Book rows** (`solid/src/components/deal/DealBook.jsx`) fill the space the chips leave above the bar, between them and
-  `deal-actions`, with two blocks — **Other sellers** and **Buy offers**, each headed by a `.shop-label` (the seller
-  icon, the two-tone BuySell mark) and each rendering nothing at all when it has no row, so a card with neither looks
-  exactly as it did. `Other sellers` are the next-cheapest Pokoin listings of the facet the chips picked — never the
-  listing Best Deal shows, never Vault stock — drawn as real `ShopListingRow`s in `compact` mode, so the price, the
-  copies picker, the cart button and the own-listing edit/cancel actions are the Shop's, not a copy of them. Under them
-  `See all N listings` scrolls to the Shop panel and moves focus to its header row; it is hidden when Best Deal plus
-  these rows already cover every Pokoin listing. `Buy offers` is the book's `selectionBid` per grade for the picked
-  language, best price first: the grade chip picks that facet (`setDealCond`, `setDealLang`), the price follows the
-  bar's currency rule (`buyerParts(pkn, true, pinnedCurrency())`), the line says `N <grade> wanted`, and `Sell` — only
-  on a grade with a `best_order_id` the visitor did not post (`buyOfferSellable`) — opens the bar's Define offer popup
-  on that grade, where the existing Sell now form and its `best_remaining` cap live. Nothing expands inside the panel.
-- **The book never grows the panel.** Above 1100px the desk stretches every column of the row to the tallest one, so
-  the Best Deal panel has spare height under the chips and `.deal-book` is the flex child that eats it
-  (`flex: 1 1 0; min-height: 0; overflow: hidden`). Stretching alone is not the rule: a flex item still contributes its
-  max-content height to a column container, so measuring `clientHeight` hands the book its own growth back and the
-  panel outruns the centre column (measured: panel 1553 against a centre of 1377 on a slack of 312). `DealBook.slack()`
-  therefore asks a different question — the panel's own fixed parts are summed from its children with the book
-  `display: none` (not squashed to `max-height: 0px`: Chrome reports the *used* value of the `margin-top: auto` that
-  pins `deal-actions` to the bottom, so a squashed void would be counted as the panel's height), the row line is the
-  tallest *other* desk column of the same row (`Math.abs(top - cell.top) <= 2` skips the Shop/Vault row below), and the
-  lists may take the difference. The same number is then written as the region's inline `max-height`, and whole rows
-  are counted out of `Math.min(slack, region.clientHeight)` — the slack is the ceiling, a shorter panel gets fewer
-  rows, and a panel that is already the tallest gets 0 and renders nothing. `--deal-book-row/-gap/-head/-more/-block`,
-  read back with `getComputedStyle` so CSS and `DEAL_BOOK_METRICS` cannot drift, decide how many rows that is: the two
-  lists alternate, each heading and the See all line is reserved before it is drawn, and a list with no row is dropped
-  so the other takes the space. The whole list is `.deal-book-list { display: flex }`, never a grid — a grid row takes
-  the tallest cell, and a row would then cost more than it is charged. A capped region does not resize when its content
-  grows, so the desk columns beside the panel are observed and new listings re-read the slack; an empty book leaves the
-  layout entirely, because as a flex child it would still cost the panel one row-gap. At 1100px and below the desk
-  stacks and nothing is measured: `dealBookUncut()` caps each list at three rows, two at 720px and below, plus the See
-  all line, so a stacked panel is never clipped.
+- **The desk is one grid** (`market/src/styles.css`, pinned by `card-desk-layout.test.js`):
+
+  ```
+  [ art ] [ band:  Best Deal · price + chips · offer bar + Add to cart ]
+  [ art ] [ graph: sold prices            ] [ form: List your card     ]
+  [ art ] [ cheap: Cheapest listings      ] [ offers: Buy offers       ]
+  ```
+
+  The art column spans all three rows and is the only element that does. Rows size to their content: the two listing
+  cells and the form hug what they paint, and only the graph stretches, so the taller of a row pair never leaves the
+  other with a hole inside its own box. The Vault and the expanded Shop are **not** grid areas — they auto-place as
+  full-width rows (`grid-column: 1 / -1`) under the third row, because a named area that renders nothing would still
+  cost its track and its gap. Below 1000px the graph, the form and both cells take the whole desk and the art column
+  stops spanning (beside five stacked rows it would be one long empty strip); at 720px the desk restacks to
+  art, band, cheap, offers, graph, form.
+- **The band** (`solid/src/pages/Card.jsx`, `.desk-band`) is one horizontal strip. Its head line carries the
+  `.shop-label` "Best Deal" and the marketplace pills at the top-left; the first content line the price stack (large
+  local, small PKN, `Sold by …` under it) with the condition and language chips beside it; the second the offer bar and
+  Add to cart, right-aligned. The chips fold inside their own box instead of pushing a third line, so the band is two
+  content lines at every desktop width. With no Pokoin listing the price slot says
+  `No Pokoin seller has this card right now.` and the action line still carries the offer bar.
+- **Cheapest listings** (`solid/src/components/deal/CheapestListings.jsx`) is the page's listing summary: the three
+  cheapest Pokoin listings across *every* condition and language, the one the band shows included, drawn as real
+  `ShopListingRow`s in `compact` mode, so the price, the copies picker, the cart button and the own-listing edit/cancel
+  actions are the Shop's, not a copy of them. Two rows on a phone. Under them `See all N listings` when there are more
+  listings than shown; with no listing at all the cell keeps the old empty text and the market-price note.
+- **Buy offers** (`solid/src/components/deal/BuyOffers.jsx`) is the book's `selectionBid` per grade for the picked
+  language, best price first, three rows (two on a phone): the grade chip picks that facet (`setDealCond`,
+  `setDealLang`), the price follows the bar's currency rule (`buyerParts(pkn, true, pinnedCurrency())`), the line says
+  `N <grade> wanted`, and `Sell` — only on a grade with a `best_order_id` the visitor did not post (`buyOfferSellable`)
+  — opens the bar's Define offer popup on that grade, where the existing Sell now form and its `best_remaining` cap
+  live. With no orders the cell is still drawn: one line, `No buy offers yet.` and a `Make offer` text button that
+  opens the same popup, so the desk never shows a blank box.
+- **`See all` opens the full Shop in place**, as the desk's last row, and the line becomes `Hide the full shop`. The
+  open state belongs to the page, not to the scroll position, and anything that walks the visitor to the Shop (a deep
+  link, the header cart hint) opens it first — `scrollShop()` in `solid/src/pages/Card.jsx`. It never auto-expands:
+  no URL carries a Shop filter or sort param today, so the "expanded when the URL already asks for one" case has no
+  trigger.
+- **The Vault row only exists with stock.** `split().vault.length` gates the whole panel at every width, which replaces
+  the old `.vault-panel.is-empty` hiding rule; its tests assert the absence instead of the class.
 - Best Deal's two-line price is flipped (`PriceStack flip`, order in `market/src/price-stack.js`): the local currency is the
   large yellow figure and the PKN amount the small line above it. A single price is unchanged. Tiles, shop rows, search and
   cart keep the old order.
