@@ -312,6 +312,15 @@ export default function SoldPriceGraph(props) {
                     >
                       {formatSoldAxisTick(tick)}
                     </text>
+                    {/* The same scale on the right edge: the newest prices are read there. */}
+                    <text
+                      x={geo().pad.l + geo().plotW + 5}
+                      y={soldGraphY(tick, geo().scale.max, geo().pad.t, geo().plotH) + 3}
+                      text-anchor="start"
+                      class="sold-graph-axis sold-graph-axis-right"
+                    >
+                      {formatSoldAxisTick(tick)}
+                    </text>
                   </g>
                 )}
               </For>
