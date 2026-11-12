@@ -3528,12 +3528,18 @@ a.era-link:focus-visible {
 
 .watch-btn:hover { filter: brightness(1.08); }
 
+/* The desk is one grid: the card on the left for the whole height, the price
+   band across the top, then the sold graph beside the listing form and the two
+   listing cells beside each other. The Vault and the full Shop are deliberately
+   NOT declared areas: a named area keeps its track and its gap even when nothing
+   renders in it, so the two optional rows auto-place as their own full-width row. */
 .card-desk {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
-    "art center deal"
-    "shop shop shop";
+    "art band band"
+    "art graph form"
+    "art cheap offers";
   gap: 1rem;
   align-items: stretch;
   margin-bottom: 2rem;
@@ -3548,45 +3554,131 @@ a.era-link:focus-visible {
   min-height: 0;
 }
 
-.hero-center {
-  grid-area: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  min-height: 0;
-}
-
-.hero-deal {
-  grid-area: deal;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  min-height: 0;
-}
-
-.hero-art-col .art-panel,
-.hero-center .sell-form,
-.hero-deal .add-panel {
+/* The card is the only element that spans rows. It grows with the desk but the
+   scan keeps its own size: the version shortcuts sink to the bottom so the long
+   left column ends on something rather than on nothing. */
+.hero-art-col .art-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.hero-deal .add-panel {
-  gap: 1.2rem;
-  padding: 1.3rem 1.2rem 1.25rem;
+.hero-art-col .version-links {
+  margin-top: auto;
 }
 
-.hero-deal .prod-px {
-  font-size: clamp(2.05rem, 3.6vw, 2.65rem);
-  text-align: center;
-  margin: 0.15rem 0;
+.desk-graph {
+  grid-area: graph;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.desk-form {
+  grid-area: form;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The graph is the elastic one: the row is as tall as the listing form needs to
+   be, and the chart takes the difference instead of the cell showing dead space. */
+.desk-graph .sold-graph {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 12rem;
+  max-height: none;
+}
+
+.desk-form .sell-form {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A signed-out visitor's List-your-card is one line; centred in the height the
+   row gave it, it reads as a step rather than as an empty box. */
+.desk-form .sell-form.is-collapsed {
+  align-items: center;
+}
+
+.cell-cheap {
+  grid-area: cheap;
+  align-self: start;
+  min-width: 0;
+}
+
+.cell-offers {
+  grid-area: offers;
+  align-self: start;
+  min-width: 0;
+}
+
+.card-desk > .vault-panel,
+.card-desk > .shop-terminal {
+  grid-column: 1 / -1;
+}
+
+/* Best Deal as one horizontal strip: label and marketplace links on their own
+   compact line, then price, chips, and the buy side right-aligned. It wraps to a
+   second line when the desk narrows; never to a third at 1360px. */
+.desk-band {
+  grid-area: band;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.7rem 0.9rem 0.75rem;
+}
+
+.band-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  min-width: 0;
+}
+
+.band-head .band-title {
+  margin: 0;
+  flex: none;
+}
+
+.band-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1rem;
+  min-width: 0;
+}
+
+.band-price {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: none;
+  min-width: 0;
+}
+
+.desk-band .prod-px {
+  font-size: clamp(1.5rem, 2.3vw, 2rem);
+  margin: 0;
+}
+
+.desk-band .px-stack {
+  align-items: flex-start;
+  line-height: 1.12;
+  gap: 0.1rem;
 }
 
 .deal-sold-by {
-  margin: -0.35rem 0 0;
-  text-align: center;
-  font-size: 0.95rem;
+  margin: 0;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -3601,29 +3693,61 @@ a.era-link:focus-visible {
   color: var(--yellow);
 }
 
-.hero-deal .px-stack {
+/* Best Deal with no Pokoin offer: a sentence in the price slot, not a dead button. */
+.desk-band .deal-none {
+  margin: 0;
+  max-width: 14rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* The two chip rows sit side by side in the band, so neither keeps the desk
+   rail's full width: five condition images, then the languages as they come. A
+   western printing names nine of them, so that row folds inside the band. */
+.desk-band .deal-facets {
+  flex: 1 1 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  width: 100%;
-  line-height: 1.15;
+  width: auto;
+  gap: 0.3rem 0.55rem;
+}
+
+.desk-band .deal-facet-row[aria-label="Condition"] {
+  width: auto;
+  grid-template-columns: repeat(5, minmax(0, 2.6rem));
   gap: 0.18rem;
 }
 
-.hero-deal .own-k {
-  margin: 0;
+.desk-band .deal-facet-row[aria-label="Language"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  width: auto;
+  gap: 0.18rem;
 }
 
-.hero-deal .buy-btn {
-  margin-top: auto;
+.desk-band .deal-chip {
+  padding: 0.25rem 0.42rem;
+  font-size: 0.76rem;
 }
 
-
-/* Best Deal with no Pokoin offer: a sentence, not a dead grey button. */
-.hero-deal .deal-none {
-  margin: auto 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.35;
+.desk-band .deal-chip .deal-flag {
+  width: 18px;
+  height: 18px;
 }
+
+.band-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.band-actions .offer-wrap { flex: none; }
+.band-actions .buy-btn { width: auto; min-width: 9.5rem; }
 
 .hero-art-col .art-frame {
   flex: none;
@@ -3635,31 +3759,20 @@ a.era-link:focus-visible {
   aspect-ratio: 88 / 63;
 }
 
-.hero-center .sell-field.comment {
+.desk-form .sell-field.comment {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.hero-center .sell-field.comment textarea {
+.desk-form .sell-field.comment textarea {
   flex: 1;
   min-height: 4.5rem;
 }
 
-.hero-deal .add-panel .fee-lines {
-  margin-top: auto;
-}
-
-/* Vault (Pokoin's own stock) and Shop share the shop row half and half; narrower screens stack them, Vault first. */
-.shop-split {
-  grid-area: shop;
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 1rem;
-  min-width: 0;
-}
-.shop-split > .shop-panel { min-width: 0; }
+/* The Vault (Pokoin's own stock) and the full Shop are each a row of their own
+   under the desk grid: they auto-place, so an absent one costs no track. */
 /* The Vault is tighter than the Shop: no seller column, the fields close together. */
 .vault-panel .shop-row .shop-seller { display: none; }
 @media (min-width: 721px) {
@@ -3672,29 +3785,33 @@ a.era-link:focus-visible {
     grid-column: 4;
   }
 }
-@media (max-width: 1100px) {
-  .shop-split { grid-template-columns: minmax(0, 1fr); }
-}
 
 /* Inside the one-tile desk every panel is flat; the Vault is the exception
    and sits in its own slightly raised box (tokens follow the desk tint). */
-html:root:root .card-page.flutter-page .card-desk .vault-panel {
+/* Inside the one-tile desk every panel is flat; the Vault and the two listing
+   cells are the exception and sit in their own slightly raised boxes (tokens
+   follow the desk tint). */
+html:root:root .card-page.flutter-page .card-desk .vault-panel,
+html:root:root .card-page.flutter-page .card-desk .desk-cell {
   box-sizing: border-box;
   background: var(--g3);
   border: 1px solid var(--g5);
   border-radius: 12px;
   padding: 0.95rem 0.7rem 0.7rem; /* top matches .shop-terminal so the header rows share a baseline */
 }
-html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel {
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .desk-cell {
   background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
   border-color: var(--desk-border);
 }
-html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel {
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .desk-cell {
   background: #241540;
   border-color: #5a3058;
 }
-/* Same header band as the Shop column row so the two baselines line up. */
-.vault-panel .vault-title {
+/* Same header band as the Shop column row so the baselines line up. */
+.vault-panel .vault-title,
+.desk-cell .cell-title {
   display: flex;
   flex: 1;
   box-sizing: border-box;
@@ -3702,12 +3819,6 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   padding: 0.1rem 0.15rem 0.35rem;
   border-bottom: 1px solid var(--g5);
   font-size: 0.72rem;
-}
-
-/* Phones: an empty (or still loading) Vault takes no room, no title and no
-   gap; it appears once stock is known. Desktop keeps the empty panel. */
-@media (max-width: 720px) {
-  .card-page .vault-panel.is-empty { display: none; }
 }
 
 .prod-layout {
@@ -3800,23 +3911,11 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   margin-bottom: 0.35rem;
 }
 
-.add-panel .add-head {
-  flex-wrap: wrap;
-  column-gap: 0.85rem;
-  row-gap: 0.55rem;
-  margin-bottom: 0;
-}
-
-.add-panel .add-head h2 {
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
 .silver-tools {
   text-align: right;
 }
 
-.hero-deal .silver-tools.is-locked {
+.band-head .silver-tools.is-locked {
   flex: 1 0 100%;
   text-align: center;
 }
@@ -4393,7 +4492,7 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vaul
   min-width: 0;
 }
 
-.hero-center .sell-field.comment.comment-inline {
+.desk-form .sell-field.comment.comment-inline {
   min-height: 0;
 }
 
@@ -7428,11 +7527,7 @@ dialog.zoom:not([open]) {
 
 @media (max-width: 1100px) {
   .card-desk {
-    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-    grid-template-areas:
-      "art center"
-      "deal deal"
-      "shop shop";
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr) minmax(0, 1fr);
   }
   .prod-layout {
     grid-template-columns: minmax(12rem, 16rem) 1fr;
@@ -7450,10 +7545,12 @@ dialog.zoom:not([open]) {
   .card-desk {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "deal"
       "art"
-      "shop"
-      "center";
+      "band"
+      "cheap"
+      "offers"
+      "graph"
+      "form";
   }
 
   .sold-graph-filters {
@@ -7493,42 +7590,61 @@ dialog.zoom:not([open]) {
     margin: 0 auto;
   }
   .hero-art-col .art-panel,
-  .hero-center .sell-form,
-  .hero-deal .add-panel {
+  .desk-form .sell-form {
     flex: none;
   }
 
-  .hero-deal .add-panel {
+  /* The band cannot keep one line on a phone: price, chips, offer bar and the
+     cart button each take a row of their own. */
+  .desk-band {
+    text-align: center;
+  }
+
+  .desk-band .band-main {
+    flex-direction: column;
     align-items: stretch;
-    text-align: center;
+    gap: 0.6rem;
   }
 
-  .hero-deal .add-head {
+  .desk-band .band-price {
+    align-items: center;
+  }
+
+  .desk-band .deal-facets {
+    flex-direction: column;
+    align-items: stretch;
     width: 100%;
-    text-align: left;
+    gap: 0.45rem;
   }
 
-  .hero-deal .prod-px,
-  .hero-deal .own-k {
-    text-align: center;
+  .desk-band .deal-facet-row[aria-label="Condition"] {
+    grid-template-columns: repeat(auto-fit, minmax(3.4rem, 1fr));
+    width: 100%;
+    gap: 0.4rem;
   }
 
-  .hero-deal .deal-facet-row {
+  .desk-band .deal-facet-row[aria-label="Language"] {
     justify-content: center;
-    gap: 0.45rem 0.4rem;
+    width: 100%;
+    gap: 0.4rem;
   }
 
+  .desk-band .deal-chip {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.82rem;
+  }
 
-  .hero-deal .buy-btn {
+  .desk-band .band-actions {
+    flex-direction: column;
+    align-items: stretch;
+    margin-left: 0;
+  }
+
+  .desk-band .band-actions .buy-btn {
     width: 100%;
     max-width: 100%;
-  }
-
-  .hero-deal .buy-btn {
     display: flex;
     align-self: stretch;
-    margin-left: auto;
-    margin-right: auto;
   }
 }
 
@@ -7956,12 +8072,6 @@ dialog.zoom:not([open]) {
   }
 
   .card-desk {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "art"
-      "deal"
-      "shop"
-      "center";
     gap: 0.75rem;
   }
 
@@ -9027,7 +9137,7 @@ dialog.zoom:not([open]) {
     justify-content: flex-start;
   }
 
-  .hero-deal .silver-tools.is-locked {
+  .band-head .silver-tools.is-locked {
     text-align: center;
   }
 }
@@ -11366,94 +11476,60 @@ img.is-lang-scan {
   vertical-align: -0.04em;
 }
 
-.hero-deal .deal-actions {
+/* The desk's two listing cells. The row count is not a CSS hide:
+ * deal-book.js caps the rows for the viewport (three on desktop, two on a
+ * phone) and the same number feeds the See all line, so a row that is cut is
+ * counted and one click away, never lost. */
+.desk-cell .cell-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  margin-top: auto;
-}
-
-.hero-deal .deal-actions .buy-btn {
-  margin-top: 0;
-}
-
-.hero-deal .deal-actions .deal-none {
-  margin: 0;
-}
-
-/* Best Deal book: the other sellers of the facet the chips picked, and the buy
-   offers for it. market/src/deal-book.js counts whole rows out of these same
-   numbers, so a row has to cost exactly --deal-book-row plus --deal-book-gap and
-   the heading and the See all line exactly their own height: the gaps between
-   the parts of a list live INSIDE those boxes, never between them. */
-.hero-deal .deal-book {
-  --deal-book-row: 50px;
-  --deal-book-gap: 6px;
-  --deal-book-head: 20px;
-  --deal-book-more: 24px;
-  --deal-book-block: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--deal-book-block);
+  gap: 0.4rem;
   min-width: 0;
+  padding-top: 0.45rem;
 }
 
-/* Only the three-column desk has spare height beside the centre column, and the
-   book is the child that eats it. A scroll container contributes no minimum
-   height of its own, so these lists can never make Best Deal taller than the
-   card in the middle; below 1101px the desk stacks, there is nothing to measure
-   and deal-book.js caps the rows instead. */
-@media (min-width: 1101px) {
-  .hero-deal .deal-book {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow: hidden;
-  }
-}
-
-.deal-book-list {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.deal-book-head {
-  height: var(--deal-book-head);
-  margin: 0;
-}
-
-.deal-book-rows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--deal-book-gap);
-  min-width: 0;
-}
-
-.deal-book-more {
-  height: var(--deal-book-more);
-  padding-top: var(--deal-book-gap);
+.desk-cell .cell-more {
+  display: block;
+  margin-top: 0.55rem;
   font-size: 0.8rem;
   text-align: left;
 }
 
-/* One line per listing: seller | price | copies | cart, out of the Shop's parts. */
-.deal-book .shop-row {
-  flex-wrap: nowrap;
-  height: var(--deal-book-row);
-  padding: 0;
-  border-bottom: 0;
+.desk-cell .cell-empty {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
-.deal-book .shop-seller {
-  flex: 1 1 auto;
+/* One line per listing: seller | facet | price and copies | cart, out of the
+   Shop's own parts. The full Shop row keeps its wrapping flex line. */
+.cell-cheap .shop-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  padding: 0;
+  border-bottom: 0;
+  min-height: 2.4rem;
+}
+
+.cell-cheap .shop-seller {
   min-width: 0;
 }
 
-.deal-book .shop-offer {
-  display: flex;
-  flex: 0 0 auto;
+.cell-cheap .shop-offer {
+  display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+/* A phone cell is one narrow column: the compact line splits in two, seller and
+   facet above, price, copies and cart below. */
+@media (max-width: 720px) {
+  .cell-cheap .shop-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0.3rem;
+  }
 }
 
 /* One line per offer: grade | best price | how many want it | Sell. */
@@ -11461,7 +11537,7 @@ img.is-lang-scan {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  height: var(--deal-book-row);
+  min-height: 2.4rem;
   padding: 0 0.25rem;
   min-width: 0;
   border-radius: 0.55rem;

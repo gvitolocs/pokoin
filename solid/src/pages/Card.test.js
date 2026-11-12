@@ -4,6 +4,10 @@ import test from 'node:test';
 
 const page = fs.readFileSync(new URL('./Card.jsx', import.meta.url), 'utf8');
 
+// The band is the desk's Best Deal now: one strip, label line then price,
+// seller line and chips. Every Best Deal assertion slices this far.
+const BAND = '<h2 class="shop-label band-title">Best Deal</h2>';
+
 test('desk theme transition is a direct color fade, not a class reset', () => {
   assert.match(page, /const pageTheme = createMemo\(\(\) => deskTheme\(themeCard\(\)\)\)/);
   assert.match(page, /rarityDeskVars\(kind\) \|\| deskThemeVars\(pageTheme\(\)\)/);
@@ -53,7 +57,7 @@ test('the gold sparkles swap the desk scan to the verified reverse holo and back
 });
 
 test('Best Deal shows no seller line for Vault stock and names every other seller', () => {
-  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  const deal = page.slice(page.indexOf(BAND), page.indexOf('class="deal-facets"'));
   assert.match(deal, /when=\{!isVaultOffer\(dealPick\(\)\)\}/);
   assert.doesNotMatch(deal, /Available in the Vault|VAULT_DEAL_LINE|is-vault/);
   assert.doesNotMatch(deal, /<Show\s+when=\{!isVaultOffer\(dealPick\(\)\)\}\s+fallback=/);
@@ -63,20 +67,37 @@ test('Best Deal shows no seller line for Vault stock and names every other selle
 });
 
 test('Best Deal goes price, seller line, then the chips: no grade · language text line', () => {
-  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  const deal = page.slice(page.indexOf(BAND), page.indexOf('class="deal-facets"'));
   assert.ok(deal.includes('deal-sold-by'));
   assert.doesNotMatch(page, /deal-what/);
   assert.doesNotMatch(deal, /languageName|conditionLabel/);
 });
 
 test('Best Deal flips its two-line price: local currency large, PKN small; nothing else flips', () => {
-  const deal = page.slice(page.indexOf('<h2>Best Deal</h2>'), page.indexOf('class="deal-facets"'));
+  const deal = page.slice(page.indexOf(BAND), page.indexOf('class="deal-facets"'));
   assert.match(deal, /<PriceStack flip parts=\{buyerParts\(dealPick\(\)\?\.pricePkn/);
   const stack = fs.readFileSync(new URL('../components/PriceStack.jsx', import.meta.url), 'utf8');
   assert.match(stack, /stackOrder\(props\.parts, props\.flip\)/);
   for (const file of ['../components/CardTile.jsx', '../components/desk/ShopListing.jsx']) {
     assert.doesNotMatch(fs.readFileSync(new URL(file, import.meta.url), 'utf8'), /<PriceStack[^>]*\bflip\b/);
   }
+});
+
+test('Best Deal is one horizontal band: label and marketplace links above, price, chips, then the buy side', () => {
+  const band = page.slice(page.indexOf('class="panel add-panel desk-band"'), page.indexOf('<CheapestListings'));
+  assert.ok(band.length > 200, 'the band is a section of its own');
+  // The compact label line keeps the SilverHead link, not a button row.
+  assert.match(band, /<div class="band-head">\s*<h2 class="shop-label band-title">Best Deal<\/h2>\s*<SilverHead card=\{card\(\)\} fromPath=\{fromPath\(\)\} \/>/);
+  // One wrapped row: price stack, chips, and the offer bar beside Add to cart.
+  assert.match(band, /<div class="band-main">\s*<div class="band-price">/);
+  assert.ok(band.indexOf('class="band-price"') < band.indexOf('class="deal-facets"'), 'price before chips');
+  assert.ok(band.indexOf('class="deal-facets"') < band.indexOf('class="band-actions"'), 'chips before the buy side');
+  const actions = band.slice(band.indexOf('class="band-actions"'));
+  assert.ok(actions.indexOf('<OfferBar') < actions.indexOf('class="btn buy-btn"'), 'the offer bar sits left of Add to cart');
+  // With no Pokoin seller the price slot says so and the buy side stays.
+  assert.match(band, /<p class="deal-none">No Pokoin seller has this card right now\.<\/p>/);
+  assert.match(band, /when=\{!offersReady\(\) \|\| canBuy\(\)\}/);
+  assert.doesNotMatch(band, /hero-deal|deal-actions|deal-book/);
 });
 
 test('the offer bar sits above Add to cart and its settings open in a body portal popup', () => {
@@ -113,9 +134,11 @@ test('the Shop panel starts with the column-header filters and keeps an accessib
   assert.match(shop, /No Pokoin listings for this card yet\./);
 });
 
-test('the Vault panel carries is-empty from the Vault memo, so phones can hide it until stock is known', () => {
-  assert.match(page, /class=\{\['panel shop-panel vault-panel', \{ 'is-empty': !split\(\)\.vault\.length \}\]\}/);
-  // Still rendered (not wrapped in a Show), so desktop keeps the empty panel.
+test('an empty Vault is not a panel at any width: the row is conditional markup', () => {
+  // Replaces the phone-only CSS hide: the desk's optional rows auto-place, so a
+  // rendered-but-empty Vault would cost a bordered box and a gap.
+  assert.match(page, /<Show when=\{split\(\)\.vault\.length\}>\s*<section class="panel shop-panel vault-panel">/);
+  assert.doesNotMatch(page, /'is-empty': !split\(\)\.vault\.length/);
   assert.match(page, /<h2 class="shop-label vault-title">\s*<Ico name="vault" \/>\s*<span>Vault<\/span>\s*<\/h2>/);
   assert.match(page, /import ShopHeader, \{ Ico \} from '..\/components\/desk\/ShopHeader\.jsx'/);
   // The Seller label in the Shop header uses the same class.
@@ -123,63 +146,81 @@ test('the Vault panel carries is-empty from the Vault memo, so phones can hide i
   assert.match(header, /shop-hseller shop-label/);
 });
 
-test('the desk loads one buy book and hands it to the bar and the Best Deal rows', () => {
+test('the desk loads one buy book and hands it to the bar and the Buy offers cell', () => {
   assert.match(page, /const buy = createBuyBook\(\{ cardId, ready: offersReady, language: shownLang \}\)/);
   assert.match(page, /<OfferBar\n\s*buy=\{buy\}/);
-  assert.doesNotMatch(page, /ready=\{offersReady\(\)\}/);
+  assert.match(page, /<BuyOffers\n\s*buy=\{buy\}/);
+  // The bar reads the book itself; only the cells need to know the listings landed.
+  const barProps = page.match(/<OfferBar\n[\s\S]*?\n\s*\/>/)[0];
+  assert.doesNotMatch(barProps, /ready=\{offersReady\(\)\}/);
+  assert.match(page, /<CheapestListings\n[\s\S]*ready=\{offersReady\(\)\}/);
+  assert.doesNotMatch(page, /fetchBuyBook/);
   // The bar owns the only Sell now form: the rows ask it for a grade, they do not grow one.
   const lib = fs.readFileSync(new URL('../lib/buy-book.js', import.meta.url), 'utf8');
   assert.match(lib, /pickSell\(condition\) \{\s*setSellPick\(condition \|\| ''\);\s*\}/);
+  // An empty Buy offers cell names no condition, so it asks for the popup alone.
+  assert.match(lib, /askOffer\(\) \{\s*setOfferAsk\(offerAsk\(\) \+ 1\);\s*\}/);
   const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
   assert.match(bar, /createEffect\(buy\.sellPick, \(condition\) => \{/);
   assert.match(bar, /setSetting\('condition', condition\);\s*openPopup\(\)/);
+  assert.match(bar, /createEffect\(buy\.offerAsk, \(ask\) => \{\s*if \(!ask\) return;\s*openPopup\(\);/);
   assert.doesNotMatch(bar, /fetchBuyBook/);
 });
 
-test('the Best Deal book sits between the chips and the offer bar, fed by the desk listings', () => {
-  const book = page.slice(page.indexOf('<DealBook'), page.indexOf('<div class="deal-actions">'));
-  assert.ok(book.length > 40, 'the book is mounted above the actions');
-  for (const prop of ['rows={nativeLive()}', 'deal={dealPick()}', 'condition={shownCond()}', 'language={shownLang()}']) {
-    assert.ok(book.includes(prop), prop);
+test('the two listing cells are the third desk row, capped by the viewport and wired to the Shop', () => {
+  assert.ok(!fs.existsSync(new URL('../components/deal/DealBook.jsx', import.meta.url)), 'the measured book is gone');
+  const cheap = page.slice(page.indexOf('<CheapestListings'), page.indexOf('<BuyOffers'));
+  const offers = page.slice(page.indexOf('<BuyOffers'), page.indexOf('own stock gets its own row'));
+  assert.ok(cheap.length > 40 && offers.length > 40);
+  assert.ok(page.indexOf('<CheapestListings') < page.indexOf('<BuyOffers'), 'listings first, then offers');
+  // Both read the desk's own listings and the one book; neither fetches.
+  assert.match(cheap, /rows=\{nativeLive\(\)\}/);
+  assert.match(cheap, /marketPrice=\{salesSeries\(\)\?\.lastMedianPkn\}/);
+  assert.match(cheap, /onCart=\{addListingToCart\}/);
+  for (const block of [cheap, offers]) {
+    assert.match(block, /max=\{deskRows\(\)\}/);
+    assert.doesNotMatch(block, /fetch/i);
   }
-  // Price, qty and cart come from the Shop row, and See all walks to the Shop panel.
-  assert.match(page, /onCart=\{addListingToCart\}/);
+  assert.match(offers, /condition=\{shownCond\(\)\}/);
+  assert.match(offers, /language=\{shownLang\(\)\}/);
+
+  // The cap is a viewport count, not a CSS hide, so See all counts what is cut.
+  assert.match(page, /const deskRows = \(\) => dealBookRows\(deskWidth\(\)\)/);
+  assert.match(page, /window\.addEventListener\('resize', onResize, \{ passive: true \}\)/);
+  assert.match(page, /import \{ dealBookRows \} from '@market\/deal-book\.js'/);
+
+  // Rows, price, quantity and cart are the Shop's own components.
+  const rows = fs.readFileSync(new URL('../components/deal/CheapestListings.jsx', import.meta.url), 'utf8');
+  assert.match(rows, /import ShopListingRow from '..\/desk\/ShopListing\.jsx'/);
+  assert.match(rows, /cheapestRows\(\{ rows: props\.rows, max: props\.max \}\)/);
+  assert.match(rows, /seeAllListings\(\{ rows: props\.rows, shown: rows\(\) \}\)/);
+  assert.match(rows, /<ShopListingRow[\s\S]*compact[\s\S]*showCard=\{false\}/);
+  assert.match(rows, /See all \$\{count\(\)\} listings/);
+  assert.match(rows, /aria-expanded=\{props\.open \? 'true' : 'false'\}/);
+  assert.match(rows, /No Pokoin listings for this card yet\./);
+  assert.match(rows, /<h2 class="shop-label cell-title">/);
+
+  const cells = fs.readFileSync(new URL('../components/deal/BuyOffers.jsx', import.meta.url), 'utf8');
+  assert.match(cells, /buyOfferRows\(book\(\), \{ language: props\.language, max: props\.max \}\)/);
+  assert.match(cells, /props\.buy\.pickSell\(row\.condition\)/);
+  // Never an empty hole: no offers is one line that opens the Define offer popup.
+  assert.match(cells, /No buy offers yet/);
+  assert.match(cells, /props\.buy\.askOffer\(\)/);
+  // A book that failed to load paints nothing, exactly like the bar.
+  assert.match(cells, /<Show when=\{Array\.isArray\(book\(\)\)\}>/);
+});
+
+test("See all opens the full Shop in place, as the desk's last row", () => {
+  assert.match(page, /const \[shopOpen, setShopOpen\] = createSignal\(false\)/);
+  assert.match(page, /<Show when=\{shopOpen\(\)\}>\s*<section class="panel shop-panel shop-terminal"/);
   assert.match(page, /onSeeAll=\{scrollShop\}/);
-  assert.match(page, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
-  // The listings, not the Vault: both are .shop-panel, so See all names the terminal one.
-  assert.match(page, /document\.querySelector\('\.card-desk \.shop-terminal'\)/);
-  assert.match(page, /querySelector\('\.shop-header'\)\?\.focus\(\)/);
-  const rows = fs.readFileSync(new URL('../components/deal/DealBook.jsx', import.meta.url), 'utf8');
-  assert.match(rows, /<Show when=\{sellers\(\)\.length\}>/);
-  assert.match(rows, /<Show when=\{offers\(\)\.length\}>/);
-  assert.match(rows, /See all \$\{total\(\)\} listings/);
-  assert.match(rows, /props\.buy\.pickSell\(row\.condition\)/);
-  assert.match(rows, /window\.getComputedStyle\(region\)/);
-  // The slack is the tallest desk column of the same row minus the panel's own
-  // fixed parts (the desk stretches, so no box can be asked how tall it is), read
-  // with the book hidden — not squashed, which would keep the auto margin's void —
-  // and the same number caps the region: the lists can never measure a height they
-  // gave themselves.
-  assert.match(rows, /region\.style\.display = 'none';/);
-  assert.match(rows, /own \+= el\.getBoundingClientRect\(\)\.height;/);
-  assert.match(rows, /line = Math\.max\(line, box\.height\);/);
-  assert.match(rows, /if \(Math\.abs\(box\.top - top\) > 2\) continue;/);
-  assert.doesNotMatch(rows, /region\.style\.maxHeight = '0px'/);
-  assert.match(rows, /region\.style\.maxHeight = cap;/);
-  // An empty book must not cost the panel the row-gap around it: with nothing to
-  // give the measured column drops it from the layout. Where the caps decide (the
-  // stacked desk) it stays in, since there the rows do not come from the slack.
-  assert.match(rows, /const hide = !space && dealBookMeasured\(window\.innerWidth\);/);
-  assert.match(rows, /region\.style\.display = hide \? 'none' : '';/);
-  // Rows are counted out of the height the layout granted, which the cap bounds.
-  assert.match(rows, /const given = space \? Math\.min\(space, region\.clientHeight\) : 0;/);
-  assert.doesNotMatch(rows, /setAvailable\(region\.clientHeight\)/);
-  // The columns beside the panel are observed (a capped box stays put) and new
-  // data re-reads the slack: the listings arrive after the first paint.
-  assert.match(rows, /if \(other !== cell\) seen\.observe\(other\)/);
-  assert.match(rows, /props\.buy\.book\(\)\],\n\s*\(\) => measure\(\),/);
-  // Rows and book arrive after the first paint: the data re-reads the slack, and
-  // the columns beside the panel are observed because a capped box stays put.
-  assert.match(rows, /for \(const other of desk\.children\) if \(other !== cell\) seen\.observe\(other\);/);
-  assert.match(rows, /\(\) => \[props\.rows, props\.deal, props\.card, props\.language, props\.condition, props\.buy\.book\(\)\],\s*\(\) => measure\(\),/);
+  assert.match(page, /<CheapestListings[\s\S]*open=\{shopOpen\(\)\}/);
+  const scroll = page.match(/function scrollShop\(\) \{[\s\S]*?\n  \}/)[0];
+  assert.match(scroll, /const open = !shopOpen\(\);/);
+  assert.match(scroll, /setShopOpen\(open\)/);
+  // Collapsing must not scroll to a panel that is being removed.
+  assert.match(scroll, /if \(!open\) return;/);
+  assert.match(scroll, /document\.querySelector\('\.card-desk \.shop-terminal'\)/);
+  assert.match(scroll, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
+  assert.match(scroll, /querySelector\('\.shop-header'\)\?\.focus\(\)/);
 });
