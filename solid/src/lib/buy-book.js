@@ -21,6 +21,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   const [book, setBook] = createSignal(null);
   const [mine, setMine] = createSignal([]);
   const [sellPick, setSellPick] = createSignal('');
+  const [offerAsk, setOfferAsk] = createSignal(0);
 
   let seq = 0;
   function load(id) {
@@ -67,5 +68,10 @@ export function createBuyBook({ cardId, ready, language } = {}) {
       setSellPick(condition || '');
     },
     sellPick,
+    /** A cell that wants the Define offer popup without naming a condition (the empty Buy offers row). */
+    askOffer() {
+      setOfferAsk(offerAsk() + 1);
+    },
+    offerAsk,
   };
 }

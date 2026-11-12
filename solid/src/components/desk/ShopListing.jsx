@@ -136,10 +136,10 @@ function TrashIcon() {
 /**
  * One shop listing. Same markup and
  * drag payloads: a mixed desk pile when tiles and listings are selected, the
- * selected listings (`dragOffers`), else the row itself. `compact` is the Best
- * Deal book line: the seller, the price and the cart button only — the facet is
- * already picked by the chips above, so no condition or language tags, no
- * seller photos and no message button.
+ * selected listings (`dragOffers`), else the row itself. `compact` is the
+ * Cheapest listings line: the seller, its facet, the price and the cart button —
+ * the card face, the seller's own photos and the message button stay with the
+ * full Shop rows.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
@@ -280,31 +280,32 @@ export default function ShopListingRow(props) {
           </a>
         </Show>
       </Show>
-      <Show when={!props.compact}>
-        <span class="shop-facets">
+      <span class="shop-facets">
+        <Show when={!props.compact}>
+          {/* The tags a full Shop row names: Reverse, 1st Edition, graded. */}
           <span class="shop-txt">
             <For each={tags()}>
               {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
             </For>
           </span>
-          <img
-            class={['shop-cond', `is-${tone()}`]}
-            src={conditionChipSrc(offer()?.condition)}
-            alt={cond()}
-            title={cond()}
-            width="40"
-            height="28"
-            draggable="false"
-          />
-          <Flag flag={language()} class="shop-flag shop-flag-lang" />
-        </span>
-      </Show>
+        </Show>
+        <img
+          class={['shop-cond', `is-${tone()}`]}
+          src={conditionChipSrc(offer()?.condition)}
+          alt={cond()}
+          title={cond()}
+          width="40"
+          height="28"
+          draggable="false"
+        />
+        <Flag flag={language()} class="shop-flag shop-flag-lang" />
+      </span>
       <span class="shop-offer">
         <span class="shop-px"><PriceStack parts={buyerParts(offer()?.pricePkn, offer()?.sellerAcceptsPkn)} /></span>
         <Show when={!props.mine}>
           <Show
             when={choices() > 1}
-            fallback={<Show when={!props.compact}><span class="ct-qty is-single" aria-label="Quantity 1">1</span></Show>}
+            fallback={<span class="ct-qty is-single" aria-label="Quantity 1">1</span>}
           >
             <label
               class="ct-qty"

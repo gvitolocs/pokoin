@@ -98,6 +98,12 @@ export default function OfferBar(props) {
     setSetting('condition', condition);
     openPopup();
   });
+  // The Buy offers cell with nothing to sell into names no condition: its Make
+  // offer opens the popup on the chips as they stand.
+  createEffect(buy.offerAsk, (ask) => {
+    if (!ask) return;
+    openPopup();
+  });
   const currency = () => buyerCurrency(props.pinned);
   const cur = () => currency() || 'PKN';
 
