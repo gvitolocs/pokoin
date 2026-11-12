@@ -4,7 +4,7 @@
 
 import { getJson } from './api.js';
 import { CONDITIONS, LIST_LANGS } from './card-desk.js';
-import { formatFiatFromPkn, formatPkn, listingPriceToPkn } from './pkn.js';
+import { fiatFromPkn, formatFiatFromPkn, formatPkn, listingPriceToPkn } from './pkn.js';
 import { priceInputFromPkn } from './seller-currency.js';
 
 export const BUY_ORDER_DAYS = [
@@ -80,6 +80,28 @@ export function sellIntoBuyOrder(id, quantity, token) {
   return getJson(orderPath(id, '/sell'), authed(token, {
     method: 'POST',
     body: JSON.stringify({ quantity }),
+  }));
+}
+
+/**
+ * Seller sells into Pokoin's starting offer: lists their card at 1 PKN and
+ * tells Pokoin. `sale` names the card and the facets, since there is no order.
+ */
+export function sellToHouse(sale, token) {
+  return getJson(`${BASE}/house/sell`, authed(token, {
+    method: 'POST',
+    body: JSON.stringify({
+      card_id: String(sale.cardId || ''),
+      condition: sale.condition,
+      language: sale.language,
+      reverse: Boolean(sale.reverse),
+      first_edition: Boolean(sale.firstEdition),
+      quantity: Number(sale.quantity) || 1,
+      card_name: sale.card?.name || '',
+      card_image_url: sale.card?.imageUrl || '',
+      set_name: sale.card?.set || '',
+      collector_number: sale.card?.number || '',
+    }),
   }));
 }
 
@@ -299,17 +321,47 @@ export function defaultOfferSettings({ condition, language } = {}) {
   };
 }
 
+/**
+ * An offer can be under a cent (1 PKN is half a cent), and two decimals would
+ * show 1 PKN and 2 PKN as the same "$0.01". Below ten euro cents (20 PKN), in
+ * whatever currency it is shown, the amount keeps up to four decimals: 0.005,
+ * 0.01, 0.0375. Null for PKN, for no price, and for larger amounts, which keep
+ * the usual two decimals.
+ */
+function smallFiat(pricePkn, code) {
+  if (code === 'PKN') return null;
+  const amount = fiatFromPkn(pricePkn, code);
+  const eur = fiatFromPkn(pricePkn, 'EUR');
+  if (amount == null || eur == null || eur >= 0.1) return null;
+  return String(Number(amount.toFixed(4)));
+}
+
 /** A price in the currency the offer form uses: "2.64 DKK" for a local currency, "120 PKN" for PKN; '' when there is none. */
 export function offerPriceLabel(pricePkn, currency = 'PKN') {
-  return String(currency || 'PKN').toUpperCase() === 'PKN' ? formatPkn(pricePkn) : formatFiatFromPkn(pricePkn, currency);
+  const code = String(currency || 'PKN').toUpperCase();
+  if (code === 'PKN') return formatPkn(pricePkn);
+  const small = smallFiat(pricePkn, code);
+  if (small == null) return formatFiatFromPkn(pricePkn, code);
+  if (code === 'DKK') return `${small} DKK`;
+  return code === 'USD' ? `$${small}` : `€${small}`;
 }
 
 /**
  * What the price field holds for a PKN price in the visitor's currency. The same
- * helper the listing form fills its price input with (priceInputFromPkn).
+ * helper the listing form fills its price input with (priceInputFromPkn), with
+ * the sub-cent precision of offerPriceLabel so 1 PKN is not typed back as 2.
  */
 export function offerPriceInput(pricePkn, currency = 'PKN') {
-  return priceInputFromPkn(pricePkn, String(currency || 'PKN').toUpperCase());
+  const code = String(currency || 'PKN').toUpperCase();
+  return smallFiat(pricePkn, code) ?? priceInputFromPkn(pricePkn, code);
+}
+
+/** The unit the offer form prices in: the visitor's local currency, or PKN when they chose it (or have no currency yet). */
+export const OFFER_UNIT_KEY = 'pokoin.offer.unit';
+export function offerUnit(choice, localCurrency) {
+  const local = String(localCurrency || '').toUpperCase();
+  if (String(choice || '').toUpperCase() === 'PKN' || !local) return 'PKN';
+  return local;
 }
 
 /**

@@ -19,7 +19,10 @@ import {
   offerPriceLabel,
   offerPricePkn,
   offerSummary,
+  OFFER_UNIT_KEY,
+  offerUnit,
   selectionBid,
+  sellToHouse,
   validateBuyOrder,
   withHouseOffer,
 } from '@market/buy-orders.js';
@@ -33,11 +36,19 @@ import { useGameNavigate } from '../../lib/game-navigate.js';
 import { authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { profile } from '../../stores/session.js';
 import { BUYSELL_PREVIEW_BANNER } from '../../pages/buysell-preview-fixture.js';
-import { buyerCurrency, buyerParts } from '../../stores/buyer.js';
+import { buyerCurrency } from '../../stores/buyer.js';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
 import SellNowForm from '../buysell/SellNowForm.jsx';
 
 const CONDITION_ROWS = CONDITIONS.filter((row) => row.value);
+
+function readUnitChoice() {
+  try {
+    return localStorage.getItem(OFFER_UNIT_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+}
 // Material "settings": one path, same 24x24 filled style as the header icons.
 const GEAR_ICON = 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z';
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -106,7 +117,25 @@ export default function OfferBar(props) {
     openPopup();
   });
   const currency = () => buyerCurrency(props.pinned);
-  const cur = () => currency() || 'PKN';
+  // The visitor prices offers in their local currency or in PKN; the choice is
+  // remembered on this device and the bar, the popup and the notices follow it.
+  const [unitChoice, setUnitChoice] = createSignal(readUnitChoice());
+  const cur = () => offerUnit(unitChoice(), currency());
+  function switchUnit() {
+    const typed = typedPkn();
+    const next = cur() === 'PKN' ? '' : 'PKN';
+    setUnitChoice(next);
+    try {
+      if (next) localStorage.setItem(OFFER_UNIT_KEY, next);
+      else localStorage.removeItem(OFFER_UNIT_KEY);
+    } catch (_) { /* private mode: the choice lasts for this page */ }
+    // The field is rewritten in the new unit from its PKN value: what was typed,
+    // or the prefilled beat price. The unit is worked out here because the
+    // choice written above is not readable through cur() until this handler ends.
+    const unit = offerUnit(next, currency());
+    const pkn = priceTouched() && typed != null ? typed : beatPkn();
+    setPrice(pkn ? offerPriceInput(pkn, unit) : '');
+  }
 
   // The bar shows the offer for the desk's chips; the buttons act on the offer settings' tuple.
   // With no buyer's offer the selection still has one: Pokoin's 1 PKN starting
@@ -118,17 +147,16 @@ export default function OfferBar(props) {
   const model = createMemo(() => offerBarModel(target()));
   const beatPkn = () => beatPricePkn(target());
   const beatText = () => (beatPkn() ? offerSummary(beatPkn(), settings(), cur()) : '');
-  const priceText = () => {
-    const parts = buyerParts(bid()?.best_price_pkn, true, props.pinned);
-    return parts.local || parts.pkn || '';
-  };
+  const priceText = () => offerPriceLabel(bid()?.best_price_pkn, cur());
   const formLangs = createMemo(() => offerLanguages([...(props.languages || []), props.language, settings().language]));
   const offersReverse = () => listingFoilOptions(game().id).some((row) => row.value === 'reverse');
   const offersFirstEd = () => listingExtraChips(game().id).some((row) => row.key === 'firstEd');
   const typedPkn = () => offerPricePkn(price(), cur());
   const ask = () => props.askFor?.(settings().condition, settings().language);
   const crosses = () => crossesAsk(typedPkn(), ask());
-  const canSellNow = () => Boolean(target()?.best_order_id) && !buy.mine().includes(target().best_order_id);
+  // Anyone can sell into Pokoin's starting offer; a buyer's offer only when it is not the visitor's own.
+  const canSellNow = () => Boolean(target()?.house)
+    || (Boolean(target()?.best_order_id) && !buy.mine().includes(target().best_order_id));
   const fromPath = () => `${location.pathname}${location.search}`;
 
   function prefill() {
@@ -402,13 +430,29 @@ export default function OfferBar(props) {
               </div>
               <Show when={canSellNow()}>
                 <SellNowForm
-                  order={{ id: target().best_order_id, price_pkn: target().best_price_pkn, remaining: target().best_remaining }}
+                  order={target().house
+                    ? { id: 'house', price_pkn: target().best_price_pkn, remaining: MAX_BUY_ORDER_QUANTITY }
+                    : { id: target().best_order_id, price_pkn: target().best_price_pkn, remaining: target().best_remaining }}
+                  priceLabel={offerPriceLabel(target().best_price_pkn, cur())}
+                  buyerLabel={target().house ? 'Pokoin' : 'the buyer'}
+                  sell={target().house
+                    ? (quantity, token) => sellToHouse({
+                      cardId: props.cardId,
+                      condition: settings().condition,
+                      language: settings().language,
+                      reverse: settings().reverse,
+                      firstEdition: settings().firstEdition,
+                      quantity,
+                      card: card(),
+                    }, token)
+                    : undefined}
                   fromPath={fromPath()}
                   preview={preview}
                   onDone={() => {
                     const sold = offerPriceLabel(target()?.best_price_pkn, cur());
+                    const told = target()?.house ? 'Pokoin has' : 'The buyer has';
                     setOpen(false);
-                    setNotice({ text: `Listed at ${sold}. The buyer has been told.` });
+                    setNotice({ text: `Listed at ${sold}. ${told} been told.` });
                     return buy.reload();
                   }}
                 />
@@ -416,7 +460,21 @@ export default function OfferBar(props) {
               <div class="buy-form">
                 <div class="sell-row">
                   <label class="sell-field grow price">
-                    {`Price (${currency() || '…'})`}
+                    <span class="offer-unit-line">
+                      {`Price (${cur()})`}
+                      <Show when={currency()}>
+                        <button
+                          type="button"
+                          class="linkish offer-unit-switch"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            switchUnit();
+                          }}
+                        >
+                          {cur() === 'PKN' ? `Use ${currency()}` : 'Use PKN'}
+                        </button>
+                      </Show>
+                    </span>
                     <input
                       ref={(el) => { priceInput = el; }}
                       inputmode="decimal"

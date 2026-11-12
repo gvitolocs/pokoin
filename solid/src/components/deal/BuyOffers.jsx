@@ -1,7 +1,8 @@
-import { For, Show } from 'solid-js';
+import { createSignal, For, Show } from 'solid-js';
 import { buyOfferRows, buyOfferSellable, buyOfferTotal, dealBookCount, seeAllOffers } from '@market/deal-book.js';
 import { conditionChipSrc, conditionLabel } from '@market/listing-meta.js';
-import { buyerParts } from '../../stores/buyer.js';
+import { errorMessage, HOUSE_OFFER_PKN, offerPriceLabel } from '@market/buy-orders.js';
+import { buyerCurrency, buyerParts } from '../../stores/buyer.js';
 import AppLink from '../AppLink.jsx';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
 
@@ -30,6 +31,20 @@ export default function BuyOffers(props) {
     const parts = buyerParts(row.best_price_pkn, true, props.pinned);
     return parts.local || parts.pkn || '';
   };
+  const [cancelling, setCancelling] = createSignal('');
+  const [cancelError, setCancelError] = createSignal('');
+  async function cancelOffer(id) {
+    if (cancelling()) return;
+    setCancelling(id);
+    setCancelError('');
+    try {
+      await props.buy.cancel(id);
+    } catch (err) {
+      setCancelError(errorMessage(err));
+    } finally {
+      setCancelling('');
+    }
+  }
   return (
     <Show when={Array.isArray(book())}>
       <section class="panel desk-cell cell-offers" aria-label="Buy offers">
@@ -46,7 +61,12 @@ export default function BuyOffers(props) {
           when={rows().length}
           fallback={(
             <p class="cell-empty">
-              No buy offers yet.{' '}
+              {/* Never an empty cell: with no buyer's offer, Pokoin's starting offer is the one to sell into. */}
+              {`Pokoin buys it for ${offerPriceLabel(HOUSE_OFFER_PKN, buyerCurrency(props.pinned) || 'PKN')}.`}{' '}
+              <button type="button" class="linkish" onClick={() => props.buy.pickSell(props.condition)}>
+                Sell
+              </button>
+              {' · '}
               <button type="button" class="linkish" onClick={() => props.buy.askOffer()}>
                 Make offer
               </button>
@@ -82,11 +102,25 @@ export default function BuyOffers(props) {
                       Sell
                     </button>
                   </Show>
+                  {/* The visitor's own offer is the row's best one: it can be taken back right here. */}
+                  <Show when={row.best_order_id && props.buy.mine().includes(row.best_order_id)}>
+                    <button
+                      type="button"
+                      class="deal-offer-sell deal-offer-cancel"
+                      title="Cancel your offer"
+                      aria-label={`Cancel your ${conditionLabel(row.condition)} offer`}
+                      disabled={cancelling() === row.best_order_id}
+                      onClick={() => cancelOffer(row.best_order_id)}
+                    >
+                      Cancel
+                    </button>
+                  </Show>
                 </div>
               )}
             </For>
           </div>
         </Show>
+        <Show when={cancelError()}><p class="sell-msg error">{cancelError()}</p></Show>
       </section>
     </Show>
   );

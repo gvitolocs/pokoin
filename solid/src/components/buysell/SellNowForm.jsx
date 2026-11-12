@@ -12,6 +12,9 @@ import AppLink from '../AppLink.jsx';
  * the seller's card at the offer price. props.order = { id, price_pkn, remaining };
  * props.onDone(result) runs after a successful sale so the caller can refetch.
  * props.preview skips sign-in and the API call (layout preview).
+ * Optional: props.priceLabel (the price in the visitor's unit, else PKN),
+ * props.buyerLabel ("Pokoin" for the starting offer, else "the buyer"), and
+ * props.sell(quantity, token) for an offer that is not an order row.
  */
 export default function SellNowForm(props) {
   const navigate = useGameNavigate();
@@ -22,7 +25,9 @@ export default function SellNowForm(props) {
   const [error, setError] = createSignal('');
   const [done, setDone] = createSignal(false);
   const remaining = () => Math.max(1, Number(props.order?.remaining) || 1);
-  const price = () => formatPkn(props.order?.price_pkn);
+  const price = () => props.priceLabel || formatPkn(props.order?.price_pkn);
+  const buyer = () => props.buyerLabel || 'the buyer';
+  const buyerSentence = () => `${buyer().charAt(0).toUpperCase()}${buyer().slice(1)}`;
 
   function toSignIn() {
     navigate(authFrom(props.fromPath || `${location.pathname}${location.search}` || '/marketplace'));
@@ -57,7 +62,9 @@ export default function SellNowForm(props) {
         toSignIn();
         return;
       }
-      const result = await sellIntoBuyOrder(props.order.id, quantity, token);
+      const result = props.sell
+        ? await props.sell(quantity, token)
+        : await sellIntoBuyOrder(props.order.id, quantity, token);
       setDone(true);
       setOpen(false);
       props.onDone?.(result);
@@ -84,7 +91,7 @@ export default function SellNowForm(props) {
             <input inputmode="numeric" value={qty()} onInput={(event) => setQty(event.currentTarget.value)} />
           </label>
           <p class="sell-now-note">
-            This lists your card at {price()} and tells the buyer. You are paid when they buy it.
+            This lists your card at {price()} and tells {buyer()}. You are paid when they buy it.
           </p>
           <div class="sell-now-actions">
             <button type="button" class="btn" disabled={busy()} onClick={submit}>
@@ -96,7 +103,7 @@ export default function SellNowForm(props) {
       </Show>
       <Show when={done()}>
         <p class="sell-msg ok">
-          Listed at {price()}. The buyer has been told.
+          Listed at {price()}. {buyerSentence()} has been told.
           {' '}
           <AppLink to="/mypokoin">See your listings</AppLink>
         </p>

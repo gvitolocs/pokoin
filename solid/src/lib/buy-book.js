@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
-import { fetchBuyBook } from '@market/buy-orders.js';
+import { cancelBuyOrder, fetchBuyBook, fetchMyBuyOrders } from '@market/buy-orders.js';
+import { getBearer, signedIn } from '../stores/auth.js';
 import { previewBook, previewScale } from '../pages/buysell-preview-fixture.js';
 import { allowMypokoinPreview } from '../pages/mypokoin-preview-fixture.js';
 import { whenIdle } from './idle.js';
@@ -35,6 +36,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
       setBook(() => previewBook(untrack(language), scale).book);
       return Promise.resolve();
     }
+    loadMine(id, run);
     return fetchBuyBook(id).then(
       (data) => {
         if (run === seq) setBook(() => (Array.isArray(data?.book) ? data.book : []));
@@ -46,6 +48,34 @@ export function createBuyBook({ cardId, ready, language } = {}) {
         if (run === seq) setBook((current) => (current === null ? [] : current));
       },
     );
+  }
+
+  /**
+   * A signed-in visitor's own open offers on this card, so an offer they posted
+   * on an earlier visit is still theirs after a reload: it shows Cancel, not
+   * Sell. Best effort; a failure keeps what this page already remembers.
+   */
+  async function loadMine(id, run) {
+    if (!signedIn()) return;
+    try {
+      const token = await getBearer();
+      if (!token) return;
+      const data = await fetchMyBuyOrders(token);
+      if (run !== seq) return;
+      const ids = (Array.isArray(data?.items) ? data.items : [])
+        .filter((row) => String(row?.card_id) === String(id) && row?.state === 'open' && row?.id)
+        .map((row) => row.id);
+      setMine([...new Set([...untrack(mine), ...ids])]);
+    } catch (_) { /* the book still paints; only the Cancel button is missing */ }
+  }
+
+  /** Cancels one of the visitor's offers and repaints the book. Throws what the API answers. */
+  async function cancel(id) {
+    const token = await getBearer();
+    if (!token) throw Object.assign(new Error('unauthorized'), { status: 401 });
+    await cancelBuyOrder(id, token);
+    setMine(untrack(mine).filter((value) => value !== id));
+    await load(String(cardId));
   }
 
   createEffect(
@@ -64,6 +94,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     mine,
     id: () => (cardId ? String(cardId) : ''),
     reload: () => load(String(cardId)),
+    cancel,
     noteMine(id) {
       if (id) setMine([...mine(), id]);
     },
