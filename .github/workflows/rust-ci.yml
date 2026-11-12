@@ -81,7 +81,17 @@ jobs:
             rustup default stable
           fi
           rustc --version
+      - name: Free disk space
+        # The debug test build of this workspace is huge; the run on 2026-11-12 lost its runner mid-build.
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+          free -m
       - name: cargo test --workspace --locked
+        # Fewer parallel rustc/linker processes keeps memory under the 16 GB runner limit.
+        env:
+          CARGO_BUILD_JOBS: 3
         run: cargo test --workspace --locked
 
   changed:
