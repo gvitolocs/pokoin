@@ -67,15 +67,16 @@ function SoldGraphFilters(props) {
   return (
     <Show when={any()}>
       <div
-        class="sold-graph-filters"
+        class={['sold-graph-filters', { 'is-bare': props.bare }]}
         onPointerDown={stopSoldPointer}
         onPointerMove={stopSoldPointer}
         onPointerUp={stopSoldPointer}
       >
-        {/* Linked to the desk chips: the graph names what it plots and has no
-            condition, language or reverse control of its own. */}
+        {/* Linked to the desk chips: the chips right above already show what is
+            plotted, so the scope is said to screen readers only and the graph has
+            no condition, language or reverse control of its own. */}
         <Show when={props.linkedLabel}>
-          <p class="sold-graph-scope">{props.linkedLabel}</p>
+          <p class="sr-only">{props.linkedLabel}</p>
         </Show>
         <Show when={props.chips.reverse && !props.linkedLabel}>
           <SoldGraphToggle label={props.reverseLabel || 'Reverse'} pressed={props.reverse} onToggle={props.onReverse} />
@@ -122,6 +123,9 @@ export default function SoldPriceGraph(props) {
   const [size, setSize] = createSignal(null);
   const [hover, setHover] = createSignal(null);
   const days = createMemo(() => (Array.isArray(props.series?.days) ? props.series.days : []));
+  // Linked to the desk chips with no 1st Ed. / Graded toggle to show, nothing
+  // sits above the plot: it starts at the top and the unit count moves to the foot.
+  const bare = () => Boolean(props.linkedLabel) && !props.chips?.firstEdition && !props.chips?.graded;
   const unitsLabel = () => {
     const series = props.series;
     const count = Number(series?.soldQty) > 0
@@ -141,7 +145,9 @@ export default function SoldPriceGraph(props) {
     const height = box.h;
     // The default top padding clears a row of menus. Linked to the desk chips
     // there is only one small caption line, so the plot starts right under it.
-    const pad = props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD;
+    const pad = bare()
+      ? { ...SOLD_GRAPH_PAD, t: 12 }
+      : (props.linkedLabel ? { ...SOLD_GRAPH_PAD, t: 36 } : SOLD_GRAPH_PAD);
     const values = rows.map((row) => Number(row.medianPkn) || 0);
     const scale = soldGraphScale(Math.max(0, ...values));
     const start = Date.parse(`${rows[0].day}T00:00:00Z`);
@@ -271,6 +277,7 @@ export default function SoldPriceGraph(props) {
         graded={props.graded}
         unitsLabel={unitsLabel()}
         linkedLabel={props.linkedLabel}
+        bare={bare()}
         onCondition={(value) => props.onCondition(value)}
         onLanguage={(value) => props.onLanguage(value)}
         onReverse={(value) => props.onReverse(value)}
