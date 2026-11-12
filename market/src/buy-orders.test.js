@@ -22,7 +22,29 @@ import {
   selectionBid,
   orderStateLabel,
   validateBuyOrder,
+  withHouseOffer,
+  HOUSE_OFFER_PKN,
 } from './buy-orders.js';
+
+test('every selection starts at the house offer of 1 PKN, shown in the visitor currency', () => {
+  assert.equal(HOUSE_OFFER_PKN, 1);
+  const real = { best_price_pkn: 120, quantity: 3, orders: 2, best_order_id: 'o1' };
+  assert.equal(withHouseOffer(real), real, 'a buyer offer is kept as it is');
+  for (const none of [null, undefined, {}, { best_price_pkn: 0 }, { best_price_pkn: 'x' }]) {
+    const house = withHouseOffer(none);
+    assert.equal(house.best_price_pkn, 1);
+    assert.equal(house.house, true);
+    assert.equal(house.best_order_id, undefined, 'nothing can be sold into the house offer');
+  }
+  const model = offerBarModel(withHouseOffer(null));
+  assert.equal(model.hasOffer, true);
+  assert.equal(model.button, 'Beat offer');
+  assert.match(model.title, /starting offer: 1 PKN/);
+  // Beat offer on the floor is the smallest step above it, and the bar's amount is the floor converted.
+  assert.equal(beatPricePkn(withHouseOffer(null)), 2);
+  assert.equal(offerPriceLabel(HOUSE_OFFER_PKN, 'PKN'), '1 PKN');
+  assert.equal(offerPriceLabel(HOUSE_OFFER_PKN, 'USD'), formatFiatFromPkn(1, 'USD'));
+});
 import { formatFiatFromPkn, listingPriceToPkn } from './pkn.js';
 
 const book = [

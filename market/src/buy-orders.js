@@ -250,6 +250,23 @@ export function offerPrefill(bid) {
 }
 
 /**
+ * Every card starts with an offer: Pokoin's own 1 PKN. It is the floor the bar
+ * shows (in the visitor's currency) when no buyer has posted one, so the bar
+ * never says "no offers" and Beat offer always has a price to beat.
+ */
+export const HOUSE_OFFER_PKN = 1;
+
+/**
+ * `bid` when a buyer's offer exists for the selection, else the house offer.
+ * The house row names no order (`best_order_id`), so nothing can be sold into it.
+ */
+export function withHouseOffer(bid) {
+  const price = Number(bid?.best_price_pkn);
+  if (bid && Number.isFinite(price) && price > 0) return bid;
+  return { best_price_pkn: HOUSE_OFFER_PKN, quantity: 0, orders: 0, house: true };
+}
+
+/**
  * What the card-page offer bar says for one selection (`bid` is selectionBid()):
  * `button` is the right segment, `title` the hover/aria text on the price part.
  */
@@ -257,6 +274,9 @@ export function offerBarModel(bid) {
   const price = Number(bid?.best_price_pkn);
   if (!bid || !Number.isFinite(price) || price <= 0) {
     return { hasOffer: false, button: 'Make offer', title: 'No offers yet' };
+  }
+  if (bid.house) {
+    return { hasOffer: true, house: true, button: 'Beat offer', title: `Pokoin's starting offer: ${HOUSE_OFFER_PKN} PKN` };
   }
   const wanted = Number(bid.quantity) || 0;
   const buyers = Number(bid.orders) || 0;

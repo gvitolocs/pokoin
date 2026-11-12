@@ -48,7 +48,13 @@ test('the gold sparkles swap the desk scan to the verified reverse holo and back
   assert.match(page, /const heroArt = createMemo\(\(\) => \(reverseOn\(\) \? reverseScan\(\) : art\(\)\)\)/);
   assert.match(page, /<DeskArtFrame\n\s+card=\{card\(\)\}\n\s+art=\{heroArt\(\)\}/);
   // Shown only for printings that have one, next to the expansion marks.
-  const row = page.slice(page.indexOf('class="version-shortcuts"'), page.indexOf('More versions...'));
+  const row = page.slice(page.indexOf('class="version-shortcuts"'), page.indexOf("'more-versions-ico'"));
+  // More versions is a circled plus at the end of that same row, not a text pill under it.
+  const more = page.slice(page.indexOf("'more-versions-ico'"), page.indexOf("'more-versions-ico'") + 700);
+  assert.match(more, /aria-label="More versions"/);
+  assert.match(more, /<circle cx="12" cy="12" r="9\.6" \/>\s*<path d="M12 7\.6v8\.8M7\.6 12h8\.8" \/>/);
+  assert.doesNotMatch(page, /More versions\.\.\./);
+  assert.match(page, /<Show when=\{setShortcuts\(\)\.length \|\| reverseScan\(\) \|\| showMoreVersions\(\)\}>\s*<div class="version-shortcuts">/);
   assert.match(row, /<Show when=\{reverseScan\(\)\}>\s*<button\s+type="button"\s+class=\{\['set-shortcut', 'reverse-toggle'/);
   assert.match(row, /aria-pressed=\{reverseOn\(\) \? 'true' : 'false'\}/);
   assert.match(row, /<ReverseSparkles \/>/);
