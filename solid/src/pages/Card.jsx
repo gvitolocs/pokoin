@@ -99,7 +99,7 @@ import { offerPriceLabel, selectionBid, withHouseOffer } from '@market/buy-order
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
 import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
-import { sellLanguages } from '@market/listing-languages.js';
+import { deskLanguageChips, deskLanguageChoice } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
@@ -652,15 +652,29 @@ function CardDesk(props) {
   const nextNav = () => neighborWindow().next?.[0] || null;
   const nativeLive = createMemo(() => pricedOffers(shop.offers));
   const listedDealLangs = createMemo(() => listedDealLanguages(shop.offers, card()));
+  // Languages with a priced listing — the data the chips are cut by. Empty
+  // while the desk is still loading, when it knows nothing about any language.
+  const listedLangData = createMemo(() => (offersReady() ? listedDealLangs() : []));
   // With the Reverse chip on, only reverse listings can be the Best Deal.
   const dealRows = createMemo(() => (dealReverse() ? nativeLive().filter((offer) => offer?.reverse) : nativeLive()));
-  const shownLang = createMemo(() => (langPinned() && dealLang()
-    ? String(dealLang()).toUpperCase()
-    : resolveDealLanguage({
-      selected: dealLang() || 'EN',
-      listed: offersReady() ? listedDealLangs() : [],
-      country: sellerSettings()?.shipFromCountry,
-    })));
+  const shownLang = createMemo(() => {
+    const row = card();
+    return deskLanguageChoice({
+      nationality: row.nationality,
+      setName: identity().set || row.set,
+      releaseLanguages: row.releaseLanguages,
+      data: listedLangData(),
+      // The chip the visitor pressed, else the language the desk picked for
+      // them. Neither is a choice once the printing cannot exist in it.
+      chosen: (langPinned() && dealLang())
+        ? String(dealLang()).toUpperCase()
+        : resolveDealLanguage({
+          selected: dealLang() || 'EN',
+          listed: listedLangData(),
+          country: sellerSettings()?.shipFromCountry,
+        }),
+    });
+  });
   // A pressed grade is kept as pressed. Before any press: the chosen grade when
   // it is listed in the shown language, else the best one that is.
   const shownCond = createMemo(() => {
@@ -722,15 +736,12 @@ function CardDesk(props) {
   const listedLangSet = createMemo(() => new Set(listedDealLangs()));
   const allDealLangs = createMemo(() => {
     const row = card();
-    const all = [...sellLanguages({
+    return deskLanguageChips({
       nationality: row.nationality,
       setName: identity().set || row.set,
       releaseLanguages: row.releaseLanguages,
-    })];
-    for (const code of [...listedDealLangs(), shownLang()]) {
-      if (code && !all.includes(code)) all.push(code);
-    }
-    return all;
+      data: listedLangData(),
+    });
   });
   const languages = createMemo(() => languagesForNationality(
     card().nationality,
@@ -850,7 +861,7 @@ function CardDesk(props) {
     writeDealLanguage(code, authUser()?.uid);
   }
 
-  /** A Buy offers row is a request for a facet: pick it, adding the chip when the language is unlisted. */
+  /** A Buy offers row is a request for a facet: pick it. A language this printing cannot be listed in stays out. */
   // The sell strip's Sell now: the best open offer for the facet the chips
   // picked when it is not the visitor's own, and Pokoin's starting offer when
   // no buyer has posted one. So there is always something to sell into.

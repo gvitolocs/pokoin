@@ -39,6 +39,12 @@ test('a desk not painted from a peek shows the stored copy and merges the revali
 
 test('the desk language list follows the printing nationality', () => {
   assert.match(page, /languagesForNationality/);
+  // The chips are what the printing can be listed in plus what is listed here:
+  // the language the desk opens on is picked from the chips, never added to them.
+  assert.match(page, /const shownLang = createMemo\(\(\) => \{\n\s*const row = card\(\);\n\s*return deskLanguageChoice\(\{/);
+  assert.match(page, /const allDealLangs = createMemo\(\(\) => \{\n\s*const row = card\(\);\n\s*return deskLanguageChips\(\{/);
+  assert.match(page, /data: listedLangData\(\)/);
+  assert.doesNotMatch(page, /\[\.\.\.listedDealLangs\(\), shownLang/);
 });
 
 test('the gold sparkles swap the desk scan to the verified reverse holo and back', () => {
