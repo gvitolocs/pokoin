@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import { cheapestRows, seeAllListings } from '@market/deal-book.js';
+import { cheapestRows, dealBookCount, listingTotal, seeAllListings } from '@market/deal-book.js';
 import { Ico } from '../desk/ShopHeader.jsx';
 import ShopListingRow from '../desk/ShopListing.jsx';
 
@@ -12,17 +12,23 @@ import ShopListingRow from '../desk/ShopListing.jsx';
  * The rows are real Shop rows (`compact`), so price, quantity, the cart button
  * and the own-listing actions stay the Shop's. Everything beyond the cap is one
  * click away: `See all N listings` opens the full Shop panel in place below the
- * desk rows, and the same line closes it again.
+ * desk rows, and the same line closes it again. The title names what is drawn
+ * and what the card really has (`3 of 100`), so a capped cell never reads as the
+ * whole market.
  *
  * props: rows, card, ready, marketPrice, max, open, mineIds, listingBusy,
  * onCart(offer, qty), onInspect(event), onEdit(offer), onCancel(offer), onSeeAll(total).
  */
 export default function CheapestListings(props) {
   const rows = () => cheapestRows({ rows: props.rows, max: props.max });
-  const total = () => seeAllListings({ rows: props.rows, shown: rows() });
+  const total = () => listingTotal({ rows: props.rows });
+  const hidden = () => seeAllListings({ rows: props.rows, shown: rows() });
   return (
     <section class="panel desk-cell cell-cheap" aria-label="Cheapest listings">
-      <h2 class="shop-label cell-title"><Ico name="seller" size="14" />Cheapest listings</h2>
+      <h2 class="cell-title">
+        <span class="shop-label"><Ico name="seller" size="14" />Cheapest listings</span>
+        <span class="cell-count">{dealBookCount(rows().length, total())}</span>
+      </h2>
       <Show
         when={rows().length}
         fallback={(
@@ -54,7 +60,7 @@ export default function CheapestListings(props) {
             )}
           </For>
         </div>
-        <Show when={total()}>
+        <Show when={hidden()}>
           {(count) => (
             <button
               type="button"

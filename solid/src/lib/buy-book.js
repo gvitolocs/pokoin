@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { fetchBuyBook } from '@market/buy-orders.js';
-import { previewBook } from '../pages/buysell-preview-fixture.js';
+import { previewBook, previewScale } from '../pages/buysell-preview-fixture.js';
 import { allowMypokoinPreview } from '../pages/mypokoin-preview-fixture.js';
 import { whenIdle } from './idle.js';
 
@@ -9,8 +9,11 @@ import { whenIdle } from './idle.js';
  * The card's buy-order book, loaded once for the desk: the offer bar and the
  * Best Deal book rows read the same signal, so the panel never asks twice. It
  * waits for the listings (`ready`) and defers to idle, like everything else
- * behind the first paint; a failed request leaves the book null, and nothing
- * built on it is drawn. `?mypokoinPreview` paints the fixture rows instead.
+ * behind the first paint; a request that never answers leaves the book null and
+ * nothing is drawn, and one that answers with nothing to show leaves an empty
+ * book, so the bar and the rows say so instead of vanishing.
+ * `?mypokoinPreview` paints the fixture rows instead, `?mypokoinPreview=100` a
+ * hundred offers of them.
  *
  * Orders the visitor posts from this page are remembered, because the book
  * never names a buyer and their own offer must not come back as Sell now.
@@ -18,6 +21,7 @@ import { whenIdle } from './idle.js';
 export function createBuyBook({ cardId, ready, language } = {}) {
   const [params] = useSearchParams();
   const preview = untrack(() => allowMypokoinPreview(params));
+  const scale = untrack(() => previewScale(params));
   const [book, setBook] = createSignal(null);
   const [mine, setMine] = createSignal([]);
   const [sellPick, setSellPick] = createSignal('');
@@ -28,7 +32,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     const run = seq + 1;
     seq = run;
     if (preview) {
-      setBook(() => previewBook(untrack(language)).book);
+      setBook(() => previewBook(untrack(language), scale).book);
       return Promise.resolve();
     }
     return fetchBuyBook(id).then(
@@ -36,7 +40,10 @@ export function createBuyBook({ cardId, ready, language } = {}) {
         if (run === seq) setBook(() => (Array.isArray(data?.book) ? data.book : []));
       },
       () => {
-        if (run === seq) setBook(null);
+        // A failed first read still leaves the desk silent about nothing: the
+        // empty book paints the bar's Make offer and the cell's one line. A
+        // failed reload keeps the rows already on screen.
+        if (run === seq) setBook((current) => (current === null ? [] : current));
       },
     );
   }

@@ -15,7 +15,7 @@ import {
   Switch,
   untrack,
 } from 'solid-js';
-import { useLocation, useParams } from '@solidjs/router';
+import { useLocation, useParams, useSearchParams } from '@solidjs/router';
 import { useGameNavigate } from '../lib/game-navigate.js';
 import {
   artistHref,
@@ -152,6 +152,7 @@ import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 import { listingSelected } from '../lib/select-band.js';
 import { afterPaint } from '../lib/yield-nav.js';
+import { BUYSELL_PREVIEW_BANNER, previewListings, previewScale } from './buysell-preview-fixture.js';
 
 /** A hover / intent prefetch this recent counts as the desk's own first read. */
 const PREFETCH_FRESH_MS = 10_000;
@@ -225,8 +226,12 @@ function CardDesk(props) {
   const cardId = untrack(() => String(props.cardId));
   const lang = untrack(() => props.lang);
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const navigate = useGameNavigate();
   const pinnedCurrency = () => currencyFromSearch(location.search);
+  // The preview pile's row count, or 0 for a normal desk. Read once: the switch
+  // is a load-test dial, not something the desk reacts to.
+  const deskPreview = untrack(() => previewScale(searchParams));
 
   // First paint: URL stub + recent tile + remembered identity + the clicked tile.
   const stubCard = createMemo(() => {
@@ -377,10 +382,17 @@ function CardDesk(props) {
 
   // Network starts with the component, not after the first paint.
   // The tile's intent prefetch is this desk's listings read: adopt it.
+  // `?mypokoinPreview=100` is the pile the row caps are proven against: the desk
+  // paints that many fixture listings and asks the listings read for none.
   listingsSeq += 1;
-  refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
-    if (!disposed) setOffersReady(true);
-  });
+  if (deskPreview) {
+    setOffers(previewListings(deskPreview, cardId));
+    setOffersReady(true);
+  } else {
+    refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
+      if (!disposed) setOffersReady(true);
+    });
+  }
   // Not painted from a peek: a stored copy of any age paints at once, and the
   // revalidated page merges in place through showCard.
   fetchCard(cardId, {
@@ -1060,6 +1072,12 @@ function CardDesk(props) {
                 </p>
               </Show>
             </header>
+
+            <Show when={deskPreview}>
+              {/* The preview notice is a note on the viewport, not a line in the
+                  band: it must never cost the desk a row. */}
+              <p class="desk-preview-note" role="status">{BUYSELL_PREVIEW_BANNER}</p>
+            </Show>
 
             <div class="card-desk">
               <div class="hero-art-col">

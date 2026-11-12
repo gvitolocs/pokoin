@@ -34,11 +34,15 @@ export function cheapestRows({ rows = [], max = DEAL_BOOK_MAX_ROWS } = {}) {
 }
 
 /**
- * The "See all N listings" count: every non-Vault listing the card has, or 0
+ * The `See all N listings` count: every non-Vault listing the card has, or 0
  * when this cell already shows them all.
  */
+export function listingTotal({ rows = [] } = {}) {
+  return pricedOffers(rows).filter((offer) => !isVaultOffer(offer)).length;
+}
+
 export function seeAllListings({ rows = [], shown = [] } = {}) {
-  const total = pricedOffers(rows).filter((offer) => !isVaultOffer(offer)).length;
+  const total = listingTotal({ rows });
   return total > shown.length ? total : 0;
 }
 
@@ -55,7 +59,31 @@ export function buyOfferRows(book, { language = '', max = DEAL_BOOK_MAX_ROWS } =
   return max > 0 ? hits.slice(0, max) : hits;
 }
 
+/** Every open offer of the card: the book's orders, in every grade and language. */
+export function buyOfferTotal(book = []) {
+  return (Array.isArray(book) ? book : [])
+    .reduce((sum, row) => sum + (Number(row?.orders) || 0), 0);
+}
+
+/**
+ * The `See all N offers` count: every offer the card has, or 0 when this cell
+ * already shows them all. It is the card's total and not the picked facet's,
+ * because the line leaves the desk for the BuySell board, which lists them all.
+ */
+export function seeAllOffers(book = [], shown = []) {
+  const total = buyOfferTotal(book);
+  return total > shown.length ? total : 0;
+}
+
 /** Sell now is reachable when the row names a best order the visitor did not post. */
 export function buyOfferSellable(row, mine = []) {
   return Boolean(row?.best_order_id) && !mine.includes(row.best_order_id);
+}
+
+/**
+ * The cell title's count: `3 of 100` while rows sit behind the cap, and the
+ * plain `3` once the cell already shows everything it has.
+ */
+export function dealBookCount(shown = 0, total = 0) {
+  return total > shown ? `${shown} of ${total}` : String(shown);
 }

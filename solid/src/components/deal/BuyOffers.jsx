@@ -1,7 +1,8 @@
 import { For, Show } from 'solid-js';
-import { buyOfferRows, buyOfferSellable } from '@market/deal-book.js';
+import { buyOfferRows, buyOfferSellable, buyOfferTotal, dealBookCount, seeAllOffers } from '@market/deal-book.js';
 import { conditionChipSrc, conditionLabel } from '@market/listing-meta.js';
 import { buyerParts } from '../../stores/buyer.js';
+import AppLink from '../AppLink.jsx';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
 
 /**
@@ -14,11 +15,17 @@ import BuySellIcon from '../buysell/BuySellIcon.jsx';
  * offer bar to open its Define offer popup on that condition. With no orders the
  * cell still says so and offers the same popup, so the desk never shows a blank box.
  *
+ * The count is the card's, not the facet's — every offer behind the cap, in
+ * every grade and language — because `See all N offers` leaves the desk for the
+ * BuySell board, which lists them all.
+ *
  * props: buy, language, condition, pinned, max, onCondition(row).
  */
 export default function BuyOffers(props) {
   const book = () => props.buy.book();
   const rows = () => (Array.isArray(book()) ? buyOfferRows(book(), { language: props.language, max: props.max }) : []);
+  const total = () => buyOfferTotal(book());
+  const hidden = () => seeAllOffers(book(), rows());
   const wantPrice = (row) => {
     const parts = buyerParts(row.best_price_pkn, true, props.pinned);
     return parts.local || parts.pkn || '';
@@ -26,7 +33,10 @@ export default function BuyOffers(props) {
   return (
     <Show when={Array.isArray(book())}>
       <section class="panel desk-cell cell-offers" aria-label="Buy offers">
-        <h2 class="shop-label cell-title"><BuySellIcon size="14" />Buy offers</h2>
+        <h2 class="cell-title">
+          <span class="shop-label"><BuySellIcon size="14" />Buy offers</span>
+          <span class="cell-count">{dealBookCount(rows().length, total())}</span>
+        </h2>
         <Show
           when={rows().length}
           fallback={(
@@ -54,8 +64,8 @@ export default function BuyOffers(props) {
                   >
                     <img class="shop-cond" src={conditionChipSrc(row.condition)} alt="" width="40" height="28" draggable="false" />
                   </button>
-                  <span class="deal-offer-px">{wantPrice(row)}</span>
                   <span class="deal-offer-want">{`${row.quantity} ${conditionLabel(row.condition).toLowerCase()} wanted`}</span>
+                  <span class="deal-offer-px">{wantPrice(row)}</span>
                   <Show when={buyOfferSellable(row, props.buy.mine())}>
                     <button
                       type="button"
@@ -71,6 +81,11 @@ export default function BuyOffers(props) {
               )}
             </For>
           </div>
+          <Show when={hidden()}>
+            <AppLink class="linkish cell-more" to="/buysell">
+              {`See all ${hidden()} offers`}
+            </AppLink>
+          </Show>
         </Show>
       </section>
     </Show>

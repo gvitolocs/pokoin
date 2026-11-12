@@ -5,9 +5,13 @@ import {
   DEAL_BOOK_MAX_ROWS,
   buyOfferRows,
   buyOfferSellable,
+  buyOfferTotal,
   cheapestRows,
+  dealBookCount,
   dealBookRows,
+  listingTotal,
   seeAllListings,
+  seeAllOffers,
 } from './deal-book.js';
 import { VAULT_SELLER_UID } from './vault.js';
 
@@ -102,4 +106,49 @@ test('Sell now only appears on an offer the visitor did not post themselves', ()
   assert.equal(buyOfferSellable(row, ['other']), true);
   assert.equal(buyOfferSellable(row, ['o1']), false, 'never offer my own order back to me');
   assert.equal(buyOfferSellable({ condition: 'NM' }, []), false, 'a facet total has no order to sell into');
+});
+
+/** A hundred of something, in the shape the preview pile sends it. */
+const many = (n, make) => Array.from({ length: n }, (_, index) => make(index));
+
+test('a hundred listings are still three rows, one See all and a counted title', () => {
+  const rows = many(100, (i) => ({
+    id: `l${i}`, pricePkn: 9000 - i * 60, condition: 'NM', language: 'EN', sellerUid: `s${i}`,
+  }));
+  assert.equal(listingTotal({ rows }), 100);
+  const shown = cheapestRows({ rows });
+  assert.equal(shown.length, DEAL_BOOK_MAX_ROWS, 'the cell never grows with the pile');
+  assert.equal(seeAllListings({ rows, shown }), 100);
+  assert.equal(dealBookCount(shown.length, listingTotal({ rows })), '3 of 100');
+  const phone = cheapestRows({ rows, max: DEAL_BOOK_MAX_ROWS_PHONE });
+  assert.equal(dealBookCount(phone.length, listingTotal({ rows })), '2 of 100');
+  assert.equal(seeAllOffers([], []), 0, 'no offers, no link');
+  // Everything visible: the title counts what it shows and asks for no link.
+  const three = rows.slice(0, 3);
+  assert.equal(dealBookCount(cheapestRows({ rows: three }).length, listingTotal({ rows: three })), '3');
+  assert.equal(seeAllListings({ rows: three, shown: cheapestRows({ rows: three }) }), 0);
+});
+
+test('a hundred offers are still three rows, one See all and a counted title', () => {
+  // The book aggregates one row per facet: 25 of them, four orders each.
+  const book = many(25, (i) => ({
+    condition: ['NM', 'SP', 'MP', 'PL', 'Poor'][i % 5],
+    language: ['EN', 'JP', 'IT', 'DE', 'FR'][(i / 5) | 0],
+    best_price_pkn: 4000 - i * 30,
+    quantity: 4,
+    orders: 4,
+  }));
+  assert.equal(buyOfferTotal(book), 100, 'the card has every offer, in every facet');
+  const shown = buyOfferRows(book, { language: 'EN' });
+  assert.equal(shown.length, DEAL_BOOK_MAX_ROWS, 'the cell never grows with the pile');
+  assert.equal(seeAllOffers(book, shown), 100);
+  assert.equal(dealBookCount(shown.length, buyOfferTotal(book)), '3 of 100');
+  assert.equal(
+    buyOfferRows(book, { language: 'EN', max: DEAL_BOOK_MAX_ROWS_PHONE }).length,
+    DEAL_BOOK_MAX_ROWS_PHONE,
+  );
+  // A facet the cell already shows whole needs no link and no of-total.
+  const one = [{ condition: 'NM', language: 'EN', best_price_pkn: 900, quantity: 1, orders: 1 }];
+  assert.equal(seeAllOffers(one, buyOfferRows(one, { language: 'EN' })), 0);
+  assert.equal(dealBookCount(buyOfferRows(one, { language: 'EN' }).length, buyOfferTotal(one)), '1');
 });
