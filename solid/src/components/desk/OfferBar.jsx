@@ -22,7 +22,6 @@ import {
   OFFER_UNIT_KEY,
   offerUnit,
   selectionBid,
-  sellToHouse,
   validateBuyOrder,
   withHouseOffer,
 } from '@market/buy-orders.js';
@@ -38,7 +37,6 @@ import { profile } from '../../stores/session.js';
 import { BUYSELL_PREVIEW_BANNER } from '../../pages/buysell-preview-fixture.js';
 import { buyerCurrency } from '../../stores/buyer.js';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
-import SellNowForm from '../buysell/SellNowForm.jsx';
 
 const CONDITION_ROWS = CONDITIONS.filter((row) => row.value);
 
@@ -60,7 +58,9 @@ const SHEET_QUERY = '(max-width: 720px)';
  * `[⇄ Offer <best price>] [Beat offer | Make offer] [gear]`. Beat offer posts one
  * step above the best offer with the visitor's settings in one press; Make offer
  * and the gear open the Define offer popup (price, copies, condition, language,
- * duration, Reverse / 1st Ed., Sell now). Nothing expands inside the panel. The
+ * duration, Reverse / 1st Ed.). Nothing expands inside the panel. Selling into an
+ * offer is not here: every Sell action opens Quick Sell (`QuickSellDialog.jsx`),
+ * so this popup is only the buyer's side. The
  * desk loads the one buy-order book (lib/buy-book.js) and hands it over as
  * props.buy, shared with the book rows beside the bar; while the book is missing
  * or the request failed, the bar is not drawn. Prices are typed and shown in the
@@ -104,15 +104,9 @@ export default function OfferBar(props) {
     ...overrides(),
   }));
   const setSetting = (key, value) => setOverrides({ ...untrack(overrides), [key]: value });
-  // A Sell button in the book rows asks for a condition; the Sell now form lives in here.
-  createEffect(buy.sellPick, (condition) => {
-    if (!condition) return;
-    buy.pickSell('');
-    setSetting('condition', condition);
-    openPopup();
-  });
   // The Buy offers cell with nothing to sell into names no condition: its Make
-  // offer opens the popup on the chips as they stand.
+  // offer opens the popup on the chips as they stand. A Sell press no longer
+  // comes through here at all: it opens Quick Sell, on the desk.
   createEffect(buy.offerAsk, (ask) => {
     if (!ask) return;
     openPopup();
@@ -155,9 +149,6 @@ export default function OfferBar(props) {
   const typedPkn = () => offerPricePkn(price(), cur());
   const ask = () => props.askFor?.(settings().condition, settings().language);
   const crosses = () => crossesAsk(typedPkn(), ask());
-  // Anyone can sell into Pokoin's starting offer; a buyer's offer only when it is not the visitor's own.
-  const canSellNow = () => Boolean(target()?.house)
-    || (Boolean(target()?.best_order_id) && !buy.mine().includes(target().best_order_id));
   const fromPath = () => `${location.pathname}${location.search}`;
 
   function prefill() {
@@ -435,35 +426,6 @@ export default function OfferBar(props) {
                 <h3 class="offer-open-head">Define offer</h3>
                 <button type="button" class="offer-pop-close" aria-label="Close" onClick={closePopup}>×</button>
               </div>
-              <Show when={canSellNow()}>
-                <SellNowForm
-                  order={target().house
-                    ? { id: 'house', price_pkn: target().best_price_pkn, remaining: MAX_BUY_ORDER_QUANTITY }
-                    : { id: target().best_order_id, price_pkn: target().best_price_pkn, remaining: target().best_remaining }}
-                  priceLabel={offerPriceLabel(target().best_price_pkn, cur())}
-                  buyerLabel={target().house ? 'Pokoin' : 'the buyer'}
-                  sell={target().house
-                    ? (quantity, token) => sellToHouse({
-                      cardId: props.cardId,
-                      condition: settings().condition,
-                      language: settings().language,
-                      reverse: settings().reverse,
-                      firstEdition: settings().firstEdition,
-                      quantity,
-                      card: card(),
-                    }, token)
-                    : undefined}
-                  fromPath={fromPath()}
-                  preview={preview}
-                  onDone={() => {
-                    const sold = offerPriceLabel(target()?.best_price_pkn, cur());
-                    const told = target()?.house ? 'Pokoin has' : 'The buyer has';
-                    setOpen(false);
-                    setNotice({ text: `Listed at ${sold}. ${told} been told.` });
-                    return buy.reload();
-                  }}
-                />
-              </Show>
               <div class="buy-form">
                 <div class="sell-row">
                   <label class="sell-field grow price">

@@ -3,6 +3,7 @@ import { buyOfferSellable, buyOfferTotal, dealBookCount, deskOfferRows, seeAllOf
 import { conditionChipSrc, conditionLabel } from '@market/listing-meta.js';
 import { flagSrc } from '@market/locale.js';
 import { errorMessage, HOUSE_OFFER_PKN, offerPriceLabel } from '@market/buy-orders.js';
+import { sellTarget } from '../../lib/buy-book.js';
 import { buyerCurrency } from '../../stores/buyer.js';
 import AppLink from '../AppLink.jsx';
 import BuySellIcon from '../buysell/BuySellIcon.jsx';
@@ -13,9 +14,11 @@ import BuySellIcon from '../buysell/BuySellIcon.jsx';
  * phone). The rows come from the one buy-order book the desk shares with the
  * offer bar (`props.buy`), so the panel never asks twice.
  *
- * A row's condition chip moves the desk to that facet; its Sell button asks the
- * offer bar to open its Define offer popup on that condition. With no orders the
- * cell still says so and offers the same popup, so the desk never shows a blank box.
+ * A row's condition chip moves the desk to that facet; its Sell button hands the
+ * row's own offer — order id, price, remaining copies and facets — to Quick Sell.
+ * With no orders the cell still says so and offers Pokoin's starting offer, so
+ * the desk never shows a blank box. Selling never opens the Define offer popup,
+ * which is the buyer's side of the trade.
  *
  * The count is the card's, not the facet's — every offer behind the cap, in
  * every grade and language — because `See all N offers` leaves the desk for the
@@ -76,7 +79,7 @@ export default function BuyOffers(props) {
             <p class="cell-empty">
               {/* Never an empty cell: with no buyer's offer, Pokoin's starting offer is the one to sell into. */}
               {`Pokoin buys it for ${offerPriceLabel(HOUSE_OFFER_PKN, buyerCurrency(props.pinned) || 'PKN')}.`}{' '}
-              <button type="button" class="linkish" onClick={() => props.buy.pickSell(props.condition)}>
+              <button type="button" class="linkish" onClick={() => props.buy.pickSell(sellTarget({ house: true }, { condition: props.condition, language: props.language }))}>
                 Sell
               </button>
               {' · '}
@@ -117,11 +120,7 @@ export default function BuyOffers(props) {
                       class="deal-offer-sell"
                       title={`Sell into the ${conditionLabel(row.condition)} offer`}
                       aria-label={`Sell into the ${conditionLabel(row.condition)} offer`}
-                      onClick={() => {
-                        // The Sell now form follows the chips: move them to this row's facet first.
-                        if (!sameLang(row)) props.onCondition?.(row);
-                        props.buy.pickSell(row.condition);
-                      }}
+                      onClick={() => props.buy.pickSell(sellTarget(row))}
                     >
                       Sell
                     </button>

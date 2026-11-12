@@ -168,16 +168,38 @@ test('the desk loads one buy book and hands it to the bar and the Buy offers cel
   assert.doesNotMatch(barProps, /ready=\{offersReady\(\)\}/);
   assert.match(page, /<CheapestListings\n[\s\S]*ready=\{offersReady\(\)\}/);
   assert.doesNotMatch(page, /fetchBuyBook/);
-  // The bar owns the only Sell now form: the rows ask it for a grade, they do not grow one.
+  // A Sell press carries the exact offer it was clicked on, not a grade the
+  // popup has to pick up: the dialog is complete at click time, so it never
+  // waits on a chip that may not have landed. One builder, one intent signal.
   const lib = fs.readFileSync(new URL('../lib/buy-book.js', import.meta.url), 'utf8');
-  assert.match(lib, /pickSell\(condition\) \{\s*setSellPick\(condition \|\| ''\);\s*\}/);
+  assert.match(lib, /export function sellTarget\(row, facets = \{\}\)/);
+  // A book row aggregates several buyers, so the copies cap is the best order's
+  // own remaining, never that total; the house offer caps at the order maximum.
+  assert.match(lib, /remaining: house\s*\?\s*MAX_BUY_ORDER_QUANTITY\s*: Math\.max\(1, Number\(row\.best_remaining \?\? row\.remaining\) \|\| 1\)/);
+  assert.match(lib, /orderId = String\(row\.best_order_id \|\| row\.id \|\| ''\)/);
+  assert.match(lib, /pricePkn: house \? HOUSE_OFFER_PKN : Number\(row\.best_price_pkn \?\? row\.price_pkn\) \|\| 0/);
+  assert.match(lib, /pickSell\(target\) \{\s*if \(!target\) \{\s*setSellPick\(null\);\s*return;\s*\}\s*sellSeq \+= 1;\s*setSellPick\(\{ \.\.\.target, seq: sellSeq \}\);\s*\}/);
+  // The counter makes a second press on the same row a new intent, and closing spends it.
+  assert.match(lib, /let sellSeq = 0;/);
+  assert.match(lib, /closeSell\(\) \{\s*setSellPick\(null\);\s*\}/);
   // An empty Buy offers cell names no condition, so it asks for the popup alone.
   assert.match(lib, /askOffer\(\) \{\s*setOfferAsk\(offerAsk\(\) \+ 1\);\s*\}/);
   const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
-  assert.match(bar, /createEffect\(buy\.sellPick, \(condition\) => \{/);
-  assert.match(bar, /setSetting\('condition', condition\);\s*openPopup\(\)/);
+  // The Define offer popup stays the buyer's side of the trade: selling never
+  // opens it, so nothing here reads a sell intent or posts a sale.
+  assert.doesNotMatch(bar, /buy\.sellPick|sellPick\b/);
+  assert.doesNotMatch(bar, /<SellNowForm|<QuickSellDialog|from '.*SellNowForm/);
+  assert.doesNotMatch(bar, /sellToHouse|sellIntoBuyOrder/);
   assert.match(bar, /createEffect\(buy\.offerAsk, \(ask\) => \{\s*if \(!ask\) return;\s*openPopup\(\);/);
   assert.doesNotMatch(bar, /fetchBuyBook/);
+  // What a sell intent opens instead, on the desk.
+  assert.match(page, /import QuickSellDialog from '\.\.\/components\/buysell\/QuickSellDialog\.jsx'/);
+  assert.match(page, /<Show when=\{buy\.sellPick\(\)\} keyed>/);
+  // `keyed` because every intent is a new target: the same row twice is a fresh dialog.
+  assert.match(page, /<QuickSellDialog\n\s+target=\{pick\(\)\}/);
+  assert.match(page, /card=\{sellCard\(\)\}\n\s+pinned=\{pinnedCurrency\(\)\}\n\s+preview=\{buy\.preview\}\n\s+fromPath=\{fromPath\(\)\}\n\s+onClose=\{buy\.closeSell\}\n\s+onDone=\{\(\) => buy\.reload\(\)\}/);
+  // The book names nobody: the desk never passes a buyer name it does not have.
+  assert.doesNotMatch(page.slice(page.indexOf('<QuickSellDialog'), page.indexOf('<QuickSellDialog') + 800), /buyerName=/);
 });
 
 test('the two listing cells are the third desk row, capped by the viewport and wired to the Shop', () => {
@@ -220,7 +242,12 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(graph, /<Show when=\{!props\.linkedLabel\}>\s*<SoldGraphFilter/);
   // The sell strip is the same one line signed in or out; the form opens from it.
   assert.match(page, /sellNowNote=\{sellNowNote\(\)\}/);
-  assert.match(page, /onSellNow=\{sellNowRow\(\) \? \(\) => buy\.pickSell\(shownCond\(\)\) : undefined\}/);
+  assert.match(page, /onSellNow=\{sellNowTarget\(\) \? \(\) => buy\.pickSell\(sellNowTarget\(\)\) : undefined\}/);
+  // The strip sells into this facet's best offer, or Pokoin's starting one with
+  // the chips as they stand: the target is built at click time, not read later.
+  assert.match(page, /const sellNowTarget = \(\) => sellTarget\(sellNowRow\(\), \{/);
+  assert.match(page, /condition: shownCond\(\),\s*language: shownLang\(\),\s*reverse: dealReverse\(\),/);
+  assert.doesNotMatch(page, /onSellNow=\{sellNowRow\(\) \? \(\) => buy\.pickSell\(shownCond/);
   const form = fs.readFileSync(new URL('../components/desk/ListingForm.jsx', import.meta.url), 'utf8');
   assert.match(form, /const collapsed = \(\) => !isEditing\(\) && !opened\(\);/);
   assert.match(form, /onClick=\{\(\) => setOpened\(false\)\}/);
@@ -242,15 +269,15 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(cells, /deskOfferRows\(book\(\), \{ language: props\.language, max: props\.max \}\)/);
   // The visitor's own offer is deleted with the red cross in its row.
   assert.match(cells, /class="deal-offer-cancel"[\s\S]*onClick=\{\(\) => cancelOffer\(row\.best_order_id\)\}/);
-  assert.match(cells, /props\.buy\.pickSell\(row\.condition\)/);
+  assert.match(cells, /props\.buy\.pickSell\(sellTarget\(row\)\)/);
   // Never an empty hole: no offers is one line that opens the Define offer popup.
   // With no buyer's offer the cell names Pokoin's starting offer and lets the seller sell into it.
   assert.match(cells, /Pokoin buys it for \$\{offerPriceLabel\(HOUSE_OFFER_PKN, buyerCurrency\(props\.pinned\) \|\| 'PKN'\)\}/);
-  assert.match(cells, /props\.buy\.pickSell\(props\.condition\)/);
+  assert.match(cells, /props\.buy\.pickSell\(sellTarget\(\{ house: true \}, \{ condition: props\.condition, language: props\.language \}\)\)\}>/);
   assert.match(page, /if \(!row\) return withHouseOffer\(null\);/);
   const bar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
-  assert.match(bar, /const canSellNow = \(\) => Boolean\(target\(\)\?\.house\)/);
-  assert.match(bar, /sellToHouse\(\{\s*cardId: props\.cardId,/);
+  // Selling is not a popup setting: no house-only form, no direct house sale here.
+  assert.doesNotMatch(bar, /canSellNow|sellToHouse/);
   assert.match(bar, /const cur = \(\) => offerUnit\(unitChoice\(\), currency\(\)\);/);
   assert.match(cells, /props\.buy\.askOffer\(\)/);
   // The cell is on the page from the first paint: until the book is known it is

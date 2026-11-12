@@ -35,6 +35,7 @@ import {
   peekPrintNationality,
   fetchVersionSet,
   invalidateListings,
+  imageSrc,
   mergeCreatedListing,
   neighborsOrPeek,
   omitListings,
@@ -132,6 +133,7 @@ import CheapestListings from '../components/deal/CheapestListings.jsx';
 import ReverseSparkles from '../components/desk/ReverseSparkles.jsx';
 import { REVERSE_SCAN_LABEL, reverseScanUrl } from '@market/reverse-scans.js';
 import OfferBar from '../components/desk/OfferBar.jsx';
+import QuickSellDialog from '../components/buysell/QuickSellDialog.jsx';
 import ListingForm from '../components/desk/ListingForm.jsx';
 import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
@@ -145,7 +147,7 @@ import ExpansionMark from '../components/ExpansionMark.jsx';
 import PriceStack from '../components/PriceStack.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
-import { createBuyBook } from '../lib/buy-book.js';
+import { createBuyBook, sellTarget } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -932,6 +934,27 @@ function CardDesk(props) {
       ? `Pokoin buys ${shownCond()} · ${shownLang()} for ${price}`
       : `Best offer for ${shownCond()} · ${shownLang()} is ${price}`;
   };
+  /**
+   * What the sell strip's Sell now sells into: this facet's best offer, or
+   * Pokoin's starting one with the chips as they stand. The book names nobody,
+   * so the dialog is told only what the desk knows: the card and this facet.
+   */
+  const sellNowTarget = () => sellTarget(sellNowRow(), {
+    condition: shownCond(),
+    language: shownLang(),
+    reverse: dealReverse(),
+  });
+  /** The desk's own card, as Quick Sell paints it. */
+  const sellCard = () => {
+    const row = card();
+    const ident = printingIdentity(row);
+    return {
+      name: displayName(row) || row.name || '',
+      imageUrl: imageSrc(row, 'grid') || '',
+      set: ident.set || '',
+      number: ident.number || '',
+    };
+  };
 
   function pickOfferCondition(row) {
     if (row?.language) pickDealLang(row.language, true);
@@ -1435,7 +1458,7 @@ function CardDesk(props) {
                   onCancelEdit={() => setEditingOffer(null)}
                   onListed={onListed}
                   sellNowNote={sellNowNote()}
-                  onSellNow={sellNowRow() ? () => buy.pickSell(shownCond()) : undefined}
+                  onSellNow={sellNowTarget() ? () => buy.pickSell(sellNowTarget()) : undefined}
                 />
               </div>
 
@@ -1736,6 +1759,23 @@ function CardDesk(props) {
                   </p>
                 </Show>
               </details>
+            </Show>
+
+            {/* Quick Sell: what every Sell press on this desk opens. `keyed` because
+                each intent is a new target, so the same row twice is a fresh dialog. */}
+            <Show when={buy.sellPick()} keyed>
+              {(pick) => (
+                <QuickSellDialog
+                  target={pick()}
+                  cardId={cardId}
+                  card={sellCard()}
+                  pinned={pinnedCurrency()}
+                  preview={buy.preview}
+                  fromPath={fromPath()}
+                  onClose={buy.closeSell}
+                  onDone={() => buy.reload()}
+                />
+              )}
             </Show>
 
             <Show when={zoom()}>
