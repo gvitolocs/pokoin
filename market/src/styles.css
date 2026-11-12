@@ -3600,10 +3600,14 @@ a.era-link:focus-visible {
   min-height: 0;
 }
 
-/* A signed-out visitor's List-your-card is one line; centred in the height the
-   row gave it, it reads as a step rather than as an empty box. */
+/* A signed-out visitor's List-your-card is one line. The cell beside it is as
+   tall as the graph, so the line keeps the box and sits in its middle: the old
+   column let the panel hug its content and leave the rest of the row empty. */
 .desk-form .sell-form.is-collapsed {
+  flex: 1 1 auto;
+  align-self: stretch;
   align-items: center;
+  justify-content: center;
 }
 
 .cell-cheap {
@@ -3624,8 +3628,10 @@ a.era-link:focus-visible {
 }
 
 /* Best Deal as one horizontal strip: label and marketplace links on their own
-   compact line, then price, chips, and the buy side right-aligned. It wraps to a
-   second line when the desk narrows; never to a third at 1360px. */
+   compact line, then two content lines that never become three — the price and
+   the chips share the first, the offer bar and the cart button take the second.
+   The chips fold inside their own box when the desk narrows, so the line count
+   stays the same from 1360px down to the width where the desk stacks. */
 .desk-band {
   grid-area: band;
   align-self: start;
@@ -3707,11 +3713,12 @@ a.era-link:focus-visible {
    rail's full width: five condition images, then the languages as they come. A
    western printing names nine of them, so that row folds inside the band. */
 .desk-band .deal-facets {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
   width: auto;
+  min-width: 0;
   gap: 0.3rem 0.55rem;
 }
 
@@ -3739,11 +3746,16 @@ a.era-link:focus-visible {
   height: 18px;
 }
 
+/* The buy side always starts its own line, right-aligned, so the band is two
+   content lines at every desk width rather than a price line the chips fall off. */
 .band-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: 1 1 100%;
   gap: 0.6rem;
-  margin-left: auto;
+  min-width: 0;
 }
 
 .band-actions .offer-wrap { flex: none; }
@@ -3915,9 +3927,11 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .desk
   text-align: right;
 }
 
+/* The locked prompt is a compact link line in the band's head, next to the
+   label — the old deal column gave it a row of its own. */
 .band-head .silver-tools.is-locked {
-  flex: 1 0 100%;
-  text-align: center;
+  flex: 0 1 auto;
+  text-align: left;
 }
 
 .silver-tools.is-pending {
@@ -7540,6 +7554,49 @@ dialog.zoom:not([open]) {
   }
 }
 
+/* Beside the listing form the graph cell is about half the desk, and its
+   overlay filter row is a single nowrap line of two selects. Tighten the line
+   before it starts cutting option text. */
+@media (max-width: 1200px) {
+  .sold-graph-filters {
+    left: 2.4rem;
+    right: 0.4rem;
+    gap: 0.14rem;
+  }
+
+  .sold-graph-filters select,
+  .sold-graph-filters button,
+  .sold-graph-units {
+    height: 1.5rem;
+    font-size: 0.64rem;
+  }
+
+  .sold-graph-filters select {
+    flex: 1 1 0;
+    padding: 0.1rem 0.3rem;
+  }
+
+  .sold-graph-filters button {
+    padding: 0.1rem 0.4rem;
+  }
+}
+
+/* Below 1000px even the tightened line is wider than half the desk, and a
+   half-desk listing cell cuts the price out of a compact Shop row. The rows
+   take the full desk and the art column stops spanning them, the way the desk
+   already behaved here: a column that ran beside five stacked rows would be
+   one long empty strip. */
+@media (max-width: 1000px) {
+  .card-desk {
+    grid-template-areas:
+      "art band band"
+      "graph graph graph"
+      "form form form"
+      "cheap cheap cheap"
+      "offers offers offers";
+  }
+}
+
 /* Compact chrome, search suggest, and card desk share 720px. */
 @media (max-width: 720px) {
   .card-desk {
@@ -7600,6 +7657,10 @@ dialog.zoom:not([open]) {
     text-align: center;
   }
 
+  .desk-band .band-head {
+    text-align: left;
+  }
+
   .desk-band .band-main {
     flex-direction: column;
     align-items: stretch;
@@ -7611,6 +7672,7 @@ dialog.zoom:not([open]) {
   }
 
   .desk-band .deal-facets {
+    flex: none;
     flex-direction: column;
     align-items: stretch;
     width: 100%;
@@ -7635,8 +7697,10 @@ dialog.zoom:not([open]) {
   }
 
   .desk-band .band-actions {
+    flex: none;
     flex-direction: column;
     align-items: stretch;
+    justify-content: flex-start;
     margin-left: 0;
   }
 
@@ -9135,10 +9199,6 @@ dialog.zoom:not([open]) {
     text-align: left;
     margin-left: 0;
     justify-content: flex-start;
-  }
-
-  .band-head .silver-tools.is-locked {
-    text-align: center;
   }
 }
 

@@ -131,15 +131,21 @@ test('rows size to their content: the cells hug theirs and only the graph stretc
   assert.match(css, /\.hero-art-col \.version-links \{[^}]*margin-top:\s*auto/);
 });
 
-test('the price band is one strip: label line, then price, chips and the buy side on one wrapped row', () => {
+test('the price band is one strip: a label line, then price + chips, then the buy side', () => {
   const main = css.match(/\.band-main \{([^}]*)\}/)[1];
   assert.match(main, /display:\s*flex/);
   assert.match(main, /flex-wrap:\s*wrap/);
-  assert.match(css, /\.band-actions \{[^}]*margin-left:\s*auto/);
-  // The chips share the row instead of each taking a desk-width line.
+  // The buy side always starts its own line, right-aligned: the band is two
+  // content lines at every desk width, never a price line the chips fall off.
+  const actions = css.match(/^\.band-actions \{([^}]*)\}/m)[1];
+  assert.match(actions, /flex:\s*1 1 100%/);
+  assert.match(actions, /justify-content:\s*flex-end/);
+  // The chips share the price line at any width: their base is zero, so they
+  // fold inside their own box instead of pushing the row count up.
   const facets = css.match(/\.desk-band \.deal-facets \{([^}]*)\}/)[1];
   assert.match(facets, /flex-direction:\s*row/);
-  assert.match(facets, /flex:\s*1 1 auto/);
+  assert.match(facets, /flex:\s*1 1 0/);
+  assert.match(facets, /min-width:\s*0/);
   assert.doesNotMatch(facets, /width:\s*100%/);
   // Both chip rows drop the rail's full-width grids: five images that fit, and a
   // language row that folds (a western printing names nine codes).
@@ -163,7 +169,10 @@ test('phones restack the desk in the order the owner asked for', () => {
   );
   // The band cannot keep one line: price, chips, offer bar and cart each take a row.
   assert.match(css, /\.desk-band \.band-main \{\s*flex-direction: column;\s*align-items: stretch;/);
-  assert.match(css, /\.desk-band \.band-actions \{\s*flex-direction: column;/);
+  assert.match(css, /\.desk-band \.band-actions \{[^}]*flex-direction: column;/);
+  // Stacked, neither box keeps the desktop line-splitting flex.
+  assert.match(css, /\.desk-band \.band-actions \{[^}]*flex:\s*none/);
+  assert.match(css, /\.desk-band \.deal-facets \{[^}]*flex:\s*none/);
   // and the chips go back to the rail's full-width rows, inside this block.
   assert.match(css.slice(at), /\.desk-band \.deal-facets \{[^}]*flex-direction:\s*column/);
 });
@@ -185,4 +194,25 @@ test('the listing cells are one line per row and the offer line shares their hei
   const offer = css.match(/\.deal-offer \{([^}]*)\}/)[1];
   assert.match(offer, /min-height:\s*2\.4rem/);
   assert.match(offer, /display:\s*flex/);
+});
+
+test('a narrow desktop keeps the graph readable: tightened filters, then the graph takes its row', () => {
+  // Half a desk is not enough for the overlay filter line at its desktop size.
+  const at = css.indexOf('@media (max-width: 1200px) {');
+  const tight = css.slice(at, css.indexOf('\n}', at));
+  assert.match(tight, /\.sold-graph-filters select \{[^}]*flex:\s*1 1 0/);
+  assert.match(tight, /\.sold-graph-filters select,\s*\.sold-graph-filters button,\s*\.sold-graph-units \{[^}]*font-size: 0\.64rem/);
+  const stack = css.slice(css.indexOf('@media (max-width: 1000px) {'));
+  assert.match(
+    stack,
+    /grid-template-areas:\s*"art band band"\s*"graph graph graph"\s*"form form form"\s*"cheap cheap cheap"\s*"offers offers offers"/,
+  );
+  // The art column stops spanning here: beside five stacked rows it would be one long strip.
+  assert.doesNotMatch(stack.slice(0, 600), /"art graph/);
+  // The phone restack (720) still wins over this one, so it must come later.
+  assert.ok(
+    css.indexOf('@media (max-width: 1000px) {')
+      < css.indexOf('@media (max-width: 720px) {\n  .card-desk {\n    grid-template-columns: 1fr;'),
+    'the 1000px stack must precede the phone restack so the phone wins below 720',
+  );
 });
