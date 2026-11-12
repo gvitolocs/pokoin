@@ -2,8 +2,8 @@
 
 BuySell is a board of standing buy offers. A signed-in buyer says "I will pay X PKN for this card, in this
 condition and language, up to N copies, for D days", even when nobody lists the card. Anyone who owns the card
-can press **Sell now**: that creates a normal listing by the seller at the offer price and tells the buyer, who
-buys it through the cart. In the UI the buyer's thing is an *offer*; the API noun is *buy order*.
+can press **Sell**: that opens **Quick Sell**, which creates a normal listing by the seller at the offer price and
+tells the buyer, who buys it through the cart. In the UI the buyer's thing is an *offer*; the API noun is *buy order*.
 
 ## Rules
 
@@ -14,6 +14,14 @@ buys it through the cart. In the UI the buyer's thing is an *offer*; the API nou
 - At most 100 open offers per user.
 - A seller cannot sell into their own offer.
 - An offer at or above the cheapest listing shows "A listing at X is already available. You can buy it now."; it can still be posted.
+- **Selling never opens the Define offer popup.** The popup is the buyer's side of the trade (price, copies, condition,
+  Open for); a Sell press opens Quick Sell on the exact offer that was pressed, with nothing to configure but the
+  copies and one optional note.
+- **A seller's note is private to the buyer.** It is sent with the notification and stored on the fill; it is never in
+  the public book, the board, the listing, or any `sellerComment` field, and only the buyer who owns the order reads it
+  back on `/buysell?tab=mine`. Pokoin's starting offer has no buyer to write to, so that note goes to Pokoin's mail
+  only. Maximum 240 characters (`BUYER_MESSAGE_MAX`), counted as code points after folding `\r\n` and trimming;
+  control characters are refused.
 
 ## States
 
@@ -25,20 +33,31 @@ buys it through the cart. In the UI the buyer's thing is an *offer*; the API nou
 | --- | --- | --- |
 | `GET ?card_id=` | public | Book for one card: best price, copies and offers per facet tuple. |
 | `GET /board?limit=&sort=recent\|price&before=` | public | Open offers, newest or highest price first, cursor in `next`. |
-| `GET /mine` | yes | The caller's offers with `state` and `fills`. |
+| `GET /mine` | yes | The caller's offers with `state` and `fills`; a fill may carry `seller_message`, the note that seller chose. |
 | `GET /for-my-listings` | yes | Open offers that match the caller's active listings. |
 | `POST /` | yes | Create an offer. `409 duplicate_buy_order`, `409 too_many_buy_orders`. |
 | `PATCH /{id}` | yes | Change `price_pkn`, `quantity` or `days`. |
 | `DELETE /{id}` | yes | Cancel. |
-| `POST /{id}/sell` | yes | Sell now: `{ quantity }` → `201 { listing_id, buy_order }`. `403 own_buy_order`, `409 not_open`, `409 quantity_exceeds_remaining`. |
+| `POST /{id}/sell` | yes | Sell into one order: `{ quantity, buyer_message? }` → `201 { listing_id, buy_order }`. `403 own_buy_order`, `409 not_open`, `409 quantity_exceeds_remaining`, `409 buy_order_changed`, `400 invalid_buyer_message`. |
+| `POST /house/sell` | yes | Sell into Pokoin's starting offer: the facets, `{ quantity, buyer_message?, card_name, card_image_url, set_name, collector_number }` → `201 { listing_id }`. |
 
-Each book row carries `best_order_id` and `best_remaining`, the copies left on that one order. The card page's Sell
-now needs both: it caps the quantity at `best_remaining` (the row's `quantity` is the total over all its orders and
-can be larger). Without `best_order_id` the offer bar hides Sell now (the board and the Sell to buyers tab always have ids).
+`buyer_message` is sent **only when there is something to send**: an empty or whitespace-only note is left out of the
+body entirely, and a note with Windows line breaks is sent folded to `\n` and trimmed — the same text the dialog's
+counter shows (`buyerMessageText` / `buyerMessageLength` / `buyerMessageError` in `market/src/buy-orders.js`). An older
+API that ignores the field still gets a listing: the note is optional, so nothing about the sale changes.
+
+Each book row carries `best_order_id` and `best_remaining`, the copies left on that one order. Quick Sell needs both:
+it caps the copies at `best_remaining` (the row's `quantity` is the total over all its orders and can be larger).
+Without `best_order_id` nothing is sellable (the board and the Sell to buyers tab always have ids). Sellers' own
+offers are hidden by `buyOfferSellable`, which the book cannot do alone because it names no buyer.
 
 Errors are `{ "error": "<code>", "code": "<code>" }`; `duplicate_buy_order` also carries the existing order's `id`.
 `POST` needs the `days` key (`null` is until cancelled) and takes an optional `buyer_name`, the buyer's public
 display name. Languages are the 16 codes of the price book (the listing form's `LIST_LANGS`); the form offers no other.
+
+Storage: `scripts/sql/143_buy_order_fill_seller_message.sql` adds `marketplace_buy_order_fills.seller_message`, one
+private line per fill, capped at the same 240 characters. It is written by the two sell calls and read only by
+`GET /mine`; nothing else selects it.
 
 ## Where the UI lives
 
@@ -64,8 +83,8 @@ display name. Languages are the 16 codes of the price book (the listing form's `
   - **Make offer** (no offer yet) and the **gear** (labelled "Define offer") open the Define offer popup with the price field focused. The popup is a
     portal in `<body>`, anchored to the bar (a bottom sheet at 720px and below), closing on Escape, a click outside and its
     own close button, with focus moving in and returning to the gear. It holds price, copies, condition, language, Open for,
-    Reverse / 1st Ed., the "listing already available" note, Post offer, Cancel and, when a live best offer that is not the
-    visitor's own exists, Sell now.
+    Reverse / 1st Ed., the "listing already available" note, Post offer and Cancel. Nothing on the seller's side is in
+    it: a Sell press opens Quick Sell from the desk, and the popup no longer reads a sell intent at all.
   - **Choices in Define offer** (copies, condition, language, days, Reverse, 1st Ed.) live in memory for the page and drive Beat offer.
     Defaults: 1 copy, the Best Deal's condition and language, 30 days. A new condition or language chip clears the two
     settings that follow the chips.
@@ -114,9 +133,31 @@ display name. Languages are the 16 codes of the price book (the listing form's `
   language, best price first, three rows (two on a phone): the grade chip picks that facet (`setDealCond`,
   `setDealLang`), the price follows the bar's currency rule (`buyerParts(pkn, true, pinnedCurrency())`), the line says
   `N <grade> wanted`, and `Sell` — only on a grade with a `best_order_id` the visitor did not post (`buyOfferSellable`)
-  — opens the bar's Define offer popup on that grade, where the existing Sell now form and its `best_remaining` cap
-  live. With no orders the cell is still drawn: one line, `No buy offers yet.` and a `Make offer` text button that
-  opens the same popup, so the desk never shows a blank box.
+  — opens Quick Sell on that row. With no orders the cell is still drawn: one line, Pokoin's starting offer, a `Sell`
+  link into it and a `Make offer` text button that opens the Define offer popup, so the desk never shows a blank box.
+- **Quick Sell** (`solid/src/components/buysell/QuickSellDialog.jsx`) is the whole sell path in one modal: a centred
+  card up to 26rem, the same bottom sheet as the Define offer popup at 720px and below. It shows the card with one
+  facet line (`NM · EN`, plus `Reverse` / `1st Ed.`), the locked price of the target in the unit the visitor picked for
+  offers (`storedOfferUnit`, so the dialog and the popup never disagree), the buyer's handle where the caller knows one
+  (the board does; the book names nobody, so the desk says `A buyer`), a copies stepper capped by that order's
+  `best_remaining`, and the optional note with its live counter. `List at <price>` posts once and the button reads
+  `Listing…`; the same dialog then replaces the form with `Listed at <price>. The buyer will be notified.` (Pokoin's
+  starting offer: `Pokoin will be notified.`) and `See your listings`. Nothing there claims a sale, a payment or a
+  delivered mail — a listing is a listing.
+  - It opens from exactly four places: the **Buy offers row** `Sell`, the empty cell's **starting-offer** `Sell`, the
+    **"Have this card?" strip** on the desk, and the **`/buysell`** Wanted board and `?tab=sell` rows
+    (`components/buysell/SellNowForm.jsx`, the trigger on a board row). None of them opens the Define offer popup.
+  - `sellTarget(row, facets)` in `solid/src/lib/buy-book.js` is the one builder of a target, and it is complete at the
+    click: a book row's own `best_order_id` / `best_remaining` / `best_price_pkn` and its own facets, or Pokoin's
+    starting offer with the facets the desk shows. Selling therefore never waits for a chip to move, which is what the
+    old path did when it wrote the grade into the popup and opened it.
+  - A `409` (`not_open`, `quantity_exceeds_remaining`, `buy_order_changed`) keeps the form open with the plain sentence
+    and reloads the book or board so the cap is fresh; a `401` goes to sign-in; `invalid_buyer_message` says
+    `That note is too long or has characters we can't send.`
+  - A11y: `role="dialog"`, `aria-modal`, labelled by its own title, focus moves into the container and back to the Sell
+    button that opened it (not on the phone sheet, which covered it), Tab is trapped, Escape and a press outside close
+    it — never while a post is in flight — the body does not scroll behind it, and `prefers-reduced-motion` drops the
+    slide-in. Every control is at least 40px.
 - **`See all` opens the full Shop in place**, as the desk's last row, and the line becomes `Hide the full shop`. The
   open state belongs to the page, not to the scroll position, and anything that walks the visitor to the Shop (a deep
   link, the header cart hint) opens it first — `scrollShop()` in `solid/src/pages/Card.jsx`. It never auto-expands:
@@ -127,7 +168,9 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 - Best Deal's two-line price is flipped (`PriceStack flip`, order in `market/src/price-stack.js`): the local currency is the
   large yellow figure and the PKN amount the small line above it. A single price is unchanged. Tiles, shop rows, search and
   cart keep the old order.
-- `solid/src/components/buysell/SellNowForm.jsx`: the Sell now flow shared by the offer bar popup and the page.
+- `solid/src/components/buysell/SellNowForm.jsx`: the `Sell now` button on a `/buysell` row, and nothing else — it builds
+  the target, sends a signed-out visitor to sign-in, and mounts the dialog. `solid/src/lib/buy-book.js` is the desk's
+  one `pickSell(target)` / `sellPick` signal, keyed by a counter so the same row twice is a fresh dialog.
 - `solid/src/pages/BuySell.jsx`: `/buysell` with tabs Wanted, My offers (`?tab=mine`), Sell to buyers (`?tab=sell`).
 - Navigation: the two-tone BuySell mark (`market/src/buysell-icon.js` paths, drawn by `components/buysell/BuySellIcon.jsx`; buy arrow `--buysell-buy` = `--yellow`, sell arrow `--buysell-sell` = `--ct-blue`; also next to the page title and in the offer bar) in Chrome, the phone menu and the footer.
 - Edge: `/buysell` is an SPA prefix in `scripts/write-cloudflare-web-routing.mjs` and has rewrites in `vercel.json`.
@@ -136,6 +179,8 @@ display name. Languages are the 16 codes of the price book (the listing form's `
 
 `?mypokoinPreview` on a card page or on `/buysell` (the MyPokoin switch: dev build, or host `localhost` /
 `127.0.0.1`; never on a production host) shows fixture offers from `solid/src/pages/buysell-preview-fixture.js`
-without calling the API or signing in. Posting, Sell now, Edit and Cancel do nothing in preview. On the desk the
+without calling the API or signing in. Posting, Edit and Cancel do nothing in preview. Quick Sell still opens and
+paints its real form, but `props.preview` skips sign-in and the request and takes the dialog straight to its success
+state, so the sheet that gets reviewed is the one a real sale ends on. On the desk the
 fixture book feeds both surfaces at once — the offer bar and the Best Deal Buy offers rows — while Other sellers
 still comes from the card's real listings.
