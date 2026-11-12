@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# pokoin-web: refuse commits from the canonical (main) worktree.
+# pokoin-web: scan staged content for secrets, and refuse commits from the
+# canonical (main) worktree.
 #
 # /home/nez/Projects/pokoin-web is the integration/deployment checkout, not a
 # development workspace (see AGENTS.md and docs/paseo-development.md). Other
@@ -16,6 +17,23 @@
 # Activate for this clone/worktree:  scripts/setup-git-hooks.sh
 
 set -euo pipefail
+
+# Staged secret scan (docs/SECRETS.md). Placed before the checks below so no
+# early `exit 0` skips it. Skipped only when gitleaks is not installed.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --no-banner; then
+    cat >&2 <<'EOF'
+================================================================================
+pokoin-web: commit rejected, gitleaks found a secret in the staged content.
+
+The value above is redacted, but it is still live. Do not commit and do not
+widen .gitleaks.toml. Remove it from the file, rotate it in Infisical if it was
+ever pushed, and tell the owner of the credential. See docs/SECRETS.md.
+================================================================================
+EOF
+    exit 1
+  fi
+fi
 
 if [[ "${POKOIN_ALLOW_CANONICAL_COMMIT:-}" == "1" ]]; then
   exit 0
