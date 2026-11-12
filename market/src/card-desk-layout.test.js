@@ -116,7 +116,7 @@ test('the desk is one grid: art for the whole height, then band, graph, the two 
   assert.match(css, /\.card-desk > \.vault-panel,\s*\.card-desk > \.shop-terminal \{\s*grid-column: 1 \/ -1/);
 });
 
-test('rows size to their content: the cells keep three row slots and only the graph stretches', () => {
+test('rows size to their content: the cells hug what they hold and only the graph stretches', () => {
   // The band hugs its content; the two cells stretch to each other so they stay level.
   const band = css.indexOf('\n.desk-band {');
   assert.match(css.slice(band, css.indexOf('}', band)), /align-self:\s*start/, '.desk-band must not stretch');
@@ -125,11 +125,13 @@ test('rows size to their content: the cells keep three row slots and only the gr
     assert.notEqual(at, -1, cls);
     assert.doesNotMatch(css.slice(at, css.indexOf('}', at)), /align-self:\s*start/, `${cls} must stay level with its neighbour`);
   }
-  // 0, 3 or 100 rows: the cell is three row slots tall on desktop, so the desk never grows with the market.
-  assert.match(
-    css,
-    /\.desk-cell \.cell-rows,\s*\.desk-cell \.empty-shop,\s*\.desk-cell \.cell-empty \{[^}]*min-height:\s*calc\(3 \* 2\.4rem/,
-  );
+  // A cell is as tall as its rows: no minimum that leaves empty slots under one row. The row cap
+  // (three, in deal-book.js) is what keeps 100 listings from stretching the desk.
+  assert.doesNotMatch(css, /\.desk-cell \.cell-rows,\s*\.desk-cell \.empty-shop,\s*\.desk-cell \.cell-empty \{[^}]*min-height/);
+  assert.match(css, /\.desk-cell \.cell-skel > span:nth-child\(n \+ 2\) \{ display: none; \}/);
+  // The set icons under the card scale with the free height of the card column on the wide desk.
+  assert.match(css, /\.hero-art-col \.version-links \{\s*flex: 1 1 auto;[^}]*container-type: size;/);
+  assert.match(css, /width: clamp\(2\.5rem, 62cqh, 4\.6rem\);\s*height: clamp\(2\.5rem, 62cqh, 4\.6rem\);/);
   // The title is one line: no divider under it and See all inside it, not in a footer row.
   const title = css.match(/\n\.desk-cell \.cell-title \{([^}]*)\}/)[1];
   assert.doesNotMatch(title, /border-bottom/);

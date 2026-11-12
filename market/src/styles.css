@@ -3594,6 +3594,28 @@ a.era-link:focus-visible {
   margin-top: auto;
 }
 
+/* Beside a tall desk the card column has free height under the card. The set
+   icons take it: the row fills what is left and the icons scale with it, from
+   their normal size up to a cap, instead of sitting small under a void. Only
+   where the card column spans the desk rows; a phone keeps the fixed size. */
+@media (min-width: 1001px) {
+  .hero-art-col .version-links {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 2.9rem;
+    container-type: size;
+  }
+  .hero-art-col .version-links .set-shortcut,
+  .hero-art-col .version-links .more-versions.more-versions-ico {
+    width: clamp(2.5rem, 62cqh, 4.6rem);
+    height: clamp(2.5rem, 62cqh, 4.6rem);
+  }
+  .hero-art-col .version-links .more-versions-ico svg {
+    width: 76%;
+    height: 76%;
+  }
+}
+
 .desk-graph {
   grid-area: graph;
   display: flex;
@@ -4164,16 +4186,14 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   font-size: 0.76rem;
 }
 
-/* Desktop cells always keep three row slots, so 0, 3 or 100 listings give the
-   same desk height and the two cells stay level with each other. */
-@media (min-width: 721px) {
-  .desk-cell .cell-rows,
-  .desk-cell .empty-shop,
-  .desk-cell .cell-empty {
-    box-sizing: border-box;
-    min-height: calc(3 * 2.4rem + 2 * 0.25rem + 0.3rem);
-  }
+/* The two cells under the graph are as tall as what they hold: one row is one
+   row, never a block of empty slots that stretches the page. They still show at
+   most three rows (deal-book.js caps them), and the pair stays level because
+   the grid stretches the shorter one to its neighbour. While the offer book is
+   loading the skeleton is one row too. */
+.desk-cell .cell-skel > span:nth-child(n + 2) { display: none; }
 
+@media (min-width: 721px) {
   /* The band is one line: price on the left, the marketplace links after it,
      the offer bar and the cart button on the right; the chips take the line
      under it. band-main's children join the band's own grid. */

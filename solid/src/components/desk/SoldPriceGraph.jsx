@@ -407,7 +407,10 @@ export default function SoldPriceGraph(props) {
                   </g>
                 )}
               </For>
-              <polygon points={geo().area} class="sold-graph-fill" />
+              {/* Overlaid series are compared as lines: the fill under one of them would sit over the others. */}
+              <Show when={!geo().others.length}>
+                <polygon points={geo().area} class="sold-graph-fill" />
+              </Show>
               <Show when={geo().lead}><polyline points={geo().lead} class="sold-graph-line sold-graph-carry" /></Show>
               <polyline points={geo().line} class="sold-graph-line" />
               <Show when={geo().tail}><polyline points={geo().tail} class="sold-graph-line sold-graph-carry" /></Show>
