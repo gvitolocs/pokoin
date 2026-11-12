@@ -21,6 +21,7 @@ import {
   offerSummary,
   selectionBid,
   validateBuyOrder,
+  withHouseOffer,
 } from '@market/buy-orders.js';
 import { CONDITIONS } from '@market/card-desk.js';
 import { game } from '@market/game.js';
@@ -108,8 +109,11 @@ export default function OfferBar(props) {
   const cur = () => currency() || 'PKN';
 
   // The bar shows the offer for the desk's chips; the buttons act on the offer settings' tuple.
-  const bid = createMemo(() => selectionBid(book(), { condition: props.condition, language: props.language }));
-  const target = createMemo(() => selectionBid(book(), { condition: settings().condition, language: settings().language }));
+  // With no buyer's offer the selection still has one: Pokoin's 1 PKN starting
+  // offer. So the bar always shows a price and the button is always Beat offer;
+  // the gear is the only way into the Define offer popup.
+  const bid = createMemo(() => withHouseOffer(selectionBid(book(), { condition: props.condition, language: props.language })));
+  const target = createMemo(() => withHouseOffer(selectionBid(book(), { condition: settings().condition, language: settings().language })));
   const barModel = createMemo(() => offerBarModel(bid()));
   const model = createMemo(() => offerBarModel(target()));
   const beatPkn = () => beatPricePkn(target());
