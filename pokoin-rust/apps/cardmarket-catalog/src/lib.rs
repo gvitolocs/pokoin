@@ -43,8 +43,11 @@
 //! (migration 141): the cheapest offer a professional or a private seller
 //! made, per product, language, condition, finish, first edition and seller
 //! type, with the moment it was seen. Neither the official guide nor
-//! TCGNotify separates sellers, so this is the only Cardmarket number that
-//! says what the competition charges. One row per facet, newest observation
+//! TCGNotify separates sellers, so a facet minimum is the only Cardmarket
+//! number that says what the competition charges. The pricer reads the price
+//! engine's published snapshot (`cm_prices.current_minimums`) for the same
+//! facets and this table as the older hand load, quoting whichever source
+//! observed a facet later. One row per facet, newest observation
 //! wins; a facet that found no offers is skipped, and so is any record whose
 //! product id, facet code, price or timestamp is not usable. Without
 //! `--apply` it is a dry run, like `guides`.
