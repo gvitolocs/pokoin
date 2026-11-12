@@ -3665,6 +3665,89 @@ html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell
   margin-left: 0.6rem;
 }
 
+/* What the sold graph plots, in the chips' words; it sits where the graph's
+   own menus used to be. */
+.sold-graph-scope {
+  z-index: 4;
+  margin: 0;
+  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Every chip can be pressed now (it also drives the graph), so an unlisted one
+   is dimmed but not dead, and a pressed one is ringed even with nothing to buy. */
+.desk-band .deal-chip.is-off { cursor: pointer; opacity: 0.45; }
+.desk-band .deal-chip.is-off.is-on { opacity: 0.8; filter: none; }
+.desk-band .deal-facet-row[aria-label="Finish"] { display: flex; width: auto; }
+.desk-band .deal-chip-reverse { display: inline-flex; align-items: center; gap: 0.3rem; }
+.desk-band .deal-chip-reverse svg { width: 14px; height: 14px; }
+
+/* Opened from the strip, the form is a full-width desk row: its five stacked
+   lines become two. Price, currency and quantity share a line with the facet
+   pickers and extras; location and comment share the next with the marketplace
+   switch and the List button. Notes and the graded fields keep full lines. */
+@media (min-width: 1001px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form {
+    display: grid;
+    grid-template-columns: minmax(20rem, 1fr) minmax(0, 1.6fr);
+    grid-template-areas:
+      "head head"
+      "price options"
+      "place targets";
+    align-items: end;
+    gap: 0.55rem 1rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > * {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    margin-bottom: 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head { grid-area: head; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head + .sell-row { grid-area: price; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-options-row { grid-area: options; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-location-row {
+    grid-area: place;
+    flex-wrap: nowrap;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .location-pick {
+    flex: 0 1 11rem;
+    min-width: 7rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .comment {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-targets-row { grid-area: targets; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-pkn-eq { order: 9; }
+
+  /* On one line with the price inputs, the pickers and extras take the inputs'
+     height and type size instead of their small stacked-form size. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row { align-items: stretch; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-field.sell-pick select,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button {
+    box-sizing: border-box;
+    height: 2.5rem;
+    font-size: 0.88rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips { align-items: center; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.95rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 8.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .listing-photo-add {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
 .cell-cheap {
   grid-area: cheap;
   min-width: 0;
@@ -8166,8 +8249,8 @@ dialog.zoom:not([open]) {
   }
 
   .promo-arrow {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
     top: 5.15rem;
   }
 
@@ -8362,18 +8445,18 @@ dialog.zoom:not([open]) {
   }
 
   .art-nav {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .collector-badge {
-    height: 2.75rem;
+    height: 2.5rem;
     line-height: calc(2.75rem - 2px);
   }
 
   .set-shortcut {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .add-panel,

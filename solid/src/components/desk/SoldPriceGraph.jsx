@@ -72,7 +72,12 @@ function SoldGraphFilters(props) {
         onPointerMove={stopSoldPointer}
         onPointerUp={stopSoldPointer}
       >
-        <Show when={props.chips.reverse}>
+        {/* Linked to the desk chips: the graph names what it plots and has no
+            condition, language or reverse control of its own. */}
+        <Show when={props.linkedLabel}>
+          <p class="sold-graph-scope">{props.linkedLabel}</p>
+        </Show>
+        <Show when={props.chips.reverse && !props.linkedLabel}>
           <SoldGraphToggle label={props.reverseLabel || 'Reverse'} pressed={props.reverse} onToggle={props.onReverse} />
         </Show>
         <Show when={props.chips.firstEdition}>
@@ -81,22 +86,24 @@ function SoldGraphFilters(props) {
         <Show when={props.chips.graded}>
           <SoldGraphToggle label="Graded" pressed={props.graded} onToggle={props.onGraded} />
         </Show>
-        <SoldGraphFilter
-          label="Sold condition"
-          allLabel="All conditions"
-          options={props.conditions}
-          value={props.condition}
-          onChange={props.onCondition}
-          optionLabel={soldConditionLabel}
-        />
-        <SoldGraphFilter
-          label="Sold language"
-          allLabel="All languages"
-          options={props.languages}
-          value={props.language}
-          onChange={props.onLanguage}
-          optionLabel={soldLanguageLabel}
-        />
+        <Show when={!props.linkedLabel}>
+          <SoldGraphFilter
+            label="Sold condition"
+            allLabel="All conditions"
+            options={props.conditions}
+            value={props.condition}
+            onChange={props.onCondition}
+            optionLabel={soldConditionLabel}
+          />
+          <SoldGraphFilter
+            label="Sold language"
+            allLabel="All languages"
+            options={props.languages}
+            value={props.language}
+            onChange={props.onLanguage}
+            optionLabel={soldLanguageLabel}
+          />
+        </Show>
         <Show when={props.unitsLabel}><p class="sold-graph-units">{props.unitsLabel}</p></Show>
       </div>
     </Show>
@@ -261,6 +268,7 @@ export default function SoldPriceGraph(props) {
         firstEdition={props.firstEdition}
         graded={props.graded}
         unitsLabel={unitsLabel()}
+        linkedLabel={props.linkedLabel}
         onCondition={(value) => props.onCondition(value)}
         onLanguage={(value) => props.onLanguage(value)}
         onReverse={(value) => props.onReverse(value)}

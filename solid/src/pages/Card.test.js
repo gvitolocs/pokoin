@@ -188,6 +188,15 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.match(page, /const deskRows = \(\) => dealBookRows\(deskWidth\(\)\)/);
   assert.match(page, /window\.addEventListener\('resize', onResize, \{ passive: true \}\)/);
   assert.match(page, /import \{ buyOfferSellable, dealBookRows \} from '@market\/deal-book\.js'/);
+  // The chips are the desk's one selection: every one can be pressed, a pressed
+  // one is kept even with nothing listed, and the sold graph plots what they pick.
+  assert.doesNotMatch(page, /class=\{\['deal-chip'[^\n]*\n(?:[^\n]*\n){0,6}[^\n]*disabled=\{dim\(\)\}/);
+  assert.match(page, /if \(condPinned\(\)\) return wanted;/);
+  assert.match(page, /createEffect\(\(\) => \[shownCond\(\), shownLang\(\), dealReverse\(\)\]/);
+  assert.match(page, /class=\{\['deal-chip', 'deal-chip-reverse', \{ 'is-on': dealReverse\(\) \}\]\}/);
+  assert.match(page, /linkedLabel=\{graphScope\(\)\}/);
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  assert.match(graph, /<Show when=\{!props\.linkedLabel\}>\s*<SoldGraphFilter/);
   // The sell strip is the same one line signed in or out; the form opens from it.
   assert.match(page, /sellNowNote=\{sellNowNote\(\)\}/);
   assert.match(page, /onSellNow=\{sellNowRow\(\) \? \(\) => buy\.pickSell\(shownCond\(\)\) : undefined\}/);

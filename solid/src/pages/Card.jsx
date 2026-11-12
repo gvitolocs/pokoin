@@ -286,6 +286,12 @@ function CardDesk(props) {
   const deskRows = () => dealBookRows(deskWidth());
   const [dealLang, setDealLang] = createSignal('');
   const [dealCond, setDealCond] = createSignal('');
+  // The band chips are the desk's one selection: they pick the Best Deal and
+  // what the sold graph plots. A chip the visitor pressed is kept as pressed,
+  // listed or not; until then the desk shows the best facet that has a listing.
+  const [dealReverse, setDealReverse] = createSignal(false);
+  const [condPinned, setCondPinned] = createSignal(false);
+  const [langPinned, setLangPinned] = createSignal(false);
   const [listingBusy, setListingBusy] = createSignal(false);
   const [shopError, setShopError] = createSignal('');
   const [editingOffer, setEditingOffer] = createSignal(null);
@@ -644,23 +650,46 @@ function CardDesk(props) {
   const nextNav = () => neighborWindow().next?.[0] || null;
   const nativeLive = createMemo(() => pricedOffers(shop.offers));
   const listedDealLangs = createMemo(() => listedDealLanguages(shop.offers, card()));
-  const shownLang = createMemo(() => resolveDealLanguage({
-    selected: dealLang() || 'EN',
-    listed: offersReady() ? listedDealLangs() : [],
-    country: sellerSettings()?.shipFromCountry,
-  }));
-  // The chosen grade when it is listed in the shown language, else the best one that is.
+  // With the Reverse chip on, only reverse listings can be the Best Deal.
+  const dealRows = createMemo(() => (dealReverse() ? nativeLive().filter((offer) => offer?.reverse) : nativeLive()));
+  const shownLang = createMemo(() => (langPinned() && dealLang()
+    ? String(dealLang()).toUpperCase()
+    : resolveDealLanguage({
+      selected: dealLang() || 'EN',
+      listed: offersReady() ? listedDealLangs() : [],
+      country: sellerSettings()?.shipFromCountry,
+    })));
+  // A pressed grade is kept as pressed. Before any press: the chosen grade when
+  // it is listed in the shown language, else the best one that is.
   const shownCond = createMemo(() => {
     const wanted = dealCond() || 'NM';
-    return offersReady() ? shownDealCondition(nativeLive(), shownLang(), wanted, card()) : wanted;
+    if (condPinned()) return wanted;
+    return offersReady() ? shownDealCondition(dealRows(), shownLang(), wanted, card()) : wanted;
   });
-  const dealPick = createMemo(() => (offersReady() ? matchDeal(nativeLive(), shownLang(), shownCond(), card()) : null));
+  const dealPick = createMemo(() => (offersReady() ? matchDeal(dealRows(), shownLang(), shownCond(), card()) : null));
+  // The sold graph plots what the chips picked. It has no menus of its own.
+  createEffect(() => [shownCond(), shownLang(), dealReverse()], ([cond, code, reverse]) => {
+    setSalesCondition(cond);
+    setSalesLanguage(code);
+    setSalesReverse(Boolean(reverse));
+  });
+  const showReverseChip = () => Boolean(salesView().chips?.reverse) || nativeLive().some((offer) => offer?.reverse);
+  /** What the graph is plotting, said in the chips' own words. */
+  const graphScope = () => {
+    const filters = graphFilters();
+    const cond = (filters.conditions || []).includes(shownCond()) ? shownCond() : '';
+    const code = (filters.languages || []).includes(shownLang()) ? shownLang() : '';
+    const parts = [cond || 'All conditions', code || 'All languages'];
+    if (salesReverse()) parts.push(game().id === 'pokemon' ? 'Reverse' : 'Foil');
+    const missing = [cond ? '' : shownCond(), code ? '' : shownLang()].filter(Boolean);
+    return missing.length ? `${parts.join(' · ')} (no ${missing.join(' · ')} sales yet)` : parts.join(' · ');
+  };
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
   const change72h = () => formatChange72h(salesSeries()?.change24hPct);
   const canBuy = () => Boolean(dealPick());
-  const listedCondSet = createMemo(() => new Set(listedDealConditions(nativeLive(), shownLang(), card()).map((row) => row.value)));
+  const listedCondSet = createMemo(() => new Set(listedDealConditions(dealRows(), shownLang(), card()).map((row) => row.value)));
   const listedLangSet = createMemo(() => new Set(listedDealLangs()));
   const allDealLangs = createMemo(() => {
     const row = card();
@@ -809,8 +838,16 @@ function CardDesk(props) {
   };
 
   function pickOfferCondition(row) {
-    if (row?.language) chooseDealLang(row.language);
-    if (row?.condition) setDealCond(row.condition);
+    if (row?.language) {
+      chooseDealLang(row.language);
+      setLangPinned(true);
+    }
+    if (row?.condition) pickDealCond(row.condition);
+  }
+
+  function pickDealCond(value) {
+    setDealCond(value);
+    setCondPinned(true);
   }
 
   /** See all: the Shop panel is the desk's own last row, and it starts closed. */
@@ -1245,6 +1282,7 @@ function CardDesk(props) {
                   reverseLabel={game().id === 'pokemon' ? 'Reverse' : 'Foil'}
                   firstEdition={salesFirstEdition()}
                   graded={salesGraded()}
+                  linkedLabel={graphScope()}
                   onCondition={setSalesCondition}
                   onLanguage={setSalesLanguage}
                   onReverse={setSalesReverse}
@@ -1254,9 +1292,13 @@ function CardDesk(props) {
                   onPickDay={(day) => {
                     const traits = soldTraitsForGraphDay(salesSlices() || [], salesFilterState(), day);
                     if (!traits) return;
-                    setSalesCondition(traits.condition);
-                    setSalesLanguage(traits.language);
-                    setSalesReverse(Boolean(traits.reverse));
+                    // A plotted day moves the chips, and the chips move the graph.
+                    if (traits.condition) pickDealCond(traits.condition);
+                    if (traits.language) {
+                      setDealLang(traits.language);
+                      setLangPinned(true);
+                    }
+                    setDealReverse(Boolean(traits.reverse));
                     setSalesFirstEdition(Boolean(traits.firstEdition));
                     setSalesGraded(Boolean(traits.graded));
                   }}
@@ -1315,7 +1357,13 @@ function CardDesk(props) {
                         </>
                       )}
                     >
-                      <p class="deal-none">No Pokoin seller has this card right now.</p>
+                      {/* A pressed facet with nothing listed is not "no seller" when other facets are listed. */}
+                      <Show
+                        when={nativeLive().length}
+                        fallback={<p class="deal-none">No Pokoin seller has this card right now.</p>}
+                      >
+                        <p class="deal-none">{`No ${shownCond()} · ${shownLang()}${dealReverse() ? ' reverse' : ''} listing right now.`}</p>
+                      </Show>
                     </Show>
                   </div>
                   <div class="deal-facets">
@@ -1324,18 +1372,17 @@ function CardDesk(props) {
                         {(row) => {
                           const listedHere = () => listedCondSet().has(row.value);
                           const on = () => shownCond() === row.value;
-                          const ring = () => offersReady() && on() && canBuy();
-                          const dim = () => offersReady() && (on() ? !canBuy() : !listedHere());
+                          // Every grade can be pressed: it also picks what the graph plots.
+                          const dim = () => offersReady() && !listedHere();
                           return (
                             <button
                               type="button"
                               role="radio"
-                              class={['deal-chip', { 'is-on': ring(), 'is-off': dim() }]}
+                              class={['deal-chip', { 'is-on': on(), 'is-off': dim() }]}
                               aria-checked={on() ? 'true' : 'false'}
                               aria-label={row.label}
-                              title={listedHere() && (!on() || canBuy()) ? row.label : `${row.label} · none listed`}
-                              disabled={dim()}
-                              onClick={() => setDealCond(row.value)}
+                              title={listedHere() ? row.label : `${row.label} · none listed`}
+                              onClick={() => pickDealCond(row.value)}
                             >
                               <img class="shop-cond" src={conditionChipSrc(row.value)} alt="" width="40" height="28" draggable="false" />
                             </button>
@@ -1349,18 +1396,17 @@ function CardDesk(props) {
                           {(code) => {
                             const listedHere = () => listedLangSet().has(code);
                             const on = () => shownLang() === code;
-                            const ring = () => offersReady() && on() && canBuy();
-                            const dim = () => offersReady() && (on() ? !canBuy() : !listedHere());
+                            const dim = () => offersReady() && !listedHere();
                             return (
                               <button
                                 type="button"
                                 role="radio"
-                                class={['deal-chip', { 'is-on': ring(), 'is-off': dim() }]}
+                                class={['deal-chip', { 'is-on': on(), 'is-off': dim() }]}
                                 aria-checked={on() ? 'true' : 'false'}
                                 aria-label={code}
-                                title={listedHere() && (!on() || canBuy()) ? code : `${code} · none listed`}
-                                disabled={dim()}
+                                title={listedHere() ? code : `${code} · none listed`}
                                 onClick={() => {
+                                  setLangPinned(true);
                                   setDealLang(code);
                                   writeDealLanguage(code, authUser()?.uid);
                                 }}
@@ -1371,6 +1417,20 @@ function CardDesk(props) {
                             );
                           }}
                         </For>
+                      </div>
+                    </Show>
+                    <Show when={showReverseChip()}>
+                      <div class="deal-facet-row" role="group" aria-label="Finish">
+                        <button
+                          type="button"
+                          class={['deal-chip', 'deal-chip-reverse', { 'is-on': dealReverse() }]}
+                          aria-pressed={dealReverse() ? 'true' : 'false'}
+                          title={dealReverse() ? 'Showing reverse only' : 'Show reverse only'}
+                          onClick={() => setDealReverse(!dealReverse())}
+                        >
+                          <ReverseSparkles />
+                          <span>{game().id === 'pokemon' ? 'Reverse' : 'Foil'}</span>
+                        </button>
                       </div>
                     </Show>
                   </div>
