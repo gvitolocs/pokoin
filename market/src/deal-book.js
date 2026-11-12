@@ -59,6 +59,24 @@ export function buyOfferRows(book, { language = '', max = DEAL_BOOK_MAX_ROWS } =
   return max > 0 ? hits.slice(0, max) : hits;
 }
 
+/**
+ * The Buy offers cell's rows: the picked language's offers first (best price
+ * first), then the other languages' (best price first), capped at `max`. A card
+ * whose only offers are in another language used to show an empty cell under a
+ * "0 of 2" count, with no way to see or cancel them.
+ */
+export function deskOfferRows(book, { language = '', max = DEAL_BOOK_MAX_ROWS } = {}) {
+  const picked = String(language || '').toUpperCase();
+  const own = buyOfferRows(book, { language: picked, max: 0 });
+  const others = [...new Set((Array.isArray(book) ? book : [])
+    .map((row) => String(row?.language || '').toUpperCase())
+    .filter((code) => code && code !== picked))]
+    .flatMap((code) => buyOfferRows(book, { language: code, max: 0 }))
+    .sort((a, b) => Number(b.best_price_pkn) - Number(a.best_price_pkn));
+  const rows = [...own, ...others];
+  return max > 0 ? rows.slice(0, max) : rows;
+}
+
 /** Every open offer of the card: the book's orders, in every grade and language. */
 export function buyOfferTotal(book = []) {
   return (Array.isArray(book) ? book : [])
