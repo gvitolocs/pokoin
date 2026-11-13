@@ -313,7 +313,7 @@ export default function Chrome(props) {
             <NavHover id="market" pop={navPop()} setPop={setNavPop} preview="MarketPreview">
               <AppLink to="/marketplace" aria-label="Marketplace"><Svg d={ICO.storefront} /></AppLink>
             </NavHover>
-            <AppLink class="buysell-link" to="/buysell" aria-label="BuySell"><BuySellIcon size={20} /></AppLink>
+            <AppLink class="buysell-link" to="/cardgts" aria-label="CardGTS"><BuySellIcon size={20} /></AppLink>
             <NavHover id="messages" pop={navPop()} setPop={setNavPop} preview="MessagesPreview">
               <AppLink
                 class="messages-link"
@@ -431,7 +431,7 @@ function Footer(props) {
         <div>
           <h3>Shop</h3>
           <AppLink to="/marketplace">Marketplace</AppLink>
-          <AppLink to="/buysell">BuySell</AppLink>
+          <AppLink to="/cardgts">CardGTS</AppLink>
           <AppLink to="/marketplace/search">Search</AppLink>
           <AppLink to="/marketplace/competitive">Competitive</AppLink>
           <AppLink to="/marketplace/explore">Explore</AppLink>

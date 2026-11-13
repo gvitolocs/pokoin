@@ -96,7 +96,7 @@ import { ownerGameChoice } from '@market/card-response.js';
 import { cartItemFromOffer } from '@market/cart-rows.js';
 import { bundleReference, preloadDragImage, writeListingDrag } from '@market/chat-listing.js';
 import { buyOfferSellable, dealBookRows } from '@market/deal-book.js';
-import { offerPriceLabel, selectionBid, withHouseOffer } from '@market/buy-orders.js';
+import { offerPriceLabel, selectionBid, sellableBid, withHouseOffer } from '@market/buy-orders.js';
 import { resolveDealLanguage, writeDealLanguage } from '@market/deal-pref.js';
 import { game, gameHref, publicGamePath } from '@market/game.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '@market/identity.js';
@@ -944,6 +944,28 @@ function CardDesk(props) {
     language: shownLang(),
     reverse: dealReverse(),
   });
+  /**
+   * The facets Quick Sell lets the seller change: the desk's own condition and
+   * language chips, and Reverse / 1st Ed. where this printing has them. Each pick
+   * resolves to that exact printing's best buyer offer (never the visitor's own),
+   * else Pokoin's starting offer.
+   */
+  const sellChoices = () => ({
+    conditions: DEAL_CONDS,
+    // The printing's languages, then any language a buyer is asking for.
+    languages: [...new Set([
+      ...allDealLangs(),
+      ...(buy.book() || []).map((row) => String(row?.language || '').toUpperCase()),
+      shownLang(),
+    ].filter(Boolean))],
+    reverse: showReverseChip(),
+    reverseLabel: game().id === 'pokemon' ? 'Reverse' : 'Foil',
+    firstEdition: Boolean(salesView().chips?.firstEdition),
+  });
+  const resolveSell = (facets) => sellTarget(
+    sellableBid(buy.book(), buy.mine(), facets) || { house: true },
+    facets,
+  );
   /** The desk's own card, as Quick Sell paints it. */
   const sellCard = () => {
     const row = card();
@@ -1793,6 +1815,8 @@ function CardDesk(props) {
               {(pick) => (
                 <QuickSellDialog
                   target={pick}
+                  choices={sellChoices()}
+                  resolve={resolveSell}
                   cardId={cardId}
                   card={sellCard()}
                   pinned={pinnedCurrency()}

@@ -355,7 +355,7 @@ function SellToBuyers(props) {
                 </OfferTitle>
                 <span class="buysell-side">
                   <strong>{formatPkn(item.price_pkn)}</strong>
-                  <SellNowForm order={item} fromPath="/buysell?tab=sell" preview={props.preview} onDone={load} />
+                  <SellNowForm order={item} fromPath="/cardgts?tab=sell" preview={props.preview} onDone={load} />
                 </span>
               </article>
             )}
@@ -375,13 +375,13 @@ export default function BuySell() {
   const here = () => `${location.pathname}${location.search}`;
 
   onSettled(() => {
-    document.title = 'BuySell · Pokoin';
+    document.title = 'CardGTS · Pokoin';
   });
 
   return (
     <div class="page desk buysell">
       <PageHead
-        title={<><BuySellIcon class="buysell-title-ico" size="0.85em" />BuySell</>}
+        title={<><BuySellIcon class="buysell-title-ico" size="0.85em" />CardGTS</>}
         lede="Say what you will pay for a card. Anyone who has it can sell it to you."
       />
       <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
@@ -392,7 +392,7 @@ export default function BuySell() {
       </ol>
       <p class="buysell-fine">Offers are not binding and no money is taken until you buy.</p>
       <div class="buysell-bar">
-        <div class="buysell-tabs" role="tablist" aria-label="BuySell">
+        <div class="buysell-tabs" role="tablist" aria-label="CardGTS">
           <For each={TABS}>
             {(row) => (
               <button

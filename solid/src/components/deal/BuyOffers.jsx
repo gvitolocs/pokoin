@@ -68,7 +68,7 @@ export default function BuyOffers(props) {
           <span class="shop-label"><BuySellIcon size="14" />Buy offers</span>
           <span class="cell-count">{dealBookCount(rows().length, total())}</span>
           <Show when={hidden()}>
-            <AppLink class="linkish cell-more" to="/buysell" aria-label={`See all ${hidden()} offers`}>
+            <AppLink class="linkish cell-more" to="/cardgts" aria-label={`See all ${hidden()} offers`}>
               See all
             </AppLink>
           </Show>

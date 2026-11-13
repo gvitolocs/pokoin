@@ -35,6 +35,7 @@ import {
   BOOK_CACHE_KEY,
   readBookCache,
   writeBookCache,
+  sellableBid,
 } from './buy-orders.js';
 
 /** Every request the calls below make, with the body they posted. */
@@ -406,4 +407,20 @@ test('offerBody carries the settings and null days for until cancelled', () => {
   assert.equal(body.reverse, false);
   assert.equal(body.quantity, 1);
   assert.equal(validateBuyOrder(body).ok, true);
+});
+
+test('sellableBid: the best offer for one exact facet set, never your own', () => {
+  const book = [
+    { condition: 'NM', language: 'EN', reverse: false, first_edition: false, best_price_pkn: 2642, best_order_id: 'a', best_remaining: 4 },
+    { condition: 'NM', language: 'EN', reverse: true, first_edition: false, best_price_pkn: 3100, best_order_id: 'b', best_remaining: 1 },
+    { condition: 'NM', language: 'JP', reverse: false, first_edition: false, best_price_pkn: 900, best_order_id: 'c', best_remaining: 2 },
+    { condition: 'SP', language: 'EN', reverse: false, first_edition: false, best_price_pkn: 2100, best_order_id: 'mine', best_remaining: 2 },
+  ];
+  assert.equal(sellableBid(book, [], { condition: 'NM', language: 'en' }).best_order_id, 'a');
+  assert.equal(sellableBid(book, [], { condition: 'NM', language: 'EN', reverse: true }).best_order_id, 'b');
+  assert.equal(sellableBid(book, [], { condition: 'NM', language: 'JP' }).best_order_id, 'c');
+  // Your own offer is not one to sell into, and a facet nobody wants is null.
+  assert.equal(sellableBid(book, ['mine'], { condition: 'SP', language: 'EN' }), null);
+  assert.equal(sellableBid(book, [], { condition: 'NM', language: 'EN', firstEdition: true }), null);
+  assert.equal(sellableBid(null, [], { condition: 'NM', language: 'EN' }), null);
 });

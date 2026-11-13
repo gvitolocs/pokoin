@@ -21,7 +21,10 @@ test('Quick Sell is one modal dialog, named by its own title', () => {
 
 test('the dialog prices the exact target it was handed, in the saved unit', () => {
   // Nothing is looked up here: the price, order id and cap arrive in the target.
-  assert.match(dialog, /const target = \(\) => props\.target \|\| \{\};/);
+  // The target is the one handed over, or, where the seller may change facets,
+  // the one the caller resolves for the exact printing picked in the dialog.
+  assert.match(dialog, /const resolved = createMemo\(\(\) => \(editable\(\) \? props\.resolve\(picked\(\)\) : null\)\);/);
+  assert.match(dialog, /const target = \(\) => resolved\(\) \|\| props\.target \|\| \{\};/);
   assert.match(dialog, /const pricePkn = \(\) => Number\(target\(\)\.pricePkn\) \|\| 0;/);
   // The unit is the one the visitor picked for offers, so the dialog and the
   // Define offer popup never show two different amounts for the same offer.
@@ -36,9 +39,11 @@ test('the dialog prices the exact target it was handed, in the saved unit', () =
 
 test('the copies stepper walks the order’s own remaining', () => {
   assert.match(dialog, /const remaining = \(\) => Math\.max\(1, Number\(target\(\)\.remaining\) \|\| 1\);/);
-  assert.match(dialog, /setQty\(\(value\) => Math\.min\(remaining\(\), Math\.max\(1, value \+ delta\)\)\)/);
-  assert.match(dialog, /disabled=\{busy\(\) \|\| qty\(\) <= 1\} onClick=\{\(\) => step\(-1\)\} aria-label="One copy fewer"/);
-  assert.match(dialog, /disabled=\{busy\(\) \|\| qty\(\) >= remaining\(\)\} onClick=\{\(\) => step\(1\)\} aria-label="One copy more"/);
+  // A facet change that lowers the cap also caps the copies already chosen.
+  assert.match(dialog, /const copies = \(\) => Math\.min\(qty\(\), remaining\(\)\);/);
+  assert.match(dialog, /setQty\(Math\.min\(remaining\(\), Math\.max\(1, copies\(\) \+ delta\)\)\)/);
+  assert.match(dialog, /disabled=\{busy\(\) \|\| copies\(\) <= 1\} onClick=\{\(\) => step\(-1\)\} aria-label="One copy fewer"/);
+  assert.match(dialog, /disabled=\{busy\(\) \|\| copies\(\) >= remaining\(\)\} onClick=\{\(\) => step\(1\)\} aria-label="One copy more"/);
   // One copy wanted leaves it fixed at 1, with the hint saying so.
   assert.match(dialog, /remaining\(\) === 1 \? 'only 1 wanted' : `up to \$\{remaining\(\)\} wanted`/);
   assert.match(dialog, /role="group" aria-labelledby=\{`\$\{titleId\(\)\}-copies`\}/);
@@ -51,7 +56,7 @@ test('the note is optional, counted by the same rules as the wire, and blocks th
   assert.match(dialog, /const noteBad = \(\) => buyerMessageError\(note\(\)\);/);
   assert.match(dialog, /class=\{\['qs-count', \{ 'is-over': count\(\) > BUYER_MESSAGE_MAX \}\]\} aria-live="polite">\{count\(\)\}\/\{BUYER_MESSAGE_MAX\}/);
   assert.match(dialog, /house\(\) \? 'Note to Pokoin \(optional\)' : 'Message to buyer \(optional\)'/);
-  assert.match(dialog, /Sent to the buyer with the notification\. This is not a chat\./);
+  assert.match(dialog, /house\(\) \? 'Sent to Pokoin with the notification\.' : 'Sent to the buyer with the notification\.'\} This is not a chat\./);
   // Over the limit is a red counter and no sale: the button is the blocked one.
   assert.match(dialog, /const blocked = \(\) => busy\(\) \|\| Boolean\(noteBad\(\)\);/);
   assert.match(dialog, /disabled=\{blocked\(\)\} onClick=\{submit\}/);
@@ -76,8 +81,8 @@ test('submit posts once against the target and answers every failure in place', 
   // A token that will not be had is the same dead end as being signed out.
   assert.match(dialog, /const token = await getBearer\(\);\n {6}if \(!token\) \{\n {8}toSignIn\(\);/);
   assert.match(dialog, /const text = note\(\);/);
-  assert.match(dialog, /await sellToHouse\(\{[\s\S]*quantity: qty\(\),[\s\S]*buyerMessage: text,\n\s*\}, token\)/);
-  assert.match(dialog, /await sellIntoBuyOrder\(target\(\)\.orderId, qty\(\), token, text\)/);
+  assert.match(dialog, /await sellToHouse\(\{[\s\S]*quantity: copies\(\),[\s\S]*buyerMessage: text,\n\s*\}, token\)/);
+  assert.match(dialog, /await sellIntoBuyOrder\(target\(\)\.orderId, copies\(\), token, text\)/);
   assert.match(dialog, /if \(err\.status === 401\) \{\s*toSignIn\(\);\s*return;\s*\}/);
   // 409: the copies or the price moved. The sentence stays with the form, and
   // the caller reloads so the next attempt carries a fresh limit.
@@ -129,4 +134,15 @@ test('Quick Sell reuses the popup surfaces and keeps 40px targets', () => {
   assert.match(block, /\.qs-close \{\n\s*flex: none;\n\s*width: 40px;\n\s*height: 40px;/);
   // Motion is a courtesy: reduced motion drops the slide-in, nothing else changes.
   assert.match(block, /@media \(prefers-reduced-motion: reduce\) \{\n\s*\.qs-pop \{\n\s*animation: none;/);
+});
+
+test('the desk lets the seller change condition, language and finish, and the offer follows', () => {
+  assert.match(dialog, /<div class="qs-facet-row" role="radiogroup" aria-label="Condition">/);
+  assert.match(dialog, /<div class="qs-facet-row" role="radiogroup" aria-label="Language">/);
+  assert.match(dialog, /onClick=\{\(\) => pick\('reverse', !picked\(\)\.reverse\)\}/);
+  assert.match(dialog, /onClick=\{\(\) => pick\('firstEdition', !picked\(\)\.firstEdition\)\}/);
+  const page = read('../../pages/Card.jsx');
+  assert.match(page, /choices=\{sellChoices\(\)\}\s*resolve=\{resolveSell\}/);
+  // Each pick is that printing's best buyer offer, never your own, else Pokoin's 1 PKN.
+  assert.match(page, /sellableBid\(buy\.book\(\), buy\.mine\(\), facets\) \|\| \{ house: true \}/);
 });

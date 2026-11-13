@@ -26,6 +26,8 @@ export default [
   { path: '/orders', component: Orders },
   { path: '/bought', component: Bought },
   { path: '/buy', component: Buy },
+  // CardGTS (formerly BuySell). /buysell stays so links already sent in emails keep working.
+  { path: '/cardgts', component: BuySell },
   { path: '/buysell', component: BuySell },
   { path: '/sales', component: Sales },
   { path: '/wallet', component: Wallet },

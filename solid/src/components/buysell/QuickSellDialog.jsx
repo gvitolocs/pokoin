@@ -1,4 +1,4 @@
-import { createSignal, onSettled, Show } from 'solid-js';
+import { createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import {
   BUYER_MESSAGE_MAX,
@@ -10,6 +10,8 @@ import {
   sellToHouse,
   storedOfferUnit,
 } from '@market/buy-orders.js';
+import { conditionChipSrc } from '@market/listing-meta.js';
+import { flagSrc } from '@market/locale.js';
 import { formatPkn } from '@market/pkn.js';
 import { authFrom } from '@market/punchouts.js';
 import { useGameNavigate } from '../../lib/game-navigate.js';
@@ -33,6 +35,13 @@ let titleSeq = 0;
  * props.buyerName only when the caller knows one (the book names nobody).
  * props.onDone runs after a sale, and after a 409 that says the offer moved, so
  * the caller's book or board is fresh again.
+ *
+ * Facets the seller can change: with props.choices ({ conditions: [{ value,
+ * label }], languages: [code], reverse, firstEdition }) and props.resolve(facets)
+ * the facet line becomes chips. Each pick asks the caller for the target of that
+ * exact printing (its best buyer offer, or Pokoin's starting one), so the price,
+ * the buyer and the copies limit follow. Without them (a BuySell row is one
+ * buyer's order) the facets are the order's own and only shown.
  */
 export default function QuickSellDialog(props) {
   const navigate = useGameNavigate();
@@ -45,9 +54,26 @@ export default function QuickSellDialog(props) {
 
   let box;
 
-  const target = () => props.target || {};
+  const [picked, setPicked] = createSignal({
+    condition: props.target?.condition || 'NM',
+    language: String(props.target?.language || 'EN').toUpperCase(),
+    reverse: Boolean(props.target?.reverse),
+    firstEdition: Boolean(props.target?.firstEdition),
+  });
+  const editable = () => Boolean(props.choices && props.resolve);
+  const resolved = createMemo(() => (editable() ? props.resolve(picked()) : null));
+  const target = () => resolved() || props.target || {};
+  function pick(key, value) {
+    if (busy()) return;
+    // Keep the copies the seller sees: a cap from the previous offer sticks.
+    setQty(copies());
+    setPicked({ ...picked(), [key]: value });
+    setError('');
+  }
   const house = () => Boolean(target().house);
   const remaining = () => Math.max(1, Number(target().remaining) || 1);
+  // A smaller offer after a facet change caps the copies already chosen.
+  const copies = () => Math.min(qty(), remaining());
   const pricePkn = () => Number(target().pricePkn) || 0;
   // The price is shown in the unit the visitor already picked for offers, so the
   // dialog and the Define offer popup never say two different amounts.
@@ -75,7 +101,7 @@ export default function QuickSellDialog(props) {
   }
 
   function step(delta) {
-    setQty((value) => Math.min(remaining(), Math.max(1, value + delta)));
+    setQty(Math.min(remaining(), Math.max(1, copies() + delta)));
   }
 
   async function submit() {
@@ -105,11 +131,11 @@ export default function QuickSellDialog(props) {
           language: target().language,
           reverse: target().reverse,
           firstEdition: target().firstEdition,
-          quantity: qty(),
+          quantity: copies(),
           card: props.card,
           buyerMessage: text,
         }, token)
-        : await sellIntoBuyOrder(target().orderId, qty(), token, text);
+        : await sellIntoBuyOrder(target().orderId, copies(), token, text);
       setDone(true);
       props.onDone?.(result);
     } catch (err) {
@@ -194,10 +220,80 @@ export default function QuickSellDialog(props) {
             <Show when={props.card?.set || props.card?.number}>
               <span class="qs-card-set">{[props.card.set, props.card.number ? `#${props.card.number}` : ''].filter(Boolean).join(' · ')}</span>
             </Show>
-            <span class="qs-card-facets">{facets()}</span>
+            <Show when={!editable() || done()}>
+              <span class="qs-card-facets">{facets()}</span>
+            </Show>
           </span>
         </div>
         <Show when={!done()}>
+          <Show when={editable()}>
+            <div class="qs-facets">
+              <div class="qs-facet-row" role="radiogroup" aria-label="Condition">
+                <For each={props.choices.conditions}>
+                  {(row) => (
+                    <button
+                      type="button"
+                      role="radio"
+                      class={['deal-chip', 'qs-chip', { 'is-on': picked().condition === row.value }]}
+                      aria-checked={picked().condition === row.value ? 'true' : 'false'}
+                      aria-label={row.label}
+                      title={row.label}
+                      disabled={busy()}
+                      onClick={() => pick('condition', row.value)}
+                    >
+                      <img class="shop-cond" src={conditionChipSrc(row.value)} alt="" width="40" height="28" draggable="false" />
+                    </button>
+                  )}
+                </For>
+              </div>
+              <Show when={props.choices.languages?.length}>
+                <div class="qs-facet-row" role="radiogroup" aria-label="Language">
+                  <For each={props.choices.languages}>
+                    {(code) => (
+                      <button
+                        type="button"
+                        role="radio"
+                        class={['deal-chip', 'qs-chip', { 'is-on': picked().language === code }]}
+                        aria-checked={picked().language === code ? 'true' : 'false'}
+                        aria-label={code}
+                        disabled={busy()}
+                        onClick={() => pick('language', code)}
+                      >
+                        <img class="deal-flag" src={flagSrc(code)} alt="" width="18" height="18" />
+                        <span>{code}</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <Show when={props.choices.reverse || props.choices.firstEdition}>
+                <div class="qs-facet-row" role="group" aria-label="Finish">
+                  <Show when={props.choices.reverse}>
+                    <button
+                      type="button"
+                      class={['deal-chip', 'qs-chip', { 'is-on': picked().reverse }]}
+                      aria-pressed={picked().reverse ? 'true' : 'false'}
+                      disabled={busy()}
+                      onClick={() => pick('reverse', !picked().reverse)}
+                    >
+                      {props.choices.reverseLabel || 'Reverse'}
+                    </button>
+                  </Show>
+                  <Show when={props.choices.firstEdition}>
+                    <button
+                      type="button"
+                      class={['deal-chip', 'qs-chip', { 'is-on': picked().firstEdition }]}
+                      aria-pressed={picked().firstEdition ? 'true' : 'false'}
+                      disabled={busy()}
+                      onClick={() => pick('firstEdition', !picked().firstEdition)}
+                    >
+                      1st Ed.
+                    </button>
+                  </Show>
+                </div>
+              </Show>
+            </div>
+          </Show>
           <div class="qs-offer">
             <span class="qs-offer-what">
               <span class="qs-label">{house() ? "Pokoin's offer" : 'Buyer offer'}</span>
@@ -215,9 +311,9 @@ export default function QuickSellDialog(props) {
           <div class="qs-copies">
             <span class="qs-label" id={`${titleId()}-copies`}>Copies</span>
             <span class="qs-stepper" role="group" aria-labelledby={`${titleId()}-copies`}>
-              <button type="button" class="qs-step" disabled={busy() || qty() <= 1} onClick={() => step(-1)} aria-label="One copy fewer">−</button>
-              <span class="qs-qty">{qty()}</span>
-              <button type="button" class="qs-step" disabled={busy() || qty() >= remaining()} onClick={() => step(1)} aria-label="One copy more">+</button>
+              <button type="button" class="qs-step" disabled={busy() || copies() <= 1} onClick={() => step(-1)} aria-label="One copy fewer">−</button>
+              <span class="qs-qty">{copies()}</span>
+              <button type="button" class="qs-step" disabled={busy() || copies() >= remaining()} onClick={() => step(1)} aria-label="One copy more">+</button>
             </span>
             <span class="qs-hint">{remaining() === 1 ? 'only 1 wanted' : `up to ${remaining()} wanted`}</span>
           </div>
@@ -233,7 +329,7 @@ export default function QuickSellDialog(props) {
               onInput={(event) => setNote(event.currentTarget.value)}
             />
           </label>
-          <p class="qs-help">Sent to the buyer with the notification. This is not a chat.</p>
+          <p class="qs-help">{house() ? 'Sent to Pokoin with the notification.' : 'Sent to the buyer with the notification.'} This is not a chat.</p>
           <p class="qs-fine">
             {house()
               ? "This creates a listing at Pokoin's starting price. Pokoin is not charged automatically; you are paid only if it buys it."

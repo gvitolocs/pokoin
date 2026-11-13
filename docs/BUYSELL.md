@@ -1,5 +1,7 @@
 # BuySell
 
+> On screen the feature is called **CardGTS** (page `/cardgts`; `/buysell` still opens it). Code, files and API paths keep the BuySell name.
+
 BuySell is a board of standing buy offers. A signed-in buyer says "I will pay X PKN for this card, in this
 condition and language, up to N copies, for D days", even when nobody lists the card. Anyone who owns the card
 can press **Sell**: that opens **Quick Sell**, which creates a normal listing by the seller at the offer price and
