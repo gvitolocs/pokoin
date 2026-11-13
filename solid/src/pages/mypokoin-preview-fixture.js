@@ -104,8 +104,19 @@ function repeatRows(rows, count) {
   });
 }
 
+// One generated book per size, handed back by reference. The desks treat rows as
+// immutable (every edit maps to a new array), so switching tabs reuses the book
+// instead of rebuilding 1,500 objects — and the boards' derivations, keyed by
+// array identity, then hit.
+const books = new Map();
+function previewBook(build) {
+  const size = previewSize();
+  if (!books.has(size)) books.set(size, build(size));
+  return books.get(size);
+}
+
 export function previewListings() {
-  return copy(previewSize() ? repeatRows(LISTINGS, previewSize()) : LISTINGS);
+  return previewBook((size) => copy(size ? repeatRows(LISTINGS, size) : LISTINGS));
 }
 
 export function previewPricer() {
@@ -322,12 +333,14 @@ export function previewGroups() {
 }
 
 export function previewCollection() {
-  const size = previewSize();
-  const rows = copy(size ? repeatRows(HELD, size) : HELD);
-  const listings = copy(size ? repeatRows(COLLECTION_LISTINGS, size) : COLLECTION_LISTINGS);
+  // The rows stay identical across mounts; the asks are rebuilt per desk.
+  const book = previewBook((size) => ({
+    rows: copy(size ? repeatRows(HELD, size) : HELD),
+    listings: copy(size ? repeatRows(COLLECTION_LISTINGS, size) : COLLECTION_LISTINGS),
+  }));
   const asks = {};
-  for (const row of rows) asks[row.id] = 250;
-  return { rows, listings, asks };
+  for (const row of book.rows) asks[row.id] = 250;
+  return { rows: book.rows, listings: book.listings, asks };
 }
 
 // Already in the contract's picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then other games;

@@ -35,7 +35,15 @@ import {
   toggleSelected,
 } from '../pricer/pricer-ui.js';
 import { memoPrices, rememberPrices } from './price-memo.js';
+import { memoizeByRows } from '../../lib/derived-cache.js';
 import RowThumb from './RowThumb.jsx';
+
+// A tab switch rebuilds the board over the same book; these four walks of all
+// 1,500 rows are pure functions of it, so the second visit reuses the first.
+const facetsOf = memoizeByRows(inventoryFacets);
+const originsOf = memoizeByRows(originFacets);
+const duplicatesOf = memoizeByRows(findCrossSourceDuplicates);
+const summaryOf = memoizeByRows(summarizeLiveInventory);
 
 const STATUS_CHIPS = [
   { id: '', label: 'All' },
@@ -376,11 +384,11 @@ export default function InventoryBoard(props) {
     return id ? props.pricing.groups().find((group) => group.id === id)?.name || '' : '';
   };
 
-  const facets = createMemo(() => inventoryFacets(props.rows));
-  const origins = createMemo(() => originFacets(props.rows));
+  const facets = createMemo(() => facetsOf(props.rows));
+  const origins = createMemo(() => originsOf(props.rows));
   // One pass over the whole book; rows look their flag up by id.
-  const duplicates = createMemo(() => findCrossSourceDuplicates(props.rows));
-  const summary = createMemo(() => summarizeLiveInventory(props.rows));
+  const duplicates = createMemo(() => duplicatesOf(props.rows));
+  const summary = createMemo(() => summaryOf(props.rows));
   const view = createMemo(() => sortInventoryRows(
     filterInventoryRows(props.rows, {
       query: query(),
