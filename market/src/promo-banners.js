@@ -1,3 +1,5 @@
+import featuredSet from './data/featured-set.json' with { type: 'json' };
+
 /** How many set slides a non-Pokémon homepage hero rotates through. */
 export const SATELLITE_PROMO_LIMIT = 5;
 
@@ -106,10 +108,10 @@ export function promoLogoSrc(banner, { pokemon = false } = {}) {
 /** Current expansions on the home promo carousel (five slides). */
 export const PROMO_BANNERS = [
   {
-    slug: 'storm-emeralda',
-    series: 'Mega Evolution',
-    title: 'Storm Emeralda',
-    lede: 'Japanese M6 is on the floor. Chase Mega Rayquaza ex.',
+    slug: featuredSet.newCardsSet.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    series: 'Pokémon',
+    title: featuredSet.newCardsSet,
+    lede: 'Explore cards from this expansion.',
     cta: 'Explore cards from this expansion',
   },
   {
