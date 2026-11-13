@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   collectorSplit,
   deskClipCandidates,
+  DESK_SET_SHORTCUT_MAX,
   deskSetShortcuts,
   deskShowMoreVersions,
   isRaritySibling,
@@ -16,6 +17,7 @@ import {
   splitVersionPage,
   versionOptionLabel,
 } from './card-versions.js';
+import { expansionSortValue } from './tcg-eras.js';
 
 const jpRegular = {
   id: '734318',
@@ -227,14 +229,18 @@ test('CLIP Dialga reprints become four desk shortcuts, not the Dialga name dump'
     set: `Set ${i}`,
     number: '001/100',
   }));
-  assert.deepEqual(deskSetShortcuts(csdc, nameDump), []);
+  // A 21-set dump is capped to DESK_SET_SHORTCUT_MAX circles, not dropped, and
+  // the printing on the desk always keeps its own circle.
+  const dumped = deskSetShortcuts(csdc, nameDump);
+  assert.equal(dumped.length, DESK_SET_SHORTCUT_MAX);
+  assert.ok(dumped.some((row) => row.id === '770422'));
   assert.deepEqual(
     deskSetShortcuts(csdc, deskClipCandidates([], clip)).length,
     4,
   );
 });
 
-test('few expansion reprints become desk set shortcuts; many do not', () => {
+test('few expansion reprints become desk set shortcuts; many cap instead of dropping', () => {
   const lost = { id: '245170', name: 'Ditto ◇ Prism Star', set: 'Lost Thunder', number: '154/214' };
   const stars = { id: '520098', name: 'Ditto ◇ Prism Star', set: 'Tag Team GX: Tag All Stars', number: '108/173' };
   const spark = { id: '586974', name: 'Ditto ◇ Prism Star', set: 'Thunderclap Spark', number: '043/060' };
@@ -256,7 +262,66 @@ test('few expansion reprints become desk set shortcuts; many do not', () => {
     set: `Set ${i}`,
     number: '001/100',
   }));
-  assert.deepEqual(deskSetShortcuts(lost, five), []);
+  // Six sets is exactly the cap: every circle paints (was: the row emptied).
+  assert.deepEqual(
+    deskSetShortcuts(lost, five).map((row) => row.set),
+    ['Set 0', 'Set 1', 'Set 2', 'Set 3', 'Set 4', 'Lost Thunder'],
+  );
+});
+
+test('an artwork printed in six expansions paints six set circles', () => {
+  // Acerola's Mischief: one CLIP group, six different expansions.
+  const mega = { id: '703266', name: "Acerola's Mischief", set: 'Mega Evolution', number: '113/132' };
+  const group = [
+    { id: '703267', name: "Acerola's Mischief", set: 'Mega Symphonia', number: '059/063' },
+    { id: '703268', name: "Acerola's Mischief", set: 'MEGA Dream ex', number: '169/193' },
+    { id: '703269', name: "Acerola's Mischief", set: 'MEGA Start Deck 100', number: '697/742' },
+    { id: '703270', name: "Acerola's Mischief", set: 'Ascended Heroes', number: '180/217' },
+    { id: '703271', name: "Acerola's Mischief", set: 'Play! Pokémon Prize Pack', number: '113/132' },
+  ];
+  assert.deepEqual(
+    deskSetShortcuts(mega, group).map((row) => row.set),
+    [
+      'Play! Pokémon Prize Pack',
+      'MEGA Dream ex',
+      'Ascended Heroes',
+      'Mega Symphonia',
+      'Mega Evolution',
+      'MEGA Start Deck 100',
+    ],
+  );
+  // The group has more than one printing, so the plus still sits next to them.
+  assert.equal(deskShowMoreVersions(mega, { clipRows: [mega, ...group] }), true);
+});
+
+test('a nine-set family caps to six with the oldest current set kept', () => {
+  const lost = { id: '245170', name: 'Ditto', set: 'Base Set', number: '154/214' };
+  const sets = ['Jungle', 'Fossil', 'Team Rocket', 'Neo Genesis', 'Lost Thunder', 'Mega Evolution', 'Mega Symphonia', 'Ascended Heroes'];
+  const others = sets.map((set, i) => ({ id: String(i + 1), name: 'Ditto', set, number: '001/100' }));
+  const capped = deskSetShortcuts(lost, others);
+  assert.deepEqual(capped.map((row) => row.set), [
+    'Ascended Heroes', 'Mega Symphonia', 'Mega Evolution', 'Lost Thunder', 'Neo Genesis', 'Base Set',
+  ]);
+  assert.equal(new Set(capped.map((row) => row.set)).size, capped.length);
+  const values = capped.map(expansionSortValue);
+  assert.deepEqual(values, [...values].sort((left, right) => right - left));
+  assert.equal(deskSetShortcuts(lost, others, { max: 3 }).length, 3);
+});
+
+test('the cap keeps one row per set, not one row per rarity', () => {
+  const ur = { id: '703000', name: 'Mega Gardevoir ex', set: 'Mega Evolution', number: 'Ultra Rare | 060/132' };
+  const others = Array.from({ length: 8 }, (_, i) => ({
+    id: String(900000 + i),
+    name: 'Mega Gardevoir ex',
+    set: `Set ${i}`,
+    number: '001/100',
+  }));
+  // Same-set regular ↔ Full-Art collapse before the cap runs, so a set that is
+  // in the group still shows exactly one circle.
+  const capped = deskSetShortcuts(ur, [...others, { id: '703002', name: 'Mega Gardevoir ex', set: 'Mega Evolution', number: 'Full-Art | 159/132' }]);
+  assert.equal(capped.length, DESK_SET_SHORTCUT_MAX);
+  assert.equal(capped.filter((row) => row.set === 'Mega Evolution').length, 1);
+  assert.equal(new Set(capped.map((row) => row.set)).size, DESK_SET_SHORTCUT_MAX);
 });
 
 test('set circles keep More versions for rarity lineup and other artwork', () => {
