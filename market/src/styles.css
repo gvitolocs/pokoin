@@ -456,6 +456,27 @@ button, input, select { font: inherit; color: inherit; }
   width: 28rem;
 }
 
+.nav-preview-dash > div:first-child > svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 720px) {
+  .nav-preview-dash {
+    position: fixed;
+    top: 44px;
+    left: 0.625rem;
+    right: 0.625rem;
+    width: auto;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+  }
+}
+
+.nav-preview-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .nav-preview-total {
   margin: 0.2rem 0 0.35rem;
   color: var(--text);
@@ -463,7 +484,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .tile-cta,
-.nav-preview .nav-scan {
+.nav-preview .nav-scan,
+.nav-preview .nav-cardgts {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -560,27 +582,39 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.icon-nav .nav-preview .nav-scan {
+.icon-nav .nav-preview .nav-scan,
+.icon-nav .nav-preview .nav-cardgts {
   width: 100%;
   height: auto;
-  min-height: 8.75rem;
+  min-height: 0;
 }
 
 .nav-preview .nav-scan:hover,
-.nav-preview .nav-scan:focus-visible {
+.nav-preview .nav-scan:focus-visible,
+.nav-preview .nav-cardgts:hover,
+.nav-preview .nav-cardgts:focus-visible {
   background: #ffe276;
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.nav-preview .nav-scan strong {
+.nav-preview .nav-scan strong,
+.nav-preview .nav-cardgts strong {
   margin: 0;
   color: inherit;
 }
 
 .icon-nav .nav-preview .nav-scan svg {
-  width: 4.5rem;
-  height: 6.25rem;
+  width: 2rem;
+  height: auto;
   flex: 0 0 auto;
+}
+
+.icon-nav .nav-preview .nav-cardgts svg {
+  width: 2rem;
+  height: 2rem;
+  padding: 0.2rem;
+  border-radius: 0.4rem;
+  background: #17131f;
 }
 
 .cart-drop {
