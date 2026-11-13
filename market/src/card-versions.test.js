@@ -270,24 +270,25 @@ test('few expansion reprints become desk set shortcuts; many cap instead of drop
 });
 
 test('an artwork printed in six expansions paints six set circles', () => {
-  // Acerola's Mischief: one CLIP group, six different expansions.
+  // Acerola's Mischief: one CLIP group, six different expansions
+  // (GET /api/marketplace-version-set?cardId=703266).
   const mega = { id: '703266', name: "Acerola's Mischief", set: 'Mega Evolution', number: '113/132' };
   const group = [
-    { id: '703267', name: "Acerola's Mischief", set: 'Mega Symphonia', number: '059/063' },
-    { id: '703268', name: "Acerola's Mischief", set: 'MEGA Dream ex', number: '169/193' },
-    { id: '703269', name: "Acerola's Mischief", set: 'MEGA Start Deck 100', number: '697/742' },
-    { id: '703270', name: "Acerola's Mischief", set: 'Ascended Heroes', number: '180/217' },
-    { id: '703271', name: "Acerola's Mischief", set: 'Play! Pokémon Prize Pack', number: '113/132' },
+    { id: '689192', name: "Acerola's Mischief", set: 'Mega Symphonia', number: '059/063' },
+    { id: '718510', name: "Acerola's Mischief", set: 'MEGA Dream ex', number: '169/193' },
+    { id: '728726', name: "Acerola's Mischief", set: 'MEGA Start Deck 100 Battle Collection', number: '697/742' },
+    { id: '741636', name: "Acerola's Mischief", set: 'Ascended Heroes', number: '180/217' },
+    { id: '806032', name: "Acerola's Mischief", set: 'Play! Pokémon Prize Pack Series', number: '113/132' },
   ];
   assert.deepEqual(
     deskSetShortcuts(mega, group).map((row) => row.set),
     [
-      'Play! Pokémon Prize Pack',
+      'Play! Pokémon Prize Pack Series',
+      'MEGA Start Deck 100 Battle Collection',
       'MEGA Dream ex',
       'Ascended Heroes',
       'Mega Symphonia',
       'Mega Evolution',
-      'MEGA Start Deck 100',
     ],
   );
   // The group has more than one printing, so the plus still sits next to them.
