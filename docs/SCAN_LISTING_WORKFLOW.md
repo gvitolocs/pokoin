@@ -143,7 +143,12 @@ language, then other languages in tiers: KO → JP → European (IT, FR, DE,
 ES, PT, NL, PL, RU together) → EN → any other language, skipping the card’s
 own language. Within each tier, nearest condition wins, then freshness. When the printing has no sold comps at all, the cheapest listed PKN
 (`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. With neither sold comps nor a listing the default is 10,000 EUR
-converted to PKN (`scanFallbackPricePkn` in `market/src/scan-pricing.js`), so a row never needs a price before upload. Switching
+converted to PKN (`scanFallbackPricePkn` in `market/src/scan-pricing.js`), so a row never needs a price before upload. Nobody buys at
+that price, so `pokoin-api job price-fallback-listings` (05:30 UTC,
+`deploy/systemd/pokoin-rust-job-price-fallback-listings.timer`) reprices
+every listing still at it from the CardTrader price store once its facets
+have an offer: the price only — a paused listing stays paused, and a price
+the seller set in the meantime wins (docs/PRICING.md "Pricer"). Switching
 the version (or language/condition/finish/1st facets) re-suggests for the new
 shape and clears the server-side price; a suggestion stays greyed
 `suggested` until edited or confirmed, and only clicking into the price field

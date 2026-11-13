@@ -202,6 +202,21 @@ by one **named strategy**.
   after the 04:30 price-store refill) applies every group with the daily
   switch on, oldest apply first. It writes by default. A failing group is
   counted and the run goes on.
+- **The scan fallback is repriced nightly**: `pokoin-api job
+  price-fallback-listings [--dry-run] [--seller=<uid>] [--game=…] [--csv=…]`
+  (`deploy/systemd/pokoin-rust-job-price-fallback-listings.timer`, 05:30 UTC,
+  after both runs above) takes every listing of every seller still sitting at
+  the 2,000,000 PKN the scan desk defaults to (10,000 EUR,
+  `SCAN_FALLBACK_PRICE_EUR` in `market/src/scan-pricing.js`,
+  docs/SCAN_LISTING_WORKFLOW.md) with stock, live or paused, and sets it to
+  the store's reference price of its facets net of the seller's own CardTrader
+  commission. Nothing else covered these listings: `pricing-groups-daily`
+  only works on grouped ones, `price-unpriced-listings` only on paused ones
+  at 0. It writes by default; `--dry-run` only reports. With no offer of
+  those facets the listing keeps the fallback, counted in `noOffer`.
+  **The status never changes**: a paused listing stays paused, only its price
+  moves. Each write compares-and-sets on "still at the fallback with stock",
+  so a price the seller set meanwhile wins and a rerun finds nothing to do.
 - **A manual price leaves the group** (2026-11-08). A new price typed by
   hand on a grouped listing (the listing edit in MyPokoin, or a Card Rails
   `update`) takes the listing out of its group in the same transaction, so
