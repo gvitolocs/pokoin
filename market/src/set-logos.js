@@ -457,6 +457,14 @@ export function expansionSymbolSources(row = {}, hostname) {
     const base = satelliteExpansionPrefix(hostname);
     return base && slug ? [withSymbolCache(`${base}/symbols/${slug}.png`)] : [];
   }
+  // Prize Pack series and their variants use the stamp printed on the cards.
+  const prizePackSlug = slug || String(row.name || '').normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (/^play-pokemon-prize-pack-series(?:-|$)/.test(prizePackSlug)) {
+    const base = (import.meta.env && import.meta.env.BASE_URL) || '/';
+    return [`${base}expansion-symbols/play-pokemon-prize-pack.png`];
+  }
   // A pinned `?v=` or a non-CDN URL from the API is used as given.
   const png = fromApi || (slug ? `/card-images/expansions/symbols/${slug}.png` : '');
   if (!png) return [];
