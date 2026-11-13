@@ -130,11 +130,49 @@ export function cancelBuyOrder(id, token) {
   return getJson(orderPath(id), authed(token, { method: 'DELETE' }));
 }
 
-/** Seller accepts an offer: lists their card at the offer price. */
-export function sellIntoBuyOrder(id, quantity, token) {
+/**
+ * The most a seller may write to the buyer with a sale, counted in Unicode code
+ * points (`buyerMessageLength`), which is also what the API counts.
+ */
+export const BUYER_MESSAGE_MAX = 240;
+const BUYER_MESSAGE_TOO_LONG = "That note is too long or has characters we can't send.";
+
+/** What the API is sent and what the counter counts: Windows and old-Mac breaks (CRLF and a lone CR) folded to LF like the server, ends trimmed. */
+function buyerMessageText(text) {
+  return String(text ?? '').replace(/\r\n?/g, '\n').trim();
+}
+
+/** Control characters that survive as line breaks only: a tab or a NUL is not sendable. */
+const BUYER_MESSAGE_CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
+
+/** The note's length as the API counts it: code points, so an emoji is 1 and not 2. */
+export function buyerMessageLength(text) {
+  return [...buyerMessageText(text)].length;
+}
+
+/** '' when the note can be sent, else the sentence the form shows. */
+export function buyerMessageError(text) {
+  const note = buyerMessageText(text);
+  if (!note) return '';
+  if ([...note].length > BUYER_MESSAGE_MAX || BUYER_MESSAGE_CONTROL.test(note)) return BUYER_MESSAGE_TOO_LONG;
+  return '';
+}
+
+/** `body` plus `buyer_message`, only when there is actually something to send. */
+function withBuyerMessage(body, text) {
+  const note = buyerMessageText(text);
+  if (note) body.buyer_message = note;
+  return body;
+}
+
+/**
+ * Seller accepts an offer: lists their card at the offer price. `buyerMessage`
+ * is the seller's optional note to the buyer; a blank one is not sent at all.
+ */
+export function sellIntoBuyOrder(id, quantity, token, buyerMessage = '') {
   return getJson(orderPath(id, '/sell'), authed(token, {
     method: 'POST',
-    body: JSON.stringify({ quantity }),
+    body: JSON.stringify(withBuyerMessage({ quantity }, buyerMessage)),
   }));
 }
 
@@ -145,7 +183,7 @@ export function sellIntoBuyOrder(id, quantity, token) {
 export function sellToHouse(sale, token) {
   return getJson(`${BASE}/house/sell`, authed(token, {
     method: 'POST',
-    body: JSON.stringify({
+    body: JSON.stringify(withBuyerMessage({
       card_id: String(sale.cardId || ''),
       condition: sale.condition,
       language: sale.language,
@@ -156,7 +194,7 @@ export function sellToHouse(sale, token) {
       card_image_url: sale.card?.imageUrl || '',
       set_name: sale.card?.set || '',
       collector_number: sale.card?.number || '',
-    }),
+    }, sale.buyerMessage)),
   }));
 }
 
@@ -291,6 +329,7 @@ const ERROR_MESSAGES = {
   not_editable: 'This offer is closed, so it can no longer be changed.',
   quantity_below_filled: 'Sellers have already listed more copies than that. Choose a higher number.',
   buy_order_changed: 'The buyer changed the price a moment ago. Check the new price and try again.',
+  invalid_buyer_message: "That note is too long or has characters we can't send.",
   nothing_to_update: 'Nothing was changed.',
   rate_limited: 'Too many changes in a short time. Wait a minute and try again.',
   unauthorized: 'Sign in to continue.',
@@ -417,6 +456,21 @@ export function offerUnit(choice, localCurrency) {
   const local = String(localCurrency || '').toUpperCase();
   if (String(choice || '').toUpperCase() === 'PKN' || !local) return 'PKN';
   return local;
+}
+
+/**
+ * The unit a surface that did not open the offer form shows prices in: the same
+ * device choice the popup writes, so a Quick Sell dialog and that popup agree.
+ */
+export function storedOfferUnit(localCurrency, { storage } = {}) {
+  let choice = '';
+  try {
+    const store = storage || (typeof localStorage === 'undefined' ? null : localStorage);
+    choice = store ? store.getItem(OFFER_UNIT_KEY) || '' : '';
+  } catch (_) {
+    choice = '';
+  }
+  return offerUnit(choice, localCurrency);
 }
 
 /**

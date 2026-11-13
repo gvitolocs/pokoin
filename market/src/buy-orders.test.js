@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BUY_ORDER_LANGS,
+  BUYER_MESSAGE_MAX,
   bestBid,
+  buyerMessageError,
+  buyerMessageLength,
   beatPricePkn,
   defaultOfferSettings,
   offerBody,
@@ -20,15 +23,137 @@ import {
   expiryLabel,
   offerLanguages,
   selectionBid,
+  sellIntoBuyOrder,
+  sellToHouse,
+  storedOfferUnit,
   orderStateLabel,
   validateBuyOrder,
   withHouseOffer,
   HOUSE_OFFER_PKN,
   offerUnit,
+  OFFER_UNIT_KEY,
   BOOK_CACHE_KEY,
   readBookCache,
   writeBookCache,
 } from './buy-orders.js';
+
+/** Every request the calls below make, with the body they posted. */
+async function captureBodies(run) {
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const calls = [];
+  globalThis.window = { location: { hostname: 'pokoin.com', pathname: '/marketplace/en/cards/1/pikachu', search: '' } };
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body ? JSON.parse(init.body) : null });
+    const text = JSON.stringify({ listing_id: 'L1', buy_order: { id: 'o1' } });
+    return {
+      ok: true,
+      status: 201,
+      headers: { get: (name) => (String(name).toLowerCase() === 'content-type' ? 'application/json' : '') },
+      json: async () => JSON.parse(text),
+      text: async () => text,
+    };
+  };
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+  return calls;
+}
+
+test('the note to the buyer counts code points and trims what is not a note', () => {
+  assert.equal(BUYER_MESSAGE_MAX, 240);
+  assert.equal(buyerMessageLength(''), 0);
+  assert.equal(buyerMessageLength('   \n '), 0, 'spaces and a lone break are no note at all');
+  assert.equal(buyerMessageLength('Sleeved since opening'), 21);
+  assert.equal(buyerMessageLength('  padded  '), 6, 'the ends the API never sees are not counted');
+  assert.equal(buyerMessageLength('a\r\nb'), 3, 'a Windows break is the one character the server counts');
+  assert.equal(buyerMessageLength('🃏🃏🃏'), 3, 'an emoji is one code point, not two');
+  assert.equal(buyerMessageLength('x'.repeat(240)), 240);
+  assert.equal(buyerMessageLength('x'.repeat(241)), 241);
+});
+
+test('buyerMessageError is silent on a sendable note, plain on one that is not', () => {
+  const tooLong = "That note is too long or has characters we can't send.";
+  assert.equal(buyerMessageError(''), '');
+  assert.equal(buyerMessageError('   '), '');
+  assert.equal(buyerMessageError('Sleeved since opening, ready to ship.'), '');
+  assert.equal(buyerMessageError('a\nb'), '', 'a line break sends');
+  assert.equal(buyerMessageError('x'.repeat(240)), '', '240 is the limit, not one past it');
+  assert.equal(buyerMessageError(`${'x'.repeat(241)}  `), tooLong, 'padded over the limit is still over');
+  assert.equal(buyerMessageError('a\tb'), tooLong, 'a tab is not sendable');
+  assert.equal(buyerMessageError('a\u0000b'), tooLong);
+  assert.equal(buyerMessageError('a\u0007b'), tooLong, 'a bell is a control character');
+  assert.match(buyerMessageError('x'.repeat(300)), /\.$/, 'the sentence ends like every other one');
+});
+
+test('the sell bodies carry the note only when there is something to send', async () => {
+  const note = 'Sleeved since opening, ready to ship.';
+  const calls = await captureBodies(async () => {
+    await sellIntoBuyOrder('o 1', 2, 'tok', note);
+    await sellIntoBuyOrder('o1', 1, 'tok');
+    await sellIntoBuyOrder('o1', 1, 'tok', '   ');
+    await sellIntoBuyOrder('o1', 1, 'tok', `${note}\r\n`);
+    await sellToHouse({
+      cardId: 42,
+      condition: 'NM',
+      language: 'EN',
+      reverse: true,
+      firstEdition: false,
+      quantity: 3,
+      card: { name: 'Pikachu', imageUrl: '/x.png', set: 'Base', number: '25/102' },
+      buyerMessage: note,
+    }, 'tok');
+    await sellToHouse({ cardId: 42, condition: 'SP', language: 'JP', quantity: 1 }, 'tok');
+  });
+  assert.ok(calls[0].url.endsWith('/api/marketplace-buy-orders/o%201/sell'), calls[0].url);
+  assert.ok(calls[4].url.endsWith('/api/marketplace-buy-orders/house/sell'), calls[4].url);
+  assert.equal(calls[0].method, 'POST');
+  assert.deepEqual(calls[0].body, { quantity: 2, buyer_message: note });
+  assert.deepEqual(calls[1].body, { quantity: 1 }, 'no note at all: the key is absent, not empty');
+  assert.deepEqual(calls[2].body, { quantity: 1 }, 'a blank note is no note');
+  assert.deepEqual(calls[3].body, { quantity: 1, buyer_message: note }, 'the break the server folds is not sent');
+  assert.deepEqual(calls[4].body, {
+    card_id: '42',
+    condition: 'NM',
+    language: 'EN',
+    reverse: true,
+    first_edition: false,
+    quantity: 3,
+    card_name: 'Pikachu',
+    card_image_url: '/x.png',
+    set_name: 'Base',
+    collector_number: '25/102',
+    buyer_message: note,
+  });
+  assert.equal('buyer_message' in calls[5].body, false, 'the house sell sends no note when there is none');
+});
+
+test('a lone carriage return is folded to a line break like the server does', async () => {
+  assert.equal(buyerMessageError('a\rb'), '');
+  assert.equal(buyerMessageLength('a\rb'), 3);
+  const calls = await captureBodies(async () => {
+    await sellIntoBuyOrder('o1', 1, 'tok', 'a\rb');
+  });
+  assert.deepEqual(calls[0].body, { quantity: 1, buyer_message: 'a\nb' });
+});
+
+test('the offer unit of a surface that did not open the popup is the device choice', () => {
+  const data = new Map([[OFFER_UNIT_KEY, 'PKN']]);
+  const storage = { getItem: (key) => (data.has(key) ? data.get(key) : null) };
+  assert.equal(storedOfferUnit('DKK', { storage }), 'PKN');
+  data.set(OFFER_UNIT_KEY, 'dkk');
+  assert.equal(storedOfferUnit('DKK', { storage }), 'DKK', 'only PKN is a choice');
+  data.delete(OFFER_UNIT_KEY);
+  assert.equal(storedOfferUnit('DKK', { storage }), 'DKK');
+  assert.equal(storedOfferUnit('', { storage }), 'PKN', 'no currency yet: PKN');
+  const blocked = { getItem: () => { throw new Error('denied'); } };
+  assert.equal(storedOfferUnit('USD', { storage: blocked }), 'USD', 'a blocked store keeps the local currency');
+  assert.equal(storedOfferUnit('USD'), 'USD', 'no localStorage at all: the local currency');
+});
 
 test('the last book of a card is kept on the device for the next paint', () => {
   const data = new Map();
@@ -192,7 +317,7 @@ test('selectionBid takes the top price across variants and sums the copies', () 
 
 test('every error code the API returns has a plain sentence', () => {
   const codes = [
-    'invalid_cursor', 'invalid_sort', 'not_editable', 'quantity_below_filled', 'buy_order_changed',
+    'invalid_buyer_message', 'invalid_cursor', 'invalid_sort', 'not_editable', 'quantity_below_filled', 'buy_order_changed',
     'nothing_to_update', 'rate_limited', 'invalid_body', 'invalid_card', 'invalid_condition',
     'invalid_language', 'invalid_price', 'invalid_quantity', 'invalid_days', 'duplicate_buy_order',
     'too_many_buy_orders', 'own_buy_order', 'not_open', 'quantity_exceeds_remaining', 'not_found',

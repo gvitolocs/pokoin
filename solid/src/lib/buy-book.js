@@ -1,10 +1,46 @@
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
-import { cancelBuyOrder, fetchBuyBook, fetchMyBuyOrders, readBookCache, writeBookCache } from '@market/buy-orders.js';
+import {
+  HOUSE_OFFER_PKN,
+  MAX_BUY_ORDER_QUANTITY,
+  cancelBuyOrder,
+  fetchBuyBook,
+  fetchMyBuyOrders,
+  readBookCache,
+  writeBookCache,
+} from '@market/buy-orders.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 import { previewBook, previewScale } from '../pages/buysell-preview-fixture.js';
 import { allowMypokoinPreview } from '../pages/mypokoin-preview-fixture.js';
 import { whenIdle } from './idle.js';
+
+/**
+ * The exact target a Sell press sells into, so Quick Sell is complete at the
+ * click and never waits for a chip update that has not landed. `row` is a book
+ * row (or a board item, which names its order `id` and its copies `remaining`):
+ * a book row is an aggregate whose `quantity` sums several orders, so the copies
+ * limit is `best_remaining` of the specific best order, never that total.
+ * Pokoin's starting offer (`house`) names no order: it takes the facets the
+ * caller shows, and every card may be sold into it.
+ */
+export function sellTarget(row, facets = {}) {
+  if (!row) return null;
+  const house = Boolean(row.house);
+  const orderId = String(row.best_order_id || row.id || '');
+  if (!house && !orderId) return null;
+  return {
+    house,
+    orderId: house ? '' : orderId,
+    remaining: house
+      ? MAX_BUY_ORDER_QUANTITY
+      : Math.max(1, Number(row.best_remaining ?? row.remaining) || 1),
+    pricePkn: house ? HOUSE_OFFER_PKN : Number(row.best_price_pkn ?? row.price_pkn) || 0,
+    condition: (house ? facets.condition : row.condition) || 'NM',
+    language: String((house ? facets.language : row.language) || 'EN').toUpperCase(),
+    reverse: Boolean(house ? facets.reverse : row.reverse),
+    firstEdition: Boolean(house ? facets.firstEdition : (row.first_edition ?? row.firstEdition)),
+  };
+}
 
 /**
  * The card's buy-order book, loaded once for the desk: the offer bar and the
@@ -30,8 +66,11 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   const stored = () => (preview || !cardId ? null : readBookCache(String(cardId)));
   const [book, setBook] = createSignal(stored());
   const [mine, setMine] = createSignal([]);
-  const [sellPick, setSellPick] = createSignal('');
+  const [sellPick, setSellPick] = createSignal(null);
   const [offerAsk, setOfferAsk] = createSignal(0);
+  // A new intent is always its own object, and `seq` counts them: pressing Sell
+  // on the same row twice opens the dialog again rather than being a no-op.
+  let sellSeq = 0;
 
   let seq = 0;
   function load(id) {
@@ -109,11 +148,24 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     forgetMine(id) {
       setMine(mine().filter((value) => value !== id));
     },
-    /** The book rows name the condition they want to sell into; the bar owns the form. */
-    pickSell(condition) {
-      setSellPick(condition || '');
+    /**
+     * Ask the desk to open Quick Sell on an exact target (`sellTarget(row)`).
+     * The rows own the facets they were aggregated from, so a press carries the
+     * whole offer: the dialog never reads a chip that may not have landed yet.
+     */
+    pickSell(target) {
+      if (!target) {
+        setSellPick(null);
+        return;
+      }
+      sellSeq += 1;
+      setSellPick({ ...target, seq: sellSeq });
     },
     sellPick,
+    /** Quick Sell closed: the intent is spent, and the next press is a fresh dialog. */
+    closeSell() {
+      setSellPick(null);
+    },
     /** A cell that wants the Define offer popup without naming a condition (the empty Buy offers row). */
     askOffer() {
       setOfferAsk(offerAsk() + 1);

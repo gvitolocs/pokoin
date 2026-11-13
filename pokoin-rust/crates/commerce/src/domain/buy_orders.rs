@@ -15,6 +15,9 @@ pub const MIN_QUANTITY: i64 = 1;
 pub const MAX_QUANTITY: i64 = 10;
 /// Open orders one buyer may hold at the same time.
 pub const MAX_OPEN_ORDERS: i64 = 100;
+/// How long a seller's private note to the buyer may be, counted in Unicode
+/// scalar values. The migration enforces the same ceiling.
+pub const MAX_BUYER_MESSAGE_CHARS: usize = 240;
 /// The listing handler sets no ceiling of its own; this keeps a typo out of
 /// the book (and inside `numeric`).
 pub const MAX_PRICE_PKN: f64 = 1_000_000_000.0;
@@ -134,6 +137,35 @@ pub fn parse_days(value: &Value) -> Result<Option<i64>, &'static str> {
 /// `expires_at` for an order placed (or re-timed) at `now`.
 pub fn expiry(now: DateTime<Utc>, days: Option<i64>) -> Option<DateTime<Utc>> {
     days.map(|days| now + Duration::days(days))
+}
+
+/// The seller's optional private note to the buyer on "Sell now", read from
+/// the `buyer_message` key of a sell body. `Ok(text)` is what is stored and
+/// mailed; `Ok(String::new())` means there is nothing to say. Newlines are
+/// normalised to `\n` and the ends are trimmed; a note that is not a plain
+/// string, that is too long or that carries a control character other than a
+/// newline is rejected whole, never truncated. Markup is kept as the seller
+/// typed it — escaping happens where the note is rendered.
+pub fn parse_buyer_message(value: &Value) -> Result<String, &'static str> {
+    let invalid = "invalid_buyer_message";
+    match value {
+        Value::Null => Ok(String::new()),
+        Value::String(raw) => {
+            let folded = raw.replace("\r\n", "\n").replace('\r', "\n");
+            let text = folded.trim().to_string();
+            if text.is_empty() {
+                return Ok(String::new());
+            }
+            if text.chars().count() > MAX_BUYER_MESSAGE_CHARS {
+                return Err(invalid);
+            }
+            if text.chars().any(|ch| ch.is_control() && ch != '\n') {
+                return Err(invalid);
+            }
+            Ok(text)
+        }
+        _ => Err(invalid),
+    }
 }
 
 /// Why a seller cannot sell `quantity` into an order right now, if they can't.
@@ -302,5 +334,104 @@ mod tests {
             check_sellable(State::Open, "buyer", "seller", 1, 2),
             Err((409, "quantity_exceeds_remaining"))
         );
+    }
+
+    #[test]
+    fn an_absent_or_blank_note_is_no_note() {
+        for value in [
+            Value::Null,
+            json!(""),
+            json!("   "),
+            json!("\n \t \r\n "),
+            json!("\u{a0}\u{a0}"),
+        ] {
+            assert_eq!(parse_buyer_message(&value), Ok(String::new()), "{value}");
+        }
+        // A key that was never sent reads as null.
+        assert_eq!(
+            parse_buyer_message(&json!({ "quantity": 1 })["buyer_message"]),
+            Ok(String::new())
+        );
+    }
+
+    #[test]
+    fn a_note_is_folded_and_trimmed_but_otherwise_untouched() {
+        assert_eq!(parse_buyer_message(&json!("a\r\nb")), Ok("a\nb".into()));
+        assert_eq!(parse_buyer_message(&json!("a\rb")), Ok("a\nb".into()));
+        assert_eq!(
+            parse_buyer_message(&json!("  7 days, ship Monday\r\n\ntext  ")),
+            Ok("7 days, ship Monday\n\ntext".to_string())
+        );
+        // Not markup: what the seller typed survives to the renderer.
+        for raw in [
+            "<script>alert(1)</script>",
+            "Bob's \"sleeved\" & mint <NM> cards",
+            "a & b < c > d \"e\" 'f'",
+            "Sleeved ✓ 日本語",
+        ] {
+            assert_eq!(parse_buyer_message(&json!(raw)), Ok(raw.to_string()));
+        }
+    }
+
+    #[test]
+    fn a_note_counts_scalar_values_and_stops_at_240() {
+        let ascii = "a".repeat(MAX_BUYER_MESSAGE_CHARS);
+        assert_eq!(ascii.len(), MAX_BUYER_MESSAGE_CHARS);
+        assert_eq!(
+            parse_buyer_message(&json!(ascii.as_str())),
+            Ok(ascii.clone())
+        );
+        let emoji = "🐱".repeat(MAX_BUYER_MESSAGE_CHARS);
+        // Four bytes and two UTF-16 units apiece; still 240 characters.
+        assert_eq!(emoji.len(), MAX_BUYER_MESSAGE_CHARS * 4);
+        assert_eq!(
+            parse_buyer_message(&json!(emoji.as_str())),
+            Ok(emoji.clone())
+        );
+        for over in [
+            "a".repeat(MAX_BUYER_MESSAGE_CHARS + 1),
+            "🐱".repeat(MAX_BUYER_MESSAGE_CHARS + 1),
+        ] {
+            // Rejected whole, never truncated to fit.
+            assert_eq!(
+                parse_buyer_message(&json!(over.as_str())),
+                Err("invalid_buyer_message"),
+                "length {}",
+                over.chars().count()
+            );
+        }
+        // Trimmed first, so padding never pushes a valid note over the line.
+        assert_eq!(
+            parse_buyer_message(&json!(format!("  {emoji}  ").as_str())),
+            Ok(emoji)
+        );
+    }
+
+    #[test]
+    fn a_note_is_a_string_without_control_characters() {
+        for not_a_string in [
+            json!(1),
+            json!(1.5),
+            json!(true),
+            json!([]),
+            json!({"a": 1}),
+        ] {
+            assert_eq!(
+                parse_buyer_message(&not_a_string),
+                Err("invalid_buyer_message"),
+                "{not_a_string}"
+            );
+        }
+        for control in ['\u{7}', '\u{0}', '\u{1b}', '\u{7f}', '\u{85}', '\u{9f}'] {
+            let raw = format!("ship Monday{control}please");
+            assert_eq!(
+                parse_buyer_message(&json!(raw)),
+                Err("invalid_buyer_message"),
+                "{:?}",
+                control
+            );
+        }
+        // A newline, however it is written, is the one allowed control.
+        assert_eq!(parse_buyer_message(&json!("a\n\nb")), Ok("a\n\nb".into()));
     }
 }

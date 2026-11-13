@@ -276,6 +276,11 @@ function MyOffers(props) {
                             <Show when={fill.listing_status === 'active'}>
                               <AppLink to={cardPath(order.card_id)}>Buy now</AppLink>
                             </Show>
+                            {/* What the seller chose to say when they took the offer. An older API
+                                simply has no field, which reads as no note. */}
+                            <Show when={fill.seller_message}>
+                              <span class="buysell-note">Seller's note: {fill.seller_message}</span>
+                            </Show>
                           </span>
                         )}
                       </For>

@@ -12317,6 +12317,282 @@ img.is-lang-scan {
   gap: 0.5rem;
 }
 
+/* Quick Sell: the dialog every Sell action opens. Same surfaces, borders,
+   radius and yellow primary as the Define offer popup above it: a centred
+   floating card on desktop, the same bottom sheet at 720px and below. */
+.qs-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1499;
+  background: rgb(0 0 0 / 55%);
+}
+
+.qs-pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1500;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  overflow-y: auto;
+  width: min(26rem, calc(100vw - 1.5rem));
+  max-height: min(88vh, 46rem);
+  translate: -50% -50%;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #14121a;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+  text-align: left;
+  animation: qs-in 160ms ease-out;
+}
+
+/* The container itself is the first focus target, so it never shows a ring. */
+.qs-pop:focus,
+.qs-pop:focus-visible {
+  outline: none;
+}
+
+@keyframes qs-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.qs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qs-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.qs-close {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qs-close:hover:not(:disabled),
+.qs-close:focus-visible {
+  background: var(--g3);
+  color: #fff;
+}
+
+.qs-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+}
+
+.qs-art {
+  flex: none;
+  width: 48px;
+  height: 67px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--g3);
+}
+
+.qs-card-lines {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.qs-card-name {
+  font-size: 0.9rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.qs-card-set,
+.qs-card-facets {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-offer,
+.qs-copies {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qs-offer {
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--g3);
+}
+
+.qs-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.qs-offer-what,
+.qs-offer-price {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.qs-offer-who {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-offer-price {
+  justify-items: end;
+  text-align: right;
+}
+
+.qs-offer-price strong {
+  color: var(--yellow);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.qs-offer-pkn {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.qs-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g2);
+}
+
+.qs-step {
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qs-step:hover:not(:disabled),
+.qs-step:focus-visible {
+  background: var(--g3);
+}
+
+.qs-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.qs-qty {
+  min-width: 2.2rem;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-hint {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.qs-field {
+  width: 100%;
+}
+
+/* The note is what the seller wrote, so it is body text, not label text. */
+.qs-field textarea {
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.qs-label-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.qs-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-count.is-over {
+  color: #f87171;
+}
+
+.qs-fine {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-help {
+  margin: -0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .qs-pop {
+    top: auto;
+    left: auto;
+    inset: auto 0 0 0;
+    width: auto;
+    max-height: 88vh;
+    translate: 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Every control keeps its 40px target on the sheet. */
+  .qs-offer,
+  .qs-copies {
+    align-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qs-pop {
+    animation: none;
+  }
+}
+
 .buysell-how {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
@@ -12445,6 +12721,19 @@ img.is-lang-scan {
 .buysell-meta .deal-flag {
   width: 1.1rem;
   height: 1.1rem;
+}
+
+/* The seller's note under a fill on My offers: it is private text, so it takes
+   its own line and never truncates into the shared row. */
+.buysell-meta .buysell-note {
+  flex: 1 1 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: var(--g2);
+  color: #fff;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .buysell-side {

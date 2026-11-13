@@ -1,8 +1,10 @@
 //! BuySell buy orders against a real Postgres: create, the book / board /
 //! mine reads, expiry, cancel, patch, "Sell now" (a real listing plus a fill),
 //! withdrawn listings giving the quantity back, `for-my-listings`, and the
-//! last-copy race. Applies the real migration
-//! `scripts/sql/142_marketplace_buy_orders.sql` twice (it is idempotent).
+//! last-copy race. Applies the real migrations
+//! `scripts/sql/142_marketplace_buy_orders.sql` and
+//! `scripts/sql/143_buy_order_fill_seller_message.sql`, each twice (they are
+//! idempotent).
 //!
 //! Needs a throwaway server (the test drops and recreates its databases):
 //!
@@ -91,6 +93,13 @@ async fn database(url: &str, name: &str) -> (PgPool, Router) {
         include_str!("../../../../scripts/sql/142_marketplace_buy_orders.sql"),
     )
     .await;
+    for _ in 0..2 {
+        run_sql(
+            &pool,
+            include_str!("../../../../scripts/sql/143_buy_order_fill_seller_message.sql"),
+        )
+        .await;
+    }
     let state = DomainState::with_pools(
         CommerceConfig::default(),
         pool.clone(),
@@ -224,6 +233,91 @@ async fn sell(app: &Router, who: &str, order: &str, quantity: i64) -> (StatusCod
 
 fn error_code(body: &Value) -> &str {
     body["code"].as_str().unwrap_or_default()
+}
+
+/// `send` without parsing: a leak check reads the bytes on the wire.
+async fn raw(app: &Router, who: &str, method: &str, path: &str) -> (StatusCode, String) {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json");
+    if !who.is_empty() {
+        request = request.header("authorization", format!("Bearer {who}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .expect("router");
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+/// The note is nowhere in what this endpoint just wrote down.
+fn refute_note(where_: &str, body: &str, probes: &[&str]) {
+    for probe in probes {
+        assert!(
+            !body.contains(probe),
+            "{where_} carries the note ({probe}): {body}"
+        );
+    }
+}
+
+/// `seller_message` of the fill of one listing.
+async fn fill_note(pool: &PgPool, order: &str, listing_id: &str) -> String {
+    sqlx::query_scalar(
+        "select f.seller_message from public.marketplace_buy_order_fills f \
+           join public.marketplace_user_listings l on l.id = f.listing_id \
+         where f.buy_order_id = $1::uuid and f.listing_id = $2::uuid",
+    )
+    .bind(order)
+    .bind(listing_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn listing_comment(pool: &PgPool, listing_id: &str) -> String {
+    sqlx::query_scalar(
+        "select seller_comment from public.marketplace_user_listings where id = $1::uuid",
+    )
+    .bind(listing_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn note_sale(
+    app: &Router,
+    who: &str,
+    order: &str,
+    quantity: i64,
+    note: &str,
+) -> (StatusCode, Value) {
+    send(
+        app,
+        who,
+        "POST",
+        &format!("{BASE}/{order}/sell"),
+        Some(json!({
+            "quantity": quantity, "sellerCountry": "DK", "buyer_message": note,
+            "sellerComment": "my own listing comment",
+        })),
+    )
+    .await
+}
+
+/// What one order would have left behind: its fills and its sell listings.
+async fn footprint(pool: &PgPool, order: &str) -> (i64, i64) {
+    sqlx::query_as(
+        "select (select count(*) from public.marketplace_buy_order_fills where buy_order_id = $1::uuid), \
+                (select count(*) from public.marketplace_user_listings where source = 'buy_order' and source_listing_id = $1)",
+    )
+    .bind(order)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
@@ -1019,4 +1113,240 @@ async fn selling_into_the_starting_offer_lists_at_one_pkn() {
     let (status, again) = send(&app, "seller-2", "POST", &path, Some(body)).await;
     assert_eq!(status, StatusCode::CREATED, "{again}");
     assert_ne!(again["listing_id"], sold["listing_id"]);
+}
+
+/// The seller's private note on "Sell now": folded and trimmed onto the fill,
+/// read back by the buyer of that order and by nobody else — not the seller
+/// who wrote it, not another user's own view, not the book, the board or
+/// `for-my-listings`, and never on the listing itself.
+#[tokio::test]
+async fn a_sell_note_reaches_that_buyer_and_nobody_else() {
+    let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+        eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let (pool, app) = database(&url, "buy_orders_notes").await;
+
+    const SENT: &str = "  ships Monday,\r\nsleeved & toploaded  ";
+    const NOTE: &str = "ships Monday,\nsleeved & toploaded";
+    // Marks of the note that must never reach a body it is not addressed to.
+    let probes = ["ships Monday", "toploaded", "sleeved"];
+
+    let a = create(&app, "buyer-1", order_body("202", "NM", "EN", 100.0, 2)).await;
+    let b = create(&app, "buyer-2", order_body("303", "PL", "DE", 10.0, 1)).await;
+
+    let (status, sold) = note_sale(&app, "seller-1", &a, 1, SENT).await;
+    assert_eq!(status, StatusCode::CREATED, "{sold}");
+    let listing = sold["listing_id"].as_str().unwrap().to_string();
+
+    // --- stored: the fill row holds the folded, trimmed note.
+    assert_eq!(fill_note(&pool, &a, &listing).await, NOTE);
+    // --- not stored on the listing: its own comment is the seller's words.
+    assert_eq!(
+        listing_comment(&pool, &listing).await,
+        "my own listing comment"
+    );
+    // --- the writing seller reads their own note off their own fill, and
+    //     sees no other fill at all.
+    let fills = sold["buy_order"]["fills"].as_array().unwrap();
+    assert_eq!(fills.len(), 1, "only the caller's fills");
+    assert_eq!(fills[0]["seller_message"], NOTE);
+    // --- the buyer reads it on their own order.
+    assert_eq!(
+        order_of(&app, "buyer-1", &a).await["fills"][0]["seller_message"],
+        NOTE
+    );
+
+    // --- nowhere else, in the raw bytes of each response.
+    for (who, path) in [
+        ("buyer-2", format!("{BASE}/mine")),
+        ("seller-2", format!("{BASE}/mine")),
+        ("seller-1", format!("{BASE}/mine")),
+        ("seller-1", format!("{BASE}/for-my-listings")),
+        ("seller-9", format!("{BASE}/for-my-listings")),
+        ("", format!("{BASE}?card_id=202")),
+        ("", format!("{BASE}/board")),
+        ("", format!("{BASE}/board?sort=recent")),
+        ("", format!("{BASE}/board?sort=price")),
+        ("", format!("{BASE}/board?limit=60&sort=price")),
+    ] {
+        let (status, body) = raw(&app, who, "GET", &path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        refute_note(&format!("{who} {path}"), &body, &probes);
+    }
+    // The buyer's own view is the one place the note is written down.
+    let (status, mine_body) = raw(&app, "buyer-1", "GET", &format!("{BASE}/mine")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(mine_body.contains("ships Monday"), "{mine_body}");
+
+    // --- a rejected note writes nothing at all.
+    let before = footprint(&pool, &b).await;
+    for bad_note in &[
+        json!("x".repeat(241)),
+        json!("🐱".repeat(241)),
+        json!(7),
+        json!({ "text": "ships Monday" }),
+        json!("a\u{7}b"),
+        json!("a\u{7f}b"),
+    ] {
+        let body = json!({
+            "quantity": 1, "sellerCountry": "DK", "buyer_message": bad_note,
+        });
+        let (status, error) = send(
+            &app,
+            "seller-2",
+            "POST",
+            &format!("{BASE}/{b}/sell"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&error)),
+            (StatusCode::BAD_REQUEST, "invalid_buyer_message"),
+            "{bad_note}"
+        );
+    }
+    assert_eq!(
+        footprint(&pool, &b).await,
+        before,
+        "a rejected note leaves no listing and no fill"
+    );
+    // The order is still there for a valid note, and 240 characters is the
+    // ceiling rather than past it.
+    let long = "a".repeat(240);
+    let (status, at_the_ceiling) = note_sale(&app, "seller-2", &b, 1, &long).await;
+    assert_eq!(status, StatusCode::CREATED, "{at_the_ceiling}");
+    assert_eq!(
+        fill_note(&pool, &b, at_the_ceiling["listing_id"].as_str().unwrap()).await,
+        long
+    );
+
+    // --- a sell with no note: empty, and every other rule unchanged.
+    let (status, second) = sell(&app, "seller-3", &a, 1).await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let second_listing = second["listing_id"].as_str().unwrap().to_string();
+    assert_eq!(fill_note(&pool, &a, &second_listing).await, "");
+    assert_eq!(second["buy_order"]["fills"][0]["seller_message"], "");
+    assert_eq!(
+        (
+            second["buy_order"]["remaining"].clone(),
+            second["buy_order"]["state"].clone()
+        ),
+        (json!(0), json!("filled")),
+        "the order filled as it always did"
+    );
+    assert!(!board_ids(&app, "?limit=60").await.contains(&a));
+    let buyer_view = order_of(&app, "buyer-1", &a).await;
+    let note_of = |listing_id: &str| {
+        buyer_view["fills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|fill| fill["listing_id"] == listing_id)
+            .unwrap()["seller_message"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(note_of(&listing), NOTE);
+    assert_eq!(note_of(&second_listing), "");
+    assert_eq!(buyer_view["state"], "filled");
+    // `null`, an empty string and pure whitespace are as good as absent.
+    for (n, blank) in [Value::Null, json!(""), json!("  \r\n  ")]
+        .iter()
+        .enumerate()
+    {
+        let order = create(
+            &app,
+            "buyer-1",
+            order_body(&format!("4{n}4"), "NM", "EN", 8.0, 1),
+        )
+        .await;
+        let (status, blank_sold) = send(
+            &app,
+            "seller-1",
+            "POST",
+            &format!("{BASE}/{order}/sell"),
+            Some(json!({
+                "quantity": 1, "sellerCountry": "DK", "buyer_message": blank,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{blank}: {blank_sold}");
+        assert_eq!(blank_sold["buy_order"]["fills"][0]["seller_message"], "");
+        assert_eq!(
+            fill_note(&pool, &order, blank_sold["listing_id"].as_str().unwrap()).await,
+            ""
+        );
+    }
+}
+
+/// The starting offer has no fill to hold a note, so the note reaches Pokoin's
+/// email and touches nothing else: not the listing, not the response, not a
+/// single read.
+#[tokio::test]
+async fn a_starting_offer_note_reaches_pokoin_and_nothing_else() {
+    let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+        eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let (pool, app) = database(&url, "buy_orders_house_note").await;
+    let path = format!("{BASE}/house/sell");
+    let note = "ships in a rigid toploader, thanks";
+    let body = json!({
+        "card_id": "888", "condition": "nm", "language": "en", "quantity": 1,
+        "sellerCountry": "DK", "card_name": "Clefable", "set_name": "Expedition",
+        "collector_number": "41/165", "sellerComment": "my own listing comment",
+        "buyer_message": note,
+    });
+
+    let (status, sold) = send(&app, "seller-1", "POST", &path, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{sold}");
+    assert_eq!(sold["price_pkn"], json!(1.0));
+    let listing = sold["listing_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        listing_comment(&pool, &listing).await,
+        "my own listing comment"
+    );
+    assert!(!sold.to_string().contains(note), "{sold}");
+
+    // No fill row anywhere, and no listing carries the note.
+    let (fills, notes_on_listings): (i64, i64) = sqlx::query_as(
+        "select (select count(*) from public.marketplace_buy_order_fills), \
+                (select count(*) from public.marketplace_user_listings where seller_comment = $1)",
+    )
+    .bind(note)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((fills, notes_on_listings), (0, 0));
+
+    for (who, read) in [
+        ("", format!("{BASE}?card_id=888")),
+        ("", format!("{BASE}/board?sort=recent")),
+        ("", format!("{BASE}/board?sort=price")),
+        ("seller-1", format!("{BASE}/mine")),
+        ("seller-1", format!("{BASE}/for-my-listings")),
+    ] {
+        let (status, page) = raw(&app, who, "GET", &read).await;
+        assert_eq!(status, StatusCode::OK, "{read}");
+        refute_note(&format!("{who} {read}"), &page, &["toploader"]);
+    }
+
+    // The same validation as a sell into a member's order.
+    for bad_note in [json!("x".repeat(241)), json!(true), json!("a\u{85}b")] {
+        let mut wrong = body.clone();
+        wrong["buyer_message"] = bad_note.clone();
+        let (status, error) = send(&app, "seller-2", "POST", &path, Some(wrong)).await;
+        assert_eq!(
+            (status, error_code(&error)),
+            (StatusCode::BAD_REQUEST, "invalid_buyer_message"),
+            "{bad_note}"
+        );
+    }
+    let listings: i64 = sqlx::query_scalar("select count(*) from public.marketplace_user_listings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(listings, 1, "a rejected note lists nothing");
 }
