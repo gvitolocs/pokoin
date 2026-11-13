@@ -1,0 +1,17 @@
+[Unit]
+Description=Pokoin native job price-fallback-listings (reprice listings still at the 10,000 EUR scan fallback)
+
+[Timer]
+# After the 04:30 UTC CardTrader price-store refill
+# (pokoin-rust-job-cardtrader-facet-prices.timer) and the 05:15 pricing-group
+# run (pokoin-rust-job-pricing-groups-daily.timer), so a scanned card priced
+# from the fallback takes a price from the same fresh book the groups took
+# theirs from. A scanned listing nobody buys at 2,000,000 PKN is the only
+# thing this touches; it never changes a listing's status.
+OnCalendar=*-*-* 05:30:00 UTC
+RandomizedDelaySec=5min
+Persistent=true
+Unit=pokoin-rust-job@price-fallback-listings.service
+
+[Install]
+WantedBy=timers.target
