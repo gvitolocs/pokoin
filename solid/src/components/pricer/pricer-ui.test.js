@@ -398,3 +398,21 @@ test('draftChanged: false for a freshly opened strategy, true after one switch f
   assert.equal(draftChanged({ ...draft, name: 'Undercut 6%' }, stored), true);
   assert.equal(draftChanged(strategyDraft(null), strategyDraft(null)), false);
 });
+
+
+test('editor combines Cardmarket bases and maps each selection to its stored source', async () => {
+  const { EDITOR_SOURCES, editorSource, editorBasisGroups, withEditorBasis } = await import('./pricer-ui.js');
+  assert.deepEqual(EDITOR_SOURCES.map((entry) => entry.id), ['cardtrader', 'pokoin', 'cardmarket', 'tcgplayer']);
+  const groups = editorBasisGroups('cardmarketoffers');
+  assert.deepEqual(groups.map((group) => [group.label, group.entries.map((entry) => entry.id)]), [
+    ['Price guide', ['trend', 'low', 'avg1', 'avg7', 'avg30']],
+    ['Seller offers we scan', ['pro', 'private']],
+  ]);
+  for (const group of groups) for (const entry of group.entries) {
+    const stored = withEditorBasis({ match: { condition: true } }, entry);
+    assert.equal(editorSource(stored.source), 'cardmarket');
+    assert.equal(stored.basis, entry.id);
+    assert.equal(stored.source, entry.source);
+    assert.deepEqual(stored.match, { condition: true });
+  }
+});
