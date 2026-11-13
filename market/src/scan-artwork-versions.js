@@ -10,6 +10,8 @@
  */
 
 import { printLangBadge } from './card-versions.js';
+import { deskLanguageChips } from './listing-languages.js';
+import { effectivePrintBucket } from './print-bucket.js';
 
 function printingId(row) {
   return String(row?.id || row?.card_id || row?.cardId || '').trim();
@@ -200,11 +202,13 @@ export function mergeArtworkCandidates(...lists) {
  */
 export function draftLanguageForPick(card, batchLanguage = '') {
   const batch = String(batchLanguage || '').trim().toUpperCase() || 'EN';
-  const n = nationalityOf(card);
-  if (!n) return batch;
-  if (matchesPrintBucket(card, preferredPrintBucket(batch))) return batch;
-  if (n === 'western') return 'EN';
-  return listingLanguageForPrint(n, batch);
+  const nationality = effectivePrintBucket(card);
+  if (nationality === 'unknown') return batch;
+  const languages = deskLanguageChips({ nationality, setName: card?.set || card?.set_name });
+  if (languages.includes(batch)) return batch;
+  // The first chip for a Korean printing is JP, so retain its own language.
+  if (nationality === 'korean') return 'KO';
+  return languages[0] || batch;
 }
 
 /** Pick a CLIP sibling for the draft language, or null if this printing already matches. */

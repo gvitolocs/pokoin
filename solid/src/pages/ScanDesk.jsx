@@ -568,7 +568,9 @@ function ScanDeskDesk(props) {
   // batch-language sibling on the first click.
   function markPick(row, nextId) {
     const lang = remapListingLanguage(row.language, defaults().language);
-    remapTried.add(`${row.id}\0${lang}\0${String(nextId)}`);
+    const key = `${row.id}\0${lang}\0${String(nextId)}`;
+    remapTried.add(key);
+    remapTried.add(`${key}\0picked`);
   }
 
   /**
@@ -997,7 +999,8 @@ function ScanDeskDesk(props) {
     if (!current || !b?.id || closed()) return;
     const qty = Math.max(1, Math.min(99, Number(current.quantity) || 1));
     try {
-      const data = await runApi((t) => scanApi.add(t, b.id, {
+      const t = await token();
+      const data = await scanApi.add(t, b.id, {
         cardId: current.cardId,
         language: current.language,
         condition: current.condition,
@@ -1007,8 +1010,10 @@ function ScanDeskDesk(props) {
         altered: current.altered,
         location: current.location,
         quantity: qty,
-      }));
+      });
       const item = data?.items?.[0];
+      if (item) markPick({ ...item, language: current.language }, current.cardId);
+      if (data?.items) dispatch({ type: 'items', items: data.items });
       if (item) {
         followTail = true;
         setFocusId(item.id);
@@ -1792,6 +1797,7 @@ function ScanDeskDesk(props) {
               slot={slots().get(row().id)}
               replacing={replaceFor() === row().id}
               preferredLanguage={defaults().language}
+              remapTried={remapTried}
               onPriceFocus={(rowId) => priceTouched.add(rowId)}
               onPriceEmptied={restoreDefaultPrice}
               onFocus={(event) => {

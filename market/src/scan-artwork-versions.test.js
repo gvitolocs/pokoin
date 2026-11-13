@@ -212,3 +212,10 @@ test('draftLanguageForPick keeps the picked printing and fits the language to it
   assert.equal(draftLanguageForPick({ id: 'x' }, 'ZH'), 'ZH');
   assert.equal(draftLanguageForPick(null, 'ZH'), 'ZH');
 });
+
+test('draft language uses stamped nationality and keeps unknown data', () => {
+  assert.equal(draftLanguageForPick({ expansion_nationality: 'western' }, 'ZH'), 'EN');
+  assert.equal(draftLanguageForPick({ nationality: 'unknown' }, 'ZH'), 'ZH');
+  assert.equal(draftLanguageForPick({ nationality: 'indonesian' }, 'ZH'), 'ID');
+  assert.equal(draftLanguageForPick({ nationality: 'korean' }, 'ZH'), 'KO');
+});

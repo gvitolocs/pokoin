@@ -20,3 +20,13 @@ test('startDraft never swaps the picked printing', () => {
 test('the draft language hotkey still remaps to that language printing', () => {
   assert.match(source, /cmd\.field === 'language' && current\.cardId\) \{\s*void remapDraftArtwork\(/);
 });
+
+test('search preserves nationality and a created draft is guarded before rows render', () => {
+  const suggest = readFileSync(new URL('../../lib/live-suggest.js', import.meta.url), 'utf8');
+  const rows = readFileSync(new URL('./rows.jsx', import.meta.url), 'utf8');
+  assert.match(suggest, /nationality: printing\.nationality/);
+  const commit = body('commitDraft');
+  assert.ok(commit.indexOf('markPick(') < commit.indexOf("dispatch({ type: 'items'"));
+  assert.match(rows, /const remapTried = props\.remapTried/);
+  assert.match(rows, /props\.remapTried\.has\(tryKey/);
+});
