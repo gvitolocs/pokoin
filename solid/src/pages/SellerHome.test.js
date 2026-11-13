@@ -10,9 +10,6 @@ const historySrc = read('../components/dashboard/CollectionHistoryPanel.jsx');
 const dashSrc = `${viewSrc}\n${historySrc}`;
 const chromeSrc = read('../components/Chrome.jsx');
 
-const CARD_ICON = 'M6 3h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6 14h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z';
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 test('Chrome Dashboard nav is a same-origin /dashboard link', () => {
   assert.match(chromeSrc, /to=\{DASHBOARD_HOME\}/);
   assert.doesNotMatch(chromeSrc, /onDashboard \? '\/'/);
@@ -21,11 +18,8 @@ test('Chrome Dashboard nav is a same-origin /dashboard link', () => {
   assert.match(chromeSrc, />Collection</);
 });
 
-test('Dashboard nav icon is four portrait card rectangles, not equal squares', () => {
-  assert.match(chromeSrc, new RegExp(`dashboard: '${escape(CARD_ICON)}'`));
-  assert.match(chromeSrc, /d=\{ICO\.dashboard\}/);
-  assert.doesNotMatch(chromeSrc, /M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z/);
-  assert.doesNotMatch(chromeSrc, /M3\.5 2h6\.5c\.8 0 1\.5\.7/);
+test('Dashboard nav uses the CardGTS arrows', () => {
+  assert.match(chromeSrc, /aria-label="Dashboard"><BuySellIcon size=\{20\} \/>/);
 });
 
 test('SellerHome Portfolio uses authenticated collection summary API', () => {

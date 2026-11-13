@@ -143,6 +143,14 @@ export function historyPresetWindow(presetId, today = new Date()) {
   return { from: addUtcDays(todayKey, -preset.days), to: todayKey, preset: preset.id };
 }
 
+/** Actual observations from today and the preceding 29 UTC days. */
+export function previewHistoryMonth(series, today = new Date()) {
+  const end = utcDayKey(today);
+  if (!end) return [];
+  const start = addUtcDays(end, -29);
+  return (Array.isArray(series) ? series : []).filter((day) => day?.date >= start && day.date <= end);
+}
+
 /** 1M and MAX always; a longer window only when the first stored day is that old. */
 export function availableHistoryPresets(series, today = new Date()) {
   const days = normalizedSeries(series);
