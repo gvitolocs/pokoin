@@ -622,6 +622,28 @@ button, input, select { font: inherit; color: inherit; }
   background: #17131f;
 }
 
+@media (max-width: 720px) {
+  .icon-nav .nav-preview .nav-scan,
+  .icon-nav .nav-preview .nav-cardgts {
+    gap: 0.25rem;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .nav-preview .nav-scan strong,
+  .nav-preview .nav-cardgts strong {
+    font-size: 0.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-scan svg,
+  .icon-nav .nav-preview .nav-cardgts svg {
+    width: 1.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-cardgts svg {
+    height: 1.75rem;
+  }
+}
+
 .cart-drop {
   /* Two 136px thumbs + gap side by side, even with the scrollbar showing. */
   width: min(20.5rem, calc(100vw - 1.25rem));
