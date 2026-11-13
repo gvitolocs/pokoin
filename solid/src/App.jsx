@@ -108,7 +108,7 @@ export default function App(props) {
     document.documentElement.classList.toggle('is-extension-desk', framed);
     let cancelIdle = () => {};
     const stopIdleWait = afterHero(() => { cancelIdle = whenIdle(() => {
-      warmLikelyRoutes();
+      if (!location.pathname.startsWith('/mypokoin')) warmLikelyRoutes();
       chatDock.warm();
       startCartSync();
       void warmRecentsRail({ account: signedIn() });

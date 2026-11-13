@@ -91,8 +91,18 @@ const COLLECTION_LISTINGS = [
   },
 ];
 
+function previewSize() {
+  if (typeof window === 'undefined') return 0;
+  const value = Number(new URLSearchParams(window.location.search).get('mypokoinPreview'));
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 5000) : 0;
+}
+
+function repeatRows(rows, count) {
+  return Array.from({ length: count }, (_, i) => ({ ...rows[i % rows.length], id: `${rows[i % rows.length].id}-${i}` }));
+}
+
 export function previewListings() {
-  return copy(LISTINGS);
+  return copy(previewSize() ? repeatRows(LISTINGS, previewSize()) : LISTINGS);
 }
 
 export function previewPricer() {
@@ -309,8 +319,9 @@ export function previewGroups() {
 }
 
 export function previewCollection() {
-  const rows = copy(HELD);
-  const listings = copy(COLLECTION_LISTINGS);
+  const size = previewSize();
+  const rows = copy(size ? repeatRows(HELD, size) : HELD);
+  const listings = copy(size ? repeatRows(COLLECTION_LISTINGS, size) : COLLECTION_LISTINGS);
   const asks = {};
   for (const row of rows) asks[row.id] = 250;
   return { rows, listings, asks };
