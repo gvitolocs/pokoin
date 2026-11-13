@@ -45,11 +45,13 @@ test('satellite eras and set icons stay off the Pokémon catalogs', () => {
   assert.match(sets, /pokemon\s*\?\s*groupExpansions/);
 });
 
-test('BuySell sits right after the market icon, in the footer and in the phone menu', () => {
+test('Dashboard uses the CardGTS arrows; CardGTS remains in the preview, footer and phone menu', () => {
   const menu = read('./MobileMenu.jsx');
   assert.match(chrome, /<BuySellIcon size=\{20\} \/>/);
   assert.doesNotMatch(chrome, /buysell: BUYSELL_ICON/);
-  assert.match(chrome, /<\/NavHover>\s*<AppLink class="buysell-link" to="\/cardgts" aria-label="CardGTS"><BuySellIcon size=\{20\} \/><\/AppLink>\s*<NavHover id="messages"/);
+  assert.doesNotMatch(chrome, /class="buysell-link"/);
+  assert.match(chrome, /<NavHover id="dashboard"[^>]*>\s*<AppLink to=\{DASHBOARD_HOME\} aria-label="Dashboard"><BuySellIcon size=\{20\} \/><\/AppLink>/);
+  assert.match(read('./NavPreviews.jsx'), /class="nav-cardgts tile-cta" href="\/cardgts"/);
   assert.match(chrome, /<AppLink to="\/cardgts">CardGTS<\/AppLink>/);
   assert.match(menu, /<Row to="\/cardgts" mark="buysell" label="CardGTS"/);
 });
