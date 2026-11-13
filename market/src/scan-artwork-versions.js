@@ -192,6 +192,21 @@ export function mergeArtworkCandidates(...lists) {
   return [...byId.values()];
 }
 
+/**
+ * Draft language for a printing the user picked from the add-card search.
+ * Keeps the batch language when the printing exists in that language family;
+ * otherwise uses the printing's own language (western EN, japanese JP,
+ * korean KO, chinese ZH). No nationality data: the batch language, never a guess.
+ */
+export function draftLanguageForPick(card, batchLanguage = '') {
+  const batch = String(batchLanguage || '').trim().toUpperCase() || 'EN';
+  const n = nationalityOf(card);
+  if (!n) return batch;
+  if (matchesPrintBucket(card, preferredPrintBucket(batch))) return batch;
+  if (n === 'western') return 'EN';
+  return listingLanguageForPrint(n, batch);
+}
+
 /** Pick a CLIP sibling for the draft language, or null if this printing already matches. */
 export function preferDraftArtwork(printings = [], currentId = '', listingLanguage = '') {
   const bucket = draftArtworkBucket(listingLanguage);

@@ -7,6 +7,7 @@ import {
   batchDefaultRowPatch,
   currentMatchesLanguageBucket,
   draftArtworkBucket,
+  draftLanguageForPick,
   languagesForPrint,
   listingLanguageForPrint,
   mergeArtworkCandidates,
@@ -196,4 +197,18 @@ test('preferDraftArtwork switches to the chinese sibling for ZH and ZHT', () => 
   assert.equal(preferDraftArtwork([JP, EN], '2', 'ZH'), null);
   assert.equal(preferDraftArtwork([JP, EN], '2', 'JP').id, '1');
   assert.equal(preferDraftArtwork([JP, EN], '1', 'JP'), null);
+});
+
+test('draftLanguageForPick keeps the picked printing and fits the language to it', () => {
+  const west = { id: 'exp', nationality: 'western' };
+  const zh = { id: 'c151', nationality: 'chinese' };
+  const jp = { id: 'jp1', nationality: 'japanese' };
+  assert.equal(draftLanguageForPick(west, 'ZH'), 'EN');
+  assert.equal(draftLanguageForPick(zh, 'ZH'), 'ZH');
+  assert.equal(draftLanguageForPick(zh, 'ZHT'), 'ZHT');
+  assert.equal(draftLanguageForPick(west, 'IT'), 'IT');
+  assert.equal(draftLanguageForPick(jp, 'ZH'), 'JP');
+  assert.equal(draftLanguageForPick(zh, 'EN'), 'ZH');
+  assert.equal(draftLanguageForPick({ id: 'x' }, 'ZH'), 'ZH');
+  assert.equal(draftLanguageForPick(null, 'ZH'), 'ZH');
 });

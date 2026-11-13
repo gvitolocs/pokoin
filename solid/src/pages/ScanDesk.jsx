@@ -19,6 +19,7 @@ import { fetchScanImage, rememberActiveSession, scanApi, streamUrl } from '@mark
 import {
   batchDefaultRowPatch,
   draftArtworkBucket,
+  draftLanguageForPick,
   listingLanguageForPrint,
   preferDraftArtwork,
   remapListingLanguage,
@@ -929,7 +930,8 @@ function ScanDeskDesk(props) {
   function startDraft(card) {
     if (!card?.id || closed()) return;
     const d = defaults();
-    const language = d.language;
+    // The printing the user picked is never swapped; the language follows it.
+    const language = draftLanguageForPick(card, d.language);
     setDraft({
       cardId: card.id,
       name: card.name || '',
@@ -945,7 +947,6 @@ function ScanDeskDesk(props) {
       location: d.location,
       quantity: 1,
     });
-    void remapDraftArtwork(card.id, language, card.name || '');
   }
 
   /** JP/KO/ID/TH/VI → japanese|korean; ZH/ZHT → chinese; western langs → western. */
