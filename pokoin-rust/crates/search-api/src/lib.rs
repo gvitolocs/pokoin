@@ -4,6 +4,7 @@
 
 pub mod autocomplete;
 pub mod lookup;
+pub mod set_suggest;
 
 use pokoin_api_common::RouteState;
 
