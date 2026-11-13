@@ -37,12 +37,13 @@ def run(name):
 
     def report(ok, label, detail):
         nonlocal failures
-        print(f'{"OK" if ok else "MISSING/UNVERIFIED"}: {label}: {detail}')
+        print(f'{"OK" if ok else "MISSING"}: {label}: {detail}')
         failures += not ok
 
-    page = request(API + '/api/marketplace-expansion-page?' + urllib.parse.urlencode({'slug': slug, 'limit': 100}))
+    page = request(API + '/api/marketplace-expansion-page?' + urllib.parse.urlencode({'slug': slug, 'limit': 400}))
     expansion, cards = page.get('expansion') or {}, page.get('cards') or []
-    report(expansion.get('name', '').casefold() == name.casefold() and bool(cards), 'catalog', f'{expansion.get("cardCount", 0)} cards reported; {len(cards)} sampled')
+    report(expansion.get('name', '').casefold() == name.casefold() and bool(cards), 'catalog', f'{expansion.get("cardCount", 0)} cards reported')
+    report(bool(cards), 'singles', f'{len(cards)} sampled')
     if not cards:
         return 1
     card = cards[0]
@@ -68,7 +69,9 @@ def run(name):
         symbol_ok = bool(symbol) and request(symbol, False)
     except Exception:
         symbol_ok = False
-    report(False, 'symbol artwork', f'{symbol or "absent"}; {"reachable" if symbol_ok else "unreachable"}; visually verify the mark is official')
+    report(symbol_ok, 'symbol HTTP', f'{symbol or "absent"}; inspect visually for text plates')
+    featured = json.loads((ROOT / 'market/src/data/featured-set.json').read_text())
+    report(featured.get('newCardsSet', '').casefold() == name.casefold(), 'featured set override', f'{featured.get("newCardsSet", "absent")}; release-date ordering requires manual review')
     rail = request(API + '/api/marketplace-home/new-cards')
     rail_cards = rail.get('cards') or []
     report(bool(rail_cards) and all((c.get('set_name') or c.get('set') or '').casefold() == name.casefold() for c in rail_cards), 'new-cards rail', ', '.join(sorted({c.get('set_name') or c.get('set') or '?' for c in rail_cards})))

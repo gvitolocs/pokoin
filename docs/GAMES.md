@@ -370,12 +370,12 @@ Public id = leftover `ct_id × 2`. Set desk path is `/marketplace/sets/{slug}`
 After the new-printing procedure above, run the read-only smoke check:
 
 ```bash
-TMPDIR="$HOME/scratch/tmp" python3 scripts/check-new-set.py "Delta Reign"
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh "Delta Reign"
 ```
 
 It exits non-zero for missing or unverified checks. It samples the public set
 page, one card image and version group, card-name and set-name suggest, the
-bundled set vocabulary, the symbol URL and the New cards rail. A successful
+bundled set vocabulary, the symbol URL, featured-set override and the New cards rail. The manual override is `market/src/data/featured-set.json`; review release dates when updating it. A successful
 sample does not prove all cards have images or correct artwork matches; inspect
 those separately. A symbol URL returning an image can still be a generated
 text plate, so visually inspect it. The check does not write to the database.

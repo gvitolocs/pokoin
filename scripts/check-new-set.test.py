@@ -30,8 +30,8 @@ class CheckNewSetTests(unittest.TestCase):
             return {'cards': [{'set': 'Storm Emeralda'}]}
         with patch.object(check, 'request', side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(check.run('Delta Reign'), 1)
-        self.assertIn('MISSING/UNVERIFIED: set-name suggest', output.getvalue())
-        self.assertIn('MISSING/UNVERIFIED: new-cards rail', output.getvalue())
+        self.assertIn('MISSING: set-name suggest', output.getvalue())
+        self.assertIn('MISSING: new-cards rail', output.getvalue())
 
 
 if __name__ == '__main__':
