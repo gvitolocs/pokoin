@@ -12098,7 +12098,21 @@ img.is-lang-scan {
   gap: 0.35rem;
   padding: 0 0.7rem;
   color: #fff;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
+
+.offer-bar-price:hover:not(:disabled),
+.offer-bar-price:focus-visible {
+  background: var(--g3);
+  outline: 2px solid var(--yellow);
+  outline-offset: -2px;
+}
+
+.offer-bar-price:disabled { cursor: progress; }
 
 .offer-bar-price .buysell-ico {
   flex: none;
@@ -12120,21 +12134,19 @@ img.is-lang-scan {
 
 .offer-bar-btn {
   flex: none;
+  margin: 0.25rem 0;
   padding: 0 0.8rem;
   border: 0;
-  border-left: 1px solid var(--g5);
-  background: transparent;
-  color: #fff;
+  border-radius: 8px;
+  background: var(--yellow);
+  color: #161616;
   font: inherit;
   cursor: pointer;
 }
 
-.offer-bar-btn:hover,
-.offer-bar-btn:focus-visible,
-.offer-bar-btn[aria-expanded='true'] {
-  background: var(--g3);
-  color: var(--yellow);
-}
+.offer-bar-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.offer-bar-btn:active:not(:disabled) { filter: brightness(0.9); }
+.offer-bar-btn:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
 
 .offer-bar-none-short {
   display: none;

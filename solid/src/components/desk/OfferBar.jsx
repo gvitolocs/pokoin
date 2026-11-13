@@ -22,6 +22,7 @@ import {
   OFFER_UNIT_KEY,
   offerUnit,
   selectionBid,
+  updateBuyOrder,
   validateBuyOrder,
   withHouseOffer,
 } from '@market/buy-orders.js';
@@ -80,15 +81,20 @@ export default function OfferBar(props) {
   // Settings the visitor changed in the popup; everything else follows the desk's chips.
   const [overrides, setOverrides] = createSignal({});
   const [price, setPrice] = createSignal('');
+  const [editing, setEditing] = createSignal(null);
   const [priceTouched, setPriceTouched] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const [notice, setNotice] = createSignal(null);
+  // Set while the popup edits the visitor's own order instead of posting a new one.
+  const [editId, setEditId] = createSignal('');
 
   let bar;
   let gear;
   let popup;
   let priceInput;
+  // The price part of the bar selects the field on open: a click there means a new price.
+  let selectPrice = false;
 
   // The chips are the source of truth for condition and language: a new chip pick clears those two settings.
   createEffect(
@@ -176,10 +182,34 @@ export default function OfferBar(props) {
   }
 
   function openPopup() {
+    setEditing(null);
     setError('');
     setNotice(null);
     setPriceTouched(false);
     prefill();
+    place();
+    setOpen(true);
+  }
+
+  function editPrice() {
+    const row = bid();
+    const id = row?.best_order_id;
+    if (!id || !buy.mine().includes(id)) {
+      openPopup();
+      return;
+    }
+    const order = buy.order(id);
+    if (!order) {
+      setError('Your offer details are still loading. Try again in a moment.');
+      return;
+    }
+    setEditing(order);
+    setOverrides({ ...untrack(overrides), condition: order.condition, language: order.language,
+      reverse: !!order.reverse, firstEdition: !!order.first_edition, quantity: String(order.quantity) });
+    setPrice(offerPriceInput(order.price_pkn, cur()));
+    setPriceTouched(true);
+    setError('');
+    setNotice(null);
     place();
     setOpen(true);
   }
@@ -192,7 +222,10 @@ export default function OfferBar(props) {
 
   createEffect(open, (isOpen) => {
     if (!isOpen) return undefined;
-    const frame = requestAnimationFrame(() => (priceInput || popup?.querySelector(FOCUSABLE))?.focus());
+    const frame = requestAnimationFrame(() => {
+      (priceInput || popup?.querySelector(FOCUSABLE))?.focus();
+      priceInput?.select();
+    });
     const onPointer = (event) => {
       if (popup?.contains(event.target) || gear?.contains(event.target)) return;
       closePopup();
@@ -279,7 +312,7 @@ export default function OfferBar(props) {
       setOpen(false);
       if (created?.id) buy.noteMine(created.id);
       setNotice({ text: posted, undoId: created?.id || '' });
-      await buy.reload();
+      await buy.reload({ fresh: true });
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(fromPath()));
@@ -312,7 +345,31 @@ export default function OfferBar(props) {
       setError(`Enter a price above 0 ${cur()}.`);
       return;
     }
+    if (editing()) return saveEdit(pkn);
     return post(pkn, true);
+  }
+
+  async function saveEdit(pkn) {
+    if (busy()) return;
+    const quantity = Number(settings().quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_BUY_ORDER_QUANTITY) {
+      setError(errorMessage('invalid_quantity'));
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const token = await getBearer();
+      if (!token) { navigate(authFrom(fromPath())); return; }
+      await updateBuyOrder(editing().id, { price_pkn: pkn, quantity }, token);
+      setOpen(false);
+      setNotice({ text: 'Offer saved.' });
+      await buy.reload({ fresh: true });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function main() {
@@ -344,7 +401,7 @@ export default function OfferBar(props) {
       await cancelBuyOrder(id, token);
       buy.forgetMine(id);
       setNotice({ text: 'Offer cancelled.' });
-      await buy.reload();
+      await buy.reload({ fresh: true });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -362,7 +419,7 @@ export default function OfferBar(props) {
       <div class={['offer-wrap', { 'is-above': props.above, 'is-loading': loading() }]} aria-busy={loading() ? 'true' : undefined}>
         <Show when={preview}><p class="seller-preview-banner" role="status">{BUYSELL_PREVIEW_BANNER}</p></Show>
         <div class="offer-bar" ref={(el) => { bar = el; }}>
-          <span class="offer-bar-price" title={loading() ? undefined : barModel().title} aria-label={loading() ? 'Loading offers' : barModel().title}>
+          <button type="button" class="offer-bar-price" title={loading() ? undefined : barModel().title} aria-label="Edit offer price" disabled={loading()} onClick={editPrice}>
             <BuySellIcon size="1.3em" />
             <Show when={!loading()} fallback={<span class="offer-bar-skel" aria-hidden="true" />}>
               <Show when={barModel().hasOffer} fallback={(
@@ -375,7 +432,7 @@ export default function OfferBar(props) {
                 <span class="offer-bar-amount">{priceText()}</span>
               </Show>
             </Show>
-          </span>
+          </button>
           <button
             type="button"
             class="offer-bar-btn"
@@ -469,6 +526,7 @@ export default function OfferBar(props) {
                     Condition
                     <select
                       value={settings().condition}
+                      disabled={!!editing()}
                       onChange={(event) => {
                         setSetting('condition', event.currentTarget.value);
                         if (!priceTouched()) prefill();
@@ -483,6 +541,7 @@ export default function OfferBar(props) {
                     Language
                     <select
                       value={settings().language}
+                      disabled={!!editing()}
                       onChange={(event) => {
                         setSetting('language', event.currentTarget.value);
                         if (!priceTouched()) prefill();
@@ -494,7 +553,7 @@ export default function OfferBar(props) {
                     </select>
                   </label>
                 </div>
-                <div class="sell-row">
+                <Show when={!editing()}><div class="sell-row">
                   <label class="sell-field grow">
                     Open for
                     <select value={settings().days} onChange={(event) => setSetting('days', event.currentTarget.value)}>
@@ -504,13 +563,14 @@ export default function OfferBar(props) {
                     </select>
                   </label>
                 </div>
+                </Show>
                 <Show when={offersReverse() || offersFirstEd()}>
                   <div class="buy-toggles">
                     <Show when={offersReverse()}>
-                      <button type="button" class={['deal-chip buy-toggle', { 'is-on': settings().reverse }]} aria-pressed={settings().reverse ? 'true' : 'false'} onClick={() => setSetting('reverse', !settings().reverse)}>Reverse</button>
+                      <button type="button" disabled={!!editing()} class={['deal-chip buy-toggle', { 'is-on': settings().reverse }]} aria-pressed={settings().reverse ? 'true' : 'false'} onClick={() => setSetting('reverse', !settings().reverse)}>Reverse</button>
                     </Show>
                     <Show when={offersFirstEd()}>
-                      <button type="button" class={['deal-chip buy-toggle', { 'is-on': settings().firstEdition }]} aria-pressed={settings().firstEdition ? 'true' : 'false'} onClick={() => setSetting('firstEdition', !settings().firstEdition)}>1st Ed.</button>
+                      <button type="button" disabled={!!editing()} class={['deal-chip buy-toggle', { 'is-on': settings().firstEdition }]} aria-pressed={settings().firstEdition ? 'true' : 'false'} onClick={() => setSetting('firstEdition', !settings().firstEdition)}>1st Ed.</button>
                     </Show>
                   </div>
                 </Show>
@@ -523,7 +583,7 @@ export default function OfferBar(props) {
                 </Show>
                 <Show when={error()}><p class="sell-msg error">{error()}</p></Show>
                 <div class="sell-now-actions">
-                  <button type="button" class="btn" disabled={busy()} onClick={submit}>{busy() ? 'Posting…' : 'Post offer'}</button>
+                  <button type="button" class="btn" disabled={busy()} onClick={submit}>{busy() ? (editing() ? 'Saving…' : 'Posting…') : (editing() ? 'Save offer' : 'Post offer')}</button>
                   <button type="button" class="btn ghost" disabled={busy()} onClick={closePopup}>Cancel</button>
                 </div>
                 <p class="buy-note">Offers are not binding. No money is taken until you buy a listing.</p>

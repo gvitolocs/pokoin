@@ -41,9 +41,17 @@ function orderPath(id, tail = '') {
   return `${BASE}/${encodeURIComponent(String(id || ''))}${tail}`;
 }
 
-/** Live offers on one card, grouped by condition / language / reverse / 1st edition. */
+/**
+ * Live offers on one card, grouped by condition / language / reverse / 1st edition.
+ * `fresh` adds a unique query param. The public book is answered from the edge cache
+ * for 15 s (`cache-control: public, max-age=15`), so the read that follows the
+ * visitor's own write must ask for a URL the edge has never seen. The book handler
+ * reads `card_id` only and ignores any other param.
+ */
+let freshBookSequence = 0;
 export function fetchBuyBook(cardId, options = {}) {
   const params = new URLSearchParams({ card_id: String(cardId || '') });
+  if (options.fresh) params.set('fresh', `${Date.now()}-${++freshBookSequence}`);
   return getJson(`${BASE}?${params}`, { cache: 'no-store', signal: options.signal });
 }
 
