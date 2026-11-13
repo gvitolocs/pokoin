@@ -17,6 +17,7 @@ import {
   historyWindowChange,
   normalizeHistoryDay,
   projectPortfolio,
+  previewHistoryMonth,
   sliceHistorySeries,
   stepHistoryPoints,
   timelineDay,
@@ -262,4 +263,17 @@ test('the tip lists every layer at that day, cards with how many have a sale', (
   ]);
   const wallet = formatHistoryTip(normalizeHistoryDay({ date: '2026-09-20', currencyPkn: 15 }));
   assert.deepEqual(wallet.rows.map((row) => row.label), ['Liquidity']);
+});
+
+
+test('preview history keeps only actual observations in the last 30 UTC days', () => {
+  const rows = [
+    { date: '2026-08-28', totalPkn: 1 },
+    { date: '2026-08-29', totalPkn: 2 },
+    { date: '2026-09-27', totalPkn: 3 },
+    { date: '2026-09-28', totalPkn: 4 },
+  ];
+  assert.deepEqual(previewHistoryMonth(rows, TODAY), rows.slice(1, 3));
+  assert.deepEqual(previewHistoryMonth(rows.slice(0, 1), TODAY), []);
+  assert.deepEqual(previewHistoryMonth(rows.slice(1, 2), TODAY), rows.slice(1, 2));
 });

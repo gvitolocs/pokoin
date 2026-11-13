@@ -110,7 +110,7 @@ export function rowPricingChip(row, defaults, data, ctx = null) {
   if (own?.none) return { label: 'None', kind: 'none' };
   const choice = own || effectiveRowPricing(row, defaults);
   const kind = own ? 'own' : 'batch';
-  if (!choice) return { label: 'No pricing', kind };
+  if (!choice) return { label: 'Suggested', kind };
   const strategies = Array.isArray(data?.strategies) ? data.strategies : [];
   const groups = Array.isArray(data?.groups) ? data.groups : [];
   const name = choice.groupId

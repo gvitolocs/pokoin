@@ -6,8 +6,10 @@ import { chatPersonName } from '@market/chat-format.js';
 import { GAMES, game, gamePreviewHref } from '@market/game.js';
 import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
 import { sparkline } from '@market/portfolio-sparkline.js';
+import { previewHistoryMonth } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN } from '@market/punchouts.js';
 import { formatAssetsValue } from '@market/seller-currency.js';
+import BuySellIcon from './buysell/BuySellIcon.jsx';
 import { chatDock } from '../lib/chat-dock-loader.js';
 import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -111,7 +113,10 @@ export function DashboardPreview() {
     },
   );
 
-  const points = () => sparkline(days());
+  const points = () => {
+    const recent = previewHistoryMonth(days());
+    return recent.length >= 2 ? sparkline(recent) : '';
+  };
   const last = () => (days().length ? days()[days().length - 1].totalPkn : 0);
 
   return (
@@ -119,28 +124,34 @@ export function DashboardPreview() {
       <div>
         <strong>Assets</strong>
         <Show when={pending()}><p>Loading your collection…</p></Show>
-        <Show when={!pending() && !days().length}>
+        <Show when={!pending() && !points()}>
           <p>{signedIn() ? 'Scan cards to start the graph.' : 'Sign in to see your collection.'}</p>
         </Show>
+        <Show when={days().length}><p class="nav-preview-total">{formatAssetsValue(last(), sellerCurrency())}</p></Show>
         <Show when={points()}>
-          <p class="nav-preview-total">{formatAssetsValue(last(), sellerCurrency())}</p>
           <svg viewBox="0 0 260 88" width="260" height="88" aria-hidden="true">
             <polyline points={points()} fill="none" stroke="#ffd33d" stroke-width="2.5" />
           </svg>
         </Show>
       </div>
-      <a class="nav-scan tile-cta" href={DASHBOARD_SCAN} aria-label="Scan cards">
-        <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
-          <rect x="1" y="1" width="70" height="98" rx="7" fill="#17131f" stroke="#6f5414" stroke-width="2" />
-          <rect x="7" y="7" width="58" height="86" rx="4" fill="none" stroke="#ffd33d" stroke-width="2" />
-          <path d="M11 20V11h9M52 11h9v9M11 80v9h9M52 89h9v-9" fill="none" stroke="#ffd33d" stroke-width="1.5" stroke-linecap="round" />
-          <circle cx="36" cy="50" r="20" fill="#211b2b" stroke="#ffd33d" stroke-width="2" />
-          <path d="M17 50h38" fill="none" stroke="#ffd33d" stroke-width="3" />
-          <circle cx="36" cy="50" r="7" fill="#17131f" stroke="#ffd33d" stroke-width="3" />
-          <circle cx="36" cy="50" r="2.5" fill="#ffd33d" />
-        </svg>
-        <strong>Scan cards</strong>
-      </a>
+      <div class="nav-preview-actions">
+        <a class="nav-scan tile-cta" href={DASHBOARD_SCAN} aria-label="Scan cards">
+          <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
+            <rect x="1" y="1" width="70" height="98" rx="7" fill="#17131f" stroke="#6f5414" stroke-width="2" />
+            <rect x="7" y="7" width="58" height="86" rx="4" fill="none" stroke="#ffd33d" stroke-width="2" />
+            <path d="M11 20V11h9M52 11h9v9M11 80v9h9M52 89h9v-9" fill="none" stroke="#ffd33d" stroke-width="1.5" stroke-linecap="round" />
+            <circle cx="36" cy="50" r="20" fill="#211b2b" stroke="#ffd33d" stroke-width="2" />
+            <path d="M17 50h38" fill="none" stroke="#ffd33d" stroke-width="3" />
+            <circle cx="36" cy="50" r="7" fill="#17131f" stroke="#ffd33d" stroke-width="3" />
+            <circle cx="36" cy="50" r="2.5" fill="#ffd33d" />
+          </svg>
+          <strong>Scan cards</strong>
+        </a>
+        <a class="nav-cardgts tile-cta" href="/cardgts">
+          <BuySellIcon size={32} />
+          <strong>CardGTS</strong>
+        </a>
+      </div>
     </div>
   );
 }

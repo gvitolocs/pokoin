@@ -456,6 +456,27 @@ button, input, select { font: inherit; color: inherit; }
   width: 28rem;
 }
 
+.nav-preview-dash > div:first-child > svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 720px) {
+  .nav-preview-dash {
+    position: fixed;
+    top: 44px;
+    left: 0.625rem;
+    right: 0.625rem;
+    width: auto;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+  }
+}
+
+.nav-preview-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .nav-preview-total {
   margin: 0.2rem 0 0.35rem;
   color: var(--text);
@@ -463,7 +484,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .tile-cta,
-.nav-preview .nav-scan {
+.nav-preview .nav-scan,
+.nav-preview .nav-cardgts {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -560,27 +582,66 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.icon-nav .nav-preview .nav-scan {
+.icon-nav .nav-preview .nav-scan,
+.icon-nav .nav-preview .nav-cardgts {
   width: 100%;
   height: auto;
-  min-height: 8.75rem;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  white-space: nowrap;
 }
 
 .nav-preview .nav-scan:hover,
-.nav-preview .nav-scan:focus-visible {
+.nav-preview .nav-scan:focus-visible,
+.nav-preview .nav-cardgts:hover,
+.nav-preview .nav-cardgts:focus-visible {
   background: #ffe276;
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.nav-preview .nav-scan strong {
+.nav-preview .nav-scan strong,
+.nav-preview .nav-cardgts strong {
   margin: 0;
   color: inherit;
 }
 
 .icon-nav .nav-preview .nav-scan svg {
-  width: 4.5rem;
-  height: 6.25rem;
+  width: auto;
+  height: 2rem;
   flex: 0 0 auto;
+}
+
+.icon-nav .nav-preview .nav-cardgts svg {
+  width: 2rem;
+  height: 2rem;
+  padding: 0.2rem;
+  border-radius: 0.4rem;
+  background: #17131f;
+}
+
+@media (max-width: 720px) {
+  .icon-nav .nav-preview .nav-scan,
+  .icon-nav .nav-preview .nav-cardgts {
+    gap: 0.25rem;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .nav-preview .nav-scan strong,
+  .nav-preview .nav-cardgts strong {
+    font-size: 0.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-scan svg,
+  .icon-nav .nav-preview .nav-cardgts svg {
+    width: 1.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-cardgts svg {
+    height: 1.75rem;
+  }
 }
 
 .cart-drop {
@@ -3590,25 +3651,47 @@ a.era-link:focus-visible {
   flex-direction: column;
 }
 
+.hero-art-col .art-frame:has(+ .version-links) {
+  margin-bottom: 0.25rem;
+}
+
 .hero-art-col .version-links {
   margin-top: auto;
+  width: 100%;
+  container-type: inline-size;
+  --shortcut-size: min(2.5rem, (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
+}
+
+.hero-art-col .version-shortcuts {
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.hero-art-col .version-links .set-shortcut,
+.hero-art-col .version-links .more-versions.more-versions-ico {
+  box-sizing: border-box;
+  width: var(--shortcut-size);
+  height: var(--shortcut-size);
+}
+
+.hero-art-col .set-shortcut-code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Beside a tall desk the card column has free height under the card. The set
    icons take it: the row fills what is left and the icons scale with it, from
    their normal size up to a cap, instead of sitting small under a void. Only
-   where the card column spans the desk rows; a phone keeps the fixed size. */
+   where the card column spans the desk rows; a phone caps them at normal size. */
 @media (min-width: 1001px) {
   .hero-art-col .version-links {
     flex: 1 1 auto;
     justify-content: center;
     min-height: 2.9rem;
     container-type: size;
-  }
-  .hero-art-col .version-links .set-shortcut,
-  .hero-art-col .version-links .more-versions.more-versions-ico {
-    width: clamp(2.5rem, 62cqh, 4.6rem);
-    height: clamp(2.5rem, 62cqh, 4.6rem);
+    --shortcut-size: min(clamp(2.5rem, 62cqh, 4.6rem), (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
   }
   .hero-art-col .version-links .more-versions-ico svg {
     width: 76%;

@@ -1353,7 +1353,7 @@ function CardDesk(props) {
                     onZoom={openZoom}
                   />
                   <Show when={setShortcuts().length || showMoreVersions() || reverseScan()}>
-                    <div class="set-link tight version-links">
+                    <div class="set-link tight version-links" style={{ '--set-count': setShortcuts().length + Number(Boolean(reverseScan())) + Number(Boolean(showMoreVersions())) }}>
                       <Show when={setShortcuts().length || reverseScan() || showMoreVersions()}>
                         <div class="version-shortcuts">
                           <For each={setShortcuts()} keyed={(row) => String(row.id)}>
