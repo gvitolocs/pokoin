@@ -14,6 +14,7 @@ import {
 import { GAMES } from '@market/game.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { accountProfile } from '../stores/account.js';
@@ -121,6 +122,10 @@ function SyncReviewDesk() {
   const ptOnly = () => (reconcile()?.ptOnly || [])
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => !dismissedPt().has(index));
+  // Either side can be a few thousand rows after a first sync, and the review
+  // reads one row at a time: paint them 40 at a time.
+  const [ctLimit, setCtLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [ptLimit, setPtLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   function listingForCtProduct(productId) {
     const source = ctSourceId(productId);
@@ -289,7 +294,7 @@ function SyncReviewDesk() {
       <Show when={ctOnly().length}>
         <DeskPanel flush title={`On CardTrader, not in Power Tools (${ctOnly().length})`}>
           <div class="thread-list">
-            <For each={ctOnly()}>
+            <For each={ctOnly().slice(0, ctLimit())}>
               {(row) => {
                 const key = `ct:${row.ctProductId}`;
                 const listing = () => listingForCtProduct(row.ctProductId);
@@ -340,13 +345,16 @@ function SyncReviewDesk() {
               }}
             </For>
           </div>
+          <Show when={ctOnly().length > ctLimit()}>
+            <button type="button" class="btn ghost" onClick={() => setCtLimit(nextCollectionBatch(ctLimit(), ctOnly().length))}>Show more</button>
+          </Show>
         </DeskPanel>
       </Show>
 
       <Show when={ptOnly().length}>
         <DeskPanel flush title={`In Power Tools, not on CardTrader (${ptOnly().length})`}>
           <div class="thread-list">
-            <For each={ptOnly()} keyed={(entry) => entry.index}>
+            <For each={ptOnly().slice(0, ptLimit())} keyed={(entry) => entry.index}>
               {(entry) => {
                 // Keyed by ptOnly position: the row behind a key never changes.
                 const { row, index } = untrack(entry);
@@ -392,6 +400,9 @@ function SyncReviewDesk() {
               }}
             </For>
           </div>
+          <Show when={ptOnly().length > ptLimit()}>
+            <button type="button" class="btn ghost" onClick={() => setPtLimit(nextCollectionBatch(ptLimit(), ptOnly().length))}>Show more</button>
+          </Show>
         </DeskPanel>
       </Show>
 

@@ -1,6 +1,8 @@
-import { For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import { groupBoxStacks, inventoryListingHref, listingBox } from '@market/inventory-listings.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
+import { memoizePair } from '../../lib/derived-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 import RowThumb from './RowThumb.jsx';
 
 function stackLabel(stack) {
@@ -8,6 +10,8 @@ function stackLabel(stack) {
 }
 
 const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
+
+const stacksOf = memoizePair(groupBoxStacks);
 
 /**
  * One box: every listing stored in
@@ -17,7 +21,16 @@ export default function LocationBoard(props) {
   // The URL may carry a full slot string (…/location/megaevoluzionietb·2-4) —
   // the box is the part before the first separator.
   const box = () => listingBox(props.location) || props.location;
-  const stacks = () => groupBoxStacks(props.rows, box());
+  // Six places below read the grouping; without the memo that is six walks of
+  // the box, and a tab switch repeats them over an unchanged book.
+  const stacks = createMemo(() => stacksOf(props.rows, box()));
+  // A box can hold thousands of slots, so each stack paints 40 postings at a
+  // time; the limit is per stack because a tall stack has nothing to do with
+  // the neighbour below it.
+  const [limits, setLimits] = createSignal({});
+  const limitOf = (stack) => limits()[stack.stack] ?? COLLECTION_BATCH_SIZE;
+  const shownPostings = (stack) => stack.postings.slice(0, limitOf(stack));
+  const setLimit = (stack, value) => setLimits((prev) => ({ ...prev, [stack.stack]: value }));
   const dividerCount = () => stacks().filter((stack) => stack.stack > 0).length;
   const postings = () => stacks().reduce((sum, stack) => sum + stack.postingCount, 0);
   const copies = () => stacks().reduce((sum, stack) => sum + stack.copies, 0);
@@ -58,7 +71,7 @@ export default function LocationBoard(props) {
                   </span>
                 </div>
                 <div class="loc-postings">
-                  <For each={stack.postings}>
+                  <For each={shownPostings(stack)}>
                     {(row) => {
                       const language = row?.language ? listingLanguageFlag(row.language) : null;
                       const slotPosition = row.slotPosition ? ` · pos ${row.slotPositionText || row.slotPosition}` : '';
@@ -92,6 +105,9 @@ export default function LocationBoard(props) {
                     }}
                   </For>
                 </div>
+                <Show when={stack.postings.length > limitOf(stack)}>
+                  <button type="button" class="btn ghost" onClick={() => setLimit(stack, nextCollectionBatch(limitOf(stack), stack.postings.length))}>Show more</button>
+                </Show>
               </div>
             )}
           </For>
