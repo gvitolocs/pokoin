@@ -90,8 +90,8 @@ then Best Deal.
    `<span>` — no dropdown arrow. **Set-symbol circles** always sit under the
    scan (even a singleton expansion). **More versions...** sits under those
    circles when this card has another rarity or another artwork. When the CLIP
-   group has **more than five** expansions, circles drop and only the link
-   remains. Changing Ultra Rare → Full-Art
+   group has **more than six** expansions, the row caps to six: the current
+   set plus the newest of the others. Changing Ultra Rare → Full-Art
    refetches `marketplace-version-set` so the circles update. Do not feed
    exact-name rows into that row — that kept every expansion of the English
    name and did not move when the select changed. Do not copy CardTrader’s
@@ -233,7 +233,7 @@ SPA and `/api/marketplace-home?v=rising-month` (Worker strips `?v=`).
 | Art | Prev / next | Same-set sibling via expansion page; do not clear siblings on cardId change |
 | Art | Scan click | Lightbox zoom |
 | Art | Version select | Always in the art column between ‹ ›. Seeded with this printing. Options are **rarity** versions in this set. Singleton is a gold `<span>`, no chevron. |
-| Art | Set shortcuts | Circular set symbols **under the scan**, including a singleton expansion (`GET /api/marketplace-version-set`). Current highlighted. Switching the rarity `<select>` reloads that CLIP group. **More versions...** under the circles → rarity lineup + artwork (gold halo). **More than five** expansions → link only |
+| Art | Set shortcuts | Circular set symbols **under the scan**, including a singleton expansion (`GET /api/marketplace-version-set`). Current highlighted. Switching the rarity `<select>` reloads that CLIP group. **More versions...** under the circles → rarity lineup + artwork (gold halo). **More than six** expansions → the row caps to six (current set + newest others) |
 | Center | Listing fields | Local form state only. Currency PKN / EUR / USD / DKK; EUR and USD convert at `1 PKN = 0.005 USDT` (`DKK` via 7.5 / EUR). POST is always `pricePkn`. |
 | Center | Extra chips | Toggle 1st Ed. / Sealed / Graded / Shipping |
 | Center | Sign in / List card | Sign in → `/auth`; signed-in List card POSTs with Firebase bearer |
