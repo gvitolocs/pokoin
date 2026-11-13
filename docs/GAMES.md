@@ -367,18 +367,26 @@ Public id = leftover `ct_id × 2`. Set desk path is `/marketplace/sets/{slug}`
 
 ### New-set public readiness check
 
-After the new-printing procedure above, run the read-only smoke check:
+The full per-game procedure (Pokémon, the 15 CardTrader satellites and the 9
+Cardmarket-only games, with hosts, dry-run vs production writes and what only
+Pokémon has) is [NEW_SET_IMPORT.md](NEW_SET_IMPORT.md). After the new-printing
+procedure above, run the read-only check:
 
 ```bash
-TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh "Delta Reign"
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh "Delta Reign"                       # Pokémon
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh --game one_piece "EB-05: Heroines Edition Vol.2"
 ```
 
-It exits non-zero for missing or unverified checks. It samples the public set
-page, one card image and version group, card-name and set-name suggest, the
-bundled set vocabulary, the symbol URL, featured-set override and the New cards rail. The manual override is `market/src/data/featured-set.json`; review release dates when updating it. A successful
-sample does not prove all cards have images or correct artwork matches; inspect
-those separately. A symbol URL returning an image can still be a generated
-text plate, so visually inspect it. The check does not write to the database.
+Each line is `OK`, `MISSING` or `SKIPPED: <reason>`; any `MISSING` (including a
+failed public request) exits 1, an unknown `--game` exits 2. It samples the
+public set page (real singles only), one card image and its key, the thumbnail,
+the version group, card-name and set-name suggest and the symbol URL. Pokémon
+also checks the bundled set vocabulary, the featured-set override
+(`market/src/data/featured-set.json`) and the New cards rail; other games skip
+those with the reason printed. A successful sample does not prove all cards have
+images or correct artwork matches; inspect those separately. A symbol URL
+returning an image can still be a generated text plate, so visually inspect it.
+The check does not write to the database.
 
 New-set release checklist:
 
