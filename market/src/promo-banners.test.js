@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GAMES } from './game.js';
 import {
+  PROMO_BANNERS,
   promoLogoIsName,
   promoLogoSrc,
   readStoredPromoBanners,
@@ -93,4 +94,10 @@ test('pokemon promo logos use the set wordmark path', () => {
     promoLogoSrc({ slug: 'dawn-of-history', logoImageUrl: 'https://cdn.example/logo.png' }, { pokemon: false }),
     'https://cdn.example/logo.png',
   );
+});
+
+
+test('featured banner follows the configured set', () => {
+  assert.equal(PROMO_BANNERS[0].title, 'Delta Reign');
+  assert.equal(PROMO_BANNERS[0].slug, 'delta-reign');
 });
