@@ -62,3 +62,9 @@ test('Assets nav preview prints the viewer-currency value, not PKN', () => {
   assert.doesNotMatch(src, /formatPknNumber/);
   assert.doesNotMatch(src, /\} PKN/);
 });
+
+test('Dashboard preview tiles keep icons beside single-line labels', () => {
+  const css = read('../../../market/src/styles.css');
+  assert.match(css, /\.icon-nav \.nav-preview \.nav-scan,\s*\.icon-nav \.nav-preview \.nav-cardgts \{[^}]*flex-direction: row;[^}]*align-items: center;/);
+  assert.match(css, /\.icon-nav \.nav-preview \.nav-scan,\s*\.icon-nav \.nav-preview \.nav-cardgts \{[^}]*white-space: nowrap;/);
+});

@@ -387,7 +387,7 @@ export function DefaultsBar(props) {
                   <For each={pricingList().strategies}>{(o) => <option value={o.value}>{o.label}</option>}</For>
                 </optgroup>
               </Show>
-              <option value="">No pricing (unpriced cards stay paused)</option>
+              <option value="">Suggested prices</option>
             </select>
           </label>
           <a class="sd-pricing-manage" href={props.pricingHref || '/mypokoin/pricer'}>Manage pricing</a>
