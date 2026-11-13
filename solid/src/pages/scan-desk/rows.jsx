@@ -54,7 +54,7 @@ function thumbFor(cardId, name, imageUrl) {
 /** Same-artwork printing select; remaps the row to the printing its language implies. */
 function ArtworkVersionSelect(props) {
   const [printings, setPrintings] = createSignal(null);
-  const remapTried = new Set();
+  const remapTried = props.remapTried;
   // The row language picks the printing. Batch language is only the fallback.
   const listingLanguage = () => remapListingLanguage(props.row.language, props.preferredLanguage);
 
@@ -104,7 +104,7 @@ function ArtworkVersionSelect(props) {
           }
         }
         const nextId = String(preferred?.id || preferred?.card_id || '');
-        if (nextId && nextId !== cardId) props.onPick(nextId);
+        if (nextId && nextId !== cardId && !cancelled && !props.remapTried.has(tryKey + "\0picked")) props.onPick(nextId);
       })();
       return () => { cancelled = true; };
     },
@@ -313,6 +313,7 @@ export function QueueRow(props) {
             row={row()}
             closed={props.closed}
             preferredLanguage={remapLang()}
+            remapTried={props.remapTried}
             onPick={(id) => props.onPick(id)}
           />
           <Show when={showCandidates()}>
