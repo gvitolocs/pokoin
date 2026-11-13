@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BUY_ORDER_LANGS,
+  fetchBuyBook,
   BUYER_MESSAGE_MAX,
   bestBid,
   buyerMessageError,
@@ -423,4 +424,17 @@ test('sellableBid: the best offer for one exact facet set, never your own', () =
   assert.equal(sellableBid(book, ['mine'], { condition: 'SP', language: 'EN' }), null);
   assert.equal(sellableBid(book, [], { condition: 'NM', language: 'EN', firstEdition: true }), null);
   assert.equal(sellableBid(null, [], { condition: 'NM', language: 'EN' }), null);
+});
+
+
+test('fresh book reads bypass the edge cache with a unique parameter', async () => {
+  const calls = await captureBodies(async () => {
+    await fetchBuyBook('123');
+    await fetchBuyBook('123', { fresh: true });
+    await fetchBuyBook('123', { fresh: true });
+  });
+  const urls = calls.map((call) => new URL(call.url, 'https://pokoin.com'));
+  assert.equal(urls[0].searchParams.has('fresh'), false);
+  assert.ok(urls[1].searchParams.get('fresh'));
+  assert.notEqual(urls[1].searchParams.get('fresh'), urls[2].searchParams.get('fresh'));
 });

@@ -1823,7 +1823,7 @@ function CardDesk(props) {
                   preview={buy.preview}
                   fromPath={fromPath()}
                   onClose={buy.closeSell}
-                  onDone={() => buy.reload()}
+                  onDone={() => buy.reload({ fresh: true })}
                 />
               )}
             </Show>
