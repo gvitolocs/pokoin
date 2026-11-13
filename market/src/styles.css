@@ -3624,25 +3624,47 @@ a.era-link:focus-visible {
   flex-direction: column;
 }
 
+.hero-art-col .art-frame:has(+ .version-links) {
+  margin-bottom: 0.25rem;
+}
+
 .hero-art-col .version-links {
   margin-top: auto;
+  width: 100%;
+  container-type: inline-size;
+  --shortcut-size: min(2.5rem, (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
+}
+
+.hero-art-col .version-shortcuts {
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.hero-art-col .version-links .set-shortcut,
+.hero-art-col .version-links .more-versions.more-versions-ico {
+  box-sizing: border-box;
+  width: var(--shortcut-size);
+  height: var(--shortcut-size);
+}
+
+.hero-art-col .set-shortcut-code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Beside a tall desk the card column has free height under the card. The set
    icons take it: the row fills what is left and the icons scale with it, from
    their normal size up to a cap, instead of sitting small under a void. Only
-   where the card column spans the desk rows; a phone keeps the fixed size. */
+   where the card column spans the desk rows; a phone caps them at normal size. */
 @media (min-width: 1001px) {
   .hero-art-col .version-links {
     flex: 1 1 auto;
     justify-content: center;
     min-height: 2.9rem;
     container-type: size;
-  }
-  .hero-art-col .version-links .set-shortcut,
-  .hero-art-col .version-links .more-versions.more-versions-ico {
-    width: clamp(2.5rem, 62cqh, 4.6rem);
-    height: clamp(2.5rem, 62cqh, 4.6rem);
+    --shortcut-size: min(clamp(2.5rem, 62cqh, 4.6rem), (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
   }
   .hero-art-col .version-links .more-versions-ico svg {
     width: 76%;
