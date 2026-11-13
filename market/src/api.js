@@ -708,7 +708,7 @@ export async function fetchLastMedianPknMap(cardIds) {
 }
 
 /** Batch cheapest listed PKN per card id (marketplace-card-cheapest-price). */
-export async function fetchCheapestPricePknMap(cardIds) {
+export async function fetchCheapestPricePknMap(cardIds, { strict = false } = {}) {
   const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 50);
   if (!ids.length) {
     return {};
@@ -724,7 +724,9 @@ export async function fetchCheapestPricePknMap(cardIds) {
       }
     }
     return byId;
-  } catch (_) {
+  } catch (err) {
+    // strict: a failed read is not "no listing"; the caller retries it.
+    if (strict) throw err;
     return {};
   }
 }

@@ -58,7 +58,7 @@ import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
-import { claimRows, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
+import { claimRows, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
   pricingApplyBodies,
   pricingChoiceValue,
@@ -152,6 +152,9 @@ function ScanDeskDesk(props) {
   const slicesCache = new Map();
   let priceTouched = new Set();
   let suggestedFor = new Map();
+  // `${rowId}:${signature}` → failed lookups or saves so far (see retryPrices).
+  let priceFailures = new Map();
+  let priceRetryTimer = null;
   // rowId → { signature, pkn }: the last default price, restored when the
   // price field is left empty.
   let lastSuggested = new Map();
@@ -235,7 +238,10 @@ function ScanDeskDesk(props) {
 
   onSettled(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(priceRetryTimer);
+    };
   });
 
   // ---------------------------------------------------------------- stream
@@ -562,6 +568,23 @@ function ScanDeskDesk(props) {
     remapTried.add(`${row.id}\0${lang}\0${String(nextId)}`);
   }
 
+  /**
+   * A failed price lookup or save is not "no data": release the rows so the
+   * prices effect asks again after a backoff. Never prices them from the
+   * "nothing found" fallbacks, and gives up after PRICE_RETRY_MAX tries.
+   */
+  function retryPrices(rows) {
+    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
+    const { retry, delay } = nextPriceRetry(priceFailures, rows, facetSignature);
+    if (!retry.length) return;
+    releaseUnsettled(retry, new Set(), books);
+    if (priceRetryTimer) return;
+    priceRetryTimer = setTimeout(() => {
+      priceRetryTimer = null;
+      setPriceRetry((n) => n + 1);
+    }, delay);
+  }
+
   /** An emptied price field falls back to the default price, never "Needs a price". */
   function restoreDefaultPrice(row) {
     priceTouched.delete(row.id);
@@ -659,8 +682,10 @@ function ScanDeskDesk(props) {
         row.id,
         () => runApi((t) => scanApi.patch(t, row.id, changes, batch()?.id)),
       )));
+      return true;
     } catch (err) {
       setError(err.message || 'Change not saved.');
+      return false;
     } finally {
       setPending((current) => {
         const next = { ...current };
@@ -1231,6 +1256,10 @@ function ScanDeskDesk(props) {
     const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
     claimRows(want, books);
     const settled = new Set();
+    // A suggestion the server did not take is asked for again.
+    const saved = (row, saving) => saving.then((ok) => {
+      if (ok === false) retryPrices([row]);
+    });
     let cancelled = false;
     let released = false;
     const release = () => {
@@ -1244,18 +1273,30 @@ function ScanDeskDesk(props) {
         .filter((id) => !slicesCache.has(id))
         .map((id) => () => {
           const pendingSlices = fetchCardSales(id, { slices: true })
-            .then((data) => (Array.isArray(data?.slices) ? data.slices : []))
-            .catch(() => []);
+            .then((data) => (Array.isArray(data?.slices) ? data.slices : []));
           slicesCache.set(id, pendingSlices);
-          return pendingSlices;
+          // A failed read is not "no comps": it is never cached, the retry asks again.
+          return pendingSlices.catch(() => {
+            if (slicesCache.get(id) === pendingSlices) slicesCache.delete(id);
+          });
         });
       while (queue.length) {
         await Promise.all(queue.splice(0, 4).map((run) => run()));
       }
       const cheapestIds = new Set();
+      const failed = [];
       for (const row of want) {
         if (cancelled) return;
-        const slices = await slicesCache.get(String(row.cardId));
+        let slices;
+        try {
+          slices = await slicesCache.get(String(row.cardId));
+        } catch (_) {
+          slices = undefined;
+        }
+        if (!Array.isArray(slices)) {
+          failed.push(row);
+          continue;
+        }
         const pkn = suggestPriceFromSlices(slices, scanFacets(row));
         if (pkn > 0) {
           const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
@@ -1263,17 +1304,27 @@ function ScanDeskDesk(props) {
           // Fresh rows race only with an empty price; stale suggested rows overwrite.
           if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
           settled.add(row.id);
-          patchRows([row.id], patch, { record: false });
+          saved(row, patchRows([row.id], patch, { record: false }));
         } else {
           cheapestIds.add(String(row.cardId));
         }
       }
       // No sold comps at all → the cheapest listed price is the floor.
-      if (!cheapestIds.size) return;
-      const byId = await fetchCheapestPricePknMap([...cheapestIds]);
+      let byId = null;
+      if (cheapestIds.size) {
+        try {
+          byId = await fetchCheapestPricePknMap([...cheapestIds], { strict: true });
+        } catch (_) {
+          byId = null;
+        }
+      }
+      if (cancelled) return;
       for (const row of want) {
-        if (cancelled) return;
-        if (settled.has(row.id)) continue;
+        if (settled.has(row.id) || failed.includes(row)) continue;
+        if (!byId) {
+          failed.push(row);
+          continue;
+        }
         const listed = Number(byId[String(row.cardId)]);
         // No comps and no listing either: €10,000 in PKN, so no row blocks the upload.
         const pkn = listed > 0 ? listed : scanFallbackPricePkn();
@@ -1281,8 +1332,9 @@ function ScanDeskDesk(props) {
         const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
         lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
         if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-        patchRows([row.id], patch, { record: false });
+        saved(row, patchRows([row.id], patch, { record: false }));
       }
+      if (failed.length) retryPrices(failed);
     })().catch(() => {
       if (!cancelled) release();
     });
@@ -1425,6 +1477,7 @@ function ScanDeskDesk(props) {
     pricesAsked = new Set();
     priceTouched = new Set();
     suggestedFor = new Map();
+    priceFailures = new Map();
     lastSuggested = new Map();
     dispatch({ type: 'reset', items: [] });
     setBatch(null);
