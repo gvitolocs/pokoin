@@ -245,6 +245,27 @@ export function selectionBid(book, { condition, language } = {}) {
   return top ? { ...top, quantity, orders } : null;
 }
 
+/**
+ * The book row a seller would sell into for one exact facet set: same
+ * condition, language, Reverse and 1st Ed., the highest price first, and never
+ * the visitor's own order (`mine` holds their order ids). null when no buyer
+ * wants that printing; the caller then offers Pokoin's starting price.
+ */
+export function sellableBid(book, mine = [], { condition, language, reverse = false, firstEdition = false } = {}) {
+  const lang = String(language || '').toUpperCase();
+  let top = null;
+  for (const row of Array.isArray(book) ? book : []) {
+    if (!row || row.condition !== condition || String(row.language || '').toUpperCase() !== lang) continue;
+    if (Boolean(row.reverse) !== Boolean(reverse)) continue;
+    if (Boolean(row.first_edition ?? row.firstEdition) !== Boolean(firstEdition)) continue;
+    if (!row.best_order_id || mine.includes(row.best_order_id)) continue;
+    const price = Number(row.best_price_pkn);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (!top || price > Number(top.best_price_pkn)) top = row;
+  }
+  return top;
+}
+
 /** Best price per condition for one language, in CONDITIONS order. */
 export function bidsByCondition(book, language) {
   const lang = String(language || '').toUpperCase();

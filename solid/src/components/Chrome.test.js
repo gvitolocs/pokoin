@@ -49,9 +49,9 @@ test('BuySell sits right after the market icon, in the footer and in the phone m
   const menu = read('./MobileMenu.jsx');
   assert.match(chrome, /<BuySellIcon size=\{20\} \/>/);
   assert.doesNotMatch(chrome, /buysell: BUYSELL_ICON/);
-  assert.match(chrome, /<\/NavHover>\s*<AppLink class="buysell-link" to="\/buysell" aria-label="BuySell"><BuySellIcon size=\{20\} \/><\/AppLink>\s*<NavHover id="messages"/);
-  assert.match(chrome, /<AppLink to="\/buysell">BuySell<\/AppLink>/);
-  assert.match(menu, /<Row to="\/buysell" mark="buysell" label="BuySell"/);
+  assert.match(chrome, /<\/NavHover>\s*<AppLink class="buysell-link" to="\/cardgts" aria-label="CardGTS"><BuySellIcon size=\{20\} \/><\/AppLink>\s*<NavHover id="messages"/);
+  assert.match(chrome, /<AppLink to="\/cardgts">CardGTS<\/AppLink>/);
+  assert.match(menu, /<Row to="\/cardgts" mark="buysell" label="CardGTS"/);
 });
 
 test('Assets nav preview prints the viewer-currency value, not PKN', () => {
