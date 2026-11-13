@@ -587,6 +587,11 @@ button, input, select { font: inherit; color: inherit; }
   width: 100%;
   height: auto;
   min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  white-space: nowrap;
 }
 
 .nav-preview .nav-scan:hover,
@@ -604,8 +609,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .icon-nav .nav-preview .nav-scan svg {
-  width: 2rem;
-  height: auto;
+  width: auto;
+  height: 2rem;
   flex: 0 0 auto;
 }
 

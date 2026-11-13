@@ -108,7 +108,7 @@ test('a row is priced by its own choice, else the batch default; none opts out',
   assert.deepEqual(rowPricingChip({}, batch, data), { label: 'Bulk', kind: 'batch' });
   assert.deepEqual(rowPricingChip({ pricing: { strategyId: 's1' } }, batch, data), { label: 'Undercut 5%', kind: 'own' });
   assert.deepEqual(rowPricingChip({ pricing: { none: true } }, batch, data), { label: 'None', kind: 'none' });
-  assert.deepEqual(rowPricingChip({}, {}, data), { label: 'No pricing', kind: 'batch' });
+  assert.deepEqual(rowPricingChip({}, {}, data), { label: 'Suggested', kind: 'batch' });
   assert.equal(rowPricingPatch({ kind: 'batch' }), null);
   assert.deepEqual(rowPricingPatch({ kind: 'none' }), { none: true });
   assert.deepEqual(rowPricingPatch({ kind: 'group', id: 'g1' }), { groupId: 'g1' });
