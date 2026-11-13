@@ -587,6 +587,11 @@ button, input, select { font: inherit; color: inherit; }
   width: 100%;
   height: auto;
   min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  white-space: nowrap;
 }
 
 .nav-preview .nav-scan:hover,
@@ -604,8 +609,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .icon-nav .nav-preview .nav-scan svg {
-  width: 2rem;
-  height: auto;
+  width: auto;
+  height: 2rem;
   flex: 0 0 auto;
 }
 
@@ -615,6 +620,28 @@ button, input, select { font: inherit; color: inherit; }
   padding: 0.2rem;
   border-radius: 0.4rem;
   background: #17131f;
+}
+
+@media (max-width: 720px) {
+  .icon-nav .nav-preview .nav-scan,
+  .icon-nav .nav-preview .nav-cardgts {
+    gap: 0.25rem;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .nav-preview .nav-scan strong,
+  .nav-preview .nav-cardgts strong {
+    font-size: 0.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-scan svg,
+  .icon-nav .nav-preview .nav-cardgts svg {
+    width: 1.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-cardgts svg {
+    height: 1.75rem;
+  }
 }
 
 .cart-drop {
