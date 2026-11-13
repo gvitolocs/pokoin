@@ -33,3 +33,26 @@ export function releaseUnsettled(claimed, settled, { pricesAsked, suggestedFor, 
   }
   return released;
 }
+
+/** Retries per row and printing after a failed lookup or save; then the row waits for a reload. */
+export const PRICE_RETRY_MAX = 4;
+
+/**
+ * A failed price lookup or save is not "no data": the row is asked again
+ * after a backoff (2 s, 4 s, 8 s, 16 s) instead of staying unpriced.
+ * `failures` counts attempts per `${rowId}:${signature}`; returns the rows
+ * still worth retrying and the delay to wait before the next run.
+ */
+export function nextPriceRetry(failures, rows, signatureOf) {
+  const retry = [];
+  let delay = 0;
+  for (const row of rows) {
+    const key = priceKey(row.id, signatureOf(row));
+    const used = failures.get(key) || 0;
+    if (used >= PRICE_RETRY_MAX) continue;
+    failures.set(key, used + 1);
+    retry.push(row);
+    delay = Math.max(delay, 2000 * 2 ** used);
+  }
+  return { retry, delay };
+}
