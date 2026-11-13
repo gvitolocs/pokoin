@@ -6,6 +6,15 @@
  * pricing").
  */
 
+// Relative, not @market: node --test loads this module without Vite's alias.
+import { localizeStrategyName } from '../../../../market/src/pricer.js';
+
+/**
+ * A strategy name as the desk shows it: money in the seller's currency, never
+ * PKN. Without a `ctx` (no caller passed one) the saved text stays as it is.
+ */
+const strategyLabel = (name, ctx) => (ctx ? localizeStrategyName(name, ctx) : String(name ?? ''));
+
 /** The select value for the batch defaults: `group:<id>`, `strategy:<id>` or "". */
 export function pricingChoiceValue(defaults) {
   const group = String(defaults?.pricingGroupId || '');
@@ -30,17 +39,18 @@ export function batchHasPricing(defaults) {
 /**
  * Select options from `fetchPricingStrategies`: groups as "<name> · <strategy
  * name>", then strategies. A saved choice that is no longer in the list stays
- * selectable so the select shows what the batch holds.
+ * selectable so the select shows what the batch holds. `ctx` is the seller's
+ * currency context for the strategy names.
  */
-export function pricingOptions(data, defaults) {
+export function pricingOptions(data, defaults, ctx = null) {
   const strategies = Array.isArray(data?.strategies) ? data.strategies : [];
   const groups = Array.isArray(data?.groups) ? data.groups : [];
-  const strategyName = new Map(strategies.map((s) => [String(s.id), String(s.name || 'Strategy')]));
+  const strategyName = new Map(strategies.map((s) => [String(s.id), strategyLabel(s.name, ctx) || 'Strategy']));
   const groupOptions = groups.map((g) => ({
     value: `group:${g.id}`,
     label: `${g.name || 'Group'} · ${strategyName.get(String(g.strategyId)) || 'no strategy'}`,
   }));
-  const strategyOptions = strategies.map((s) => ({ value: `strategy:${s.id}`, label: String(s.name || 'Strategy') }));
+  const strategyOptions = strategies.map((s) => ({ value: `strategy:${s.id}`, label: strategyLabel(s.name, ctx) || 'Strategy' }));
   const current = pricingChoiceValue(defaults);
   if (current.startsWith('group:') && !groupOptions.some((o) => o.value === current)) {
     groupOptions.push({ value: current, label: 'Group not found' });
@@ -93,8 +103,9 @@ export function rowIsPriced(row, defaults) {
 /**
  * The row's pricing chip: `{ label, kind }` with kind 'own' (the row's own
  * choice, highlighted), 'batch' (the batch default, greyed) or 'none'.
+ * `ctx` is the seller's currency context for a strategy name.
  */
-export function rowPricingChip(row, defaults, data) {
+export function rowPricingChip(row, defaults, data, ctx = null) {
   const own = rowOwnPricing(row);
   if (own?.none) return { label: 'None', kind: 'none' };
   const choice = own || effectiveRowPricing(row, defaults);
@@ -104,7 +115,7 @@ export function rowPricingChip(row, defaults, data) {
   const groups = Array.isArray(data?.groups) ? data.groups : [];
   const name = choice.groupId
     ? groups.find((g) => String(g.id) === choice.groupId)?.name || 'Group not found'
-    : strategies.find((s) => String(s.id) === choice.strategyId)?.name || 'Strategy not found';
+    : strategyLabel(strategies.find((s) => String(s.id) === choice.strategyId)?.name, ctx) || 'Strategy not found';
   return { label: name, kind };
 }
 

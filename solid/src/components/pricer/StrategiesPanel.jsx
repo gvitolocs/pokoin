@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import {
+  localizeStrategyName,
   localToPkn,
   nameProblem,
   pknToLocal,
@@ -141,7 +142,7 @@ export default function StrategiesPanel(props) {
     const target = pending()?.target;
     if (target === 'back') return 'go back to the pricing groups';
     if (target === 'new') return 'start a new strategy';
-    return `open “${target?.name || 'that strategy'}”`;
+    return `open “${localizeStrategyName(target?.name, ctx()) || 'that strategy'}”`;
   };
 
   // Opened before the strategies arrived: show the first one once they do.
@@ -231,7 +232,7 @@ export default function StrategiesPanel(props) {
                       aria-pressed={String(entry().id === selectedId() && entry().id === draft().id)}
                       onClick={() => (entry().id === draft().id ? undefined : leaveTo(entry()))}
                     >
-                      <strong>{entry().name}</strong>
+                      <strong>{localizeStrategyName(entry().name, ctx())}</strong>
                       {/* The server's `summary` stays in PKN; the seller reads their own currency. */}
                       <span class="pricer-group-sub">{strategySummary(entry(), ctx())}</span>
                       <span class="pricer-group-sub">{usedByLine(entry().groupNames)}</span>

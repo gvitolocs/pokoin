@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
-import { lastAppliedLine, nameProblem, ungroupedCount } from '@market/pricer.js';
+import { lastAppliedLine, localizeStrategyName, nameProblem, ungroupedCount } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from './NewGroupForm.jsx';
 import StrategiesPanel from './StrategiesPanel.jsx';
@@ -162,7 +162,7 @@ function GroupPanel(props) {
         <label class="ps-field">
           <span>Strategy</span>
           <select value={group().strategyId} disabled={busy() === 'save'} onChange={(event) => save({ strategyId: event.target.value })}>
-            <For each={pricing.strategies()}>{(entry) => <option value={entry.id}>{entry.name}</option>}</For>
+            <For each={pricing.strategies()}>{(entry) => <option value={entry.id}>{localizeStrategyName(entry.name, pricing.currencyCtx())}</option>}</For>
           </select>
         </label>
         <label class="ps-field ps-check">
@@ -353,7 +353,7 @@ export default function PricerTab(props) {
   };
   const plan = () => planOf('answer');
   const planError = () => planOf('error') || '';
-  const strategyName = (id) => pricing.strategies().find((entry) => entry.id === id)?.name || 'No strategy';
+  const strategyName = (id) => localizeStrategyName(pricing.strategies().find((entry) => entry.id === id)?.name, pricing.currencyCtx()) || 'No strategy';
   const ungrouped = () => ungroupedCount(props.rows || [], pricing.memberships());
   // The editor's worked example: the selected group's first card with offers per toggle.
   const exampleComp = createMemo(() => {
@@ -421,6 +421,7 @@ export default function PricerTab(props) {
             <section class="mypokoin-card">
               <NewGroupForm
                 daily
+                ctx={pricing.currencyCtx()}
                 groups={pricing.groups()}
                 strategies={pricing.strategies()}
                 onCreate={create}

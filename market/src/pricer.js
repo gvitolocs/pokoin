@@ -220,6 +220,38 @@ export function formatLocal(amount, ctx = EUR_CONTEXT) {
   return sign ? `${sign}${value.toFixed(2)}` : `${value.toFixed(2)} ${ctx.code}`;
 }
 
+// A seller writes an amount freely in a strategy name: "5", "2.5", "1,000",
+// "1,000.50" (a comma of three digits groups thousands, else it reads as the
+// decimal separator).
+const PKN_AMOUNT_TEXT = String.raw`\d+(?:,\d{3})*(?:[.,]\d+)?`;
+/** "5 PKN", "5PKN", "1,000 PKN", "2.5 pkn": the amount, then the unit. */
+const PKN_UNIT_LAST = new RegExp(`(${PKN_AMOUNT_TEXT})[ \t]*PKN\\b`, 'gi');
+/** "PKN 5", "PKN5": the unit, then the amount. */
+const PKN_UNIT_FIRST = new RegExp(`\\bPKN[ \t]*(${PKN_AMOUNT_TEXT})`, 'gi');
+
+/** The PKN amount as written in a name, its thousands groups dropped. */
+function pknAmountFromText(raw) {
+  return Number(String(raw).replace(/,(\d{3})(?!\d)/g, '$1').replace(',', '.')) || 0;
+}
+
+/**
+ * A strategy name as the pricer shows it: money in the seller's currency,
+ * never PKN (D000014) — "Undercut by 5 PKN" reads "Undercut by €0.03", and a
+ * bare "PKN" with no amount beside it goes with one adjacent space. Only the
+ * display: the saved name and the uniqueness checks keep the text as typed.
+ * An empty or missing name comes back empty, so the caller's own fallback
+ * ('Strategy', 'No strategy') still applies.
+ */
+export function localizeStrategyName(name, ctx = EUR_CONTEXT) {
+  const text = String(name ?? '');
+  if (!text.trim()) return text;
+  const money = (_unit, amount) => formatLocal(pknToLocal(pknAmountFromText(amount), ctx), ctx);
+  const amounts = text.replace(PKN_UNIT_LAST, money).replace(PKN_UNIT_FIRST, money);
+  const spaced = amounts.replace(/[ \t]+PKN\b/gi, '').replace(/\bPKN[ \t]+/gi, '');
+  // Nothing around the unit was a space ("…PKN"): drop the unit itself.
+  return spaced === amounts ? spaced.replace(/PKN\b/gi, '') : spaced;
+}
+
 /** A new strategy's starting point. */
 export const DEFAULT_STRATEGY = {
   id: '',

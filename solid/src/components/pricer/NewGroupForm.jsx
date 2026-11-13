@@ -1,10 +1,11 @@
 import { createSignal, For, Show } from 'solid-js';
-import { nameProblem } from '@market/pricer.js';
+import { localizeStrategyName, nameProblem } from '@market/pricer.js';
 
 /**
  * Name + strategy (+ daily) for a new pricing group: the Pricer tab's
  * "New group" and the board's "Add to group ▾" mini-form. `onCreate`
  * resolves when the group exists; a rejection shows its message here.
+ * `ctx` is the seller's currency context for the strategy names.
  */
 export default function NewGroupForm(props) {
   const [name, setName] = createSignal('');
@@ -15,6 +16,8 @@ export default function NewGroupForm(props) {
   const [error, setError] = createSignal('');
   const problem = () => nameProblem(name(), '', props.groups || [], 'group');
   const idPrefix = props.idPrefix || 'pricer-new-group';
+  // Without a currency context the saved text stays as it is.
+  const optionText = (entry) => (props.ctx ? localizeStrategyName(entry.name, props.ctx) : entry.name);
 
   async function submit(event) {
     event.preventDefault();
@@ -50,7 +53,7 @@ export default function NewGroupForm(props) {
       <label class="ps-field">
         <span>Strategy</span>
         <select value={strategyId()} onChange={(event) => setStrategyId(event.target.value)} aria-label="Strategy for the new group">
-          <For each={props.strategies || []}>{(entry) => <option value={entry.id}>{entry.name}</option>}</For>
+          <For each={props.strategies || []}>{(entry) => <option value={entry.id}>{optionText(entry)}</option>}</For>
         </select>
       </label>
       <Show when={props.daily}>
