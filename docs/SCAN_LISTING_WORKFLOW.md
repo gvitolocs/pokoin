@@ -142,7 +142,8 @@ then relaxing the finish/1st flag, then the nearest condition in the same
 language, then other languages in tiers: KO → JP → European (IT, FR, DE,
 ES, PT, NL, PL, RU together) → EN → any other language, skipping the card’s
 own language. Within each tier, nearest condition wins, then freshness. When the printing has no sold comps at all, the cheapest listed PKN
-(`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. Switching
+(`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. With neither sold comps nor a listing the default is 10,000 EUR
+converted to PKN (`scanFallbackPricePkn` in `market/src/scan-pricing.js`), so a row never needs a price before upload. Switching
 the version (or language/condition/finish/1st facets) re-suggests for the new
 shape and clears the server-side price; a suggestion stays greyed
 `suggested` until edited or confirmed, and only clicking into the price field

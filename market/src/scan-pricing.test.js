@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PRICE_LANGUAGE_FALLBACK,
+  SCAN_FALLBACK_PRICE_EUR,
   facetSignature,
   priceFieldCommit,
   scanFacets,
+  scanFallbackPricePkn,
   suggestPriceFromSlices,
 } from './scan-pricing.js';
+import { PKN_USDT_PRICE } from './pkn.js';
 import { priceInputFromPkn } from './seller-currency.js';
 
 const slice = (over = {}) => ({
@@ -146,6 +149,15 @@ test('graded slices never suggest', () => {
 test('no usable slices → null (caller falls back to cheapest listed)', () => {
   assert.equal(suggestPriceFromSlices([], scanFacets({ cardId: 1 })), null);
   assert.equal(suggestPriceFromSlices([slice({ medianPkn: 0 })], scanFacets({ cardId: 1 })), null);
+});
+
+test('no comps and no listing → the default is €10,000 in PKN', () => {
+  assert.equal(SCAN_FALLBACK_PRICE_EUR, 10000);
+  const pkn = scanFallbackPricePkn();
+  assert.ok(Number.isInteger(pkn) && pkn > 0, `positive integer, got ${pkn}`);
+  // EUR→PKN at the fixed parity: 10,000 / 0.005 = 2,000,000.
+  assert.equal(pkn, Math.round(SCAN_FALLBACK_PRICE_EUR / PKN_USDT_PRICE));
+  assert.equal(pkn, 2000000);
 });
 
 test('facetSignature changes with version and every priced facet', () => {

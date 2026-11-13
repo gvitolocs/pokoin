@@ -46,7 +46,7 @@ import {
   typeQuantity,
 } from '@market/scan-model.js';
 import { shortcutFor } from '@market/scan-shortcuts.js';
-import { facetSignature, scanFacets, suggestPriceFromSlices } from '@market/scan-pricing.js';
+import { facetSignature, scanFacets, scanFallbackPricePkn, suggestPriceFromSlices } from '@market/scan-pricing.js';
 import { connectScanStream } from '@market/scan-stream.js';
 import { gameIdFromHost } from '@market/game.js';
 import { currencyContext } from '@market/pricer.js';
@@ -1274,15 +1274,14 @@ function ScanDeskDesk(props) {
       for (const row of want) {
         if (cancelled) return;
         if (settled.has(row.id)) continue;
-        const pkn = byId[String(row.cardId)];
-        // No comps and no listing: settled without a price, never retried.
+        const listed = Number(byId[String(row.cardId)]);
+        // No comps and no listing either: €10,000 in PKN, so no row blocks the upload.
+        const pkn = listed > 0 ? listed : scanFallbackPricePkn();
         settled.add(row.id);
-        if (pkn > 0) {
-          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
-          lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
-          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-          patchRows([row.id], patch, { record: false });
-        }
+        const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
+        lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
+        if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
+        patchRows([row.id], patch, { record: false });
       }
     })().catch(() => {
       if (!cancelled) release();
