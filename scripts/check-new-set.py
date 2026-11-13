@@ -210,7 +210,10 @@ def run(name, game='pokemon'):
     by_set, ok = attempt('set-name suggest', lambda: request(query('/api/marketplace-suggest', game, q=name, limit=24)))
     if ok:
         sample_ids = {card_key(c) for c in singles}
-        report(bool(sample_ids & suggest_ids(by_set)), 'set-name suggest', 'sampled singles returned for set name')
+        returned = [p for g in by_set.get('groups', []) for p in g.get('printings', [])]
+        returned_singles = [p for p in returned if is_single(p)]
+        hits = sample_ids & {card_key(p) for p in returned_singles}
+        report(bool(hits), 'set-name suggest', f'{len(returned)} printings returned, {len(returned_singles)} singles, {len(hits)} of the sampled singles; the API ranks sealed products first for a bare set name')
     if pokemon:
         set_file = (ROOT / 'market/src/data/suggest-sets.js').read_text()
         report(f'"slug":"{slug}"' in set_file, 'local suggest set catalog', slug)

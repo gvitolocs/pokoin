@@ -38,7 +38,7 @@ def pokemon_fake(overrides=None, rail_set='Delta Reign'):
         if 'q=Pikachu' in url:
             return {'groups': [{'printings': [{'id': '2'}]}]}
         if 'suggest' in url:
-            return {'groups': [{'printings': [{'id': '2'}]}]}
+            return {'groups': [{'printings': [{'id': '2', 'itemKind': 'single', 'productType': 'card'}]}]}
         return {'cards': [{'set': rail_set}]}
     return fake
 
@@ -64,7 +64,7 @@ def satellite_fake(game='one_piece', overrides=None):
                               single(10, 'Nojiko', f'/card-images/{prefix}/5_nojiko.jpg')]}
         if 'version-set' in url:
             return {'version': 'name:nojiko', 'printings': [{'card_id': '10'}]}
-        return {'groups': [{'printings': [{'id': '10'}]}]}
+        return {'groups': [{'printings': [{'id': '10', 'itemKind': 'single', 'productType': 'card'}]}]}
     return fake
 
 
@@ -113,6 +113,12 @@ class CheckNewSetTests(unittest.TestCase):
         for label in ('catalog', 'singles', 'thumbnail', 'version set', 'search index', 'local suggest set catalog',
                       'symbol HTTP', 'featured set override', 'new-cards rail'):
             self.assertIn(f'OK: {label}', text)
+
+    def test_set_name_suggest_with_only_sealed_products_is_missing(self):
+        sealed = {'groups': [{'printings': [{'id': '2', 'itemKind': 'sealed', 'productType': 'box'}]}]}
+        code, text = run_check(pokemon_fake({'q=Delta': sealed}), 'Delta Reign', 'pokemon')
+        self.assertEqual(code, 1)
+        self.assertIn('MISSING: set-name suggest: 1 printings returned, 0 singles', text)
 
     def test_pokemon_thumbnail_must_be_480_wide(self):
         code, text = run_check(pokemon_fake(), 'Delta Reign', 'pokemon', webp=(240, 336))
