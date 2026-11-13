@@ -131,7 +131,9 @@ test('rows size to their content: the cells hug what they hold and only the grap
   assert.match(css, /\.desk-cell \.cell-skel > span:nth-child\(n \+ 2\) \{ display: none; \}/);
   // The set icons under the card scale with the free height of the card column on the wide desk.
   assert.match(css, /\.hero-art-col \.version-links \{\s*flex: 1 1 auto;[^}]*container-type: size;/);
-  assert.match(css, /width: clamp\(2\.5rem, 62cqh, 4\.6rem\);\s*height: clamp\(2\.5rem, 62cqh, 4\.6rem\);/);
+  assert.match(css, /--shortcut-size: min\(clamp\(2\.5rem, 62cqh, 4\.6rem\), \(100cqw - \(var\(--set-count\) - 1\) \* 0\.35rem\) \/ var\(--set-count\)\);/);
+  assert.match(css, /\.hero-art-col \.version-shortcuts \{[^}]*flex-wrap: nowrap/);
+  assert.match(css, /\.hero-art-col \.set-shortcut-code \{[^}]*overflow: hidden/);
   // The title is one line: no divider under it and See all inside it, not in a footer row.
   const title = css.match(/\n\.desk-cell \.cell-title \{([^}]*)\}/)[1];
   assert.doesNotMatch(title, /border-bottom/);
