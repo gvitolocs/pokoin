@@ -463,7 +463,8 @@ export function QueueRow(props) {
                   props.onPatch({ pricePkn: commit.pricePkn, ...(r.priceSuggested ? { priceSuggested: false } : {}) });
                   return;
                 }
-                if (commit.action === 'default') props.onPriceEmptied?.(r);
+                // Invalid text on an unpriced or suggested row also gives the price back to the default.
+                if (commit.action === 'default' || (commit.action === 'restore' && (r.pricePkn == null || r.priceSuggested))) props.onPriceEmptied?.(r);
                 e.currentTarget.value = priceInputFromPkn(r.pricePkn, currency());
               }}
               onKeyDown={(e) => {
