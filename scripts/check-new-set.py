@@ -213,7 +213,7 @@ def run(name, game='pokemon'):
         returned = [p for g in by_set.get('groups', []) for p in g.get('printings', [])]
         returned_singles = [p for p in returned if is_single(p)]
         hits = sample_ids & {card_key(p) for p in returned_singles}
-        report(bool(hits), 'set-name suggest', f'{len(returned)} printings returned, {len(returned_singles)} singles, {len(hits)} of the sampled singles; the API ranks sealed products first for a bare set name')
+        report(bool(hits), 'set-name suggest', f'{len(returned)} printings returned, {len(returned_singles)} singles, {len(hits)} of the sampled singles' + ('' if hits else '; the API ranks sealed products first for a bare set name'))
     if pokemon:
         set_file = (ROOT / 'market/src/data/suggest-sets.js').read_text()
         report(f'"slug":"{slug}"' in set_file, 'local suggest set catalog', slug)
