@@ -13,6 +13,7 @@ import {
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
+import { localizeStrategyName } from '@market/pricer.js';
 import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
 import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
@@ -209,7 +210,7 @@ function SelectionBar(props) {
   const ids = () => [...props.selected];
   const count = () => props.selected.size;
   const inGroup = () => ids().some((id) => pricing.memberships().has(id));
-  const strategyName = (id) => pricing.strategies().find((entry) => entry.id === id)?.name || 'No strategy';
+  const strategyName = (id) => localizeStrategyName(pricing.strategies().find((entry) => entry.id === id)?.name, pricing.currencyCtx()) || 'No strategy';
 
   // Outside clicks and Escape close the menu.
   createEffect(menuOpen, (open) => {
@@ -307,6 +308,7 @@ function SelectionBar(props) {
               <NewGroupForm
                 class="pricer-menu-form"
                 idPrefix="board-new-group"
+                ctx={pricing.currencyCtx()}
                 groups={pricing.groups()}
                 strategies={pricing.strategies()}
                 onCreate={createWith}

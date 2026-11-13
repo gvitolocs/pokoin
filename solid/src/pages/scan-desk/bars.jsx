@@ -71,7 +71,7 @@ export function DefaultsBar(props) {
   const [sizeDraft, setSizeDraft] = createSignal(untrack(() => String(size())));
   const [sizeOpen, setSizeOpen] = createSignal(false);
   let sizeMenu;
-  const pricingList = createMemo(() => pricingOptions(props.pricing, d()));
+  const pricingList = createMemo(() => pricingOptions(props.pricing, d(), props.currencyCtx));
 
   createEffect(sizeOpen, (open) => {
     if (!open) return undefined;

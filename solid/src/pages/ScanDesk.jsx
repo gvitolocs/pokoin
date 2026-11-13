@@ -135,6 +135,8 @@ function ScanDeskDesk(props) {
   const [submitIntent, setSubmitIntent] = createSignal('list');
   /** `fetchPricingStrategies` answer for the Pricing select (null until loaded). */
   const [pricingData, setPricingData] = createSignal(fixture?.pricing ?? null);
+  /** The seller's currency, as the strategies answer states it: for every pricing label. */
+  const pricingCtx = () => currencyContext(pricingData()?.pricerSettings, pricingData()?.currencyRate);
   /** One line after submit: what batch pricing did, or that it failed. */
   const [pricingNote, setPricingNote] = createSignal({ text: '', failed: false });
   const [now, setNow] = createSignal(Date.now());
@@ -821,7 +823,7 @@ function ScanDeskDesk(props) {
   /** "Batch default" tile: the batch's choice by name. */
   const batchPricingLabel = () => {
     if (!pricingChoiceValue(defaults())) return 'No pricing';
-    return rowPricingChip({}, defaults(), pricingData()).label;
+    return rowPricingChip({}, defaults(), pricingData(), pricingCtx()).label;
   };
 
   function choosePricing(choice) {
@@ -1550,6 +1552,7 @@ function ScanDeskDesk(props) {
               defaults={defaults()}
               showPricing={submitIntent() === 'list'}
               pricing={pricingData()}
+              currencyCtx={pricingCtx()}
               pricingHref={props.preview ? '/mypokoin/pricer?mypokoinPreview' : '/mypokoin/pricer'}
               boxes={recentBoxNames()}
               stackFull={stackFull()}
@@ -1663,7 +1666,7 @@ function ScanDeskDesk(props) {
             count={ids().length}
             strategies={pricingData()?.strategies || []}
             groups={pricingData()?.groups || []}
-            ctx={currencyContext(pricingData()?.pricerSettings, pricingData()?.currencyRate)}
+            ctx={pricingCtx()}
             current={pricingCurrent()}
             batchLabel={batchPricingLabel()}
             onChoose={choosePricing}
@@ -1726,7 +1729,7 @@ function ScanDeskDesk(props) {
               priceOnLoad={rowPriced(row())}
               picked={picked().has(row().id)}
               onTogglePick={!closed() && submitIntent() === 'list' ? () => togglePicked(row().id) : undefined}
-              pricingChip={submitIntent() === 'list' ? rowPricingChip(row(), defaults(), pricingData()) : null}
+              pricingChip={submitIntent() === 'list' ? rowPricingChip(row(), defaults(), pricingData(), pricingCtx()) : null}
               onPricingChip={() => setPricingFor([row().id])}
               image={images()[row().id]}
               closed={closed()}
