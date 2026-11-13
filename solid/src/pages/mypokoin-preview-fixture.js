@@ -98,7 +98,10 @@ function previewSize() {
 }
 
 function repeatRows(rows, count) {
-  return Array.from({ length: count }, (_, i) => ({ ...rows[i % rows.length], id: `${rows[i % rows.length].id}-${i}` }));
+  return Array.from({ length: count }, (_, i) => {
+    const row = rows[i % rows.length];
+    return { ...row, id: `${row.id}-${i}`, cardId: `${row.cardId}-${Math.floor(i / rows.length)}` };
+  });
 }
 
 export function previewListings() {

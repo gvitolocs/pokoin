@@ -1,3 +1,4 @@
+import { createTabCache } from '../lib/tab-cache.js';
 import { createEffect, createSignal, For, Show, untrack } from 'solid-js';
 import { useLocation } from '@solidjs/router';
 import {
@@ -66,6 +67,8 @@ function pickCardFromSearch(data, row) {
   return scored[0]?.card || null;
 }
 
+const syncReviewCache = createTabCache();
+
 function SyncReviewDesk() {
   const uid = () => authUser()?.uid || accountProfile()?.uid || authSession()?.uid || '';
   const sellerName = () => {
@@ -84,7 +87,12 @@ function SyncReviewDesk() {
   createEffect(
     () => (signedIn() ? uid() : ''),
     (id) => {
-      if (!id) return undefined;
+      if (!id) { setReconcile(null); setListings([]); setShipFromCountry(''); return undefined; }
+      const cached = syncReviewCache.get(id);
+      setReconcile(() => cached?.reconcile ?? null);
+      setListings(() => cached?.listings ?? []);
+      setShipFromCountry(cached?.shipFromCountry ?? '');
+      if (syncReviewCache.fresh(id)) return undefined;
       let cancelled = false;
       getBearer()
         .then(async (token) => {
@@ -95,9 +103,11 @@ function SyncReviewDesk() {
           ]);
           if (cancelled) return;
           const summary = syncData?.sync?.summary || syncData?.summary || {};
-          setReconcile(() => summary.powerToolsReconcile || null);
-          setListings(listData?.listings || listData?.items || []);
-          setShipFromCountry(String(settings?.shipFromCountry || '').toUpperCase());
+          const next = { reconcile: summary.powerToolsReconcile || null, listings: listData?.listings || listData?.items || [], shipFromCountry: String(settings?.shipFromCountry || '').toUpperCase() };
+          syncReviewCache.set(id, next);
+          setReconcile(() => next.reconcile);
+          setListings(() => next.listings);
+          setShipFromCountry(next.shipFromCountry);
         })
         .catch((err) => {
           if (!cancelled) setError(err.message || 'Could not load sync review.');
@@ -131,6 +141,7 @@ function SyncReviewDesk() {
       setError('No Pokoin listing linked to that CardTrader product yet. Sync again or open the card desk.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {
@@ -154,6 +165,7 @@ function SyncReviewDesk() {
       setError('No Pokoin listing to cancel for that CardTrader product.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {
@@ -185,6 +197,7 @@ function SyncReviewDesk() {
       setError('That Power Tools row has no price. Open the card desk to list it manually.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {

@@ -10,9 +10,13 @@ import {
 } from '@market/api.js';
 import { currencyContext, membershipMap, normalizeStrategy } from '@market/pricer.js';
 import { game } from '@market/game.js';
-import { getBearer } from '../../stores/auth.js';
+import { authUid, getBearer } from '../../stores/auth.js';
+import { createTabCache } from '../../lib/tab-cache.js';
+
 import { rememberedComp } from '../inventory/price-memo.js';
 import * as local from './pricer-local.js';
+
+const pricingCache = createTabCache();
 
 /**
  * The seller's strategies, pricing groups and memberships: one source for
@@ -31,16 +35,17 @@ export function createPricing(options = {}) {
   let previewState = preview
     ? { strategies: [], groups: [], pairs: [], ...(options.previewState || {}) }
     : null;
-  const first = preview ? local.snapshot(previewState) : { strategies: [], groups: [], memberships: [] };
+  const cached = preview ? null : pricingCache.get(untrack(authUid));
+  const first = preview ? local.snapshot(previewState) : cached?.data || { strategies: [], groups: [], memberships: [] };
   const [strategies, setStrategies] = createSignal(first.strategies);
   const [groups, setGroups] = createSignal(first.groups);
   const [pairs, setPairs] = createSignal(first.memberships);
-  const [loaded, setLoaded] = createSignal(preview);
+  const [loaded, setLoaded] = createSignal(preview || Boolean(cached));
   const [error, setError] = createSignal('');
   // The seller's display currency and the edge's fresh ECB rate beside it;
   // every strategies answer carries both, and a settings save updates them.
-  const [pricerSettings, setPricerSettings] = createSignal(options.pricerSettings || {});
-  const [currencyRate, setCurrencyRate] = createSignal(options.currencyRate ?? null);
+  const [pricerSettings, setPricerSettings] = createSignal(options.pricerSettings || cached?.settings || {});
+  const [currencyRate, setCurrencyRate] = createSignal(options.currencyRate ?? cached?.rate ?? null);
   const currencyCtx = createMemo(() => currencyContext(pricerSettings(), currencyRate()));
   // Bumped on every change: dry runs re-plan on it.
   const [version, setVersion] = createSignal(0);
@@ -65,10 +70,19 @@ export function createPricing(options = {}) {
   }
 
   /** Reload everything; answers the strategies response (it carries pricerSettings and currencyRate). */
-  async function refresh() {
+  async function refresh({ force = false } = {}) {
     if (preview) {
       publish(local.snapshot(previewState));
       return null;
+    }
+    const uid = authUid();
+    const stored = pricingCache.get(uid);
+    if (!force && stored && pricingCache.fresh(uid)) {
+      publish(stored.data);
+      setPricerSettings(() => stored.settings);
+      setCurrencyRate(() => stored.rate);
+      setLoaded(true);
+      return stored.answer;
     }
     let strategyData;
     let groupData;
@@ -79,11 +93,14 @@ export function createPricing(options = {}) {
       setError(err.message || 'Could not load your pricing groups.');
       throw err;
     }
-    publish({
+    if (authUid() !== uid) return null;
+    const data = {
       strategies: strategyData.strategies || [],
       groups: groupData.groups || strategyData.groups || [],
       memberships: groupData.memberships || [],
-    });
+    };
+    pricingCache.set(uid, { data, settings: strategyData.pricerSettings || {}, rate: strategyData.currencyRate ?? null, answer: strategyData });
+    publish(data);
     setPricerSettings(() => strategyData.pricerSettings || {});
     setCurrencyRate(() => strategyData.currencyRate ?? null);
     setError('');
@@ -94,7 +111,7 @@ export function createPricing(options = {}) {
   async function settle(data) {
     publish(data);
     // Strategy "Used by" names and group counts follow the change.
-    await refresh().catch((err) => setError(err.message || 'Could not reload your pricing groups.'));
+    await refresh({ force: true }).catch((err) => setError(err.message || 'Could not reload your pricing groups.'));
     return data;
   }
 
@@ -156,7 +173,7 @@ export function createPricing(options = {}) {
     }
     const token = await getBearer();
     const result = await applyPricing(body, token);
-    if (!body.dryRun) await refresh().catch((err) => setError(err.message || 'Could not reload your pricing groups.'));
+    if (!body.dryRun) await refresh({ force: true }).catch((err) => setError(err.message || 'Could not reload your pricing groups.'));
     return result;
   }
 
@@ -174,9 +191,9 @@ export function createPricing(options = {}) {
     pairs,
     memberships,
     pricerSettings,
-    setPricerSettings,
+    setPricerSettings: (value) => { pricingCache.delete(authUid()); setPricerSettings(value); },
     currencyRate,
-    setCurrencyRate,
+    setCurrencyRate: (value) => { pricingCache.delete(authUid()); setCurrencyRate(value); },
     currencyCtx,
     loaded,
     error,

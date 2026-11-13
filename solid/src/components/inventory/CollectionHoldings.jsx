@@ -20,7 +20,7 @@ import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { sellerCurrency, sellerSettings } from '../../stores/buyer.js';
-import { previewCollection } from '../../pages/mypokoin-preview-fixture.js';
+import { previewCollection } from '../../pages/mypokoin-preview.js';
 import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 
 const ADDRESS_FIELDS = ['name', 'line1', 'city', 'postalCode', 'country'];
@@ -227,6 +227,7 @@ export default function CollectionHoldings(props) {
   const editedAsks = new Set();
   const [heldLimit, setHeldLimit] = createSignal(COLLECTION_BATCH_SIZE);
   const [listedLimit, setListedLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [nftLimit, setNftLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   async function loadCollection() {
     setError('');
@@ -632,7 +633,8 @@ export default function CollectionHoldings(props) {
                 <Show when={heldNft().length}>
                   <div class="collection-tile-grid" data-testid="collection-nft">
                     <p class="page-lede">NFT · {heldNft().length} holding{heldNft().length === 1 ? '' : 's'}</p>
-                    <For each={heldNft()}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <For each={heldNft().slice(0, nftLimit())}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <Show when={heldNft().length > nftLimit()}><button type="button" class="btn ghost" onClick={() => setNftLimit(nextCollectionBatch(nftLimit(), heldNft().length))}>Show more</button></Show>
                   </div>
                   <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>

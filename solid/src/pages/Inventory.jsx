@@ -24,7 +24,7 @@ import {
   previewComps,
   previewGroups,
   previewStrategies,
-} from './mypokoin-preview-fixture.js';
+} from './mypokoin-preview.js';
 import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';

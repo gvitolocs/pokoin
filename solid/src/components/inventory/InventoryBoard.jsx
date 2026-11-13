@@ -403,7 +403,7 @@ export default function InventoryBoard(props) {
     setPage(next);
     board?.scrollIntoView({ block: 'start', behavior: 'instant' });
   }
-  const pageSize = 50;
+  const pageSize = 40;
   const entries = createMemo(() => mode() === 'stacks' ? groupInventoryStacks(view())
     : mode() === 'titles' ? groupInventoryTitles(view()) : view());
   const totalPages = () => Math.max(1, Math.ceil(entries().length / pageSize));
