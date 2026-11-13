@@ -363,3 +363,14 @@ test('year headings link to the TCG era page', () => {
   assert.equal(headingHref('2019/2020–2023'), '/marketplace/eras/sword-shield');
   assert.equal(headingHref('Other'), '/marketplace/eras/other');
 });
+
+
+test('Prize Pack series and variants use the bundled printed stamp', () => {
+  const asset = '/expansion-symbols/play-pokemon-prize-pack.png';
+  for (const slug of ['play-pokemon-prize-pack-series', 'play-pokemon-prize-pack-series-cosmos-holo', 'play-pokemon-prize-pack-series-eight']) {
+    assert.deepEqual(expansionSymbolSources({ slug, expansionSymbolUrl: 'https://cdn.pokoin.com/expansions/symbols/missing.png' }), [asset]);
+  }
+  assert.deepEqual(expansionSymbolSources({ name: 'Play! Pokémon Prize Pack Series' }), [asset]);
+  assert.ok(!expansionSymbolSources({ slug: 'scarlet-and-violet' }).includes(asset));
+  assert.ok(!expansionSymbolSources({ slug: 'play-pokemon-prize-pack-series' }, 'onepiece.pokoin.com').includes(asset));
+});

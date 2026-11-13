@@ -18,10 +18,14 @@ export default function ExpansionMark(props) {
   const slug = () => props.slug || setSlug(props.setName);
   // Sources that 404'd here before are skipped, so the mark paints at once.
   // A memo: the filter runs once per source list, not again after an error.
-  const sources = createMemo(() => [
-    expansionStampSrc({ slug: slug(), number: props.number, id: props.cardId }),
-    ...expansionSymbolSources({ slug: slug(), expansionSymbolUrl: props.symbolUrl }),
-  ].filter(Boolean).map(cdnFetchUrl).filter((url) => workingImage(url) !== DEAD_IMAGE), {
+  const sources = createMemo(() => {
+    const symbols = expansionSymbolSources({ slug: slug(), expansionSymbolUrl: props.symbolUrl });
+    const stamp = expansionStampSrc({ slug: slug(), number: props.number, id: props.cardId });
+    // The bundled Prize Pack mark replaces the missing generic Play! stamp.
+    const ordered = symbols[0]?.includes('/expansion-symbols/play-pokemon-prize-pack.png')
+      ? [...symbols, stamp] : [stamp, ...symbols];
+    return ordered.filter(Boolean).map(cdnFetchUrl).filter((url) => workingImage(url) !== DEAD_IMAGE);
+  }, {
     equals: (a, b) => a.length === b.length && a.every((url, i) => url === b[i]),
   });
   const [failed, setFailed] = createSignal(() => (sources(), 0));

@@ -7,7 +7,8 @@ const mark = read('./ExpansionMark.jsx');
 
 test('a stamped deck printing shows its stamp before the set mark, then the code', () => {
   // Stamp, then the set mark SVG and its PNG (expansionSymbolSources), then letters.
-  assert.match(mark, /expansionStampSrc\(\{ slug: slug\(\), number: props\.number, id: props\.cardId \}\),\s*\.\.\.expansionSymbolSources\(/);
+  assert.match(mark, /expansionStampSrc\(\{ slug: slug\(\), number: props\.number, id: props\.cardId \}\)/);
+  assert.match(mark, /\? \[\.\.\.symbols, stamp\] : \[stamp, \.\.\.symbols\]/);
   // A missing stamp plate falls through to the set mark, not straight to letters.
   // The failed source is remembered (image-fallback-memo) and the next one is tried.
   assert.match(mark, /onError=\{\(\) => \{\s*rememberImageFallback\(src\(\), DEAD_IMAGE, [^)]*\);\s*setFailed\(\(n\) => n \+ 1\);/);
