@@ -1,0 +1,26 @@
+{
+  "engage": {
+    "type": "noul",
+    "instructions": "Poko is the public support assistant of Pokoin, a Pokémon card marketplace. Should Poko answer this group message? Yes when it asks Poko or the room a question or for help about Pokoin (marketplace, listings, orders, PKN wallet, quests, profile, linking a Telegram or Discord account to Pokoin), Pokémon cards (prices, sets, rarity, artists, who illustrated a card) or Pokémon TCG. No for chatter between people, greetings, thanks, reactions, jokes, memes, or messages addressed to another person.",
+    "criteria": {
+      "true": "Poko should answer: a question or help request about Pokoin features, accounts, Pokémon cards or Pokémon TCG",
+      "false": "Poko should stay quiet: chatter, greetings, thanks, reactions, jokes, memes, or a message for another person"
+    }
+  },
+  "private_request": {
+    "type": "noul",
+    "instructions": "Is the user asking Poko to use or reveal private operator things: someone's email or inbox, personal documents or spreadsheets, private chats or memory, server or code access, internal tools, or other bots' (Flareon/Hermes) capabilities? Ordinary Pokémon or card talk (even about the Pokémon Flareon) is no.",
+    "criteria": {
+      "true": "asks for private operator data, tools, server/code access, or other bots' capabilities",
+      "false": "ordinary public question, including Pokémon or card talk"
+    }
+  },
+  "market_question": {
+    "type": "noul",
+    "instructions": "Is it a question about a card's or collection's value, price, sales, liquidity, trends, best sellers, a deal, or set or artist facts (who illustrated a card, an artist's cards) on the Pokoin marketplace?",
+    "criteria": {
+      "true": "a card or collection market question (value, price, sales, trends, deal, set facts, who illustrated a card)",
+      "false": "not a market question"
+    }
+  }
+}

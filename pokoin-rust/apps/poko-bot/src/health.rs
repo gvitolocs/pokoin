@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 const SAMPLE_CAP: usize = 200;
 
 pub struct Metrics {
+    pub jev: crate::jev::Jev,
     started: Instant,
     pub telegram_enabled: AtomicBool,
     pub telegram_polling: AtomicBool,
@@ -26,13 +27,23 @@ pub struct Metrics {
     pub hermes_fail: AtomicU64,
     pub blocked: AtomicU64,
     pub apologies: AtomicU64,
+    /// Bounded wait-out cycles taken after all-transient route failures.
+    pub transient_waits: AtomicU64,
+    /// Turns whose text carried invisible Unicode that was stripped.
+    pub invisible_stripped: AtomicU64,
+    gateway_lock: Mutex<String>,
     brain_latency: Mutex<VecDeque<u64>>,
     reply_latency: Mutex<VecDeque<u64>>,
 }
 
 impl Metrics {
     pub fn new() -> Self {
+        Self::with_jev(crate::jev::Jev::new(crate::jev::JevConfig::default()))
+    }
+
+    pub fn with_jev(jev: crate::jev::Jev) -> Self {
         Self {
+            jev,
             started: Instant::now(),
             telegram_enabled: AtomicBool::new(false),
             telegram_polling: AtomicBool::new(false),
@@ -48,9 +59,16 @@ impl Metrics {
             hermes_fail: AtomicU64::new(0),
             blocked: AtomicU64::new(0),
             apologies: AtomicU64::new(0),
+            transient_waits: AtomicU64::new(0),
+            invisible_stripped: AtomicU64::new(0),
+            gateway_lock: Mutex::new("not_started".into()),
             brain_latency: Mutex::new(VecDeque::new()),
             reply_latency: Mutex::new(VecDeque::new()),
         }
+    }
+
+    pub fn set_gateway_lock(&self, state: String) {
+        *self.gateway_lock.lock().expect("gateway lock state") = state;
     }
 
     pub fn push_brain_latency(&self, ms: u64) {
@@ -65,12 +83,14 @@ impl Metrics {
         let last = self.telegram_last_update_ms.load(Ordering::Relaxed);
         json!({
             "ok": true,
+            "jev": self.jev.snapshot(),
             "version": option_env!("POKO_BOT_BUILD_COMMIT").unwrap_or("dev"),
             "uptimeS": self.started.elapsed().as_secs(),
             "telegram": {
                 "enabled": self.telegram_enabled.load(Ordering::Relaxed),
                 "polling": self.telegram_polling.load(Ordering::Relaxed),
                 "lastUpdateAt": if last == 0 { Value::Null } else { json!(last) },
+                "gatewayLock": self.gateway_lock.lock().expect("gateway lock state").clone(),
             },
             "discord": {
                 "enabled": self.discord_enabled.load(Ordering::Relaxed),
@@ -86,6 +106,8 @@ impl Metrics {
                 "hermesFail": self.hermes_fail.load(Ordering::Relaxed),
                 "blocked": self.blocked.load(Ordering::Relaxed),
                 "apologies": self.apologies.load(Ordering::Relaxed),
+                "transientWaits": self.transient_waits.load(Ordering::Relaxed),
+                "invisibleStripped": self.invisible_stripped.load(Ordering::Relaxed),
             },
             "brainLatencyMs": latency_json(&self.brain_latency),
             "replyLatencyMs": latency_json(&self.reply_latency),
@@ -100,7 +122,7 @@ impl Default for Metrics {
     }
 }
 
-fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
+pub(crate) fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
     let mut samples = slot.lock().expect("latency");
     if samples.len() == SAMPLE_CAP {
         samples.pop_front();
@@ -108,7 +130,7 @@ fn push_sample(slot: &Mutex<VecDeque<u64>>, ms: u64) {
     samples.push_back(ms);
 }
 
-fn latency_json(slot: &Mutex<VecDeque<u64>>) -> Value {
+pub(crate) fn latency_json(slot: &Mutex<VecDeque<u64>>) -> Value {
     let samples = slot.lock().expect("latency");
     let mut sorted: Vec<u64> = samples.iter().copied().collect();
     sorted.sort_unstable();
