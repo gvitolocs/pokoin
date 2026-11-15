@@ -207,6 +207,15 @@ Answer:
 - `totals` weight **this page** by each row's quantity; `asOf` is the newest
   observation day among the page's rows, `null` when none has one.
 
+**Coverage.** These prices exist only for the cards the collector walks:
+cm-price-engine walks the products and the languages Pokoin listings need, on a
+7-day cycle published Mondays 03:00 UTC (docs/PRICE_DUMPS.md), and this call
+queues nothing for a read. A card that is in no Pokoin listing is never walked,
+so an `items` row for it always answers `no_offers`. `no_offers` means "no offer
+in the latest published walk, or not walked at all", never proof that Cardmarket
+has none. What is read is the latest weekly publish: `asOf` is the observation
+day of that snapshot, and the numbers age with it.
+
 ```bash
 curl -s https://api.pokoin.com/api/seller-api/v1 \
   -H "Authorization: Bearer $POKOIN_SELLER_API_TOKEN" -H 'Content-Type: application/json' \

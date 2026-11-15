@@ -322,7 +322,9 @@ stock, for a script or for valuing a lot; or let a strategy use it — source
 `cardmarketoffers`, basis `private` or `pro`, action `undercut` with
 `amountPkn` 2, because 2 PKN is exactly 1 cent. The strategy then goes through
 the same rounding, `minPkn` and cents core as every other basis, while the
-action gives the raw number and never a 0: a 1-cent minimum is no answer.
+action gives the raw number and never a 0: a 1-cent minimum is no answer. Only
+what the collector has walked has a number, so a card of no Pokoin listing
+answers `no_offers` — see the "Coverage" note beside that action.
 
 Cardmarket's condition facet is the *worst* grade the query accepts, so an `NM`
 facet means NM or better, and a `*` facet is an unfiltered mix: it answers a
