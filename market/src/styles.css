@@ -12857,6 +12857,18 @@ img.is-lang-scan {
   overflow-wrap: anywhere;
 }
 
+/* The Wanted board's tag on a row the caller posted themselves, where Edit and
+   Delete offer replace Sell now. */
+.buysell-own {
+  width: fit-content;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .buysell-side {
   display: grid;
   justify-items: end;

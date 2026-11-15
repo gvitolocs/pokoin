@@ -9,6 +9,7 @@ import {
   fetchBuyBoard,
   fetchBuyOrdersForMyListings,
   fetchMyBuyOrders,
+  openBuyOrderIds,
   orderStateLabel,
   updateBuyOrder,
 } from '@market/buy-orders.js';
@@ -22,9 +23,9 @@ import RequireSignIn from '../components/RequireSignIn.jsx';
 import BuySellIcon from '../components/buysell/BuySellIcon.jsx';
 import SellNowForm from '../components/buysell/SellNowForm.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
-import { getBearer } from '../stores/auth.js';
+import { getBearer, signedIn } from '../stores/auth.js';
 import { allowMypokoinPreview } from './mypokoin-preview-fixture.js';
-import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine } from './buysell-preview-fixture.js';
+import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine, previewOwnIds } from './buysell-preview-fixture.js';
 
 const TABS = [
   { id: 'wanted', label: 'Wanted' },
@@ -66,14 +67,85 @@ function OfferTitle(props) {
   );
 }
 
+/**
+ * Edit and delete of one of the caller's own open offers, shared by My offers and
+ * the marked rows of the Wanted board: one row sits in the editor at a time, a
+ * delete confirms first, and a failure of either write goes to `onError` — the
+ * surface's own Alert. `onDeleted` and `onEdited` say what each list does once a
+ * write lands: My offers reloads, the board keeps its rows and edits them in place.
+ */
+function ownOfferActions({ preview, onError, onDeleted, onEdited }) {
+  const [editing, setEditing] = createSignal('');
+  const [busyId, setBusyId] = createSignal('');
+  const isEditing = (order) => editing() === String(order.id);
+  const isBusy = (order) => busyId() === String(order.id);
+
+  async function remove(order) {
+    if (!window.confirm('Delete this offer?')) return;
+    setBusyId(String(order.id));
+    try {
+      if (!preview) await cancelBuyOrder(order.id, await getBearer());
+      onDeleted(order);
+    } catch (err) {
+      onError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  return {
+    isEditing,
+    isBusy,
+    toggle: (order) => setEditing(isEditing(order) ? '' : String(order.id)),
+    remove,
+    editorDone: (order, saved, updated) => {
+      setEditing('');
+      if (saved) onEdited(order, updated);
+    },
+  };
+}
+
+/** The Edit and Delete offer buttons of a row the caller owns; the editor opens below them. */
+function OwnOfferButtons(props) {
+  return (
+    <>
+      <button type="button" class="btn ghost" onClick={() => props.actions.toggle(props.order)}>Edit</button>
+      <button type="button" class="btn ghost" disabled={props.actions.isBusy(props.order)} onClick={() => props.actions.remove(props.order)}>Delete offer</button>
+    </>
+  );
+}
+
 function Wanted(props) {
   const [sort, setSort] = createSignal('recent');
   const [items, setItems] = createSignal(null);
   const [next, setNext] = createSignal('');
   const [error, setError] = createSignal('');
   const [loading, setLoading] = createSignal(false);
+  const [ownIds, setOwnIds] = createSignal(props.preview ? new Set(previewOwnIds()) : new Set());
   const [now] = createSignal(Date.now());
   let seq = 0;
+  let ownAsked = false;
+
+  const isOwn = (item) => ownIds().has(String(item.id));
+
+  const own = ownOfferActions({
+    preview: props.preview,
+    onError: setError,
+    onDeleted: (order) => {
+      // The row simply goes: the board is not fetched again, so the loaded pages stay.
+      setItems((rows) => (rows || []).filter((row) => String(row.id) !== String(order.id)));
+      setOwnIds((ids) => {
+        const left = new Set(ids);
+        left.delete(String(order.id));
+        return left;
+      });
+    },
+    // The PATCH answer is the order itself, so the row repaints instead of the board.
+    onEdited: (order, updated) => {
+      if (!updated) return;
+      setItems((rows) => (rows || []).map((row) => (String(row.id) === String(order.id) ? { ...row, ...updated } : row)));
+    },
+  });
 
   async function load(reset) {
     const mine = seq + 1;
@@ -99,6 +171,21 @@ function Wanted(props) {
 
   createEffect(sort, () => { load(true); });
 
+  /** The caller's own open offers, asked once; without them the board is the public one. */
+  async function markOwnOffers() {
+    try {
+      setOwnIds(openBuyOrderIds((await fetchMyBuyOrders(await getBearer()))?.items));
+    } catch (_) {
+      /* a board that cannot say which rows are yours still shows the rows */
+    }
+  }
+
+  createEffect(() => signedIn(), (ready) => {
+    if (props.preview || ownAsked || !ready) return;
+    ownAsked = true;
+    markOwnOffers();
+  });
+
   return (
     <>
       <div class="buysell-bar">
@@ -123,6 +210,7 @@ function Wanted(props) {
               <article class="buysell-row">
                 <RowThumb row={item} />
                 <OfferTitle item={item}>
+                  <Show when={isOwn(item)}><span class="buysell-own">Your offer</span></Show>
                   <OfferFacets item={item} />
                   <span class="buysell-meta">
                     {item.remaining} wanted · {expiryLabel(item.expires_at, now())}
@@ -131,9 +219,23 @@ function Wanted(props) {
                 </OfferTitle>
                 <span class="buysell-side">
                   <strong>{formatPkn(item.price_pkn)}</strong>
-                  <SellNowForm order={item} preview={props.preview} onDone={() => load(true)} />
+                  {/* Sell now is somebody else's offer to take; yours gets Edit and Delete. */}
+                  <Show when={!isOwn(item)}>
+                    <SellNowForm order={item} preview={props.preview} onDone={() => load(true)} />
+                  </Show>
+                  <Show when={isOwn(item)}>
+                    <OwnOfferButtons order={item} actions={own} />
+                  </Show>
                   <AppLink to={cardPath(item.card_id)}>Card page</AppLink>
                 </span>
+                <Show when={own.isEditing(item)}>
+                  <OfferEditor
+                    order={item}
+                    preview={props.preview}
+                    defaultDays="keep"
+                    onDone={(saved, updated) => own.editorDone(item, saved, updated)}
+                  />
+                </Show>
               </article>
             )}
           </For>
@@ -179,8 +281,8 @@ function OfferEditor(props) {
     setBusy(true);
     setError('');
     try {
-      if (!props.preview) await updateBuyOrder(props.order.id, body, await getBearer());
-      props.onDone(true);
+      const updated = props.preview ? null : await updateBuyOrder(props.order.id, body, await getBearer());
+      props.onDone(true, updated);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -211,8 +313,6 @@ function OfferEditor(props) {
 function MyOffers(props) {
   const [items, setItems] = createSignal(null);
   const [error, setError] = createSignal('');
-  const [editing, setEditing] = createSignal('');
-  const [busyId, setBusyId] = createSignal('');
   const [now] = createSignal(Date.now());
 
   async function load() {
@@ -226,22 +326,16 @@ function MyOffers(props) {
   }
   onSettled(() => { load(); });
 
+  const own = ownOfferActions({
+    preview: props.preview,
+    onError: setError,
+    onDeleted: () => load(),
+    onEdited: () => load(),
+  });
+
   const groups = createMemo(() => STATE_ORDER
     .map((state) => ({ state, rows: (items() || []).filter((row) => row.state === state) }))
     .filter((group) => group.rows.length));
-
-  async function cancel(order) {
-    if (!window.confirm('Cancel this offer?')) return;
-    setBusyId(order.id);
-    try {
-      if (!props.preview) await cancelBuyOrder(order.id, await getBearer());
-      await load();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusyId('');
-    }
-  }
 
   return (
     <>
@@ -288,19 +382,15 @@ function MyOffers(props) {
                     <span class="buysell-side">
                       <strong>{formatPkn(order.price_pkn)}</strong>
                       <Show when={group.state === 'open'}>
-                        <button type="button" class="btn ghost" onClick={() => setEditing(editing() === order.id ? '' : order.id)}>Edit</button>
-                        <button type="button" class="btn ghost" disabled={busyId() === order.id} onClick={() => cancel(order)}>Cancel offer</button>
+                        <OwnOfferButtons order={order} actions={own} />
                       </Show>
                     </span>
-                    <Show when={editing() === order.id}>
+                    <Show when={own.isEditing(order)}>
                       <OfferEditor
                         order={order}
                         preview={props.preview}
                         defaultDays="keep"
-                        onDone={(saved) => {
-                          setEditing('');
-                          if (saved) load();
-                        }}
+                        onDone={(saved, updated) => own.editorDone(order, saved, updated)}
                       />
                     </Show>
                   </article>

@@ -58,7 +58,7 @@ function offer(id, card, fields) {
 }
 
 const WANTED = [
-  offer(1, 0, { price_pkn: 5200, remaining: 1, condition: 'SP', buyer_name: 'Mira', expires_at: iso(6 * DAY_MS) }),
+  offer(1, 0, { price_pkn: 5200, remaining: 1, condition: 'SP', expires_at: iso(6 * DAY_MS) }),
   offer(2, 1, { price_pkn: 440, remaining: 3, buyer_name: 'Jonas', expires_at: null }),
   offer(3, 2, { price_pkn: 980, remaining: 1, condition: 'MP', first_edition: true, expires_at: iso(2 * DAY_MS) }),
   offer(4, 3, { price_pkn: 640, remaining: 2, language: 'JP', buyer_name: 'Aiko', expires_at: iso(28 * DAY_MS) }),
@@ -67,6 +67,15 @@ const WANTED = [
   offer(7, 6, { price_pkn: 360, remaining: 2, condition: 'PL', buyer_name: 'Lars', expires_at: iso(14 * DAY_MS) }),
   offer(8, 7, { price_pkn: 1250, remaining: 1, language: 'DE', expires_at: null }),
 ];
+
+/**
+ * The board row the preview shows as the caller's own: no buyer name of a
+ * stranger above the "Your offer" tag, and it is not one of the offers the
+ * Sell-to-buyers tab matches, because you never sell into yourself.
+ */
+export function previewOwnIds() {
+  return [WANTED[0].id];
+}
 
 /** The board, in the order the API returns it for `sort`. */
 export function previewBoard(sort = 'recent') {
