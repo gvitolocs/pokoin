@@ -10,12 +10,13 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value as Json};
 
 use crate::domain::portfolio_catalog::{
-    catalog_select_sql, is_undefined_table, listing_join_sql, urls_join_sql,
+    catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    build_daily_series, clean_days, frozen_card_days, holding_slices,
-    sold_price_book, stored_is_current, stored_is_fresh, utc_day_key_ms, wallet_series,
-    HOLDINGS_SQL, PRICE_BASIS, SOLD_BY_BLUEPRINT_SQL, SERIES_REVISION,
+    add_utc_days, build_daily_series, clean_days, frozen_card_days, holding_slices,
+    sold_price_book, stored_is_current, stored_is_fresh, top_movers, utc_day_key_ms, wallet_series,
+    Mover, CARDS_BY_BLUEPRINT_SQL, HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION,
+    SOLD_BY_BLUEPRINT_SQL,
 };
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
@@ -255,9 +256,169 @@ pub async fn portfolio_history_other() -> Response {
     response
 }
 
+// ---------------------------------------------------------------------------
+// marketplace-portfolio-movers
+// ---------------------------------------------------------------------------
+
+/// The chart opens on a month, so the movers window does too.
+const MOVER_DEFAULT_DAYS: i64 = 30;
+const MOVER_DEFAULT_LIMIT: usize = 6;
+const MOVER_MAX_LIMIT: usize = 12;
+
+/// `?days=30|90|180|max` — the window is counted back from today; `max` (or no
+/// parameter) prices the whole stored history. The chart's own 1M/3M/6M day
+/// counts are accepted, so a tile always moves over the window it sits under.
+fn movers_window(raw: Option<&str>, today_key: &str) -> (Json, String) {
+    let text = raw.unwrap_or("").trim();
+    if text.eq_ignore_ascii_case("max") {
+        return (json!("max"), String::new());
+    }
+    let days = text
+        .parse::<i64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .unwrap_or(MOVER_DEFAULT_DAYS)
+        .clamp(1, HISTORY_DAYS);
+    (json!(days), add_utc_days(today_key, -days))
+}
+
+/// `?limit=6`, bounded so one request cannot ask for the whole collection.
+fn movers_limit(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(MOVER_DEFAULT_LIMIT)
+        .min(MOVER_MAX_LIMIT)
+}
+
+/// Blueprint id → the catalog fields a tile needs.
+async fn read_mover_cards(
+    db: &MarketplaceDb,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<String, Json>> {
+    let rows = db
+        .query_json(CARDS_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids.to_vec())])
+        .await
+        .map_err(ApiError::from)?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            let blueprint_id = row_text(row, "blueprint_id");
+            if blueprint_id.is_empty() {
+                return None;
+            }
+            let images = react_image_urls(row);
+            Some((
+                blueprint_id,
+                json!({
+                    "cardId": row_text(row, "card_id"),
+                    "name": row_text(row, "name"),
+                    "setName": row_text(row, "expansion_name"),
+                    "collectorNumber": row_text(row, "expansion_number"),
+                    "imageUrl": images.get("imageUrl").and_then(Json::as_str).unwrap_or(""),
+                }),
+            ))
+        })
+        .collect())
+}
+
+/// A mover plus the card it is a picture of. A printing the catalog lost still
+/// keeps its own numbers; the tile then shows no art rather than a wrong one.
+fn mover_item(mover: &Mover, cards: &std::collections::HashMap<String, Json>) -> Json {
+    let mut row = mover.to_json();
+    if let Some(card) = cards.get(&mover.blueprint_id).and_then(Json::as_object) {
+        if let Some(object) = row.as_object_mut() {
+            for (key, value) in card {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if let Some(object) = row.as_object_mut() {
+        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
+            object
+                .entry(key.to_string())
+                .or_insert_with(|| Json::String(String::new()));
+        }
+    }
+    row
+}
+
+/// `GET /api/marketplace-portfolio-movers`.
+pub async fn marketplace_portfolio_movers(
+    State(state): State<DomainState>,
+    method: axum::http::Method,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if method != axum::http::Method::GET {
+        return portfolio_history_other().await;
+    }
+    match portfolio_movers_inner(&state, &headers, &query).await {
+        Ok(response) => response,
+        Err(error) => history_error(error),
+    }
+}
+
+async fn portfolio_movers_inner(
+    state: &DomainState,
+    headers: &HeaderMap,
+    query: &std::collections::HashMap<String, String>,
+) -> Result<Response> {
+    let claims = require_claims(state, headers).await?;
+    let today_key = utc_day_key_ms(state.clock().now().timestamp_millis());
+    let (days, from_day) = movers_window(query.get("days").map(String::as_str), &today_key);
+    let limit = movers_limit(query.get("limit").map(String::as_str));
+    // The same read model the history series uses; without it there is no
+    // sold book to rank, which is an empty dashboard and not a failure.
+    let no_movers = || {
+        ok_no_store(json!({
+            "ok": true, "days": days, "gainers": [], "losers": [],
+        }))
+    };
+    let db = match state.marketplace_db() {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::debug!(%error, "portfolio movers read model is not configured");
+            return Ok(no_movers());
+        }
+    };
+    let Some((holdings, book)) = read_card_book(&db, &claims.uid).await else {
+        return Ok(no_movers());
+    };
+    let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
+
+    let mut ids: Vec<i64> = Vec::new();
+    for mover in movers.gainers.iter().chain(movers.losers.iter()) {
+        if let Ok(value) = mover.blueprint_id.parse::<i64>() {
+            if !ids.contains(&value) {
+                ids.push(value);
+            }
+        }
+    }
+    let cards = if ids.is_empty() {
+        Default::default()
+    } else {
+        match read_mover_cards(&db, &ids).await {
+            Ok(cards) => cards,
+            Err(error) => {
+                // The move is the substance; the picture is a join away.
+                tracing::error!(%error, "portfolio mover cards failed");
+                Default::default()
+            }
+        }
+    };
+
+    Ok(ok_no_store(json!({
+        "ok": true,
+        "days": days,
+        "gainers": movers.gainers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
+        "losers": movers.losers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::portfolio_history::PricePoint;
 
     #[test]
     fn utc_iso_renders_milliseconds() {
@@ -273,10 +434,86 @@ mod tests {
             response.headers().get(axum::http::header::CACHE_CONTROL),
             Some(&axum::http::HeaderValue::from_static("no-store"))
         );
-        let response = history_error(
-            ApiError::bad_request("nope").with_code("invalid_token"),
-        );
+        let response = history_error(ApiError::bad_request("nope").with_code("invalid_token"));
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn the_movers_window_counts_back_from_today() {
+        // The chart presets arrive as their day counts.
+        assert_eq!(
+            movers_window(Some("91"), "2026-10-08"),
+            (json!(91), "2026-07-09".to_string())
+        );
+        // No parameter and junk both mean the month the dashboard opens on.
+        assert_eq!(
+            movers_window(None, "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("0"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("two"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        // A window longer than the stored series is clamped, never refused.
+        assert_eq!(
+            movers_window(Some("4000"), "2026-10-08"),
+            (json!(HISTORY_DAYS), "2025-09-03".to_string())
+        );
+        // MAX asks for everything and prices from the first stored day.
+        assert_eq!(
+            movers_window(Some("MAX"), "2026-10-08"),
+            (json!("max"), String::new())
+        );
+    }
+
+    #[test]
+    fn the_movers_limit_defaults_and_bounds() {
+        assert_eq!(movers_limit(None), 6);
+        assert_eq!(movers_limit(Some("3")), 3);
+        assert_eq!(movers_limit(Some("0")), 6);
+        assert_eq!(movers_limit(Some("60")), 12);
+    }
+
+    #[test]
+    fn a_mover_item_keeps_its_numbers_when_the_catalog_lost_the_card() {
+        let mover = Mover {
+            key: "502874|NM|EN|-|-|-".to_string(),
+            blueprint_id: "502874".to_string(),
+            condition: "NM".to_string(),
+            language: "EN".to_string(),
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            quantity: 2,
+            start_pkn: 1000.0,
+            end_pkn: 1450.0,
+            change_pkn: 450.0,
+            change_pct: 45.0,
+            series: vec![PricePoint {
+                day: "2026-10-01".to_string(),
+                pkn: 1450.0,
+            }],
+        };
+        let cards = std::collections::HashMap::from([(
+            "502874".to_string(),
+            json!({ "cardId": "1234", "name": "Snorlax", "imageUrl": "https://cdn/x.jpg" }),
+        )]);
+        let joined = mover_item(&mover, &cards);
+        assert_eq!(joined["cardId"], json!("1234"));
+        assert_eq!(joined["name"], json!("Snorlax"));
+        assert_eq!(joined["changePct"], json!(45));
+        assert_eq!(joined["endPkn"], json!(1450));
+        assert_eq!(joined["series"].as_array().map(Vec::len), Some(1));
+
+        // A missing join still answers with the empty fields the tile expects.
+        let alone = mover_item(&mover, &std::collections::HashMap::new());
+        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
+            assert_eq!(alone[key], json!(""), "{key}");
+        }
     }
 }
 
@@ -285,8 +522,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 const PORTFOLIO_SHORT_CACHE: &str = "public, max-age=15, s-maxage=30";
-const PORTFOLIO_CACHE: &str =
-    "public, max-age=15, s-maxage=30, stale-while-revalidate=60";
+const PORTFOLIO_CACHE: &str = "public, max-age=15, s-maxage=30, stale-while-revalidate=60";
 
 /// Per-game catalog pools. The Pokemon catalog is the configured default; every
 /// other game resolves its own URL (explicit env, else derived from the base
@@ -298,10 +534,13 @@ fn game_db(state: &DomainState, game: &str) -> Result<MarketplaceDb> {
     }
     let url = database_url_for_game(game, &env_pairs());
     if url.is_empty() {
-        return Err(ApiError::internal("Marketplace database is not configured."));
+        return Err(ApiError::internal(
+            "Marketplace database is not configured.",
+        ));
     }
-    let pool = pokoin_db::satellite_pool(&url)
-        .map_err(|error| ApiError::internal(format!("Marketplace database pool failed: {error}")))?;
+    let pool = pokoin_db::satellite_pool(&url).map_err(|error| {
+        ApiError::internal(format!("Marketplace database pool failed: {error}"))
+    })?;
     Ok(MarketplaceDb::from_pool(pool))
 }
 
@@ -358,7 +597,11 @@ async fn query_pokemon_priced(
     } else {
         "null::float8"
     };
-    let listing_qty = if has_listings { "listings.qty" } else { "null::int" };
+    let listing_qty = if has_listings {
+        "listings.qty"
+    } else {
+        "null::int"
+    };
     let listing_count = if has_listings {
         "coalesce(listings.listing_count, 0)"
     } else {
@@ -369,14 +612,26 @@ async fn query_pokemon_priced(
     } else {
         "c.item_kind = 'product'"
     };
-    let card_name = if has_listings { "listings.card_name" } else { "null::text" };
+    let card_name = if has_listings {
+        "listings.card_name"
+    } else {
+        "null::text"
+    };
     let collector = if has_listings {
         "listings.collector_number"
     } else {
         "null::text"
     };
-    let condition = if has_listings { "listings.condition" } else { "null" };
-    let language = if has_listings { "listings.language" } else { "null" };
+    let condition = if has_listings {
+        "listings.condition"
+    } else {
+        "null"
+    };
+    let language = if has_listings {
+        "listings.language"
+    } else {
+        "null"
+    };
     let sql = format!(
         "select card_id, ct_id, floor_pkn, \
                 coalesce(listing_total, floor_pkn * qty)::float8 as total_pkn, \
@@ -548,9 +803,9 @@ pub async fn marketplace_portfolio(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use crate::domain::marketplace_game::{parse_game_from_request, is_pokemon_game};
+    use crate::domain::marketplace_game::{is_pokemon_game, parse_game_from_request};
     use crate::domain::portfolio_catalog::{
-        empty_payload, limit_for_game, parse_public_card_id, payload_from_rows, game_label,
+        empty_payload, game_label, limit_for_game, parse_public_card_id, payload_from_rows,
     };
 
     if method == axum::http::Method::OPTIONS {
