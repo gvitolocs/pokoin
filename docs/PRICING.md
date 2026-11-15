@@ -315,6 +315,15 @@ agreeing on the switches that are on. Every value carries the facet it came
 from (`condition`, `language`, `finish`, `firstEdition`), its `offers` count
 and `countsComplete`, so a reader can tell what question the number answers.
 
+"1 cent under" is that number, not a rule of its own. Read it in bulk with the
+`cm-undercut` connector action (docs/pricer-cardrails-contract.md), which
+answers both seller types of up to 2 000 items, of one group or of the whole
+stock, for a script or for valuing a lot; or let a strategy use it — source
+`cardmarketoffers`, basis `private` or `pro`, action `undercut` with
+`amountPkn` 2, because 2 PKN is exactly 1 cent. The strategy then goes through
+the same rounding, `minPkn` and cents core as every other basis, while the
+action gives the raw number and never a 0: a 1-cent minimum is no answer.
+
 Cardmarket's condition facet is the *worst* grade the query accepts, so an `NM`
 facet means NM or better, and a `*` facet is an unfiltered mix: it answers a
 switch that is off and never one that is on. A graded, signed or altered copy
