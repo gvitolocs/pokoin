@@ -1,3 +1,5 @@
+import { createTabCache } from '../lib/tab-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import { createEffect, createSignal, For, Show, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { fetchCardTraderZeroPicked, saveCardTraderZeroPick } from '@market/api.js';
@@ -9,12 +11,15 @@ import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
-import { getBearer, signedIn } from '../stores/auth.js';
+import { authUid, getBearer, signedIn } from '../stores/auth.js';
+
 import {
   allowMypokoinPreview,
   MYPOKOIN_PREVIEW_BANNER,
   previewZeroPicked,
-} from './mypokoin-preview-fixture.js';
+} from './mypokoin-preview.js';
+
+const pickedCache = createTabCache();
 
 function pickedWhen(value) {
   const at = value ? new Date(value) : null;
@@ -49,27 +54,35 @@ export function undoBody(row) {
  * listings: never in Listings, stock counts, or totals. Undo puts one back.
  */
 function PickedDesk(props) {
-  const [rows, setRows] = createSignal(props.preview ? previewZeroPicked().rows : null);
+  const [rows, setRows] = createSignal(props.preview ? previewZeroPicked().rows : pickedCache.get(untrack(authUid)) ?? null);
+  const [limit, setLimit] = createSignal(COLLECTION_BATCH_SIZE);
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal([]);
   const [notes, setNotes] = createSignal({});
   const flight = new Set();
 
-  async function load() {
+  async function load(uid) {
     setError('');
     try {
       const token = await getBearer();
       const data = await fetchCardTraderZeroPicked(token);
-      setRows(() => data?.rows || []);
+      const next = data?.rows || [];
+      if (authUid() !== uid) return;
+      pickedCache.set(uid, next);
+      setRows(() => next);
     } catch (err) {
+      if (authUid() !== uid) return;
       setError(err.message || 'Picked cards failed to load.');
       setRows((current) => current || []);
     }
   }
 
-  createEffect(signedIn, (on) => {
-    if (props.preview || !on) return;
-    load();
+  createEffect(() => ({ on: signedIn(), uid: authUid() }), ({ on, uid }) => {
+    if (props.preview) return;
+    if (!on || !uid) { setRows(null); return; }
+    const cached = pickedCache.get(uid);
+    if (cached) setRows(() => cached);
+    if (!pickedCache.fresh(uid)) load(uid);
   });
 
   async function undo(row) {
@@ -82,7 +95,7 @@ function PickedDesk(props) {
         const token = await getBearer();
         await saveCardTraderZeroPick(token, undoBody(row));
       }
-      setRows((list) => (list || []).filter((other) => String(other.id) !== key));
+      setRows((list) => { const next = (list || []).filter((other) => String(other.id) !== key); if (!props.preview) pickedCache.set(authUid(), next); return next; });
       setNotes((all) => ({ ...all, last: `${row.name || 'Card'} is back in inventory${row.locationFrom ? ` (${row.locationFrom})` : ''}.` }));
     } catch (err) {
       setError(err?.body?.code === 'allocated_copy_gone'
@@ -131,7 +144,7 @@ function PickedDesk(props) {
                 <span role="columnheader">Sold for</span>
                 <span role="columnheader"><span class="sr-only">Actions</span></span>
               </div>
-              <For each={rows()}>
+              <For each={rows().slice(0, limit())}>
                 {(row) => {
                   const language = () => (row.language ? listingLanguageFlag(row.language) : null);
                   const working = () => busy().includes(String(row.id));
@@ -185,6 +198,7 @@ function PickedDesk(props) {
                 }}
               </For>
             </div>
+            <Show when={rows().length > limit()}><button class="btn ghost" type="button" onClick={() => setLimit(nextCollectionBatch(limit(), rows().length))}>Show more</button></Show>
           </DeskPanel>
         </Show>
       </Show>
