@@ -5,6 +5,7 @@ import { sellTarget } from '../../lib/buy-book.js';
 import { useGameNavigate } from '../../lib/game-navigate.js';
 import { signedIn } from '../../stores/auth.js';
 import QuickSellDialog from './QuickSellDialog.jsx';
+import BuySellIcon from './BuySellIcon.jsx';
 import { rowThumbSrc } from '../inventory/RowThumb.jsx';
 
 /**
@@ -38,7 +39,10 @@ export default function SellNowForm(props) {
   return (
     <div class="sell-now">
       <Show when={!open()}>
-        <button type="button" class="btn ghost sell-now-btn" onClick={begin}>Sell now</button>
+        <button type="button" class="btn ghost sell-now-btn" title="Sell into this buyer's offer" onClick={begin}>
+          <BuySellIcon class="sell-now-ico" size="0.95em" />
+          Sell
+        </button>
       </Show>
       <Show when={open()}>
         <QuickSellDialog
