@@ -12,6 +12,37 @@ rails = SourceFileLoader(
 ).load_module()
 
 
+FIXTURE_SET_ALIASES = (
+    "storm emeralda",
+    "storm emeralda (japanese)",
+    "m6",
+    "japanese storm emeralda",
+)
+FIXTURE_SET_NEEDLES = ("storm emeralda",)
+FIXTURE_CURATED = (
+    {"name": "Mega Rayquaza ex", "number": "113/076", "note": "MUR / Gold"},
+    {"name": "Mega Rayquaza ex", "number": "110/076", "note": "SAR"},
+    {"name": "Raikou ex", "number": "108/076", "note": "SAR"},
+    {"name": "Mega Rayquaza ex", "number": "095/076", "note": "SR"},
+    {"name": "Zinnia's Trust", "number": "112/076", "note": "SAR"},
+    {"name": "Kyogre", "number": "080/076", "note": "AR"},
+    {"name": "Mega Golisopod ex", "number": "107/076", "note": "SAR"},
+    {"name": "Kecleon", "number": "088/076", "note": "AR"},
+    {"name": "Mega Golurk ex", "number": "109/076", "note": "SAR"},
+    {"name": "Groudon", "number": "084/076", "note": "AR"},
+    {"name": "Aarune", "number": "111/076", "note": "SAR"},
+    {"name": "Growlithe", "number": "078/076", "note": "AR"},
+    {"name": "Zinnia's Trust", "number": "102/076", "note": "SR"},
+    {"name": "Talonflame ex", "number": "096/076", "note": "SR"},
+    {"name": "Raikou ex", "number": "092/076", "note": "SR"},
+    {"name": "Emcee's Hype", "number": "100/076", "note": "SR"},
+    {"name": "Aarune", "number": "101/076", "note": "SR"},
+    {"name": "Mega Malamar ex", "number": "094/076", "note": "SR"},
+    {"name": "Altaria", "number": "087/076", "note": "AR"},
+    {"name": "Azurill", "number": "086/076", "note": "AR"},
+)
+
+
 def card(card_id, name, number, set_name="Storm Emeralda"):
     return {
         "id": str(card_id),
@@ -26,9 +57,9 @@ def card(card_id, name, number, set_name="Storm Emeralda"):
 
 class CuratedNewCardsTests(unittest.TestCase):
     def test_curated_list_is_twenty_and_keeps_duplicate_names(self):
-        names = [spec["name"] for spec in rails.NEW_CARDS_CURATED]
-        self.assertEqual(len(rails.NEW_CARDS_CURATED), 20)
-        self.assertEqual(len(rails.NEW_CARDS_CURATED), rails.NEW_CARDS_LIMIT)
+        names = [spec["name"] for spec in FIXTURE_CURATED]
+        self.assertEqual(len(FIXTURE_CURATED), 20)
+        self.assertEqual(len(FIXTURE_CURATED), rails.NEW_CARDS_LIMIT)
         self.assertGreater(names.count("Mega Rayquaza ex"), 1)
         self.assertGreater(names.count("Raikou ex"), 1)
         self.assertGreater(names.count("Zinnia's Trust"), 1)
@@ -46,9 +77,9 @@ class CuratedNewCardsTests(unittest.TestCase):
         ]
         matched, missing = rails.pick_curated_cards(
             pool,
-            rails.NEW_CARDS_CURATED[:5],
-            set_aliases=rails.NEW_CARDS_SET_ALIASES,
-            set_needles=rails.NEW_CARDS_SET_NEEDLES,
+            FIXTURE_CURATED[:5],
+            set_aliases=FIXTURE_SET_ALIASES,
+            set_needles=FIXTURE_SET_NEEDLES,
         )
         self.assertEqual(
             [item["id"] for item in matched],
@@ -74,8 +105,8 @@ class CuratedNewCardsTests(unittest.TestCase):
                 {"name": "Mega Rayquaza ex", "number": "113/076"},
                 {"name": "Growlithe", "number": "078/076"},
             ),
-            set_aliases=rails.NEW_CARDS_SET_ALIASES,
-            set_needles=rails.NEW_CARDS_SET_NEEDLES,
+            set_aliases=FIXTURE_SET_ALIASES,
+            set_needles=FIXTURE_SET_NEEDLES,
         )
         self.assertEqual([item["id"] for item in matched], ["1", "8"])
         self.assertEqual(missing, [])
@@ -89,9 +120,9 @@ class CuratedNewCardsTests(unittest.TestCase):
         with redirect_stderr(buf):
             matched, missing = rails.pick_curated_cards(
                 pool,
-                rails.NEW_CARDS_CURATED[:2],
-                set_aliases=rails.NEW_CARDS_SET_ALIASES,
-                set_needles=rails.NEW_CARDS_SET_NEEDLES,
+                FIXTURE_CURATED[:2],
+                set_aliases=FIXTURE_SET_ALIASES,
+                set_needles=FIXTURE_SET_NEEDLES,
             )
         self.assertEqual([item["id"] for item in matched], ["2"])
         self.assertEqual(missing[0]["number"], "113/076")
@@ -139,6 +170,13 @@ class FeaturedThirtiethTests(unittest.TestCase):
         a = [item["id"] for item in rails.pick_featured_cards(pool, 30, seed="2026-09-13")]
         b = [item["id"] for item in rails.pick_featured_cards(pool, 30, seed="2026-09-14")]
         self.assertNotEqual(a, b)
+
+
+class ConfiguredNewSetTests(unittest.TestCase):
+    def test_override_and_collector_order(self):
+        self.assertEqual(rails.NEW_CARDS_SET, 'Delta Reign')
+        rows = [card(3, 'Raikou', '121', 'Delta Reign'), card(1, 'Meowscarada', '014', 'Delta Reign'), card(2, 'Raikou', '033', 'Delta Reign')]
+        self.assertEqual([c['id'] for c in rails.pick_new_set_cards(rows, 2)], ['1', '2'])
 
 
 if __name__ == "__main__":
