@@ -780,7 +780,9 @@ pub fn top_movers(
             }
         };
         let (start_pkn, end_pkn) = (round2(start_hit.pkn), round2(end_hit.pkn));
-        if !(start_pkn > 0.0) || end_pkn < MOVER_MIN_PKN {
+        if start_pkn.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+            || end_pkn < MOVER_MIN_PKN
+        {
             continue;
         }
         let mut day = if from_day.is_empty() {

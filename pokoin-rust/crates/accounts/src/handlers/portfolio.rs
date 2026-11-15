@@ -290,17 +290,23 @@ fn movers_limit(raw: Option<&str>) -> usize {
         .min(MOVER_MAX_LIMIT)
 }
 
-/// Blueprint id → the catalog fields a tile needs.
+/// Blueprint id → the catalog fields a tile needs. A failed join is logged and
+/// answers with nothing, so the movers still carry their own numbers.
 async fn read_mover_cards(
     db: &MarketplaceDb,
     ids: &[i64],
-) -> Result<std::collections::HashMap<String, Json>> {
-    let rows = db
+) -> std::collections::HashMap<String, Json> {
+    let rows = match db
         .query_json(CARDS_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids.to_vec())])
         .await
-        .map_err(ApiError::from)?;
-    Ok(rows
-        .iter()
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(%error, "portfolio mover cards failed");
+            return Default::default();
+        }
+    };
+    rows.iter()
         .filter_map(|row| {
             let blueprint_id = row_text(row, "blueprint_id");
             if blueprint_id.is_empty() {
@@ -318,7 +324,7 @@ async fn read_mover_cards(
                 }),
             ))
         })
-        .collect())
+        .collect()
 }
 
 /// A mover plus the card it is a picture of. A printing the catalog lost still
@@ -352,18 +358,18 @@ pub async fn marketplace_portfolio_movers(
     if method != axum::http::Method::GET {
         return portfolio_history_other().await;
     }
-    match portfolio_movers_inner(&state, &headers, &query).await {
-        Ok(response) => response,
-        Err(error) => history_error(error),
-    }
+    portfolio_movers_inner(&state, &headers, &query).await
 }
 
 async fn portfolio_movers_inner(
     state: &DomainState,
     headers: &HeaderMap,
     query: &std::collections::HashMap<String, String>,
-) -> Result<Response> {
-    let claims = require_claims(state, headers).await?;
+) -> Response {
+    let claims = match require_claims(state, headers).await {
+        Ok(claims) => claims,
+        Err(error) => return history_error(error),
+    };
     let today_key = utc_day_key_ms(state.clock().now().timestamp_millis());
     let (days, from_day) = movers_window(query.get("days").map(String::as_str), &today_key);
     let limit = movers_limit(query.get("limit").map(String::as_str));
@@ -378,11 +384,11 @@ async fn portfolio_movers_inner(
         Ok(db) => db,
         Err(error) => {
             tracing::debug!(%error, "portfolio movers read model is not configured");
-            return Ok(no_movers());
+            return no_movers();
         }
     };
     let Some((holdings, book)) = read_card_book(&db, &claims.uid).await else {
-        return Ok(no_movers());
+        return no_movers();
     };
     let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
 
@@ -394,127 +400,19 @@ async fn portfolio_movers_inner(
             }
         }
     }
+    // The move is the substance; the picture is one join away.
     let cards = if ids.is_empty() {
         Default::default()
     } else {
-        match read_mover_cards(&db, &ids).await {
-            Ok(cards) => cards,
-            Err(error) => {
-                // The move is the substance; the picture is a join away.
-                tracing::error!(%error, "portfolio mover cards failed");
-                Default::default()
-            }
-        }
+        read_mover_cards(&db, &ids).await
     };
 
-    Ok(ok_no_store(json!({
+    ok_no_store(json!({
         "ok": true,
         "days": days,
         "gainers": movers.gainers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
         "losers": movers.losers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
-    })))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::portfolio_history::PricePoint;
-
-    #[test]
-    fn utc_iso_renders_milliseconds() {
-        assert_eq!(utc_iso(1_791_417_600_000), "2026-10-08T00:00:00.000Z");
-        assert_eq!(utc_iso(0), "1970-01-01T00:00:00.000Z");
-    }
-
-    #[test]
-    fn error_bodies_only_carry_a_code_when_there_is_one() {
-        let response = history_error(ApiError::internal("Firestore is not configured."));
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(
-            response.headers().get(axum::http::header::CACHE_CONTROL),
-            Some(&axum::http::HeaderValue::from_static("no-store"))
-        );
-        let response = history_error(ApiError::bad_request("nope").with_code("invalid_token"));
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[test]
-    fn the_movers_window_counts_back_from_today() {
-        // The chart presets arrive as their day counts.
-        assert_eq!(
-            movers_window(Some("91"), "2026-10-08"),
-            (json!(91), "2026-07-09".to_string())
-        );
-        // No parameter and junk both mean the month the dashboard opens on.
-        assert_eq!(
-            movers_window(None, "2026-10-08"),
-            (json!(30), "2026-09-08".to_string())
-        );
-        assert_eq!(
-            movers_window(Some("0"), "2026-10-08"),
-            (json!(30), "2026-09-08".to_string())
-        );
-        assert_eq!(
-            movers_window(Some("two"), "2026-10-08"),
-            (json!(30), "2026-09-08".to_string())
-        );
-        // A window longer than the stored series is clamped, never refused.
-        assert_eq!(
-            movers_window(Some("4000"), "2026-10-08"),
-            (json!(HISTORY_DAYS), "2025-09-03".to_string())
-        );
-        // MAX asks for everything and prices from the first stored day.
-        assert_eq!(
-            movers_window(Some("MAX"), "2026-10-08"),
-            (json!("max"), String::new())
-        );
-    }
-
-    #[test]
-    fn the_movers_limit_defaults_and_bounds() {
-        assert_eq!(movers_limit(None), 6);
-        assert_eq!(movers_limit(Some("3")), 3);
-        assert_eq!(movers_limit(Some("0")), 6);
-        assert_eq!(movers_limit(Some("60")), 12);
-    }
-
-    #[test]
-    fn a_mover_item_keeps_its_numbers_when_the_catalog_lost_the_card() {
-        let mover = Mover {
-            key: "502874|NM|EN|-|-|-".to_string(),
-            blueprint_id: "502874".to_string(),
-            condition: "NM".to_string(),
-            language: "EN".to_string(),
-            reverse: false,
-            first_edition: false,
-            graded: false,
-            quantity: 2,
-            start_pkn: 1000.0,
-            end_pkn: 1450.0,
-            change_pkn: 450.0,
-            change_pct: 45.0,
-            series: vec![PricePoint {
-                day: "2026-10-01".to_string(),
-                pkn: 1450.0,
-            }],
-        };
-        let cards = std::collections::HashMap::from([(
-            "502874".to_string(),
-            json!({ "cardId": "1234", "name": "Snorlax", "imageUrl": "https://cdn/x.jpg" }),
-        )]);
-        let joined = mover_item(&mover, &cards);
-        assert_eq!(joined["cardId"], json!("1234"));
-        assert_eq!(joined["name"], json!("Snorlax"));
-        assert_eq!(joined["changePct"], json!(45));
-        assert_eq!(joined["endPkn"], json!(1450));
-        assert_eq!(joined["series"].as_array().map(Vec::len), Some(1));
-
-        // A missing join still answers with the empty fields the tile expects.
-        let alone = mover_item(&mover, &std::collections::HashMap::new());
-        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
-            assert_eq!(alone[key], json!(""), "{key}");
-        }
-    }
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -910,4 +808,106 @@ pub async fn portfolio_other() -> Response {
         axum::http::HeaderValue::from_static("GET, OPTIONS"),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::portfolio_history::PricePoint;
+
+    #[test]
+    fn utc_iso_renders_milliseconds() {
+        assert_eq!(utc_iso(1_791_417_600_000), "2026-10-08T00:00:00.000Z");
+        assert_eq!(utc_iso(0), "1970-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn error_bodies_only_carry_a_code_when_there_is_one() {
+        let response = history_error(ApiError::internal("Firestore is not configured."));
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL),
+            Some(&axum::http::HeaderValue::from_static("no-store"))
+        );
+        let response = history_error(ApiError::bad_request("nope").with_code("invalid_token"));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn the_movers_window_counts_back_from_today() {
+        // The chart presets arrive as their day counts.
+        assert_eq!(
+            movers_window(Some("91"), "2026-10-08"),
+            (json!(91), "2026-07-09".to_string())
+        );
+        // No parameter and junk both mean the month the dashboard opens on.
+        assert_eq!(
+            movers_window(None, "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("0"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("two"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        // A window longer than the stored series is clamped, never refused.
+        assert_eq!(
+            movers_window(Some("4000"), "2026-10-08"),
+            (json!(HISTORY_DAYS), "2025-09-03".to_string())
+        );
+        // MAX asks for everything and prices from the first stored day.
+        assert_eq!(
+            movers_window(Some("MAX"), "2026-10-08"),
+            (json!("max"), String::new())
+        );
+    }
+
+    #[test]
+    fn the_movers_limit_defaults_and_bounds() {
+        assert_eq!(movers_limit(None), 6);
+        assert_eq!(movers_limit(Some("3")), 3);
+        assert_eq!(movers_limit(Some("0")), 6);
+        assert_eq!(movers_limit(Some("60")), 12);
+    }
+
+    #[test]
+    fn a_mover_item_keeps_its_numbers_when_the_catalog_lost_the_card() {
+        let mover = Mover {
+            key: "502874|NM|EN|-|-|-".to_string(),
+            blueprint_id: "502874".to_string(),
+            condition: "NM".to_string(),
+            language: "EN".to_string(),
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            quantity: 2,
+            start_pkn: 1000.0,
+            end_pkn: 1450.0,
+            change_pkn: 450.0,
+            change_pct: 45.0,
+            series: vec![PricePoint {
+                day: "2026-10-01".to_string(),
+                pkn: 1450.0,
+            }],
+        };
+        let cards = std::collections::HashMap::from([(
+            "502874".to_string(),
+            json!({ "cardId": "1234", "name": "Snorlax", "imageUrl": "https://cdn/x.jpg" }),
+        )]);
+        let joined = mover_item(&mover, &cards);
+        assert_eq!(joined["cardId"], json!("1234"));
+        assert_eq!(joined["name"], json!("Snorlax"));
+        assert_eq!(joined["changePct"], json!(45));
+        assert_eq!(joined["endPkn"], json!(1450));
+        assert_eq!(joined["series"].as_array().map(Vec::len), Some(1));
+
+        // A missing join still answers with the empty fields the tile expects.
+        let alone = mover_item(&mover, &std::collections::HashMap::new());
+        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
+            assert_eq!(alone[key], json!(""), "{key}");
+        }
+    }
 }
