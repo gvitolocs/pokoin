@@ -594,10 +594,14 @@ button, input, select { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
+/* `.icon-nav a:hover` turns every topbar link gold, and these two tiles are links
+   in that nav sitting on a gold ground: the label keeps its ink colour, or
+   #ffd33d on #ffe276 is barely readable. Same dark as the rest state above. */
 .nav-preview .nav-scan:hover,
 .nav-preview .nav-scan:focus-visible,
 .nav-preview .nav-cardgts:hover,
 .nav-preview .nav-cardgts:focus-visible {
+  color: #17120a;
   background: #ffe276;
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
