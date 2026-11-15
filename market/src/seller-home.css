@@ -605,6 +605,16 @@
   font-size: 1.05rem;
 }
 
+/* The spreadsheet link belongs under the button, not beside it. */
+.seller-tile-cta-stack {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  justify-content: center;
+}
+
 .seller-tile-list {
   background:
     linear-gradient(160deg, rgb(255 211 61 / 0.1), transparent 48%),
@@ -984,4 +994,215 @@
   flex-wrap: wrap;
   gap: 0.35rem 0.9rem;
   justify-content: flex-end;
+}
+
+/* Top movers: the seller's own printings that moved most in the chart window. */
+.seller-top-movers-shell {
+  margin-top: 16px;
+}
+
+.seller-top-movers-window {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.seller-top-movers-switch {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.seller-top-movers-switch button {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.seller-top-movers-switch button[aria-pressed='true'] {
+  background: var(--yellow);
+  color: #0c0b12;
+}
+
+.seller-movers-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mover-tile {
+  min-width: 0;
+}
+
+/* MiniCardTile fills whatever box it is given, so the tile sets the width. */
+.mover-tile .seller-listing-tile {
+  flex: none;
+  width: 76px;
+}
+
+.mover-tile-link,
+.mover-tile-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.mover-tile-link:hover,
+.mover-tile-link:focus-visible {
+  border-color: rgb(255 211 61 / 0.55);
+}
+
+.mover-tile-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mover-tile-name {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mover-tile-set {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.mover-tile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 0;
+}
+
+.mover-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--g5);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.mover-tile-value {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+}
+
+.mover-tile-never {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.mover-tile-change {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 680;
+}
+
+.mover-tile-change.is-up { color: #3dcf74; }
+.mover-tile-change.is-down { color: #ff7a7a; }
+.mover-tile-change.is-flat { color: var(--muted); }
+
+.mover-spark {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 34px;
+  margin-top: auto;
+}
+
+.mover-spark-area {
+  fill: rgb(255 211 61 / 0.12);
+}
+
+.mover-spark-line {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.mover-tile.is-skeleton {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+}
+
+.mover-skeleton-art,
+.mover-skeleton-line {
+  display: block;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.04));
+  background-size: 200% 100%;
+  animation: mover-skeleton 1.2s linear infinite;
+}
+
+.mover-skeleton-art {
+  width: 84px;
+  height: 118px;
+  border-radius: 8px;
+}
+
+.mover-skeleton-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mover-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+}
+
+.mover-skeleton-line.is-short { width: 60%; }
+
+@keyframes mover-skeleton {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (max-width: 980px) {
+  .seller-movers-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .seller-movers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-panel-head:has(.seller-top-movers-switch) {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }

@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { formatPknNumber } from '@market/pkn.js';
+import { moverDaysForPreset } from '@market/portfolio-movers.js';
 import {
   DEFAULT_HISTORY_PRESET,
   availableHistoryPresets,
@@ -14,6 +15,7 @@ import {
   historyPresetWindow,
   historyTimeline,
   historyWindowChange,
+  HISTORY_PRESETS,
   projectPortfolio,
   sliceHistorySeries,
   stepHistoryPoints,
@@ -114,6 +116,22 @@ export default function CollectionHistoryPanel(props) {
   const timeline = createMemo(() => historyTimeline(points()));
   const chart = createMemo(() => layoutChart(points(), timeline()));
   const change = () => historyWindowChange(points(), custom() ? 'custom' : presetId());
+
+  // The top movers sheet prices the window the graph is drawing, so it reports
+  // the range instead of keeping its own switch.
+  createEffect(
+    () => [custom() ? 'custom' : presetId(), bounds().from, bounds().to],
+    ([id, from, to]) => {
+      const days = id === 'custom' ? Math.max(1, daySpan(from, to)) : moverDaysForPreset(id);
+      const preset = HISTORY_PRESETS.find((row) => row.id === id);
+      const label = id === 'MAX' ? 'all time' : (preset?.phrase || `${days} days`);
+      // The callback is a prop, not a dependency: a parent re-render must not
+      // restart the movers request.
+      untrack(() => {
+        if (props.onRange) props.onRange({ id, days, label });
+      });
+    },
+  );
 
   // Hover: the day under the pointer, realized or projected.
   const hovered = createMemo(() => {
