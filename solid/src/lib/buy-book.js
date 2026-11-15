@@ -11,7 +11,7 @@ import {
 } from '@market/buy-orders.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 import { previewBook, previewScale } from '../pages/buysell-preview-fixture.js';
-import { allowMypokoinPreview } from '../pages/mypokoin-preview-fixture.js';
+import { allowMypokoinPreview } from '../pages/mypokoin-preview.js';
 import { whenIdle } from './idle.js';
 
 /**

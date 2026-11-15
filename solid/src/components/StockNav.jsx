@@ -103,7 +103,7 @@ export default function StockNav(props) {
         <For each={tabs()}>
           {(tab) => (
             <a
-              href={tab.to}
+              href={location.search?.includes('mypokoinPreview') ? `${tab.to}${location.search}` : tab.to}
               class={{ on: active(tab) || Boolean(props.forceActive && tab.label === props.forceActive) }}
               aria-current={active(tab) ? 'page' : undefined}
             >

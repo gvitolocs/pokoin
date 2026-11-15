@@ -20,13 +20,21 @@ import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { sellerCurrency, sellerSettings } from '../../stores/buyer.js';
-import { previewCollection } from '../../pages/mypokoin-preview-fixture.js';
+import { previewCollection } from '../../pages/mypokoin-preview.js';
+import { createTabCache } from '../../lib/tab-cache.js';
+import { memoizeByRows, memoizePair } from '../../lib/derived-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 
 const ADDRESS_FIELDS = ['name', 'line1', 'city', 'postalCode', 'country'];
 
 // The last holdings read, in memory only: a revisit of the tab repaints them
 // while they refresh instead of blanking to a skeleton.
-let holdingsMemo = { uid: '', rows: null };
+const holdingsCache = createTabCache();
+
+// Coming back to the tab rebuilds this desk over the same two arrays, and
+// splitting them is the same answer: both walks are remembered per book.
+const partitionOf = memoizeByRows(partitionHoldings);
+const deskOf = memoizePair(splitOwnedDesk);
 
 function canShip(row) {
   const status = String(row.physicalShippingStatus || '');
@@ -207,7 +215,7 @@ function facetOptions(rows) {
 export default function CollectionHoldings(props) {
   const uid = () => authUid() || accountProfile()?.uid || '';
   const firstUid = untrack(uid);
-  const [rows, setRows] = createSignal(holdingsMemo.uid && holdingsMemo.uid === firstUid ? holdingsMemo.rows : null);
+  const [rows, setRows] = createSignal(holdingsCache.get(firstUid) ?? null);
   // Listed copies come from the seller's MyPokoin book (stored, stamp-checked).
   const [listings, setListings] = createSignal(inventoryBooks.peek(firstUid, game().id)?.rows || []);
   const [error, setError] = createSignal('');
@@ -224,6 +232,9 @@ export default function CollectionHoldings(props) {
   const [asks, setAsks] = createSignal({});
   const [suggestedAsks, setSuggestedAsks] = createSignal({});
   const editedAsks = new Set();
+  const [heldLimit, setHeldLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [listedLimit, setListedLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [nftLimit, setNftLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   async function loadCollection() {
     setError('');
@@ -238,7 +249,7 @@ export default function CollectionHoldings(props) {
           : null,
       ]);
       const items = Array.isArray(owned.items) ? owned.items : [];
-      holdingsMemo = { uid: seller, rows: items };
+      holdingsCache.set(seller, items);
       setRows(items);
     } catch (err) {
       console.error('collection load failed', err);
@@ -262,17 +273,31 @@ export default function CollectionHoldings(props) {
         setError('');
         return;
       }
+      // The stored book paints at once and is only asked for again once the
+      // cached one ages: switching tabs back and forth reads the memory copy.
+      const seller = uid();
+      setRows(holdingsCache.get(seller) ?? null);
+      if (holdingsCache.fresh(seller)) return undefined;
       loadCollection().catch(() => setRows([]));
     },
   );
 
-  const nft = createMemo(() => partitionHoldings(rows() || []).nft);
-  const desk = createMemo(() => splitOwnedDesk(rows() || [], listings()));
+  // Listing, holding, dragging and removing update the rows in place of a
+  // refetch; the cache has to carry the same book to the next visit.
+  createEffect(rows, (value) => {
+    const seller = uid();
+    if (seller && Array.isArray(value) && value.length && holdingsCache.get(seller) !== value) {
+      holdingsCache.set(seller, value);
+    }
+  });
+
+  const nft = createMemo(() => partitionOf(rows() || []).nft);
+  const desk = createMemo(() => deskOf(rows() || [], listings()));
   const shippable = () => nft().filter(canShip);
   const heldPhysical = createMemo(() => desk().held.filter((entry) => entry.kind !== 'nft'));
   const heldNft = () => desk().held.filter((entry) => entry.kind === 'nft');
-  const visibleHeld = () => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() }));
-  const visibleListed = () => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() }));
+  const visibleHeld = createMemo(() => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() })));
+  const visibleListed = createMemo(() => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() })));
   const heldFacets = () => facetOptions(heldPhysical().map((entry) => entry.holding));
   const listedFacets = () => facetOptions(desk().listed.map((entry) => entry.holding || entry.listing));
   const ownedCards = () => (rows() || []).reduce((sum, row) => sum + (Number(row.quantity) > 0 ? Number(row.quantity) : 0), 0)
@@ -604,7 +629,7 @@ export default function CollectionHoldings(props) {
                   fallback={<p class="page-lede">{heldPhysical().length ? 'No cards match this search.' : 'Nothing held back. Drop a listed card here to stop selling it.'}</p>}
                 >
                   <div class="collection-tile-grid" data-testid="collection-physical">
-                    <For each={visibleHeld()} keyed={(entry) => entry.holding.id}>
+                    <For each={visibleHeld().slice(0, heldLimit())} keyed={(entry) => entry.holding.id}>
                       {(entry) => (
                         <HoldingRow
                           row={entry().holding}
@@ -624,12 +649,15 @@ export default function CollectionHoldings(props) {
                       )}
                     </For>
                   </div>
+                  <Show when={visibleHeld().length > heldLimit()}><button type="button" class="btn ghost" onClick={() => setHeldLimit(nextCollectionBatch(heldLimit(), visibleHeld().length))}>Show more</button></Show>
                 </Show>
                 <Show when={heldNft().length}>
                   <div class="collection-tile-grid" data-testid="collection-nft">
                     <p class="page-lede">NFT · {heldNft().length} holding{heldNft().length === 1 ? '' : 's'}</p>
-                    <For each={heldNft()}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <For each={heldNft().slice(0, nftLimit())}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <Show when={heldNft().length > nftLimit()}><button type="button" class="btn ghost" onClick={() => setNftLimit(nextCollectionBatch(nftLimit(), heldNft().length))}>Show more</button></Show>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>
@@ -651,7 +679,7 @@ export default function CollectionHoldings(props) {
                   fallback={<p class="page-lede">{desk().listed.length ? 'No cards match this search.' : 'No cards listed. Drop one here to sell it.'}</p>}
                 >
                   <div class="collection-tile-grid">
-                    <For each={visibleListed()} keyed={(entry) => String(entry.listing.id)}>
+                    <For each={visibleListed().slice(0, listedLimit())} keyed={(entry) => String(entry.listing.id)}>
                       {(entry) => (
                         <ListedRow
                           entry={entry()}
@@ -670,6 +698,7 @@ export default function CollectionHoldings(props) {
                       )}
                     </For>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>

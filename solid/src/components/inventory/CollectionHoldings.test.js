@@ -12,7 +12,7 @@ test('Collection red cross removes physical holdings via the authenticated BFF',
   assert.match(src, /function cardLabel\(row\) \{\s*return row\?\.cardName \|\| row\?\.name \|\| row\?\.cardId/);
   // Only physical rows pass onRemove; NFT holdings keep no red cross.
   assert.match(src, /onRemove=\{removeItem\}/);
-  assert.match(src, /<For each=\{heldNft\(\)\}>\{\(entry\) => <HoldingRow row=\{entry\.holding\} \/>\}<\/For>/);
+  assert.match(src, /<For each=\{heldNft\(\)\.slice\(0, nftLimit\(\)\)\}>\{\(entry\) => <HoldingRow row=\{entry\.holding\} \/>\}<\/For>/);
   // The row updates in place from the API result (after/deleted).
   assert.match(src, /result\.deleted/);
   assert.match(src, /quantity: result\.after/);

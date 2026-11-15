@@ -25,7 +25,7 @@ import {
   allowMypokoinPreview,
   MYPOKOIN_PREVIEW_BANNER,
   previewZero,
-} from './mypokoin-preview-fixture.js';
+} from './mypokoin-preview.js';
 
 function PowerToolsPanel(props) {
   const [status, setStatus] = createSignal(null);

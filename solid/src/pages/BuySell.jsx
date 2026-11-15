@@ -23,7 +23,7 @@ import BuySellIcon from '../components/buysell/BuySellIcon.jsx';
 import SellNowForm from '../components/buysell/SellNowForm.jsx';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import { getBearer } from '../stores/auth.js';
-import { allowMypokoinPreview } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview } from './mypokoin-preview.js';
 import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine } from './buysell-preview-fixture.js';
 
 const TABS = [
