@@ -4717,9 +4717,18 @@ html.is-pointer-dragging body {
   text-transform: uppercase;
 }
 
+.pricer-basis-groups, .pricer-basis-group { min-width: 0; }
+.pricer-basis-group + .pricer-basis-group { margin-top: 14px; }
+.pricer-basis-group-label {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .pricer-bases {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 8px;
 }
 
@@ -4734,6 +4743,8 @@ html.is-pointer-dragging body {
   background: var(--g2);
   cursor: pointer;
 }
+
+.pricer-basis:focus-within { outline: 2px solid var(--yellow); outline-offset: 2px; }
 
 .pricer-basis.on {
   border-color: var(--yellow);
