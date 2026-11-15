@@ -19,6 +19,14 @@ filename — `{ct_id}-{leftover-slug}.jpg` on CardTrader). CardTrader GET runs
 on Oracle `pokoin-marketplace` (home IP is rate-limited). Pillow JPEG/webp
 stays on nezopt. Do not HUP `pokoin-card-images` after rsync (HUP stops the
 Node process).
+Low-res upgrades: `POKOIN_MIN_SCAN_WIDTH` above the current leftover width so
+a wider scan replaces it. `POKOIN_TMP_DIR` moves the local jobs/out/id files
+(the Oracle side stays under /tmp); `POKOIN_BACKUP_DIR` copies the leftover jpg
+and its `_homepage.webp` out of the replica before they are overwritten
+(existing backups are never replaced); `POKOIN_NO_PUSH=1` stages and reports
+without rsync or CLIP and lists the keys in `POKOIN_TMP_DIR/replaced-keys.txt`.
+A scan no wider than the file already on the replica is refused
+(`skip-smaller`) and counted as a failure.
 """
 from __future__ import annotations
 
@@ -27,6 +35,7 @@ import io
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -45,6 +54,14 @@ REPLICA_OBJECTS = Path(
         "/home/nez/data/pokoin-leftovers/objects",
     )
 )
+# Local scratch only; the Oracle side of prefetch stays under /tmp.
+TMP_DIR = Path(os.environ.get("POKOIN_TMP_DIR", "/tmp"))
+BACKUP_DIR: Path | None = (
+    Path(os.environ["POKOIN_BACKUP_DIR"])
+    if os.environ.get("POKOIN_BACKUP_DIR", "").strip()
+    else None
+)
+NO_PUSH = os.environ.get("POKOIN_NO_PUSH", "").strip().lower() in {"1", "true", "yes"}
 EXPANSION = os.environ.get("POKOIN_INGEST_EXPANSION", "").strip()
 IDS = [
     int(part)
@@ -284,7 +301,8 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
         return {}
     if not CT_FETCH_HOST:
         return {key: data for key, urls in jobs.items() if (data := fetch_first(urls))}
-    jobs_path = Path("/tmp/pokoin-ct-fetch-jobs.json")
+    jobs_path = TMP_DIR / "pokoin-ct-fetch-jobs.json"
+    jobs_path.parent.mkdir(parents=True, exist_ok=True)
     jobs_path.write_text(json.dumps(jobs))
     script = Path(__file__).resolve()
     remote_script = "/tmp/ingest-missing-product-images.py"
@@ -294,7 +312,7 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
         ["ssh", *SSH_OPTS, CT_FETCH_HOST, "python3", remote_script, "--oracle-fetch"],
         check=True,
     )
-    raw = Path("/tmp/pokoin-ct-fetch-out")
+    raw = TMP_DIR / "pokoin-ct-fetch-out"
     raw.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["rsync", "-a", "--info=stats1", f"{CT_FETCH_HOST}:/tmp/pokoin-ct-fetch-out/", f"{raw}/"],
@@ -308,12 +326,46 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     return bodies
 
 
+def existing_scan_width(name: str) -> int:
+    """Widest readable jpg already staged or shipped for `name` (0 = none)."""
+    from PIL import Image
+
+    width = 0
+    for path in (REPLICA_OBJECTS / name, OUT / name):
+        if not path.is_file():
+            continue
+        try:
+            with Image.open(path) as image:
+                width = max(width, int(image.size[0]))
+        except Exception:
+            continue
+    return width
+
+
+def backup_leftover(key: str) -> None:
+    """Copy the leftover this run replaces out of the replica before push."""
+    if not BACKUP_DIR:
+        return
+    for name in (key, Path(key).stem + "_homepage.webp"):
+        src = REPLICA_OBJECTS / name
+        if not src.is_file():
+            continue
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        dest = BACKUP_DIR / name
+        if dest.exists():
+            continue
+        shutil.copy2(src, dest)
+
+
 def write_jpeg(dest: Path, data: bytes) -> bool:
     from PIL import Image
 
     try:
         with Image.open(io.BytesIO(data)) as image:
             if image.size == (186, 260) or image.size[0] < MIN_SCAN_WIDTH:
+                return False
+            if image.size[0] <= existing_scan_width(dest.name):
+                print(f"skip-smaller {dest.name}", flush=True)
                 return False
             image.convert("RGB").save(dest, "JPEG", quality=92, optimize=True)
         return dest.exists() and dest.stat().st_size > 9000
@@ -530,11 +582,12 @@ def replica_has_scan(key: str) -> bool:
     return not is_placeholder(path)
 
 
-def ingest(rows: list[dict]) -> tuple[int, int, int]:
+def ingest(rows: list[dict]) -> tuple[int, int, int, list[str]]:
     OUT.mkdir(parents=True, exist_ok=True)
     jobs: dict[str, list[str]] = {}
     planned: list[tuple[dict, str, Path]] = []
     saved = skipped = failed = 0
+    replaced: list[str] = []
     for row in rows:
         key = leftover_key(row.get("ct_id") or "", row.get("name") or "", row.get("image_url") or "")
         if not key:
@@ -571,11 +624,24 @@ def ingest(rows: list[dict]) -> tuple[int, int, int]:
             print(f"placeholder {row.get('ct_id')} {row.get('name')}", file=sys.stderr)
             failed += 1
             continue
+        backup_leftover(key)
         write_homepage(dest)
         saved += 1
+        replaced.append(key)
         if index % 25 == 0 or saved <= 5:
             print(f"{index}/{len(planned)} saved={saved} skip={skipped} fail={failed} {key}", flush=True)
-    return saved, skipped, failed
+    return saved, skipped, failed, replaced
+
+
+def write_replaced_keys(keys: list[str]) -> None:
+    dest = TMP_DIR / "replaced-keys.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for key in sorted(set(keys)):
+        lines.append(key)
+        lines.append(Path(key).stem + "_homepage.webp")
+    dest.write_text("".join(line + "\n" for line in lines))
+    print(f"replaced_keys={len(set(keys))} {dest}", flush=True)
 
 
 def push() -> None:
@@ -610,7 +676,13 @@ def write_replaced_ids(rows: list[dict], saved: int) -> None:
             > PLACEHOLDER_MAX_BYTES
         }
     )
-    dest = Path(os.environ.get("POKOIN_PLACEHOLDER_ID_FILE", "/tmp/pokoin-placeholder-ingest-ids.json"))
+    dest = Path(
+        os.environ.get(
+            "POKOIN_PLACEHOLDER_ID_FILE",
+            str(TMP_DIR / "pokoin-placeholder-ingest-ids.json"),
+        )
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("[" + ",".join(str(n) for n in ids) + "]\n")
     print(f"replaced_ids={len(ids)} {dest}", flush=True)
 
@@ -692,14 +764,19 @@ def main() -> int:
         rows = enrich_blueprint_urls(rows)
         rows = [row for row in rows if has_cardtrader_scan(row)]
     print(f"missing_rows={len(rows)} out={OUT}", flush=True)
-    saved, skipped, failed = ingest(rows)
+    saved, skipped, failed, replaced = ingest(rows)
     print(f"done saved={saved} skip={skipped} fail={failed}", flush=True)
+    write_replaced_keys(replaced)
     write_replaced_ids(rows, saved)
-    if saved or skipped:
-        push()
-        print("pushed to Pi leftover objects", flush=True)
-        match_imported_version_sets(rows)
-    return 0 if saved or skipped else 1
+    if not (saved or skipped):
+        return 1
+    if NO_PUSH:
+        print("POKOIN_NO_PUSH: skipped push and version match", flush=True)
+        return 0
+    push()
+    print("pushed to Pi leftover objects", flush=True)
+    match_imported_version_sets(rows)
+    return 0
 
 
 if __name__ == "__main__":
