@@ -174,6 +174,9 @@ test('the history opens on the Seek head and tab=sell lands on the Offer door', 
   assert.match(page, /fallback=\{<RequireSignIn from=\{here\(\)\}><History onClose=\{\(\) => setParams\(\{ tab: undefined \}\)\} \/><\/RequireSignIn>\}/);
   assert.match(page, /<History preview onClose=\{\(\) => setParams\(\{ tab: undefined \}\)\} \/>/);
   assert.match(history, /<h2 class="buysell-panel-title" id="buysell-history-title"><ListGlyph size=\{19\} \/>My offers<\/h2>/);
+  // Opening it brings the panel to the top of the screen instead of leaving it under the doors.
+  assert.match(history, /<section class="buysell-panel buysell-history" ref=\{\(el\) => \{ panel = el; \}\}/);
+  assert.match(history, /requestAnimationFrame\(\(\) => panel\?\.scrollIntoView\(\{ block: 'start', behavior: 'smooth' \}\)\)/);
   assert.match(history, /title="Close My offers" aria-label="Close My offers" onClick=\{props\.onClose\}/);
   assert.match(history, /<CloseGlyph \/>/);
   // `?tab=sell` scrolls to the Offer door, once, and nothing else changes.

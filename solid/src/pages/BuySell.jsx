@@ -440,6 +440,7 @@ function History(props) {
   const [items, setItems] = createSignal(null);
   const [error, setError] = createSignal('');
   const [now] = createSignal(Date.now());
+  let panel;
 
   async function load() {
     try {
@@ -450,7 +451,12 @@ function History(props) {
       setError(err.status === 404 ? 'Buy offers are not available yet.' : errorMessage(err));
     }
   }
-  onSettled(() => { load(); });
+
+  // The history opens under both doors, so the button that asked for it has to bring it in view.
+  onSettled(() => {
+    load();
+    requestAnimationFrame(() => panel?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  });
 
   const own = ownOfferActions({
     preview: props.preview,
@@ -464,7 +470,7 @@ function History(props) {
     .filter((group) => group.rows.length));
 
   return (
-    <section class="buysell-panel buysell-history" aria-labelledby="buysell-history-title">
+    <section class="buysell-panel buysell-history" ref={(el) => { panel = el; }} aria-labelledby="buysell-history-title">
       <div class="buysell-panel-head">
         <h2 class="buysell-panel-title" id="buysell-history-title"><ListGlyph size={19} />My offers</h2>
         <button type="button" class="buysell-act" title="Close My offers" aria-label="Close My offers" onClick={props.onClose}>
