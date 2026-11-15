@@ -27,6 +27,12 @@ and its `_homepage.webp` out of the replica before they are overwritten
 without rsync or CLIP and lists the keys in `POKOIN_TMP_DIR/replaced-keys.txt`.
 A scan no wider than the file already on the replica is refused
 (`skip-smaller`) and counted as a failure.
+`POKOIN_REGEN_PREVIEWS=1` re-cuts every `REPLICA_OBJECTS/previews/{ct_id}_*`
+thumb to the new scan at its own size and format (aspect differs by <2%, so the
+resize is exact-to-box with no crop) into `OUT/previews/`, backs the old preview
+up, and lists `previews/<name>` in replaced-keys.txt.
+`POKOIN_PREVIEWS_ONLY=1` with `POKOIN_PREVIEWS_KEYS_FILE` (one main jpg key per
+line) skips the DB and the fetch and re-cuts previews from the replica JPEGs.
 """
 from __future__ import annotations
 
@@ -88,6 +94,19 @@ PLACEHOLDER_BYTES = int(os.environ.get("POKOIN_PLACEHOLDER_BYTES", "7920"))
 # CardTrader full is ~749×1050. Desk upscales both; MIN_SCAN_WIDTH treats
 # them as placeholders so ingest can replace them.
 MIN_SCAN_WIDTH = int(os.environ.get("POKOIN_MIN_SCAN_WIDTH", "400"))
+REGEN_PREVIEWS = os.environ.get("POKOIN_REGEN_PREVIEWS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PREVIEWS_ONLY = os.environ.get("POKOIN_PREVIEWS_ONLY", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PREVIEWS_KEYS_FILE = os.environ.get("POKOIN_PREVIEWS_KEYS_FILE", "").strip()
+PREVIEW_WEBP_QUALITY = 82
+PREVIEW_JPG_QUALITY = 85
 CT_FETCH_HOST = os.environ.get("POKOIN_CT_FETCH_HOST", "pokoin-marketplace")
 CT_FETCH_WORKERS = int(os.environ.get("POKOIN_CT_FETCH_WORKERS", "4"))
 PG_CONTAINER = os.environ.get("POKOIN_MARKETPLACE_POSTGRES", "pokoin-marketplace-postgres-15t")
@@ -342,19 +361,24 @@ def existing_scan_width(name: str) -> int:
     return width
 
 
-def backup_leftover(key: str) -> None:
-    """Copy the leftover this run replaces out of the replica before push."""
+def backup_replica_file(rel: str) -> None:
+    """Copy one replica file out before this run replaces it; never overwrite a backup."""
     if not BACKUP_DIR:
         return
+    src = REPLICA_OBJECTS / rel
+    if not src.is_file():
+        return
+    dest = BACKUP_DIR / rel
+    if dest.exists():
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+def backup_leftover(key: str) -> None:
+    """Copy the leftover this run replaces out of the replica before push."""
     for name in (key, Path(key).stem + "_homepage.webp"):
-        src = REPLICA_OBJECTS / name
-        if not src.is_file():
-            continue
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        dest = BACKUP_DIR / name
-        if dest.exists():
-            continue
-        shutil.copy2(src, dest)
+        backup_replica_file(name)
 
 
 def write_jpeg(dest: Path, data: bytes) -> bool:
@@ -400,6 +424,51 @@ def write_homepage(jpg_path: Path) -> Path | None:
     except Exception as exc:
         print(f"webp fail {jpg_path.name}: {exc}", file=sys.stderr)
         return None
+
+
+def ct_id_of(key: str) -> str:
+    """CardTrader blueprint id of a leftover key: digits before the first underscore."""
+    match = re.match(r"^(\d+)_", Path(str(key)).name)
+    return match.group(1) if match else ""
+
+
+def regen_previews(key: str, source: Path | None = None) -> list[str]:
+    """Re-cut each shipped preview of key's ct_id into OUT/previews at its old size."""
+    from PIL import Image
+
+    ct_id = ct_id_of(key)
+    full_path = OUT / key if source is None else source
+    replica_previews = REPLICA_OBJECTS / "previews"
+    if not ct_id or not replica_previews.is_dir():
+        return []
+    written: list[str] = []
+    try:
+        with Image.open(full_path) as full:
+            full = full.convert("RGB")
+            for old in sorted(replica_previews.glob(f"{ct_id}_*")):
+                if not old.is_file():
+                    continue
+                try:
+                    with Image.open(old) as thumb:
+                        size = (int(thumb.size[0]), int(thumb.size[1]))
+                        fmt = str(thumb.format or "").upper()
+                except Exception:
+                    print(f"preview unreadable {old.name}", file=sys.stderr)
+                    continue
+                if fmt not in {"WEBP", "JPEG"} or min(size) < 1:
+                    continue
+                backup_replica_file(f"previews/{old.name}")
+                dest = OUT / "previews" / old.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                image = full.resize(size, Image.LANCZOS)
+                if fmt == "WEBP":
+                    image.save(dest, "WEBP", quality=PREVIEW_WEBP_QUALITY, method=6)
+                else:
+                    image.save(dest, "JPEG", quality=PREVIEW_JPG_QUALITY, optimize=True)
+                written.append(f"previews/{old.name}")
+    except Exception as exc:
+        print(f"preview fail {key}: {exc}", file=sys.stderr)
+    return written
 
 
 def dump_sql() -> str:
@@ -582,12 +651,13 @@ def replica_has_scan(key: str) -> bool:
     return not is_placeholder(path)
 
 
-def ingest(rows: list[dict]) -> tuple[int, int, int, list[str]]:
+def ingest(rows: list[dict]) -> tuple[int, int, int, list[str], list[str]]:
     OUT.mkdir(parents=True, exist_ok=True)
     jobs: dict[str, list[str]] = {}
     planned: list[tuple[dict, str, Path]] = []
     saved = skipped = failed = 0
     replaced: list[str] = []
+    previews: list[str] = []
     for row in rows:
         key = leftover_key(row.get("ct_id") or "", row.get("name") or "", row.get("image_url") or "")
         if not key:
@@ -626,22 +696,25 @@ def ingest(rows: list[dict]) -> tuple[int, int, int, list[str]]:
             continue
         backup_leftover(key)
         write_homepage(dest)
+        if REGEN_PREVIEWS:
+            previews.extend(regen_previews(key))
         saved += 1
         replaced.append(key)
         if index % 25 == 0 or saved <= 5:
             print(f"{index}/{len(planned)} saved={saved} skip={skipped} fail={failed} {key}", flush=True)
-    return saved, skipped, failed, replaced
+    return saved, skipped, failed, replaced, previews
 
 
-def write_replaced_keys(keys: list[str]) -> None:
+def write_replaced_keys(keys: list[str], previews: list[str] | None = None) -> None:
     dest = TMP_DIR / "replaced-keys.txt"
     dest.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     for key in sorted(set(keys)):
         lines.append(key)
         lines.append(Path(key).stem + "_homepage.webp")
+    lines.extend(sorted(set(previews or [])))
     dest.write_text("".join(line + "\n" for line in lines))
-    print(f"replaced_keys={len(set(keys))} {dest}", flush=True)
+    print(f"replaced_keys={len(set(keys))} previews={len(set(previews or []))} {dest}", flush=True)
 
 
 def push() -> None:
@@ -758,15 +831,43 @@ def match_imported_version_sets(rows: list[dict]) -> None:
     join_reverse_pattern_versions()
 
 
+def previews_only() -> int:
+    """Re-cut previews from the replica JPEGs named by POKOIN_PREVIEWS_KEYS_FILE."""
+    if not PREVIEWS_KEYS_FILE or not Path(PREVIEWS_KEYS_FILE).is_file():
+        print("POKOIN_PREVIEWS_KEYS_FILE points at no file", file=sys.stderr)
+        return 1
+    OUT.mkdir(parents=True, exist_ok=True)
+    keys = [
+        line.strip()
+        for line in Path(PREVIEWS_KEYS_FILE).read_text().splitlines()
+        if line.strip()
+    ]
+    previews: list[str] = []
+    for key in keys:
+        found = regen_previews(key, REPLICA_OBJECTS / key)
+        previews.extend(found)
+        print(f"previews {key} {len(found)}", flush=True)
+    print(f"previews_only keys={len(keys)} previews={len(set(previews))}", flush=True)
+    write_replaced_keys([], previews)
+    if NO_PUSH:
+        print("POKOIN_NO_PUSH: skipped push", flush=True)
+        return 0
+    push()
+    print("pushed to Pi leftover objects", flush=True)
+    return 0
+
+
 def main() -> int:
+    if PREVIEWS_ONLY:
+        return previews_only()
     rows = placeholder_rows_from_pi() if PLACEHOLDERS else dump_rows()
     if PLACEHOLDERS:
         rows = enrich_blueprint_urls(rows)
         rows = [row for row in rows if has_cardtrader_scan(row)]
     print(f"missing_rows={len(rows)} out={OUT}", flush=True)
-    saved, skipped, failed, replaced = ingest(rows)
+    saved, skipped, failed, replaced, previews = ingest(rows)
     print(f"done saved={saved} skip={skipped} fail={failed}", flush=True)
-    write_replaced_keys(replaced)
+    write_replaced_keys(replaced, previews)
     write_replaced_ids(rows, saved)
     if not (saved or skipped):
         return 1
