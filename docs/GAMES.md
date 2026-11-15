@@ -364,3 +364,38 @@ exclusive-locks `marketplace_cards`). Procedure:
 
 Public id = leftover `ct_id × 2`. Set desk path is `/marketplace/sets/{slug}`
 (no `/en/`). `ct_id` stays on candidates for CDN filenames and CardTrader.
+
+### New-set public readiness check
+
+After the new-printing procedure above, run the read-only smoke check:
+
+```bash
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh "Delta Reign"
+```
+
+It exits non-zero for missing or unverified checks. It samples the public set
+page, one card image and version group, card-name and set-name suggest, the
+bundled set vocabulary, the symbol URL, featured-set override and the New cards rail. The manual override is `market/src/data/featured-set.json`; review release dates when updating it. A successful
+sample does not prove all cards have images or correct artwork matches; inspect
+those separately. A symbol URL returning an image can still be a generated
+text plate, so visually inspect it. The check does not write to the database.
+
+New-set release checklist:
+
+1. Import raw blueprints and project cards, candidates, versions and URLs as
+   described above; refresh the expansion counts.
+2. Ingest the leftover scans and homepage images, replicate them, and inspect
+   coverage. Run the targeted artwork matcher after scans are available, and
+   review singleton groups; see [VERSIONS.md](VERSIONS.md).
+3. Verify the Redis search delta has indexed the cards (the `search-delta` job
+   runs every two minutes); run `python3 scripts/export-suggest-names.py` and
+   `python3 scripts/export-suggest-catalog.py` against the catalog when the
+   bundled vocabulary needs refreshing. The latter also regenerates the
+   nationality table. These change repository files and need a web build and
+   deployment to reach users.
+4. Verify the expansion symbol visually. The CDN may serve a generated code
+   plate rather than the official mark; obtain and publish the correct symbol
+   through the existing expansion-symbol workflow.
+5. Verify set-name suggestions and the New cards homepage rail against the
+   public API. The rail is persisted by `scripts/sync-marketplace-rails.py`;
+   changing source code alone does not update its stored contents.

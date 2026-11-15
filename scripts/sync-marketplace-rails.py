@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import random
 import re
 import subprocess
@@ -32,8 +33,13 @@ POSTGRES_CONTAINER = os.environ.get("POKOIN_MARKETPLACE_POSTGRES") or "pokoin-ma
 PKN_USDT_PRICE = os.environ.get("PKN_USDT_PRICE") or os.environ.get("PKN_CHECKOUT_USDT_PRICE") or "0.005"
 CARDTRADER_AUTH_TOKEN = os.environ.get("CARDTRADER_AUTH_TOKEN") or ""
 CARDTRADER_API_BASE = "https://api.cardtrader.com/api/v2"
+FEATURED_SET = json.loads((Path(__file__).resolve().parent / "featured-set.json" if (Path(__file__).resolve().parent / "featured-set.json").exists() else Path(__file__).resolve().parents[1] / "market/src/data/featured-set.json").read_text())
+NEW_CARDS_SET = FEATURED_SET["newCardsSet"]
+NEW_CARDS_SET_ALIASES = tuple(FEATURED_SET["aliases"])
+NEW_CARDS_SET_NEEDLES = NEW_CARDS_SET_ALIASES
+NEW_CARDS_SLUG = re.sub(r"[^a-z0-9]+", "-", NEW_CARDS_SET.lower()).strip("-")
 PROMO_SLUGS = [
-    "storm-emeralda",
+    NEW_CARDS_SLUG,
     "mega-evolution",
     "phantasmal-flames",
     "black-bolt",
@@ -41,7 +47,7 @@ PROMO_SLUGS = [
     "destined-rivals",
 ]
 LIVE_SET_NAMES = (
-    "Storm Emeralda",
+    NEW_CARDS_SET,
     "Mega Evolution",
     "Phantasmal Flames",
     "Black Bolt",
@@ -390,35 +396,13 @@ def pick_live_homepage(cards: list[dict], limit: int) -> list[dict]:
 # name. Same Pokémon names are different variants and must stay separate.
 # Do not sort this list after retrieval.
 NEW_CARDS_LIMIT = 20
-NEW_CARDS_SET_ALIASES = (
-    "storm emeralda",
-    "storm emeralda (japanese)",
-    "m6",
-    "japanese storm emeralda",
-)
-NEW_CARDS_SET_NEEDLES = ("storm emeralda",)
-NEW_CARDS_CURATED = (
-    {"name": "Mega Rayquaza ex", "number": "113/076", "note": "MUR / Gold"},
-    {"name": "Mega Rayquaza ex", "number": "110/076", "note": "SAR"},
-    {"name": "Raikou ex", "number": "108/076", "note": "SAR"},
-    {"name": "Mega Rayquaza ex", "number": "095/076", "note": "SR"},
-    {"name": "Zinnia's Trust", "number": "112/076", "note": "SAR"},
-    {"name": "Kyogre", "number": "080/076", "note": "AR"},
-    {"name": "Mega Golisopod ex", "number": "107/076", "note": "SAR"},
-    {"name": "Kecleon", "number": "088/076", "note": "AR"},
-    {"name": "Mega Golurk ex", "number": "109/076", "note": "SAR"},
-    {"name": "Groudon", "number": "084/076", "note": "AR"},
-    {"name": "Aarune", "number": "111/076", "note": "SAR"},
-    {"name": "Growlithe", "number": "078/076", "note": "AR"},
-    {"name": "Zinnia's Trust", "number": "102/076", "note": "SR"},
-    {"name": "Talonflame ex", "number": "096/076", "note": "SR"},
-    {"name": "Raikou ex", "number": "092/076", "note": "SR"},
-    {"name": "Emcee's Hype", "number": "100/076", "note": "SR"},
-    {"name": "Aarune", "number": "101/076", "note": "SR"},
-    {"name": "Mega Malamar ex", "number": "094/076", "note": "SR"},
-    {"name": "Altaria", "number": "087/076", "note": "AR"},
-    {"name": "Azurill", "number": "086/076", "note": "AR"},
-)
+def pick_new_set_cards(cards, limit=NEW_CARDS_LIMIT):
+    """Choose a stable collector order without collapsing name variants."""
+    def order(card):
+        match = re.search(r"(\d+)(?:\s*/\s*\d+)?", str(card.get("number") or card.get("card_number") or ""))
+        return (int(match.group(1)) if match else 1_000_000, card_id(card))
+    return take_rail(sorted(cards, key=order), limit, unique_names=False)
+
 
 # Homepage Featured: 30 random 30th Anniversary singles. Daily seed so the
 # 5-minute publisher does not reshuffle the carousel every tick.
@@ -1213,37 +1197,21 @@ def main() -> None:
             max_per_set=2,
         )
     live_pool = overlay_pkn(psql_live_set_cards(16))
-    curated_pool = overlay_pkn(
+    new_pool = overlay_pkn(
         psql_cards_for_set_aliases(NEW_CARDS_SET_ALIASES, NEW_CARDS_SET_NEEDLES, limit=400)
     )
-    new_cards, new_cards_missing = pick_curated_cards(
-        curated_pool,
-        NEW_CARDS_CURATED,
-        set_aliases=NEW_CARDS_SET_ALIASES,
-        set_needles=NEW_CARDS_SET_NEEDLES,
-    )
-    if new_cards_missing:
-        print(
-            "new_cards curated missing "
-            + "; ".join(spec_label(spec) for spec in new_cards_missing),
-            file=sys.stderr,
-        )
-    if not new_cards:
-        print("new_cards curated empty; not substituting another printing", file=sys.stderr)
-    new_cards = overlay_cardtrader_asks(new_cards[:NEW_CARDS_LIMIT], limit=24)
+    new_cards = overlay_cardtrader_asks(pick_new_set_cards(new_pool), limit=24)
     spotlight = overlay_cardtrader_asks(pick_live_homepage(live_pool, 16), limit=20)
     if not spotlight:
         spotlight = overlay_cardtrader_asks(overlay_pkn(home_spotlight)) or new_cards
 
     meta_rate = {"pknUsdt": float(PKN_USDT_PRICE)}
     new_meta = {
-        "source": "curated_set_number_name",
-        "set": "Storm Emeralda",
-        "rank": "curated",
+        "source": "featured_set_override",
+        "set": NEW_CARDS_SET,
+        "rank": "collector",
         **meta_rate,
     }
-    if new_cards_missing:
-        new_meta["missing"] = [spec_label(spec) for spec in new_cards_missing]
     rails.append(rail("new_cards", new_cards, new_meta))
     rails.append(rail("spotlight", spotlight, {"source": "live_sets_chase_inset", **meta_rate}))
     if featured_from_thirtieth:
