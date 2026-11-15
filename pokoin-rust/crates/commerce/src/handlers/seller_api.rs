@@ -1712,6 +1712,7 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
 }
 
 /// Every connector action (`connector` dispatches on these).
+#[cfg(test)]
 const ACTIONS: [&str; 18] = [
     "connect",
     "info",
