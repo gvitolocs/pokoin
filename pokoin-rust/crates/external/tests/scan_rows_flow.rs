@@ -282,3 +282,84 @@ async fn a_removed_row_comes_back_newer_than_the_one_on_screen() {
     assert_eq!(restored["items"][0]["seq"], json!(20));
     assert_eq!(restored["items"][0]["status"], json!("active"));
 }
+
+/// A deterministic uuid per scan event.
+fn scan_uuid(n: i64) -> String {
+    format!("0b0e0000-0000-4000-a000-{n:012x}")
+}
+
+/// Wait until a scan of this server is parked on the row lock of `scan_batches`.
+async fn wait_blocked_on_batch(pool: &sqlx::PgPool) {
+    for _ in 0..200 {
+        let waiting: i64 = sqlx::query_scalar(
+            "select count(*) from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock'
+                and state = 'active' and query ilike '%scan_batches%for update%'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+        if waiting > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("the scan never blocked on the batch row lock");
+}
+
+#[tokio::test]
+async fn a_scan_that_lands_while_submit_closes_the_batch_is_rejected() {
+    let Some(scratch) = scratch_db("scan_after_batch_close").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+
+    let started = scan_store::start_session(&db, SELLER, "")
+        .await
+        .expect("session");
+    let batch_id = started["batch"]["id"].as_str().expect("batch").to_string();
+    let secret: String = sqlx::query_scalar("select qr_secret from public.scan_pairings")
+        .fetch_one(&pool)
+        .await
+        .expect("pairing");
+    let paired =
+        scan_store::claim_pairing(&db, "", &secret, "203.0.113.9", "Card Rails/1", "iPhone")
+            .await
+            .expect("pair");
+    let token = paired["phoneToken"].as_str().expect("token").to_string();
+
+    // submit's closing write, held open: the batch row is locked and the last
+    // status anybody can still read as committed is `open`.
+    let mut closer = pool.begin().await.expect("closer");
+    sqlx::query("update public.scan_batches set status = 'submitted' where id = $1::uuid")
+        .bind(&batch_id)
+        .execute(&mut *closer)
+        .await
+        .expect("close");
+
+    let ingest_db = DbPools::lazy(pool.clone(), pool.clone());
+    let body = json!({ "scanEventId": scan_uuid(1), "clientSequence": 1 });
+    let ingest =
+        tokio::spawn(async move { scan_store::ingest_scan(&ingest_db, &token, &body).await });
+    wait_blocked_on_batch(&pool).await;
+
+    closer.commit().await.expect("commit close");
+    let out = ingest.await.expect("ingest task");
+    let error =
+        out.expect_err("a scan that lands behind the commit that closed the batch is refused");
+    assert_eq!(
+        (error.status, error.code.as_deref()),
+        (409, Some("batch_closed")),
+        "the scan answered {error:?} for a batch submit had already closed"
+    );
+    let rows: i64 =
+        sqlx::query_scalar("select count(*) from public.scan_items where batch_id = $1::uuid")
+            .bind(&batch_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(rows, 0, "the refused scan inserts nothing");
+
+    scratch.finish().await;
+}

@@ -1017,15 +1017,12 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
         return Err(too_many(rules::LIMIT_SCAN_PER_SESSION, received_at_ms));
     }
     limit_increment(&mut tx, &scan_bucket, rules::LIMIT_SCAN_PER_SESSION, received_at_ms).await?;
-    if session.get("batch_status").and_then(Value::as_str) != Some("open") {
-        return Err(ApiError::conflict("This batch is closed.").with_code("batch_closed"));
-    }
     let batch_id = session["batch_id"].as_str().unwrap_or_default().to_string();
-    let batch_row = sqlx::query("select * from public.scan_batches where id = $1::uuid for update")
-        .bind(&batch_id)
-        .fetch_one(&mut *tx)
-        .await?;
-    let batch = row_value(&batch_row);
+    let batch_seller = session["seller_uid"].as_str().unwrap_or_default();
+    // Open or closed is decided by the row this transaction has just locked. The
+    // `batch_status` joined with the session is the value that was committed before
+    // the lock, so a submit that closed the batch in between stayed invisible here.
+    let batch = lock_batch(&mut tx, batch_seller, &batch_id, true).await?;
     if batch.get("item_position").and_then(Value::as_i64).unwrap_or(0) >= MAX_BATCH_ROWS {
         return Err(ApiError::conflict("This batch is full. Add it to inventory and start a new one.")
             .with_code("batch_full"));
