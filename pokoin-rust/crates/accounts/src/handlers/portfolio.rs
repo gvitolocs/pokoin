@@ -162,12 +162,12 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
             Ok(history_body(days))
         }
         Plan::ComputeNow => {
-            // A missing or failing read model is not fatal: the last good
-            // series is served instead, exactly like the Node `readCardBook`
-            // catch.
+            // There was no stored series to answer with, so a read model that
+            // cannot report one leaves the empty series the Node `readCardBook`
+            // catch produced.
             let days = recompute_series(state, &uid, stored.as_ref())
                 .await?
-                .unwrap_or_else(|| last_good_series(stored.as_ref()));
+                .unwrap_or_default();
             Ok(history_body(days))
         }
     }
@@ -202,16 +202,6 @@ fn stored_days(stored: Option<&Json>) -> Vec<Json> {
     clean_days(stored.and_then(|doc| doc.get("days")))
 }
 
-/// The series to answer with when nothing could be recomputed: the stored days
-/// while they are on the current basis, none before there is such a thing.
-fn last_good_series(stored: Option<&Json>) -> Vec<Json> {
-    if stored_is_current(stored) {
-        stored_days(stored)
-    } else {
-        Vec::new()
-    }
-}
-
 fn history_body(days: Vec<Json>) -> Response {
     ok_no_store(json!({ "ok": true, "days": days }))
 }
@@ -219,6 +209,7 @@ fn history_body(days: Vec<Json>) -> Response {
 /// The recompute and its stored write: card book, ledger, balance, series.
 /// `None` when the market read model is unavailable, which writes nothing so
 /// the stored series survives.
+#[allow(clippy::result_large_err)]
 async fn recompute_series(
     state: &DomainState,
     uid: &str,
@@ -275,7 +266,7 @@ struct RefreshClaim<'a>(&'a Mutex<HashSet<String>>, String);
 
 impl Drop for RefreshClaim<'_> {
     fn drop(&mut self) {
-        lock_claims(&self.0).remove(&self.1);
+        lock_claims(self.0).remove(&self.1);
     }
 }
 
