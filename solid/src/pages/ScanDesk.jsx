@@ -47,7 +47,7 @@ import {
   typeQuantity,
 } from '@market/scan-model.js';
 import { shortcutFor } from '@market/scan-shortcuts.js';
-import { facetSignature, scanFacets, scanFallbackPricePkn, suggestPriceFromSlices } from '@market/scan-pricing.js';
+import { facetSignature } from '@market/scan-pricing.js';
 import { connectScanStream } from '@market/scan-stream.js';
 import { gameIdFromHost } from '@market/game.js';
 import { currencyContext } from '@market/pricer.js';
@@ -59,8 +59,10 @@ import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
-import { claimRows, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
+import { nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
+import { selectPriceRows, startPriceRun } from './scan-desk/price-run.js';
 import {
+  batchHasPricing,
   pricingApplyBodies,
   pricingChoiceValue,
   pricingFailedLine,
@@ -152,15 +154,34 @@ function ScanDeskDesk(props) {
   const undoStack = [];
   let redoStack = [];
   let pricesAsked = new Set();
+  // Sold comps per printing, and the cheapest listed price per printing, both
+  // held for the whole mount: an in-flight read answers for its printing, so a
+  // new scan never re-queries what a slow request already covers.
   const slicesCache = new Map();
-  let priceTouched = new Set();
+  const cheapestCache = new Map();
+  const cheapestInFlight = new Map();
+  // rowId → the shape whose price field the seller typed in (see rowNeedsPrice).
+  let priceTouched = new Map();
   let suggestedFor = new Map();
   // `${rowId}:${signature}` → failed lookups or saves so far (see retryPrices).
   let priceFailures = new Map();
+  // `${rowId}:${signature}` → ms until which a row that used its retry budget
+  // is left alone, so giving up does not turn into a request storm.
+  let priceRetryAt = new Map();
   let priceRetryTimer = null;
+  let priceRetryIn = 0;
   // rowId → { signature, pkn }: the last default price, restored when the
   // price field is left empty.
   let lastSuggested = new Map();
+  /** Everything the claim helpers in `scan-desk/price-requests.js` read. */
+  const priceBooks = () => ({
+    pricesAsked,
+    suggestedFor,
+    priceFailures,
+    retryAt: priceRetryAt,
+    signatureOf: facetSignature,
+    now: () => Date.now(),
+  });
   const patchChain = createPatchChain();
   const remapTried = new Set();
   let queueEl = null;
@@ -576,16 +597,22 @@ function ScanDeskDesk(props) {
   /**
    * A failed price lookup or save is not "no data": release the rows so the
    * prices effect asks again after a backoff. Never prices them from the
-   * "nothing found" fallbacks, and gives up after PRICE_RETRY_MAX tries.
+   * "nothing found" fallbacks, and a row that used its budget is asked again
+   * later in this same mount rather than left claimed forever.
    */
-  function retryPrices(rows) {
-    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
-    const { retry, delay } = nextPriceRetry(priceFailures, rows, facetSignature);
-    if (!retry.length) return;
+  function retryPrices(rows, { terminal = false } = {}) {
+    const books = priceBooks();
+    const { retry, delay } = nextPriceRetry(books, rows, { terminal });
+    // A given-up or terminal row is already released by `nextPriceRetry`;
+    // `delay` 0 means there is nothing left to ask again for.
     releaseUnsettled(retry, new Set(), books);
-    if (priceRetryTimer) return;
+    if (!delay) return;
+    if (priceRetryTimer && priceRetryIn <= delay) return;
+    clearTimeout(priceRetryTimer);
+    priceRetryIn = delay;
     priceRetryTimer = setTimeout(() => {
       priceRetryTimer = null;
+      priceRetryIn = 0;
       setPriceRetry((n) => n + 1);
     }, delay);
   }
@@ -600,9 +627,13 @@ function ScanDeskDesk(props) {
       patchRows([row.id], { pricePkn: last.pkn, priceSuggested: true }, { label: 'Price' });
       return;
     }
-    // No default known for this printing yet: clear it so the price effect asks again.
-    pricesAsked.delete(`${row.id}:${signature}`);
+    // No default known for this printing yet: clear the claim *and* the failed
+    // attempts and cool-down, or the next ask lands back on a spent budget.
+    const key = priceKey(row.id, signature);
+    pricesAsked.delete(key);
     suggestedFor.delete(row.id);
+    priceFailures.delete(key);
+    priceRetryAt.delete(key);
     if (row.pricePkn != null) {
       patchRows([row.id], { pricePkn: null, priceSuggested: false }, { label: 'Price' });
     } else {
@@ -610,13 +641,14 @@ function ScanDeskDesk(props) {
     }
   }
 
+  /** True only once the server took every patch: a row is settled on that answer. */
   async function patchRows(ids, changes, { record = true, label = '' } = {}) {
     // Prefer displayRows (includes in-flight pending) so a version remap right
     // after Batch Defaults → IT does not stomp language back to stale EN.
     const source = untrack(displayRows);
     const committed = untrack(rows);
     const targets = ids.map((id) => source[id] || committed[id]).filter((row) => row && row.status === 'active');
-    if (!targets.length) return;
+    if (!targets.length) return false;
     const tokenId = `${Date.now()}-${Math.random()}`;
     const optimistic = { ...changes };
     delete optimistic.confirm;
@@ -1248,108 +1280,93 @@ function ScanDeskDesk(props) {
 
   // ---------------------------------------------------------------- prices + images
 
-  watch(() => [list(), closed(), submitIntent(), priceRetry()], ([rowsNow, isClosed, intent]) => {
+  /**
+   * Sold comps for one printing, once for the mount: the promise itself is
+   * cached so every row of that printing shares the request, and a read that
+   * failed is dropped instead of being kept as "no comps".
+   */
+  function loadPriceSlices(cardId) {
+    const id = String(cardId);
+    const cached = slicesCache.get(id);
+    if (cached) return cached;
+    const pendingSlices = fetchCardSales(id, { slices: true })
+      .then((data) => ({ ok: true, slices: Array.isArray(data?.slices) ? data.slices : [] }))
+      .catch(() => {
+        if (slicesCache.get(id) === pendingSlices) slicesCache.delete(id);
+        return { ok: false, slices: [] };
+      });
+    slicesCache.set(id, pendingSlices);
+    return pendingSlices;
+  }
+
+  /**
+   * The cheapest listed price of each printing that has no sold comps, asked
+   * once per printing for the mount: a printing another request is still working
+   * on is waited for, not queried again. A failed query leaves its printings out
+   * of the answer uncached — the run then prices those rows from the documented
+   * fallback, so one dead printing neither strands the others nor is remembered
+   * as "nobody lists it".
+   */
+  async function loadCheapestPrices(cardIds) {
+    const want = [...new Set(cardIds.map(String))];
+    const missing = want.filter((id) => !cheapestCache.has(id));
+    const fresh = missing.filter((id) => !cheapestInFlight.has(id));
+    if (fresh.length) {
+      const request = fetchCheapestPricePknMap(fresh, { strict: true })
+        .then((prices) => {
+          for (const id of fresh) {
+            const value = Number(prices?.[id]);
+            cheapestCache.set(id, value > 0 ? value : null);
+            cheapestInFlight.delete(id);
+          }
+        })
+        .catch(() => {
+          for (const id of fresh) if (cheapestInFlight.get(id) === request) cheapestInFlight.delete(id);
+        });
+      for (const id of fresh) cheapestInFlight.set(id, request);
+    }
+    await Promise.all(missing.map((id) => cheapestInFlight.get(id)).filter(Boolean));
+    const byId = {};
+    for (const id of want) {
+      const value = cheapestCache.get(id);
+      if (value != null) byId[id] = value;
+    }
+    return byId;
+  }
+
+  /**
+   * The queue as the price pipeline sees it: which rows exist, what shape each
+   * has, whether it holds a price and which shapes the seller took over, plus
+   * what the batch wants priced. Location, stack, qty and a price that merely
+   * landed are not in here, so they cannot restart the run.
+   */
+  const priceIntent = createMemo(() => [
+    list().map((row) => `${row.id} ${facetSignature(row)} ${row.pricePkn == null ? 'none' : row.priceSuggested ? 'suggested' : 'manual'}`).join(';'),
+    [...priceTouched].map(([id, signature]) => `${id} ${signature}`).join(';'),
+    pricingChoiceValue(defaults()),
+  ].join('|'));
+
+  watch(() => [priceIntent(), closed(), submitIntent(), priceRetry(), batch()?.id], ([, isClosed, intent]) => {
     // The preview's unpriced rows stay unpriced: they show "on load".
     if (props.preview || isClosed || intent === 'collection') return undefined;
-    const want = rowsNow
-      .filter((row) => {
-        if (!row.cardId || priceTouched.has(row.id)) return false;
-        const signature = facetSignature(row);
-        if (row.pricePkn == null) return !pricesAsked.has(priceKey(row.id, signature));
-        return row.priceSuggested === true && suggestedFor.get(row.id) !== signature;
-      })
-      .slice(0, 12);
+    // A batch that names a pricing group or strategy prices its unpriced rows
+    // itself when it loads; the desk must not race that with a suggestion.
+    if (batchHasPricing(defaults())) return undefined;
+    const books = priceBooks();
+    const want = selectPriceRows(untrack(list), { books, touched: priceTouched });
     if (!want.length) return undefined;
-    // A cancelled or failed run releases the rows it did not price, so the next run asks again.
-    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
-    claimRows(want, books);
-    const settled = new Set();
-    // A suggestion the server did not take is asked for again.
-    const saved = (row, saving) => saving.then((ok) => {
-      if (ok === false) retryPrices([row]);
+    // One row at a time, and nothing here cancels a run that is under way: each
+    // run re-reads its own rows before it writes (scan-desk/price-run.js).
+    void startPriceRun(want, {
+      books,
+      liveRow: (id) => untrack(displayRows)[id],
+      loadSlices: loadPriceSlices,
+      loadCheapest: loadCheapestPrices,
+      save: (row, patch) => patchRows([row.id], patch, { record: false }),
+      retry: retryPrices,
+      rememberDefault: (rowId, signature, pkn) => lastSuggested.set(rowId, { signature, pkn }),
     });
-    let cancelled = false;
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      releaseUnsettled(want, settled, books);
-    };
-    (async () => {
-      // Sold-comps slices once per printing (4 in flight, docs "once per printing").
-      const queue = [...new Set(want.map((row) => String(row.cardId)))]
-        .filter((id) => !slicesCache.has(id))
-        .map((id) => () => {
-          const pendingSlices = fetchCardSales(id, { slices: true })
-            .then((data) => (Array.isArray(data?.slices) ? data.slices : []));
-          slicesCache.set(id, pendingSlices);
-          // A failed read is not "no comps": it is never cached, the retry asks again.
-          return pendingSlices.catch(() => {
-            if (slicesCache.get(id) === pendingSlices) slicesCache.delete(id);
-          });
-        });
-      while (queue.length) {
-        await Promise.all(queue.splice(0, 4).map((run) => run()));
-      }
-      const cheapestIds = new Set();
-      const failed = [];
-      for (const row of want) {
-        if (cancelled) return;
-        let slices;
-        try {
-          slices = await slicesCache.get(String(row.cardId));
-        } catch (_) {
-          slices = undefined;
-        }
-        if (!Array.isArray(slices)) {
-          failed.push(row);
-          continue;
-        }
-        const pkn = suggestPriceFromSlices(slices, scanFacets(row));
-        if (pkn > 0) {
-          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
-          lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
-          // Fresh rows race only with an empty price; stale suggested rows overwrite.
-          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-          settled.add(row.id);
-          saved(row, patchRows([row.id], patch, { record: false }));
-        } else {
-          cheapestIds.add(String(row.cardId));
-        }
-      }
-      // No sold comps at all → the cheapest listed price is the floor.
-      let byId = null;
-      if (cheapestIds.size) {
-        try {
-          byId = await fetchCheapestPricePknMap([...cheapestIds], { strict: true });
-        } catch (_) {
-          byId = null;
-        }
-      }
-      if (cancelled) return;
-      for (const row of want) {
-        if (settled.has(row.id) || failed.includes(row)) continue;
-        if (!byId) {
-          failed.push(row);
-          continue;
-        }
-        const listed = Number(byId[String(row.cardId)]);
-        // No comps and no listing either: €10,000 in PKN, so no row blocks the upload.
-        const pkn = listed > 0 ? listed : scanFallbackPricePkn();
-        settled.add(row.id);
-        const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
-        lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
-        if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-        saved(row, patchRows([row.id], patch, { record: false }));
-      }
-      if (failed.length) retryPrices(failed);
-    })().catch(() => {
-      if (!cancelled) release();
-    });
-    return () => {
-      cancelled = true;
-      release();
-    };
+    return undefined;
   });
 
   watch(() => [list(), images()], ([rowsNow, shots]) => {
@@ -1483,9 +1500,10 @@ function ScanDeskDesk(props) {
     setPricingNote({ text: '', failed: false });
     loadPricing();
     pricesAsked = new Set();
-    priceTouched = new Set();
+    priceTouched = new Map();
     suggestedFor = new Map();
     priceFailures = new Map();
+    priceRetryAt = new Map();
     lastSuggested = new Map();
     dispatch({ type: 'reset', items: [] });
     setBatch(null);
@@ -1798,7 +1816,10 @@ function ScanDeskDesk(props) {
               replacing={replaceFor() === row().id}
               preferredLanguage={defaults().language}
               remapTried={remapTried}
-              onPriceFocus={(rowId) => priceTouched.add(rowId)}
+              onPriceEdited={(rowId) => {
+                const live = untrack(displayRows)[rowId];
+                if (live) priceTouched.set(rowId, facetSignature(live));
+              }}
               onPriceEmptied={restoreDefaultPrice}
               onFocus={(event) => {
                 const rowsNow = list();
