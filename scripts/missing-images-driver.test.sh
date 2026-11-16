@@ -210,6 +210,15 @@ fi
 if ! grep -q 'ROLLBACK;' "$STUB_SQL"; then
   fail "dry mode did not roll its transaction back"
 fi
+# Postgres wants ON COMMIT before AS: `CREATE TEMP TABLE x AS SELECT ... ON COMMIT
+# DROP` is a syntax error, so the stamp pass must never emit that order.
+if grep -Eq 'AS SELECT.*ON COMMIT' "$STUB_SQL"; then
+  fail "ON COMMIT DROP after the query: $(grep -E 'AS SELECT.*ON COMMIT' "$STUB_SQL")"
+fi
+for temp_table in missing_stamped missing_touch_cand missing_touch_cards missing_touch_vers; do
+  grep -q "CREATE TEMP TABLE $temp_table ON COMMIT DROP AS SELECT" "$STUB_SQL" ||
+    fail "no ON COMMIT DROP before AS SELECT for $temp_table"
+done
 if [ -n "$(ls -A "$R3/missing-undo" 2>/dev/null)" ]; then
   fail "dry mode wrote an undo file: $(ls -A "$R3/missing-undo")"
 fi
