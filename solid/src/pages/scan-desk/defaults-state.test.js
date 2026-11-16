@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  acceptSuggestion,
+  batchFlag,
+  displaySlots,
+  draftValue,
+  gearState,
+  isLocationOff,
+  locationFieldState,
+  locationSuggestion,
+  parseBatchFlags,
+  pendingDraft,
+  serializeBatchFlags,
+  setBatchFlag,
+  sizeCommit,
+  stripCursorKeys,
+} from './defaults-state.js';
+
+// The Location seed and the "Off" switches. `locationSuggestion` is the whole
+// gate: the seed answers a box, and this decides whether the desk may even show
+// it. The answers themselves come from `fetchSellerBoxSlots`.
+
+test('a seed answer never wins against a field the seller is typing in', () => {
+  // The 700 ms pause: the batch default is still empty while "mega" is typed.
+  assert.equal(
+    draftValue({ focused: true, draft: 'mega', serverValue: '712' }),
+    'mega',
+    'the typed text stays in the field',
+  );
+  // Once the field is left go the desk adopts the batch default again.
+  assert.equal(draftValue({ focused: false, draft: 'mega', serverValue: 'A1' }), 'A1');
+  // The seed is only ever a suggestion while the box is unknown.
+  assert.equal(locationSuggestion({ boxes: ['712'], location: '', touched: false }), '712');
+  assert.equal(locationSuggestion({ boxes: ['712'], location: 'mega', touched: true }), '');
+});
+
+test('a cleared location is never seeded again for that batch', () => {
+  // Clearing is a choice: the seed stays silent across reloads through the flag.
+  const stored = serializeBatchFlags(setBatchFlag({}, 'batch-1', 'locationTouched', true));
+  assert.equal(batchFlag(parseBatchFlags(stored), 'batch-1', 'locationTouched'), true);
+  assert.equal(locationSuggestion({ boxes: ['712'], location: '', touched: true }), '');
+  assert.equal(acceptSuggestion({ suggestion: '712', location: '', touched: true }), null);
+  // Another batch of the same seller is still a fresh start.
+  assert.equal(batchFlag(parseBatchFlags(stored), 'batch-2', 'locationTouched'), false);
+});
+
+test('a scan accepts the box the seller was shown, and nothing else does', () => {
+  assert.deepEqual(acceptSuggestion({ suggestion: '712', location: '', touched: false }), { location: '712' });
+  // Already a box: the scan must not move the batch to the newest listing.
+  assert.equal(acceptSuggestion({ suggestion: '712', location: 'A1', touched: false }), null);
+  assert.equal(acceptSuggestion({ suggestion: '', location: '', touched: false }), null);
+});
+
+test('emptying cards per stack and leaving it means Off, not the old number', () => {
+  assert.deepEqual(sizeCommit(''), { kind: 'off' });
+  assert.deepEqual(sizeCommit('  '), { kind: 'off' });
+  assert.deepEqual(sizeCommit('40'), { kind: 'size', size: 40 });
+  // Junk never applies (and never silently keeps the old number either).
+  assert.deepEqual(sizeCommit('abc'), { kind: 'invalid' });
+  assert.deepEqual(sizeCommit('0'), { kind: 'invalid' });
+});
+
+test('stack setup Off greys the gear, hides its number and freezes the cursor', () => {
+  const off = gearState({ off: true, size: 80, stack: 4, startPosition: 3, locationOff: false });
+  assert.equal(off.greyed, true);
+  assert.equal(off.showSize, false, 'the gear shows no number');
+  assert.match(off.title, /Off/);
+  assert.match(off.title, /Choose cards per stack to switch it on/, 'the title says how to switch it on');
+
+  const on = gearState({ off: false, size: 80, stack: 4, startPosition: 3, locationOff: false });
+  assert.equal(on.greyed, false);
+  assert.equal(on.showSize, true);
+  assert.match(on.title, /80 cards per stack, stack 4, next position 3/);
+
+  // With no box there is nothing to stack in: the gear is greyed and says so.
+  const noBox = gearState({ off: false, size: 80, stack: 4, startPosition: 3, locationOff: true });
+  assert.equal(noBox.greyed, true);
+  assert.match(noBox.title, /type a box/i);
+});
+
+test('location off greys the field and keeps the suggestion as a placeholder', () => {
+  assert.equal(isLocationOff({ location: '' }), true);
+  assert.equal(isLocationOff({ location: '  ' }), true);
+  assert.equal(isLocationOff({ location: '712' }), false);
+
+  const suggested = locationFieldState({ location: '', suggestion: '712' });
+  assert.equal(suggested.off, true);
+  assert.equal(suggested.placeholder, '712', 'placeholder style, not a value');
+  assert.match(suggested.title, /Box of your newest listing: 712/);
+
+  const cleared = locationFieldState({ location: '', suggestion: '' });
+  assert.equal(cleared.placeholder, '');
+  assert.match(cleared.title, /new rows get no location/);
+
+  const set = locationFieldState({ location: '712', suggestion: '' });
+  assert.equal(set.off, false);
+  assert.equal(set.placeholder, '');
+});
+
+test('off rows keep the plain box name with no stack or position suffix', () => {
+  // slotText of scan-model renders the suffix out of a slot; the desk hands it
+  // nothing at all while the stack setup is Off, so the box name stands alone.
+  const slots = new Map([['row-1', { stack: 4, start: 2, end: 2, stackSize: 80 }]]);
+  assert.equal(slots.get('row-1').stack, 4, 'on: the slot is there to suffix');
+  assert.equal(displaySlots(slots, { off: true }).has('row-1'), false, 'off: no slot, no suffix');
+  assert.equal(displaySlots(slots, { off: false }), slots);
+  assert.equal(displaySlots(undefined, { off: false }) instanceof Map, true);
+});
+
+test('while off the desk stops writing the stack cursor', () => {
+  assert.deepEqual(stripCursorKeys({ stack: 7, startPosition: 3 }, { off: true }), {});
+  assert.deepEqual(stripCursorKeys({ stack: 7, language: 'IT' }, { off: true }), { language: 'IT' });
+  // Turning the setup back on sends the chosen size itself.
+  assert.deepEqual(stripCursorKeys({ stackSize: 40 }, { off: false }), { stackSize: 40 });
+});
+
+test('a pending draft is flushed before a row is created with the old box', () => {
+  assert.equal(pendingDraft({ draft: 'mega', applied: '712' }), 'mega');
+  // An emptied field is a pending change too: clearing means no location.
+  assert.equal(pendingDraft({ draft: '', applied: '712' }), '');
+  assert.equal(pendingDraft({ draft: '712', applied: '712' }), null);
+  assert.equal(pendingDraft({ draft: undefined, applied: '' }), null);
+});
+
+test('the stored batch flags survive junk and prune themselves', () => {
+  assert.deepEqual(parseBatchFlags(''), {});
+  assert.deepEqual(parseBatchFlags('not json'), {});
+  assert.deepEqual(parseBatchFlags('[]'), {});
+  assert.deepEqual(parseBatchFlags('{"b1":{"stackOff":true,"extra":1}}'), { b1: { stackOff: true } });
+  const flags = setBatchFlag(setBatchFlag({}, 'b1', 'stackOff', true), 'b1', 'locationTouched', true);
+  assert.deepEqual(flags, { b1: { stackOff: true, locationTouched: true } });
+  // Turning both off leaves no entry behind, so the store cannot grow forever.
+  const cleared = setBatchFlag(setBatchFlag(flags, 'b1', 'stackOff', false), 'b1', 'locationTouched', false);
+  assert.deepEqual(cleared, {});
+  assert.equal(setBatchFlag(flags, '', 'stackOff', true), flags, 'no batch id, no write');
+});
