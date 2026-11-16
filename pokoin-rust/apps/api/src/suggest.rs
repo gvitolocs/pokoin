@@ -761,22 +761,33 @@ async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)
  let Some(pool)=crate::catalog_api::game_pool(&state,&game).await else{return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
  let cap=crate::catalog_api::limit(&p,"limit",12,24);
  let needle=query.to_lowercase();let like=format!("%{needle}%");
- // Same token coverage as the satellite results page: a character plus an
- // expansion code (`luffy op01`) or a code without its hyphen (`op01`) has to
- // find that expansion, not the rows whose name happens to resemble the phrase.
- let tokens=crate::game_search::query_tokens(&needle);
- let coverage=crate::game_search::Coverage::new(tokens.len(),4);
- let sql=format!(r#"select m.card_id from (
+    // Same token coverage as the satellite results page: a character plus an
+    // expansion code (`luffy op01`) or a code without its hyphen (`op01`) has to
+    // find that expansion, not the rows whose name happens to resemble the phrase.
+    let tokens = crate::game_search::query_tokens(&needle);
+    let coverage = crate::game_search::Coverage::new(tokens.len(), 4);
+    let sql = format!(
+        r#"select m.card_id from (
  select c.card_id,c.item_kind,c.search_weight,
   replace(lower(c.name),'-','') as nflat,replace(lower(coalesce(c.set_name,'')),'-','') as sflat,replace(lower(c.search_text),'-','') as tflat
  from public.marketplace_search_candidates c
  where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null) m
  where ({predicate})
  order by {ranking},case when m.item_kind='single' then 0 else 1 end,m.search_weight desc,m.card_id desc limit $3"#,
-  predicate=coverage.predicate("$1","$2"),ranking=coverage.ranking("$1"));
- let mut statement=sqlx::query_scalar::<_,i64>(&sql).bind(&needle).bind(like).bind((cap*8).max(48));
- for token in &tokens{statement=statement.bind(format!("%{token}%"))}
- let ids=match statement.fetch_all(&pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+        predicate = coverage.predicate("$1", "$2"),
+        ranking = coverage.ranking("$1")
+    );
+    let mut statement = sqlx::query_scalar::<_, i64>(&sql)
+        .bind(&needle)
+        .bind(like)
+        .bind((cap * 8).max(48));
+    for token in &tokens {
+        statement = statement.bind(format!("%{token}%"))
+    }
+    let ids = match statement.fetch_all(&pool).await {
+        Ok(r) => r,
+        Err(e) => return crate::catalog_api::failure(&e),
+    };
  let cards=match crate::catalog_api::cards(&pool,&ids,&game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
  let mut groups=vec![];let mut names=HashMap::<String,usize>::new();
  for raw in cards {
