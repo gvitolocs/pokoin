@@ -1,5 +1,6 @@
 mod body_validation;
 mod card_identity;
+mod game_search;
 mod http_cache;
 mod related;
 mod ct_deals;

@@ -343,6 +343,11 @@ pub(crate) async fn sql_search_page(wanted:pokoin_api_common::compact::Wanted,po
  let phrase=query.trim().to_lowercase();
  let like=format!("%{phrase}%");
  let pokemon=game=="pokemon";
+ // Satellites have no search engine of their own: every typed word has to be
+ // somewhere in the row's own text, hyphen included or not, so `luffy op01`
+ // and `romance dawn` find the expansion instead of drowning in it.
+ let tokens=if pokemon { Vec::new() } else { crate::game_search::query_tokens(&phrase) };
+ let coverage=crate::game_search::Coverage::new(tokens.len(),7);
  let sql=if pokemon {
  r#"select c.card_id from public.marketplace_search_candidates c
  where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
@@ -350,18 +355,24 @@ pub(crate) async fn sql_search_page(wanted:pokoin_api_common::compact::Wanted,po
  and ($3='' or c.product_type=$3)
  and (not $4 or c.item_kind='product' or c.product_type='jumbo')
  order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 else 4 end,
- c.search_weight desc,c.card_id desc limit $5 offset $6"#
+ c.search_weight desc,c.card_id desc limit $5 offset $6"#.to_string()
  } else {
- r#"select c.card_id from public.marketplace_search_candidates c
- where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
- and ($1='' or c.search_text like $2 or word_similarity($1,coalesce(c.set_name,''))>0.4 or word_similarity($1,coalesce(c.name,''))>0.4)
- and ($3='' or c.product_type=$3)
- and (not $4 or c.item_kind='product' or c.product_type='jumbo')
- and ($1<>'' or $3<>'' or $4 or (c.item_kind='single' and c.product_type='card'))
- order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 when word_similarity($1,coalesce(c.set_name,''))>0.4 then 4 when word_similarity($1,coalesce(c.name,''))>0.4 then 5 else 6 end,
- case when not $4 and $3<>'sealed' and c.item_kind='single' then 0 else 1 end,c.search_weight desc,c.imported_at desc nulls last,c.card_id desc limit $5 offset $6"#
+  format!(r#"select m.card_id from (
+  select c.card_id,c.item_kind,c.product_type,c.search_weight,c.imported_at,
+   replace(lower(c.name),'-','') as nflat,replace(lower(coalesce(c.set_name,'')),'-','') as sflat,replace(lower(c.search_text),'-','') as tflat
+  from public.marketplace_search_candidates c
+  where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null) m
+  where ($1='' or {predicate})
+  and ($3='' or m.product_type=$3)
+  and (not $4 or m.item_kind='product' or m.product_type='jumbo')
+  and ($1<>'' or $3<>'' or $4 or (m.item_kind='single' and m.product_type='card'))
+  order by {ranking},
+  case when not $4 and $3<>'sealed' and m.item_kind='single' then 0 else 1 end,m.search_weight desc,m.imported_at desc nulls last,m.card_id desc limit $5 offset $6"#,
+   predicate=coverage.predicate("$1","$2"),ranking=coverage.ranking("$1"))
  };
- let ids=match sqlx::query_scalar::<_,i64>(sql).bind(&phrase).bind(like).bind(product_type).bind(product_only).bind(limit+1).bind(offset).fetch_all(pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+ let mut statement=sqlx::query_scalar::<_,i64>(&sql).bind(&phrase).bind(like).bind(product_type).bind(product_only).bind(limit+1).bind(offset);
+ for token in &tokens{statement=statement.bind(format!("%{token}%"))}
+ let ids=match statement.fetch_all(pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
  let has_more=ids.len()>limit as usize;
  let mut raw=match crate::catalog_api::cards(pool,&ids[..ids.len().min(limit as usize)],game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
  if let Err(e)=crate::catalog_api::localize(pool,&mut raw,lang,game).await{return crate::catalog_api::failure(&e)}
