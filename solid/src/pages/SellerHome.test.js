@@ -107,6 +107,17 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
   // Multi-day smooth path only; a single live day is a point — no flat underline.
   assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><path class="seller-history-line"/);
+  // The draw-in reveal rides a clip rect that rests at the full plot width, so
+  // nothing is hidden unless an animation is actually running.
+  assert.match(historySrc, /prefers-reduced-motion/);
+  assert.match(historySrc, /<clipPath id=\{REVEAL_CLIP\}>[\s\S]*?width=\{CHART_W\}/);
+  assert.match(historySrc, /clip-path=\{`url\(#\$\{REVEAL_CLIP\}\)`\}/);
+  assert.match(historySrc, /requestAnimationFrame\(step\)/);
+  assert.match(historySrc, /cancelAnimationFrame\(revealFrame\)/);
+  assert.match(historySrc, /onCleanup\(showWholeChart\)/);
+  // The end dot joins late; the hover dot and the tip are never hidden.
+  assert.match(historySrc, /ref=\{\(el\) => \{ endDotNode = el; \}\}/);
+  assert.match(historySrc, /class="seller-history-point is-hover" style=/);
   assert.match(historySrc, /seller-history-liquidity/);
   assert.match(historySrc, /seller-history-legend/);
   assert.match(historySrc, /seller-history-point/);
