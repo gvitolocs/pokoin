@@ -19,6 +19,11 @@ filename — `{ct_id}-{leftover-slug}.jpg` on CardTrader). CardTrader GET runs
 on Oracle `pokoin-marketplace` (home IP is rate-limited). Pillow JPEG/webp
 stays on nezopt. Do not HUP `pokoin-card-images` after rsync (HUP stops the
 Node process).
+`POKOIN_INGEST_IDS` / `POKOIN_INGEST_ID_FILE` are CardTrader ids and match
+`ct_id` only. Set `POKOIN_IDS_ARE_CARD_IDS=1` to take leftover public card ids
+instead, which match `card_id` only — never both kinds, because card_id is
+ct_id * 2 for most cards and a ct_id list would otherwise pull in unrelated
+cards whose card_id collides with one of the ids.
 Low-res upgrades: `POKOIN_MIN_SCAN_WIDTH` above the current leftover width so
 a wider scan replaces it. `POKOIN_TMP_DIR` moves the local jobs/out/id files
 (the Oracle side stays under /tmp); `POKOIN_BACKUP_DIR` copies the leftover jpg
@@ -82,6 +87,11 @@ if _ID_FILE:
         if part.strip().isdigit()
     )
 IDS = sorted(set(IDS))
+IDS_ARE_CARD_IDS = os.environ.get("POKOIN_IDS_ARE_CARD_IDS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 PLACEHOLDERS = os.environ.get("POKOIN_INGEST_PLACEHOLDERS", "").strip().lower() in {
     "1",
     "true",
@@ -474,6 +484,7 @@ def regen_previews(key: str, source: Path | None = None) -> list[str]:
 def dump_sql() -> str:
     if IDS:
         needles = ",".join(str(n) for n in IDS)
+        id_column = "c.card_id" if IDS_ARE_CARD_IDS else "c.ct_id"
         return f"""
 COPY (
   SELECT
@@ -491,7 +502,7 @@ COPY (
   LEFT JOIN public.cardtrader_pokemon_blueprints b
     ON b.id = c.ct_id
   WHERE c.item_kind = 'single'
-    AND (c.ct_id IN ({needles}) OR c.card_id IN ({needles}))
+    AND {id_column} IN ({needles})
   ORDER BY c.card_id
 ) TO STDOUT WITH CSV HEADER
 """

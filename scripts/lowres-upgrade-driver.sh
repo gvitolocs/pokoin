@@ -35,6 +35,8 @@ log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
 die() { log "FATAL $*"; exit 1; }
 
 # ct_id per line: reachable scan, at least 700 px wide, in numeric order.
+# The ingest takes CardTrader ids only (POKOIN_IDS_ARE_CARD_IDS stays unset), so
+# ids.txt matches c.ct_id and never a colliding c.card_id.
 list_candidates() {
   {
     for f in "$R"/pkprobe.[0-9][0-9].out; do
