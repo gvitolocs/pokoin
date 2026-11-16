@@ -2214,7 +2214,11 @@ pub async fn mutate_batch(
         }
         "item" => {
             let patch = payload.get("patch").cloned().unwrap_or_else(|| payload.clone());
-            patch_item(db, seller_uid, item_id, &patch, payload.get("onlyIfEmptyPrice") == Some(&Value::Bool(true))).await
+            // The desk sends the guard inside `patch` (market/src/scan-api.js);
+            // a top-level `true` stays accepted.
+            let flag = |value: &Value| value.get("onlyIfEmptyPrice") == Some(&Value::Bool(true));
+            let guard = flag(&patch) || flag(payload);
+            patch_item(db, seller_uid, item_id, &patch, guard).await
         }
         "add" => add_manual(db, seller_uid, batch_id, payload).await,
         "remove" => set_status(db, seller_uid, item_id, "active", "removed").await,
