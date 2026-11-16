@@ -7,14 +7,16 @@ import {
   draftValue,
   gearState,
   isLocationOff,
+  LOCATION_OFF_PATCH,
   locationFieldState,
   locationSuggestion,
+  MAX_TRACKED_BATCHES,
   parseBatchFlags,
   pendingDraft,
   serializeBatchFlags,
   setBatchFlag,
   sizeCommit,
-  stripCursorKeys,
+  STACK_OFF_PATCH,
 } from './defaults-state.js';
 
 // The Location seed and the "Off" switches. `locationSuggestion` is the whole
@@ -108,11 +110,11 @@ test('off rows keep the plain box name with no stack or position suffix', () => 
   assert.equal(displaySlots(undefined, { off: false }) instanceof Map, true);
 });
 
-test('while off the desk stops writing the stack cursor', () => {
-  assert.deepEqual(stripCursorKeys({ stack: 7, startPosition: 3 }, { off: true }), {});
-  assert.deepEqual(stripCursorKeys({ stack: 7, language: 'IT' }, { off: true }), { language: 'IT' });
-  // Turning the setup back on sends the chosen size itself.
-  assert.deepEqual(stripCursorKeys({ stackSize: 40 }, { off: false }), { stackSize: 40 });
+test('off is sent as the closest value today server accepts', () => {
+  // normalize_defaults clamps 0 back to 1, so an off stack setup travels as
+  // "one card per stack" and the desk keeps the Off state itself.
+  assert.deepEqual(STACK_OFF_PATCH, { stackSize: 1 });
+  assert.deepEqual(LOCATION_OFF_PATCH, { location: '' });
 });
 
 test('a pending draft is flushed before a row is created with the old box', () => {
@@ -134,4 +136,18 @@ test('the stored batch flags survive junk and prune themselves', () => {
   const cleared = setBatchFlag(setBatchFlag(flags, 'b1', 'stackOff', false), 'b1', 'locationTouched', false);
   assert.deepEqual(cleared, {});
   assert.equal(setBatchFlag(flags, '', 'stackOff', true), flags, 'no batch id, no write');
+});
+
+test('a batch worked on again is never the one dropped from the store', () => {
+  let flags = {};
+  for (let i = 0; i < MAX_TRACKED_BATCHES; i += 1) flags = setBatchFlag(flags, `old-${i}`, 'stackOff', true);
+  flags = setBatchFlag(flags, 'current', 'stackOff', true);
+  assert.deepEqual(Object.keys(flags).slice(0, 2), ['old-1', 'old-2'], 'the oldest batch went');
+  assert.equal(batchFlag(flags, 'current', 'stackOff'), true);
+  // Working on an old one again moves it to the end instead of evicting it.
+  flags = setBatchFlag(flags, 'old-100', 'locationTouched', true);
+  assert.equal(Object.keys(flags).at(-1), 'old-100');
+  flags = setBatchFlag(flags, 'current', 'locationTouched', true);
+  assert.equal(batchFlag(flags, 'current', 'stackOff'), true);
+  assert.equal(Object.keys(flags).length, MAX_TRACKED_BATCHES);
 });

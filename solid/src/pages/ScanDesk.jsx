@@ -62,6 +62,17 @@ import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
+import {
+  acceptSuggestion,
+  BATCH_FLAGS_KEY,
+  batchFlag,
+  displaySlots,
+  locationSuggestion,
+  parseBatchFlags,
+  serializeBatchFlags,
+  setBatchFlag,
+} from './scan-desk/defaults-state.js';
+import { applyDefaultsResponse, defaultsFailureMessage, rollbackDefaults } from './scan-desk/defaults-write.js';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
 import { claimRows, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
@@ -152,6 +163,9 @@ function ScanDeskDesk(props) {
   const [draft, setDraft] = createSignal(null);
   const [boxStockRows, setBoxStockRows] = createSignal([]);
   const [recentBoxNames, setRecentBoxNames] = createSignal([]);
+  /** Batch-defaults switches the batch row has no field for: see defaults-state.js. */
+  const [stackOff, setStackOff] = createSignal(false);
+  const [locationTouched, setLocationTouched] = createSignal(false);
   let qtyBuffer = { id: '', buffer: '', at: 0 };
   const undoStack = [];
   let redoStack = [];
@@ -170,6 +184,8 @@ function ScanDeskDesk(props) {
   let queueEl = null;
   let locationInput = null;
   let stackButton = null;
+  /** What the Batch defaults bar can do on command: apply a typed Location now. */
+  let defaultsBar = null;
   let draftQtyInput = null;
   let addSearchInput = null;
   let submitKey = newSubmitKey();
@@ -276,6 +292,13 @@ function ScanDeskDesk(props) {
               pushToast({ id: event.mergedId, text: `Qty ${event.from} → ${event.to}`, itemId: event.mergedId });
             }
             const item = data.items.find((row) => row.id === (event.id || event.mergedId));
+            if (event.type === 'added') {
+              // A scan is the seller putting a card in a box: it accepts the
+              // box the desk was suggesting, and a box still being typed is
+              // applied now, so the write that fans onto active rows reaches
+              // this row instead of leaving it on the box from before.
+              void flushLocationDraft();
+            }
             if (event.type === 'added' && item) {
               console.info('[scan-desk] dashboard-row', {
                 itemId: item.id,
@@ -352,6 +375,8 @@ function ScanDeskDesk(props) {
   const list = createMemo(() => queueRows(displayRows()));
   const occupiedAbs = createMemo(() => occupiedAbsForScanBoxes(list(), boxStockRows()));
   const slots = createMemo(() => boxSlots(list(), { occupiedAbs: occupiedAbs() }));
+  /** The Loc column suffix: with the stack setup Off every row keeps the plain box name. */
+  const rowSlots = createMemo(() => displaySlots(slots(), { off: stackOff() }));
   const occupancy = createMemo(() => occupancyForScanBoxes(list(), boxStockRows()));
   /** stack → highest position this batch takes, per box the batch rows name. */
   const batchOccupancy = createMemo(() => {
@@ -518,34 +543,79 @@ function ScanDeskDesk(props) {
     },
   );
 
-  // An empty location suggests the box on the seller's newest listing.
-  // One shot per batch: clearing the field afterwards stays cleared.
-  let locationSeeded = '';
+  // An empty location suggests the box on the seller's newest listing. It is a
+  // suggestion and nothing else: writing it into the batch defaults is what
+  // stamped a box the seller never chose on every card of the batch, and the
+  // answer used to land in the field while a box was still being typed. The
+  // box list is fetched once per batch, for the menu as well as the suggestion.
+  let boxesAsked = '';
   watch(
     () => [batch()?.id, defaults().location, closed(), stockUid()],
     ([batchId, location, isClosed, sellerUid]) => {
       if (props.preview || isClosed || !batchId || !sellerUid) return undefined;
-      if (String(location || '').trim()) {
-        locationSeeded = batchId;
-        return undefined;
-      }
-      if (locationSeeded === batchId) return undefined;
+      if (String(location || '').trim()) return undefined;
+      if (boxesAsked === batchId) return undefined;
+      boxesAsked = batchId;
       let cancelled = false;
       (async () => {
         try {
           const data = await fetchSellerBoxSlots(sellerUid, await getBearer());
-          if (cancelled || locationSeeded === batchId) return;
-          const boxes = (Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean);
-          setRecentBoxNames(boxes);
-          const last = boxes[0];
-          if (!last || String(defaults().location || '').trim()) return;
-          locationSeeded = batchId;
-          setDefaults({ location: last });
-        } catch (_) { /* the field stays empty; the seller can still type a box */ }
+          if (cancelled) return;
+          setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
+        } catch (_) {
+          boxesAsked = ''; /* the field stays empty; the seller can still type a box */
+        }
       })();
       return () => { cancelled = true; };
     },
   );
+  const boxSuggestion = createMemo(() => locationSuggestion({
+    boxes: recentBoxNames(),
+    location: defaults().location,
+    touched: locationTouched(),
+  }));
+
+  // The switches the batch row has no column for, kept per batch in this
+  // browser so "Off" and "the seller has a hand on Location" survive a reload.
+  let batchFlags = parseBatchFlags(localStorage.getItem(BATCH_FLAGS_KEY));
+  function rememberBatchFlag(name, value) {
+    const batchId = untrack(batch)?.id;
+    if (!batchId) return;
+    batchFlags = setBatchFlag(batchFlags, batchId, name, value);
+    try {
+      localStorage.setItem(BATCH_FLAGS_KEY, serializeBatchFlags(batchFlags));
+    } catch (_) { /* private mode etc. — the switch stays for this session */ }
+  }
+  function markLocationTouched() {
+    if (locationTouched()) return;
+    setLocationTouched(true);
+    rememberBatchFlag('locationTouched', true);
+  }
+  /** Stack setup Off: the gear goes grey and the rows keep the plain box name. */
+  function rememberStackOff(next) {
+    setStackOff(Boolean(next));
+    rememberBatchFlag('stackOff', Boolean(next));
+  }
+  watch(() => [batch()?.id], ([batchId]) => {
+    setLocationTouched(batchFlag(batchFlags, batchId || '', 'locationTouched'));
+    setStackOff(batchFlag(batchFlags, batchId || '', 'stackOff'));
+  });
+
+  /**
+   * Apply the Location the seller is typing before a row is created with the
+   * one from before it: a scan that arrives, or a card added from search.
+   */
+  function flushLocationDraft() {
+    // A closed batch has no defaults to change and no bar left to read from.
+    if (closed()) return undefined;
+    const accepted = acceptSuggestion({
+      suggestion: boxSuggestion(),
+      location: untrack(defaults).location,
+      touched: locationTouched(),
+    });
+    if (accepted) return setDefaults(accepted);
+    return defaultsBar?.commitLocation();
+  }
 
   /**
    * Where the next card of `box` goes when the cursor is thought to sit at
@@ -740,7 +810,23 @@ function ScanDeskDesk(props) {
     if ((Math.trunc(Number(quantity)) || 1) !== 1) setDefaults({ quantity: 1 });
   });
 
-  async function setDefaults(patch) {
+  /**
+   * Change a batch default. What the seller chose paints at once — a select
+   * that only answers after the previous write looks like a default that
+   * cannot be switched — and the write itself goes through one chain per batch,
+   * so two quick changes never answer out of order.
+   */
+  async function setDefaults(patch, { stackOff: nextStackOff = null } = {}) {
+    const current = untrack(batch);
+    if (!current?.id) return;
+    if (nextStackOff !== null) rememberStackOff(nextStackOff);
+    const before = { ...(current.defaults || {}) };
+    setBatch((prev) => ({ ...prev, defaults: { ...prev.defaults, ...patch } }));
+    await patchChain(`defaults:${current.id}`, () => saveDefaults(patch, before));
+  }
+
+  /** The serialised half: the stock hint of a typed box, the request, its answer. */
+  async function saveDefaults(patch, before) {
     const current = untrack(batch);
     if (!current?.id) return;
     const d = untrack(defaults);
@@ -755,22 +841,32 @@ function ScanDeskDesk(props) {
       if (loc) {
         const box = listingBox(loc);
         const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? d.stackSize)) || 1);
+        const key = `${current.id}|${box}`;
         try {
           const data = await fetchSellerBoxSlots(sellerUid, await getBearer(), { box, stackSize: size });
-          const stock = Array.isArray(data?.rows) ? data.rows : [];
-          boxStock = { key: `${current.id}|${box}`, box, rows: stock };
-          setBoxStockRows(stock);
-          setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
-          const next = data?.next;
-          if (next && patch.stack == null && patch.startPosition == null) {
-            const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
-            const cursor = cursorForBox(box, wantedSize, next.stack, stock);
-            nextPatch = {
-              ...nextPatch,
-              stack: Math.min(9999, cursor.stack),
-              startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
-              ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
-            };
+          // Another box was typed while this was in flight (its optimistic
+          // value is already on screen): the desk computes every slot out of
+          // one `boxStock`, so taking this answer would mix the old box's
+          // stock with the new box's name and anchor scans at a taken slot.
+          const stillWanted = boxStock.key === key
+            && untrack(batch)?.id === current.id
+            && listingBox(String(untrack(defaults).location || '').trim()) === box;
+          if (stillWanted) {
+            const stock = Array.isArray(data?.rows) ? data.rows : [];
+            boxStock = { key, box, rows: stock };
+            setBoxStockRows(stock);
+            setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
+            const next = data?.next;
+            if (next && patch.stack == null && patch.startPosition == null) {
+              const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
+              const cursor = cursorForBox(box, wantedSize, next.stack, stock);
+              nextPatch = {
+                ...nextPatch,
+                stack: Math.min(9999, cursor.stack),
+                startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
+                ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
+              };
+            }
           }
         } catch (_) {
           /* stock hint is best-effort; submit still seeds from inventory */
@@ -780,7 +876,7 @@ function ScanDeskDesk(props) {
         boxStock = { key: '', box: '', rows: [] };
       }
     }
-    const merged = { ...(current.defaults || {}), ...nextPatch };
+    const merged = { ...untrack(defaults), ...nextPatch };
     const loc = String(merged.location || '').trim();
     if (loc && (nextPatch.startPosition != null || nextPatch.stack != null || nextPatch.stackSize != null)) {
       const size = Math.max(1, Math.trunc(Number(nextPatch.stackSize ?? d.stackSize)) || 1);
@@ -811,10 +907,16 @@ function ScanDeskDesk(props) {
       if (props.preview) return;
       const t = await token();
       const data = await scanApi.defaults(t, current.id, nextPatch);
-      setBatch((prev) => ({ ...prev, ...data.batch }));
+      // Only the keys this write set, and never an answer older than the
+      // newest default applied: the batch view is a whole snapshot of the
+      // moment the server took it, not of what the desk has since chosen.
+      setBatch((prev) => applyDefaultsResponse(prev, { patch: nextPatch, view: data?.batch }));
       if (data?.items?.length) dispatch({ type: 'items', items: data.items });
     } catch (err) {
-      setError(err.message || 'Defaults not saved.');
+      // A default the server never took must not stay on screen: the next scan
+      // takes the defaults in force on the server, not the ones shown here.
+      setBatch((prev) => rollbackDefaults(prev, before, nextPatch));
+      setError(`${err.message || 'Defaults not saved.'} ${defaultsFailureMessage(nextPatch)}`);
     } finally {
       if (tokenId) {
         setPending((prev) => {
@@ -1029,6 +1131,10 @@ function ScanDeskDesk(props) {
     const b = batch();
     if (!current || !b?.id || closed()) return;
     const qty = Math.max(1, Math.min(99, Number(current.quantity) || 1));
+    // A box typed in Batch defaults while this draft sat open is the box the
+    // seller means: it is applied before the row is created, and the draft has
+    // no location control of its own, so the row takes the batch default.
+    await flushLocationDraft();
     try {
       const t = await token();
       const data = await scanApi.add(t, b.id, {
@@ -1039,7 +1145,7 @@ function ScanDeskDesk(props) {
         firstEdition: current.firstEdition,
         signed: current.signed,
         altered: current.altered,
-        location: current.location,
+        location: String(untrack(defaults).location || ''),
         quantity: qty,
       });
       const item = data?.items?.[0];
@@ -1645,6 +1751,10 @@ function ScanDeskDesk(props) {
               currencyCtx={pricingCtx()}
               pricingHref={props.preview ? '/mypokoin/pricer?mypokoinPreview' : '/mypokoin/pricer'}
               boxes={recentBoxNames()}
+              suggestion={boxSuggestion()}
+              stackOff={stackOff()}
+              onTouched={markLocationTouched}
+              api={(api) => { defaultsBar = api; }}
               stackFull={stackFull()}
               onChange={setDefaults}
               cursorForStack={cursorForStack}
@@ -1825,7 +1935,7 @@ function ScanDeskDesk(props) {
               closed={closed()}
               hidePrice={submitIntent() === 'collection'}
               priceCurrency={priceCurrency()}
-              slot={slots().get(row().id)}
+              slot={rowSlots().get(row().id)}
               replacing={replaceFor() === row().id}
               preferredLanguage={defaults().language}
               remapTried={remapTried}

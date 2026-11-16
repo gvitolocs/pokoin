@@ -9,9 +9,6 @@
 /** localStorage key of `{ [batchId]: { locationTouched, stackOff } }`. */
 export const BATCH_FLAGS_KEY = 'scan:batch-defaults';
 
-/** The stack cursor keys: what "Off" freezes and the desk's bookkeeping writes. */
-export const CURSOR_KEYS = Object.freeze(['stack', 'stackSize', 'startPosition']);
-
 /** `{ batchId: {…} }` out of stored JSON; junk, arrays and null become empty. */
 export function parseBatchFlags(raw) {
   let parsed = null;
@@ -36,6 +33,9 @@ export function serializeBatchFlags(flags) {
   return JSON.stringify(flags && typeof flags === 'object' ? flags : {});
 }
 
+/** Entries kept: a seller starts batches all day, the store must not grow with them. */
+export const MAX_TRACKED_BATCHES = 200;
+
 /** Turn one flag on or off for one batch; an entry with no flag left is pruned. */
 export function setBatchFlag(flags, batchId, name, value) {
   if (!batchId) return flags;
@@ -43,8 +43,13 @@ export function setBatchFlag(flags, batchId, name, value) {
   const entry = { ...(next[batchId] || {}) };
   if (value) entry[name] = true;
   else delete entry[name];
+  // Object key order is insertion order: re-inserting puts the batch the desk
+  // is working on at the end, so dropping from the front only ever drops the
+  // batches it is done with.
+  delete next[batchId];
   if (Object.keys(entry).length) next[batchId] = entry;
-  else delete next[batchId];
+  const ids = Object.keys(next);
+  for (const id of ids.slice(0, Math.max(0, ids.length - MAX_TRACKED_BATCHES))) delete next[id];
   return next;
 }
 
@@ -84,24 +89,12 @@ export function acceptSuggestion({ suggestion, location, touched }) {
 export const LOCATION_OFF_PATCH = Object.freeze({ location: '' });
 
 /**
- * Stack setup Off, in the closest values today's server accepts: 1 card per
- * stack with the cursor home. There is no "no stack setup" yet, so the desk
- * keeps the Off choice itself and shows none of the cursor.
+ * Stack setup Off, in the closest value today's server accepts: one card per
+ * stack. `normalize_defaults` clamps a stack size below 1 back to 1, so there
+ * is no "no stack setup" on the wire yet and the desk keeps the Off choice
+ * itself: the gear says Off and the rows show the plain box name.
  */
-export const STACK_OFF_PATCH = Object.freeze({ stackSize: 1, stack: 1, startPosition: 1 });
-
-/**
- * While the stack setup is Off the desk's cursor bookkeeping — the box-stock
- * hint and the advance as cards land — has nothing to say: it only writes stack
- * keys. `setDefaults` drops them and asks the server for nothing else.
- * Choosing a size again clears the flag before the patch is sent.
- */
-export function stripCursorKeys(patch = {}, { off }) {
-  if (!off) return patch;
-  const out = { ...patch };
-  for (const key of CURSOR_KEYS) delete out[key];
-  return out;
-}
+export const STACK_OFF_PATCH = Object.freeze({ stackSize: 1 });
 
 /**
  * What "Cards per stack" means when the seller leaves the field: emptied is an
