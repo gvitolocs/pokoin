@@ -247,11 +247,15 @@ export function QueueRow(props) {
   // and it is the desk's only sign that a price was written by hand.
   const [priceTyped, setPriceTyped] = createSignal(null);
   let priceField = null;
-  createEffect(() => {
-    if (priceTyped() !== null) return;
-    const text = priceInputFromPkn(row().pricePkn, currency());
-    if (priceField && priceField.value !== text) priceField.value = text;
-  });
+  createEffect(
+    // `undefined` while the seller types: their text is the value, and nothing
+    // the row does may repaint the field under them.
+    () => (priceTyped() === null ? priceInputFromPkn(row().pricePkn, currency()) : undefined),
+    (text) => {
+      if (text === undefined || !priceField || priceField.value === text) return;
+      priceField.value = text;
+    },
+  );
   const pick = (id) => {
     props.onPick(id);
     props.onReplaceDone();

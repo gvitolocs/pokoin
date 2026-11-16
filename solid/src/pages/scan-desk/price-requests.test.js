@@ -190,7 +190,8 @@ test('the price box displays the default price and is only taken over by a keyst
   assert.match(rows, /if \(priceTyped\(\) === null\) props\.onPriceEdited\?\.\(row\(\)\.id\);/);
   // The row's price is written into the field only while nobody is typing in it.
   assert.doesNotMatch(rows, /value=\{priceInputFromPkn\(row\(\)\.pricePkn, currency\(\)\)\}/);
-  assert.match(rows, /if \(priceTyped\(\) !== null\) return;/);
+  assert.match(rows, /priceTyped\(\) === null \? priceInputFromPkn\(row\(\)\.pricePkn, currency\(\)\) : undefined/);
+  assert.match(rows, /if \(text === undefined \|\| !priceField \|\| priceField\.value === text\) return;/);
   assert.match(rows, /priceFieldBlur\(r, e\.currentTarget\.value, currency\(\), priceTyped\(\) !== null\)/);
 });
 
