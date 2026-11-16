@@ -12,8 +12,9 @@ import {
 } from '@market/api.js';
 import {
   listingBox,
-  nextPositionInStack,
+  occupancyForScanBoxes,
   occupiedAbsForScanBoxes,
+  stackOccupancy,
 } from '@market/inventory-listings.js';
 import { fetchScanImage, rememberActiveSession, scanApi, streamUrl } from '@market/scan-api.js';
 import {
@@ -37,11 +38,14 @@ import {
   nextAttentionIndex,
   nextBoxPositions,
   newSubmitKey,
+  nextFreeStackPosition,
   phaseText,
   queueRows,
   rowProblem,
   sessionPhase,
   slotFilledStack,
+  slotFilledStackNumber,
+  stackOccupancyFromSlots,
   stepCandidate,
   submitLabel,
   typeQuantity,
@@ -348,6 +352,20 @@ function ScanDeskDesk(props) {
   const list = createMemo(() => queueRows(displayRows()));
   const occupiedAbs = createMemo(() => occupiedAbsForScanBoxes(list(), boxStockRows()));
   const slots = createMemo(() => boxSlots(list(), { occupiedAbs: occupiedAbs() }));
+  const occupancy = createMemo(() => occupancyForScanBoxes(list(), boxStockRows()));
+  /** stack → highest position this batch takes, per box the batch rows name. */
+  const batchOccupancy = createMemo(() => {
+    const slotsPerBox = new Map();
+    const slotMap = slots();
+    for (const row of list()) {
+      const key = listingBox(String(row.location || '').trim()).toLowerCase();
+      const slot = slotMap.get(row.id);
+      if (!key || !slot) continue;
+      if (!slotsPerBox.has(key)) slotsPerBox.set(key, []);
+      slotsPerBox.get(key).push(slot);
+    }
+    return new Map([...slotsPerBox].map(([key, inBox]) => [key, stackOccupancyFromSlots(inBox)]));
+  });
   const defaults = () => batch()?.defaults || DEFAULTS;
   /** Listing, and the row's own pricing choice or the batch's names a group or strategy: an unpriced row is priced on load. */
   const rowPriced = (row) => submitIntent() === 'list' && rowIsPriced(row, defaults());
@@ -394,11 +412,11 @@ function ScanDeskDesk(props) {
   // effect below could read it. Explicit Stack/Position edits are remembered
   // in setDefaults.
   watch(
-    () => [list(), occupiedAbs(), defaults().location, defaults().startPosition, defaults().stack, defaults().stackSize],
-    ([rowsNow, occupied, , , , stackSize]) => {
+    () => [list(), occupiedAbs(), occupancy(), defaults().location, defaults().startPosition, defaults().stack, defaults().stackSize],
+    ([rowsNow, occupied, boxesOccupancy, , , , stackSize]) => {
       const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
       if (!rowsNow.length) return;
-      const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied });
+      const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied, occupancy: boxesOccupancy });
       const store = loadStoppedPositions();
       let dirty = false;
       for (const [box, cursor] of next) {
@@ -418,7 +436,7 @@ function ScanDeskDesk(props) {
 
   // Advance Stack / Position as cards land, and flash when a divider fills.
   let prevListLen = 0;
-  watch(() => [list(), occupiedAbs()], ([rowsNow, occupied]) => {
+  watch(() => [list(), occupiedAbs(), occupancy()], ([rowsNow, occupied, boxesOccupancy]) => {
     const d = defaults();
     const loc = String(d.location || '').trim();
     const len = rowsNow.length;
@@ -426,7 +444,7 @@ function ScanDeskDesk(props) {
     prevListLen = len;
     if (!loc || !grew || !len) return;
     const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-    const slotMap = boxSlots(rowsNow);
+    const slotMap = slots();
     const last = rowsNow[rowsNow.length - 1];
     const slot = last && slotMap.get(last.id);
     // Size 1 = one card per divider: nothing "fills", so never flash/toast.
@@ -434,11 +452,11 @@ function ScanDeskDesk(props) {
       setStackFull(true);
       if (stackFullTimer) clearTimeout(stackFullTimer);
       stackFullTimer = setTimeout(() => setStackFull(false), 2800);
-      pushToast({ text: `Stack ${slot.stack} full — next divider`, ms: 3200 });
+      pushToast({ text: `Stack ${slotFilledStackNumber(slot)} full — next divider`, ms: 3200 });
     } else if (size === 1 && stackFull()) {
       setStackFull(false);
     }
-    const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied }).get(loc);
+    const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied, occupancy: boxesOccupancy }).get(loc);
     if (!next) return;
     const patch = {};
     if (next.stack !== (d.stack ?? 1)) patch.stack = next.stack;
@@ -475,15 +493,19 @@ function ScanDeskDesk(props) {
           const next = data?.next;
           if (!next) return;
           // Inventory is the cursor, including when a saved stop ran ahead of
-          // the last card actually added (that stop opened an empty stack).
+          // the last card actually added (that stop opened an empty stack). The
+          // server names the stack to continue; what that stack holds decides
+          // the position, so a partially filled stack is not restarted.
+          const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
+          const cursor = cursorForBox(box, wantedSize, next.stack, stock);
           if (
-            next.stack !== (d.stack ?? 1)
-            || (next.stackSize === 1 ? 1 : next.startPosition) !== (d.startPosition ?? 1)
+            cursor.stack !== (d.stack ?? 1)
+            || (wantedSize === 1 ? 1 : cursor.startPosition) !== (d.startPosition ?? 1)
             || next.stackSize !== size
           ) {
             setDefaults({
-              stack: Math.min(9999, next.stack),
-              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              stack: Math.min(9999, cursor.stack),
+              startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
               ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             });
           }
@@ -525,24 +547,31 @@ function ScanDeskDesk(props) {
     },
   );
 
-  /** Next free position when the seller types a stack: stock in the box plus this batch. */
-  function positionForStack(stack) {
+  /**
+   * Where the next card of `box` goes when the cursor is thought to sit at
+   * `fromStack`: the stock in the box plus this batch decide whether that
+   * stack still has room, so a card never lands on position 1 of a stack that
+   * already holds cards. `rows` overrides the fetched stock (the location
+   * effect has the answer in hand).
+   */
+  function cursorForBox(box, stackSize, fromStack, rows = null) {
+    const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+    const stock = rows ?? (boxStock.box === box ? boxStock.rows : []);
+    return nextFreeStackPosition(
+      [stackOccupancy(stock, box, size), batchOccupancy().get(String(box || '').toLowerCase())],
+      size,
+      fromStack,
+    );
+  }
+
+  /** Next stack and position when the seller types a stack: stock plus this batch. */
+  function cursorForStack(stack) {
     const d = defaults();
     const loc = String(d.location || '').trim();
     const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-    if (!loc || size === 1) return null;
-    const box = listingBox(loc);
-    const stock = boxStock.box === box ? boxStock.rows : [];
-    let next = nextPositionInStack(stock, box, stack, size) || 1;
-    const slotMap = slots();
-    for (const row of list()) {
-      if (listingBox(String(row.location || '').trim()) !== box) continue;
-      const slot = slotMap.get(row.id);
-      if (!slot || stack < slot.stack || stack > (slot.endStack || slot.stack)) continue;
-      const end = (slot.endStack || slot.stack) > stack ? size : slot.end;
-      next = Math.max(next, end + 1);
-    }
-    return next;
+    const wanted = Math.max(1, Math.min(9999, Math.trunc(Number(stack)) || 1));
+    if (!loc || size === 1) return { stack: wanted, startPosition: 1 };
+    return cursorForBox(listingBox(loc), size, wanted);
   }
 
   // ---------------------------------------------------------------- toasts / undo
@@ -734,10 +763,12 @@ function ScanDeskDesk(props) {
           setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
           const next = data?.next;
           if (next && patch.stack == null && patch.startPosition == null) {
+            const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
+            const cursor = cursorForBox(box, wantedSize, next.stack, stock);
             nextPatch = {
               ...nextPatch,
-              stack: Math.min(9999, next.stack),
-              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              stack: Math.min(9999, cursor.stack),
+              startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
               ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             };
           }
@@ -1616,7 +1647,7 @@ function ScanDeskDesk(props) {
               boxes={recentBoxNames()}
               stackFull={stackFull()}
               onChange={setDefaults}
-              positionForStack={positionForStack}
+              cursorForStack={cursorForStack}
               locationRef={(el) => { locationInput = el; }}
               stackButtonRef={(el) => { stackButton = el; }}
             />
