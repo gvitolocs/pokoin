@@ -356,6 +356,7 @@
 }
 
 .seller-history-grid .seller-history-line {
+  fill: none;
   stroke: var(--history-cards);
   stroke-width: 2;
   stroke-linejoin: round;

@@ -105,8 +105,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
-  // Multi-day polyline only; a single live day is a point — no flat underline.
-  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><polyline class="seller-history-line"/);
+  // Multi-day smooth path only; a single live day is a point — no flat underline.
+  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><path class="seller-history-line"/);
   assert.match(historySrc, /seller-history-liquidity/);
   assert.match(historySrc, /seller-history-legend/);
   assert.match(historySrc, /seller-history-point/);

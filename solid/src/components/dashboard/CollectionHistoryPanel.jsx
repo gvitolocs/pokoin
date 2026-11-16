@@ -16,7 +16,8 @@ import {
   historyWindowChange,
   HISTORY_PRESETS,
   sliceHistorySeries,
-  stepHistoryPoints,
+  smoothHistoryBandPath,
+  smoothHistoryPath,
   timelineDay,
   timelineRatio,
   withLiveToday,
@@ -30,10 +31,6 @@ const PLOT_BOTTOM = 8;
 // Today is the right edge; the rule sits a little inside it so the stroke is
 // never clipped by the frame.
 const TODAY_X = CHART_W - 2;
-
-function pointsAttr(coords) {
-  return coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-}
 
 /** Everything the chart draws for one window (React rendered this inline). */
 function layoutChart(points, timeline) {
@@ -57,14 +54,17 @@ function layoutChart(points, timeline) {
   };
   if (hasData) {
     const coords = points.map((day) => ({ x: xOf(day.date), day }));
-    const totalTop = stepHistoryPoints(coords.map((c) => ({ x: c.x, y: yOf(c.day.totalPkn) })));
-    const liquidityTop = stepHistoryPoints(coords.map((c) => ({ x: c.x, y: yOf(c.day.assets.currencyPkn) })));
+    const totalTop = coords.map((c) => ({ x: c.x, y: yOf(c.day.totalPkn) }));
+    const liquidityTop = coords.map((c) => ({ x: c.x, y: yOf(c.day.assets.currencyPkn) }));
     if (hasLine) {
-      out.totalLine = pointsAttr(totalTop);
-      out.cardsArea = pointsAttr([...liquidityTop, ...[...totalTop].reverse()]);
-      const firstX = liquidityTop[0].x;
-      const lastX = liquidityTop[liquidityTop.length - 1].x;
-      out.liquidityArea = pointsAttr([{ x: firstX, y: baseY }, ...liquidityTop, { x: lastX, y: baseY }]);
+      // The areas share their edges with the line and with each other, so the
+      // stack reads as one pile rather than three separately stepped shapes.
+      out.totalLine = smoothHistoryPath(totalTop);
+      out.cardsArea = smoothHistoryBandPath(totalTop, liquidityTop);
+      out.liquidityArea = smoothHistoryBandPath(
+        liquidityTop,
+        liquidityTop.map((c) => ({ x: c.x, y: baseY })),
+      );
     }
     const last = coords[coords.length - 1];
     out.endDot = { x: last.x, y: yOf(last.day.totalPkn) };
@@ -284,13 +284,13 @@ export default function CollectionHistoryPanel(props) {
               {(tick) => <line class="seller-history-rule" x1="0" x2={CHART_W} y1={chart().yOf(tick)} y2={chart().yOf(tick)} />}
             </For>
             <Show when={chart().hasLine}>
-              <polygon class="seller-history-liquidity" points={chart().liquidityArea} />
-              <polygon class="seller-history-fill" points={chart().cardsArea} />
+              <path class="seller-history-liquidity" d={chart().liquidityArea} />
+              <path class="seller-history-fill" d={chart().cardsArea} />
             </Show>
             <Show when={chart().live}>
               <line class="seller-history-today" x1={TODAY_X} x2={TODAY_X} y1="0" y2={CHART_H} />
             </Show>
-            <Show when={chart().hasLine}><polyline class="seller-history-line" points={chart().totalLine} fill="none" /></Show>
+            <Show when={chart().hasLine}><path class="seller-history-line" d={chart().totalLine} /></Show>
             <Show when={hovered().dot}>
               {(dot) => <line class="seller-history-crosshair" x1={dot().x} x2={dot().x} y1="0" y2={CHART_H} />}
             </Show>
