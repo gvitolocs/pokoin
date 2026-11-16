@@ -285,6 +285,15 @@ test('clicking into the price box only owns that shape', () => {
   assert.equal(rowNeedsPrice(facet, { books: desk.books, touched: desk.touched }), true, 'a facet change is new intent');
 });
 
+test('a row that is not active is never asked for a price', () => {
+  const desk = harness([]);
+  const ask = { books: desk.books, touched: desk.touched };
+  assert.equal(rowNeedsPrice(row('r1', 100), ask), true);
+  for (const status of ['paused', 'cancelled', 'sold_out']) {
+    assert.equal(rowNeedsPrice(row('r1', 100, { status }), ask), false, `${status} has no price to suggest`);
+  }
+});
+
 test('a row is asked once, and a given-up row waits for its cool-down', () => {
   let clock = 0;
   const desk = harness([row('r1', 100)]);

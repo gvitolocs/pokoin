@@ -41,6 +41,8 @@ export const SLICES_CONCURRENCY = 4;
  */
 export function rowNeedsPrice(row, { books, touched, signatureOf = facetSignature }) {
   if (!row.cardId) return false;
+  // A row that is not on the listing any more has no price to suggest.
+  if (row.status && row.status !== 'active') return false;
   const signature = signatureOf(row);
   if (touched.get(row.id) === signature) return false;
   if (!isAskable(row, books)) return false;

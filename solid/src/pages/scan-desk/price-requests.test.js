@@ -56,12 +56,19 @@ test('after the first row is priced, the re-run asks again for the rest of the b
   assert.deepEqual(want.map((row) => row.id), ['b']);
 });
 
-test('the Scan Desk prices effect releases unsettled rows on cancel and on failure', () => {
+test('the Scan Desk prices effect starts a run per row and never cancels one', () => {
+  // Rewritten with the pricing run moved to `price-run.js`: a run is no longer
+  // cancelled by a later change, so there is nothing left to "release on
+  // cancel" — every claimed row now gets an outcome from the run itself.
   const scan = fs.readFileSync(new URL('../ScanDesk.jsx', import.meta.url), 'utf8');
-  assert.match(scan, /claimRows\(want, books\)/);
-  assert.match(scan, /releaseUnsettled\(want, settled, books\)/);
-  assert.match(scan, /return \(\) => \{\n\s+cancelled = true;\n\s+release\(\);\n\s+\};/);
-  assert.match(scan, /\.catch\(\(\) => \{\n\s+if \(!cancelled\) release\(\);/);
+  assert.match(scan, /selectPriceRows\(untrack\(list\), \{ books, touched: priceTouched \}\)/);
+  assert.match(scan, /startPriceRun\(want, \{/);
+  // The run decides through the live store, and a row it could not price goes
+  // back through the same backoff the effect used to.
+  assert.match(scan, /liveRow: \(id\) => untrack\(displayRows\)\[id\]/);
+  assert.match(scan, /retry: retryPrices/);
+  assert.match(scan, /rememberDefault: \(rowId, signature, pkn\) => lastSuggested\.set\(rowId, \{ signature, pkn \}\)/);
+  assert.doesNotMatch(scan, /cancelled = true;\n\s+release\(\);/);
 });
 
 test('a failed lookup or save is retried with a backoff, then given up on', () => {
@@ -154,14 +161,19 @@ test('a row that is gone or not active is dropped without a retry', () => {
 
 test('a failed read is never taken for "no comps" or "no listing"', () => {
   const scan = fs.readFileSync(new URL('../ScanDesk.jsx', import.meta.url), 'utf8');
-  // The slices read is not turned into [] on failure, and a failed one is not cached.
+  const run = fs.readFileSync(new URL('./price-run.js', import.meta.url), 'utf8');
+  // The slices read keeps its failure marker, and a failed one is not cached.
   assert.doesNotMatch(scan, /fetchCardSales\(id, \{ slices: true \}\)[\s\S]{0,160}\.catch\(\(\) => \[\]\)/);
   assert.match(scan, /slicesCache\.delete\(id\)/);
-  // The cheapest-price read throws on failure instead of answering "nothing listed".
-  assert.match(scan, /fetchCheapestPricePknMap\(\[\.\.\.cheapestIds\], \{ strict: true \}\)/);
-  // Failures and rejected saves go back through retryPrices, never to the fallback price.
-  assert.match(scan, /retryPrices\(failed\)/);
-  assert.match(scan, /if \(ok === false\) retryPrices\(\[row\]\)/);
+  // The cheapest-price read never caches a failure as "nobody lists it".
+  assert.match(scan, /fetchCheapestPricePknMap\(fresh, \{ strict: true \}\)/);
+  assert.match(scan, /\.catch\(\(\) => \{\n\s+for \(const id of fresh\) if \(cheapestInFlight\.get\(id\) === request\)/);
+  // A failed comps read goes back through the backoff instead of pricing a row
+  // from nothing; a printing with no listing at all takes the fallback rung.
+  assert.match(run, /entry\.ok !== true[\s\S]{0,120}settle\(row, false\)/);
+  assert.match(run, /value > 0 \? value : scanFallbackPricePkn\(\)/);
+  // A row is only asked again through retryPrices, never silently dropped.
+  assert.match(scan, /retry: retryPrices/);
 });
 
 test('invalid text left in the price field of an unpriced or suggested row gives the price back to the default', () => {
