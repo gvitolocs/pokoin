@@ -2,7 +2,11 @@
 //!
 //! * `marketplace-portfolio-history` — the stored daily collection-value series.
 //!   Card values come from CardTrader sold medians only, so the pricing rules
-//!   live in [`crate::domain::portfolio_history`].
+//!   live in [`crate::domain::portfolio_history`]. A stored series that is on
+//!   the current basis answers the request at once and is recomputed behind it.
+
+use std::collections::HashSet;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -148,37 +152,97 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
     let uid = claims.uid.clone();
     let firestore = state.firestore()?;
     let now_ms = state.clock().now().timestamp_millis();
-    let today_key = utc_day_key_ms(now_ms);
 
     let stored = read_stored(&firestore, &uid).await?;
-    if stored_is_fresh(stored.as_ref(), now_ms) {
-        let days = clean_days(stored.as_ref().and_then(|doc| doc.get("days")));
-        return Ok(ok_no_store(json!({ "ok": true, "days": days })));
+    match history_plan(stored.as_ref(), now_ms) {
+        Plan::ServeFresh => Ok(history_body(stored_days(stored.as_ref()))),
+        Plan::ServeStaleAndRefresh => {
+            let days = stored_days(stored.as_ref());
+            spawn_history_refresh(state, &uid, stored);
+            Ok(history_body(days))
+        }
+        Plan::ComputeNow => {
+            // A missing or failing read model is not fatal: the last good
+            // series is served instead, exactly like the Node `readCardBook`
+            // catch.
+            let days = recompute_series(state, &uid, stored.as_ref())
+                .await?
+                .unwrap_or_else(|| last_good_series(stored.as_ref()));
+            Ok(history_body(days))
+        }
     }
+}
 
-    // A missing or failing read model is not fatal: the last good series is
-    // served instead, exactly like the Node `readCardBook` catch.
+/// What a history request does with the series it just read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plan {
+    /// Answer with the stored days: recomputed less than `FRESH_MS` ago.
+    ServeFresh,
+    /// Answer with the stored days at once and recompute behind the response.
+    ServeStaleAndRefresh,
+    /// Nothing to answer with: recompute and wait for it.
+    ComputeNow,
+}
+
+/// Past days are frozen and sold prices arrive once a day, so a stored series
+/// on the current basis is good enough to show immediately even when the last
+/// recompute is hours old. Waiting for one made every visit pay for it.
+fn history_plan(stored: Option<&Json>, now_ms: i64) -> Plan {
+    if stored_is_fresh(stored, now_ms) {
+        return Plan::ServeFresh;
+    }
+    if stored_is_current(stored) && !stored_days(stored).is_empty() {
+        return Plan::ServeStaleAndRefresh;
+    }
+    Plan::ComputeNow
+}
+
+/// The days of a stored series, in the shape the client reads.
+fn stored_days(stored: Option<&Json>) -> Vec<Json> {
+    clean_days(stored.and_then(|doc| doc.get("days")))
+}
+
+/// The series to answer with when nothing could be recomputed: the stored days
+/// while they are on the current basis, none before there is such a thing.
+fn last_good_series(stored: Option<&Json>) -> Vec<Json> {
+    if stored_is_current(stored) {
+        stored_days(stored)
+    } else {
+        Vec::new()
+    }
+}
+
+fn history_body(days: Vec<Json>) -> Response {
+    ok_no_store(json!({ "ok": true, "days": days }))
+}
+
+/// The recompute and its stored write: card book, ledger, balance, series.
+/// `None` when the market read model is unavailable, which writes nothing so
+/// the stored series survives.
+async fn recompute_series(
+    state: &DomainState,
+    uid: &str,
+    stored: Option<&Json>,
+) -> Result<Option<Vec<Json>>> {
+    let now_ms = state.clock().now().timestamp_millis();
+    let today_key = utc_day_key_ms(now_ms);
+    let firestore = state.firestore()?;
+
     let card_book = match state.marketplace_db() {
-        Ok(db) => read_card_book(&db, &uid).await,
+        Ok(db) => read_card_book(&db, uid).await,
         Err(error) => {
             tracing::debug!(%error, "portfolio read model is not configured");
             None
         }
     };
     let Some((holdings, book)) = card_book else {
-        let stale = stored_is_current(stored.as_ref());
-        let days = if stale {
-            clean_days(stored.as_ref().and_then(|doc| doc.get("days")))
-        } else {
-            Vec::new()
-        };
-        return Ok(ok_no_store(json!({ "ok": true, "days": days })));
+        return Ok(None);
     };
 
-    let movements = read_ledger(&firestore, &uid).await;
-    let balance = read_balance(&firestore, &uid).await;
+    let movements = read_ledger(&firestore, uid).await;
+    let balance = read_balance(&firestore, uid).await;
     let wallet = wallet_series(&movements, balance, &today_key);
-    let frozen = frozen_card_days(stored.as_ref(), &today_key);
+    let frozen = frozen_card_days(stored, &today_key);
     let days = build_daily_series(&wallet, &holdings, &book, &frozen, &today_key);
 
     firestore
@@ -196,7 +260,56 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
         )
         .await?;
 
-    Ok(ok_no_store(json!({ "ok": true, "days": days })))
+    Ok(Some(days))
+}
+
+/// Uids with a history refresh running in this process.
+fn refresh_claims() -> &'static Mutex<HashSet<String>> {
+    static CLAIMS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    CLAIMS.get_or_init(Default::default)
+}
+
+/// One uid held in the in-flight set while its refresh runs. Releasing happens
+/// in `Drop`, so an error return and a panic both free the uid.
+struct RefreshClaim<'a>(&'a Mutex<HashSet<String>>, String);
+
+impl Drop for RefreshClaim<'_> {
+    fn drop(&mut self) {
+        lock_claims(&self.0).remove(&self.1);
+    }
+}
+
+/// The in-flight set. A holder that panics already released its uid in `Drop`,
+/// so a poisoned lock is no reason to stop refreshing: take it anyway.
+fn lock_claims(claims: &Mutex<HashSet<String>>) -> MutexGuard<'_, HashSet<String>> {
+    claims
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The uid, when no refresh for it is already running.
+fn claim_uid<'a>(claims: &'a Mutex<HashSet<String>>, uid: &str) -> Option<RefreshClaim<'a>> {
+    if !lock_claims(claims).insert(uid.to_string()) {
+        return None;
+    }
+    Some(RefreshClaim(claims, uid.to_string()))
+}
+
+/// Recompute behind the response, at most once per uid at a time. A request
+/// that finds the uid already refreshing just serves its stored series.
+fn spawn_history_refresh(state: &DomainState, uid: &str, stored: Option<Json>) {
+    let Some(claim) = claim_uid(refresh_claims(), uid) else {
+        return;
+    };
+    let state = state.clone();
+    let uid = uid.to_string();
+    tokio::spawn(async move {
+        let outcome = recompute_series(&state, &uid, stored.as_ref()).await;
+        drop(claim);
+        if let Err(error) = outcome {
+            tracing::warn!(%error, "portfolio history background refresh failed");
+        }
+    });
 }
 
 fn utc_iso(millis: i64) -> String {
@@ -909,5 +1022,94 @@ mod tests {
         for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
             assert_eq!(alone[key], json!(""), "{key}");
         }
+    }
+
+    /// Noon, so an offset of hours still lands on the same UTC day.
+    const NOON: i64 = 1_791_460_800_000;
+
+    fn stored(updated_at: &str, days: Json) -> Json {
+        json!({
+            "priceBasis": PRICE_BASIS,
+            "seriesRevision": SERIES_REVISION,
+            "updatedAt": updated_at,
+            "days": days,
+        })
+    }
+
+    fn one_day() -> Json {
+        json!([{ "date": "2026-10-08", "currencyPkn": 100, "cardsValuePkn": 30, "cardsHeld": 2 }])
+    }
+
+    #[test]
+    fn a_series_recomputed_minutes_ago_is_served_without_a_refresh() {
+        let doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeFresh);
+    }
+
+    #[test]
+    fn a_series_sixteen_minutes_old_answers_at_once_and_refreshes() {
+        let doc = stored("2026-10-08T11:44:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeStaleAndRefresh);
+    }
+
+    #[test]
+    fn yesterdays_series_answers_at_once_and_refreshes() {
+        // Visits are hours apart, so this is the common case the graph pays for.
+        let doc = stored("2026-10-07T18:00:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeStaleAndRefresh);
+    }
+
+    #[test]
+    fn another_basis_or_revision_is_never_served_stale() {
+        let mut doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        doc["priceBasis"] = json!("old-basis");
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+
+        let mut doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        doc["seriesRevision"] = json!(SERIES_REVISION - 1);
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+    }
+
+    #[test]
+    fn an_empty_or_missing_series_leaves_nothing_to_serve() {
+        let doc = stored("2026-10-07T18:00:00.000Z", json!([]));
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+        // A day row without a date is dropped, which empties the series.
+        let doc = stored("2026-10-07T18:00:00.000Z", json!([{ "currencyPkn": 100 }]));
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+        assert_eq!(history_plan(None, NOON), Plan::ComputeNow);
+    }
+
+    #[test]
+    fn one_refresh_per_uid_runs_at_a_time() {
+        let claims = Mutex::new(HashSet::new());
+        let first = claim_uid(&claims, "u1").expect("the uid is free");
+        assert!(
+            claim_uid(&claims, "u1").is_none(),
+            "a second refresh is refused"
+        );
+        assert!(
+            claim_uid(&claims, "u2").is_some(),
+            "another uid is independent"
+        );
+        drop(first);
+        assert!(
+            claim_uid(&claims, "u1").is_some(),
+            "the uid is free once held ends"
+        );
+    }
+
+    #[test]
+    fn a_refresh_that_panics_still_releases_its_uid() {
+        let claims = Mutex::new(HashSet::new());
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _claim = claim_uid(&claims, "u1").expect("the uid is free");
+            panic!("the refresh blew up");
+        }));
+        assert!(panic.is_err());
+        assert!(
+            claim_uid(&claims, "u1").is_some(),
+            "a panic must not strand the uid forever"
+        );
     }
 }
