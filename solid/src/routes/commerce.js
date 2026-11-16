@@ -1,3 +1,4 @@
+import { loadMypokoinPreview } from '../pages/mypokoin-preview.js';
 import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
@@ -9,10 +10,10 @@ import RedirectTo from '../pages/RedirectTo.jsx';
 const Cart = lazy(() => import('../pages/Cart.jsx'));
 const Checkout = lazy(() => import('../pages/Checkout.jsx'));
 const Orders = lazy(() => import('../pages/Orders.jsx'));
-const Bought = lazy(() => import('../pages/Bought.jsx'));
+const Bought = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Bought.jsx'); });
 const Buy = lazy(() => import('../pages/Buy.jsx'));
-const BuySell = lazy(() => import('../pages/BuySell.jsx'));
-const Sales = lazy(() => import('../pages/Sales.jsx'));
+const BuySell = lazy(async () => { await loadMypokoinPreview(); return import('../pages/BuySell.jsx'); });
+const Sales = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Sales.jsx'); });
 const Wallet = lazy(() => import('../pages/Wallet.jsx'));
 const Exchange = lazy(() => import('../pages/Exchange.jsx'));
 const Flex = lazy(() => import('../pages/Flex.jsx'));

@@ -438,6 +438,24 @@ export function withSource(draft, source) {
   return { ...(draft || {}), source, basis };
 }
 
+/** Editor-only grouping; persisted source IDs remain unchanged. */
+export const EDITOR_SOURCES = PRICER_SOURCES.filter(({ id }) => id !== 'cardmarketoffers');
+
+export function editorSource(source) {
+  return source === 'cardmarketoffers' ? 'cardmarket' : source;
+}
+
+export function editorBasisGroups(source) {
+  const sources = editorSource(source) === 'cardmarket'
+    ? [['Price guide', 'cardmarket'], ['Seller offers we scan', 'cardmarketoffers']]
+    : [['', source]];
+  return sources.map(([label, id]) => ({ label, entries: pricerBases(id).map((entry) => ({ ...entry, source: id })) }));
+}
+
+export function withEditorBasis(draft, entry) {
+  return { ...draft, source: entry.source, basis: entry.id };
+}
+
 /** The editor shows the toggles for every source and basis but Pokoin's cheapest ask. */
 export function showsSwitches(draft) {
   return !(draft?.source === 'pokoin' && draft?.basis === 'offers');

@@ -53,7 +53,11 @@ function Mini(props) {
 
 function Rail(props) {
   let scroller;
-  createEffect(() => props.items.length, (count) => (count ? bindRailControls(scroller) : undefined));
+  createEffect(() => props.items.length, (count) => {
+    // Solid uses the returned rail unbind as this effect's cleanup.
+    if (!count) return undefined;
+    return bindRailControls(scroller);
+  });
   return (
     <Show when={props.items.length}>
       <section class="carousel">
@@ -114,8 +118,12 @@ function PortfolioList() {
   });
 
   // A new search starts again from the first page (not the restored one).
-  createEffect(query, () => setShown(PAGE), { defer: true });
-  createEffect(() => ({ shown: shown(), query: query() }), (view) => rememberView(href, view));
+  createEffect(query, () => {
+    setShown(PAGE);
+  }, { defer: true });
+  createEffect(() => ({ shown: shown(), query: query() }), (view) => {
+    rememberView(href, view);
+  });
 
   createEffect(
     () => (catalog() ? [ranked().holdings.length, query()] : null),

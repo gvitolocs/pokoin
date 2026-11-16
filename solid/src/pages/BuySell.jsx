@@ -41,7 +41,7 @@ import {
 } from '../components/buysell/BuySellIcons.jsx';
 import { dismissWhileOpen } from '../lib/dismiss.js';
 import { getBearer, signedIn } from '../stores/auth.js';
-import { allowMypokoinPreview } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview } from './mypokoin-preview.js';
 import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine, previewOwnIds } from './buysell-preview-fixture.js';
 
 const STATE_ORDER = ['open', 'filled', 'expired', 'cancelled'];

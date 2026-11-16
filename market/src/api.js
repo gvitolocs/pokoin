@@ -1009,6 +1009,20 @@ export function fetchPortfolioHistory(token) {
   });
 }
 
+/**
+ * Dashboard top movers: the seller's own printings that moved most inside the
+ * chart's window. `days` is that window in days, or "max".
+ */
+export function fetchPortfolioMovers(token, days) {
+  const query = days === undefined || days === null || days === '' ? '' : `?days=${days}`;
+  return getJson(`/api/marketplace-portfolio-movers${query}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 /** Associate desk: role, campaign window, and live royalty earnings. */
 export function fetchAssociateSummary(token) {
   return getJson('/api/marketplace-associate', {

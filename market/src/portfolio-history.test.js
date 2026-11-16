@@ -3,12 +3,10 @@ import test from 'node:test';
 import {
   addUtcDays,
   availableHistoryPresets,
-  cardMoves,
   daySpan,
   formatDayLabel,
   formatHistoryDelta,
   formatHistoryTip,
-  formatProjectionTip,
   historyAxis,
   historyDateTicks,
   historyDayAt,
@@ -16,7 +14,6 @@ import {
   historyTimeline,
   historyWindowChange,
   normalizeHistoryDay,
-  projectPortfolio,
   previewHistoryMonth,
   sliceHistorySeries,
   stepHistoryPoints,
@@ -97,17 +94,8 @@ test('the screenshot seller: quiet days hold the pile and the header matches the
   assert.equal(change.last, 16300);
   // The cards arrived inside the month, so there is no percentage return.
   assert.equal(formatHistoryDelta(change), '+16285 PKN in the last month');
-  const timeline = historyTimeline(points, TODAY);
-  const projection = projectPortfolio(points, timeline);
-  const axis = historyAxis([
-    ...points.map((day) => day.totalPkn),
-    ...projection.days.flatMap((day) => [day.low, day.high]),
-  ]);
+  const axis = historyAxis(points.map((day) => day.totalPkn));
   assert.deepEqual(axis.ticks, [0, 5000, 10000, 15000, 20000]);
-  // Six days of moves: the projection holds today's value, no fan.
-  assert.equal(projection.band, false);
-  assert.equal(projection.end.value, 16300);
-  assert.equal(projection.end.date, '2026-10-12');
 });
 
 test('history opens on the last month and hides windows the series does not reach', () => {
@@ -133,34 +121,43 @@ test('history opens on the last month and hides windows the series does not reac
   assert.equal(formatHistoryDelta(steady), '-50 PKN (-25%) in this period');
 });
 
-test('a window that ends today puts today at two thirds with the projection on the same day scale', () => {
+test('a window that ends today spans the whole plot on its own realized day scale', () => {
   const points = sliceHistorySeries(screenshotSeries(), historyPresetWindow('1M', TODAY));
   const timeline = historyTimeline(points, TODAY);
   assert.deepEqual(
-    [timeline.from, timeline.to, timeline.end, timeline.span, timeline.horizonDays],
-    ['2026-08-28', '2026-09-27', '2026-10-12', 30, 15],
+    [timeline.from, timeline.to, timeline.span, timeline.live],
+    ['2026-08-28', '2026-09-27', 30, true],
   );
-  assert.equal(timeline.split, 2 / 3);
-  assert.equal(timelineRatio(timeline, '2026-09-27'), 2 / 3);
-  assert.equal(timelineRatio(timeline, '2026-10-12'), 1);
-  assert.equal(timelineDay(timeline, 0.9), '2026-10-08');
-  // A past custom window has no projection.
+  assert.equal(timelineRatio(timeline, timeline.from), 0);
+  assert.equal(timelineRatio(timeline, timeline.to), 1);
+  assert.equal(timelineDay(timeline, 0.5), '2026-09-12');
+  assert.equal(timelineDay(timeline, 1), '2026-09-27');
+  // A past custom window is realized end to end and is not today.
   const past = historyTimeline(sliceHistorySeries(screenshotSeries(), { from: '2026-09-01', to: '2026-09-20' }), TODAY);
-  assert.equal(past.horizonDays, 0);
-  assert.equal(past.split, 1);
+  assert.equal(past.live, false);
+  assert.equal(past.span, 19);
   // A single stored day still gets a realized day before it.
   const single = historyTimeline([normalizeHistoryDay({ date: '2026-09-27', currencyPkn: 15 })], TODAY);
   assert.equal(single.from, '2026-09-26');
-  assert.equal(single.horizonDays, 1);
+  assert.equal(single.span, 1);
+});
+
+test('the last realized day of a live window maps to the right edge, never past today', () => {
+  const points = sliceHistorySeries(screenshotSeries(), historyPresetWindow('1M', TODAY));
+  const timeline = historyTimeline(points, TODAY);
+  assert.equal(timelineRatio(timeline, points[points.length - 1].date), 1);
+  // The far right of the plot is today, so nothing hovers or ticks past it.
+  assert.equal(timelineDay(timeline, 1), '2026-09-27');
+  assert.ok(historyDateTicks(timeline).every((tick) => tick.date <= timeline.to));
 });
 
 test('date ticks are Mondays or month starts and leave room for Today', () => {
   const month = historyTimeline(sliceHistorySeries(screenshotSeries(), historyPresetWindow('1M', TODAY)), TODAY);
   const ticks = historyDateTicks(month);
-  assert.deepEqual(ticks.map((tick) => tick.label), ['Aug 31', 'Sep 7', 'Sep 14', 'Sep 21', 'Oct 5']);
-  assert.ok(ticks.every((tick) => Math.abs(tick.ratio - month.split) > 0.08));
+  assert.deepEqual(ticks.map((tick) => tick.label), ['Aug 31', 'Sep 7', 'Sep 14', 'Sep 21']);
+  assert.ok(ticks.every((tick) => tick.ratio < 0.92));
   const quarter = historyTimeline(sliceHistorySeries(screenshotSeries(), historyPresetWindow('3M', TODAY)), TODAY);
-  assert.deepEqual(historyDateTicks(quarter).map((tick) => tick.label), ['Aug 1', 'Sep 1', 'Nov 1']);
+  assert.deepEqual(historyDateTicks(quarter).map((tick) => tick.label), ['Jul 6', 'Jul 20', 'Aug 3', 'Aug 17', 'Aug 31', 'Sep 14']);
   assert.equal(formatDayLabel('2026-09-20'), 'Sep 20');
   assert.equal(daySpan('2026-09-01', '2026-10-01'), 30);
 });
@@ -179,71 +176,6 @@ test('the axis starts at zero for a big move and hugs a steady pile', () => {
     { x: 640, y: 180 },
     { x: 640, y: 20 },
   ]);
-});
-
-function movingSeries(moves) {
-  let value = 1000;
-  const days = [normalizeHistoryDay({ date: '2026-09-01', currencyPkn: 50, cardsKnown: true, cardsValuePkn: value, cardsHeld: 10, cardsPriced: 10 })];
-  moves.forEach((move, index) => {
-    value = Math.round(value * (1 + move) * 100) / 100;
-    days.push(normalizeHistoryDay({
-      date: addUtcDays('2026-09-01', index + 1),
-      currencyPkn: 50,
-      cardsKnown: true,
-      cardsValuePkn: value,
-      cardsHeld: 10,
-      cardsPriced: 10,
-      cardsMove: move,
-    }));
-  });
-  return days;
-}
-
-test('a week of basket moves draws a fan that widens with time; liquidity stays flat', () => {
-  const points = movingSeries([0.01, -0.02, 0.015, 0, 0.005, -0.01, 0.02, 0, 0.01, -0.005]);
-  const timeline = historyTimeline(points, new Date('2026-09-11T08:00:00Z'));
-  assert.equal(timeline.horizonDays, 5);
-  const projection = projectPortfolio(points, timeline);
-  assert.equal(projection.band, true);
-  assert.equal(projection.moves, 10);
-  const [start, , mid, , , end] = projection.days;
-  assert.equal(start.value, points[points.length - 1].totalPkn);
-  assert.equal(start.low, start.high);
-  assert.ok(end.high - end.low > mid.high - mid.low);
-  assert.ok(end.low > 50 && end.high > end.value && end.value > end.low);
-  assert.equal(end.liquidity, 50);
-  // The mean move is shrunk toward zero: ten days cannot draw a steep trend.
-  const mean = cardMoves(points).reduce((sum, move) => sum + move, 0) / 10;
-  assert.ok(Math.abs(projection.drift) < Math.abs(mean));
-  const tip = formatProjectionTip(end, projection);
-  assert.equal(tip.dateLabel, `${formatDayLabel(end.date)} · Projection`);
-  assert.match(tip.rows[0].value, /^\d+–\d+ PKN$/);
-  assert.match(tip.footnote, /10 days of sold prices/);
-});
-
-test('one lucky sale cannot draw a trend, and first sales are not moves', () => {
-  // The other 1-DR seller: one +57% basket print among quiet days.
-  const short = movingSeries([0, 0.568, 0, 0, 0, 0]);
-  const flat = projectPortfolio(short, historyTimeline(short, new Date('2026-09-07T08:00:00Z')));
-  assert.equal(flat.band, false);
-  assert.equal(flat.end.value, short[short.length - 1].totalPkn);
-  assert.match(formatProjectionTip(flat.end, flat).footnote, /week of sold prices/);
-  const week = movingSeries([0, 0.568, 0, 0, 0, 0, 0]);
-  const clipped = cardMoves(week);
-  assert.equal(Math.max(...clipped), 0.25);
-  const fan = projectPortfolio(week, historyTimeline(week, new Date('2026-09-08T08:00:00Z')));
-  assert.ok(fan.end.value < week[week.length - 1].totalPkn * 1.06);
-  // Carried window edges repeat a day, so they add no move.
-  const carried = [...week, { ...week[week.length - 1], date: '2026-09-09', carried: true }];
-  assert.equal(cardMoves(carried).length, 7);
-  // A wallet-only series projects the wallet.
-  const wallet = [
-    normalizeHistoryDay({ date: '2026-09-25', currencyPkn: 15 }),
-    normalizeHistoryDay({ date: '2026-09-27', currencyPkn: 15 }),
-  ];
-  const held = projectPortfolio(wallet, historyTimeline(wallet, TODAY));
-  assert.equal(held.end.value, 15);
-  assert.equal(held.band, false);
 });
 
 test('the tip lists every layer at that day, cards with how many have a sale', () => {

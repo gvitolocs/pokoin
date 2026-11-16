@@ -9,7 +9,7 @@ const routes = read('../routes/account.js');
 const api = read('../../../market/src/api.js');
 
 test('/mypokoin/picked is a lazy route of its own page', () => {
-  assert.match(routes, /const ZeroPicked = lazy\(\(\) => import\('\.\.\/pages\/ZeroPicked\.jsx'\)\);/);
+  assert.match(routes, /const ZeroPicked = lazy\(async \(\) => \{ await loadMypokoinPreview\(\); return import\('\.\.\/pages\/ZeroPicked\.jsx'\); \}\);/);
   assert.match(routes, /\{ path: '\/mypokoin\/picked', component: ZeroPicked \}/);
 });
 

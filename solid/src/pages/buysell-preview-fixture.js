@@ -1,6 +1,6 @@
 /**
  * Layout preview for BuySell: the card-page offer bar and /buysell.
- * Same switch as the MyPokoin desks (mypokoin-preview-fixture.js): the URL has
+ * Same switch as the MyPokoin desks (mypokoin-preview.js): the URL has
  * ?mypokoinPreview and the build is DEV or the host is localhost / 127.0.0.1.
  * Production hosts never take this path. Nothing here calls the API; offers
  * carry the site's own missing-card image and ids that match no catalog printing.
@@ -11,7 +11,7 @@
  * against the eight-row sample.
  */
 // The site's own missing-card scan (market/src/missing-card.js MISSING_CARD_SRC); no @market alias in node tests.
-import { allowMypokoinPreview } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview } from './mypokoin-preview.js';
 
 const MISSING_CARD_SRC = '/home/missing-card.webp';
 
