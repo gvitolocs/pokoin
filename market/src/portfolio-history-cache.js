@@ -130,7 +130,6 @@ function queueFollowUp(id, fetcher, chain) {
 }
 
 function runFollowUp(id, fetcher, chain) {
-  if (chains.get(id) !== chain) return;
   Promise.resolve().then(fetcher).then((data) => {
     if (chains.get(id) !== chain) return;
     const days = normalizedDays(data);
@@ -191,14 +190,14 @@ export function loadPortfolioHistory(uid, fetcher, options = {}) {
 export function subscribePortfolioHistory(uid, listener) {
   const key = keyFor(uid);
   if (!key || typeof listener !== 'function') return () => {};
-  const rows = listeners.get(key) || new Set();
-  rows.add(listener);
-  listeners.set(key, rows);
+  const subscribers = listeners.get(key) || new Set();
+  subscribers.add(listener);
+  listeners.set(key, subscribers);
   return () => {
-    const current = listeners.get(key);
-    if (!current) return;
-    current.delete(listener);
-    if (!current.size) listeners.delete(key);
+    const still = listeners.get(key);
+    if (!still) return;
+    still.delete(listener);
+    if (!still.size) listeners.delete(key);
   };
 }
 
