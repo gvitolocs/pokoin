@@ -62,6 +62,7 @@ import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
 import { nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import { selectPriceRows, startPriceRun } from './scan-desk/price-run.js';
 import {
+  batchHasPricing,
   pricingApplyBodies,
   pricingChoiceValue,
   pricingFailedLine,
@@ -1348,6 +1349,9 @@ function ScanDeskDesk(props) {
   watch(() => [priceIntent(), closed(), submitIntent(), priceRetry(), batch()?.id], ([, isClosed, intent]) => {
     // The preview's unpriced rows stay unpriced: they show "on load".
     if (props.preview || isClosed || intent === 'collection') return undefined;
+    // A batch that names a pricing group or strategy prices its unpriced rows
+    // itself when it loads; the desk must not race that with a suggestion.
+    if (batchHasPricing(defaults())) return undefined;
     const books = priceBooks();
     const want = selectPriceRows(untrack(list), { books, touched: priceTouched });
     if (!want.length) return undefined;

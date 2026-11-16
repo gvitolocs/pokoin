@@ -200,3 +200,11 @@ test('the batch default shows where the row price comes from, without a control'
   assert.match(rows, /<span\n\s+class=\{\['c-pricing-chip', 'is-batch'\]\}/);
   assert.doesNotMatch(rows, /'Batch default · change it for this row'/);
 });
+
+test('a batch that prices itself stops the desk run, and dropping that choice re-arms it', () => {
+  const scan = fs.readFileSync(new URL('../ScanDesk.jsx', import.meta.url), 'utf8');
+  assert.match(scan, /if \(batchHasPricing\(defaults\(\)\)\) return undefined;/);
+  // The Pricing select is part of what the effect watches, so a batch switched
+  // back to "None" prices its unpriced rows again inside the same mount.
+  assert.match(scan, /pricingChoiceValue\(defaults\(\)\)/);
+});
