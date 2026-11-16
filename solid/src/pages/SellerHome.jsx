@@ -12,7 +12,11 @@ import { inventoryBooks } from '@market/inventory-book.js';
 import { inventoryListingHref, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { fetchRail, RAIL } from '@market/lists.js';
 import { addUtcDays, utcDayKey } from '@market/portfolio-history.js';
-import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
+import {
+  loadPortfolioHistory,
+  peekPortfolioHistory,
+  subscribePortfolioHistory,
+} from '@market/portfolio-history-cache.js';
 import { normalizeMovers } from '@market/portfolio-movers.js';
 import { loadPortfolioMovers, peekPortfolioMovers } from '@market/portfolio-movers-cache.js';
 import {
@@ -336,11 +340,16 @@ function LiveDashboard() {
     const cached = peekPortfolioHistory(id);
     if (cached) setHistorySeries(cached);
     setHistoryPending(!cached);
+    const show = (series) => { if (!cancelled) setHistorySeries(series); };
+    const unsubscribe = subscribePortfolioHistory(id, show);
     loadPortfolioHistory(id, () => getBearer().then((token) => fetchPortfolioHistory(token)))
-      .then((series) => { if (!cancelled) setHistorySeries(series); })
-      .catch(() => { if (!cancelled) setHistorySeries([]); })
+      .then(show)
+      .catch(() => { /* a failed refresh keeps the painted series */ })
       .finally(() => { if (!cancelled) setHistoryPending(false); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   });
 
   // Top movers over the window the chart is showing, one request per window.
