@@ -8,7 +8,6 @@ import {
   formatDayLabel,
   formatHistoryDelta,
   formatHistoryTip,
-  formatProjectionTip,
   historyAxis,
   historyDateTicks,
   historyDayAt,
@@ -16,7 +15,6 @@ import {
   historyTimeline,
   historyWindowChange,
   HISTORY_PRESETS,
-  projectPortfolio,
   sliceHistorySeries,
   stepHistoryPoints,
   timelineDay,
@@ -29,6 +27,9 @@ const CHART_H = 220;
 // Inner padding so a line at the top or on zero never sits on the frame edge.
 const PLOT_TOP = 12;
 const PLOT_BOTTOM = 8;
+// Today is the right edge; the rule sits a little inside it so the stroke is
+// never clipped by the frame.
+const TODAY_X = CHART_W - 2;
 
 function pointsAttr(coords) {
   return coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
@@ -36,11 +37,7 @@ function pointsAttr(coords) {
 
 /** Everything the chart draws for one window (React rendered this inline). */
 function layoutChart(points, timeline) {
-  const projection = projectPortfolio(points, timeline);
-  const axis = historyAxis([
-    ...points.map((day) => day.totalPkn),
-    ...(projection ? projection.days.flatMap((day) => [day.low, day.high]) : []),
-  ]);
+  const axis = historyAxis(points.map((day) => day.totalPkn));
   const xOf = (date) => timelineRatio(timeline, date) * CHART_W;
   const yOf = (value) => {
     const span = Math.max(1e-9, axis.yMax - axis.yMin);
@@ -52,12 +49,11 @@ function layoutChart(points, timeline) {
   const hasData = points.length > 0;
   const baseY = CHART_H - PLOT_BOTTOM;
   const out = {
-    projection, axis, xOf, yOf, hasLine, hasData,
+    axis, xOf, yOf, hasLine, hasData,
     hasPoint: points.length === 1,
     totalLine: '', cardsArea: '', liquidityArea: '', endDot: null,
-    projectionLine: '', projectionHatch: '', projectionBand: '', projectionLow: '', projectionHigh: '',
     ticks: historyDateTicks(timeline),
-    split: timeline ? timeline.split : 1,
+    live: Boolean(timeline?.live),
   };
   if (hasData) {
     const coords = points.map((day) => ({ x: xOf(day.date), day }));
@@ -73,18 +69,6 @@ function layoutChart(points, timeline) {
     const last = coords[coords.length - 1];
     out.endDot = { x: last.x, y: yOf(last.day.totalPkn) };
   }
-  if (projection && out.endDot) {
-    const center = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.value) }));
-    out.projectionLine = pointsAttr(center);
-    out.projectionHatch = pointsAttr([{ x: center[0].x, y: baseY }, ...center, { x: center[center.length - 1].x, y: baseY }]);
-    if (projection.band) {
-      const high = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.high) }));
-      const low = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.low) }));
-      out.projectionBand = pointsAttr([...high, ...[...low].reverse()]);
-      out.projectionHigh = pointsAttr(high);
-      out.projectionLow = pointsAttr(low);
-    }
-  }
   out.widestTick = axis.ticks.reduce((wide, tick) => {
     const text = formatPknNumber(tick);
     return text.length > wide.length ? text : wide;
@@ -95,8 +79,8 @@ function layoutChart(points, timeline) {
 /**
  * Collection value chart (was in the React SellerDashboardView,
  * CollectionHistoryPanel): cards stacked on liquidity (wallet PKN), one point
- * per day; a window that ends today fills two thirds with realized days and
- * the hatched last third is the projection. Opens on the last month.
+ * per day across the whole plot; a window that ends today stops at the Today
+ * mark. Opens on the last month.
  */
 export default function CollectionHistoryPanel(props) {
   const [hover, setHover] = createSignal(null);
@@ -133,7 +117,7 @@ export default function CollectionHistoryPanel(props) {
     },
   );
 
-  // Hover: the day under the pointer, realized or projected.
+  // Hover: the day under the pointer.
   const hovered = createMemo(() => {
     const at = hover();
     const line = timeline();
@@ -142,10 +126,6 @@ export default function CollectionHistoryPanel(props) {
     const fallback = { tip: null, dot: null, legendDay: list[list.length - 1] || null };
     if (!at || !line || !c.hasData) return fallback;
     const date = timelineDay(line, at.ratio);
-    if (c.projection && date > line.to) {
-      const point = c.projection.days[Math.min(c.projection.days.length - 1, daySpan(line.to, date))];
-      return { tip: formatProjectionTip(point, c.projection), dot: { x: c.xOf(point.date), y: c.yOf(point.value), projected: true }, legendDay: fallback.legendDay };
-    }
     const day = historyDayAt(list, date);
     const tip = formatHistoryTip(day);
     if (tip) tip.dateLabel = formatDayLabel(date);
@@ -190,11 +170,9 @@ export default function CollectionHistoryPanel(props) {
 
   const summary = () => {
     const list = points();
-    const c = chart();
-    return c.hasData
+    return chart().hasData
       ? `Collection value from ${formatDayLabel(list[0].date)} to ${formatDayLabel(list[list.length - 1].date)}: `
         + `${formatPknNumber(list[0].totalPkn)} PKN to ${formatPknNumber(list[list.length - 1].totalPkn)} PKN`
-        + (c.projection ? `, projected ${formatPknNumber(c.projection.end.value)} PKN by ${formatDayLabel(c.projection.end.date)}` : '')
       : 'Collection value history chart';
   };
   const pct = (value, of) => `${(value / of) * 100}%`;
@@ -269,12 +247,6 @@ export default function CollectionHistoryPanel(props) {
               <span>Liquidity</span>
               <strong>{formatPknNumber(legendDay()?.assets?.currencyPkn || 0)} PKN</strong>
             </li>
-            <Show when={chart().projection}>
-              <li class="is-projection">
-                <span class="seller-history-key" aria-hidden="true" />
-                <span>Projection</span>
-              </li>
-            </Show>
           </ul>
         </Show>
       </div>
@@ -307,9 +279,6 @@ export default function CollectionHistoryPanel(props) {
                 <stop offset="0%" stop-color="#ffd33d" stop-opacity="0.24" />
                 <stop offset="100%" stop-color="#ffd33d" stop-opacity="0.03" />
               </linearGradient>
-              <pattern id="collection-history-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="7" stroke="#ffd33d" stroke-opacity="0.32" stroke-width="1.4" />
-              </pattern>
             </defs>
             <For each={chart().axis.ticks}>
               {(tick) => <line class="seller-history-rule" x1="0" x2={CHART_W} y1={chart().yOf(tick)} y2={chart().yOf(tick)} />}
@@ -318,14 +287,9 @@ export default function CollectionHistoryPanel(props) {
               <polygon class="seller-history-liquidity" points={chart().liquidityArea} />
               <polygon class="seller-history-fill" points={chart().cardsArea} />
             </Show>
-            <Show when={chart().projectionHatch}><polygon class="seller-history-projection" points={chart().projectionHatch} /></Show>
-            <Show when={chart().projectionBand}><polygon class="seller-history-band" points={chart().projectionBand} /></Show>
-            <Show when={chart().projectionHigh}><polyline class="seller-history-band-edge" points={chart().projectionHigh} fill="none" /></Show>
-            <Show when={chart().projectionLow}><polyline class="seller-history-band-edge" points={chart().projectionLow} fill="none" /></Show>
-            <Show when={chart().split < 1}>
-              <line class="seller-history-today" x1={chart().split * CHART_W} x2={chart().split * CHART_W} y1="0" y2={CHART_H} />
+            <Show when={chart().live}>
+              <line class="seller-history-today" x1={TODAY_X} x2={TODAY_X} y1="0" y2={CHART_H} />
             </Show>
-            <Show when={chart().projectionLine}><polyline class="seller-history-forecast" points={chart().projectionLine} fill="none" /></Show>
             <Show when={chart().hasLine}><polyline class="seller-history-line" points={chart().totalLine} fill="none" /></Show>
             <Show when={hovered().dot}>
               {(dot) => <line class="seller-history-crosshair" x1={dot().x} x2={dot().x} y1="0" y2={CHART_H} />}
@@ -348,7 +312,7 @@ export default function CollectionHistoryPanel(props) {
           </Show>
           <Show when={hovered().dot}>
             {(dot) => (
-              <span class={['seller-history-point', 'is-hover', { 'is-projected': Boolean(dot().projected) }]} style={{ left: pct(dot().x, CHART_W), top: pct(dot().y, CHART_H) }} />
+              <span class="seller-history-point is-hover" style={{ left: pct(dot().x, CHART_W), top: pct(dot().y, CHART_H) }} />
             )}
           </Show>
           <Show when={hovered().tip}>
@@ -383,11 +347,11 @@ export default function CollectionHistoryPanel(props) {
           <For each={chart().ticks}>
             {(tick) => <span class={tick.minor ? 'is-minor' : undefined} style={{ left: `${tick.ratio * 100}%` }}>{tick.label}</span>}
           </For>
-          <Show when={chart().hasData && chart().split < 1}>
-            <span class="is-today" style={{ left: `${chart().split * 100}%` }}>Today</span>
+          <Show when={chart().hasData && chart().live}>
+            <span class="is-today">Today</span>
           </Show>
-          <Show when={chart().hasData && chart().split >= 1}>
-            <span class="is-end" style={{ left: '100%' }}>{formatDayLabel(points()[points().length - 1].date)}</span>
+          <Show when={chart().hasData && !chart().live}>
+            <span class="is-end">{formatDayLabel(points()[points().length - 1].date)}</span>
           </Show>
         </div>
       </div>
@@ -413,19 +377,6 @@ export default function CollectionHistoryPanel(props) {
                 </tr>
               )}
             </For>
-            <Show when={chart().projection}>
-              {(projection) => (
-                <tr>
-                  <th scope="row">{projection().end.date} (projection)</th>
-                  <td>{formatPknNumber(projection().end.cards)} PKN</td>
-                  <td>{formatPknNumber(projection().end.liquidity)} PKN</td>
-                  <td>
-                    {formatPknNumber(projection().end.value)} PKN
-                    {projection().band ? ` (${formatPknNumber(projection().end.low)}–${formatPknNumber(projection().end.high)})` : ''}
-                  </td>
-                </tr>
-              )}
-            </Show>
           </tbody>
         </table>
       </Show>

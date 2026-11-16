@@ -272,13 +272,6 @@
   background: var(--history-liquidity);
 }
 
-.seller-history-legend .is-projection .seller-history-key {
-  height: 0;
-  border-radius: 0;
-  background: none;
-  border-top: 2px dashed var(--history-cards);
-}
-
 /* Axis labels sit in their own grid cells, positioned by the same y/x math as the SVG. */
 .seller-history-chart {
   display: grid;
@@ -350,31 +343,6 @@
   fill-opacity: 0.3;
 }
 
-.seller-history-grid .seller-history-projection {
-  fill: url(#collection-history-hatch);
-}
-
-.seller-history-grid .seller-history-band {
-  fill: var(--history-cards);
-  fill-opacity: 0.12;
-}
-
-.seller-history-grid .seller-history-band-edge {
-  stroke: var(--history-cards);
-  stroke-opacity: 0.6;
-  stroke-width: 1;
-  stroke-dasharray: 2 4;
-  vector-effect: non-scaling-stroke;
-}
-
-.seller-history-grid .seller-history-forecast {
-  stroke: var(--history-cards);
-  stroke-width: 2;
-  stroke-dasharray: 6 5;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
 .seller-history-grid .seller-history-today {
   stroke: rgb(255 255 255 / 0.22);
   stroke-width: 1;
@@ -425,11 +393,6 @@
   margin: -6px 0 0 -6px;
 }
 
-.seller-history-point.is-projected {
-  background: #0c0b10;
-  border-color: var(--history-cards);
-}
-
 .seller-history-grid .seller-history-crosshair {
   stroke: rgb(255 255 255 / 0.3);
   stroke-width: 1;
@@ -453,13 +416,16 @@
   white-space: nowrap;
 }
 
+/* A window ends on the right edge, so its label ends there too. */
+.seller-history-x .is-today,
+.seller-history-x .is-end {
+  right: 0;
+  transform: none;
+}
+
 .seller-history-x .is-today {
   color: var(--text);
   font-weight: 700;
-}
-
-.seller-history-x .is-end {
-  transform: translateX(-100%);
 }
 
 .seller-history-empty {
