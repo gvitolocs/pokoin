@@ -59,7 +59,7 @@ import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
-import { claimRows, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
+import { claimRows, isAskable, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
   pricingApplyBodies,
   pricingChoiceValue,
@@ -157,10 +157,23 @@ function ScanDeskDesk(props) {
   let suggestedFor = new Map();
   // `${rowId}:${signature}` → failed lookups or saves so far (see retryPrices).
   let priceFailures = new Map();
+  // `${rowId}:${signature}` → ms until which a row that used its retry budget
+  // is left alone, so giving up does not turn into a request storm.
+  let priceRetryAt = new Map();
   let priceRetryTimer = null;
+  let priceRetryIn = 0;
   // rowId → { signature, pkn }: the last default price, restored when the
   // price field is left empty.
   let lastSuggested = new Map();
+  /** Everything the claim helpers in `scan-desk/price-requests.js` read. */
+  const priceBooks = () => ({
+    pricesAsked,
+    suggestedFor,
+    priceFailures,
+    retryAt: priceRetryAt,
+    signatureOf: facetSignature,
+    now: () => Date.now(),
+  });
   const patchChain = createPatchChain();
   const remapTried = new Set();
   let queueEl = null;
@@ -576,16 +589,22 @@ function ScanDeskDesk(props) {
   /**
    * A failed price lookup or save is not "no data": release the rows so the
    * prices effect asks again after a backoff. Never prices them from the
-   * "nothing found" fallbacks, and gives up after PRICE_RETRY_MAX tries.
+   * "nothing found" fallbacks, and a row that used its budget is asked again
+   * later in this same mount rather than left claimed forever.
    */
-  function retryPrices(rows) {
-    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
-    const { retry, delay } = nextPriceRetry(priceFailures, rows, facetSignature);
-    if (!retry.length) return;
+  function retryPrices(rows, { terminal = false } = {}) {
+    const books = priceBooks();
+    const { retry, delay } = nextPriceRetry(books, rows, { terminal });
+    // A given-up or terminal row is already released by `nextPriceRetry`;
+    // `delay` 0 means there is nothing left to ask again for.
     releaseUnsettled(retry, new Set(), books);
-    if (priceRetryTimer) return;
+    if (!delay) return;
+    if (priceRetryTimer && priceRetryIn <= delay) return;
+    clearTimeout(priceRetryTimer);
+    priceRetryIn = delay;
     priceRetryTimer = setTimeout(() => {
       priceRetryTimer = null;
+      priceRetryIn = 0;
       setPriceRetry((n) => n + 1);
     }, delay);
   }
@@ -600,9 +619,13 @@ function ScanDeskDesk(props) {
       patchRows([row.id], { pricePkn: last.pkn, priceSuggested: true }, { label: 'Price' });
       return;
     }
-    // No default known for this printing yet: clear it so the price effect asks again.
-    pricesAsked.delete(`${row.id}:${signature}`);
+    // No default known for this printing yet: clear the claim *and* the failed
+    // attempts and cool-down, or the next ask lands back on a spent budget.
+    const key = priceKey(row.id, signature);
+    pricesAsked.delete(key);
     suggestedFor.delete(row.id);
+    priceFailures.delete(key);
+    priceRetryAt.delete(key);
     if (row.pricePkn != null) {
       patchRows([row.id], { pricePkn: null, priceSuggested: false }, { label: 'Price' });
     } else {
@@ -1251,17 +1274,19 @@ function ScanDeskDesk(props) {
   watch(() => [list(), closed(), submitIntent(), priceRetry()], ([rowsNow, isClosed, intent]) => {
     // The preview's unpriced rows stay unpriced: they show "on load".
     if (props.preview || isClosed || intent === 'collection') return undefined;
+    const books = priceBooks();
     const want = rowsNow
       .filter((row) => {
         if (!row.cardId || priceTouched.has(row.id)) return false;
         const signature = facetSignature(row);
-        if (row.pricePkn == null) return !pricesAsked.has(priceKey(row.id, signature));
+        // Free of any run still working on it, and out of its give-up cool-down.
+        if (!isAskable(row, books)) return false;
+        if (row.pricePkn == null) return true;
         return row.priceSuggested === true && suggestedFor.get(row.id) !== signature;
       })
       .slice(0, 12);
     if (!want.length) return undefined;
     // A cancelled or failed run releases the rows it did not price, so the next run asks again.
-    const books = { pricesAsked, suggestedFor, signatureOf: facetSignature };
     claimRows(want, books);
     const settled = new Set();
     // A suggestion the server did not take is asked for again.
@@ -1486,6 +1511,7 @@ function ScanDeskDesk(props) {
     priceTouched = new Set();
     suggestedFor = new Map();
     priceFailures = new Map();
+    priceRetryAt = new Map();
     lastSuggested = new Map();
     dispatch({ type: 'reset', items: [] });
     setBatch(null);
