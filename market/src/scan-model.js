@@ -136,29 +136,93 @@ export function boxSlots(list, { occupiedAbs = null } = {}) {
 }
 
 /**
+ * Occupied top position per stack from `boxSlots` output: the highest position
+ * this batch takes inside each stack. A stack a slot only passes through
+ * (a quantity spilling over the divider) is full.
+ */
+export function stackOccupancyFromSlots(slots) {
+  const tops = new Map();
+  const walk = (slot) => {
+    if (!slot) return;
+    const size = Math.max(1, Math.trunc(Number(slot.stackSize)) || 1);
+    const from = Math.max(1, Math.trunc(Number(slot.stack)) || 1);
+    const to = Math.max(from, Math.min(9999, Math.trunc(Number(slot.endStack ?? slot.stack)) || from));
+    for (let s = from; s <= to; s += 1) {
+      const top = s < to ? size : Math.min(size, Math.trunc(Number(slot.end)) || size);
+      if (top > (tops.get(s) || 0)) tops.set(s, top);
+    }
+  };
+  if (slots instanceof Map) for (const slot of slots.values()) walk(slot);
+  else for (const slot of slots || []) walk(slot);
+  return tops;
+}
+
+/**
+ * Where the next card goes: the first stack at or after `fromStack` with a free
+ * position, and that position — one after the highest position already taken
+ * there. `occupied` is what the box holds: one Map (or an array of Maps, e.g.
+ * the stock in the box plus this batch) of stack number → highest occupied
+ * position. A stack whose top reaches `stackSize` is full, so the cursor walks
+ * on (41 → 42 → …) and never restarts a stack at position 1 behind cards that
+ * are already in it. Stops at stack 9999.
+ */
+export function nextFreeStackPosition(occupied, stackSize = 1, fromStack = 1) {
+  const size = Math.max(1, Math.min(9999, Math.trunc(Number(stackSize)) || 1));
+  const tops = new Map();
+  const sources = Array.isArray(occupied) ? occupied : [occupied];
+  for (const source of sources) {
+    if (!source) continue;
+    const entries = source instanceof Map ? source.entries() : Object.entries(source);
+    for (const [stack, position] of entries) {
+      const s = Math.trunc(Number(stack)) || 0;
+      const top = Math.min(size, Math.trunc(Number(position)) || 0);
+      if (s < 1 || top < 1 || top <= (tops.get(s) || 0)) continue;
+      tops.set(s, top);
+    }
+  }
+  const first = Math.max(1, Math.min(9999, Math.trunc(Number(fromStack)) || 1));
+  for (let s = first; s <= 9999; s += 1) {
+    const top = tops.get(s) || 0;
+    if (top < size) return { stack: s, startPosition: top + 1, stackSize: size };
+  }
+  return { stack: 9999, startPosition: size, stackSize: size };
+}
+
+/**
  * Next free cursor per location: { stack, startPosition, stackSize }.
  * With stackSize 1, position stays 1 and stack advances each card.
+ *
+ * `occupancy` (Map of bare box → stack → highest occupied position, from the
+ * stock already in the box) is searched together with this batch, so rolling
+ * past a filled divider lands after the cards waiting in the next stack.
  */
-export function nextBoxPositions(list, options) {
+export function nextBoxPositions(list, { occupiedAbs = null, occupancy = null } = {}) {
   const next = new Map();
-  const slots = boxSlots(list, options);
+  const slots = boxSlots(list, { occupiedAbs });
   const lastByLoc = new Map();
+  const slotsByLoc = new Map();
   for (const row of list || []) {
     const loc = String(row.location ?? '').trim();
     if (!loc) continue;
     const slot = slots.get(row.id);
     if (!slot) continue;
     lastByLoc.set(loc, slot);
+    if (!slotsByLoc.has(loc)) slotsByLoc.set(loc, []);
+    slotsByLoc.get(loc).push(slot);
   }
   for (const [loc, slot] of lastByLoc) {
     const size = slot.stackSize || 1;
-    const nextAbs = slot.absEnd + 1;
-    const cur = indexToStackPos(nextAbs, size);
+    const candidate = indexToStackPos(slot.absEnd + 1, size);
+    const cursor = nextFreeStackPosition(
+      [occupancy instanceof Map ? occupancy.get(loc) : null, stackOccupancyFromSlots(slotsByLoc.get(loc))],
+      size,
+      candidate.stack,
+    );
     next.set(loc, {
-      stack: cur.stack,
-      startPosition: cur.position,
+      stack: cursor.stack,
+      startPosition: cursor.startPosition,
       stackSize: size,
-      nextAbs,
+      nextAbs: stackPosToIndex(cursor.stack, cursor.startPosition, size),
     });
   }
   return next;
@@ -240,6 +304,13 @@ export function slotText(slot) {
 /** True when this slot closed out a divider stack (size > 1). */
 export function slotFilledStack(slot) {
   return Boolean(slot && slot.filledStack);
+}
+
+/** The highest stack this slot closed out: what the "stack full" toast names. */
+export function slotFilledStackNumber(slot) {
+  if (!slotFilledStack(slot)) return 0;
+  const endStack = slot.endStack || slot.stack || 1;
+  return slot.end === (slot.stackSize || 1) ? endStack : Math.max(1, endStack - 1);
 }
 
 /** Rows the seller works with: merged repeats live inside their head's qty. */

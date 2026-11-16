@@ -16,9 +16,11 @@ import {
   listingSlotEnd,
   maxOccupiedStack,
   nextPositionInStack,
+  occupancyForScanBoxes,
   recentBoxes,
   occupiedAbsForScanBoxes,
   parseListingLocation,
+  stackOccupancy,
   liveInventoryListings,
   sameListingBox,
   sortInventoryRows,
@@ -314,6 +316,46 @@ test('typing a stack continues after the cards already in it', () => {
   assert.equal(nextPositionInStack(rows, 'b', 6, 20), 21); // whole-stack location
   assert.equal(nextPositionInStack(rows, 'b', 7, 20), null);
   assert.equal(nextPositionInStack(rows, 'b', 3, 1), null);
+});
+
+test('stackOccupancy reads what a box holds stack by stack', () => {
+  const rows = [
+    { location: 'box·41·39' },
+    { location: 'box·41·40' },
+    { location: 'box·7-9' },
+    { location: 'box·12' },
+    { location: 'box·4·1–5·2' },
+    { location: 'other·3·50' },
+  ];
+  const tops = stackOccupancy(rows, 'box', 80);
+  assert.equal(tops.get(41), 40, 'the highest card in the stack, not the first gap');
+  assert.equal(tops.get(7), 80); // a stack range fills every stack it names
+  assert.equal(tops.get(9), 80);
+  assert.equal(tops.get(12), 80); // `box·12` names the whole stack
+  assert.equal(tops.get(4), 80); // spilled over: 4 is full
+  assert.equal(tops.get(5), 2);
+  assert.equal(tops.has(3), false, 'another box does not count');
+  // A hand-typed box matches the stored casing, like the server's box match.
+  assert.equal(stackOccupancy([{ location: 'Box·41·7' }], 'box', 80).get(41), 7);
+  assert.equal(stackOccupancy(rows, '', 80).size, 0);
+  assert.equal(stackOccupancy(rows, 'other', 1).get(3), 1);
+});
+
+test('occupancyForScanBoxes seeds the desk cursor box by box', () => {
+  const stock = [
+    { location: 'megaevoluzionietb·40·80' },
+    { location: 'megaevoluzionietb·41·39' },
+    { location: 'megaevoluzionietb·41·40' },
+    { location: 'other·9' },
+  ];
+  const scan = [
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 80 } },
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 80 } },
+  ];
+  const map = occupancyForScanBoxes(scan, stock);
+  assert.equal(map.size, 1, 'one entry per box the batch names');
+  assert.deepEqual([...map.get('megaevoluzionietb')], [[40, 80], [41, 40]]);
+  assert.equal(map.has('other'), false);
 });
 
 test('occupiedAbsForScanBoxes seeds the scan desk from live inventory', () => {

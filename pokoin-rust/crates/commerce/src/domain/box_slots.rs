@@ -8,7 +8,7 @@
 //! which is scoped to the host's game, capped at 1,000 rows by price, and was
 //! then filtered to active/paused, so the cursor skipped other games' cards.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Statuses whose card still sits in its box (`sold_out` left it).
 pub const SLOT_STATUSES: [&str; 3] = ["active", "paused", "inactive"];
@@ -215,52 +215,68 @@ pub fn continue_cursor(rows: &[SlotRow], box_name: &str, stack_size: i64) -> Opt
     Some(Cursor { stack, start_position: start, stack_size: size })
 }
 
-/// Every slot the box's rows hold, as absolute indexes for `size`.
-fn occupied(rows: &[SlotRow], wanted: &str, size: i64) -> HashSet<i64> {
-    let mut taken = HashSet::new();
+/// What a box holds stack by stack: stack number → highest position taken
+/// there. A location that spills into a later stack fills the stacks it passes
+/// through, and one without a position (`box·7`, `box·7-9`) names whole stacks.
+fn stack_tops(rows: &[SlotRow], wanted: &str, size: i64) -> HashMap<i64, i64> {
+    let size = size.max(1);
+    let mut tops: HashMap<i64, i64> = HashMap::new();
     for row in in_box(rows, wanted) {
-        let (_, start_stack, start_pos) = parse_location(&row.location);
-        let (_, end_stack, end_pos) = slot_end(&row.location);
-        let (Some(start_stack), Some(end_stack)) = (start_stack, end_stack) else { continue };
-        let from = if size == 1 {
-            start_stack
-        } else {
-            stack_pos_to_index(start_stack, start_pos.unwrap_or(1), size)
+        let (_, start_stack, _) = parse_location(&row.location);
+        let (_, end_stack, end_position) = slot_end(&row.location);
+        let (Some(start_stack), Some(end_stack)) = (start_stack, end_stack) else {
+            continue;
         };
-        let to = if size == 1 {
-            end_stack
-        } else {
-            match end_pos {
-                // `box·7` / `box·7-9`: whole stacks.
-                None => end_stack * size,
-                Some(position) => stack_pos_to_index(end_stack, position, size),
+        let from = start_stack.clamp(1, MAX_STACK);
+        let to = end_stack.clamp(1, MAX_STACK).max(from);
+        let end_top = end_position.map_or(size, |position| size.min(position.max(1)));
+        for stack in from..=to {
+            let top = if stack < to { size } else { end_top };
+            let entry = tops.entry(stack).or_insert(0);
+            if top > *entry {
+                *entry = top;
             }
-        };
-        // A typo like `box·1·1-90000` must not allocate millions of slots.
-        for index in from..=to.min(from + 10 * size.max(80)) {
-            taken.insert(index);
         }
     }
-    taken
+    tops
 }
 
-/// The next free slot of a box: the continue cursor, moved past any slot a
-/// row already holds (a card added back into an earlier gap must not make
-/// the next card collide with the one after it).
+/// `nextFreeStackPosition` (market/src/scan-model.js): the first stack at or
+/// after `from_stack` with a free position, and that position — one after the
+/// highest position already taken there. A stack whose top reaches `size` is
+/// full, so the cursor walks on (41 → 42 → …) instead of restarting a stack at
+/// position 1 behind the cards already in it. Stops at stack 9999.
+fn free_position(tops: &HashMap<i64, i64>, size: i64, from_stack: i64) -> Cursor {
+    let size = size.max(1);
+    for stack in from_stack.clamp(1, MAX_STACK)..=MAX_STACK {
+        let top = tops.get(&stack).copied().unwrap_or(0);
+        if top < size {
+            return Cursor {
+                stack,
+                start_position: top + 1,
+                stack_size: size,
+            };
+        }
+    }
+    Cursor {
+        stack: MAX_STACK,
+        start_position: size,
+        stack_size: size,
+    }
+}
+
+/// The next slot of a box: the stack the continue cursor names, moved to the
+/// first stack at or after it that still has room and one past the highest
+/// position that stack holds.
 pub fn next_slot(rows: &[SlotRow], box_name: &str, stack_size: i64) -> Option<Cursor> {
     let cursor = continue_cursor(rows, box_name, stack_size)?;
     let size = cursor.stack_size.max(1);
-    let taken = occupied(rows, &box_key(box_name), size);
-    let mut index = stack_pos_to_index(cursor.stack, cursor.start_position, size);
-    let limit = MAX_STACK * size;
-    while taken.contains(&index) && index < limit {
-        index += 1;
-    }
-    if index == stack_pos_to_index(cursor.stack, cursor.start_position, size) {
-        return Some(cursor);
-    }
-    let (stack, start_position) = index_to_stack_pos(index, size);
-    Some(Cursor { stack, start_position, stack_size: size })
+    // The candidate as an absolute slot first: "cards per stack 1" keeps its
+    // next position in the `stack` number, so `(1·5)` means divider 5.
+    let index = stack_pos_to_index(cursor.stack, cursor.start_position, size);
+    let (from_stack, _) = index_to_stack_pos(index, size);
+    let tops = stack_tops(rows, &box_key(box_name), size);
+    Some(free_position(&tops, size, from_stack))
 }
 
 /// One box of a seller: display name (casing of its newest row), how many
@@ -396,6 +412,97 @@ mod tests {
         assert_eq!(next_slot(&rows, "box", 80), cur(5, 8, 80));
         let flat = vec![at("a", "box·2", 1), at("b", "box·3", 2), at("c", "box·1", 3)];
         assert_eq!(next_slot(&flat, "box", 1), cur(4, 1, 1));
+    }
+
+    // Giuseppe's desk bug: stack 40 filled and the cursor rolled to 41·1 while
+    // 41 already held ·39 and ·40.
+    #[test]
+    fn a_full_stack_moves_to_the_next_stacks_first_free_position() {
+        let mut rows: Vec<SlotRow> = (1..=40)
+            .map(|p| at(&format!("s41{p}"), &format!("megaevoluzionietb·41·{p}"), 1))
+            .collect();
+        rows.push(at("s40", "megaevoluzionietb·40·80", 2));
+        assert_eq!(
+            continue_cursor(&rows, "megaevoluzionietb", 80),
+            cur(41, 1, 80)
+        );
+        assert_eq!(next_slot(&rows, "megaevoluzionietb", 80), cur(41, 41, 80));
+    }
+
+    #[test]
+    fn the_cursor_walks_on_while_every_stack_it_reaches_is_full() {
+        let mut rows: Vec<SlotRow> = (1..=80)
+            .map(|p| at(&format!("s41{p}"), &format!("box·41·{p}"), 1))
+            .collect();
+        for p in 1..=3 {
+            rows.push(at(&format!("s42{p}"), &format!("box·42·{p}"), 2));
+        }
+        rows.push(at("s40", "box·40·80", 3));
+        assert_eq!(next_slot(&rows, "box", 80), cur(42, 4, 80));
+        // The stack it rolls into is empty, so position 1 is right.
+        assert_eq!(next_slot(&[row("box·40·80")], "box", 80), cur(41, 1, 80));
+    }
+
+    // The same answers as `nextFreeStackPosition` (market/src/scan-model.js).
+    #[test]
+    fn free_position_answers_like_the_web_model() {
+        let tops: HashMap<i64, i64> = [(40, 80), (41, 40)].into_iter().collect();
+        assert_eq!(free_position(&tops, 80, 40), cur(41, 41, 80).unwrap());
+        let tops: HashMap<i64, i64> = [(40, 80), (41, 80), (42, 3)].into_iter().collect();
+        assert_eq!(free_position(&tops, 80, 40), cur(42, 4, 80).unwrap());
+        // A top at or past the divider means the divider is full.
+        let tops: HashMap<i64, i64> = [(41, 97)].into_iter().collect();
+        assert_eq!(free_position(&tops, 80, 41), cur(42, 1, 80).unwrap());
+        assert_eq!(
+            free_position(&HashMap::new(), 80, 1),
+            cur(1, 1, 80).unwrap()
+        );
+        // Cards per stack 1 keeps walking the dividers.
+        let tops: HashMap<i64, i64> = [(1, 1), (2, 1), (3, 1)].into_iter().collect();
+        assert_eq!(free_position(&tops, 1, 1), cur(4, 1, 1).unwrap());
+        assert_eq!(
+            free_position(&HashMap::new(), 1, 47),
+            cur(47, 1, 1).unwrap()
+        );
+        // 9999 is the last divider: typing past it clamps instead of inventing
+        // stack 10000, and a box with no room left answers 9999·size.
+        let tops: HashMap<i64, i64> = (9990..=9999).map(|s| (s, 80)).collect();
+        assert_eq!(free_position(&tops, 80, 9990), cur(9999, 80, 80).unwrap());
+        assert_eq!(
+            free_position(&HashMap::new(), 80, 10_000),
+            cur(9999, 1, 80).unwrap()
+        );
+    }
+
+    #[test]
+    fn stack_tops_reads_what_a_box_holds_stack_by_stack() {
+        let rows = vec![
+            row("box·1·1-20"),
+            row("box·2·1-7"),
+            row("box·3"),
+            row("box·4·5–9·2"),
+            row("other·9·5"),
+        ];
+        let tops = stack_tops(&rows, &box_key("Box"), 20);
+        assert_eq!(tops.get(&1).copied(), Some(20));
+        assert_eq!(tops.get(&2).copied(), Some(7));
+        assert_eq!(tops.get(&3).copied(), Some(20));
+        assert_eq!(tops.get(&4).copied(), Some(20));
+        assert_eq!(tops.get(&8).copied(), Some(20));
+        // The spill ends at 9·2; `other` is not this box.
+        assert_eq!(tops.get(&9).copied(), Some(2));
+    }
+
+    #[test]
+    fn cards_per_stack_one_still_walks_the_dividers() {
+        let rows: Vec<SlotRow> = (1..=3)
+            .map(|s| at(&format!("f{s}"), &format!("box·{s}"), s))
+            .collect();
+        assert_eq!(next_slot(&rows, "box", 1), cur(4, 1, 1));
+        // One card per divider puts the position in the stack number: 5 is
+        // taken, so the next card goes to 6.
+        let mixed = vec![row("box·1·4"), row("box·2"), row("box·5")];
+        assert_eq!(next_slot(&mixed, "box", 1), cur(6, 1, 1));
     }
 
     #[test]
