@@ -10,9 +10,13 @@
 
 import { formatPknNumber } from './pkn.js';
 import { HISTORY_PRESETS, stepHistoryPoints } from './portfolio-history.js';
+import { formatAssetsValue } from './seller-currency.js';
 
 /** Tiles per side of the switch. */
 export const MOVER_LIMIT = 6;
+
+/** The currency a tile prints when the seller has not stated one. */
+const MOVER_PKN = 'PKN';
 
 /** Sparkline box in viewBox units; the CSS sizes it fluidly. */
 export const MOVER_SPARK = { width: 120, height: 34, pad: 3 };
@@ -93,10 +97,23 @@ export function moverChips(mover) {
   ].filter(Boolean);
 }
 
+/**
+ * One PKN amount as a tile prints it. A seller whose display currency is PKN
+ * (or not yet known) keeps the digits-only PKN text; anyone else gets the same
+ * local-currency label and rounding the Inventory page uses (docs/MARKET.md
+ * "Buyer display currency", docs/SCAN_LISTING_WORKFLOW.md "Price").
+ */
+function moverAmount(pkn, currency) {
+  const value = numberOrZero(pkn);
+  const code = String(currency || MOVER_PKN).trim().toUpperCase() || MOVER_PKN;
+  if (code === MOVER_PKN) return `${formatPknNumber(value)} PKN`;
+  return formatAssetsValue(value, code);
+}
+
 /** Today's value: the last sold median of that slice, per copy. */
-export function formatMoverValue(mover) {
+export function formatMoverValue(mover, currency = '') {
   const value = numberOrZero(mover?.endPkn);
-  return value > 0 ? `${formatPknNumber(value)} PKN` : '';
+  return value > 0 ? moverAmount(value, currency) : '';
 }
 
 export function moverTone(mover) {
@@ -106,26 +123,26 @@ export function moverTone(mover) {
 }
 
 /** "+320 PKN (+28.4%)" — the money move first, the percent beside it. */
-export function formatMoverChange(mover) {
+export function formatMoverChange(mover, currency = '') {
   if (!mover) return '';
   const pkn = numberOrZero(mover.changePkn);
   const pct = numberOrZero(mover.changePct);
   const sign = pkn > 0 || pct > 0 ? '+' : (pkn < 0 || pct < 0 ? '-' : '');
-  const money = `${sign}${formatPknNumber(Math.abs(pkn))} PKN`;
+  const money = `${sign}${moverAmount(Math.abs(pkn), currency)}`;
   const percent = formatPknNumber(Math.round(Math.abs(pct) * 10) / 10, { maximumFractionDigits: 1 });
   return `${money} (${sign}${percent}%)`;
 }
 
 /** Screen-reader / title text for the whole tile. */
-export function moverTitle(mover) {
+export function moverTitle(mover, currency = '') {
   if (!mover) return '';
   const parts = [
     mover.name || 'Card',
     moverTileLine(mover),
     ...moverChips(mover),
     mover.quantity > 1 ? `Qty ${mover.quantity}` : '',
-    formatMoverValue(mover),
-    formatMoverChange(mover),
+    formatMoverValue(mover, currency),
+    formatMoverChange(mover, currency),
   ].filter(Boolean);
   return parts.join(' · ');
 }

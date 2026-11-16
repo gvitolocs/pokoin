@@ -113,6 +113,57 @@ test('tile text reads value, then the move in PKN and percent', () => {
   assert.equal(formatMoverValue(normalizeMover(apiMover({ endPkn: 0 }))), '');
 });
 
+/**
+ * The tiles read in the seller's display currency (docs/MARKET.md "Buyer
+ * display currency", docs/BUYSELL.md "Currency"): the same helper and rounding
+ * the Inventory page uses, and a PKN display currency keeps today's text.
+ */
+test('a DKK seller sees value and change in kroner', () => {
+  const up = normalizeMover(apiMover());
+  assert.equal(formatMoverValue(up, 'DKK'), '54.38 DKK');
+  assert.equal(formatMoverChange(up, 'DKK'), '+16.88 DKK (+45%)');
+
+  const down = normalizeMover(apiMover({ changePkn: -150, changePct: -12.55 }));
+  assert.equal(formatMoverChange(down, 'DKK'), '-5.63 DKK (-12.6%)');
+
+  const flat = normalizeMover(apiMover({ changePkn: 0, changePct: 0 }));
+  assert.equal(formatMoverChange(flat, 'DKK'), '0 DKK (0%)');
+  // A slice that never sold still has no value to print, in any currency.
+  assert.equal(formatMoverValue(normalizeMover(apiMover({ endPkn: 0 })), 'DKK'), '');
+  assert.equal(
+    moverTitle(normalizeMover(apiMover({ reverse: true, quantity: 3 })), 'DKK'),
+    'Charizard ex · Stellar Crown · 124/182 · NM · EN · Reverse · Qty 3 · 54.38 DKK · +16.88 DKK (+45%)',
+  );
+});
+
+test('a EUR seller sees euros and a USD seller dollars', () => {
+  const up = normalizeMover(apiMover());
+  assert.equal(formatMoverValue(up, 'EUR'), '€7.25');
+  assert.equal(formatMoverChange(up, 'EUR'), '+€2.25 (+45%)');
+  const flat = normalizeMover(apiMover({ changePkn: 0, changePct: 0 }));
+  assert.equal(formatMoverChange(flat, 'EUR'), '€0 (0%)');
+  // A zero move still prices the slice that did sell.
+  assert.equal(formatMoverValue(flat, 'EUR'), '€7.25');
+  assert.equal(formatMoverValue(up, 'eur'), '€7.25');
+  assert.equal(formatMoverValue(up, 'USD'), '$7.25');
+});
+
+test('a PKN seller keeps the PKN text, whatever spelling arrives', () => {
+  const up = normalizeMover(apiMover());
+  for (const currency of ['PKN', 'pkn', '', '  ', undefined]) {
+    assert.equal(formatMoverValue(up, currency), '1450 PKN');
+    assert.equal(formatMoverChange(up, currency), '+450 PKN (+45%)');
+  }
+  assert.equal(formatMoverChange(normalizeMover(apiMover({ changePkn: 0, changePct: 0 })), 'PKN'), '0 PKN (0%)');
+});
+
+test('the sparkline stays unitless when the tile switches currency', () => {
+  const mover = normalizeMover(apiMover());
+  assert.deepEqual(moverSpark(mover), moverSpark(mover, MOVER_SPARK));
+  assert.equal(moverSpark(mover).high, 1450);
+  assert.equal(moverSpark(mover).low, 1000);
+});
+
 test('finishes and quantity appear in the chips and the title', () => {
   const mover = normalizeMover(apiMover({ reverse: true, firstEdition: true, quantity: 3 }));
   assert.deepEqual(moverChips(mover), ['NM', 'EN', 'Reverse', '1st Ed.']);
