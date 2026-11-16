@@ -215,54 +215,27 @@
   font-size: 0.9rem;
 }
 
-.sell-sheet-hub {
-  margin-top: 16px;
-}
-
-.sell-sheet-hub > h2 {
-  margin: 0 0 12px;
-  font-size: 1.2rem;
-}
-
-.sell-sheet-hub-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
-  gap: 12px;
-}
-
-.sell-sheet-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+/* The spreadsheet entry point sits under the Scan cards button (D00006B keeps
+   the route); it is a secondary text link, not a dashboard tile. */
+.seller-spreadsheet-link {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  min-height: 9.25rem;
-  padding: 18px 16px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--g5);
-  background: var(--surface);
-  color: var(--text);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 620;
   text-decoration: none;
 }
 
-.sell-sheet-tile:hover,
-.sell-sheet-tile:focus-visible {
-  border-color: rgb(255 211 61 / 0.55);
+.seller-spreadsheet-link svg {
+  color: var(--yellow);
+  flex: none;
 }
 
-.sell-sheet-tile-icon {
+.seller-spreadsheet-link:hover,
+.seller-spreadsheet-link:focus-visible {
   color: var(--text);
-  margin-bottom: 4px;
-}
-
-.sell-sheet-tile strong {
-  font-size: 1.02rem;
-  font-weight: 750;
-}
-
-.sell-sheet-tile > span:last-child {
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.35;
+  text-decoration: underline;
 }
 
 @media (max-width: 800px) {

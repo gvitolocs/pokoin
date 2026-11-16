@@ -37,7 +37,6 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(dashSrc, /last sold median of its condition and language/);
   assert.doesNotMatch(dashSrc, /Sold today/);
   assert.doesNotMatch(dashSrc, /Dump minimum/);
-  assert.match(dashSrc, /collection-history-hatch/);
   assert.match(dashSrc, /Listed for sale/);
   assert.match(dashSrc, /Currency availability/);
   assert.match(dashSrc, /formatPknNumber\(balance\(\)\)/);
@@ -113,9 +112,9 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   assert.match(historySrc, /seller-history-point/);
   assert.match(historySrc, /historyTimeline/);
   assert.match(historySrc, /timelineRatio/);
-  assert.match(historySrc, /projectPortfolio/);
-  assert.match(historySrc, /seller-history-band/);
-  assert.match(historySrc, /seller-history-forecast/);
+  // The future projection is gone: the realized window is the whole plot.
+  assert.doesNotMatch(historySrc, /projection|forecast/i);
+  assert.match(historySrc, /seller-history-today/);
   assert.doesNotMatch(historySrc, /CHART_W \* 0\.85/);
   assert.doesNotMatch(historySrc, /<circle[\s\S]*seller-history-point/);
   assert.match(historySrc, /seller-history-y/);
