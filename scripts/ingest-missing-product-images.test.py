@@ -56,12 +56,28 @@ class LeftoverSlugTests(unittest.TestCase):
 
 
 class SmallScanTests(unittest.TestCase):
-    def test_id_file_targets_leftover_or_public_id(self):
+    def test_id_list_matches_ct_id_only_by_default(self):
         ingest.IDS = [158374]
-        sql = ingest.dump_sql()
-        self.assertIn("c.ct_id IN (158374)", sql)
-        self.assertIn("c.card_id IN (158374)", sql)
-        ingest.IDS = []
+        ingest.IDS_ARE_CARD_IDS = False
+        try:
+            sql = ingest.dump_sql()
+            self.assertIn("c.ct_id IN (158374)", sql)
+            # card_id is ct_id * 2 for most cards; matching both kinds would
+            # pull unrelated printings onto the run.
+            self.assertNotIn("c.card_id IN (", sql)
+        finally:
+            ingest.IDS = []
+
+    def test_card_id_list_matches_card_id_only(self):
+        ingest.IDS = [316748]
+        ingest.IDS_ARE_CARD_IDS = True
+        try:
+            sql = ingest.dump_sql()
+            self.assertIn("c.card_id IN (316748)", sql)
+            self.assertNotIn("c.ct_id IN (", sql)
+        finally:
+            ingest.IDS = []
+            ingest.IDS_ARE_CARD_IDS = False
 
     def test_magnemite_slug2_without_id_prefix(self):
         row = {
