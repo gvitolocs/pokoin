@@ -25,7 +25,6 @@ import {
   quantityFieldCommit,
   slotText,
 } from '@market/scan-model.js';
-import { priceFieldCommit } from '@market/scan-pricing.js';
 import { DRAFT_HOTKEY_LEGEND, dispatchDraftHotkey, draftLegendActive } from '@market/scan-shortcuts.js';
 import { formatSellerPrice, priceInputFromPkn, sellerListCurrency } from '@market/seller-currency.js';
 import ThumbZoom from '../../components/ThumbZoom.jsx';
@@ -34,6 +33,7 @@ import { accountProfile } from '../../stores/account.js';
 import { authUser } from '../../stores/auth.js';
 import { scanOwnerBook } from './duplicate-book.js';
 import { scanDuplicateNote } from './duplicates.js';
+import { priceFieldBlur } from './price-run.js';
 import { loadVersionSet } from './version-sets.js';
 import { watch } from './watch.js';
 
@@ -242,6 +242,20 @@ export function QueueRow(props) {
   const zoomSrc = () => thumbArt().hero || thumbArt().thumb;
   const remapLang = () => remapListingLanguage(row().language, props.preferredLanguage);
   const currency = () => props.priceCurrency || sellerListCurrency();
+  // What the seller typed in the price box and has not committed (null: nothing
+  // typed). It keeps a patch of the row from repainting the field under them,
+  // and it is the desk's only sign that a price was written by hand.
+  const [priceTyped, setPriceTyped] = createSignal(null);
+  let priceField = null;
+  createEffect(
+    // `undefined` while the seller types: their text is the value, and nothing
+    // the row does may repaint the field under them.
+    () => (priceTyped() === null ? priceInputFromPkn(row().pricePkn, currency()) : undefined),
+    (text) => {
+      if (text === undefined || !priceField || priceField.value === text) return;
+      priceField.value = text;
+    },
+  );
   const pick = (id) => {
     props.onPick(id);
     props.onReplaceDone();
@@ -440,33 +454,36 @@ export function QueueRow(props) {
         <span class={['c-price', { suggested: row().priceSuggested }]}>
           <Show when={!props.closed} fallback={formatSellerPrice(row().pricePkn, currency())}>
             <input
+              ref={(el) => { priceField = el; }}
               inputmode="decimal"
               tabindex={-1}
-              value={priceInputFromPkn(row().pricePkn, currency())}
-              // While a suggested price is cleared for typing, it stays visible
-              // as the placeholder: leaving the field empty keeps it.
-              // With batch pricing an unpriced row is priced when the batch loads.
+              // The price stays in the box while it is being edited: a suggestion
+              // is a value, not a button, and it never disappears on focus.
+              // With batch pricing an unpriced row is priced when the batch loads,
+              // and while its suggestion is in flight the box shows it as a ghost.
               class={{ 'price-on-load': unpricedOnLoad() }}
-              // The thin space keeps the italic "d" inside the right-aligned field.
               placeholder={unpricedOnLoad()
                 ? 'on load\u2009'
-                : row().priceSuggested && row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
-              onFocus={(e) => {
-                // Clicking in is the only thing that empties a suggested price;
-                // switching versions re-suggests instead.
-                props.onPriceFocus?.(row().id);
-                if (row().priceSuggested) e.currentTarget.value = '';
+                : row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
+              // The thin space keeps the italic "d" inside the right-aligned field.
+              onFocus={(e) => e.currentTarget.select()}
+              onInput={(e) => {
+                // The first keystroke is the seller taking over this shape's price;
+                // clicking into the box is not.
+                if (priceTyped() === null) props.onPriceEdited?.(row().id);
+                setPriceTyped(e.currentTarget.value);
               }}
               onBlur={(e) => {
                 const r = row();
-                const commit = priceFieldCommit(r, e.currentTarget.value, currency());
+                const commit = priceFieldBlur(r, e.currentTarget.value, currency(), priceTyped() !== null);
+                setPriceTyped(null);
                 if (commit.action === 'set') {
                   props.onPatch({ pricePkn: commit.pricePkn, ...(r.priceSuggested ? { priceSuggested: false } : {}) });
                   return;
                 }
-                // Invalid text on an unpriced or suggested row also gives the price back to the default.
+                // Invalid text left in the price field of an unpriced or suggested row gives the
+                // price back to the default; `priceTyped` re-paints the field either way.
                 if (commit.action === 'default' || (commit.action === 'restore' && (r.pricePkn == null || r.priceSuggested))) props.onPriceEmptied?.(r);
-                e.currentTarget.value = priceInputFromPkn(r.pricePkn, currency());
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur();
@@ -474,13 +491,24 @@ export function QueueRow(props) {
             />
           </Show>
           <Show when={props.pricingChip}>
-            {(chip) => (
+            {(chip) => (chip().kind === 'batch' ? (
+              // The batch default is not this row's choice, so it is the price
+              // shown and nothing to click: tick the row and use "Price
+              // selected" to price this row differently.
+              <span
+                class={['c-pricing-chip', 'is-batch']}
+                style={{ cursor: 'default' }}
+                title="Batch default · tick the row and use Price selected to change it for this row"
+              >
+                {chip().label}
+              </span>
+            ) : (
               <button
                 type="button"
                 class={['c-pricing-chip', `is-${chip().kind}`]}
                 tabindex={-1}
                 disabled={props.closed}
-                title={chip().kind === 'own' ? 'This row’s own pricing · change it' : chip().kind === 'none' ? 'No pricing for this row · change it' : 'Batch default · change it for this row'}
+                title={chip().kind === 'own' ? 'This row’s own pricing · change it' : 'No pricing for this row · change it'}
                 aria-label={`Pricing: ${chip().label}. Change it for this row`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -489,7 +517,7 @@ export function QueueRow(props) {
               >
                 {chip().label}
               </button>
-            )}
+            ))}
           </Show>
         </span>
       </Show>
