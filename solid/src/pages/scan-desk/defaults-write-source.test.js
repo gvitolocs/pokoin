@@ -104,7 +104,10 @@ test('a typed location is applied before a scan or a search add uses the old one
 });
 
 test('the seller keeps a field they are typing and a draft never applies twice', () => {
-  assert.match(bars, /draftValue\(\{ focused: editingField\(\) === 'location', draft: current, serverValue: location \}\)/);
+  // Focus is read untracked: only an answer adopts the batch default, a focus
+  // change never may, or leaving the field would drop the text just typed.
+  assert.match(bars, /const focused = untrack\(\(\) => editingField\(\)\) === 'location';/);
+  assert.match(bars, /setLocationDraft\(\(current\) => draftValue\(\{ focused, draft: current, serverValue: location \}\)\)/);
   assert.match(bars, /if \(draft === location \|\| draft === locationSent\) return undefined;/);
   // The old unguarded write of the draft, and the copy over the typed text.
   assert.doesNotMatch(bars, /props\.onChange\(\{ location: draft \}\)/);

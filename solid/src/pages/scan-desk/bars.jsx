@@ -119,19 +119,24 @@ export function DefaultsBar(props) {
   // An answer only repaints a field the seller is not working in. A defaults
   // write that came back while the box was still being typed used to copy its
   // own value over the text — the seed did the same, and the seller lost the
-  // location they had chosen.
+  // location they had chosen. `editingField` is read untracked on purpose: a
+  // focus change must not adopt the batch default, only an answer may.
   createEffect(() => d().location, (location) => {
-    if (editingField() !== 'location') locationSent = String(location ?? '');
-    setLocationDraft((current) => draftValue({ focused: editingField() === 'location', draft: current, serverValue: location }));
+    const focused = untrack(() => editingField()) === 'location';
+    if (!focused) locationSent = String(location ?? '');
+    setLocationDraft((current) => draftValue({ focused, draft: current, serverValue: location }));
   });
   createEffect(() => [d().stack, d().location], ([stack]) => {
-    setStackDraft((current) => draftValue({ focused: editingField() === 'stack', draft: current, serverValue: String(stack ?? 1) }));
+    const focused = untrack(() => editingField()) === 'stack';
+    setStackDraft((current) => draftValue({ focused, draft: current, serverValue: String(stack ?? 1) }));
   });
   createEffect(() => [d().startPosition, d().location, d().stack], ([start]) => {
-    setPosDraft((current) => draftValue({ focused: editingField() === 'position', draft: current, serverValue: String(start ?? 1) }));
+    const focused = untrack(() => editingField()) === 'position';
+    setPosDraft((current) => draftValue({ focused, draft: current, serverValue: String(start ?? 1) }));
   });
   createEffect(size, (next) => {
-    setSizeDraft((current) => draftValue({ focused: editingField() === 'size', draft: current, serverValue: String(next) }));
+    const focused = untrack(() => editingField()) === 'size';
+    setSizeDraft((current) => draftValue({ focused, draft: current, serverValue: String(next) }));
   });
 
   const applyLocation = (next) => {
