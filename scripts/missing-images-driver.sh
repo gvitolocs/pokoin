@@ -384,7 +384,7 @@ stamp_sql() { # $1 = dry|apply, $2 = VALUES list
   printf '%s\n' "SET LOCAL lock_timeout='$LOCK_TIMEOUT';"
   printf '%s\n' 'CREATE TEMP TABLE missing_keys(id bigint PRIMARY KEY, main_key text, homepage_key text) ON COMMIT DROP;'
   printf '%s\n' "INSERT INTO missing_keys(id,main_key,homepage_key) VALUES $values;"
-  printf '%s\n' "CREATE TEMP TABLE missing_stamped AS SELECT k.id, k.main_key, k.homepage_key FROM missing_keys k JOIN $BP b ON b.id = k.id WHERE nullif(b.cdn_image_url,'') IS NULL ON COMMIT DROP;"
+  printf '%s\n' "CREATE TEMP TABLE missing_stamped ON COMMIT DROP AS SELECT k.id, k.main_key, k.homepage_key FROM missing_keys k JOIN $BP b ON b.id = k.id WHERE nullif(b.cdn_image_url,'') IS NULL;"
   printf '%s\n' "SELECT 'COUNT cardtrader_pokemon_blueprints '||count(*) FROM missing_stamped;"
   if [ "$mode" = apply ]; then
     printf '%s\n' "SELECT 'UNDO UPDATE $BP SET cdn_image_url='||quote_nullable(b.cdn_image_url)||', cdn_object_key='||quote_nullable(b.cdn_object_key)||', homepage_image_url='||quote_nullable(b.homepage_image_url)||', homepage_object_key='||quote_nullable(b.homepage_object_key)||' WHERE id='||b.id||';' FROM $BP b JOIN missing_stamped s ON s.id = b.id;"
@@ -399,7 +399,7 @@ stamp_sql() { # $1 = dry|apply, $2 = VALUES list
       home_update=''
       home_undo=''
     fi
-    printf '%s\n' "CREATE TEMP TABLE missing_touch_$short AS SELECT c.card_id AS pk FROM public.$table c WHERE c.ct_id IN (SELECT id FROM missing_stamped) AND nullif(c.cdn_image_url,'') IS NULL ON COMMIT DROP;"
+    printf '%s\n' "CREATE TEMP TABLE missing_touch_$short ON COMMIT DROP AS SELECT c.card_id AS pk FROM public.$table c WHERE c.ct_id IN (SELECT id FROM missing_stamped) AND nullif(c.cdn_image_url,'') IS NULL;"
     printf '%s\n' "SELECT 'COUNT $table '||count(*) FROM missing_touch_$short;"
     if [ "$mode" = apply ]; then
       printf '%s\n' "SELECT 'UNDO UPDATE public.$table SET image_url='||quote_nullable(c.image_url)||', cdn_image_url='||quote_nullable(c.cdn_image_url)||', preview_image_url='||quote_nullable(c.preview_image_url)$home_undo||' WHERE card_id='||c.card_id||';' FROM public.$table c JOIN missing_touch_$short t ON t.pk = c.card_id;"
