@@ -72,7 +72,7 @@ import {
   serializeBatchFlags,
   setBatchFlag,
 } from './scan-desk/defaults-state.js';
-import { applyDefaultsResponse, defaultsFailureMessage, rollbackDefaults } from './scan-desk/defaults-write.js';
+import { applyDefaultsResponse, defaultsFailureMessage, rollbackDefaults, stockAnswerIsForBox } from './scan-desk/defaults-write.js';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
 import { claimRows, nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
 import {
@@ -842,16 +842,18 @@ function ScanDeskDesk(props) {
         const box = listingBox(loc);
         const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? d.stackSize)) || 1);
         const key = `${current.id}|${box}`;
+        const asked = { batchId: current.id, box, key };
         try {
           const data = await fetchSellerBoxSlots(sellerUid, await getBearer(), { box, stackSize: size });
           // Another box was typed while this was in flight (its optimistic
           // value is already on screen): the desk computes every slot out of
-          // one `boxStock`, so taking this answer would mix the old box's
-          // stock with the new box's name and anchor scans at a taken slot.
-          const stillWanted = boxStock.key === key
-            && untrack(batch)?.id === current.id
-            && listingBox(String(untrack(defaults).location || '').trim()) === box;
-          if (stillWanted) {
+          // one `boxStock`, so this answer may not move it any more.
+          const now = {
+            batchId: untrack(batch)?.id,
+            box: listingBox(String(untrack(defaults).location || '').trim()),
+            key: boxStock.key,
+          };
+          if (stockAnswerIsForBox(asked, now)) {
             const stock = Array.isArray(data?.rows) ? data.rows : [];
             boxStock = { key, box, rows: stock };
             setBoxStockRows(stock);

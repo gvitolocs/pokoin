@@ -51,6 +51,23 @@ function asVersion(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** What a box-stock request is about: the batch, the box, and the desk's own key. */
+function stockTarget({ batchId, box, key }) {
+  return { batchId: String(batchId || ''), box: String(box || ''), key: String(key || '') };
+}
+
+/**
+ * Whether a box-stock answer may still move the desk. Every slot the desk
+ * computes comes out of one `boxStock`, so an answer of the box that was typed
+ * before — or of another batch — would price the next scan against stock that
+ * is not in the box on screen at all.
+ */
+export function stockAnswerIsForBox(asked, now) {
+  const a = stockTarget(asked);
+  const n = stockTarget(now);
+  return Boolean(a.batchId) && a.batchId === n.batchId && a.box === n.box && a.key === n.key;
+}
+
 /**
  * Merge one `action=defaults` answer into the batch. An answer older than the
  * newest already applied is dropped whole; a newer one only replaces the keys

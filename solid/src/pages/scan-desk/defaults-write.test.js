@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { affectedKeys, applyDefaultsResponse, defaultsFailureMessage, rollbackDefaults } from './defaults-write.js';
+import {
+  affectedKeys,
+  applyDefaultsResponse,
+  defaultsFailureMessage,
+  rollbackDefaults,
+  stockAnswerIsForBox,
+} from './defaults-write.js';
 
 // `setDefaults` writes optimistically and then applies the server's batch view.
 // The server is last-write-wins and answers with the whole defaults object, so
@@ -93,6 +99,17 @@ test('a key the batch did not have before a failed write is dropped again', () =
   const before = { condition: 'NM' };
   const rolled = rollbackDefaults({ condition: 'NM', location: '712' }, before, { location: '712' });
   assert.equal(Object.prototype.hasOwnProperty.call(rolled.defaults, 'location'), false);
+});
+
+test('a box-stock answer only counts while it is about the box on screen', () => {
+  const asked = { batchId: 'b1', box: 'A1', key: 'b1|A1' };
+  assert.equal(stockAnswerIsForBox(asked, asked), true, 'nothing changed');
+  // The seller typed B2 in the debounce window: its optimistic value is
+  // already on screen, so A1's stock must not move the cursor of the whole desk.
+  assert.equal(stockAnswerIsForBox(asked, { batchId: 'b1', box: 'B2', key: 'b1|B2' }), false);
+  // A batch loaded in the meantime, and an answer with no batch to compare to.
+  assert.equal(stockAnswerIsForBox(asked, { batchId: 'b2', box: 'A1', key: 'b2|A1' }), false);
+  assert.equal(stockAnswerIsForBox({ batchId: '', box: 'A1', key: '|A1' }, asked), false);
 });
 
 test('a missing batch view leaves the optimistic state alone', () => {

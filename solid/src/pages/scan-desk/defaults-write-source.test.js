@@ -56,11 +56,15 @@ test('two defaults writes cannot answer out of order and a failed one rolls back
 });
 
 test('the location stock hint cannot be written out of order', () => {
-  const body = defaultsWrite();
-  const hint = between(body, 'await fetchSellerBoxSlots(', 'boxStock = {');
-  assert.match(hint, /boxStock\.key === key/);
-  assert.match(hint, /listingBox\(String\(untrack\(defaults\)\.location \|\| ''\)\.trim\(\)\) === box/);
-  assert.match(hint, /untrack\(batch\)\?\.id === current\.id/);
+  // Everything between the stock request and the write of the shared cursor.
+  const hint = between(defaultsWrite(), 'await fetchSellerBoxSlots(', 'boxStock = {');
+  // The rule itself is answered in defaults-write.test.js; here it has to sit
+  // in front of the write.
+  assert.match(hint, /const now = \{/);
+  assert.match(hint, /box: listingBox\(String\(untrack\(defaults\)\.location \|\| ''\)\.trim\(\)\)/);
+  assert.match(hint, /key: boxStock\.key/);
+  assert.match(hint, /if \(stockAnswerIsForBox\(asked, now\)\) \{/);
+  assert.ok(hint.indexOf('const now = {') < hint.indexOf('stockAnswerIsForBox'), 'the desk is read before the answer is judged');
   // The sibling effect keeps its own guards.
   assert.match(desk, /if \(boxStock\.key === key\) return undefined;/);
   assert.match(desk, /if \(cancelled\) return;/);
