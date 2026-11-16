@@ -10,6 +10,7 @@ import {
   beatPricePkn,
   defaultOfferSettings,
   offerBody,
+  openBuyOrderIds,
   offerPriceInput,
   offerPriceLabel,
   offerPricePkn,
@@ -437,4 +438,21 @@ test('fresh book reads bypass the edge cache with a unique parameter', async () 
   assert.equal(urls[0].searchParams.has('fresh'), false);
   assert.ok(urls[1].searchParams.get('fresh'));
   assert.notEqual(urls[1].searchParams.get('fresh'), urls[2].searchParams.get('fresh'));
+});
+
+test('the caller\'s open offers are the ids a board row is marked with', () => {
+  const mine = openBuyOrderIds([
+    { id: 'o1', state: 'open' },
+    { id: 'o2', state: 'filled' },
+    { id: 'o3', state: 'expired' },
+    { id: 'o4', state: 'cancelled' },
+    { id: 5, state: 'open' },
+    { state: 'open' },
+    null,
+  ]);
+  // Only open offers can be edited or deleted, and the board names its rows by string id.
+  assert.deepEqual([...mine], ['o1', '5']);
+  assert.equal(mine.has('o2'), false);
+  assert.equal(openBuyOrderIds(null).size, 0);
+  assert.equal(openBuyOrderIds([]).size, 0);
 });
