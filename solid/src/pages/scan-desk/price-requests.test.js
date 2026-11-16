@@ -180,3 +180,23 @@ test('invalid text left in the price field of an unpriced or suggested row gives
   const rows = fs.readFileSync(new URL('./rows.jsx', import.meta.url), 'utf8');
   assert.match(rows, /commit\.action === 'restore' && \(r\.pricePkn == null \|\| r\.priceSuggested\)\)\) props\.onPriceEmptied/);
 });
+
+test('the price box displays the default price and is only taken over by a keystroke', () => {
+  const rows = fs.readFileSync(new URL('./rows.jsx', import.meta.url), 'utf8');
+  // Focusing no longer empties a suggested price, and no longer opts the row out
+  // of the pipeline: only typing in the box is the seller owning that shape.
+  assert.doesNotMatch(rows, /if \(row\(\)\.priceSuggested\) e\.currentTarget\.value = '';/);
+  assert.doesNotMatch(rows, /onPriceFocus/);
+  assert.match(rows, /if \(priceTyped\(\) === null\) props\.onPriceEdited\?\.\(row\(\)\.id\);/);
+  // The row's price is written into the field only while nobody is typing in it.
+  assert.doesNotMatch(rows, /value=\{priceInputFromPkn\(row\(\)\.pricePkn, currency\(\)\)\}/);
+  assert.match(rows, /if \(priceTyped\(\) !== null\) return;/);
+  assert.match(rows, /priceFieldBlur\(r, e\.currentTarget\.value, currency\(\), priceTyped\(\) !== null\)/);
+});
+
+test('the batch default shows where the row price comes from, without a control', () => {
+  const rows = fs.readFileSync(new URL('./rows.jsx', import.meta.url), 'utf8');
+  assert.match(rows, /chip\(\)\.kind === 'batch' \? \(/);
+  assert.match(rows, /<span\n\s+class=\{\['c-pricing-chip', 'is-batch'\]\}/);
+  assert.doesNotMatch(rows, /'Batch default · change it for this row'/);
+});

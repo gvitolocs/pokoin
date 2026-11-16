@@ -1812,7 +1812,7 @@ function ScanDeskDesk(props) {
               replacing={replaceFor() === row().id}
               preferredLanguage={defaults().language}
               remapTried={remapTried}
-              onPriceFocus={(rowId) => {
+              onPriceEdited={(rowId) => {
                 const live = untrack(displayRows)[rowId];
                 if (live) priceTouched.set(rowId, facetSignature(live));
               }}
