@@ -1972,6 +1972,12 @@ html.is-card-banding * {
   border-radius: 16px 16px 0 0;
 }
 
+/* The hover preview still pops out of the frame, so the rail gutters reserved for it keep their purpose. */
+.tile:not(.tile-album):hover > .tile-art,
+.tile:not(.tile-album):focus-visible > .tile-art {
+  overflow: visible;
+}
+
 .prod-art.hero-art {
   cursor: zoom-in;
   position: relative;
@@ -2002,6 +2008,11 @@ html.is-card-banding * {
 .tile-art img {
   object-fit: cover;
   object-position: center;
+}
+
+/* The loading shimmer fills the same flush slot, not a smaller card inside it. */
+.tile:not(.tile-album):not(.tile-row) .tile-art > .tile-ph {
+  border-radius: 16px 16px 0 0;
 }
 
 .hero-art img {

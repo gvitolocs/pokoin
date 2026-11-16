@@ -78,6 +78,16 @@ test('CardTile art covers the tile frame: flush slot, cover fit, tile top radius
   assert.match(css, /\.tile-art img \{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center/);
   // The caption keeps its gap: .tile-meta pads its own top, the art slot no longer does.
   assert.match(css, /\.tile-meta \{[^}]*padding:\s*0\.55rem 0\.55rem 0\.75rem/);
+  // The hover and keyboard-focus preview still pops the scan out of the frame.
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):hover > \.tile-art,\s*\.tile:not\(\.tile-album\):focus-visible > \.tile-art \{[^}]*overflow:\s*visible/,
+  );
+  // The loading shimmer fills the same flush slot instead of a smaller card inside it.
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):not\(\.tile-row\) \.tile-art > \.tile-ph \{[^}]*border-radius:\s*16px 16px 0 0/,
+  );
   // List rows and album cells keep their own frames.
   assert.match(css, /\.tile-row \.tile-art \{[^}]*border-radius:\s*0;[^}]*overflow:\s*visible/);
   assert.match(css, /\.tile-album \.tile-art \{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;[^}]*border-radius:\s*0/);
