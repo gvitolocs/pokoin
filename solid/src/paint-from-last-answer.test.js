@@ -49,6 +49,24 @@ test('shop, artist and cart paint their last answer instead of a placeholder', (
   assert.match(rails, /JSON\.stringify\(current\.rails\) === JSON\.stringify\(rails\)\) return;/);
 });
 
+test('the dashboard graph paints its stored series and takes quiet updates', () => {
+  const cacheSrc = read('../../market/src/portfolio-history-cache.js');
+  const home = read('./pages/SellerHome.jsx');
+  const previews = read('./components/NavPreviews.jsx');
+  const auth = read('./stores/auth.js');
+  assert.match(cacheSrc, /pokoin\.portfolioHistory\.v1/);
+  assert.match(cacheSrc, /globalThis\.localStorage/);
+  for (const src of [home, previews]) {
+    assert.match(src, /const cached = peekPortfolioHistory\(/);
+    assert.match(src, /subscribePortfolioHistory\(/);
+    assert.match(src, /unsubscribe\(\);/);
+  }
+  // A failed refresh keeps the painted series instead of blanking the chart.
+  assert.doesNotMatch(home, /setHistorySeries\(\[\]\)/);
+  assert.doesNotMatch(previews, /setDays\(\[\]\)/);
+  assert.match(auth, /clearPortfolioHistory\(leaving\)/);
+});
+
 test('skeletons and loading text stay invisible for 250 ms', () => {
   assert.match(styles, /@keyframes skel-appear/);
   const rule = styles.slice(styles.indexOf('.tile-skel,\n.shop-row-skel'), styles.indexOf('@keyframes skel-shimmer'));
