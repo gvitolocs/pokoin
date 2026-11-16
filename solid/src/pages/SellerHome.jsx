@@ -229,6 +229,8 @@ function PreviewDashboard() {
 }
 
 function LiveDashboard() {
+  const uid = () => authUid() || accountProfile()?.uid || '';
+  const sellerUid = () => (signedIn() ? uid() : '');
   const [ownedCards, setOwnedCards] = createSignal(null);
   const [physicalOwned, setPhysicalOwned] = createSignal(0);
   const [nftOwned, setNftOwned] = createSignal(0);
@@ -239,15 +241,14 @@ function LiveDashboard() {
   const [listingsLoaded, setListingsLoaded] = createSignal(false);
   const [movers, setMovers] = createSignal([]);
   const [cardTraderAssets, setCardTraderAssets] = createSignal(null);
-  const [historySeries, setHistorySeries] = createSignal([]);
-  const [historyPending, setHistoryPending] = createSignal(false);
+  // The last known series is on the first frame: no empty graph to swap out.
+  const [historySeries, setHistorySeries] = createSignal(untrack(() => peekPortfolioHistory(uid()) || []));
+  const [historyPending, setHistoryPending] = createSignal(untrack(() => Boolean(signedIn() && !peekPortfolioHistory(uid()))));
   const [topMovers, setTopMovers] = createSignal(null);
   const [moversPending, setMoversPending] = createSignal(true);
   // The chart owns the window; the movers sheet prices whatever it shows.
   const [moverRange, setMoverRange] = createSignal(DEFAULT_MOVER_RANGE);
   const [error, setError] = createSignal('');
-  const uid = () => authUid() || accountProfile()?.uid || '';
-  const sellerUid = () => (signedIn() ? uid() : '');
 
   function applyTiles(entry) {
     setOwnedCards(entry.ownedCards);
