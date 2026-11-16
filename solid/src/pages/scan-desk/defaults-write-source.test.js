@@ -91,11 +91,16 @@ test('a typed location is applied before a scan or a search add uses the old one
   const commit = between(desk, 'async function commitDraft(', 'function applyAttribute(');
   assert.ok(commit.indexOf('await flushLocationDraft()') < commit.indexOf('scanApi.add('));
   assert.match(commit, /location: String\(untrack\(defaults\)\.location \|\| ''\)/);
-  // Blur, Enter and the pause still commit as before, through the same rule.
-  assert.match(bars, /setEditingField\(''\);\s*\n\s*setBoxMenuOpen\(false\);\s*\n\s*commitLocation\(\)/);
+  // Blur, Enter and the pause still commit as before, through the same rule,
+  // and leaving an untouched field accepts the box it showed.
+  assert.match(bars, /onBlur=\{leaveLocation\}/);
+  assert.match(bars, /if \(suggestion && !String\(locationDraft\(\) \|\| ''\)\) return applyLocation\(suggestion\)/);
   assert.match(bars, /const t = setTimeout\(\(\) => applyLocation\(draft\), 700\)/);
   assert.match(bars, /props\.api\?\.\(\{ commitLocation \}\)/);
   assert.match(desk, /api=\{\(api\) => \{ defaultsBar = api; \}\}/);
+  // Only typing is "the seller has a hand on it" — looking is not.
+  assert.equal(/onFocus=\{\(\) => \{[^}]*props\.onTouched/.test(bars), false, 'focus does not switch the seed off');
+  assert.match(bars, /setLocationDraft\(e\.currentTarget\.value\);[\s\S]{0,240}props\.onTouched\?\.\(\)/);
 });
 
 test('the seller keeps a field they are typing and a draft never applies twice', () => {

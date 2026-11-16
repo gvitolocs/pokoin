@@ -160,6 +160,17 @@ export function DefaultsBar(props) {
     const next = pendingDraft({ draft: locationDraft(), applied: locationSent });
     return next === null ? undefined : applyLocation(next);
   };
+  /**
+   * Leaving the field: what was typed is applied, and nothing typed at all
+   * accepts the box that was shown in it. The desk applies the same on a scan.
+   */
+  const leaveLocation = () => {
+    setEditingField('');
+    setBoxMenuOpen(false);
+    const suggestion = String(props.suggestion || '');
+    if (suggestion && !String(locationDraft() || '')) return applyLocation(suggestion);
+    return commitLocation();
+  };
   // The desk applies a typed box before it creates a row: a scan or a card
   // added from search must not land in the box from before the typing.
   props.api?.({ commitLocation });
@@ -314,12 +325,8 @@ export function DefaultsBar(props) {
                 // its say and stays out of the rest of this batch.
                 props.onTouched?.();
               }}
-              onFocus={() => { setEditingField('location'); setBoxMenuOpen(true); setBoxActive(0); props.onTouched?.(); }}
-              onBlur={() => {
-                setEditingField('');
-                setBoxMenuOpen(false);
-                commitLocation();
-              }}
+              onFocus={() => { setEditingField('location'); setBoxMenuOpen(true); setBoxActive(0); }}
+              onBlur={leaveLocation}
               onKeyDown={(e) => {
                 if (showBoxMenu()) {
                   const list = suggestions();
