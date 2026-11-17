@@ -286,7 +286,9 @@ export default function ChatDock() {
   // Keep the composer's page-card chip on the card being viewed (Poko only).
   createEffect(
     () => ({ state: dock(), pageCard: deskCard(), off: chipOff(), used: chipUsed() }),
-    ({ pageCard, off, used }) => syncPokoPageChip({ pageCard, off, used }),
+    ({ pageCard, off, used }) => {
+      syncPokoPageChip({ pageCard, off, used });
+    },
   );
 
   function removeTag(key) {

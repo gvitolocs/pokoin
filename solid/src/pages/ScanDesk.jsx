@@ -1,21 +1,26 @@
 import { createMemo, createSignal, flush, For, onSettled, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import {
+  applyPricing,
   fetchCardSales,
   fetchCheapestPricePknMap,
   fetchExactNameCards,
+  fetchPricingStrategies,
   fetchSellerBoxSlots,
+  savePricingGroup,
   imageSrc,
 } from '@market/api.js';
 import {
   listingBox,
-  nextPositionInStack,
+  occupancyForScanBoxes,
   occupiedAbsForScanBoxes,
+  stackOccupancy,
 } from '@market/inventory-listings.js';
 import { fetchScanImage, rememberActiveSession, scanApi, streamUrl } from '@market/scan-api.js';
 import {
   batchDefaultRowPatch,
   draftArtworkBucket,
+  draftLanguageForPick,
   listingLanguageForPrint,
   preferDraftArtwork,
   remapListingLanguage,
@@ -33,19 +38,23 @@ import {
   nextAttentionIndex,
   nextBoxPositions,
   newSubmitKey,
+  nextFreeStackPosition,
   phaseText,
   queueRows,
   rowProblem,
   sessionPhase,
   slotFilledStack,
+  slotFilledStackNumber,
+  stackOccupancyFromSlots,
   stepCandidate,
   submitLabel,
   typeQuantity,
 } from '@market/scan-model.js';
 import { shortcutFor } from '@market/scan-shortcuts.js';
-import { facetSignature, scanFacets, suggestPriceFromSlices } from '@market/scan-pricing.js';
+import { facetSignature } from '@market/scan-pricing.js';
 import { connectScanStream } from '@market/scan-stream.js';
 import { gameIdFromHost } from '@market/game.js';
+import { currencyContext } from '@market/pricer.js';
 import { marketUrl } from '@market/punchouts.js';
 import '@market/scan-desk.css';
 import InventoryTargets from '../components/desk/InventoryTargets.jsx';
@@ -54,6 +63,23 @@ import { authUser, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
 import { AutoFocusButton, DefaultsBar, HelpOverlay, PerfPanel, QrBlock } from './scan-desk/bars.jsx';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
+import { nextPriceRetry, priceKey, releaseUnsettled } from './scan-desk/price-requests.js';
+import { selectPriceRows, startPriceRun } from './scan-desk/price-run.js';
+import {
+  batchHasPricing,
+  pricingApplyBodies,
+  pricingChoiceValue,
+  pricingFailedLine,
+  pricingResultLine,
+  rowIsPriced,
+  rowOwnPricing,
+  rowPricingChip,
+  rowPricingPatch,
+  sumPricingAnswers,
+} from './scan-desk/pricing.js';
+import PricerPopup from '../components/pricer/PricerPopup.jsx';
+import { TagIcon } from '../components/pricer/icons.jsx';
+import { allowScanPreview, previewScanDesk, SCAN_PREVIEW_BANNER, SCAN_PREVIEW_ERROR } from './scan-desk/preview-fixture.js';
 import {
   FIELD_LABEL,
   loadStoppedPositions,
@@ -73,22 +99,37 @@ import { usePageTitle } from './tools/board.jsx';
  * batch to inventory or the collection. Behaviour follows the React desk
  * line by line; `watch` stands in for useEffect with explicit deps.
  */
-function ScanDeskDesk() {
+/**
+ * The desk. `preview` (`?scanPreview`, dev / localhost only): fixture state
+ * from `previewScanDesk`, every server call refused before it is sent, batch
+ * defaults (the Pricing select included) changed locally.
+ */
+function ScanDeskDesk(props) {
   const location = useLocation();
+  const fixture = props.preview ? previewScanDesk() : null;
+  if (fixture) {
+    // Each row's version set is its own western printing: no catalog request,
+    // and nothing to remap to.
+    for (const item of fixture.items) versionSetCache.set(item.cardId, fixture.versionSets[item.cardId]);
+  }
   const uid = () => authUser()?.uid || accountProfile()?.uid || '';
-  // Sellers who opted out of PKN payments price the queue in local currency.
+  // Sellers price the queue in their local currency.
   const priceCurrency = () => sellerCurrency();
-  const [session, setSession] = createSignal(null);
-  const [batch, setBatch] = createSignal(null);
+  const [session, setSession] = createSignal(fixture?.session ?? null);
+  const [batch, setBatch] = createSignal(fixture?.batch ?? null);
   const [pairing, setPairing] = createSignal(null);
   const [idleDisconnectNote, setIdleDisconnectNote] = createSignal(false);
   const [serverOffset, setServerOffset] = createSignal(0);
-  const [rows, setRows] = createSignal({});
+  const [rows, setRows] = createSignal(fixture ? applyItems({}, fixture.items) : {});
   const [pending, setPending] = createSignal({});
   const [streamStatus, setStreamStatus] = createSignal('connecting');
   const [error, setError] = createSignal('');
   const [focusId, setFocusId] = createSignal('');
   const [selection, setSelection] = createSignal(new Set());
+  /** Rows ticked to price together ("Price selected"); separate from the shift-range selection. */
+  const [picked, setPicked] = createSignal(new Set());
+  /** Row ids the pricer pop-up sets a pricing choice for (null: closed). */
+  const [pricingFor, setPricingFor] = createSignal(null);
   const [toasts, setToasts] = createSignal([]);
   const [stackFull, setStackFull] = createSignal(false);
   let stackFullTimer = null;
@@ -99,6 +140,12 @@ function ScanDeskDesk() {
   const [problems, setProblems] = createSignal({});
   /** Finalize intent: list → listings+ownership; collection → ownership only. */
   const [submitIntent, setSubmitIntent] = createSignal('list');
+  /** `fetchPricingStrategies` answer for the Pricing select (null until loaded). */
+  const [pricingData, setPricingData] = createSignal(fixture?.pricing ?? null);
+  /** The seller's currency, as the strategies answer states it: for every pricing label. */
+  const pricingCtx = () => currencyContext(pricingData()?.pricerSettings, pricingData()?.currencyRate);
+  /** One line after submit: what batch pricing did, or that it failed. */
+  const [pricingNote, setPricingNote] = createSignal({ text: '', failed: false });
   const [now, setNow] = createSignal(Date.now());
   const [images, setImages] = createSignal({});
   // Bumped to re-run the price suggestion effect for a row whose price field was emptied.
@@ -111,12 +158,34 @@ function ScanDeskDesk() {
   const undoStack = [];
   let redoStack = [];
   let pricesAsked = new Set();
+  // Sold comps per printing, and the cheapest listed price per printing, both
+  // held for the whole mount: an in-flight read answers for its printing, so a
+  // new scan never re-queries what a slow request already covers.
   const slicesCache = new Map();
-  let priceTouched = new Set();
+  const cheapestCache = new Map();
+  const cheapestInFlight = new Map();
+  // rowId → the shape whose price field the seller typed in (see rowNeedsPrice).
+  let priceTouched = new Map();
   let suggestedFor = new Map();
+  // `${rowId}:${signature}` → failed lookups or saves so far (see retryPrices).
+  let priceFailures = new Map();
+  // `${rowId}:${signature}` → ms until which a row that used its retry budget
+  // is left alone, so giving up does not turn into a request storm.
+  let priceRetryAt = new Map();
+  let priceRetryTimer = null;
+  let priceRetryIn = 0;
   // rowId → { signature, pkn }: the last default price, restored when the
   // price field is left empty.
   let lastSuggested = new Map();
+  /** Everything the claim helpers in `scan-desk/price-requests.js` read. */
+  const priceBooks = () => ({
+    pricesAsked,
+    suggestedFor,
+    priceFailures,
+    retryAt: priceRetryAt,
+    signatureOf: facetSignature,
+    now: () => Date.now(),
+  });
   const patchChain = createPatchChain();
   const remapTried = new Set();
   let queueEl = null;
@@ -136,7 +205,7 @@ function ScanDeskDesk() {
 
   // ---------------------------------------------------------------- session
 
-  const token = (force = false) => getBearer(force);
+  const token = (force = false) => (props.preview ? Promise.reject(new Error(SCAN_PREVIEW_ERROR)) : getBearer(force));
 
   async function startSession(batchId) {
     setError('');
@@ -172,24 +241,41 @@ function ScanDeskDesk() {
   }
 
   watch(() => [signedIn(), uid()], ([on, id]) => {
-    if (!on || !id) return;
+    if (props.preview || !on || !id) return;
     // A different account in this tab never sees the previous seller's batch.
     setSession(null);
     setBatch(null);
     setPairing(null);
     dispatch({ type: 'reset', items: [] });
     startSession();
+    loadPricing();
   });
+
+  async function loadPricing() {
+    if (fixture) {
+      setPricingData(fixture.pricing);
+      return;
+    }
+    try {
+      setPricingData(await fetchPricingStrategies(await token()));
+    } catch (_) {
+      /* the select still offers "No pricing"; a saved choice shows as not found */
+      setPricingData(null);
+    }
+  }
 
   onSettled(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(priceRetryTimer);
+    };
   });
 
   // ---------------------------------------------------------------- stream
 
   watch(() => [batch()?.id], ([batchId]) => {
-    if (!batchId) return undefined;
+    if (!batchId || props.preview) return undefined;
     const perf = perfSink();
     const handle = connectScanStream({
       batchId,
@@ -287,9 +373,25 @@ function ScanDeskDesk() {
   const list = createMemo(() => queueRows(displayRows()));
   const occupiedAbs = createMemo(() => occupiedAbsForScanBoxes(list(), boxStockRows()));
   const slots = createMemo(() => boxSlots(list(), { occupiedAbs: occupiedAbs() }));
-  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent() }));
-  const phaseInfo = createMemo(() => phaseText(sessionPhase(session(), now(), serverOffset()), session()));
+  const occupancy = createMemo(() => occupancyForScanBoxes(list(), boxStockRows()));
+  /** stack → highest position this batch takes, per box the batch rows name. */
+  const batchOccupancy = createMemo(() => {
+    const slotsPerBox = new Map();
+    const slotMap = slots();
+    for (const row of list()) {
+      const key = listingBox(String(row.location || '').trim()).toLowerCase();
+      const slot = slotMap.get(row.id);
+      if (!key || !slot) continue;
+      if (!slotsPerBox.has(key)) slotsPerBox.set(key, []);
+      slotsPerBox.get(key).push(slot);
+    }
+    return new Map([...slotsPerBox].map(([key, inBox]) => [key, stackOccupancyFromSlots(inBox)]));
+  });
   const defaults = () => batch()?.defaults || DEFAULTS;
+  /** Listing, and the row's own pricing choice or the batch's names a group or strategy: an unpriced row is priced on load. */
+  const rowPriced = (row) => submitIntent() === 'list' && rowIsPriced(row, defaults());
+  const counts = createMemo(() => batchCounts(displayRows(), { intent: submitIntent(), priced: rowPriced }));
+  const phaseInfo = createMemo(() => phaseText(sessionPhase(session(), now(), serverOffset()), session()));
   const closed = () => Boolean(batch() && batch().status !== 'open');
   const stockUid = uid;
 
@@ -331,11 +433,11 @@ function ScanDeskDesk() {
   // effect below could read it. Explicit Stack/Position edits are remembered
   // in setDefaults.
   watch(
-    () => [list(), occupiedAbs(), defaults().location, defaults().startPosition, defaults().stack, defaults().stackSize],
-    ([rowsNow, occupied, , , , stackSize]) => {
+    () => [list(), occupiedAbs(), occupancy(), defaults().location, defaults().startPosition, defaults().stack, defaults().stackSize],
+    ([rowsNow, occupied, boxesOccupancy, , , , stackSize]) => {
       const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
       if (!rowsNow.length) return;
-      const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied });
+      const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied, occupancy: boxesOccupancy });
       const store = loadStoppedPositions();
       let dirty = false;
       for (const [box, cursor] of next) {
@@ -355,7 +457,7 @@ function ScanDeskDesk() {
 
   // Advance Stack / Position as cards land, and flash when a divider fills.
   let prevListLen = 0;
-  watch(() => [list(), occupiedAbs()], ([rowsNow, occupied]) => {
+  watch(() => [list(), occupiedAbs(), occupancy()], ([rowsNow, occupied, boxesOccupancy]) => {
     const d = defaults();
     const loc = String(d.location || '').trim();
     const len = rowsNow.length;
@@ -363,7 +465,7 @@ function ScanDeskDesk() {
     prevListLen = len;
     if (!loc || !grew || !len) return;
     const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-    const slotMap = boxSlots(rowsNow);
+    const slotMap = slots();
     const last = rowsNow[rowsNow.length - 1];
     const slot = last && slotMap.get(last.id);
     // Size 1 = one card per divider: nothing "fills", so never flash/toast.
@@ -371,11 +473,11 @@ function ScanDeskDesk() {
       setStackFull(true);
       if (stackFullTimer) clearTimeout(stackFullTimer);
       stackFullTimer = setTimeout(() => setStackFull(false), 2800);
-      pushToast({ text: `Stack ${slot.stack} full — next divider`, ms: 3200 });
+      pushToast({ text: `Stack ${slotFilledStackNumber(slot)} full — next divider`, ms: 3200 });
     } else if (size === 1 && stackFull()) {
       setStackFull(false);
     }
-    const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied }).get(loc);
+    const next = nextBoxPositions(rowsNow, { occupiedAbs: occupied, occupancy: boxesOccupancy }).get(loc);
     if (!next) return;
     const patch = {};
     if (next.stack !== (d.stack ?? 1)) patch.stack = next.stack;
@@ -390,7 +492,7 @@ function ScanDeskDesk() {
     () => [batch()?.id, defaults().location, closed(), stockUid()],
     ([batchId, location, isClosed, sellerUid]) => {
       const loc = String(location || '').trim();
-      if (isClosed || !batchId || !loc || !sellerUid) return undefined;
+      if (props.preview || isClosed || !batchId || !loc || !sellerUid) return undefined;
       const box = listingBox(loc);
       const key = `${batchId}|${box}`;
       if (boxStock.key === key) return undefined;
@@ -412,15 +514,19 @@ function ScanDeskDesk() {
           const next = data?.next;
           if (!next) return;
           // Inventory is the cursor, including when a saved stop ran ahead of
-          // the last card actually added (that stop opened an empty stack).
+          // the last card actually added (that stop opened an empty stack). The
+          // server names the stack to continue; what that stack holds decides
+          // the position, so a partially filled stack is not restarted.
+          const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
+          const cursor = cursorForBox(box, wantedSize, next.stack, stock);
           if (
-            next.stack !== (d.stack ?? 1)
-            || (next.stackSize === 1 ? 1 : next.startPosition) !== (d.startPosition ?? 1)
+            cursor.stack !== (d.stack ?? 1)
+            || (wantedSize === 1 ? 1 : cursor.startPosition) !== (d.startPosition ?? 1)
             || next.stackSize !== size
           ) {
             setDefaults({
-              stack: Math.min(9999, next.stack),
-              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              stack: Math.min(9999, cursor.stack),
+              startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
               ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             });
           }
@@ -439,7 +545,7 @@ function ScanDeskDesk() {
   watch(
     () => [batch()?.id, defaults().location, closed(), stockUid()],
     ([batchId, location, isClosed, sellerUid]) => {
-      if (isClosed || !batchId || !sellerUid) return undefined;
+      if (props.preview || isClosed || !batchId || !sellerUid) return undefined;
       if (String(location || '').trim()) {
         locationSeeded = batchId;
         return undefined;
@@ -462,24 +568,31 @@ function ScanDeskDesk() {
     },
   );
 
-  /** Next free position when the seller types a stack: stock in the box plus this batch. */
-  function positionForStack(stack) {
+  /**
+   * Where the next card of `box` goes when the cursor is thought to sit at
+   * `fromStack`: the stock in the box plus this batch decide whether that
+   * stack still has room, so a card never lands on position 1 of a stack that
+   * already holds cards. `rows` overrides the fetched stock (the location
+   * effect has the answer in hand).
+   */
+  function cursorForBox(box, stackSize, fromStack, rows = null) {
+    const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+    const stock = rows ?? (boxStock.box === box ? boxStock.rows : []);
+    return nextFreeStackPosition(
+      [stackOccupancy(stock, box, size), batchOccupancy().get(String(box || '').toLowerCase())],
+      size,
+      fromStack,
+    );
+  }
+
+  /** Next stack and position when the seller types a stack: stock plus this batch. */
+  function cursorForStack(stack) {
     const d = defaults();
     const loc = String(d.location || '').trim();
     const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-    if (!loc || size === 1) return null;
-    const box = listingBox(loc);
-    const stock = boxStock.box === box ? boxStock.rows : [];
-    let next = nextPositionInStack(stock, box, stack, size) || 1;
-    const slotMap = slots();
-    for (const row of list()) {
-      if (listingBox(String(row.location || '').trim()) !== box) continue;
-      const slot = slotMap.get(row.id);
-      if (!slot || stack < slot.stack || stack > (slot.endStack || slot.stack)) continue;
-      const end = (slot.endStack || slot.stack) > stack ? size : slot.end;
-      next = Math.max(next, end + 1);
-    }
-    return next;
+    const wanted = Math.max(1, Math.min(9999, Math.trunc(Number(stack)) || 1));
+    if (!loc || size === 1) return { stack: wanted, startPosition: 1 };
+    return cursorForBox(listingBox(loc), size, wanted);
   }
 
   // ---------------------------------------------------------------- toasts / undo
@@ -505,7 +618,32 @@ function ScanDeskDesk() {
   // batch-language sibling on the first click.
   function markPick(row, nextId) {
     const lang = remapListingLanguage(row.language, defaults().language);
-    remapTried.add(`${row.id}\0${lang}\0${String(nextId)}`);
+    const key = `${row.id}\0${lang}\0${String(nextId)}`;
+    remapTried.add(key);
+    remapTried.add(`${key}\0picked`);
+  }
+
+  /**
+   * A failed price lookup or save is not "no data": release the rows so the
+   * prices effect asks again after a backoff. Never prices them from the
+   * "nothing found" fallbacks, and a row that used its budget is asked again
+   * later in this same mount rather than left claimed forever.
+   */
+  function retryPrices(rows, { terminal = false } = {}) {
+    const books = priceBooks();
+    const { retry, delay } = nextPriceRetry(books, rows, { terminal });
+    // A given-up or terminal row is already released by `nextPriceRetry`;
+    // `delay` 0 means there is nothing left to ask again for.
+    releaseUnsettled(retry, new Set(), books);
+    if (!delay) return;
+    if (priceRetryTimer && priceRetryIn <= delay) return;
+    clearTimeout(priceRetryTimer);
+    priceRetryIn = delay;
+    priceRetryTimer = setTimeout(() => {
+      priceRetryTimer = null;
+      priceRetryIn = 0;
+      setPriceRetry((n) => n + 1);
+    }, delay);
   }
 
   /** An emptied price field falls back to the default price, never "Needs a price". */
@@ -518,9 +656,13 @@ function ScanDeskDesk() {
       patchRows([row.id], { pricePkn: last.pkn, priceSuggested: true }, { label: 'Price' });
       return;
     }
-    // No default known for this printing yet: clear it so the price effect asks again.
-    pricesAsked.delete(`${row.id}:${signature}`);
+    // No default known for this printing yet: clear the claim *and* the failed
+    // attempts and cool-down, or the next ask lands back on a spent budget.
+    const key = priceKey(row.id, signature);
+    pricesAsked.delete(key);
     suggestedFor.delete(row.id);
+    priceFailures.delete(key);
+    priceRetryAt.delete(key);
     if (row.pricePkn != null) {
       patchRows([row.id], { pricePkn: null, priceSuggested: false }, { label: 'Price' });
     } else {
@@ -528,13 +670,14 @@ function ScanDeskDesk() {
     }
   }
 
+  /** True only once the server took every patch: a row is settled on that answer. */
   async function patchRows(ids, changes, { record = true, label = '' } = {}) {
     // Prefer displayRows (includes in-flight pending) so a version remap right
     // after Batch Defaults → IT does not stomp language back to stale EN.
     const source = untrack(displayRows);
     const committed = untrack(rows);
     const targets = ids.map((id) => source[id] || committed[id]).filter((row) => row && row.status === 'active');
-    if (!targets.length) return;
+    if (!targets.length) return false;
     const tokenId = `${Date.now()}-${Math.random()}`;
     const optimistic = { ...changes };
     delete optimistic.confirm;
@@ -585,6 +728,19 @@ function ScanDeskDesk() {
       redoStack = [];
     }
     try {
+      if (props.preview) {
+        // The preview edits its fixture rows on the page.
+        const live = untrack(rows);
+        const { confirm: _confirm, ...fields } = changes;
+        dispatch({
+          type: 'items',
+          items: targets.map((row) => {
+            const base = live[row.id] || row;
+            return { ...base, ...optimistic, ...fields, seq: Number(base.seq || 0) + 1 };
+          }),
+        });
+        return;
+      }
       // Serialize per row: the version-switch patch (which clears the stale
       // price) must land before the follow-up price suggestion is sent, or the
       // server applies them out of order and wipes the fresh suggestion.
@@ -592,8 +748,10 @@ function ScanDeskDesk() {
         row.id,
         () => runApi((t) => scanApi.patch(t, row.id, changes, batch()?.id)),
       )));
+      return true;
     } catch (err) {
       setError(err.message || 'Change not saved.');
+      return false;
     } finally {
       setPending((current) => {
         const next = { ...current };
@@ -637,10 +795,12 @@ function ScanDeskDesk() {
           setRecentBoxNames((Array.isArray(data?.boxes) ? data.boxes : []).map((entry) => String(entry?.box || '')).filter(Boolean));
           const next = data?.next;
           if (next && patch.stack == null && patch.startPosition == null) {
+            const wantedSize = Math.max(1, Math.trunc(Number(next.stackSize)) || size);
+            const cursor = cursorForBox(box, wantedSize, next.stack, stock);
             nextPatch = {
               ...nextPatch,
-              stack: Math.min(9999, next.stack),
-              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              stack: Math.min(9999, cursor.stack),
+              startPosition: wantedSize === 1 ? 1 : cursor.startPosition,
               ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             };
           }
@@ -679,6 +839,8 @@ function ScanDeskDesk() {
       });
     }
     try {
+      // The preview keeps its defaults on the page only.
+      if (props.preview) return;
       const t = await token();
       const data = await scanApi.defaults(t, current.id, nextPatch);
       setBatch((prev) => ({ ...prev, ...data.batch }));
@@ -725,6 +887,57 @@ function ScanDeskDesk() {
     const row = focused();
     return row ? [row.id] : [];
   };
+
+  function togglePicked(id) {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** The pricer pop-up's marked tile: the rows' shared own choice, else none marked. */
+  const pricingCurrent = createMemo(() => {
+    const ids = pricingFor();
+    if (!ids?.length) return null;
+    // With in-flight edits: a choice just made marks its tile at once.
+    const live = displayRows();
+    const keys = new Set(ids.map((id) => JSON.stringify(rowOwnPricing(live[id]))));
+    if (keys.size !== 1) return null;
+    const own = rowOwnPricing(live[ids[0]]);
+    if (!own) return { kind: 'batch' };
+    if (own.none) return { kind: 'none' };
+    return own.groupId ? { kind: 'group', id: own.groupId } : { kind: 'strategy', id: own.strategyId };
+  });
+
+  /** "Batch default" tile: the batch's choice by name. */
+  const batchPricingLabel = () => {
+    if (!pricingChoiceValue(defaults())) return 'No pricing';
+    return rowPricingChip({}, defaults(), pricingData(), pricingCtx()).label;
+  };
+
+  function choosePricing(choice) {
+    const ids = pricingFor() || [];
+    setPricingFor(null);
+    setPicked(new Set());
+    if (ids.length) patchRows(ids, { pricing: rowPricingPatch(choice) }, { label: 'Pricing' });
+  }
+
+  /** "New group…" in the pop-up: the group exists, the Pricing choices list it. */
+  async function createPricingGroup(input) {
+    if (fixture) {
+      const id = `preview-group-${Date.now().toString(36)}`;
+      setPricingData((current) => ({
+        ...current,
+        groups: [...(current?.groups || []), { id, ...input, listingCount: 0, lastAppliedAt: null, lastApplied: null }],
+      }));
+      return id;
+    }
+    const data = await savePricingGroup({ group: input }, await token());
+    await loadPricing();
+    return data.groupId;
+  }
 
   function move(delta) {
     const rowsNow = list();
@@ -782,7 +995,8 @@ function ScanDeskDesk() {
   function startDraft(card) {
     if (!card?.id || closed()) return;
     const d = defaults();
-    const language = d.language;
+    // The printing the user picked is never swapped; the language follows it.
+    const language = draftLanguageForPick(card, d.language);
     setDraft({
       cardId: card.id,
       name: card.name || '',
@@ -798,7 +1012,6 @@ function ScanDeskDesk() {
       location: d.location,
       quantity: 1,
     });
-    void remapDraftArtwork(card.id, language, card.name || '');
   }
 
   /** JP/KO/ID/TH/VI → japanese|korean; ZH/ZHT → chinese; western langs → western. */
@@ -849,7 +1062,8 @@ function ScanDeskDesk() {
     if (!current || !b?.id || closed()) return;
     const qty = Math.max(1, Math.min(99, Number(current.quantity) || 1));
     try {
-      const data = await runApi((t) => scanApi.add(t, b.id, {
+      const t = await token();
+      const data = await scanApi.add(t, b.id, {
         cardId: current.cardId,
         language: current.language,
         condition: current.condition,
@@ -859,8 +1073,10 @@ function ScanDeskDesk() {
         altered: current.altered,
         location: current.location,
         quantity: qty,
-      }));
+      });
       const item = data?.items?.[0];
+      if (item) markPick({ ...item, language: current.language }, current.cardId);
+      if (data?.items) dispatch({ type: 'items', items: data.items });
       if (item) {
         followTail = true;
         setFocusId(item.id);
@@ -933,7 +1149,7 @@ function ScanDeskDesk() {
     const row = focused();
     if (!row) return;
     const intent = submitIntent();
-    const problem = rowProblem(row, { intent });
+    const problem = rowProblem(row, { intent, priced: rowPriced });
     if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed && row.cardId) {
       patchRows([row.id], { confirm: true }, { label: 'Confirm' });
     } else if (problem === 'no_printing') {
@@ -988,7 +1204,7 @@ function ScanDeskDesk() {
         move(cmd.delta);
         return;
       case 'nextAttention': {
-        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent() });
+        const i = nextAttentionIndex(list(), focusIndex(), { intent: submitIntent(), priced: rowPriced });
         if (i >= 0) setFocusId(list()[i].id);
         return;
       }
@@ -1082,7 +1298,7 @@ function ScanDeskDesk() {
       // The confirm dialog's button has focus, so Enter there is a native click.
       const cmd = shortcutFor(event, {
         helpOpen: helpOpen(),
-        modalOpen: confirmOpen() || Boolean(replaceFor()),
+        modalOpen: confirmOpen() || Boolean(replaceFor()) || Boolean(pricingFor()),
         draftActive: Boolean(draft()),
       });
       if (!cmd) return;
@@ -1095,70 +1311,97 @@ function ScanDeskDesk() {
 
   // ---------------------------------------------------------------- prices + images
 
-  watch(() => [list(), closed(), submitIntent(), priceRetry()], ([rowsNow, isClosed, intent]) => {
-    if (isClosed || intent === 'collection') return undefined;
-    const want = rowsNow
-      .filter((row) => {
-        if (!row.cardId || priceTouched.has(row.id)) return false;
-        const signature = facetSignature(row);
-        if (row.pricePkn == null) return !pricesAsked.has(`${row.id}:${signature}`);
-        return row.priceSuggested === true && suggestedFor.get(row.id) !== signature;
-      })
-      .slice(0, 12);
-    if (!want.length) return undefined;
-    for (const row of want) {
-      const signature = facetSignature(row);
-      pricesAsked.add(`${row.id}:${signature}`);
-      suggestedFor.set(row.id, signature);
-    }
-    let cancelled = false;
-    (async () => {
-      // Sold-comps slices once per printing (4 in flight, docs "once per printing").
-      const queue = [...new Set(want.map((row) => String(row.cardId)))]
-        .filter((id) => !slicesCache.has(id))
-        .map((id) => () => {
-          const pendingSlices = fetchCardSales(id, { slices: true })
-            .then((data) => (Array.isArray(data?.slices) ? data.slices : []))
-            .catch(() => []);
-          slicesCache.set(id, pendingSlices);
-          return pendingSlices;
+  /**
+   * Sold comps for one printing, once for the mount: the promise itself is
+   * cached so every row of that printing shares the request, and a read that
+   * failed is dropped instead of being kept as "no comps".
+   */
+  function loadPriceSlices(cardId) {
+    const id = String(cardId);
+    const cached = slicesCache.get(id);
+    if (cached) return cached;
+    const pendingSlices = fetchCardSales(id, { slices: true })
+      .then((data) => ({ ok: true, slices: Array.isArray(data?.slices) ? data.slices : [] }))
+      .catch(() => {
+        if (slicesCache.get(id) === pendingSlices) slicesCache.delete(id);
+        return { ok: false, slices: [] };
+      });
+    slicesCache.set(id, pendingSlices);
+    return pendingSlices;
+  }
+
+  /**
+   * The cheapest listed price of each printing that has no sold comps, asked
+   * once per printing for the mount: a printing another request is still working
+   * on is waited for, not queried again. A failed query leaves its printings out
+   * of the answer uncached — the run then prices those rows from the documented
+   * fallback, so one dead printing neither strands the others nor is remembered
+   * as "nobody lists it".
+   */
+  async function loadCheapestPrices(cardIds) {
+    const want = [...new Set(cardIds.map(String))];
+    const missing = want.filter((id) => !cheapestCache.has(id));
+    const fresh = missing.filter((id) => !cheapestInFlight.has(id));
+    if (fresh.length) {
+      const request = fetchCheapestPricePknMap(fresh, { strict: true })
+        .then((prices) => {
+          for (const id of fresh) {
+            const value = Number(prices?.[id]);
+            cheapestCache.set(id, value > 0 ? value : null);
+            cheapestInFlight.delete(id);
+          }
+        })
+        .catch(() => {
+          for (const id of fresh) if (cheapestInFlight.get(id) === request) cheapestInFlight.delete(id);
         });
-      while (queue.length) {
-        await Promise.all(queue.splice(0, 4).map((run) => run()));
-      }
-      const cheapestIds = new Set();
-      for (const row of want) {
-        if (cancelled) return;
-        const slices = await slicesCache.get(String(row.cardId));
-        const pkn = suggestPriceFromSlices(slices, scanFacets(row));
-        if (pkn > 0) {
-          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
-          lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
-          // Fresh rows race only with an empty price; stale suggested rows overwrite.
-          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-          patchRows([row.id], patch, { record: false });
-        } else {
-          cheapestIds.add(String(row.cardId));
-        }
-      }
-      // No sold comps at all → the cheapest listed price is the floor.
-      if (!cheapestIds.size) return;
-      const byId = await fetchCheapestPricePknMap([...cheapestIds]);
-      for (const row of want) {
-        if (cancelled) return;
-        const pkn = byId[String(row.cardId)];
-        if (pkn > 0) {
-          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
-          lastSuggested.set(row.id, { signature: facetSignature(row), pkn: patch.pricePkn });
-          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
-          patchRows([row.id], patch, { record: false });
-        }
-      }
-    })().catch(() => {});
-    return () => { cancelled = true; };
+      for (const id of fresh) cheapestInFlight.set(id, request);
+    }
+    await Promise.all(missing.map((id) => cheapestInFlight.get(id)).filter(Boolean));
+    const byId = {};
+    for (const id of want) {
+      const value = cheapestCache.get(id);
+      if (value != null) byId[id] = value;
+    }
+    return byId;
+  }
+
+  /**
+   * The queue as the price pipeline sees it: which rows exist, what shape each
+   * has, whether it holds a price and which shapes the seller took over, plus
+   * what the batch wants priced. Location, stack, qty and a price that merely
+   * landed are not in here, so they cannot restart the run.
+   */
+  const priceIntent = createMemo(() => [
+    list().map((row) => `${row.id} ${facetSignature(row)} ${row.pricePkn == null ? 'none' : row.priceSuggested ? 'suggested' : 'manual'}`).join(';'),
+    [...priceTouched].map(([id, signature]) => `${id} ${signature}`).join(';'),
+    pricingChoiceValue(defaults()),
+  ].join('|'));
+
+  watch(() => [priceIntent(), closed(), submitIntent(), priceRetry(), batch()?.id], ([, isClosed, intent]) => {
+    // The preview's unpriced rows stay unpriced: they show "on load".
+    if (props.preview || isClosed || intent === 'collection') return undefined;
+    // A batch that names a pricing group or strategy prices its unpriced rows
+    // itself when it loads; the desk must not race that with a suggestion.
+    if (batchHasPricing(defaults())) return undefined;
+    const books = priceBooks();
+    const want = selectPriceRows(untrack(list), { books, touched: priceTouched });
+    if (!want.length) return undefined;
+    // One row at a time, and nothing here cancels a run that is under way: each
+    // run re-reads its own rows before it writes (scan-desk/price-run.js).
+    void startPriceRun(want, {
+      books,
+      liveRow: (id) => untrack(displayRows)[id],
+      loadSlices: loadPriceSlices,
+      loadCheapest: loadCheapestPrices,
+      save: (row, patch) => patchRows([row.id], patch, { record: false }),
+      retry: retryPrices,
+      rememberDefault: (rowId, signature, pkn) => lastSuggested.set(rowId, { signature, pkn }),
+    });
+    return undefined;
   });
 
   watch(() => [list(), images()], ([rowsNow, shots]) => {
+    if (props.preview) return undefined;
     const wanted = rowsNow.filter((row) => row.hasImage && (row.recognitionState !== 'matched' || !row.cardId) && !shots[row.id]);
     if (!wanted.length) return undefined;
     let cancelled = false;
@@ -1219,6 +1462,11 @@ function ScanDeskDesk() {
   }
 
   async function submit(targets = pendingTargets) {
+    if (props.preview) {
+      setConfirmOpen(false);
+      setError(SCAN_PREVIEW_ERROR);
+      return;
+    }
     const b = batch();
     if (submitting() || !b?.id) return;
     const intent = submitIntent();
@@ -1231,6 +1479,7 @@ function ScanDeskDesk() {
     pendingTargets = nextTargets;
     setSubmitting(true);
     setError('');
+    setPricingNote({ text: '', failed: false });
     try {
       const t = await token();
       const data = await scanApi.submit(t, b.id, submitKey, intent, nextTargets);
@@ -1239,6 +1488,25 @@ function ScanDeskDesk() {
       setProblems({});
       if (data.cardtrader && data.cardtrader.ok === false) {
         setError(data.cardtrader.error || 'Listed on Pokoin; CardTrader push had errors.');
+      }
+      // Pricing runs once per group and once per strategy the rows named
+      // (`rowPricing`); the submit stands whatever happens here.
+      const pricingBodies = pricingApplyBodies(data.result);
+      if (pricingBodies.length) {
+        setPricingNote({ text: 'Pricing the new listings…', failed: false });
+        const answers = [];
+        const failed = [];
+        for (const body of pricingBodies) {
+          try {
+            answers.push(await applyPricing(body, await token()));
+          } catch (_) {
+            failed.push(body);
+          }
+        }
+        const lines = [];
+        if (answers.length) lines.push(pricingResultLine(sumPricingAnswers(answers)));
+        if (failed.length) lines.push(pricingFailedLine(failed));
+        setPricingNote({ text: lines.join('. '), failed: failed.length > 0 });
       }
       rememberActiveSession('');
       const snapshot = await scanApi.batch(t, b.id);
@@ -1260,9 +1528,13 @@ function ScanDeskDesk() {
 
   async function newBatch() {
     submitKey = newSubmitKey();
+    setPricingNote({ text: '', failed: false });
+    loadPricing();
     pricesAsked = new Set();
-    priceTouched = new Set();
+    priceTouched = new Map();
     suggestedFor = new Map();
+    priceFailures = new Map();
+    priceRetryAt = new Map();
     lastSuggested = new Map();
     dispatch({ type: 'reset', items: [] });
     setBatch(null);
@@ -1287,6 +1559,9 @@ function ScanDeskDesk() {
 
   return (
     <div class="page desk scan-desk">
+      <Show when={props.preview}>
+        <p class="scan-preview-banner" role="status">{SCAN_PREVIEW_BANNER}</p>
+      </Show>
       <header class="scan-head">
         <div class="scan-head-title">
           <p class="page-kicker">Seller · Scan</p>
@@ -1383,10 +1658,14 @@ function ScanDeskDesk() {
             </section>
             <DefaultsBar
               defaults={defaults()}
+              showPricing={submitIntent() === 'list'}
+              pricing={pricingData()}
+              currencyCtx={pricingCtx()}
+              pricingHref={props.preview ? '/mypokoin/pricer?mypokoinPreview' : '/mypokoin/pricer'}
               boxes={recentBoxNames()}
               stackFull={stackFull()}
               onChange={setDefaults}
-              positionForStack={positionForStack}
+              cursorForStack={cursorForStack}
               locationRef={(el) => { locationInput = el; }}
               stackButtonRef={(el) => { stackButton = el; }}
             />
@@ -1404,8 +1683,13 @@ function ScanDeskDesk() {
           <p>
             {batch().submitResult?.intent === 'collection'
               ? `${batch().submitResult?.ownership ?? 0} collection records saved. None listed for sale.`
-              : `${batch().submitResult?.listings ?? 0} listings are live (also added to your collection).`}
+              : batch().submitResult?.paused
+                ? `${batch().submitResult?.listings ?? 0} listings added, ${batch().submitResult.paused} paused until priced (also added to your collection).`
+                : `${batch().submitResult?.listings ?? 0} listings are live (also added to your collection).`}
           </p>
+          <Show when={pricingNote().text}>
+            <p class={['scan-pricing-note', { bad: pricingNote().failed }]} role="status" data-testid="scan-pricing-note">{pricingNote().text}</p>
+          </Show>
           <div class="scan-done-actions">
             <a class="btn ghost" href={marketUrl('/mypokoin/collection')}>View collection</a>
             <Show when={batch().submitResult?.intent !== 'collection'}>
@@ -1474,6 +1758,31 @@ function ScanDeskDesk() {
         </Show>
       </div>
 
+      <Show when={picked().size && !closed() && submitIntent() === 'list'}>
+        <div class="scan-pick-bar" role="region" aria-label="Rows selected for pricing">
+          <strong>{picked().size} selected</strong>
+          <button type="button" class="btn scan-pick-price" onClick={() => setPricingFor([...picked()])}>
+            <TagIcon size={17} /> Price selected
+          </button>
+          <button type="button" class="btn ghost" onClick={() => setPicked(new Set())}>Clear</button>
+        </div>
+      </Show>
+      <Show when={pricingFor()}>
+        {(ids) => (
+          <PricerPopup
+            mode="rows"
+            count={ids().length}
+            strategies={pricingData()?.strategies || []}
+            groups={pricingData()?.groups || []}
+            ctx={pricingCtx()}
+            current={pricingCurrent()}
+            batchLabel={batchPricingLabel()}
+            onChoose={choosePricing}
+            onCreateGroup={createPricingGroup}
+            onClose={() => setPricingFor(null)}
+          />
+        )}
+      </Show>
       <div
         class={['scan-queue', { 'intent-collection': submitIntent() === 'collection' }]}
         role="grid"
@@ -1482,7 +1791,21 @@ function ScanDeskDesk() {
         ref={(el) => { queueEl = el; }}
       >
         <div class="scan-row scan-row-head" role="row">
-          <span role="columnheader">#</span>
+          <span role="columnheader" class="c-num">
+            <Show when={!closed() && submitIntent() === 'list' && list().length} fallback="#">
+              <label class="c-pick">
+                <input
+                  type="checkbox"
+                  tabindex={-1}
+                  aria-label="Select every row for pricing"
+                  checked={list().length > 0 && list().every((row) => picked().has(row.id))}
+                  prop:indeterminate={picked().size > 0 && !list().every((row) => picked().has(row.id))}
+                  onChange={(event) => setPicked(event.currentTarget.checked ? new Set(list().map((row) => row.id)) : new Set())}
+                />
+                <span>#</span>
+              </label>
+            </Show>
+          </span>
           <span role="columnheader" class="c-card-head">Card</span>
           <span role="columnheader">Lang</span>
           <span role="columnheader">Cond</span>
@@ -1491,7 +1814,7 @@ function ScanDeskDesk() {
           <span role="columnheader">Location</span>
           <span role="columnheader">Qty</span>
           <Show when={submitIntent() === 'list'}>
-            <span role="columnheader">Price{priceCurrency() !== 'PKN' ? ` · ${priceCurrency()}` : ''}</span>
+            <span role="columnheader">Price · {priceCurrency()}</span>
           </Show>
           <span role="columnheader">State</span>
           <span role="columnheader" class="c-remove" aria-label="Remove" />
@@ -1510,7 +1833,12 @@ function ScanDeskDesk() {
               index={index()}
               focused={row().id === focusId()}
               selected={selection().has(row().id)}
-              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent() })}
+              problem={problems()[row().id] || rowProblem(row(), { intent: submitIntent(), priced: rowPriced })}
+              priceOnLoad={rowPriced(row())}
+              picked={picked().has(row().id)}
+              onTogglePick={!closed() && submitIntent() === 'list' ? () => togglePicked(row().id) : undefined}
+              pricingChip={submitIntent() === 'list' ? rowPricingChip(row(), defaults(), pricingData(), pricingCtx()) : null}
+              onPricingChip={() => setPricingFor([row().id])}
               image={images()[row().id]}
               closed={closed()}
               hidePrice={submitIntent() === 'collection'}
@@ -1518,7 +1846,11 @@ function ScanDeskDesk() {
               slot={slots().get(row().id)}
               replacing={replaceFor() === row().id}
               preferredLanguage={defaults().language}
-              onPriceFocus={(rowId) => priceTouched.add(rowId)}
+              remapTried={remapTried}
+              onPriceEdited={(rowId) => {
+                const live = untrack(displayRows)[rowId];
+                if (live) priceTouched.set(rowId, facetSignature(live));
+              }}
               onPriceEmptied={restoreDefaultPrice}
               onFocus={(event) => {
                 const rowsNow = list();
@@ -1588,13 +1920,21 @@ function ScanDeskDesk() {
   );
 }
 
-/** /inventory/scan and /dashboard/scan. */
+/** /inventory/scan and /dashboard/scan; `?scanPreview` on dev / localhost is the fixture layout. */
 export default function ScanDesk() {
   const location = useLocation();
+  const [params] = useSearchParams();
   usePageTitle('Scan · Pokoin');
   return (
-    <RequireSignIn to={`/auth?from=${encodeURIComponent(location.pathname || '/inventory/scan')}`}>
-      <ScanDeskDesk />
-    </RequireSignIn>
+    <Show
+      when={untrack(() => allowScanPreview(params))}
+      fallback={(
+        <RequireSignIn to={`/auth?from=${encodeURIComponent(location.pathname || '/inventory/scan')}`}>
+          <ScanDeskDesk />
+        </RequireSignIn>
+      )}
+    >
+      <ScanDeskDesk preview />
+    </Show>
   );
 }

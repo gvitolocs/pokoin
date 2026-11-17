@@ -12,6 +12,7 @@ const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) pokoin-ops/1";
 
 pub fn subject(text: &str) -> String {
     format!("[pokoin {}] {}", env::hostname(), text)
+        .split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
 }
 
 pub fn send(subject: &str, body: &str) -> Result<()> {
@@ -66,4 +67,19 @@ pub fn truncate(text: &str, max: usize) -> String {
         end -= 1;
     }
     format!("{}\n… (truncated)", &text[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subject_collapses_whitespace_and_caps_unicode() {
+        let s = subject("  check\n\r detail\t  with\u{2003}spaces  ");
+        assert!(s.ends_with(" check detail with spaces"), "{s}");
+        assert!(!s.chars().any(|c| c.is_whitespace() && c != ' '));
+        let s = subject(&"é".repeat(300));
+        assert_eq!(s.chars().count(), 200);
+        assert!(s.ends_with('é'));
+    }
 }

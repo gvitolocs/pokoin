@@ -79,7 +79,7 @@ export function createRecallSearch({
 
   async function start(session, options, request) {
     const [lookups, headRows] = await Promise.all([
-      recallLookups(options.query),
+      recallLookups(options.query, request),
       typeof options.head === 'function' ? options.head() : null,
     ]);
     const firsts = await Promise.all(lookups.map((query) => fetchSearchPage({

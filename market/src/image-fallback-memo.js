@@ -10,7 +10,8 @@
  */
 const KEY = 'pokoin.imgFallback.v1';
 /** Every sibling failed: paint the missing-card scan without asking again. */
-export const DEAD_IMAGE = 'about:dead';
+// v2: marks written before CardArt's retry round (one failure, 24 h) are no longer trusted.
+export const DEAD_IMAGE = 'about:dead2';
 const KEEP_MS = 7 * 24 * 60 * 60_000;
 const MAX = 1500;
 
@@ -57,7 +58,10 @@ function flush() {
 export function workingImage(url) {
   const key = String(url || '');
   if (!key) return key;
-  return load().get(key)?.[0] || key;
+  const saved = load().get(key)?.[0] || '';
+  // An older dead mark is not a URL: never hand it out as an <img> src.
+  if (!saved || (saved.startsWith('about:') && saved !== DEAD_IMAGE)) return key;
+  return saved;
 }
 
 /** `failed` did not load; `working` did (or is the next one to try). */

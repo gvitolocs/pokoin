@@ -4,6 +4,7 @@
 pub mod address;
 /// Storage-box slots (`box·stack·position`) across every game.
 pub mod box_slots;
+pub mod buy_orders;
 pub mod cart;
 pub mod country;
 pub mod crypto;

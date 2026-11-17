@@ -55,6 +55,8 @@ pub struct Ask {
 #[derive(Debug, Default)]
 pub struct CtAsks {
     rows: Vec<Ask>,
+    /// The header's `generated_at` (Unix seconds): when the file was built.
+    pub generated_at: u64,
 }
 
 impl CtAsks {
@@ -79,7 +81,13 @@ impl CtAsks {
         // The file is sorted already; sorting again keeps lookups right if not.
         out.sort_by_key(|ask| ask.card_id);
         out.shrink_to_fit();
-        Ok(Self { rows: out })
+        let generated_at = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        Ok(Self { rows: out, generated_at })
+    }
+
+    /// Every source-7 row, sorted by card id (the price store's refill).
+    pub fn rows(&self) -> &[Ask] {
+        &self.rows
     }
 
     /// Every ask of one card.
@@ -152,6 +160,31 @@ pub fn facet_cents(asks: &[Ask], language: &str, condition: &str, finish: bool) 
     (cheapest, matched)
 }
 
+/// The cheapest ask, in EUR cents, sharing the attributes `m` asks for with
+/// the listing (the price file has no first edition, so that toggle is
+/// ignored): its language, its finish, and its condition or a better one.
+/// [`facet_cents`] is the all-on case and is used for it. An attribute the
+/// listing does not state matches nothing when it is asked for.
+pub fn facet_cents_by(asks: &[Ask], language: &str, condition: &str, finish: bool, m: crate::price_check::Match) -> Option<u32> {
+    if m.condition && m.language && m.finish {
+        return facet_cents(asks, language, condition, finish).1;
+    }
+    let lang = lang_code(language);
+    let cond = condition_index(condition);
+    if (m.language && lang.is_none()) || (m.condition && cond.is_none()) {
+        return None;
+    }
+    asks.iter()
+        .filter(|ask| ask.cents > 0)
+        .filter(|ask| {
+            split_variant(ask.variant).is_some_and(|(l, c, f)| {
+                (!m.language || Some(l) == lang) && (!m.condition || cond.is_some_and(|cond| c <= cond)) && (!m.finish || f == finish)
+            })
+        })
+        .map(|ask| ask.cents)
+        .min()
+}
+
 /// EUR cents → PKN (1 PKN = €0.005).
 pub fn pkn_from_cents(cents: u32) -> f64 {
     f64::from(cents) * 2.0
@@ -188,7 +221,9 @@ fn http() -> &'static reqwest::Client {
     })
 }
 
-async fn download(game: &str) -> Result<CtAsks, String> {
+/// Download and parse one game's file, uncached (the price store's refill;
+/// requests go through [`ct_asks`]). A game without a file answers `HTTP 404`.
+pub async fn download(game: &str) -> Result<CtAsks, String> {
     let url = format!("{}/v1/prices/{}", origin(), game);
     let response = http().get(&url).send().await.map_err(|error| format!("{url}: {error}"))?;
     if !response.status().is_success() {

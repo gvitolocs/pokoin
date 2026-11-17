@@ -51,6 +51,7 @@ export default function ScanImage(props) {
         width={props.width}
         height={props.height}
         loading={props.loading ?? 'lazy'}
+        decoding={props.decoding ?? 'async'}
         draggable={props.draggable === true ? 'true' : 'false'}
         onError={() => setFailed(String(props.src || ''))}
       />

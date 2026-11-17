@@ -63,6 +63,7 @@
 import RAW_NAMES from './data/suggest-names.js';
 import { compactQuery } from './compact-query.js';
 import RAW_SETS from './data/suggest-sets.js';
+import SET_BADGE_CODES from './data/set-badge-codes.js';
 import { suggestKind } from './identity.js';
 import { effectivePrintBucket, printLangMatchesBucket } from './print-bucket.js';
 import { TCG_ERA_CATALOG, matchTcgEra } from './tcg-eras.js';
@@ -1196,9 +1197,101 @@ function buildAliasState() {
       map.set(alias, packed);
     }
   }
+  for (const [compact, packed] of setBadgeAliases()) {
+    remember(compact, packed, packed.setNames[0], false);
+  }
   aliasIndexCache = map;
   setAliasPoolCache = pool;
   return { map, pool };
+}
+
+/**
+ * The badge printed on a set chip (`3CPD`, `3CSC`, `s8a`: tools/expansion-symbols
+ * symbols.tsv → data/set-badge-codes.js) is an exact set alias, so typing what
+ * the card page shows finds it (`espeon 3cpd`). Only letter+digit badges of 3+
+ * characters qualify: a bare word (`MEW` → 151) stays a name, and anything that
+ * reads as a collector number (`3c`, `sv4`, `tg01`) stays a number. Era and
+ * shortname aliases win a clash; one badge on several sets (`1MC`) keeps all.
+ */
+export function isSetBadgeAlias(compact) {
+  return compact.length >= 3
+    && /\d/.test(compact)
+    && /[a-z]/.test(compact)
+    && !parseCollectorWord(compact)
+    && !MODIFIER_WORD.has(compact)
+    && !ART_ALIAS_COMPACT.has(compact)
+    && !RARITY_ALIAS_COMPACT.has(compact)
+    && !namePoolHasCompact(compact);
+}
+
+function setBadgeAliases() {
+  const displayBySlug = new Map(RAW_SETS.map((row) => [row.slug, row.display]));
+  const byBadge = new Map();
+  for (const [slug, badge] of Object.entries(SET_BADGE_CODES)) {
+    const display = displayBySlug.get(slug);
+    const compact = compactAlias(badge);
+    if (!display || !isSetBadgeAlias(compact)) {
+      continue;
+    }
+    const names = byBadge.get(compact) || [];
+    if (!names.includes(display)) {
+      names.push(display);
+    }
+    byBadge.set(compact, names);
+  }
+  return [...byBadge].map(([compact, setNames]) => [compact, {
+    eraId: '',
+    setNames,
+    needles: setNames.map(compactAlias),
+    slug: setNames.length === 1 ? RAW_SETS.find((row) => row.display === setNames[0])?.slug || '' : '',
+  }]);
+}
+
+/**
+ * Era words as typed set evidence (docs/TCG_ERAS.md): `pikachu diamond` means
+ * the Diamond & Pearl block, not "pikachu, ignore the rest". Short codes and the
+ * distinctive half of a two-name era stand alone; generic halves (`sun`, `moon`,
+ * `black`, `white`) only count as the full pair (`sun moon`), so `black kyurem`
+ * keeps its name. A word that is a card name never becomes an era.
+ */
+const ERA_WORDS = {
+  dp: 'Diamond & Pearl',
+  diamond: 'Diamond & Pearl',
+  pearl: 'Diamond & Pearl',
+  bw: 'Black & White',
+  xy: 'XY',
+  sm: 'Sun & Moon',
+  swsh: 'Sword & Shield',
+  sword: 'Sword & Shield',
+  shield: 'Sword & Shield',
+  sv: 'Scarlet & Violet',
+  scarlet: 'Scarlet & Violet',
+  violet: 'Scarlet & Violet',
+};
+const ERA_PHRASES = new Set([
+  'diamondpearl', 'blackwhite', 'sunmoon', 'swordshield', 'scarletviolet', 'heartgoldsoulsilver',
+]);
+
+function packedEra(eraId) {
+  const era = TCG_ERA_CATALOG.find((row) => row.id === eraId);
+  return era ? { eraId: era.id, ...eraNeedles(era), slug: '' } : null;
+}
+
+/** Era for one query word (`diamond`, `dp`, `xy`), or null. */
+export function eraWordAlias(word) {
+  const compact = compactQuery(word);
+  const eraId = ERA_WORDS[compact];
+  return eraId && !namePoolHasCompact(compact) ? packedEra(eraId) : null;
+}
+
+/** Era for two adjacent query words (`sun moon`, `diamond pearl`), or null. */
+export function eraPhraseAlias(first, second) {
+  const compact = compactQuery(`${first} ${second}`);
+  if (!ERA_PHRASES.has(compact)) {
+    return null;
+  }
+  const era = TCG_ERA_CATALOG.find((row) => compactAlias(row.id) === compact);
+  return era ? packedEra(era.id) : null;
 }
 
 function expansionAliasIndex() {

@@ -6,8 +6,13 @@
 //! A problem mails once it has been seen `confirm` runs in a row, again every
 //! POKOIN_SENTINEL_REMIND_S while it lasts, on escalation (warn → crit), and once when it
 //! clears. All of one run's changes go out in one mail.
+//!
+//! On nezopt it also watches what OnFailure= cannot see (`nezopt.rs`), posts the full
+//! snapshot to the Secretary app every run, and pushes each change into crit (and the
+//! recovery) there (`health.rs`).
 
-use crate::{env, hc, mail, sys};
+use crate::health::{self, Meta};
+use crate::{digest, env, hc, mail, nezopt, secretary, sys};
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -39,11 +44,22 @@ pub struct Finding {
     pub sev: Sev,
     pub detail: String,
     pub confirm: u32,
+    /// Where it lands in the Secretary snapshot; derived from `key` when unset.
+    pub meta: Option<Meta>,
 }
 
 impl Finding {
-    fn new(key: impl Into<String>, sev: Sev, detail: impl Into<String>, confirm: u32) -> Self {
-        Finding { key: key.into(), sev, detail: detail.into(), confirm: confirm.max(1) }
+    pub fn new(key: impl Into<String>, sev: Sev, detail: impl Into<String>, confirm: u32) -> Self {
+        Finding { key: key.into(), sev, detail: detail.into(), confirm: confirm.max(1), meta: None }
+    }
+
+    pub fn with(mut self, meta: Meta) -> Self {
+        self.meta = Some(meta);
+        self
+    }
+
+    fn meta(&self) -> Meta {
+        self.meta.clone().unwrap_or_else(|| Meta::legacy(&self.key))
     }
 }
 
@@ -55,7 +71,7 @@ pub struct CheckOut {
     pub complete: bool,
 }
 
-fn check(prefix: &'static str, confirm: u32, f: impl FnOnce() -> Result<Vec<Finding>>) -> CheckOut {
+pub fn check(prefix: &'static str, confirm: u32, f: impl FnOnce() -> Result<Vec<Finding>>) -> CheckOut {
     match f() {
         Ok(findings) => CheckOut { prefix, findings, complete: true },
         Err(err) => CheckOut {
@@ -88,6 +104,20 @@ pub struct State {
     pub alerts: BTreeMap<String, AlertState>,
     #[serde(default)]
     pub metrics: Option<MetricsSample>,
+    /// Secretary snapshot: per check id, the current state and when it began.
+    #[serde(default)]
+    pub health: BTreeMap<String, health::Track>,
+    /// NRestarts / RestartCount per `unit:` / `container:` id.
+    #[serde(default)]
+    pub restarts: BTreeMap<String, health::RestartTrack>,
+    #[serde(default)]
+    pub k3s_last_run: i64,
+    /// Failed k3s Jobs first seen after the previous run, with when they were seen.
+    #[serde(default)]
+    pub k3s_new_failed: Vec<(String, i64)>,
+    /// CPU Tctl samples (unix seconds, °C) of the last 20 minutes, for the sustained-heat rule.
+    #[serde(default)]
+    pub temp_samples: Vec<(i64, f64)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -197,6 +227,24 @@ pub fn rollback(
         }
     }
     next
+}
+
+/// Split evaluated events without re-arming any previously alerted state.
+pub fn split_events(events: &[Event], prev: &BTreeMap<String, AlertState>, regex: Option<&Regex>) -> (Vec<Event>, Vec<Event>) {
+    let mut mailed = Vec::new();
+    let mut deferred = Vec::new();
+    for e in events {
+        let selected = regex.is_none_or(|re| re.is_match(&e.key) && match e.kind {
+            EventKind::Resolved => prev.get(&e.key).is_some_and(|s| s.sev == Sev::Crit && s.alerted),
+            _ => e.sev == Sev::Crit,
+        });
+        if selected {
+            mailed.push(e.clone());
+        } else if matches!(e.kind, EventKind::Firing | EventKind::Escalated) {
+            deferred.push(e.clone());
+        }
+    }
+    (mailed, deferred)
 }
 
 pub fn render(events: &[Event], active: &BTreeMap<String, AlertState>, now: i64) -> (String, String) {
@@ -470,6 +518,22 @@ fn newest_dump_age_s(dir: &Path) -> Result<Option<u64>> {
     Ok(best)
 }
 
+/// Every finding as a snapshot row, one per check id.
+fn snapshot_items(outs: &[CheckOut]) -> Vec<health::Item> {
+    let items = outs
+        .iter()
+        .flat_map(|o| {
+            o.findings.iter().map(move |f| health::Item {
+                meta: f.meta(),
+                sev: f.sev,
+                detail: f.detail.clone(),
+                prefix: o.prefix.to_string(),
+            })
+        })
+        .collect();
+    health::merge(items)
+}
+
 pub fn eval_units(units: &[String], ignore: &Regex, scope: &str) -> Vec<Finding> {
     units
         .iter()
@@ -481,7 +545,7 @@ pub fn eval_units(units: &[String], ignore: &Regex, scope: &str) -> Vec<Finding>
         .collect()
 }
 
-fn run_checks(cfg: &Cfg, state: &mut State) -> Vec<CheckOut> {
+fn run_checks(cfg: &Cfg, state: &mut State, now: i64) -> Vec<CheckOut> {
     let mut outs = Vec::new();
     let psql_rows = |container: &str, sql: &str| -> Result<Vec<Vec<String>>> {
         Ok(sys::rows(&sys::psql(container, &cfg.pg_user, &cfg.pg_db, sql)?))
@@ -594,6 +658,9 @@ fn run_checks(cfg: &Cfg, state: &mut State) -> Vec<CheckOut> {
         }
         Ok(out)
     }));
+    if cfg.role == Role::Nezopt {
+        outs.extend(nezopt::checks(cfg, &nezopt::NezCfg::from_env(), state, now));
+    }
     if let Some(peer) = &cfg.peer_tcp {
         outs.push(check("peer", 2, || {
             let addr = peer.to_socket_addrs()?.next().ok_or_else(|| anyhow!("cannot resolve {peer}"))?;
@@ -611,9 +678,20 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
     let path = env::state_dir().join(format!("sentinel-{}.json", if role == Role::Pi { "pi" } else { "nezopt" }));
     let mut state: State = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let prev = state.alerts.clone();
-    let outs = run_checks(&cfg, &mut state);
     let now = chrono::Utc::now().timestamp();
+    let mut outs = run_checks(&cfg, &mut state, now);
+    // The Pi being offline alerts once, from pi-health; its dependants stay quiet meanwhile.
+    if role == Role::Nezopt {
+        if let Some(since) = crate::pi::down_since() {
+            println!("pi-health: Pi offline since {since}; muted {} Pi-dependent finding(s)", crate::pi::mute(&mut outs, since, now));
+        }
+    }
     let (next, events) = plan(&prev, &outs, now, cfg.remind_s);
+    let immediate = env::immediate_regex("POKOIN_SENTINEL_IMMEDIATE");
+    let (mail_events, digest_events) = split_events(&events, &prev, immediate.as_ref());
+    let mail_active = next.iter()
+        .filter(|(key, _)| immediate.as_ref().is_none_or(|re| re.is_match(key)))
+        .map(|(key, state)| (key.clone(), state.clone())).collect();
 
     let active: Vec<String> = next.iter().filter(|(_, s)| s.sev != Sev::Ok).map(|(k, s)| format!("{} {k}: {}", s.sev.label(), s.detail)).collect();
     for o in &outs {
@@ -621,28 +699,86 @@ pub fn run(role: Role, dry_run: bool) -> Result<()> {
             println!("{:4} {} — {}", f.sev.label(), f.key, f.detail);
         }
     }
+    // The Secretary snapshot and its pushes (nezopt only).
+    let host = env::hostname();
+    let snap = (role == Role::Nezopt).then(|| {
+        let items = snapshot_items(&outs);
+        let incomplete: BTreeSet<String> = outs.iter().filter(|o| !o.complete).map(|o| o.prefix.to_string()).collect();
+        let (tracks, pushes) = health::track(&state.health, &items, &incomplete, now);
+        let snap = health::snapshot(&host, now, nezopt::metrics(), &items, &tracks);
+        println!("snapshot: {} checks, {} (overall {})", items.len(), health::summary(&items), snap.overall);
+        for i in items.iter().filter(|i| i.sev != Sev::Ok) {
+            println!("  {:4} {} [{}] {}", health::state_str(i.sev), i.meta.id, i.meta.group, i.detail);
+        }
+        let pushes = if immediate.is_some() {
+            mail_events.iter().map(|e| {
+                let meta = outs.iter().flat_map(|o| &o.findings).find(|f| f.key == e.key)
+                    .map(|f| f.meta()).unwrap_or_else(|| Meta::legacy(&e.key));
+                health::Push {
+                    kind: if e.kind == EventKind::Resolved { health::PushKind::Recovered } else { health::PushKind::Crit },
+                    id: meta.id, name: meta.name, detail: e.detail.clone(),
+                }
+            }).collect()
+        } else {
+            pushes
+        };
+        (snap, tracks, pushes)
+    });
+
     if dry_run {
-        for e in &events {
+        for e in &mail_events {
             println!("event {:?} {}", e.kind, e.key);
+        }
+        for e in &digest_events {
+            println!("digest {:?} {}", e.kind, e.key);
+        }
+        if let Some((snap, _, pushes)) = &snap {
+            for p in pushes {
+                println!("push {:?} {} — {}", p.kind, p.dedup_key(&host), p.title(&host));
+            }
+            if env::get("POKOIN_SENTINEL_PRINT_SNAPSHOT").is_some() {
+                println!("{}", serde_json::to_string_pretty(snap)?);
+            }
         }
         return Ok(());
     }
 
+    if let Some((snap, mut tracks, pushes)) = snap {
+        let client = secretary::Client::from_env();
+        match client.post("/v1/system/health", &serde_json::to_value(&snap)?) {
+            Ok(_) => {}
+            Err(err) => secretary::log_err("POST /v1/system/health", &err),
+        }
+        let mut failed = Vec::new();
+        for p in &pushes {
+            if let Err(err) = client.notify(&p.title(&host), &p.detail, &p.dedup_key(&host)) {
+                secretary::log_err(&format!("notify {}", p.id), &err);
+                failed.push(p.clone());
+            }
+        }
+        health::undelivered(&mut tracks, &state.health, &failed, now);
+        state.health = tracks;
+    }
+
     let mut delivered = true;
-    if !events.is_empty() {
-        let (subject, body) = render(&events, &next, now);
+    if !mail_events.is_empty() {
+        let (subject, body) = render(&mail_events, &mail_active, now);
         if let Err(err) = mail::send(&mail::subject(&subject), &body) {
             eprintln!("{err:#}");
             delivered = false;
         }
     }
-    state.alerts = if delivered { next } else { rollback(&prev, next, &events) };
+    state.alerts = if delivered { next } else { rollback(&prev, next, &mail_events) };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(&state)?)?;
     std::fs::rename(&tmp, &path)?;
+    // Only durable consumed events go into the digest, including when mail failed.
+    for e in &digest_events {
+        digest::record("check", &e.key, e.sev.label(), &e.detail);
+    }
 
     let slug = hc::slug_for_unit(&hc::host_prefix(), "pokoin-sentinel.service");
     let summary = if active.is_empty() { "all clear".to_string() } else { active.join("\n") };
@@ -663,6 +799,65 @@ mod tests {
 
     fn f(key: &str, sev: Sev, confirm: u32) -> Finding {
         Finding::new(key, sev, "d", confirm)
+    }
+
+    #[test]
+    fn immediate_split_and_rollback_only_mailed_events() {
+        let re = Regex::new("^urgent").unwrap();
+        let findings = vec![f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1), f("other.crit", Sev::Crit, 1)];
+        let (next, events) = plan(&BTreeMap::new(), &[out("urgent", findings)], 100, 1000);
+        let (mailed, deferred) = split_events(&events, &BTreeMap::new(), Some(&re));
+        assert_eq!(mailed.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), vec!["urgent.crit"]);
+        assert_eq!(deferred.len(), 2);
+        let rolled = rollback(&BTreeMap::new(), next, &mailed);
+        assert!(!rolled["urgent.crit"].alerted);
+        assert!(rolled["urgent.warn"].alerted);
+        assert!(rolled["other.crit"].alerted);
+        let (_, retry) = plan(&rolled, &[out("urgent", vec![f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1), f("other.crit", Sev::Crit, 1)])], 200, 1000);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0].key, "urgent.crit");
+        let (legacy, deferred) = split_events(&events, &BTreeMap::new(), None);
+        assert_eq!(legacy, events);
+        assert!(deferred.is_empty());
+    }
+
+    #[test]
+    fn split_drops_unmatched_reminders_and_only_resolves_mailed_crit() {
+        let re = Regex::new("^urgent").unwrap();
+        let (mut prev, _) = plan(&BTreeMap::new(), &[out("urgent", vec![
+            f("urgent.crit", Sev::Crit, 1), f("urgent.warn", Sev::Warn, 1),
+            f("urgent.unalerted", Sev::Crit, 1), f("other.crit", Sev::Crit, 1),
+        ])], 100, 1000);
+        prev.get_mut("urgent.unalerted").unwrap().alerted = false;
+        let events: Vec<_> = prev.keys().map(|key| Event {
+            kind: EventKind::Resolved, key: key.clone(), sev: Sev::Ok, detail: "cleared".into(), since: 0,
+        }).collect();
+        let (mailed, deferred) = split_events(&events, &prev, Some(&re));
+        assert_eq!(mailed.len(), 1);
+        assert_eq!(mailed[0].key, "urgent.crit");
+        assert!(deferred.is_empty());
+        let reminder = Event { kind: EventKind::Reminder, key: "other.crit".into(), sev: Sev::Crit, detail: "d".into(), since: 0 };
+        let (mailed, deferred) = split_events(&[reminder], &prev, Some(&re));
+        assert!(mailed.is_empty() && deferred.is_empty());
+        let escalated = Event { kind: EventKind::Escalated, key: "other.crit".into(), sev: Sev::Crit, detail: "d".into(), since: 0 };
+        assert_eq!(split_events(&[escalated], &prev, Some(&re)).1.len(), 1);
+    }
+
+    #[test]
+    fn existing_alerts_are_not_replayed_when_filter_is_enabled() {
+        let findings = || vec![f("urgent.crit", Sev::Crit, 1), f("other.warn", Sev::Warn, 1)];
+        let (prev, _) = plan(&BTreeMap::new(), &[out("urgent", findings())], 100, 1000);
+        let (_, events) = plan(&prev, &[out("urgent", findings())], 200, 1000);
+        let (mailed, deferred) = split_events(&events, &prev, Some(&Regex::new("^urgent").unwrap()));
+        assert!(mailed.is_empty() && deferred.is_empty());
+    }
+
+    #[test]
+    fn old_state_without_temp_samples_loads() {
+        let s: State = serde_json::from_str("{}").unwrap();
+        assert!(s.temp_samples.is_empty());
+        let s: State = serde_json::from_str(r#"{"k3s_last_run": 5, "temp_samples": [[10, 91.5]]}"#).unwrap();
+        assert_eq!((s.k3s_last_run, s.temp_samples), (5, vec![(10, 91.5)]));
     }
 
     #[test]

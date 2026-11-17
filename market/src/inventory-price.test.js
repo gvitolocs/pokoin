@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inventoryMarketLabel, inventoryMarketValue, priceCheckItem, priceCheckKey, priceGame } from './inventory-price.js';
+import {
+  gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups, priceCheckItem, priceCheckKey, priceGame,
+} from './inventory-price.js';
 
 const row = { cardId: '824942' };
 const daily = { days: [
@@ -56,10 +58,75 @@ test('rows price against their own game', () => {
   assert.equal(priceGame({ marketplaceGame: '' }), 'pokemon');
 });
 
+test('price checks group rows by their own game, the desk game for rows without one', () => {
+  const rows = [
+    { cardId: '824942', condition: 'NM', language: 'EN' },
+    { cardId: '801148', condition: 'LP', language: 'EN', marketplaceGame: 'riftbound' },
+    { card_id: '5001', condition: 'NM', language: 'IT', marketplace_game: 'magic', foil: true },
+    { cardId: '801149', condition: 'NM', language: 'EN', marketplaceGame: 'riftbound' },
+    { cardId: 'sealed-box', marketplaceGame: 'riftbound' },
+  ];
+  const groups = priceCheckGroups(rows, 'pokemon');
+  assert.deepEqual(groups.map((group) => [group.game, group.items.map(priceCheckKey)]), [
+    ['pokemon', ['824942:NM:EN:']],
+    ['riftbound', ['801148:SP:EN:', '801149:NM:EN:']],
+    ['magic', ['5001:NM:IT:H']],
+  ]);
+  // On the Riftbound desk, a row without a game is a Riftbound card.
+  assert.deepEqual(priceCheckGroups([{ cardId: '1' }], 'riftbound').map((group) => group.game), ['riftbound']);
+  assert.deepEqual(priceCheckGroups([], 'pokemon'), []);
+  assert.deepEqual(priceCheckGroups([{ cardId: '' }, { cardId: 'abc' }], 'pokemon'), []);
+});
+
+test('price checks hold at most 100 priceable rows across games', () => {
+  const rows = [{ cardId: 'x' }, ...Array.from({ length: 150 }, (_, index) => ({
+    cardId: String(index + 1), marketplaceGame: index % 2 ? 'riftbound' : 'pokemon',
+  }))];
+  const groups = priceCheckGroups(rows, 'pokemon');
+  assert.equal(groups.reduce((sum, group) => sum + group.items.length, 0), 100);
+  assert.equal(groups.at(-1).items.at(-1).cardId, '100');
+  assert.equal(priceCheckGroups(rows, 'pokemon', { limit: 3 }).flatMap((group) => group.items).length, 3);
+});
+
+test('a row reads the comp of its own game, never a colliding card id of another game', () => {
+  const byGame = {
+    pokemon: { '801148:NM:EN:': { ctMatchedPkn: 900 } },
+    riftbound: { '801148:NM:EN:': { ctMatchedPkn: 240, ctBasis: 'zero' } },
+    magic: null,
+  };
+  const rift = { cardId: '801148', condition: 'NM', language: 'EN', marketplaceGame: 'riftbound' };
+  assert.equal(inventoryMarketValue(gamePrices(byGame, rift, 'pokemon'), rift, 'cardtrader').value, 240);
+  const poke = { cardId: '801148', condition: 'NM', language: 'EN' };
+  assert.equal(inventoryMarketValue(gamePrices(byGame, poke, 'pokemon'), poke, 'cardtrader').value, 900);
+  assert.equal(inventoryMarketValue(gamePrices(byGame, poke, 'riftbound'), poke, 'cardtrader').value, 240);
+  // A game whose check failed, or was never asked, has no comp.
+  assert.deepEqual(gamePrices(byGame, { cardId: '1', marketplaceGame: 'magic' }, 'pokemon'), {});
+  assert.deepEqual(gamePrices(byGame, { cardId: '1', marketplaceGame: 'one_piece' }, 'pokemon'), {});
+  assert.deepEqual(gamePrices(undefined, poke, 'pokemon'), {});
+});
+
 test('other games read the CardTrader Zero price file', () => {
   const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'zero' } }, { cardId: '801148' }, 'cardtrader');
   assert.equal(value.value, 240);
   assert.match(value.title, /CardTrader Zero seller with the same language and finish, in this condition or better/);
+  assert.doesNotMatch(value.title, /Prices of/);
+});
+
+test('the CardTrader column is net of the seller fee and names the ask', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 219.5, ctMatchedGrossPkn: 240, ctBasis: 'zero', ctFee: { pct: 7, vatPct: 22, minCents: 1, channel: 'zero' } } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 219.5);
+  assert.match(value.title, /Net of CardTrader's 7% seller fee \+ 22% VAT \(ask 240 PKN\)\./);
+  assert.equal(value.askLabel, '240 PKN', 'the ask shows under the net in the cell');
+  const plain = inventoryMarketValue({ 1: { ctMatchedPkn: 26 } }, { cardId: '1' }, 'cardtrader');
+  assert.equal(plain.askLabel, '');
+});
+
+test('a price from the price store says when the store was refilled', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'zero', ctAsOf: '2026-10-21T04:31:07Z' } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 240);
+  assert.match(value.title, /Prices of 2026-10-21 04:31 UTC\.$/);
+  const junk = inventoryMarketValue({ 801148: { ctMatchedPkn: 240, ctBasis: 'pro', ctAsOf: '<b>' } }, { cardId: '801148' }, 'cardtrader');
+  assert.doesNotMatch(junk.title, /Prices of/);
 });
 
 test('TCGplayer variants retain USD and source timestamps without PKN conversion', () => {
@@ -79,6 +146,67 @@ test('missing, null, zero and invalid TCGplayer quotes stay unavailable', () => 
   ] } }, row, 'tcgplayer'), null);
   assert.equal(inventoryMarketValue({}, row, 'cardtrader'), null);
   assert.equal(inventoryMarketLabel(null), '—');
+});
+
+const scanned = { sources: { cardmarketoffers: {
+  asOf: '2026-11-10',
+  pro: {
+    '': { pkn: 40, eur: 0.2, offers: 9, countsComplete: true, condition: 'SP', language: 'EN', finish: '*', firstEdition: '*' },
+    CLFE: { pkn: 60, eur: 0.3, offers: 3, countsComplete: true, condition: 'NM', language: 'IT', finish: 'N', firstEdition: 'N' },
+  },
+  private: { CLFE: { pkn: 20, eur: 0.1, offers: 1, countsComplete: true, condition: 'NM', language: 'IT', finish: 'N', firstEdition: 'N' } },
+} } };
+const ita = { cardId: '824942', condition: 'NM', language: 'IT' };
+
+test('the two Cardmarket chips read the professional and the private offer separately', () => {
+  const pro = inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketpro');
+  assert.equal(pro.value, 60);
+  assert.equal(inventoryMarketLabel(pro), '60 PKN');
+  assert.match(pro.title, /Cheapest professional or powerseller Cardmarket offer with this card's condition, language, finish and 1st edition, as listed\./);
+  assert.match(pro.title, /3 offers seen\./);
+  assert.match(pro.title, /The other kind of seller asks 20 PKN\./);
+  assert.match(pro.title, /Scanned 2026-11-10; kept 7 days\.$/);
+  const priv = inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketprivate');
+  assert.equal(priv.value, 20);
+  assert.match(priv.title, /Cheapest private Cardmarket offer/);
+  assert.match(priv.title, /1 offer seen\./);
+  assert.match(priv.title, /The other kind of seller asks 60 PKN\./);
+});
+
+test('a one-of-a-kind copy reads only the cheapest offer scanned, never the exact-copy key', () => {
+  const anyOnly = { sources: { cardmarketoffers: { asOf: '2026-11-10', pro: { '': { pkn: 40, offers: 9 } } } } };
+  const exactOnly = { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 60 } } } } };
+  for (const flag of [{ graded: true }, { signed: true }, { altered: true }]) {
+    const value = inventoryMarketValue({ 824942: anyOnly }, { ...ita, ...flag }, 'cardmarketpro');
+    assert.equal(value.value, 40);
+    assert.match(value.title, /any copy/);
+    assert.doesNotMatch(value.title, /1st edition/);
+    assert.doesNotMatch(value.title, /The other kind of seller/);
+    assert.equal(inventoryMarketValue({ 824942: exactOnly }, { ...ita, ...flag }, 'cardmarketpro'), null);
+  }
+  assert.equal(inventoryMarketValue({ 824942: exactOnly }, ita, 'cardmarketpro').value, 60);
+});
+
+test('an unscanned card, seller type or facet has no Cardmarket price at all', () => {
+  // The scan asked `*` for the finish, so no facet agrees on all four yet.
+  const star = { sources: { cardmarketoffers: { asOf: '2026-11-10', pro: { '': { pkn: 40 } } } } };
+  assert.equal(inventoryMarketValue({ 824942: star }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketprivate').value, 20);
+  assert.equal(inventoryMarketValue({ 824942: { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 60 } } } } } }, ita, 'cardmarketprivate'), null);
+  assert.equal(inventoryMarketValue({ 824942: { ctMatchedPkn: 500 } }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({ 824942: { sources: { cardmarketoffers: { pro: { CLFE: { pkn: 0 } } } } } }, ita, 'cardmarketpro'), null);
+  assert.equal(inventoryMarketValue({}, ita, 'cardmarketpro'), null);
+});
+
+test('a scan that stopped short says the price is an upper bound', () => {
+  const short = { sources: { cardmarketoffers: {
+    pro: { CLFE: { pkn: 60, offers: 2, countsComplete: false } },
+  } } };
+  const value = inventoryMarketValue({ 824942: short }, ita, 'cardmarketpro');
+  assert.equal(value.value, 60);
+  assert.match(value.title, /The scan stopped before the last page, so this is an upper bound\./);
+  assert.doesNotMatch(value.title, /Scanned/);
+  assert.doesNotMatch(inventoryMarketValue({ 824942: scanned }, ita, 'cardmarketpro').title, /upper bound/);
 });
 
 test('Pokoin sold fallback is explicitly attributed to CardTrader inferred sales', () => {

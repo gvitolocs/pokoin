@@ -186,6 +186,59 @@ fn build_extension_search_term(body: &Value) -> SearchInput {
     SearchInput { search_term, search_terms, parts, source: "structured_fields" }
 }
 
+/// Plain collector number: "30C 039" -> "039" (Cardmarket prefixes the set code); "025/165" stays.
+fn bare_integer(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+static NUMBER_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+)(?:/\d+)?").unwrap());
+
+/// Whether a catalog number ("Holo Rare | 4/102", "039/L-P", "BS 4") carries `wanted` as one of
+/// its numbers (the numerator of a fraction counts; leading zeros do not).
+fn card_number_has(card_number: &str, wanted: u64) -> bool {
+    NUMBER_TOKEN
+        .captures_iter(card_number)
+        .filter_map(|caps| caps.get(1)?.as_str().parse::<u64>().ok())
+        .any(|n| n == wanted)
+}
+
+fn plain_collector_number(value: &str) -> String {
+    let compact = compact_part(value);
+    compact
+        .split_whitespace()
+        .filter(|token| token.chars().any(|c| c.is_ascii_digit()))
+        .last()
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// Candidate terms for a structured request with both a collector number and a set. The
+/// candidate search misses rows when a number and a set name share one term ("Pikachu 039
+/// 30th Celebration" finds nothing, and on the Pi takes ~8 s to do so), while "Pikachu 039"
+/// and "Pikachu 30th Celebration" each find the card in 1-3 s. Search those halves instead
+/// (concurrently); ranking still scores the rows against the full term.
+fn structured_split_terms(input: &SearchInput) -> Vec<String> {
+    if input.source != "structured_fields" {
+        return Vec::new();
+    }
+    let parts = &input.parts;
+    let name = compact_part(&parts.name);
+    let number = plain_collector_number(&parts.collector_number);
+    let expansion = compact_part(&parts.expansion);
+    if name.is_empty() || number.is_empty() || expansion.is_empty() {
+        return Vec::new();
+    }
+    let mut seen = HashSet::new();
+    [format!("{name} {number}"), format!("{name} {expansion}")]
+        .into_iter()
+        .map(term)
+        .filter(|t| !t.is_empty() && seen.insert(t.clone()))
+        .collect()
+}
+
 static NON_ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 
 fn slug_part(value: &str) -> String {
@@ -273,21 +326,39 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
         return Ok(Value::Object(out));
     }
     let redis = state.api.redis().await;
-    let mut ctx = Ctx::new(state.api.read().clone(), redis);
+    let mut ctx = Ctx::new(state.api.read().clone(), redis.clone());
     if wants_debug {
         ctx.debug = Some(json!({ "steps": [] }));
     }
     let candidate_started = std::time::Instant::now();
     let mut seen = HashSet::new();
     let mut rows = Vec::new();
-    for term in &input.search_terms {
-        let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
-            .await
-            .map_err(|e| engine_error(&e, "Extension card search failed."))?;
-        for row in found {
-            let id = id_string(&row);
-            if !id.is_empty() && seen.insert(id) {
-                rows.push(row);
+    let split_terms = structured_split_terms(&input);
+    if !split_terms.is_empty() {
+        let read = state.api.read().clone();
+        let searches = split_terms.iter().map(|term| {
+            let mut term_ctx = Ctx::new(read.clone(), redis.clone());
+            let language = language.clone();
+            async move { engine::rows_for_autocomplete_search_term(&mut term_ctx, term, pool_limit as i64, &language, None, false).await }
+        });
+        for found in futures_util::future::join_all(searches).await {
+            for row in found.map_err(|e| engine_error(&e, "Extension card search failed."))? {
+                let id = id_string(&row);
+                if !id.is_empty() && seen.insert(id) {
+                    rows.push(row);
+                }
+            }
+        }
+    } else {
+        for term in &input.search_terms {
+            let found = engine::rows_for_autocomplete_search_term(&mut ctx, term, pool_limit as i64, &language, None, false)
+                .await
+                .map_err(|e| engine_error(&e, "Extension card search failed."))?;
+            for row in found {
+                let id = id_string(&row);
+                if !id.is_empty() && seen.insert(id) {
+                    rows.push(row);
+                }
             }
         }
     }
@@ -299,7 +370,27 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
     let analytics_ms = analytics_started.elapsed().as_millis() as u64;
     let rank_started = std::time::Instant::now();
     let candidate_rows = rows.len();
-    let ranked = rank_autocomplete_entries(rows, &input.search_term, result_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    // A bare collector number ("4" from Cardmarket's "BS 4") never matches the catalog's "4/102"
+    // as a ranking term, so the real card scored like a same-set product and was dropped. Rank
+    // split requests on name + set and order by the number below instead.
+    let wanted_number = if split_terms.is_empty() { None } else { bare_integer(&plain_collector_number(&input.parts.collector_number)) };
+    let rank_term = match wanted_number {
+        Some(_) => term(format!("{} {}", compact_part(&input.parts.name), compact_part(&input.parts.expansion))),
+        None => input.search_term.clone(),
+    };
+    // With a number to sort by, rank every candidate and cut to the limit only after the sort:
+    // the set's products and other numbers otherwise fill the top slots before the card is seen.
+    let rank_limit = if wanted_number.is_some() { candidate_rows.max(result_limit) } else { result_limit };
+    let mut ranked = rank_autocomplete_entries(rows, &rank_term, rank_limit, &boosts, &Default::default(), &Default::default(), &Default::default());
+    // Same number first, then the requested set ("30th Celebration" before "30th Celebration
+    // Simplified Chinese"); the sort is stable, so rank order holds within each group.
+    let wanted_set = compact_part(&input.parts.expansion).to_lowercase();
+    ranked.sort_by_key(|entry| {
+        let number_miss = wanted_number.is_some_and(|n| !card_number_has(&js::string_or_empty(entry.row.get("card_number")), n));
+        let set_miss = !wanted_set.is_empty() && compact_part(&js::string_or_empty(entry.row.get("set_name"))).to_lowercase() != wanted_set;
+        (number_miss, set_miss)
+    });
+    ranked.truncate(result_limit);
     let rank_ms = rank_started.elapsed().as_millis() as u64;
     out.insert("matches".into(), Value::Array(ranked.iter().map(|e| match_from_entry(e, &language)).collect()));
     if wants_debug {
@@ -320,6 +411,8 @@ async fn search_extension_card(state: &RouteState, body: &Value) -> Result<Value
             "debug".into(),
             json!({
                 "searchTerms": input.search_terms,
+                "splitTerms": split_terms,
+                "rankTerm": rank_term,
                 "candidateRows": candidate_rows,
                 "boostedRows": boosts.size(),
                 "candidateDurationMs": candidate_ms,
@@ -368,5 +461,30 @@ mod tests {
         assert_eq!(clean_extension_query(Some(&json!("Charizard ex Illus. Mitsuhiro Arita"))), "Charizard ex");
         let row = json!({ "card_id": "123", "rarity": "Rare | Holo", "name": "Mew ex", "card_number": "Rare | 151/165", "set_name": "151" });
         assert_eq!(marketplace_path_for_row(&row, "EN"), "/marketplace/en/cards/123/rare-holo-mew-ex-151-165-151");
+    }
+
+    #[test]
+    fn card_numbers_match_bare_integers() {
+        assert_eq!(bare_integer(&plain_collector_number("BS 4")), Some(4));
+        assert_eq!(bare_integer(&plain_collector_number("30C 039")), Some(39));
+        assert_eq!(bare_integer(&plain_collector_number("4/102")), None);
+        assert!(card_number_has("Holo Rare | 4/102", 4));
+        assert!(card_number_has("Shadowless | Holo Rare 4/102", 4));
+        assert!(card_number_has("039/L-P", 39));
+        assert!(card_number_has("BS 4", 4));
+        assert!(!card_number_has("Secret Rare | 102/100", 4));
+        assert!(!card_number_has("", 4));
+    }
+
+    #[test]
+    fn structured_requests_split_number_and_set() {
+        let input = build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "30C 039", "expansion": "30th Celebration" }));
+        assert_eq!(input.search_term, "Pikachu 30C 039 30th Celebration");
+        assert_eq!(structured_split_terms(&input), vec!["Pikachu 039", "Pikachu 30th Celebration"]);
+        let plain = build_extension_search_term(&json!({ "name": "Umbreon V", "collectorNumber": "189/203", "expansion": "Evolving Skies" }));
+        assert_eq!(structured_split_terms(&plain), vec!["Umbreon V 189/203", "Umbreon V Evolving Skies"]);
+        // No split without both a number and a set, or for free-text queries.
+        assert!(structured_split_terms(&build_extension_search_term(&json!({ "name": "Pikachu", "collectorNumber": "039" }))).is_empty());
+        assert!(structured_split_terms(&build_extension_search_term(&json!({ "query": "Pikachu 039 30th Celebration", "collectorNumber": "039", "expansion": "30th Celebration" }))).is_empty());
     }
 }

@@ -9,6 +9,8 @@ import {
   deskTheme,
   deskThemeFromShade,
   deskThemeVars,
+  dominantShade,
+  fullArtRowTheme,
   peekCardBucket,
   rememberCardBucket,
   SHADE_BUCKETS,
@@ -192,4 +194,58 @@ test('desk theme transition is a direct color fade (CSS)', () => {
   assert.match(css, /html\.desk-tinted \.card-page \.asset-header \{[^}]*background-color: var\(--desk-hero\);[^}]*background-image: none;/s);
   assert.match(css, /html\.desk-tinted\.desk-rainbow \.card-page \.asset-header[^}]*#4c1d86 0%, #12386a/s);
   assert.match(css, /html\.desk-tinted\.desk-rainbow \.card-page \.panel[^}]*background: #1a1030;/s);
+});
+
+function hslOf(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (!d) return { h: 0, s: 0, l };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  return { h: h < 0 ? h + 360 : h, s, l };
+}
+
+function contrastWithWhite(hex) {
+  const lum = [1, 3, 5]
+    .map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 1.05 / (0.2126 * lum[0] + 0.7152 * lum[1] + 0.0722 * lum[2] + 0.05);
+}
+
+test('Full Art row colour is the dominant margin hue, readable under white text', () => {
+  const pink = [246, 168, 206];
+  const white = [250, 248, 250];
+  const ink = [40, 32, 40];
+  // Sylveon GX 140/145: pink texture, a white ribbon and some dark text in the strip.
+  const shade = dominantShade([...Array(26).fill(pink), ...Array(8).fill(white), ...Array(6).fill(ink)]);
+  const hue = hslOf(shade).h;
+  assert.ok(hue > 300 && hue < 350, `pink hue, got ${shade}`);
+  const theme = fullArtRowTheme(shade);
+  assert.equal(theme.kind, 'fullart');
+  assert.equal(theme.stops.length, 3);
+  for (const stop of theme.stops) {
+    assert.match(stop, /^#[0-9a-f]{6}$/);
+    assert.ok(contrastWithWhite(stop) >= 4.5, `${stop} vs white`);
+    const h = hslOf(stop).h;
+    assert.ok(h > 290 && h < 360, `${stop} keeps the pink hue`);
+  }
+  assert.ok(hslOf(theme.stops[0]).s > 0.25, 'stays chromatic');
+  // A silver / black Full Art margin stays neutral instead of picking a stray hue.
+  const silver = dominantShade([...Array(30).fill([150, 152, 156]), [200, 40, 40], [40, 200, 40]]);
+  assert.ok(hslOf(silver).s < 0.1, silver);
+  assert.ok(hslOf(fullArtRowTheme(silver).stops[0]).s < 0.05);
+  // Shiny Vault: red wings cross a white margin; the background is still white.
+  const vault = dominantShade([...Array(22).fill([244, 244, 246]), ...Array(18).fill([200, 60, 50])]);
+  assert.ok(hslOf(vault).s < 0.1 && hslOf(vault).l > 0.9, vault);
+  assert.equal(dominantShade([]), '');
+  assert.equal(fullArtRowTheme('pink'), null);
+});
+
+test('Full Art suggest rows paint the three-stop gradient', () => {
+  const css = fs.readFileSync(new URL('./search-box.css', import.meta.url), 'utf8');
+  assert.match(css, /\.suggest-row\.is-fullart \{[^}]*linear-gradient\(100deg, var\(--suggest-fa-a\) 0%, var\(--suggest-fa-b\) 55%, var\(--suggest-fa-c\) 100%\)/s);
 });

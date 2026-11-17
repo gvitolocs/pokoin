@@ -69,6 +69,32 @@ export function priceCheckKey(row) {
   return `${item.cardId}:${item.condition}:${item.language}:${finishFlags(item)}`;
 }
 
+/**
+ * The price checks of `rows`, one per game: the first `limit` rows with a
+ * numeric card id, grouped by `priceGame` as `[{ game, items }]`. Card ids
+ * are per game, and a Riftbound or Magic card read from the Pokémon catalog
+ * has no comp (or another card's).
+ */
+export function priceCheckGroups(rows, fallbackGame, { limit = 100 } = {}) {
+  const groups = new Map();
+  let count = 0;
+  for (const row of rows || []) {
+    if (count >= limit) break;
+    const item = priceCheckItem(row);
+    if (!/^\d+$/.test(item.cardId)) continue;
+    count += 1;
+    const id = priceGame(row, fallbackGame);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(item);
+  }
+  return [...groups].map(([game, items]) => ({ game, items }));
+}
+
+/** A row's game's answer in per-game price checks (`{ [game]: prices }`). */
+export function gamePrices(pricesByGame, row, fallbackGame) {
+  return pricesByGame?.[priceGame(row, fallbackGame)] || {};
+}
+
 export function inventoryMarketValue(prices, row, source) {
   const entry = prices[priceCheckKey(row)] || prices[String(row?.cardId || row?.card_id || '')];
   if (!entry) return null;
@@ -82,6 +108,32 @@ export function inventoryMarketValue(prices, row, source) {
         + '\nTCGplayer aggregate market quotes in USD; condition is unspecified. Variants remain separate; no conversion to PKN.',
     };
   }
+  if (source === 'cardmarketpro' || source === 'cardmarketprivate') {
+    // Our own walk of Cardmarket's listing pages, not its guide: the guide
+    // cannot say who is selling. `CLFE` is the cheapest offer agreeing with
+    // this row on all four attributes; a graded, signed or altered copy is
+    // one of a kind, so only the cheapest copy scanned at all answers it.
+    const scanned = entry.sources?.cardmarketoffers;
+    const seller = source === 'cardmarketpro' ? 'pro' : 'private';
+    const key = /[GSA]/.test(finishFlags(row)) ? '' : 'CLFE';
+    const offer = scanned?.[seller]?.[key];
+    const value = positive(offer?.pkn);
+    if (value == null) return null;
+    const who = seller === 'pro' ? 'professional or powerseller' : 'private';
+    const facet = key === ''
+      ? `Cheapest ${who} Cardmarket offer scanned for the card, any copy`
+      : `Cheapest ${who} Cardmarket offer with this card's condition, language, finish and 1st edition`;
+    const other = positive(scanned?.[seller === 'pro' ? 'private' : 'pro']?.[key]?.pkn);
+    const compare = other != null
+      ? ` The other kind of seller asks ${formatPknNumber(other, { maximumFractionDigits: 0 })} PKN.`
+      : '';
+    const seen = Number(offer?.offers) > 0 ? ` ${Number(offer.offers)} ${Number(offer.offers) === 1 ? 'offer' : 'offers'} seen.` : '';
+    const short = offer?.countsComplete === false ? ' The scan stopped before the last page, so this is an upper bound.' : '';
+    const asOf = /^\d{4}-\d{2}-\d{2}/.test(String(scanned?.asOf || ''))
+      ? ` Scanned ${String(scanned.asOf).slice(0, 10)}; kept 7 days.`
+      : '';
+    return { currency: 'PKN', value, title: `${facet}, as listed.${seen}${compare}${short}${asOf}` };
+  }
   if (source === 'cardtrader') {
     // Only the cheapest professional seller with the same condition,
     // language and finishes counts: another condition, a private one-off
@@ -90,11 +142,24 @@ export function inventoryMarketValue(prices, row, source) {
     // sellers, this condition or better.
     const value = positive(entry.ctMatchedPkn);
     if (value == null) return null;
+    const ask = positive(entry.ctMatchedGrossPkn);
+    // `ctAsOf`: when the price store was refilled (docs/PRICING.md "Price store").
+    const asOf = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(entry.ctAsOf || ''))
+      ? ` Prices of ${String(entry.ctAsOf).slice(0, 16).replace('T', ' ')} UTC.`
+      : '';
+    // `ctMatchedPkn` is what a seller nets at that ask, after CardTrader's
+    // commission and its VAT (server: ct_fees); `ctMatchedGrossPkn` is the ask.
+    const gross = positive(entry.ctMatchedGrossPkn);
+    const fee = entry.ctFee && Number.isFinite(Number(entry.ctFee.pct))
+      ? ` Net of CardTrader's ${Number(entry.ctFee.pct)}% seller fee + ${Number(entry.ctFee.vatPct) || 0}% VAT${gross != null ? ` (ask ${formatPknNumber(gross, { maximumFractionDigits: 0 })} PKN)` : ''}.`
+      : '';
     return {
       currency: 'PKN', value,
-      title: entry.ctBasis === 'zero'
+      // The CardTrader ask, shown under the net so the two are never confused.
+      askLabel: ask != null && Math.round(ask) !== Math.round(value) ? `${formatPknNumber(ask, { maximumFractionDigits: 0 })} PKN` : '',
+      title: (entry.ctBasis === 'zero'
         ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
-        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).',
+        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).') + fee + asOf,
     };
   }
   const native = positive(entry.pokoinCheapestPkn);

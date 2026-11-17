@@ -2,10 +2,15 @@
 //! backups / restore tests. See docs/BACKUPS_AND_ALERTS.md.
 
 mod backup;
+mod digest;
 mod env;
 mod hc;
+mod health;
 mod mail;
+mod nezopt;
 mod notify;
+mod pi;
+mod secretary;
 mod sentinel;
 mod sys;
 mod wal;
@@ -31,6 +36,11 @@ enum Cmd {
         #[arg(long)]
         user: bool,
     },
+    /// Mail the weekly summary of deferred alerts.
+    Digest {
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Ping a dead-man check: ok (default), start or fail.
     HcPing {
         #[arg(long, conflicts_with = "unit")]
@@ -49,6 +59,18 @@ enum Cmd {
         /// Print findings and would-be events; no mail, no state change.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// nezopt: probe the Pi, keep its up/down state, alert once per transition (see pi.rs).
+    PiHealth {
+        /// Declare planned work on the Pi for this long (e.g. 2h, 90m): alerts are held.
+        #[arg(long, value_name = "DURATION", conflicts_with = "end_maintenance")]
+        maintenance: Option<String>,
+        /// What the maintenance is, for the notice.
+        #[arg(long, default_value = "", requires = "maintenance")]
+        reason: String,
+        /// End a declared maintenance window now.
+        #[arg(long)]
+        end_maintenance: bool,
     },
     #[command(subcommand)]
     Backup(BackupCmd),
@@ -119,8 +141,16 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Digest { dry_run } => digest::run(dry_run),
         Cmd::HcProvision => hc::provision(),
         Cmd::Sentinel { role, dry_run } => sentinel::run(role, dry_run),
+        Cmd::PiHealth { maintenance, reason, end_maintenance } => {
+            if maintenance.is_some() || end_maintenance {
+                pi::maintenance(maintenance.as_deref(), &reason, end_maintenance)
+            } else {
+                pi::run()
+            }
+        }
         Cmd::Backup(cmd) => {
             let cfg = backup::Cfg::from_env;
             match cmd {

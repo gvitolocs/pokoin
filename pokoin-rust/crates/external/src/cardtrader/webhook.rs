@@ -122,24 +122,35 @@ const FIND_LINKED_BY_PRODUCT_SQL: &str = r#"
 /// then the product-links table.
 pub async fn find_linked_listing(db: &DbPools, seller_uid: &str, item: &Value) -> ApiResult<Option<Value>> {
     let listing_id = crate::cardtrader::sync_core::parse_pokoin_listing_id(&item_user_data_field(item));
+    let product_id = item_product_id(item);
+    let source_id = crate::cardtrader::sync_core::ct_source_listing_id(&product_id);
+    let mut named = None;
     if !listing_id.is_empty() {
         let rows = db
             .query("pokemon", FIND_LINKED_BY_ID_SQL, &[json!(listing_id), json!(seller_uid)])
             .await?;
         if let Some(row) = rows.first() {
-            return Ok(Some(row.clone()));
+            // The product's primary may have left its group since (repriced):
+            // then the copies still on the product answer the sale.
+            let still_member = product_id.is_empty()
+                || clean_text_value(row.get("source_listing_id").unwrap_or(&Value::Null), 160) == source_id;
+            if still_member {
+                return Ok(Some(row.clone()));
+            }
+            named = Some(row.clone());
         }
     }
-    let product_id = item_product_id(item);
     if product_id.is_empty() {
-        return Ok(None);
+        return Ok(named);
     }
-    let source_id = crate::cardtrader::sync_core::ct_source_listing_id(&product_id);
     let rows = db
         .query("pokemon", FIND_LINKED_BY_SOURCE_SQL, &[json!(seller_uid), json!(source_id)])
         .await?;
     if let Some(row) = rows.first() {
         return Ok(Some(row.clone()));
+    }
+    if named.is_some() {
+        return Ok(named);
     }
     match db
         .query("pokemon", FIND_LINKED_BY_PRODUCT_SQL, &[json!(seller_uid), json!(product_id)])
@@ -183,6 +194,38 @@ pub async fn decrement_pokoin_listing(db: &DbPools, listing: &Value, quantity: i
         )
         .await?;
     Ok(rows.first().cloned())
+}
+
+/// Take `quantity` copies for one CardTrader order item. A listing that
+/// shares its product with identical copies (cardtrader::group) takes them
+/// from the group, the listing first: one statement, nothing written unless
+/// the group holds them all. Each row carries the copies it gave (`taken`).
+pub async fn take_copies(db: &DbPools, seller_uid: &str, listing: &Value, quantity: i64) -> ApiResult<Vec<Value>> {
+    let source = clean_text_value(listing.get("source_listing_id").unwrap_or(&Value::Null), 160);
+    let id = clean_text_value(listing.get("id").unwrap_or(&Value::Null), 80);
+    if crate::cardtrader::sync_core::parse_ct_product_id(&source).is_empty() {
+        let mut rows: Vec<Value> = decrement_pokoin_listing(db, listing, quantity).await?.into_iter().collect();
+        for row in &mut rows {
+            row["taken"] = json!(quantity.max(1));
+        }
+        return Ok(rows);
+    }
+    let mut rows = db
+        .write("pokemon", crate::cardtrader::group::GROUP_DECREMENT_SQL, &[json!(id), json!(quantity.max(1)), json!(seller_uid), json!(source)])
+        .await?;
+    // The listing the order names first, as the sale and the history show it.
+    rows.sort_by_key(|row| clean_text_value(row.get("id").unwrap_or(&Value::Null), 80) != id);
+    Ok(rows)
+}
+
+/// `[{listingId, quantity}]` for the event doc: what a cancellation restores.
+pub fn allocations(taken: &[Value]) -> Value {
+    Value::Array(
+        taken
+            .iter()
+            .map(|row| json!({ "listingId": row["id"], "quantity": row.get("taken").and_then(Value::as_i64).unwrap_or(1) }))
+            .collect(),
+    )
 }
 
 /// `claimWebhookEvent` — Firestore create() = idempotency claim.
@@ -299,9 +342,23 @@ pub async fn restore_cancelled_item(
         .unwrap_or(1)
         .max(1);
     let listing_id = clean_text_value(data.get("listingId").unwrap_or(&Value::Null), 80);
-    db.write(
-        "pokemon",
-        r#"
+    // A group sale restores each copy it took; an older event, its one listing.
+    let restock: Vec<(String, i64)> = match data.get("allocations").and_then(Value::as_array) {
+        Some(rows) if !rows.is_empty() => rows
+            .iter()
+            .map(|row| {
+                (
+                    clean_text_value(row.get("listingId").unwrap_or(&Value::Null), 80),
+                    i64_field(row, &["quantity"]).unwrap_or(1).max(1),
+                )
+            })
+            .collect(),
+        _ => vec![(listing_id.clone(), qty)],
+    };
+    for (restock_id, restock_qty) in restock {
+        db.write(
+            "pokemon",
+            r#"
       update public.marketplace_user_listings
       set
         quantity_available = quantity_available + $2,
@@ -309,9 +366,10 @@ pub async fn restore_cancelled_item(
         updated_at = now()
       where id = $1::uuid and seller_uid = $3
     "#,
-        &[json!(listing_id), json!(qty), json!(uid)],
-    )
-    .await?;
+            &[json!(restock_id), json!(restock_qty), json!(uid)],
+        )
+        .await?;
+    }
     let sale_doc = format!("ct_{}__{}", clean_text_value(order.get("id").unwrap_or(&Value::Null), 40), current_item_id).replace('/', "_");
     let _ = firestore
         .merge_doc(
@@ -404,7 +462,8 @@ pub async fn handle_order_payload(
             continue;
         }
         let qty = i64_field(item, &["quantity"]).unwrap_or(1).max(1);
-        let updated = decrement_pokoin_listing(db, &listing, qty).await?;
+        let taken = take_copies(db, uid, &listing, qty).await?;
+        let updated = taken.first().cloned();
         let Some(updated) = updated else {
             let claim_id = event_doc_id(uid, &order_id, &current_item_id);
             release_webhook_event(firestore, &claim_id).await;
@@ -419,6 +478,7 @@ pub async fn handle_order_payload(
                     "listingId": updated["id"],
                     "quantity": qty,
                     "productId": item_product_id(item),
+                    "allocations": allocations(&taken),
                 }),
             )
             .await;
@@ -433,6 +493,7 @@ pub async fn handle_order_payload(
             "orderItemId": current_item_id,
             "ok": true,
             "listingId": updated["id"],
+            "allocations": allocations(&taken),
             "quantity": qty,
             "remaining": updated["quantity_available"],
             "status": updated["status"],

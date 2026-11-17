@@ -51,6 +51,8 @@ export default [
   { path: '/docs', component: Site },
   { path: '/contact', component: Site },
   { path: '/privacy', component: Site },
+  // Chrome Web Store privacy-policy URL for the Pokoin Sniper extension.
+  { path: '/extension/privacy', component: Site },
   { path: '/earn', component: Site },
   { path: '/whitepaper', component: Site },
   { path: '/health', component: Site },

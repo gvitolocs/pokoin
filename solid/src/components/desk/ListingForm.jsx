@@ -5,14 +5,15 @@ import {
   cardHref,
   createListing,
   fetchPriceCheck,
+  fetchPricingGroups,
   fetchSellerBoxSlots,
-  formatPkn,
   formatPknNumber,
   publicCardId,
   saveSellerSettings,
   updateListing,
 } from '@market/api.js';
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
+import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox } from '@market/inventory-listings.js';
@@ -24,7 +25,7 @@ import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
 import { fiatFromPkn, LIST_CURRENCIES, listingPriceToPkn } from '@market/pkn.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { suggestPriceFromSlices } from '@market/scan-pricing.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { priceInputFromPkn } from '@market/seller-currency.js';
 import { Action, track } from '@market/track.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '@market/user-photos.js';
 import { authReady, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -101,11 +102,13 @@ export default function ListingForm(props) {
   const blank = untrack(() => blankListingForm(props.card));
   const [price, setPrice] = createSignal(blank.price);
   let priceManual = Boolean(untrack(() => props.editing?.id));
+  // The seller typed a price in this edit (an edit sends the price only then).
+  let priceTyped = false;
   let priceFocused = false;
   let currencyManual = false;
   let boxTouched = false;
   let formEl;
-  const [currency, setCurrency] = createSignal(blank.currency);
+  const [currency, setCurrency] = createSignal(untrack(sellerCurrency));
   const [qty, setQty] = createSignal(blank.qty);
   const [condition, setCondition] = createSignal(blank.condition);
   const [language, setLanguage] = createSignal(blank.language);
@@ -154,9 +157,26 @@ export default function ListingForm(props) {
   const langKey = createMemo(() => listLangs().join(','));
   const editingId = createMemo(() => props.editing?.id || '');
   const isEditing = () => Boolean(editingId());
+  // The pricing group of the listing being edited: a new price takes it out.
+  const [priceGroup, setPriceGroup] = createSignal(null);
+  createEffect(editingId, (id) => {
+    setPriceGroup(null);
+    if (!id) return;
+    (async () => {
+      try {
+        const token = await getBearer();
+        if (!token) return;
+        const data = await fetchPricingGroups(token);
+        if (untrack(editingId) === id) setPriceGroup(listingPricingGroup(data, id));
+      } catch {
+        // Never block the form over the note.
+      }
+    })();
+  });
 
   function applyFields(next) {
-    const listIn = currencyManual ? next.currency : untrack(sellerCurrency);
+    // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
+    const listIn = untrack(currencyManual ? currency : sellerCurrency);
     setPrice(listIn === next.currency || !next.price
       ? next.price
       : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
@@ -179,6 +199,7 @@ export default function ListingForm(props) {
   createEffect(resetKey, () => {
     const editing = untrack(() => props.editing);
     const row = untrack(card);
+    priceTyped = false;
     if (editing?.id) {
       applyFields(listingFormFromOffer(editing, row));
       priceManual = true;
@@ -275,9 +296,6 @@ export default function ListingForm(props) {
   });
 
   const hint = () => (!price() && graphPrice() ? graphPrice() : '');
-  const listedPkn = () => (price()
-    ? listingPriceToPkn(price(), currency())
-    : listingPriceToPkn(graphPrice(), currency()));
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
@@ -415,9 +433,11 @@ export default function ListingForm(props) {
         setName: props.identity.set,
         collectorNumber: props.identity.number,
       };
+      const { pricePkn: _typedPrice, ...editFields } = fields;
       const saved = editing
         ? await updateListing(id, {
-          ...fields,
+          ...editFields,
+          ...editPriceFields(amount, props.editing?.pricePkn ?? props.editing?.price_pkn, priceTyped),
           sellerUid: uid() || props.editing?.sellerUid,
           status: 'active',
         }, token)
@@ -439,6 +459,10 @@ export default function ListingForm(props) {
         setError(saved.cardtrader.error || 'CardTrader push failed.');
       } else if (saved?.listing === null && saved?.cardtrader?.ok) {
         setDone('Listed on CardTrader.');
+      } else if (editing && leftGroupLine(saved)) {
+        // The new price took the listing out of its pricing group.
+        setDone(`Listing updated. ${leftGroupLine(saved)}`);
+        setPriceGroup(null);
       } else {
         setDone(editing ? 'Listing updated.' : 'Listing created.');
       }
@@ -489,10 +513,11 @@ export default function ListingForm(props) {
     }
   }
 
-  // A signed-out visitor came to buy: the sell form waits behind one button
-  // instead of being the biggest panel on the desk.
+  // Every visitor came to buy first, signed in or not: the sell form waits
+  // behind one strip instead of being the biggest panel on the desk. The strip
+  // is the same for both, so the desk has one layout.
   const [opened, setOpened] = createSignal(false);
-  const collapsed = () => authReady() && !signedIn() && !isEditing() && !opened();
+  const collapsed = () => !isEditing() && !opened();
 
   return (
     <Show
@@ -500,8 +525,16 @@ export default function ListingForm(props) {
       fallback={(
         <section class="panel sell-form is-collapsed">
           <div class="add-head">
-            <h2>Sell this card</h2>
-            <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            <h2>Have this card?</h2>
+            <Show when={props.sellNowNote}>
+              <span class="sell-strip-note">{props.sellNowNote}</span>
+            </Show>
+            <span class="sell-strip-actions">
+              <Show when={props.onSellNow}>
+                <button type="button" class="btn ghost sell-open sell-now" onClick={() => props.onSellNow()}>Sell now</button>
+              </Show>
+              <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            </span>
           </div>
         </section>
       )}
@@ -529,11 +562,16 @@ export default function ListingForm(props) {
                 Cancel edit
               </button>
             </Show>
+            <Show when={!isEditing()}>
+              <button type="button" class="linkish sell-close" onClick={() => setOpened(false)}>
+                Close
+              </button>
+            </Show>
           </span>
         </Show>
       </div>
       <div class="sell-row">
-        <label class="sell-field grow">
+        <label class="sell-field grow price">
           Price
           <input
             inputmode="decimal"
@@ -551,6 +589,7 @@ export default function ListingForm(props) {
               const next = event.currentTarget.value;
               setPrice(next);
               priceManual = next.trim() !== '';
+              priceTyped = true;
             }}
           />
         </label>
@@ -563,7 +602,7 @@ export default function ListingForm(props) {
               setCurrency(event.currentTarget.value);
             }}
           >
-            <For each={LIST_CURRENCIES}>
+            <For each={[...new Set([...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()])]}>
               {(code) => <option value={code} selected={code === currency()}>{code}</option>}
             </For>
           </select>
@@ -584,6 +623,9 @@ export default function ListingForm(props) {
           </button>
         </Show>
       </div>
+      <Show when={priceGroup()}>
+        <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
+      </Show>
       <Show when={!isEditing()}>
         <div class="sell-targets-row">
           <InventoryTargets
@@ -603,16 +645,9 @@ export default function ListingForm(props) {
           />
         </div>
       </Show>
-      <Show
-        when={sellerCurrency() !== 'PKN'}
-        fallback={(
-          <Show when={currency() !== 'PKN' && listedPkn()}>
-            <p class="sell-pkn-eq">Lists at {formatPkn(listedPkn())}</p>
-          </Show>
-        )}
-      >
+      {/* The price field already shows what the card lists at; only the PKN-off notice keeps a line. */}
+      <Show when={sellerSettings()?.acceptsPkn === false}>
         <p class="sell-pkn-eq">
-          {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())} · ` : ''}
           Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
         </p>
       </Show>

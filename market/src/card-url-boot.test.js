@@ -17,7 +17,7 @@ function bootFns() {
   return context;
 }
 
-const { cardBootPlan } = bootFns();
+const { cardBootPlan, canonicalUrlKeepingQuery } = bootFns();
 
 function appCardRequest(pathname, hostname) {
   globalThis.window = { location: { hostname, pathname } };
@@ -243,4 +243,12 @@ test('no hero preload without a CDN deskArtUrl', async () => {
   assert.equal((await bootWithPage('/marketplace/en/cards/222454/defender', { id: '222454' })).length, 0);
   assert.equal((await bootWithPage('/marketplace/en/cards/222454/defender', { deskArtUrl: '/card-images/1_x.jpg' })).length, 0);
   assert.equal((await bootWithPage('/marketplace', { deskArtUrl: 'https://cdn.pokoin.com/1_x.jpg' })).length, 0);
+});
+
+test('the canonical redirect keeps the visitor query and hash (the preview switch would be lost otherwise)', () => {
+  const canonical = '/marketplace/en/cards/209900/card-lucario-coin';
+  assert.equal(canonicalUrlKeepingQuery(canonical, '?mypokoinPreview', ''), `${canonical}?mypokoinPreview`);
+  assert.equal(canonicalUrlKeepingQuery(canonical, '?a=1', '#top'), `${canonical}?a=1#top`);
+  assert.equal(canonicalUrlKeepingQuery(canonical, '', ''), canonical);
+  assert.equal(canonicalUrlKeepingQuery(`${canonical}?x=1`, '?mypokoinPreview', ''), `${canonical}?x=1`);
 });

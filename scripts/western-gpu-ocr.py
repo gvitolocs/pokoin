@@ -25,7 +25,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "4")
 ORT = "/tmp/pokoin-ort-rocm"
 ROCM_HOME = str(Path.home() / ".local/rocm")
 SONAMES = str(Path.home() / ".local/lib/rocm-sonames")
-TORCH_LIB = "/home/nez/Projects/ai-toolkit/venv/lib/python3.12/site-packages/torch/lib"
+TORCH_LIB = "/home/nez/Projects/AI/ai-toolkit/venv/lib/python3.12/site-packages/torch/lib"
 DET_ONNX = "/home/nez/.cache/ppocrv5-onnx/det/inference.onnx"
 REC_ONNX = "/home/nez/.cache/ppocrv5-onnx/en-rec/inference.onnx"
 REC_KEYS = "/home/nez/.cache/ppocrv5-onnx/en-rec/keys.txt"
@@ -116,7 +116,7 @@ def main() -> None:
     parser.add_argument("--csv", default="/tmp/western-leftovers.csv")
     parser.add_argument(
         "--out",
-        default="/home/nez/Projects/pokoin-web/scripts/out/western-full-ocr-gpu.jsonl",
+        default="/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-full-ocr-gpu.jsonl",
     )
     parser.add_argument("--also-done", action="append", default=None)
     parser.add_argument("--parity", choices=("all", "even", "odd"), default="even")
@@ -167,7 +167,7 @@ def main() -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     also = args.also_done or [
-        "/home/nez/Projects/pokoin-web/scripts/out/western-full-ocr.jsonl"
+        "/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-full-ocr.jsonl"
     ]
     prior = latest_ocr_rows(out, *[Path(p) for p in also])
     if args.retry_junk_footer:

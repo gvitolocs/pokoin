@@ -48,6 +48,28 @@ export function soldConditionLabel(code) {
   return SOLD_CONDITION_LABELS[code] || code;
 }
 
+/**
+ * Line colours for the desk graph when several series are compared. One palette
+ * per language, in the order the languages were picked: the first keeps the
+ * grade colours (the same greens, gold, copper and red as the single graph),
+ * and every colour of the first three palettes is different from every other,
+ * so a language is never read as a grade. A fourth language reuses the second
+ * palette, a fifth the third, and so on.
+ */
+export const SOLD_SERIES_PALETTES = [
+  { NM: '#147a3f', SP: '#3dcf74', MP: '#ffd33d', PL: '#b87333', Poor: '#e44545' },
+  { NM: '#5fb8e8', SP: '#38d6c4', MP: '#e45fd0', PL: '#a78bfa', Poor: '#ff8fb1' },
+  { NM: '#ff9f43', SP: '#f4f4f5', MP: '#2563eb', PL: '#84cc16', Poor: '#9ca3af' },
+];
+
+export function soldSeriesColor(condition, languageIndex = 0) {
+  const index = Math.max(0, Math.trunc(Number(languageIndex) || 0));
+  const palette = index < SOLD_SERIES_PALETTES.length
+    ? SOLD_SERIES_PALETTES[index]
+    : SOLD_SERIES_PALETTES[1 + ((index - 1) % (SOLD_SERIES_PALETTES.length - 1))];
+  return palette[String(condition || '').trim()] || '#f3f4f7';
+}
+
 /** Line/fill tone for the desk graph. All stays white; MP keeps gold. */
 export function soldGraphTone(condition) {
   const key = String(condition || '').trim();
@@ -147,43 +169,38 @@ export function activeSoldIndex(hover, dayCount) {
   return hover;
 }
 
-/** 0–50 by tens, 0–500, 0–2500, 0–5000, 0–50k, then 0–125k by 25k (2.5–5–10). */
-export function soldGraphScale(maxValue) {
+/**
+ * Five steps from zero, sized to the data: the smallest 1–2–2.5–5 step (times a
+ * power of ten, never under 10) whose fifth tick reaches the highest value. The
+ * line always uses at least half the plot's height, so 7,000 PKN reads on a
+ * 0–10,000 axis rather than lying flat on a 0–50k one.
+ */
+export function soldGraphScale(maxValue, { minStep = 10 } = {}) {
   const max = Math.max(0, Number(maxValue) || 0);
-  let step = 10;
-  while (step * 5 < max) {
-    if (step < 10000) {
-      if (step === 100) {
-        step = 500;
-      } else if (step === 500) {
-        step = 1000;
-      } else {
-        step *= 10;
-      }
-    } else {
-      const mag = 10 ** Math.floor(Math.log10(step));
-      const lead = step / mag;
-      if (lead < 2.5) {
-        step = 2.5 * mag;
-      } else if (lead < 5) {
-        step = 5 * mag;
-      } else {
-        step = 10 * mag;
-      }
+  // `minStep` is the smallest step the axis may use: 10 for PKN, and a cent
+  // (0.01) when the axis is drawn in the visitor's currency, where a card that
+  // sold for a quarter must not sit on a 0–50 axis.
+  const floor = Number(minStep) > 0 ? Number(minStep) : 10;
+  let step = floor;
+  for (let mag = floor; step * 5 < max; mag *= 10) {
+    for (const lead of [1, 2, 2.5, 5]) {
+      step = lead * mag;
+      if (step * 5 >= max) break;
     }
   }
-  const top = step * 5;
+  // Decimal steps pick up binary noise (0.1 * 3); six decimals is far below a cent.
+  const clean = (value) => Number(value.toFixed(6));
   return {
     min: 0,
-    max: top,
-    step,
-    ticks: [0, 1, 2, 3, 4, 5].map((n) => n * step),
+    max: clean(step * 5),
+    step: clean(step),
+    ticks: [0, 1, 2, 3, 4, 5].map((n) => clean(n * step)),
   };
 }
 
 export function soldGraphY(value, top, padT, plotH) {
   const v = Math.max(0, Number(value) || 0);
-  const ceiling = Math.max(Number(top) || 0, 1);
+  const ceiling = Number(top) > 0 ? Number(top) : 1;
   return padT + (1 - Math.min(v, ceiling) / ceiling) * plotH;
 }
 
@@ -192,8 +209,9 @@ export function formatSoldAxisTick(value) {
   if (n >= 10000 && n % 1000 === 0) {
     return `${n / 1000}k`;
   }
-  if (n >= 1000) {
-    return String(n);
+  // A local-currency axis has ticks under one unit: 0.05, 0.25, 1.5.
+  if (!Number.isInteger(n)) {
+    return String(Number(n.toFixed(3)));
   }
   return String(n);
 }
@@ -229,4 +247,236 @@ export function soldUnitCount(days) {
 export function formatSoldSampleCount(count) {
   const n = Math.max(0, Math.trunc(Number(count) || 0));
   return `${n.toLocaleString('en-US')} ${n === 1 ? 'unit' : 'units'}`;
+}
+
+const DAY_MS = 86_400_000;
+
+/** A `YYYY-MM-DD` calendar day as UTC midnight ms; NaN when it is not a day. */
+export function soldGraphDayMs(day) {
+  const match = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return NaN;
+  }
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * The window a range button asked for, or `null` when the graph was not given
+ * one: without a range every series day is drawn, as it always was.
+ */
+export function soldGraphRangeBounds(range) {
+  const from = String(range?.from || '');
+  const to = String(range?.to || '');
+  if (!Number.isFinite(soldGraphDayMs(from)) || !Number.isFinite(soldGraphDayMs(to))) {
+    return null;
+  }
+  return { key: String(range?.key || ''), from, to };
+}
+
+/** Series days inside the selected range, oldest first. */
+export function soldGraphRangeDays(days, bounds) {
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  if (!bounds) {
+    return rows;
+  }
+  const lo = soldGraphDayMs(bounds.from);
+  const hi = soldGraphDayMs(bounds.to);
+  return rows
+    .filter((row) => {
+      const ms = soldGraphDayMs(row.day);
+      return ms >= lo && ms <= hi;
+    })
+    .sort((a, b) => soldGraphDayMs(a.day) - soldGraphDayMs(b.day));
+}
+
+/**
+ * The dates the x-axis spans: the selected range clipped to the first and last
+ * day the visible series actually have, so a 1-month window with two weeks of
+ * data does not leave half the plot empty.
+ */
+export function soldGraphDateWindow(days, bounds) {
+  const points = (Array.isArray(days) ? days : [])
+    .map((row) => soldGraphDayMs(row?.day))
+    .filter((ms) => Number.isFinite(ms));
+  if (!points.length) {
+    return null;
+  }
+  let start = Math.min(...points);
+  let end = Math.max(...points);
+  const lo = soldGraphDayMs(bounds?.from);
+  const hi = soldGraphDayMs(bounds?.to);
+  if (Number.isFinite(lo)) {
+    start = Math.max(start, lo);
+  }
+  if (Number.isFinite(hi)) {
+    end = Math.min(end, hi);
+  }
+  return { start, end: Math.max(start, end) };
+}
+
+/**
+ * A source line split into the runs the graph draws solid, plus the pairs that
+ * bridge each hole. Two days more than `gapDays` apart are not a price move:
+ * that stretch is quoted from the source's own last value, not measured here.
+ */
+export function soldGraphGapSegments(days, gapDays) {
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  const max = Math.max(0, Math.trunc(Number(gapDays)) || 0);
+  const segments = [];
+  const bridges = [];
+  let run = null;
+  for (const row of rows) {
+    const prev = run ? run[run.length - 1] : null;
+    if (prev && (soldGraphDayMs(row.day) - soldGraphDayMs(prev.day)) / DAY_MS > max) {
+      bridges.push([prev, row]);
+      run = null;
+    }
+    if (!run) {
+      run = [];
+      segments.push(run);
+    }
+    run.push(row);
+  }
+  return { segments, bridges };
+}
+
+/** The series day nearest `day`, when it is within `toleranceDays` of it. */
+export function soldGraphNearDay(days, day, toleranceDays = 0) {
+  const target = soldGraphDayMs(day);
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+  const tolerance = Math.max(0, Number(toleranceDays) || 0);
+  let best = null;
+  let bestGap = Infinity;
+  for (const row of (Array.isArray(days) ? days : [])) {
+    const ms = soldGraphDayMs(row?.day);
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+    const gap = Math.abs(ms - target);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = row;
+    }
+  }
+  return best && bestGap / DAY_MS <= tolerance ? best : null;
+}
+
+/** The last series day at or before `day`: a weekly trend reads backwards. */
+export function soldGraphDayOnOrBefore(days, day) {
+  const target = soldGraphDayMs(day);
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+  let best = null;
+  let bestMs = -Infinity;
+  for (const row of (Array.isArray(days) ? days : [])) {
+    const ms = soldGraphDayMs(row?.day);
+    if (Number.isFinite(ms) && ms <= target && ms >= bestMs) {
+      bestMs = ms;
+      best = row;
+    }
+  }
+  return best;
+}
+
+/**
+ * Long windows read their dates with the year: the drawn range past 300 days,
+ * or its first and last day in different years (a short window across New Year).
+ */
+export function soldGraphSpansYears(startMs, endMs) {
+  const lo = Number(startMs);
+  const hi = Number(endMs);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return false;
+  }
+  if ((hi - lo) / DAY_MS > 300) {
+    return true;
+  }
+  return new Date(lo).getUTCFullYear() !== new Date(hi).getUTCFullYear();
+}
+
+/** `formatSoldDay`, with the locale's two-digit year appended when asked. */
+export function formatSoldDayWithYear(isoDay, locale, withYear) {
+  if (!withYear) {
+    return formatSoldDay(isoDay, locale);
+  }
+  const match = String(isoDay || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return '';
+  }
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat(locale, {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+export const SOLD_GRAPH_TIP_ROWS = 6;
+
+/**
+ * What the hover popup lists for one day: one row per visible series, in the
+ * order they are passed. A sold series with no sale that day says so; a source
+ * reads its own nearest day (Cardmarket its last one at or before) inside its
+ * gap, says which day it starts from when the hover is earlier than that, and
+ * otherwise has no data. The list is capped and the rest is counted.
+ */
+export function soldGraphHoverRows(series, day, {
+  cap = SOLD_GRAPH_TIP_ROWS,
+  formatValue = (value) => String(value),
+  formatDay = (iso) => iso,
+  endDay = '',
+} = {}) {
+  const rows = [];
+  for (const line of (Array.isArray(series) ? series : [])) {
+    if (!line || !line.label) {
+      continue;
+    }
+    const days = Array.isArray(line.days) ? line.days : [];
+    let firstDay = '';
+    let firstMs = Infinity;
+    for (const row of days) {
+      const ms = soldGraphDayMs(row?.day);
+      if (Number.isFinite(ms) && ms < firstMs) {
+        firstMs = ms;
+        firstDay = String(row.day);
+      }
+    }
+    let hit = null;
+    let note = '';
+    if (line.kind === 'sold') {
+      hit = days.find((row) => String(row?.day) === String(day)) || null;
+      if (!hit) {
+        note = 'no sale';
+      }
+    } else if (line.kind === 'now') {
+      hit = day && String(day) === String(endDay) ? { value: line.value } : null;
+      if (!hit) {
+        note = 'no data';
+      }
+    } else {
+      hit = line.carry === 'onOrBefore'
+        ? soldGraphDayOnOrBefore(days, day)
+        : soldGraphNearDay(days, day, line.gapDays);
+      if (!hit && firstDay && soldGraphDayMs(day) < soldGraphDayMs(firstDay)) {
+        note = `from ${formatDay(firstDay)}`;
+      } else if (!hit) {
+        note = 'no data';
+      }
+    }
+    rows.push({
+      key: line.key,
+      label: line.label,
+      color: line.color || '',
+      dashed: Boolean(line.dashed),
+      picked: Boolean(line.picked),
+      value: hit ? Number(hit.value) : null,
+      text: hit ? formatValue(Number(hit.value)) : note,
+    });
+  }
+  const shown = rows.slice(0, Math.max(1, Math.trunc(Number(cap)) || SOLD_GRAPH_TIP_ROWS));
+  return { rows: shown, more: Math.max(0, rows.length - shown.length) };
 }

@@ -70,7 +70,7 @@ Pods differ from the Pi only where they must:
 - **Database:** they read and write the **writer Postgres** on nezopt (the Pi reads its replica), on the private Docker network `pokoin-overflow` (writer `172.31.250.10`, k3s `172.31.250.20`), TLS `verify-full` with the Pokoin PG CA. UFW drops container → host traffic, which is why the host LAN URL is not used.
 - **Redis:** `redis.pokoin-overflow.svc.cluster.local:6379`.
 - **Outbox worker:** off (`POKOIN_LISTING_SYNC_WORKER=0`). It runs on the Pi only.
-- **CDN:** no card images on nezopt. Non-Pokémon game image paths on api.pokoin.com proxy to `https://cdn.pokoin.com`. Pokémon image paths 404 here, as they did with the Node overflow. Images normally load from cdn.pokoin.com, which is not load-balanced.
+- **CDN:** the pods also serve the cdn.pokoin.com origin `nez-k3s` (port 8081) from the read-only leftover mirror plus `poko-video/`. A miss falls back to the Pi's own CDN (see *Staying in sync with the Pi*).
 - **Scan and Hermes:** the Pi's loopback SSH tunnels do not exist in a pod, so pods reach those two host services through socat bridges on the same Docker network (next section).
 
 ## Host services through socat bridges
@@ -97,28 +97,97 @@ nezopt (fixed 2026-10-14).
 
 ## Staying in sync with the Pi
 
-`pokoin-overflow-sync.timer` (user systemd on nezopt, every 5 min) runs
-`~/pokoin-overflow/bin/nezopt-k3s.sh sync`. It does three things:
+> **2026-10-28:** event-driven instead of a 5-minute poll, quiet while the Pi is offline, env from the
+> Pi's env file instead of `/proc` (Infisical next). Before → after numbers: end of this section.
 
-1. **Secret.** `pokoin-api-env` is rebuilt from the **running Pi Rust service**: `/proc/<MainPID>/environ` of `pokoin-rust-api`, which is the env file after systemd unquoting. Pi-only keys (listeners, CDN/SEO paths, trusted proxies, Valkey, the outbox worker flag) are dropped. Loopback database URLs point at the writer as described above. Loopback `POKO_CHAT_URL` / `POKONTACT_SERVICE_URL` (the Pi's Hermes tunnel) become `http://172.31.250.13:18789/api/poko`, the Hermes bridge.
-2. **Sitemaps.** `/srv/pokoin/seo` is rsynced to `~/pokoin-overflow/data/seo`, which is mounted at `/srv/pokoin/seo` in the pods.
-3. **Release.** The Pi's commit is read from `/srv/pokoin/rust/current --version`. If `~/pokoin-overflow/data/rust/current` is a different commit, the script builds that commit for x86_64 and rolls the pods:
-   - The build runs in a detached worktree of `~/Projects/pokoin-web` at `~/pokoin-overflow/src`, with target dir `~/pokoin-overflow/build/target`, `--locked`.
-   - The binary's `--version` must report the same commit.
-   - The script keeps 3 releases.
+**Triggers.** The Pi tells nezopt when something changed, and nezopt pulls with its own access:
 
-So a Rust deploy to the Pi reaches nezopt on the next timer run, plus build time: about 1 minute incremental, longer on a cold target dir.
+| Pi side (`scripts/install-pi-overflow-notify.sh`) | Notice | nezopt runs |
+| --- | --- | --- |
+| `pokoin-overflow-notify.path` on `/srv/pokoin/rust/` (the `current` symlink swap of a deploy, an edit of `pokoin-api.env`) | `release` | `pokoin-overflow-sync.service` |
+| `poko-video-notify.service` (`inotifywait -r` on `poko-video/`, 3 s debounce) | `video` | `poko-video-mirror.service` |
 
-The timer runs the copies in `~/pokoin-overflow/bin` (the script, `infra/k3s/pokoin-overflow.yaml` and
-`infra/k3s/pokoin-security.yaml`) that `install` makes, never a git checkout, so a repository change reaches the
-timer only after `scripts/nezopt-k3s.sh install`.
+A notice is `ssh nez@nezopt <verb>` with the key `/etc/pokoin/overflow-notify/id_ed25519`. It is sent as the
+Pi user `pokoin-notify`, which has no shell and only a traverse ACL on `/srv/pokoin/card-images`. It is
+not in group `nes`, which can read the API env file. nezopt's `authorized_keys` pins it to `restrict,from="192.168.178.46",command="~/.local/bin/pokoin-pi-hook"`,
+which only touches a stamp and starts the unit. A notice that arrives during a run makes that run go
+again (`follow` in `nezopt-k3s.sh`). The timers stay as an hourly backstop
+(`install-ops-nezopt.sh pi-hooks-live`, installed 2026-10-28).
+
+**`sync`** (`nezopt-k3s.sh sync`):
+
+1. **Secrets.** `pokoin-api-env` / `pokoin-jobs-env` are built from the API env, from `POKOIN_ENV_SOURCE`:
+   - `pi-file` (default): the Pi's `/srv/pokoin/rust/pokoin-api.env`, parsed like systemd's `EnvironmentFile=`.
+     `nezopt-k3s.sh env-diff` lists key names that differ from the running process: none on 2026-10-28,
+     and both sources give the same secret hash.
+   - `pi-proc`: the old `/proc/<MainPID>/environ` read.
+   - `infisical`: `secret://pokoin-runtime/prod#POKOIN_API_ENV` (the whole env file as one value) through
+     `infisical-broker exec`. The value only exists inside the child that applies the secret. Needs the owner (below).
+
+   Then the same rewrites as before (Pi-only keys dropped, loopback database URLs → writer, Hermes → bridge,
+   least-privilege logins). The secrets carry `pokoin.com/env-sha256`. They are applied only when that hash
+   changes, and a change rolls the pods. Before, a Pi env change only reached pods that happened to restart.
+2. **Sitemaps and extension zips**, as before.
+3. **Release**, as before: the Pi's commit, an x86_64 build from a detached worktree, a rollout.
+
+**Videos.** `nezopt-k3s.sh video`: `rsync -a` from the Pi into the CDN root, **never `--delete`**. On a
+miss the k3s CDN falls back to the Pi's own CDN: `POKOIN_CDN_FALLBACK_ORIGIN=http://172.31.250.15:18181`
+→ `pokoin-pi-cdn-bridge` → `pokoin-pi-cdn-tunnel.service` (`ssh -L 18181:127.0.0.1:18081 pi-home`). It is never
+cdn.pokoin.com, which would route back here. The fallback covers the game prefixes. `poko-video/`
+(`POKOIN_CDN_FALLBACK_EXTRA_PREFIXES`) needs a release that contains the cdn.rs change, and a request
+that is itself a fallback fetch (`user-agent: pokoin-cdn-fallback`) is never forwarded again.
+
+**Pi offline is a state, not a failure.**
+
+- Every Pi-dependent unit has `ExecCondition=~/.local/bin/pokoin-pi-up` (a 4 s TCP probe of the Pi's
+  port 22). The units are the sync, the video mirror, and the scan, Honcho, tcgprices and CDN tunnels. While
+  the Pi is down they skip: no failure, no `OnFailure=` mail. A skip also ends `Restart=always`.
+- `pokoin-pi-health.timer` (every minute, `pokoin-ops pi-health`) keeps `~/.local/state/pokoin-ops/pi-health.json`.
+  - After 3 failed probes it sends **one** mail + Secretary push ("Pi offline"). It pauses the `pi-*`
+    and `nezopt-overflow-sync` healthchecks, which resume on their next ping.
+  - When the Pi answers again it sends **one** "Pi back after …". It starts the enabled tunnels again and
+    runs the sync and the video mirror once.
+  - A blip under 3 minutes alerts nobody; the next run restarts any tunnel the blip skipped.
+- The sentinel mutes findings for those units, and `replication.standby` / `replication.lag`, while
+  pi-health says the Pi is down (`pi::mute`). A timer whose last run was a condition skip is OK.
+
+**Install / undo.** nezopt: `scripts/backup/install-ops-nezopt.sh pi-follow`. Pi (owner's OK):
+`scripts/install-pi-overflow-notify.sh install`, then `install-ops-nezopt.sh pi-hooks-live`.
+`scripts/install-pi-overflow-notify.sh remove` takes the Pi side out and puts the 5-minute timers back.
+
+**Secrets from Infisical (owner steps).** Each one is an owner action:
+1. An Infisical project `pokoin-runtime` (env `prod`) with `POKOIN_API_ENV` = the Pi env file.
+2. A broker caller `svc-pokoin-overflow-sync` (class services, `bind_unit = "pokoin-overflow-sync.service"`),
+   with `broker-services` as viewer on the project.
+3. A Pi machine identity (viewer) whose credentials are in systemd-creds on the Pi. A Pi-side render step
+   writes `pokoin-api.env` from the same secret and keeps the last good file when Infisical is unreachable,
+   so the Pi service never depends on Infisical being up.
+4. `Environment=POKOIN_ENV_SOURCE=infisical` on `pokoin-overflow-sync.service`. Check first with
+   `POKOIN_SECRET_DRY_RUN=1 POKOIN_ENV_SOURCE=infisical nezopt-k3s.sh secret`: the hash must equal the `pi-file` one.
+
+**Maintenance.** Before planned work on the Pi, run `pokoin-ops pi-health --maintenance 2h --reason "…"` on
+nezopt. One notice says the window is open, and the Pi's healthchecks are paused. Down/back alerts are held
+until the window ends; if the Pi is still down then, the "Pi offline" alert goes out with a note about
+the window. `--end-maintenance` closes it early. The 2026-10-28 outage was planned work of this kind:
+an SSD moved to another USB port, 13:44 → 15:33 UTC.
+
+**Measured (2026-10-28).**
+
+| | Before | After |
+| --- | --- | --- |
+| sync + video mirror runs | about 288 + 288 a day (5-minute timers) | about 24 + 24 a day (hourly backstop), plus one per Pi release or upload. `pi-health` adds 1,440 runs a day of about 35 ms each. |
+| a Pi outage (2026-10-28, 09:10 → 15:34 UTC) | 1,864 notifier runs; about 10 failure mails, each with a Secretary push; sentinel CRITs; healthchecks emails | drill: 0 notifier runs, 1 "offline" + 1 "back"; none inside a declared maintenance window |
+| upload on the Pi → in the nezopt CDN | up to 5 minutes | 4.5 s (3 s of it is the debounce) |
+| Pi release → nezopt sync starts | up to 5 minutes | about 12 s (10 s settle delay on the Pi) |
 
 ## Commands
 
 ```bash
 scripts/nezopt-k3s.sh status        # pods, HPA, CronJobs, release vs Pi commit, a pod's /readyz
 scripts/nezopt-k3s.sh sync          # force a secret/sitemap/release sync now
-scripts/nezopt-k3s.sh secret        # only rebuild the env secret from the Pi Rust service
+scripts/nezopt-k3s.sh secret        # only rebuild the env secrets (POKOIN_ENV_SOURCE; applied when the hash changes)
+scripts/nezopt-k3s.sh video         # poko-video mirror now (additive)
+scripts/nezopt-k3s.sh env-diff      # key names that differ between the Pi process env and its env file
 scripts/nezopt-k3s.sh apply         # after editing either manifest (applies both; also deletes the retired meili-* CronJobs)
 scripts/nezopt-k3s.sh reindex       # rebuild the Redis Search index now
 scripts/nezopt-k3s.sh install       # (re)install the sync timer and its script + manifest copies

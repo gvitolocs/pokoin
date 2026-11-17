@@ -9,6 +9,8 @@ import { legacyDashboardHref } from '@market/punchouts.js';
 import { warmRecentsRail } from '@market/recents-rail.js';
 import { isDashboardHost } from '@market/scan-api.js';
 import { subscribeOriginDown } from '@market/working-page.js';
+import { getChatDock, openChatList, subscribeChatDock } from '@market/chat-dock-store.js';
+import '@market/chat-dock.css';
 import Chrome from './components/Chrome.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
@@ -88,6 +90,7 @@ export default function App(props) {
   onCleanup(() => setGamePathSource(null));
   const framed = framedByChromeExtension();
   const [originDown, setOriginDown] = createSignal(typeof window !== 'undefined' && Boolean(window.__pokoinOriginDown));
+  const [messagesUnread, setMessagesUnread] = createSignal(0);
 
   const owner = getOwner();
   // Firebase Auth after the first paint; buyer currency once a session exists.
@@ -105,11 +108,13 @@ export default function App(props) {
     const stopAuthWait = afterHero(warmAuthWhenIdle);
     const stopDeskSession = watchDeskSession(() => refreshAccount());
     const unsubscribe = subscribeOriginDown(() => setOriginDown(true));
+    const openDock = () => { if (getChatDock().open) chatDock.warm(); };
+    const unsubscribeDock = subscribeChatDock(openDock);
+    openDock();
     document.documentElement.classList.toggle('is-extension-desk', framed);
     let cancelIdle = () => {};
     const stopIdleWait = afterHero(() => { cancelIdle = whenIdle(() => {
-      warmLikelyRoutes();
-      chatDock.warm();
+      if (!location.pathname.startsWith('/mypokoin')) warmLikelyRoutes();
       startCartSync();
       void warmRecentsRail({ account: signedIn() });
       import('./lib/referral-claim.js')
@@ -125,6 +130,7 @@ export default function App(props) {
       stopIdleWait();
       stopDeskSession();
       unsubscribe();
+      unsubscribeDock();
       cancelIdle();
       document.documentElement.classList.remove('is-extension-desk');
     };
@@ -166,9 +172,9 @@ export default function App(props) {
     <Show when={!gamePrivate()} fallback={<DashboardMarketHandoff target={`${routerPath()}${location.search || ''}`} />}>
     <Show when={!bare()} fallback={route()}>
       <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
-        <Chrome>{route()}</Chrome>
+        <Chrome onMessagesUnread={setMessagesUnread}>{route()}</Chrome>
         <CookieBanner />
-        <Show when={chatDock.mod()}>
+        <Show when={chatDock.mod()} fallback={<button type="button" class="chat-fab" aria-label={messagesUnread() ? `Open messages, ${messagesUnread()} unread` : 'Open messages'} onClick={() => { openChatList(); chatDock.warm(); }}><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 3C6.48 3 2 6.92 2 11.75c0 2.68 1.35 5.08 3.48 6.74V21l3.2-1.76c1.05.3 2.17.46 3.32.46 5.52 0 10-3.92 10-8.75S17.52 3 12 3z" /></svg><Show when={messagesUnread() > 0}><span class="chat-fab-badge" aria-hidden="true">{messagesUnread() > 9 ? '9+' : messagesUnread()}</span></Show></button>}>
           {(mod) => {
             const Dock = untrack(mod).default;
             return <Dock />;

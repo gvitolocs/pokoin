@@ -274,6 +274,12 @@ pub fn listing_row(row: &Value, owner: bool) -> Value {
             .cloned()
             .unwrap_or(fallback);
     }
+    // The owner's book read adds `cardrails_key` (seller API connector rows).
+    out["origin"] = json!(crate::listing_origin::listing_origin(
+        out["source"].as_str().unwrap_or(""),
+        out["sourceListingId"].as_str().unwrap_or(""),
+        row["cardrails_key"] == true,
+    ));
     if owner {
         out["location"] = row
             .get("location")
@@ -514,6 +520,16 @@ mod tests {
         assert!(public.get("location").is_none());
         assert_eq!(listing_row(&row, true)["location"], "BIN-07 ");
         assert!(public.get("sellerCountry").is_none());
+        assert_eq!(public["origin"], "pokoin");
+    }
+    #[test]
+    fn row_emits_the_listing_origin() {
+        let origin = |row: Value| listing_row(&row, true)["origin"].clone();
+        assert_eq!(origin(json!({"cardrails_key":true})), "cardrails");
+        assert_eq!(origin(json!({"cardrails_key":false,"source_listing_id":"ct:1"})), "pokoin");
+        assert_eq!(origin(json!({"source":"cardtrader_seller_import","source_listing_id":"ct:1"})), "cardtrader");
+        assert_eq!(origin(json!({"source":"powertools_csv_import","source_listing_id":"pt:7"})), "cardmarket");
+        assert_eq!(origin(json!({"source":"pokoin_scan_batch","source_listing_id":"scan:9"})), "pokoin");
     }
     #[test]
     fn reserve_names_cannot_be_replaced_by_profiles() {

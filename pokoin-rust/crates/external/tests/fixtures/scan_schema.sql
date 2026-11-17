@@ -59,6 +59,7 @@ CREATE TABLE public.scan_items (
     price_pkn numeric,
     price_suggested boolean DEFAULT false NOT NULL,
     seller_comment text DEFAULT ''::text NOT NULL,
+    pricing jsonb,
     listing_id uuid,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT scan_items_image_check CHECK (((image IS NULL) OR (octet_length(image) <= 60000))),

@@ -9,8 +9,8 @@ catalog expansion that has no symbol file yet.
 Never overwrite an existing PNG (those are real set marks). Pi has no Pillow;
 render on nezopt, rsync to replica + pi-home.
 
-  /home/nez/Projects/ai-toolkit/venv/bin/python scripts/export-expansion-code-marks.py
-  /home/nez/Projects/ai-toolkit/venv/bin/python scripts/export-expansion-code-marks.py --apply
+  /home/nez/Projects/AI/ai-toolkit/venv/bin/python scripts/export-expansion-code-marks.py
+  /home/nez/Projects/AI/ai-toolkit/venv/bin/python scripts/export-expansion-code-marks.py --apply
 """
 from __future__ import annotations
 

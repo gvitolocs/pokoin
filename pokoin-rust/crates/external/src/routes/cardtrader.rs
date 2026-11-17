@@ -322,17 +322,63 @@ pub async fn assets(State(state): State<DomainState>, headers: HeaderMap) -> Api
 }
 
 /// `GET /api/cardtrader-zero` — weekly merged Zero picking list.
-pub async fn zero(State(state): State<DomainState>, headers: HeaderMap) -> ApiResult<Response> {
+/// `powertools=0` answers without Power Tools (the page asks for the overlay
+/// next); `refresh=1` skips the per-seller cache. `Server-Timing` names each step.
+pub async fn zero(State(state): State<DomainState>, uri: Uri, headers: HeaderMap) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
-    let list = zero::zero_list(
+    let (list, timings) = zero::zero_list(
         &state.cardtrader,
         state.firestore.as_ref(),
         &state.db,
         &state.powertools,
         &identity.uid,
+        zero_options(&uri),
     )
     .await?;
-    Ok(json_response(200, list))
+    let mut response = json_response(200, list);
+    if let Ok(value) = axum::http::HeaderValue::from_str(&timings.header()) {
+        response.headers_mut().insert("server-timing", value);
+    }
+    Ok(response)
+}
+
+fn zero_options(uri: &Uri) -> zero::ZeroOptions {
+    let flag = |key: &str| query_first(uri, key).map(|v| v.trim().to_string());
+    zero::ZeroOptions {
+        power_tools: !matches!(flag("powertools").as_deref(), Some("0" | "false")),
+        refresh: matches!(flag("refresh").as_deref(), Some("1" | "true")),
+    }
+}
+
+/// `POST /api/cardtrader-zero-sort` — save the seller's picking sort
+/// (`{fields}` / `{reset: true}`) and `smartLocations`. No CardTrader or
+/// Power Tools call.
+pub async fn zero_sort(
+    State(state): State<DomainState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let payload = body_json(&body).await?;
+    let (current, _) = zero::read_settings(state.firestore.as_ref(), &identity.uid).await;
+    let next = zero::parse_sort_request(&payload, &current)?;
+    let out = zero::save_settings(state.firestore.as_ref(), &identity.uid, &next).await?;
+    Ok(json_response(200, out))
+}
+
+/// `POST /api/cardtrader-zero-pt-sort` — write the Pokoin picking order to
+/// the seller's Power Tools picking list (`updateSorting`). User-triggered
+/// only, throttled, never retried; `dryRun` reads without writing.
+pub async fn zero_pt_sort(
+    State(state): State<DomainState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let identity = require_token(&state, &headers).await?;
+    let payload = body_json(&body).await?;
+    let request = zero::parse_pt_sort_request(&payload)?;
+    let out = zero::apply_pt_sort(state.firestore.as_ref(), &state.powertools, &identity.uid, &request).await?;
+    Ok(json_response(200, out))
 }
 
 /// `POST /api/cardtrader-clean-listings` — deactivate CardTrader-linked stock.
@@ -693,5 +739,39 @@ mod tests {
         assert_eq!(secret_from(&headers), "cron-secret");
 
         assert_eq!(secret_from(&HeaderMap::new()), "");
+    }
+
+    #[tokio::test]
+    async fn zero_sort_requires_a_bearer_saves_and_resets() {
+        let state = DomainState::for_test();
+        let body = Bytes::from(r#"{"fields":["cn.desc","game.asc"],"smartLocations":false}"#);
+        let error = zero_sort(State(state.clone()), HeaderMap::new(), body.clone()).await.unwrap_err();
+        assert_eq!(error.status, 401);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer test-u1"));
+        let response = zero_sort(State(state.clone()), headers.clone(), body).await.unwrap();
+        assert_eq!(response.status(), 200);
+        let doc = state.firestore.get_doc(zero::SETTINGS_COLLECTION, "u1").await.unwrap();
+        assert_eq!(doc.data["sortingFields"], json!(["cn.desc", "game.asc", "none", "none"]));
+        assert_eq!(doc.data["smartLocations"], false);
+
+        let duplicate = Bytes::from(r#"{"fields":["cn.desc","cn.asc"]}"#);
+        let error = zero_sort(State(state.clone()), headers.clone(), duplicate).await.unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("duplicate_sorting_field"));
+
+        let reset = Bytes::from(r#"{"reset":true}"#);
+        zero_sort(State(state.clone()), headers, reset).await.unwrap();
+        let doc = state.firestore.get_doc(zero::SETTINGS_COLLECTION, "u1").await.unwrap();
+        assert_eq!(doc.data["sortingFields"], json!(zero::DEFAULT_SORTING_FIELDS));
+        assert_eq!(doc.data["smartLocations"], false, "reset keeps smartLocations");
+    }
+
+    #[test]
+    fn zero_query_flags() {
+        let options = |q: &str| zero_options(&format!("/api/cardtrader-zero{q}").parse::<Uri>().unwrap());
+        assert!(options("").power_tools && !options("").refresh);
+        assert!(!options("?powertools=0").power_tools);
+        assert!(options("?powertools=1&refresh=1").refresh);
     }
 }

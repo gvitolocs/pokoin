@@ -83,8 +83,8 @@ function sortKey(row) {
   };
 }
 
-/** CardTrader shows expansion circles only when the reprint family is short. */
-export const DESK_SET_SHORTCUT_MAX = 5;
+/** Maximum number of expansion circles on the desk. */
+export const DESK_SET_SHORTCUT_MAX = 6;
 
 /**
  * CLIP same-illustration rows for desk shortcuts. Prefer the dedicated
@@ -96,13 +96,20 @@ export function deskClipCandidates(fetched = [], payloadVersions = []) {
   return (source || []).filter((row) => row?.id || row?.card_id);
 }
 
+/** Desk shortcut order: newest expansion block first, ties by set key. */
+function byExpansionNewest(left, right) {
+  return expansionSortValue(right) - expansionSortValue(left)
+    || setKey(left).localeCompare(setKey(right));
+}
+
 /**
  * One printing per expansion for the desk shortcut row. Pass the CLIP
  * same-illustration group (`marketplace-version-set` printings), not every
  * rarity of the English name. Default order is the set date, newest block
  * first, so a circle keeps its position when the seller clicks another one.
- * A singleton still paints one circle. Empty when there are more than
- * DESK_SET_SHORTCUT_MAX sets (then the desk keeps only “More versions...”).
+ * A singleton still paints one circle. A group with more than
+ * DESK_SET_SHORTCUT_MAX sets keeps that many — the current card's own set plus
+ * the newest of the others — and "More versions..." stays next to them.
  */
 export function deskSetShortcuts(current, candidates = [], { max = DESK_SET_SHORTCUT_MAX } = {}) {
   if (!current?.id && !current?.card_id) {
@@ -123,13 +130,21 @@ export function deskSetShortcuts(current, candidates = [], { max = DESK_SET_SHOR
       bySet.set(key, row);
     }
   }
-  const rows = [...bySet.values()];
-  if (!rows.length || rows.length > max) {
+  let rows = [...bySet.values()];
+  if (!rows.length) {
     return [];
   }
-  return rows.sort((left, right) =>
-    expansionSortValue(right) - expansionSortValue(left)
-    || setKey(left).localeCompare(setKey(right)));
+  const limit = Number(max);
+  if (Number.isFinite(limit) && limit >= 1 && rows.length > limit) {
+    const currentKey = setKey(current);
+    const own = rows.find((row) => setKey(row) === currentKey);
+    const others = rows
+      .filter((row) => row !== own)
+      .sort(byExpansionNewest)
+      .slice(0, own ? limit - 1 : limit);
+    rows = own ? [own, ...others] : others;
+  }
+  return rows.sort(byExpansionNewest);
 }
 
 /** Rarity lineup + other artwork live on `/versions`. Keep that link next to set circles. */

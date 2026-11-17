@@ -40,12 +40,13 @@ STUB
 chmod +x "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH"
 export POKOIN_GPU_LEASE="$tmp/bin/gpu-lease" POKOIN_AI_PYTHON="$tmp/bin/ok" POKOIN_CT_PRICE_BIN="$tmp/bin/ok" POKOIN_CT_SOLD_BIN="$tmp/bin/ok"
+export POKOIN_CARD_REFRESH_BIN="$tmp/bin/ok"
 export POKOIN_CATALOG_RUN_ROOT="$tmp/run"
 
 # 1. A full run whose dump fails reports every stage and exits 1.
 POKOIN_CT_DUMP_BIN="$tmp/bin/dump-fails" bash "$tmp/repo/scripts/run-all-cardtrader-daily.sh" && fail "dump failure must exit 1"
 notify_line="$(grep 'cardtrader-daily-notify.py' "$log")"
-for want in "--exit-code 1" "catalog=0" "pictures=0" "picture-sync=0" "artwork=0" "dump=4" "prices=0" "sold=0"; do
+for want in "--exit-code 1" "catalog=0" "pictures=0" "picture-sync=0" "artwork=0" "cards=0" "dump=4" "prices=0" "sold=0"; do
   [[ "$notify_line" == *"$want"* ]] || fail "full run: missing $want in: $notify_line"
 done
 [[ "$notify_line" != *interrupted* ]] || fail "full run marked interrupted"

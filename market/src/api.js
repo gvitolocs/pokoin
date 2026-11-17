@@ -25,6 +25,7 @@ import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.j
 import { withGameQuery, withGameQueryFor, isPokemonGame, gameHeadersForUrl, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
+import { cardmarketChoices } from './cardmarket-matches.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { SCAN_API_BASE, scanIdentifyUrl } from './scan-live.js';
 import { getSearchLang } from './locale.js';
@@ -707,7 +708,7 @@ export async function fetchLastMedianPknMap(cardIds) {
 }
 
 /** Batch cheapest listed PKN per card id (marketplace-card-cheapest-price). */
-export async function fetchCheapestPricePknMap(cardIds) {
+export async function fetchCheapestPricePknMap(cardIds, { strict = false } = {}) {
   const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 50);
   if (!ids.length) {
     return {};
@@ -723,7 +724,9 @@ export async function fetchCheapestPricePknMap(cardIds) {
       }
     }
     return byId;
-  } catch (_) {
+  } catch (err) {
+    // strict: a failed read is not "no listing"; the caller retries it.
+    if (strict) throw err;
     return {};
   }
 }
@@ -1006,6 +1009,20 @@ export function fetchPortfolioHistory(token) {
   });
 }
 
+/**
+ * Dashboard top movers: the seller's own printings that moved most inside the
+ * chart's window. `days` is that window in days, or "max".
+ */
+export function fetchPortfolioMovers(token, days) {
+  const query = days === undefined || days === null || days === '' ? '' : `?days=${days}`;
+  return getJson(`/api/marketplace-portfolio-movers${query}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 /** Associate desk: role, campaign window, and live royalty earnings. */
 export function fetchAssociateSummary(token) {
   return getJson('/api/marketplace-associate', {
@@ -1096,9 +1113,70 @@ export function sellerApiGrantAction(token, body) {
   });
 }
 
-/** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
-export function fetchCardTraderZero(token) {
-  return getJson('/api/cardtrader-zero', {
+/**
+ * CardTrader Zero picking list (weekly merged shipment + Zero sales waiting
+ * for the next merge). `powerTools: false` answers without the Power Tools
+ * overlay (fast first paint); `refresh: true` skips the server's 60 s cache.
+ */
+export function fetchCardTraderZero(token, { powerTools = true, refresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (!powerTools) params.set('powertools', '0');
+  if (refresh) params.set('refresh', '1');
+  const query = params.toString();
+  return getJson(`/api/cardtrader-zero${query ? `?${query}` : ''}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/**
+ * Zero picking state, server side. A pick moves inventory:
+ * `{ orderId, itemId, lineKey, listingId, allocatedListingId, quantity, action: 'pick' | 'undo' }`
+ * → `{ ok, pick, listings, inventory }`. Issues: `{ orderId, lineKey, issue }`.
+ */
+export function saveCardTraderZeroPick(token, body) {
+  return getJson('/api/cardtrader-zero-pick', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** `{ fields, smartLocations }` or `{ reset: true }`: the seller's Zero picking sort, saved on Pokoin only. */
+export function saveCardTraderZeroSort(token, body) {
+  return getJson('/api/cardtrader-zero-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Power Tools write (user-triggered only): `{ orderId, listId, sequence, dryRun?, expectCount }`.
+ * Dry run → `{ dryRun, before, items }`; real → `{ before, after, applied }`.
+ */
+export function pushCardTraderZeroPtSort(token, body) {
+  return getJson('/api/cardtrader-zero-pt-sort', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The seller's picked Zero copies (newest first): `{ rows }`. */
+export function fetchCardTraderZeroPicked(token) {
+  return getJson('/api/cardtrader-zero-picked', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2308,6 +2386,9 @@ export function cardFromAutocomplete(row = {}) {
     isMarketAvailable: row.isMarketAvailable === true,
     nationality: row.nationality || expansionNationality(row.set_name || row.set) || '',
     expansionSymbolUrl: row.expansionSymbolUrl || row.expansion_symbol_url || row.defaultSymbolUrl || row.symbolImageUrl || '',
+    // TCGdex scans of this printing per card language (lang-scans.js): the
+    // popup shows the French scan under French, as the desk does.
+    langScans: row.langScans || row.lang_scans || '',
     live,
   };
 }
@@ -2884,6 +2965,17 @@ export async function fetchCardmarketRedirect(card) {
   return data.url || data.redirect || data.href || '';
 }
 
+/** Every stored verified Cardmarket product for the card, and what the redirect opens (cardmarket-matches.js). */
+export async function fetchCardmarketMatches(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const leftover = leftoverBlueprintId(card);
+  const params = new URLSearchParams({ id });
+  if (leftover && leftover !== id) {
+    params.set('blueprintId', leftover);
+  }
+  return cardmarketChoices(await getJson(`/api/cardmarket-matches?${params}`));
+}
+
 /** CardTrader leftover blueprint. Never a public card_id (those 404 on cardtrader.com). */
 export function leftoverBlueprintId(card) {
   if (card && typeof card === 'object') {
@@ -3206,7 +3298,51 @@ export function fetchSellerShop(username, {
   return request;
 }
 
-/** PowerTools pricing strategies + pricer defaults (users/{uid}). */
+/**
+ * Pricing groups: `{ groups, memberships: [[listingId, groupId]] }`
+ * (market/src/pricer.js, docs/PRICING.md "Pricer").
+ */
+export function fetchPricingGroups(token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Create or edit a group (`{ group: { id?, name, strategyId, autoDaily } }`,
+ * optionally `add` to start it with listings), or move listings
+ * (`{ groupId, add: [listingId], remove: [listingId] }`).
+ */
+export function savePricingGroup(body, token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function deletePricingGroup(id, token) {
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-pricing-groups?${params}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Plan or apply prices: `{ groupId }` (the group's strategy over its
+ * listings) or `{ strategyId, listingIds }`, with `dryRun: true` for the plan
+ * only. Answers `{ plan, scoped, noComp, unchanged, activated, applied, failed }`.
+ */
+export function applyPricing(body, token) {
+  return getJson('/api/marketplace-pricing-groups/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+/** Named pricing strategies, the groups, and the pricer defaults (users/{uid}). */
 export function fetchPricingStrategies(token) {
   return getJson('/api/marketplace-pricing-strategies', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -3247,6 +3383,16 @@ export async function fetchPriceCheck(items, token, { game: gameId } = {}) {
     ...(gameId ? { game: gameId } : {}),
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+}
+
+/**
+ * One price check per `priceCheckGroups` group, in parallel:
+ * `{ [game]: prices }`, a failed game `null` so only its rows lack a comp.
+ */
+export async function fetchPriceChecksByGame(groups, token) {
+  const answers = await Promise.all((groups || []).map((group) => fetchPriceCheck(group.items, token, { game: group.game })
+    .then((data) => [group.game, data?.prices || {}], () => [group.game, null])));
+  return Object.fromEntries(answers);
 }
 
 export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0, game: gameId, order = '' } = {}) {

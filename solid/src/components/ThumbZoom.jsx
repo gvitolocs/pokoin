@@ -95,7 +95,13 @@ export default function ThumbZoom(props) {
     window.addEventListener('dragstart', onStart, true);
     window.addEventListener('dragend', onEnd, true);
     return () => {
-      hide();
+      // Teardown runs inside this component's owned scope, where Solid 2.0
+      // rejects a reactive write; the box is going away with the host anyway.
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      document.documentElement.classList.remove('is-card-dragging');
       window.removeEventListener('dragstart', onStart, true);
       window.removeEventListener('dragend', onEnd, true);
     };

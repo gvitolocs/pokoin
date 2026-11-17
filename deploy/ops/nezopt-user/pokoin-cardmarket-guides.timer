@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Cardmarket price guide load, every game
+# Cardmarket builds price_guide_<idGame>.json around 00:45 UTC.
+
+[Timer]
+OnCalendar=*-*-* 02:45:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+Unit=pokoin-cardmarket-guides.service
+
+[Install]
+WantedBy=timers.target

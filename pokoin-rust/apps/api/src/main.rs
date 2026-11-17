@@ -629,6 +629,8 @@ fn external_fallback_router() -> Router {
         "/api/cardtrader-sync",
         "/api/cardtrader-assets",
         "/api/cardtrader-zero",
+        "/api/cardtrader-zero-sort",
+        "/api/cardtrader-zero-pt-sort",
         "/api/cardtrader-clean-listings",
         "/api/cardtrader-webhook/{uid}",
         "/api/cardtrader-blueprint-listings",
@@ -637,6 +639,7 @@ fn external_fallback_router() -> Router {
         "/api/cardtrader-game-ingest",
         "/api/powertools-connect",
         "/api/marketplace-pricing-strategies",
+        "/api/marketplace-pricing-groups",
         "/api/marketplace-price-check",
         "/api/scan/identify",
         "/api/scan/identify-album",
@@ -676,6 +679,7 @@ fn commerce_fallback_router() -> Router {
         "/api/seller-api-grants",
         "/api/cardrails/connector",
         "/api/seller-api/v1",
+        "/api/marketplace-pricing-groups/apply",
         "/api/account-addresses",
         "/api/marketplace-shipping-options",
         "/api/marketplace-checkout-quote",
@@ -696,6 +700,8 @@ fn commerce_fallback_router() -> Router {
         "/api/extension-download",
         "/api/money-request",
         "/api/earn-pkn",
+        "/api/cardtrader-zero-pick",
+        "/api/cardtrader-zero-picked",
     ])
 }
 

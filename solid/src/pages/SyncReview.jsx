@@ -1,3 +1,4 @@
+import { createTabCache } from '../lib/tab-cache.js';
 import { createEffect, createSignal, For, Show, untrack } from 'solid-js';
 import { useLocation } from '@solidjs/router';
 import {
@@ -13,6 +14,7 @@ import {
 import { GAMES } from '@market/game.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { accountProfile } from '../stores/account.js';
@@ -66,6 +68,8 @@ function pickCardFromSearch(data, row) {
   return scored[0]?.card || null;
 }
 
+const syncReviewCache = createTabCache();
+
 function SyncReviewDesk() {
   const uid = () => authUser()?.uid || accountProfile()?.uid || authSession()?.uid || '';
   const sellerName = () => {
@@ -84,7 +88,12 @@ function SyncReviewDesk() {
   createEffect(
     () => (signedIn() ? uid() : ''),
     (id) => {
-      if (!id) return undefined;
+      if (!id) { setReconcile(null); setListings([]); setShipFromCountry(''); return undefined; }
+      const cached = syncReviewCache.get(id);
+      setReconcile(() => cached?.reconcile ?? null);
+      setListings(() => cached?.listings ?? []);
+      setShipFromCountry(cached?.shipFromCountry ?? '');
+      if (syncReviewCache.fresh(id)) return undefined;
       let cancelled = false;
       getBearer()
         .then(async (token) => {
@@ -95,9 +104,11 @@ function SyncReviewDesk() {
           ]);
           if (cancelled) return;
           const summary = syncData?.sync?.summary || syncData?.summary || {};
-          setReconcile(() => summary.powerToolsReconcile || null);
-          setListings(listData?.listings || listData?.items || []);
-          setShipFromCountry(String(settings?.shipFromCountry || '').toUpperCase());
+          const next = { reconcile: summary.powerToolsReconcile || null, listings: listData?.listings || listData?.items || [], shipFromCountry: String(settings?.shipFromCountry || '').toUpperCase() };
+          syncReviewCache.set(id, next);
+          setReconcile(() => next.reconcile);
+          setListings(() => next.listings);
+          setShipFromCountry(next.shipFromCountry);
         })
         .catch((err) => {
           if (!cancelled) setError(err.message || 'Could not load sync review.');
@@ -111,6 +122,10 @@ function SyncReviewDesk() {
   const ptOnly = () => (reconcile()?.ptOnly || [])
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => !dismissedPt().has(index));
+  // Either side can be a few thousand rows after a first sync, and the review
+  // reads one row at a time: paint them 40 at a time.
+  const [ctLimit, setCtLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [ptLimit, setPtLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   function listingForCtProduct(productId) {
     const source = ctSourceId(productId);
@@ -131,6 +146,7 @@ function SyncReviewDesk() {
       setError('No Pokoin listing linked to that CardTrader product yet. Sync again or open the card desk.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {
@@ -154,6 +170,7 @@ function SyncReviewDesk() {
       setError('No Pokoin listing to cancel for that CardTrader product.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {
@@ -185,6 +202,7 @@ function SyncReviewDesk() {
       setError('That Power Tools row has no price. Open the card desk to list it manually.');
       return;
     }
+    syncReviewCache.delete(uid());
     setBusyKey(key);
     setError('');
     try {
@@ -276,7 +294,7 @@ function SyncReviewDesk() {
       <Show when={ctOnly().length}>
         <DeskPanel flush title={`On CardTrader, not in Power Tools (${ctOnly().length})`}>
           <div class="thread-list">
-            <For each={ctOnly()}>
+            <For each={ctOnly().slice(0, ctLimit())}>
               {(row) => {
                 const key = `ct:${row.ctProductId}`;
                 const listing = () => listingForCtProduct(row.ctProductId);
@@ -327,13 +345,16 @@ function SyncReviewDesk() {
               }}
             </For>
           </div>
+          <Show when={ctOnly().length > ctLimit()}>
+            <button type="button" class="btn ghost" onClick={() => setCtLimit(nextCollectionBatch(ctLimit(), ctOnly().length))}>Show more</button>
+          </Show>
         </DeskPanel>
       </Show>
 
       <Show when={ptOnly().length}>
         <DeskPanel flush title={`In Power Tools, not on CardTrader (${ptOnly().length})`}>
           <div class="thread-list">
-            <For each={ptOnly()} keyed={(entry) => entry.index}>
+            <For each={ptOnly().slice(0, ptLimit())} keyed={(entry) => entry.index}>
               {(entry) => {
                 // Keyed by ptOnly position: the row behind a key never changes.
                 const { row, index } = untrack(entry);
@@ -379,6 +400,9 @@ function SyncReviewDesk() {
               }}
             </For>
           </div>
+          <Show when={ptOnly().length > ptLimit()}>
+            <button type="button" class="btn ghost" onClick={() => setPtLimit(nextCollectionBatch(ptLimit(), ptOnly().length))}>Show more</button>
+          </Show>
         </DeskPanel>
       </Show>
 

@@ -75,6 +75,30 @@ export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
 }
 
 /**
+ * Desk language chips: what this printing can exist in, plus a language the
+ * caller has real data for (a listing, a sale, a buy order). What the visitor
+ * reads is not data: an English desk of a Chinese card offers ZH and ZHT.
+ */
+export function deskLanguageChips({ nationality, setName, releaseLanguages, data } = {}) {
+  const codes = sellLanguages({ nationality, setName, releaseLanguages });
+  const extra = cleanCodes(data).filter((code) => !codes.includes(code));
+  return [...codes, ...rank(extra)];
+}
+
+/**
+ * Chip the desk opens on: `chosen` (the URL, or the visitor's own language)
+ * when this printing exists in it, else the first chip with data, else the
+ * printing's first language — ZH for a Chinese one, EN for a western one.
+ */
+export function deskLanguageChoice({ nationality, setName, releaseLanguages, data, chosen } = {}) {
+  const chips = deskLanguageChips({ nationality, setName, releaseLanguages, data });
+  const have = new Set(cleanCodes(data));
+  const want = String(chosen || '').trim().toUpperCase();
+  if (chips.includes(want)) return want;
+  return chips.find((code) => have.has(code)) || chips[0];
+}
+
+/**
  * Asian codes that are a different printing of the same artwork.
  * Choosing one confirms a redirect instead of listing this card in that language.
  */

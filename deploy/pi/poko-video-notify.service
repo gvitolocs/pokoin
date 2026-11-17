@@ -1,0 +1,13 @@
+[Unit]
+Description=Notify nezopt when a poko-video file lands (nezopt pulls it into the k3s CDN mirror)
+After=network-online.target
+
+[Service]
+User=pokoin-notify
+ExecStart=/usr/local/lib/pokoin/poko-video-notify
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

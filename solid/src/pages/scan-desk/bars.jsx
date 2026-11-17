@@ -5,6 +5,7 @@ import { phoneConnectUrl } from '@market/scan-api.js';
 import { CONDITIONS, FINISHES, LANGUAGES, STACK_SIZES } from '@market/scan-model.js';
 import { HELP_SECTIONS } from '@market/scan-shortcuts.js';
 import { FIELD_LABEL, perfRows, perfSink } from './version-sets.js';
+import { pricingChoicePatch, pricingChoiceValue, pricingHint, pricingOptions } from './pricing.js';
 
 /** Pairing QR: ECC H with a centered Pokoin logo on a white pad (D00006I). */
 export function QrBlock(props) {
@@ -56,7 +57,10 @@ function boxSuggestions(boxes, draft) {
  * Batch defaults strip: game, language, condition, finish, flags, location
  * (+ stack setup behind the gear) and merge repeats. `onChange` patches the
  * batch defaults; `locationRef` / `stackButtonRef` receive the elements the
- * Alt shortcuts focus.
+ * Alt shortcuts focus; `cursorForStack(stack)` answers with the stack and
+ * position the desk really uses (stock in the box plus this batch).
+ * `pricing` (the `fetchPricingStrategies` answer) fills
+ * the Pricing select, last in the row, when `showPricing` (listing for sale).
  */
 export function DefaultsBar(props) {
   const d = () => props.defaults;
@@ -69,6 +73,7 @@ export function DefaultsBar(props) {
   const [sizeDraft, setSizeDraft] = createSignal(untrack(() => String(size())));
   const [sizeOpen, setSizeOpen] = createSignal(false);
   let sizeMenu;
+  const pricingList = createMemo(() => pricingOptions(props.pricing, d(), props.currencyCtx));
 
   createEffect(sizeOpen, (open) => {
     if (!open) return undefined;
@@ -116,10 +121,10 @@ export function DefaultsBar(props) {
       return;
     }
     // Typing a stack that already holds cards (even the current one) continues
-    // after them instead of restarting at position 1.
-    const pos = (props.positionForStack && props.positionForStack(n)) || 1;
-    const next = pos > size() ? { stack: Math.min(9999, n + 1), startPosition: 1 } : { stack: n, startPosition: pos };
-    if (next.stack !== stack || next.startPosition !== (d().startPosition ?? 1)) props.onChange(next);
+    // after them; a full one walks on to the next stack with room. The desk
+    // answers with both numbers, so the setup shows the cursor it really took.
+    const cursor = props.cursorForStack(n) || { stack: n, startPosition: 1 };
+    if (cursor.stack !== stack || cursor.startPosition !== (d().startPosition ?? 1)) props.onChange(cursor);
     else setStackDraft(String(stack));
   };
   const commitPos = () => {
@@ -363,7 +368,36 @@ export function DefaultsBar(props) {
           <input type="checkbox" checked={Boolean(d().mergeRepeats)} onChange={(e) => props.onChange({ mergeRepeats: e.currentTarget.checked })} />
           <span>Merge repeats</span>
         </label>
+        <Show when={props.showPricing}>
+          <label class="sd-field sd-pricing">
+            <span>Pricing</span>
+            <select
+              value={pricingChoiceValue(d())}
+              data-testid="scan-pricing"
+              onChange={(e) => {
+                const next = e.currentTarget.value;
+                if (next !== pricingChoiceValue(d())) props.onChange(pricingChoicePatch(next));
+              }}
+            >
+              <Show when={pricingList().groups.length}>
+                <optgroup label="Add to a group">
+                  <For each={pricingList().groups}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+                </optgroup>
+              </Show>
+              <Show when={pricingList().strategies.length}>
+                <optgroup label="Price once with a strategy">
+                  <For each={pricingList().strategies}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+                </optgroup>
+              </Show>
+              <option value="">Suggested prices</option>
+            </select>
+          </label>
+          <a class="sd-pricing-manage" href={props.pricingHref || '/mypokoin/pricer'}>Manage pricing</a>
+        </Show>
       </div>
+      <Show when={props.showPricing && pricingHint(d())}>
+        <p class="sd-pricing-hint">{pricingHint(d())}</p>
+      </Show>
       <Show when={props.stackFull}>
         <p class="sd-stack-full-msg" role="status">Stack full — next card starts a new divider.</p>
       </Show>

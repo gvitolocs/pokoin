@@ -13,7 +13,9 @@ export default function SeoHead(props) {
       imageAlt: props.imageAlt,
       jsonLd: props.jsonLd || null,
     }),
-    (head) => applySeoHead(head),
+    (head) => {
+      applySeoHead(head);
+    },
   );
   return null;
 }

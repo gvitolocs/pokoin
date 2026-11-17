@@ -200,6 +200,7 @@ add('pokemon', {});
 const table = JSON.parse(readFileSync(`${root}market/src/data/catalog-image-cache.json`, 'utf8'));
 const lists = {
   'small-scan-ctf1': JSON.parse(readFileSync(`${root}market/src/data/small-scan-ctf1.json`, 'utf8')),
+  'small-scan-ctf2': JSON.parse(readFileSync(`${root}market/src/data/small-scan-ctf2.json`, 'utf8')),
   'pokoin-placeholder-leftovers': JSON.parse(readFileSync(`${root}market/src/data/pokoin-placeholder-leftovers.json`, 'utf8')),
 };
 for (const rule of table.rules) {

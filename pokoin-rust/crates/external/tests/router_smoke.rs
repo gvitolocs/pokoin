@@ -44,6 +44,7 @@ async fn authenticated_routes_require_a_bearer_token() {
         "/api/cardtrader-assets",
         "/api/powertools-connect",
         "/api/marketplace-pricing-strategies",
+        "/api/marketplace-pricing-groups",
     ] {
         let (status, body) = call(DomainState::for_test(), get(uri)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
