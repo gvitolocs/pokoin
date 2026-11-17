@@ -1,0 +1,13 @@
+[Unit]
+Description=Every 15 minutes: fetch origin and deploy the Pokoin Rust API if main changed it (docs/AUTO_DEPLOY.md)
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=15min
+AccuracySec=1min
+
+# The only trigger. Nothing fetches origin/main on its own, so a path unit on refs/remotes/origin/main would never
+# fire reliably; the script fetches.
+
+[Install]
+WantedBy=timers.target
