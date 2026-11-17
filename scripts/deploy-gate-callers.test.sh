@@ -30,7 +30,7 @@ done
 ok "structure: all four entry points call require-ci-green.sh"
 
 # ---- fixtures ----------------------------------------------------------------------------------------------
-add_repo_gate() { jq --arg c "$1" '.check_runs += [{id:200000000001,name:"repo-gate",status:"completed",conclusion:$c,app:{slug:"github-actions"}}]' "$real"; }
+add_repo_gate() { jq --arg c "$1" '.check_runs += [{id:200000000001,name:"repo-gate",status:"completed",conclusion:$c,app:{slug:"github-actions"}},{id:200000000002,name:"secret-gate",status:"completed",conclusion:"success",app:{slug:"github-actions"}}]' "$real"; }
 add_repo_gate success > "$t/fx-green.json"
 add_repo_gate failure > "$t/fx-red.json"
 
