@@ -358,6 +358,28 @@
   color: var(--yellow);
 }
 .sd-stack-done { justify-self: end; }
+/* Switched-off defaults: greyed, never taken away. A greyed control keeps its
+   tab stop and stays clickable (the gear still opens the setup to switch it
+   back on); its title says how. */
+.sd-location.is-off > label,
+.sd-location.is-off .sd-location-input input,
+.sd-stack-menu input[aria-disabled="true"] {
+  color: var(--muted);
+}
+.sd-location.is-off .sd-location-input input,
+.sd-stack-menu input[aria-disabled="true"] {
+  border-color: var(--g4);
+  background: transparent;
+}
+.sd-gear.is-off,
+.sd-location.is-off .sd-gear {
+  border-color: var(--g4);
+  background: transparent;
+}
+.sd-gear.is-off:not(:hover):not([aria-expanded="true"]),
+.sd-location.is-off .sd-gear:not(:hover):not([aria-expanded="true"]) {
+  color: var(--muted);
+}
 .scan-defaults.is-stack-full,
 .sd-location.is-full .sd-gear {
   animation: sd-stack-pulse 1.1s ease-in-out 2;
