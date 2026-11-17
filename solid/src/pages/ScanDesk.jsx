@@ -71,6 +71,7 @@ import {
   parseBatchFlags,
   serializeBatchFlags,
   setBatchFlag,
+  STACK_SETUP_OFF_ENABLED,
 } from './scan-desk/defaults-state.js';
 import { applyDefaultsResponse, defaultsFailureMessage, rollbackDefaults, stockAnswerIsForBox } from './scan-desk/defaults-write.js';
 import { ManualAddBar, QueueRow } from './scan-desk/rows.jsx';
@@ -619,7 +620,9 @@ function ScanDeskDesk(props) {
   }
   watch(() => [batch()?.id], ([batchId]) => {
     setLocationTouched(batchFlag(batchFlags, batchId || '', 'locationTouched'));
-    setStackOff(batchFlag(batchFlags, batchId || '', 'stackOff'));
+    // A stored stack-off flag from before the gate must not grey the gear: the
+    // choice is not on offer until the server holds an off value.
+    setStackOff(STACK_SETUP_OFF_ENABLED && batchFlag(batchFlags, batchId || '', 'stackOff'));
   });
 
   /**

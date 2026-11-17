@@ -9,6 +9,17 @@
 /** localStorage key of `{ [batchId]: { locationTouched, stackOff } }`. */
 export const BATCH_FLAGS_KEY = 'scan:batch-defaults';
 
+/**
+ * Stack setup Off waits for the server to hold an off value: `normalize_defaults`
+ * clamps `stackSize` to 1..9999, so an off batch would submit `box1` while the
+ * desk row says `box1·7` — a location the listing will not have. While this is
+ * false the desk never offers the choice: no Off chip, an emptied "Cards per
+ * stack" restores its number, the gear never greys from stack-off, and rows
+ * keep the suffix the listing will really have. The Off rules stay and their
+ * tests run with the flag forced on, passed as a parameter.
+ */
+export const STACK_SETUP_OFF_ENABLED = false;
+
 /** `{ batchId: {…} }` out of stored JSON; junk, arrays and null become empty. */
 export function parseBatchFlags(raw) {
   let parsed = null;
@@ -98,11 +109,13 @@ export const STACK_OFF_PATCH = Object.freeze({ stackSize: 1 });
 
 /**
  * What "Cards per stack" means when the seller leaves the field: emptied is an
- * explicit Off, never "keep the old number".
+ * explicit Off, never "keep the old number" — but only while the server can
+ * hold the off value (`offEnabled`). Until then an emptied field is a keep: the
+ * bar restores the number it had, because Off is not on offer.
  */
-export function sizeCommit(raw) {
+export function sizeCommit(raw, offEnabled = STACK_SETUP_OFF_ENABLED) {
   const text = String(raw ?? '').trim();
-  if (!text) return { kind: 'off' };
+  if (!text) return offEnabled ? { kind: 'off' } : { kind: 'keep' };
   const n = Number.parseInt(text, 10);
   if (!(n >= 1 && n <= 9999)) return { kind: 'invalid' };
   return { kind: 'size', size: n };
@@ -144,16 +157,18 @@ export function locationFieldState({ location, suggestion }) {
 
 /**
  * The gear: greyed with no number while the stack setup is Off (or there is no
- * box to stack in), and its title always says how to switch it back on.
+ * box to stack in), and its title always says how to switch it back on. A
+ * stack-off request only takes while `offEnabled` says the server can hold it.
  */
-export function gearState({ off, size, stack, startPosition, locationOff }) {
-  const greyed = Boolean(off || locationOff);
+export function gearState({ off, offEnabled = STACK_SETUP_OFF_ENABLED, size, stack, startPosition, locationOff }) {
+  const stackOff = Boolean(off) && offEnabled;
+  const greyed = Boolean(stackOff || locationOff);
   const n = Math.max(1, Math.trunc(Number(size)) || 1);
   if (greyed) {
     return {
       greyed,
       showSize: false,
-      title: off
+      title: stackOff
         ? 'Stack setup is Off — cards keep the box name only. Choose cards per stack to switch it on.'
         : 'No Location set — type a box and the stack setup switches on.',
     };
@@ -166,8 +181,9 @@ export function gearState({ off, size, stack, startPosition, locationOff }) {
 }
 
 /** Off = the plain box name: no row of the batch shows a stack or position suffix. */
-export function displaySlots(slots, { off }) {
-  if (!off) return slots instanceof Map ? slots : new Map();
+export function displaySlots(slots, { off, offEnabled = STACK_SETUP_OFF_ENABLED } = {}) {
+  const stackOff = Boolean(off) && offEnabled;
+  if (!stackOff) return slots instanceof Map ? slots : new Map();
   return new Map();
 }
 

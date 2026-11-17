@@ -138,6 +138,11 @@ test('defaults can be switched off and an off control is greyed but stays reacha
 test('the stack setup switch is remembered per batch and read back on load', () => {
   assert.match(desk, /function rememberStackOff\(next\)/);
   assert.match(desk, /rememberBatchFlag\('stackOff', Boolean\(next\)\)/);
-  assert.match(desk, /setStackOff\(batchFlag\(batchFlags, batchId \|\| '', 'stackOff'\)\)/);
+  // The read-back goes through the gate: a stored stack-off flag from before
+  // the server holds an off value must never grey the gear.
+  assert.match(desk, /setStackOff\(STACK_SETUP_OFF_ENABLED && batchFlag\(batchFlags, batchId \|\| '', 'stackOff'\)\)/);
+  assert.match(state, /export const STACK_SETUP_OFF_ENABLED = false/);
   assert.match(state, /export const BATCH_FLAGS_KEY = 'scan:batch-defaults'/);
+  // The gear pop-up only paints the Off chip while the gate is open.
+  assert.match(bars, /<Show when=\{STACK_SETUP_OFF_ENABLED\}>/);
 });

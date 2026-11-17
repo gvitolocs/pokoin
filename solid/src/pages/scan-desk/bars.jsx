@@ -14,6 +14,7 @@ import {
   pendingDraft,
   sizeCommit,
   STACK_OFF_PATCH,
+  STACK_SETUP_OFF_ENABLED,
 } from './defaults-state.js';
 import { pricingChoicePatch, pricingChoiceValue, pricingHint, pricingOptions } from './pricing.js';
 
@@ -227,10 +228,12 @@ export function DefaultsBar(props) {
   const commitSize = () => {
     // An emptied field and left is the seller asking for no stack setup, not
     // "keep the number that was there": the server keeps the old size for a
-    // value it cannot parse, so the desk has to say Off itself.
+    // value it cannot parse, so the desk has to say Off itself. Until the
+    // server holds an off value (STACK_SETUP_OFF_ENABLED) an emptied field is
+    // a keep: the bar restores the number it had, Off is not on offer.
     const decision = sizeCommit(sizeDraft());
     if (decision.kind === 'off') return chooseStackOff();
-    if (decision.kind === 'invalid') {
+    if (decision.kind !== 'size') {
       setSizeDraft(String(size()));
       return undefined;
     }
@@ -397,14 +400,21 @@ export function DefaultsBar(props) {
           </Show>
           <Show when={sizeOpen()}>
             <div class="sd-stack-menu" role="dialog" aria-label="Stack setup">
-              <p class="sd-stack-help">How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself. Off keeps the box name on its own.</p>
+              <p class="sd-stack-help">
+                How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.
+                <Show when={STACK_SETUP_OFF_ENABLED}> Off keeps the box name on its own.</Show>
+              </p>
               <label class="sd-stack-row">
                 <span>Cards per stack</span>
                 <input
                   inputmode="numeric"
                   value={sizeDraft()}
                   aria-label="Cards per stack"
-                  title={gear().greyed ? gear().title : 'Leave it empty and Off takes over: no stack, no position.'}
+                  title={gear().greyed
+                    ? gear().title
+                    : (STACK_SETUP_OFF_ENABLED
+                      ? 'Leave it empty and Off takes over: no stack, no position.'
+                      : 'How many cards fit in one stack between two dividers.')}
                   readOnly={gear().greyed}
                   aria-disabled={String(gear().greyed)}
                   onFocus={() => setEditingField('size')}
@@ -414,17 +424,20 @@ export function DefaultsBar(props) {
                 />
               </label>
               <div class="sd-stack-chips" role="group" aria-label="Common stack sizes">
-                <button
-                  type="button"
-                  aria-pressed={String(stackOff())}
-                  class={stackOff() ? 'on' : ''}
-                  title={stackOff()
-                    ? 'Stack setup is Off — cards keep the box name only. Pick a size to switch it on.'
-                    : 'Switch the stack setup off: no divider number on any card of this batch.'}
-                  onClick={chooseStackOff}
-                >
-                  Off
-                </button>
+                {/* The Off choice waits for the server to hold an off value. */}
+                <Show when={STACK_SETUP_OFF_ENABLED}>
+                  <button
+                    type="button"
+                    aria-pressed={String(stackOff())}
+                    class={stackOff() ? 'on' : ''}
+                    title={stackOff()
+                      ? 'Stack setup is Off — cards keep the box name only. Pick a size to switch it on.'
+                      : 'Switch the stack setup off: no divider number on any card of this batch.'}
+                    onClick={chooseStackOff}
+                  >
+                    Off
+                  </button>
+                </Show>
                 <For each={STACK_SIZES}>
                   {(n) => (
                     <button

@@ -17,11 +17,14 @@ import {
   setBatchFlag,
   sizeCommit,
   STACK_OFF_PATCH,
+  STACK_SETUP_OFF_ENABLED,
 } from './defaults-state.js';
 
 // The Location seed and the "Off" switches. `locationSuggestion` is the whole
 // gate: the seed answers a box, and this decides whether the desk may even show
-// it. The answers themselves come from `fetchSellerBoxSlots`.
+// it. The answers themselves come from `fetchSellerBoxSlots`. The stack-off
+// tests run with the gate forced on, passed as a parameter: the shipped build
+// keeps STACK_SETUP_OFF_ENABLED false and never offers the choice.
 
 test('a seed answer never wins against a field the seller is typing in', () => {
   // The 700 ms pause: the batch default is still empty while "mega" is typed.
@@ -55,16 +58,31 @@ test('a scan accepts the box the seller was shown, and nothing else does', () =>
 });
 
 test('emptying cards per stack and leaving it means Off, not the old number', () => {
-  assert.deepEqual(sizeCommit(''), { kind: 'off' });
-  assert.deepEqual(sizeCommit('  '), { kind: 'off' });
-  assert.deepEqual(sizeCommit('40'), { kind: 'size', size: 40 });
+  // Off state: the gate is forced on, passed as a parameter.
+  assert.deepEqual(sizeCommit('', true), { kind: 'off' });
+  assert.deepEqual(sizeCommit('  ', true), { kind: 'off' });
+  assert.deepEqual(sizeCommit('40', true), { kind: 'size', size: 40 });
   // Junk never applies (and never silently keeps the old number either).
   assert.deepEqual(sizeCommit('abc'), { kind: 'invalid' });
   assert.deepEqual(sizeCommit('0'), { kind: 'invalid' });
 });
 
+test('the shipped build never offers the stack-off choice', () => {
+  assert.equal(STACK_SETUP_OFF_ENABLED, false, 'the gate ships closed');
+  // An emptied "Cards per stack" is a keep: the bar restores the number.
+  assert.deepEqual(sizeCommit(''), { kind: 'keep' });
+  assert.deepEqual(sizeCommit('  '), { kind: 'keep' });
+  // The gear never greys from stack-off…
+  const gear = gearState({ off: true, size: 80, stack: 4, startPosition: 3, locationOff: false });
+  assert.equal(gear.greyed, false, 'no stack-off greyed state without the server value');
+  assert.equal(gear.showSize, true, 'the gear keeps its number');
+  // …and rows keep the suffix the listing will really have.
+  const slots = new Map([['row-1', { stack: 4, start: 2, end: 2, stackSize: 80 }]]);
+  assert.equal(displaySlots(slots, { off: true }), slots);
+});
+
 test('stack setup Off greys the gear, hides its number and freezes the cursor', () => {
-  const off = gearState({ off: true, size: 80, stack: 4, startPosition: 3, locationOff: false });
+  const off = gearState({ off: true, offEnabled: true, size: 80, stack: 4, startPosition: 3, locationOff: false });
   assert.equal(off.greyed, true);
   assert.equal(off.showSize, false, 'the gear shows no number');
   assert.match(off.title, /Off/);
@@ -103,9 +121,10 @@ test('location off greys the field and keeps the suggestion as a placeholder', (
 test('off rows keep the plain box name with no stack or position suffix', () => {
   // slotText of scan-model renders the suffix out of a slot; the desk hands it
   // nothing at all while the stack setup is Off, so the box name stands alone.
+  // The gate is forced on, passed as a parameter.
   const slots = new Map([['row-1', { stack: 4, start: 2, end: 2, stackSize: 80 }]]);
   assert.equal(slots.get('row-1').stack, 4, 'on: the slot is there to suffix');
-  assert.equal(displaySlots(slots, { off: true }).has('row-1'), false, 'off: no slot, no suffix');
+  assert.equal(displaySlots(slots, { off: true, offEnabled: true }).has('row-1'), false, 'off: no slot, no suffix');
   assert.equal(displaySlots(slots, { off: false }), slots);
   assert.equal(displaySlots(undefined, { off: false }) instanceof Map, true);
 });
