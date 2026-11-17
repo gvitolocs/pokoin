@@ -859,7 +859,7 @@ async fn shelf_listing_for_ct_product(
     state: &DomainState,
     seller_uid: &str,
     product: &str,
-) -> Result<Option<uuid::Uuid>, ApiError> {
+) -> Result<Option<uuid::Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         "select l.id from public.marketplace_user_listings l \
          where l.seller_uid = $1 and l.status in ('active', 'paused', 'sold_out') \
@@ -871,7 +871,6 @@ async fn shelf_listing_for_ct_product(
     .bind(product)
     .fetch_optional(state.write_db())
     .await
-    .map_err(api::store_error)
 }
 
 /// Create a listing from a tool's item, at most once per idempotency key.
@@ -918,7 +917,10 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     // price and quantity. Before 2026-10-23 a tool holding the same CardTrader
     // stock re-listed every copy (12,115 duplicate listings on 2026-10-22).
     if let Some(product) = item_ct_product(&body["item"]) {
-        if let Some(id) = shelf_listing_for_ct_product(state, &grant.seller_uid, &product).await? {
+        let matched = shelf_listing_for_ct_product(state, &grant.seller_uid, &product)
+            .await
+            .map_err(api::store_error)?;
+        if let Some(id) = matched {
             let claimed: Option<Option<uuid::Uuid>> = sqlx::query_scalar(
                 "insert into public.seller_api_listing_keys (grant_id, idempotency_key, listing_id) values ($1, $2, $3) \
                  on conflict (grant_id, idempotency_key) do update set listing_id = excluded.listing_id \
