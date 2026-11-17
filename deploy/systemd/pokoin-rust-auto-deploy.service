@@ -1,0 +1,17 @@
+[Unit]
+Description=Deploy the Pokoin Rust API from origin/main when it changed (docs/AUTO_DEPLOY.md)
+# Built switched off: install with scripts/install-auto-deploy-rust.sh and enable by hand, see docs/AUTO_DEPLOY.md.
+
+[Service]
+Type=oneshot
+Nice=10
+# CPUQuota= is left to scripts/build-pokoin-rust-release.sh, which sets its own limits for the build.
+# The build, the test gate and the Pi install can take over an hour.
+TimeoutStartSec=3h
+# Runs an INSTALLED copy of the script (scripts/install-auto-deploy-rust.sh puts it in ~/.local/bin), not a file in a
+# checkout: the build script checks out commits in ~/pokoin-deploy/rust-release, and a bash script must not execute from
+# a file its own run replaces. The planning repo is a dedicated clone used only to fetch and diff paths between
+# commits; the build never switches it. The script flocks, so overlapping triggers exit at once. Exit 1 or 3 (a failed
+# step, a pending migration) fails the unit, and the user-wide OnFailure= drop-in (service.d/90-alert.conf) mails the owner.
+Environment=POKOIN_AUTODEPLOY_REPO=%h/pokoin-deploy/auto-deploy-repo
+ExecStart=%h/.local/bin/pokoin-auto-deploy-rust

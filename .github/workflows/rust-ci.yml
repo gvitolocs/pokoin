@@ -146,7 +146,6 @@ jobs:
 
   flow-db:
     # Informational until green, like Lucina's non-gating tiers; rust-gate does not wait for it.
-    # Known red on main: seller_api_flow in pokoin-commerce fails against a real Postgres.
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     continue-on-error: true
