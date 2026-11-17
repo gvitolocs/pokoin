@@ -40,7 +40,7 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git check
 [ -f "$root/$map" ] || die "$map is not in this checkout"
 
 tmpfiles=()
-# shellcheck disable=SC2329  # invoked by the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # called through the trap cleanup EXIT below, never directly
 cleanup() {
     if [ "${#tmpfiles[@]}" -gt 0 ]; then rm -f "${tmpfiles[@]}"; fi
 }

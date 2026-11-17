@@ -22,6 +22,7 @@ inventory=$here/js-test-inventory.sh
 [ -f "$inventory" ] || { echo "check-features.test.sh: $inventory is missing" >&2; exit 1; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/check-features-test.XXXXXX")
+# shellcheck disable=SC2317,SC2329  # called through the trap cleanup EXIT below, never directly
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
