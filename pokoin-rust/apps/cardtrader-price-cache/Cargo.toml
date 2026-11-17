@@ -25,3 +25,6 @@ ctbook = { path = "../../crates/ctbook" }
 flate2 = "1"
 sqlx = { workspace = true }
 tokio = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

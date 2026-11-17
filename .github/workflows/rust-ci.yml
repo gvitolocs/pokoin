@@ -45,7 +45,7 @@ jobs:
             base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
           git diff --name-only "$base" HEAD | tee /tmp/changed.txt
-          if grep -qE '^(pokoin-rust/|\.github/workflows/rust-ci\.yml$|scripts/check-fast)' /tmp/changed.txt; then
+          if grep -qE '^(pokoin-rust/|\.github/workflows/rust-ci\.yml$|scripts/check-fast|scripts/rust-lints-check|scripts/rust-unsafe-exceptions\.txt)' /tmp/changed.txt; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"

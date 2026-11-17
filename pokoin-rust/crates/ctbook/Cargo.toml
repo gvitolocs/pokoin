@@ -16,3 +16,6 @@ brotli = "8"
 flate2 = "1"
 itoa = "1"
 serde_json = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"
