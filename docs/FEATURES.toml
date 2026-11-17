@@ -6,7 +6,9 @@
 #   name    what the user does, a few words.
 #   money   true for every flow that moves or prices money (cart, checkout, payment, refund, payout,
 #           PKN balance, shipping cost, buy orders, the pricing tools a seller sets prices with).
-#   entry   tracked files where the user reaches the flow; [] when no web surface exists (job, CLI, machine-called).
+#   entry   tracked files where the user reaches the flow — the page or the caller, not the handler that answers it;
+#           [] when this repository holds no user-facing surface for it: a job, a machine-called connector or
+#           webhook, a flow only staff perform, or a client that lives in another repository.
 #   proof   tracked test files, with ::<test name> when one test is meant; [] only for an unproved flow.
 #   status  "proved"   — a test the CI runs drives the flow through the real handler and asserts its main result
 #                        (real router or direct handler call; mock Firestore or real Postgres behind it);

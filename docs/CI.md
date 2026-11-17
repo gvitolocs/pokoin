@@ -122,8 +122,10 @@ scripts/rust-lints-check.sh --base origin/main   # as CI runs it
 ## Feature map
 
 `docs/FEATURES.toml` is the address list of the product: one `[[flow]]` block per user-visible flow, six keys each —
-`id` (kebab-case, unique), `name`, `money`, `entry` (the tracked files that carry it), `proof` (the tracked test
-files, or `file.rs::test_name`, that drive it) and `status`.
+`id` (kebab-case, unique), `name`, `money`, `entry` (the tracked files where the user reaches it — the page or the
+caller, not the handler that answers, and `[]` when this repository holds no user-facing surface: a job, a
+machine-called connector, a flow only staff perform), `proof` (the tracked test files, or `file.rs::test_name`, that
+drive it) and `status`.
 
 - `money = true` for every flow that moves or prices money: cart, checkout, payment, refund, payout, PKN balance,
   shipping cost, buy orders, seller pricing tools. Those are the flows whose coverage may never quietly shrink.
