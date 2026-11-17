@@ -1,10 +1,10 @@
-import { createMemo, createSignal, For, onSettled, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import { formatPkn } from '@market/api.js';
 import { POKOIN_NOW_SOURCE, PRICE_SOURCE_RANGES } from '@market/price-history.js';
 import {
   activeSoldIndex,
   formatSoldAxisTick,
-  formatSoldDay,
+  formatSoldDayWithYear,
   formatSoldSampleCount,
   isSoldGraphClick,
   nearestSoldIndex,
@@ -19,6 +19,7 @@ import {
   soldGraphRangeBounds,
   soldGraphRangeDays,
   soldGraphScale,
+  soldGraphSpansYears,
   soldGraphTipMods,
   soldGraphTone,
   soldGraphY,
@@ -145,6 +146,7 @@ function SoldGraphFilters(props) {
  */
 export default function SoldPriceGraph(props) {
   let wrap;
+  let legendEl;
   let touchPointerActive = false;
   let pointerStart = null;
   const [size, setSize] = createSignal(null);
@@ -216,6 +218,18 @@ export default function SoldPriceGraph(props) {
   const nowOn = createMemo(() => Boolean(nowLine()) && shown(POKOIN_NOW_SOURCE.key));
   // The keys and range buttons take the plot's top line whenever they are there.
   const legendLine = createMemo(() => Boolean(overlays().length || sourceKeys().length || props.onRange));
+  // A keys row that still overflows (overlay keys joined in) fades at its right
+  // edge so it reads as scrollable. Read when the keys or the panel change,
+  // never on a pointer move: scrollWidth forces a layout.
+  const [keysOverflow, setKeysOverflow] = createSignal(false);
+  createEffect(
+    () => [sourceKeys(), overlays(), plot(), narrow()],
+    ([, , , isNarrow]) => {
+      // legendEl is untracked: the keys' change that re-runs this effect is also
+      // what has just rendered it.
+      setKeysOverflow(Boolean(legendEl) && isNarrow && legendEl.scrollWidth > legendEl.clientWidth);
+    },
+  );
   // Several lines on one plot: the hover lists them all instead of one price.
   const compareLines = createMemo(() => Boolean(underLines().length || nowOn()));
   const hasLines = createMemo(() => Boolean(plotDays().length || underLines().length));
@@ -257,6 +271,8 @@ export default function SoldPriceGraph(props) {
     if (!window) return null;
     const start = window.start;
     const end = window.end;
+    // A long window reads its dates with the year: past 300 days, or across New Year.
+    const withYear = soldGraphSpansYears(start, end);
     const range = Math.max(1, end - start);
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
@@ -346,8 +362,9 @@ export default function SoldPriceGraph(props) {
       now: nowOn() ? { x: pad.l + plotW, y: soldGraphY(nowValue() * factor, scale.max, pad.t, plotH) } : null,
       // The fill follows the line across the whole range it is drawn for.
       area: `${left},${pad.t + plotH} ${lead ? `${pad.l},${points[0][1]} ` : ''}${line}${tail ? ` ${pad.l + plotW},${points[points.length - 1][1]}` : ''} ${right},${pad.t + plotH}`,
-      firstLabel: formatSoldDay(firstDay.day, dateLocale),
-      lastLabel: formatSoldDay(lastDay.day, dateLocale),
+      withYear,
+      firstLabel: formatSoldDayWithYear(firstDay.day, dateLocale, withYear),
+      lastLabel: formatSoldDayWithYear(lastDay.day, dateLocale, withYear),
     };
   });
 
@@ -381,7 +398,15 @@ export default function SoldPriceGraph(props) {
     return geo && mark && mark.x > geo.width / 2 ? 'is-end' : 'is-start';
   };
   const formatValue = (pkn) => ((props.formatPrice ? props.formatPrice(pkn) : formatPkn(pkn)) || '0 PKN');
+  // The rows can round the PKN amount themselves (props.formatRowPrice); the
+  // visitor-currency part is whatever the desk's own formatter says.
+  const rowValue = (pkn) => (props.formatRowPrice ? props.formatRowPrice(pkn) || formatValue(pkn) : formatValue(pkn));
   const price = () => (active() ? formatValue(active().medianPkn) : '');
+  // The last day of the drawn range: where the Pokoin-now row can appear.
+  const tipEndDay = createMemo(() => {
+    const marks = plot()?.marks;
+    return marks?.length ? marks[marks.length - 1].day : '';
+  });
   // One row per visible line, in this order: the picked facet, the other price
   // sources, then the other picked facets.
   const tipLines = createMemo(() => {
@@ -397,7 +422,11 @@ export default function SoldPriceGraph(props) {
     const sources = underLines()
       .filter((row) => row.isSource)
       .map((row) => ({ key: row.key, label: row.label, kind: 'source', color: row.color, dashed: row.dashed, gapDays: row.gapDays, carry: row.carry, days: row.days }));
-    const now = nowOn() ? [{ ...POKOIN_NOW_SOURCE, kind: 'now', value: nowValue() }] : [];
+    // Pokoin now is one value, today: its row is in the list only when the
+    // guide stands on the last day of the range, and is left out before that.
+    const now = nowOn() && hoverDay() && String(hoverDay()) === String(tipEndDay())
+      ? [{ ...POKOIN_NOW_SOURCE, kind: 'now', value: nowValue() }]
+      : [];
     const facets = underLines()
       .filter((row) => !row.isSource)
       .map((row) => ({
@@ -412,11 +441,10 @@ export default function SoldPriceGraph(props) {
   });
   const tipRows = createMemo(() => {
     const geo = plot();
-    const marks = geo ? geo.marks : [];
     return soldGraphHoverRows(tipLines(), hoverDay(), {
-      formatValue,
-      formatDay: (iso) => formatSoldDay(iso, soldDateLocale()),
-      endDay: marks.length ? marks[marks.length - 1].day : '',
+      formatValue: rowValue,
+      formatDay: (iso) => formatSoldDayWithYear(iso, soldDateLocale(), geo?.withYear),
+      endDay: tipEndDay(),
     });
   });
 
@@ -484,7 +512,7 @@ export default function SoldPriceGraph(props) {
   return (
     <section
       ref={(el) => { wrap = el; }}
-      class={['panel sold-graph', `is-${tone()}`, { 'is-dashed-line': props.dashed }]}
+      class={['panel sold-graph', `is-${tone()}`, { 'is-dashed-line': props.dashed, 'is-narrow': narrow() }]}
       style={lineStyle()}
       aria-label="Daily sold median"
       aria-busy={!days().length && props.series == null ? 'true' : undefined}
@@ -531,9 +559,17 @@ export default function SoldPriceGraph(props) {
           onPointerMove={stopSoldPointer}
           onPointerUp={stopSoldPointer}
         >
-          <div class="sold-graph-legend">
+          <div
+            ref={(el) => { legendEl = el; }}
+            class={['sold-graph-legend', { 'is-overflow': keysOverflow() }]}
+          >
             <Show when={plot()}>
-              <span class={['sold-graph-key is-picked', { 'is-dashed': props.dashed }]}>{props.pickedLabel}</span>
+              {/* On a phone the desk chips right above already say which condition
+                  and language is plotted: the picked key only stays when there are
+                  overlay keys to tell apart. */}
+              <Show when={!narrow() || overlays().length}>
+                <span class={['sold-graph-key is-picked', { 'is-dashed': props.dashed }]}>{props.pickedLabel}</span>
+              </Show>
               <For each={overlays()}>
                 {(row) => (
                   <span class={['sold-graph-key', { 'is-dashed': row.dashed }]} style={{ '--key-line': row.color }}>
@@ -703,7 +739,7 @@ export default function SoldPriceGraph(props) {
                   role="status"
                 >
                   <strong>{price()}</strong>
-                  <span>{formatSoldDay(active()?.day, geo().dateLocale)}</span>
+                  <span>{formatSoldDayWithYear(active()?.day, geo().dateLocale, geo().withYear)}</span>
                   <Show when={!props.hideUnits && Number(active()?.soldQty || active()?.sampleCount) > 0}>
                     <span>{formatSoldSampleCount(active()?.soldQty || active()?.sampleCount)}</span>
                   </Show>
@@ -723,7 +759,7 @@ export default function SoldPriceGraph(props) {
                   }}
                   role="status"
                 >
-                  <strong>{formatSoldDay(day(), geo().dateLocale)}</strong>
+                  <strong>{formatSoldDayWithYear(day(), geo().dateLocale, geo().withYear)}</strong>
                   <For each={tipRows().rows}>
                     {(row) => (
                       <span class={['sold-graph-tip-row', { 'is-picked': row.picked }]} style={{ '--row-line': row.color }}>

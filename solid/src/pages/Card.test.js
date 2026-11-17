@@ -407,3 +407,43 @@ test('the desk reads the other sources after the hero, one window at a time', ()
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
 });
+
+test('long windows read their dates with the year', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  // The drawn window decides: past 300 days, or first and last day across New Year.
+  assert.match(graph, /const withYear = soldGraphSpansYears\(start, end\);/);
+  assert.match(graph, /withYear,\s*firstLabel: formatSoldDayWithYear\(firstDay\.day, dateLocale, withYear\),\s*lastLabel: formatSoldDayWithYear\(lastDay\.day, dateLocale, withYear\),/);
+  // Both tooltips name the year the same way.
+  assert.match(graph, /formatSoldDayWithYear\(active\(\)\?\.day, geo\(\)\.dateLocale, geo\(\)\.withYear\)/);
+  assert.match(graph, /<strong>\{formatSoldDayWithYear\(day\(\), geo\(\)\.dateLocale, geo\(\)\.withYear\)\}<\/strong>/);
+});
+
+test('tooltip rows: Pokoin now only on the last day, and a whole-number PKN', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  // Pokoin now quotes today only: its row joins when the guide stands on the
+  // last day of the drawn range, and is left out on the days before it.
+  assert.match(graph, /const now = nowOn\(\) && hoverDay\(\) && String\(hoverDay\(\)\) === String\(tipEndDay\(\)\)/);
+  // The rows format through the desk's row formatter when the desk gives one.
+  assert.match(graph, /props\.formatRowPrice \? props\.formatRowPrice\(pkn\) \|\| formatValue\(pkn\) : formatValue\(pkn\)/);
+  assert.match(page, /formatRowPrice=\{graphRowPrice\}/);
+  // The row's PKN amount is whole; the visitor-currency part keeps its format.
+  assert.match(page, /const graphRowPrice = \(pkn\) => \{/);
+  assert.match(page, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
+  assert.match(page, /if \(parts\.local && parts\.pkn\) return `\$\{parts\.local\} \(\$\{whole\}\)`;/);
+});
+
+test('on a narrow panel the keys span it and drop the picked key without overlays', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../../../market/src/styles.css', import.meta.url), 'utf8');
+  // The panel's measured width decides, like the short key labels do.
+  assert.match(graph, /'is-narrow': narrow\(\)/);
+  assert.match(css, /\.sold-graph\.is-narrow \.sold-graph-topline \{ left: 0\.5rem; right: 0\.5rem; \}/);
+  assert.match(css, /\.sold-graph\.is-narrow \.sold-graph-topline \.sold-graph-legend \{ gap: 0\.16rem 6px; \}/);
+  assert.match(css, /\.sold-graph\.is-narrow \.sold-graph-range \{ padding: 0 5px; \}/);
+  // Without overlays the desk chips right above say what is plotted; with them the picked key stays.
+  assert.match(graph, /<Show when=\{!narrow\(\) \|\| overlays\(\)\.length\}>\s*<span class=\{\['sold-graph-key is-picked'/);
+  // Keys that still overflow fade at their right edge, over the panel background.
+  assert.match(graph, /'is-overflow': keysOverflow\(\)/);
+  assert.match(graph, /legendEl\.scrollWidth > legendEl\.clientWidth/);
+  assert.match(css, /\.sold-graph-legend\.is-overflow \{[^}]*mask-image: linear-gradient\(to right, #000 calc\(100% - 16px\), transparent\);/);
+});

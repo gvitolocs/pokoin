@@ -104,7 +104,7 @@ import { deskLanguageChips, deskLanguageChoice } from '@market/listing-languages
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
-import { currencyFromSearch, fiatFromPkn, pknRateLabel } from '@market/pkn.js';
+import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import {
@@ -826,6 +826,15 @@ function CardDesk(props) {
   const graphSources = createMemo(() => priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() }));
   // Pokoin's own price right now: the cheapest live listing, one point, today.
   const graphNowPoint = () => Number(nativeLive()[0]?.pricePkn) || 0;
+  // The tooltip rows round the PKN amount to a whole number ("114 PKN", never
+  // "114.41 PKN"); the visitor-currency part keeps the exact price's format.
+  const graphRowPrice = (pkn) => {
+    const parts = buyerParts(pkn, true, pinnedCurrency());
+    if (parts.pending) return '';
+    const whole = formatPkn(Math.round(pkn));
+    if (parts.local && parts.pkn) return `${parts.local} (${whole})`;
+    return parts.local || whole;
+  };
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
@@ -1502,6 +1511,7 @@ function CardDesk(props) {
                   onFirstEdition={setSalesFirstEdition}
                   onGraded={setSalesGraded}
                   formatPrice={(pkn) => buyerFormat(pkn, true, pinnedCurrency())}
+                  formatRowPrice={graphRowPrice}
                   onPickDay={(day) => {
                     const traits = soldTraitsForGraphDay(salesSlices() || [], salesFilterState(), day);
                     if (!traits) return;
