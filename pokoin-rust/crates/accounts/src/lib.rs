@@ -94,6 +94,7 @@ pub const PORTED_ROUTES: &[&str] = &[
     "GET /api/marketplace-associate-suggest",
     "GET /api/marketplace-associate",
     "GET /api/marketplace-portfolio-history",
+    "GET /api/marketplace-portfolio-movers",
     "GET /api/marketplace-portfolio",
     "GET /api/marketplace-referral",
     "POST /api/marketplace-referral",
@@ -221,8 +222,7 @@ pub fn router(state: DomainState) -> Router {
         )
         .route(
             "/api/marketplace-associate-suggest",
-            get(handlers::associate::marketplace_associate_suggest)
-                .options(handlers::preflight),
+            get(handlers::associate::marketplace_associate_suggest).options(handlers::preflight),
         )
         .route(
             "/api/marketplace-portfolio",
@@ -233,6 +233,11 @@ pub fn router(state: DomainState) -> Router {
         .route(
             "/api/marketplace-portfolio-history",
             get(handlers::portfolio::marketplace_portfolio_history)
+                .fallback(handlers::portfolio::portfolio_history_other),
+        )
+        .route(
+            "/api/marketplace-portfolio-movers",
+            get(handlers::portfolio::marketplace_portfolio_movers)
                 .fallback(handlers::portfolio::portfolio_history_other),
         )
         .route(
@@ -247,10 +252,7 @@ pub fn router(state: DomainState) -> Router {
                 .post(handlers::referral::marketplace_referral)
                 .options(handlers::referral::marketplace_referral_options),
         )
-        .route(
-            "/api/poko-market",
-            post(handlers::poko_market::poko_market),
-        )
+        .route("/api/poko-market", post(handlers::poko_market::poko_market))
         .route(
             "/api/poko-connect",
             post(handlers::poko::poko_connect).fallback(handlers::poko::poko_connect_other),
@@ -268,8 +270,7 @@ pub fn router(state: DomainState) -> Router {
         )
         .route(
             "/api/poko-bets",
-            post(handlers::poko_bets::poko_bets)
-                .fallback(handlers::poko_bets::poko_bets_other),
+            post(handlers::poko_bets::poko_bets).fallback(handlers::poko_bets::poko_bets_other),
         )
         .route(
             "/api/poko-personal-context",
@@ -307,9 +308,9 @@ mod tests {
 
     #[test]
     fn every_assigned_route_is_accounted_for() {
-        // 43 ported + 0 unported = the 43 (method, path) pairs assigned to this
+        // 44 ported + 0 unported = the 44 (method, path) pairs assigned to this
         // worker; 9 more belong to the external photos/R2/social assistant worker.
-        assert_eq!(PORTED_ROUTES.len(), 43);
+        assert_eq!(PORTED_ROUTES.len(), 44);
         assert_eq!(UNPORTED_ROUTES.len(), 0);
         assert_eq!(EXTERNAL_ROUTES.len(), 9);
     }

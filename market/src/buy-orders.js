@@ -222,6 +222,16 @@ export function buyerNameOf(name) {
   return text === 'Pokoin seller' ? '' : text;
 }
 
+/**
+ * The ids of the caller's own open offers, from a `/mine` answer: a public board
+ * row with one of these ids is theirs, so it gets Edit and Delete instead of Sell now.
+ */
+export function openBuyOrderIds(items) {
+  return new Set((Array.isArray(items) ? items : [])
+    .filter((row) => row && row.state === 'open' && row.id != null)
+    .map((row) => String(row.id)));
+}
+
 /** The book row for one facet tuple, or null. */
 export function bestBid(book, { condition, language, reverse = false, firstEdition = false } = {}) {
   const lang = String(language || '').toUpperCase();

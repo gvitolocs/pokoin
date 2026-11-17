@@ -594,10 +594,14 @@ button, input, select { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
+/* `.icon-nav a:hover` turns every topbar link gold, and these two tiles are links
+   in that nav sitting on a gold ground: the label keeps its ink colour, or
+   #ffd33d on #ffe276 is barely readable. Same dark as the rest state above. */
 .nav-preview .nav-scan:hover,
 .nav-preview .nav-scan:focus-visible,
 .nav-preview .nav-cardgts:hover,
 .nav-preview .nav-cardgts:focus-visible {
+  color: #17120a;
   background: #ffe276;
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
@@ -12399,6 +12403,11 @@ img.is-lang-scan {
   gap: 0.4rem;
 }
 
+/* Sell is the row's one labelled action: the BuySell mark leads the word. */
+.sell-now-btn .buysell-ico {
+  margin-right: 0.35rem;
+}
+
 .sell-now-note {
   margin: 0;
   color: var(--muted);
@@ -12714,11 +12723,12 @@ img.is-lang-scan {
   }
 }
 
+/* The three steps, behind the one info button by the title. */
 .buysell-how {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.7rem;
-  margin: 0 0 1rem;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
   padding: 0;
   list-style: none;
   counter-reset: how;
@@ -12726,10 +12736,6 @@ img.is-lang-scan {
 
 .buysell-how li {
   counter-increment: how;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--g5);
-  border-radius: 12px;
-  background: var(--g2);
   font-size: 0.85rem;
 }
 
@@ -12746,47 +12752,157 @@ img.is-lang-scan {
 }
 
 .buysell-fine {
-  margin: 0 0 1rem;
+  margin: 0;
   color: var(--muted);
   font-size: 0.78rem;
 }
 
-.buysell-bar {
+/* The two doors: Seek is everybody's board, Offer is what matches your listings. */
+.buysell-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.buysell-panel {
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  background: var(--g2);
+}
+
+.buysell-panel-head {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 0.8rem;
+  justify-content: space-between;
+  gap: 0.5rem 0.8rem;
+  margin-bottom: 0.7rem;
 }
 
-.buysell-tabs,
-.buysell-sort {
+.buysell-panel-title {
   display: inline-flex;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 1rem;
 }
 
-.buysell-tabs button,
-.buysell-sort button {
-  padding: 0.4rem 0.85rem;
+/* Seek takes the buy gold, Offer the sell blue — the two arrows of the mark. */
+.is-seek .buysell-panel-title svg {
+  color: var(--buysell-buy);
+}
+
+.is-offer .buysell-panel-title svg {
+  color: var(--buysell-sell);
+}
+
+.buysell-panel-tools,
+.buysell-sort,
+.buysell-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Every row and header action: a 36px target, the text colour, and a gold ring.
+   Text and icon are #fff on --g3 (15:1) and --yellow on hover (11:1). */
+.buysell-act {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 1px solid var(--g5);
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 800;
-  font-size: 0.82rem;
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
   cursor: pointer;
 }
 
-.buysell-tabs button.on,
-.buysell-sort button.on {
+.buysell-act:hover {
   border-color: var(--yellow);
   color: var(--yellow);
 }
 
-.buysell-tabs button.on {
-  box-shadow: inset 0 -2px 0 var(--buysell-sell);
+.buysell-act:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.buysell-act[aria-pressed="true"] {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.14);
+  color: var(--yellow);
+}
+
+.buysell-act:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* The row's facts: copies, time left, buyer, your own listing. */
+.buysell-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.7rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.buysell-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.buysell-about {
+  position: relative;
+  display: inline-flex;
+}
+
+.buysell-about-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g3);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.55);
+  text-align: left;
+}
+
+/* The signed-out Offer door says one line and hands over a sign-in button. */
+.buysell-ask {
+  margin: 0 0 0.7rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* The history the Seek header opens, under both doors. */
+.buysell-history {
+  margin-top: 0.9rem;
+}
+
+/* Phones stack the doors, Seek first, the way the panels are written. */
+@media (max-width: 900px) {
+  .buysell-panels {
+    grid-template-columns: 1fr;
+  }
+
+  /* The title actions sit at the left of a stacked head, so the pop runs right. */
+  .buysell-about-pop {
+    right: auto;
+    left: 0;
+  }
 }
 
 .buysell-list {
@@ -12855,6 +12971,18 @@ img.is-lang-scan {
   color: #fff;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+/* The Seek board's tag on a row the caller posted themselves, where the pencil
+   and the bin replace Sell. */
+.buysell-own {
+  width: fit-content;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .buysell-side {

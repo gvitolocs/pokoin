@@ -145,7 +145,9 @@ export default function Chrome(props) {
   const [navPop, setNavPop] = createSignal('');
   const [cardDrag, setCardDrag] = createSignal(false);
   const [messagesUnread, setMessagesUnread] = createSignal(0);
-  createEffect(messagesUnread, (count) => props.onMessagesUnread?.(count));
+  createEffect(messagesUnread, (count) => {
+    props.onMessagesUnread?.(count);
+  });
 
   const profile = () => accountProfile();
   const showAvatar = () => Boolean(signedIn() && (profile()?.uid || authUser()?.uid));

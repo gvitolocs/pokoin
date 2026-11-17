@@ -95,6 +95,13 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
 
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("test database");
     run_sql(&pool, LISTINGS_SQL).await;
+    // The owner's book (`read_sql` through `card_ids_in_catalog`) keeps only rows whose
+    // card the game catalog holds, so these cards must be in it. Recreated rather than left
+    // to whatever an earlier flow test built in the same database: that catalog answers for
+    // its own cards and empties the book.
+    run_sql(&pool, "drop table if exists public.marketplace_search_candidates cascade;
+        create table public.marketplace_search_candidates (card_id bigint primary key, name text, set_name text);
+        insert into public.marketplace_search_candidates (card_id) values (220962), (555001), (741592);").await;
     run_sql(&pool, "drop table if exists public.scan_batches cascade;
         create table public.scan_batches (id uuid primary key default gen_random_uuid(), seller_uid text not null,
         defaults jsonb not null, status text not null default 'open', updated_at timestamptz not null default now());").await;

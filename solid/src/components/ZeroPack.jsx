@@ -217,7 +217,9 @@ export function ShipmentPanel(props) {
   // Fresh server data: server wins for every saved line.
   createEffect(
     () => order().items,
-    (items) => commit(reconcilePickCache(current, items)),
+    (items) => {
+      commit(reconcilePickCache(current, items));
+    },
     { defer: true },
   );
 

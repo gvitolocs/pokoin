@@ -677,8 +677,11 @@ export function paintCatalogGroups(query, options = {}) {
     return printings.length ? [{ name: row.display, printings }] : [];
   });
   if (!groups.length) return live.groups;
+  // The stem tops up the whole-query rows, it never replaces them: `dark`
+  // also prefixes Darkrai, and a compound name (`dark jolteon`) must not be
+  // dropped because its printings are fewer than the stem's.
   const filled = fillSuggestGroups(
-    popupGroups(orderSuggestGroups(groups, ranked), options.printLang),
+    popupGroups(mergeSuggestGroups([live.groups, orderSuggestGroups(groups, ranked)]), options.printLang),
     limit,
     limit,
     {
