@@ -1,0 +1,337 @@
+{
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+        "resourceVersion": "8824000"
+    },
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "pokoin-api-6559bc874-t7xwl",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-17T06:40:02Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "api",
+                        "resources": {
+                            "limits": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            },
+                            "requests": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Running",
+                "conditions": [
+                    {
+                        "type": "Initialized",
+                        "status": "True"
+                    },
+                    {
+                        "type": "Ready",
+                        "status": "True"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "api",
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-11-17T06:40:09Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": true,
+                        "restartCount": 0,
+                        "containerID": "containerd://11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "cloudflared-7d4f8b6c95-m2kq1",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-10T08:12:00Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "cloudflared",
+                        "resources": {
+                            "limits": {
+                                "cpu": "500m",
+                                "memory": "256Mi"
+                            },
+                            "requests": {
+                                "cpu": "50m",
+                                "memory": "64Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Running",
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "True"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "cloudflared",
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-11-10T08:12:31Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": true,
+                        "restartCount": 0,
+                        "containerID": "containerd://aabbccddeeff00112233445566778899aabbccddeeff001122334455667788"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "pokoin-api-5f7d9c8b4-qk1zz",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-15T02:11:00Z",
+                "deletionTimestamp": "2026-11-15T02:14:31Z",
+                "deletionGracePeriodSeconds": 0
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "api",
+                        "resources": {
+                            "limits": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            },
+                            "requests": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Failed",
+                "reason": "Evicted",
+                "message": "The node had condition: [DiskPressure].",
+                "startTime": "2026-11-15T02:11:01Z",
+                "qosClass": "Guaranteed",
+                "conditions": [
+                    {
+                        "type": "PodScheduled",
+                        "status": "False",
+                        "reason": "FitError",
+                        "message": "0/1 nodes are available: 1 node had memory pressure."
+                    },
+                    {
+                        "type": "Ready",
+                        "status": "False",
+                        "reason": "PodFailed"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "api",
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://223344556677889900112233445566778899aabbccddeeff00112233445566",
+                                "exitCode": 137,
+                                "reason": "Error",
+                                "startedAt": "2026-11-15T02:11:04Z",
+                                "finishedAt": "2026-11-15T02:14:30Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": false,
+                        "restartCount": 0,
+                        "containerID": "containerd://223344556677889900112233445566778899aabbccddeeff00112233445566"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "pokoin-api-5f7d9c8b4-pp99jj",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-15T02:15:02Z",
+                "deletionTimestamp": "2026-11-15T02:18:40Z",
+                "deletionGracePeriodSeconds": 0
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "api",
+                        "resources": {
+                            "limits": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            },
+                            "requests": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Failed",
+                "reason": "OOMKilling",
+                "message": "A system OOM occurred while running the pod.",
+                "qosClass": "Guaranteed",
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "False",
+                        "reason": "PodFailed"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "api",
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://3344556677889900112233445566778899aabbccddeeff0011223344556677",
+                                "exitCode": 137,
+                                "reason": "OOMKilled",
+                                "startedAt": "2026-11-15T02:15:06Z",
+                                "finishedAt": "2026-11-15T02:18:39Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": false,
+                        "restartCount": 0,
+                        "containerID": "containerd://3344556677889900112233445566778899aabbccddeeff0011223344556677"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "search-delta-29021400-xc4m2",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-16T04:00:00Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "job",
+                        "image": "pokoin-api:8f2b6e1",
+                        "resources": {
+                            "limits": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            },
+                            "requests": {
+                                "cpu": "500m",
+                                "memory": "512Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Failed",
+                "reason": "Error",
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "False",
+                        "reason": "PodFailed"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "job",
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://44556677889900112233445566778899aabbccddeeff001122334455667788",
+                                "exitCode": 1,
+                                "reason": "Error",
+                                "startedAt": "2026-11-16T04:00:05Z",
+                                "finishedAt": "2026-11-16T04:00:41Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": false,
+                        "restartCount": 0,
+                        "containerID": "containerd://44556677889900112233445566778899aabbccddeeff001122334455667788"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "site-map-refresh-29022000-lk2m9",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-17T03:17:00Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "job",
+                        "image": "pokoin-api:8f2b6e1"
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Succeeded",
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "False",
+                        "reason": "PodCompleted"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "job",
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://556677889900112233445566778899aabbccddeeff00112233445566778899",
+                                "exitCode": 0,
+                                "reason": "Completed",
+                                "startedAt": "2026-11-17T03:17:04Z",
+                                "finishedAt": "2026-11-17T03:18:22Z"
+                            }
+                        },
+                        "lastState": {},
+                        "ready": false,
+                        "restartCount": 0,
+                        "containerID": "containerd://556677889900112233445566778899aabbccddeeff00112233445566778899"
+                    }
+                ]
+            }
+        }
+    ]
+}
