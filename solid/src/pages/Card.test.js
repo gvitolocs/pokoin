@@ -347,3 +347,63 @@ test("See all opens the full Shop in place, as the desk's last row", () => {
   assert.match(scroll, /scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
   assert.match(scroll, /querySelector\('\.shop-header'\)\?\.focus\(\)/);
 });
+
+test('every price source is a line inside the graph the desk already had', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../../../market/src/styles.css', import.meta.url), 'utf8');
+  // The keys and the range buttons share the plot's own top line; the panel's
+  // size rules are the ones it has always had, and the new line is positioned.
+  assert.match(css, /\.desk-graph \.sold-graph \{[^}]*min-height: 12rem;[^}]*\}/);
+  assert.match(css, /\.sold-graph-topline \{\s*position: absolute;/);
+  assert.doesNotMatch(css, /\.sold-graph-topline \{[^}]*height:/);
+  assert.match(graph, /<div\s+class="sold-graph-topline"/);
+  // Four windows, never scrolling, each saying which one is drawn.
+  assert.match(graph, /<For each=\{PRICE_SOURCE_RANGES\}>\s*\{\(row\) => \(\s*<button\s+type="button"\s+class="sold-graph-range"/);
+  assert.match(graph, /onClick=\{\(\) => props\.onRange\(row\.key\)\}/);
+  // One key per source: pressed says the line is on, and a source with nothing
+  // in this window cannot be pressed at all.
+  assert.match(graph, /<For each=\{sourceKeys\(\)\}>/);
+  assert.match(graph, /'sold-graph-key',\s*'is-source',/);
+  assert.match(graph, /aria-pressed=\{String\(Boolean\(shown\(row\.key\) && row\.hasData\)\)\}/);
+  assert.match(graph, /disabled=\{!row\.hasData\}/);
+  assert.match(graph, /No \$\{row\.label\} data in this range/);
+  // The choice is this browser's, remembered under one key, and storage is optional.
+  assert.match(graph, /const SOURCE_STATE_KEY = 'pokoin\.graph\.sources';/);
+  assert.match(graph, /function readSourceState\(\) \{\s*try \{/);
+  assert.match(graph, /function writeSourceState\(state\) \{\s*try \{/);
+  // Every new prop is optional: without them the plot is the sold median alone.
+  assert.match(graph, /Array\.isArray\(props\.sources\) \? props\.sources : \[\]/);
+  assert.match(graph, /Number\(props\.nowPoint\) > 0 \? Number\(props\.nowPoint\) : 0/);
+  assert.match(graph, /const bounds = createMemo\(\(\) => soldGraphRangeBounds\(props\.range\)\);/);
+  // A source with no sale of its own still draws: the empty message waits for both.
+  assert.match(graph, /<Show when=\{!hasLines\(\) && props\.series != null\}>/);
+  // Sources are thinner than sold lines, break where they stopped quoting, and
+  // bridge the hole dotted. Pokoin now is one dot today with a stub at it.
+  assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
+  assert.match(graph, /class="sold-graph-gap"/);
+  assert.match(graph, /class="sold-graph-now-dot"/);
+  assert.match(graph, /x1=\{now\(\)\.x - 44\}/);
+  // The hover lists every visible line, and the helper caps the rows.
+  assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
+});
+
+test('the desk reads the other sources after the hero, one window at a time', () => {
+  assert.match(page, /const \[graphRange, setGraphRange\] = createSignal\(PRICE_HISTORY_DEFAULT_RANGE\);/);
+  // Not before the hero, not before the sales: idle, then ask.
+  const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
+  assert.match(history, /afterHero\(\(\) => whenIdle\(\(\) => \{/);
+  assert.ok(page.indexOf('const [graphRange') > page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
+  // One read per card and window, kept in memory for the next visit.
+  assert.match(history, /const graphHistoryKey = \(\) => `\$\{cardId\}\|\$\{graphRange\(\)\}`;/);
+  assert.match(history, /priceHistoryCache\.set\(askedFor, entry\);/);
+  // A late answer for a card or window nobody asked for anymore is dropped, and
+  // what is already drawn stays until the new window answers.
+  assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
+  assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
+  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
+  // Pokoin now is the cheapest live listing this desk already has.
+  assert.match(page, /const graphNowPoint = \(\) => Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0;/);
+  // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
+  assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
+});

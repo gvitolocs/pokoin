@@ -107,6 +107,12 @@ import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, fiatFromPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
+import {
+  PRICE_HISTORY_DEFAULT_RANGE,
+  fetchCardPriceHistory,
+  priceHistoryRange,
+  priceSourceSeries,
+} from '@market/price-history.js';
 import { authFrom } from '@market/punchouts.js';
 import { rarityKindLabel, storedRarityKind } from '@market/rarity-theme.js';
 import { preloadRelatedThumbs, relatedFromPage } from '@market/related-cards.js';
@@ -177,6 +183,9 @@ function rowsFrom(list) {
 function offerCopies(rows) {
   return (rows || []).map((row) => ({ ...row }));
 }
+
+/** Other sources' history, per card and window: a range switch revisits what was read. */
+const priceHistoryCache = new Map();
 
 /**
  * Card desk route. One desk per `lang:cardId`:
@@ -781,6 +790,42 @@ function CardDesk(props) {
   // The graph's axis is in the visitor's currency, like its tooltip: how many
   // units of it one PKN is. 1 while the currency is unknown, so the axis is PKN.
   const graphAxisFactor = () => fiatFromPkn(1, buyerCurrency(pinnedCurrency()) || 'PKN') || 1;
+  // The other price sources join the graph, they do not replace it: they are
+  // context, so their history is asked for only once the card is painted and the
+  // browser is idle again. One fetch per card and window, kept in memory; the
+  // lines already drawn stay while another window loads.
+  const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
+  const [priceHistory, setPriceHistory] = createSignal(null);
+  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
+  createEffect(
+    () => (salesSlices() == null ? '' : graphHistoryKey()),
+    (key) => {
+      if (!key || disposed) return;
+      const known = priceHistoryCache.get(key);
+      if (known) { setPriceHistory(known); return; }
+      const askedFor = key;
+      const range = key.slice(cardId.length + 1);
+      afterHero(() => whenIdle(() => {
+        if (disposed || untrack(graphHistoryKey) !== askedFor) return;
+        const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
+        fetchCardPriceHistory(cardId, bounds).then((history) => {
+          if (disposed || untrack(graphHistoryKey) !== askedFor) return;
+          const entry = { range, from: bounds.from, to: bounds.to, history };
+          priceHistoryCache.set(askedFor, entry);
+          setPriceHistory(entry);
+        });
+      }));
+    },
+  );
+  // The window the lines on the plot were read for, so the chart clips to it
+  // even while a longer one is still loading.
+  const graphRangeProps = () => {
+    const entry = priceHistory();
+    return entry ? { key: entry.range, from: entry.from, to: entry.to } : null;
+  };
+  const graphSources = createMemo(() => priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() }));
+  // Pokoin's own price right now: the cheapest live listing, one point, today.
+  const graphNowPoint = () => Number(nativeLive()[0]?.pricePkn) || 0;
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
@@ -1447,6 +1492,10 @@ function CardDesk(props) {
                   graded={salesGraded()}
                   linkedLabel={graphScope()}
                   axisFactor={graphAxisFactor()}
+                  sources={graphSources()}
+                  nowPoint={graphNowPoint()}
+                  range={graphRangeProps()}
+                  onRange={setGraphRange}
                   onCondition={setSalesCondition}
                   onLanguage={setSalesLanguage}
                   onReverse={setSalesReverse}
