@@ -41,8 +41,10 @@ git -C "$REPO" fetch -q origin
 COMMIT="$(git -C "$REPO" rev-parse "${1:-origin/main}^{commit}")"
 git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
   || die "${COMMIT:0:12} is not on origin/main"
-# Builds only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate"), also with --skip-tests.
-POKOIN_CI_CALLER=build-pokoin-rust-release bash "$root/scripts/require-ci-green.sh" --repo-dir "$REPO" "$COMMIT" \
+# Builds only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate"), also with --skip-tests,
+# and only from a checkout whose own scripts are origin/main's.
+POKOIN_CI_CALLER=build-pokoin-rust-release bash "$root/scripts/require-ci-green.sh" --repo-dir "$REPO" \
+  --caller-script "$root/scripts/build-pokoin-rust-release.sh" "$COMMIT" \
   || die "the required CI checks are not green for ${COMMIT:0:12}"
 SHORT="${COMMIT:0:12}"
 

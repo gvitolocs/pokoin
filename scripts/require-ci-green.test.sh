@@ -2,10 +2,13 @@
 # Run: bash scripts/require-ci-green.test.sh
 # Runs scripts/require-ci-green.sh against a throwaway git repo and a fake `gh` that applies the script's own --jq
 # filter (real jq) to JSON fixtures. scripts/testdata/check-runs/main-b757cc1a.json is a real GitHub answer; the
-# other fixtures are edited copies of it. No network; everything lives in one temp dir.
+# other fixtures are edited copies of it. The repo's origin/main holds the very files the gate compares itself
+# with, so the self-check passes for every case except the ones that edit a file on purpose (16).
+# No network; everything lives in one temp dir.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-gate="$here/require-ci-green.sh"
+gate_real="$here/require-ci-green.sh"
+gate="$gate_real"
 real="$here/testdata/check-runs/main-b757cc1a.json"
 t="$(mktemp -d)"
 trap 'rm -rf "$t"' EXIT
@@ -20,8 +23,20 @@ ok() { echo "ok: $*"; }
 gitq() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
 
 # throwaway repo: one commit with the two-name list, one without a list, one with a comments-only list, one with rust-gate only
+# The gate compares this checkout's own scripts with origin/main before it does anything else, so the repo gets an
+# origin remote holding the gate script, the required-check list and one caller; the working copies stay identical
+# to it, except inside the self-check cases (16), which edit one file and put it back.
+gitq init -q --bare "$t/origin.git"
 gitq init -q "$t/repo"
+gitq -C "$t/repo" symbolic-ref HEAD refs/heads/main
+gitq -C "$t/repo" remote add origin "$t/origin.git"
 mkdir -p "$t/repo/scripts"
+cp "$gate_real" "$t/repo/scripts/require-ci-green.sh"
+cat > "$t/repo/scripts/fake-caller.sh" << 'C'
+#!/usr/bin/env bash
+# stands for a deploy entry point given to --caller-script
+echo fake-caller
+C
 printf '# header comment\nrust-gate\n\n  repo-gate  # trailing comment\n' > "$t/repo/scripts/ci-required-checks"
 echo x > "$t/repo/f"
 gitq -C "$t/repo" add -A
@@ -39,6 +54,15 @@ printf 'rust-gate\n' > "$t/repo/scripts/ci-required-checks"
 gitq -C "$t/repo" add -A
 gitq -C "$t/repo" commit -q -m rust-only
 SHA_RUST="$(gitq -C "$t/repo" rev-parse HEAD)"
+# the working tree back to the two-names state, and that state published as origin/main: from here on every file
+# the gate compares is byte-identical to origin/main's, so the cases above behave exactly as they did before.
+gitq -C "$t/repo" checkout -q "$SHA_TWO" -- scripts/ci-required-checks
+gitq -C "$t/repo" commit -q -m back-to-two-names
+gitq -C "$t/repo" push -q origin main
+gate="$t/repo/scripts/require-ci-green.sh"
+for f in require-ci-green.sh ci-required-checks fake-caller.sh; do
+  cp "$t/repo/scripts/$f" "$t/pristine-$f"
+done
 
 # fake gh: appends its arguments to $FAKE_GH_CALLS, applies the --jq argument to a fixture with real jq.
 cat > "$t/gh" << 'FAKE'
@@ -319,6 +343,112 @@ FAKE_GH_FIXTURE="$real" run_gate "$SHA_RUST"
 want_rc 0 "15 real fixture"
 has "rust-gate success (run 134049989018)" "15"
 ok "15: the real GitHub answer, required rust-gate only -> 0"
+
+# 16. the self-check: this checkout's gate script, the list next to it and every --caller-script must be
+#     origin/main's, or nothing ships. None of these cases may reach GitHub, and the override may not skip them.
+GATE_COPY="$gate"
+LIST_COPY="$t/repo/scripts/ci-required-checks"
+CALLER_COPY="$t/repo/scripts/fake-caller.sh"
+NOT_ON_MAIN="this checkout's deploy scripts are not origin/main's"
+rm -f "$LOGF"
+printf '# edited\n' >> "$GATE_COPY"
+POKOIN_CI_CALLER=caller-16 FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 1 "16a the gate script edited locally"
+has "$NOT_ON_MAIN" "16a"
+has "require-ci-green.sh" "16a"
+has "This check has no override." "16a"
+[ ! -s "$calls" ] || fail "16a: gh was called although the gate script is not origin/main's"
+[ "$(wc -l < "$LOGF")" = 1 ] || fail "16a: expected one log line, got $(cat "$LOGF")"
+[ "$(awk -F'\t' '{print $3 "|" $5}' "$LOGF")" = "refused|caller-16" ] || fail "16a: the log line is not the refusal: $(cat "$LOGF")"
+cp "$t/pristine-require-ci-green.sh" "$GATE_COPY"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "16a restored"
+ok "16a: the gate's own file edited by one byte -> 1 before any gh call, logged as refused; put back -> 0"
+
+printf 'made-up-gate\n' >> "$LIST_COPY"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 1 "16b the list edited locally"
+has "$NOT_ON_MAIN" "16b"
+has "ci-required-checks" "16b"
+[ ! -s "$calls" ] || fail "16b: gh was called although the list is not origin/main's"
+cp "$t/pristine-ci-required-checks" "$LIST_COPY"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "16b restored"
+ok "16b: the required-check list edited by one line -> 1, gh never called; put back -> 0"
+
+printf '# edited\n' >> "$CALLER_COPY"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --caller-script "$CALLER_COPY" "$SHA_TWO"
+want_rc 1 "16c a caller script that differs"
+has "$NOT_ON_MAIN" "16c"
+has "fake-caller.sh" "16c"
+[ ! -s "$calls" ] || fail "16c: gh was called although a caller script is not origin/main's"
+cp "$t/pristine-fake-caller.sh" "$CALLER_COPY"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --caller-script "$CALLER_COPY" "$SHA_TWO"
+want_rc 0 "16c an identical caller script"
+ok "16c: a --caller-script that differs -> 1; identical -> 0"
+
+cp "$t/pristine-fake-caller.sh" "$t/repo/scripts/never-committed.sh"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --caller-script "$t/repo/scripts/never-committed.sh" "$SHA_TWO"
+want_rc 1 "16d a caller path origin/main does not have"
+has "$NOT_ON_MAIN" "16d"
+has "origin/main has no scripts/never-committed.sh" "16d"
+[ ! -s "$calls" ] || fail "16d: gh was called for a caller origin/main does not have"
+rm -f "$t/repo/scripts/never-committed.sh"
+ok "16d: a --caller-script path origin/main does not have -> 1"
+
+printf '# edited\n' >> "$GATE_COPY"
+POKOIN_CI_OVERRIDE="$SHA_TWO:$GOODREASON" POKOIN_OPS_RECORD_CMD="$t/ops" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 1 "16e the override does not skip the self-check"
+has "$NOT_ON_MAIN" "16e"
+hasnt "override accepted" "16e"
+[ ! -s "$t/ops-in" ] || fail "16e: the ops record was written although the self-check refused"
+[ ! -s "$calls" ] || fail "16e: gh was called"
+cp "$t/pristine-require-ci-green.sh" "$GATE_COPY"
+ok "16e: a correct override does not get past a differing script: 1, no ops record, no gh"
+
+gitq init -q "$t/repo2"
+mkdir -p "$t/repo2/scripts"
+cp "$t/pristine-fake-caller.sh" "$t/repo2/scripts/fake-caller.sh"
+gitq -C "$t/repo2" add -A
+gitq -C "$t/repo2" commit -q -m other-repository
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --caller-script "$t/repo2/scripts/fake-caller.sh" "$SHA_TWO"
+want_rc 1 "16f a caller script from another repository"
+has "$NOT_ON_MAIN" "16f"
+has "another repository" "16f"
+[ ! -s "$calls" ] || fail "16f: gh was called for a caller of another repository"
+cp "$t/pristine-fake-caller.sh" "$t/norepo-caller.sh"
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --caller-script "$t/norepo-caller.sh" "$SHA_TWO"
+want_rc 1 "16g a caller script outside every repository"
+has "$NOT_ON_MAIN" "16g"
+ok "16f/g: a caller script that is not part of the repository being shipped -> 1"
+
+# --no-wait without --caller-script (how a pre-push hook will call it) compares only the gate and the list
+printf '# edited\n' >> "$CALLER_COPY"
+FAKE_GH_FIXTURE="$t/fx-repofail.json" run_gate --no-wait "$SHA_TWO"
+want_rc 1 "16h --no-wait without a caller script"
+has "repo-gate finished as failure" "16h"
+hasnt "$NOT_ON_MAIN" "16h"
+cp "$t/pristine-fake-caller.sh" "$CALLER_COPY"
+ok "16h: --no-wait without --caller-script refuses on CI, not on the untouched caller file"
+
+# --self-check-only answers the comparison and nothing else: no commit, no gh, no log line
+rm -f "$LOGF"
+: > "$calls"
+rc=0
+GH="$t/gh" bash "$GATE_COPY" --self-check-only --repo-dir "$t/repo" --caller-script "$CALLER_COPY" > "$t/out" 2>&1 || rc=$?
+want_rc 0 "16i --self-check-only identical"
+[ ! -s "$calls" ] || fail "16i: gh was called in --self-check-only mode"
+[ ! -e "$LOGF" ] || fail "16i: --self-check-only wrote a log line: $(cat "$LOGF")"
+printf '# edited\n' >> "$GATE_COPY"
+rc=0
+GH="$t/gh" bash "$GATE_COPY" --self-check-only --repo-dir "$t/repo" --caller-script "$CALLER_COPY" > "$t/out" 2>&1 || rc=$?
+want_rc 1 "16j --self-check-only differing"
+has "$NOT_ON_MAIN" "16j"
+hasnt "REFUSED" "16j"
+[ ! -s "$calls" ] || fail "16j: gh was called in --self-check-only mode"
+[ ! -e "$LOGF" ] || fail "16j: --self-check-only wrote a log line: $(cat "$LOGF")"
+cp "$t/pristine-require-ci-green.sh" "$GATE_COPY"
+ok "16i/j: --self-check-only gives 0 for identical files and 1 for a differing one, with no gh call, no log line and no commit"
 
 # usage and unresolvable commit
 rc=0
