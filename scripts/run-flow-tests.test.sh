@@ -103,7 +103,7 @@ reset_case() { rm -rf "$canned"; mkdir -p "$canned"; }
 canned_out() { printf '%s\n' "$2" >"$canned/$1.out"; }
 canned_rc() { printf '%s' "$2" >"$canned/$1.rc"; }
 
-run_tests() { # run_tests [extra env assignment or -u NAME ...]: the copied script in $repo against the fakes
+run_tests() { # run_tests [extra env assignments ...]: the copied script in $repo against the fakes; later assignments win
     rc=0
     : >"$calls"
     (

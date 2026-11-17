@@ -5,7 +5,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Tier | Runs | Where | Decides |
 | --- | --- | --- | --- |
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
-| GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
+| GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed`, `flow-db` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
 | GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, `scripts/run-flow-tests.sh` against a Postgres 17 service | GitHub, only when Rust files changed | Part of `rust-gate`: every `*_flow` binary runs in a database of its own, and a binary that fails, prints `skipped:` or runs no test is a failure |
