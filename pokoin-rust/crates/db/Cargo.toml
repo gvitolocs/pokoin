@@ -12,3 +12,6 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_code = "forbid"
