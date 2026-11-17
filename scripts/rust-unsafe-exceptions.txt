@@ -1,0 +1,8 @@
+# Exceptions to "unsafe_code = forbid" in pokoin-rust (scripts/rust-lints-check.sh, docs/CI.md
+# "Unsafe code"). One line per crate that really contains unsafe code:
+# 	<crate directory><TAB><reason a reviewer can check>
+# Directory is relative to the repository root and is the directory holding the crate's Cargo.toml.
+# CI fails on every ADDED line: it ships only with the owner's logged override of
+# scripts/require-ci-green.sh. Removing a line is always fine: give the crate the table instead.
+pokoin-rust/crates/shared-dictionary	src/lib.rs: Brotli raw shared dictionaries (RFC 9842 dcb) through the brotlic_sys C FFI - three Drop guards that destroy encoder/prepared/decoder states and the CompressStream/DecompressStream loops
+pokoin-rust/apps/cardtrader-bridge	src/main.rs Locked::open: libc::flock LOCK_EX on the gate file, the cross-process request pause shared by every Oracle pipeline process
