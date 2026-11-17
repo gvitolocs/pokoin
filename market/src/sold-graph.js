@@ -381,6 +381,40 @@ export function soldGraphDayOnOrBefore(days, day) {
   return best;
 }
 
+/**
+ * Long windows read their dates with the year: the drawn range past 300 days,
+ * or its first and last day in different years (a short window across New Year).
+ */
+export function soldGraphSpansYears(startMs, endMs) {
+  const lo = Number(startMs);
+  const hi = Number(endMs);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return false;
+  }
+  if ((hi - lo) / DAY_MS > 300) {
+    return true;
+  }
+  return new Date(lo).getUTCFullYear() !== new Date(hi).getUTCFullYear();
+}
+
+/** `formatSoldDay`, with the locale's two-digit year appended when asked. */
+export function formatSoldDayWithYear(isoDay, locale, withYear) {
+  if (!withYear) {
+    return formatSoldDay(isoDay, locale);
+  }
+  const match = String(isoDay || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return '';
+  }
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat(locale, {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
 export const SOLD_GRAPH_TIP_ROWS = 6;
 
 /**

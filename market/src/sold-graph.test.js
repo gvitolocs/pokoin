@@ -4,6 +4,7 @@ import {
   activeSoldIndex,
   formatSoldAxisTick,
   formatSoldDay,
+  formatSoldDayWithYear,
   nearestSoldIndex,
   isSoldGraphClick,
   soldGraphDateWindow,
@@ -15,6 +16,7 @@ import {
   soldGraphRangeBounds,
   soldGraphRangeDays,
   soldGraphScale,
+  soldGraphSpansYears,
   soldGraphTipMods,
   soldGraphY,
   soldConditionLabel,
@@ -142,6 +144,25 @@ test('sold-day labels follow the viewer locale, not MM/DD', () => {
   assert.equal(formatSoldDay('2026-09-03', 'en-GB'), '03/09');
   assert.equal(formatSoldDay('2026-09-03', 'it-IT'), '03/09');
   assert.equal(formatSoldDay('2026-09-06', 'it-IT'), '06/09');
+});
+
+test('long or year-crossing windows put the two-digit year on the dates', () => {
+  // A 90-day window inside one year stays day and month.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-06-01'), soldGraphDayMs('2026-08-30')), false);
+  // 366 days: the year joins both axis labels and the tooltip date.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2025-11-16'), soldGraphDayMs('2026-11-17')), true);
+  // 30 days across New Year: the first and last day are in different years.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-12-20'), soldGraphDayMs('2027-01-18')), true);
+  // Exactly 300 days apart is still short; one day more is not.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-01-20'), soldGraphDayMs('2026-11-16')), false);
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-01-19'), soldGraphDayMs('2026-11-16')), true);
+  assert.equal(soldGraphSpansYears(NaN, soldGraphDayMs('2026-11-16')), false);
+  // The locale keeps its own order and separators, with or without the year.
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-US', true), '09/03/26');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'it-IT', true), '03/09/26');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-GB', false), '03/09');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-US', false), formatSoldDay('2026-09-03', 'en-US'));
+  assert.equal(formatSoldDayWithYear('nonsense', 'en-US', true), '');
 });
 
 test('plot padding leaves room for unstretched axis labels', () => {
