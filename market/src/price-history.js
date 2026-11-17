@@ -1,0 +1,161 @@
+import { getJson } from './api.js';
+
+/**
+ * The price sources the card-desk graph plots beside the CardTrader sold median.
+ * The browser never converts a currency: a source is plotted only when the API
+ * already answered in PKN, so a response without those fields simply has one
+ * line less.
+ */
+
+const DAY_MS = 86_400_000;
+
+/** The earliest day any source has history for. */
+export const PRICE_HISTORY_FIRST_DAY = '2024-02-08';
+
+/** The range buttons, in the order the graph shows them. `days: 0` is `all`. */
+export const PRICE_SOURCE_RANGES = [
+  { key: '1m', label: '1M', days: 30 },
+  { key: '3m', label: '3M', days: 90 },
+  { key: '1y', label: '1Y', days: 365 },
+  { key: 'all', label: 'All', days: 0 },
+];
+
+export const PRICE_HISTORY_DEFAULT_RANGE = '3m';
+
+/**
+ * The fetched lines, in legend order. `gapDays` is how far apart two of the
+ * source's own days may be before the graph breaks the line and bridges the
+ * break: TCGplayer quotes daily, Cardmarket's trend is weekly, the CardTrader
+ * lowest ask moves whenever a listing does. `carry` says how a hover reads a
+ * day the source did not quote: `near` the closest day inside the gap, or
+ * `onOrBefore` the last one it published (a weekly trend stands until replaced).
+ */
+export const PRICE_SOURCES = [
+  { key: 'tcgplayer', label: 'TCGplayer', short: 'TP', color: '#8ab4ff', dashed: false, gapDays: 10, carry: 'near' },
+  { key: 'cardmarket', label: 'Cardmarket', short: 'CM', color: '#ff7a59', dashed: false, gapDays: 99, carry: 'onOrBefore' },
+  { key: 'cardtrader_ask', label: 'CT lowest ask', short: 'CT ask', color: '#d6c2ff', dashed: true, gapDays: 3, carry: 'near' },
+];
+
+/** The cheapest live Pokoin listing: one value, today, nothing to fetch. */
+export const POKOIN_NOW_SOURCE = {
+  key: 'pokoin_now',
+  label: 'Pokoin now',
+  short: 'PK',
+  color: 'var(--yellow)',
+  dashed: true,
+  gapDays: 0,
+};
+
+function isIsoDay(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+/** `isoDay` moved `days` back, still a UTC calendar day. */
+function shiftIsoDay(isoDayValue, days) {
+  const [year, month, day] = String(isoDayValue).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day) - days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * The window a range button asks for: `to` is today and `from` is `days` days
+ * before it, so `3m` on 2026-11-16 is `{ from: '2026-08-18', to: '2026-11-16' }`.
+ * An unknown key falls back to the default range.
+ */
+export function priceHistoryRange(rangeKey, todayIso) {
+  const found = PRICE_SOURCE_RANGES.find((row) => row.key === rangeKey)
+    || PRICE_SOURCE_RANGES.find((row) => row.key === PRICE_HISTORY_DEFAULT_RANGE);
+  const to = isIsoDay(todayIso) ? String(todayIso) : new Date().toISOString().slice(0, 10);
+  return {
+    key: found.key,
+    from: found.days > 0 ? shiftIsoDay(to, found.days) : PRICE_HISTORY_FIRST_DAY,
+    to,
+  };
+}
+
+/**
+ * One card's price history over a window, or `null` when it is unavailable: the
+ * graph then keeps showing the sold lines alone. Never throws.
+ */
+export async function fetchCardPriceHistory(cardId, { from, to } = {}) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) {
+    return null;
+  }
+  const params = new URLSearchParams({ cardId: id });
+  if (isIsoDay(from)) {
+    params.set('from', from);
+  }
+  if (isIsoDay(to)) {
+    params.set('to', to);
+  }
+  try {
+    const data = await getJson(`/api/marketplace-card-price-history?${params}`);
+    return data && typeof data === 'object' ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** `[{ day, pkn }]`, oldest first, days without a positive price dropped. */
+function pricedDays(rows, valueOf) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ day: String(row?.day || ''), pkn: Number(valueOf(row)) }))
+    .filter((row) => isIsoDay(row.day) && Number.isFinite(row.pkn) && row.pkn > 0)
+    .sort((a, b) => (a.day < b.day ? -1 : (a.day > b.day ? 1 : 0)));
+}
+
+function dayRowsOf(row) {
+  return Array.isArray(row?.days) ? row.days : [];
+}
+
+/**
+ * TCGplayer answers with one series per product and subtype. A reverse-holo
+ * pick reads the reverse series; every other pick reads a series that is not
+ * one. Inside the preferred group it is the series with the most days; with no
+ * series in it at all, the whole group is the pool.
+ */
+function tcgplayerDays(tcgplayer, reverse) {
+  const series = Array.isArray(tcgplayer?.series) ? tcgplayer.series.filter((row) => row && row.days) : [];
+  if (!series.length) {
+    return [];
+  }
+  const prefersReverse = (row) => /reverse/i.test(String(row?.subtype || ''));
+  const preferred = series.filter((row) => (reverse ? prefersReverse(row) : !prefersReverse(row)));
+  const pool = preferred.length ? preferred : series;
+  const best = pool.reduce((a, b) => (dayRowsOf(b).length > dayRowsOf(a).length ? b : a), pool[0]);
+  return pricedDays(dayRowsOf(best), (row) => row?.marketPkn);
+}
+
+/** Cardmarket answers per product; the desk is one product, so `products[0]`. */
+function cardmarketDays(cardmarket, reverse) {
+  const product = Array.isArray(cardmarket?.products) ? cardmarket.products[0] : null;
+  return pricedDays(dayRowsOf(product), (row) => {
+    const foil = Number(row?.trendFoilPkn);
+    if (reverse && Number.isFinite(foil) && foil > 0) {
+      return foil;
+    }
+    return row?.trendPkn;
+  });
+}
+
+function cardtraderAskDays(cardtrader) {
+  return pricedDays(dayRowsOf(cardtrader), (row) => row?.lowestAskPkn);
+}
+
+/**
+ * The fetched sources the graph can draw, in legend order, each with
+ * `days: [{ day, pkn }]` oldest first. A source whose response has no PKN field
+ * for this card (or a status that answered nothing) is left out; `reverse`
+ * switches TCGplayer to its reverse series and Cardmarket to its foil trend.
+ */
+export function priceSourceSeries(history, { reverse } = {}) {
+  const foil = reverse === true;
+  const daysByKey = {
+    tcgplayer: tcgplayerDays(history?.tcgplayer, foil),
+    cardmarket: cardmarketDays(history?.cardmarket, foil),
+    cardtrader_ask: cardtraderAskDays(history?.cardtrader),
+  };
+  return PRICE_SOURCES
+    .map((source) => ({ ...source, days: daysByKey[source.key] || [] }))
+    .filter((source) => source.days.length);
+}
