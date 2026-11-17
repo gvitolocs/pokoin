@@ -44,3 +44,24 @@ create table public.marketplace_user_listings (
 );
 create or replace function public.refresh_marketplace_blueprint_price_summary(text)
   returns void language sql as 'select';
+
+-- The seller's CardTrader product links (scripts/sql/089), as the real schema
+-- has them: one row per (seller, product), one listing per row.
+drop table if exists public.marketplace_cardtrader_product_links;
+create table public.marketplace_cardtrader_product_links (
+  seller_uid text not null,
+  ct_product_id text not null,
+  listing_id uuid not null,
+  blueprint_id text not null default '',
+  last_ct_quantity integer not null default 0,
+  last_seen_at timestamptz not null default now(),
+  origin text not null default 'import'
+    check (origin in ('import', 'push', 'match')),
+  missing_from_ct boolean not null default false,
+  unresolved_reason text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (seller_uid, ct_product_id)
+);
+create unique index marketplace_cardtrader_product_links_listing_uidx
+  on public.marketplace_cardtrader_product_links (listing_id);
