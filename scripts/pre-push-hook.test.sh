@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run: bash scripts/pre-push-hook.test.sh
 # Tests .githooks/pre-push. Throwaway repositories; the hook is called directly, exactly as git calls it: two arguments
-# (remote name, remote url) and the ref lines on stdin. The fake `gh` arrives through GH= as in
+# (remote name, remote url) and the ref lines on stdin — except in the last section (cases 21 to 25), which runs real
+# `git push` commands instead, because only git itself can show what it puts in a hook's environment (PKN-15). The fake
+# `gh` arrives through GH= as in
 # scripts/require-ci-green.test.sh and reuses that test's fixtures under scripts/testdata/check-runs/ (derived with jq,
 # never copied). Every case that reaches the hook's scan runs real gitleaks and assembles its secret-shaped string at
 # run time, so the clean fixtures scan clean; only case 16 stands for a host without the binary. The throwaway
@@ -131,6 +133,7 @@ push() { # push <remote name> <remote url> <ref line>... : the hook with EV as i
 }
 want_rc() { [ "$rc" = "$1" ] || fail "$2: expected exit $1, got $rc"; }
 has() { grep -qF -- "$1" "$t/out" || fail "$2: output lacks '$1'"; }
+hasnt() { if grep -qF -- "$1" "$t/out"; then fail "$2: output has '$1'"; fi; }
 gh_calls() { wc -l < "$t/gh-calls" | tr -d ' '; }
 gh_quiet() { [ ! -s "$t/gh-calls" ] || fail "$1: gh was called ($(gh_calls) time(s)) although it must not be"; }
 gh_used() { [ -s "$t/gh-calls" ] || fail "$1: gh was not called"; }
@@ -408,5 +411,113 @@ has "origin/main: this checkout has not fetched it" "20 origin/main never fetche
 has "This check has no override." "20 origin/main never fetched"
 has "$MAIN_TEXT" "20 origin/main never fetched"
 ok "20: a checkout that has not fetched origin/main -> 1 with the gate's message, gh not called"
+
+# ---- the hook as git really runs it: a throwaway repository pushed to for real (PKN-15) ----
+# Every case above calls the hook by hand with git's own arguments, so not one of them can see what git puts in a
+# hook's environment. It exports GIT_DIR (absolute, and inside a linked work tree the work tree's own gitdir),
+# GIT_PREFIX, GIT_EXEC_PATH and GIT_CONFIG_PARAMETERS. The gate resolved its own file through a relative
+# `rev-parse --show-toplevel`, which with GIT_DIR set and no GIT_WORK_TREE answers the directory it was called
+# from, so its self-check refused EVERY push to main ("origin/main has no require-ci-green.sh") before it ever
+# asked GitHub. These cases run real `git push` commands and so cannot be passed by calling the hook correctly:
+# a linked work tree with core.hooksPath=.githooks holding a copy of the real hook and the real gate, a local bare
+# repository as origin whose main holds the same gate files, that bare's path presented as this repository through
+# POKOIN_PUSH_GUARD_URL_RE, and the same fake gh as the cases above. The base commit is pushed while the default
+# url pattern still stands (the bare path is not github.com, so nothing is guarded) and before the work tree
+# exists, so the fixture can be published without a green answer to fake.
+e2e_origin="$t/e2e-origin.git"
+e2e_clone="$t/e2e-clone"
+e2e_wt="$t/e2e-worktree"
+gitq init -q --bare "$e2e_origin"
+gitq init -q "$e2e_clone"
+gitq -C "$e2e_clone" symbolic-ref HEAD refs/heads/main
+mkdir -p "$e2e_clone/.githooks" "$e2e_clone/scripts"
+cp "$hook" "$e2e_clone/.githooks/pre-push"
+cp "$root/scripts/require-ci-green.sh" "$e2e_clone/scripts/require-ci-green.sh"
+printf 'rust-gate\n' > "$e2e_clone/scripts/ci-required-checks"
+cp "$root/.gitleaks.toml" "$e2e_clone/.gitleaks.toml"
+echo base > "$e2e_clone/f.txt"
+gitq -C "$e2e_clone" remote add origin "$e2e_origin"
+gitq -C "$e2e_clone" add -A
+gitq -C "$e2e_clone" commit -q -m e2e-base
+gitq -C "$e2e_clone" push -q origin main
+gitq -C "$e2e_clone" worktree add -q --detach "$e2e_wt" HEAD
+gitq -C "$e2e_wt" config core.hooksPath .githooks
+
+E2E_ENV=("GITLEAKS=$gl" "GH=$t/gh" "POKOIN_CI_LOG=$t/e2e-gate.log" "POKOIN_PUSH_GUARD_URL_RE=^$e2e_origin$")
+e2e_commit() { # e2e_commit <message>: one new commit on the detached work-tree HEAD, its id in E2E_SHA
+  echo "$1" > "$e2e_wt/f.txt"
+  gitq -C "$e2e_wt" add f.txt
+  gitq -C "$e2e_wt" commit -q -m "$1"
+  E2E_SHA="$(gitq -C "$e2e_wt" rev-parse HEAD)"
+}
+e2e_push() { # e2e_push <label> <fixture> <refspec> [<directory git runs from>]
+  local from="${4:-$e2e_wt}"
+  : > "$t/gh-calls"
+  rm -f "$t/e2e-gate.log"
+  rc=0
+  env "${E2E_ENV[@]}" "FAKE_GH_CALLS=$t/gh-calls" "FAKE_GH_FIXTURE=$2" \
+    git -C "$from" push origin "$3" > "$t/out" 2>&1 || rc=$?
+  if grep -qF -- 'was NOT secret-scanned' "$t/out"; then fail "$1: gitleaks did not run although it is here ($gl)"; fi
+}
+remote_main() { gitq -C "$e2e_origin" rev-parse --verify --quiet refs/heads/main || printf none; }
+remote_lacks() { # remote_lacks <sha> <label>: the refused commit never reached the bare repository at all
+  if gitq -C "$e2e_origin" cat-file -e "$1^{commit}" 2> /dev/null; then
+    fail "$2: the bare origin holds the refused commit $1, so something was published after all"
+  fi
+}
+
+# 21. a real push to main whose checks are green: the hook lets it through and the bare remote takes the commit
+e2e_commit e2e-green
+E2E_GREEN="$E2E_SHA"
+e2e_push "21 push main green" "$t/fx-green.json" "HEAD:refs/heads/main"
+want_rc 0 "21 push main green"
+gh_used "21 push main green"
+has "rust-gate success (run 134049989018)" "21 push main green"
+[ "$(remote_main)" = "$E2E_GREEN" ] || fail "21 push main green: origin/main is $(remote_main), not the pushed $E2E_GREEN"
+ok "21: a real push of a green commit to main -> 0, and the bare origin has it"
+
+# 22. the same with a failed check: refused, the remote untouched, the hook's own guidance and not the self-check's
+e2e_commit e2e-red
+E2E_RED="$E2E_SHA"
+e2e_push "22 push main red" "$t/fx-fail.json" "HEAD:refs/heads/main"
+want_rc 1 "22 push main red"
+gh_used "22 push main red"
+has "rust-gate finished as failure" "22 push main red"
+has "$MAIN_TEXT" "22 push main red"
+hasnt "origin/main has no require-ci-green.sh" "22 push main red"
+hasnt "this checkout's deploy scripts are not origin/main's" "22 push main red"
+[ "$(remote_main)" = "$E2E_GREEN" ] \
+  || fail "22 push main red: the refused commit reached the remote, which is now $(remote_main)"
+remote_lacks "$E2E_RED" "22 push main red"
+ok "22: a real push of a red commit to main -> 1, the bare origin still at the green commit, and the refusal is the CI one"
+
+# 23. a real branch push: allowed at once, whatever the checks say, and gh is never reached
+e2e_commit e2e-branch
+E2E_BRANCH="$E2E_SHA"
+e2e_push "23 push a branch" "$t/fx-fail.json" "HEAD:refs/heads/e2e-branch"
+want_rc 0 "23 push a branch"
+gh_quiet "23 push a branch"
+[ "$(gitq -C "$e2e_origin" rev-parse --verify --quiet refs/heads/e2e-branch)" = "$E2E_BRANCH" ] \
+  || fail "23 push a branch: the bare origin does not have refs/heads/e2e-branch"
+ok "23: a real push of a branch whose checks would fail -> 0 without asking GitHub, and the bare origin has it"
+
+# 24. both of them again from a subdirectory of the work tree, where git also sets GIT_PREFIX=scripts/
+e2e_commit e2e-subdir-green
+E2E_SUB_GREEN="$E2E_SHA"
+e2e_push "24 push main green from scripts/" "$t/fx-green.json" "HEAD:refs/heads/main" "$e2e_wt/scripts"
+want_rc 0 "24 push main green from scripts/"
+gh_used "24 push main green from scripts/"
+[ "$(remote_main)" = "$E2E_SUB_GREEN" ] \
+  || fail "24 push main green from scripts/: origin/main is $(remote_main), not the pushed $E2E_SUB_GREEN"
+e2e_commit e2e-subdir-red
+E2E_SUB_RED="$E2E_SHA"
+e2e_push "25 push main red from scripts/" "$t/fx-fail.json" "HEAD:refs/heads/main" "$e2e_wt/scripts"
+want_rc 1 "25 push main red from scripts/"
+has "$MAIN_TEXT" "25 push main red from scripts/"
+hasnt "origin/main has no require-ci-green.sh" "25 push main red from scripts/"
+[ "$(remote_main)" = "$E2E_SUB_GREEN" ] \
+  || fail "25 push main red from scripts/: the refused commit reached the remote, which is now $(remote_main)"
+remote_lacks "$E2E_SUB_RED" "25 push main red from scripts/"
+ok "24/25: the same push from a subdirectory of the work tree behaves exactly the same, green and red"
 
 echo "pre-push-hook.test: all cases passed"
