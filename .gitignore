@@ -4,6 +4,16 @@ market/dist/
 market/.env
 market/.env.local
 market/.env.*.local
+# Any .env or .env.<name> in any directory, so a broad git add cannot stage one.
+# The .example/.sample/.template shapes are templates and stay committable.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
 dist-web/
 .vercel/
 .wrangler/

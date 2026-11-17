@@ -126,6 +126,34 @@ else
   fails=$((fails + 1))
 fi
 
+# The .gitignore promise of docs/SECRETS.md, checked in the real repository that makes it: every .env or .env.<name>
+# in any directory is ignored, so a broad `git add` cannot stage one; the .example/.sample/.template templates and
+# ordinary files stay committable.
+env_ignored() { git -C "$root" check-ignore -q "$1"; }
+for p in .env .env.local .env.production api/.env solid/.env.local pokoin-rust/.env local/.env.production market/.env; do
+  if env_ignored "$p"; then
+    echo "ok   $p is gitignored"
+  else
+    echo "FAIL $p is not gitignored: docs/SECRETS.md promises every .env* is, so a broad git add would stage a secret file into a public push"
+    fails=$((fails + 1))
+  fi
+done
+for p in deploy/ops/x/.env.example market/.env.example README.md; do
+  if env_ignored "$p"; then
+    echo "FAIL $p is gitignored but must stay committable: the .example/.sample/.template shapes are the documented templates to copy, and README.md is not an env file at all"
+    fails=$((fails + 1))
+  else
+    echo "ok   $p is not gitignored"
+  fi
+done
+tracked_ignored=$(git -C "$root" ls-files -ci --exclude-standard)
+if [ -z "$tracked_ignored" ]; then
+  echo "ok   no tracked file is gitignored"
+else
+  printf 'FAIL tracked file(s) are gitignored (%s): the ignore patterns reach committed work, so a later git rm --cached or git clean would silently drop it and docs/SECRETS.md would not be the promise it claims\n' "$(echo "$tracked_ignored" | tr '\n' ' ')"
+  fails=$((fails + 1))
+fi
+
 if [ "$fails" -ne 0 ]; then
   echo "ci-secret-scan.test: $fails failure(s)"
   exit 1
