@@ -45,7 +45,7 @@ has_forbid() { # <manifest>
 }
 
 is_crate_manifest() { # <manifest>: 0 when it declares a package, so it is a crate
-  awk '/^[[:space:]]*\[package\][[:space:]]*$/ { found = 1 } END { exit(found ? 0 : 1) }' "$1"
+  awk '/^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]/ { found = 1 } END { exit(found ? 0 : 1) }' "$1"
 }
 
 exception_entries() { # stdin -> one "dir<TAB>reason" line per entry; comments and blanks dropped
@@ -103,6 +103,14 @@ n_crates=0
 n_forbid=0
 n_exception=0
 n_uncovered=0
+
+if [ ! -d "$rust_dir" ]; then
+  # A renamed or removed workspace would otherwise pass by checking nothing.
+  echo "FAIL $rust_dir: no such directory here, so no crate was checked"
+  echo "rust-lints-check: 0 crate(s), 0 forbid, 0 exception, 0 uncovered"
+  echo "rust-lints-check: FAILED"
+  exit 1
+fi
 
 while IFS= read -r manifest; do
   [ -n "$manifest" ] || continue

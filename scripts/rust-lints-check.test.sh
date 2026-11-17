@@ -196,7 +196,14 @@ commit_all only-the-root
 run 0 "a pure workspace manifest needs nothing"
 says "rust-lints-check: 0 crate(s)"
 
-# 13. usage errors.
+# 13. a repository without the Rust workspace fails instead of passing on nothing.
+new_repo no-workspace
+rm -rf "$repo/pokoin-rust"
+commit_all workspace-gone
+run 1 "no pokoin-rust directory at all"
+says "no such directory here, so no crate was checked"
+
+# 14. usage errors.
 new_repo usage
 run 2 "an unknown argument" --nonsense
 run 2 "--base without a value" --base
