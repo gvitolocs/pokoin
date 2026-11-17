@@ -1230,7 +1230,7 @@ async fn poko_market_requires_a_service_token_and_valid_tool() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
         body["error"].as_str().unwrap(),
-        "unknown tool; expected one of resolve_card, card_quote, card_ocr, card_liquidity, collection_quote, suggest_cards, market_snapshot, top_movers, top_sellers, card_sales, deal_check, set_sales, recent_sales, artist_cards, set_info"
+        "unknown tool; expected one of resolve_card, card_quote, card_ocr, card_liquidity, collection_quote, suggest_cards, market_snapshot, top_movers, top_sellers, card_sales, card_price_history, deal_check, set_sales, recent_sales, artist_cards, set_info"
     );
     std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
     std::env::remove_var("POKONTACT_SERVICE_TOKEN");
