@@ -7,6 +7,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
+| GitHub `js-gate` | `.github/workflows/js-ci.yml`: jobs `js-inventory`, `market`, `market-sweep`, `solid`, `workers`, `news`, `scripts`, `bench`, `js-gate` | GitHub, on every pull request and every push to `main` | Whether every tracked JavaScript test still passes; not yet a required check — see "JavaScript tests" below and `scripts/ci-required-checks` |
 | GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
@@ -76,6 +77,22 @@ Because `rust-gate` always runs, requiring it cannot block front-end PRs. Do thi
 5. Save. Do not add `test`, `changed` or `flow-db`; they are skipped on non-Rust PRs and a skipped required check counts as passed only through `rust-gate`.
 
 The same steps apply to `repo-gate` (from `.github/workflows/repo-ci.yml`): merge the workflow first, then require `repo-gate` as well.
+
+## JavaScript tests: `js-ci.yml`
+
+Triggers and permissions are as in `rust-ci.yml`: every `pull_request` and every `push` to `main`, no `paths` filter, `contents: read`, no secrets, no deploy step, actions pinned by commit SHA. One job per group of tests; nothing here installs a browser or starts a server.
+
+The file globs live in `scripts/js-test-groups.txt` — one line per job: group, working directory, command, globs. `scripts/js-run-group.sh GROUP` is the only thing that runs a job: it reads that line, asks `scripts/js-test-inventory.sh --files GROUP` for the *tracked* files matching the globs, and appends them to the command. The workflow and the inventory read the same line, so they cannot drift apart.
+
+- `js-inventory` — no Node install: `scripts/js-test-inventory.test.sh` (the checker, on a throwaway repo), then `scripts/js-test-inventory.sh`, which fails when a tracked `*.test.js|mjs|cjs|jsx|ts|tsx` file is run by no job and is not listed with a reason in `scripts/js-tests-not-in-gate.txt`. That list is only for files a runner cannot execute at all (browser farm, database, secret). A red test stays in its job and keeps the job red.
+- `market` — `npm ci --no-audit --no-fund` in `market/`, then `market/src/*.test.js`, `market/src/*.test.mjs` and `market/index.test.js`.
+- `market-sweep` — the one market file that needs minutes of corpus work (`market/src/search-token-triples.test.js`), split out to keep `market` short.
+- `solid`, `workers`, `news`, `scripts`, `bench` — the same shape, from their own line of the groups file; `solid` and `bench` run `npm ci` first.
+- `js-gate` — `needs:` all of them, `if: always()`, and it passes only when every job succeeded. A failed, cancelled or skipped job fails it, so the aggregate cannot go green by a job that never ran. This is the name to make required once it has run on `main`; it is not in `scripts/ci-required-checks` yet, so no deploy waits for it.
+
+Cost: `gvitolocs/pokoin` is public, so these `ubuntu-24.04` runners use no billed minutes; a green run is about 3 minutes of wall time, because the jobs run in parallel and the longest of them (`market`) is about 2 minutes. If the repository becomes private, every job counts against the plan's included minutes.
+
+Locally, from your worktree: `bash scripts/js-run-group.sh market` is exactly the `market` job, and `bash scripts/js-test-inventory.sh` is the `js-inventory` job.
 
 ## Deploy gate: main must be green to ship
 
