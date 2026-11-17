@@ -80,6 +80,10 @@ async fn count(pool: &PgPool, sql: &str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.expect("count")
 }
 
+async fn shelf_text(pool: &PgPool, sql: &str) -> String {
+    sqlx::query_scalar(sql).fetch_one(pool).await.expect("text")
+}
+
 #[tokio::test]
 async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
@@ -562,6 +566,122 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
         1
     );
     assert_eq!(count(&pool, "select price_pkn::bigint from public.marketplace_user_listings where card_id = '806382'").await, 8767);
+    // The match writes nothing the item carried either: the import's own
+    // quantity and location still stand, so a tool that sends its whole item
+    // on every sync cannot quietly restock or move a shelf listing.
+    assert_eq!(
+        count(
+            &pool,
+            "select quantity_available::bigint from public.marketplace_user_listings where card_id = '806382'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        shelf_text(
+            &pool,
+            "select location from public.marketplace_user_listings where card_id = '806382'"
+        )
+        .await,
+        "HYPERBEAM BINDER·1"
+    );
+    let untouched: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available, location, \
+           source, source_listing_id) \
+         values ('806390', 'seller-1', 'IT', 4321, 7, 'TIN·9', 'cardtrader_seller_import', 'ct:2600000001') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, quiet) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct6","item":{
+        "identity":{"publicId":"806390","game":"pokemon"},"quantity":2,"priceEurCents":10000,
+        "condition":"EX","language":"EN","location":"BIN-7","ctProductId":"2600000001"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quiet}");
+    assert_eq!(
+        (
+            quiet["listingId"].clone(),
+            quiet["created"].clone(),
+            quiet["matched"].clone()
+        ),
+        (
+            json!(untouched.to_string()),
+            json!(false),
+            json!("cardtrader_product")
+        )
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.marketplace_user_listings where card_id = '806390'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        shelf_text(
+            &pool,
+            "select quantity_available::text || '|' || location || '|' || condition || '|' || price_pkn::text \
+               from public.marketplace_user_listings where source_listing_id = 'ct:2600000001'"
+        )
+        .await,
+        "7|TIN·9|NM|4321"
+    );
+    // A matched item never reaches the pricing checks: the unknown group a
+    // new listing cannot name asks nothing of the shelf listing, and the
+    // answer carries no pricing field at all.
+    let other_product: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, \
+           source, source_listing_id) \
+         values ('806392', 'seller-1', 'IT', 1500, 'cardtrader_seller_import', 'ct:2600000002') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let unknown_group = "22222222-2222-2222-2222-222222222222";
+    let (status, skipped) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct7","pricingGroupId":unknown_group,
+        "item":{"identity":{"publicId":"806392","game":"pokemon"},"quantity":1,"priceEurCents":4793,
+        "ctProductId":"2600000002"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{skipped}");
+    assert_eq!(
+        (
+            skipped["listingId"].clone(),
+            skipped["created"].clone(),
+            skipped["matched"].clone()
+        ),
+        (
+            json!(other_product.to_string()),
+            json!(false),
+            json!("cardtrader_product")
+        )
+    );
+    assert!(
+        !skipped.to_string().contains("pricing") && skipped["priced"].is_null(),
+        "{skipped}"
+    );
+    // The same unknown group is refused for an item that is not a copy of a
+    // product on the shelf, and claims no key.
+    let (status, refused) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct8","pricingGroupId":unknown_group,
+        "item":{"identity":{"publicId":"806396","game":"pokemon"},"quantity":1,"priceEurCents":4793}}),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("pricing_group_unknown")),
+        "{refused}"
+    );
     // Another seller's import of that product is not this seller's shelf.
     sqlx::query(
         "update public.marketplace_user_listings set seller_uid = 'seller-2' where id = $1",
@@ -616,6 +736,37 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     .execute(&pool)
     .await;
     assert!(second_import.is_err(), "one live import per product");
+    // Rule 1 by itself: for a product this seller has no listing of at all,
+    // the trigger lets both imports through (they are the same kind of row),
+    // so the partial unique index is what refuses the second one.
+    let import_ct = "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+                     values ('806394', $1, 'IT', 100, 'cardtrader_seller_import', 'ct:2600000003')";
+    let first_import = sqlx::query(import_ct).bind("seller-1").execute(&pool).await;
+    assert!(
+        first_import.is_ok(),
+        "a seller's first live import of a free product: {first_import:?}"
+    );
+    let second_of_one_product = sqlx::query(import_ct).bind("seller-1").execute(&pool).await;
+    let index_error = second_of_one_product.unwrap_err().to_string();
+    assert!(
+        index_error.contains("marketplace_user_listings_ct_import_uidx"),
+        "rule 1 is the index, not the trigger: {index_error}"
+    );
+    // Another seller's import of the same CardTrader product is its own row.
+    let other_seller_import = sqlx::query(import_ct).bind("seller-2").execute(&pool).await;
+    assert!(
+        other_seller_import.is_ok(),
+        "the index is per seller: {other_seller_import:?}"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.marketplace_user_listings \
+             where source_listing_id = 'ct:2600000003' and status = 'active'"
+        )
+        .await,
+        2
+    );
     let native_too = sqlx::query(
         "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source_listing_id) \
          values ('806382', 'seller-1', 'IT', 100, 'ct:456705610')",
