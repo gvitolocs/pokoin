@@ -311,7 +311,8 @@ ok "13: the log gets one line per run that ends"
 # 14. the repository's own list
 grep -qx 'rust-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks rust-gate"
 grep -qx 'repo-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks repo-gate"
-ok "14: scripts/ci-required-checks names rust-gate and repo-gate"
+grep -qx 'secret-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks secret-gate"
+ok "14: scripts/ci-required-checks names rust-gate, repo-gate and secret-gate"
 
 # 15. the real answer, with rust-gate as the only required name
 FAKE_GH_FIXTURE="$real" run_gate "$SHA_RUST"
