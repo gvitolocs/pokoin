@@ -13215,3 +13215,176 @@ img.is-lang-scan {
 .sold-graph-key.is-picked.is-dashed::before {
   background: repeating-linear-gradient(90deg, var(--sold-line, var(--yellow)) 0 4px, transparent 4px 7px);
 }
+
+/* Every price source inside the panel the sold graph already has.
+   The legend keys and the four range buttons share one line at the plot's top,
+   so nothing new is added above or below it: the chart only starts lower.
+   The source colours are the only literals here; everything else is the page's
+   own variables, because the desk is tinted per card. */
+.sold-graph-topline {
+  position: absolute;
+  z-index: 4;
+  top: 0.35rem;
+  left: 2.85rem;
+  right: 2.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+/* The keys give room first: they are the part that scrolls, the buttons are not. */
+.sold-graph-topline .sold-graph-legend {
+  position: static;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.sold-graph-ranges {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.16rem;
+  margin-left: auto;
+  pointer-events: auto;
+}
+.sold-graph-range {
+  height: 20px;
+  padding: 0 0.32rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sold-graph-range:hover { color: var(--text); border-color: var(--muted); }
+.sold-graph-range[aria-pressed="true"] {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+}
+.sold-graph-range:focus-visible { outline: 1px solid var(--yellow); outline-offset: 1px; }
+
+/* A source key is the same swatch-plus-text chip, but pressable: it takes the
+   line off the chart. Turned off, or with nothing to draw in this range, it is
+   dimmed; the latter cannot be pressed at all. */
+button.sold-graph-key.is-source {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+button.sold-graph-key.is-source:hover { color: var(--text); }
+.sold-graph-key.is-source.is-off,
+.sold-graph-key.is-source.is-empty { opacity: 0.45; }
+.sold-graph-key.is-source.is-off:hover { color: var(--muted); }
+.sold-graph-key.is-source:disabled { cursor: default; }
+.sold-graph-key.is-source:focus-visible { outline: 1px solid var(--yellow); outline-offset: 2px; }
+
+/* An outer price source is a thinner line than a sold series, and it is drawn
+   under it. Where it stopped quoting the line breaks and a faint dotted segment
+   bridges the hole, so a gap reads as a gap instead of a flat price. */
+.sold-graph-under.is-source polyline { stroke-width: 1.6; opacity: 0.95; }
+.sold-graph-under.is-source.is-dashed polyline:not(.sold-graph-gap) { stroke-dasharray: 5 4; }
+.sold-graph-under.is-source polyline.sold-graph-gap,
+.sold-graph-under.is-source.is-dashed polyline.sold-graph-gap {
+  stroke-width: 1.3;
+  stroke-dasharray: 1 4;
+  opacity: 0.38;
+}
+
+/* Pokoin now has no history to draw: the cheapest live listing is one dot at
+   the right edge, with a short dotted stub pointing at it. */
+.sold-graph-now-stub { stroke: var(--yellow); stroke-width: 1.4; stroke-dasharray: 1 4; opacity: 0.5; stroke-linecap: round; }
+.sold-graph-now-dot { fill: var(--yellow); stroke: none; }
+/* Every visible line gets a mark on the guide for the day it quotes. */
+.sold-graph-hover-dot { fill: var(--dot-fill, var(--muted)); stroke: none; }
+
+/* Several lines on the plot: the hover is one small table at its top, beside the
+   guide on whichever side is free, and it never leaves the panel. */
+.sold-graph-tip.is-rows {
+  display: grid;
+  gap: 0.02rem;
+  padding: 0.28rem 0.42rem;
+  white-space: nowrap;
+}
+.sold-graph-tip.is-rows.is-start { transform: translate(0.55rem, 2px); margin-left: 0; }
+.sold-graph-tip.is-rows.is-end { transform: translate(calc(-100% - 0.55rem), 2px); margin-left: 0; }
+.sold-graph-tip.is-rows strong {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+  margin-top: 0.1rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-row.is-picked { color: var(--text); }
+.sold-graph-tip.is-rows .sold-graph-tip-swatch {
+  flex: none;
+  width: 0.7rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--row-line, var(--muted));
+}
+.sold-graph-tip.is-rows .sold-graph-tip-swatch.is-dashed {
+  background: repeating-linear-gradient(90deg, var(--row-line, var(--muted)) 0 4px, transparent 4px 7px);
+}
+.sold-graph-tip.is-rows .sold-graph-tip-label {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-value {
+  margin: 0 0 0 auto;
+  max-width: none;
+  padding-left: 0.5rem;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-value.is-none { color: var(--muted); font-weight: 600; }
+.sold-graph-tip.is-rows .sold-graph-tip-more {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* On a phone the same line stays one row: the keys scroll, the buttons stay put. */
+@media (max-width: 720px) {
+  .sold-graph-topline { gap: 0.24rem; }
+  .sold-graph-topline .sold-graph-legend { gap: 0.16rem 0.5rem; }
+  .sold-graph-ranges { gap: 0.1rem; }
+  .sold-graph-range { padding: 0 0.22rem; }
+}
+
+/* A panel under 560 px (the measured width, like the short key labels): the top
+   line spans the whole panel, the key gap and the buttons tighten, so the four
+   source keys in short form and the four range buttons fit a 314 px phone
+   panel. At 560 px and wider nothing here changes. */
+.sold-graph.is-narrow .sold-graph-topline { left: 0.5rem; right: 0.5rem; }
+.sold-graph.is-narrow .sold-graph-topline .sold-graph-legend { gap: 0.16rem 6px; }
+.sold-graph.is-narrow .sold-graph-key::before { width: 0.75rem; }
+.sold-graph.is-narrow .sold-graph-range { padding: 0 5px; }
+/* Keys that still overflow (overlay keys joined in) fade over their last
+   16 px: the mask clears to the panel's own background, so the row reads as
+   scrollable instead of cut off. */
+.sold-graph-legend.is-overflow {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}
