@@ -6,7 +6,7 @@
 # gate, and which objects are stampable. Run: sh scripts/missing-images-driver.test.sh
 set -eu
 
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 base=$(mktemp -d "${TMPDIR:-$HOME/scratch/tmp}/missing-images-driver-test.XXXXXX")
 trap 'rm -rf "$base"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -230,6 +230,12 @@ case "$out" in
   *"verify keys=2 all=200"*) ;;
   *) fail "the staged keys were not verified: $out" ;;
 esac
+# stamp-keys.tsv pairs a main JPEG with its own WebP and lists only the main key.
+webp_rows=$(awk -F'\t' '$2 ~ /_homepage\.webp$/ { n++ } END { print n + 0 }' \
+  "$R3/missing-batches/0001/stamp-keys.tsv")
+[ "$webp_rows" = 0 ] || fail "a homepage webp was stamped as the main image"
+[ "$(wc -l <"$R3/missing-batches/0001/stamp-keys.tsv" | tr -d ' ')" = 1 ] ||
+  fail "stamp-keys.tsv should hold exactly the one main key: $(cat "$R3/missing-batches/0001/stamp-keys.tsv")"
 if [ -z "$(awk -F'\t' -v q=111 '$1 == q && $2 == "abra" && $3 == 400' "$R3/missing-under500.txt" 2>/dev/null)" ]; then
   fail "under-500 report missing: $(cat "$R3/missing-under500.txt" 2>/dev/null)"
 fi
@@ -275,12 +281,12 @@ bp_line=$(grep -n 'UPDATE public.cardtrader_pokemon_blueprints b SET' "$STUB_SQL
 ov_line=$(grep -n 'UPDATE public.marketplace_search_candidates c SET' "$STUB_SQL" | head -n 1 | cut -d: -f1)
 [ -n "$bp_line" ] && [ -n "$ov_line" ] && [ "$bp_line" -lt "$ov_line" ] ||
   fail "the overlay did not run after the blueprint stamp (bp=$bp_line overlay=$ov_line)"
-if [ -z "$(ls "$R5/missing-undo" 2>/dev/null)" ]; then
+undo=$(find "$R5/missing-undo" -type f -name '*.sql' | sort | head -n 1)
+if [ -z "$undo" ]; then
   fail "apply wrote no undo file"
 fi
-undo=$(ls "$R5/missing-undo" | head -n 1)
-grep -q 'WHERE id=111;' "$R5/missing-undo/$undo" || fail "undo file lacks the blueprint row"
-grep -q 'WHERE card_id=222;' "$R5/missing-undo/$undo" || fail "undo file lacks the candidate row"
+grep -q 'WHERE id=111;' "$undo" || fail "undo file lacks the blueprint row"
+grep -q 'WHERE card_id=222;' "$undo" || fail "undo file lacks the candidate row"
 grep -q 'ON_ERROR_STOP=1 <' "$R5"/missing-batches/*/batch.log ||
   fail "batch log lacks the undo command line"
 grep -q "nullif(b.cdn_image_url,'') IS NULL" "$STUB_SQL" ||
