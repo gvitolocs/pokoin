@@ -24,6 +24,8 @@
 #   POKOIN_CI_CALLER            who is calling, for the log (default: unknown)
 #   POKOIN_CI_OVERRIDE          the owner's emergency switch: <full 40-hex commit id>:<reason>
 #   POKOIN_OPS_RECORD_CMD       command that takes one JSON object on stdin (default: lucina-rs ops record)
+#   POKOIN_CANONICAL_CHECKOUT   the integration checkout to warn about when it is dirty (default, if it exists:
+#                               /home/nez/Projects/Startup/Pokoin/pokoin-web); a warning only, never a refusal
 set -euo pipefail
 
 # git exports GIT_DIR (and GIT_PREFIX, GIT_EXEC_PATH, GIT_CONFIG_PARAMETERS) into the hooks it runs; with GIT_DIR
@@ -205,6 +207,38 @@ if [ "$self_check_only" = 1 ]; then
   exit 0
 fi
 
+# ---- the canonical checkout, if this host has one ----------------------------------------------------------
+# Every deploy runs from the canonical integration checkout, so uncommitted work there — left by a generator or by
+# another agent — blocks its next fast-forward to origin/main. The gate only says so: it is not a refusal, it is not
+# logged, it does not change the result, and it never shows the contents of the files listed.
+CANONICAL_DEFAULT=/home/nez/Projects/Startup/Pokoin/pokoin-web
+CANONICAL_KNOWN='?? server/node_modules/'
+CANONICAL_MAX=15
+
+canonical_warning() {
+  local dir lines line shown=0 total=0
+  dir="${POKOIN_CANONICAL_CHECKOUT:-}"
+  if [ -z "$dir" ]; then dir="$CANONICAL_DEFAULT"; fi
+  if [ ! -d "$dir" ]; then return 0; fi
+  lines="$(git -C "$dir" status --porcelain 2> /dev/null)" || return 0
+  while IFS= read -r line; do
+    if [ -z "$line" ] || [ "$line" = "$CANONICAL_KNOWN" ]; then continue; fi
+    total=$((total + 1))
+    if [ "$shown" -eq 0 ]; then
+      echo "$BEFORE_SHA_PREFIX: WARNING the canonical checkout has uncommitted changes: a generator or an agent wrote there; it blocks its next fast-forward. ($dir)" >&2
+    fi
+    if [ "$shown" -lt "$CANONICAL_MAX" ]; then
+      echo "$BEFORE_SHA_PREFIX: WARNING   $line" >&2
+      shown=$((shown + 1))
+    fi
+  done <<< "$lines"
+  if [ "$total" -gt "$shown" ]; then
+    echo "$BEFORE_SHA_PREFIX: WARNING   and $((total - shown)) more" >&2
+  fi
+}
+
+canonical_warning
+
 # ---- override (the self-check above is not part of it) -----------------------------------------------------
 if [ -n "${POKOIN_CI_OVERRIDE:-}" ]; then
   ov="$POKOIN_CI_OVERRIDE"
@@ -281,6 +315,22 @@ fi
 FILTER='.check_runs[] | select((.app.slug? // "") == "github-actions") | [.id, .name, .status, (.conclusion // "none")] | @tsv'
 ENDPOINT="repos/$REPO/commits/$SHA/check-runs?per_page=100"
 
+# The answer's stderr is captured so a commit GitHub has never seen is named the first time it is asked for, instead
+# of being retried and reported as an unreadable API. A host with no mktemp — the gate must keep working with a bare
+# PATH (test 9h) — falls back to /dev/null, which keeps the old wording.
+gh_err=/dev/null
+gh_err_mine=0
+if gh_err_new="$(mktemp "${TMPDIR:-/tmp}/require-ci-green-gh.XXXXXX" 2> /dev/null)"; then
+  gh_err="$gh_err_new"
+  gh_err_mine=1
+fi
+
+# shellcheck disable=SC2317,SC2329  # called through the trap cleanup EXIT below, never directly
+gh_err_cleanup() {
+  if [ "$gh_err_mine" = 1 ]; then rm -f "$gh_err"; fi
+}
+trap gh_err_cleanup EXIT
+
 api_fails=0
 while true; do
   elapsed=$(($(date +%s) - start))
@@ -288,9 +338,12 @@ while true; do
   api_ok=1
   api_note=
   out=
-  if ! out="$("$GH_BIN" api --paginate "$ENDPOINT" --jq "$FILTER" 2> /dev/null)"; then
+  if ! out="$("$GH_BIN" api --paginate "$ENDPOINT" --jq "$FILTER" 2> "$gh_err")"; then
     api_ok=0
     api_note="gh api exited non-zero"
+    if [ "$gh_err_mine" = 1 ] && grep -qE '\(HTTP (404|422)\)' "$gh_err" 2> /dev/null; then
+      refuse "GitHub has no commit $SHORT: it was never pushed. Push a branch and open a pull request." --no-advice
+    fi
   else
     while IFS= read -r row; do
       [ -n "$row" ] || continue
