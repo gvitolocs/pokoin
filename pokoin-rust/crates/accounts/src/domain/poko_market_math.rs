@@ -861,7 +861,7 @@ pub fn sold_stats(rows: &[Json]) -> Option<SoldStats> {
         if let Some(day) = day_of(row.get("observed_day")) {
             if last_sale_day
                 .as_deref()
-                .map(|current| day > current.to_string())
+                .map(|current| day.as_str() > current)
                 .unwrap_or(true)
             {
                 last_sale_day = Some(day.clone());

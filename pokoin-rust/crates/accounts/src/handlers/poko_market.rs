@@ -2724,9 +2724,8 @@ async fn top_movers(deps: &MarketDeps, params: &Json) -> Result<Json> {
             continue;
         }
         let change_pct = ((end - start) / start * 1000.0).round() / 10.0;
-        if (direction == "up" && !(change_pct > 0.0))
-            || (direction == "down" && !(change_pct < 0.0))
-        {
+        // A zero change belongs to neither direction.
+        if (direction == "up" && change_pct <= 0.0) || (direction == "down" && change_pct >= 0.0) {
             continue;
         }
         let mut body = candidate_from_row(row)
