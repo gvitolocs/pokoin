@@ -99,6 +99,13 @@ gaps).
   `expansion-symbols emit-codes --symbols symbols.tsv --js ../../market/src/data/set-badge-codes.js`.
   Only letter+digit badges of 3+ characters; anything that reads as a collector
   number (`3c`, `sv4`) or a card name stays that.
+- A set's TCG short name (`DEX`, `PLF`, `BKT`, `EVO`, `PRE`, `SVI`) is an exact set
+  alias as well: `scripts/export-suggest-catalog.py` collects each expansion's
+  `tcg_shortnames` rows of `marketplace_expansion_aliases` into the `codes` field
+  of `market/src/data/suggest-sets.js`, and `setShortCodeAliases()` registers them.
+  A suffix that is already part of the card name (`flareon ex`) keeps today's
+  meaning; a bare code beside a name is set intent, and the set reading wins, so
+  `flareon dex` leads with Dark Explorers and browses scoped to it.
 - Era words are typed set evidence in the scorer: `diamond`, `pearl`, `dp`,
   `bw`, `xy`, `sm`, `swsh`, `sword`, `shield`, `sv`, `scarlet`, `violet`, and the
   pairs `diamond pearl`, `black white`, `sun moon`, `sword shield`,
