@@ -98,6 +98,8 @@ FAKE
 chmod +x "$t/gh" "$t/ops" "$t/ops-fail"
 
 # fixtures: edited copies of the real answer (rust-gate is success there; repo-gate does not exist yet)
+# `green` stands for every required check green, so it carries a success run for each name of the real list the
+# real answer lacks; the throwaway repo above requires only rust-gate and repo-gate, so js-gate never decides a case.
 add_run() { # id name status conclusion slug
   jq --argjson id "$1" --arg name "$2" --arg status "$3" --arg c "$4" --arg slug "$5" \
     '.check_runs += [{id:$id,name:$name,status:$status,conclusion:(if $c=="null" then null else $c end),app:{slug:$slug}}]'
@@ -106,7 +108,7 @@ fx() { cat > "$t/fx-$1.json"; }
 jq . "$real" > /dev/null || fail "the real fixture is not JSON"
 jq -e '[.check_runs[]|select(.name=="rust-gate" and .conclusion=="success")]|length==1' "$real" > /dev/null \
   || fail "the real fixture should have rust-gate success"
-add_run 200000000001 repo-gate completed success github-actions < "$real" | fx green
+add_run 200000000001 repo-gate completed success github-actions < "$real" | add_run 200000000003 js-gate completed success github-actions | fx green
 add_run 200000000001 repo-gate completed failure github-actions < "$real" | fx repofail
 add_run 200000000001 repo-gate in_progress null github-actions < "$real" | fx running
 # old failure + newer success: rust-gate failure id 50, success id 100 (the real run, renumbered)
@@ -336,7 +338,8 @@ ok "13: the log gets one line per run that ends"
 grep -qx 'rust-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks rust-gate"
 grep -qx 'repo-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks repo-gate"
 grep -qx 'secret-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks secret-gate"
-ok "14: scripts/ci-required-checks names rust-gate, repo-gate and secret-gate"
+grep -qx 'js-gate' "$here/ci-required-checks" || fail "14: scripts/ci-required-checks lacks js-gate"
+ok "14: scripts/ci-required-checks names rust-gate, repo-gate, secret-gate and js-gate"
 
 # 15. the real answer, with rust-gate as the only required name
 FAKE_GH_FIXTURE="$real" run_gate "$SHA_RUST"

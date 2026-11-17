@@ -82,7 +82,8 @@ local hook uses) from the release archive, checks its sha256, and runs
 3. allowlist guard: fails on any change to `.gitleaks.toml` in the range, on a
    `.gitleaksignore` file, and on an added inline allow comment.
 
-`secret-gate` is in `scripts/ci-required-checks`, so a commit ships only when it is
+`secret-gate` is in `scripts/ci-required-checks`, which names `rust-gate`,
+`repo-gate`, `secret-gate` and `js-gate`: a commit ships only when all four are
 green.
 
 ## When the scan finds something
