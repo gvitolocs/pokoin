@@ -15,7 +15,8 @@ gitleaks detect --no-git -s . --redact --no-banner; echo exit=$?   # 0 == clean
 `.githooks/pre-commit` runs `gitleaks protect --staged --redact --no-banner`
 and fails the commit on a finding, when `gitleaks` is on `PATH` (the hook stays
 silent on hosts without it, so nothing else breaks). Enable the hook with
-`scripts/setup-git-hooks.sh`.
+`scripts/setup-git-hooks.sh`. The hook file must stay executable in git (mode
+100755) or git skips it silently; `scripts/ci-secret-scan.test.sh` checks this.
 
 The scan is only a gate while it stays clean: a new real secret must be finding
 number one, not number 190. Do not "fix" a red scan by widening the allowlist.

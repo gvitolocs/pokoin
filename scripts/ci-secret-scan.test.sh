@@ -101,6 +101,31 @@ run 1 "inline allow marker added" GITLEAKS="$gl"
 new_repo missing; mark_base
 run 2 "gitleaks missing" GITLEAKS=/nonexistent
 
+# Hook mode: git skips a hook that is not executable, silently, so every tracked file under .githooks/ must be
+# mode 100755 in the index (it was 100644 once: PKN-01).
+hooks_not_executable() { # hooks_not_executable <repo>: prints tracked .githooks files whose index mode is not 100755
+  git -C "$1" ls-files -s .githooks/ | awk '$1 != "100755" { print $4 }'
+}
+bad=$(hooks_not_executable "$root")
+if [ -z "$bad" ]; then
+  echo "ok   .githooks files are mode 100755 in the real repository"
+else
+  echo "FAIL .githooks file(s) not mode 100755 in the index: $bad (git skips a hook that is not executable, so the staged secret scan would not run)"
+  fails=$((fails + 1))
+fi
+# The same check must fail on a repository whose hook is 100644.
+new_repo hookmode
+mkdir -p "$repo/.githooks"
+printf '#!/bin/sh\nexit 0\n' >"$repo/.githooks/pre-commit"
+chmod 644 "$repo/.githooks/pre-commit"
+git -C "$repo" add .githooks/pre-commit
+if [ -n "$(hooks_not_executable "$repo")" ]; then
+  echo "ok   a 100644 hook is detected"
+else
+  echo "FAIL a 100644 hook was not detected"
+  fails=$((fails + 1))
+fi
+
 if [ "$fails" -ne 0 ]; then
   echo "ci-secret-scan.test: $fails failure(s)"
   exit 1
