@@ -24,6 +24,9 @@ marker="gitleaks"":allow"
 
 fails=0
 n=0
+# core.hooksPath is forced empty on every commit: a host that sets it globally (scripts/setup-git-hooks.sh, or a CI
+# lane that wraps this repository's own hooks) would run the canonical-checkout guard inside the throwaway fixtures
+# below and refuse their base commits, because a fresh `git init` is a main work tree.
 new_repo() { # new_repo <name>: a repo with the real policy and one clean commit; sets $repo
   n=$((n + 1))
   repo=$tmp/r$n-$1
@@ -35,9 +38,9 @@ new_repo() { # new_repo <name>: a repo with the real policy and one clean commit
   cp "$root/.gitleaks.toml" "$repo/.gitleaks.toml"
   echo clean >"$repo/a.txt"
   git -C "$repo" add -A
-  git -C "$repo" commit -q -m base
+  git -C "$repo" -c core.hooksPath= commit -q -m base
 }
-commit_all() { git -C "$repo" add -A && git -C "$repo" commit -q -m "$1"; }
+commit_all() { git -C "$repo" add -A && git -C "$repo" -c core.hooksPath= commit -q -m "$1"; }
 run() { # run <expected-exit> <label> [env...]: scan $repo from its commit "base" tag to HEAD
   local want=$1 label=$2 out rc
   shift 2
