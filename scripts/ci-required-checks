@@ -1,0 +1,3 @@
+# Check runs that must be green on a commit before it ships (scripts/require-ci-green.sh, docs/CI.md).
+rust-gate
+repo-gate
