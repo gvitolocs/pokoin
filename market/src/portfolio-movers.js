@@ -9,7 +9,7 @@
  */
 
 import { formatPknNumber } from './pkn.js';
-import { HISTORY_PRESETS, stepHistoryPoints } from './portfolio-history.js';
+import { HISTORY_PRESETS, formatDayLabel, smoothHistoryBandPath, smoothHistoryPath } from './portfolio-history.js';
 import { formatAssetsValue } from './seller-currency.js';
 
 /** Tiles per side of the switch. */
@@ -148,8 +148,11 @@ export function moverTitle(mover, currency = '') {
 }
 
 /**
- * Sparkline geometry. The value is carried between sales, so the line steps —
- * the same reading as the portfolio chart above it. Flat series sit mid-box.
+ * Sparkline geometry, as SVG path `d` strings. The value is carried between
+ * sales and the curve is the monotone one the portfolio chart above uses: it
+ * passes through every point and never rises above or dips below the two it
+ * joins. Flat series sit mid-box. Each point keeps its day and price so a
+ * pointer over the tile can name the real value instead of a curve reading.
  */
 export function moverSpark(mover, size = MOVER_SPARK) {
   const series = mover?.series || [];
@@ -166,17 +169,55 @@ export function moverSpark(mover, size = MOVER_SPARK) {
   const yOf = (value) => (high === low
     ? height / 2
     : height - pad - ((value - low) / (high - low)) * plotHeight);
-  const coords = series.map((point, index) => ({ x: pad + index * step, y: yOf(point.pkn) }));
-  const stepped = stepHistoryPoints(coords);
-  const attr = (list) => list.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const coords = series.map((point, index) => ({
+    x: pad + index * step,
+    y: yOf(point.pkn),
+    day: point.day,
+    pkn: point.pkn,
+  }));
   const baseline = height - pad;
+  const edge = [
+    { x: coords[0].x, y: baseline },
+    { x: coords[coords.length - 1].x, y: baseline },
+  ];
   return {
-    line: attr(stepped),
-    area: attr([{ x: coords[0].x, y: baseline }, ...stepped, { x: coords[coords.length - 1].x, y: baseline }]),
+    line: smoothHistoryPath(coords),
+    area: smoothHistoryBandPath(coords, edge),
     points: coords,
     width,
     height,
     high,
     low,
+  };
+}
+
+/**
+ * The sparkline day a pointer sits on: `ratio` is the 0..1 position across the
+ * tile's sparkline width and the answer is the nearest point by x, so the
+ * tooltip quotes a price that really happened that day. `currency` is the
+ * tile's display currency, the same unit the tile prices the slice in.
+ */
+export function moverSparkHover(spark, ratio, currency = '') {
+  const points = spark?.points || [];
+  if (!points.length) return null;
+  const width = numberOrZero(spark.width) || MOVER_SPARK.width;
+  const target = Math.min(1, Math.max(0, Number(ratio) || 0)) * width;
+  let index = 0;
+  let best = Infinity;
+  for (let i = 0; i < points.length; i += 1) {
+    const distance = Math.abs(numberOrZero(points[i].x) - target);
+    if (distance >= best) continue;
+    best = distance;
+    index = i;
+  }
+  const point = points[index];
+  return {
+    index,
+    x: numberOrZero(point.x),
+    y: numberOrZero(point.y),
+    day: point.day,
+    pkn: numberOrZero(point.pkn),
+    dateLabel: formatDayLabel(point.day),
+    valueLabel: moverAmount(point.pkn, currency),
   };
 }

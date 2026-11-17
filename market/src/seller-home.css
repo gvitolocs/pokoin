@@ -1097,12 +1097,20 @@
 .mover-tile-change.is-down { color: #ff7a7a; }
 .mover-tile-change.is-flat { color: var(--muted); }
 
-.mover-spark {
+/* The wrap holds the hover dot and the day tip over the sparkline; it takes
+   the svg's place in the tile's column, so nothing below moves. */
+.mover-spark-wrap {
+  position: relative;
   display: block;
   flex: none;
   width: 100%;
-  height: 34px;
   margin-top: auto;
+}
+
+.mover-spark {
+  display: block;
+  width: 100%;
+  height: 34px;
 }
 
 .mover-spark-area {
@@ -1114,6 +1122,50 @@
   stroke: var(--yellow);
   stroke-width: 1.5;
   stroke-linejoin: round;
+}
+
+/* A CSS circle in %, like the chart above it, and its tip in miniature. */
+.mover-spark-dot {
+  position: absolute;
+  z-index: 2;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--yellow);
+  border: 2px solid #0c0b10;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.mover-spark-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  z-index: 3;
+  width: max-content;
+  padding: 4px 8px;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: rgb(12 11 16 / 0.94);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.45);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mover-spark-tip-day {
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mover-spark-tip strong {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .mover-tile.is-skeleton {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { smoothHistorySegments } from './portfolio-history.js';
 import {
   MOVER_SPARK,
   formatMoverChange,
@@ -7,6 +8,7 @@ import {
   moverChips,
   moverDaysForPreset,
   moverSpark,
+  moverSparkHover,
   moverTileLine,
   moverTitle,
   moverTone,
@@ -174,16 +176,51 @@ test('finishes and quantity appear in the chips and the title', () => {
   assert.equal(moverTitle(normalizeMover(apiMover({ quantity: 1 }))).includes('Qty'), false);
 });
 
-test('the sparkline steps between sales like the chart above it', () => {
-  const mover = normalizeMover(apiMover({
-    series: [
-      { day: '2026-08-01', pkn: 100 },
-      { day: '2026-08-02', pkn: 140 },
-      { day: '2026-08-03', pkn: 120 },
-    ],
+/** One sale per day, starting 2026-08-01, as the endpoint sends the series. */
+function sparkMover(values) {
+  return normalizeMover(apiMover({
+    series: values.map((pkn, index) => ({
+      day: `2026-08-${String(index + 1).padStart(2, '0')}`,
+      pkn,
+    })),
   }));
-  const spark = moverSpark(mover);
-  assert.equal(spark.line, '3.0,31.0 60.0,31.0 60.0,3.0 117.0,3.0 117.0,17.0');
+}
+
+/**
+ * The curve as the tile draws it, read back off the segment geometry rather
+ * than the string: every data point is a segment end in order, a segment's
+ * control points sit inside that segment's own x and y box (so a run never
+ * overshoots the two prices it joins), and the whole curve stays inside the
+ * padded box it was laid out in.
+ */
+function assertSmoothSparkShape(spark) {
+  const points = spark.points;
+  const segments = smoothHistorySegments(points);
+  assert.equal(segments.length, points.length - 1);
+  // The pen starts on the first point and every segment ends on the next one.
+  const drawn = [[segments[0].x0, segments[0].y0], ...segments.map((s) => [s.x1, s.y1])];
+  assert.deepEqual(drawn, points.map((p) => [p.x, p.y]));
+  const floor = MOVER_SPARK.pad;
+  const ceiling = spark.height - MOVER_SPARK.pad;
+  for (const s of segments) {
+    const yLo = Math.min(s.y0, s.y1);
+    const yHi = Math.max(s.y0, s.y1);
+    const xLo = Math.min(s.x0, s.x1);
+    const xHi = Math.max(s.x0, s.x1);
+    for (const [cx, cy] of [[s.cx1, s.cy1], [s.cx2, s.cy2]]) {
+      assert.ok(cy >= yLo && cy <= yHi, `control y ${cy} leaves [${yLo}, ${yHi}]`);
+      assert.ok(cy >= floor && cy <= ceiling, `control y ${cy} leaves [${floor}, ${ceiling}]`);
+      assert.ok(cx >= xLo && cx <= xHi, `control x ${cx} leaves [${xLo}, ${xHi}]`);
+    }
+  }
+}
+
+test('the sparkline curves through sales with the chart above it', () => {
+  const spark = moverSpark(sparkMover([100, 140, 120]));
+  assert.equal(
+    spark.line,
+    'M 3.00 31.00 C 22.00 21.67, 41.00 3.00, 60.00 3.00 C 79.00 3.00, 98.00 12.33, 117.00 17.00',
+  );
   assert.equal(spark.high, 140);
   assert.equal(spark.low, 100);
   assert.equal(spark.points.length, 3);
@@ -191,13 +228,18 @@ test('the sparkline steps between sales like the chart above it', () => {
     { width: spark.width, height: spark.height },
     { width: MOVER_SPARK.width, height: MOVER_SPARK.height },
   );
-  assert.equal(spark.area.startsWith('3.0,31.0 '), true);
+  // Each point names its own day and price, so a hover can quote a real value.
+  assert.deepEqual(spark.points[1], { x: 60, y: 3, day: '2026-08-02', pkn: 140 });
+  // The fill drops to the baseline at the last x and walks it back to the first.
+  assert.equal(spark.area.includes('L 117.00 31.00 '), true);
+  assert.equal(spark.area.endsWith('3.00 31.00 Z'), true);
+  assertSmoothSparkShape(spark);
 
   // A quiet slice holds mid-box rather than drawing a false trend.
   const flat = moverSpark(normalizeMover(apiMover({
     series: [{ day: '2026-08-01', pkn: 100 }, { day: '2026-08-09', pkn: 100 }],
   })));
-  assert.equal(flat.line, '3.0,17.0 117.0,17.0 117.0,17.0');
+  assert.equal(flat.line, 'M 3.00 17.00 C 41.00 17.00, 79.00 17.00, 117.00 17.00');
 
   // One point or none: nothing to draw.
   assert.deepEqual(
@@ -205,4 +247,48 @@ test('the sparkline steps between sales like the chart above it', () => {
     { line: '', area: '', points: [] },
   );
   assert.deepEqual(moverSpark(null), { line: '', area: '', points: [] });
+});
+
+test('a jagged sparkline turns at the prices, not past them', () => {
+  const jag = moverSpark(sparkMover([64500, 61000, 64600, 59500, 59000, 61300]));
+  assert.equal(jag.points.length, 6);
+  assertSmoothSparkShape(jag);
+  // The top and the bottom sale land on the padded edges of the box.
+  assert.equal(Math.min(...jag.points.map((p) => p.y)), MOVER_SPARK.pad);
+  assert.equal(Math.max(...jag.points.map((p) => p.y)), MOVER_SPARK.height - MOVER_SPARK.pad);
+});
+
+test('a pointer over the sparkline reads a real day, priced like the tile', () => {
+  const spark = moverSpark(sparkMover([100, 140, 120]));
+  const at = (ratio) => moverSparkHover(spark, ratio);
+  assert.deepEqual(at(0), {
+    index: 0,
+    x: 3,
+    y: 31,
+    day: '2026-08-01',
+    pkn: 100,
+    dateLabel: 'Aug 1',
+    valueLabel: '100 PKN',
+  });
+  assert.equal(at(0.5).index, 1);
+  assert.equal(at(0.5).day, '2026-08-02');
+  assert.equal(at(0.5).pkn, 140);
+  assert.equal(at(0.5).dateLabel, 'Aug 2');
+  // Nearest point by x, never a price read off the curve between two sales.
+  assert.equal(at(0.42).index, 1);
+  assert.equal(at(1).index, 2);
+  assert.equal(at(1).valueLabel, '120 PKN');
+  // A pointer outside the sparkline still answers with an end day.
+  assert.equal(at(-3).index, 0);
+  assert.equal(at(4).index, 2);
+  assert.equal(at('nonsense').index, 0);
+  // PKN stays digits-only (D000014); another currency takes the tile's label.
+  assert.equal(moverSparkHover(moverSpark(sparkMover([64500, 61000])), 0).valueLabel, '64500 PKN');
+  assert.equal(moverSparkHover(spark, 0.5, 'DKK').valueLabel, '5.25 DKK');
+  // A currency the tile has not settled yet is the PKN text it already shows.
+  assert.equal(moverSparkHover(spark, 0.5, '').valueLabel, '140 PKN');
+  // Nothing hovered, no sparkline: no day to name.
+  assert.equal(moverSparkHover({ line: '', area: '', points: [] }, 0.5), null);
+  assert.equal(moverSparkHover(moverSpark(normalizeMover(apiMover({ series: [] }))), 0.5), null);
+  assert.equal(moverSparkHover(null, 0.5), null);
 });
