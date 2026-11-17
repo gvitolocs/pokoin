@@ -13372,3 +13372,19 @@ button.sold-graph-key.is-source:hover { color: var(--text); }
   .sold-graph-ranges { gap: 0.1rem; }
   .sold-graph-range { padding: 0 0.22rem; }
 }
+
+/* A panel under 560 px (the measured width, like the short key labels): the top
+   line spans the whole panel, the key gap and the buttons tighten, so the four
+   source keys in short form and the four range buttons fit a 314 px phone
+   panel. At 560 px and wider nothing here changes. */
+.sold-graph.is-narrow .sold-graph-topline { left: 0.5rem; right: 0.5rem; }
+.sold-graph.is-narrow .sold-graph-topline .sold-graph-legend { gap: 0.16rem 6px; }
+.sold-graph.is-narrow .sold-graph-key::before { width: 0.75rem; }
+.sold-graph.is-narrow .sold-graph-range { padding: 0 5px; }
+/* Keys that still overflow (overlay keys joined in) fade over their last
+   16 px: the mask clears to the panel's own background, so the row reads as
+   scrollable instead of cut off. */
+.sold-graph-legend.is-overflow {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}
