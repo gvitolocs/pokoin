@@ -1,0 +1,2 @@
+# Tracked test files that cannot run on a GitHub runner at all (browser farm, database, secret). One line each: path<TAB>reason.
+# Never list a red test here: a failing test stays in its gate job. docs/CI.md.

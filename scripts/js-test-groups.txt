@@ -1,0 +1,13 @@
+# One line per gate job of .github/workflows/js-ci.yml. Fields are TAB separated:
+#   group <TAB> working directory (relative to the repo root) <TAB> command <TAB> file globs
+# scripts/js-run-group.sh runs the command in the working directory with the tracked files matching the globs appended
+# (paths relative to the working directory). scripts/js-test-inventory.sh reads the same globs, so a job and the check
+# that every test file is run cannot drift apart. In a glob, * stops at a slash, ** crosses slashes, and a leading ! excludes.
+# Several globs are separated by a space. The gate job `js-gate` needs one job per line here.
+market	.	node --test --test-force-exit	market/src/*.test.js market/src/*.test.mjs !market/src/search-token-triples.test.js market/index.test.js
+market-sweep	.	node --test --test-force-exit	market/src/search-token-triples.test.js
+solid	solid	node --test --test-force-exit	solid/src/**/*.test.js
+workers	.	node --test --test-force-exit	workers/*.test.js workers/*.test.mjs
+news	.	node --test --test-force-exit	news/test/*.test.mjs
+scripts	.	node --test --test-force-exit	scripts/*.test.js scripts/*.test.mjs scripts/sql/*.test.js
+bench	bench	node --test --test-force-exit	bench/lib/*.test.mjs
