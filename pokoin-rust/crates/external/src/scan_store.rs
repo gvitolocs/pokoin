@@ -1400,11 +1400,15 @@ pub async fn set_defaults(db: &DbPools, seller_uid: &str, batch_id: &str, defaul
     }
     let mut items: Vec<Value> = Vec::new();
     if !sets.is_empty() {
-        let _ = bump_batch(&mut tx, batch_id, 0).await?;
+        // Every fanned row takes the batch's new item_seq: the desk cursor is
+        // that seq, so a row left behind it would never replay on the stream.
+        let (fan_seq, _) = bump_batch(&mut tx, batch_id, 0).await?;
+        values.push(json!(fan_seq));
+        sets.push(format!("seq = ${}", values.len()));
         values.push(json!(batch_id));
         let sql = format!(
             "update public.scan_items
-                set {}, seq = seq + 1, updated_at = now()
+                set {}, updated_at = now()
               where batch_id = ${}::uuid and status = 'active'
               returning {}",
             sets.join(", "),

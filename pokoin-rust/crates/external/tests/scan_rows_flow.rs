@@ -646,3 +646,48 @@ async fn a_submit_lists_a_priced_row_and_parks_the_unpriced_one() {
 
     scratch.finish().await;
 }
+
+#[tokio::test]
+async fn the_defaults_fan_keeps_every_row_ahead_of_the_stream_cursor() {
+    let Some(scratch) = scratch_db("defaults_cursor").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 18, 2).await;
+    insert_row(&pool, &batch, 17, 1.0, None).await;
+    insert_row(&pool, &batch, 18, 2.0, None).await;
+    let cursor = 18_i64;
+
+    let _out = scan_store::set_defaults(&db, SELLER, &batch, &json!({ "condition": "MP" }))
+        .await
+        .expect("defaults fan");
+    let batch_cursor: i64 =
+        sqlx::query_scalar("select item_seq from public.scan_batches where id = $1::uuid")
+            .bind(&batch)
+            .fetch_one(&pool)
+            .await
+            .expect("batch item_seq");
+    assert!(batch_cursor > cursor);
+
+    let after = scan_store::items_after(&db, &batch, cursor, 500)
+        .await
+        .expect("items after");
+    let after = after.as_array().expect("array");
+    assert_eq!(
+        after.len(),
+        2,
+        "both fanned rows are past the desk's cursor"
+    );
+    for row in after {
+        assert_eq!(row["condition"], json!("MP"));
+    }
+    let max_seq = after.iter().filter_map(|row| row["seq"].as_i64()).max();
+    assert_eq!(
+        max_seq,
+        Some(batch_cursor),
+        "every fanned row sits on the batch item_seq"
+    );
+
+    scratch.finish().await;
+}
