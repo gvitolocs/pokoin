@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Run: bash scripts/deploy-gate-callers.test.sh
-# Proves each deploy and publish entry point refuses BEFORE it ships when CI is red, and goes past the gate when CI is
-# green. Uses copies of the real scripts in a throwaway bare origin + clone, a fake `gh` (JSON fixtures), and fake
-# wrangler, vercel, ssh, scp and file that only append to a calls file. No network; everything lives in one temp dir.
+# Proves each deploy and publish entry point refuses BEFORE it ships when CI is red, goes past the gate when CI is
+# green and when a version is promoted, and refuses again with green CI when its own file is not origin/main's.
+# Uses copies of the real scripts in a throwaway bare origin + clone, a fake `gh` (JSON fixtures), and fake wrangler,
+# vercel, ssh, scp and file that only append to a calls file. The fake wrangler answers `versions list --json` from
+# $FAKE_WRANGLER_LIST. No network; everything lives in one temp dir.
 #
 # Where a script stops (green CI):
 #   publish-web.sh               runs to the end (build and node steps are stubs, wrangler is fake)
@@ -70,11 +72,18 @@ for a in "$@"; do
 done
 jq -r "$filter" "$FAKE_GH_FIXTURE"
 FAKE
+# The fake wrangler answers `versions list` from $FAKE_WRANGLER_LIST (a file), exiting $FAKE_WRANGLER_LIST_RC; with
+# no fixture given the call fails. The JSON shape publish-web.sh reads (an array of objects with an `id`) comes from
+# the Cloudflare documentation and has not been seen from the real tool by this run.
 cat > "$t/wrangler" << 'FAKE'
 #!/usr/bin/env bash
 echo "wrangler $*" >> "$CALLS"
 case "$*" in
   "versions upload"*) echo "Version ID: 11111111-2222-3333-4444-555555555555" ;;
+  "versions list --name pokoin-web --json")
+    if [ -n "${FAKE_WRANGLER_LIST:-}" ]; then cat "$FAKE_WRANGLER_LIST"; exit "${FAKE_WRANGLER_LIST_RC:-0}"; fi
+    echo "wrangler: versions list has no fixture in this test" >&2
+    exit 1 ;;
 esac
 FAKE
 for n in vercel ssh scp; do
@@ -140,23 +149,118 @@ grep -qP '^\S+\t11111111-2222-3333-4444-555555555555\t'"$SHA"'\tgreen$' "$POKOIN
   || fail "publish green: versions file lacks the id with the sha and green: $(cat "$POKOIN_WEB_VERSIONS_LOG" 2> /dev/null)"
 ok "publish-web.sh upload, CI green: exit 0, wrangler versions upload called, version recorded with sha and green"
 
-# ---- publish-web.sh --promote (rollback must never be blocked) ----------------------------------------------
+# ---- publish-web.sh --promote (the rollback path, with an exception that ends by itself) ---------------------
 RECORDED=11111111-2222-3333-4444-555555555555
 UNKNOWN=99999999-8888-7777-6666-555555555555
+SECOND=22222222-3333-4444-5555-666666666666
+THIRD=33333333-4444-5555-6666-777777777777
+
+# list_json_of <id>...: a `versions list --json` answer in the shape the fake wrangler prints, holding these ids.
+# The shape is taken from the Cloudflare documentation and has NOT been seen from the real tool by this run;
+# publish-web.sh prints the count line, so a wrong assumption shows itself at the first real promote.
+list_json_of() {
+  jq -n --arg ids "$*" '($ids | split(" ") | to_entries
+    | map({id: .value, version_id: .value, number: (.key + 1), created_on: "2026-11-01T00:00:00Z", annotations: []}))'
+}
+# vlog <file> <kind> <id>...: a versions log with one line per id, as publish-web.sh records it
+vlog() {
+  local f="$1" kind="$2" id
+  shift 2
+  : > "$f"
+  for id in "$@"; do printf '2026-11-01T00:00:00Z\t%s\t%s\t%s\n' "$id" "$SHA" "$kind" >> "$f"; done
+}
+list_json_of "$RECORDED" "$SECOND" "$THIRD" > "$t/list-3.json"
+echo '[]' > "$t/list-none.json"
+echo 'the retained versions, as a table' > "$t/list-not-json.txt"
+vlog "$t/v-3of3.tsv" green "$RECORDED" "$SECOND" "$THIRD"
+vlog "$t/v-1of3.tsv" green "$RECORDED"
+: > "$t/v-none.tsv"
+GATED_COUNT="retained versions were uploaded through the gate"
+UNLISTED="publish-web: the retained versions could not be listed"
+NOT_UPLOADED_WARNING="version $UNKNOWN was not uploaded through this script on this host; its commit's CI state is unknown"
+NOT_UPLOADED_REFUSED="version $UNKNOWN was not uploaded through this script; every retained version was, so this one is not a rollback target."
+
+grep -q -- '--self-check-only' "$here/publish-web.sh" || fail "promote: publish-web.sh does not run the gate's self-check"
+
 in_clone red bash scripts/publish-web.sh --promote "$RECORDED"
 want_rc 0 "promote recorded"
 called "wrangler versions deploy $RECORDED@100%" || fail "promote recorded: wrangler versions deploy $RECORDED@100% not called"
 hasnt "WARNING" "promote recorded"
+has "$UNLISTED" "promote recorded: the count line"
 grep -qP '^\S+\t'"$RECORDED"'\t'"$SHA"'\tpromoted$' "$POKOIN_WEB_VERSIONS_LOG" || fail "promote recorded: no 'promoted' line"
 [ ! -s "$GH_CALLS" ] 2> /dev/null || [ ! -e "$GH_CALLS" ] || fail "promote: the gate was called for a promotion"
 ok "publish-web.sh --promote <recorded id>: wrangler called, no warning, promoted line appended"
 
-in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
-want_rc 0 "promote unknown"
-called "wrangler versions deploy $UNKNOWN@100%" || fail "promote unknown: wrangler was not called"
-has "version $UNKNOWN was not uploaded through this script on this host; its commit's CI state is unknown" "promote unknown"
-grep -qP '^\S+\t'"$UNKNOWN"'\t-\tpromoted-unrecorded$' "$POKOIN_WEB_VERSIONS_LOG" || fail "promote unknown: no 'promoted-unrecorded' line"
-ok "publish-web.sh --promote <unknown id>: wrangler called, warning printed, promoted-unrecorded line appended"
+POKOIN_WEB_VERSIONS_LOG="$t/v-3of3.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$RECORDED"
+want_rc 0 "promote recorded, every retained version gated"
+called "wrangler versions deploy $RECORDED@100%" || fail "promote recorded, every retained version gated: wrangler was not called"
+hasnt "WARNING" "promote recorded, every retained version gated"
+has "publish-web: 3 of 3 $GATED_COUNT" "promote recorded, every retained version gated"
+ok "publish-web.sh --promote <recorded id> with 3 of 3 gated: promoted, no warning, 3 of 3 counted"
+
+POKOIN_WEB_VERSIONS_LOG="$t/v-1of3.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote unknown, 1 of 3 gated"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote unknown, 1 of 3 gated: wrangler was not called"
+has "$NOT_UPLOADED_WARNING" "promote unknown, 1 of 3 gated"
+has "publish-web: 1 of 3 $GATED_COUNT" "promote unknown, 1 of 3 gated"
+grep -qP '^\S+\t'"$UNKNOWN"'\t-\tpromoted-unrecorded$' "$t/v-1of3.tsv" || fail "promote unknown, 1 of 3 gated: no 'promoted-unrecorded' line"
+ok "publish-web.sh --promote <unknown id> with 1 of 3 gated: promoted, warned, counted 1 of 3"
+
+POKOIN_WEB_VERSIONS_LOG="$t/v-3of3.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 1 "promote unknown, 3 of 3 gated"
+if called "versions deploy"; then fail "promote unknown, 3 of 3 gated: wrangler versions deploy ran anyway"; fi
+has "publish-web: 3 of 3 $GATED_COUNT" "promote unknown, 3 of 3 gated"
+has "$NOT_UPLOADED_REFUSED" "promote unknown, 3 of 3 gated"
+if grep -qF "$UNKNOWN" "$t/v-3of3.tsv"; then fail "promote unknown, 3 of 3 gated: a refused promotion was recorded"; fi
+ok "publish-web.sh --promote <unknown id> with 3 of 3 gated: exit 1, versions deploy never called"
+
+# the retained list cannot be trusted: unknown, so the old warning still carries the rollback
+POKOIN_WEB_VERSIONS_LOG="$t/v-none.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" FAKE_WRANGLER_LIST_RC=1 \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote, versions list exits 1"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote, versions list exits 1: wrangler was not called"
+has "$UNLISTED (wrangler versions list did not answer)" "promote, versions list exits 1"
+has "$NOT_UPLOADED_WARNING" "promote, versions list exits 1"
+POKOIN_WEB_VERSIONS_LOG="$t/v-3of3.tsv" FAKE_WRANGLER_LIST="$t/list-none.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote, versions list is empty"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote, versions list is empty: wrangler was not called"
+has "$UNLISTED (no version id came back)" "promote, versions list is empty"
+has "$NOT_UPLOADED_WARNING" "promote, versions list is empty"
+POKOIN_WEB_VERSIONS_LOG="$t/v-3of3.tsv" FAKE_WRANGLER_LIST="$t/list-not-json.txt" \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote, versions list is not JSON"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote, versions list is not JSON: wrangler was not called"
+has "$UNLISTED (wrangler versions list did not answer with JSON)" "promote, versions list is not JSON"
+has "$NOT_UPLOADED_WARNING" "promote, versions list is not JSON"
+ok "publish-web.sh --promote keeps rolling back, with the count line, while the retained list cannot be read"
+
+# the self-check on the promote path: a warning while an old checkout could still be the rollback target, a
+# refusal once every retained version went through the gate
+PUBLISH_COPY="$t/clone/scripts/publish-web.sh"
+cp "$PUBLISH_COPY" "$t/pristine-publish-web.sh"
+printf '# edited\n' >> "$PUBLISH_COPY"
+POKOIN_WEB_VERSIONS_LOG="$t/v-none.tsv" in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote from a stale checkout, list unknown"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote from a stale checkout, list unknown: wrangler was not called"
+has "WARNING promoting anyway" "promote from a stale checkout, list unknown"
+has "deploy scripts are not origin/main's" "promote from a stale checkout, list unknown"
+POKOIN_WEB_VERSIONS_LOG="$t/v-1of3.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
+want_rc 0 "promote from a stale checkout, 1 of 3 gated"
+called "wrangler versions deploy $UNKNOWN@100%" || fail "promote from a stale checkout, 1 of 3 gated: wrangler was not called"
+has "WARNING promoting anyway" "promote from a stale checkout, 1 of 3 gated"
+POKOIN_WEB_VERSIONS_LOG="$t/v-3of3.tsv" FAKE_WRANGLER_LIST="$t/list-3.json" \
+  in_clone red bash scripts/publish-web.sh --promote "$RECORDED"
+want_rc 1 "promote from a stale checkout, 3 of 3 gated"
+if called "versions deploy"; then fail "promote from a stale checkout, 3 of 3 gated: wrangler versions deploy ran anyway"; fi
+has "deploy scripts are not origin/main's" "promote from a stale checkout, 3 of 3 gated"
+hasnt "WARNING promoting anyway" "promote from a stale checkout, 3 of 3 gated"
+cp "$t/pristine-publish-web.sh" "$PUBLISH_COPY"
+ok "publish-web.sh --promote warns about a stale checkout while the exception lives, and refuses once it has ended"
 
 POKOIN_WEB_VERSIONS_LOG="$t/not-yet/dir/v.tsv" in_clone red bash scripts/publish-web.sh --promote "$UNKNOWN"
 want_rc 0 "promote, no versions dir"
@@ -213,5 +317,31 @@ in_clone green env HOME="$t/home" bash scripts/build-pokoin-rust-release.sh --sk
 hasnt "REFUSED" "build green"
 [ -d "$POKOIN_DEPLOY_DIR/rust-release" ] || fail "build green: it did not get past the gate to the checkout"
 ok "build-pokoin-rust-release.sh, CI green: past the gate (stops before cargo: no ~/.cargo/env in the test HOME)"
+
+# ---- a checkout whose entry point is not origin/main's cannot ship -------------------------------------------
+# One local byte changed in each entry point, with CI green: the gate refuses before the script can build, upload,
+# deploy or open a release checkout. The fake gh answers green here, so only the self-check can be refusing.
+rm -rf "$POKOIN_DEPLOY_DIR"
+edit_refuses() { # <script> [args...]: edit that entry point, run it with green CI, expect a refusal first
+  local f="$1"
+  shift
+  cp "$t/clone/scripts/$f" "$t/pristine-entry-$f"
+  printf '# edited\n' >> "$t/clone/scripts/$f"
+  in_clone green bash "scripts/$f" "$@"
+  want_rc 1 "stale checkout: $f"
+  refused_by_gate "stale checkout: $f"
+  has "this checkout's deploy scripts are not origin/main's" "stale checkout: $f"
+  if called build-web || called "wrangler versions" || called '^vercel' || called '^ssh' || called '^scp'; then
+    fail "stale checkout: $f shipped something anyway: $(cat "$CALLS")"
+  fi
+  mv "$t/pristine-entry-$f" "$t/clone/scripts/$f"
+  ok "stale checkout: scripts/$f edited by one byte -> 1, nothing shipped"
+}
+edit_refuses publish-web.sh
+edit_refuses deploy-web.sh
+edit_refuses deploy-pokoin-rust.sh
+edit_refuses build-pokoin-rust-release.sh --skip-tests
+[ ! -e "$POKOIN_DEPLOY_DIR/rust-release" ] || fail "stale checkout: build-pokoin-rust-release opened the release checkout anyway"
+ok "every entry point refuses, before anything ships, when its own file is not origin/main's"
 
 echo "all deploy-gate caller tests passed"
