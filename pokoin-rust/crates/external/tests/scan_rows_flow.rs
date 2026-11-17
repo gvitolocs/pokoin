@@ -36,6 +36,24 @@ create table public.scan_rate_limits (
     primary key (bucket, window_start)
 );";
 
+/// Listings a `list` submit writes (the subset `submit_batch` touches).
+const LISTINGS_SCHEMA: &str = "
+create table public.marketplace_user_listings (
+  id uuid primary key default gen_random_uuid(),
+  card_id text not null, seller_uid text not null, seller_name text not null default '',
+  condition text not null default 'NM', language text not null default 'EN',
+  price_pkn numeric not null default 0 check (price_pkn >= 0), quantity_available integer not null default 1,
+  signed boolean not null default false, reverse boolean not null default false, first_edition boolean not null default false,
+  foil_state text not null default 'standard', graded boolean not null default false,
+  grading_company text, grade text, certification_id text, seller_comment text not null default '',
+  source text not null default 'pokoin_user_listing', source_listing_id text not null default '',
+  card_name text not null default '', card_image_url text not null default '', set_name text not null default '',
+  collector_number text not null default '', location text not null default '', altered boolean not null default false,
+  status text not null default 'active', marketplace_game text not null default 'pokemon',
+  updated_at timestamptz not null default now());
+create unique index marketplace_user_listings_scan_source_uidx on public.marketplace_user_listings (source_listing_id)
+  where source = 'pokoin_scan_batch' and source_listing_id not like 'ct:%';";
+
 /// The submit seam: these tests never list, so ownership is never reached.
 struct Owned;
 
@@ -203,9 +221,7 @@ async fn only_if_empty_price_is_read_from_the_patch_the_desk_sends() {
     );
 
     // The other side of the guard — the empty box gets the suggestion, an
-    // unguarded patch writes — is not assertable here yet: `patch_item` binds the
-    // parameters of its dynamically built UPDATE as jsonb, so every row write
-    // fails with `cannot cast type jsonb to uuid`.
+    // unguarded patch writes — is covered by the patch tests below.
 
     scratch.finish().await;
 }
@@ -360,6 +376,273 @@ async fn a_scan_that_lands_while_submit_closes_the_batch_is_rejected() {
             .await
             .expect("count");
     assert_eq!(rows, 0, "the refused scan inserts nothing");
+
+    scratch.finish().await;
+}
+
+async fn insert_batch(pool: &sqlx::PgPool, item_seq: i64, item_position: i32) -> String {
+    sqlx::query_scalar(
+        "insert into public.scan_batches (seller_uid, item_seq, item_position) values ($1, $2, $3) returning id::text",
+    )
+    .bind(SELLER)
+    .bind(item_seq)
+    .bind(item_position)
+    .fetch_one(pool)
+    .await
+    .expect("batch")
+}
+
+async fn item_field(pool: &sqlx::PgPool, item: &str, column: &str) -> Option<String> {
+    let sql = format!("select {column}::text from public.scan_items where id = $1::uuid");
+    sqlx::query_scalar(&sql)
+        .bind(item)
+        .fetch_one(pool)
+        .await
+        .expect("item field")
+}
+
+#[tokio::test]
+async fn a_price_patch_writes_the_rows_price() {
+    let Some(scratch) = scratch_db("patch_price").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 5, 1).await;
+    let item = insert_row(&pool, &batch, 1, 1.0, None).await;
+
+    let out = scan_store::mutate_batch(
+        &db,
+        &Owned,
+        SELLER,
+        &batch,
+        "item",
+        &json!({ "itemId": item, "patch": { "pricePkn": 12.34 } }),
+    )
+    .await
+    .expect("a price patch writes the row");
+    assert_eq!(out["items"][0]["pricePkn"], json!(12.34));
+    assert_eq!(price_pkn(&pool, &item).await, Some(12.34));
+
+    scratch.finish().await;
+}
+
+#[tokio::test]
+async fn a_facet_and_printing_patch_writes_the_row() {
+    let Some(scratch) = scratch_db("patch_facets").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 5, 1).await;
+    let item: String = sqlx::query_scalar(
+        "insert into public.scan_items (batch_id, seller_uid, recognition_state, seq, position, card_id, card_name)
+         values ($1::uuid, $2, 'manual', 1, 1, '111', 'Lugia') returning id::text",
+    )
+    .bind(&batch)
+    .bind(SELLER)
+    .fetch_one(&pool)
+    .await
+    .expect("item");
+
+    let out = scan_store::mutate_batch(
+        &db,
+        &Owned,
+        SELLER,
+        &batch,
+        "item",
+        &json!({ "itemId": item, "patch": { "condition": "MP", "language": "JP", "cardId": "222" } }),
+    )
+    .await
+    .expect("a facet and printing patch writes the row");
+    assert_eq!(out["items"][0]["condition"], json!("MP"));
+    assert_eq!(out["items"][0]["language"], json!("JP"));
+    assert_eq!(out["items"][0]["cardId"], json!("222"));
+    assert_eq!(
+        item_field(&pool, &item, "condition").await.as_deref(),
+        Some("MP")
+    );
+    assert_eq!(
+        item_field(&pool, &item, "language").await.as_deref(),
+        Some("JP")
+    );
+    assert_eq!(
+        item_field(&pool, &item, "card_id").await.as_deref(),
+        Some("222")
+    );
+
+    scratch.finish().await;
+}
+
+#[tokio::test]
+async fn batch_defaults_set_and_clear_on_every_active_row() {
+    let Some(scratch) = scratch_db("defaults_fan").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 10, 3).await;
+    let first = insert_row(&pool, &batch, 1, 1.0, None).await;
+    let second = insert_row(&pool, &batch, 2, 2.0, None).await;
+    let removed: String = sqlx::query_scalar(
+        "insert into public.scan_items (batch_id, seller_uid, recognition_state, seq, position, status)
+         values ($1::uuid, $2, 'manual', 3, 3, 'removed') returning id::text",
+    )
+    .bind(&batch)
+    .bind(SELLER)
+    .fetch_one(&pool)
+    .await
+    .expect("removed");
+
+    let out = scan_store::set_defaults(&db, SELLER, &batch, &json!({ "condition": "MP" }))
+        .await
+        .expect("a batch default fans onto the active rows");
+    assert_eq!(out["items"].as_array().map(Vec::len), Some(2));
+    for item in [&first, &second] {
+        assert_eq!(
+            item_field(&pool, item, "condition").await.as_deref(),
+            Some("MP")
+        );
+    }
+    assert_eq!(
+        item_field(&pool, &removed, "condition").await.as_deref(),
+        Some("NM")
+    );
+
+    let out = scan_store::set_defaults(&db, SELLER, &batch, &json!({ "condition": "NM" }))
+        .await
+        .expect("clearing a batch default fans onto the active rows");
+    assert_eq!(out["items"].as_array().map(Vec::len), Some(2));
+    for item in [&first, &second] {
+        assert_eq!(
+            item_field(&pool, item, "condition").await.as_deref(),
+            Some("NM")
+        );
+    }
+
+    scratch.finish().await;
+}
+
+#[tokio::test]
+async fn a_status_patch_removes_and_restores_the_row() {
+    let Some(scratch) = scratch_db("patch_status").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 5, 1).await;
+    let item = insert_row(&pool, &batch, 1, 1.0, Some(4.0)).await;
+
+    let removed = scan_store::set_status(&db, SELLER, &item, "active", "removed")
+        .await
+        .expect("remove");
+    assert_eq!(removed["items"][0]["status"], json!("removed"));
+    assert_eq!(
+        item_field(&pool, &item, "status").await.as_deref(),
+        Some("removed")
+    );
+
+    let restored = scan_store::set_status(&db, SELLER, &item, "removed", "active")
+        .await
+        .expect("restore");
+    assert_eq!(restored["items"][0]["status"], json!("active"));
+    assert_eq!(
+        item_field(&pool, &item, "status").await.as_deref(),
+        Some("active")
+    );
+
+    scratch.finish().await;
+}
+
+#[tokio::test]
+async fn a_duplicated_row_copies_the_printing_and_price() {
+    let Some(scratch) = scratch_db("duplicate").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch = insert_batch(&pool, 5, 1).await;
+    let item = insert_row(&pool, &batch, 1, 1.0, Some(9.5)).await;
+
+    let out = scan_store::duplicate_item(&db, SELLER, &item)
+        .await
+        .expect("duplicate");
+    let copy = &out["items"][0];
+    assert_ne!(copy["id"], json!(item));
+    assert_eq!(copy["status"], json!("active"));
+    assert_eq!(copy["condition"], json!("NM"));
+    assert_eq!(
+        price_pkn(&pool, copy["id"].as_str().expect("copy id")).await,
+        Some(9.5)
+    );
+    let rows: i64 =
+        sqlx::query_scalar("select count(*) from public.scan_items where batch_id = $1::uuid")
+            .bind(&batch)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(rows, 2);
+
+    scratch.finish().await;
+}
+
+#[tokio::test]
+async fn a_submit_lists_a_priced_row_and_parks_the_unpriced_one() {
+    let Some(scratch) = scratch_db("submit_rows").await else {
+        return;
+    };
+    let pool = scratch.pool.clone();
+    sqlx::raw_sql(LISTINGS_SCHEMA)
+        .execute(&pool)
+        .await
+        .expect("listings schema");
+    let db = DbPools::lazy(pool.clone(), pool.clone());
+    let batch: String = sqlx::query_scalar(
+        "insert into public.scan_batches (seller_uid, item_seq, defaults) values ($1, 2, $2) returning id::text",
+    )
+    .bind(SELLER)
+    .bind(sqlx::types::Json(json!({ "pricingStrategyId": "st_test" })))
+    .fetch_one(&pool)
+    .await
+    .expect("batch");
+    sqlx::query(
+        "insert into public.scan_items
+           (batch_id, seller_uid, recognition_state, seq, position, card_id, card_name, price_pkn, graded, grading_company, grade)
+         values ($1::uuid, $2, 'matched', 1, 1, '111', 'Lugia', 12.5, true, 'PSA', '10'),
+                ($1::uuid, $2, 'matched', 2, 2, '222', 'Ho-Oh', null, false, null, null)",
+    )
+    .bind(&batch)
+    .bind(SELLER)
+    .execute(&pool)
+    .await
+    .expect("rows");
+
+    let out = scan_store::submit_batch(
+        &db,
+        &Owned,
+        SELLER,
+        &batch,
+        "submit-rows",
+        "Seller",
+        "list",
+        &json!({ "pokoin": true, "cardtrader": false }),
+    )
+    .await
+    .expect("submit one priced and one unpriced row");
+    assert_eq!(out["result"]["paused"], json!(1));
+    let listings: Vec<(String, String, f64)> = sqlx::query_as(
+        "select card_id, status, price_pkn::float8 from public.marketplace_user_listings order by card_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("listings");
+    assert_eq!(
+        listings,
+        vec![
+            ("111".into(), "active".into(), 12.5),
+            ("222".into(), "paused".into(), 0.0),
+        ]
+    );
 
     scratch.finish().await;
 }

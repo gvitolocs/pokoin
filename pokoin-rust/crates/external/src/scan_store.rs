@@ -1405,17 +1405,15 @@ pub async fn set_defaults(db: &DbPools, seller_uid: &str, batch_id: &str, defaul
         let sql = format!(
             "update public.scan_items
                 set {}, seq = seq + 1, updated_at = now()
-              where batch_id = ${} and status = 'active'
+              where batch_id = ${}::uuid and status = 'active'
               returning {}",
             sets.join(", "),
             values.len(),
             ITEM_COLUMNS
         );
-        let mut query = sqlx::query(&sql);
-        for value in &values {
-            query = query.bind(value.clone());
-        }
-        let rows = query.fetch_all(&mut *tx).await?;
+        let rows = crate::db::bound_query(&sql, &values)
+            .fetch_all(&mut *tx)
+            .await?;
         items = rows.iter().map(row_value).collect();
     }
     tx.commit().await?;
@@ -1478,14 +1476,23 @@ pub async fn patch_item(
     let mut values: Vec<Value> = vec![json!(item_id), json!(seq)];
     for (column, value) in &changes {
         values.push(value.clone());
-        sets.push(format!("{column} = ${}", values.len()));
+        // A NULL from the desk has to be cast to the column's type: an untyped
+        // jsonb null has no assignment cast to numeric/jsonb.
+        let cast = match column.as_str() {
+            "price_pkn" => "::numeric",
+            "pricing" => "::jsonb",
+            _ => "",
+        };
+        sets.push(format!("{column} = ${}{cast}", values.len()));
     }
-    let sql = format!("update public.scan_items set {} where id = $1::uuid returning {}", sets.join(", "), ITEM_COLUMNS);
-    let mut query = sqlx::query(&sql);
-    for value in &values {
-        query = query.bind(value.clone());
-    }
-    let updated = query.fetch_one(&mut *tx).await?;
+    let sql = format!(
+        "update public.scan_items set {} where id = $1::uuid returning {}",
+        sets.join(", "),
+        ITEM_COLUMNS
+    );
+    let updated = crate::db::bound_query(&sql, &values)
+        .fetch_one(&mut *tx)
+        .await?;
     touch_sessions(&mut tx, &batch_id).await?;
     tx.commit().await?;
     Ok(json!({ "items": [rules::item_view(&row_value(&updated))] }))
@@ -1865,9 +1872,9 @@ pub async fn submit_batch(
             .bind(row.get("first_edition") == Some(&Value::Bool(true)))
             .bind(row.get("foil_state").and_then(Value::as_str).unwrap_or("standard"))
             .bind(row.get("graded") == Some(&Value::Bool(true)))
-            .bind(row.get("grading_company").cloned().unwrap_or(Value::Null))
-            .bind(row.get("grade").cloned().unwrap_or(Value::Null))
-            .bind(row.get("certification_id").cloned().unwrap_or(Value::Null))
+            .bind(row.get("grading_company").and_then(Value::as_str))
+            .bind(row.get("grade").and_then(Value::as_str))
+            .bind(row.get("certification_id").and_then(Value::as_str))
             .bind(row.get("seller_comment").and_then(Value::as_str).unwrap_or(""))
             .bind(&source_listing_id)
             .bind(row.get("card_name").and_then(Value::as_str).unwrap_or(""))
