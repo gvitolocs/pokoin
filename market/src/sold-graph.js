@@ -248,3 +248,201 @@ export function formatSoldSampleCount(count) {
   const n = Math.max(0, Math.trunc(Number(count) || 0));
   return `${n.toLocaleString('en-US')} ${n === 1 ? 'unit' : 'units'}`;
 }
+
+const DAY_MS = 86_400_000;
+
+/** A `YYYY-MM-DD` calendar day as UTC midnight ms; NaN when it is not a day. */
+export function soldGraphDayMs(day) {
+  const match = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return NaN;
+  }
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/**
+ * The window a range button asked for, or `null` when the graph was not given
+ * one: without a range every series day is drawn, as it always was.
+ */
+export function soldGraphRangeBounds(range) {
+  const from = String(range?.from || '');
+  const to = String(range?.to || '');
+  if (!Number.isFinite(soldGraphDayMs(from)) || !Number.isFinite(soldGraphDayMs(to))) {
+    return null;
+  }
+  return { key: String(range?.key || ''), from, to };
+}
+
+/** Series days inside the selected range, oldest first. */
+export function soldGraphRangeDays(days, bounds) {
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  if (!bounds) {
+    return rows;
+  }
+  const lo = soldGraphDayMs(bounds.from);
+  const hi = soldGraphDayMs(bounds.to);
+  return rows
+    .filter((row) => {
+      const ms = soldGraphDayMs(row.day);
+      return ms >= lo && ms <= hi;
+    })
+    .sort((a, b) => soldGraphDayMs(a.day) - soldGraphDayMs(b.day));
+}
+
+/**
+ * The dates the x-axis spans: the selected range clipped to the first and last
+ * day the visible series actually have, so a 1-month window with two weeks of
+ * data does not leave half the plot empty.
+ */
+export function soldGraphDateWindow(days, bounds) {
+  const points = (Array.isArray(days) ? days : [])
+    .map((row) => soldGraphDayMs(row?.day))
+    .filter((ms) => Number.isFinite(ms));
+  if (!points.length) {
+    return null;
+  }
+  let start = Math.min(...points);
+  let end = Math.max(...points);
+  const lo = soldGraphDayMs(bounds?.from);
+  const hi = soldGraphDayMs(bounds?.to);
+  if (Number.isFinite(lo)) {
+    start = Math.max(start, lo);
+  }
+  if (Number.isFinite(hi)) {
+    end = Math.min(end, hi);
+  }
+  return { start, end: Math.max(start, end) };
+}
+
+/**
+ * A source line split into the runs the graph draws solid, plus the pairs that
+ * bridge each hole. Two days more than `gapDays` apart are not a price move:
+ * that stretch is quoted from the source's own last value, not measured here.
+ */
+export function soldGraphGapSegments(days, gapDays) {
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  const max = Math.max(0, Math.trunc(Number(gapDays)) || 0);
+  const segments = [];
+  const bridges = [];
+  let run = null;
+  for (const row of rows) {
+    const prev = run ? run[run.length - 1] : null;
+    if (prev && (soldGraphDayMs(row.day) - soldGraphDayMs(prev.day)) / DAY_MS > max) {
+      bridges.push([prev, row]);
+      run = null;
+    }
+    if (!run) {
+      run = [];
+      segments.push(run);
+    }
+    run.push(row);
+  }
+  return { segments, bridges };
+}
+
+/** The series day nearest `day`, when it is within `toleranceDays` of it. */
+export function soldGraphNearDay(days, day, toleranceDays = 0) {
+  const target = soldGraphDayMs(day);
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+  const tolerance = Math.max(0, Number(toleranceDays) || 0);
+  let best = null;
+  let bestGap = Infinity;
+  for (const row of (Array.isArray(days) ? days : [])) {
+    const ms = soldGraphDayMs(row?.day);
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+    const gap = Math.abs(ms - target);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = row;
+    }
+  }
+  return best && bestGap / DAY_MS <= tolerance ? best : null;
+}
+
+/** The last series day at or before `day`: a weekly trend reads backwards. */
+export function soldGraphDayOnOrBefore(days, day) {
+  const target = soldGraphDayMs(day);
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+  let best = null;
+  let bestMs = -Infinity;
+  for (const row of (Array.isArray(days) ? days : [])) {
+    const ms = soldGraphDayMs(row?.day);
+    if (Number.isFinite(ms) && ms <= target && ms >= bestMs) {
+      bestMs = ms;
+      best = row;
+    }
+  }
+  return best;
+}
+
+export const SOLD_GRAPH_TIP_ROWS = 6;
+
+/**
+ * What the hover popup lists for one day: one row per visible series, in the
+ * order they are passed. A sold series with no sale that day says so; a source
+ * reads its own nearest day (Cardmarket its last one at or before) inside its
+ * gap, says which day it starts from when the hover is earlier than that, and
+ * otherwise has no data. The list is capped and the rest is counted.
+ */
+export function soldGraphHoverRows(series, day, {
+  cap = SOLD_GRAPH_TIP_ROWS,
+  formatValue = (value) => String(value),
+  formatDay = (iso) => iso,
+  endDay = '',
+} = {}) {
+  const rows = [];
+  for (const line of (Array.isArray(series) ? series : [])) {
+    if (!line || !line.label) {
+      continue;
+    }
+    const days = Array.isArray(line.days) ? line.days : [];
+    let firstDay = '';
+    let firstMs = Infinity;
+    for (const row of days) {
+      const ms = soldGraphDayMs(row?.day);
+      if (Number.isFinite(ms) && ms < firstMs) {
+        firstMs = ms;
+        firstDay = String(row.day);
+      }
+    }
+    let hit = null;
+    let note = '';
+    if (line.kind === 'sold') {
+      hit = days.find((row) => String(row?.day) === String(day)) || null;
+      if (!hit) {
+        note = 'no sale';
+      }
+    } else if (line.kind === 'now') {
+      hit = day && String(day) === String(endDay) ? { value: line.value } : null;
+      if (!hit) {
+        note = 'no data';
+      }
+    } else {
+      hit = line.carry === 'onOrBefore'
+        ? soldGraphDayOnOrBefore(days, day)
+        : soldGraphNearDay(days, day, line.gapDays);
+      if (!hit && firstDay && soldGraphDayMs(day) < soldGraphDayMs(firstDay)) {
+        note = `from ${formatDay(firstDay)}`;
+      } else if (!hit) {
+        note = 'no data';
+      }
+    }
+    rows.push({
+      key: line.key,
+      label: line.label,
+      color: line.color || '',
+      dashed: Boolean(line.dashed),
+      picked: Boolean(line.picked),
+      value: hit ? Number(hit.value) : null,
+      text: hit ? formatValue(Number(hit.value)) : note,
+    });
+  }
+  const shown = rows.slice(0, Math.max(1, Math.trunc(Number(cap)) || SOLD_GRAPH_TIP_ROWS));
+  return { rows: shown, more: Math.max(0, rows.length - shown.length) };
+}

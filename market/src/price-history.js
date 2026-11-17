@@ -26,12 +26,14 @@ export const PRICE_HISTORY_DEFAULT_RANGE = '3m';
  * The fetched lines, in legend order. `gapDays` is how far apart two of the
  * source's own days may be before the graph breaks the line and bridges the
  * break: TCGplayer quotes daily, Cardmarket's trend is weekly, the CardTrader
- * lowest ask moves whenever a listing does.
+ * lowest ask moves whenever a listing does. `carry` says how a hover reads a
+ * day the source did not quote: `near` the closest day inside the gap, or
+ * `onOrBefore` the last one it published (a weekly trend stands until replaced).
  */
 export const PRICE_SOURCES = [
-  { key: 'tcgplayer', label: 'TCGplayer', short: 'TP', color: '#8ab4ff', dashed: false, gapDays: 10 },
-  { key: 'cardmarket', label: 'Cardmarket', short: 'CM', color: '#ff7a59', dashed: false, gapDays: 99 },
-  { key: 'cardtrader_ask', label: 'CT lowest ask', short: 'CT ask', color: '#d6c2ff', dashed: true, gapDays: 3 },
+  { key: 'tcgplayer', label: 'TCGplayer', short: 'TP', color: '#8ab4ff', dashed: false, gapDays: 10, carry: 'near' },
+  { key: 'cardmarket', label: 'Cardmarket', short: 'CM', color: '#ff7a59', dashed: false, gapDays: 99, carry: 'onOrBefore' },
+  { key: 'cardtrader_ask', label: 'CT lowest ask', short: 'CT ask', color: '#d6c2ff', dashed: true, gapDays: 3, carry: 'near' },
 ];
 
 /** The cheapest live Pokoin listing: one value, today, nothing to fetch. */
