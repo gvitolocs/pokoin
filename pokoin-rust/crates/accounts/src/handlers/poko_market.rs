@@ -10,7 +10,7 @@
 //! 404, `ambiguous` a 200, `unsupported` a 422. A thrown query is a 500 with a
 //! generic message; the tool's own detail never leaks as a 500.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
 use axum::body::Bytes;
@@ -21,14 +21,15 @@ use regex::Regex;
 use serde_json::{json, Map, Value as Json};
 
 use crate::domain::poko_market_math::{
-    ask_history_from_source, bucket_for_span, candidate_from_row, clean_text, day_of, days_ago_iso,
-    deal_verdict, dedupe_artwork_versions, escape_like, facet_label, fuzzy_artist_pattern,
-    history_source_block, is_iso_day, js_num, liquidity_bands, median_of, normalize_condition,
-    normalize_language, parse_history_day, price_strategies, resolve_facet, round2, round2_or_none,
-    row_matches_slice, shift_day, sold_by_condition_language, sold_estimate_from_stats,
-    sold_facet_from_params, sold_flag, sold_stats, span_days, summarize_live_asks, today_iso,
-    variants_sold, weighted_median, DailyValue, Facet, HistoryKind, HistorySource,
-    HISTORY_ALL_FROM, HISTORY_MAX_SPAN_DAYS, MAX_COLLECTION_CARDS, MAX_UNITS_PER_ROW,
+    ask_history_from_source, bucket_for_span, candidate_from_row, clean_text, cm_product_ids,
+    day_of, days_ago_iso, deal_verdict, dedupe_artwork_versions, escape_like, facet_label,
+    fuzzy_artist_pattern, fx_eur_usd, history_source_block, is_iso_day, js_num, liquidity_bands,
+    median_of, normalize_condition, normalize_language, price_strategies, resolve_facet, round2,
+    round2_or_none, row_matches_slice, shift_day, sold_by_condition_language,
+    sold_estimate_from_stats, sold_facet_from_params, sold_flag, sold_stats, span_days,
+    summarize_live_asks, thin_history_points, today_iso, variants_sold, weighted_median,
+    DailyValue, Facet, HistoryKind, HistorySource, HISTORY_ALL_FROM, HISTORY_MAX_SPAN_DAYS,
+    HISTORY_OTHER_SUBTYPES_MAX, HISTORY_RESULT_CHARS, MAX_COLLECTION_CARDS, MAX_UNITS_PER_ROW,
     MOVERS_MAX_CANDIDATES, MOVERS_MIN_PRICE_PKN, PKN_EUR_RATE, RECENT_SALE_VERIFY_RATIO,
     SOLD_HIGH_VALUE_MAX_TO_ASK, SOLD_HIGH_VALUE_PKN, SOLD_REFERENCE_ASK_DAYS, SOLD_ROWS_LIMIT,
     SOLD_UNVERIFIED_MAX_PKN, TOP_SELLERS_MAX_SOLD_TO_ASK,
@@ -717,6 +718,9 @@ const HISTORY_RANGES: [(&str, i64); 5] = [
 /// The range a missing or unknown `range` falls back to.
 const HISTORY_DEFAULT_RANGE_DAYS: i64 = 365;
 
+/// The `"thinned":true` flag, which the ceiling must still leave room for.
+const HISTORY_THINNED_FLAG_CHARS: usize = ",\"thinned\":true".len();
+
 /// The one sentence every history result carries.
 const HISTORY_DATA_NOTE: &str = "Every source only covers the days it has stored, from its own storedFrom: TCGplayer market price is a USD aggregate with no condition or language, Cardmarket trend is EUR, and CardTrader sold (inferred sales) and lowest ask are PKN.";
 
@@ -745,31 +749,33 @@ const ASK_HISTORY: HistoryKind = HistoryKind {
     metric: "lowestAsk",
 };
 
-/// The asked window: `(from, to, bucket)`, or the reason it is invalid. An
-/// explicit `from` and `to` win over `range`.
+/// The asked window: `(from, to, bucket)`, or the reason it is invalid. Explicit
+/// `from` and `to` win over `range`, and either one alone is already explicit.
 fn history_window(
     params: &Json,
     today: &str,
 ) -> std::result::Result<(String, String, &'static str), String> {
     let from_param = param_string(params, "from", 10);
     let to_param = param_string(params, "to", 10);
-    let (from, to) = if is_iso_day(&from_param) && is_iso_day(&to_param) {
-        (from_param, to_param)
-    } else {
-        let range = param_string(params, "range", 10).to_ascii_lowercase();
+    let range = param_string(params, "range", 10).to_ascii_lowercase();
+    // The range window anchored at a day: `all` starts at the cutover day, a
+    // known name — or anything unrecognized — counts back from the anchor.
+    let anchored = |end: &str| -> String {
         if range == "all" {
-            (HISTORY_ALL_FROM.to_string(), today.to_string())
-        } else {
-            let days = HISTORY_RANGES
-                .iter()
-                .find(|(name, _)| *name == range)
-                .map(|(_, days)| *days)
-                .unwrap_or(HISTORY_DEFAULT_RANGE_DAYS);
-            (
-                shift_day(today, days).unwrap_or_default(),
-                today.to_string(),
-            )
+            return HISTORY_ALL_FROM.to_string();
         }
+        let days = HISTORY_RANGES
+            .iter()
+            .find(|(name, _)| *name == range)
+            .map(|(_, days)| *days)
+            .unwrap_or(HISTORY_DEFAULT_RANGE_DAYS);
+        shift_day(end, days).unwrap_or_default()
+    };
+    let (from, to) = match (is_iso_day(&from_param), is_iso_day(&to_param)) {
+        (true, true) => (from_param, to_param),
+        (true, false) => (from_param, today.to_string()),
+        (false, true) => (anchored(&to_param), to_param),
+        (false, false) => (anchored(today), today.to_string()),
     };
     if !is_iso_day(&from) || !is_iso_day(&to) {
         return Err("from and to must be YYYY-MM-DD".to_string());
@@ -892,6 +898,9 @@ fn tcgplayer_series(rows: &[Json]) -> TcgplayerSeries {
     days.sort_by(|a, b| a.day.cmp(&b.day));
     let mut other_subtypes: Vec<String> = Vec::new();
     for key in order.iter().filter(|key| **key != best_key) {
+        if other_subtypes.len() >= HISTORY_OTHER_SUBTYPES_MAX {
+            break;
+        }
         let Some((subtype, _)) = groups.get(key.as_str()) else {
             continue;
         };
@@ -907,14 +916,25 @@ fn tcgplayer_series(rows: &[Json]) -> TcgplayerSeries {
     }
 }
 
-/// The `cardtrader_ask` daily values: the stored lowest ask of each day.
+/// The `cardtrader_ask` daily values: one lowest ask per UTC day. A day can hold
+/// several refreshes and the rows come ordered by `refreshed_at`, so the last
+/// write wins and a bucket median never counts the same day twice.
 fn ask_history_days(rows: &[Json]) -> Vec<DailyValue> {
-    rows.iter()
-        .filter_map(|row| {
-            let day = day_of(row.get("day"))?;
-            let value = row.get("lowest_ask_pkn").and_then(Json::as_f64)?;
-            (value > 0.0).then(|| DailyValue::new(&day, value))
-        })
+    let mut latest: BTreeMap<String, f64> = BTreeMap::new();
+    for row in rows {
+        let Some(day) = day_of(row.get("day")) else {
+            continue;
+        };
+        let Some(value) = row.get("lowest_ask_pkn").and_then(Json::as_f64) else {
+            continue;
+        };
+        if value > 0.0 {
+            latest.insert(day, value);
+        }
+    }
+    latest
+        .into_iter()
+        .map(|(day, value)| DailyValue::new(&day, value))
         .collect()
 }
 
@@ -974,13 +994,12 @@ fn sold_history_days(
         .collect()
 }
 
-/// The Cardmarket daily values. The price guide is change-only, so within a
-/// product's stored span a day without a row repeats the newest row before it;
-/// nothing is invented past the last stored row. Where a blueprint maps to
-/// several products, their carried trends merge into one value per day.
+/// The Cardmarket daily values. One row is one run day of one product and
+/// already carries that product's newest guide row at or before the run day, so
+/// a day whose blueprint maps to several products takes their median and a
+/// product with no stored guide row yields no rows at all.
 fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
-    let mut order: Vec<String> = Vec::new();
-    let mut groups: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    let mut trends: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     for row in rows {
         let Some(day) = day_of(row.get("day")) else {
             continue;
@@ -989,76 +1008,29 @@ fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
             Some(trend) if trend > 0.0 => trend,
             _ => continue,
         };
-        let product = row
-            .get("product_id")
-            .map(|value| value.to_string())
-            .unwrap_or_default();
-        if !order.contains(&product) {
-            order.push(product.clone());
-        }
-        groups.entry(product).or_default().push((day, trend));
+        trends.entry(day).or_default().push(trend);
     }
-    let mut carried_by_day: HashMap<String, Vec<f64>> = HashMap::new();
-    for product in order {
-        let Some(rows) = groups.remove(product.as_str()) else {
-            continue;
-        };
-        let Some(first_day) = rows.first().map(|(day, _)| day.clone()) else {
-            continue;
-        };
-        let last_day = rows.last().map(|(day, _)| day.clone()).unwrap_or_default();
-        let Some(cursor) = parse_history_day(&first_day) else {
-            continue;
-        };
-        let Some(limit) = parse_history_day(&last_day) else {
-            continue;
-        };
-        let mut day = cursor;
-        let mut index = 0usize;
-        let mut carried: Option<f64> = None;
-        // A change-only table with one stored row per day, bounded by the span.
-        while day <= limit && index < rows.len() {
-            let text = day.format("%Y-%m-%d").to_string();
-            while rows
-                .get(index)
-                .map(|(row_day, _)| *row_day <= text)
-                .unwrap_or(false)
-            {
-                carried = Some(rows[index].1);
-                index += 1;
-            }
-            if let Some(trend) = carried {
-                carried_by_day.entry(text).or_default().push(trend);
-            }
-            day = match day.checked_add_days(chrono::Days::new(1)) {
-                Some(next) => next,
-                None => break,
-            };
-        }
-    }
-    let mut days: Vec<String> = carried_by_day.keys().cloned().collect();
-    days.sort();
-    days.into_iter()
-        .filter_map(|day| {
-            let values = carried_by_day.remove(day.as_str())?;
-            median_of(&values).map(|value| DailyValue::new(&day, value))
-        })
+    trends
+        .iter()
+        .filter_map(|(day, values)| median_of(values).map(|value| DailyValue::new(day, value)))
         .collect()
 }
 
-/// The newest stored guide row, as the block's `latest`.
+/// The newest guide row at or before the end of the range, as the block's
+/// `latest`. A carried row names its own `guide_day`, which can predate `from`.
 fn cardmarket_latest(rows: &[Json]) -> Option<Json> {
     let mut best: Option<(&Json, String)> = None;
     for row in rows {
-        let Some(day) = day_of(row.get("day")) else {
+        let Some(stored_day) = day_of(row.get("guide_day")).or_else(|| day_of(row.get("day")))
+        else {
             continue;
         };
         let newer = best
             .as_ref()
-            .map(|(_, best_day)| day >= *best_day)
+            .map(|(_, best_day)| stored_day >= *best_day)
             .unwrap_or(true);
         if newer {
-            best = Some((row, day));
+            best = Some((row, stored_day));
         }
     }
     let (row, day) = best?;
@@ -1222,6 +1194,10 @@ async fn sold_history_block(
                         and observed_day between $2::date and $3::date \
                         and sold_qty > 0 \
                         and coalesce(graded, false) = false \
+                        and ($4::text is null or condition = $4) \
+                        and ($5::text is null or upper(language) = $5) \
+                        and coalesce(reverse, false) = $6::boolean \
+                        and coalesce(first_edition, false) = $7::boolean \
                       order by observed_day desc \
                       limit {SOLD_ROWS_LIMIT}"
                 ),
@@ -1229,6 +1205,16 @@ async fn sold_history_block(
                     SqlParam::Text(blueprint_id.to_string()),
                     SqlParam::Text(from.to_string()),
                     SqlParam::Text(to.to_string()),
+                    match condition {
+                        Some(condition) => SqlParam::Text(condition.to_string()),
+                        None => SqlParam::Null,
+                    },
+                    match language {
+                        Some(language) => SqlParam::Text(language.to_string()),
+                        None => SqlParam::Null,
+                    },
+                    SqlParam::Bool(facet.reverse),
+                    SqlParam::Bool(facet.first_edition),
                 ],
             )
             .await
@@ -1278,30 +1264,30 @@ async fn cardmarket_history_block(
     )
     .await
     {
-        Ok(rows) => rows
-            .iter()
-            .filter_map(|row| {
-                row.get("id_product")
-                    .map(|value| value.to_string())
-                    .unwrap_or_default()
-                    .parse::<i64>()
-                    .ok()
-            })
-            .filter(|id| *id > 0)
-            .collect::<Vec<_>>(),
+        Ok(rows) => cm_product_ids(&rows),
         Err(error) => return failed_history_source(&CARDMARKET_HISTORY, bucket, &error, None),
     };
     if products.is_empty() {
         return history_block(&CARDMARKET_HISTORY, bucket, &[], "empty", None);
     }
+    // The guide is change-only: every run day of the range carries each
+    // product's newest guide row at or before it, which may predate `from`.
     let rows = match query_rows(
         &deps.db,
-        "select g.day::text as day, g.id_product::text as product_id, \
+        "select r.day::text as day, p.id_product::text as product_id, \
+                g.guide_day::text as guide_day, \
                 g.trend::float8 as trend, g.avg7::float8 as avg7, g.low::float8 as low \
-           from public.cardmarket_price_guide g \
-          where g.game = 'pokemon' and g.id_product = any($1::bigint[]) \
-            and g.day between $2::date and $3::date \
-          order by g.id_product, g.day",
+           from public.cardmarket_price_guide_runs r \
+           cross join unnest($1::bigint[]) p(id_product) \
+           cross join lateral ( \
+             select guide.day as guide_day, guide.trend, guide.avg7, guide.low \
+             from public.cardmarket_price_guide guide \
+             where guide.game = 'pokemon' and guide.id_product = p.id_product \
+               and guide.day <= r.day \
+             order by guide.day desc limit 1 \
+           ) g \
+          where r.game = 'pokemon' and r.day between $2::date and $3::date \
+          order by r.day, p.id_product",
         &[
             SqlParam::IntArray(products),
             SqlParam::Text(from.to_string()),
@@ -1336,11 +1322,8 @@ async fn history_fx(db: &MarketplaceDb, to: &str) -> Option<Json> {
     .ok()?;
     let row = rows.first()?;
     let day = day_of(row.get("day"))?;
-    let rate = row
-        .get("rate")
-        .and_then(Json::as_f64)
-        .filter(|rate| *rate > 0.0)?;
-    Some(json!({ "eurUsd": round2(rate), "day": day }))
+    let rate = row.get("rate").and_then(Json::as_f64)?;
+    fx_eur_usd(&day, rate)
 }
 
 /// The `card_price_history` body: the window, the rates and the source blocks.
@@ -1364,7 +1347,16 @@ fn history_body(
     body.insert("pknPerEur".into(), js_num(1.0 / PKN_EUR_RATE));
     body.insert("sources".into(), sources);
     body.insert("dataNote".into(), json!(HISTORY_DATA_NOTE));
-    Json::Object(body)
+    let mut body = Json::Object(body);
+    // The whole result has to stay a chat-sized answer: an over-long one thins
+    // its series evenly and says so, instead of dropping a source. The room for
+    // the flag itself is reserved, so the bound holds once it is written.
+    if thin_history_points(&mut body, HISTORY_RESULT_CHARS - HISTORY_THINNED_FLAG_CHARS) {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("thinned".into(), json!(true));
+        }
+    }
+    body
 }
 
 /// `recentPriceSources(card, days)`.
@@ -1890,13 +1882,9 @@ async fn card_price_history(
         Required::Card(card) => card,
         Required::Failure(body) => return Ok(body),
     };
-    let Some(blueprint_id) = card.get("blueprintId").and_then(Json::as_i64) else {
-        return Ok(json!({
-            "status": "unsupported",
-            "error": "card_price_history needs an explicit catalog blueprint mapping",
-            "card": card,
-        }));
-    };
+    // TCGplayer is keyed by the catalog card id, so it reads even without a
+    // blueprint; the three blueprint-keyed sources answer `empty` on their own.
+    let blueprint_id = card.get("blueprintId").and_then(Json::as_i64);
     let today = deps.today();
     let (from, to, bucket) = match history_window(params, &today) {
         Ok(window) => window,
@@ -1912,13 +1900,11 @@ async fn card_price_history(
     for source in wanted {
         let block = match source {
             "tcgplayer" => tcgplayer_history_block(deps, &card_id, &from, &to, bucket).await,
-            "cardmarket" => {
-                cardmarket_history_block(deps, Some(blueprint_id), &from, &to, bucket).await
-            }
+            "cardmarket" => cardmarket_history_block(deps, blueprint_id, &from, &to, bucket).await,
             "cardtrader_sold" => {
-                sold_history_block(deps, Some(blueprint_id), params, &from, &to, bucket).await
+                sold_history_block(deps, blueprint_id, params, &from, &to, bucket).await
             }
-            _ => ask_history_block(deps, Some(blueprint_id), &from, &to, bucket).await,
+            _ => ask_history_block(deps, blueprint_id, &from, &to, bucket).await,
         };
         blocks.insert(source.to_string(), block);
     }
@@ -4003,6 +3989,7 @@ pub fn tool_list() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::poko_market_math::parse_history_day;
 
     /// One day of each of the four history kinds, for the pure builders.
     const TODAY: &str = "2026-11-17";
@@ -4037,8 +4024,13 @@ mod tests {
         })
     }
 
-    fn cm_row(product: i64, day: &str, trend: Json) -> Json {
-        json!({ "day": day, "product_id": product.to_string(), "trend": trend, "avg7": trend, "low": trend })
+    /// One Cardmarket guide row of a run day: the SQL already carries the guide
+    /// row of `guide_day` forward to the run day `run_day`.
+    fn cm_row(run_day: &str, product: i64, guide_day: &str, trend: Json) -> Json {
+        json!({
+            "day": run_day, "product_id": product.to_string(), "guide_day": guide_day,
+            "trend": trend, "avg7": trend, "low": trend,
+        })
     }
 
     /// The raw, ungraded facet: every copy of the variant counts.
@@ -4059,13 +4051,26 @@ mod tests {
             window(json!({ "from": "2026-01-01", "to": "2026-02-01", "range": "2y" })),
             Ok(("2026-01-01".to_string(), "2026-02-01".to_string(), "week"))
         );
-        // A one-sided or malformed pair falls back to the range.
+        // A lone `from` runs to today; the range only fills the missing side.
         assert_eq!(
             window(json!({ "from": "2026-01-01", "range": "1m" })),
-            Ok(("2026-10-18".to_string(), TODAY.to_string(), "week"))
+            Ok(("2026-01-01".to_string(), TODAY.to_string(), "month"))
         );
         assert_eq!(
+            window(json!({ "to": "2026-02-01" })),
+            Ok(("2025-02-01".to_string(), "2026-02-01".to_string(), "month"))
+        );
+        assert_eq!(
+            window(json!({ "to": "2026-02-01", "range": "1m" })),
+            Ok(("2026-01-02".to_string(), "2026-02-01".to_string(), "week"))
+        );
+        // A malformed `from` falls back to the range, anchored at the given `to`.
+        assert_eq!(
             window(json!({ "from": "last spring", "to": "2026-02-01" })),
+            Ok(("2025-02-01".to_string(), "2026-02-01".to_string(), "month"))
+        );
+        assert_eq!(
+            window(json!({ "from": "last spring" })),
             Ok(("2025-11-17".to_string(), TODAY.to_string(), "month"))
         );
         // The default is one year; all starts at the cutover day.
@@ -4159,6 +4164,22 @@ mod tests {
         ]);
         assert_eq!(tied.subtype, "Normal");
         assert_eq!(tied.other_subtypes, vec!["Holofoil".to_string()]);
+        // The sibling list is capped, because it rides along in a bounded result.
+        let mut many = vec![
+            tcg_row(7, "Normal", "2026-01-01", json!(1.5)),
+            tcg_row(7, "Normal", "2026-01-02", json!(1.6)),
+        ];
+        for index in 0..=HISTORY_OTHER_SUBTYPES_MAX {
+            many.push(tcg_row(
+                8 + index as i64,
+                &format!("Sub {index}"),
+                "2026-01-01",
+                json!(2.0),
+            ));
+        }
+        let many = tcgplayer_series(&many);
+        assert_eq!(many.subtype, "Normal");
+        assert_eq!(many.other_subtypes.len(), HISTORY_OTHER_SUBTYPES_MAX);
         // A zero or missing price is not a data point.
         let empty = tcgplayer_series(&[
             tcg_row(7, "Normal", "2026-01-01", json!(0.0)),
@@ -4184,6 +4205,24 @@ mod tests {
     }
 
     #[test]
+    fn ask_history_days_keeps_one_value_per_utc_day() {
+        // The rows arrive ordered by `refreshed_at`, so the last of a day is the
+        // newest refresh and the earlier ones must not be averaged with it.
+        let rows = vec![
+            json!({ "day": "2026-11-01", "lowest_ask_pkn": 2642.0 }),
+            json!({ "day": "2026-11-01", "lowest_ask_pkn": 2400.0 }),
+            json!({ "day": "2026-11-02", "lowest_ask_pkn": 2500.0 }),
+        ];
+        let days = ask_history_days(&rows);
+        assert_eq!(
+            days.iter()
+                .map(|day| (day.day.as_str(), day.value))
+                .collect::<Vec<_>>(),
+            vec![("2026-11-01", 2400.0), ("2026-11-02", 2500.0)]
+        );
+    }
+
+    #[test]
     fn sold_history_days_weight_each_day_and_sum_the_units() {
         let rows = vec![
             sold_row("2026-01-03", 200.0, 2, false),
@@ -4205,32 +4244,72 @@ mod tests {
     }
 
     #[test]
-    fn cardmarket_days_carry_the_trend_forward_between_rows() {
+    fn cardmarket_days_use_the_guide_row_carried_to_each_run_day() {
         let rows = vec![
-            cm_row(11, "2026-11-01", json!(0.78)),
-            // Change-only: the 3rd and 4th are missing, so the 1st stands.
-            cm_row(11, "2026-11-05", json!(0.90)),
+            cm_row("2026-11-01", 11, "2026-10-20", json!(1.0)),
+            // Change-only, so the run day carries product 11's October row.
+            cm_row("2026-11-02", 11, "2026-10-20", json!(1.0)),
             // A second product of the same blueprint merges by median.
-            cm_row(12, "2026-11-02", json!(1.20)),
-            cm_row(12, "2026-11-03", Json::Null),
+            cm_row("2026-11-02", 12, "2026-11-02", json!(2.0)),
+            cm_row("2026-11-03", 11, "2026-11-03", json!(2.0)),
         ];
-        let days = cardmarket_days(&rows);
         assert_eq!(
-            days.iter()
+            cardmarket_days(&rows)
+                .iter()
                 .map(|day| (day.day.as_str(), day.value))
                 .collect::<Vec<_>>(),
             vec![
-                ("2026-11-01", 0.78),
-                ("2026-11-02", 0.99),
-                ("2026-11-03", 0.78),
-                ("2026-11-04", 0.78),
-                ("2026-11-05", 0.9),
+                ("2026-11-01", 1.0),
+                ("2026-11-02", 1.5),
+                ("2026-11-03", 2.0),
             ]
         );
+        // `latest` names the guide row's own day, not the run day that carried it.
         let latest = cardmarket_latest(&rows).unwrap_or(Json::Null);
-        assert_eq!(latest["day"], json!("2026-11-05"));
-        assert_eq!(latest["trend"], json!(0.9));
+        assert_eq!(latest["day"], json!("2026-11-03"));
+        assert_eq!(latest["trend"], json!(2));
+        let carried = vec![cm_row("2026-11-02", 11, "2026-10-20", json!(1.0))];
+        assert_eq!(
+            cardmarket_latest(&carried).unwrap_or(Json::Null)["day"],
+            json!("2026-10-20")
+        );
         assert_eq!(cardmarket_latest(&[]), None);
+    }
+
+    /// Deps pointed at a port nothing listens on: any query would fail, so a
+    /// source that still answers `empty` proved it read nothing.
+    fn unreachable_deps() -> MarketDeps {
+        let options = sqlx::postgres::PgConnectOptions::new()
+            .host("127.0.0.1")
+            .port(58_123)
+            .database("poko_price_history_never_connected");
+        MarketDeps {
+            db: MarketplaceDb::connect_lazy_with(options, 1),
+            tcg: None,
+            game: "pokemon".to_string(),
+            now_ms: parse_history_day(TODAY)
+                .and_then(|day| day.and_hms_opt(0, 0, 0))
+                .map(|moment| moment.and_utc().timestamp_millis())
+                .unwrap_or_default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_source_without_a_blueprint_answers_empty_without_reading() {
+        // TCGplayer is keyed by the catalog card id and keeps its own read; the
+        // three blueprint-keyed sources have nothing to ask for.
+        let deps = unreachable_deps();
+        let ask = ask_history_block(&deps, None, "2026-10-01", TODAY, "week").await;
+        let sold = sold_history_block(&deps, None, &json!({}), "2026-10-01", TODAY, "week").await;
+        let cardmarket = cardmarket_history_block(&deps, None, "2026-10-01", TODAY, "week").await;
+        assert_eq!(ask["status"], "empty");
+        assert_eq!(sold["status"], "empty");
+        assert_eq!(sold["slice"]["condition"], json!(""));
+        assert_eq!(sold["slice"]["language"], json!(""));
+        assert_eq!(cardmarket["status"], "empty");
+        for block in [&ask, &sold, &cardmarket] {
+            assert!(block.get("points").is_none(), "an empty source has points");
+        }
     }
 
     #[test]
@@ -4363,6 +4442,160 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("storedFrom"));
+    }
+
+    /// `count` consecutive days whose value and units are as wide as the tool
+    /// can emit, for the result-ceiling test.
+    fn widest_series(from: &str, count: i64, value: f64, units: Option<i64>) -> Vec<DailyValue> {
+        daily_series(from, count, 0.0)
+            .into_iter()
+            .map(|day| DailyValue {
+                day: day.day,
+                value,
+                units,
+            })
+            .collect()
+    }
+
+    /// Four full sources of a `span` day window, every point at its widest and
+    /// every side field present: the largest body the tool can build.
+    fn widest_body(span: i64) -> Json {
+        let from = shift_day(TODAY, span).unwrap_or_default();
+        let bucket = bucket_for_span(span);
+        let usd = widest_series(&from, span + 1, 99_999.99, None);
+        let pkn = widest_series(&from, span + 1, 9_999_999.0, Some(9_999_999));
+        let ask = widest_series(&from, span + 1, 9_999_999.0, None);
+        let mut sources = Map::new();
+        sources.insert(
+            "tcgplayer".to_string(),
+            history_block(
+                &TCGPLAYER_HISTORY,
+                bucket,
+                &usd,
+                "",
+                Some(&json!({
+                    "subtype": "Normal",
+                    "otherSubtypes": ["Holofoil", "Reverse Holofoil", "1st Edition", "Box Topper", "Textless"],
+                })),
+            ),
+        );
+        sources.insert(
+            "cardmarket".to_string(),
+            history_block(
+                &CARDMARKET_HISTORY,
+                bucket,
+                &usd,
+                "",
+                Some(&json!({ "latest": { "day": from, "trend": 99_999.99, "avg7": 99_999.99, "low": 99_999.99 } })),
+            ),
+        );
+        sources.insert(
+            "cardtrader_sold".to_string(),
+            history_block(
+                &SOLD_HISTORY,
+                bucket,
+                &pkn,
+                "",
+                Some(&json!({ "slice": { "condition": "NM", "language": "EN", "variant": "reverse first edition" } })),
+            ),
+        );
+        sources.insert(
+            "cardtrader_ask".to_string(),
+            history_block(&ASK_HISTORY, bucket, &ask, "", None),
+        );
+        let card = candidate_from_row(&json!({
+            "card_id": 119662, "ct_id": 239324, "name": "Charizard",
+            "set_name": "Base Set", "card_number": "4/102",
+            "artist": "Mitsuhiro Arita", "item_kind": "single",
+        }));
+        history_body(
+            card,
+            &from,
+            TODAY,
+            bucket,
+            fx_eur_usd(TODAY, 1.0989_1234),
+            Json::Object(sources),
+        )
+    }
+
+    #[test]
+    fn every_window_fits_the_result_ceiling_with_its_endpoints() {
+        for span in [26_i64, 182, 790, 3_660] {
+            let body = widest_body(span);
+            let text = serde_json::to_string(&body).unwrap_or_default();
+            assert!(
+                text.chars().count() <= HISTORY_RESULT_CHARS,
+                "a {span} day body is {} chars",
+                text.chars().count()
+            );
+            for source in [
+                "tcgplayer",
+                "cardmarket",
+                "cardtrader_sold",
+                "cardtrader_ask",
+            ] {
+                let block = &body["sources"][source];
+                let points = block["points"].as_array().cloned().unwrap_or_default();
+                assert!(points.len() >= 2, "{source} lost its series at {span} days");
+                assert_eq!(
+                    points.first(),
+                    Some(&block["first"]),
+                    "{source} lost its first point at {span} days"
+                );
+                assert_eq!(
+                    points.last(),
+                    Some(&block["last"]),
+                    "{source} lost its last point at {span} days"
+                );
+            }
+            // Only the widest window runs out of room; a shorter one keeps every
+            // bucket it has.
+            assert_eq!(
+                body["thinned"].as_bool().unwrap_or(false),
+                span >= 3_660,
+                "thinning flag wrong for a {span} day body"
+            );
+        }
+    }
+
+    #[test]
+    fn thinning_drops_points_evenly_and_keeps_both_ends() {
+        let points: Vec<Json> = (0..400)
+            .map(|index| json!([format!("day-{index:03}"), index, 9_999_999]))
+            .collect();
+        let mut body = json!({
+            "sources": {
+                "cardtrader_sold": { "points": points },
+                "tcgplayer": { "points": [] },
+            },
+        });
+        assert!(thin_history_points(&mut body, 4_000));
+        let text = serde_json::to_string(&body).unwrap_or_default();
+        assert!(
+            text.chars().count() <= 4_000,
+            "thinned body is still {} chars",
+            text.chars().count()
+        );
+        let kept = body["sources"]["cardtrader_sold"]["points"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(kept.first(), Some(&json!(["day-000", 0, 9_999_999])));
+        assert_eq!(kept.last(), Some(&json!(["day-399", 399, 9_999_999])));
+        // Evenly: one constant stride, only the pinned last point closer.
+        let values: Vec<i64> = kept.iter().filter_map(|point| point[1].as_i64()).collect();
+        let gaps: Vec<i64> = values.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        let stride = gaps.first().copied().unwrap_or(0);
+        assert!(stride > 1, "nothing was thinned");
+        assert!(
+            gaps.iter().all(|gap| *gap == stride || *gap < stride),
+            "uneven thinning {gaps:?}"
+        );
+        assert!(
+            !thin_history_points(&mut body, 4_000),
+            "a body that fits loses nothing more"
+        );
+        assert_eq!(serde_json::to_string(&body).unwrap_or_default(), text);
     }
 
     #[test]
