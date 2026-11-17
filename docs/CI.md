@@ -6,6 +6,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | --- | --- | --- | --- |
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
+| GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
 
@@ -72,3 +73,21 @@ Because `rust-gate` always runs, requiring it cannot block front-end PRs. Do thi
 3. Tick "Require status checks to pass before merging".
 4. Search for `rust-gate` and select it (it appears only after it has run once in the last week).
 5. Save. Do not add `test`, `changed` or `flow-db`; they are skipped on non-Rust PRs and a skipped required check counts as passed only through `rust-gate`.
+
+The same steps apply to `repo-gate` (from `.github/workflows/repo-ci.yml`): merge the workflow first, then require `repo-gate` as well.
+
+## Deploy gate: main must be green to ship
+
+A commit ships only when its required GitHub checks are green. `scripts/require-ci-green.sh <commit>` asks GitHub for the check runs of that exact commit (`gh api repos/gvitolocs/pokoin/commits/<sha>/check-runs`) and exits 0 only when every name in `scripts/ci-required-checks` has a completed run that ended in `success`. The list is read from the commit being shipped, so a commit without the list cannot ship. Only runs made by GitHub Actions count; a check with the right name from another app does not. When a check was run more than once, the newest run decides. `skipped`, `cancelled`, `neutral`, `timed_out` and a missing run are not green. Any error talking to GitHub is a refusal, never a pass.
+
+These entry points call it before they do anything else that matters: `scripts/publish-web.sh` (upload mode), `scripts/deploy-web.sh`, `scripts/deploy-pokoin-rust.sh` and `scripts/build-pokoin-rust-release.sh`. `scripts/deploy-gate-callers.test.sh` fails if one of them stops calling it. `publish-web.sh --promote` does not call it: promoting an older version is the rollback path and is never blocked. It records every upload and promotion, with the commit and the CI result, in `$HOME/pokoin-deploy/web-versions.tsv`, and warns when you promote a version it did not record.
+
+Waiting: a check that is still running is waited for (poll every 30 seconds, give up after an hour). A check run that does not exist yet gets 5 minutes to appear, then it is a refusal. `--no-wait` refuses at once for anything not yet green. The settings are `POKOIN_CI_POLL_S`, `POKOIN_CI_WAIT_S` and `POKOIN_CI_MISSING_GRACE_S`.
+
+Why only the newest `main` commit is usually shippable: the workflows use `cancel-in-progress`, so when a newer commit lands on `main` the runs of the older one are cancelled, and a cancelled check is not green. Ship the newest `origin/main` commit, or re-run the failed workflow on GitHub for the older one.
+
+The required names are in `scripts/ci-required-checks`: `rust-gate` and `repo-gate`. Add a name there only after that check exists on `main`; a name nobody produces blocks every deploy.
+
+Override (owner only): `POKOIN_CI_OVERRIDE=<full 40-hex commit id>:<reason>` skips the check for that one commit. The reason is at least 10 characters of letters, digits, space and `.,;_()/#-`. A use is valid only when both records are written: a line in `$HOME/pokoin-deploy/ci-gate.log` and an incident in the ops record (`lucina-rs ops record --source pokoin-ci-gate`, or `POKOIN_OPS_RECORD_CMD`). If either cannot be written, the override is refused. Lane workers never get it: it is refused whenever `LANE_WORKER` is set. An agent never sets it; if you are an agent and the gate refuses, stop and report.
+
+Every run that ends is logged: one line in `$HOME/pokoin-deploy/ci-gate.log` with the UTC time, the full commit, the result (`green`, `refused` or `override`), the reason and the caller.

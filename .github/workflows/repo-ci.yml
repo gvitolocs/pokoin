@@ -1,0 +1,52 @@
+# CI for the repository's own scripts (the deploy gate). docs/CI.md.
+# `repo-gate` is the check scripts/require-ci-green.sh and branch protection read. It always runs and passes only when every job it needs passed.
+# Nothing here deploys, uses a secret, or runs on a self-hosted runner.
+name: repo-ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate-tests:
+    # The deploy gate script and the entry points that call it, tested against fakes (no network, no deploy).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: require-ci-green tests
+        run: bash scripts/require-ci-green.test.sh
+      - name: deploy entry points refuse on red CI
+        run: bash scripts/deploy-gate-callers.test.sh
+      - name: auto-deploy-rust tests
+        run: bash scripts/auto-deploy-rust.test.sh
+      - name: shellcheck
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh
+
+  repo-gate:
+    # Add later jobs to `needs`; the loop below checks every job listed there.
+    needs: [gate-tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          bad=0
+          for job in $(echo "$NEEDS" | jq -r 'keys[]'); do
+            result=$(echo "$NEEDS" | jq -r --arg j "$job" '.[$j].result')
+            echo "$job=$result"
+            if [ "$result" != success ]; then bad=1; fi
+          done
+          if [ "$bad" != 0 ]; then echo "::error::repo-gate: a needed job did not succeed"; exit 1; fi
+          echo "repo-gate: every needed job succeeded"
