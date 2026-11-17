@@ -24,3 +24,10 @@ test('the CardTrader 186×260 placeholder goes dead without a retry', () => {
   assert.match(art, /isCardTraderPlaceholderSize\([\s\S]*?failCurrent\(\{ retryable: false \}\);/);
   assert.match(art, /onError=\{\(\) => failCurrent\(\)\}/);
 });
+
+test('the tile scan reaches the frame as a bare img so the CSS cover fit applies', () => {
+  assert.match(art, /<Show when=\{props\.cut\} fallback=\{image\(\)\}>/);
+  const image = art.slice(art.indexOf('const image = () =>'), art.indexOf('\n  return ('));
+  // No inline geometry: the art slot owns the 63:88 box and the crop.
+  assert.doesNotMatch(image, /style=\{|\swidth="|\sheight="/);
+});

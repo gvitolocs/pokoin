@@ -1966,7 +1966,16 @@ html.is-card-banding * {
 }
 
 .tile-art {
-  padding: 0.5rem;
+  /* 16px is .tile's own radius; the caption gap is .tile-meta padding. */
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0;
+}
+
+/* The hover preview still pops out of the frame, so the rail gutters reserved for it keep their purpose. */
+.tile:not(.tile-album):hover > .tile-art,
+.tile:not(.tile-album):focus-visible > .tile-art {
+  overflow: visible;
 }
 
 .prod-art.hero-art {
@@ -1993,6 +2002,17 @@ html.is-card-banding * {
 .tile-art .tile-ph {
   width: 100%;
   aspect-ratio: 63 / 88;
+}
+
+/* Off-ratio scans and thin scanner borders crop, never letterbox. */
+.tile-art img {
+  object-fit: cover;
+  object-position: center;
+}
+
+/* The loading shimmer fills the same flush slot, not a smaller card inside it. */
+.tile:not(.tile-album):not(.tile-row) .tile-art > .tile-ph {
+  border-radius: 16px 16px 0 0;
 }
 
 .hero-art img {
@@ -2125,6 +2145,7 @@ html.is-card-banding * {
   position: relative;
   padding: 0;
   overflow: hidden;
+  border-radius: 0;
 }
 
 .tile-album .art-cut,
@@ -2655,6 +2676,8 @@ html.is-card-banding * {
   width: auto;
   flex: 0 0 auto;
   padding: 0.35rem 0 0.35rem 0.45rem;
+  border-radius: 0;
+  overflow: visible;
 }
 .tile-row .thumb-zoom-host,
 .tile-row .art-cut {
@@ -8595,13 +8618,6 @@ dialog.zoom:not([open]) {
     width: 4.4rem;
   }
 
-  .tile-art {
-    padding: 0.45rem;
-  }
-
-  .tile-album .tile-art {
-    padding: 0;
-  }
   .tile-album .tile-meta {
     padding: 0.12rem 0.36rem 0.14rem;
   }
