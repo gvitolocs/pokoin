@@ -74,8 +74,8 @@ PG_CONTAINER="${PG_CONTAINER:-pokoin-marketplace-postgres-15t}"
 PG_USER="${PG_USER:-pokoin_marketplace}"
 PG_DB="${PG_DB:-pokoin_marketplace}"
 
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-WORKTREE="${WORKTREE:-$(CDPATH= cd -- "$SELF_DIR/.." && pwd)}"
+SELF_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+WORKTREE="${WORKTREE:-$(CDPATH='' cd -- "$SELF_DIR/.." && pwd)}"
 SCRIPT="$WORKTREE/scripts/ingest-missing-product-images.py"
 BP=public.cardtrader_pokemon_blueprints
 OVERLAY_TABLES="marketplace_search_candidates marketplace_cards marketplace_card_versions"
@@ -661,12 +661,21 @@ build_stamp_keys() { # $1 = bdir, $2 = tag
     printf '%s\n' "$key" >>"$ok"
   done <"$bdir/verify-keys.txt"
   sort -u -o "$ok" "$ok"
+  # The WebP half of the verified set, so the loop below never reads and writes
+  # the same list.
+  homes="$bdir/verify-homes.txt"
+  while read -r key; do
+    [ -n "$key" ] || continue
+    case "$key" in
+      *.jpg) homepage_of "$key" ;;
+    esac
+  done <"$ok" >"$homes"
   while read -r key; do
     [ -n "$key" ] || continue
     id=$(key_ct_id "$key")
     [ -n "$id" ] || continue
     home=$(homepage_of "$key")
-    if grep -q -x -- "$home" "$ok"; then
+    if grep -q -x -- "$home" "$homes"; then
       printf '%s\t%s\n' "$id" "$key" >>"$bdir/stamp-keys.tsv"
     else
       log "batch $tag warn: $key is 200 but $home is not; id $id not stamped"
