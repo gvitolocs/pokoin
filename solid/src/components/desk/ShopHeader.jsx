@@ -127,7 +127,7 @@ export default function ShopHeader(props) {
   const conditionLabel = () => CONDITIONS.find((row) => row.value === props.condition)?.label || 'Any condition';
   const sortLabel = () => SHOP_SORTS.find((row) => row.value === props.sort)?.label || 'Sort';
   return (
-    <div class="shop-header" role="group" aria-label="Shop filters">
+    <div class="shop-header" role="group" aria-label="Shop filters" tabindex="-1">
       <span class="shop-hcell shop-hseller shop-label">
         <Ico name="seller" />
         <span>Seller</span>

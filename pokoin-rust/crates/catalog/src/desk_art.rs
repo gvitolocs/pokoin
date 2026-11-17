@@ -49,6 +49,7 @@ static CACHE_RULES: LazyLock<Vec<CacheRule>> = LazyLock::new(|| {
     let list = |name: &str| -> Vec<u64> {
         let text = match name {
             "small-scan-ctf1" => include_str!("../../../../market/src/data/small-scan-ctf1.json"),
+            "small-scan-ctf2" => include_str!("../../../../market/src/data/small-scan-ctf2.json"),
             "pokoin-placeholder-leftovers" => include_str!("../../../../market/src/data/pokoin-placeholder-leftovers.json"),
             other => panic!("catalog-image-cache.json names an unknown idList {other}"),
         };

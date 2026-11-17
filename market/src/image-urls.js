@@ -11,10 +11,12 @@ export function isPrefixedCatalog(value) {
 
 import CATALOG_IMAGE_CACHE from './data/catalog-image-cache.json' with { type: 'json' };
 import SMALL_SCAN_IDS from './data/small-scan-ctf1.json' with { type: 'json' };
+import SMALL_SCAN_CTF2_IDS from './data/small-scan-ctf2.json' with { type: 'json' };
 import POKOIN_PLACEHOLDER_IDS from './data/pokoin-placeholder-leftovers.json' with { type: 'json' };
 
 const ID_LISTS = {
   'small-scan-ctf1': SMALL_SCAN_IDS,
+  'small-scan-ctf2': SMALL_SCAN_CTF2_IDS,
   'pokoin-placeholder-leftovers': POKOIN_PLACEHOLDER_IDS,
 };
 

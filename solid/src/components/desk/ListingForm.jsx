@@ -25,7 +25,7 @@ import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
 import { fiatFromPkn, LIST_CURRENCIES, listingPriceToPkn } from '@market/pkn.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { suggestPriceFromSlices } from '@market/scan-pricing.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { priceInputFromPkn } from '@market/seller-currency.js';
 import { Action, track } from '@market/track.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '@market/user-photos.js';
 import { authReady, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -296,9 +296,6 @@ export default function ListingForm(props) {
   });
 
   const hint = () => (!price() && graphPrice() ? graphPrice() : '');
-  const listedPkn = () => (price()
-    ? listingPriceToPkn(price(), currency())
-    : listingPriceToPkn(graphPrice(), currency()));
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
@@ -516,10 +513,11 @@ export default function ListingForm(props) {
     }
   }
 
-  // A signed-out visitor came to buy: the sell form waits behind one button
-  // instead of being the biggest panel on the desk.
+  // Every visitor came to buy first, signed in or not: the sell form waits
+  // behind one strip instead of being the biggest panel on the desk. The strip
+  // is the same for both, so the desk has one layout.
   const [opened, setOpened] = createSignal(false);
-  const collapsed = () => authReady() && !signedIn() && !isEditing() && !opened();
+  const collapsed = () => !isEditing() && !opened();
 
   return (
     <Show
@@ -527,8 +525,16 @@ export default function ListingForm(props) {
       fallback={(
         <section class="panel sell-form is-collapsed">
           <div class="add-head">
-            <h2>Sell this card</h2>
-            <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            <h2>Have this card?</h2>
+            <Show when={props.sellNowNote}>
+              <span class="sell-strip-note">{props.sellNowNote}</span>
+            </Show>
+            <span class="sell-strip-actions">
+              <Show when={props.onSellNow}>
+                <button type="button" class="btn ghost sell-open sell-now" onClick={() => props.onSellNow()}>Sell now</button>
+              </Show>
+              <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            </span>
           </div>
         </section>
       )}
@@ -554,6 +560,11 @@ export default function ListingForm(props) {
             <Show when={isEditing()}>
               <button type="button" class="linkish sell-cancel-edit" onClick={() => props.onCancelEdit?.()}>
                 Cancel edit
+              </button>
+            </Show>
+            <Show when={!isEditing()}>
+              <button type="button" class="linkish sell-close" onClick={() => setOpened(false)}>
+                Close
               </button>
             </Show>
           </span>
@@ -634,12 +645,12 @@ export default function ListingForm(props) {
           />
         </div>
       </Show>
-      <p class="sell-pkn-eq">
-        {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())}` : ''}
-        <Show when={sellerSettings()?.acceptsPkn === false}>
-          {listedPkn() ? ' · ' : ''}Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
-        </Show>
-      </p>
+      {/* The price field already shows what the card lists at; only the PKN-off notice keeps a line. */}
+      <Show when={sellerSettings()?.acceptsPkn === false}>
+        <p class="sell-pkn-eq">
+          Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
+        </p>
+      </Show>
       <div class="sell-options-row">
         <div class="sell-field sell-pick condition-pick">
           <span class="sr-only">Condition</span>

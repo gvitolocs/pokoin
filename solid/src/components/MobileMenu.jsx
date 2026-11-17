@@ -141,7 +141,7 @@ export default function MobileMenu(props) {
         <h2 id="mm-shop">Shop</h2>
         <ul>
           <Row to="/marketplace" icon={ICO.market} label="Marketplace" onClose={close} />
-          <Row to="/buysell" mark="buysell" label="BuySell" onClose={close} />
+          <Row to="/cardgts" mark="buysell" label="CardGTS" onClose={close} />
           <Row to="/marketplace/explore" icon={ICO.explore} label="Explore" onClose={close} />
           <Show when={props.competitive}>
             <Row to="/marketplace/competitive" icon={ICO.trophy} label="Competitive" onClose={close} />

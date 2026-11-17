@@ -1,5 +1,5 @@
 import { createMemo, createSignal, createUniqueId, For, Match, onCleanup, onSettled, Show, Switch } from 'solid-js';
-import { EUR_CONTEXT, normalizeStrategy } from '@market/pricer.js';
+import { EUR_CONTEXT, localizeStrategyName, normalizeStrategy } from '@market/pricer.js';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from './NewGroupForm.jsx';
 import {
@@ -40,7 +40,7 @@ function StrategyTile(props) {
         <span class={`pricer-tile-icon is-${tile().icon}`}><ActionIcon action={tile().icon} size={18} /></span>
         <span class="pricer-source">{tile().source}{basisText()}</span>
       </span>
-      <strong class="pricer-tile-name">{props.strategy.name}</strong>
+      <strong class="pricer-tile-name">{localizeStrategyName(props.strategy.name, props.ctx)}</strong>
       <span class="pricer-tile-chips">
         <For each={tile().rules}>{(rule) => <span class="pricer-chip">{rule}</span>}</For>
       </span>
@@ -111,7 +111,7 @@ export default function PricerPopup(props) {
   let dialog;
   const opener = typeof document !== 'undefined' ? document.activeElement : null;
 
-  const strategyName = (id) => props.strategies.find((entry) => entry.id === id)?.name || 'No strategy';
+  const strategyName = (id) => localizeStrategyName(props.strategies.find((entry) => entry.id === id)?.name, ctx()) || 'No strategy';
   const chosenName = () => {
     const current = step();
     if (!current) return '';
@@ -341,6 +341,7 @@ export default function PricerPopup(props) {
                 <NewGroupForm
                   class="pricer-popup-form"
                   idPrefix={`${titleId}-group`}
+                  ctx={ctx()}
                   groups={props.groups}
                   strategies={props.strategies}
                   submitLabel={rows() ? 'Create and use' : 'Create and preview'}

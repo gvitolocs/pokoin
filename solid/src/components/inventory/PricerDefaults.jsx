@@ -11,7 +11,9 @@ export default function PricerDefaults(props) {
   const [saved, setSaved] = createSignal(false);
   // Follow the parent whenever it loads new settings (a cached copy may
   // predate `currency`: it reads EUR).
-  createEffect(() => setDraft(props.settings ? { ...DEFAULT_PRICER, ...props.settings } : DEFAULT_PRICER));
+  createEffect(() => props.settings, (settings) => {
+    setDraft(settings ? { ...DEFAULT_PRICER, ...settings } : DEFAULT_PRICER);
+  });
 
   async function save(next) {
     setDraft(next);

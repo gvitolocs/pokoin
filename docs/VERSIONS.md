@@ -19,8 +19,8 @@ expansion. Changing the rarity select (Ultra Rare → Full-Art) must refetch
 that group — do not build the circles from exact-name search (that is every
 printing of the English name, so the row never moved). **More versions...**
 stays under the circles whenever there is a rarity lineup or other artwork
-(`{canonicalPath}/versions`). More than five expansions drop the circles and
-keep only that link. The versions page then groups that CLIP list by TCG era
+(`{canonicalPath}/versions`). More than six expansions cap the row to six —
+the current set plus the newest of the others — and that link stays beside them. The versions page then groups that CLIP list by TCG era
 (`tcgEra` in `market/src/set-logos.js`, catalog `market/src/tcg-eras.js`).
 Era headings are gold links to `/marketplace/eras/{id}` (Neo →
 `/marketplace/eras/neo`). **Rarity Lineup** is not an era.

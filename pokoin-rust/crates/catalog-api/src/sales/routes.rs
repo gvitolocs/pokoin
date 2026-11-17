@@ -10,6 +10,7 @@ use serde_json::{json, Map, Value};
 use sqlx::PgPool;
 
 use super::core::{self, SoldSlice};
+use super::history_sources::{self, FxRates};
 use super::tcgcsv::{self, TcgError};
 use crate::reads::util;
 use crate::shared::{card_versions, js};
@@ -615,6 +616,30 @@ fn day_of(v: &Value) -> String {
     js::string_or_empty(Some(v)).chars().take(10).collect()
 }
 
+/// The `observations` rows of a `read_tcgplayer_history` result.
+fn tcg_observations(result: &Value) -> &[Value] {
+    let rows = result["observations"].as_array();
+    rows.map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The TCGplayer status of an unconfigured history pool: `unconfigured` while
+/// `TCGCSV_DATABASE_URL` is unset or empty, `unavailable` once it is set.
+fn unconfigured_status() -> &'static str {
+    if std::env::var("TCGCSV_DATABASE_URL").map_or(true, |value| value.is_empty()) {
+        "unconfigured"
+    } else {
+        "unavailable"
+    }
+}
+
+/// A source block that did not answer, so the response must not be cached.
+fn status_failed(block: &Value) -> bool {
+    matches!(
+        block["status"].as_str(),
+        Some("unavailable") | Some("unconfigured")
+    )
+}
+
 fn count(v: Option<&Value>) -> i64 {
     let n = js::number(v);
     if n.is_finite() { (n.trunc() as i64).max(0) } else { 0 }
@@ -634,7 +659,7 @@ fn cardtrader_source(rows: &[Value], status: Option<&str>) -> Value {
     })
 }
 
-fn tcgplayer_source(rows: &[Value], status: Option<&str>) -> Value {
+fn tcgplayer_source(rows: &[Value], rates: &FxRates, status: Option<&str>) -> Value {
     let mut order: Vec<String> = Vec::new();
     let mut by: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
     for r in rows {
@@ -644,10 +669,13 @@ fn tcgplayer_source(rows: &[Value], status: Option<&str>) -> Value {
             json!({ "productId": js::js_string(&r["product_id"]), "categoryId": r["category_id"], "groupId": r["group_id"], "subtype": r["subtype"], "days": [] })
         });
         if let Some(days) = entry.get_mut("days").and_then(Value::as_array_mut) {
-            days.push(json!({
-                "day": day_of(&r["observed_on"]), "marketPrice": r["market_price"], "lowPrice": r["low_price"], "midPrice": r["mid_price"],
+            let day = day_of(&r["observed_on"]);
+            let mut market = json!({
+                "day": day, "marketPrice": r["market_price"], "lowPrice": r["low_price"], "midPrice": r["mid_price"],
                 "highPrice": r["high_price"], "directLowPrice": r["direct_low_price"], "sourceTimestamp": if js::truthy(r.get("snapshot_timestamp")) { r["snapshot_timestamp"].clone() } else { Value::Null },
-            }));
+            });
+            history_sources::add_market_pkn(&mut market, r.get("market_price"), &day, rates);
+            days.push(market);
         }
     }
     json!({
@@ -693,7 +721,7 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         return with_headers(StatusCode::NOT_FOUND, json!({ "error": "Card not found." }), &cors, &[]);
     };
     let ct = if card["ct_id"].is_null() { None } else { Some(js::js_string(&card["ct_id"])) };
-    let (listed, tcg) = tokio::join!(
+    let (listed, tcg, cardmarket, rates) = tokio::join!(
         async {
             match &ct {
                 Some(ct) => pg::pool_rows(&pool, LISTED_SQL, &[Bind::Text(ct.clone()), Bind::Text(from.clone()), Bind::Text(to.clone())]).await,
@@ -701,21 +729,24 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
             }
         },
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
+        history_sources::cardmarket_history(&pool, &game_id, ct.as_deref(), &from, &to),
+        history_sources::read_fx_rates(&pool, &to),
     );
     let cardtrader = match listed {
         Ok(rows) => cardtrader_source(&rows, None),
         Err(_) => cardtrader_source(&[], Some("unavailable")),
     };
-    let tcgplayer = match tcg {
-        Ok(result) => tcgplayer_source(result["observations"].as_array().map(Vec::as_slice).unwrap_or(&[]), None),
-        Err(TcgError::Unconfigured) => tcgplayer_source(&[], Some(if std::env::var("TCGCSV_DATABASE_URL").map_or(true, |v| v.is_empty()) { "unconfigured" } else { "unavailable" })),
-        Err(TcgError::Db(_)) => tcgplayer_source(&[], Some("unavailable")),
+    let tcgplayer = match &tcg {
+        Ok(result) => tcgplayer_source(tcg_observations(result), &rates, None),
+        Err(TcgError::Unconfigured) => tcgplayer_source(&[], &rates, Some(unconfigured_status())),
+        Err(TcgError::Db(_)) => tcgplayer_source(&[], &rates, Some("unavailable")),
     };
-    let degraded = [&cardtrader, &tcgplayer].iter().any(|f| matches!(f["status"].as_str(), Some("unavailable") | Some("unconfigured")));
+    let blocks = [&cardtrader, &tcgplayer, &cardmarket];
+    let degraded = blocks.iter().copied().any(status_failed);
     let body = json!({
         "game": game_id, "cardId": js::js_string(&card["card_id"]), "ctId": ct, "from": from, "to": to,
         "printing": { "name": card["name"], "setName": card["expansion_name"], "number": card["card_number"] },
-        "cardtrader": cardtrader, "tcgplayer": tcgplayer,
+        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "fx": history_sources::fx_json(&rates),
     });
     with_headers(StatusCode::OK, body, &cors, &[("cache-control", if degraded { "no-store" } else { "public, max-age=20, s-maxage=120" })])
 }

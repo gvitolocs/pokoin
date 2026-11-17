@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+// Relative, not @market: node --test loads these without Vite's alias.
+import { currencyContext, formatLocal, pknToLocal } from '../../../../market/src/pricer.js';
 import {
   batchHasPricing,
   effectiveRowPricing,
@@ -42,6 +44,21 @@ test('options list groups with their strategy, then strategies', () => {
   assert.deepEqual(pricingOptions(null, {}), { groups: [], strategies: [] });
 });
 
+test('a currency context localizes the strategy names in the labels', () => {
+  const ctx = currencyContext({ currency: 'EUR' });
+  const name = `Undercut by ${formatLocal(pknToLocal(5, ctx), ctx)}`;
+  const data = {
+    strategies: [{ id: 's1', name: 'Undercut by 5 PKN' }, { id: 's2', name: 'Match' }],
+    groups: [{ id: 'g1', name: 'Bulk', strategyId: 's1' }],
+  };
+  const out = pricingOptions(data, {}, ctx);
+  assert.deepEqual(out.groups, [{ value: 'group:g1', label: `Bulk · ${name}` }], 'the group name stays as saved');
+  assert.deepEqual(out.strategies.map((o) => o.label), [name, 'Match']);
+  assert.deepEqual(rowPricingChip({ pricing: { strategyId: 's1' } }, {}, data, ctx), { label: name, kind: 'own' });
+  assert.deepEqual(rowPricingChip({ pricing: { groupId: 'g1' } }, {}, data, ctx), { label: 'Bulk', kind: 'own' });
+  assert.deepEqual(rowPricingChip({ pricing: { strategyId: 's1' } }, {}, data), { label: 'Undercut by 5 PKN', kind: 'own' }, 'no context: as saved');
+});
+
 test('hint names the group only for a group', () => {
   assert.equal(pricingHint({}), '');
   assert.equal(
@@ -52,6 +69,16 @@ test('hint names the group only for a group', () => {
     pricingHint({ pricingStrategyId: 's1' }),
     "Unpriced cards get the strategy's price when the batch loads and go on sale. Cards with no market price stay paused.",
   );
+});
+
+test('a batch that names a group or a strategy prices its own rows', () => {
+  // Exactly the choices `applyPricing` covers at submit: for those, the desk's
+  // suggested-price run stands down instead of racing the batch pricing.
+  assert.equal(batchHasPricing({ pricingGroupId: 'g1', pricingStrategyId: '' }), true);
+  assert.equal(batchHasPricing({ pricingGroupId: '', pricingStrategyId: 's1' }), true);
+  assert.equal(batchHasPricing({ pricingGroupId: '', pricingStrategyId: '' }), false);
+  assert.equal(batchHasPricing({}), false, 'no choice: the desk suggests the price');
+  assert.equal(batchHasPricing(null), false, 'a batch without defaults suggests too');
 });
 
 test('apply bodies: one per group with every listing that joined it, one per strategy for unpriced rows', () => {
@@ -91,7 +118,7 @@ test('a row is priced by its own choice, else the batch default; none opts out',
   assert.deepEqual(rowPricingChip({}, batch, data), { label: 'Bulk', kind: 'batch' });
   assert.deepEqual(rowPricingChip({ pricing: { strategyId: 's1' } }, batch, data), { label: 'Undercut 5%', kind: 'own' });
   assert.deepEqual(rowPricingChip({ pricing: { none: true } }, batch, data), { label: 'None', kind: 'none' });
-  assert.deepEqual(rowPricingChip({}, {}, data), { label: 'No pricing', kind: 'batch' });
+  assert.deepEqual(rowPricingChip({}, {}, data), { label: 'Suggested', kind: 'batch' });
   assert.equal(rowPricingPatch({ kind: 'batch' }), null);
   assert.deepEqual(rowPricingPatch({ kind: 'none' }), { none: true });
   assert.deepEqual(rowPricingPatch({ kind: 'group', id: 'g1' }), { groupId: 'g1' });

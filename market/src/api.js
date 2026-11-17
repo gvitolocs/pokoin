@@ -708,7 +708,7 @@ export async function fetchLastMedianPknMap(cardIds) {
 }
 
 /** Batch cheapest listed PKN per card id (marketplace-card-cheapest-price). */
-export async function fetchCheapestPricePknMap(cardIds) {
+export async function fetchCheapestPricePknMap(cardIds, { strict = false } = {}) {
   const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 50);
   if (!ids.length) {
     return {};
@@ -724,7 +724,9 @@ export async function fetchCheapestPricePknMap(cardIds) {
       }
     }
     return byId;
-  } catch (_) {
+  } catch (err) {
+    // strict: a failed read is not "no listing"; the caller retries it.
+    if (strict) throw err;
     return {};
   }
 }
@@ -1000,6 +1002,20 @@ export function fetchCardTraderAssets(token) {
 /** Stored collection-value days. The server prices the pile once per UTC day. */
 export function fetchPortfolioHistory(token) {
   return getJson('/api/marketplace-portfolio-history', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/**
+ * Dashboard top movers: the seller's own printings that moved most inside the
+ * chart's window. `days` is that window in days, or "max".
+ */
+export function fetchPortfolioMovers(token, days) {
+  const query = days === undefined || days === null || days === '' ? '' : `?days=${days}`;
+  return getJson(`/api/marketplace-portfolio-movers${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

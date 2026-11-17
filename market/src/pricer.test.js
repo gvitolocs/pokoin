@@ -13,6 +13,7 @@ import {
   formatLocal,
   isAllExact,
   localToPkn,
+  localizeStrategyName,
   pricerBases,
   pknToLocal,
   sourceHasFees,
@@ -237,6 +238,32 @@ test('a summary renders its money in DKK under a DKK context', () => {
     strategySummary({ source: 'cardtrader', action: 'undercut', amountPct: 5, amountPkn: 40, rounding: 'integer', minPkn: 200 }, dkk),
     'CardTrader · all exact · net of CardTrader fees · undercut 5% − 1.50 DKK · nearest · min 7.50 DKK',
   );
+});
+
+test('a strategy name reads in the seller’s currency, never PKN', () => {
+  const eur = currencyContext({ currency: 'EUR' });
+  const money = (pkn) => formatLocal(pknToLocal(pkn, eur), eur);
+  assert.equal(localizeStrategyName('Undercut by 5 PKN', eur), `Undercut by ${money(5)}`);
+  assert.equal(localizeStrategyName('Undercut 5PKN', eur), `Undercut ${money(5)}`, 'no space before the unit');
+  assert.equal(localizeStrategyName('Undercut 1,000 PKN', eur), `Undercut ${money(1000)}`, 'thousands separator');
+  assert.equal(localizeStrategyName('min 1,000.50 PKN', eur), `min ${money(1000.5)}`);
+  assert.equal(localizeStrategyName('Above 2.5 pkn', eur), `Above ${money(2.5)}`, 'decimals and any case');
+  assert.equal(localizeStrategyName('PKN 5 under', eur), `${money(5)} under`, 'unit before the amount');
+  assert.equal(localizeStrategyName('PKN5 under', eur), `${money(5)} under`);
+  assert.equal(localizeStrategyName('Undercut 5%', eur), 'Undercut 5%', 'a percent is not money');
+  assert.equal(localizeStrategyName('Match CardTrader · same language', eur), 'Match CardTrader · same language', 'nothing to localize');
+  assert.equal(localizeStrategyName('Undercut PKN', eur), 'Undercut', 'a bare unit goes with one adjacent space');
+  assert.equal(localizeStrategyName('PKN undercut', eur), 'undercut');
+  assert.equal(localizeStrategyName('cheap PKN price', eur), 'cheap price');
+  assert.equal(localizeStrategyName('', eur), '', 'empty: the caller’s own fallback still applies');
+  assert.equal(localizeStrategyName(undefined, eur), '');
+  assert.equal(localizeStrategyName('   ', eur), '   ', 'blank stays blank');
+  const dkk = currencyContext({ currency: 'DKK' }, { rate: 7.46, day: '2026-11-07' });
+  assert.equal(localizeStrategyName('Never below 200 PKN', dkk), `Never below ${formatLocal(pknToLocal(200, dkk), dkk)}`);
+  assert.equal(localizeStrategyName('Never below 200 PKN', dkk), 'Never below 7.46 DKK');
+  const usd = currencyContext({ currency: 'USD' }, { rate: 1.08, day: '2026-11-07' });
+  assert.equal(localizeStrategyName('Undercut by 5 PKN', usd), 'Undercut by $0.03');
+  assert.equal(normalizeStrategy({ name: 'Undercut by 5 PKN' }).name, 'Undercut by 5 PKN', 'only the display changes, never the saved name');
 });
 
 test('each source has its bases and the toggles it can honour', () => {

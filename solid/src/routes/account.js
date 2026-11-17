@@ -1,3 +1,4 @@
+import { loadMypokoinPreview } from '../pages/mypokoin-preview.js';
 import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
@@ -15,16 +16,16 @@ const ExtensionAuthBridge = lazy(() => import('../pages/ExtensionAuthBridge.jsx'
 const ExtensionDownload = lazy(() => import('../pages/ExtensionDownload.jsx'));
 const ConnectCardRails = lazy(() => import('../pages/ConnectCardRails.jsx'));
 const Auth = lazy(() => import('../pages/Auth.jsx'));
-const CardTraderZero = lazy(() => import('../pages/CardTraderZero.jsx'));
+const CardTraderZero = lazy(async () => { await loadMypokoinPreview(); return import('../pages/CardTraderZero.jsx'); });
 const CardTraderOneDay = lazy(() => import('../pages/CardTraderOneDay.jsx'));
-const ZeroPicked = lazy(() => import('../pages/ZeroPicked.jsx'));
+const ZeroPicked = lazy(async () => { await loadMypokoinPreview(); return import('../pages/ZeroPicked.jsx'); });
 const Messages = lazy(() => import('../pages/Messages.jsx'));
 const Conversation = lazy(() => import('../pages/Messages.jsx').then((m) => ({ default: m.Conversation })));
-const Inventory = lazy(() => import('../pages/Inventory.jsx'));
+const Inventory = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Inventory.jsx'); });
 const SellSpreadsheet = lazy(() => import('../pages/SellSpreadsheet.jsx'));
 const Associate = lazy(() => import('../pages/Associate.jsx'));
 const Portfolio = lazy(() => import('../pages/Portfolio.jsx'));
-const Profile = lazy(() => import('../pages/Profile.jsx'));
+const Profile = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Profile.jsx'); });
 const SellerHome = lazy(() => import('../pages/SellerHome.jsx'));
 
 export default [

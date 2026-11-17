@@ -4,7 +4,7 @@
 
 import { getJson } from './api.js';
 import { CONDITIONS, LIST_LANGS } from './card-desk.js';
-import { formatFiatFromPkn, formatPkn, listingPriceToPkn } from './pkn.js';
+import { fiatFromPkn, formatFiatFromPkn, formatPkn, listingPriceToPkn } from './pkn.js';
 import { priceInputFromPkn } from './seller-currency.js';
 
 export const BUY_ORDER_DAYS = [
@@ -41,10 +41,73 @@ function orderPath(id, tail = '') {
   return `${BASE}/${encodeURIComponent(String(id || ''))}${tail}`;
 }
 
-/** Live offers on one card, grouped by condition / language / reverse / 1st edition. */
+/**
+ * Live offers on one card, grouped by condition / language / reverse / 1st edition.
+ * `fresh` adds a unique query param. The public book is answered from the edge cache
+ * for 15 s (`cache-control: public, max-age=15`), so the read that follows the
+ * visitor's own write must ask for a URL the edge has never seen. The book handler
+ * reads `card_id` only and ignores any other param.
+ */
+let freshBookSequence = 0;
 export function fetchBuyBook(cardId, options = {}) {
   const params = new URLSearchParams({ card_id: String(cardId || '') });
+  if (options.fresh) params.set('fresh', `${Date.now()}-${++freshBookSequence}`);
   return getJson(`${BASE}?${params}`, { cache: 'no-store', signal: options.signal });
+}
+
+/**
+ * The last book each card answered with, kept on the device so a reload paints
+ * the offer bar and the Buy offers cell at once instead of after the request.
+ * The book is public (it never names a buyer) and is always asked for again;
+ * the stored copy only fills the moment before that answer. Bounded: the 40
+ * most recent cards, each for 30 minutes.
+ */
+export const BOOK_CACHE_KEY = 'pokoin.buybook.v1';
+const BOOK_CACHE_MAX = 40;
+const BOOK_CACHE_MS = 30 * 60 * 1000;
+
+function bookStore(storage) {
+  if (storage) return storage;
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readBookEntries(store) {
+  try {
+    const all = JSON.parse(store.getItem(BOOK_CACHE_KEY) || '{}');
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+/** The stored book for `cardId`, or null when there is none or it is too old. */
+export function readBookCache(cardId, { storage, now = Date.now() } = {}) {
+  const store = bookStore(storage);
+  const id = String(cardId || '');
+  if (!store || !id) return null;
+  const hit = readBookEntries(store)[id];
+  if (!hit || !Array.isArray(hit.book)) return null;
+  const age = now - Number(hit.at);
+  return age >= 0 && age < BOOK_CACHE_MS ? hit.book : null;
+}
+
+/** Remembers `book` for `cardId`, dropping the oldest cards past the cap. */
+export function writeBookCache(cardId, book, { storage, now = Date.now() } = {}) {
+  const store = bookStore(storage);
+  const id = String(cardId || '');
+  if (!store || !id || !Array.isArray(book)) return;
+  try {
+    const all = readBookEntries(store);
+    all[id] = { at: now, book };
+    const kept = Object.keys(all)
+      .sort((a, b) => Number(all[b]?.at) - Number(all[a]?.at))
+      .slice(0, BOOK_CACHE_MAX);
+    store.setItem(BOOK_CACHE_KEY, JSON.stringify(Object.fromEntries(kept.map((key) => [key, all[key]]))));
+  } catch (_) { /* a full or blocked store only costs the instant paint */ }
 }
 
 /** The public board of open offers. `before` is the cursor the last page returned as `next`. */
@@ -75,11 +138,71 @@ export function cancelBuyOrder(id, token) {
   return getJson(orderPath(id), authed(token, { method: 'DELETE' }));
 }
 
-/** Seller accepts an offer: lists their card at the offer price. */
-export function sellIntoBuyOrder(id, quantity, token) {
+/**
+ * The most a seller may write to the buyer with a sale, counted in Unicode code
+ * points (`buyerMessageLength`), which is also what the API counts.
+ */
+export const BUYER_MESSAGE_MAX = 240;
+const BUYER_MESSAGE_TOO_LONG = "That note is too long or has characters we can't send.";
+
+/** What the API is sent and what the counter counts: Windows and old-Mac breaks (CRLF and a lone CR) folded to LF like the server, ends trimmed. */
+function buyerMessageText(text) {
+  return String(text ?? '').replace(/\r\n?/g, '\n').trim();
+}
+
+/** Control characters that survive as line breaks only: a tab or a NUL is not sendable. */
+const BUYER_MESSAGE_CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
+
+/** The note's length as the API counts it: code points, so an emoji is 1 and not 2. */
+export function buyerMessageLength(text) {
+  return [...buyerMessageText(text)].length;
+}
+
+/** '' when the note can be sent, else the sentence the form shows. */
+export function buyerMessageError(text) {
+  const note = buyerMessageText(text);
+  if (!note) return '';
+  if ([...note].length > BUYER_MESSAGE_MAX || BUYER_MESSAGE_CONTROL.test(note)) return BUYER_MESSAGE_TOO_LONG;
+  return '';
+}
+
+/** `body` plus `buyer_message`, only when there is actually something to send. */
+function withBuyerMessage(body, text) {
+  const note = buyerMessageText(text);
+  if (note) body.buyer_message = note;
+  return body;
+}
+
+/**
+ * Seller accepts an offer: lists their card at the offer price. `buyerMessage`
+ * is the seller's optional note to the buyer; a blank one is not sent at all.
+ */
+export function sellIntoBuyOrder(id, quantity, token, buyerMessage = '') {
   return getJson(orderPath(id, '/sell'), authed(token, {
     method: 'POST',
-    body: JSON.stringify({ quantity }),
+    body: JSON.stringify(withBuyerMessage({ quantity }, buyerMessage)),
+  }));
+}
+
+/**
+ * Seller sells into Pokoin's starting offer: lists their card at 1 PKN and
+ * tells Pokoin. `sale` names the card and the facets, since there is no order.
+ */
+export function sellToHouse(sale, token) {
+  return getJson(`${BASE}/house/sell`, authed(token, {
+    method: 'POST',
+    body: JSON.stringify(withBuyerMessage({
+      card_id: String(sale.cardId || ''),
+      condition: sale.condition,
+      language: sale.language,
+      reverse: Boolean(sale.reverse),
+      first_edition: Boolean(sale.firstEdition),
+      quantity: Number(sale.quantity) || 1,
+      card_name: sale.card?.name || '',
+      card_image_url: sale.card?.imageUrl || '',
+      set_name: sale.card?.set || '',
+      collector_number: sale.card?.number || '',
+    }, sale.buyerMessage)),
   }));
 }
 
@@ -97,6 +220,16 @@ export function offerLanguages(codes) {
 export function buyerNameOf(name) {
   const text = String(name || '').trim();
   return text === 'Pokoin seller' ? '' : text;
+}
+
+/**
+ * The ids of the caller's own open offers, from a `/mine` answer: a public board
+ * row with one of these ids is theirs, so it gets Edit and Delete instead of Sell now.
+ */
+export function openBuyOrderIds(items) {
+  return new Set((Array.isArray(items) ? items : [])
+    .filter((row) => row && row.state === 'open' && row.id != null)
+    .map((row) => String(row.id)));
 }
 
 /** The book row for one facet tuple, or null. */
@@ -128,6 +261,27 @@ export function selectionBid(book, { condition, language } = {}) {
     if (!top || price > Number(top.best_price_pkn)) top = row;
   }
   return top ? { ...top, quantity, orders } : null;
+}
+
+/**
+ * The book row a seller would sell into for one exact facet set: same
+ * condition, language, Reverse and 1st Ed., the highest price first, and never
+ * the visitor's own order (`mine` holds their order ids). null when no buyer
+ * wants that printing; the caller then offers Pokoin's starting price.
+ */
+export function sellableBid(book, mine = [], { condition, language, reverse = false, firstEdition = false } = {}) {
+  const lang = String(language || '').toUpperCase();
+  let top = null;
+  for (const row of Array.isArray(book) ? book : []) {
+    if (!row || row.condition !== condition || String(row.language || '').toUpperCase() !== lang) continue;
+    if (Boolean(row.reverse) !== Boolean(reverse)) continue;
+    if (Boolean(row.first_edition ?? row.firstEdition) !== Boolean(firstEdition)) continue;
+    if (!row.best_order_id || mine.includes(row.best_order_id)) continue;
+    const price = Number(row.best_price_pkn);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (!top || price > Number(top.best_price_pkn)) top = row;
+  }
+  return top;
 }
 
 /** Best price per condition for one language, in CONDITIONS order. */
@@ -214,6 +368,7 @@ const ERROR_MESSAGES = {
   not_editable: 'This offer is closed, so it can no longer be changed.',
   quantity_below_filled: 'Sellers have already listed more copies than that. Choose a higher number.',
   buy_order_changed: 'The buyer changed the price a moment ago. Check the new price and try again.',
+  invalid_buyer_message: "That note is too long or has characters we can't send.",
   nothing_to_update: 'Nothing was changed.',
   rate_limited: 'Too many changes in a short time. Wait a minute and try again.',
   unauthorized: 'Sign in to continue.',
@@ -250,6 +405,23 @@ export function offerPrefill(bid) {
 }
 
 /**
+ * Every card starts with an offer: Pokoin's own 1 PKN. It is the floor the bar
+ * shows (in the visitor's currency) when no buyer has posted one, so the bar
+ * never says "no offers" and Beat offer always has a price to beat.
+ */
+export const HOUSE_OFFER_PKN = 1;
+
+/**
+ * `bid` when a buyer's offer exists for the selection, else the house offer.
+ * The house row names no order (`best_order_id`), so nothing can be sold into it.
+ */
+export function withHouseOffer(bid) {
+  const price = Number(bid?.best_price_pkn);
+  if (bid && Number.isFinite(price) && price > 0) return bid;
+  return { best_price_pkn: HOUSE_OFFER_PKN, quantity: 0, orders: 0, house: true };
+}
+
+/**
  * What the card-page offer bar says for one selection (`bid` is selectionBid()):
  * `button` is the right segment, `title` the hover/aria text on the price part.
  */
@@ -257,6 +429,9 @@ export function offerBarModel(bid) {
   const price = Number(bid?.best_price_pkn);
   if (!bid || !Number.isFinite(price) || price <= 0) {
     return { hasOffer: false, button: 'Make offer', title: 'No offers yet' };
+  }
+  if (bid.house) {
+    return { hasOffer: true, house: true, button: 'Beat offer', title: `Pokoin's starting offer: ${HOUSE_OFFER_PKN} PKN` };
   }
   const wanted = Number(bid.quantity) || 0;
   const buyers = Number(bid.orders) || 0;
@@ -279,17 +454,62 @@ export function defaultOfferSettings({ condition, language } = {}) {
   };
 }
 
+/**
+ * An offer can be under a cent (1 PKN is half a cent), and two decimals would
+ * show 1 PKN and 2 PKN as the same "$0.01". Below ten euro cents (20 PKN), in
+ * whatever currency it is shown, the amount keeps up to four decimals: 0.005,
+ * 0.01, 0.0375. Null for PKN, for no price, and for larger amounts, which keep
+ * the usual two decimals.
+ */
+function smallFiat(pricePkn, code) {
+  if (code === 'PKN') return null;
+  const amount = fiatFromPkn(pricePkn, code);
+  const eur = fiatFromPkn(pricePkn, 'EUR');
+  if (amount == null || eur == null || eur >= 0.1) return null;
+  return String(Number(amount.toFixed(4)));
+}
+
 /** A price in the currency the offer form uses: "2.64 DKK" for a local currency, "120 PKN" for PKN; '' when there is none. */
 export function offerPriceLabel(pricePkn, currency = 'PKN') {
-  return String(currency || 'PKN').toUpperCase() === 'PKN' ? formatPkn(pricePkn) : formatFiatFromPkn(pricePkn, currency);
+  const code = String(currency || 'PKN').toUpperCase();
+  if (code === 'PKN') return formatPkn(pricePkn);
+  const small = smallFiat(pricePkn, code);
+  if (small == null) return formatFiatFromPkn(pricePkn, code);
+  if (code === 'DKK') return `${small} DKK`;
+  return code === 'USD' ? `$${small}` : `€${small}`;
 }
 
 /**
  * What the price field holds for a PKN price in the visitor's currency. The same
- * helper the listing form fills its price input with (priceInputFromPkn).
+ * helper the listing form fills its price input with (priceInputFromPkn), with
+ * the sub-cent precision of offerPriceLabel so 1 PKN is not typed back as 2.
  */
 export function offerPriceInput(pricePkn, currency = 'PKN') {
-  return priceInputFromPkn(pricePkn, String(currency || 'PKN').toUpperCase());
+  const code = String(currency || 'PKN').toUpperCase();
+  return smallFiat(pricePkn, code) ?? priceInputFromPkn(pricePkn, code);
+}
+
+/** The unit the offer form prices in: the visitor's local currency, or PKN when they chose it (or have no currency yet). */
+export const OFFER_UNIT_KEY = 'pokoin.offer.unit';
+export function offerUnit(choice, localCurrency) {
+  const local = String(localCurrency || '').toUpperCase();
+  if (String(choice || '').toUpperCase() === 'PKN' || !local) return 'PKN';
+  return local;
+}
+
+/**
+ * The unit a surface that did not open the offer form shows prices in: the same
+ * device choice the popup writes, so a Quick Sell dialog and that popup agree.
+ */
+export function storedOfferUnit(localCurrency, { storage } = {}) {
+  let choice = '';
+  try {
+    const store = storage || (typeof localStorage === 'undefined' ? null : localStorage);
+    choice = store ? store.getItem(OFFER_UNIT_KEY) || '' : '';
+  } catch (_) {
+    choice = '';
+  }
+  return offerUnit(choice, localCurrency);
 }
 
 /**

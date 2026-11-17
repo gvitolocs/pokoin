@@ -159,6 +159,20 @@ pub async fn suggest(
         },
         &query,
     );
+    if offset == 0 {
+        if let Some(pool) = state.db.read().await.clone() {
+            match pokoin_search_api::set_suggest::set_hits(&pool, &query).await {
+                Ok(hits) => {
+                    groups = pokoin_search_api::set_suggest::merge_set_groups(
+                        &hits,
+                        groups,
+                        group_limit as usize,
+                    );
+                }
+                Err(error) => tracing::warn!(%error, "set suggest lookup failed"),
+            }
+        }
+    }
     let (needs_nationality, needs_title) = catalog_sql_needed(&groups, &search_language);
     if let Some(pool) = state.db.read().await.clone() {
         let sql_started = Instant::now();

@@ -20,7 +20,7 @@ import TelegramConnectPanel from '../components/profile/TelegramConnectPanel.jsx
 import UsernameEditor from '../components/profile/UsernameEditor.jsx';
 import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
-import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview.js';
 import { accountAdmin, accountProfile, accountSilver, availablePkn } from '../stores/account.js';
 import { authUid, authUser, getBearer } from '../stores/auth.js';
 import { publishSellerSettings, sellerSettings as loadedSellerSettings, sellerSettingsFailed } from '../stores/buyer.js';

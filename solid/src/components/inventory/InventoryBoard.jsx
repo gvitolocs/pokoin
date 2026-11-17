@@ -13,6 +13,7 @@ import {
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
+import { localizeStrategyName } from '@market/pricer.js';
 import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
 import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
@@ -34,7 +35,15 @@ import {
   toggleSelected,
 } from '../pricer/pricer-ui.js';
 import { memoPrices, rememberPrices } from './price-memo.js';
+import { memoizeByRows } from '../../lib/derived-cache.js';
 import RowThumb from './RowThumb.jsx';
+
+// A tab switch rebuilds the board over the same book; these four walks of all
+// 1,500 rows are pure functions of it, so the second visit reuses the first.
+const facetsOf = memoizeByRows(inventoryFacets);
+const originsOf = memoizeByRows(originFacets);
+const duplicatesOf = memoizeByRows(findCrossSourceDuplicates);
+const summaryOf = memoizeByRows(summarizeLiveInventory);
 
 const STATUS_CHIPS = [
   { id: '', label: 'All' },
@@ -209,7 +218,7 @@ function SelectionBar(props) {
   const ids = () => [...props.selected];
   const count = () => props.selected.size;
   const inGroup = () => ids().some((id) => pricing.memberships().has(id));
-  const strategyName = (id) => pricing.strategies().find((entry) => entry.id === id)?.name || 'No strategy';
+  const strategyName = (id) => localizeStrategyName(pricing.strategies().find((entry) => entry.id === id)?.name, pricing.currencyCtx()) || 'No strategy';
 
   // Outside clicks and Escape close the menu.
   createEffect(menuOpen, (open) => {
@@ -307,6 +316,7 @@ function SelectionBar(props) {
               <NewGroupForm
                 class="pricer-menu-form"
                 idPrefix="board-new-group"
+                ctx={pricing.currencyCtx()}
                 groups={pricing.groups()}
                 strategies={pricing.strategies()}
                 onCreate={createWith}
@@ -374,11 +384,11 @@ export default function InventoryBoard(props) {
     return id ? props.pricing.groups().find((group) => group.id === id)?.name || '' : '';
   };
 
-  const facets = createMemo(() => inventoryFacets(props.rows));
-  const origins = createMemo(() => originFacets(props.rows));
+  const facets = createMemo(() => facetsOf(props.rows));
+  const origins = createMemo(() => originsOf(props.rows));
   // One pass over the whole book; rows look their flag up by id.
-  const duplicates = createMemo(() => findCrossSourceDuplicates(props.rows));
-  const summary = createMemo(() => summarizeLiveInventory(props.rows));
+  const duplicates = createMemo(() => duplicatesOf(props.rows));
+  const summary = createMemo(() => summaryOf(props.rows));
   const view = createMemo(() => sortInventoryRows(
     filterInventoryRows(props.rows, {
       query: query(),
@@ -401,7 +411,7 @@ export default function InventoryBoard(props) {
     setPage(next);
     board?.scrollIntoView({ block: 'start', behavior: 'instant' });
   }
-  const pageSize = 50;
+  const pageSize = 40;
   const entries = createMemo(() => mode() === 'stacks' ? groupInventoryStacks(view())
     : mode() === 'titles' ? groupInventoryTitles(view()) : view());
   const totalPages = () => Math.max(1, Math.ceil(entries().length / pageSize));

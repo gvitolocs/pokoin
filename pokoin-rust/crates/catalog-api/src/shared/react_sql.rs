@@ -383,6 +383,13 @@ pub async fn read_cards_for_set(
     .await
 }
 
+fn featured_set_name(config: &str) -> String {
+    serde_json::from_str::<Value>(config).expect("valid featured set JSON")["newCardsSet"]
+        .as_str()
+        .expect("featured set name")
+        .to_owned()
+}
+
 /// `readNewestEnglishCards(limit)`.
 pub async fn read_newest_english_cards(
     pool: &PgPool,
@@ -406,8 +413,11 @@ pub async fn read_newest_english_cards(
         );
         return super::sql_json::rows_json(pool, &sql, &[super::sql_json::SqlBind::Int(cap)]).await;
     }
+    let set_name = featured_set_name(include_str!(
+        "../../../../../market/src/data/featured-set.json"
+    ));
     let slices = [
-        ("Storm Emeralda", cap.min(12)),
+        (set_name.as_str(), cap.min(12)),
         ("Mega Evolution", cap.min(8)),
         ("Phantasmal Flames", cap.min(8)),
         ("Black Bolt", cap.min(8)),
@@ -1114,6 +1124,13 @@ pub async fn read_visual_themes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn newest_set_is_taken_from_input_config() {
+        assert_eq!(
+            super::featured_set_name(r#"{"newCardsSet":"Fixture Set"}"#),
+            "Fixture Set"
+        );
+    }
     use super::*;
     use serde_json::json;
     use std::collections::HashMap;

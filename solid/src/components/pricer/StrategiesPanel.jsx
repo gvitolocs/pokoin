@@ -1,13 +1,12 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import {
+  localizeStrategyName,
   localToPkn,
   nameProblem,
   pknToLocal,
   PRICER_ACTIONS,
   PRICER_MATCHES,
   PRICER_ROUNDINGS,
-  PRICER_SOURCES,
-  pricerBases,
   sourceHasFees,
   sourceSwitches,
   strategySummary,
@@ -16,6 +15,9 @@ import {
 import { Alert } from '../Desk.jsx';
 import {
   draftChanged,
+  EDITOR_SOURCES,
+  editorBasisGroups,
+  editorSource,
   exampleLead,
   exampleSteps,
   NO_OFFER,
@@ -27,6 +29,7 @@ import {
   uniqueCopyName,
   usedByLine,
   withSource,
+  withEditorBasis,
 } from './pricer-ui.js';
 
 const numberInput = (value) => (value === '' ? '' : Number(value));
@@ -82,6 +85,8 @@ export default function StrategiesPanel(props) {
   const example = createMemo(() => exampleSteps(draft(), pickExampleComp([props.exampleComp, SAMPLE_COMP], draft()), ctx()));
   const unsaved = createMemo(() => draftChanged(draft(), baseline()));
   // The toggles this source's data can honour, and the block's title.
+  const selectedSource = createMemo(() => editorSource(draft().source));
+  const basisGroups = createMemo(() => editorBasisGroups(selectedSource()));
   const switches = () => sourceSwitches(draft().source, draft().basis);
   const togglesTitle = () => {
     if (draft().basis === 'sold') return 'Compare with sales that have';
@@ -141,7 +146,7 @@ export default function StrategiesPanel(props) {
     const target = pending()?.target;
     if (target === 'back') return 'go back to the pricing groups';
     if (target === 'new') return 'start a new strategy';
-    return `open “${target?.name || 'that strategy'}”`;
+    return `open “${localizeStrategyName(target?.name, ctx()) || 'that strategy'}”`;
   };
 
   // Opened before the strategies arrived: show the first one once they do.
@@ -231,7 +236,7 @@ export default function StrategiesPanel(props) {
                       aria-pressed={String(entry().id === selectedId() && entry().id === draft().id)}
                       onClick={() => (entry().id === draft().id ? undefined : leaveTo(entry()))}
                     >
-                      <strong>{entry().name}</strong>
+                      <strong>{localizeStrategyName(entry().name, ctx())}</strong>
                       {/* The server's `summary` stays in PKN; the seller reads their own currency. */}
                       <span class="pricer-group-sub">{strategySummary(entry(), ctx())}</span>
                       <span class="pricer-group-sub">{usedByLine(entry().groupNames)}</span>
@@ -279,36 +284,42 @@ export default function StrategiesPanel(props) {
           <fieldset class="pricer-fieldset">
             <legend>1 · Start from</legend>
             <div class="pricer-chips" role="group" aria-label="Market">
-              <For each={PRICER_SOURCES}>
+              <For each={EDITOR_SOURCES}>
                 {(entry) => (
                   <button
                     type="button"
-                    class={['inv-chip', { on: draft().source === entry.id }]}
-                    aria-pressed={String(draft().source === entry.id)}
+                    class={['inv-chip', { on: selectedSource() === entry.id }]}
+                    aria-pressed={String(selectedSource() === entry.id)}
                     title={entry.hint}
-                    onClick={() => edit(withSource(draft(), entry.id))}
+                    onClick={() => { if (selectedSource() !== entry.id) edit(withSource(draft(), entry.id)); }}
                   >
                     {entry.label}
                   </button>
                 )}
               </For>
             </div>
-            <div class="pricer-bases" role="radiogroup" aria-label="Start from">
-              <For each={pricerBases(draft().source)}>
-                {(entry) => (
-                  <label class={['pricer-basis', { on: draft().basis === entry.id }]}>
-                    <input
-                      type="radio"
-                      name="pricer-basis"
-                      value={entry.id}
-                      checked={draft().basis === entry.id}
-                      onChange={() => edit({ basis: entry.id })}
-                    />
-                    <span>
-                      <strong>{entry.label}</strong>
-                      <small>{entry.hint}</small>
-                    </span>
-                  </label>
+            <div class="pricer-basis-groups" role="radiogroup" aria-label="Start from">
+              <For each={basisGroups()}>
+                {(group) => (
+                  <div class="pricer-basis-group">
+                    <Show when={group.label}><p class="pricer-basis-group-label">{group.label}</p></Show>
+                    <div class="pricer-bases">
+                      <For each={group.entries}>
+                        {(entry) => (
+                          <label class={['pricer-basis', { on: draft().source === entry.source && draft().basis === entry.id }]}>
+                            <input
+                              type="radio"
+                              name="pricer-basis"
+                              value={`${entry.source}:${entry.id}`}
+                              checked={draft().source === entry.source && draft().basis === entry.id}
+                              onChange={() => edit(withEditorBasis(draft(), entry))}
+                            />
+                            <span><strong>{entry.label}</strong><small>{entry.hint}</small></span>
+                          </label>
+                        )}
+                      </For>
+                    </div>
+                  </div>
                 )}
               </For>
             </div>

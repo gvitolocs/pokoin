@@ -43,7 +43,10 @@ export default function Carousel(props) {
   const ready = () => Boolean(props.cards?.length);
   createEffect(
     () => [props.cards?.length || 0, props.placeholders || 0],
-    () => bindRailControls(scroller),
+    () => {
+      // Solid uses the returned rail unbind as this effect's cleanup.
+      return bindRailControls(scroller);
+    },
   );
   return (
     <Show when={ready() || (props.placeholders || 0) > 0}>

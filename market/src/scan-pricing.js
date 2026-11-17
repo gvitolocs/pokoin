@@ -1,10 +1,13 @@
 // Scan desk price suggestions: the default listing price follows the row's
 // facets (condition, language, reverse finish, 1st edition) from sold comps
 // slices (`marketplace-card-sales?slices=1`), relaxing the condition first and
-// then language tiers (KO → JP → European → EN → other) when a facet has no sold data, with
-// the cheapest listed PKN as the floor. Spec: docs/SCAN_LISTING_WORKFLOW.md.
+// then language tiers (KO → JP → European → EN → other) when a facet has no sold data.
+// The chain is sold comps → cheapest listed PKN → the €10,000 fallback below, so a
+// scanned row always reaches the upload with a default price.
+// Spec: docs/SCAN_LISTING_WORKFLOW.md.
 
 import { pknFromPriceInput, priceInputFromPkn } from './seller-currency.js';
+import { PKN_USDT_PRICE } from './pkn.js';
 
 // Each array is one tier; an empty tier accepts all remaining languages.
 export const PRICE_LANGUAGE_FALLBACK = [
@@ -14,6 +17,19 @@ export const PRICE_LANGUAGE_FALLBACK = [
   ['EN'],
   [],
 ];
+
+/** What a row defaults to when the printing has no sold comps and no listing. */
+export const SCAN_FALLBACK_PRICE_EUR = 10000;
+
+/**
+ * The last rung of the chain, in PKN: nobody sells at €10,000 by accident, the
+ * owner reprices later. EUR converts through the fixed 1 PKN = €0.005 parity;
+ * the same parity is used directly when the converter yields nothing usable.
+ */
+export function scanFallbackPricePkn() {
+  const pkn = Math.round(pknFromPriceInput(String(SCAN_FALLBACK_PRICE_EUR), 'EUR'));
+  return Number.isFinite(pkn) && pkn > 0 ? pkn : Math.round(SCAN_FALLBACK_PRICE_EUR / PKN_USDT_PRICE);
+}
 
 export const SCAN_CONDITIONS = ['NM', 'SP', 'MP', 'PL', 'Poor'];
 

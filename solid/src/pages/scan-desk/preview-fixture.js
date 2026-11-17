@@ -5,7 +5,7 @@
  * fixture, and no backend. Production hosts never take this path.
  */
 import { DEFAULTS } from '@market/scan-model.js';
-import { previewGroups, previewStrategies } from '../mypokoin-preview-fixture.js';
+import { previewGroups, previewStrategies } from '../mypokoin-preview-rules.js';
 
 export const SCAN_PREVIEW_BANNER = 'Layout preview — fixture data. Nothing is saved, scanned or listed.';
 

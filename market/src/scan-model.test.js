@@ -12,6 +12,7 @@ import {
   frameEvents,
   nextAttentionIndex,
   nextBoxPositions,
+  nextFreeStackPosition,
   orderedRows,
   phaseText,
   queueRows,
@@ -20,12 +21,14 @@ import {
   sessionPhase,
   slotText,
   stackKey,
+  stackOccupancyFromSlots,
   stepCandidate,
   submitLabel,
   suggestedStartPosition,
   suggestedStackCursor,
   locationDefaultsText,
   slotFilledStack,
+  slotFilledStackNumber,
   indexToStackPos,
   stackPosToIndex,
   typeQuantity,
@@ -357,4 +360,111 @@ test('priced can be decided per row (a row\'s own pricing choice)', () => {
   assert.equal(rowProblem(none, { priced }), 'no_price');
   const counts = batchCounts({ a: own, b: none }, { priced });
   assert.deepEqual([counts.noPrice, counts.ready], [1, false]);
+});
+
+const SIZE = 80;
+const snap = (stack, startPosition, stackSize = SIZE) => ({ stack, stackSize, startPosition });
+const inBox = (id, position, quantity, snapshot) => row(id, {
+  position,
+  quantity,
+  location: 'megaevoluzionietb',
+  defaultsSnapshot: snapshot,
+});
+
+test('the cursor never restarts a stack that already holds cards', () => {
+  // Stack 40's last card lands and 41 holds 1-40 → 41·41, not 41·1.
+  assert.deepEqual(nextFreeStackPosition(new Map([[40, 80], [41, 40]]), SIZE, 40), { stack: 41, startPosition: 41, stackSize: SIZE });
+  // 41 full as well and 42 holds 1-3 → 42·4: walk on until a stack has room.
+  assert.deepEqual(nextFreeStackPosition(new Map([[40, 80], [41, 80], [42, 3]]), SIZE, 40), { stack: 42, startPosition: 4, stackSize: SIZE });
+  // The next stack is empty → position 1.
+  assert.deepEqual(nextFreeStackPosition(new Map([[40, 80]]), SIZE, 40), { stack: 41, startPosition: 1, stackSize: SIZE });
+  // The stack itself still has room → one after its highest card.
+  assert.deepEqual(nextFreeStackPosition(new Map([[41, 12]]), SIZE, 41), { stack: 41, startPosition: 13, stackSize: SIZE });
+  // A position past the divider counts as the divider being full.
+  assert.deepEqual(nextFreeStackPosition(new Map([[41, 97]]), SIZE, 41), { stack: 42, startPosition: 1, stackSize: SIZE });
+  // An empty box starts at 1·1.
+  assert.deepEqual(nextFreeStackPosition(new Map(), SIZE, 1), { stack: 1, startPosition: 1, stackSize: SIZE });
+});
+
+test('the cursor reads stock, the batch, or both maps at once', () => {
+  const stock = new Map([[41, 20]]);
+  const batch = new Map([[41, 40], [42, 5]]);
+  assert.deepEqual(nextFreeStackPosition(stock, SIZE, 41), { stack: 41, startPosition: 21, stackSize: SIZE });
+  assert.deepEqual(nextFreeStackPosition(batch, SIZE, 41), { stack: 41, startPosition: 41, stackSize: SIZE });
+  assert.deepEqual(nextFreeStackPosition([stock, batch], SIZE, 41), { stack: 41, startPosition: 41, stackSize: SIZE });
+  assert.deepEqual(nextFreeStackPosition([stock, batch], SIZE, 42), { stack: 42, startPosition: 6, stackSize: SIZE });
+  assert.deepEqual(nextFreeStackPosition([null, undefined, { 43: 7 }], SIZE, 43), { stack: 43, startPosition: 8, stackSize: SIZE });
+});
+
+test('cards per stack 1 keeps walking the dividers', () => {
+  assert.deepEqual(nextFreeStackPosition(new Map([[1, 1], [2, 1], [3, 1]]), 1, 1), { stack: 4, startPosition: 1, stackSize: 1 });
+  assert.deepEqual(nextFreeStackPosition(new Map(), 1, 47), { stack: 47, startPosition: 1, stackSize: 1 });
+  assert.deepEqual(nextFreeStackPosition([new Map([[5, 1]]), new Map([[6, 1]])], 1, 5), { stack: 7, startPosition: 1, stackSize: 1 });
+  assert.deepEqual(nextFreeStackPosition([new Map([[5, 1]])], 1, 9), { stack: 9, startPosition: 1, stackSize: 1 });
+});
+
+test('the cursor stops at stack 9999', () => {
+  const full = new Map();
+  for (let s = 9990; s <= 9999; s += 1) full.set(s, SIZE);
+  assert.deepEqual(nextFreeStackPosition(full, SIZE, 9990), { stack: 9999, startPosition: SIZE, stackSize: SIZE });
+  assert.equal(nextFreeStackPosition(new Map(), SIZE, 9999).stack, 9999);
+  // Typing past the last divider clamps instead of inventing stack 10000.
+  assert.deepEqual(nextFreeStackPosition(new Map(), SIZE, 10_000), { stack: 9999, startPosition: 1, stackSize: SIZE });
+});
+
+test('the advance after a card lands skips a stack that already holds cards', () => {
+  // The batch's last card closes stack 40; the counter says 41·1.
+  const list = [inBox('a', 1, 1, snap(40, 80))];
+  assert.deepEqual(nextBoxPositions(list).get('megaevoluzionietb').startPosition, 1, 'an empty next stack keeps 41·1');
+  const stock41 = new Map([['megaevoluzionietb', new Map([[41, 40]])]]);
+  const after = nextBoxPositions(list, { occupancy: stock41 }).get('megaevoluzionietb');
+  assert.deepEqual({ stack: after.stack, startPosition: after.startPosition }, { stack: 41, startPosition: 41 });
+  assert.equal(after.nextAbs, stackPosToIndex(41, 41, SIZE));
+  // 41 and 42 are both full in the stock → walk on to the next divider.
+  const stock42 = new Map([['megaevoluzionietb', new Map([[41, 80], [42, 80]])]]);
+  const rolled = nextBoxPositions([inBox('a', 1, 1, snap(41, 80))], { occupancy: stock42 }).get('megaevoluzionietb');
+  assert.deepEqual({ stack: rolled.stack, startPosition: rolled.startPosition }, { stack: 43, startPosition: 1 });
+  // A batch card in the next stack is respected as well.
+  const batchNext = nextBoxPositions([inBox('a', 1, 1, snap(41, 80)), inBox('b', 2, 5, snap(42, 1))]).get('megaevoluzionietb');
+  assert.deepEqual({ stack: batchNext.stack, startPosition: batchNext.startPosition }, { stack: 42, startPosition: 6 });
+  // Cards per stack 1: the absolute continue counter still wins, and a stack
+  // the stock holds is walked past like any other.
+  const flat = [
+    inBox('a', 1, 1, snap(1, 1, 1)),
+    inBox('b', 2, 1, snap(1, 1, 1)),
+  ];
+  assert.equal(nextBoxPositions(flat, { occupiedAbs: new Map([['megaevoluzionietb', 41]]) }).get('megaevoluzionietb').stack, 44);
+  const flatTaken = nextBoxPositions(flat, {
+    occupiedAbs: new Map([['megaevoluzionietb', 41]]),
+    occupancy: new Map([['megaevoluzionietb', new Map([[44, 1]])]]),
+  }).get('megaevoluzionietb');
+  assert.deepEqual({ stack: flatTaken.stack, startPosition: flatTaken.startPosition }, { stack: 45, startPosition: 1 });
+});
+
+test('a card that spans the divider continues into the next stack, past its cards', () => {
+  const list = [inBox('a', 1, 5, snap(40, 78))]; // 40·78…40·80 then 41·1, 41·2
+  const slots = boxSlots(list);
+  assert.deepEqual(
+    [slots.get('a').stack, slots.get('a').start, slots.get('a').endStack, slots.get('a').end],
+    [40, 78, 41, 2],
+  );
+  assert.deepEqual([...stackOccupancyFromSlots(slots)], [[40, 80], [41, 2]]);
+  const plain = nextBoxPositions(list).get('megaevoluzionietb');
+  assert.deepEqual({ stack: plain.stack, startPosition: plain.startPosition }, { stack: 41, startPosition: 3 });
+  // 41 already holds up to position 40 (stock): the next card skips past them.
+  const occupied = new Map([['megaevoluzionietb', new Map([[41, 40]])]]);
+  const next = nextBoxPositions(list, { occupancy: occupied }).get('megaevoluzionietb');
+  assert.deepEqual({ stack: next.stack, startPosition: next.startPosition }, { stack: 41, startPosition: 41 });
+});
+
+test('the stack-full toast names the divider that filled', () => {
+  const exact = boxSlots([inBox('a', 1, 1, snap(3, 4, 4))]);
+  assert.equal(slotFilledStack(exact.get('a')), true);
+  assert.equal(slotFilledStackNumber(exact.get('a')), 3);
+  // Spilling 3·4 → 4·1 filled 3, not the stack the card landed in.
+  const spill = boxSlots([inBox('a', 1, 2, snap(3, 4, 4))]);
+  assert.equal(slotFilledStackNumber(spill.get('a')), 3);
+  const half = boxSlots([inBox('a', 1, 1, snap(3, 2, 4))]);
+  assert.equal(slotFilledStackNumber(half.get('a')), 0);
+  assert.equal(slotFilledStackNumber(undefined), 0);
 });
