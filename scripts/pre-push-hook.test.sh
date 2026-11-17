@@ -3,10 +3,13 @@
 # Tests .githooks/pre-push. Throwaway repositories; the hook is called directly, exactly as git calls it: two arguments
 # (remote name, remote url) and the ref lines on stdin. The fake `gh` arrives through GH= as in
 # scripts/require-ci-green.test.sh and reuses that test's fixtures under scripts/testdata/check-runs/ (derived with jq,
-# never copied). The secret-scan cases run real gitleaks and assemble the secret-shaped string at run time, so this
-# file scans clean; the throwaway repository carries an untracked copy of the real .gitleaks.toml (untracked, so the
-# scanned history stays small and the allowlist itself is never a scanned file).
-# Exit 2 when gitleaks is missing: the scan cases cannot be skipped into a pass.
+# never copied). Every case that reaches the hook's scan runs real gitleaks and assembles its secret-shaped string at
+# run time, so the clean fixtures scan clean; only case 16 stands for a host without the binary. The throwaway
+# repository carries an untracked copy of the real .gitleaks.toml (untracked, so the scanned history stays small and
+# the allowlist itself is never a scanned file) and an origin whose main holds the very scripts/require-ci-green.sh
+# and scripts/ci-required-checks its work tree has, because the gate compares itself with origin/main before it asks
+# GitHub (PK-C010) — the repository is built the way scripts/require-ci-green.test.sh builds its own.
+# Exit 2 when gitleaks is missing: no case may be skipped into a pass.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
@@ -62,16 +65,22 @@ jq '(.check_runs[] | select(.name == "rust-gate") | .status) = "in_progress"
 jq '.check_runs = []' "$real" > "$t/fx-none.json"
 
 # ---- throwaway repository ----
+# The gate refuses a checkout whose own scripts differ from origin/main's, so the repository gets a bare origin
+# remote whose main holds the same two files the work tree has: from here on the self-check passes, and cases 19
+# and 20 are the two ways it does not.
+gitq init -q --bare "$t/origin.git"
 repo="$t/repo"
 gitq init -q "$repo"
 mkdir -p "$repo/scripts"
-# The hook runs <top level>/scripts/require-ci-green.sh from the work tree, so it only has to exist there. It stays
-# untracked: the gate script is not something the scan cases publish.
+# The hook runs <top level>/scripts/require-ci-green.sh from the work tree, so it only has to exist there; it is
+# committed and published because the gate compares its bytes with origin/main's copy of the same path.
 cp "$root/scripts/require-ci-green.sh" "$repo/scripts/require-ci-green.sh"
+cp "$root/scripts/require-ci-green.sh" "$t/pristine-gate.sh"
 cp "$root/.gitleaks.toml" "$repo/.gitleaks.toml"
 printf 'rust-gate\n' > "$repo/scripts/ci-required-checks"
 echo x > "$repo/f.txt"
-gitq -C "$repo" add f.txt scripts/ci-required-checks
+gitq -C "$repo" remote add origin "$t/origin.git"
+gitq -C "$repo" add f.txt scripts/require-ci-green.sh scripts/ci-required-checks
 gitq -C "$repo" commit -q -m base
 gitq -C "$repo" branch -M main
 
@@ -82,6 +91,9 @@ MAIN1="$(gitq -C "$repo" rev-parse HEAD)"
 echo two > "$repo/f.txt"
 gitq -C "$repo" commit -qam main2
 MAIN2="$(gitq -C "$repo" rev-parse HEAD)"
+# publish that main, so origin/main exists and holds the gate files: every ref line below that says the remote's
+# main is at $MAIN2 now matches a state this clone really has fetched.
+gitq -C "$repo" push -q origin main
 gitq -C "$repo" checkout -q -b rewrite "$MAIN1"
 echo rewritten > "$repo/f.txt"
 gitq -C "$repo" commit -qam side
@@ -97,6 +109,9 @@ gitq -C "$repo" checkout -q main
 # ---- running the hook ----
 EV=()
 rc=0
+work_repo=
+expect_warning=0
+npush=0
 push() { # push <remote name> <remote url> <ref line>... : the hook with EV as its environment, lines on stdin
   local name=$1 url=$2
   shift 2
@@ -104,7 +119,15 @@ push() { # push <remote name> <remote url> <ref line>... : the hook with EV as i
   rm -f "$t/gate.log"
   printf '%s\n' "$@" > "$t/in"
   rc=0
-  ( cd "$repo" && env "${EV[@]}" bash "$hook" "$name" "$url" < "$t/in" ) > "$t/out" 2>&1 || rc=$?
+  npush=$((npush + 1))
+  ( cd "${work_repo:-$repo}" && env "${EV[@]}" bash "$hook" "$name" "$url" < "$t/in" ) > "$t/out" 2>&1 || rc=$?
+  # Saying "this push was not scanned" is only ever right in the case that expects it: everywhere else the host has
+  # gitleaks and the scan has to have run. Checked per push so a skipped scan cannot pass unnoticed.
+  if grep -qF -- 'was NOT secret-scanned' "$t/out"; then
+    [ "$expect_warning" = 1 ] || fail "push #$npush said the push was NOT secret-scanned although gitleaks is here ($gl)"
+  else
+    [ "$expect_warning" = 0 ] || fail "push #$npush is the missing-gitleaks case but printed no warning"
+  fi
 }
 want_rc() { [ "$rc" = "$1" ] || fail "$2: expected exit $1, got $rc"; }
 has() { grep -qF -- "$1" "$t/out" || fail "$2: output lacks '$1'"; }
@@ -112,12 +135,12 @@ gh_calls() { wc -l < "$t/gh-calls" | tr -d ' '; }
 gh_quiet() { [ ! -s "$t/gh-calls" ] || fail "$1: gh was called ($(gh_calls) time(s)) although it must not be"; }
 gh_used() { [ -s "$t/gh-calls" ] || fail "$1: gh was not called"; }
 
-# The CI-gate cases turn the secret scan off (GITLEAKS=/nonexistent with no ~/.local/bin/gitleaks): they test what
-# main accepts, and the scan has its own cases below. HOME is an empty directory, which is what makes gitleaks absent.
+# Every case scans with the real gitleaks of this host, the CI-gate cases included: the hook scans what a push
+# publishes before it asks GitHub, and the fixtures here are clean, so the scan is silent and passes. HOME is only
+# pointed at an empty directory in case 16, which is the case that tests a host without the binary.
 mkdir -p "$t/nohome"
 gate_env=(
-  "GITLEAKS=/nonexistent"
-  "HOME=$t/nohome"
+  "GITLEAKS=$gl"
   "GH=$t/gh"
   "POKOIN_CI_LOG=$t/gate.log"
   "POKOIN_CI_POLL_S=30"
@@ -162,6 +185,8 @@ EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-green.json")
 push origin "$POKOIN_URL" "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
 want_rc 0 "3 main green"
 gh_used "3 main green"
+# gitleaks really ran on the way to the gate: its own verdict is in the output, and no "not scanned" warning is.
+has "no leaks found" "3 main green"
 has "rust-gate success (run 134049989018)" "3 main green"
 [ -f "$t/gate.log" ] || fail "3 main green: the gate wrote no log"
 [ "$(awk -F'\t' '{print $5}' "$t/gate.log" | sort -u | tr '\n' ' ')" = "pre-push " ] \
@@ -303,9 +328,12 @@ want_rc 1 "15 new branch with a secret"
 has "push rejected, gitleaks found a secret" "15 new branch with a secret"
 ok "15: a new branch carrying a secret -> 1"
 
-# 16. no gitleaks on this host: one warning line, and the push is allowed
+# 16. no gitleaks on this host: one warning line, and the push is allowed. This is the only case that may warn:
+#     GITLEAKS points at a missing file and HOME at an empty directory, so neither lookup finds the binary.
 EV=("GITLEAKS=/nonexistent" "HOME=$t/nohome" "GH=$t/gh" "FAKE_GH_CALLS=$t/gh-calls")
+expect_warning=1
 push origin "$POKOIN_URL" "refs/heads/clean-branch $CLEAN refs/heads/clean-branch $MAIN2"
+expect_warning=0
 want_rc 0 "16 gitleaks missing"
 has "was NOT secret-scanned" "16 gitleaks missing"
 ok "16: no gitleaks and no ~/.local/bin/gitleaks -> 0 with the warning that it was not scanned"
@@ -329,5 +357,56 @@ chmod 644 "$t/modes/.githooks/pre-push"
 gitq -C "$t/modes" add .githooks/pre-push
 [ -n "$(hooks_not_executable "$t/modes")" ] || fail "18b: a 100644 hook was not detected by the check above"
 ok "18b: the same check does fail on a 100644 hook"
+
+# ---- the gate's self-check of its own checkout (PK-C010), reached through the hook ----
+# The gate compares its own file and the required-check list with origin/main before it does anything else, and that
+# check has no override. Two ways it refuses, both of which case 3's green answer must not be able to save.
+# 19. the push case 3 allows, from a work tree whose copy of the gate script was edited by one byte: refused, and
+#     gh is never called. The file is put back afterwards.
+printf '#' >> "$repo/scripts/require-ci-green.sh"
+EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-green.json")
+push origin "$POKOIN_URL" "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
+want_rc 1 "19 gate script edited locally"
+gh_quiet "19 gate script edited locally"
+has "this checkout's deploy scripts are not origin/main's" "19 gate script edited locally"
+has "require-ci-green.sh differs from origin/main" "19 gate script edited locally"
+has "This check has no override." "19 gate script edited locally"
+has "$MAIN_TEXT" "19 gate script edited locally"
+cp "$t/pristine-gate.sh" "$repo/scripts/require-ci-green.sh"
+[ -z "$(gitq -C "$repo" status --porcelain -- scripts/require-ci-green.sh)" ] \
+  || fail "19: the gate script was not restored byte for byte"
+ok "19: a locally edited gate script -> 1 with the gate's own message, gh not called"
+
+# 19b. the same work tree with the byte taken back is allowed again: the refusal was the edit, nothing else.
+EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-green.json")
+push origin "$POKOIN_URL" "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
+want_rc 0 "19b gate script restored"
+ok "19b: after the byte is taken back the same push is green -> 0"
+
+# 20. a repository that has never fetched origin/main: the gate says so and refuses, without asking GitHub.
+repo2="$t/repo-never-fetched"
+gitq init -q "$repo2"
+mkdir -p "$repo2/scripts"
+cp "$t/pristine-gate.sh" "$repo2/scripts/require-ci-green.sh"
+cp "$root/.gitleaks.toml" "$repo2/.gitleaks.toml"
+printf 'rust-gate\n' > "$repo2/scripts/ci-required-checks"
+echo one > "$repo2/f.txt"
+gitq -C "$repo2" add scripts/require-ci-green.sh scripts/ci-required-checks f.txt
+gitq -C "$repo2" commit -q -m one
+OLD2="$(gitq -C "$repo2" rev-parse HEAD)"
+echo two > "$repo2/f.txt"
+gitq -C "$repo2" commit -qam two
+NEW2="$(gitq -C "$repo2" rev-parse HEAD)"
+gitq -C "$repo2" branch -M main
+work_repo="$repo2"
+EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-green.json")
+push origin "$POKOIN_URL" "refs/heads/main $NEW2 refs/heads/main $OLD2"
+work_repo=
+want_rc 1 "20 origin/main never fetched"
+gh_quiet "20 origin/main never fetched"
+has "origin/main: this checkout has not fetched it" "20 origin/main never fetched"
+has "This check has no override." "20 origin/main never fetched"
+has "$MAIN_TEXT" "20 origin/main never fetched"
+ok "20: a checkout that has not fetched origin/main -> 1 with the gate's message, gh not called"
 
 echo "pre-push-hook.test: all cases passed"
