@@ -104,6 +104,45 @@ run 1 "inline allow marker added" GITLEAKS="$gl"
 new_repo missing; mark_base
 run 2 "gitleaks missing" GITLEAKS=/nonexistent
 
+# ---- step b scans the tracked files of HEAD, not the working copy (docs/SECRETS.md, "The scan in CI") ----------
+# The same secret-shaped string is used for the next two cases, so the difference between them is the path alone.
+SEC=$(mk_secret 13)
+
+# 9. a secret that was never committed is not part of what this repository publishes: neither step sees it
+new_repo tree-untracked; mark_base
+printf 'token = "%s"\n' "$SEC" >"$repo/untracked.txt"
+run 0 "a secret in an untracked file" GITLEAKS="$gl"
+case $LAST_OUT in *"tree scan: PASS"*) echo "ok   step b did not read the untracked working copy" ;; *) echo "FAIL step b reported an untracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+# the history scan is unaffected: it reads commits, and there is no commit holding this file
+case $LAST_OUT in *"range scan: PASS"*) echo "ok   the range scan is not the one that saw the untracked file" ;; *) echo "FAIL the range scan reported the untracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+
+# 10. the same string committed and still in HEAD: step b finds it although step a cannot, because it predates <base>
+new_repo tree-tracked
+printf 'token = "%s"\n' "$SEC" >"$repo/cfg.txt"; commit_all add-secret
+mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 1 "a secret in a tracked file of HEAD" GITLEAKS="$gl"
+case $LAST_OUT in *"range scan: PASS"*) echo "ok   the range scan passed on its own" ;; *) echo "FAIL 10: the range scan did not pass: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+case $LAST_OUT in *"tree scan: FAIL"*) echo "ok   step b reported the tracked secret" ;; *) echo "FAIL step b missed a secret in a tracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+
+# 11. the real policy still applies to the export: that path is allowlisted as a public by-construction data file,
+#     and the finding above shows the same string is reported anywhere else
+new_repo tree-allowlisted
+mkdir -p "$repo/market/src"
+printf 'export const apiKey = "%s"\n' "$SEC" >"$repo/market/src/firebase-client.js"; commit_all add-public-config
+mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 0 "the same secret on a path the real .gitleaks.toml allowlists" GITLEAKS="$gl"
+
+# 12. the export is a temporary directory and is gone again afterwards
+left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'ci-secret-scan-tree.*' 2> /dev/null | head -5)
+if [ -z "$left" ]; then
+  echo "ok   step b left no temporary directory behind"
+else
+  echo "FAIL step b left a temporary directory behind: $(echo "$left" | tr '\n' ' ')"
+  fails=$((fails + 1))
+fi
+
 # Hook mode: git skips a hook that is not executable, silently, so every tracked file under .githooks/ must be
 # mode 100755 in the index (it was 100644 once: PKN-01).
 hooks_not_executable() { # hooks_not_executable <repo>: prints tracked .githooks files whose index mode is not 100755

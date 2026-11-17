@@ -78,7 +78,10 @@ local hook uses) from the release archive, checks its sha256, and runs
 
 1. range scan: gitleaks over every commit of `<base>..<head>`, so a secret that
    was added and removed again inside the range is still found;
-2. tree scan: gitleaks over the checked-out tree;
+2. tree scan: gitleaks over an export of the tracked files of HEAD
+   (`git archive HEAD` unpacked into a temporary directory, scanned with this
+   repository's `.gitleaks.toml`), so `node_modules/`, `target/`, `dist-web/`
+   and anything else untracked in a work tree are not scanned;
 3. allowlist guard: fails on any change to `.gitleaks.toml` in the range, on a
    `.gitleaksignore` file, and on an added inline allow comment.
 
