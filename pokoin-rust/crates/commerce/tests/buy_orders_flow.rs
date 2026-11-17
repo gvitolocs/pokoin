@@ -58,6 +58,7 @@ async fn run_sql(pool: &PgPool, sql: &str) {
 async fn database(url: &str, name: &str) -> (PgPool, Router) {
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     let admin = PgPoolOptions::new()
         .max_connections(2)

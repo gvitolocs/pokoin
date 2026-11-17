@@ -95,6 +95,7 @@ async fn next_slot_counts_every_game_and_every_status_holding_a_card() {
     };
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("test database");
     sqlx::raw_sql(SCHEMA).execute(&pool).await.expect("schema");
