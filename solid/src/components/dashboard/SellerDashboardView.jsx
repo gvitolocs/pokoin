@@ -406,6 +406,8 @@ export function SellerDashboardView(props) {
         <TopMoversPanel
           movers={props.topMovers}
           pending={Boolean(props.topMoversPending)}
+          currency={props.moverCurrency || ''}
+          currencyPending={Boolean(props.moverCurrencyPending)}
           windowLabel={props.moverRange?.label || ''}
           hrefFor={(mover) => (props.moverHrefFor
             ? props.moverHrefFor(mover)

@@ -65,17 +65,32 @@ test('sold graph tile is a fixed 12rem whether empty or plotted', () => {
   assert.doesNotMatch(css, /\.analytics-empty \{/);
 });
 
-test('CardTile pads the full scan on every side so the label cannot sit on the bottom border', () => {
-  const desktop = css.slice(0, css.indexOf('@media (max-width: 480px)'));
-  const phone = css.slice(css.indexOf('@media (max-width: 480px)'));
-  const art = desktop.match(/\.tile-art \{\s*padding:[^}]+\}/g)?.find((block) => /padding:\s*0\./.test(block));
-  assert.ok(art, 'desktop .tile-art padding');
-  assert.match(art, /padding:\s*0\.5rem;/);
-  assert.doesNotMatch(art, /0\.5rem 0\.5rem 0/);
-  const phoneArt = phone.match(/\.tile-art \{\s*padding:[^}]+\}/);
-  assert.ok(phoneArt, 'phone .tile-art padding');
-  assert.match(phoneArt[0], /padding:\s*0\.45rem;/);
-  assert.doesNotMatch(phoneArt[0], /0\.45rem 0\.45rem 0/);
+test('CardTile art covers the tile frame: flush slot, cover fit, tile top radius', () => {
+  const frames = css.match(/\.tile-art \{[^}]*\}/g) || [];
+  const flush = frames.find((block) => /border-radius:\s*16px 16px 0 0/.test(block));
+  assert.ok(flush, '.tile-art frame with the tile top radius');
+  assert.match(flush, /padding:\s*0;/);
+  assert.match(flush, /overflow:\s*hidden;/);
+  // No .tile-art rule pads the scan on any side any more (desktop 0.5rem / phone 0.45rem inset).
+  assert.equal(frames.filter((block) => /padding:\s*0\.[45]rem/.test(block)).length, 0, 'inset art padding left');
+  // The scan fills the 63:88 slot: an off-ratio file crops, never letterboxes.
+  assert.match(css, /\.tile-art img,\s*\.tile-art \.tile-ph \{[^}]*aspect-ratio:\s*63 \/ 88/);
+  assert.match(css, /\.tile-art img \{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center/);
+  // The caption keeps its gap: .tile-meta pads its own top, the art slot no longer does.
+  assert.match(css, /\.tile-meta \{[^}]*padding:\s*0\.55rem 0\.55rem 0\.75rem/);
+  // The hover and keyboard-focus preview still pops the scan out of the frame.
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):hover > \.tile-art,\s*\.tile:not\(\.tile-album\):focus-visible > \.tile-art \{[^}]*overflow:\s*visible/,
+  );
+  // The loading shimmer fills the same flush slot instead of a smaller card inside it.
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):not\(\.tile-row\) \.tile-art > \.tile-ph \{[^}]*border-radius:\s*16px 16px 0 0/,
+  );
+  // List rows and album cells keep their own frames.
+  assert.match(css, /\.tile-row \.tile-art \{[^}]*border-radius:\s*0;[^}]*overflow:\s*visible/);
+  assert.match(css, /\.tile-album \.tile-art \{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;[^}]*border-radius:\s*0/);
 });
 
 test('More versions sits on a gold halo so the link is visible without set circles', () => {

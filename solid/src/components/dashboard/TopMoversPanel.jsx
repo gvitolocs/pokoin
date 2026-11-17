@@ -22,7 +22,7 @@ const SPARK = { width: 120, height: 34 };
 function MoverTile(props) {
   const mover = () => props.mover;
   const spark = createMemo(() => moverSpark(mover(), SPARK));
-  const value = () => formatMoverValue(mover());
+  const value = () => formatMoverValue(mover(), props.currency);
   const chips = createMemo(() => moverChips(mover()));
   const body = () => (
     <>
@@ -47,7 +47,7 @@ function MoverTile(props) {
             <strong>{value()}</strong>
           </Show>
         </p>
-        <p class={['mover-tile-change', moverTone(mover())]}>{formatMoverChange(mover())}</p>
+        <p class={['mover-tile-change', moverTone(mover())]}>{formatMoverChange(mover(), props.currency)}</p>
         <Show when={spark().line}>
           <svg
             class="mover-spark"
@@ -68,7 +68,7 @@ function MoverTile(props) {
         when={props.href}
         fallback={<div class="mover-tile-body">{body()}</div>}
       >
-        <a class="mover-tile-link" href={props.href} title={moverTitle(mover())}>
+        <a class="mover-tile-link" href={props.href} title={moverTitle(mover(), props.currency)}>
           {body()}
         </a>
       </Show>
@@ -80,15 +80,20 @@ function MoverTile(props) {
  * Top movers under the portfolio graph: the seller's own printings whose last
  * sold median moved most inside the window the chart is showing. One slice per
  * tile, so a Condition A and a Condition B copy of the same card can both list.
+ * Amounts print in `currency` (the seller's display currency); the endpoint
+ * keeps answering in PKN and only the labels convert.
  */
 export default function TopMoversPanel(props) {
   const [side, setSide] = createSignal('gainers');
   const limit = () => (Number(props.limit) > 0 ? Number(props.limit) : MOVER_LIMIT);
+  const currency = () => String(props.currency || 'PKN').trim().toUpperCase() || 'PKN';
   const rows = () => {
     const list = (side() === 'gainers' ? props.movers?.gainers : props.movers?.losers) || [];
     return list.slice(0, limit());
   };
-  const pending = () => Boolean(props.pending) && !rows().length;
+  // A tile is an amount, so it waits for the currency: `pending` alone still
+  // lets a window switch keep the painted rows, never a PKN-then-DKK swap.
+  const pending = () => Boolean(props.currencyPending) || (Boolean(props.pending) && !rows().length);
   const hrefFor = (mover) => (props.hrefFor ? props.hrefFor(mover) : '');
 
   return (
@@ -131,9 +136,9 @@ export default function TopMoversPanel(props) {
       <Show when={!pending() && !rows().length}>
         <p class="seller-panel-empty" data-testid="top-movers-empty">No price movement yet</p>
       </Show>
-      <Show when={rows().length}>
+      <Show when={!pending() && rows().length}>
         <ul class="seller-movers-grid" data-testid="top-movers-grid">
-          <For each={rows()}>{(mover) => <MoverTile mover={mover} href={hrefFor(mover)} />}</For>
+          <For each={rows()}>{(mover) => <MoverTile mover={mover} currency={currency()} href={hrefFor(mover)} />}</For>
         </ul>
       </Show>
     </section>
