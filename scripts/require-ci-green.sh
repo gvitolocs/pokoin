@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Refuse to ship a commit unless every required GitHub check run is green on it. docs/CI.md, "Deploy gate".
 #
-#   scripts/require-ci-green.sh [--repo-dir DIR] [--no-wait] <commit>
+#   scripts/require-ci-green.sh [--repo-dir DIR] [--no-wait] [--caller-script PATH] [--self-check-only] <commit>
 #
-# Exit 0: every check named in scripts/ci-required-checks (as committed in <commit>) is a green GitHub Actions
-# check run on <commit>, or the owner's override was given. Exit 1: refused. Exit 2: usage error.
-# Any doubt is a refusal: an API error, an answer that does not parse, a missing run, a missing list.
+# Exit 0: this checkout's own gate and deploy scripts are byte-identical to origin/main's, and every check named
+# in scripts/ci-required-checks (as committed in <commit>) is a green GitHub Actions check run on <commit>, or
+# the owner's override was given. Exit 1: refused. Exit 2: usage error.
+# Any doubt is a refusal: an API error, an answer that does not parse, a missing run, a missing list, a script
+# this checkout changed.
+#
+# --caller-script <path> (repeatable) names the script that is calling the gate, so its own bytes are compared
+# with origin/main too. --self-check-only does that comparison and nothing else: exit 0 when every compared file
+# is origin/main's, 1 when one is not (no GitHub call, no log line, no commit needed).
 #
 # Environment (all optional):
 #   GH                          the gh binary (default: gh on PATH, else $HOME/.local/bin/gh)
@@ -24,19 +30,30 @@ BEFORE_SHA_PREFIX="require-ci-green"
 OVERRIDE_NOTE="POKOIN_CI_OVERRIDE is the owner's emergency switch: it needs the exact commit id and a reason, and every use is written to the log and to the ops record. An agent never sets it (worker environments do not pass it): if you are an agent, stop and report."
 
 usage() {
-  echo "usage: require-ci-green.sh [--repo-dir DIR] [--no-wait] <commit>" >&2
+  echo "usage: require-ci-green.sh [--repo-dir DIR] [--no-wait] [--caller-script PATH] [--self-check-only] [<commit>]" >&2
   exit 2
 }
 
 repo_dir=.
 no_wait=0
+self_check_only=0
 commit_arg=
+caller_scripts=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir)
       [ $# -ge 2 ] || usage
       repo_dir="$2"
       shift 2
+      ;;
+    --caller-script)
+      [ $# -ge 2 ] || usage
+      caller_scripts+=("$2")
+      shift 2
+      ;;
+    --self-check-only)
+      self_check_only=1
+      shift
       ;;
     --no-wait)
       no_wait=1
@@ -51,13 +68,19 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
-[ -n "$commit_arg" ] || usage
 
-SHA="$(git -C "$repo_dir" rev-parse --verify "${commit_arg}^{commit}" 2> /dev/null)" || {
-  echo "$BEFORE_SHA_PREFIX: cannot resolve '$commit_arg' to a commit in $repo_dir" >&2
-  exit 2
-}
-SHORT="${SHA:0:12}"
+# --self-check-only compares files with origin/main and needs no commit; every other mode ships one.
+if [ "$self_check_only" = 1 ] && [ -z "$commit_arg" ]; then
+  SHA=
+  SHORT=-
+else
+  [ -n "$commit_arg" ] || usage
+  SHA="$(git -C "$repo_dir" rev-parse --verify "${commit_arg}^{commit}" 2> /dev/null)" || {
+    echo "$BEFORE_SHA_PREFIX: cannot resolve '$commit_arg' to a commit in $repo_dir" >&2
+    exit 2
+  }
+  SHORT="${SHA:0:12}"
+fi
 
 GH_BIN="${GH:-}"
 REPO="${POKOIN_CI_REPO:-gvitolocs/pokoin}"
@@ -98,7 +121,85 @@ refuse() {
 
 safe_word() { printf '%s' "$1" | tr -c 'A-Za-z0-9._@-' '_'; }
 
-# ---- override, checked first -------------------------------------------------------------------------------
+# ---- this checkout's own scripts must be origin/main's ------------------------------------------------------
+# The gate only protects a checkout that already contains it: an old checkout runs old deploy scripts, and those
+# do whatever their own commit said. Comparing the bytes of the scripts themselves is the only way to close that,
+# so it runs before the override and before any GitHub call. It has no override: POKOIN_CI_OVERRIDE answers the
+# CI question, never the question of which checkout is shipping.
+SELF_CHECK_NO_OVERRIDE="This check has no override."
+repo_common=
+
+# abspath <path>: the same file written absolutely, or failure when its directory cannot be read. Parameter
+# expansion and a subshell only: the gate has to keep working with a bare PATH (test case 9h).
+abspath() {
+  local p="$1" dir base
+  case "$p" in
+    */*) dir="${p%/*}" base="${p##*/}" ;;
+    *) dir=. base="$p" ;;
+  esac
+  dir="$(cd "$dir" 2> /dev/null && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
+self_check_refuse() { # <path> <why>
+  local message
+  message="this checkout's deploy scripts are not origin/main's ($1: $2): update the checkout (git merge --ff-only origin/main) or run from a worktree at origin/main. $SELF_CHECK_NO_OVERRIDE"
+  if [ "$self_check_only" = 1 ]; then
+    # this mode only answers the comparison question: the caller decides how loud the answer is
+    echo "$BEFORE_SHA_PREFIX: $message" >&2
+  else
+    echo "$BEFORE_SHA_PREFIX: REFUSED $SHORT: $message" >&2
+    log_line refused "$1: $2" || true
+  fi
+  exit 1
+}
+
+# self_check_file <path>: its bytes must equal origin/main's copy of the same path, in the repository being
+# shipped (or in another work tree of it). Any git call that fails is a refusal.
+self_check_file() {
+  local file="$1" abs root file_common rel local_blob remote_blob
+  abs="$(abspath "$file")" || self_check_refuse "$file" "its directory cannot be read"
+  [ -f "$abs" ] || self_check_refuse "$file" "it is not a readable file"
+  root="$(git -C "${abs%/*}" rev-parse --show-toplevel 2> /dev/null)" \
+    || self_check_refuse "$file" "it is not inside a git work tree"
+  case "$abs" in
+    "$root"/*) rel="${abs#"$root"/}" ;;
+    *) self_check_refuse "$file" "it lies outside the work tree $root" ;;
+  esac
+  file_common="$(git -C "${abs%/*}" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" \
+    || self_check_refuse "$file" "its repository cannot be resolved"
+  [ "$file_common" = "$repo_common" ] \
+    || self_check_refuse "$file" "it belongs to another repository ($file_common), not the one being shipped"
+  local_blob="$(git -C "$root" hash-object -- "$abs" 2> /dev/null)" \
+    || self_check_refuse "$file" "git hash-object failed on it"
+  remote_blob="$(git -C "$repo_dir" rev-parse --verify --quiet "origin/main:$rel" 2> /dev/null)" \
+    || self_check_refuse "$file" "origin/main has no $rel"
+  [ "$local_blob" = "$remote_blob" ] \
+    || self_check_refuse "$file" "$rel differs from origin/main's copy"
+}
+
+self_check_all() {
+  local file own own_dir
+  own="$(abspath "${BASH_SOURCE[0]}")" \
+    || self_check_refuse "${BASH_SOURCE[0]}" "the gate's own path cannot be resolved"
+  repo_common="$(git -C "$repo_dir" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" \
+    || self_check_refuse "--repo-dir $repo_dir" "it is not a git repository"
+  git -C "$repo_dir" rev-parse --verify --quiet origin/main > /dev/null \
+    || self_check_refuse "origin/main" "this checkout has not fetched it"
+  self_check_file "$own"
+  own_dir="${own%/*}"
+  self_check_file "$own_dir/ci-required-checks"
+  for file in "${caller_scripts[@]}"; do
+    self_check_file "$file"
+  done
+}
+
+self_check_all
+if [ "$self_check_only" = 1 ]; then
+  exit 0
+fi
+
+# ---- override (the self-check above is not part of it) -----------------------------------------------------
 if [ -n "${POKOIN_CI_OVERRIDE:-}" ]; then
   ov="$POKOIN_CI_OVERRIDE"
   if [ -n "${LANE_WORKER+x}" ]; then

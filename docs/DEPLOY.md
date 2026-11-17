@@ -23,6 +23,10 @@ and pages blank for a minute or two after the deploy.
 
 Rollback: `scripts/publish-web.sh --promote <previous version>`
 (`wrangler deployments list --name pokoin-web` shows the history).
+Every promote prints `publish-web: N of M retained versions were uploaded through the gate`;
+a version id this host never recorded is still promoted with a warning while that list cannot
+be read or `N < M`, and once `N = M` — every retained version went through the CI gate — such an
+id is refused and `versions deploy` is never called ([CI.md](CI.md), "Deploy gate").
 
 ## The rule
 
@@ -32,7 +36,8 @@ Rollback: `scripts/publish-web.sh --promote <previous version>`
 2. **Deploy with `scripts/deploy-web.sh` on nezopt.** Never `vercel --prod`
    from a branch, a dirty checkout, or a copied directory.
    A commit ships only when `scripts/require-ci-green.sh` passes for it: its
-   required GitHub checks are green (docs/CI.md, "Deploy gate").
+   required GitHub checks are green, and this checkout's own gate and deploy
+   scripts are byte-identical to `origin/main`'s (docs/CI.md, "Deploy gate").
 3. **One checkout per agent.** Use `git worktree add` for parallel work. In a
    checkout another agent may be using, never `git stash`, `git reset --hard`,
    `git checkout -- .`, or `git add -A` / `git commit -a` — they move other
