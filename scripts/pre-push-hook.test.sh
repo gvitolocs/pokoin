@@ -60,7 +60,9 @@ chmod +x "$t/gh"
 : > "$t/gh-calls"
 
 # ---- fixtures: rust-gate is success in the real answer, and the throwaway repo requires only rust-gate ----
-jq '.' "$real" > "$t/fx-green.json"
+# fx-green stands for every required check green, so it carries a green js-gate run too, as the real
+# scripts/ci-required-checks now names it; these throwaway repos ask for rust-gate only, so it decides no case.
+jq '.check_runs += [{id:200000000003,name:"js-gate",status:"completed",conclusion:"success",app:{slug:"github-actions"}}]' "$real" > "$t/fx-green.json"
 jq '(.check_runs[] | select(.name == "rust-gate") | .conclusion) = "failure"' "$real" > "$t/fx-fail.json"
 jq '(.check_runs[] | select(.name == "rust-gate") | .status) = "in_progress"
      | (.check_runs[] | select(.name == "rust-gate") | .conclusion) = null' "$real" > "$t/fx-running.json"

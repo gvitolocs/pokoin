@@ -32,7 +32,9 @@ done
 ok "structure: all four entry points call require-ci-green.sh"
 
 # ---- fixtures ----------------------------------------------------------------------------------------------
-add_repo_gate() { jq --arg c "$1" '.check_runs += [{id:200000000001,name:"repo-gate",status:"completed",conclusion:$c,app:{slug:"github-actions"}},{id:200000000002,name:"secret-gate",status:"completed",conclusion:"success",app:{slug:"github-actions"}}]' "$real"; }
+# add_repo_gate <repo-gate conclusion>: the real answer plus a green run for every other name of the real
+# scripts/ci-required-checks (which the clone copies), so "green" here really means all four gates green.
+add_repo_gate() { jq --arg c "$1" '.check_runs += [{id:200000000001,name:"repo-gate",status:"completed",conclusion:$c,app:{slug:"github-actions"}},{id:200000000002,name:"secret-gate",status:"completed",conclusion:"success",app:{slug:"github-actions"}},{id:200000000003,name:"js-gate",status:"completed",conclusion:"success",app:{slug:"github-actions"}}]' "$real"; }
 add_repo_gate success > "$t/fx-green.json"
 add_repo_gate failure > "$t/fx-red.json"
 
