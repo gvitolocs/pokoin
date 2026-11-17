@@ -118,6 +118,8 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   // The end dot joins late; the hover dot and the tip are never hidden.
   assert.match(historySrc, /ref=\{\(el\) => \{ endDotNode = el; \}\}/);
   assert.match(historySrc, /class="seller-history-point is-hover" style=/);
+  // One dot under the cursor: the last-day dot yields while a hover is active.
+  assert.match(historySrc, /display: hovered\(\)\.dot \? 'none' : ''/);
   assert.match(historySrc, /seller-history-liquidity/);
   assert.match(historySrc, /seller-history-legend/);
   assert.match(historySrc, /seller-history-point/);

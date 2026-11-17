@@ -380,13 +380,20 @@ export default function CollectionHistoryPanel(props) {
         {/* Dots and the tip sit over the frame without its clipping. CSS
             circles, because an SVG circle stretches under preserveAspectRatio=none. */}
         <div class="seller-history-overlay" aria-hidden="true">
+          {/* One dot only: the cursor dot replaces the last-day dot while a
+              hover is active, and it stays the very node the reveal fades, so
+              a hover in the middle of a draw-in cannot flash it back. */}
           <Show when={chart().endDot}>
             {(dot) => (
               <span
                 ref={(el) => { endDotNode = el; }}
                 class="seller-history-point"
                 data-testid="collection-history-point"
-                style={{ left: pct(dot().x, CHART_W), top: pct(dot().y, CHART_H) }}
+                style={{
+                  left: pct(dot().x, CHART_W),
+                  top: pct(dot().y, CHART_H),
+                  display: hovered().dot ? 'none' : '',
+                }}
               />
             )}
           </Show>
