@@ -1878,8 +1878,13 @@ async fn card_sales(deps: &MarketDeps, params: &Json) -> Result<Json> {
 }
 
 /// `card_price_history`: every stored price series of one printing, per source,
-/// bucketed so the whole answer stays small enough for a chat reply.
-async fn card_price_history(deps: &MarketDeps, params: &Json) -> Result<Json> {
+/// bucketed so the whole answer stays small enough for a chat reply. Catalog
+/// resolution is the one fallible step; `ApiError` is wide, so this tool hands
+/// it over boxed and the dispatcher clones it back.
+async fn card_price_history(
+    deps: &MarketDeps,
+    params: &Json,
+) -> std::result::Result<Json, Box<ApiError>> {
     let required = require_card(&deps.db, params).await?;
     let card = match required {
         Required::Card(card) => card,
@@ -3852,7 +3857,9 @@ pub(crate) async fn run_tool(deps: &MarketDeps, tool: &str, params: &Json) -> Re
         "top_movers" => top_movers(deps, params).await,
         "top_sellers" => top_sellers(deps, params).await,
         "card_sales" => card_sales(deps, params).await,
-        "card_price_history" => card_price_history(deps, params).await,
+        "card_price_history" => card_price_history(deps, params)
+            .await
+            .map_err(|error| (*error).clone()),
         "deal_check" => deal_check(deps, params).await,
         "set_sales" => set_sales(deps, params).await,
         "recent_sales" => recent_sales(deps, params).await,
