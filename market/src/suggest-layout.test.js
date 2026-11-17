@@ -10,13 +10,53 @@ const styles = read('styles.css');
 assert.match(styles, /^@import "\.\/search-box\.css";/);
 const searchBox = read('search-box.css');
 const css = styles.replace(/^@import "\.\/search-box\.css";/, searchBox);
-/** Desktop rules, the first phone ≤720px block, and what follows it — per file, search rules first. */
-function split(sheet) {
-  const at = sheet.indexOf('@media (max-width: 720px)');
-  const phone = sheet.slice(at);
-  return { desktop: sheet.slice(0, at), phone, phoneFirst: phone.slice(0, phone.indexOf('@media (max-width: 480px)')) };
+/** Desktop rules, the phone ≤720px block of the search UI, and what follows it — per file, search rules first.
+ * The cut anchors on the first ≤720px block restyling the suggest panel (`.suggest-`) or the topbar row the
+ * search pill sits in (`.topbar-row`), not on the first such block in the file: in styles.css that block is the
+ * unrelated `.nav-preview-dash` one 280bc4fe put ahead of the search rules (PKN-06), and cutting there drops
+ * thousands of desktop lines. A sheet that yields no anchor, or an empty or whole desktop slice, throws. */
+const PHONE720 = '@media (max-width: 720px)';
+const PHONE480 = '@media (max-width: 480px)';
+const SEARCH_RESTYLED = /\.suggest-|\.topbar-row\b/;
+/** Comments blanked to spaces, offsets and line breaks intact, so prose never moves the cut. */
+const noComments = (sheet) => sheet.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+/** Index of the `}` closing the block whose `@media` starts at `at`. */
+function blockEnd(sheet, at) {
+  let depth = 0;
+  for (let i = sheet.indexOf('{', at); i < sheet.length; i += 1) {
+    if (sheet[i] === '{') depth += 1;
+    else if (sheet[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return sheet.length;
 }
-const [boxParts, styleParts] = [split(searchBox), split(styles)];
+function split(sheet, name) {
+  const flat = noComments(sheet);
+  let at = -1;
+  for (let i = flat.indexOf(PHONE720); i !== -1; i = flat.indexOf(PHONE720, i + 1)) {
+    if (SEARCH_RESTYLED.test(flat.slice(i, blockEnd(flat, i)))) {
+      at = i;
+      break;
+    }
+  }
+  assert.ok(at !== -1, `${name}: no ${PHONE720} block restyles the suggest panel or the topbar row`);
+  // Earlier ≤720px blocks are cut out of it: a phone-only rule is never a desktop rule.
+  let desktop = '';
+  let from = 0;
+  for (let i = flat.indexOf(PHONE720); i !== -1 && i < at; i = flat.indexOf(PHONE720, i + 1)) {
+    desktop += sheet.slice(from, i);
+    from = blockEnd(flat, i) + 1;
+  }
+  desktop += sheet.slice(from, at);
+  assert.ok(desktop.length > 0, `${name}: the desktop slice came out empty`);
+  assert.ok(desktop.length < sheet.length, `${name}: the desktop slice is the whole sheet, so nothing was cut`);
+  const phone = sheet.slice(at);
+  const narrow = phone.indexOf(PHONE480);
+  return { desktop, phone, phoneFirst: phone.slice(0, narrow === -1 ? phone.length : narrow) };
+}
+const [boxParts, styleParts] = [split(searchBox, 'search-box.css'), split(styles, 'styles.css')];
 const desktopCss = boxParts.desktop + styleParts.desktop;
 const phone720 = boxParts.phone + styleParts.phone;
 const phone720First = boxParts.phoneFirst + styleParts.phoneFirst;
