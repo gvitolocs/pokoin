@@ -8,6 +8,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed`, `flow-db` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
 | Unsafe-code check | `scripts/rust-lints-check.sh` and its test, as steps of `gate-tests` | GitHub, on every pull request and every push to `main`; part of `repo-gate` | Whether a `pokoin-rust` crate is left out of `unsafe_code = "forbid"`, or an exception to that rule was added; see "Unsafe code" below |
+| Feature map check | `scripts/check-features.sh` and its test, as steps of `gate-tests` | GitHub, on every pull request and every push to `main`; part of `repo-gate` | Whether `docs/FEATURES.toml` still names real files and real tests, and whether a change shrank the map; see "Feature map" below |
 | GitHub `js-gate` | `.github/workflows/js-ci.yml`: jobs `js-inventory`, `market`, `market-sweep`, `solid`, `workers`, `news`, `scripts`, `bench`, `js-gate` | GitHub, on every pull request and every push to `main` | Whether every tracked JavaScript test still passes; not yet a required check — see "JavaScript tests" below and `scripts/ci-required-checks` |
 | GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, `scripts/run-flow-tests.sh` against a Postgres 17 service | GitHub, only when Rust files changed | Part of `rust-gate`: every `*_flow` binary runs in a database of its own, and a binary that fails, prints `skipped:` or runs no test is a failure |
@@ -117,6 +118,45 @@ The exceptions today are `pokoin-rust/crates/shared-dictionary` (Brotli's C libr
 scripts/rust-lints-check.sh                  # what every crate does today
 scripts/rust-lints-check.sh --base origin/main   # as CI runs it
 ```
+
+## Feature map
+
+`docs/FEATURES.toml` is the address list of the product: one `[[flow]]` block per user-visible flow, six keys each —
+`id` (kebab-case, unique), `name`, `money`, `entry` (the tracked files that carry it), `proof` (the tracked test
+files, or `file.rs::test_name`, that drive it) and `status`.
+
+- `money = true` for every flow that moves or prices money: cart, checkout, payment, refund, payout, PKN balance,
+  shipping cost, buy orders, seller pricing tools. Those are the flows whose coverage may never quietly shrink.
+- `status = "proved"` only when a test a CI job runs drives the flow through the real handler (the router or the
+  handler itself; mock Firestore or real Postgres both count). `"partial"` means what runs proves a piece of it — a
+  client-side store, a helper, one guard path — and `"unproved"` means nothing does, with `proof = []`.
+- A flow with no proof says so. `proof` is never filled with a file that does not run the flow, and a file that no
+  CI job runs is not a proof: a Rust proof must live under `pokoin-rust/` and be a `tests/` file or carry a
+  `#[cfg(test)]` module, and a JavaScript proof must be matched by a group of `scripts/js-test-groups.txt` — read
+  through `scripts/js-test-inventory.sh --files GROUP`, the same call `js-run-group.sh` makes — and not be listed in
+  `scripts/js-test-not-in-gate.txt`.
+
+`scripts/check-features.sh` enforces all of it and prints the whole map as a table plus the counts. It exits 1,
+naming the flow, on a missing or unknown key, a duplicated or non-kebab id, an `entry` or `proof` path that is not a
+tracked file, a `proof::name` that is not a declared test in that file (a Rust `fn` behind `#[test]`/`#[tokio::test]`,
+a JS `test('name')`/`it('name')`), a `proved` or `partial` flow with an empty `proof`, an `unproved` flow with one,
+and any proof file no CI job runs. Exit 2 means it could not run (no checkout, no map, an unreadable `--base`).
+
+With `--base <commit>` the map may only grow: a flow that exists at the base may not be removed, and the number of
+`unproved` money flows may not rise. A flow that is genuinely gone gets a `status` and a reason in the same PR, not a
+deletion. A base with no `docs/FEATURES.toml` fails neither rule, which is why adding the map itself is a green diff.
+Today: 56 flows, 31 of them money, 19 proved, 34 partial, 3 unproved — `seller-settings` being the only money one
+nothing proves yet.
+
+```bash
+scripts/check-features.sh                                        # what the map says today
+scripts/check-features.sh --base "$(git merge-base origin/main HEAD)"   # as CI runs it
+bash scripts/check-features.test.sh                              # the checker itself, on throwaway repos
+```
+
+Both run as steps of `gate-tests` in `.github/workflows/repo-ci.yml`, so the check is part of `repo-gate`. A change
+that adds or changes a user-visible flow updates `docs/FEATURES.toml` in the same PR (AGENTS.md); a change that
+retires a proof has to say which flow is now unproved, and CI fails the diff if that flow carries money.
 
 ## Deploy gate: main must be green to ship
 

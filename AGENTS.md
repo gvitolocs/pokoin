@@ -4,6 +4,7 @@
 - Do not introduce, restore, deploy, or retain a Node.js production runtime as the migration's completed state. Do not proxy Rust routes to Node or return placeholder success payloads for unfinished ports.
 - Node.js may be used for local builds, development tools, reference implementations, and isolated tests/benchmarks; it must not serve production requests or production backend jobs after cutover.
 - Complete native implementations and verify contract parity, authentication/authorization, persistence, and end-to-end flows before declaring migration complete. A partial Rust rollout does not satisfy this requirement.
+- A change that adds a user-visible flow, or changes one that exists, updates [docs/FEATURES.toml](docs/FEATURES.toml) in the same PR: its `money` flag, the files that carry it, the tests that prove it and its `status`, as `scripts/check-features.sh` checks ([docs/CI.md](docs/CI.md), "Feature map").
 - Run `scripts/check-fast` before committing a `pokoin-rust/` change ([docs/CI.md](docs/CI.md)): it checks only what the change touched, fails only on new fmt/clippy findings, and prints skipped steps as SKIPPED.
 - Preserve service availability while the migration is being prepared. Production replacement/removal follows the existing explicit push/deploy authorization rule; this requirement is not permission to shut down live services prematurely.
 
