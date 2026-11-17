@@ -60,6 +60,29 @@ public or test-only.
 - Re-run the full scan afterwards and check that removing the new entry brings
   back exactly the findings it is meant to cover.
 
+A change to the allowlist makes `secret-gate` fail by design: it fails on any
+change to `.gitleaks.toml`, on a `.gitleaksignore` file, and on an added inline
+allow comment, and no trailer, label or variable turns it green. An agent never
+changes the allowlist. The owner ships such a commit only with the logged
+override of `scripts/require-ci-green.sh`.
+
+## The scan in CI
+
+`.github/workflows/secrets-ci.yml` runs one job, `secret-gate`, on every pull
+request and every push to `main`. It installs gitleaks 8.30.1 (the version the
+local hook uses) from the release archive, checks its sha256, and runs
+`scripts/ci-secret-scan.sh --base <base>` and then
+`scripts/ci-secret-scan.test.sh`. The scan has three steps, all run:
+
+1. range scan: gitleaks over every commit of `<base>..<head>`, so a secret that
+   was added and removed again inside the range is still found;
+2. tree scan: gitleaks over the checked-out tree;
+3. allowlist guard: fails on any change to `.gitleaks.toml` in the range, on a
+   `.gitleaksignore` file, and on an added inline allow comment.
+
+`secret-gate` is in the list of checks a commit needs before it ships once the
+lead adds it to that list.
+
 ## When the scan finds something
 
 A finding on new or changed content is treated as a live secret.

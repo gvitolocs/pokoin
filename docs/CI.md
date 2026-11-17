@@ -6,6 +6,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | --- | --- | --- | --- |
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
+| GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; docs/SECRETS.md |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
 
