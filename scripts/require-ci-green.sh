@@ -8,10 +8,11 @@
 # Any doubt is a refusal: an API error, an answer that does not parse, a missing run, a missing list.
 #
 # Environment (all optional):
-#   GH                          the gh binary (default: gh)
+#   GH                          the gh binary (default: gh on PATH, else $HOME/.local/bin/gh)
 #   POKOIN_CI_REPO              GitHub repository (default: gvitolocs/pokoin)
 #   POKOIN_CI_POLL_S            seconds between polls (default 30)
 #   POKOIN_CI_WAIT_S            give up after this many seconds (default 3600)
+#   POKOIN_CI_API_RETRIES       refuse after this many unreadable GitHub answers in a row (default 5)
 #   POKOIN_CI_MISSING_GRACE_S   how long a check run may be absent before it is a refusal (default 300)
 #   POKOIN_CI_LOG               log file (default: $HOME/pokoin-deploy/ci-gate.log)
 #   POKOIN_CI_CALLER            who is calling, for the log (default: unknown)
@@ -58,10 +59,11 @@ SHA="$(git -C "$repo_dir" rev-parse --verify "${commit_arg}^{commit}" 2> /dev/nu
 }
 SHORT="${SHA:0:12}"
 
-GH_BIN="${GH:-gh}"
+GH_BIN="${GH:-}"
 REPO="${POKOIN_CI_REPO:-gvitolocs/pokoin}"
 POLL_S="${POKOIN_CI_POLL_S:-30}"
 WAIT_S="${POKOIN_CI_WAIT_S:-3600}"
+API_RETRIES="${POKOIN_CI_API_RETRIES:-5}"
 GRACE_S="${POKOIN_CI_MISSING_GRACE_S:-300}"
 LOG="${POKOIN_CI_LOG:-$HOME/pokoin-deploy/ci-gate.log}"
 CALLER="${POKOIN_CI_CALLER:-unknown}"
@@ -151,10 +153,28 @@ if [ "${#required[@]}" -eq 0 ]; then
   refuse "commit has no required-check list; it predates the CI gate or the list was emptied."
 fi
 
+# ---- find gh (the override never needs it) ----------------------------------------------------------------
+gh_tried=
+case "$GH_BIN" in
+  "") if command -v gh > /dev/null 2>&1; then
+      GH_BIN=gh
+    else
+      gh_tried="gh not on PATH; $HOME/.local/bin/gh"
+      GH_BIN="$HOME/.local/bin/gh"
+    fi ;;
+  *) gh_tried="GH=$GH_BIN" ;;
+esac
+if [[ "$GH_BIN" != */* ]]; then
+  command -v "$GH_BIN" > /dev/null 2>&1 || refuse "cannot find the gh binary ($gh_tried)." --no-advice
+elif ! { [ -x "$GH_BIN" ] && [ -f "$GH_BIN" ]; }; then
+  refuse "cannot find the gh binary ($gh_tried)." --no-advice
+fi
+
 # ---- poll --------------------------------------------------------------------------------------------------
 FILTER='.check_runs[] | select((.app.slug? // "") == "github-actions") | [.id, .name, .status, (.conclusion // "none")] | @tsv'
 ENDPOINT="repos/$REPO/commits/$SHA/check-runs?per_page=100"
 
+api_fails=0
 while true; do
   elapsed=$(($(date +%s) - start))
   declare -A best_id=() best_status=() best_concl=()
@@ -182,6 +202,7 @@ while true; do
   fi
 
   if [ "$api_ok" = 1 ]; then
+    api_fails=0
     pending=()
     green=()
     for name in "${required[@]}"; do
@@ -209,6 +230,10 @@ while true; do
     fi
     state="pending: ${pending[*]}"
   else
+    api_fails=$((api_fails + 1))
+    if [ "$api_fails" -ge "$API_RETRIES" ] && [ "$no_wait" = 0 ]; then
+      refuse "the GitHub API could not be read for $SHORT $api_fails times in a row ($api_note)."
+    fi
     state="the GitHub API could not be read ($api_note)"
   fi
 

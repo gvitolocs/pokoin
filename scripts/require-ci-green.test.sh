@@ -46,7 +46,9 @@ cat > "$t/gh" << 'FAKE'
 echo "$*" >> "$FAKE_GH_CALLS"
 n=$(wc -l < "$FAKE_GH_CALLS")
 case "${FAKE_GH_MODE:-}" in
+  failn) if [ "$n" -le "${FAKE_GH_FAILS:-0}" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
   exit1) echo "gh: HTTP 502" >&2; exit 1 ;;
+  failn) if [ "$n" -le "${FAKE_GH_FAILS:-0}" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
   garbage) echo "this is not a check run"; exit 0 ;;
   halfrow) printf '12345\tonly-two\n'; exit 0 ;;
 esac
@@ -107,7 +109,7 @@ run_gate() { # args...: runs the gate with the fake gh, output in $t/out, exit c
   rm -f "$calls" "$t/ops-in"
   : > "$calls"
   rc=0
-  env GH="$t/gh" bash "$gate" --repo-dir "$t/repo" "$@" > "$t/out" 2>&1 || rc=$?
+  env GH="${GH_OVERRIDE:-$t/gh}" bash "$gate" --repo-dir "$t/repo" "$@" > "$t/out" 2>&1 || rc=$?
 }
 want_rc() { [ "$rc" = "$1" ] || fail "$2: expected exit $1, got $rc"; }
 has() { grep -qF -- "$1" "$t/out" || fail "$2: output lacks '$1'"; }
@@ -177,15 +179,58 @@ done
 ok "8: cancelled, skipped, timed_out, neutral, action_required, stale -> 1"
 
 # 9. gh fails, gh prints garbage, gh prints a short row
-FAKE_GH_MODE=exit1 FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_WAIT_S=1 run_gate "$SHA_TWO"
+calls_n() { wc -l < "$calls" | tr -d ' '; }
+FAKE_GH_MODE=exit1 FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_API_RETRIES=3 POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
 want_rc 1 "9a gh exits 1"
 has "could not be read" "9a"
-FAKE_GH_MODE=garbage FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_WAIT_S=1 run_gate "$SHA_TWO"
+[ "$(calls_n)" = 3 ] || fail "9a: expected exactly 3 gh calls, got $(calls_n)"
+FAKE_GH_MODE=garbage FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_API_RETRIES=3 POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
 want_rc 1 "9b garbage"
 has "could not be read" "9b"
-FAKE_GH_MODE=halfrow FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_WAIT_S=1 run_gate "$SHA_TWO"
+[ "$(calls_n)" = 3 ] || fail "9b: expected exactly 3 gh calls, got $(calls_n)"
+FAKE_GH_MODE=halfrow FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_API_RETRIES=3 POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
 want_rc 1 "9c half row"
-ok "9: gh error, garbage and a short row -> 1, never 0"
+ok "9: gh error, garbage and a short row -> 1 after the retry count, never 0"
+
+# 9d. the default retry count is 5, well before a large wait limit
+s0=$SECONDS
+FAKE_GH_MODE=exit1 FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
+want_rc 1 "9d default retries"
+[ "$(calls_n)" = 5 ] || fail "9d: expected exactly 5 gh calls, got $(calls_n)"
+[ $((SECONDS - s0)) -lt 10 ] || fail "9d: it waited for the wait limit"
+# 9e. fail, fail, then a good answer -> 0 (a readable answer resets the count)
+FAKE_GH_MODE=failn FAKE_GH_FAILS=2 FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_API_RETRIES=3 POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
+want_rc 0 "9e fail, fail, ok"
+# 9f. --no-wait refuses on the first unreadable answer
+FAKE_GH_MODE=exit1 FAKE_GH_FIXTURE="$t/fx-green.json" run_gate --no-wait "$SHA_TWO"
+want_rc 1 "9f no-wait"
+[ "$(calls_n)" = 1 ] || fail "9f: expected 1 gh call, got $(calls_n)"
+ok "9: default 5 retries, fail-fail-then-good gives 0, --no-wait refuses on the first unreadable answer"
+
+# 9g. finding gh: a missing binary refuses at once; HOME/.local/bin/gh is used when gh is not on PATH
+s0=$SECONDS
+GH_OVERRIDE=/nonexistent/gh FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
+want_rc 1 "9g missing gh"
+[ $((SECONDS - s0)) -lt 2 ] || fail "9g: the missing gh was waited on"
+has "cannot find the gh binary (GH=/nonexistent/gh)" "9g"
+mkdir -p "$t/home/.local/bin" "$t/toolbin"
+cp "$t/gh" "$t/home/.local/bin/gh"
+for tool in git jq date sleep dirname mkdir tr printf cat id hostname wc sed awk bash env; do
+  p="$(command -v "$tool" || true)"
+  if [ -n "$p" ] && [ "${p#/}" != "$p" ]; then ln -sf "$p" "$t/toolbin/$tool"; fi
+done
+rc=0
+rm -f "$calls"
+: > "$calls"
+env -u GH HOME="$t/home" PATH="$t/toolbin" FAKE_GH_FIXTURE="$t/fx-green.json" bash "$gate" --repo-dir "$t/repo" "$SHA_TWO" > "$t/out" 2>&1 || rc=$?
+want_rc 0 "9h HOME/.local/bin/gh"
+[ "$(calls_n)" -ge 1 ] || fail "9h: the fake gh in HOME/.local/bin was not called"
+rm -f "$t/home/.local/bin/gh"
+rc=0
+env -u GH HOME="$t/home" PATH="$t/toolbin" FAKE_GH_FIXTURE="$t/fx-green.json" bash "$gate" --repo-dir "$t/repo" "$SHA_TWO" > "$t/out" 2>&1 || rc=$?
+want_rc 1 "9i no gh anywhere"
+has "cannot find the gh binary (gh not on PATH;" "9i"
+ok "9: missing gh refuses at once; \$HOME/.local/bin/gh is used when gh is not on PATH"
 
 # 10. list absent, list with only comments
 FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_NONE"
