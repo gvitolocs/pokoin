@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Secret scan for CI (docs/SECRETS.md, "The scan in CI"). Three steps, all run, each printed with its result:
 #   a. range scan: gitleaks over every commit of <base>..<head> (a secret added and removed again inside the range is found);
-#   b. tree scan: gitleaks over the checked-out tree;
+#   b. tree scan: gitleaks over an export of the tracked files of HEAD;
 #   c. allowlist guard: fails on ANY change to the allowlist. No trailer, label or variable turns it green.
 # Usage: scripts/ci-secret-scan.sh --base <commit> [--head <commit>]
 # GITLEAKS picks the binary (default: gitleaks). Exit 0 all passed, 1 a step failed, 2 usage error or gitleaks missing.
 set -euo pipefail
+
+tmpdir=
+# shellcheck disable=SC2317,SC2329  # called through the trap cleanup EXIT below, never directly
+cleanup() {
+    if [ -n "$tmpdir" ]; then rm -rf "$tmpdir"; fi
+}
+trap cleanup EXIT
 
 usage() {
   echo "usage: $0 --base <commit> [--head <commit>]" >&2
@@ -40,7 +47,35 @@ else
 fi
 
 echo "== b. tree scan"
-if "$gitleaks" detect --no-git -s . --redact --no-banner; then
+# What is published is HEAD's tracked files, so that is what is scanned: an export of them into a temporary
+# directory. The working copy of a development host also holds node_modules/, target/, dist-web/ and whatever an
+# agent left untracked there, and scanning those costs minutes and reports files no commit ever carries. A fresh CI
+# checkout has nothing but those tracked files, so both hosts answer the same question.
+tree_ok=1
+if ! tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ci-secret-scan-tree.XXXXXX" 2> /dev/null)"; then
+  echo "  no temporary directory could be created"
+  tree_ok=0
+elif ! git archive HEAD | tar -x -C "$tmpdir"; then
+  echo "  HEAD could not be exported to $tmpdir"
+  tree_ok=0
+fi
+if [ "$tree_ok" -eq 1 ]; then
+  # the repository's own policy, from the top of this work tree; without it gitleaks uses its built-in rules, which
+  # allowlist nothing and so can only report more, never less
+  policy=.gitleaks.toml
+  toplevel="$(git rev-parse --show-toplevel 2> /dev/null)" || toplevel=
+  if [ -n "$toplevel" ]; then policy="$toplevel/.gitleaks.toml"; fi
+  if [ -f "$policy" ]; then
+    "$gitleaks" detect --no-git -s "$tmpdir" --redact --no-banner -c "$policy" || tree_ok=0
+  else
+    "$gitleaks" detect --no-git -s "$tmpdir" --redact --no-banner || tree_ok=0
+  fi
+fi
+if [ -n "$tmpdir" ]; then
+  rm -rf "$tmpdir"
+  tmpdir=
+fi
+if [ "$tree_ok" -eq 1 ]; then
   echo "tree scan: PASS"
 else
   echo "tree scan: FAIL"

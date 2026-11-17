@@ -36,7 +36,11 @@ fail() {
   exit 1
 }
 ok() { echo "ok: $*"; }
-gitq() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
+# core.hooksPath is forced empty: a host that sets it globally (scripts/setup-git-hooks.sh, or a CI lane that wraps
+# this repository's own hooks) would run the canonical-checkout guard inside every throwaway fixture below and refuse
+# its base commit. Only the fixture *commits* are ungoverned this way: cases 21 to 25 push with git itself, with
+# core.hooksPath set on the fixture work tree, so the hook under test still runs there.
+gitq() { git -c user.name=t -c user.email=t@example.invalid -c core.hooksPath= "$@"; }
 
 ZERO='0000000000000000000000000000000000000000'
 # The url of the repository this guard exists for, in the form a clone has by default.

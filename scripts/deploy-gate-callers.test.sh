@@ -23,7 +23,10 @@ fail() {
   exit 1
 }
 ok() { echo "ok: $*"; }
-gitq() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
+# core.hooksPath is forced empty: a host that sets it globally (scripts/setup-git-hooks.sh, or a CI lane that wraps
+# this repository's own hooks) would run the canonical-checkout guard inside the throwaway clone below and refuse its
+# base commit, because a fresh `git init` is a main work tree.
+gitq() { git -c user.name=t -c user.email=t@example.invalid -c core.hooksPath= "$@"; }
 
 # ---- structural check: every entry point calls the gate ------------------------------------------------------
 for f in publish-web.sh deploy-web.sh deploy-pokoin-rust.sh build-pokoin-rust-release.sh; do

@@ -20,7 +20,10 @@ fail() {
 }
 ok() { echo "ok: $*"; }
 
-gitq() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
+# core.hooksPath is forced empty: a host that sets it globally (scripts/setup-git-hooks.sh, or a CI lane that wraps
+# this repository's own hooks) would run the canonical-checkout guard inside every throwaway fixture below and refuse
+# its base commit, because a fresh `git init` is a main work tree.
+gitq() { git -c user.name=t -c user.email=t@example.invalid -c core.hooksPath= "$@"; }
 
 # throwaway repo: one commit with the two-name list, one without a list, one with a comments-only list, one with rust-gate only
 # The gate compares this checkout's own scripts with origin/main before it does anything else, so the repo gets an
@@ -73,6 +76,13 @@ case "${FAKE_GH_MODE:-}" in
   failn) if [ "$n" -le "${FAKE_GH_FAILS:-0}" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
   exit1) echo "gh: HTTP 502" >&2; exit 1 ;;
   failn) if [ "$n" -le "${FAKE_GH_FAILS:-0}" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
+  http404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  http422)
+    # the answer gh really gives for a sha it has never seen, with the sha of the endpoint it was asked about
+    ep=
+    for a in "$@"; do case "$a" in */check-runs*) ep="$a" ;; esac; done
+    echo "gh: No commit found for SHA: $(printf '%s' "$ep" | sed 's|.*/commits/||; s|/.*||') (HTTP 422)" >&2
+    exit 1 ;;
   garbage) echo "this is not a check run"; exit 0 ;;
   halfrow) printf '12345\tonly-two\n'; exit 0 ;;
 esac
@@ -129,6 +139,15 @@ export POKOIN_CI_POLL_S=0.2 POKOIN_CI_WAIT_S=2 POKOIN_CI_MISSING_GRACE_S=1
 LOGF="$t/ci.log"
 export POKOIN_CI_LOG="$LOGF"
 unset POKOIN_CI_OVERRIDE LANE_WORKER POKOIN_OPS_RECORD_CMD FAKE_GH_MODE FAKE_GH_FIXTURE2 || true
+
+# Case 17 aims the gate at canonical checkouts of its own. Every other case must say nothing about them, so
+# POKOIN_CANONICAL_CHECKOUT is aimed at a clean throwaway repository here: on a host whose real integration checkout
+# is dirty, the other cases would otherwise each carry a warning block.
+gitq init -q "$t/canon-silent"
+printf 'x\n' > "$t/canon-silent/f.txt"
+gitq -C "$t/canon-silent" add f.txt
+gitq -C "$t/canon-silent" commit -q -m base
+export POKOIN_CANONICAL_CHECKOUT="$t/canon-silent"
 
 rc=0
 run_gate() { # args...: runs the gate with the fake gh, output in $t/out, exit code in $rc
@@ -257,6 +276,31 @@ env -u GH HOME="$t/home" PATH="$t/toolbin" FAKE_GH_FIXTURE="$t/fx-green.json" ba
 want_rc 1 "9i no gh anywhere"
 has "cannot find the gh binary (gh not on PATH;" "9i"
 ok "9: missing gh refuses at once; \$HOME/.local/bin/gh is used when gh is not on PATH"
+
+# 9j. GitHub has never seen the commit: gh api answers 404 or 422 for its check-runs URL. Retrying cannot make such an
+#     answer readable, so the gate refuses at once and says what is wrong (the commit is local only) instead of
+#     reporting an unreadable API. Any other failure keeps retrying (9a, 9d, 9e).
+NOTPUSHED="GitHub has no commit ${SHA_TWO:0:12}: it was never pushed. Push a branch and open a pull request."
+for mode in http404 http422; do
+  s0=$SECONDS
+  FAKE_GH_MODE=$mode FAKE_GH_FIXTURE="$t/fx-green.json" POKOIN_CI_API_RETRIES=5 POKOIN_CI_WAIT_S=1000 run_gate "$SHA_TWO"
+  want_rc 1 "9j $mode"
+  [ "$(calls_n)" = 1 ] || fail "9j $mode: expected exactly 1 gh call, got $(calls_n)"
+  has "$NOTPUSHED" "9j $mode"
+  hasnt "could not be read" "9j $mode"
+  hasnt "waiting" "9j $mode"
+  [ $((SECONDS - s0)) -lt 10 ] || fail "9j $mode: it waited instead of refusing at once"
+done
+# a 4xx on the same commit is not a green answer: nothing about the checks is claimed, and no advice to re-run a
+# workflow is given for a commit that has never been on GitHub
+hasnt "success (run" "9j 404"
+hasnt "re-run the failed workflow" "9j 404"
+# and a readable answer for that very commit is still green, so the refusal came from the HTTP code alone
+FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "9j readable answer again"
+unset FAKE_GH_MODE
+export POKOIN_CI_POLL_S=0.2 POKOIN_CI_WAIT_S=2 POKOIN_CI_MISSING_GRACE_S=1
+ok "9j: gh api HTTP 404 and HTTP 422 -> 1 at once, one call only, 'GitHub has no commit <sha12>'"
 
 # 10. list absent, list with only comments
 FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_NONE"
@@ -471,6 +515,114 @@ hasnt "$NOT_ON_MAIN" "16k GIT_DIR exported, cwd inside scripts/"
 [ ! -s "$calls" ] || fail "16k: gh was called in --self-check-only mode"
 [ ! -e "$LOGF" ] || fail "16k: --self-check-only wrote a log line: $(cat "$LOGF")"
 ok "16k: called as a hook calls it (GIT_DIR exported, cwd inside scripts/), an untouched tree passes its self-check -> 0"
+
+# 17. the canonical checkout warning. The deploy entry points all run from the canonical integration checkout, so
+#     uncommitted work there — left by a generator or by another agent — blocks its next fast-forward. The gate lists
+#     it and nothing else changes: the result code is the CI answer, the log gains no line, and no file content is
+#     printed. POKOIN_CANONICAL_CHECKOUT names the directory (the callers do not set it; see 17i for the fallback).
+CANON_TEXT="the canonical checkout has uncommitted changes"
+canon_new() { # canon_new <name>: a clean throwaway repository at $t/canon-<name>, its path in $CANON
+  CANON="$t/canon-$1"
+  gitq init -q "$CANON"
+  printf 'tracked line\n' > "$CANON/f.txt"
+  gitq -C "$CANON" add f.txt
+  gitq -C "$CANON" commit -q -m base
+}
+
+# 17a. a clean canonical checkout says nothing
+canon_new clean
+POKOIN_CANONICAL_CHECKOUT="$CANON" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17a clean"
+hasnt "canonical checkout" "17a clean"
+
+# 17b. a dirty one lists its entries and still ships, because the CI answer is green
+canon_new dirty
+printf 'written there by mistake\n' >> "$CANON/f.txt"
+printf 'THE-CONTENT-OF-THE-DIRTY-FILE\n' > "$CANON/note.txt"
+rm -f "$LOGF"
+POKOIN_CANONICAL_CHECKOUT="$CANON" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17b dirty"
+has "$CANON_TEXT" "17b dirty"
+has "$CANON" "17b dirty: names the directory"
+has " M f.txt" "17b dirty"
+has "?? note.txt" "17b dirty"
+hasnt "THE-CONTENT-OF-THE-DIRTY-FILE" "17b dirty: printed the content of a file"
+[ "$(wc -l < "$LOGF")" = 1 ] || fail "17b dirty: the warning changed the log: $(cat "$LOGF")"
+
+# 17c. the one entry every work station has, on its own, says nothing. server/ holds a committed file: with nothing
+#      else in it tracked, git collapses the entry to `?? server/` and the point of the case would be lost.
+canon_new nm
+mkdir -p "$CANON/server"
+printf 'kept\n' > "$CANON/server/app.js"
+gitq -C "$CANON" add server/app.js
+gitq -C "$CANON" commit -q -m server
+mkdir -p "$CANON/server/node_modules"
+printf 'dep\n' > "$CANON/server/node_modules/pkg.js"
+gitq -C "$CANON" status --porcelain > "$t/nm-status"
+[ "$(cat "$t/nm-status")" = '?? server/node_modules/' ] \
+  || fail "17c: the fixture does not hold exactly the known entry: $(cat "$t/nm-status")"
+POKOIN_CANONICAL_CHECKOUT="$CANON" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17c server/node_modules alone"
+hasnt "canonical checkout" "17c server/node_modules alone"
+
+# 17d. the known entry does not hide the others
+canon_new nm-plus
+mkdir -p "$CANON/server"
+printf 'kept\n' > "$CANON/server/app.js"
+gitq -C "$CANON" add server/app.js
+gitq -C "$CANON" commit -q -m server
+mkdir -p "$CANON/server/node_modules"
+printf 'dep\n' > "$CANON/server/node_modules/pkg.js"
+printf 'written there by mistake\n' >> "$CANON/f.txt"
+POKOIN_CANONICAL_CHECKOUT="$CANON" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17d server/node_modules plus a real change"
+has "$CANON_TEXT" "17d"
+has " M f.txt" "17d"
+hasnt "?? server/node_modules/" "17d: listed the known entry"
+
+# 17e. at most 15 entries are listed; the rest is counted, not printed
+canon_new many
+for i in $(seq 1 20); do : > "$CANON/u$i.txt"; done
+POKOIN_CANONICAL_CHECKOUT="$CANON" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17e 20 entries"
+listed="$(grep -c 'WARNING   ?? u' "$t/out")"
+[ "$listed" = 15 ] || fail "17e: expected 15 listed entries, got $listed"
+has "and 5 more" "17e"
+
+# 17f. a directory that is not a repository, and one that does not exist: nothing said, nothing refused
+mkdir -p "$t/canon-broken/.git"
+POKOIN_CANONICAL_CHECKOUT="$t/canon-broken" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17f not a repository"
+hasnt "canonical checkout" "17f not a repository"
+POKOIN_CANONICAL_CHECKOUT="$t/canon-absent" FAKE_GH_FIXTURE="$t/fx-green.json" run_gate "$SHA_TWO"
+want_rc 0 "17f absent directory"
+hasnt "canonical checkout" "17f absent directory"
+
+# 17g. the warning does not soften a refusal: red CI still exits 1, warning first
+POKOIN_CANONICAL_CHECKOUT="$t/canon-dirty" FAKE_GH_FIXTURE="$t/fx-repofail.json" run_gate "$SHA_TWO"
+want_rc 1 "17g dirty and red"
+has "$CANON_TEXT" "17g"
+has "repo-gate finished as failure" "17g"
+
+# 17h. --self-check-only answers the comparison and nothing else: no warning, even from a dirty canonical checkout
+rc=0
+: > "$calls"
+rm -f "$LOGF"
+GH="$t/gh" POKOIN_CANONICAL_CHECKOUT="$t/canon-dirty" bash "$GATE_COPY" --self-check-only --repo-dir "$t/repo" > "$t/out" 2>&1 || rc=$?
+want_rc 0 "17h --self-check-only stays out of it"
+hasnt "canonical checkout" "17h"
+[ ! -s "$calls" ] || fail "17h: gh was called in --self-check-only mode"
+[ ! -e "$LOGF" ] || fail "17h: --self-check-only wrote a log line: $(cat "$LOGF")"
+
+# 17i. with the variable unset the gate falls back to its own default path; wherever that is on this host, naming a
+#      directory is a warning only and never changes the answer
+rc=0
+env -u POKOIN_CANONICAL_CHECKOUT GH="$t/gh" FAKE_GH_FIXTURE="$t/fx-green.json" \
+  bash "$gate" --repo-dir "$t/repo" "$SHA_TWO" > "$t/out" 2>&1 || rc=$?
+want_rc 0 "17i default path"
+unset CANON
+export POKOIN_CANONICAL_CHECKOUT="$t/canon-silent"
+ok "17: a dirty canonical checkout is listed (up to 15 entries), the known server/node_modules entry alone is not, and the result code never changes"
 
 # usage and unresolvable commit
 rc=0
