@@ -421,9 +421,10 @@ ok "20: a checkout that has not fetched origin/main -> 1 with the gate's message
 # asked GitHub. These cases run real `git push` commands and so cannot be passed by calling the hook correctly:
 # a linked work tree with core.hooksPath=.githooks holding a copy of the real hook and the real gate, a local bare
 # repository as origin whose main holds the same gate files, that bare's path presented as this repository through
-# POKOIN_PUSH_GUARD_URL_RE, and the same fake gh as the cases above. The base commit is pushed while the default
-# url pattern still stands (the bare path is not github.com, so nothing is guarded) and before the work tree
-# exists, so the fixture can be published without a green answer to fake.
+# POKOIN_PUSH_GUARD_URL_RE, and the same fake gh as the cases above. core.hooksPath is set on the work tree only and
+# only after the base commit was published from the clone, so the fixture reaches origin/main with no guard to
+# fake a green answer for. That the refusals below arrive through a real push is also what proves the hook ran at
+# all: an inactive core.hooksPath would have answered 0 for them.
 e2e_origin="$t/e2e-origin.git"
 e2e_clone="$t/e2e-clone"
 e2e_wt="$t/e2e-worktree"
