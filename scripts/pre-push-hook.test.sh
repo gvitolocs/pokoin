@@ -142,6 +142,21 @@ want_rc 0 "2 main on another url"
 gh_quiet "2 main on another url"
 ok "2: main on a different repository url -> 0, gh not called"
 
+# 2b. the ssh form of this repository is the same repository
+EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-fail.json")
+push origin git@github.com:gvitolocs/pokoin.git "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
+want_rc 1 "2b ssh form"
+gh_used "2b ssh form"
+has "$MAIN_TEXT" "2b ssh form"
+ok "2b: git@github.com:gvitolocs/pokoin.git is guarded as this repository"
+
+# 2c. a repository whose name only looks like ours is not
+EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-fail.json")
+push origin https://github.com/gvitolocs/pokoin-extra.git "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
+want_rc 0 "2c near-miss url"
+gh_quiet "2c near-miss url"
+ok "2c: github.com/gvitolocs/pokoin-extra -> 0, gh not called"
+
 # 3. main with green checks: allowed, by the gate, with the caller it logs
 EV=("${gate_env[@]}" "FAKE_GH_FIXTURE=$t/fx-green.json")
 push origin "$POKOIN_URL" "refs/heads/main $MAIN2 refs/heads/main $MAIN1"
