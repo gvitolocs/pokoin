@@ -4,6 +4,9 @@
 #
 #   scripts/js-test-inventory.sh                check the repository of the current directory (exit 1 on a gap)
 #   scripts/js-test-inventory.sh --files GROUP  print the tracked files of one group of scripts/js-test-groups.txt
+#   scripts/js-test-inventory.sh --base COMMIT  also fail when the not-in-gate list has a path that COMMIT's copy of the
+#                                               list does not have: the list is a count that may only fall. A COMMIT with
+#                                               no list at all (this file's first use) counts every line as already there.
 #
 # The groups file is the one place where the file globs of the jobs are written; scripts/js-run-group.sh runs a job
 # from the same line. Format: group<TAB>working directory<TAB>command<TAB>file globs (see the header of that file).
@@ -72,7 +75,14 @@ if [[ ${1:-} == --files ]]; then
   done
   die "no group named $2 in $groups"
 fi
-[[ $# -eq 0 ]] || die "usage: [--files GROUP]"
+base=''
+if [[ ${1:-} == --base ]]; then
+  [[ $# -eq 2 ]] || die "usage: --base COMMIT"
+  git -C "$root" cat-file -e "$2" 2>/dev/null || die "--base: no such object: $2"
+  base=$2
+  shift 2
+fi
+[[ $# -eq 0 ]] || die "usage: [--files GROUP | --base COMMIT]"
 
 fail=0
 covered=$(mktemp)
@@ -108,6 +118,27 @@ if [[ -f $notin ]]; then
     fi
     printf '%s\n' "$path" >>"$listed"
   done <"$notin"
+fi
+
+# The list is a count that may only fall. Adding a line takes a test file out of the gate, which is not a change a
+# merge can make on its own: CI fails on every added line, and such a commit ships only with the owner's logged
+# override of scripts/require-ci-green.sh. Removing a line is always fine.
+if [[ -n $base ]]; then
+  if git -C "$root" cat-file -e "$base:scripts/js-tests-not-in-gate.txt" 2>/dev/null; then
+    baselist=$(mktemp)
+    trap 'rm -f "$covered" "$listed" "$baselist"' EXIT
+    while IFS= read -r line || [[ -n $line ]]; do
+      [[ -z $line || $line == '#'* ]] && continue
+      printf '%s\n' "${line%%"$tab"*}" >>"$baselist"
+    done < <(git -C "$root" show "$base:scripts/js-tests-not-in-gate.txt")
+    while IFS= read -r path; do
+      grep -qxF -- "$path" "$baselist" && continue
+      echo "not-in-gate list: $path was taken out of the gate at $base: an added line. CI fails on every added line; it ships only with the owner's logged override of scripts/require-ci-green.sh" >&2
+      fail=1
+    done <"$listed"
+  else
+    echo "js-test-inventory: $base has no scripts/js-tests-not-in-gate.txt, so every line counts as already there" >&2
+  fi
 fi
 
 total=0; missing=()

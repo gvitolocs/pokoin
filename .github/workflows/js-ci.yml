@@ -23,9 +23,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # --base reads the list as it was at the base commit, so the history has to be here.
+          fetch-depth: 0
           persist-credentials: false
       - run: bash scripts/js-test-inventory.test.sh
-      - run: bash scripts/js-test-inventory.sh
+      - name: Every test file is covered, and scripts/js-tests-not-in-gate.txt did not grow
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/js-test-inventory.sh --base "$base"
 
   market:
     runs-on: ubuntu-24.04

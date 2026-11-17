@@ -1,2 +1,5 @@
-# Tracked test files that cannot run on a GitHub runner at all (browser farm, database, secret). One line each: path<TAB>reason.
+# Tracked test files that cannot run on a GitHub runner at all (browser farm, database, secret, a toolchain that exists only on
+# nezopt). One line each: path<TAB>reason. The list may only shrink: scripts/js-test-inventory.sh --base <commit> fails on an
+# added line.
 # Never list a red test here: a failing test stays in its gate job. docs/CI.md.
+market/src/gesture-exclusivity.test.js	needs the pinned TLC toolchain of scripts/check-gesture-tlc.sh (its bundled JRE 17 and tla2tools.jar, under /home/nez/deepseek-harness-local/formal/orchestra-tlc/toolchain), which exists only on nezopt; on a runner the script exits "pinned TLC toolchain missing"; its model check gets a CI job of its own (finding PKN-13)

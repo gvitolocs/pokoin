@@ -4,7 +4,7 @@
 # (paths relative to the working directory). scripts/js-test-inventory.sh reads the same globs, so a job and the check
 # that every test file is run cannot drift apart. In a glob, * stops at a slash, ** crosses slashes, and a leading ! excludes.
 # Several globs are separated by a space. The gate job `js-gate` needs one job per line here.
-market	.	node --test --test-force-exit	market/src/*.test.js market/src/*.test.mjs !market/src/search-token-triples.test.js market/index.test.js
+market	.	node --test --test-force-exit	market/src/*.test.js market/src/*.test.mjs !market/src/search-token-triples.test.js !market/src/gesture-exclusivity.test.js market/index.test.js
 market-sweep	.	node --test --test-force-exit	market/src/search-token-triples.test.js
 solid	solid	node --test --test-force-exit	solid/src/**/*.test.js
 workers	.	node --test --test-force-exit	workers/*.test.js workers/*.test.mjs
