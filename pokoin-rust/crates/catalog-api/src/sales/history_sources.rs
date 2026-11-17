@@ -133,20 +133,12 @@ impl FxRates {
         FxRates { rates }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rates.is_empty()
-    }
-
     /// The newest rate with `day <=` the asked day; the first stored rate (marked
     /// `approx`) for a day that predates the stored history; `None` without rates.
     pub fn rate_for(&self, day: &str) -> Option<ChosenRate> {
         let first = self.rates.first()?;
-        match self
-            .rates
-            .iter()
-            .filter(|rate| rate.day.as_str() <= day)
-            .next_back()
-        {
+        let newest = self.rates.iter().rfind(|rate| rate.day.as_str() <= day);
+        match newest {
             Some(rate) => Some(ChosenRate {
                 rate: rate.rate,
                 approx: false,
@@ -386,7 +378,6 @@ mod tests {
             json!({ "day": "2026-08-12", "rate": null }),
         ]);
         assert_eq!(usable.rates.len(), 1);
-        assert!(!usable.is_empty());
     }
 
     /// A TCGplayer row whose only read field is `market_price`.
