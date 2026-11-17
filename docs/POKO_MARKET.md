@@ -43,7 +43,7 @@ consumers must not interpret PKN as euro cents.
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
 | `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily lowest listed ask (first vs latest actual UTC refresh date), cards under €2 / 400 PKN excluded as bulk noise; returns explicit PKN and EUR values — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
 | `card_ocr` | `cardId` or `query` | approximate western leftover PP-OCRv5 chrome (`marketplace_card_ocr`): attacks/abilities/HP text; `junk`/`confidence` when noisy; missing printing → `not_found` (never invent text) |
-| `card_price_history` | `cardId`/`query`/`artist`; `range` (`1m`, `3m`, `6m`, `1y`, `2y`, `all`; default `1y`) or explicit `from`/`to` (both win over `range`, span ≤3660 days); `sources` (any of `tcgplayer`, `cardmarket`, `cardtrader_sold`, `cardtrader_ask`; default all four); `condition`, `language`, `reverse`, `firstEdition` narrow `cardtrader_sold` only | one series per source for the window — TCGplayer `marketPrice` in USD, Cardmarket `trend` in EUR with its newest row, CardTrader median sold and lowest listed ask in PKN — bucketed by day, week, month or quarter from the span, each with `storedFrom`/`storedTo`/`days` and first/last/min/max/change. A source with no rows, no Cardmarket product mapping or a failed read degrades alone; `cardtrader_sold` says `truncated` once its row cap is reached, and a printing with no catalog blueprint mapping answers `unsupported` for the whole tool. Graded sold rows are always excluded |
+| `card_price_history` | `cardId`/`query`/`artist`; `range` (`1m`, `3m`, `6m`, `1y`, `2y`, `all`; default `1y`) or an explicit `from` and/or `to` (either wins over `range`, and a lone `from` runs to today; span ≤3660 days); `sources` (any of `tcgplayer`, `cardmarket`, `cardtrader_sold`, `cardtrader_ask`; default all four); `condition`, `language`, `reverse`, `firstEdition` narrow `cardtrader_sold` only | one series per source for the window — TCGplayer `marketPrice` in USD, Cardmarket `trend` in EUR with its newest row, CardTrader median sold and lowest listed ask in PKN (one ask value per UTC day) — bucketed by day, week, month or quarter from the span, each with `storedFrom`/`storedTo`/`days` and first/last/min/max/change. Sources degrade alone: no rows, no Cardmarket product mapping or a failed read is `empty`/`unavailable`, so a printing with no catalog blueprint mapping still gets its TCGplayer series and the three blueprint-keyed sources answer `empty`. The whole result is capped at 5,500 characters: an over-long one thins every series evenly, keeps its first and last bucket and says `thinned`. `cardtrader_sold` filters its slice in SQL and says `truncated` once its row cap is reached. Graded sold rows are always excluded |
 
 ## Product rules baked into the handler
 
@@ -81,14 +81,18 @@ serialized output).
   passes already applied upstream; this module adds none): units and median
   price per day, condition, language, reverse holo and 1st edition. Graded rows
   are a separate slice and never enter a Poko sold history.
-- `cardtrader_blueprint_daily_analytics` — dated lowest listed asks per blueprint.
+- `cardtrader_blueprint_daily_analytics` — dated lowest listed asks per blueprint;
+  a day can hold several refreshes, and a history series keeps the last one.
 - `cardmarket_price_guide` — Cardmarket EUR `trend`, `avg7` and `low` per
-  product and day (`game = 'pokemon'`); a gap between two rows of the same
-  product is carried forward, never invented.
+  product and day (`game = 'pokemon'`); the table is change-only.
+- `cardmarket_price_guide_runs` — the days the guide was refreshed. A history
+  read takes each run day of the window and carries each product's newest guide
+  row at or before it, which can predate the asked `from`.
 - `cardtrader_pokemon_blueprints.card_market_ids` — the blueprint → Cardmarket
   product ids (a JSON array; non-array values are ignored).
-- `fx_rates_daily` — the newest EUR→USD rate, reported with its own day so a
-  conversion is always named as approximate.
+- `fx_rates_daily` — the newest EUR→USD rate up to the asked `to`, kept to four
+  decimals and reported with its own day so a conversion is always named as
+  approximate.
 - `tcgplayer_product_links` and the private TCGCSV reader — verified exact
   printing links and daily TCGplayer quotes, grouped by product/subtype.
 - `marketplace_card_weights` — sell-through / days-of-supply signals.
