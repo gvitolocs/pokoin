@@ -1105,7 +1105,6 @@ fn failed_history_source(
 }
 
 /// The TCGplayer block: one series, the other subtypes named beside it.
-/// The four blocks the tool can build for one printing.
 async fn tcgplayer_history_block(
     deps: &MarketDeps,
     card_id: &str,
@@ -1139,7 +1138,6 @@ async fn tcgplayer_history_block(
     history_block(&TCGPLAYER_HISTORY, bucket, &series.days, "", Some(&extra))
 }
 
-/// The `cardtrader_ask` block: dated lowest listed asks in PKN.
 /// The `cardtrader_ask` block: the stored lowest listed ask of each day.
 async fn ask_history_block(
     deps: &MarketDeps,
@@ -1180,8 +1178,7 @@ async fn ask_history_block(
     history_block(&ASK_HISTORY, bucket, &days, "", None)
 }
 
-/// The `cardtrader_sold` block: the slice's weighted daily medians and units.
-/// The sold slice's series for one blueprint.
+/// The sold block: the slice's weighted daily medians and summed units.
 async fn sold_history_block(
     deps: &MarketDeps,
     blueprint_id: Option<i64>,
@@ -1254,8 +1251,7 @@ async fn sold_history_block(
     block
 }
 
-/// The `cardmarket` block: the trend carried across the change-only guide days.
-/// The Cardmarket guide series of one blueprint.
+/// The Cardmarket block: the trend carried across the change-only guide days.
 async fn cardmarket_history_block(
     deps: &MarketDeps,
     blueprint_id: Option<i64>,
