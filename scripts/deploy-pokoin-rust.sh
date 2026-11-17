@@ -8,6 +8,9 @@ PI="${PI_HOST:-pi-home}"
 BIN="$REPO/pokoin-rust/target/aarch64-unknown-linux-gnu/release/pokoin-api"
 git -C "$REPO" fetch -q origin
 [[ "$COMMIT" == "$(git -C "$REPO" rev-parse origin/main)" ]] || die "deploy only the exact origin/main commit"
+# Ships only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate").
+POKOIN_CI_CALLER=deploy-pokoin-rust bash "$REPO/scripts/require-ci-green.sh" --repo-dir "$REPO" "$COMMIT" \
+  || die "the required CI checks are not green for this commit"
 [[ "$COMMIT" == "$(git -C "$REPO" rev-parse HEAD)" ]] || die "checkout must be on the requested commit"
 git -C "$REPO" diff --quiet HEAD -- || die "tracked changes must be committed before deployment"
 [[ -f "$BIN" ]] || die "build the clean aarch64 release first"
