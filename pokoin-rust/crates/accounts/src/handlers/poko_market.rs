@@ -4588,7 +4588,7 @@ mod tests {
         let stride = gaps.first().copied().unwrap_or(0);
         assert!(stride > 1, "nothing was thinned");
         assert!(
-            gaps.iter().all(|gap| *gap == stride || *gap < stride),
+            gaps.iter().all(|gap| *gap <= stride),
             "uneven thinning {gaps:?}"
         );
         assert!(
