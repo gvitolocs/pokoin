@@ -7,6 +7,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
+| GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
 
@@ -86,7 +87,7 @@ Waiting: a check that is still running is waited for (poll every 30 seconds, giv
 
 Why only the newest `main` commit is usually shippable: the workflows use `cancel-in-progress`, so when a newer commit lands on `main` the runs of the older one are cancelled, and a cancelled check is not green. Ship the newest `origin/main` commit, or re-run the failed workflow on GitHub for the older one.
 
-The required names are in `scripts/ci-required-checks`: `rust-gate` and `repo-gate`. Add a name there only after that check exists on `main`; a name nobody produces blocks every deploy.
+The required names are in `scripts/ci-required-checks`: `rust-gate`, `repo-gate` and `secret-gate`. `js-gate` joins when the JavaScript workflow lands. Add a name there only after that check exists on `main`; a name nobody produces blocks every deploy.
 
 Override (owner only): `POKOIN_CI_OVERRIDE=<full 40-hex commit id>:<reason>` skips the check for that one commit. The reason is at least 10 characters of letters, digits, space and `.,;_()/#-`. A use is valid only when both records are written: a line in `$HOME/pokoin-deploy/ci-gate.log` and an incident in the ops record (`lucina-rs ops record --source pokoin-ci-gate`, or `POKOIN_OPS_RECORD_CMD`). If either cannot be written, the override is refused. Lane workers never get it: it is refused whenever `LANE_WORKER` is set. An agent never sets it; if you are an agent and the gate refuses, stop and report.
 
