@@ -26,11 +26,31 @@ else
   WRANGLER_CMD=(npx --yes wrangler@4)
 fi
 
+# Every version this script uploads or promotes: <UTC>\t<version-id>\t<sha>\t<green|override|promoted|promoted-unrecorded>.
+VERSIONS_LOG="${POKOIN_WEB_VERSIONS_LOG:-$HOME/pokoin-deploy/web-versions.tsv}"
+record_version() { # version-id sha kind: a log problem warns, it never stops a publish
+  { mkdir -p "$(dirname "$VERSIONS_LOG")" \
+    && printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" >> "$VERSIONS_LOG"; } 2> /dev/null \
+    || echo "publish-web: WARNING cannot write $VERSIONS_LOG" >&2
+}
+
 mode=upload
 case "${1:-}" in
   --promote)
     VERSION_ID="${2:?--promote requires a version id}"
-    exec "${WRANGLER_CMD[@]}" versions deploy "$VERSION_ID@100%" --name pokoin-web -y
+    # Promoting an older version is the rollback path, so an id this host did not upload is never refused:
+    # it gets a warning and a line in the versions file.
+    PROMOTE_SHA="$(awk -F'\t' -v id="$VERSION_ID" '$2 == id && $3 != "-" { print $3; exit }' "$VERSIONS_LOG" 2> /dev/null || true)"
+    if [ -z "$PROMOTE_SHA" ]; then
+      echo "publish-web: WARNING version $VERSION_ID was not uploaded through this script on this host; its commit's CI state is unknown" >&2
+      PROMOTE_SHA=-
+      PROMOTE_KIND=promoted-unrecorded
+    else
+      PROMOTE_KIND=promoted
+    fi
+    "${WRANGLER_CMD[@]}" versions deploy "$VERSION_ID@100%" --name pokoin-web -y
+    record_version "$VERSION_ID" "$PROMOTE_SHA" "$PROMOTE_KIND"
+    exit 0
     ;;
   --build-only)
     mode=build
@@ -38,7 +58,7 @@ case "${1:-}" in
     ;;
 esac
 
-exec 9>/tmp/pokoin-web-publish.lock
+exec 9>"${POKOIN_WEB_PUBLISH_LOCK:-/tmp/pokoin-web-publish.lock}"
 flock 9
 
 git fetch -q origin main
@@ -48,9 +68,16 @@ if [ "$mode" = upload ] && ! git merge-base --is-ancestor "$SHA" origin/main; th
   echo "publish-web: $SHA is not on origin/main" >&2
   exit 1
 fi
+CI_RESULT=
+if [ "$mode" = upload ]; then
+  # Uploads only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate").
+  POKOIN_CI_CALLER=publish-web bash "$ROOT/scripts/require-ci-green.sh" --repo-dir "$ROOT" "$SHA"
+  CI_RESULT=green
+  if [ -n "${POKOIN_CI_OVERRIDE:-}" ]; then CI_RESULT=override; fi
+fi
 SHORT="${SHA:0:12}"
 
-WORK="$(mktemp -d /tmp/pokoin-web-publish.XXXXXX)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/pokoin-web-publish.XXXXXX")"
 if [ "$mode" = upload ]; then
   trap 'rm -rf "$WORK"' EXIT
 fi
@@ -70,6 +97,7 @@ UPLOAD_OUT="$(cd "$WORK" && "${WRANGLER_CMD[@]}" versions upload -c wrangler.pok
 printf '%s\n' "$UPLOAD_OUT"
 VERSION_ID="$(printf '%s' "$UPLOAD_OUT" | grep -oE 'Version ID: [0-9a-f-]{36}' | head -1 | awk '{print $3}')"
 if [ -n "$VERSION_ID" ]; then
+  record_version "$VERSION_ID" "$SHA" "$CI_RESULT"
   echo "pokoin-web version $VERSION_ID (main $SHORT). Check the Version Preview URL above, then:"
   echo "  scripts/publish-web.sh --promote $VERSION_ID"
 else
