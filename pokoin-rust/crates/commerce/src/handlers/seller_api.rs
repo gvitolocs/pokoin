@@ -1766,6 +1766,29 @@ mod tests {
         assert_eq!(item_ct_product(&json!({"ctProductId": "0"})), None);
         assert_eq!(item_ct_product(&json!({"ctProductId": "12; drop"})), None);
         assert_eq!(item_ct_product(&json!({})), None);
+        // `cardtraderProductId` is the alias; the canonical key wins when the
+        // item carries both, and an empty one falls through to the alias.
+        assert_eq!(
+            item_ct_product(&json!({"cardtraderProductId": "777"})).as_deref(),
+            Some("777")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"888","cardtraderProductId":"777"})).as_deref(),
+            Some("888")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"","cardtraderProductId":"777"})).as_deref(),
+            Some("777")
+        );
+        // Spaces are trimmed, and an id longer than 20 digits is not an id.
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId": " 456705610 "})).as_deref(),
+            Some("456705610")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"123456789012345678901"})),
+            None
+        );
         let copy = json!({"identity":{"publicId":"806382"},"quantity":1,"priceEurCents":4793,"ctProductId":456705610});
         assert_eq!(
             listing_body(&copy, "s", "IT").unwrap()["sourceListingId"],
