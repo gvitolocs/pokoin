@@ -47,8 +47,23 @@ jobs:
           bash scripts/flow-test-workers-check.sh --base "$base"
       - name: flow-test-workers-check tests
         run: bash scripts/flow-test-workers-check.test.sh
+      - name: unsafe-code check tests
+        run: bash scripts/rust-lints-check.test.sh
+      - name: every pokoin-rust crate forbids unsafe code
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/rust-lints-check.sh --base "$base"
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.

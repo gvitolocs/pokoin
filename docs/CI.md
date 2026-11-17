@@ -7,6 +7,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed`, `flow-db` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
+| Unsafe-code check | `scripts/rust-lints-check.sh` and its test, as steps of `gate-tests` | GitHub, on every pull request and every push to `main`; part of `repo-gate` | Whether a `pokoin-rust` crate is left out of `unsafe_code = "forbid"`, or an exception to that rule was added; see "Unsafe code" below |
 | GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, `scripts/run-flow-tests.sh` against a Postgres 17 service | GitHub, only when Rust files changed | Part of `rust-gate`: every `*_flow` binary runs in a database of its own, and a binary that fails, prints `skipped:` or runs no test is a failure |
 | Release gate | `cargo test --workspace --locked` in `scripts/build-pokoin-rust-release.sh` | nezopt, at deploy | Whether a release is built and deployed |
@@ -59,7 +60,7 @@ Triggers: every `pull_request` and every `push` to `main`, with no `paths` filte
 
 Cost: `gvitolocs/pokoin` is a public repository, so standard GitHub-hosted runners (`ubuntu-24.04`) use no billed minutes. If the repository is made private, every run counts against the plan's included minutes (then per-minute billing), so the `test` and `flow-db` jobs (up to 90 minutes each) would cost real money; revisit the timeouts, the cache and whether `flow-db` should run at all.
 
-- `changes`: `git diff --name-only` against the PR's merge base (or the push's previous commit) with full history. Output `rust=true` when `pokoin-rust/**`, `.github/workflows/rust-ci.yml`, `scripts/check-fast*`, `scripts/run-flow-tests*` or `scripts/flow-test-workers*` changed, else `rust=false`
+- `changes`: `git diff --name-only` against the PR's merge base (or the push's previous commit) with full history. Output `rust=true` when `pokoin-rust/**`, `.github/workflows/rust-ci.yml`, `scripts/check-fast*`, `scripts/run-flow-tests*`, `scripts/rust-lints-check*`, `scripts/rust-unsafe-exceptions.txt` or `scripts/flow-test-workers*` changed, else `rust=false`
 - `test`: only when `rust=true`. The same coverage as the release gate's `cargo test --workspace --locked`, without a database, but as 6 shards of workspace packages (`cargo test -p … --locked --no-fail-fast`, packages taken from `cargo metadata` so new crates are included). A single `cargo test --workspace` froze the GitHub runner VM three times (the log is lost, "runner lost communication"), while every package and every shard passes alone; the cause is not found. The `test` result is the aggregate of the shards
 - `changed`: only when `rust=true`. `scripts/check-fast --no-test` against the PR's base branch (or the push's previous commit). On the runner `diffgate`, `actionlint` and `gitleaks` are not installed, so they show as `SKIPPED`
 - `flow-db`: only when `rust=true`, and `rust-gate` waits for it. `scripts/run-flow-tests.sh` discovers every tracked `pokoin-rust/crates/<crate>/tests/<name>_flow.rs` in the tree, creates a fresh database `flow_<name>` for each from `POKOIN_FLOW_ADMIN_URL`, and runs that one binary in it with both `POKOIN_TEST_DATABASE_URL` and `POKOIN_PRICE_EXPORT_TEST_DATABASE_URL` set to that database. One shared database used to let a binary read tables an earlier one had left behind with a different shape, and `price_export_flow` skipped itself because the job never set the variable it reads. A binary is a failure when cargo exits non-zero, when its output has a line starting with `skipped:` (a guard returned early, so nothing was asserted), or when it reports no passed test at all. The host of `POKOIN_FLOW_ADMIN_URL` must be `127.0.0.1`, `localhost` or `::1`: the script creates and drops databases, so it refuses any URL that is not a throwaway Postgres on the runner. Every binary runs even after one fails, and the job ends with one table (binary, package, result, passed, seconds). `pokoin_commerce::router()` is not a pure constructor but starts three background workers, so every flow test that builds one switches `POKOIN_SELLER_BOOK_WORKER`, `POKOIN_LISTING_SYNC_WORKER` and `POKOIN_SELLER_WEBHOOK_WORKER` off next to its database guard, or carries a line with its reason in `scripts/flow-test-workers-exceptions.txt`: the seller-book sweep racing the assertion it was supposed to feed is what made `seller_snapshot_flow` fail roughly one run in five (PKN-09). `scripts/flow-test-workers-check.sh --base <commit>` enforces that rule, and `repo-gate` runs it and `scripts/flow-test-workers-check.test.sh` so the gate cannot quietly stop checking (`bash scripts/flow-test-workers-check.sh` runs it locally, with no database and no cargo)
@@ -78,6 +79,28 @@ Because `rust-gate` always runs, requiring it cannot block front-end PRs. Do thi
 5. Save. Do not add `test`, `changed` or `flow-db`; each is skipped on non-Rust PRs and a skipped required check counts as passed only through `rust-gate`, which now waits for all three.
 
 The same steps apply to `repo-gate` (from `.github/workflows/repo-ci.yml`): merge the workflow first, then require `repo-gate` as well.
+
+## Unsafe code
+
+Unsafe code is forbidden in every crate of `pokoin-rust/` by the compiler, not by review: each crate manifest carries
+
+```toml
+[lints.rust]
+unsafe_code = "forbid"
+```
+
+so a new `unsafe` block, `unsafe fn`, `unsafe impl` or `unsafe extern` is a build error rather than a discussion.
+
+`scripts/rust-lints-check.sh` covers the other half: that no crate is left out of the rule. It walks every tracked `pokoin-rust/**/Cargo.toml` with a `[package]` section and fails on a crate that neither has that table nor is listed in `scripts/rust-unsafe-exceptions.txt` (one `crate directory<TAB>reason` line per crate). It also fails on an exception whose directory is gone, whose crate has the table anyway, whose reason is shorter than 15 characters, or whose sources no longer contain `unsafe` — the list cannot quietly rot or protect nothing.
+
+The exceptions today are `pokoin-rust/crates/shared-dictionary` (Brotli's C library through `brotlic_sys`, the raw shared dictionaries of RFC 9842) and `pokoin-rust/apps/cardtrader-bridge` (`libc::flock` on the gate file the Oracle pipeline processes share).
+
+**CI fails on every added exception**: with `--base`, the check compares the list against the base commit and refuses any line that was not already there. An added exception ships only with the owner's logged override of `scripts/require-ci-green.sh` ("Deploy gate" below). Removing a line is always fine: give the crate the table and retire the exception. `scripts/rust-lints-check.test.sh` proves each rule on throwaway repositories. Both run as steps of `gate-tests` in `.github/workflows/repo-ci.yml`, so the check is part of `repo-gate`; `rust-ci.yml` also re-runs the Rust jobs when the checker or the list changes.
+
+```bash
+scripts/rust-lints-check.sh                  # what every crate does today
+scripts/rust-lints-check.sh --base origin/main   # as CI runs it
+```
 
 ## Deploy gate: main must be green to ship
 
