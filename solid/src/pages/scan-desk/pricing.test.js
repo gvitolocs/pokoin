@@ -71,6 +71,16 @@ test('hint names the group only for a group', () => {
   );
 });
 
+test('a batch that names a group or a strategy prices its own rows', () => {
+  // Exactly the choices `applyPricing` covers at submit: for those, the desk's
+  // suggested-price run stands down instead of racing the batch pricing.
+  assert.equal(batchHasPricing({ pricingGroupId: 'g1', pricingStrategyId: '' }), true);
+  assert.equal(batchHasPricing({ pricingGroupId: '', pricingStrategyId: 's1' }), true);
+  assert.equal(batchHasPricing({ pricingGroupId: '', pricingStrategyId: '' }), false);
+  assert.equal(batchHasPricing({}), false, 'no choice: the desk suggests the price');
+  assert.equal(batchHasPricing(null), false, 'a batch without defaults suggests too');
+});
+
 test('apply bodies: one per group with every listing that joined it, one per strategy for unpriced rows', () => {
   const rowPricing = [
     { listingId: 'l1', itemId: 'i1', priced: false, groupId: 'g1' },

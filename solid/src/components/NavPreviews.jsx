@@ -4,7 +4,11 @@ import { listConversations } from '@market/chat-client.js';
 import { openThread } from '@market/chat-dock-store.js';
 import { chatPersonName } from '@market/chat-format.js';
 import { GAMES, game, gamePreviewHref } from '@market/game.js';
-import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
+import {
+  loadPortfolioHistory,
+  peekPortfolioHistory,
+  subscribePortfolioHistory,
+} from '@market/portfolio-history-cache.js';
 import { sparkline } from '@market/portfolio-sparkline.js';
 import { previewHistoryMonth } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN } from '@market/punchouts.js';
@@ -97,18 +101,17 @@ export function DashboardPreview() {
       const cached = peekPortfolioHistory(owner);
       if (cached) setDays(cached);
       setPending(!cached);
+      const show = (series) => { if (live) setDays(series); };
+      const unsubscribe = subscribePortfolioHistory(owner, show);
       loadPortfolioHistory(owner, () => getBearer().then((token) => fetchPortfolioHistory(token)))
-        .then((series) => {
-          if (live) setDays(series);
-        })
-        .catch(() => {
-          if (live) setDays([]);
-        })
+        .then(show)
+        .catch(() => { /* a failed refresh keeps the painted series */ })
         .finally(() => {
           if (live) setPending(false);
         });
       return () => {
         live = false;
+        unsubscribe();
       };
     },
   );

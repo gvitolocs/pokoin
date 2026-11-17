@@ -4,9 +4,19 @@ import {
   activeSoldIndex,
   formatSoldAxisTick,
   formatSoldDay,
+  formatSoldDayWithYear,
   nearestSoldIndex,
   isSoldGraphClick,
+  soldGraphDateWindow,
+  soldGraphDayMs,
+  soldGraphDayOnOrBefore,
+  soldGraphGapSegments,
+  soldGraphHoverRows,
+  soldGraphNearDay,
+  soldGraphRangeBounds,
+  soldGraphRangeDays,
   soldGraphScale,
+  soldGraphSpansYears,
   soldGraphTipMods,
   soldGraphY,
   soldConditionLabel,
@@ -19,6 +29,7 @@ import {
   soldUnitCount,
   formatSoldSampleCount,
   SOLD_GRAPH_PAD,
+  SOLD_GRAPH_TIP_ROWS,
   SOLD_SERIES_PALETTES,
   soldSeriesColor,
 } from './sold-graph.js';
@@ -135,6 +146,25 @@ test('sold-day labels follow the viewer locale, not MM/DD', () => {
   assert.equal(formatSoldDay('2026-09-06', 'it-IT'), '06/09');
 });
 
+test('long or year-crossing windows put the two-digit year on the dates', () => {
+  // A 90-day window inside one year stays day and month.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-06-01'), soldGraphDayMs('2026-08-30')), false);
+  // 366 days: the year joins both axis labels and the tooltip date.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2025-11-16'), soldGraphDayMs('2026-11-17')), true);
+  // 30 days across New Year: the first and last day are in different years.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-12-20'), soldGraphDayMs('2027-01-18')), true);
+  // Exactly 300 days apart is still short; one day more is not.
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-01-20'), soldGraphDayMs('2026-11-16')), false);
+  assert.equal(soldGraphSpansYears(soldGraphDayMs('2026-01-19'), soldGraphDayMs('2026-11-16')), true);
+  assert.equal(soldGraphSpansYears(NaN, soldGraphDayMs('2026-11-16')), false);
+  // The locale keeps its own order and separators, with or without the year.
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-US', true), '09/03/26');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'it-IT', true), '03/09/26');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-GB', false), '03/09');
+  assert.equal(formatSoldDayWithYear('2026-09-03', 'en-US', false), formatSoldDay('2026-09-03', 'en-US'));
+  assert.equal(formatSoldDayWithYear('nonsense', 'en-US', true), '');
+});
+
 test('plot padding leaves room for unstretched axis labels', () => {
   assert.ok(SOLD_GRAPH_PAD.l >= 40);
   assert.ok(SOLD_GRAPH_PAD.r >= 36);
@@ -189,4 +219,107 @@ test('sold graph unit count sums copies sold, not listing events', () => {
   assert.equal(soldUnitCount([{ listings: 3 }, { sampleCount: 2 }]), 5);
   assert.equal(formatSoldSampleCount(1), '1 unit');
   assert.equal(formatSoldSampleCount(128), '128 units');
+});
+
+test('a range window clips the days it covers, and no range clips nothing', () => {
+  const bounds = soldGraphRangeBounds({ key: '1m', from: '2026-10-17', to: '2026-11-16' });
+  assert.deepEqual(bounds, { key: '1m', from: '2026-10-17', to: '2026-11-16' });
+  const days = [
+    { day: '2026-11-16', medianPkn: 300 },
+    { day: '2026-10-17', medianPkn: 320 },
+    { day: '2026-10-16', medianPkn: 330 },
+    { day: '2026-11-17', medianPkn: 290 },
+  ];
+  // Outside the window is not drawn; inside it is oldest first.
+  assert.deepEqual(soldGraphRangeDays(days, bounds).map((row) => row.day), ['2026-10-17', '2026-11-16']);
+  assert.equal(soldGraphRangeBounds(undefined), null);
+  assert.equal(soldGraphRangeBounds({ key: '3m' }), null);
+  assert.equal(soldGraphRangeBounds({ from: '2026-10-17', to: 'not a day' }), null);
+  // Without a range the series is passed through untouched, as today's graph.
+  assert.deepEqual(soldGraphRangeDays(days, null), days);
+  assert.deepEqual(soldGraphRangeDays([{ day: 'nope' }, null], null), []);
+});
+
+test('the drawn window is the range clipped to the visible days', () => {
+  const bounds = { from: '2026-10-17', to: '2026-11-16' };
+  const days = [{ day: '2026-10-17' }, { day: '2026-11-01' }];
+  assert.deepEqual(
+    soldGraphDateWindow(days, bounds),
+    { start: soldGraphDayMs('2026-10-17'), end: soldGraphDayMs('2026-11-01') },
+  );
+  // A range that covers everything still starts and ends where the data does.
+  const wide = soldGraphDateWindow([{ day: '2024-03-01' }, { day: '2026-11-10' }], { from: '2024-02-08', to: '2026-11-16' });
+  assert.deepEqual(wide, { start: soldGraphDayMs('2024-03-01'), end: soldGraphDayMs('2026-11-10') });
+  // One day, or no range at all: the window is the series itself.
+  assert.deepEqual(soldGraphDateWindow([{ day: '2026-01-05' }], null), { start: soldGraphDayMs('2026-01-05'), end: soldGraphDayMs('2026-01-05') });
+  assert.equal(soldGraphDateWindow([], null), null);
+});
+
+test('a source line breaks where its own days are further apart than its gap', () => {
+  const days = [
+    { day: '2026-11-01', pkn: 100 },
+    { day: '2026-11-02', pkn: 110 },
+    { day: '2026-11-12', pkn: 120 },
+    { day: '2026-11-13', pkn: 130 },
+  ];
+  // Exactly the gap is still one price move; one day more is a hole.
+  assert.deepEqual(soldGraphGapSegments(days, 10).segments.map((run) => run.length), [4]);
+  assert.deepEqual(soldGraphGapSegments(days, 10).bridges, []);
+  const nine = soldGraphGapSegments(days, 9);
+  assert.deepEqual(nine.segments.map((run) => run.map((row) => row.day)), [['2026-11-01', '2026-11-02'], ['2026-11-12', '2026-11-13']]);
+  assert.deepEqual(nine.bridges, [[days[1], days[2]]]);
+  // A line that starts and ends at its own first and last day: no edge carry.
+  assert.equal(nine.segments[0][0].day, '2026-11-01');
+  assert.equal(nine.segments[1][1].day, '2026-11-13');
+  assert.deepEqual(soldGraphGapSegments([], 3), { segments: [], bridges: [] });
+  assert.deepEqual(soldGraphGapSegments([{ day: 'oops' }], 3), { segments: [], bridges: [] });
+});
+
+test('a source reads its nearest day inside the gap, its weekly one backwards', () => {
+  const days = [
+    { day: '2026-11-01', value: 100 },
+    { day: '2026-11-05', value: 120 },
+    { day: '2026-11-20', value: 90 },
+  ];
+  assert.equal(soldGraphNearDay(days, '2026-11-07', 3)?.value, 120);
+  assert.equal(soldGraphNearDay(days, '2026-11-07', 1), null);
+  assert.equal(soldGraphNearDay(days, '2026-11-12', 10)?.value, 120);
+  assert.equal(soldGraphNearDay(days, '2026-11-14', 10)?.value, 90);
+  assert.equal(soldGraphNearDay(days, 'nonsense', 99), null);
+  assert.equal(soldGraphDayOnOrBefore(days, '2026-11-19')?.value, 120);
+  assert.equal(soldGraphDayOnOrBefore(days, '2026-11-20')?.value, 90);
+  assert.equal(soldGraphDayOnOrBefore(days, '2026-10-31'), null);
+});
+
+test('the hover names every visible series, capped at six rows', () => {
+  const sold = { key: 'picked', label: 'NM · EN', kind: 'sold', picked: true, days: [{ day: '2026-11-10', value: 300 }] };
+  const tp = {
+    key: 'tcgplayer', label: 'TCGplayer', kind: 'source', gapDays: 10,
+    days: [{ day: '2026-11-08', value: 280 }, { day: '2026-11-12', value: 290 }],
+  };
+  const cm = { key: 'cardmarket', label: 'Cardmarket', kind: 'source', carry: 'onOrBefore', gapDays: 99, days: [{ day: '2026-11-09', value: 260 }] };
+  const now = { key: 'pokoin_now', label: 'Pokoin now', kind: 'now', value: 275 };
+  const options = { formatValue: (value) => `${value} PKN`, formatDay: (iso) => iso.slice(5), endDay: '2026-11-11' };
+  const today = soldGraphHoverRows([sold, tp, cm, now], '2026-11-11', options);
+  assert.deepEqual(today.rows.map((row) => [row.label, row.text, row.value]), [
+    ['NM · EN', 'no sale', null],
+    ['TCGplayer', '290 PKN', 290],
+    ['Cardmarket', '260 PKN', 260],
+    ['Pokoin now', '275 PKN', 275],
+  ]);
+  assert.equal(today.more, 0);
+  // Before Cardmarket has any trend: say where it starts. Pokoin now is today only.
+  const early = soldGraphHoverRows([sold, tp, cm, now], '2026-11-05', options);
+  assert.deepEqual(early.rows.map((row) => row.text), ['no sale', '280 PKN', 'from 11-09', 'no data']);
+  const eight = soldGraphHoverRows([
+    sold, tp, cm, now,
+    { key: 'x1', label: 'SP', kind: 'sold', days: [] },
+    { key: 'x2', label: 'PL', kind: 'sold', days: [] },
+    { key: 'x3', label: 'Poor', kind: 'sold', days: [] },
+    { key: 'x4', label: 'IT', kind: 'sold', days: [] },
+  ], '2026-11-10', options);
+  assert.equal(eight.rows.length, SOLD_GRAPH_TIP_ROWS);
+  assert.equal(eight.more, 2);
+  assert.deepEqual(eight.rows.map((row) => row.label), ['NM · EN', 'TCGplayer', 'Cardmarket', 'Pokoin now', 'SP', 'PL']);
+  assert.equal(soldGraphHoverRows([], '2026-11-10').rows.length, 0);
 });

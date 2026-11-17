@@ -153,7 +153,7 @@ async fn read_prices_attaches_every_source_from_the_real_tables() {
 
     assert_eq!(
         comp["sourceStatus"],
-        json!({ "cardtraderSold": "available", "pokoinSold": "unavailable", "cardmarket": "available", "tcgplayer": "available" })
+        json!({ "cardtraderSold": "available", "pokoinSold": "unavailable", "cardmarket": "available", "cardmarketoffers": "unavailable", "tcgplayer": "available" })
     );
 
     // The reverse item prices the reverse rows in both feeds.
