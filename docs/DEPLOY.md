@@ -31,6 +31,8 @@ Rollback: `scripts/publish-web.sh --promote <previous version>`
    on `origin/main`.
 2. **Deploy with `scripts/deploy-web.sh` on nezopt.** Never `vercel --prod`
    from a branch, a dirty checkout, or a copied directory.
+   A commit ships only when `scripts/require-ci-green.sh` passes for it: its
+   required GitHub checks are green (docs/CI.md, "Deploy gate").
 3. **One checkout per agent.** Use `git worktree add` for parallel work. In a
    checkout another agent may be using, never `git stash`, `git reset --hard`,
    `git checkout -- .`, or `git add -A` / `git commit -a` — they move other
