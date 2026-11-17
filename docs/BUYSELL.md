@@ -174,6 +174,10 @@ private line per fill, capped at the same 240 characters. It is written by the t
   the target, sends a signed-out visitor to sign-in, and mounts the dialog. `solid/src/lib/buy-book.js` is the desk's
   one `pickSell(target)` / `sellPick` signal, keyed by a counter so the same row twice is a fresh dialog.
 - `solid/src/pages/BuySell.jsx`: `/buysell` with tabs Wanted, My offers (`?tab=mine`), Sell to buyers (`?tab=sell`).
+  Signed in, Wanted also reads `/mine` once and marks the board rows that are the caller's own open offers with a
+  "Your offer" tag: those rows take the My offers **Edit** and **Delete offer** instead of Sell now (same
+  `ownOfferActions`, so the same editor and the same DELETE), and a delete drops the row from the loaded pages
+  instead of refetching the board. Signed out, the board is the public one.
 - Navigation: the two-tone BuySell mark (`market/src/buysell-icon.js` paths, drawn by `components/buysell/BuySellIcon.jsx`; buy arrow `--buysell-buy` = `--yellow`, sell arrow `--buysell-sell` = `--ct-blue`; also next to the page title and in the offer bar) in Chrome, the phone menu and the footer.
 - Edge: `/buysell` is an SPA prefix in `scripts/write-cloudflare-web-routing.mjs` and has rewrites in `vercel.json`.
 
@@ -181,7 +185,8 @@ private line per fill, capped at the same 240 characters. It is written by the t
 
 `?mypokoinPreview` on a card page or on `/buysell` (the MyPokoin switch: dev build, or host `localhost` /
 `127.0.0.1`; never on a production host) shows fixture offers from `solid/src/pages/buysell-preview-fixture.js`
-without calling the API or signing in. Posting, Edit and Cancel do nothing in preview. Quick Sell still opens and
+without calling the API or signing in. Posting, Edit and Delete do nothing in preview, and `previewOwnIds()` marks
+one board row as the caller's own so the Wanted Edit and Delete offer state is reviewable. Quick Sell still opens and
 paints its real form, but `props.preview` skips sign-in and the request and takes the dialog straight to its success
 state, so the sheet that gets reviewed is the one a real sale ends on. On the desk the
 fixture book feeds both surfaces at once — the offer bar and the Best Deal Buy offers rows — while Other sellers

@@ -8,6 +8,7 @@ use axum::Router;
 use pokoin_api_common::RouteState;
 
 pub mod core;
+pub mod history_sources;
 pub mod routes;
 pub mod tcgcsv;
 
