@@ -12,7 +12,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-tmp=$(mktemp -d "${TMPDIR:-$HOME/scratch/tmp}/check-migrations-test.XXXXXX")
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-migrations-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 repo=$tmp/repo
