@@ -22,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: require-ci-green tests
         run: bash scripts/require-ci-green.test.sh
@@ -31,8 +32,23 @@ jobs:
         run: bash scripts/auto-deploy-rust.test.sh
       - name: run-flow-tests tests
         run: bash scripts/run-flow-tests.test.sh
+      - name: flow tests switch the router's workers off
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/flow-test-workers-check.sh --base "$base"
+      - name: flow-test-workers-check tests
+        run: bash scripts/flow-test-workers-check.test.sh
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.
