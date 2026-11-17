@@ -324,8 +324,8 @@ pub(crate) fn tool_schemas() -> Vec<Json> {
             "card_price_history",
             "Price history of one printing per source (TCGplayer USD, Cardmarket EUR, CardTrader sold and lowest ask in PKN) for a range up to years, bucketed by day, week, month or quarter. Use it for 'older prices', 'a year ago', 'since release' and trend-over-months questions.",
             &join(&card, &variant, &[
-                ("range", "string", "\"1m\", \"3m\", \"6m\", \"1y\", \"2y\" or \"all\". Defaults to 1y and is ignored when from and to are both dates."),
-                ("from", "string", "First day as YYYY-MM-DD. Use together with to."),
+                ("range", "string", "\"1m\", \"3m\", \"6m\", \"1y\", \"2y\" or \"all\". Defaults to 1y and is ignored when from or to is a date."),
+                ("from", "string", "First day as YYYY-MM-DD. Alone it runs to today."),
                 ("to", "string", "Last day as YYYY-MM-DD. Defaults to today."),
                 ("sources", "string", "Comma list of tcgplayer, cardmarket, cardtrader_sold, cardtrader_ask. Defaults to all four."),
             ]),
