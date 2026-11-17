@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 pokoin-cache = { path = "../cache" }
 serde_json = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"
