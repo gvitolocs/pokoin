@@ -121,3 +121,16 @@ The required names are in `scripts/ci-required-checks`: `rust-gate`, `repo-gate`
 Override (owner only): `POKOIN_CI_OVERRIDE=<full 40-hex commit id>:<reason>` skips the check for that one commit. The reason is at least 10 characters of letters, digits, space and `.,;_()/#-`. A use is valid only when both records are written: a line in `$HOME/pokoin-deploy/ci-gate.log` and an incident in the ops record (`lucina-rs ops record --source pokoin-ci-gate`, or `POKOIN_OPS_RECORD_CMD`). If either cannot be written, the override is refused. Lane workers never get it: it is refused whenever `LANE_WORKER` is set. An agent never sets it; if you are an agent and the gate refuses, stop and report.
 
 Every run that ends is logged: one line in `$HOME/pokoin-deploy/ci-gate.log` with the UTC time, the full commit, the result (`green`, `refused` or `override`), the reason and the caller.
+
+## Pushing to main
+
+`.githooks/pre-push` is the local front door of that gate. A pull request is merged on GitHub and never passes through a local `git push`, so every local push that updates `refs/heads/main` is a direct push: 11 of the 161 first-parent commits on `main` in the 30 days before this hook existed were exactly that. For a remote url of this repository (`POKOIN_PUSH_GUARD_URL_RE` names it) the hook
+
+- **secret-scans what it publishes**, every ref and not only `main`, a deletion excepted: `gitleaks detect --redact --log-opts=<remote sha>..<local sha>`, or `<local sha> --not --remotes=<remote>` for commits no remote branch has yet. A finding refuses the push (docs/SECRETS.md). Where this host has no gitleaks, it prints one warning that the push was not scanned and lets it pass; the CI `secret-gate` is unchanged by that.
+- **refuses, for `refs/heads/main`,** deleting it, and any push that does not fast-forward the remote `main` (a rewrite of published history — refused even when the checks of that commit are green, and a remote sha this clone does not have counts as not an ancestor). Otherwise it runs `scripts/require-ci-green.sh --no-wait` on the commit, so a check that is still running is a refusal, never a wait.
+
+The hook adds no switch of its own: the emergency path is the gate's `POKOIN_CI_OVERRIDE` above, logged and ops-recorded, and an agent never sets it. Every other remote passes silently.
+
+Both are refusals only where the hook runs: it needs `core.hooksPath=.githooks` (`scripts/setup-git-hooks.sh`; active in every worktree on nezopt) and `git push --no-verify` skips it. That is why the deploy gate above is what makes an untested commit unshippable — the deploy entry points call `scripts/require-ci-green.sh` again, so a commit that reached `main` unchecked may sit there but will not ship.
+
+`scripts/pre-push-hook.test.sh` covers it on throwaway repositories (the hook called directly with git's arguments and the ref lines on stdin, a fake `gh` through `GH=`, real gitleaks for the scan cases) and runs in the `gate-tests` job of `.github/workflows/repo-ci.yml`.

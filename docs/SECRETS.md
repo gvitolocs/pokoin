@@ -2,8 +2,9 @@
 
 Every credential of this project lives in **Infisical** and in the runtime
 environment that reads it. Nothing secret is committed — not to a feature
-branch, not "temporarily", not in a test. `.env*` files are gitignored and are
-never a deployment mechanism here.
+branch, not "temporarily", not in a test. `.env*` files are gitignored — the
+`.example`, `.sample` and `.template` templates excepted — and are never a
+deployment mechanism here.
 
 ## Running the scan
 

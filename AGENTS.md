@@ -45,6 +45,15 @@ checkout. It is **not** a development workspace:
   in the canonical checkout are rejected by `.githooks/pre-commit` unless
   `POKOIN_ALLOW_CANONICAL_COMMIT=1` is set for an intentional integration
   or maintenance operation.
+- A local push that updates `refs/heads/main` is a direct push, so
+  `.githooks/pre-push` refuses it unless that commit's required GitHub checks
+  are already green on it, and refuses deleting or rewriting `main` whatever
+  the checks say. It also secret-scans every commit before it is published.
+  Push your branch and open a pull request instead; an agent never overrides
+  this hook — if it refuses, stop and report. `git push --no-verify` skips the
+  hook, and the deploy entry points run `scripts/require-ci-green.sh` again, so
+  an unchecked commit is still unshippable
+  ([docs/CI.md](docs/CI.md), "Pushing to main").
 
 While operating inside a Paseo workspace:
 
