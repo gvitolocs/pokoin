@@ -125,8 +125,13 @@ guard_main() {
   find_toplevel
   gate="$toplevel/scripts/require-ci-green.sh"
   [ -f "$gate" ] || refuse "the CI gate script is not here ($gate); this checkout predates it or it was removed."
+  # git exports GIT_DIR (and GIT_PREFIX, GIT_EXEC_PATH, GIT_CONFIG_PARAMETERS) into the hook it runs. The calls
+  # above want exactly that repository, so they keep it; the gate does not: it names its own repository with
+  # --repo-dir/-C, and an inherited GIT_DIR would make it resolve its own file against the wrong work tree top
+  # and refuse every push to main. Taken away here rather than trusted to the gate's own defence.
   rc=0
-  POKOIN_CI_CALLER=pre-push bash "$gate" --no-wait "$local_sha" || rc=$?
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_PREFIX -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+    POKOIN_CI_CALLER=pre-push bash "$gate" --no-wait "$local_sha" || rc=$?
   if [ "$rc" != 0 ]; then
     printf '%s\n' "$MAIN_TEXT" >&2
     exit 1

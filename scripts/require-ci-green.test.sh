@@ -450,6 +450,25 @@ hasnt "REFUSED" "16j"
 cp "$t/pristine-require-ci-green.sh" "$GATE_COPY"
 ok "16i/j: --self-check-only gives 0 for identical files and 1 for a differing one, with no gh call, no log line and no commit"
 
+# 16k. the environment a git hook really runs in: git exports GIT_DIR (absolute) and GIT_PREFIX when it calls a hook,
+#      and .githooks/pre-push calls the gate with the current directory inside scripts/. With GIT_DIR set and no
+#      GIT_WORK_TREE git takes the current directory as the top of the work tree, so the self-check's relative
+#      `rev-parse --show-toplevel` answered <top level>/scripts, the compared path lost its scripts/ prefix, and the
+#      gate refused its own file as "origin/main has no require-ci-green.sh" — every guarded push died there before
+#      it asked GitHub anything (PKN-15). On an untouched tree it must pass.
+rc=0
+: > "$calls"
+rm -f "$LOGF"
+( cd "$t/repo/scripts" \
+  && env GIT_DIR="$t/repo/.git" GIT_PREFIX=scripts/ GH="$t/gh" FAKE_GH_FIXTURE="$t/fx-green.json" \
+       bash "$GATE_COPY" --repo-dir "$t/repo" --self-check-only > "$t/out" 2>&1 ) || rc=$?
+want_rc 0 "16k GIT_DIR exported, cwd inside scripts/"
+hasnt "has no require-ci-green.sh" "16k GIT_DIR exported, cwd inside scripts/"
+hasnt "$NOT_ON_MAIN" "16k GIT_DIR exported, cwd inside scripts/"
+[ ! -s "$calls" ] || fail "16k: gh was called in --self-check-only mode"
+[ ! -e "$LOGF" ] || fail "16k: --self-check-only wrote a log line: $(cat "$LOGF")"
+ok "16k: called as a hook calls it (GIT_DIR exported, cwd inside scripts/), an untouched tree passes its self-check -> 0"
+
 # usage and unresolvable commit
 rc=0
 bash "$gate" > "$t/out" 2>&1 || rc=$?

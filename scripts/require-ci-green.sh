@@ -26,6 +26,12 @@
 #   POKOIN_OPS_RECORD_CMD       command that takes one JSON object on stdin (default: lucina-rs ops record)
 set -euo pipefail
 
+# git exports GIT_DIR (and GIT_PREFIX, GIT_EXEC_PATH, GIT_CONFIG_PARAMETERS) into the hooks it runs; with GIT_DIR
+# set and no GIT_WORK_TREE, git takes the current directory as the top of the work tree, so a relative
+# `rev-parse --show-toplevel` answers the directory the gate happens to sit in. Drop them: the gate always names
+# the repository it means with -C / --repo-dir and never needs the caller's hook environment.
+unset GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_INDEX_FILE GIT_COMMON_DIR
+
 BEFORE_SHA_PREFIX="require-ci-green"
 OVERRIDE_NOTE="POKOIN_CI_OVERRIDE is the owner's emergency switch: it needs the exact commit id and a reason, and every use is written to the log and to the ops record. An agent never sets it (worker environments do not pass it): if you are an agent, stop and report."
 
