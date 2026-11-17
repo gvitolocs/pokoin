@@ -29,8 +29,10 @@ jobs:
         run: bash scripts/deploy-gate-callers.test.sh
       - name: auto-deploy-rust tests
         run: bash scripts/auto-deploy-rust.test.sh
+      - name: run-flow-tests tests
+        run: bash scripts/run-flow-tests.test.sh
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.
