@@ -7,6 +7,7 @@ The fast check runs on nezopt in your worktree. GitHub repeats the gate that alr
 | Fast check | `scripts/check-fast` | Your worktree, before a commit | Nothing by itself; it tells you early |
 | GitHub `rust-gate` | `.github/workflows/rust-ci.yml`: jobs `changes`, `test`, `changed` | GitHub, on every pull request and every push to `main`; the Rust jobs run only when Rust files changed | Whether the PR may merge, once the owner makes it a required check |
 | GitHub `repo-gate` | `.github/workflows/repo-ci.yml`: job `gate-tests` | GitHub, on every pull request and every push to `main` | Whether the deploy gate's own scripts still work; `scripts/require-ci-green.sh` also reads it before anything ships |
+| Unsafe-code check | `scripts/rust-lints-check.sh` and its test, as steps of `gate-tests` | GitHub, on every pull request and every push to `main`; part of `repo-gate` | Whether a `pokoin-rust` crate is left out of `unsafe_code = "forbid"`, or an exception to that rule was added; see "Unsafe code" below |
 | GitHub `js-gate` | `.github/workflows/js-ci.yml`: jobs `js-inventory`, `market`, `market-sweep`, `solid`, `workers`, `news`, `scripts`, `bench`, `js-gate` | GitHub, on every pull request and every push to `main` | Whether every tracked JavaScript test still passes; not yet a required check — see "JavaScript tests" below and `scripts/ci-required-checks` |
 | GitHub `secret-gate` | `.github/workflows/secrets-ci.yml`: `scripts/ci-secret-scan.sh` (gitleaks over the commit range and the tree, fails on any allowlist change) and its test | GitHub, on every pull request and every push to `main` | Whether the PR may merge, once the owner makes it a required check; it is also in scripts/ci-required-checks, so a commit ships only when it is green; docs/SECRETS.md |
 | `flow-db` | Same workflow, Postgres 17 service, `*_flow` test binaries | GitHub | Nothing: informational, `continue-on-error`. `seller_api_flow` is the known red on `main` |
@@ -60,7 +61,7 @@ Triggers: every `pull_request` and every `push` to `main`, with no `paths` filte
 
 Cost: `gvitolocs/pokoin` is a public repository, so standard GitHub-hosted runners (`ubuntu-24.04`) use no billed minutes. If the repository is made private, every run counts against the plan's included minutes (then per-minute billing), so the `test` and `flow-db` jobs (up to 90 minutes each) would cost real money; revisit the timeouts, the cache and whether `flow-db` should run at all.
 
-- `changes`: `git diff --name-only` against the PR's merge base (or the push's previous commit) with full history. Output `rust=true` when `pokoin-rust/**`, `.github/workflows/rust-ci.yml` or `scripts/check-fast*` changed, else `rust=false`
+- `changes`: `git diff --name-only` against the PR's merge base (or the push's previous commit) with full history. Output `rust=true` when `pokoin-rust/**`, `.github/workflows/rust-ci.yml`, `scripts/check-fast*`, `scripts/rust-lints-check*` or `scripts/rust-unsafe-exceptions.txt` changed, else `rust=false`
 - `test`: only when `rust=true`. The same coverage as the release gate's `cargo test --workspace --locked`, without a database, but as 6 shards of workspace packages (`cargo test -p … --locked --no-fail-fast`, packages taken from `cargo metadata` so new crates are included). A single `cargo test --workspace` froze the GitHub runner VM three times (the log is lost, "runner lost communication"), while every package and every shard passes alone; the cause is not found. The `test` result is the aggregate of the shards
 - `changed`: only when `rust=true`. `scripts/check-fast --no-test` against the PR's base branch (or the push's previous commit). On the runner `diffgate`, `actionlint` and `gitleaks` are not installed, so they show as `SKIPPED`
 - `flow-db`: only when `rust=true`. The `*_flow` binaries against Postgres 17, informational (`continue-on-error`)
@@ -93,6 +94,27 @@ The file globs live in `scripts/js-test-groups.txt` — one line per job: group,
 Cost: `gvitolocs/pokoin` is public, so these `ubuntu-24.04` runners use no billed minutes; a green run is about 3 minutes of wall time, because the jobs run in parallel and the longest of them (`market`) is about 2 minutes. If the repository becomes private, every job counts against the plan's included minutes.
 
 Locally, from your worktree: `bash scripts/js-run-group.sh market` is exactly the `market` job, and `bash scripts/js-test-inventory.sh --base "$(git merge-base origin/main HEAD)"` is the `js-inventory` job.
+## Unsafe code
+
+Unsafe code is forbidden in every crate of `pokoin-rust/` by the compiler, not by review: each crate manifest carries
+
+```toml
+[lints.rust]
+unsafe_code = "forbid"
+```
+
+so a new `unsafe` block, `unsafe fn`, `unsafe impl` or `unsafe extern` is a build error rather than a discussion.
+
+`scripts/rust-lints-check.sh` covers the other half: that no crate is left out of the rule. It walks every tracked `pokoin-rust/**/Cargo.toml` with a `[package]` section and fails on a crate that neither has that table nor is listed in `scripts/rust-unsafe-exceptions.txt` (one `crate directory<TAB>reason` line per crate). It also fails on an exception whose directory is gone, whose crate has the table anyway, whose reason is shorter than 15 characters, or whose sources no longer contain `unsafe` — the list cannot quietly rot or protect nothing.
+
+The exceptions today are `pokoin-rust/crates/shared-dictionary` (Brotli's C library through `brotlic_sys`, the raw shared dictionaries of RFC 9842) and `pokoin-rust/apps/cardtrader-bridge` (`libc::flock` on the gate file the Oracle pipeline processes share).
+
+**CI fails on every added exception**: with `--base`, the check compares the list against the base commit and refuses any line that was not already there. An added exception ships only with the owner's logged override of `scripts/require-ci-green.sh` ("Deploy gate" below). Removing a line is always fine: give the crate the table and retire the exception. `scripts/rust-lints-check.test.sh` proves each rule on throwaway repositories. Both run as steps of `gate-tests` in `.github/workflows/repo-ci.yml`, so the check is part of `repo-gate`; `rust-ci.yml` also re-runs the Rust jobs when the checker or the list changes.
+
+```bash
+scripts/rust-lints-check.sh                  # what every crate does today
+scripts/rust-lints-check.sh --base origin/main   # as CI runs it
+```
 
 ## Deploy gate: main must be green to ship
 
