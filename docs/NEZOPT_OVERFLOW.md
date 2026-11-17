@@ -73,6 +73,37 @@ Pods differ from the Pi only where they must:
 - **CDN:** the pods also serve the cdn.pokoin.com origin `nez-k3s` (port 8081) from the read-only leftover mirror plus `poko-video/`. A miss falls back to the Pi's own CDN (see *Staying in sync with the Pi*).
 - **Scan and Hermes:** the Pi's loopback SSH tunnels do not exist in a pod, so pods reach those two host services through socat bridges on the same Docker network (next section).
 
+## Memory and the kill order
+
+The `api` container of `pokoin-api` requests exactly what it is limited to, for
+cpu **and** memory, because that equality is what puts the pod in the Kubernetes
+**Guaranteed** QoS class. With requests below limits the class is **Burstable**
+and the kernel is told to kill the pod first when nezopt runs short of memory:
+`oom_score_adj` 998 read from `/proc` on the host, versus -997 for Guaranteed.
+
+| | requests | limits | class | `oom_score_adj` |
+| --- | --- | --- | --- | --- |
+| until 2026-11-17 | 500m / 128Mi | cpu 2 / 768Mi | Burstable | 998 |
+| now | 1 / 1536Mi | 1 / 1536Mi | Guaranteed | -997 |
+
+The Burstable pods were OOM-killed 21 times in four days, five of them at their
+own 768Mi limit (finding PKN-10). The worst case the node must hold is the HPA at
+`maxReplicas: 4`: 4 CPUs and 6144Mi, inside a node with 12 allocatable CPUs and
+63831852Ki whose other pods request 700m CPU and 972Mi in total. Measured usage
+stays far below the request (6 to 8 millicores average per pod, 0 throttled
+periods at cpu 2), so the reservation is what changed, not the capacity. The HPA
+itself is unchanged, and 60 % of a bigger request means it now scales at 600m per
+pod instead of 300m.
+
+`scripts/k3s-manifest-check.sh` keeps it that way: it reads the manifest with awk
+(no kubectl, no YAML tool, no cluster) and fails on an unequal pair, on a missing
+request, on a memory limit under 1536Mi, on a unit other than Mi/Gi, and on an
+HPA whose `maxReplicas` x the pod limits would reserve more than 8Gi or 6 CPUs —
+the share this API may hold on the node, so raising either constant is a capacity
+decision. It runs in CI (`.github/workflows/repo-ci.yml`, job `gate-tests`) with
+its fixture test `scripts/k3s-manifest-check.test.sh`. Nothing here applies
+anything: `scripts/nezopt-k3s.sh apply` does.
+
 ## Host services through socat bridges
 
 UFW drops container → host traffic, so a pod cannot call a service on the

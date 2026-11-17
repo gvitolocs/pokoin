@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   gate-tests:
-    # The deploy gate script and the entry points that call it, tested against fakes (no network, no deploy).
+    # The deploy gate script and the entry points that call it, tested against fakes (no network, no deploy);
+    # and the k3s manifest check, which reads infra/k3s/*.yaml only (no cluster access).
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -60,8 +61,12 @@ jobs:
             base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
           bash scripts/rust-lints-check.sh --base "$base"
+      - name: k3s manifest check tests
+        run: bash scripts/k3s-manifest-check.test.sh
+      - name: k3s manifest keeps pokoin-api Guaranteed
+        run: bash scripts/k3s-manifest-check.sh
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.
