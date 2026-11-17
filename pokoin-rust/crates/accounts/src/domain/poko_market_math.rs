@@ -1311,6 +1311,113 @@ pub const HISTORY_MAX_SPAN_DAYS: i64 = 3_660;
 pub const HISTORY_DAY_MAX_DAYS: i64 = 26;
 pub const HISTORY_WEEK_MAX_DAYS: i64 = 182;
 pub const HISTORY_MONTH_MAX_DAYS: i64 = 790;
+/// The whole `card_price_history` result must stay a chat-sized answer, so this
+/// is the character ceiling its `points` are thinned down to.
+pub const HISTORY_RESULT_CHARS: usize = 5_500;
+/// How many sibling subtypes a TCGplayer block may name beside its own series.
+pub const HISTORY_OTHER_SUBTYPES_MAX: usize = 5;
+
+/// The positive, de-duplicated Cardmarket product ids of a blueprint, read as
+/// text because a `text` column arrives as a JSON string.
+pub fn cm_product_ids(rows: &[Json]) -> Vec<i64> {
+    let mut products: Vec<i64> = Vec::new();
+    for row in rows {
+        let text = match row.get("id_product") {
+            Some(Json::String(text)) => text.clone(),
+            Some(value) if !value.is_null() => js_num_or_text(value),
+            _ => continue,
+        };
+        if let Some(id) = text.trim().parse::<i64>().ok().filter(|id| *id > 0) {
+            if !products.contains(&id) {
+                products.push(id);
+            }
+        }
+    }
+    products
+}
+
+/// The `fx` block: EUR→USD kept to four decimals, because a card price of
+/// thousands of PKN must not inherit a two-decimal rounding of the rate.
+pub fn fx_eur_usd(day: &str, rate: f64) -> Option<Json> {
+    if day.is_empty() || !rate.is_finite() || rate <= 0.0 {
+        return None;
+    }
+    Some(json!({
+        "eurUsd": js_num((rate * 10_000.0).round() / 10_000.0),
+        "day": day,
+    }))
+}
+
+/// `thinHistoryPoints(body, limit)` — the result must stay a chat-sized answer,
+/// so while it is longer than `limit` the widest series keeps every other point
+/// and nothing else changes. True when it had to drop any point.
+pub fn thin_history_points(body: &mut Json, limit: usize) -> bool {
+    let mut thinned = false;
+    while history_char_count(body) > limit {
+        let Some(key) = longest_thinnable_series(body) else {
+            break;
+        };
+        halve_history_series(body, &key);
+        thinned = true;
+    }
+    thinned
+}
+
+/// The serialised length in characters, which is what the model actually sees.
+fn history_char_count(body: &Json) -> usize {
+    serde_json::to_string(body)
+        .map(|text| text.chars().count())
+        .unwrap_or(0)
+}
+
+/// The key of the source with the most points, when it can still lose some.
+fn longest_thinnable_series(body: &Json) -> Option<String> {
+    let sources = body.get("sources")?.as_object()?;
+    let mut best: Option<(String, usize)> = None;
+    for (key, block) in sources {
+        let count = block
+            .get("points")
+            .and_then(Json::as_array)
+            .map_or(0, Vec::len);
+        if count > 2 && best.as_ref().is_none_or(|(_, widest)| count > *widest) {
+            best = Some((key.clone(), count));
+        }
+    }
+    best.map(|(key, _)| key)
+}
+
+/// Half the series, evenly: every point at an even index plus the last one, so
+/// the first and the last day of the range always survive.
+fn halve_history_series(body: &mut Json, key: &str) {
+    let Some(points) = body
+        .get_mut("sources")
+        .and_then(Json::as_object_mut)
+        .and_then(|sources| sources.get_mut(key))
+        .and_then(|block| block.get_mut("points"))
+        .and_then(Json::as_array_mut)
+    else {
+        return;
+    };
+    let last = points.len().saturating_sub(1);
+    let mut index = last;
+    while index > 1 {
+        index -= 1;
+        if index % 2 == 0 {
+            continue;
+        }
+        points.remove(index);
+    }
+}
+
+/// A JSON scalar rendered as text without the quotes a `Json::String` would
+/// gain from `to_string`.
+fn js_num_or_text(value: &Json) -> String {
+    match value {
+        Json::String(text) => text.clone(),
+        Json::Number(number) => number.to_string(),
+        _ => value.to_string(),
+    }
+}
 
 /// `bucketForSpan(spanDays)` — the granularity that keeps a series short.
 pub fn bucket_for_span(span_days: i64) -> &'static str {
@@ -2577,5 +2684,38 @@ mod tests {
             extra: None,
         });
         assert!(zero_block.get("changePct").is_none());
+    }
+
+    #[test]
+    fn cardmarket_product_ids_parse_from_text_and_number() {
+        // A `text` column arrives as a JSON string, which is how the guide reader
+        // gets its ids; a quoted value must still read as the id it names.
+        let rows = vec![
+            json!({ "id_product": "794461" }),
+            json!({ "id_product": " 794462 " }),
+            json!({ "id_product": 794463 }),
+            json!({ "id_product": "0" }),
+            json!({ "id_product": "-5" }),
+            json!({ "id_product": "" }),
+            json!({ "id_product": "not-a-product" }),
+            Json::Null,
+        ];
+        assert_eq!(cm_product_ids(&rows), vec![794461, 794462, 794463]);
+        assert!(cm_product_ids(&[]).is_empty());
+    }
+
+    #[test]
+    fn fx_keeps_four_decimals_and_never_a_bogus_rate() {
+        let rate = fx_eur_usd("2026-11-16", 1.09891).unwrap_or(Json::Null);
+        assert_eq!(rate["eurUsd"], js_num(1.0989));
+        assert_eq!(rate["day"], json!("2026-11-16"));
+        assert_eq!(
+            fx_eur_usd("2026-11-16", 1.09896).unwrap_or(Json::Null)["eurUsd"],
+            js_num(1.099)
+        );
+        assert_eq!(fx_eur_usd("", 1.0989), None);
+        assert_eq!(fx_eur_usd("2026-11-16", 0.0), None);
+        assert_eq!(fx_eur_usd("2026-11-16", -1.0), None);
+        assert_eq!(fx_eur_usd("2026-11-16", f64::NAN), None);
     }
 }
