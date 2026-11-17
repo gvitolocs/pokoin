@@ -209,6 +209,11 @@ export function exactSetAlias(word) {
   return expansionAliasIndex().get(compactQuery(word)) || null;
 }
 
+/** True when the token is exactly some set's short name (`dex` → Dark Explorers). */
+export function isExactSetShortCode(word) {
+  return Boolean(expansionAliasIndex().get(compactQuery(word))?.code);
+}
+
 /** Expansion-title prefix candidate (`pika` → Pikachu World Collection), or null. */
 export function expansionPrefixSet(word) {
   return packedFromExpansionPrefix(compactQuery(word));
@@ -1200,6 +1205,9 @@ function buildAliasState() {
   for (const [compact, packed] of setBadgeAliases()) {
     remember(compact, packed, packed.setNames[0], false);
   }
+  for (const [compact, packed] of setShortCodeAliases()) {
+    remember(compact, packed, packed.setNames[0], false);
+  }
   aliasIndexCache = map;
   setAliasPoolCache = pool;
   return { map, pool };
@@ -1244,6 +1252,54 @@ function setBadgeAliases() {
     setNames,
     needles: setNames.map(compactAlias),
     slug: setNames.length === 1 ? RAW_SETS.find((row) => row.display === setNames[0])?.slug || '' : '',
+  }]);
+}
+
+/**
+ * A set's printed short name (`dex` → Dark Explorers) is an exact set alias,
+ * one per row of the generated set catalog (`codes`, exported by
+ * scripts/export-suggest-catalog.py from marketplace_expansion_aliases
+ * source `tcg_shortnames`). Every set gets this treatment, not a hand-kept
+ * list: `plf`, `bkt`, `svi`, `neorev`, `sv1v`.
+ *
+ * Two guards, same reasoning as the badge rule above:
+ * - shorter than 3 characters is an unfinished word, not a code (`de` mid-typing
+ *   `dex`), and the two-letter block codes are already era aliases;
+ * - anything that reads as a collector number (`s8`, `cs15`), a mechanic
+ *   (`mega`), an art/rarity shorthand (`ar`, `sr`) or leftover `ex` keeps the
+ *   meaning it has today.
+ */
+export function isSetShortCode(compact) {
+  return compact.length >= 3
+    && compact.length <= 7
+    && !BLOCKED_SET_ALIASES.has(compact)
+    && !parseCollectorWord(compact)
+    && !MODIFIER_WORD.has(compact)
+    && !ART_ALIAS_COMPACT.has(compact)
+    && !RARITY_ALIAS_COMPACT.has(compact);
+}
+
+function setShortCodeAliases() {
+  const byCode = new Map();
+  for (const row of RAW_SETS) {
+    for (const code of row.codes || []) {
+      const compact = compactAlias(code);
+      if (!isSetShortCode(compact)) {
+        continue;
+      }
+      const names = byCode.get(compact) || [];
+      if (!names.some((hit) => hit.display === row.display)) {
+        names.push({ display: row.display, slug: row.slug || '' });
+      }
+      byCode.set(compact, names);
+    }
+  }
+  return [...byCode].map(([compact, hits]) => [compact, {
+    eraId: '',
+    setNames: hits.map((hit) => hit.display),
+    needles: [...new Set(hits.map((hit) => compactAlias(hit.display)))],
+    slug: hits.length === 1 ? hits[0].slug : '',
+    code: true,
   }]);
 }
 
@@ -1460,7 +1516,7 @@ function phraseLooksLikeCardName(token, setHit) {
   return nameHit.distance <= Number(setHit?.distance || 0);
 }
 
-function classifyQueryWord(word, index) {
+function classifyQueryWord(word, index, hasOtherName) {
   const compact = compactQuery(word);
   if (ART_ALIAS_COMPACT.has(compact)) {
     return {
@@ -1482,7 +1538,10 @@ function classifyQueryWord(word, index) {
     ? index.get(compact)
     : null;
   if (exact) {
-    if (namePoolHasCompact(compact)) {
+    // An exact blueprint name never peels as a set title (`eevee`, D000033).
+    // A short code is the exception once the query already supplies the card
+    // name: `snivy deoxys` means the set, `deoxys` alone means the Pokémon.
+    if (namePoolHasCompact(compact) && !(exact.code && hasOtherName)) {
       return { kind: 'name', token: word };
     }
     return {
@@ -1553,6 +1612,11 @@ function consumeSetPhrase(words, start) {
   const maxN = Math.min(4, words.length - start);
   for (let n = maxN; n >= 2; n -= 1) {
     const token = words.slice(start, start + n).join(' ');
+    // A word that is exactly a set short name outranks a fuzzy phrase reading
+    // of the same letters: `eevee dex` must not dissolve into `Eevee Heroes`.
+    if (token.split(/\s+/).some(isExactSetShortCode)) {
+      continue;
+    }
     const phraseCompact = compactQuery(token);
     if (phraseCompact.length < 6) {
       continue;
@@ -1651,6 +1715,10 @@ export function parseTypedQuery(query) {
     peeled.push(words[i]);
   }
   const index = expansionAliasIndex();
+  // Evidence of a card name elsewhere in the query, so a bare token that is
+  // both a name and a set short code can read as the set (`snivy deoxys`).
+  const nameFlags = peeled.map((word) => namePoolHasCompact(compactQuery(word)));
+  const nameTotal = nameFlags.filter(Boolean).length;
   const classified = [];
   for (let i = 0; i < peeled.length; ) {
     const phrase = consumeSetPhrase(peeled, i);
@@ -1664,7 +1732,7 @@ export function parseTypedQuery(query) {
       i += 1;
       continue;
     }
-    classified.push(classifyQueryWord(peeled[i], index));
+    classified.push(classifyQueryWord(peeled[i], index, nameTotal - (nameFlags[i] ? 1 : 0) > 0));
     i += 1;
   }
   const setTokens = classified.filter((row) => row.kind === 'set').map((row) => ({

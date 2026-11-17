@@ -438,21 +438,56 @@ export function occupiedAbsForScanBoxes(scanRows, stockRows) {
  * when nothing is stored there yet. Returns size + 1 when the stack is full.
  */
 export function nextPositionInStack(rows, box, stack, stackSize = 1) {
-  const wanted = String(box || '').trim();
   const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
   const s = Math.trunc(Number(stack)) || 0;
   if (size === 1 || s < 1) return null;
-  let max = 0;
+  const top = stackOccupancy(rows, box, size).get(s) || 0;
+  return top ? top + 1 : null;
+}
+
+/**
+ * What a box already holds, stack by stack: Map stack number → highest
+ * position taken there, from stored listing locations (`box·4·12`, `box·7-9`,
+ * `box·3·5–9·2`). A stack a location only passes through is full; a location
+ * without a position (`box·7`) names the whole stack, so it is full too.
+ */
+export function stackOccupancy(rows, box, stackSize = 1) {
+  const wanted = String(box || '').trim().toLowerCase();
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const tops = new Map();
+  if (!wanted) return tops;
   for (const row of Array.isArray(rows) ? rows : []) {
     const start = parseListingLocation(row?.location);
     const end = listingSlotEnd(row?.location);
-    if (!end.box || end.box !== wanted || end.stack == null) continue;
-    if (s < (start.stack ?? end.stack) || s > end.stack) continue;
-    // Spanning into a later stack fills this one; a whole-stack location fills it too.
-    const pos = end.stack > s || end.position == null ? size : Math.min(size, end.position);
-    if (pos > max) max = pos;
+    if (!end.box || end.box.trim().toLowerCase() !== wanted || end.stack == null) continue;
+    const from = Math.max(1, Math.min(9999, start.stack ?? end.stack));
+    const to = Math.max(from, Math.min(9999, end.stack));
+    for (let s = from; s <= to; s += 1) {
+      const top = s < to || end.position == null ? size : Math.min(size, end.position);
+      if (top > (tops.get(s) || 0)) tops.set(s, top);
+    }
   }
-  return max ? max + 1 : null;
+  return tops;
+}
+
+/**
+ * Seed map for scan `nextBoxPositions`: box location → stack → highest
+ * position the stock in that box occupies. Uses each scan row's stackSize
+ * snapshot, like `occupiedAbsForScanBoxes`.
+ */
+export function occupancyForScanBoxes(scanRows, stockRows) {
+  const map = new Map();
+  const seen = new Set();
+  for (const row of Array.isArray(scanRows) ? scanRows : []) {
+    const loc = String(row?.location ?? '').trim();
+    if (!loc || seen.has(loc)) continue;
+    seen.add(loc);
+    const snap = row.defaultsSnapshot || row.defaults_snapshot || {};
+    const size = Math.max(1, Math.trunc(Number(snap.stackSize)) || 1);
+    const tops = stackOccupancy(stockRows, loc, size);
+    if (tops.size) map.set(loc, tops);
+  }
+  return map;
 }
 
 /** Highest stack number a seller already occupies in a box (inventory hint). */

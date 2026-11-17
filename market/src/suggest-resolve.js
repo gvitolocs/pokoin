@@ -31,6 +31,7 @@ import {
   compactQuery,
   exactSetAlias,
   expansionPrefixSet,
+  isExactSetShortCode,
   isModifierWord,
   maxDistance,
   namePoolHasCompact,
@@ -334,10 +335,13 @@ function setAliasEntry(packed, distance, exactness) {
   };
 }
 
-function setAliasCandidates(spanRaw, spanCompactText, wordCount, isLast) {
+function setAliasCandidates(spanRaw, spanCompactText, wordCount, isLast, hasOtherName) {
   const out = [];
-  // An exact blueprint name never binds as a set title (D00005N).
-  if (wordCount === 1 && namePoolHasCompact(spanCompactText)) {
+  // An exact blueprint name never binds as a set title (D00005N) — unless the
+  // token is a set short name and the query already carries the card name,
+  // which is exactly when `dex` means Dark Explorers (see spanCandidates).
+  const shortCode = wordCount === 1 && isExactSetShortCode(spanCompactText);
+  if (wordCount === 1 && namePoolHasCompact(spanCompactText) && !(shortCode && hasOtherName)) {
     return out;
   }
   if (wordCount === 1) {
@@ -406,9 +410,27 @@ function dedupeCandidates(list) {
   });
 }
 
+/** Some token outside [start, end] is an exact card name. */
+function hasOtherNameToken(comps, start, end) {
+  for (let i = 0; i < comps.length; i += 1) {
+    if (i >= start && i <= end) {
+      continue;
+    }
+    if (comps[i] && namePoolHasCompact(comps[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function spanCandidates(comps, start, end, total) {
   const spanCompactText = comps.slice(start, end + 1).join('');
-  const memoKey = `${total}:${spanCompactText}`;
+  // Another token already supplies the card name, so this one is free to read
+  // as a set short name even when the same letters are also a name
+  // (`snivy deoxys` = the set, never a second Deoxys).
+  const hasOtherName = end === start && isExactSetShortCode(spanCompactText)
+    && hasOtherNameToken(comps, start, end);
+  const memoKey = `${total}:${hasOtherName ? 1 : 0}:${spanCompactText}`;
   const cached = spanMemo.get(memoKey);
   if (cached) {
     return cached;
@@ -440,7 +462,7 @@ function spanCandidates(comps, start, end, total) {
       costOverride: 0.25 + Math.max(0, entry.distance - 2) * 0.5,
     });
   }
-  for (const row of setAliasCandidates(spanRaw, spanCompactText, end - start + 1, end === total - 1)) {
+  for (const row of setAliasCandidates(spanRaw, spanCompactText, end - start + 1, end === total - 1, hasOtherName)) {
     out.push(row);
   }
   // Fuzzy candidates still run unless something matched exactly: an alias
@@ -461,7 +483,11 @@ function spanCandidates(comps, start, end, total) {
       });
     }
   }
-  const ranked = dedupeCandidates(out)
+  const ranked = dedupeCandidates(hasOtherName
+    // The short-code reading wins outright here: `snivy deoxys` is the set, and
+    // the Deoxys names would otherwise outrank it as literal evidence.
+    ? out.filter((row) => row.kind !== 'name')
+    : out)
     .sort((left, right) => (
       (left.rewrites - right.rewrites)
       || (candidateCost(left) - candidateCost(right))
