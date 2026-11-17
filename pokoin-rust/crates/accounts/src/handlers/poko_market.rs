@@ -23,15 +23,15 @@ use serde_json::{json, Map, Value as Json};
 use crate::domain::poko_market_math::{
     ask_history_from_source, bucket_for_span, candidate_from_row, clean_text, day_of, days_ago_iso,
     deal_verdict, dedupe_artwork_versions, escape_like, facet_label, fuzzy_artist_pattern,
-    history_source_block, is_iso_day, js_num, liquidity_bands, normalize_condition,
+    history_source_block, is_iso_day, js_num, liquidity_bands, median_of, normalize_condition,
     normalize_language, parse_history_day, price_strategies, resolve_facet, round2, round2_or_none,
     row_matches_slice, shift_day, sold_by_condition_language, sold_estimate_from_stats,
     sold_facet_from_params, sold_flag, sold_stats, span_days, summarize_live_asks, today_iso,
-    variants_sold, weighted_median, DailyValue, Facet, HistorySource, HISTORY_ALL_FROM,
-    HISTORY_MAX_SPAN_DAYS, MAX_COLLECTION_CARDS, MAX_UNITS_PER_ROW, MOVERS_MAX_CANDIDATES,
-    MOVERS_MIN_PRICE_PKN, PKN_EUR_RATE, RECENT_SALE_VERIFY_RATIO, SOLD_HIGH_VALUE_MAX_TO_ASK,
-    SOLD_HIGH_VALUE_PKN, SOLD_REFERENCE_ASK_DAYS, SOLD_ROWS_LIMIT, SOLD_UNVERIFIED_MAX_PKN,
-    TOP_SELLERS_MAX_SOLD_TO_ASK,
+    variants_sold, weighted_median, DailyValue, Facet, HistoryKind, HistorySource,
+    HISTORY_ALL_FROM, HISTORY_MAX_SPAN_DAYS, MAX_COLLECTION_CARDS, MAX_UNITS_PER_ROW,
+    MOVERS_MAX_CANDIDATES, MOVERS_MIN_PRICE_PKN, PKN_EUR_RATE, RECENT_SALE_VERIFY_RATIO,
+    SOLD_HIGH_VALUE_MAX_TO_ASK, SOLD_HIGH_VALUE_PKN, SOLD_REFERENCE_ASK_DAYS, SOLD_ROWS_LIMIT,
+    SOLD_UNVERIFIED_MAX_PKN, TOP_SELLERS_MAX_SOLD_TO_ASK,
 };
 use crate::error::{ApiError, Result};
 use crate::sql::{row_text, MarketplaceDb, SqlParam};
@@ -696,12 +696,13 @@ async fn read_card_price_history(
 // `card_price_history` — one series per stored source
 // ---------------------------------------------------------------------------
 
-/// The sources the tool can return, in response order.
-const HISTORY_SOURCES: [&str; 4] = [
-    "tcgplayer",
-    "cardmarket",
-    "cardtrader_sold",
-    "cardtrader_ask",
+/// The sources the tool can return, in response order. One entry per
+/// [`HistoryKind`], so a name never drifts from the block that answers it.
+const HISTORY_KINDS: [HistoryKind; 4] = [
+    TCGPLAYER_HISTORY,
+    CARDMARKET_HISTORY,
+    SOLD_HISTORY,
+    ASK_HISTORY,
 ];
 
 /// `range` → the days it covers; `all` starts at [`HISTORY_ALL_FROM`].
@@ -719,29 +720,26 @@ const HISTORY_DEFAULT_RANGE_DAYS: i64 = 365;
 /// The one sentence every history result carries.
 const HISTORY_DATA_NOTE: &str = "Every source only covers the days it has stored, from its own storedFrom: TCGplayer market price is a USD aggregate with no condition or language, Cardmarket trend is EUR, and CardTrader sold (inferred sales) and lowest ask are PKN.";
 
-/// The label, scale and metric a history block reports for one source.
-struct HistoryKind {
-    source: &'static str,
-    currency: &'static str,
-    metric: &'static str,
-}
-
 const TCGPLAYER_HISTORY: HistoryKind = HistoryKind {
+    key: "tcgplayer",
     source: "tcgcsv/tcgplayer",
     currency: "USD",
     metric: "marketPrice",
 };
 const CARDMARKET_HISTORY: HistoryKind = HistoryKind {
+    key: "cardmarket",
     source: "cardmarket_price_guide",
     currency: "EUR",
     metric: "trend",
 };
 const SOLD_HISTORY: HistoryKind = HistoryKind {
+    key: "cardtrader_sold",
     source: "cardtrader_sold",
     currency: "PKN",
     metric: "medianSold",
 };
 const ASK_HISTORY: HistoryKind = HistoryKind {
+    key: "cardtrader_ask",
     source: "cardtrader_listed",
     currency: "PKN",
     metric: "lowestAsk",
@@ -788,12 +786,14 @@ fn history_window(
     Ok((from, to, bucket_for_span(span)))
 }
 
-/// The requested sources; an unrecognized name is invalid rather than silently
-/// dropped, so a typo cannot come back as an empty answer.
+/// The requested source keys, in response order; an unrecognized name is
+/// invalid rather than silently dropped, so a typo cannot come back as an
+/// empty answer.
 fn history_sources(params: &Json) -> std::result::Result<Vec<&'static str>, String> {
+    let keys = || -> Vec<&'static str> { HISTORY_KINDS.iter().map(|kind| kind.key).collect() };
     let raw = param_string(params, "sources", 120);
     if raw.is_empty() {
-        return Ok(HISTORY_SOURCES.to_vec());
+        return Ok(keys());
     }
     let mut picked: Vec<&str> = Vec::new();
     for token in raw.split(',') {
@@ -801,16 +801,16 @@ fn history_sources(params: &Json) -> std::result::Result<Vec<&'static str>, Stri
         if token.is_empty() {
             continue;
         }
-        match HISTORY_SOURCES.iter().find(|name| **name == token) {
-            Some(name) => {
-                if !picked.contains(name) {
-                    picked.push(name);
+        match keys().into_iter().find(|key| *key == token) {
+            Some(key) => {
+                if !picked.contains(&key) {
+                    picked.push(key);
                 }
             }
             None => {
                 return Err(format!(
                     "unknown source {token}; expected {}",
-                    HISTORY_SOURCES.join(", ")
+                    keys().join(", ")
                 ))
             }
         }
@@ -818,14 +818,13 @@ fn history_sources(params: &Json) -> std::result::Result<Vec<&'static str>, Stri
     if picked.is_empty() {
         return Err(format!(
             "sources must name at least one of {}",
-            HISTORY_SOURCES.join(", ")
+            keys().join(", ")
         ));
     }
     // Always the canonical order, whatever the caller asked in.
-    Ok(HISTORY_SOURCES
-        .iter()
-        .filter(|name| picked.contains(name))
-        .copied()
+    Ok(keys()
+        .into_iter()
+        .filter(|key| picked.contains(key))
         .collect())
 }
 
@@ -977,7 +976,8 @@ fn sold_history_days(
 
 /// The Cardmarket daily values. The price guide is change-only, so within a
 /// product's stored span a day without a row repeats the newest row before it;
-/// nothing is invented past the last stored row.
+/// nothing is invented past the last stored row. Where a blueprint maps to
+/// several products, their carried trends merge into one value per day.
 fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<(String, f64)>> = HashMap::new();
@@ -998,7 +998,7 @@ fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
         }
         groups.entry(product).or_default().push((day, trend));
     }
-    let mut days: Vec<DailyValue> = Vec::new();
+    let mut carried_by_day: HashMap<String, Vec<f64>> = HashMap::new();
     for product in order {
         let Some(rows) = groups.remove(product.as_str()) else {
             continue;
@@ -1028,7 +1028,7 @@ fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
                 index += 1;
             }
             if let Some(trend) = carried {
-                days.push(DailyValue::new(&text, trend));
+                carried_by_day.entry(text).or_default().push(trend);
             }
             day = match day.checked_add_days(chrono::Days::new(1)) {
                 Some(next) => next,
@@ -1036,8 +1036,14 @@ fn cardmarket_days(rows: &[Json]) -> Vec<DailyValue> {
             };
         }
     }
-    days.sort_by(|a, b| a.day.cmp(&b.day));
-    days
+    let mut days: Vec<String> = carried_by_day.keys().cloned().collect();
+    days.sort();
+    days.into_iter()
+        .filter_map(|day| {
+            let values = carried_by_day.remove(day.as_str())?;
+            median_of(&values).map(|value| DailyValue::new(&day, value))
+        })
+        .collect()
 }
 
 /// The newest stored guide row, as the block's `latest`.
@@ -1066,7 +1072,7 @@ fn cardmarket_latest(rows: &[Json]) -> Option<Json> {
     Some(json!({ "day": day, "trend": eur("trend"), "avg7": eur("avg7"), "low": eur("low") }))
 }
 
-/// One `sources.<name>` block, with the shape arguments kept in one place.
+/// One `sources.<name>` block, with the source identity kept in one place.
 fn history_block(
     kind: &HistoryKind,
     bucket: &str,
@@ -1075,9 +1081,7 @@ fn history_block(
     extra: Option<&Json>,
 ) -> Json {
     history_source_block(HistorySource {
-        source: kind.source,
-        currency: kind.currency,
-        metric: kind.metric,
+        kind: *kind,
         bucket,
         days,
         status,
@@ -1101,6 +1105,7 @@ fn failed_history_source(
 }
 
 /// The TCGplayer block: one series, the other subtypes named beside it.
+/// The four blocks the tool can build for one printing.
 async fn tcgplayer_history_block(
     deps: &MarketDeps,
     card_id: &str,
@@ -1135,6 +1140,7 @@ async fn tcgplayer_history_block(
 }
 
 /// The `cardtrader_ask` block: dated lowest listed asks in PKN.
+/// The `cardtrader_ask` block: the stored lowest listed ask of each day.
 async fn ask_history_block(
     deps: &MarketDeps,
     blueprint_id: Option<i64>,
@@ -1175,6 +1181,7 @@ async fn ask_history_block(
 }
 
 /// The `cardtrader_sold` block: the slice's weighted daily medians and units.
+/// The sold slice's series for one blueprint.
 async fn sold_history_block(
     deps: &MarketDeps,
     blueprint_id: Option<i64>,
@@ -1248,6 +1255,7 @@ async fn sold_history_block(
 }
 
 /// The `cardmarket` block: the trend carried across the change-only guide days.
+/// The Cardmarket guide series of one blueprint.
 async fn cardmarket_history_block(
     deps: &MarketDeps,
     blueprint_id: Option<i64>,
@@ -1893,23 +1901,25 @@ async fn card_price_history(deps: &MarketDeps, params: &Json) -> Result<Json> {
         Ok(window) => window,
         Err(error) => return Ok(json!({ "status": "invalid", "error": error, "card": card })),
     };
-    let sources = match history_sources(params) {
-        Ok(sources) => sources,
+    let wanted = match history_sources(params) {
+        Ok(wanted) => wanted,
         Err(error) => return Ok(json!({ "status": "invalid", "error": error, "card": card })),
     };
     let card_id = field_str(&card, "cardId");
-    let blueprint = Some(blueprint_id);
+    // Each source is read on its own and degrades on its own.
     let mut blocks = Map::new();
-    for source in sources {
+    for source in wanted {
         let block = match source {
             "tcgplayer" => tcgplayer_history_block(deps, &card_id, &from, &to, bucket).await,
-            "cardmarket" => cardmarket_history_block(deps, blueprint, &from, &to, bucket).await,
-            "cardtrader_sold" => {
-                sold_history_block(deps, blueprint, params, &from, &to, bucket).await
+            "cardmarket" => {
+                cardmarket_history_block(deps, Some(blueprint_id), &from, &to, bucket).await
             }
-            _ => ask_history_block(deps, blueprint, &from, &to, bucket).await,
+            "cardtrader_sold" => {
+                sold_history_block(deps, Some(blueprint_id), params, &from, &to, bucket).await
+            }
+            _ => ask_history_block(deps, Some(blueprint_id), &from, &to, bucket).await,
         };
-        blocks.insert((*source).to_string(), block);
+        blocks.insert(source.to_string(), block);
     }
     let fx = history_fx(&deps.db, &to).await;
     Ok(history_body(
@@ -3991,6 +4001,383 @@ pub fn tool_list() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One day of each of the four history kinds, for the pure builders.
+    const TODAY: &str = "2026-11-17";
+
+    /// `count` consecutive days from `from`, values climbing by `step`.
+    fn daily_series(from: &str, count: i64, step: f64) -> Vec<DailyValue> {
+        let mut cursor = parse_history_day(from);
+        let mut days = Vec::new();
+        for index in 0..count {
+            let Some(date) = cursor else { break };
+            days.push(DailyValue::new(
+                &date.format("%Y-%m-%d").to_string(),
+                100.0 + index as f64 * step,
+            ));
+            cursor = date.checked_add_days(chrono::Days::new(1));
+        }
+        days
+    }
+
+    fn tcg_row(product: i64, subtype: &str, day: &str, price: Json) -> Json {
+        json!({
+            "category_id": 1, "product_id": product, "subtype": subtype,
+            "observed_on": format!("{day}T00:00:00.000Z"), "market_price": price,
+        })
+    }
+
+    fn sold_row(day: &str, median: f64, qty: i64, graded: bool) -> Json {
+        json!({
+            "observed_day": day, "condition": "NM", "language": "EN",
+            "reverse": false, "first_edition": false, "graded": graded,
+            "sold_qty": qty, "median_pkn": median,
+        })
+    }
+
+    fn cm_row(product: i64, day: &str, trend: Json) -> Json {
+        json!({ "day": day, "product_id": product.to_string(), "trend": trend, "avg7": trend, "low": trend })
+    }
+
+    /// The raw, ungraded facet: every copy of the variant counts.
+    fn any_raw() -> Facet {
+        Facet {
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            explicit: false,
+        }
+    }
+
+    #[test]
+    fn history_window_prefers_explicit_dates() {
+        let window = |params: Json| history_window(&params, TODAY);
+        // A parseable from+to pair wins over range.
+        assert_eq!(
+            window(json!({ "from": "2026-01-01", "to": "2026-02-01", "range": "2y" })),
+            Ok(("2026-01-01".to_string(), "2026-02-01".to_string(), "week"))
+        );
+        // A one-sided or malformed pair falls back to the range.
+        assert_eq!(
+            window(json!({ "from": "2026-01-01", "range": "1m" })),
+            Ok(("2026-10-18".to_string(), TODAY.to_string(), "week"))
+        );
+        assert_eq!(
+            window(json!({ "from": "last spring", "to": "2026-02-01" })),
+            Ok(("2025-11-17".to_string(), TODAY.to_string(), "month"))
+        );
+        // The default is one year; all starts at the cutover day.
+        assert_eq!(
+            window(json!({})),
+            Ok(("2025-11-17".to_string(), TODAY.to_string(), "month"))
+        );
+        assert_eq!(
+            window(json!({ "range": "ALL" })),
+            Ok((HISTORY_ALL_FROM.to_string(), TODAY.to_string(), "quarter"))
+        );
+        assert_eq!(
+            window(json!({ "range": "5y" })),
+            Ok(("2025-11-17".to_string(), TODAY.to_string(), "month"))
+        );
+    }
+
+    #[test]
+    fn history_window_rejects_an_impossible_span() {
+        assert_eq!(
+            history_window(&json!({ "from": "2026-03-05", "to": "2026-03-04" }), TODAY),
+            Err("from is after to".to_string())
+        );
+        let Err(message) = history_window(&json!({ "from": "2015-01-01", "to": TODAY }), TODAY)
+        else {
+            panic!("a ten year span must be rejected");
+        };
+        assert!(
+            message.ends_with("day span is beyond the 3660 day limit"),
+            "{message}"
+        );
+        // The largest accepted span still reads as quarters.
+        assert_eq!(
+            history_window(&json!({ "from": "2016-11-18", "to": TODAY }), TODAY),
+            Ok(("2016-11-18".to_string(), TODAY.to_string(), "quarter"))
+        );
+    }
+
+    #[test]
+    fn history_sources_default_reorder_and_reject() {
+        assert_eq!(
+            history_sources(&json!({})),
+            Ok(vec![
+                "tcgplayer",
+                "cardmarket",
+                "cardtrader_sold",
+                "cardtrader_ask"
+            ])
+        );
+        assert_eq!(
+            history_sources(&json!({ "sources": "cardtrader_ask, tcgplayer" })),
+            Ok(vec!["tcgplayer", "cardtrader_ask"])
+        );
+        assert_eq!(
+            history_sources(&json!({ "sources": "TCGPLAYER,tcgplayer," })),
+            Ok(vec!["tcgplayer"])
+        );
+        assert_eq!(
+            history_sources(&json!({ "sources": "cardmaket" })),
+            Err(
+                "unknown source cardmaket; expected tcgplayer, cardmarket, cardtrader_sold, cardtrader_ask"
+                    .to_string()
+            )
+        );
+        assert!(history_sources(&json!({ "sources": ", " })).is_err());
+    }
+
+    #[test]
+    fn tcgplayer_series_keeps_the_longest_and_names_the_rest() {
+        let rows = vec![
+            tcg_row(7, "Normal", "2026-01-02", json!(1.6)),
+            tcg_row(7, "Normal", "2026-01-01", json!(1.5)),
+            tcg_row(7, "Holofoil", "2026-01-01", json!(3.0)),
+            tcg_row(9, "Normal", "2026-01-01", json!(2.0)),
+        ];
+        let series = tcgplayer_series(&rows);
+        assert_eq!(series.subtype, "Normal");
+        assert_eq!(series.other_subtypes, vec!["Holofoil".to_string()]);
+        assert_eq!(
+            series
+                .days
+                .iter()
+                .map(|day| (day.day.as_str(), day.value))
+                .collect::<Vec<_>>(),
+            vec![("2026-01-01", 1.5), ("2026-01-02", 1.6)]
+        );
+        // An equally long series does not displace the first one.
+        let tied = tcgplayer_series(&[
+            tcg_row(7, "Normal", "2026-01-01", json!(1.5)),
+            tcg_row(7, "Holofoil", "2026-01-01", json!(3.0)),
+        ]);
+        assert_eq!(tied.subtype, "Normal");
+        assert_eq!(tied.other_subtypes, vec!["Holofoil".to_string()]);
+        // A zero or missing price is not a data point.
+        let empty = tcgplayer_series(&[
+            tcg_row(7, "Normal", "2026-01-01", json!(0.0)),
+            tcg_row(7, "Normal", "2026-01-02", Json::Null),
+        ]);
+        assert!(empty.days.is_empty());
+        assert!(empty.subtype.is_empty());
+        assert!(empty.other_subtypes.is_empty());
+    }
+
+    #[test]
+    fn ask_history_days_reads_the_stored_lowest_ask() {
+        let rows = vec![
+            json!({ "day": "2026-11-01T00:00:00.000Z", "lowest_ask_pkn": 2642.0 }),
+            json!({ "day": "2026-11-02", "lowest_ask_pkn": 0.0 }),
+            json!({ "day": "2026-11-03", "lowest_ask_pkn": Json::Null }),
+        ];
+        let days = ask_history_days(&rows);
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0].day, "2026-11-01");
+        assert_eq!(days[0].value, 2642.0);
+        assert_eq!(days[0].units, None);
+    }
+
+    #[test]
+    fn sold_history_days_weight_each_day_and_sum_the_units() {
+        let rows = vec![
+            sold_row("2026-01-03", 200.0, 2, false),
+            sold_row("2026-01-02", 300.0, 1, false),
+            sold_row("2026-01-02", 100.0, 4, false),
+            // Graded rows never enter a series, and a zero-qty row is not a sale.
+            sold_row("2026-01-02", 9_000.0, 3, true),
+            sold_row("2026-01-04", 100.0, 0, false),
+        ];
+        let days = sold_history_days(&rows, any_raw(), None, None);
+        assert_eq!(days.len(), 2);
+        assert_eq!(days[0].day, "2026-01-02");
+        assert_eq!(days[0].value, 100.0);
+        assert_eq!(days[0].units, Some(5));
+        assert_eq!(days[1].day, "2026-01-03");
+        assert_eq!(days[1].units, Some(2));
+        // A named condition or language that no row carries yields no series.
+        assert!(sold_history_days(&rows, any_raw(), Some("NM"), Some("JP")).is_empty());
+    }
+
+    #[test]
+    fn cardmarket_days_carry_the_trend_forward_between_rows() {
+        let rows = vec![
+            cm_row(11, "2026-11-01", json!(0.78)),
+            // Change-only: the 3rd and 4th are missing, so the 1st stands.
+            cm_row(11, "2026-11-05", json!(0.90)),
+            // A second product of the same blueprint merges by median.
+            cm_row(12, "2026-11-02", json!(1.20)),
+            cm_row(12, "2026-11-03", Json::Null),
+        ];
+        let days = cardmarket_days(&rows);
+        assert_eq!(
+            days.iter()
+                .map(|day| (day.day.as_str(), day.value))
+                .collect::<Vec<_>>(),
+            vec![
+                ("2026-11-01", 0.78),
+                ("2026-11-02", 0.99),
+                ("2026-11-03", 0.78),
+                ("2026-11-04", 0.78),
+                ("2026-11-05", 0.9),
+            ]
+        );
+        let latest = cardmarket_latest(&rows).unwrap_or(Json::Null);
+        assert_eq!(latest["day"], json!("2026-11-05"));
+        assert_eq!(latest["trend"], json!(0.9));
+        assert_eq!(cardmarket_latest(&[]), None);
+    }
+
+    #[test]
+    fn history_block_shape_matches_the_contract() {
+        let days = daily_series("2026-10-01", 40, 1.0);
+        let block = history_block(&ASK_HISTORY, "week", &days, "", None);
+        assert_eq!(block["status"], "available");
+        assert_eq!(block["source"], "cardtrader_listed");
+        assert_eq!(block["currency"], "PKN");
+        assert_eq!(block["metric"], "lowestAsk");
+        assert_eq!(block["storedFrom"], json!("2026-10-01"));
+        assert_eq!(block["storedTo"], json!("2026-11-09"));
+        assert_eq!(block["days"], json!(40));
+        assert!(block.get("units").is_none());
+        // Whole PKN, and the first week only holds 10-01..10-04.
+        let points = block["points"].as_array().cloned().unwrap_or_default();
+        assert_eq!(points[0], json!(["2026-09-28", 102]));
+        for point in &points {
+            let value = point[1].as_f64().unwrap_or_default();
+            assert_eq!(value, value.round(), "PKN point {point} is not whole");
+        }
+        assert!(block.get("changePct").is_some());
+        let usd = history_block(&CARDMARKET_HISTORY, "day", &days, "", None);
+        assert_eq!(usd["currency"], "EUR");
+        // Sold buckets carry their units as the third point element.
+        let sold: Vec<DailyValue> = days
+            .iter()
+            .map(|day| DailyValue {
+                day: day.day.clone(),
+                value: day.value,
+                units: Some(2),
+            })
+            .collect();
+        let sold_block = history_block(&SOLD_HISTORY, "month", &sold, "", None);
+        assert_eq!(sold_block["units"], json!(80));
+        assert_eq!(sold_block["points"][0], json!(["2026-10", 115, 62]));
+    }
+
+    #[test]
+    fn empty_or_failed_history_source_carries_no_points() {
+        let empty = history_block(&ASK_HISTORY, "day", &[], "", None);
+        assert_eq!(empty["status"], "empty");
+        for key in ["points", "storedFrom", "storedTo", "days", "first", "last"] {
+            assert!(empty.get(key).is_none(), "{key} present on an empty source");
+        }
+        let failed = history_block(
+            &TCGPLAYER_HISTORY,
+            "month",
+            &[],
+            "unconfigured",
+            Some(&json!({ "otherSubtypes": ["Holofoil"] })),
+        );
+        assert_eq!(failed["status"], "unconfigured");
+        assert_eq!(failed["otherSubtypes"], json!(["Holofoil"]));
+        assert!(failed.get("points").is_none());
+        assert!(failed.get("storedFrom").is_none());
+    }
+
+    #[test]
+    fn body_of_800_days_per_source_stays_under_5500_chars() {
+        let days = daily_series(HISTORY_ALL_FROM, 800, 0.37);
+        let sold: Vec<DailyValue> = days
+            .iter()
+            .map(|day| DailyValue {
+                day: day.day.clone(),
+                value: day.value,
+                units: Some(1),
+            })
+            .collect();
+        let mut sources = Map::new();
+        sources.insert(
+            "tcgplayer".to_string(),
+            history_block(
+                &TCGPLAYER_HISTORY,
+                "quarter",
+                &days,
+                "",
+                Some(&json!({ "subtype": "Normal", "otherSubtypes": ["Holofoil"] })),
+            ),
+        );
+        sources.insert(
+            "cardmarket".to_string(),
+            history_block(
+                &CARDMARKET_HISTORY,
+                "quarter",
+                &days,
+                "",
+                Some(&json!({ "latest": { "day": "2026-03-09", "trend": 0.78, "avg7": 0.79, "low": 0.5 } })),
+            ),
+        );
+        sources.insert(
+            "cardtrader_sold".to_string(),
+            history_block(
+                &SOLD_HISTORY,
+                "quarter",
+                &sold,
+                "",
+                Some(
+                    &json!({ "slice": { "condition": "NM", "language": "EN", "variant": "raw" } }),
+                ),
+            ),
+        );
+        sources.insert(
+            "cardtrader_ask".to_string(),
+            history_block(&ASK_HISTORY, "quarter", &days, "", None),
+        );
+        let card = candidate_from_row(&json!({
+            "card_id": 119662, "ct_id": 239324, "name": "Charizard",
+            "set_name": "Base Set", "card_number": "4/102",
+            "artist": "Mitsuhiro Arita", "item_kind": "single",
+        }));
+        let body = history_body(
+            card,
+            HISTORY_ALL_FROM,
+            "2026-03-10",
+            "quarter",
+            Some(json!({ "eurUsd": 1.1014, "day": "2026-11-16" })),
+            Json::Object(sources),
+        );
+        let text = serde_json::to_string(&body).unwrap_or_default();
+        assert!(
+            text.chars().count() < 5_500,
+            "history body is {} chars",
+            text.chars().count()
+        );
+        assert_eq!(body["pknPerEur"], js_num(200.0));
+        assert_eq!(body["bucket"], json!("quarter"));
+        assert_eq!(body["fx"]["eurUsd"], json!(1.1014));
+        assert!(body["dataNote"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("storedFrom"));
+    }
+
+    #[test]
+    fn body_without_rates_omits_the_fx_block() {
+        let card = json!({ "cardId": "119662" });
+        let body = history_body(
+            card,
+            "2026-10-01",
+            "2026-11-17",
+            "week",
+            None,
+            json!({ "tcgplayer": { "status": "empty" } }),
+        );
+        assert!(body.get("fx").is_none());
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["sources"]["tcgplayer"]["status"], "empty");
+    }
 
     #[test]
     fn plausible_sold_keeps_the_two_bounds() {

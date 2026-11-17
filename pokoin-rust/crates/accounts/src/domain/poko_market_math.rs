@@ -1327,7 +1327,8 @@ pub fn bucket_for_span(span_days: i64) -> &'static str {
 
 /// `isIsoDay(value)` — a real `YYYY-MM-DD`, nothing else.
 pub fn is_iso_day(value: &str) -> bool {
-    parse_history_day(value).is_some()
+    let value = value.trim();
+    value.len() == 10 && parse_history_day(value).is_some()
 }
 
 /// `spanDays(from, to)` — the day difference (negative when `from` is later).
@@ -1486,12 +1487,20 @@ fn round1_or_none(value: f64) -> Option<f64> {
     Some((value * 10.0).round() / 10.0)
 }
 
+/// Which price source a history block reports, and what its numbers mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryKind {
+    /// The `sources` parameter name and the response key of this block.
+    pub key: &'static str,
+    /// The table or feed the values came from, e.g. `tcgcsv/tcgplayer`.
+    pub source: &'static str,
+    pub currency: &'static str,
+    pub metric: &'static str,
+}
+
 /// What one `sources.<name>` block of `card_price_history` is built from.
 pub struct HistorySource<'a> {
-    /// The source label, e.g. `tcgcsv/tcgplayer`.
-    pub source: &'a str,
-    pub currency: &'a str,
-    pub metric: &'a str,
+    pub kind: HistoryKind,
     pub bucket: &'a str,
     /// The daily rows found inside the asked range, oldest first.
     pub days: &'a [DailyValue],
@@ -1514,8 +1523,9 @@ pub fn history_source_block(spec: HistorySource<'_>) -> Json {
     };
     let mut block = Map::new();
     block.insert("status".into(), json!(status));
-    block.insert("currency".into(), json!(spec.currency));
-    block.insert("metric".into(), json!(spec.metric));
+    block.insert("source".into(), json!(spec.kind.source));
+    block.insert("currency".into(), json!(spec.kind.currency));
+    block.insert("metric".into(), json!(spec.kind.metric));
     if let Some(Json::Object(fields)) = spec.extra {
         for (key, value) in fields {
             block.insert(key.clone(), value.clone());
@@ -1538,7 +1548,7 @@ pub fn history_source_block(spec: HistorySource<'_>) -> Json {
         .into_iter()
         .map(|point| DailyValue {
             day: point.day,
-            value: round_history_value(point.value, spec.currency),
+            value: round_history_value(point.value, spec.kind.currency),
             units: point.units,
         })
         .collect();
@@ -2298,5 +2308,274 @@ mod tests {
         assert_eq!(resolve_status_code("invalid"), 400);
         assert_eq!(resolve_status_code("not_found"), 422);
         assert_eq!(resolve_status_code("ambiguous"), 422);
+    }
+
+    fn series(days: &[(&str, f64)]) -> Vec<DailyValue> {
+        days.iter()
+            .map(|(day, value)| DailyValue::new(day, *value))
+            .collect()
+    }
+
+    /// The CardTrader listing kind, for the block builder tests.
+    const ASK_KIND: HistoryKind = HistoryKind {
+        key: "cardtrader_ask",
+        source: "cardtrader_listed",
+        currency: "PKN",
+        metric: "lowestAsk",
+    };
+
+    #[test]
+    fn bucket_choice_walks_the_day_week_month_quarter_bounds() {
+        assert_eq!(bucket_for_span(-1), "day");
+        assert_eq!(bucket_for_span(0), "day");
+        assert_eq!(bucket_for_span(26), "day");
+        assert_eq!(bucket_for_span(27), "week");
+        assert_eq!(bucket_for_span(182), "week");
+        assert_eq!(bucket_for_span(183), "month");
+        assert_eq!(bucket_for_span(790), "month");
+        assert_eq!(bucket_for_span(791), "quarter");
+        assert_eq!(bucket_for_span(3_660), "quarter");
+    }
+
+    #[test]
+    fn bucket_labels_use_the_iso_monday_month_and_quarter() {
+        // Monday-labelled weeks, including across the year boundary.
+        assert_eq!(
+            bucket_label("2024-12-30", "week"),
+            Some("2024-12-30".to_string())
+        );
+        assert_eq!(
+            bucket_label("2025-01-01", "week"),
+            Some("2024-12-30".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-11-17", "week"),
+            Some("2026-11-16".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-11-16", "week"),
+            Some("2026-11-16".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-01-01", "month"),
+            Some("2026-01".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-12-31", "month"),
+            Some("2026-12".to_string())
+        );
+        for (day, quarter) in [
+            ("2026-01-01", "2026-Q1"),
+            ("2026-03-31", "2026-Q1"),
+            ("2026-04-01", "2026-Q2"),
+            ("2026-06-30", "2026-Q2"),
+            ("2026-07-01", "2026-Q3"),
+            ("2026-09-30", "2026-Q3"),
+            ("2026-10-01", "2026-Q4"),
+            ("2026-12-31", "2026-Q4"),
+        ] {
+            assert_eq!(
+                bucket_label(day, "quarter"),
+                Some(quarter.to_string()),
+                "{day}"
+            );
+        }
+        // A day bucket is the day itself; anything else is not a date.
+        assert_eq!(
+            bucket_label("2026-11-17", "day"),
+            Some("2026-11-17".to_string())
+        );
+        assert_eq!(bucket_label("17 Nov 2026", "week"), None);
+        assert_eq!(bucket_label("2026-02-30", "month"), None);
+        assert_eq!(
+            bucket_label("2026-11-17", ""),
+            Some("2026-11-17".to_string())
+        );
+    }
+
+    #[test]
+    fn iso_day_and_span_checks() {
+        assert!(is_iso_day("2026-11-17"));
+        assert!(!is_iso_day("2026-11-7"));
+        assert!(!is_iso_day("2026-11-17T00:00:00Z"));
+        assert!(!is_iso_day(""));
+        assert_eq!(span_days("2026-01-01", "2026-01-11"), Some(10));
+        assert_eq!(span_days("2026-01-11", "2026-01-01"), Some(-10));
+        assert_eq!(span_days("nope", "2026-01-01"), None);
+        assert_eq!(shift_day("2026-03-01", 30), Some("2026-01-30".to_string()));
+        assert_eq!(shift_day("2026-03-01", 0), Some("2026-03-01".to_string()));
+        assert_eq!(shift_day("2026-03-01", -1), Some("2026-03-02".to_string()));
+        assert_eq!(shift_day("2026-13-01", 30), None);
+    }
+
+    #[test]
+    fn bucket_days_medians_each_bucket_and_skips_the_empty_ones() {
+        use chrono::Datelike;
+        // One bucket of three (odd middle), one of two (mean of the pair).
+        let days = series(&[
+            ("2026-10-05", 300.0),
+            ("2026-10-02", 100.0),
+            ("2026-10-04", 200.0),
+            ("2026-10-13", 50.0),
+            ("2026-10-12", 60.0),
+        ]);
+        let buckets = bucket_days(&days, "week");
+        assert_eq!(
+            buckets
+                .iter()
+                .map(|bucket| (bucket.day.as_str(), bucket.value))
+                .collect::<Vec<_>>(),
+            vec![
+                ("2026-09-28", 150.0),
+                ("2026-10-05", 300.0),
+                ("2026-10-12", 55.0),
+            ]
+        );
+        // Every week bucket is labelled by its Monday.
+        assert!(buckets.iter().all(|bucket| {
+            parse_history_day(&bucket.day)
+                .map(|date| date.weekday() == chrono::Weekday::Mon)
+                .unwrap_or(false)
+        }));
+        // October 2026 has data, November only partly, December none at all.
+        let months = bucket_days(
+            &series(&[
+                ("2026-10-05", 100.0),
+                ("2026-10-06", 102.0),
+                ("2026-11-02", 200.0),
+            ]),
+            "month",
+        );
+        assert_eq!(
+            months
+                .iter()
+                .map(|bucket| (bucket.day.as_str(), bucket.value))
+                .collect::<Vec<_>>(),
+            vec![("2026-10", 101.0), ("2026-11", 200.0)]
+        );
+        // A non-finite value or a non-date never becomes a bucket.
+        assert!(bucket_days(&series(&[("2026-10-05", f64::NAN)]), "month").is_empty());
+        assert!(bucket_days(
+            &[DailyValue {
+                day: "last may".to_string(),
+                value: 100.0,
+                units: None,
+            }],
+            "month"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn bucket_days_sum_the_units_of_their_source_rows() {
+        let days = vec![
+            DailyValue {
+                day: "2026-10-02".to_string(),
+                value: 100.0,
+                units: Some(3),
+            },
+            DailyValue {
+                day: "2026-10-03".to_string(),
+                value: 120.0,
+                units: Some(4),
+            },
+        ];
+        let buckets = bucket_days(&days, "week");
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].units, Some(7));
+        // A source that counts nothing keeps counting nothing.
+        assert_eq!(
+            bucket_days(&series(&[("2026-10-02", 100.0)]), "week")[0].units,
+            None
+        );
+    }
+
+    #[test]
+    fn medians_ignore_order_and_weight_by_units() {
+        assert_eq!(median_of(&[]), None);
+        assert_eq!(median_of(&[7.0]), Some(7.0));
+        assert_eq!(median_of(&[3.0, 1.0, 2.0]), Some(2.0));
+        assert_eq!(median_of(&[4.0, 1.0, 3.0, 2.0]), Some(2.5));
+        // Five units at 100 outweigh one unit at 300.
+        assert_eq!(weighted_median(&[(100.0, 5), (300.0, 1)]), Some(100.0));
+        assert_eq!(weighted_median(&[(100.0, 1), (300.0, 5)]), Some(300.0));
+        // An even split takes the lower value, the first to reach half.
+        assert_eq!(weighted_median(&[(100.0, 2), (300.0, 2)]), Some(100.0));
+        assert_eq!(weighted_median(&[(100.0, 0), (300.0, 0)]), None);
+        assert_eq!(weighted_median(&[]), None);
+    }
+
+    #[test]
+    fn history_values_round_per_currency_and_change_needs_a_base() {
+        assert_eq!(round_history_value(156.456, "EUR"), 156.46);
+        assert_eq!(round_history_value(2642.6, "PKN"), 2643.0);
+        assert_eq!(round_history_value(2642.4, "PKN"), 2642.0);
+        assert_eq!(round_history_value(0.85, "USD"), 0.85);
+        assert_eq!(change_pct(100.0, 110.0), Some(10.0));
+        assert_eq!(change_pct(1.0, 1.045), Some(4.5));
+        assert_eq!(change_pct(0.0, 100.0), None);
+        assert_eq!(change_pct(100.0, 0.0), Some(-100.0));
+        assert_eq!(change_pct(f64::NAN, 1.0), None);
+    }
+
+    #[test]
+    fn history_source_block_reports_storage_before_points() {
+        let days = series(&[
+            ("2026-10-05", 100.4),
+            ("2026-10-06", 120.4),
+            ("2026-10-07", 110.4),
+        ]);
+        let block = history_source_block(HistorySource {
+            kind: HistoryKind {
+                key: "tcgplayer",
+                source: "tcgcsv/tcgplayer",
+                currency: "USD",
+                metric: "marketPrice",
+            },
+            bucket: "month",
+            days: &days,
+            status: "",
+            extra: None,
+        });
+        assert_eq!(block["status"], "available");
+        assert_eq!(block["source"], "tcgcsv/tcgplayer");
+        assert_eq!(block["storedFrom"], json!("2026-10-05"));
+        assert_eq!(block["storedTo"], json!("2026-10-07"));
+        assert_eq!(block["days"], json!(3));
+        assert_eq!(block["first"], json!(["2026-10", 110.4]));
+        assert_eq!(block["last"], json!(["2026-10", 110.4]));
+        assert_eq!(block["min"], json!(["2026-10", 110.4]));
+        assert_eq!(block["max"], json!(["2026-10", 110.4]));
+        // One bucket is not a trend.
+        assert!(block.get("changePct").is_none());
+        // Min and max name the earliest bucket holding that value.
+        let spread = series(&[
+            ("2026-10-05", 100.0),
+            ("2026-11-05", 300.0),
+            ("2026-12-05", 200.0),
+        ]);
+        let spread_block = history_source_block(HistorySource {
+            kind: ASK_KIND,
+            bucket: "month",
+            days: &spread,
+            status: "",
+            extra: Some(&json!({ "slice": { "condition": "NM" } })),
+        });
+        assert_eq!(spread_block["first"], json!(["2026-10", 100]));
+        assert_eq!(spread_block["last"], json!(["2026-12", 200]));
+        assert_eq!(spread_block["min"], json!(["2026-10", 100]));
+        assert_eq!(spread_block["max"], json!(["2026-11", 300]));
+        assert_eq!(spread_block["changePct"], json!(100.0));
+        assert_eq!(spread_block["slice"]["condition"], json!("NM"));
+        // A zero first value never produces a percentage.
+        let from_zero = series(&[("2026-10-05", 0.0), ("2026-11-05", 300.0)]);
+        let zero_block = history_source_block(HistorySource {
+            kind: ASK_KIND,
+            bucket: "month",
+            days: &from_zero,
+            status: "",
+            extra: None,
+        });
+        assert!(zero_block.get("changePct").is_none());
     }
 }
