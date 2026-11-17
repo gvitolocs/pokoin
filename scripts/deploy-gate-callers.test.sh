@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Run: bash scripts/deploy-gate-callers.test.sh
-# Proves each deploy and publish entry point refuses BEFORE it ships when CI is red, and goes past the gate when CI is
-# green. Uses copies of the real scripts in a throwaway bare origin + clone, a fake `gh` (JSON fixtures), and fake
-# wrangler, vercel, ssh, scp and file that only append to a calls file. No network; everything lives in one temp dir.
+# Proves each deploy and publish entry point refuses BEFORE it ships when CI is red, goes past the gate when CI is
+# green and when a version is promoted, and refuses again with green CI when its own file is not origin/main's.
+# Uses copies of the real scripts in a throwaway bare origin + clone, a fake `gh` (JSON fixtures), and fake wrangler,
+# vercel, ssh, scp and file that only append to a calls file. The fake wrangler answers `versions list --json` from
+# $FAKE_WRANGLER_LIST. No network; everything lives in one temp dir.
 #
 # Where a script stops (green CI):
 #   publish-web.sh               runs to the end (build and node steps are stubs, wrangler is fake)
@@ -315,5 +317,31 @@ in_clone green env HOME="$t/home" bash scripts/build-pokoin-rust-release.sh --sk
 hasnt "REFUSED" "build green"
 [ -d "$POKOIN_DEPLOY_DIR/rust-release" ] || fail "build green: it did not get past the gate to the checkout"
 ok "build-pokoin-rust-release.sh, CI green: past the gate (stops before cargo: no ~/.cargo/env in the test HOME)"
+
+# ---- a checkout whose entry point is not origin/main's cannot ship -------------------------------------------
+# One local byte changed in each entry point, with CI green: the gate refuses before the script can build, upload,
+# deploy or open a release checkout. The fake gh answers green here, so only the self-check can be refusing.
+rm -rf "$POKOIN_DEPLOY_DIR"
+edit_refuses() { # <script> [args...]: edit that entry point, run it with green CI, expect a refusal first
+  local f="$1"
+  shift
+  cp "$t/clone/scripts/$f" "$t/pristine-entry-$f"
+  printf '# edited\n' >> "$t/clone/scripts/$f"
+  in_clone green bash "scripts/$f" "$@"
+  want_rc 1 "stale checkout: $f"
+  refused_by_gate "stale checkout: $f"
+  has "this checkout's deploy scripts are not origin/main's" "stale checkout: $f"
+  if called build-web || called "wrangler versions" || called '^vercel' || called '^ssh' || called '^scp'; then
+    fail "stale checkout: $f shipped something anyway: $(cat "$CALLS")"
+  fi
+  mv "$t/pristine-entry-$f" "$t/clone/scripts/$f"
+  ok "stale checkout: scripts/$f edited by one byte -> 1, nothing shipped"
+}
+edit_refuses publish-web.sh
+edit_refuses deploy-web.sh
+edit_refuses deploy-pokoin-rust.sh
+edit_refuses build-pokoin-rust-release.sh --skip-tests
+[ ! -e "$POKOIN_DEPLOY_DIR/rust-release" ] || fail "stale checkout: build-pokoin-rust-release opened the release checkout anyway"
+ok "every entry point refuses, before anything ships, when its own file is not origin/main's"
 
 echo "all deploy-gate caller tests passed"
