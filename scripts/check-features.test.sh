@@ -14,8 +14,6 @@
 # Usage: scripts/check-features.test.sh
 # Exit: 0 every case behaved, 1 a case did not.
 set -euo pipefail
-export TMPDIR=${TMPDIR:-$HOME/scratch/tmp}
-[ -d "$TMPDIR" ] || mkdir -p "$TMPDIR"
 
 here=$(cd "$(dirname "$0")" && pwd)
 check=$here/check-features.sh
@@ -23,7 +21,7 @@ inventory=$here/js-test-inventory.sh
 [ -x "$check" ] || { echo "check-features.test.sh: $check is not executable" >&2; exit 1; }
 [ -f "$inventory" ] || { echo "check-features.test.sh: $inventory is missing" >&2; exit 1; }
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/check-features-test.XXXXXX")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
