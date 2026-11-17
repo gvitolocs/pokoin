@@ -1,5 +1,5 @@
 import { createEffect, createSignal, onSettled, Show, untrack } from 'solid-js';
-import { useSearchParams } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import {
   cardFromCatalogRow,
   fetchCardTraderAssets,
@@ -11,6 +11,7 @@ import { game } from '@market/game.js';
 import { inventoryBooks } from '@market/inventory-book.js';
 import { inventoryListingHref, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { fetchRail, RAIL } from '@market/lists.js';
+import { currencyFromSearch } from '@market/pkn.js';
 import { addUtcDays, utcDayKey } from '@market/portfolio-history.js';
 import {
   loadPortfolioHistory,
@@ -32,6 +33,7 @@ import SignedIn from '../components/SignedIn.jsx';
 import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile, availablePkn } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
+import { buyerPending, sellerCurrency } from '../stores/buyer.js';
 
 const MOVER_LIMIT = 10;
 // Owner reads come back cheapest-first and include cancelled rows. One page
@@ -213,6 +215,9 @@ function PreviewDashboard() {
       movers={PREVIEW_FIXTURE.movers}
       topMovers={PREVIEW_TOP_MOVERS}
       moverRange={previewRange()}
+      // No account behind the fixtures: the movers tiles price in DKK, the
+      // currency the owner reviews this desk in.
+      moverCurrency="DKK"
       onHistoryRange={setPreviewRange}
       moverHrefFor={moverHref}
       historySeries={previewHistorySeries()}
@@ -231,6 +236,15 @@ function PreviewDashboard() {
 function LiveDashboard() {
   const uid = () => authUid() || accountProfile()?.uid || '';
   const sellerUid = () => (signedIn() ? uid() : '');
+  // The movers tiles price in the seller's display currency: the `?currency=`
+  // pin, else the profile country's currency (docs/BUYSELL.md "Currency",
+  // docs/MARKET.md "Buyer display currency"). A PKN pin or a PKN seller keeps PKN.
+  const location = useLocation();
+  const moverPin = () => currencyFromSearch(location.search);
+  const moverCurrency = () => moverPin() || sellerCurrency();
+  // Until the profile country is known the tiles hold their skeleton, so they
+  // never paint one unit and swap to another.
+  const moverCurrencyPending = () => !moverPin() && buyerPending();
   const [ownedCards, setOwnedCards] = createSignal(null);
   const [physicalOwned, setPhysicalOwned] = createSignal(0);
   const [nftOwned, setNftOwned] = createSignal(0);
@@ -426,6 +440,8 @@ function LiveDashboard() {
         topMovers={topMovers()}
         moverRange={moverRange()}
         topMoversPending={moversPending()}
+        moverCurrency={moverCurrency()}
+        moverCurrencyPending={moverCurrencyPending()}
         moverHrefFor={moverHref}
         onHistoryRange={setMoverRange}
         loading={ownedCards() == null}
