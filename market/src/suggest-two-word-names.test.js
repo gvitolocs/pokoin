@@ -8,6 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { prefetchSearchPage, resetHotSearchPage, takeHotSearchPage } from './search-hot.js';
 import { compactQuery } from './suggest-rank.js';
 import { catalogRecall } from './suggest-pool.js';
 import { createRecallSearch, recallOrder } from './search-recall-core.js';
@@ -149,4 +150,34 @@ test('a cached name from another query is not absorbed into an exact one (PH-05 
     liveSuggestGroups('dark jolte', { kind: 'singles' }).groups.some((row) => row.name === 'Dark Jolteau'),
     'a partial compound still ranks the cached spellings it collected',
   );
+});
+
+test('the traced arrivals leave one list and the number of that list (PH-05 §5.6)', async () => {
+  // Report §2.A1's transport order, replayed through the modules SearchBox
+  // drives: the stem's pages, the stem's results page, the compound's results
+  // page, then the compound's own suggest answer.
+  const manyDarkrai = group('Darkrai', Array.from({ length: 24 }, (_, index) => [`t${index}`, `Set ${index}`, `${index + 1}/100`]));
+  const server = {
+    dark: Array.from({ length: 1909 }, (_, index) => ({ id: `dark-${index}` })),
+    'dark jolteon': [{ id: 'dark-jolteon' }, { id: 'dark-jolteon-lv23' }, { id: 'dark-jolteon-3' }, { id: 'dark-jolteon-4' }, { id: 'dark-jolteon-5' }],
+  };
+  const search = createRecallSearch({
+    fetchSearchPage: async ({ query, offset = 0, limit = 48 }) => {
+      const all = server[String(query).trim()] || [];
+      const cards = all.slice(offset, offset + limit);
+      return { query: String(query).trim(), cards, total: all.length, hasMore: offset + cards.length < all.length, nextOffset: offset + cards.length };
+    },
+    recallLookups: async (query) => recallOrder(query, catalogRecall(query), compactQuery),
+  });
+  resetSuggestLive();
+  resetHotSearchPage();
+  rememberSuggestGroups([manyDarkrai, DARK_PATCH, DARKNESS_ENERGY]);
+  await prefetchSearchPage('dark', 'en', { fetchSearchPage: search, tab: 'singles' });
+  await prefetchSearchPage('dark jolteon', 'en', { fetchSearchPage: search, tab: 'singles' });
+  rememberSuggestGroups([DARK_JOLTEON, DARK_JOLTEON_JP, JOLTEON]);
+
+  const rows = paintCatalogGroups('dark jolteon', PAINT).flatMap((row) => (row.printings || []).map((printing) => printing.name));
+  assert.deepEqual(rows.slice(0, 4), ['Dark Jolteon', 'Dark Jolteon Lv.23', 'Jolteon', 'Jolteon'], rows.join(', '));
+  assert.equal(takeHotSearchPage('dark jolteon', 'en', 'singles').count, 5, 'the footer counts the list on screen');
+  assert.equal(takeHotSearchPage('dark', 'en', 'singles').count, 1909, 'the stem page keeps its own number');
 });
