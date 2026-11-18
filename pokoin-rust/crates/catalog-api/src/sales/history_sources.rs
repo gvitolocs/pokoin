@@ -324,25 +324,31 @@ pub async fn cardmarket_history(
 /// `marketplace_user_listing_events_card_day_idx (card_id, occurred_at desc)`, so
 /// one statement reads the card's whole history and the day-by-day state is
 /// folded from its rows below.
+///
+/// The event `id` is read with them and is what orders the rows: the audit
+/// trigger writes `occurred_at = now()`, the transaction timestamp, so two
+/// changes of one listing inside one transaction — a decrement per order line —
+/// share an instant exactly, and only the id says which of them is the listing's
+/// last state (`scripts/sql/listing-pipeline.sql`).
 pub const POKOIN_EVENTS_SQL: &str = "with before_start as ( \
-     select distinct on (e.listing_id) e.listing_id::text as listing_id, e.occurred_at, \
+     select distinct on (e.listing_id) e.listing_id::text as listing_id, e.id, e.occurred_at, \
             e.status_after, e.quantity_after, e.price_pkn::float8 as price_pkn \
        from public.marketplace_user_listing_events e \
       where e.card_id = $1::text and e.occurred_at < $2::timestamptz \
-      order by e.listing_id, e.occurred_at desc \
+      order by e.listing_id, e.occurred_at desc, e.id desc \
    ), in_range as ( \
-     select e.listing_id::text as listing_id, e.occurred_at, e.status_after, \
+     select e.listing_id::text as listing_id, e.id, e.occurred_at, e.status_after, \
             e.quantity_after, e.price_pkn::float8 as price_pkn \
        from public.marketplace_user_listing_events e \
       where e.card_id = $1::text and e.occurred_at >= $2::timestamptz \
         and e.occurred_at < $3::timestamptz \
    ) \
-   select listing_id, \
+   select listing_id, id, \
           to_char(occurred_at at time zone 'utc', 'YYYY-MM-DD') as day, \
           to_char(occurred_at at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') as at_utc, \
           status_after, quantity_after, price_pkn \
      from (select * from before_start union all select * from in_range) asked \
-    order by at_utc, listing_id";
+    order by occurred_at, id";
 
 /// The one table of `POKOIN_EVENTS_SQL`. The marketplace database writes it from
 /// the listings audit trigger, which a satellite game's catalog database does not
@@ -369,11 +375,27 @@ fn day_after_utc(day: &str) -> String {
         .unwrap_or_else(|| day_start_utc(day))
 }
 
+/// The event `id` as a row carries it: `row_to_node_json` renders a `bigint` as a
+/// string, so the tie-breaker of two same-instant changes is read from the text.
+/// `None` for a cell that is absent, null or not a whole number — an id that
+/// cannot be read orders nothing, and a fold that guesses one plots a state the
+/// market never had.
+fn event_id(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::String(id) => id.trim().parse::<i64>().ok(),
+        Value::Number(id) => id.as_i64(),
+        _ => None,
+    }
+}
+
 /// One row of `POKOIN_EVENTS_SQL`: a listing as it stands from `at` on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListingEvent {
     /// The listing the change belongs to; rows without one share one state.
     pub listing: String,
+    /// The event's own `id`, which orders two changes of one listing that share
+    /// the instant — the transaction timestamp the audit trigger writes.
+    pub id: i64,
     /// The UTC day of the change.
     pub day: String,
     /// The instant of the change, which orders the rows.
@@ -384,14 +406,17 @@ pub struct ListingEvent {
 }
 
 impl ListingEvent {
-    /// The event of one row; a row without a day or an instant is not a change.
+    /// The event of one row; a row without a day, an instant or a readable event
+    /// id is not a change.
     fn from_row(row: &Value) -> Option<ListingEvent> {
         let day = day_of(row.get("day"));
         let at = js::string_or_empty(row.get("at_utc"));
+        let id = event_id(row.get("id"))?;
         if day.len() != 10 || at.is_empty() {
             return None;
         }
         Some(ListingEvent {
+            id,
             listing: js::string_or_empty(row.get("listing_id")),
             day,
             at,
@@ -410,10 +435,16 @@ impl ListingEvent {
     }
 }
 
-/// The rows of `POKOIN_EVENTS_SQL` in the order the changes happened.
+/// The rows of `POKOIN_EVENTS_SQL` in the order the changes happened: the instant
+/// first, and the event id inside it, because two changes written by one
+/// transaction carry that transaction's timestamp and nothing else separates them.
 pub fn listing_events(rows: &[Value]) -> Vec<ListingEvent> {
     let mut events: Vec<ListingEvent> = rows.iter().filter_map(ListingEvent::from_row).collect();
-    events.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.listing.cmp(&b.listing)));
+    events.sort_by(|a, b| {
+        a.at.cmp(&b.at)
+            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.listing.cmp(&b.listing))
+    });
     events
 }
 
@@ -1136,13 +1167,31 @@ mod tests {
         })
     }
 
-    /// One row of `POKOIN_EVENTS_SQL` as Postgres answers it: the listing, the UTC
-    /// day and instant of its change, and how the listing stands from then on.
+    /// One row of `POKOIN_EVENTS_SQL` as Postgres answers it: the listing, the
+    /// event id — `row_to_node_json` sends a `bigint` as a string — the UTC day
+    /// and instant of its change, and how the listing stands from then on. That id
+    /// is always the same here, so it says nothing about which of two rows of one
+    /// instant came last; a row whose order matters comes from `event_row_id`.
     fn event_row(listing: &str, at: &str, status: &str, quantity: Value, price: Value) -> Value {
         json!({
-            "listing_id": listing, "day": &at[..10], "at_utc": at,
+            "listing_id": listing, "id": "1", "day": &at[..10], "at_utc": at,
             "status_after": status, "quantity_after": quantity, "price_pkn": price,
         })
+    }
+
+    /// `event_row` with the event id that orders two changes written at one
+    /// instant: the higher id is the one that happened last.
+    fn event_row_id(
+        id: &str,
+        listing: &str,
+        at: &str,
+        status: &str,
+        quantity: Value,
+        price: Value,
+    ) -> Value {
+        let mut row = event_row(listing, at, status, quantity, price);
+        row["id"] = json!(id);
+        row
     }
 
     /// The days of `rows` folded over the range, the way the block builder does.
@@ -1402,9 +1451,206 @@ mod tests {
             "same instant: the listing id breaks the tie, so the fold is deterministic"
         );
         assert!(events.iter().all(|event| event.is_live()));
-        assert!(!ListingEvent::from_row(&json!({ "day": "2026-10-01", "at_utc": "2026-10-01T00:00:00.000Z", "status_after": "removed", "quantity_after": 0, "price_pkn": null }))
+        assert!(!ListingEvent::from_row(&json!({ "id": "7", "day": "2026-10-01", "at_utc": "2026-10-01T00:00:00.000Z", "status_after": "removed", "quantity_after": 0, "price_pkn": null }))
             .expect("row")
             .is_live());
+    }
+
+    /// Two writes of one listing inside one transaction share the transaction
+    /// timestamp the audit trigger writes, so the event id is the only thing that
+    /// says which of them the listing stands in from that instant on.
+    #[test]
+    fn pokoin_days_order_two_changes_of_one_instant_by_the_event_id() {
+        let listed = || {
+            event_row_id(
+                "10",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "active",
+                json!(1),
+                json!(200),
+            )
+        };
+        let sold = || {
+            event_row_id(
+                "11",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "sold_out",
+                json!(0),
+                json!(200),
+            )
+        };
+        // Both arrival orders of the pair, because the fold must not care which
+        // row the read happened to hand over first.
+        for rows in [vec![listed(), sold()], vec![sold(), listed()]] {
+            assert!(
+                pokoin_days(&rows, "2026-10-04", "2026-10-05").is_empty(),
+                "the listing is off the market from its higher id on, whatever the row order"
+            );
+        }
+        // The same with a price tie: 300 then 180 in one instant is an ask of 180.
+        let dear = || {
+            event_row_id(
+                "10",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "active",
+                json!(1),
+                json!(300),
+            )
+        };
+        let cheap = || {
+            event_row_id(
+                "11",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "active",
+                json!(1),
+                json!(180),
+            )
+        };
+        let priced = vec![
+            json!({ "day": "2026-10-04", "lowestAskPkn": 180, "listingCount": 1 }),
+            json!({ "day": "2026-10-05", "lowestAskPkn": 180, "listingCount": 1 }),
+        ];
+        for rows in [vec![dear(), cheap()], vec![cheap(), dear()]] {
+            assert_eq!(
+                pokoin_days(&rows, "2026-10-04", "2026-10-05"),
+                priced,
+                "the higher id is the price the listing has from that instant"
+            );
+        }
+        // And the other way round: a listing sold and relisted in one transaction
+        // stands live, at the higher id's price.
+        let rows = [
+            event_row_id(
+                "10",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "sold_out",
+                json!(0),
+                json!(200),
+            ),
+            event_row_id(
+                "11",
+                "a",
+                "2026-10-04T12:00:00.000Z",
+                "active",
+                json!(1),
+                json!(210),
+            ),
+        ];
+        assert_eq!(
+            pokoin_days(&rows, "2026-10-04", "2026-10-04"),
+            vec![json!({ "day": "2026-10-04", "lowestAskPkn": 210, "listingCount": 1 })],
+            "a relist at the higher id is an ask again"
+        );
+    }
+
+    /// The id is read from the string Postgres sends, it orders a tie as a number
+    /// and a row without a readable one is not a change.
+    #[test]
+    fn listing_events_reads_the_event_id_and_drops_a_row_without_one() {
+        let events = listing_events(&[
+            event_row_id(
+                "11",
+                "a",
+                "2026-10-02T09:00:00.000Z",
+                "sold_out",
+                json!(0),
+                json!(200),
+            ),
+            event_row_id(
+                "9",
+                "a",
+                "2026-10-02T09:00:00.000Z",
+                "active",
+                json!(1),
+                json!(200),
+            ),
+        ]);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.id)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [9, 11],
+            "the ids of one instant order as numbers, not as their text"
+        );
+
+        // A cell that is not a whole number id cannot order anything, so the row
+        // is left out the way a row without a day or an instant is.
+        for id in [
+            Value::Null,
+            json!(""),
+            json!("abc"),
+            json!("1e3"),
+            json!(1.5),
+            json!("12 listing"),
+        ] {
+            let mut row = event_row(
+                "a",
+                "2026-10-02T09:00:00.000Z",
+                "active",
+                json!(1),
+                json!(200),
+            );
+            row["id"] = id.clone();
+            assert!(
+                ListingEvent::from_row(&row).is_none(),
+                "event id {id} is not a change"
+            );
+        }
+        let mut no_id = event_row(
+            "a",
+            "2026-10-02T09:00:00.000Z",
+            "active",
+            json!(1),
+            json!(200),
+        );
+        no_id
+            .as_object_mut()
+            .expect("object")
+            .remove("id")
+            .expect("id");
+        assert!(
+            ListingEvent::from_row(&no_id).is_none(),
+            "a row that did not read an id is not a change"
+        );
+        // A row whose id is a plain JSON number is a change too.
+        let numeric = ListingEvent::from_row(&json!({
+            "listing_id": "a", "id": 12, "day": "2026-10-02",
+            "at_utc": "2026-10-02T09:00:00.000Z", "status_after": "active",
+            "quantity_after": 1, "price_pkn": 200,
+        }))
+        .expect("row");
+        assert_eq!(numeric.id, 12);
+        assert!(numeric.is_live());
+    }
+
+    /// One statement reads both halves of the card's events, and a same-instant
+    /// pair is decided by the event id in the read and in the order it arrives.
+    #[test]
+    fn pokoin_sql_orders_a_tie_by_the_event_id() {
+        assert_eq!(
+            POKOIN_EVENTS_SQL.matches("e.id").count(),
+            3,
+            "both halves select the id and the state before the window orders by it: {POKOIN_EVENTS_SQL}"
+        );
+        assert!(POKOIN_EVENTS_SQL.contains("order by e.listing_id, e.occurred_at desc, e.id desc"));
+        assert!(
+            POKOIN_EVENTS_SQL.contains("order by occurred_at, id"),
+            "the rows arrive by the timestamp itself, not by its millisecond text: {POKOIN_EVENTS_SQL}"
+        );
+        assert!(
+            !POKOIN_EVENTS_SQL.contains("order by at_utc"),
+            "the rendered instant is not the tie-breaker"
+        );
+        // The bounds the index of the events table offers, unchanged by the fix.
+        assert!(POKOIN_EVENTS_SQL.contains("e.card_id = $1::text"));
+        assert!(POKOIN_EVENTS_SQL.contains("distinct on (e.listing_id)"));
     }
 
     /// The `pokoin` leg reaches Postgres only when the probe found the events
