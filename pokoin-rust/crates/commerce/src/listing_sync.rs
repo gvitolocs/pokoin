@@ -6,7 +6,7 @@ use pokoin_external::{
         client::{self as ct_client, CardTraderClient},
         integration, link,
         push::{self as ct_push, PushOutcome},
-        sync_core::parse_ct_product_id,
+        sync_core::{facet_key_of_row, parse_ct_product_id},
     },
     firebase::{FirestoreRest, FirestoreStore},
 };
@@ -546,13 +546,45 @@ pub fn cardtrader_edit(before: &Value, after: &Value) -> Option<Value> {
     (edit.get("pricePkn").is_some() || edit.get("quantityDelta").is_some()).then_some(edit)
 }
 
+/// Did this edit change a facet CardTrader's product carries: condition,
+/// language, the finish (foil_state or reverse), first edition, signed,
+/// altered or graded? Compared by [`facet_key_of_row`], the same normalised
+/// key the product is built with and a seller's copies are grouped by, so
+/// `NM`→`nm` and an empty→default are no change. Two spellings of one
+/// CardTrader value (`JP` and `JA`) do read as one: the write is a PUT of
+/// absolute property values, so a repeated one changes nothing.
+pub fn facets_changed(before: &Value, after: &Value) -> bool {
+    facet_key_of_row(before) != facet_key_of_row(after)
+}
+
+/// The CardTrader product a facet edit has to be written to: `Some(product_id)`
+/// when the listing is linked (its push not still pending), the link itself did
+/// not change, the listing stays on sale, and a facet changed. Unlike a price
+/// edit, a facet edit is never queued: it goes to CardTrader inside the save
+/// (`handlers::listings::update_listing_guarded`), so the seller learns that
+/// CardTrader cannot take it. A copy that shares its product with live siblings
+/// is not one of these: `group_leave` takes it out of the group instead, and the
+/// reconcile pushes it again with its new facets.
+pub fn facets_to_push(before: &Value, after: &Value) -> Option<String> {
+    let source = field(before, "source_listing_id", 160);
+    let product = parse_ct_product_id(&source);
+    if product.is_empty() || field(after, "source_listing_id", 160) != source {
+        return None;
+    }
+    let qty = number(&after["quantity_available"]);
+    if ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0) {
+        return None;
+    }
+    facets_changed(before, after).then_some(product)
+}
+
 /// A listing that shares its CardTrader product with identical copies
 /// (`siblings` other live members, pokoin_external::cardtrader::group) and
-/// goes off sale or changes price leaves the group instead: its copies come
-/// off the product (`quantityDelta`, an increment), the caller clears its
-/// source, and the seller reconcile pushes it again into the group of its new
-/// price. The product stays for the other copies: never deleted, never
-/// repriced for one of them.
+/// goes off sale, changes price or changes a facet leaves the group instead:
+/// its copies come off the product (`quantityDelta`, an increment), the caller
+/// clears its source, and the seller reconcile pushes it again into the group
+/// of its new price and facets. The product stays for the other copies: never
+/// deleted, never repriced or refaceted for one of them.
 pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value> {
     let source = field(before, "source_listing_id", 160);
     let product = parse_ct_product_id(&source);
@@ -563,7 +595,7 @@ pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value
     let off = ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0);
     let price = number(&after["price_pkn"]);
     let repriced = price.is_finite() && price > 0.0 && (price - number(&before["price_pkn"])).abs() >= 0.005;
-    if !off && !repriced {
+    if !off && !repriced && !facets_changed(before, after) {
         return None;
     }
     let mut edit = json!({ "productId": product, "leaveGroup": true });
@@ -964,6 +996,129 @@ mod tests {
         assert!(SIBLINGS_SQL.contains("id <> $3") && LEAVE_GROUP_SQL.contains("source_listing_id = $2"));
         // The link row moves with the product, never left naming the leaver.
         assert!(HAND_OVER_LINK_SQL.contains("where listing_id = $1") && DROP_LEFT_LINK_SQL.contains("listing_id = $1"));
+    }
+
+    #[test]
+    fn a_facet_change_is_a_change_and_a_resend_or_a_price_is_not() {
+        let card = json!({"card_id": "220962", "condition": "NM", "language": "EN"});
+        // Every facet CardTrader's product carries, in one direction and back.
+        for (key, value) in [
+            ("condition", json!("LP")),
+            ("language", json!("IT")),
+            ("foil_state", json!("reverse")),
+            ("reverse", json!(true)),
+            ("first_edition", json!(true)),
+            ("signed", json!(true)),
+            ("altered", json!(true)),
+            ("graded", json!(true)),
+        ] {
+            let after =
+                json!({ "card_id": "220962", "condition": "NM", "language": "EN", key: value });
+            assert!(facets_changed(&card, &after), "{key}");
+            assert!(facets_changed(&after, &card), "{key} back");
+        }
+        // The push normalises case and empties: neither is a change.
+        assert!(!facets_changed(
+            &card,
+            &json!({"card_id":"220962","condition":"nm","language":"en"})
+        ));
+        assert!(
+            !facets_changed(&json!({"card_id":"220962"}), &card),
+            "empty is NM|EN"
+        );
+        assert!(
+            !facets_changed(
+                &card,
+                &json!({"card_id":"220962","condition":"NM","language":"EN","reverse":false,"graded":false})
+            ),
+            "a facet that is already the default"
+        );
+        // foil_state 'holo' is not the product's reverse; 'reverse' and the
+        // reverse column are the same facet, so switching spelling is not one.
+        assert!(!facets_changed(
+            &card,
+            &json!({"card_id":"220962","condition":"NM","language":"EN","foil_state":"holo"})
+        ));
+        assert!(!facets_changed(
+            &json!({"card_id":"220962","condition":"NM","language":"EN","foil_state":"reverse"}),
+            &json!({"card_id":"220962","condition":"NM","language":"EN","reverse":true})
+        ));
+        // Price, quantity, status, a comment: what the price sync already sends.
+        let priced = json!({"card_id":"220962","condition":"NM","language":"EN","price_pkn":30.0,"quantity_available":4,"status":"active","seller_comment":"x"});
+        assert!(!facets_changed(&card, &priced));
+        assert!(!facets_changed(&priced, &priced));
+    }
+
+    #[test]
+    fn facets_to_push_names_the_linked_product_the_facet_changed_on() {
+        let before = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "EN", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        let relabelled = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "nm", "language": "EN", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        assert_eq!(
+            facets_to_push(&before, &relabelled),
+            None,
+            "the same facets resend nothing"
+        );
+        let italian = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "IT", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        assert_eq!(facets_to_push(&before, &italian).as_deref(), Some("900"));
+        // Off sale, at zero, unlinked, still pending its push, or relinked:
+        // no product to facet, and the reconcile owns that case.
+        for after in [
+            json!({"source_listing_id":"ct:900","card_id":"220962","condition":"NM","language":"IT","quantity_available":1,"status":"inactive"}),
+            json!({"source_listing_id":"ct:900","card_id":"220962","condition":"NM","language":"IT","quantity_available":0,"status":"active"}),
+        ] {
+            assert_eq!(facets_to_push(&before, &after), None, "{after}");
+        }
+        for before in [
+            json!({"card_id":"220962","condition":"NM","language":"EN","quantity_available":1,"status":"active"}),
+            json!({"source_listing_id":"ct:pending:900","card_id":"220962","condition":"NM","language":"EN","quantity_available":1,"status":"active"}),
+        ] {
+            let mut italian = before.clone();
+            italian["language"] = json!("IT");
+            assert_eq!(
+                facets_to_push(&before, &italian).as_deref(),
+                None,
+                "{before}"
+            );
+        }
+        // The link moving to another product is that product's business, not a
+        // facet edit of this one.
+        let mut moved = before.clone();
+        moved["source_listing_id"] = json!("ct:901");
+        let mut moved_italian = moved.clone();
+        moved_italian["language"] = json!("IT");
+        assert_eq!(
+            facets_to_push(&moved, &moved_italian).as_deref(),
+            Some("901")
+        );
+        assert_eq!(
+            facets_to_push(&before, &moved_italian),
+            None,
+            "the link changed"
+        );
+    }
+
+    #[test]
+    fn a_grouped_copy_that_changes_a_facet_leaves_the_group_instead_of_refaceting_it() {
+        let before = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "EN", "price_pkn": 26.0, "quantity_available": 1, "status": "active"});
+        let mut italian = before.clone();
+        italian["language"] = json!("IT");
+        assert_eq!(
+            group_leave(&before, &italian, 3),
+            Some(json!({"productId": "900", "leaveGroup": true, "quantityDelta": -1}))
+        );
+        // The facets are never PUT to a shared product, and a facet-only edit
+        // is no price/quantity edit at all: the group decision owns it.
+        assert_eq!(
+            cardtrader_edit(&before, &italian),
+            None,
+            "a facet-only edit queues no price"
+        );
+        // Alone on its product the facet goes to the PUT (step 4), not to a leave.
+        assert_eq!(group_leave(&before, &italian, 0), None);
+        // Same facets in another spelling: it stays in the group.
+        let mut relabelled = before.clone();
+        relabelled["condition"] = json!("nm");
+        assert_eq!(group_leave(&before, &relabelled, 3), None);
     }
 
     #[test]
