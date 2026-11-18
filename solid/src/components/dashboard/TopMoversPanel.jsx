@@ -5,6 +5,8 @@ import {
   formatMoverValue,
   moverChips,
   moverSpark,
+  moverSparkHover,
+  moverSparkTipPlacement,
   moverTileLine,
   moverTitle,
   moverTone,
@@ -19,11 +21,28 @@ const SIDES = [
 /** The sparkline box; MOVER_SPARK is the viewBox the CSS scales fluidly. */
 const SPARK = { width: 120, height: 34 };
 
+const pct = (value, of) => `${(value / of) * 100}%`;
+
 function MoverTile(props) {
   const mover = () => props.mover;
   const spark = createMemo(() => moverSpark(mover(), SPARK));
   const value = () => formatMoverValue(mover(), props.currency);
   const chips = createMemo(() => moverChips(mover()));
+  // The sparkline day under the pointer, or null. Hover only: the tile itself
+  // stays a plain link, so nothing here cancels or stops a click.
+  const [sparkPoint, setSparkPoint] = createSignal(null);
+  // The tip lives inside the spark box: anchored to the hovered day,
+  // clamped to the box edges, on the vertical side away from the point, so
+  // it never covers the tile's text above the sparkline.
+  const sparkTipStyle = () => moverSparkTipPlacement(sparkPoint(), spark());
+
+  function trackSpark(event) {
+    const box = event.currentTarget.getBoundingClientRect();
+    if (!(box.width > 0)) return;
+    setSparkPoint(moverSparkHover(spark(), (event.clientX - box.left) / box.width, props.currency));
+  }
+
+  const hideSpark = () => setSparkPoint(null);
   const body = () => (
     <>
       <MiniCardTile
@@ -49,15 +68,46 @@ function MoverTile(props) {
         </p>
         <p class={['mover-tile-change', moverTone(mover())]}>{formatMoverChange(mover(), props.currency)}</p>
         <Show when={spark().line}>
-          <svg
-            class="mover-spark"
-            viewBox={`0 0 ${SPARK.width} ${SPARK.height}`}
-            preserveAspectRatio="none"
-            aria-hidden="true"
+          <span
+            class="mover-spark-wrap"
+            onPointerMove={trackSpark}
+            onPointerDown={trackSpark}
+            onPointerLeave={hideSpark}
+            onPointerCancel={hideSpark}
           >
-            <polygon class="mover-spark-area" points={spark().area} />
-            <polyline class="mover-spark-line" points={spark().line} fill="none" vector-effect="non-scaling-stroke" />
-          </svg>
+            <svg
+              class="mover-spark"
+              viewBox={`0 0 ${SPARK.width} ${SPARK.height}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path class="mover-spark-area" d={spark().area} />
+              <path class="mover-spark-line" d={spark().line} fill="none" vector-effect="non-scaling-stroke" />
+            </svg>
+            {/* A CSS circle in %, like the chart above: an SVG circle stretches
+                under preserveAspectRatio=none. */}
+            <Show when={sparkPoint()}>
+              {(dot) => (
+                <span
+                  class="mover-spark-dot"
+                  aria-hidden="true"
+                  style={{ left: pct(dot().x, SPARK.width), top: pct(dot().y, SPARK.height) }}
+                />
+              )}
+            </Show>
+            <Show when={sparkPoint()}>
+              {(dot) => (
+                <span
+                  class="mover-spark-tip"
+                  aria-hidden="true"
+                  style={sparkTipStyle()}
+                >
+                  <span class="mover-spark-tip-day">{dot().dateLabel}</span>
+                  <strong>{dot().valueLabel}</strong>
+                </span>
+              )}
+            </Show>
+          </span>
         </Show>
       </div>
     </>
@@ -68,7 +118,7 @@ function MoverTile(props) {
         when={props.href}
         fallback={<div class="mover-tile-body">{body()}</div>}
       >
-        <a class="mover-tile-link" href={props.href} title={moverTitle(mover(), props.currency)}>
+        <a class="mover-tile-link" href={props.href} aria-label={moverTitle(mover(), props.currency)}>
           {body()}
         </a>
       </Show>

@@ -361,6 +361,142 @@ export function stepHistoryPoints(coords) {
   return out;
 }
 
+/**
+ * The points a curve can be built from: finite x and y, and x still moving
+ * the way the series started. A day that repeats or steps back has no width
+ * and is dropped, so no segment ever divides by zero.
+ */
+function usableHistoryCoords(coords) {
+  const finite = [];
+  for (const point of coords || []) {
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) finite.push({ x, y });
+  }
+  let direction = 0;
+  for (let i = 1; i < finite.length && direction === 0; i += 1) {
+    direction = Math.sign(finite[i].x - finite[i - 1].x);
+  }
+  if (!direction) return finite.slice(0, 1);
+  const out = [];
+  for (const point of finite) {
+    const previous = out[out.length - 1];
+    if (previous && Math.sign(point.x - previous.x) !== direction) continue;
+    out.push(point);
+  }
+  return out;
+}
+
+function historySlope(from, to) {
+  return (to.y - from.y) / (to.x - from.x);
+}
+
+function slopeSign(slope) {
+  return slope > 0 ? 1 : (slope < 0 ? -1 : 0);
+}
+
+/**
+ * Tangent at a point between two runs, held inside the monotone-X rules: it
+ * vanishes at a turning point and never exceeds the shallower neighbouring
+ * slope, which is what keeps every curve between the values it joins.
+ */
+function historyTangent(left, right) {
+  if (slopeSign(left.slope) !== slopeSign(right.slope)) return 0;
+  const chord = (left.slope * right.width + right.slope * left.width) / (left.width + right.width);
+  return slopeSign(left.slope)
+    * Math.min(Math.abs(left.slope), Math.abs(right.slope), Math.abs(chord) / 2);
+}
+
+/**
+ * Cubic Bezier segments of a monotone-X (Fritsch-Carlson) interpolation
+ * through `coords`, as {x0, y0, cx1, cy1, cx2, cy2, x1, y1}. The curve passes
+ * through every point, and both control points of a segment sit inside that
+ * segment's x and y box, so a smooth run never rises above or dips below the
+ * two real values it joins. A flat run stays flat, fewer than two usable
+ * points give no segments, and the result is unchanged by reading `coords`
+ * backwards, so a reversed edge is the same curve.
+ */
+export function smoothHistorySegments(coords) {
+  const points = usableHistoryCoords(coords);
+  if (points.length < 2) return [];
+  const runs = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    runs.push({ width: points[i + 1].x - points[i].x, slope: historySlope(points[i], points[i + 1]) });
+  }
+  const tangents = [
+    runs[0].slope,
+    ...runs.slice(1).map((right, i) => historyTangent(runs[i], right)),
+    runs[runs.length - 1].slope,
+  ];
+  return runs.map((run, i) => ({
+    x0: points[i].x,
+    y0: points[i].y,
+    cx1: points[i].x + run.width / 3,
+    cy1: points[i].y + (tangents[i] * run.width) / 3,
+    cx2: points[i + 1].x - run.width / 3,
+    cy2: points[i + 1].y - (tangents[i + 1] * run.width) / 3,
+    x1: points[i + 1].x,
+    y1: points[i + 1].y,
+  }));
+}
+
+function historyNumber(value) {
+  return value.toFixed(2);
+}
+
+function historyPoint(point) {
+  return `${historyNumber(point.x)} ${historyNumber(point.y)}`;
+}
+
+/** The curve commands of segments; the pen must already sit on the first one. */
+function historyCurve(segments) {
+  return segments.map((s) => [
+    `C ${historyPoint({ x: s.cx1, y: s.cy1 })}`,
+    historyPoint({ x: s.cx2, y: s.cy2 }),
+    historyPoint({ x: s.x1, y: s.y1 }),
+  ].join(', ')).join(' ');
+}
+
+/** Move to the first point, then one smooth curve through all of them. */
+export function smoothHistoryPath(coords) {
+  const points = usableHistoryCoords(coords);
+  if (!points.length) return '';
+  return [`M ${historyPoint(points[0])}`, historyCurve(smoothHistorySegments(points))].filter(Boolean).join(' ');
+}
+
+/**
+ * Closed shape between two smooth curves that share their x: out along
+ * `upper`, a vertical step at the last x, back along `lower`, closed with a
+ * vertical step at the first. Reading `lower` backwards draws the same curve,
+ * so two shapes that share an edge meet it exactly instead of gapping.
+ */
+export function smoothHistoryBandPath(upper, lower) {
+  const top = usableHistoryCoords(upper);
+  const bottom = usableHistoryCoords(lower);
+  if (top.length < 2 || bottom.length < 2) return '';
+  return [
+    `M ${historyPoint(top[0])}`,
+    historyCurve(smoothHistorySegments(top)),
+    `L ${historyPoint(bottom[bottom.length - 1])}`,
+    historyCurve(smoothHistorySegments([...bottom].reverse())),
+    'Z',
+  ].filter(Boolean).join(' ');
+}
+
+/**
+ * Cubic ease-in-out of the draw-in reveal: 0 at the start, 1 at and past
+ * `durationMs`, clamped either side so a stray frame never overdraws.
+ */
+export function historyDrawProgress(elapsedMs, durationMs) {
+  const elapsed = Number(elapsedMs);
+  const total = Number(durationMs);
+  if (!(total > 0)) return 1;
+  if (!(elapsed > 0)) return 0;
+  if (elapsed >= total) return 1;
+  const t = elapsed / total;
+  return t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+}
+
 export const HISTORY_LAYERS = [
   { key: 'liquidity', label: 'Liquidity' },
   { key: 'cards', label: 'Cards' },

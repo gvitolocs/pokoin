@@ -10,12 +10,16 @@ import {
   historyAxis,
   historyDateTicks,
   historyDayAt,
+  historyDrawProgress,
   historyPresetWindow,
   historyTimeline,
   historyWindowChange,
   normalizeHistoryDay,
   previewHistoryMonth,
   sliceHistorySeries,
+  smoothHistoryBandPath,
+  smoothHistoryPath,
+  smoothHistorySegments,
   stepHistoryPoints,
   timelineDay,
   timelineRatio,
@@ -176,6 +180,128 @@ test('the axis starts at zero for a big move and hugs a steady pile', () => {
     { x: 640, y: 180 },
     { x: 640, y: 20 },
   ]);
+});
+
+const JAGGED_VALUES = [64500, 61000, 64600, 63100, 59500, 59000, 61300, 65100, 59800, 58300];
+
+/** The panel's plot box: x spread over 640, y inside 12..212, newest value high. */
+function jaggedCoords() {
+  const high = Math.max(...JAGGED_VALUES);
+  const low = Math.min(...JAGGED_VALUES);
+  return JAGGED_VALUES.map((value, index) => ({
+    x: (index / (JAGGED_VALUES.length - 1)) * 640,
+    y: 212 - ((value - low) / (high - low)) * 200,
+  }));
+}
+
+test('the smooth curve runs through every day and never overshoots between two', () => {
+  const coords = jaggedCoords();
+  const segments = smoothHistorySegments(coords);
+  assert.equal(segments.length, coords.length - 1);
+  segments.forEach((segment, index) => {
+    const from = coords[index];
+    const to = coords[index + 1];
+    assert.deepEqual([segment.x0, segment.y0, segment.x1, segment.y1], [from.x, from.y, to.x, to.y]);
+    const lo = Math.min(from.y, to.y);
+    const hi = Math.max(from.y, to.y);
+    assert.ok(segment.cx1 > from.x && segment.cx1 < to.x, `first control x on ${index}`);
+    assert.ok(segment.cx2 > from.x && segment.cx2 < to.x, `second control x on ${index}`);
+    assert.ok(segment.cy1 >= lo && segment.cy1 <= hi, `first control y on ${index}`);
+    assert.ok(segment.cy2 >= lo && segment.cy2 <= hi, `second control y on ${index}`);
+  });
+});
+
+test('a flat run stays flat and a reversed edge is the very same curve', () => {
+  const flat = [0, 80, 160, 240, 320].map((x) => ({ x, y: 100 }));
+  const levels = smoothHistorySegments(flat);
+  assert.equal(levels.length, flat.length - 1);
+  for (const segment of levels) {
+    assert.equal(segment.cy1, 100);
+    assert.equal(segment.cy2, 100);
+  }
+  const coords = jaggedCoords();
+  const forward = smoothHistorySegments(coords);
+  const back = smoothHistorySegments([...coords].reverse());
+  const mirror = (segment) => [
+    segment.cx2, segment.cy2, segment.cx1, segment.cy1,
+    segment.x1, segment.y1, segment.x0, segment.y0,
+  ];
+  back.forEach((segment, index) => {
+    const want = mirror(forward[forward.length - 1 - index]);
+    const got = [
+      segment.cx1, segment.cy1, segment.cx2, segment.cy2,
+      segment.x0, segment.y0, segment.x1, segment.y1,
+    ];
+    want.forEach((value, at) => {
+      assert.ok(Math.abs(value - got[at]) < 1e-9, `segment ${index} field ${at}: ${got[at]} vs ${value}`);
+    });
+  });
+});
+
+test('a short window has no curve, two days join straight, junk x never makes NaN', () => {
+  assert.deepEqual(smoothHistorySegments([]), []);
+  assert.deepEqual(smoothHistorySegments([{ x: 0, y: 10 }]), []);
+  const pair = smoothHistorySegments([{ x: 0, y: 200 }, { x: 100, y: 100 }]);
+  assert.equal(pair.length, 1);
+  const [only] = pair;
+  assert.equal(only.cy1, 200 + (100 - 200) / 3);
+  assert.equal(only.cy2, 100 - (100 - 200) / 3);
+  // A day that repeats or is not a number cannot widen the curve.
+  const broken = [
+    [{ x: 0, y: 200 }, { x: 0, y: 12 }, { x: 640, y: 30 }],
+    [{ x: 0, y: 200 }, { x: NaN, y: 12 }, { x: 120, y: Infinity }, { x: 640, y: 30 }],
+    [{ x: 640, y: 30 }, { x: 120, y: 12 }],
+  ];
+  for (const coords of broken) {
+    for (const segment of smoothHistorySegments(coords)) {
+      for (const value of Object.values(segment)) assert.ok(Number.isFinite(value), `${value} is not a number`);
+    }
+  }
+  // A backwards series is a curve too: an area returns along its own edge.
+  assert.equal(smoothHistorySegments(broken[2]).length, 1);
+  assert.equal(smoothHistorySegments(broken[0]).length, 1);
+  assert.equal(smoothHistoryPath([{ x: 5, y: 5 }]), 'M 5.00 5.00');
+  assert.equal(smoothHistoryPath([]), '');
+  assert.equal(smoothHistoryBandPath([], []), '');
+});
+
+test('the area band keeps the line curve and closes on its own edges', () => {
+  const top = jaggedCoords();
+  const bottom = top.map((point) => ({ x: point.x, y: point.y + 40 }));
+  const line = smoothHistoryPath(top);
+  const band = smoothHistoryBandPath(top, bottom);
+  assert.ok(band.startsWith(`${line} L `), band.slice(0, 60));
+  assert.ok(band.endsWith(' Z'));
+  assert.equal(band.split('M').length, 2);
+  // Both edges carry the curve, so the band is not a triangle over one leg.
+  assert.equal(band.split('C').length - 1, 2 * (top.length - 1));
+  line.split('C').slice(1).forEach((commands, index) => {
+    const end = commands.split(',').pop().trim().split(' ').map(Number);
+    assert.deepEqual(end, [Number(top[index + 1].x.toFixed(2)), Number(top[index + 1].y.toFixed(2))]);
+  });
+  for (const value of band.split(/[^-\d.]+/).filter(Boolean)) {
+    assert.match(value, /^-?\d+(\.\d{1,2})?$/, value);
+  }
+  // The lowest band steps down to the baseline at its first and last x.
+  const area = smoothHistoryBandPath(bottom, bottom.map((point) => ({ x: point.x, y: 212 })));
+  assert.ok(area.startsWith(`${smoothHistoryPath(bottom)} L `));
+  assert.ok(area.includes(`L ${bottom[bottom.length - 1].x.toFixed(2)} 212.00`), area.slice(-40));
+});
+
+test('the draw-in reveal eases in and out and clamps at both ends', () => {
+  assert.equal(historyDrawProgress(0, 800), 0);
+  assert.equal(historyDrawProgress(400, 800), 0.5);
+  assert.equal(historyDrawProgress(800, 800), 1);
+  assert.equal(historyDrawProgress(1600, 800), 1);
+  assert.equal(historyDrawProgress(-20, 800), 0);
+  assert.equal(historyDrawProgress(Number.NaN, 800), 0);
+  let previous = 0;
+  for (let elapsed = -100; elapsed <= 1000; elapsed += 10) {
+    const value = historyDrawProgress(elapsed, 800);
+    assert.ok(value >= 0 && value <= 1, `${elapsed} is out of range`);
+    assert.ok(value >= previous, `${elapsed} went backwards`);
+    previous = value;
+  }
 });
 
 test('the tip lists every layer at that day, cards with how many have a sale', () => {
