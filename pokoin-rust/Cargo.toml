@@ -4,6 +4,7 @@ members = [
   "apps/api",
   "apps/poko-eval",
   "apps/poko-bot",
+  "apps/newsroom",
   "apps/cardtrader-bridge",
   "apps/cardtrader-listing-dump",
   "apps/cardtrader-price-cache",
