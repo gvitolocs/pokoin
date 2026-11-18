@@ -1,9 +1,12 @@
 //! The wallet request id: the client's own name for one money intent.
 //!
-//! A wallet request that never reached the browser — the user never saw the
-//! answer — is sent again with the id it was sent with the first time, and the
-//! store applies that id once. The rule lives here, apart from the handlers, so
-//! both values of the requirement are exercised without touching the network.
+//! A wallet request whose answer the browser never saw is sent again with the
+//! id it was sent with, and the store applies that id once: one id moves money
+//! once, and an id that is asked to stand for a different request is refused.
+//! The rule lives here, apart from the handlers, so it can be read and exercised
+//! without the network. The wallet handlers pass the tolerant value of the
+//! requirement (`require = false`), which is the value until every client sends
+//! an id; `resolve` answers for both.
 
 use serde_json::Value;
 
@@ -57,11 +60,12 @@ pub fn fingerprint(target: &str, amount_pkn: i64) -> String {
 }
 
 /// Whether the request sent under a key is the request the key was committed
-/// with. A key recorded before fingerprints existed answers for anything.
+/// with. Only a recorded fingerprint can vouch for a request, so a key that
+/// records nothing is refused: this call cannot be shown to name one intent.
 pub fn same_request(stored: Option<&str>, current: &str) -> bool {
     match stored {
         Some(stored) => stored == current,
-        None => true,
+        None => false,
     }
 }
 
@@ -162,7 +166,21 @@ mod tests {
         // so it never rides on the first request's id.
         assert!(!same_request(Some(&sent), &fingerprint("recipient-2", 250)));
         assert!(!same_request(Some(&sent), &fingerprint("recipient-1", 251)));
-        // A key committed without a fingerprint answers for the request it holds.
-        assert!(same_request(None, &fingerprint("recipient-2", 999)));
+    }
+
+    #[test]
+    fn a_key_that_records_nothing_vouches_for_no_request() {
+        // Fail closed: with no fingerprint recorded under the key there is
+        // nothing to compare this request against, so the replay is refused
+        // rather than believed.
+        for current in [
+            fingerprint("recipient-1", 250),
+            fingerprint("0x3535353535353535353535353535353535353535", 400),
+        ] {
+            assert!(!same_request(None, &current), "{current}");
+        }
+        // The same request is still one request when the key says so.
+        let sent = fingerprint("recipient-1", 250);
+        assert!(same_request(Some(&sent), &sent));
     }
 }

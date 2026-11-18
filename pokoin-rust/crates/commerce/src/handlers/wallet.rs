@@ -14,7 +14,7 @@ use crate::auth::Claims;
 use crate::domain::money_request as mr;
 use crate::domain::request_id::{self, RequestId};
 use crate::error::{ApiError, StoreError};
-use crate::firestore::StructuredQuery;
+use crate::firestore::{FirestoreClient, StructuredQuery};
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
@@ -25,30 +25,48 @@ const SILVER_DURATION_MS: i64 = 365 * 24 * 60 * 60 * 1000;
 /// this to `true` and every client has to name its request.
 const REQUIRE_REQUEST_ID: bool = false;
 
+/// How many times the result of a payout that already happened is written to
+/// its request record before the answer is given without it.
+const RECORD_ATTEMPTS: usize = 3;
+
+/// What a client is told when its request id was applied for another request.
+const REUSED_ID_MESSAGE: &str =
+    "This send was already made with different details. Start it again.";
+
+/// What a withdrawal that the bank did not pay automatically is answered with,
+/// written into its record so every later answer for that request says it too.
+const MANUAL_REVIEW_WARNING: &str =
+    "Withdraw request created, but automatic bank payout is pending manual review.";
+
 /// The body's `requestId`: the name the browser gave this intent, so however
 /// often the body arrives the request behind it is applied once.
 /// `None` is a client that names nothing — logged and served as before.
-fn wallet_request_id(body: &Value, route: &str) -> Result<Option<String>, ApiError> {
+fn wallet_request_id(body: &Value, route: &str) -> Result<Option<String>, request_id::Reject> {
     match request_id::resolve(body, REQUIRE_REQUEST_ID) {
         Ok(RequestId::Id(id)) => Ok(Some(id)),
         Ok(RequestId::Absent) => {
             tracing::warn!(route = route, "wallet request without request id");
             Ok(None)
         }
-        Err(reject) => Err(ApiError::bad_request(reject.message()).with_code(reject.code())),
+        Err(reject) => Err(reject),
     }
 }
 
-/// A request id belongs to exactly one request: the same id arriving with
-/// another request is refused, and nothing moves.
-fn refuse_reused_id(stored: Option<&str>, current: &str) -> Result<(), ApiError> {
-    if request_id::same_request(stored, current) {
-        return Ok(());
-    }
-    Err(ApiError::conflict(
-        "That request id already stands for another request.",
-    )
-    .with_code("request_id_reused"))
+/// The 400 a refused request id answers with.
+fn request_id_error(reject: request_id::Reject) -> ApiError {
+    ApiError::bad_request(reject.message()).with_code(reject.code())
+}
+
+/// A request id belongs to exactly one request: the id that was committed for
+/// another request is refused. Nothing recorded under the key says nothing
+/// about it, so that is refused too.
+fn is_reused_id(stored: Option<&str>, current: &str) -> bool {
+    !request_id::same_request(stored, current)
+}
+
+/// The 409 that says this id already stands for a different request.
+fn reused_id() -> ApiError {
+    ApiError::conflict(REUSED_ID_MESSAGE).with_code("request_id_reused")
 }
 
 async fn username_for_uid(state: &DomainState, uid: &str) -> Result<String, ApiError> {
@@ -305,7 +323,8 @@ pub async fn transfer_account_balance(
     AuthedUser(claims): AuthedUser,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
-    let request_id = wallet_request_id(&body, "transfer-account-balance")?;
+    let request_id =
+        wallet_request_id(&body, "transfer-account-balance").map_err(request_id_error)?;
     let to_username = text_field(&body, &["recipientUsername"], 40).to_ascii_lowercase();
     let amount = body
         .get("amountPkn")
@@ -357,9 +376,12 @@ pub async fn transfer_account_balance(
     op.counterparty_username = Some(to_username.clone());
     let outcome = store::apply(state.firestore()?, &op).await?;
     if !outcome.applied {
-        // The id was applied already: nothing moves again, and the client that
-        // never got the first answer is given it now.
-        refuse_reused_id(outcome.fingerprint.as_deref(), &fingerprint)?;
+        // The id was applied already: nothing moves again, and the client is
+        // told the outcome this key carries — the answer the first call stored
+        // when it stored one, the move's facts otherwise.
+        if is_reused_id(outcome.fingerprint.as_deref(), &fingerprint) {
+            return Err(reused_id());
+        }
         let answer = outcome
             .result
             .unwrap_or_else(|| json!({ "ok": true, "creditedAccountBalance": true }));
@@ -429,13 +451,27 @@ async fn notify_pkn_received(
 // POST /api/request-pkn-withdraw
 // ---------------------------------------------------------------------------
 
-/// `withdraw_requests/{requestId}` as the bank and the seller desk see it.
-async fn load_withdraw_request(state: &DomainState, request_id: &str) -> Result<Value, ApiError> {
-    let firestore = state.firestore()?;
-    Ok(firestore
-        .get_document(&firestore.document_path(store::WITHDRAW_REQUESTS, request_id)?)
-        .await?
-        .unwrap_or_else(|| json!({})))
+/// The record of one withdrawal intent, `withdraw_requests/{requestId}`. A
+/// named intent gets it from the commit that locks the PKN, so this is where
+/// that intent stands: `None` is a request nothing ever recorded.
+async fn load_withdraw_request(
+    firestore: &FirestoreClient,
+    request_id: &str,
+) -> Result<Option<Value>, StoreError> {
+    let path = firestore.document_path(store::WITHDRAW_REQUESTS, request_id)?;
+    firestore.get_document(&path).await
+}
+
+/// Write an intent's record after its payout is known. The client has nothing
+/// to retry at that point — the bank has been asked — so the write is repeated
+/// here rather than left to another call. `false` means every attempt failed.
+async fn record_withdraw_request(firestore: &FirestoreClient, path: &str, record: &Value) -> bool {
+    for _ in 0..RECORD_ATTEMPTS {
+        if firestore.set_document(path, record).await.is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 pub async fn request_pkn_withdraw(
@@ -443,7 +479,7 @@ pub async fn request_pkn_withdraw(
     AuthedUser(claims): AuthedUser,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
-    let intent_id = wallet_request_id(&body, "request-pkn-withdraw")?;
+    let intent_id = wallet_request_id(&body, "request-pkn-withdraw").map_err(request_id_error)?;
     let address = text_field(&body, &["toAddress"], 80);
     let amount = body
         .get("amountPkn")
@@ -459,8 +495,10 @@ pub async fn request_pkn_withdraw(
         ));
     }
 
-    // The request document of a named intent is that intent: the same id names
-    // the same lock and the same payout. An unnamed request keeps a fresh id.
+    let firestore = state.firestore()?;
+    // The intent id names one request: its lock, its marker and its record. An
+    // unnamed request is a request of its own, so it mints an id and keys
+    // nothing.
     let request_id = intent_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -468,30 +506,8 @@ pub async fn request_pkn_withdraw(
         .as_ref()
         .map(|id| format!("withdraw:{}:{id}", claims.uid));
     let fingerprint = request_id::fingerprint(&address.to_ascii_lowercase(), amount);
-    let mut lock = LedgerOp::lock(&claims.uid, amount, "withdraw_requested")
-        .with_ref(&request_id)
-        .with_meta(json!({ "toAddress": address }));
-    if let Some(key) = &key {
-        lock = lock
-            .with_idempotency(key.clone())
-            .with_fingerprint(fingerprint.clone());
-    }
-    let outcome = store::apply(state.firestore()?, &lock).await?;
-    if !outcome.applied {
-        refuse_reused_id(outcome.fingerprint.as_deref(), &fingerprint)?;
-        // The PKN of this intent is already locked and the bank was asked for it
-        // by the call that committed the id. The request document says where
-        // that payout stands; this call starts no other.
-        let stored = load_withdraw_request(&state, &request_id).await?;
-        return Ok(private_json(json!({
-            "ok": true,
-            "requestId": request_id,
-            "status": stored.get("status").cloned().unwrap_or(json!("pending")),
-            "payoutTxHash": stored.get("payoutTxHash").cloned().unwrap_or(Value::Null),
-        })));
-    }
-
-    let mut request = json!({
+    let request_path = firestore.document_path(store::WITHDRAW_REQUESTS, &request_id)?;
+    let mut record = json!({
         "uid": claims.uid,
         "email": claims.email,
         "toAddress": address,
@@ -501,57 +517,106 @@ pub async fn request_pkn_withdraw(
         "createdAt": store::now_iso(),
         "updatedAt": store::now_iso(),
     });
-    let _ = state
-        .firestore()?
-        .set_document(
-            &state
-                .firestore()?
-                .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
-            &request,
-        )
-        .await;
+
+    let mut lock = LedgerOp::lock(&claims.uid, amount, "withdraw_requested")
+        .with_ref(&request_id)
+        .with_meta(json!({ "toAddress": address }));
+    if let Some(key) = &key {
+        // One commit carries the lock, the marker and this record: a request
+        // that locked PKN has its record, and an id whose record is already
+        // written commits nothing at all.
+        lock = lock
+            .with_idempotency(key.clone())
+            .with_fingerprint(fingerprint.clone())
+            .with_create(request_path.clone(), record.clone());
+    }
+    let outcome = match store::apply(firestore, &lock).await {
+        Ok(outcome) => outcome,
+        // A record already stands at this path, so this call is not the request
+        // that id belongs to, and nothing of it was committed.
+        Err(StoreError::Conflict(_)) => return Err(reused_id()),
+        Err(error) => return Err(error.into()),
+    };
+    if !outcome.applied {
+        if is_reused_id(outcome.fingerprint.as_deref(), &fingerprint) {
+            return Err(reused_id());
+        }
+        // The call that committed this id locked the PKN and asked the bank;
+        // its own record says where that stands, and this call starts nothing.
+        let stored = load_withdraw_request(firestore, &request_id).await?;
+        let Some(stored) = stored else {
+            // A row written before records joined the commit: what that
+            // withdrawal stands as is the team's to say, not this call's.
+            tracing::warn!(
+                route = "request-pkn-withdraw",
+                "withdraw replay has no request record"
+            );
+            return Err(ApiError::conflict(
+                "This withdrawal needs a check by the Pokoin team. Contact support.",
+            )
+            .with_code("withdraw_needs_support"));
+        };
+        // One intent, one account: the record belongs to the account that made
+        // it, whoever sends the id now.
+        if stored.get("uid").and_then(Value::as_str) != Some(claims.uid.as_str()) {
+            return Err(reused_id());
+        }
+        let mut answer = json!({
+            "ok": true,
+            "requestId": request_id,
+            "status": stored["status"],
+            "payoutTxHash": stored.get("payoutTxHash").cloned().unwrap_or(Value::Null),
+        });
+        // The warning the first answer carried is the record's own, so the
+        // replay of that request carries the same text.
+        if let Some(warning) = stored.get("warning").cloned() {
+            answer["warning"] = warning;
+        }
+        return Ok(private_json(answer));
+    }
+
+    if key.is_none() {
+        // An unnamed request is keyed to nothing, so it records itself the way
+        // it always did and no later call reads this write back.
+        let _ = firestore.set_document(&request_path, &record).await;
+    }
 
     match state.chain().send_bank_pkn(&address, amount as f64).await {
         Ok((mode, tx_hash)) => match tx_hash {
             Some(tx_hash) => {
-                let unlock = LedgerOp::unlock(&claims.uid, amount, "withdraw_paid", false)
-                    .with_ref(&request_id)
-                    .with_meta(json!({ "payoutTxHash": tx_hash, "toAddress": address }));
-                store::apply(state.firestore()?, &unlock).await?;
-                if let Some(object) = request.as_object_mut() {
+                if let Some(object) = record.as_object_mut() {
                     object.insert("status".into(), json!("completed"));
                     object.insert("payoutMode".into(), json!(mode));
                     object.insert("payoutTxHash".into(), json!(tx_hash));
                     object.insert("completedAt".into(), json!(store::now_iso()));
                     object.insert("updatedAt".into(), json!(store::now_iso()));
                 }
-                let _ = state
-                    .firestore()?
-                    .set_document(
-                        &state
-                            .firestore()?
-                            .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
-                        &request,
-                    )
-                    .await;
+                // The bank has paid, so the record is written first: what this
+                // intent is stays kept whatever the unlock does next.
+                if !record_withdraw_request(firestore, &request_path, &record).await {
+                    tracing::error!(request_id = %request_id, "withdraw payout not recorded");
+                }
+                let unlock = LedgerOp::unlock(&claims.uid, amount, "withdraw_paid", false)
+                    .with_ref(&request_id)
+                    .with_meta(json!({ "payoutTxHash": tx_hash, "toAddress": address }));
+                if store::apply(firestore, &unlock).await.is_err() {
+                    // The payout and its record stand; releasing the lock is a
+                    // step for the team. Answering an error here would send the
+                    // client to ask the bank again.
+                    tracing::error!(request_id = %request_id, "withdraw lock not released");
+                }
                 Ok(private_json(json!({
                     "ok": true, "requestId": request_id, "status": "completed",
                     "payoutTxHash": tx_hash,
                 })))
             }
             None => {
-                if let Some(object) = request.as_object_mut() {
+                if let Some(object) = record.as_object_mut() {
                     object.insert("payoutMode".into(), json!(mode));
                 }
-                let _ = state
-                    .firestore()?
-                    .set_document(
-                        &state
-                            .firestore()?
-                            .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
-                        &request,
-                    )
-                    .await;
+                if !record_withdraw_request(firestore, &request_path, &record).await {
+                    tracing::error!(request_id = %request_id, "withdraw payout not recorded");
+                }
                 Ok(private_json(json!({
                     "ok": true, "requestId": request_id, "status": "pending",
                     "payoutTxHash": Value::Null,
@@ -559,23 +624,21 @@ pub async fn request_pkn_withdraw(
             }
         },
         Err(error) => {
-            if let Some(object) = request.as_object_mut() {
+            if let Some(object) = record.as_object_mut() {
                 object.insert("payoutMode".into(), json!("manual_pending"));
                 object.insert("payoutError".into(), json!(error.to_string()));
+                object.insert("warning".into(), json!(MANUAL_REVIEW_WARNING));
             }
-            let _ = state
-                .firestore()?
-                .set_document(
-                    &state
-                        .firestore()?
-                        .document_path(store::WITHDRAW_REQUESTS, &request_id)?,
-                    &request,
-                )
-                .await;
+            if !record_withdraw_request(firestore, &request_path, &record).await {
+                tracing::error!(
+                    request_id = %request_id,
+                    "withdraw manual review not recorded"
+                );
+            }
             Ok(private_json(json!({
                 "ok": true, "requestId": request_id, "status": "pending",
                 "payoutTxHash": Value::Null,
-                "warning": "Withdraw request created, but automatic bank payout is pending manual review.",
+                "warning": MANUAL_REVIEW_WARNING,
             })))
         }
     }
