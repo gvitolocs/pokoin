@@ -55,6 +55,7 @@ import {
   sellerCacheKey,
   setListingsInflight,
 } from './listings-cache.js';
+import { saveCardSales } from './sold-sales-cache.js';
 import {
   homepageDerivativeUrl,
   homepageMatchesCatalog,
@@ -628,6 +629,7 @@ export function fetchCardSales(cardId, {
   firstEdition,
   graded,
   slices,
+  signal,
 } = {}) {
   const id = String(cardId || '').trim();
   if (!/^\d+$/.test(id)) {
@@ -646,7 +648,7 @@ export function fetchCardSales(cardId, {
   const params = new URLSearchParams({ cardId: id });
   if (slices === true || slices === '1') {
     params.set('slices', '1');
-    return getJson(`/api/marketplace-card-sales?${params}`);
+    return getJson(`/api/marketplace-card-sales?${params}`, { signal });
   }
   if (condition) {
     params.set('condition', condition);
@@ -663,7 +665,7 @@ export function fetchCardSales(cardId, {
   if (graded === true || graded === '1') {
     params.set('graded', '1');
   }
-  return getJson(`/api/marketplace-card-sales?${params}`);
+  return getJson(`/api/marketplace-card-sales?${params}`, { signal });
 }
 
 /** Tile / versions last-median: one read of the stored daily medians
@@ -931,7 +933,7 @@ export {
  * already in flight, or rows fetched within that window (the hover / intent
  * prefetch), are the fresh read, so the mount does not fetch them again.
  */
-export function fetchListings(cardId, { limit = 40, fresh = false, maxAgeMs = 0 } = {}) {
+export function fetchListings(cardId, { limit = 40, fresh = false, maxAgeMs = 0, signal } = {}) {
   const id = String(cardId || '');
   if (fresh && maxAgeMs > 0) {
     const inflight = listingsInflightFor(id);
@@ -964,6 +966,7 @@ export function fetchListings(cardId, { limit = 40, fresh = false, maxAgeMs = 0 
   }
   const pending = getJson(`/api/marketplace-listings?${params}`, {
     cache: 'no-store',
+    signal,
   }).then((data) => {
     const kept = rememberListings(id, data, epoch);
     clearListingsInflight(id);
@@ -2202,12 +2205,29 @@ export function preloadDeskArt(card) {
 
 /**
  * Warm one card desk before it opens: its page (local store, low priority,
- * abortable by `signal`), with `art` its hero scan, with `listings` its live
- * listings (the desk adopts a read this recent instead of asking again) and with
- * `book` its buy-order book, which the desk otherwise paints from this device's
- * last answer only — a neighbour it has never opened has no answer.
+ * abortable by `signal`), with `art` its hero scan, then the panels behind that
+ * page in the order the desk shows them — live `listings`, sold `sales`, the
+ * `versions` set, the buy-order `book`, the `names` snapshot of the card's name,
+ * Pokoin's own `native` sold rows. Each is its own flag: a hover wants the page
+ * and the art, the arrow warmer wants all of them.
+ *
+ * A warm is worth only what the desk can read back from it, so the rows the desk
+ * keeps in this device's own copy (book, sales, native) are stored, not merely
+ * fetched, and every local-storable read carries `prefetch: true` — low priority,
+ * and an answer of any age is kept for the desk to adopt.
  */
-export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, listings = false, book = false, signal } = {}) {
+export function prefetchCardDesk(card, {
+  lang = 'en',
+  slug = '',
+  art = true,
+  listings = false,
+  sales = false,
+  versions = false,
+  book = false,
+  names = false,
+  native = false,
+  signal,
+} = {}) {
   const id = neighborCardId(card);
   if (!id) {
     return Promise.resolve(null);
@@ -2215,8 +2235,20 @@ export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, lis
   if (art) {
     preloadCardArt(card);
   }
+  // The page goes out first: every read below is a panel of this page, and the
+  // name snapshot is keyed by the name this page answers with.
+  const page = fetchCard(id, { lang, slug: slug || slugFromCard(card), prefetch: true, signal });
   if (listings) {
-    fetchListings(id).catch(() => {});
+    // Not `fresh`: this is the read the desk adopts instead of asking again.
+    fetchListings(id, { signal }).catch(() => {});
+  }
+  if (sales) {
+    fetchCardSales(id, { slices: true, signal }).then((data) => {
+      if (Array.isArray(data?.slices)) saveCardSales(id, data.slices);
+    }).catch(() => {});
+  }
+  if (versions) {
+    fetchVersionSet(id, { prefetch: true, signal }).catch(() => {});
   }
   if (book) {
     // `buy-orders.js` imports this module, so the book warm cannot be a static
@@ -2230,29 +2262,36 @@ export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, lis
       }),
     ).catch(() => {});
   }
-  return fetchCard(id, { lang, slug: slug || slugFromCard(card), prefetch: true, signal }).then((data) => {
+  return page.then(async (data) => {
     if (art) {
       preloadCardArt(data.card);
     }
+    const name = String(data?.card?.name || card?.name || '').trim();
+    const rest = [];
+    if (names && name) {
+      rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
+    }
+    if (native) {
+      rest.push(fetchNativeSales(id, { signal }).catch(() => {}));
+    }
+    // Awaited, not fired: the caller owns the abort of this warm, and a promise
+    // that resolved before the last two reads landed would leave them running
+    // past the navigation that stopped caring.
+    await Promise.all(rest);
     return data;
   });
 }
 
-export function warmupCard(card, { lang = 'en', listings = false, book = false } = {}) {
-  prefetchCardDesk(card, { lang, listings, book }).catch(() => {});
-}
-
-export function warmupNeighbors(neighbors, { lang = 'en' } = {}) {
-  const prev = neighbors?.prev || [];
-  const next = neighbors?.next || [];
-  [next[0], prev[0]].filter(Boolean).forEach((card, index) => {
-    const run = () => warmupCard(card, { lang, listings: true, book: true });
-    if (index === 0) {
-      run();
-      return;
-    }
-    setTimeout(run, 40);
-  });
+export function warmupCard(card, {
+  lang = 'en',
+  listings = false,
+  sales = false,
+  versions = false,
+  book = false,
+  names = false,
+  native = false,
+} = {}) {
+  prefetchCardDesk(card, { lang, listings, sales, versions, book, names, native }).catch(() => {});
 }
 
 export function fetchAutocomplete(query, { limit = 8, signal } = {}) {

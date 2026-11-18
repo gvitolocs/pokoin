@@ -53,7 +53,6 @@ import {
   toggleWatchlist,
   versionsHref,
   warmupCard,
-  warmupNeighbors,
 } from '@market/api.js';
 import {
   albumShade,
@@ -156,6 +155,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { createBuyBook, sellTarget } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
+import { warmDeskNeighbor } from '../lib/local-prefetch.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { accountSilver } from '../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -176,6 +176,14 @@ import { BUYSELL_PREVIEW_BANNER, previewListings, previewScale } from './buysell
  * window at all (`onListed`).
  */
 const PREFETCH_FRESH_MS = 120_000;
+
+/**
+ * How long the neighbour warm waits for the browser to be idle before it runs
+ * anyway. Long enough that this page's own reads — issued at mount — are on the
+ * wire first, short enough that a neighbour is warm before a visitor decides to
+ * step to it.
+ */
+const NEIGHBOR_WARM_IDLE_MS = 400;
 
 const DESK_VARS = ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint'];
 
@@ -375,11 +383,30 @@ function CardDesk(props) {
     navigate(`${prefixed}${untrack(() => location.search)}`, { replace: true, scroll: false });
   }
 
+  // PH-R034 P5: the two cards the arrows lead to, each warmed once for this desk.
+  // One warmer for both, and the queue behind it runs the loads at idle — after
+  // this page's own reads, which were scheduled before — so the neighbour's data
+  // is already on this device when the click lands.
+  const neighborWarmed = new Set();
+  function warmNeighbors(neighborWindow) {
+    for (const row of [neighborWindow?.next?.[0], neighborWindow?.prev?.[0]]) {
+      const id = String(row?.id || '');
+      if (!/^\d+$/.test(id) || neighborWarmed.has(id)) continue;
+      neighborWarmed.add(id);
+      // Behind the hero: the neighbour's scan must not compete with this card's
+      // (market/src/hero-gate.js). `price` is the Silver gate — the graph history
+      // is a Silver feature, so a warm for anybody else never asks for it.
+      afterHero(() => whenIdle(() => warmDeskNeighbor(row, {
+        lang,
+        price: untrack(accountSilver),
+      }), NEIGHBOR_WARM_IDLE_MS));
+    }
+  }
+
   function showCard(data) {
     if (disposed || !data?.card) return;
     const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
-    // The next card's scan waits for this one's (market/src/hero-gate.js).
-    afterHero(() => warmupNeighbors(neighborWindow, { lang }));
+    warmNeighbors(neighborWindow);
     const current = untrack(page);
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
@@ -566,10 +593,7 @@ function CardDesk(props) {
   if (cached) rememberNeighbors(cached.card, cached.neighbors);
   // Arrows painted from the cache: warm the next hop now, not after this
   // card's own page loads, so fast clicking keeps finding neighbours.
-  if (!cached) {
-    const painted = untrack(page)?.neighbors;
-    if (painted?.prev?.length || painted?.next?.length) afterHero(() => warmupNeighbors(painted, { lang }));
-  }
+  if (!cached) warmNeighbors(untrack(page)?.neighbors);
   const landedWithoutSlug = !untrack(() => props.slug);
   const knownPath = landedWithoutSlug
     ? (peekCanonicalPath(cardId, { lang }) || firstStub?.canonicalPath || firstStub?.canonical_path || '')
