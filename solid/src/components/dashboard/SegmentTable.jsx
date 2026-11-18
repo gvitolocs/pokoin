@@ -1,9 +1,12 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
+import { collectionIdFromKey } from '@market/portfolio-collections.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { formatAssetsValue } from '@market/seller-currency.js';
 import {
   ALL_LEVEL,
+  COLLECTIONS_LEVEL,
   collectionSeries,
+  collectionSeriesOn,
   defaultSegmentLevel,
   formatSegmentChange,
   indexedSeries,
@@ -102,11 +105,14 @@ function SegmentSpark(props) {
 /** A row nothing can be plotted for: held stock with no sale, or none at all. */
 function PlainRow(props) {
   const empty = () => props.row.state === 'empty';
+  // A saved list with nothing in it is not a slice the seller happens not to
+  // hold, so the Collections level names its empty row for what it is.
+  const note = () => (empty() ? props.emptyNote || 'None held' : 'No price data yet');
   return (
     <div class={['segment-row', 'is-plain', { 'is-empty': empty() }]} data-testid={`segment-row-${props.row.key}`}>
       <Label row={props.row} />
       <span class="segment-cards">{empty() ? '0' : cards(props.row.held)}</span>
-      <span class="segment-note">{empty() ? 'None held' : 'No price data yet'}</span>
+      <span class="segment-note">{note()}</span>
       <span class="segment-change" />
       <span class="segment-spark" aria-hidden="true" />
     </div>
@@ -148,10 +154,153 @@ function VersusChart(props) {
 }
 
 /**
+ * The Collections level's own toolbar. The button that makes a list stays on
+ * screen at the limit and says why it cannot be pressed: a disabled control
+ * with no reason reads as a broken page.
+ */
+function CollectionsBar(props) {
+  const book = () => props.book || null;
+  const limit = () => Number(book()?.limits().collections) || 0;
+  const saved = () => (book()?.collections() || []).length;
+  const full = () => Boolean(book()?.atLimit());
+  const reason = () => {
+    if (!book()) return 'The saved collections are not loaded yet.';
+    if (full()) return `You can keep up to ${limit()} collections. Delete one first.`;
+    return 'Keep a list of the cards you want to watch.';
+  };
+  return (
+    <div class="segment-collections-bar" data-testid="segment-collections-bar">
+      <button
+        type="button"
+        class="btn ghost segment-collections-new"
+        data-testid="segment-collections-new"
+        disabled={!book() || full()}
+        title={reason()}
+        aria-label={full() ? reason() : 'New collection'}
+        onClick={() => book()?.openNew()}
+      >
+        New collection
+      </button>
+      <span class="segment-collections-count">
+        {limit() ? `${saved()} of ${limit()} collections` : `${saved()} collections`}
+      </span>
+      <Show when={book()?.error()}>
+        {(message) => (
+          <span class="segment-collections-error" data-testid="segment-collections-error">
+            {message()}
+            <button type="button" data-testid="segment-collections-retry" onClick={() => book()?.reload()}>Try again</button>
+          </span>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * What a saved list answers to once it is open. The delete has exactly one
+ * inline confirm, and it names the list: nothing else on this desk destroys
+ * work, and a second dialog for a row this small would only slow the seller.
+ * A refusal stays here beside the buttons that caused it and leaves the
+ * confirm open, so the row does not vanish under a retry.
+ */
+function CollectionActions(props) {
+  const book = () => props.book || null;
+  const id = () => collectionIdFromKey(props.row.key);
+  const [confirming, setConfirming] = createSignal(false);
+  const [problem, setProblem] = createSignal('');
+  const busy = () => String(book()?.saving() || '') === id();
+
+  function drop() {
+    const asked = book()?.remove(id());
+    if (!asked) return;
+    Promise.resolve(asked).then((answer) => {
+      if (answer?.ok) return;
+      setProblem(answer?.message || 'Could not delete the collection.');
+    });
+  }
+
+  const confirmUi = (
+    <span class="segment-collections-confirm">
+      <span id={`segment-collection-confirm-${props.row.key}`}>
+        Delete “{props.row.label}” and its history? The cards themselves stay in your collection.
+      </span>
+      <button
+        type="button"
+        class="btn is-danger"
+        data-testid={`segment-collection-confirm-${props.row.key}`}
+        disabled={busy()}
+        onClick={drop}
+      >
+        Delete
+      </button>
+      <button
+        type="button"
+        class="btn ghost"
+        data-testid={`segment-collection-cancel-${props.row.key}`}
+        onClick={() => {
+          setConfirming(false);
+          setProblem('');
+        }}
+      >
+        Keep it
+      </button>
+    </span>
+  );
+
+  const buttons = (
+    <span class="segment-collections-buttons">
+      <button
+        type="button"
+        class="btn ghost"
+        data-testid={`segment-collection-edit-${props.row.key}`}
+        disabled={busy()}
+        onClick={() => book()?.openEdit(id())}
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        class="btn ghost is-danger"
+        data-testid={`segment-collection-delete-${props.row.key}`}
+        disabled={busy()}
+        onClick={() => {
+          setProblem('');
+          setConfirming(true);
+        }}
+      >
+        Delete
+      </button>
+    </span>
+  );
+
+  return (
+    <div class="segment-collections-actions" data-testid={`segment-collection-actions-${props.row.key}`}>
+      <Show when={confirming()} fallback={buttons}>
+        {confirmUi}
+      </Show>
+      <Show when={busy()}>
+        <span class="segment-collections-busy">Saving…</span>
+      </Show>
+      <Show when={problem()}>
+        {(message) => (
+          <span class="segment-collections-error" data-testid={`segment-collection-problem-${props.row.key}`}>{message()}</span>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/**
  * The collection as segments under the value graph: one row per segment with a
  * sparkline, opening into a chart that compares it with the whole collection.
  * Rows come from the portfolio-history answer (DG-R001 adds the per-day
  * `segments` split); the window is the range the main graph is showing.
+ *
+ * `collections` is the saved-lists book (DG-C004). Its answer arrives nested
+ * in `model` as `model.collections`, which is what puts the Collections level
+ * in `levels()`; the book itself is only here for the buttons, the limits that
+ * disable them and the reason a load failed. A table without it never shows
+ * that level, because nothing nested it.
  */
 export default function SegmentTable(props) {
   const model = () => props.model || null;
@@ -171,6 +320,15 @@ export default function SegmentTable(props) {
   const defaultLevel = () => defaultSegmentLevel(model());
   const levelId = () => (levels().some((level) => level.id === picked()) ? picked() : defaultLevel());
   const levelName = () => levels().find((level) => level.id === levelId())?.label || 'All games';
+  // The Collections level is the seller's own lists. The book beside it carries
+  // the buttons, the limits that disable them, and the reason a load failed;
+  // its answer reached the model already, as `model.collections`, or this level
+  // would not be in `levels()` at all.
+  const book = () => props.collections || null;
+  const isCollections = () => levelId() === COLLECTIONS_LEVEL;
+  // What the row states when it is open: the two counts the value is built
+  // from, for the day the window ends on.
+  const collectionsMeta = (row) => `Priced ${cards(row.priced)} of ${cards(row.held)} cards`;
 
   const groups = createMemo(() => segmentGroups(model(), levelId(), windowRange()));
   const rows = createMemo(() => groups().flatMap((group) => group.rows));
@@ -190,6 +348,10 @@ export default function SegmentTable(props) {
   const compareSeries = createMemo(() => {
     const level = levelId();
     const win = windowRange();
+    // A saved list is compared with the whole book on the days of its own
+    // series: the answer of one collection can carry days the history never
+    // had, and the two lines are drawn by index, so they must line up by date.
+    if (level === COLLECTIONS_LEVEL) return collectionSeriesOn(model(), openRow()?.series || []);
     if (level !== ALL_LEVEL) {
       const def = (model()?.defs || []).find((row) => row.group === 'game' && row.game === level);
       if (def) {
@@ -330,6 +492,10 @@ export default function SegmentTable(props) {
             </div>
           </Show>
 
+          <Show when={isCollections()}>
+            <CollectionsBar book={book()} />
+          </Show>
+
           <div class="segment-head" aria-hidden="true">
             <span>Segment</span>
             <span class="segment-col-cards">Cards</span>
@@ -348,7 +514,7 @@ export default function SegmentTable(props) {
                   <For each={group().rows} keyed={(row) => row.key}>
                     {(row) => (
                       <>
-                        <Switch fallback={<PlainRow row={row()} />}>
+                        <Switch fallback={<PlainRow row={row()} emptyNote={isCollections() ? 'No cards yet' : ''} />}>
                           <Match when={row().state === 'ok'}>
                             <button
                               type="button"
@@ -377,6 +543,15 @@ export default function SegmentTable(props) {
                               {levelName()}
                               <strong class={['mover-tile-change', tone(chart().collectionChange)]}>{formatSegmentChange(chart().collectionChange)}</strong>
                             </p>
+                            <Show when={isCollections()}>
+                              <p class="segment-collections-meta" data-testid={`segment-collection-meta-${row().key}`}>
+                                <span>{collectionsMeta(row())}</span>
+                                <Show when={row().held > row().priced}>
+                                  <em> A card that never sold counts in the list and adds nothing to the value.</em>
+                                </Show>
+                              </p>
+                              <CollectionActions row={row()} book={book()} />
+                            </Show>
                             <VersusChart
                               width={chartWidth()}
                               segmentPct={chart().segmentPct}
@@ -393,6 +568,16 @@ export default function SegmentTable(props) {
               </div>
             )}
           </For>
+
+          <Show when={isCollections() && !rows().length}>
+            {/* A level with nothing saved has a line of its own: the rows are
+                where the seller would otherwise look for it. */}
+            <p class="segment-collections-none" data-testid="segment-collections-none">
+              {book()?.error()
+                ? 'Nothing came back, and what you did save is not lost.'
+                : 'No collections yet. New collection keeps a list of the cards you own, and the Dashboard follows what it is worth from the day you save it.'}
+            </p>
+          </Show>
         </Show>
       </section>
     </Show>
