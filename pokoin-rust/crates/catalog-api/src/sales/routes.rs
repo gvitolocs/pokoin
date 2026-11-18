@@ -871,7 +871,7 @@ mod tests {
             .expect("lazy pool");
         let block = cardtrader_history(&pool, None, "2026-10-01", "2026-11-01").await;
         assert_eq!(block["status"], "empty");
-        assert_eq!(block["days"].as_array().expect("days").len(), 0);
+        assert!(block["days"].as_array().expect("days").is_empty());
     }
 
     #[test]

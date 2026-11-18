@@ -627,7 +627,7 @@ mod tests {
         let block =
             cardmarket_history(&pool, "magic", Some("239324"), "2026-10-01", "2026-11-01").await;
         assert_eq!(block["status"], "unsupported_game");
-        assert_eq!(block["products"].as_array().expect("products").len(), 0);
+        assert!(block["products"].as_array().expect("products").is_empty());
     }
 
     #[test]
