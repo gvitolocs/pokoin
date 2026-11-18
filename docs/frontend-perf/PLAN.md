@@ -35,10 +35,10 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
 
 ## Phase C/D — Solid 2 app (`solid/`), critical path first
 - [x] C1 Scaffold: Vite 8 + Solid 2 rc.14 + router 2, shares `market/src` via `@market`, React guard, chunks in `/market/s/`.
-- [x] C2 Coexistence switch (`scripts/build-ui-shell.mjs`; on/off and canary in `solid/owned-routes.json`, env `POKOIN_UI_SWITCH` / `POKOIN_UI_CANARY` override locally; CSP hash; e2e verified).
+- [x] C2 Coexistence switch (`scripts/build-ui-shell.mjs`, `solid/owned-routes.json`, canary, CSP hash). Retired with the React UI (see Phase I).
 - [x] D1 header + typeahead (parity 10/10 queries), D2 Home rails.
 - [x] D3 Search, D4 Card desk + versions merged; smoke parity with React on home, search (singles + product), desk, slugless desk, versions.
-- [ ] D5 Sets/Expansion/Era/hubs, then collections/listings/cart/checkout/profile.
+- [x] D5 Sets/Expansion/Era/hubs, then collections/listings/cart/checkout/profile: all 65 remaining pages ported (PRs #325–#328).
 
 ## Phase E — local-first search
 - [ ] Ranking in a worker with a compact name-pool shard (needs a Rust endpoint, see requests).
@@ -48,16 +48,31 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
 - [x] Requests sent and accepted by the Rust session (Server-Timing + TAO, weak ETag/304 on 9 routes, cold p95 < 300 ms for search-page/expansions, `/api/catalog/names` + `/api/catalog/version`): draft PR feature/cache-sync-engine.
 
 ## Phase G/H — parity, regression, rollout
-- [ ] Playwright parity tests React vs Solid on the migrated routes.
+- [x] Playwright parity React vs Solid on every route (integration branch, PRs #325–#328).
 - [x] Stage 1 rollout: switch shipped with canary 0 — React stays the default; Solid owns home, search, card desk, versions for visitors who opt in.
 - [x] Stage 2 (2026-10-09, Giuseppe: 100% now): `canary` 100 — every visitor gets Solid on the owned routes; explicit `?ui=react` opt-outs and framed pages stay React.
 
-### Rollout and rollback
-- Opt in: any owned URL with `?ui=solid` (sticky in localStorage `pokoin.ui`); opt out with `?ui=react`.
-- Canary: `canary` (percent) in `solid/owned-routes.json`; visitors are sampled once and remembered.
-- Kill switch: set `canary` back to 0 and deploy — sampled visitors return to React, explicit opt-ins stay.
-  Full off: `"enabled": false` (the shell is then exactly the React build). Fastest: `wrangler versions deploy <previous>@100%`.
-- Solid hands any route it does not own back to React at the same URL (sessionStorage `pokoin.ui.once=react`).
+### Rollout and rollback (historical)
+- The coexistence switch (`?ui=solid` / `?ui=react`, localStorage `pokoin.ui`, the canary in
+  `solid/owned-routes.json`, the `pokoin.ui.once` handoff) is gone with the React UI.
+- Rollback is a Cloudflare version rollback (`wrangler versions deploy <previous>@100%`,
+  docs/WEB_HOST.md); there is no React build to fall back to.
+
+## Phase I — React removed (2026-10-11)
+- [x] The React UI is deleted: `market/src/pages`, `market/src/components`, the root `.jsx`
+      files and the React hook modules. `market/` is the framework-free modules the Solid app
+      (`@market/*`) and the workers share, with their node tests; React, react-dom,
+      react-router-dom, react-easy-crop, @vitejs/plugin-react and Vite left `market/package.json`.
+- [x] `scripts/build-web.sh` builds Solid only: `solid/dist` (with `market/public` as its
+      publicDir) is `/market/*`, `index.html` is the shell, chunks are `/market/s/*`.
+- [x] React leftovers are errors that name where they are:
+      `node scripts/react-legacy-report.mjs` (run by `market/src/react-legacy-report.test.js`)
+      prints one `[react-legacy] file:line` line per React import, `.jsx` under `market/src`
+      or React dependency; the Solid entry reports `?ui=react`, a stored `pokoin.ui` React
+      preference or a `pokoin.ui.once` handoff as a `[react-legacy]` client error
+      (`solid/src/lib/react-legacy.js`); `bench/crawl-solid.mjs` fails a page on either, or on
+      any React chunk.
+- [x] The UI guards the React tests held moved to `solid/src/**/*.test.js` (`cd solid && npm test`).
 
 ## Measurement notes
 - nezopt is shared (load avg 4–16, swap full on 2026-10-09): use CPU-time metrics

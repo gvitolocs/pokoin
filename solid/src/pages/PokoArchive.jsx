@@ -4,8 +4,8 @@ import { BoardBar, usePageTitle } from './tools/board.jsx';
 
 const CATALOG_URL = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
 
-/** newPoko Gemini Fenrir voice archive — dataset phrases + remade episode lines
- * (market/src/pages/PokoArchive.jsx). */
+/** newPoko Gemini Fenrir voice archive — dataset phrases + remade episode lines.
+ * */
 export default function PokoArchive() {
   const [catalog, setCatalog] = createSignal(null);
   const [error, setError] = createSignal('');

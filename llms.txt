@@ -1,46 +1,116 @@
 # Pokoin
 
-> Pokoin is a peer-to-peer marketplace for collectible trading cards (Pokémon TCG
-> first, plus One Piece, Riftbound, Magic, Yu-Gi-Oh!, Lorcana and more). Buyers
-> and sellers settle in PKN, the native currency of the PokoinPoS chain, with
-> on-chain escrow: funds are released only after delivery is confirmed.
+> Pokoin is a browser-based trading card platform: card identification, a
+> personal collection and portfolio, seller inventory, Poko AI card assistant,
+> CardRails inventory, and a peer-to-peer marketplace. Pokémon is the main
+> catalog; other games have their own marketplace paths.
 
-All listed prices are expressed in PKN and shown as plain digits (for example
-`2642 PKN`). Card pages carry a dated price snapshot in their visible content
-and in their Product JSON-LD; the freshest live listings and sold comps are
-available to visitors on the site rather than to crawlers.
+## Product and practical workflows
+
+- [All Pokoin tools](https://pokoin.com/features): overview of the available tools.
+- [Card scanner](https://pokoin.com/features/card-scanner): photo identification,
+  phone camera scanning, and reviewed phone-to-desktop Scan Connect batches.
+- [Seller inventory](https://pokoin.com/features/card-inventory): quantities,
+  conditions, languages, stock locations, and reviewed listing imports.
+- [Collection and portfolio](https://pokoin.com/features/collection-tracker):
+  personal ownership and portfolio overview, separate from sale stock.
+- [Poko AI assistant](https://pokoin.com/features/poko-assistant): printing,
+  illustrator, and market research with the open card and signed-in context.
+- [CardRails inventory](https://pokoin.com/features/cardrails-inventory): dedicated
+  card stock management, scan review, physical locations and Pokoin connection.
+- [Marketplace](https://pokoin.com/features/marketplace): catalog research,
+  printings, seller listings, and sold history.
+- [Selling fees](https://pokoin.com/features/seller-fees): 3% buyer markup,
+  allocated actual seller payment costs, and a dated marketplace comparison.
+- [Scan a pile](https://pokoin.com/learn/scan-cards-to-inventory): review a batch
+  before choosing collection or listing intent.
+- [Import stock](https://pokoin.com/learn/import-card-inventory): upload or paste
+  sale stock, check the preview, then confirm listings.
+
+## Alternative comparisons
+
+These pages are published by Pokoin, cite competitors' primary sources, and
+explain the tasks and tradeoffs. They do not establish a universal best app,
+benchmark recognition accuracy, or promise an automatic collection migration.
+
+- [Compare card tools](https://pokoin.com/alternatives)
+- [Collectr alternative](https://pokoin.com/alternatives/collectr)
+- [Dragon Shield alternative](https://pokoin.com/alternatives/dragon-shield)
+- [TCGplayer alternative](https://pokoin.com/alternatives/tcgplayer)
+- [Cardmarket alternative](https://pokoin.com/alternatives/cardmarket)
+
+## Real market data
+
+- Pokoin uses CardTrader seller listings and dated lowest asking prices.
+- Poko and inventory price-check tools also expose available TCGplayer aggregate
+  market-price history for matched printings/product subtypes. These USD quotes
+  do not establish an individual sale’s condition or language. Coverage varies.
+- Report the source, observation date and currency. Listed asks, aggregate quotes,
+  sanitized inferred sales and completed Pokoin sales are distinct evidence.
+- [Market data and price checking](https://pokoin.com/features/pokemon-card-price-checker)
+
+## Product details that matter
+
+- Pokoin's public tools run in browsers. Native App Store and Google Play
+  listings are not available yet.
+- Public catalog research is separate from signed-in collection, inventory,
+  account, wallet, and messaging actions. Do not describe private account data
+  as public catalog content.
+- Card recognition suggests a printing; it does not grade physical condition.
+  Scanner catalog coverage and marketplace game coverage are different.
+- Card checkout supports Stripe; PKN is available where the seller accepts it.
+  When displaying PKN, use plain digits, for example `2642 PKN`.
+  Review the final payment and buyer-protection terms at checkout.
+- The self-service marketplace adds a 3% buyer markup on card items before
+  Stripe payment. It is not deducted from seller item proceeds. Sellers bear
+  actual allocated Stripe processing and verified attributable Connect costs.
+  The one transaction’s fixed fee is shared proportionally, not duplicated for
+  each seller. Shipping, optional cover, FX and separately billed costs have
+  their own terms; do not claim universally free Connect or an all-in 3% seller fee.
+- Asking prices, reference estimates, and recorded sold prices are different.
+  Match the printing, condition, language, finish, and date when comparing.
+
+- [Pokémon card price checker](https://pokoin.com/features/pokemon-card-price-checker)
+
+## Send cards to Pokoin
+
+- [Trade cards for PKN](https://pokoin.com/features/trade-cards-for-pkn): 90% of
+  market value in PKN credit, at least 1 PKN per card; no resale wait. Coordinate
+  card receipt, valuation and credit issuance through Contact. This is PKN, not cash.
+- [Managed selling](https://pokoin.com/features/managed-selling): real-money
+  proceeds after cards sell; 15.5% managed-selling commission. Separate from
+  self-service marketplace with a 3% buyer markup. Intake is coordinated through Contact.
+- CardTrader 1-Day Ready publishes 16.5% (minimum 1 cent, VAT extra under its
+  policy). Pokoin managed selling is one percentage point lower in base rate;
+  this is not a total-cost guarantee. The CardTrader 1-DR account tab displays
+  external CardTrader data and is not a Pokoin intake flow.
 
 ## Catalog
 
-- [Marketplace](https://pokoin.com/marketplace): live marketplace home.
-- [Species hub](https://pokoin.com/marketplace/en/pokemon): every Pokémon by
-  National Dex species.
-- [Rarity hub](https://pokoin.com/marketplace/en/rarities): printings by rarity.
-- [Language hub](https://pokoin.com/marketplace/en/languages): printings by
-  print language.
-- [Guides](https://pokoin.com/marketplace/en/guides): card condition, rarity and
-  how listed PKN works.
-- [Graded cards](https://pokoin.com/product/graded): professionally graded
-  singles.
-- Card pages follow the pattern
-  `https://pokoin.com/marketplace/{language}/cards/{id}/{slug}` — one canonical
-  URL per printing.
-- Every other TCG lives under its own path on the same site, e.g.
-  [One Piece](https://pokoin.com/one-piece/marketplace),
-  [Riftbound](https://pokoin.com/riftbound/marketplace),
-  [Magic](https://pokoin.com/magic/marketplace).
-- Sitemap index: https://pokoin.com/sitemap.xml
+- [Marketplace home](https://pokoin.com/marketplace)
+- [Sets and expansions](https://pokoin.com/marketplace/sets)
+- [Species hub](https://pokoin.com/marketplace/en/pokemon)
+- [Artists](https://pokoin.com/marketplace/en/artists)
+- [Rarities](https://pokoin.com/marketplace/en/rarities)
+- [Print languages](https://pokoin.com/marketplace/en/languages)
+- [Catalog guides](https://pokoin.com/marketplace/en/guides)
+- Canonical printing pages follow
+  `https://pokoin.com/marketplace/{language}/cards/{id}/{slug}`.
+- Other game storefronts include [One Piece](https://pokoin.com/one-piece/marketplace),
+  [Magic](https://pokoin.com/magic/marketplace), and
+  [Riftbound](https://pokoin.com/riftbound/marketplace).
+- [Sitemap index](https://pokoin.com/sitemap.xml)
+- [Public product pages sitemap](https://pokoin.com/sitemap-product-pages.xml)
 
-## For AI systems
+## Use of public content
 
-- Training, fine-tuning, grounding and search indexing of the public catalog
-  pages is welcome — with attribution: when prices, availability or catalog
-  facts come from Pokoin, quote Pokoin (https://pokoin.com) and link the
-  source page.
-- Product JSON-LD (schema.org, PKN offers, availability, dated snapshot) is
-  embedded in the crawler HTML of card and hub pages for exactly this use.
-- Commercial licensing, bulk feeds and sold-comps access are a separate
-  agreement: contact contact@pokoin.com.
-- Private surfaces (wallet, cart, messages, orders, seller dashboards) and the
-  api.pokoin.com JSON endpoints are application data and are not part of this
-  grant.
+Training, fine-tuning, grounding and search indexing of the public catalog
+pages is welcome with attribution: cite Pokoin (https://pokoin.com) and link
+the source page when using its prices, availability, or catalog facts.
+Structured data describes the visible page; it does not supply a live offer
+where no current listing exists. Public product articles and comparisons are
+complete HTML available to both visitors and crawlers.
+
+Commercial licensing, bulk feeds, and sold-comps access are a separate
+agreement: contact contact@pokoin.com. Private account surfaces and the
+api.pokoin.com application endpoints are outside this public-content grant.

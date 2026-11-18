@@ -6,14 +6,12 @@ import {
   cleanPokoImages,
   clearActiveDeskCard,
   defaultPokoDeskPrompt,
-  deskCardFromPath,
   isPokoPeer,
   mergePokoEvents,
   pokoPreview,
   readPokoHistory,
   reconcilePokoEvents,
   pokoEventsSignature,
-  resolvePokoCards,
   setActiveDeskCard,
   tagsToPokoCards,
   writePokoHistory,
@@ -43,15 +41,15 @@ test('tagsToPokoCards and cleanPokoImages sanitize payloads', () => {
   );
 });
 
-test('deskCardFromPath and resolvePokoCards prefer live desk then URL', () => {
-  clearActiveDeskCard();
-  const fromPath = deskCardFromPath('/marketplace/en/cards/246912/card-noivern-v-full-art-195-196-evolving-skies');
-  assert.equal(fromPath.cardId, '246912');
-  assert.match(fromPath.name, /Noivern/i);
-  assert.equal(resolvePokoCards({ pathname: fromPath.canonicalPath })[0].cardId, '246912');
-  setActiveDeskCard({ id: '99', name: 'Live Desk', set: 'SV' });
-  assert.equal(resolvePokoCards({ pathname: fromPath.canonicalPath })[0].cardId, '99');
-  assert.equal(resolvePokoCards({ tags: [{ id: '7', name: 'Tagged' }], pathname: fromPath.canonicalPath })[0].cardId, '7');
+test('buildPokoPageContext names only an attached card, never the desk being viewed', () => {
+  globalThis.localStorage = { getItem: () => null, setItem() {} };
+  const path = '/marketplace/en/cards/250366/card-foongus-12-135-plasma-storm';
+  setActiveDeskCard({ id: '250366', name: 'Foongus', set: 'Plasma Storm' });
+  const ctx = buildPokoPageContext({ pathname: path, cards: [] });
+  assert.equal(ctx.deskCardId, '');
+  assert.equal(ctx.deskCardName, '');
+  assert.deepEqual(ctx.attachedCards, []);
+  assert.deepEqual(tagsToPokoCards([]), []);
   clearActiveDeskCard();
 });
 

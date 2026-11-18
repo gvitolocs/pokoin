@@ -1,5 +1,8 @@
+import { createTabCache } from '../lib/tab-cache.js';
+import { authUid } from '../stores/auth.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import { fetchSoldHistory, imageSrc, markMarketplaceShipped, refundMarketplaceOrder } from '@market/api.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import {
@@ -22,10 +25,11 @@ import {
   refundInputFromAmount,
 } from '@market/order-status.js';
 import CardArt from '../components/CardArt.jsx';
-import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
-import RequireSignIn from '../components/RequireSignIn.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { getBearer } from '../stores/auth.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewSales } from './mypokoin-preview.js';
 import '@market/sales-row.css';
 
 function SaleThumb(props) {
@@ -117,9 +121,12 @@ function RefundForm(props) {
   );
 }
 
-function SalesDesk() {
+const salesCache = createTabCache();
+
+function SalesDesk(props) {
   const location = useLocation();
-  const [sales, setSales] = createSignal(null);
+  const [sales, setSales] = createSignal(props.preview ? null : salesCache.get(untrack(authUid)) ?? null);
+  const [limit, setLimit] = createSignal(COLLECTION_BATCH_SIZE);
   const [error, setError] = createSignal('');
   const [notice, setNotice] = createSignal('');
   const [source, setSource] = createSignal('all');
@@ -128,11 +135,19 @@ function SalesDesk() {
   const [trackingDraft, setTrackingDraft] = createSignal({});
   const [shipBusy, setShipBusy] = createSignal('');
 
-  onSettled(() => {
+  createEffect(() => props.preview ? 'preview' : authUid(), (uid) => {
+    if (uid === 'preview') {
+      setSales(previewSales());
+      return undefined;
+    }
+    if (!uid) { setSales(null); return undefined; }
+    const cached = salesCache.get(uid);
+    setSales(() => cached ?? null);
+    if (salesCache.fresh(uid)) return undefined;
     let cancelled = false;
     getBearer()
       .then((token) => fetchSoldHistory(token))
-      .then((data) => { if (!cancelled) setSales(() => data.sales || []); })
+      .then((data) => { if (!cancelled && authUid() === uid) { salesCache.set(uid, data.sales || []); setSales(() => data.sales || []); } })
       .catch((err) => { if (!cancelled) setError(err.message || 'Sold history failed.'); });
     return () => {
       cancelled = true;
@@ -143,7 +158,10 @@ function SalesDesk() {
   createEffect(
     () => (openId() && sales() ? openId() : ''),
     (id) => {
-      if (id) document.getElementById(`sale-${id}`)?.scrollIntoView({ block: 'center' });
+      if (!id) return;
+      const index = (sales() || []).findIndex((row) => row.orderId === id);
+      if (index >= limit()) setLimit(index + 1);
+      requestAnimationFrame(() => document.getElementById(`sale-${id}`)?.scrollIntoView({ block: 'center' }));
     },
   );
 
@@ -151,6 +169,7 @@ function SalesDesk() {
   const totals = createMemo(() => salesTotals(sales()));
 
   function applyRefund(orderId, result) {
+    salesCache.delete(authUid());
     setOpenId('');
     setNotice(`Refunded ${formatOrderMoney(result.refund?.amount, result.currency)} on ${orderId}.`);
     if (result.sale) {
@@ -161,6 +180,7 @@ function SalesDesk() {
   }
 
   async function shipOrder(orderId) {
+    salesCache.delete(authUid());
     const trackingCode = String(trackingDraft()[orderId] || '').trim();
     if (!trackingCode) {
       setError('Add the shipping tracking code before marking shipped.');
@@ -184,30 +204,28 @@ function SalesDesk() {
   }
 
   return (
-    <div class="page desk">
-      <PageHead
-        kicker="Seller"
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
         title="Sold history"
-        lede="Every card that actually sold: Pokoin checkout and your linked CardTrader store. Refund part of a Pokoin order from here."
+        lede="Every card that actually sold, on Pokoin and CardTrader."
+        metrics={sales() ? [
+          { value: totals().count, label: 'Sales' },
+          { value: totals().units, label: 'Cards sold' },
+          {
+            value: totals().eurNet ? formatOrderMoney(totals().eurNet, 'EUR') : '—',
+            label: 'EUR after refunds',
+            hint: totals().pknNet ? `+ ${formatOrderMoney(totals().pknNet, 'PKN')}` : '',
+          },
+          { value: salesRefundedLine(totals()), label: 'Refunded' },
+        ] : []}
       >
         <a class="btn ghost" href="/inventory/scan">Scan cards</a>
-      </PageHead>
-      <StockNav />
+      </StockNav>
       <Alert>{error()}</Alert>
       <Show when={notice()}><p class="desk-ok">{notice()}</p></Show>
-
-      <Show when={sales()}>
-        <MetricGrid>
-          <Metric value={totals().count} label="Sales" />
-          <Metric value={totals().units} label="Cards sold" />
-          <Metric
-            value={totals().eurNet ? formatOrderMoney(totals().eurNet, 'EUR') : '—'}
-            label="EUR after refunds"
-            hint={totals().pknNet ? `+ ${formatOrderMoney(totals().pknNet, 'PKN')}` : ''}
-          />
-          <Metric value={salesRefundedLine(totals())} label="Refunded" />
-        </MetricGrid>
-      </Show>
 
       <Show when={sales() == null && !error()}>
         <DeskPanel title="Sales"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
@@ -235,7 +253,7 @@ function SalesDesk() {
           )}
         >
           <div class="thread-list">
-            <For each={shown()}>
+            <For each={shown().slice(0, limit())}>
               {(row) => {
                 const ct = row.source === 'cardtrader';
                 const status = () => saleStatus(row, orderStatus);
@@ -343,20 +361,29 @@ function SalesDesk() {
               }}
             </For>
           </div>
+          <Show when={shown().length > limit()}><button class="btn ghost" type="button" onClick={() => setLimit(nextCollectionBatch(limit(), shown().length))}>Show more</button></Show>
         </DeskPanel>
       </Show>
     </div>
   );
 }
 
-/** /sales (market/src/pages/Sales.jsx): sold history, partial refunds, tracking. */
+/** /sales: sold history, partial refunds, tracking. */
 export default function Sales() {
+  const [params] = useSearchParams();
   onSettled(() => {
     document.title = 'Sold history · Pokoin';
   });
   return (
-    <RequireSignIn>
-      <SalesDesk />
-    </RequireSignIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <SignedIn early>
+          <SalesDesk />
+        </SignedIn>
+      )}
+    >
+      <SalesDesk preview />
+    </Show>
   );
 }

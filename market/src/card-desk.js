@@ -3,7 +3,6 @@
 // listing form's defaults, share helpers. No framework imports.
 
 import { cardFromCatalogRow } from './api.js';
-import { continueBoxCursor } from './inventory-listings.js';
 import { listingFoilOptions } from './listing-faces.js';
 import { conditionShort } from './listing-meta.js';
 import {
@@ -78,12 +77,12 @@ export function pricedOffers(rows) {
 
 export function formatChange72h(pct) {
   if (pct == null || !Number.isFinite(Number(pct))) {
-    return { text: '72h —', empty: true };
+    return { text: '3 days —', empty: true };
   }
   const value = Number(pct) * 100;
   const sign = value > 0 ? '+' : '';
   return {
-    text: `72h ${sign}${value.toFixed(1)}%`,
+    text: `${sign}${value.toFixed(1)}% · 3 days`,
     empty: false,
     up: value >= 0,
   };
@@ -123,14 +122,18 @@ export function shownDealCondition(rows, language, wanted, card = null) {
   return bestDealCondition(rows, language, card) || wanted;
 }
 
-/** Next inventory slot for a box, or the bare box when it has no stack yet. */
-export function nextBoxLocation(rows, box) {
+/**
+ * Next inventory slot for a box from `fetchSellerBoxSlots` boxes, or the bare
+ * box when it has no slot yet. The box keeps the casing the seller picked.
+ */
+export function nextBoxLocation(boxes, box) {
   const name = String(box || '').trim();
   if (!name) return '';
-  const cursor = continueBoxCursor(rows, name, 80);
-  if (!cursor) return name;
-  if (cursor.stackSize <= 1) return `${name}·${cursor.stack}`;
-  return `${name}·${cursor.stack}·${cursor.startPosition}`;
+  const key = name.toLowerCase();
+  const hit = (Array.isArray(boxes) ? boxes : [])
+    .find((entry) => String(entry?.box || '').trim().toLowerCase() === key);
+  const slot = String(hit?.next?.slot || '');
+  return /^[·•]\d/.test(slot) ? `${name}${slot}` : name;
 }
 
 export function defaultFoil(card, foils = listingFoilOptions()) {

@@ -120,6 +120,99 @@ pub fn pkn_balance_discount(
     }
 }
 
+/// The buyer opted into the balance discount: `usePknDiscount: true`, or the
+/// legacy numeric `pknDiscount` > 0. A client amount is never used; the server
+/// prices the discount from the buyer's own balance.
+pub fn wants_pkn_discount(body: &serde_json::Value) -> bool {
+    if body.get("usePknDiscount").and_then(serde_json::Value::as_bool) == Some(true) {
+        return true;
+    }
+    body.get("pknDiscount")
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value.is_finite() && value > 0.0)
+        .unwrap_or(false)
+}
+
+/// Sellers whose profile says `acceptsPkn: false` (missing means they accept).
+pub fn pkn_refused_sellers<'a>(
+    sellers: impl IntoIterator<Item = (&'a str, &'a serde_json::Value)>,
+) -> Vec<String> {
+    let mut refused: Vec<String> = Vec::new();
+    for (uid, user) in sellers {
+        let uid = uid.trim();
+        let accepts = user
+            .get("acceptsPkn")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        if !accepts && !uid.is_empty() && !refused.iter().any(|seen| seen == uid) {
+            refused.push(uid.to_string());
+        }
+    }
+    refused
+}
+
+/// What the buyer could take off the card charge (`voucher`) and what is
+/// taken (`applied`: the voucher when they opted in, else nothing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckoutPknDiscount {
+    pub voucher: PknBalanceDiscount,
+    pub applied: PknBalanceDiscount,
+    pub available_pkn: i64,
+    pub opted_in: bool,
+}
+
+impl CheckoutPknDiscount {
+    /// The card charge after the discount.
+    pub fn charge_cents(&self, grand_total_cents: i64) -> i64 {
+        grand_total_cents - self.applied.discount_eur_cents
+    }
+
+    /// The quote/session JSON: `pknVoucher`, `pknDiscount`.
+    pub fn voucher_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "pkn": self.voucher.discount_pkn,
+            "eurCents": self.voucher.discount_eur_cents,
+            "eligiblePkn": self.voucher.eligible_pkn,
+            "availablePkn": self.available_pkn,
+        })
+    }
+
+    pub fn applied_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "pkn": self.applied.discount_pkn,
+            "eurCents": self.applied.discount_eur_cents,
+            "applied": self.applied.discount_pkn > 0,
+        })
+    }
+}
+
+/// One rule for the quote and the Stripe session.
+pub fn checkout_pkn_discount(
+    available_pkn: i64,
+    items: &[QuoteItem],
+    refused_seller_uids: &[String],
+    grand_total_cents: i64,
+    opted_in: bool,
+) -> CheckoutPknDiscount {
+    let voucher =
+        pkn_balance_discount(available_pkn, items, refused_seller_uids, grand_total_cents);
+    let applied = if opted_in {
+        voucher
+    } else {
+        PknBalanceDiscount {
+            discount_pkn: 0,
+            discount_eur_cents: 0,
+            eligible_pkn: voucher.eligible_pkn,
+        }
+    };
+    CheckoutPknDiscount {
+        voucher,
+        applied,
+        available_pkn: available_pkn.max(0),
+        opted_in,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +311,71 @@ mod tests {
         assert_eq!(discount.discount_eur_cents, 200);
         assert_eq!(discount.discount_pkn, 400);
         assert_eq!(discount.eligible_pkn, 401);
+    }
+
+    #[test]
+    fn the_discount_opt_in_is_a_flag_never_an_amount() {
+        use serde_json::json;
+        assert!(wants_pkn_discount(&json!({ "usePknDiscount": true })));
+        assert!(!wants_pkn_discount(&json!({ "usePknDiscount": false })));
+        assert!(!wants_pkn_discount(&json!({})));
+        assert!(!wants_pkn_discount(&json!({ "usePknDiscount": "true" })));
+        // The legacy numeric field is an opt-in; its amount is ignored.
+        assert!(wants_pkn_discount(&json!({ "pknDiscount": 500 })));
+        assert!(!wants_pkn_discount(&json!({ "pknDiscount": 0 })));
+        assert!(!wants_pkn_discount(&json!({ "pknDiscount": "500" })));
+    }
+
+    #[test]
+    fn refused_sellers_are_the_ones_that_said_no() {
+        use serde_json::json;
+        let red = json!({ "acceptsPkn": false });
+        let givi = json!({ "acceptsPkn": true });
+        let blank = json!({});
+        let refused = pkn_refused_sellers([
+            ("red", &red),
+            ("givi", &givi),
+            ("new", &blank),
+            ("red", &red),
+        ]);
+        assert_eq!(refused, vec!["red".to_string()]);
+    }
+
+    #[test]
+    fn the_checkout_discount_skips_refused_sellers_and_keeps_the_card_floor() {
+        let items = vec![
+            QuoteItem {
+                seller_uid: "red".into(),
+                quantity: 1,
+                unit_price_pkn: 200.0,
+                ..Default::default()
+            },
+            QuoteItem {
+                seller_uid: "givi".into(),
+                quantity: 2,
+                unit_price_pkn: 400.0,
+                ..Default::default()
+            },
+        ];
+        let refused = vec!["red".to_string()];
+        // givi's 800 PKN are eligible: 400 cents off a 1830-cent order.
+        let off = checkout_pkn_discount(10_000, &items, &refused, 1830, false);
+        assert_eq!(off.voucher.discount_eur_cents, 400);
+        assert_eq!(off.voucher.eligible_pkn, 800);
+        assert_eq!(off.applied.discount_pkn, 0);
+        assert_eq!(off.charge_cents(1830), 1830);
+        let on = checkout_pkn_discount(10_000, &items, &refused, 1830, true);
+        assert_eq!(on.applied, on.voucher);
+        assert_eq!(on.applied.discount_pkn, 800);
+        assert_eq!(on.charge_cents(1830), 1430);
+        assert_eq!(on.applied_json()["applied"], serde_json::json!(true));
+        // A small order keeps a 50-cent card charge.
+        let floor = checkout_pkn_discount(10_000, &items, &[], 300, true);
+        assert_eq!(floor.charge_cents(300), 50);
+        assert_eq!(floor.applied.discount_pkn, 500);
+        // An empty balance offers nothing.
+        let broke = checkout_pkn_discount(0, &items, &[], 1830, true);
+        assert_eq!(broke.voucher.discount_pkn, 0);
+        assert_eq!(broke.charge_cents(1830), 1830);
     }
 }

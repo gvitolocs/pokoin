@@ -1,5 +1,6 @@
 import { children, createEffect, createMemo, Match, Switch } from 'solid-js';
-import { useLocation, useNavigate } from '@solidjs/router';
+import { useLocation } from '@solidjs/router';
+import { useGameNavigate } from '../lib/game-navigate.js';
 import { authFrom } from '@market/punchouts.js';
 import { authConfirmed, loadAuth, signedIn } from '../stores/auth.js';
 import { SessionWait } from './Desk.jsx';
@@ -13,7 +14,7 @@ import { SessionWait } from './Desk.jsx';
  * wrote `if (!ready && !signedIn) return <SessionWait />`).
  */
 export default function SignedIn(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const location = useLocation();
   loadAuth().catch(() => {});
   const state = createMemo(() => {

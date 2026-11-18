@@ -5,14 +5,15 @@
  *
  *   node scripts/build-site-map.mjs [--cards cards.tsv] [--expansions exp.json]
  *
- * Page→page links come from the SPA source (App.jsx routes, <Link to>, href,
- * navigate(), APP.*, and the *Href helpers). Catalog links come from the
- * 15T marketplace Postgres (read-only SELECT via `docker exec`) and the public
- * expansion list. Needs nezopt, so it is not part of the Vercel build — rerun
- * it and commit the JSON when the catalog moves. See docs/SEO.md.
+ * Page→page links come from the Solid app (solid/src/router.js and the route
+ * modules it imports, <A> / <AppLink> href and to, navigate(), APP.*, and the
+ * *Href helpers). Catalog links come from the 15T marketplace Postgres
+ * (read-only SELECT via `docker exec`) and the public expansion list. Needs
+ * nezopt, so it is not part of the Vercel build — rerun it and commit the JSON
+ * when the catalog moves. See docs/SEO.md.
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ERA_ORDER, TCG_ERA_ORDER, expansionEra, isSetVariant, tcgEra, tcgEraId } from '../market/src/set-logos.js';
@@ -21,7 +22,9 @@ import { pokedexSpeciesList } from '../market/src/pokemon-hubs.js';
 import { artistSlug } from '../market/src/artist-name.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = join(ROOT, 'market/src');
+const MARKET_SRC = join(ROOT, 'market/src');
+const SOLID_SRC = join(ROOT, 'solid/src');
+const SOLID_PAGES = join(SOLID_SRC, 'pages') + sep;
 const OUT = join(ROOT, 'market/public/data/site-map.json');
 /** Card thumbnails load on first hover, so the graph file stays small. */
 const OUT_IMAGES = join(ROOT, 'market/public/data/site-map-images.json');
@@ -127,32 +130,92 @@ function labelFor(path) {
   return last.charAt(0).toUpperCase() + last.slice(1).replace(/-/g, ' ');
 }
 
-function parseRoutes() {
-  const app = readFileSync(join(SRC, 'App.jsx'), 'utf8');
-  const componentFile = new Map();
-  for (const m of app.matchAll(/import\s+(\w+)?\s*,?\s*(?:\{([^}]*)\})?\s*from\s+'(\.\/[^']+\.jsx)'/g)) {
-    const file = resolve(SRC, m[3]);
-    if (m[1]) componentFile.set(m[1], file);
-    for (const named of String(m[2] || '').split(',').map((s) => s.trim()).filter(Boolean)) {
-      componentFile.set(named, file);
+/** Drop `import.meta.env.DEV ? [ ... ] : []` so dev-only routes never enter the map. */
+function stripDevRoutes(text) {
+  return text.replace(/import\.meta\.env\.DEV\s*\?\s*\[[\s\S]*?\]\s*:\s*\[\s*\]/g, '');
+}
+
+/**
+ * A trailing Solid optional (`/marketplace/eras/:eraId?`) is the index page and
+ * the param page. The card desk stays the one `:slug?` template the graph keys.
+ */
+function routePaths(path) {
+  if (path === '/marketplace/:lang/cards/:cardId/:slug?') return [path];
+  const optional = path.match(/^(.*)\/(:[^/]+)\?$/);
+  if (!optional) return [path];
+  return [optional[1], path.slice(0, -1)];
+}
+
+function resolveSourceFile(file) {
+  const candidates = [file, `${file}.jsx`, `${file}.js`, join(file, 'index.jsx'), join(file, 'index.js')];
+  return candidates.find((candidate) => {
+    try {
+      return statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  }) || '';
+}
+
+/** Route modules spread into the router: `import accountRoutes from './routes/account.js'`. */
+function routeModuleFiles() {
+  const routerFile = join(SOLID_SRC, 'router.js');
+  const text = readFileSync(routerFile, 'utf8');
+  const files = [routerFile];
+  for (const match of text.matchAll(/import\s+\w+\s+from\s+['"](\.\/routes\/[^'"]+)['"]/g)) {
+    const file = resolveSourceFile(resolve(dirname(routerFile), match[1]));
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+function componentFiles(text, dir) {
+  const map = new Map();
+  const bind = (name, spec) => {
+    const clean = String(name || '').trim();
+    if (!clean || clean === 'lazy') return;
+    const file = resolveSourceFile(resolve(dir, spec));
+    if (file) map.set(clean, file);
+  };
+  for (const match of text.matchAll(/import\s+(\w+)?\s*,?\s*(?:\{([^}]*)\})?\s*from\s+['"](\.[^'"]+)['"]/g)) {
+    if (match[1]) bind(match[1], match[3]);
+    for (const named of String(match[2] || '').split(',')) {
+      bind(named.split(/\s+as\s+/).pop(), match[3]);
     }
   }
+  for (const match of text.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(\s*['"](\.[^'"]+)['"]/g)) {
+    bind(match[1], match[2]);
+  }
+  return map;
+}
+
+function parseRoutes() {
   const routes = new Map();
   const redirects = [];
-  for (const line of app.split('\n')) {
-    if (/import\.meta\.env\.DEV/.test(line)) continue;
-    const m = line.match(/both\('([^']+)',\s*(.+)\)\}\s*$/);
-    if (!m) continue;
-    const [, path, element] = m;
-    if (OFF_MAP.has(path)) continue;
-    const redirect = element.match(/^<Navigate to="([^"]+)"/);
-    if (redirect) {
-      redirects.push([path, redirect[1]]);
-      continue;
+  for (const file of routeModuleFiles()) {
+    const text = stripDevRoutes(readFileSync(file, 'utf8'));
+    const components = componentFiles(text, dirname(file));
+    for (const line of text.split('\n')) {
+      if (/import\.meta\.env\.DEV/.test(line)) continue;
+      const match = line.match(/\{\s*path:\s*'([^']+)'\s*,\s*component:\s*(\w+)/);
+      if (!match) continue;
+      const [, path, component] = match;
+      if (path.includes('*') || OFF_MAP.has(path)) continue;
+      // pokoin.com/ is the static landing (index.html). The router redirects it
+      // to /marketplace; the map keeps the landing node and does not record that redirect.
+      if (path === '/') {
+        routes.set('/', { path: '/', files: [] });
+        continue;
+      }
+      const redirect = line.match(/\binfo:\s*\{\s*to:\s*'([^']+)'/);
+      if (component === 'RedirectTo' || redirect) {
+        if (redirect) redirects.push([path, redirect[1]]);
+        continue;
+      }
+      const page = components.get(component);
+      const files = page ? [page] : [];
+      for (const key of routePaths(path)) routes.set(key, { path: key, files });
     }
-    // pokoin.com/ is the static landing (index.html); the SPA only paints / on the dashboard host.
-    const files = path === '/' ? [] : [...element.matchAll(/<([A-Z]\w*)/g)].map((c) => componentFile.get(c[1])).filter(Boolean);
-    routes.set(path, { path, files });
   }
   return { routes, redirects };
 }
@@ -192,7 +255,7 @@ function listSource(dir, out = []) {
 }
 
 function parseAppConstants() {
-  const text = readFileSync(join(SRC, 'punchouts.js'), 'utf8');
+  const text = readFileSync(join(MARKET_SRC, 'punchouts.js'), 'utf8');
   const block = text.slice(text.indexOf('export const APP = {'));
   const app = {};
   for (const m of block.slice(0, block.indexOf('};')).matchAll(/(\w+):\s*route\('([^']+)'\)/g)) {
@@ -210,11 +273,72 @@ function normalizeLink(raw) {
   return path;
 }
 
-function scanFile(file, appConstants) {
+/**
+ * Vite aliases from solid/vite.config.js (`@market` → market/src, plus any
+ * later `alias: { '@x': path.join(...) }` entry).
+ */
+function loadViteAliases() {
+  const configPath = join(ROOT, 'solid/vite.config.js');
+  const text = readFileSync(configPath, 'utf8');
+  const solidDir = dirname(configPath);
+  const vars = new Map([['rootDir', solidDir]]);
+  for (const match of text.matchAll(/const\s+(\w+)\s*=\s*path\.(resolve|join|dirname)\(([^;]*?)\)/g)) {
+    const [, name, fn] = match;
+    if (fn === 'dirname') {
+      vars.set(name, solidDir);
+      continue;
+    }
+    const args = match[3].split(',').map((part) => part.trim()).filter(Boolean);
+    let acc = aliasArg(args[0], vars);
+    for (const arg of args.slice(1)) acc = join(acc, aliasArg(arg, vars));
+    vars.set(name, acc);
+  }
+  const aliases = [];
+  const block = text.match(/alias:\s*\{([^}]*)\}/);
+  if (!block) return aliases;
+  for (const match of block[1].matchAll(/['"]([^'"]+)['"]\s*:\s*path\.(?:join|resolve)\(([^)]*)\)/g)) {
+    const args = match[2].split(',').map((part) => part.trim()).filter(Boolean);
+    let acc = aliasArg(args[0], vars);
+    for (const arg of args.slice(1)) acc = join(acc, aliasArg(arg, vars));
+    aliases.push({ prefix: match[1], dir: acc });
+  }
+  aliases.sort((a, b) => b.prefix.length - a.prefix.length);
+  return aliases;
+}
+
+function aliasArg(token, vars) {
+  const clean = String(token || '').replace(/^['"]|['"]$/g, '');
+  return vars.get(clean) || clean;
+}
+
+function insideRoot(file) {
+  const rel = relative(ROOT, file);
+  return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+function resolveSpecifier(spec, fromFile, aliases) {
+  if (spec.startsWith('.')) return resolve(dirname(fromFile), spec);
+  for (const { prefix, dir } of aliases) {
+    if (spec === prefix) return dir;
+    if (spec.startsWith(`${prefix}/`)) return resolve(dir, spec.slice(prefix.length + 1));
+  }
+  return '';
+}
+
+function isScannable(file) {
+  return /\.jsx?$/.test(file) && !/\.test\.jsx?$/.test(file) && !file.includes(`${sep}node_modules${sep}`) && insideRoot(file);
+}
+
+function scanFile(file, appConstants, aliases) {
   const text = readFileSync(file, 'utf8');
   const imports = [];
-  for (const m of text.matchAll(/import\s+[^'"]*?from\s+'(\.{1,2}\/[^']+)'/g)) {
-    imports.push(resolve(dirname(file), m[1]));
+  const specs = [
+    ...text.matchAll(/import\s+[^'"]*?from\s+['"]([^'"]+)['"]/g),
+    ...text.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g),
+  ];
+  for (const match of specs) {
+    const resolved = resolveSpecifier(match[1], file, aliases);
+    if (resolved) imports.push(resolved);
   }
   const links = new Set();
   const add = (raw) => {
@@ -222,6 +346,7 @@ function scanFile(file, appConstants) {
     if (path) links.add(path);
   };
   if (/\.jsx$/.test(file)) {
+    // <A href>, <AppLink href>, and <AppLink to> (href/to already). navigate() too.
     for (const m of text.matchAll(/(?:\bto|\bhref)=\{?\s*(['"`])(\/[^'"`]*)/g)) add(m[2]);
     for (const m of text.matchAll(/[{,]\s*(?:to|href):\s*(['"`])(\/[^'"`]*)/g)) add(m[2]);
     for (const m of text.matchAll(/\bnavigate\(\s*(['"`])(\/[^'"`]*)/g)) add(m[2]);
@@ -265,17 +390,36 @@ function matchRoute(path, patterns) {
   return best;
 }
 
+function scanSources(appConstants, aliases) {
+  const scans = new Map();
+  const queue = listSource(SOLID_SRC);
+  const seen = new Set(queue);
+  while (queue.length) {
+    const file = queue.pop();
+    const scan = scanFile(file, appConstants, aliases);
+    scans.set(file, scan);
+    for (const dep of scan.imports) {
+      const withExt = resolveSourceFile(dep);
+      if (!withExt || seen.has(withExt) || !isScannable(withExt)) continue;
+      seen.add(withExt);
+      queue.push(withExt);
+    }
+  }
+  return scans;
+}
+
 function buildPageGraph() {
+  const aliases = loadViteAliases();
   const { routes, redirects } = parseRoutes();
   const appConstants = parseAppConstants();
-  const scans = new Map(listSource(SRC).map((file) => [file, scanFile(file, appConstants)]));
+  const scans = scanSources(appConstants, aliases);
   const patterns = [...routes.keys()];
   const redirectTo = new Map(redirects);
   const resolveLink = (path) => {
     const target = redirectTo.get(path) ? normalizeLink(redirectTo.get(path)) : path;
     return matchRoute(target, patterns);
   };
-  const chromeFile = join(SRC, 'components/Chrome.jsx');
+  const chromeFile = join(SOLID_SRC, 'components/Chrome.jsx');
 
   // A page's links are its own file plus the components it renders (not other pages, not the shell).
   function closure(files) {
@@ -287,7 +431,7 @@ function buildPageGraph() {
       seen.add(file);
       for (const dep of scans.get(file).imports) {
         const withExt = [dep, `${dep}.jsx`, `${dep}.js`].find((f) => scans.has(f));
-        if (withExt && /\.jsx$/.test(withExt) && withExt !== chromeFile && !withExt.includes('/pages/')) {
+        if (withExt && /\.jsx$/.test(withExt) && withExt !== chromeFile && !withExt.startsWith(SOLID_PAGES)) {
           stack.push(withExt);
         }
       }

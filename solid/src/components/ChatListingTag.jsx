@@ -11,6 +11,7 @@ import {
   overListingStock,
   paintOwned,
   personListsCard,
+  resolveTagGame,
   tagKey,
   writeCardOwned,
 } from '@market/chat-listing.js';
@@ -20,6 +21,7 @@ import { endTrayDrag, startTrayDrag } from '@market/tray-drag.js';
 import ChatBundle from './ChatBundle.jsx';
 import QtyStepper from './QtyStepper.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
+import { publicGamePath } from '@market/game.js';
 
 function unique(list) {
   const out = [];
@@ -30,7 +32,7 @@ function unique(list) {
   return out;
 }
 
-function urlsFromCard(card) {
+function urlsFromCard(card, gameId) {
   if (!card) return [];
   return unique([
     card.homepageImageUrl,
@@ -40,19 +42,19 @@ function urlsFromCard(card) {
     card.imageUrl,
     card.gridImageUrl,
     card.image_url,
-    imageSrc(card, 'grid'),
-    imageSrc(card, 'hero'),
+    imageSrc(card, 'grid', gameId),
+    imageSrc(card, 'hero', gameId),
   ]);
 }
 
 /** Tiles miss some printings (Ancient Origins Meowth 219916). The card page still has the scan. */
-async function loadCatalogImages(id) {
-  const tiles = await fetchCardTiles([id]).catch(() => []);
+async function loadCatalogImages(id, gameId) {
+  const tiles = await fetchCardTiles([id], { game: gameId }).catch(() => []);
   const tile = (tiles || []).find((item) => String(item?.id) === id) || tiles?.[0];
-  const fromTiles = urlsFromCard(tile);
+  const fromTiles = urlsFromCard(tile, gameId);
   if (fromTiles.length) return fromTiles;
-  const page = await fetchCard(id).catch(() => null);
-  return urlsFromCard(page?.card);
+  const page = await fetchCard(id, { game: gameId }).catch(() => null);
+  return urlsFromCard(page?.card, gameId);
 }
 
 function CardQuantity(props) {
@@ -74,6 +76,7 @@ function CardTag(props) {
   const row = () => props.row;
   const label = () => row().cardName || 'Card';
   const id = () => cardIdOf(row());
+  const catalogGame = () => resolveTagGame(row(), { defaultGame: props.defaultGame });
   const people = () => [
     { uid: props.peer?.uid || '', username: props.peer?.username || '' },
     { uid: props.me?.uid || '', username: props.me?.username || '' },
@@ -90,13 +93,13 @@ function CardTag(props) {
   const [owned, setOwned] = createSignal(() => (identity(), paintOwned(row(), id(), people())));
 
   createEffect(
-    () => [id(), identity()],
-    ([cardId]) => {
+    () => [id(), identity(), catalogGame()],
+    ([cardId, , gameId]) => {
       if (!cardId) return undefined;
       let live = true;
       const tag = row();
       const who = people();
-      loadCatalogImages(cardId).then((next) => {
+      loadCatalogImages(cardId, gameId).then((next) => {
         if (live && next.length) setCatalog(next);
       }).catch(() => {});
       const sellers = [
@@ -177,7 +180,7 @@ function CardTag(props) {
         when={row().path}
         fallback={<span class="chat-tag-body" role="img" aria-label={label()}>{image()}</span>}
       >
-        <a href={row().path} aria-label={label()} draggable="false" onClick={(event) => event.stopPropagation()}>{image()}</a>
+        <a href={publicGamePath(row().path, catalogGame())} aria-label={label()} draggable="false" onClick={(event) => event.stopPropagation()}>{image()}</a>
       </Show>
       <CardQuantity row={row()} draft={draft()} onQty={props.onQty} />
       <Show when={props.onRemove}>
@@ -187,7 +190,7 @@ function CardTag(props) {
   );
 }
 
-/** A card, listing or bundle attached to a chat message or draft (market/src/components/ChatListingTag.jsx). */
+/** A card, listing or bundle attached to a chat message or draft. */
 export default function ChatListingTag(props) {
   return (
     <Show
@@ -200,10 +203,17 @@ export default function ChatListingTag(props) {
           peer={props.peer}
           me={props.me}
           trayId={props.trayId}
+          defaultGame={props.defaultGame}
         />
       )}
     >
-      <ChatBundle row={props.row} peer={props.peer} onRemove={props.onRemove} trayId={props.trayId} />
+      <ChatBundle
+        row={props.row}
+        peer={props.peer}
+        onRemove={props.onRemove}
+        trayId={props.trayId}
+        defaultGame={props.defaultGame}
+      />
     </Show>
   );
 }

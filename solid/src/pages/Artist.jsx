@@ -29,9 +29,36 @@ import SeoHead from '../components/SeoHead.jsx';
 import { afterPaint } from '../lib/after-paint.js';
 import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 import { addCartItem } from '../stores/cart.js';
+import { gameHref } from '@market/game.js';
 
 const ALBUM_PAGE = 24;
 const PRELOAD_AHEAD = 20;
+const ARTIST_STORED_KEY = 'pokoin.artistAlbums.v1';
+
+/** Artist slugs whose whole album this browser stored (IndexedDB), newest last. */
+function storedArtistAlbums() {
+  try {
+    const list = JSON.parse(localStorage.getItem(ARTIST_STORED_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function artistAlbumStored(slug) {
+  return storedArtistAlbums().includes(slug);
+}
+
+function rememberArtistAlbum(slug) {
+  const list = storedArtistAlbums().filter((item) => item !== slug);
+  list.push(slug);
+  try {
+    localStorage.setItem(ARTIST_STORED_KEY, JSON.stringify(list.slice(-200)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /** First pokedex page. SQL already returns this order, so it can paint before the rest. */
 const ARTIST_FIRST = 48;
 
@@ -66,6 +93,7 @@ function ArtistsIndex(props) {
     });
   onSettled(() => () => {
     disposed = true;
+    window.clearTimeout(firstTimer);
     stopRestore();
   });
 
@@ -100,7 +128,7 @@ function ArtistsIndex(props) {
       />
       <form class="shop-toolbar" onSubmit={(event) => event.preventDefault()}>
         <p class="result-count">
-          <Show when={artists() != null} fallback="Loading…">
+          <Show when={artists() != null} fallback={<span class="wait-text">Loading…</span>}>
             <strong>{shown().length}</strong> artists
           </Show>
         </p>
@@ -136,7 +164,7 @@ function ArtistsIndex(props) {
                     <a
                       class="tile artist-tile tile-cut tile-album"
                       draggable="true"
-                      href={`/marketplace/${props.lang}/artists/${slug}`}
+                      href={gameHref(`/marketplace/${props.lang}/artists/${slug}`)}
                       style={albumShadeStyle(row)}
                       onDragStart={(event) => writeListingDrag(event, bundleReference({
                         kind: 'artist',
@@ -259,13 +287,24 @@ function ArtistDesk(props) {
     document.title = artistDeskIsUnknown(data) ? 'Artist · Pokoin' : artistSeoTitle(data.artist?.name || firstPaint);
     setError('');
   }
+  // The live first page (48 tiles) is for a first visit. When this browser
+  // stored the album, IndexedDB answers in a few ms: painting the 48 first
+  // made the album, its count and its facets swap a moment later.
+  let firstTimer = 0;
   if (!peekArtist(slug, 5000)) {
-    fetchArtist(slug, { limit: ARTIST_FIRST })
-      .then((data) => paintArtist(data))
-      .catch(() => {});
+    const firstPage = () => {
+      if (disposed || painted) return;
+      fetchArtist(slug, { limit: ARTIST_FIRST })
+        .then((data) => paintArtist(data))
+        .catch(() => {});
+    };
+    if (artistAlbumStored(slug)) firstTimer = window.setTimeout(firstPage, 300);
+    else firstPage();
   }
-  fetchArtist(slug, { limit: 5000 })
+  // A stored album of any age paints at once; the revalidated one replaces it.
+  fetchArtist(slug, { limit: 5000, onUpdate: (data) => paintArtist(data, { replace: true }) })
     .then((data) => {
+      if (data?.cards?.length) rememberArtistAlbum(slug);
       paintArtist(data, { replace: true });
       if (!disposed) setRestPending(false);
     })
@@ -451,7 +490,7 @@ function ArtistDesk(props) {
       fallback={(
         <div class="page desk">
           <EmptyDesk title="No illustrator" lede="That URL is not a leftover artist. Open the catalog.">
-            <a class="btn" href={`/marketplace/${lang}/artists`}>Artists</a>
+            <a class="btn" href={gameHref(`/marketplace/${lang}/artists`)}>Artists</a>
           </EmptyDesk>
         </div>
       )}
@@ -464,7 +503,7 @@ function ArtistDesk(props) {
         />
         <SeoCrumbs items={crumbs()} />
         <PageHead
-          kicker={<a class="page-kicker-link" href={`/marketplace/${lang}/artists`}>Artist</a>}
+          kicker={<a class="page-kicker-link" href={gameHref(`/marketplace/${lang}/artists`)}>Artist</a>}
           title={(
             <>
               <svg class="page-title-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
@@ -538,7 +577,7 @@ function ArtistDesk(props) {
             />
           </div>
           <p class="result-count">
-            <Switch fallback="Loading…">
+            <Switch fallback={<span class="wait-text">Loading…</span>}>
               <Match when={payload() && !allCards()?.length}>No cards for this artist.</Match>
               <Match when={payload() && filtersOn()}>
                 <strong>{uniqueCardCount()}</strong> matching{sortNote()}
@@ -597,7 +636,7 @@ function ArtistDesk(props) {
   );
 }
 
-/** /marketplace/:lang/artists(/:artistSlug) (market/src/pages/Artist.jsx). */
+/** /marketplace/:lang/artists(/:artistSlug). */
 export default function Artist() {
   const params = useParams();
   const lang = () => params.lang || 'en';

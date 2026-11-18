@@ -4,8 +4,9 @@ import { guideHref, LANGUAGE_HUBS, RARITY_HUBS, SEO_GUIDES } from '@market/seo.j
 import { EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
+import { gameHref } from '@market/game.js';
 
-/** Guide bodies (same copy and links as market/src/pages/Guides.jsx). */
+/** Guide bodies (copy and links). */
 const BODIES = {
   'pokemon-card-condition-guide': () => (
     <>
@@ -37,7 +38,7 @@ const BODIES = {
         <For each={RARITY_HUBS}>
           {(row) => (
             <li>
-              <a href={`/marketplace/en/rarities/${row.slug}`}>{row.name}</a>
+              <a href={gameHref(`/marketplace/en/rarities/${row.slug}`)}>{row.name}</a>
             </li>
           )}
         </For>
@@ -62,7 +63,7 @@ const BODIES = {
           {(row, index) => (
             <span>
               <Show when={index()}>{', '}</Show>
-              <a href={`/marketplace/en/languages/${row.slug}`}>{row.name}</a>
+              <a href={gameHref(`/marketplace/en/languages/${row.slug}`)}>{row.name}</a>
             </span>
           )}
         </For>
@@ -89,7 +90,7 @@ function GuidesIndex() {
         <For each={SEO_GUIDES}>
           {(row) => (
             <li>
-              <a href={guideHref(row.slug)}>{row.title}</a>
+              <a href={gameHref(guideHref(row.slug))}>{row.title}</a>
             </li>
           )}
         </For>
@@ -117,7 +118,7 @@ function Guide(props) {
   );
 }
 
-/** /marketplace/:lang/guides(/:slug) (market/src/pages/Guides.jsx). */
+/** /marketplace/:lang/guides(/:slug). */
 export default function Guides() {
   const params = useParams();
   const guide = () => SEO_GUIDES.find((row) => row.slug === params.slug) || null;
@@ -127,7 +128,7 @@ export default function Guides() {
       <Match when={!guide()}>
         <div class="page desk hub-page">
           <EmptyDesk title="Unknown guide" lede="Open the guides index.">
-            <a class="btn" href="/marketplace/en/guides">Guides</a>
+            <a class="btn" href={gameHref('/marketplace/en/guides')}>Guides</a>
           </EmptyDesk>
         </div>
       </Match>

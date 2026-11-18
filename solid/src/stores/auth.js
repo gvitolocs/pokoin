@@ -1,24 +1,26 @@
 import { createSignal } from 'solid-js';
 import { clearAuthSession, readAuthSession, readAuthToken, writeAuthSession, writeAuthToken } from '@market/auth-session.js';
 import { setBearerProvider } from '@market/auth-bearer.js';
+import { retainPrivateBooks, wipePrivateBooks } from '@market/inventory-book.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
   framedByChromeExtension,
   isExtensionDeskSession,
   isTrustedDeskSessionEvent,
 } from '@market/extension-auth-bridge.js';
+import { clearPortfolioHistory } from '@market/portfolio-history-cache.js';
 import { authSession, refreshSession } from './session.js';
 
 /**
  * Firebase Auth is not on the first paint: the header and price labels start
  * from the cached session (`pokoin.auth.session`), and the SDK loads on idle
  * or on the first bearer request, whichever comes first. The token cache
- * (`pokoin.auth.token`) is shared with the React UI, so a fresh token can be
- * sent without loading Firebase at all.
+ * (`pokoin.auth.token`) survives reloads, so a fresh token can be sent
+ * without loading Firebase at all.
  *
  * The extension side panel frames the SPA in a credentialless iframe with no
  * Firebase persistence: the parent extension posts a desk session (uid + ID
- * token) instead, as in React auth.jsx. Sign-in flows live in pages/Auth.jsx;
+ * token) instead. Sign-in flows live in pages/Auth.jsx;
  * the users/{uid} + balances/{uid} read is stores/account.js.
  */
 const [firebaseUser, setFirebaseUser] = createSignal(undefined);
@@ -36,13 +38,18 @@ function applyDeskSession(data = {}) {
 }
 
 function dropSession() {
+  // Whichever account is leaving, its portfolio graph leaves with it.
+  const leaving = deskSession.uid || readAuthSession()?.uid || '';
   deskSession = { token: '', uid: '', expiresAt: 0 };
   setDeskUid('');
   clearAuthSession();
+  // The seller's stored MyPokoin book never outlives the session.
+  wipePrivateBooks();
+  clearPortfolioHistory(leaving);
   refreshSession();
 }
 
-/** Firebase answered. Same rules as React auth.jsx onAuthStateChanged. */
+/** Firebase answered (onAuthStateChanged). */
 function onFirebaseUser(user) {
   setFirebaseUser(() => user || null);
   if (user) {
@@ -51,6 +58,7 @@ function onFirebaseUser(user) {
     deskSession = { token: '', uid: '', expiresAt: 0 };
     setDeskUid('');
     const cached = readAuthSession();
+    if (cached?.uid !== user.uid) retainPrivateBooks(user.uid);
     writeAuthSession(cached?.uid === user.uid ? cached : { uid: user.uid, signedIn: true });
     refreshSession();
     return;
@@ -66,6 +74,7 @@ function onFirebaseUser(user) {
   // Cold start without a Firebase user: a still-valid token cookie signs in.
   const shared = readAuthToken();
   if (shared && applyDeskSession(shared)) {
+    if (readAuthSession()?.uid !== shared.uid) retainPrivateBooks(shared.uid);
     writeAuthSession(readAuthSession()?.uid === shared.uid ? readAuthSession() : { uid: shared.uid, signedIn: true });
     refreshSession();
     setDeskUid(shared.uid);
@@ -85,6 +94,7 @@ export function watchDeskSession(onSession) {
     if (!applyDeskSession(event.data)) return;
     const uid = deskSession.uid;
     const cached = readAuthSession();
+    if (cached?.uid !== uid) retainPrivateBooks(uid);
     writeAuthSession(cached?.uid === uid ? cached : { uid, signedIn: true });
     refreshSession();
     setDeskUid(uid);
@@ -140,6 +150,9 @@ export async function getBearer(forceRefresh = false) {
     }
   }
   const auth = await loadAuth();
+  // Pages that paint on the cached session ask before Firebase restored its
+  // user: currentUser is null until then, which would send no bearer.
+  await auth.authStateReady?.();
   const user = auth.currentUser;
   return user ? user.getIdToken(forceRefresh) : '';
 }

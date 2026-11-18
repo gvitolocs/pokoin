@@ -48,6 +48,7 @@ import { filterSuggestByPrintLang } from './locale.js';
 import { mergePrintingFields } from './print-bucket.js';
 import { earlySetPrefixName, rankFreeText, scoreGroups, tokenizeQuery } from './search-score.js';
 import { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady } from './compact-query.js';
+import { englishQuery } from './localized-names.js';
 export { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady };
 
 const TTL_MS = 30 * 60 * 1000;
@@ -385,6 +386,50 @@ function popupGroups(groups, printLang) {
   return filterSuggestByPrintLang(groups, printLang);
 }
 
+/** Other expansions' n/151 printings kept above a number-titled set's browse. */
+const NUMBER_SET_COLLECTOR_HEAD = 4;
+
+/**
+ * A bare number that is also a set title (`151` → Scarlet & Violet—151)
+ * browses that set's singles toward 20, like a bare set title (D00004M). The
+ * set's own n/151 printing leads, a few other collector-number hits follow, and
+ * the rest of them only top up a short list, so they cannot starve the set.
+ * Null until the set's cards are cached (the collector paint stands in) and on
+ * the Product tab, where the set's sealed SKUs come from the name pool.
+ */
+function numberSetBrowse(query, parsed, { limit, printLang, kind }) {
+  const tab = String(kind || '').trim().toLowerCase();
+  if (tab && tab !== 'singles') {
+    return null;
+  }
+  const intent = catalogIntent(query);
+  if (intent.kind !== 'set' || !intent.slug || intent.compact !== compactQuery(query)) {
+    return null;
+  }
+  const setRows = cachedPrintings(catalogCacheKey(intent));
+  if (!setRows.length) {
+    return null;
+  }
+  const idOf = (row) => String(row.id || row.card_id || '');
+  const inSet = new Set(setRows.map(idOf));
+  const collector = cachedNumberPrintings(parsed);
+  const others = collector.filter((row) => !inSet.has(idOf(row)));
+  const rows = [
+    ...collector.filter((row) => inSet.has(idOf(row))),
+    ...others.slice(0, NUMBER_SET_COLLECTOR_HEAD),
+    ...setRows,
+    ...others.slice(NUMBER_SET_COLLECTOR_HEAD),
+  ];
+  // Tokenless fill: keep this order; the Singles tab drops sealed rows.
+  const browse = { ...parsed, nameQuery: '', numberTokens: [] };
+  return {
+    groups: fillSuggestGroups(popupGroups(groupsFromCards(rows), printLang), limit, limit, browse, kind || 'singles'),
+    ranked: intent.ranked || [],
+    parsed,
+    intent,
+  };
+}
+
 export function liveSuggestGroups(query, {
   rank = rankNames,
   pool,
@@ -397,7 +442,21 @@ export function liveSuggestGroups(query, {
   if (!suggestLiveReady(query)) {
     return { groups: [], ranked: [], parsed: parseTypedQuery(query) };
   }
+  // A localized card name (`evoli`, `glurak`, `イーブイ`) ranks as its English
+  // identity; the rows keep their localized subtitle (localized-names.js).
+  const english = englishQuery(query, searchLang);
+  if (english) {
+    return liveSuggestGroups(english, {
+      rank, pool, limit, preferPerGroup, printLang, searchLang: 'en', kind,
+    });
+  }
   const parsed = parseTypedQuery(query);
+  if (isBareCollectorQuery(parsed)) {
+    const numberSet = numberSetBrowse(query, parsed, { limit, printLang, kind });
+    if (numberSet) {
+      return numberSet;
+    }
+  }
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
@@ -603,12 +662,14 @@ function firstNameToken(query) {
  * second word cannot replace the local catalog with an empty singles row.
  */
 export function paintCatalogGroups(query, options = {}) {
+  const english = englishQuery(query, options.searchLang);
+  if (english) return paintCatalogGroups(english, { ...options, searchLang: 'en' });
   const live = liveSuggestGroups(query, options);
   const limit = options.limit || SUGGEST_RESULT_FLOOR;
   const have = printingCount(live.groups);
   if (have >= limit) return live.groups;
   const token = firstNameToken(query);
-  if (compactQuery(token).length < SUGGEST_LIVE_MIN_CHARS) return live.groups;
+  if (!suggestLiveReady(token)) return live.groups;
   const rank = options.rank || rankNames;
   const ranked = rank(token, options.pool);
   const groups = ranked.filter((row) => row.withinCap !== false).flatMap((row) => {
@@ -616,8 +677,11 @@ export function paintCatalogGroups(query, options = {}) {
     return printings.length ? [{ name: row.display, printings }] : [];
   });
   if (!groups.length) return live.groups;
+  // The stem tops up the whole-query rows, it never replaces them: `dark`
+  // also prefixes Darkrai, and a compound name (`dark jolteon`) must not be
+  // dropped because its printings are fewer than the stem's.
   const filled = fillSuggestGroups(
-    popupGroups(orderSuggestGroups(groups, ranked), options.printLang),
+    popupGroups(mergeSuggestGroups([live.groups, orderSuggestGroups(groups, ranked)]), options.printLang),
     limit,
     limit,
     {

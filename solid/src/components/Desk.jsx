@@ -1,8 +1,9 @@
 import { children, For, Show } from 'solid-js';
 import { flagSrc } from '@market/locale.js';
+import { gameHref } from '@market/game.js';
 
 /**
- * Desk building blocks (market/src/components/Desk.jsx): same markup and
+ * Desk building blocks: same markup and
  * classes, so market/src/styles.css applies unchanged. Slots that React took
  * as elements (`leading`, `meta`, `extra`, `actions`) are passed the same way;
  * each slot is resolved once (`children`) so testing it does not build it twice.
@@ -143,7 +144,7 @@ export function Thread(props) {
   );
   return (
     <Show when={props.to} fallback={<article class="thread">{inner()}</article>}>
-      <a class="thread" href={props.to}>{inner()}</a>
+      <a class="thread" href={gameHref(props.to)}>{inner()}</a>
     </Show>
   );
 }

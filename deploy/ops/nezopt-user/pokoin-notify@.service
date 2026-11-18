@@ -1,0 +1,9 @@
+[Unit]
+Description=Mail the failure of %i (user unit)
+# Never OnFailure= here: a failing notifier must not trigger itself.
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/pokoin-ops notify-unit --user %i
+TimeoutStartSec=120
+Nice=5

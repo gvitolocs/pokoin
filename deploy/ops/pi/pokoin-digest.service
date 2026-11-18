@@ -1,0 +1,9 @@
+[Unit]
+Description=Pokoin weekly deferred alert digest
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pokoin-ops digest
+Nice=5
+TimeoutStartSec=2min

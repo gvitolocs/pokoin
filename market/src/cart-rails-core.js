@@ -14,15 +14,28 @@ import { countryFromLocale } from './pkn.js';
 import { SHIP_TO_COUNTRIES } from './ship-countries.js';
 import { fetchSpeciesCards } from './species-cards.js';
 
+function shipToCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  return SHIP_TO_COUNTRIES.some((row) => row.code === code) ? code : '';
+}
+
 /**
- * Amazon's "Deliver to …": the default saved address country (masked list,
- * no street data), else the browser locale — the country checkout quotes first.
+ * Amazon's "Deliver to …": the country picked in the buyer's profile, else
+ * the default saved address country (masked list, no street data), else the
+ * browser locale — the country checkout quotes first.
  */
-export function deliveryCountryFrom(accountCountry) {
-  if (accountCountry) return { country: accountCountry, saved: true };
-  const locale = countryFromLocale();
-  const known = SHIP_TO_COUNTRIES.some((row) => row.code === locale);
-  return { country: known ? locale : 'DK', saved: false };
+export function deliveryCountryFrom(accountCountry, profileCountry = '') {
+  const profile = shipToCode(profileCountry);
+  if (profile) return { country: profile, saved: true };
+  const account = shipToCode(accountCountry);
+  if (account) return { country: account, saved: true };
+  const locale = shipToCode(countryFromLocale());
+  return { country: locale || 'DK', saved: false };
+}
+
+/** The profile country (GET /api/seller-settings shipFromCountry). */
+export function profileCountryFrom(settings) {
+  return shipToCode(settings?.shipFromCountry);
 }
 
 /** The preferred saved address's country from GET /api/account-addresses. */

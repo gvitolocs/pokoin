@@ -12,7 +12,7 @@ import { POKOIN_RPC, poolIdFor, sendSwapTransaction, swapPoolsOf } from '@market
 import { getBearer, signedIn } from '../stores/auth.js';
 import { connectWallet, startWallet, walletAddress } from '../stores/wallet.js';
 
-/** /exchange (market/src/pages/Exchange.jsx): WPKN exchange and PokoinSwap. */
+/** /exchange: WPKN exchange and PokoinSwap. */
 export default function Exchange() {
   const [busy, setBusy] = createSignal(false);
   const [flash, setFlash] = createSignal('');

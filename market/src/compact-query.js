@@ -44,7 +44,12 @@ export function compactQuery(value) {
 
 /** The typeahead popup opens at this many compact characters (moved from suggest-live.js). */
 export const SUGGEST_LIVE_MIN_CHARS = 3;
+/** Two kanji / hangul / kana already name a card (`伊布` Eevee, `胖丁` Jigglypuff). */
+export const SUGGEST_LIVE_MIN_WIDE_CHARS = 2;
+const WIDE_SCRIPT = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 
 export function suggestLiveReady(query) {
-  return compactQuery(query).length >= SUGGEST_LIVE_MIN_CHARS;
+  const compact = compactQuery(query);
+  if (compact.length >= SUGGEST_LIVE_MIN_CHARS) return true;
+  return compact.length >= SUGGEST_LIVE_MIN_WIDE_CHARS && WIDE_SCRIPT.test(compact);
 }

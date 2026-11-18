@@ -75,7 +75,7 @@ function Shot(props) {
   );
 }
 
-/** Leftover-scan sanitizer before/after board (market/src/pages/Sanitize.jsx). */
+/** Leftover-scan sanitizer before/after board. */
 export default function Sanitize() {
   const [guides, setGuides] = createSignal(true);
   const [zoom, setZoom] = createSignal(null);

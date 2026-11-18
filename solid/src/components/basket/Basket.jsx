@@ -1,4 +1,4 @@
-// Amazon-layout cart pieces (market/src/components/Basket.jsx): big price,
+// Amazon-layout cart pieces: big price,
 // basket row, seller parcel bar, "Important messages", the Subtotal box and
 // the Flex card. Same markup and classes; market/src/cart.css styles them.
 
@@ -12,6 +12,7 @@ import {
   shareCartRow,
 } from '@market/basket-format.js';
 import { brandSrc } from '@market/brand-assets.js';
+import { game, publicGamePath } from '@market/game.js';
 import { isSelected, priceDrop } from '@market/cart-model.js';
 import { listingStock } from '@market/cart-qty.js';
 import { looseCardReference, writeListingDrag } from '@market/chat-listing.js';
@@ -19,6 +20,7 @@ import { printingIdentity } from '@market/identity.js';
 import { homepageDerivativeUrl } from '@market/image-urls.js';
 import {
   conditionChipSrc,
+  conditionLabel,
   conditionShort,
   conditionTone,
   listingExtraTags,
@@ -33,6 +35,7 @@ import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } fr
 import { buyerCurrency, buyerFiat, buyerFormat, buyerParts, buyerPending } from '../../stores/buyer.js';
 import AuthLink from '../AuthLink.jsx';
 import CardArt from '../CardArt.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
  * Amazon's price: small symbol, big whole part, small raised cents. PKN stays
@@ -163,7 +166,7 @@ export function BasketRow(props) {
   const selected = () => isSelected(row()) && !gone();
   const qty = () => Math.max(1, Math.trunc(Number(row().qty) || 1));
   const drop = () => priceDrop(row());
-  const href = () => row().href || '/marketplace';
+  const href = () => publicGamePath(row().href || '/marketplace', game().id) || row().href || '/marketplace';
   const seller = () => basketSellerOf(row());
   const sellerLink = () => sellerHref(row());
   const countryName = () => sellerCountryLabel(row().sellerCountry);
@@ -199,7 +202,7 @@ export function BasketRow(props) {
       </label>
       <a
         class="bk-pic"
-        href={href()}
+        href={gameHref(href())}
         draggable="true"
         onDragStart={(event) => writeListingDrag(event, looseCardReference({
           imageUrl: row().image,
@@ -216,7 +219,7 @@ export function BasketRow(props) {
         </Show>
       </a>
       <div class="bk-head">
-        <a class="bk-title" href={href()}>{row().name}</a>
+        <a class="bk-title" href={gameHref(href())}>{row().name}</a>
         <Show when={setLine()}><div class="bk-set">{setLine()}</div></Show>
       </div>
       <div class="bk-body">
@@ -237,7 +240,7 @@ export function BasketRow(props) {
         <div class="bk-ship">
           Sold by{' '}
           <Show when={sellerLink()} fallback={<span>{seller()}</span>}>
-            <a class="bk-link" href={sellerLink()}>{seller()}</a>
+            <a class="bk-link" href={gameHref(sellerLink())}>{seller()}</a>
           </Show>
           <Show when={countryName()}>
             {' · ships from '}
@@ -251,7 +254,7 @@ export function BasketRow(props) {
             <b>Condition: </b>
             <img class={`bk-cond is-${tone()}`} src={conditionChipSrc(row().condition)} alt="" width="30" height="21" />
             {' '}
-            {conditionShort(row().condition)}
+            {conditionLabel(row().condition)}
           </span>
           <Show when={language()}>
             {(lang) => (
@@ -294,7 +297,7 @@ export function BasketRow(props) {
                 fallback={(
                   <>
                     No other copy in this condition and language right now.{' '}
-                    <a class="bk-link" href={href()}>See all offers</a>
+                    <a class="bk-link" href={gameHref(href())}>See all offers</a>
                   </>
                 )}
               >
@@ -333,7 +336,7 @@ export function BasketRow(props) {
         <Show when={!accepts()}>
           <div class="bk-promo"><span class="bk-save-badge is-muted">Card only</span> pay by card</div>
         </Show>
-        <Show when={sellerLink()}><a class="bk-link bk-shop" href={sellerLink()}>Shop this seller</a></Show>
+        <Show when={sellerLink()}><a class="bk-link bk-shop" href={gameHref(sellerLink())}>Shop this seller</a></Show>
       </div>
     </article>
   );
@@ -352,7 +355,7 @@ export function SellerBar(props) {
   return (
     <div class="bk-seller-bar">
       <span class="bk-seller-name">
-        Parcel from <Show when={link()} fallback={label()}><a class="bk-link" href={link()}>{label()}</a></Show>
+        Parcel from <Show when={link()} fallback={label()}><a class="bk-link" href={gameHref(link())}>{label()}</a></Show>
         <Show when={countryName()}>
           {' · '}
           <Flag flag={sellerCountryFlag(group().sellerCountry)} />
@@ -425,6 +428,9 @@ export function BasketSummary(props) {
   const balance = () => Math.max(0, Math.trunc(Number(props.availablePkn) || 0));
   const discountOn = () => Boolean(props.useBalance && props.discount.pkn >= 1);
   const insuranceCents = () => Math.round((props.subtotalEurCents || 0) * 0.05);
+  const estimatedTotalCents = () => (props.subtotalEurCents || 0)
+    + Math.max(0, props.shipping.cents || 0)
+    + (props.insurance && props.subtotalEurCents > 2000 ? insuranceCents() : 0);
   const nudgeLabel = () => (props.nudge
     ? basketSellerOf({ sellerUsername: props.nudge.group.sellerUsername, sellerName: props.nudge.group.sellerName })
     : '');
@@ -435,7 +441,6 @@ export function BasketSummary(props) {
       sellerUid: props.nudge.group.sellerUid,
     })
     : '');
-  const selected = () => props.services.find((option) => option.id === props.service) || null;
   const shippingCell = () => {
     const shipping = props.shipping;
     if (!shipping.count) return '—';
@@ -451,7 +456,7 @@ export function BasketSummary(props) {
             <InfoIcon />
             <p>
               Add up to <span class="bk-red">{nudge().estimate.room} more card{nudge().estimate.room === 1 ? '' : 's'}</span> from{' '}
-              <Show when={nudgeLink()} fallback={nudgeLabel()}><a class="bk-link" href={nudgeLink()}>{nudgeLabel()}</a></Show> to the same parcel: shipping stays{' '}
+              <Show when={nudgeLink()} fallback={nudgeLabel()}><a class="bk-link" href={gameHref(nudgeLink())}>{nudgeLabel()}</a></Show> to the same parcel: shipping stays{' '}
               <b>{formatLocalFromEurCents(nudge().estimate.amountCents, props.currency)}</b>.{' '}
               <a class="bk-link" href="/shipping">Shipping details</a>
             </p>
@@ -471,31 +476,44 @@ export function BasketSummary(props) {
             </For>
           </select>
         </label>
-        <Switch>
-          <Match when={props.services.length}>
-            <label class="bk-field">
-              <span>Shipping</span>
-              <select value={selected() ? selected().id : ''} onChange={(event) => props.onService(event.target.value)}>
-                <Show when={!selected()}><option value="">Cheapest for each parcel</option></Show>
-                <For each={props.services}>
-                  {(option) => (
-                    <option value={option.id}>
-                      {option.label || (option.tracked ? 'Tracked' : 'Untracked letter')}
-                      {' · '}
-                      {formatLocalFromEurCents(option.cents, props.currency)}
-                      {option.complete ? '' : ' (not every parcel)'}
-                    </option>
-                  )}
-                </For>
-              </select>
-            </label>
-          </Match>
-          <Match when={props.shipping.count}>
-            <p class="bk-sum-hint is-warn">
-              No shipping service from these sellers to {shipFromCountryName(props.country) || props.country} yet.
-            </p>
-          </Match>
-        </Switch>
+        {/* One parcel per seller, each on its own lane and service. */}
+        <For each={props.shipping.parcels}>
+          {(parcel) => (
+            <div class="bk-field bk-parcel-ship">
+              <span>
+                Parcel from {basketSellerOf({ sellerUsername: parcel.sellerUsername, sellerName: parcel.sellerName })}
+                {' · '}
+                <Flag flag={sellerCountryFlag(parcel.from)} />
+                {' '}
+                {shipFromCountryName(parcel.from) || parcel.from}
+              </span>
+              <Show
+                when={parcel.options.length}
+                fallback={(
+                  <p class="bk-sum-hint is-warn">
+                    No shipping service from {shipFromCountryName(parcel.from) || parcel.from} to {shipFromCountryName(props.country) || props.country} yet.
+                  </p>
+                )}
+              >
+                <select
+                  aria-label={`Shipping for the parcel from ${basketSellerOf({ sellerUsername: parcel.sellerUsername, sellerName: parcel.sellerName })}`}
+                  value={parcel.estimate ? parcel.estimate.serviceId : ''}
+                  onChange={(event) => props.onParcelService?.(parcel.key, event.target.value)}
+                >
+                  <For each={parcel.options}>
+                    {(option) => (
+                      <option value={option.id}>
+                        {option.label}
+                        {' · '}
+                        {formatLocalFromEurCents(option.amountCents, props.currency)}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </Show>
+            </div>
+          )}
+        </For>
         <Show when={props.shipping.count}><a class="bk-link" href="/shipping">Rates for each parcel</a></Show>
       </div>
 
@@ -520,6 +538,16 @@ export function BasketSummary(props) {
           <div>
             <dt>Estimated card charge</dt>
             <dd>{formatLocalFromEurCents(props.discount.chargeCents, props.currency)}</dd>
+          </div>
+        </Show>
+        {/* Cards are priced in PKN and shipping in euro: one sum a visitor can read. Display only. */}
+        <Show when={!discountOn() && estimatedTotalCents() > 0}>
+          <div class="bk-sum-total">
+            <dt>Estimated total</dt>
+            <dd>
+              ≈ {formatLocalFromEurCents(estimatedTotalCents(), props.currency)}
+              {props.shipping.missing || !props.shipping.cents ? ' + shipping' : ''}
+            </dd>
           </div>
         </Show>
       </dl>

@@ -10,7 +10,7 @@ import {
   pokoUserTurnKey,
   readPokoHistory,
   reconcilePokoEvents,
-  resolvePokoCards,
+  tagsToPokoCards,
   writePokoHistory,
 } from '@market/poko-chat.js';
 
@@ -21,7 +21,7 @@ function cachedFor(uid) {
 }
 
 /**
- * The Poko assistant thread (market/src/use-poko-thread.js): cached history
+ * The Poko assistant thread: cached history
  * first, a 4 s poll while open that never races an in-flight send, an
  * optimistic user bubble reconciled with the server's echo, older pages near
  * the top. Options are accessors.
@@ -147,7 +147,8 @@ export function createPokoThread({ uid, signedIn, getBearer, enabled, pathname }
 
   async function send({ message = '', tags = [], photos = [] } = {}) {
     const path = pathname();
-    const attached = resolvePokoCards({ tags, pathname: path });
+    // Only the cards in the composer count; the page being viewed is not context.
+    const attached = tagsToPokoCards(tags);
     const attachedImages = (photos || []).slice();
     if (busyNow || (!message.trim() && !attached.length && !attachedImages.length)) return null;
     busyNow = true;

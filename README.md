@@ -5,11 +5,12 @@ the Pokoin Wallet, the PokoinPoS chain, marketplace tooling, and market-signal
 apps.
 
 This repository is the **public web**: landing (`index.html`, `home/`) and the
-React market (`market/`). Android/iOS CardVault is a separate app
+marketplace SPA, a Solid 2 app (`solid/`) over the shared modules in `market/`.
+Android/iOS CardVault is a separate app
 ([docs/APP.md](docs/APP.md)). Product APIs stay on `api.pokoin.com`.
 
 See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline, copy, and
-deploy. React market: [docs/MARKET.md](docs/MARKET.md). Card-art surfaces:
+deploy. Marketplace: [docs/MARKET.md](docs/MARKET.md). Card-art surfaces:
 [docs/CARD_ART.md](docs/CARD_ART.md). Pi CDN + nezopt 15T replica (crop/CLIP
 here, not on the Pi): [docs/GAMES.md](docs/GAMES.md). Scan catalogs:
 [docs/SCAN.md](docs/SCAN.md). Public card id is leftover
@@ -33,10 +34,10 @@ public `card_id` display cache): [docs/ARTISTS.md](docs/ARTISTS.md).
 
 | Module | Repository | Verified status |
 | --- | --- | --- |
-| Pokoin Web | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public website: landing (`index.html`, `home/`) and React market (`market/`) on `https://pokoin.com`. |
+| Pokoin Web | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public website: landing (`index.html`, `home/`) and the Solid marketplace (`solid/`, shared modules in `market/`) on `https://pokoin.com`. |
 | CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter Android/iOS app on `https://app.pokoin.com`. **App client only** — not the shared API runtime. [docs/APP.md](docs/APP.md). |
 | Shared Pokoin API | Pi `api.pokoin.com`: one native Rust binary from this repo's `pokoin-rust/` (unit `pokoin-rust-api`) | Consumed by **both** Web and CardVault. See [docs/API.md](docs/API.md) and [docs/RUST_RUNTIME.md](docs/RUST_RUNTIME.md). Deploying the API ≠ deploying CardVault. |
-| Wallet | This repo (`/wallet`) and [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | MetaMask + PokoinPoS on the React SPA. The `pokoinwallet` repository is an older Flutter/Firebase Functions prototype. |
+| Wallet | This repo (`/wallet`) and [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | MetaMask + PokoinPoS on the marketplace SPA. The `pokoinwallet` repository is an older Flutter/Firebase Functions prototype. |
 | Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js Pokoin News at `https://news.pokoin.com`, hosted on Always Free Ampere A1 behind a Cloudflare named tunnel. Pipeline: [docs/NEWS.md](docs/NEWS.md). |
 | Card Extension | [`gvitolocs/pokemon-card-extension`](https://github.com/gvitolocs/pokemon-card-extension) | Chrome Manifest V3 extension that adds Pokoin card links to supported Pokemon marketplace listings. |
 | PokoinPoS | [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | Native Proof-of-Stake chain and node runtime for the Pokoin/CardVault ecosystem. Public network values are documented in the repository. |
@@ -46,8 +47,8 @@ public `card_id` display cache): [docs/ARTISTS.md](docs/ARTISTS.md).
 ### Pokoin Repository
 
 - Provides the public README for the Pokoin ecosystem.
-- Holds the pokoin.com landing (`index.html`, `home/`) and the React
-  market (`market/`). Deploys itself to Vercel project `web`.
+- Holds the pokoin.com landing (`index.html`, `home/`) and the Solid
+  marketplace (`solid/`, shared modules in `market/`). Deploys itself to Vercel project `web`.
 
 ### CardVault
 
@@ -59,7 +60,7 @@ Flutter Android/iOS. Not the pokoin.com web host. Details: [docs/APP.md](docs/AP
 
 ### Wallet
 
-- Public wallet UI: `https://pokoin.com/wallet` in this React SPA.
+- Public wallet UI: `https://pokoin.com/wallet` in this SPA.
 - Public PokoinPoS values:
   - Network name: `PokoinPoS`
   - Chain ID: `26062026`
@@ -117,7 +118,7 @@ Flutter Android/iOS. Not the pokoin.com web host. Details: [docs/APP.md](docs/AP
 
 | Area | Verified stack |
 | --- | --- |
-| Public marketplace (web) | React + Vite in `market/`; humans hit `/marketplace` |
+| Public marketplace (web) | Solid 2 + Vite in `solid/` (framework-free shared modules in `market/`); humans hit `/marketplace` |
 | Android/iOS app | Flutter, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore. Host `app.pokoin.com`. [docs/APP.md](docs/APP.md). |
 | Legacy wallet prototype | Flutter, Firebase Functions v2 on Node 20, Express, Firestore, `tweetnacl` signatures |
 | Market signals and news | Next.js, React, TypeScript, Tailwind CSS, Vercel, Vercel Cron, SQLite via `better-sqlite3` |
@@ -134,13 +135,14 @@ git clone https://github.com/gvitolocs/pokoin.git
 cd pokoin
 ```
 
-Landing is static HTML. The React marketplace:
+Landing is static HTML. The marketplace (Solid):
 
 ```bash
-cd market
+(cd market && npm install)   # packages of the shared modules (firebase, jsqr)
+cd solid
 npm install
 npm run dev
-# http://127.0.0.1:5174/marketplace
+# http://127.0.0.1:5175/marketplace
 ```
 
 Work on a module from its own repository:
@@ -173,8 +175,8 @@ cd pokemon-card-extension
 
 ## Configuration
 
-Landing has none. The React marketplace uses the public Firebase web config
-in `market/src/auth.jsx` (same project as Android/iOS
+Landing has none. The marketplace uses the public Firebase web config
+in `market/src/firebase-client.js` (same project as Android/iOS
 `DefaultFirebaseOptions.web`) and talks to `https://api.pokoin.com`.
 
 Known module configuration from the repositories:
@@ -202,7 +204,7 @@ host. Map: [docs/WEB_HOST.md](docs/WEB_HOST.md). Details:
 
 ## Usage
 
-- Visit `https://pokoin.com/` for the landing and `https://pokoin.com/marketplace` for the React market.
+- Visit `https://pokoin.com/` for the landing and `https://pokoin.com/marketplace` for the marketplace.
 - Wallet, auth, cart, checkout, forum, scan, and buy are this SPA (`/wallet`, `/auth`, `/cart`, `/checkout`, `/forum`, `/scan`, `/buy`).
 - Use `https://rpc.pokoin.com/rpc` as the documented public PokoinPoS RPC URL.
 - Use `https://explorer.pokoin.com` as the documented public explorer URL.

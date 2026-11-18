@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { fetchExactNameCards, imageSrc } from '@market/api.js';
+import { game, gameIdFromHost, publicGamePath } from '@market/game.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { flagSrc } from '@market/locale.js';
@@ -24,11 +25,15 @@ import {
   quantityFieldCommit,
   slotText,
 } from '@market/scan-model.js';
-import { priceFieldCommit } from '@market/scan-pricing.js';
 import { DRAFT_HOTKEY_LEGEND, dispatchDraftHotkey, draftLegendActive } from '@market/scan-shortcuts.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { formatSellerPrice, priceInputFromPkn, sellerListCurrency } from '@market/seller-currency.js';
 import ThumbZoom from '../../components/ThumbZoom.jsx';
 import { createLiveSuggest } from '../../lib/live-suggest.js';
+import { accountProfile } from '../../stores/account.js';
+import { authUser } from '../../stores/auth.js';
+import { scanOwnerBook } from './duplicate-book.js';
+import { scanDuplicateNote } from './duplicates.js';
+import { priceFieldBlur } from './price-run.js';
 import { loadVersionSet } from './version-sets.js';
 import { watch } from './watch.js';
 
@@ -49,7 +54,7 @@ function thumbFor(cardId, name, imageUrl) {
 /** Same-artwork printing select; remaps the row to the printing its language implies. */
 function ArtworkVersionSelect(props) {
   const [printings, setPrintings] = createSignal(null);
-  const remapTried = new Set();
+  const remapTried = props.remapTried;
   // The row language picks the printing. Batch language is only the fallback.
   const listingLanguage = () => remapListingLanguage(props.row.language, props.preferredLanguage);
 
@@ -99,7 +104,7 @@ function ArtworkVersionSelect(props) {
           }
         }
         const nextId = String(preferred?.id || preferred?.card_id || '');
-        if (nextId && nextId !== cardId) props.onPick(nextId);
+        if (nextId && nextId !== cardId && !cancelled && !props.remapTried.has(tryKey + "\0picked")) props.onPick(nextId);
       })();
       return () => { cancelled = true; };
     },
@@ -206,9 +211,16 @@ function CandidateAlts(props) {
 const FLAG_FIELDS = ['firstEdition', 'signed', 'altered'];
 const FLAG_SHORT = { firstEdition: '1st', signed: 'S', altered: 'A' };
 
-/** One queue row (market/src/pages/ScanDesk.jsx QueueRow). `row` is the live row. */
+/**
+ * One queue row. `row` is the live row; `priceOnLoad`: the row is priced when
+ * the batch loads (its own pricing choice, else the batch's). `picked` /
+ * `onTogglePick`: the row's checkbox (rows to price together);
+ * `pricingChip` (`{ label, kind }`) / `onPricingChip`: the row's pricing
+ * choice under the price, opening the pricer pop-up for this row.
+ */
 export function QueueRow(props) {
   const row = () => props.row;
+  const unpricedOnLoad = () => Boolean(props.priceOnLoad) && !(Number(row().pricePkn) > 0);
   const stateLabel = () => {
     const r = row();
     if (r.status === 'submitted') return props.hidePrice ? 'Collected' : 'Listed';
@@ -229,15 +241,35 @@ export function QueueRow(props) {
   const thumbArt = createMemo(() => thumbFor(row().cardId, row().cardName, row().imageUrl));
   const zoomSrc = () => thumbArt().hero || thumbArt().thumb;
   const remapLang = () => remapListingLanguage(row().language, props.preferredLanguage);
-  const currency = () => props.priceCurrency || 'PKN';
+  const currency = () => props.priceCurrency || sellerListCurrency();
+  // What the seller typed in the price box and has not committed (null: nothing
+  // typed). It keeps a patch of the row from repainting the field under them,
+  // and it is the desk's only sign that a price was written by hand.
+  const [priceTyped, setPriceTyped] = createSignal(null);
+  let priceField = null;
+  createEffect(
+    // `undefined` while the seller types: their text is the value, and nothing
+    // the row does may repaint the field under them.
+    () => (priceTyped() === null ? priceInputFromPkn(row().pricePkn, currency()) : undefined),
+    (text) => {
+      if (text === undefined || !priceField || priceField.value === text) return;
+      priceField.value = text;
+    },
+  );
   const pick = (id) => {
     props.onPick(id);
     props.onReplaceDone();
   };
+  // The same copy already listed from Card Rails / CardTrader / Cardmarket:
+  // a warning only, the submit is unchanged (docs/INVENTORY_ORIGIN.md).
+  const duplicateNote = createMemo(() => scanDuplicateNote(
+    scanOwnerBook(authUser()?.uid || accountProfile()?.uid || '', gameIdFromHost()),
+    row(),
+  ));
 
   return (
     <div
-      class={['scan-row', { focused: props.focused, selected: props.selected, done: row().status === 'submitted' }]}
+      class={['scan-row', { focused: props.focused, selected: props.selected, picked: props.picked, done: row().status === 'submitted' }]}
       role="row"
       aria-selected={String(Boolean(props.focused || props.selected))}
       data-row={row().id}
@@ -246,7 +278,20 @@ export function QueueRow(props) {
         props.onFocus(event);
       }}
     >
-      <span class="c-num">{props.index + 1}</span>
+      <span class="c-num">
+        <Show when={props.onTogglePick} fallback={props.index + 1}>
+          <label class="c-pick">
+            <input
+              type="checkbox"
+              tabindex={-1}
+              checked={Boolean(props.picked)}
+              aria-label={`Select ${row().cardName || 'row'} for pricing`}
+              onChange={() => props.onTogglePick()}
+            />
+            <span>{props.index + 1}</span>
+          </label>
+        </Show>
+      </span>
       <span class="c-identity">
         <span
           class="c-art"
@@ -258,7 +303,7 @@ export function QueueRow(props) {
               id: r.cardId,
               name: r.cardName,
               imageUrl: r.imageUrl || zoomSrc() || thumbArt().thumb,
-              canonicalPath: r.cardId ? `/marketplace/en/cards/${r.cardId}` : '',
+              canonicalPath: r.cardId ? (publicGamePath(`/marketplace/en/cards/${r.cardId}`, game().id) || `/marketplace/en/cards/${r.cardId}`) : '',
             }));
           }}
         >
@@ -282,6 +327,7 @@ export function QueueRow(props) {
             row={row()}
             closed={props.closed}
             preferredLanguage={remapLang()}
+            remapTried={props.remapTried}
             onPick={(id) => props.onPick(id)}
           />
           <Show when={showCandidates()}>
@@ -289,6 +335,9 @@ export function QueueRow(props) {
           </Show>
           <Show when={props.replacing && !unidentified()}>
             <ReplacePrinting onPick={pick} onClose={() => props.onReplaceDone()} seed={untrack(() => row().cardName)} />
+          </Show>
+          <Show when={duplicateNote()}>
+            <small class="scan-dup-note" role="note" title={duplicateNote()}>{duplicateNote()}</small>
           </Show>
         </span>
       </span>
@@ -405,32 +454,70 @@ export function QueueRow(props) {
         <span class={['c-price', { suggested: row().priceSuggested }]}>
           <Show when={!props.closed} fallback={formatSellerPrice(row().pricePkn, currency())}>
             <input
+              ref={(el) => { priceField = el; }}
               inputmode="decimal"
               tabindex={-1}
-              value={priceInputFromPkn(row().pricePkn, currency())}
-              // While a suggested price is cleared for typing, it stays visible
-              // as the placeholder: leaving the field empty keeps it.
-              placeholder={row().priceSuggested && row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
-              onFocus={(e) => {
-                // Clicking in is the only thing that empties a suggested price;
-                // switching versions re-suggests instead.
-                props.onPriceFocus?.(row().id);
-                if (row().priceSuggested) e.currentTarget.value = '';
+              // The price stays in the box while it is being edited: a suggestion
+              // is a value, not a button, and it never disappears on focus.
+              // With batch pricing an unpriced row is priced when the batch loads,
+              // and while its suggestion is in flight the box shows it as a ghost.
+              class={{ 'price-on-load': unpricedOnLoad() }}
+              placeholder={unpricedOnLoad()
+                ? 'on load\u2009'
+                : row().pricePkn != null ? priceInputFromPkn(row().pricePkn, currency()) : currency()}
+              // The thin space keeps the italic "d" inside the right-aligned field.
+              onFocus={(e) => e.currentTarget.select()}
+              onInput={(e) => {
+                // The first keystroke is the seller taking over this shape's price;
+                // clicking into the box is not.
+                if (priceTyped() === null) props.onPriceEdited?.(row().id);
+                setPriceTyped(e.currentTarget.value);
               }}
               onBlur={(e) => {
                 const r = row();
-                const commit = priceFieldCommit(r, e.currentTarget.value, currency());
+                const commit = priceFieldBlur(r, e.currentTarget.value, currency(), priceTyped() !== null);
+                setPriceTyped(null);
                 if (commit.action === 'set') {
                   props.onPatch({ pricePkn: commit.pricePkn, ...(r.priceSuggested ? { priceSuggested: false } : {}) });
                   return;
                 }
-                if (commit.action === 'default') props.onPriceEmptied?.(r);
-                e.currentTarget.value = priceInputFromPkn(r.pricePkn, currency());
+                // Invalid text left in the price field of an unpriced or suggested row gives the
+                // price back to the default; `priceTyped` re-paints the field either way.
+                if (commit.action === 'default' || (commit.action === 'restore' && (r.pricePkn == null || r.priceSuggested))) props.onPriceEmptied?.(r);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur();
               }}
             />
+          </Show>
+          <Show when={props.pricingChip}>
+            {(chip) => (chip().kind === 'batch' ? (
+              // The batch default is not this row's choice, so it is the price
+              // shown and nothing to click: tick the row and use "Price
+              // selected" to price this row differently.
+              <span
+                class={['c-pricing-chip', 'is-batch']}
+                style={{ cursor: 'default' }}
+                title="Batch default · tick the row and use Price selected to change it for this row"
+              >
+                {chip().label}
+              </span>
+            ) : (
+              <button
+                type="button"
+                class={['c-pricing-chip', `is-${chip().kind}`]}
+                tabindex={-1}
+                disabled={props.closed}
+                title={chip().kind === 'own' ? 'This row’s own pricing · change it' : 'No pricing for this row · change it'}
+                aria-label={`Pricing: ${chip().label}. Change it for this row`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.onPricingChip?.();
+                }}
+              >
+                {chip().label}
+              </button>
+            ))}
           </Show>
         </span>
       </Show>

@@ -123,3 +123,29 @@ test('set rail load more slices priced cards and keeps hasMore from cardCount', 
   assert.equal(pastRail.cards.length, 0);
   assert.equal(pastRail.hasMore, true);
 });
+
+test('a tile under its real id and the old 999 stamp keeps the real row', async () => {
+  const { fetchCardTiles } = await import('./lists.js');
+  const realFetch = globalThis.fetch;
+  const rows = [
+    { id: '806322', name: 'Growlithe', price: 982, gridImageUrl: '/card-images/806322_growlithe.jpg' },
+    { id: '999806322', name: 'Growlithe', price: 1922, gridImageUrl: '/card-images/999806322_growlithe.jpg' },
+  ];
+  try {
+    for (const cards of [rows, [...rows].reverse()]) {
+      globalThis.fetch = async () => ({ ok: true, json: async () => ({ cards }) });
+      const [tile, ...rest] = await fetchCardTiles(['806322']);
+      assert.equal(rest.length, 0);
+      assert.equal(tile.id, '806322');
+      assert.equal(tile.price, 982);
+      assert.equal(tile.gridImageUrl, '/card-images/806322_growlithe.jpg');
+    }
+    // The stamp still fills a card the real id does not return.
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ cards: [rows[1]] }) });
+    const [only] = await fetchCardTiles(['806322']);
+    assert.equal(only.id, '806322');
+    assert.equal(only.price, 1922);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

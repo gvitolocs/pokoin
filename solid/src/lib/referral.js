@@ -6,8 +6,8 @@ import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import { authSession } from '../stores/session.js';
 
 /**
- * Invite & Earn + ambassador progress for the signed-in account
- * (market/src/use-referral.js): cached answer first (instant paint), then a
+ * Invite & Earn + ambassador progress for the signed-in account:
+ * cached answer first (instant paint), then a
  * fresh fetch. `enabled` is an accessor.
  */
 export function createReferral(enabled = () => true) {

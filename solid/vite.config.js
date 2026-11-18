@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import solid from '@solidjs/vite-plugin';
+import { productPageForPath } from '../content/product-pages.mjs';
+import { renderProductPage, productPagesSitemap } from '../scripts/build-product-pages.mjs';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const marketDir = path.resolve(rootDir, '../market');
@@ -50,6 +52,56 @@ function serveLandingHome() {
   };
 }
 
+/** Public marketing pages render complete HTML in dev, as in the static build. */
+function serveProductPages() {
+  return {
+    name: 'pokoin-product-pages',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const pathname = url.pathname;
+        if (pathname === '/' || pathname === '/landing.html') {
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          // The landing island runs from source in dev (build-web.sh points it at the built entry).
+          const landing = fs
+            .readFileSync(path.resolve(rootDir, '../index.html'), 'utf8')
+            .replace('src="/market/landing-island.js"', 'src="/src/landing/island.jsx"');
+          if (req.method === 'HEAD') {
+            res.end('');
+            return;
+          }
+          server.transformIndexHtml(pathname, landing).then((html) => res.end(html), next);
+          return;
+        }
+        if (pathname === '/sitemap-product-pages.xml') {
+          res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+          res.end(productPagesSitemap());
+          return;
+        }
+        const page = productPageForPath(pathname);
+        if (!page) {
+          if (/^\/(features|alternatives|learn)(?:\/|$)/.test(pathname)) {
+            res.statusCode = 404;
+            res.end('Page not found');
+            return;
+          }
+          next();
+          return;
+        }
+        if (pathname !== page.path) {
+          res.writeHead(301, { Location: page.path + url.search });
+          res.end();
+          return;
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(req.method === 'HEAD' ? '' : renderProductPage(page));
+      });
+    },
+  };
+}
+
 /**
  * Rolldown splits every module shared by the entry and a lazy chunk into its
  * own common chunk, so lazy trays / chat / previews turned the first paint
@@ -70,16 +122,16 @@ function entryGroup(id, ctx) {
   return walk(id) ? 'index' : null;
 }
 
-/** The Solid app must never bundle React. Shared modules come from market/src,
- * so a hook import there would silently drag react-dom in; fail the build instead. */
+/** The site is Solid only. Shared modules come from market/src, so a React
+ * import there (or a dependency that brings react along) fails the build. */
 const FORBIDDEN = /^(react|react-dom|react-router|react-router-dom)(\/|$)/;
 function forbidReact() {
   return {
     name: 'pokoin-forbid-react',
     enforce: 'pre',
     resolveId(source, importer) {
-      if (FORBIDDEN.test(source) && process.env.SOLID_ALLOW_REACT !== '1') {
-        throw new Error(`Solid app imported "${source}" from ${importer || '?'} — split the React hook out of that shared module.`);
+      if (FORBIDDEN.test(source)) {
+        throw new Error(`"${source}" imported from ${importer || '?'}: the site is Solid only.`);
       }
       return null;
     },
@@ -128,12 +180,12 @@ function prefetchSuggestEngine() {
 }
 
 export default defineConfig(({ command }) => ({
-  // Same base as the React build: shared modules build asset URLs from
-  // import.meta.env.BASE_URL (flags, game icons, data/catalog.json) that the
-  // React build already publishes under /market/. Only Solid chunks move to /market/s/.
+  // Shared modules build asset URLs from import.meta.env.BASE_URL (flags, game
+  // icons, data/catalog.json): market/public is published under /market/, the
+  // chunks under /market/s/.
   base: command === 'build' ? '/market/' : '/',
-  publicDir: command === 'build' ? false : path.join(marketDir, 'public'),
-  plugins: [forbidReact(), solid(), serveLandingHome(), prefetchSuggestEngine()],
+  publicDir: path.join(marketDir, 'public'),
+  plugins: [forbidReact(), solid(), serveLandingHome(), serveProductPages(), prefetchSuggestEngine()],
   resolve: {
     alias: { '@market': path.join(marketDir, 'src') },
     dedupe: ['solid-js', '@solidjs/web', '@solidjs/signals'],

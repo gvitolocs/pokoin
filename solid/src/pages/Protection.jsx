@@ -22,7 +22,7 @@ function Icon(props) {
   );
 }
 
-/** /protection (market/src/pages/Protection.jsx): buyer protection, static. */
+/** /protection: buyer protection, static. */
 export default function Protection() {
   onSettled(() => {
     document.title = 'Buyer protection · Pokoin';

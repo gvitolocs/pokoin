@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js';
 import { WALLET_ADDRESS_KEY, fetchWalletBalance, requestWalletAccount } from '@market/wallet-tx.js';
 
 /**
- * The connected PokoinPoS wallet (market/src/wallet.jsx WalletProvider):
+ * The connected PokoinPoS wallet:
  * the saved address, its chain balance and network. Only the wallet and
  * exchange pages import this; the header chip keeps reading stores/account.js.
  */

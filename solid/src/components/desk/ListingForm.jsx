@@ -1,20 +1,23 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
-import { useNavigate } from '@solidjs/router';
+import { useGameNavigate } from '../../lib/game-navigate.js';
 import {
   cardHref,
   createListing,
-  fetchSellerListings,
-  formatPkn,
+  fetchPriceCheck,
+  fetchPricingGroups,
+  fetchSellerBoxSlots,
   formatPknNumber,
   publicCardId,
   saveSellerSettings,
   updateListing,
 } from '@market/api.js';
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
+import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
-import { listingBox, liveInventoryListings, recentBoxes } from '@market/inventory-listings.js';
+import { listingBox } from '@market/inventory-listings.js';
+import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
 import { sellLanguages, versionRedirects } from '@market/listing-languages.js';
 import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
@@ -22,7 +25,7 @@ import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
 import { fiatFromPkn, LIST_CURRENCIES, listingPriceToPkn } from '@market/pkn.js';
 import { authAnchorRel, authFrom } from '@market/punchouts.js';
 import { suggestPriceFromSlices } from '@market/scan-pricing.js';
-import { formatSellerPrice, priceInputFromPkn } from '@market/seller-currency.js';
+import { priceInputFromPkn } from '@market/seller-currency.js';
 import { Action, track } from '@market/track.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '@market/user-photos.js';
 import { authReady, authUser, getBearer, signedIn } from '../../stores/auth.js';
@@ -86,12 +89,12 @@ function CameraIcon() {
 }
 
 /**
- * "List your card" / "Edit listing" (market/src/pages/Card.jsx ListingForm).
+ * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
  */
 export default function ListingForm(props) {
-  const navigate = useNavigate();
+  const navigate = useGameNavigate();
   const gameId = currentGame().id;
   const foils = listingFoilOptions(gameId);
   const listChips = listingExtraChips(gameId);
@@ -99,11 +102,13 @@ export default function ListingForm(props) {
   const blank = untrack(() => blankListingForm(props.card));
   const [price, setPrice] = createSignal(blank.price);
   let priceManual = Boolean(untrack(() => props.editing?.id));
+  // The seller typed a price in this edit (an edit sends the price only then).
+  let priceTyped = false;
   let priceFocused = false;
   let currencyManual = false;
   let boxTouched = false;
   let formEl;
-  const [currency, setCurrency] = createSignal(blank.currency);
+  const [currency, setCurrency] = createSignal(untrack(sellerCurrency));
   const [qty, setQty] = createSignal(blank.qty);
   const [condition, setCondition] = createSignal(blank.condition);
   const [language, setLanguage] = createSignal(blank.language);
@@ -111,8 +116,14 @@ export default function ListingForm(props) {
   const [chips, setChips] = createSignal(blank.chips);
   const [comment, setComment] = createSignal(blank.comment);
   const [box, setBox] = createSignal('');
-  const [stockRows, setStockRows] = createSignal([]);
+  // The seller's boxes with their next free slot, from the server.
+  const [stockBoxes, setStockBoxes] = createSignal([]);
   const [stockReady, setStockReady] = createSignal(false);
+  // Where the listing being edited is stored (public offers carry no location);
+  // null until the server answered, and then the form leaves location alone.
+  const [ownLocation, setOwnLocation] = createSignal(null);
+  // Bumped after a save so the next card gets the slot after this one.
+  const [stockVersion, setStockVersion] = createSignal(0);
   const [photos, setPhotos] = createSignal(
     untrack(() => (Array.isArray(props.editing?.photoUrls) ? props.editing.photoUrls.slice(0, MAX_LISTING_PHOTOS) : [])),
   );
@@ -132,7 +143,9 @@ export default function ListingForm(props) {
 
   const uid = () => authUser()?.uid || authSession()?.uid || '';
   const sellerName = () => sellerNameOf(authUser(), profile());
-  const ready = () => authReady();
+  // The cached session is enough to paint the form enabled; a save waits for
+  // the bearer (getBearer) anyway.
+  const ready = () => authReady() || signedIn();
   const listLangs = createMemo(() => sellLanguages({
     nationality: card().nationality,
     setName: props.identity?.set || card().set,
@@ -144,9 +157,26 @@ export default function ListingForm(props) {
   const langKey = createMemo(() => listLangs().join(','));
   const editingId = createMemo(() => props.editing?.id || '');
   const isEditing = () => Boolean(editingId());
+  // The pricing group of the listing being edited: a new price takes it out.
+  const [priceGroup, setPriceGroup] = createSignal(null);
+  createEffect(editingId, (id) => {
+    setPriceGroup(null);
+    if (!id) return;
+    (async () => {
+      try {
+        const token = await getBearer();
+        if (!token) return;
+        const data = await fetchPricingGroups(token);
+        if (untrack(editingId) === id) setPriceGroup(listingPricingGroup(data, id));
+      } catch {
+        // Never block the form over the note.
+      }
+    })();
+  });
 
   function applyFields(next) {
-    const listIn = currencyManual ? next.currency : untrack(sellerCurrency);
+    // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
+    const listIn = untrack(currencyManual ? currency : sellerCurrency);
     setPrice(listIn === next.currency || !next.price
       ? next.price
       : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
@@ -169,6 +199,7 @@ export default function ListingForm(props) {
   createEffect(resetKey, () => {
     const editing = untrack(() => props.editing);
     const row = untrack(card);
+    priceTyped = false;
     if (editing?.id) {
       applyFields(listingFormFromOffer(editing, row));
       priceManual = true;
@@ -207,8 +238,40 @@ export default function ListingForm(props) {
     reverse: foil() === 'reverse',
     firstEdition: chips().firstEd,
   }));
+
+  // The suggested price is the cheapest professional CardTrader seller of this
+  // printing with the same condition, language and finish; the sold graph
+  // only fills in when no such offer exists.
+  const [proFloorPkn, setProFloorPkn] = createSignal(null);
+  const floorItem = createMemo(() => priceCheckItem({
+    cardId: card().id,
+    condition: condition(),
+    language: language(),
+    reverse: foil() === 'reverse',
+    firstEdition: chips().firstEd === true,
+  }));
+  const floorKey = createMemo(() => (signedIn() && /^\d+$/.test(floorItem().cardId) ? priceCheckKey(floorItem()) : ''));
+  createEffect(floorKey, (key) => {
+    setProFloorPkn(null);
+    if (!key) return undefined;
+    const item = untrack(floorItem);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchPriceCheck([item], await getBearer());
+        const value = Number(data?.prices?.[key]?.ctMatchedPkn);
+        if (!cancelled) setProFloorPkn(Number.isFinite(value) && value > 0 ? value : null);
+      } catch (_) {
+        // The sold graph stays the suggestion.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
   const graphPrice = createMemo(() => {
-    const pkn = graphPkn();
+    const pkn = proFloorPkn() ?? graphPkn();
     if (!(pkn > 0)) return '';
     return currency() === 'PKN'
       ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
@@ -233,16 +296,13 @@ export default function ListingForm(props) {
   });
 
   const hint = () => (!price() && graphPrice() ? graphPrice() : '');
-  const listedPkn = () => (price()
-    ? listingPriceToPkn(price(), currency())
-    : listingPriceToPkn(graphPrice(), currency()));
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  // [signedIn, uid, editingId]: the seller's stock for the box/slot picker.
-  const stockKey = createMemo(() => (signedIn() && uid() ? `${uid()}|${editingId()}` : ''));
+  // [signedIn, uid, editingId, saves]: the seller's boxes for the box/slot picker.
+  const stockKey = createMemo(() => (signedIn() && uid() ? `${uid()}|${editingId()}|${stockVersion()}` : ''));
   createEffect(stockKey, (key) => {
     if (!key) return undefined;
     const owner = untrack(uid);
@@ -250,15 +310,15 @@ export default function ListingForm(props) {
     (async () => {
       try {
         const token = await getBearer();
-        const data = await fetchSellerListings(owner, token, { limit: 1000 });
+        const id = untrack(editingId);
+        const data = await fetchSellerBoxSlots(owner, token, { stackSize: 80, ...(id ? { id } : {}) });
         if (cancelled) return;
-        setStockRows(liveInventoryListings(data.listings || data.items || []));
+        setStockBoxes(Array.isArray(data?.boxes) ? data.boxes : []);
+        setOwnLocation(typeof data?.listing?.location === 'string' ? data.listing.location : null);
         setStockReady(true);
       } catch (_) {
-        if (!cancelled) {
-          setStockRows([]);
-          setStockReady(true);
-        }
+        // Not ready: an edit then keeps the stored location instead of clearing it.
+        if (!cancelled) setStockBoxes([]);
       }
     })();
     return () => {
@@ -267,33 +327,30 @@ export default function ListingForm(props) {
   });
 
   createEffect(
-    () => [editingId(), stockRows(), props.editing?.location || ''],
-    ([id, rows, location]) => {
+    () => [editingId(), stockBoxes(), ownLocation() ?? props.editing?.location ?? ''],
+    ([id, boxes, location]) => {
       if (id) {
-        const mine = rows.find((row) => row.id === id);
-        setBox(listingBox(mine?.location || location || ''));
+        setBox(listingBox(location || ''));
         return;
       }
       if (boxTouched) return;
-      const first = recentBoxes(rows)[0] || '';
+      const first = String(boxes[0]?.box || '');
       if (first) setBox(first);
     },
   );
 
   const boxOptions = () => {
-    const names = recentBoxes(stockRows());
+    const names = stockBoxes().map((entry) => String(entry?.box || '')).filter(Boolean);
     const current = box();
     if (current && !names.some((name) => name.toLowerCase() === current.toLowerCase())) return [current, ...names];
     return names;
   };
-  const keptLocation = () => (editingId()
-    ? (stockRows().find((row) => row.id === editingId())?.location || props.editing?.location || '')
-    : '');
+  const keptLocation = () => (editingId() ? (ownLocation() ?? props.editing?.location ?? '') : '');
   const locationValue = () => {
     const current = box();
     if (!current) return '';
     const sameBox = listingBox(keptLocation()).toLowerCase() === current.toLowerCase();
-    return sameBox ? keptLocation() : nextBoxLocation(stockRows(), current);
+    return sameBox ? keptLocation() : nextBoxLocation(stockBoxes(), current);
   };
 
   async function submit(targets = { pokoin: true, cardtrader: false }) {
@@ -369,16 +426,18 @@ export default function ListingForm(props) {
         reserveAvailable: false,
         nftAvailable: false,
         sellerComment: comment().trim(),
-        ...(!editing || stockReady() ? { location: locationValue() } : {}),
+        ...(!editing || (stockReady() && ownLocation() !== null) ? { location: locationValue() } : {}),
         source: 'pokoin_user_listing',
         cardName: row.name,
         cardImageUrl: row.heroImageUrl || row.imageUrl || '',
         setName: props.identity.set,
         collectorNumber: props.identity.number,
       };
+      const { pricePkn: _typedPrice, ...editFields } = fields;
       const saved = editing
         ? await updateListing(id, {
-          ...fields,
+          ...editFields,
+          ...editPriceFields(amount, props.editing?.pricePkn ?? props.editing?.price_pkn, priceTyped),
           sellerUid: uid() || props.editing?.sellerUid,
           status: 'active',
         }, token)
@@ -400,10 +459,15 @@ export default function ListingForm(props) {
         setError(saved.cardtrader.error || 'CardTrader push failed.');
       } else if (saved?.listing === null && saved?.cardtrader?.ok) {
         setDone('Listed on CardTrader.');
+      } else if (editing && leftGroupLine(saved)) {
+        // The new price took the listing out of its pricing group.
+        setDone(`Listing updated. ${leftGroupLine(saved)}`);
+        setPriceGroup(null);
       } else {
         setDone(editing ? 'Listing updated.' : 'Listing created.');
       }
       if (!editing) setQty('1');
+      setStockVersion((n) => n + 1);
       const listingRow = saved?.id ? saved : saved?.listing;
       if (listingRow?.id && photos().length) {
         const attached = await saveListingPhotos(token, listingRow.id, photos());
@@ -449,7 +513,32 @@ export default function ListingForm(props) {
     }
   }
 
+  // Every visitor came to buy first, signed in or not: the sell form waits
+  // behind one strip instead of being the biggest panel on the desk. The strip
+  // is the same for both, so the desk has one layout.
+  const [opened, setOpened] = createSignal(false);
+  const collapsed = () => !isEditing() && !opened();
+
   return (
+    <Show
+      when={!collapsed()}
+      fallback={(
+        <section class="panel sell-form is-collapsed">
+          <div class="add-head">
+            <h2>Have this card?</h2>
+            <Show when={props.sellNowNote}>
+              <span class="sell-strip-note">{props.sellNowNote}</span>
+            </Show>
+            <span class="sell-strip-actions">
+              <Show when={props.onSellNow}>
+                <button type="button" class="btn ghost sell-open sell-now" onClick={() => props.onSellNow()}>Sell now</button>
+              </Show>
+              <button type="button" class="btn ghost sell-open" onClick={() => setOpened(true)}>List yours</button>
+            </span>
+          </div>
+        </section>
+      )}
+    >
     <section class={['panel sell-form', { 'is-editing': isEditing() }]} ref={(el) => { formEl = el; }}>
       <div class="add-head">
         <h2>{isEditing() ? 'Edit listing' : 'List your card'}</h2>
@@ -473,11 +562,16 @@ export default function ListingForm(props) {
                 Cancel edit
               </button>
             </Show>
+            <Show when={!isEditing()}>
+              <button type="button" class="linkish sell-close" onClick={() => setOpened(false)}>
+                Close
+              </button>
+            </Show>
           </span>
         </Show>
       </div>
       <div class="sell-row">
-        <label class="sell-field grow">
+        <label class="sell-field grow price">
           Price
           <input
             inputmode="decimal"
@@ -495,6 +589,7 @@ export default function ListingForm(props) {
               const next = event.currentTarget.value;
               setPrice(next);
               priceManual = next.trim() !== '';
+              priceTyped = true;
             }}
           />
         </label>
@@ -507,7 +602,7 @@ export default function ListingForm(props) {
               setCurrency(event.currentTarget.value);
             }}
           >
-            <For each={LIST_CURRENCIES}>
+            <For each={[...new Set([...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()])]}>
               {(code) => <option value={code} selected={code === currency()}>{code}</option>}
             </For>
           </select>
@@ -528,6 +623,9 @@ export default function ListingForm(props) {
           </button>
         </Show>
       </div>
+      <Show when={priceGroup()}>
+        <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
+      </Show>
       <Show when={!isEditing()}>
         <div class="sell-targets-row">
           <InventoryTargets
@@ -537,7 +635,6 @@ export default function ListingForm(props) {
             disabled={!ready() || (!signedIn() && ready())}
             busy={saving()}
             busyLabel="Listing…"
-            pricePkn={listedPkn()}
             onSubmit={(targets) => {
               if (!signedIn()) {
                 navigate(authFrom(props.fromPath));
@@ -548,16 +645,9 @@ export default function ListingForm(props) {
           />
         </div>
       </Show>
-      <Show
-        when={sellerCurrency() !== 'PKN'}
-        fallback={(
-          <Show when={currency() !== 'PKN' && listedPkn()}>
-            <p class="sell-pkn-eq">Lists at {formatPkn(listedPkn())}</p>
-          </Show>
-        )}
-      >
+      {/* The price field already shows what the card lists at; only the PKN-off notice keeps a line. */}
+      <Show when={sellerSettings()?.acceptsPkn === false}>
         <p class="sell-pkn-eq">
-          {listedPkn() ? `Lists at ${formatSellerPrice(listedPkn(), sellerCurrency())} · ` : ''}
           Buyers pay you by card · PKN payments are off in <a href="/profile">Profile</a>
         </p>
       </Show>
@@ -710,5 +800,6 @@ export default function ListingForm(props) {
         }}
       />
     </section>
+    </Show>
   );
 }

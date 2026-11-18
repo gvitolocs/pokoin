@@ -1,0 +1,330 @@
+[
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/connect ABCD1234",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "connect",
+      "arg": "ABCD1234"
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/connect ABCD1234",
+    "expected": {
+      "command": "connect",
+      "arg": "ABCD1234"
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/connect@PokoBot ABCD1234",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/connect@PokoBot ABCD1234",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/connect@OtherBot ABCD1234",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/connect@OtherBot ABCD1234",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/start",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "start",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/start",
+    "expected": {
+      "command": "start",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/start@PokoBot",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/start@PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/start connect_ABCD12",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "start",
+      "arg": "connect_ABCD12"
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/start connect_ABCD12",
+    "expected": {
+      "command": "start",
+      "arg": "connect_ABCD12"
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/start connect-ZXCV99",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "start",
+      "arg": "connect-ZXCV99"
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/start connect-ZXCV99",
+    "expected": {
+      "command": "start",
+      "arg": "connect-ZXCV99"
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/help",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "help",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/help",
+    "expected": {
+      "command": "help",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/help@pokobot",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/help@pokobot",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/whoami",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "whoami",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/whoami",
+    "expected": {
+      "command": "whoami",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/disconnect",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "disconnect",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/disconnect",
+    "expected": {
+      "command": "disconnect",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/CONNECT code12",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "connect",
+      "arg": "code12"
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/CONNECT code12",
+    "expected": {
+      "command": "connect",
+      "arg": "code12"
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "connect ABCD1234",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "connect ABCD1234",
+    "expected": {
+      "command": "connect",
+      "arg": "ABCD1234"
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/connect",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "connect",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/connect",
+    "expected": {
+      "command": "connect",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/unknown",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/unknown",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "hello",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "hello",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/connect ABCD extra",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/connect ABCD extra",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "  /whoami  ",
+    "botUsername": "PokoBot",
+    "expected": {
+      "command": "whoami",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "  /whoami  ",
+    "expected": {
+      "command": "whoami",
+      "arg": ""
+    }
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "/start@",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "/start@",
+    "expected": null
+  },
+  {
+    "fn": "parseTelegramCommand",
+    "text": "",
+    "botUsername": "PokoBot",
+    "expected": null
+  },
+  {
+    "fn": "parseDiscordCommand",
+    "text": "",
+    "expected": null
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": " ABCD1234 ",
+    "expected": "ABCD1234"
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "abcd1234",
+    "expected": "ABCD1234"
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "abc",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "ABC_1234",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "ABCDEFGHIJKLM",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "ab cd12",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "  ",
+    "expected": ""
+  },
+  {
+    "fn": "normalizeLinkCode",
+    "text": "zz99zz",
+    "expected": "ZZ99ZZ"
+  }
+]

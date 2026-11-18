@@ -5,13 +5,14 @@
 //! apps. `c1` is an additional representation of the *same* body, chosen by the
 //! client:
 //!
-//! - `Accept: application/vnd.pokoin.c1+json`, or
-//! - `?format=c1` (for cache-busting and for clients that cannot set `Accept`).
+//! - `?format=c1` / `?format=c1v2`, or
+//! - `Accept: application/vnd.pokoin.c1+json` — honoured in-process only: the
+//!   public edge (`apps/api` `http_cache::edge`) answers plain JSON to it,
+//!   because Cloudflare keys on the URL and ignores `Vary: Accept`.
 //!
 //! A `c1` response keeps the status code and the `Cache-Control` of the default
 //! response and swaps only the content type and the body. Both representations
-//! carry `Vary: Accept`, so a shared cache can never hand a `c1` body to a
-//! client that asked for plain JSON.
+//! carry `Vary: Accept` for caches that honour it.
 //!
 //! See `docs/rust-migration/COMPACT_ENCODING.md` for why this shape was chosen
 //! over JSON+brotli alone, CBOR/MessagePack and shared-dictionary compression,

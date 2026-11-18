@@ -45,7 +45,7 @@ function AuthChatPhoto(props) {
   );
 }
 
-/** Photos on a chat message or draft (market/src/components/ChatPhotos.jsx). */
+/** Photos on a chat message or draft. */
 export default function ChatPhotos(props) {
   const urls = () => props.urls || [];
   return (

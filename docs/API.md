@@ -18,7 +18,7 @@ CardVault app (Flutter) ──────────┘     api.pokoin.com
 
 | Client | Repo | Role |
 | --- | --- | --- |
-| **Pokoin Web** | `gvitolocs/pokoin` (this repo) | Website / React SPA |
+| **Pokoin Web** | `gvitolocs/pokoin` (this repo) | Website / Solid SPA |
 | **CardVault** | `gvitolocs/cardvault` | Android/iOS app client |
 | **Pokoin API** | **Shared backend** on Pi | Auth, marketplace BFFs, listings, recents, … |
 
@@ -62,6 +62,10 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardrails/connector` / `POST /api/seller-api/v1` | An app with a seller's `pkn_` grant: connect, locations, listings, stock, list, sales, webhook URL. Pokoin posts signed stock and order webhooks back |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 | `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `POST /api/cardtrader-zero-pick` | `action: pick\|undo` of one copy: Postgres `cardtrader_zero_picks`, finalize (empty copy leaves its box) or swap (picked identical copy −n, sold copy +n, both outbox events in one transaction); issues / `reset` / unlinked lines stay on Firestore ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `GET /api/cardtrader-zero-picked` | Seller's picked Zero copies, newest first, 100 a page (`offset`); not listings, never stock |
+| `POST /api/cardtrader-zero-sort` | Save the Zero picking sort (Power Tools sort model, ≤ 4 levels) and `smartLocations`; no CardTrader / Power Tools call |
+| `POST /api/cardtrader-zero-pt-sort` | User-triggered Apply sort: Power Tools `updateSorting` of the picking list (confirmed count, throttled, never retried; `dryRun` reads only) |
 | `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
@@ -111,7 +115,7 @@ Deploy note: the seller sync ships in the Rust release
 
 | URL | What |
 | --- | --- |
-| `GET /api/__contract` | React/Flutter identity, images, page BFFs, route families |
+| `GET /api/__contract` | Web/Flutter identity, images, page BFFs, route families |
 | `GET /healthz` | Pipeline: Postgres and Redis are required; Pi CDN is degraded. **503** if Postgres or Redis is down. Not a liveness ping (that is `/livez`). Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
 | `GET /api/__routes` | Every hosted handler + `family` |
 | `GET /api/__routes?group=1` | Same list grouped |
@@ -146,12 +150,12 @@ Bare calls without `game` / satellite Host / `x-pokoin-game` return **400** (no
 silent Pokemon default). Older app builds that only used Firestore
 `user_card_recent_views` are unaffected until they adopt this API.
 
-**React page BFFs (pokoin-web)**
+**Web page BFFs (pokoin-web)**
 
 | Page | API |
 | --- | --- |
 | Home | Rails vector: Worker `GET /api/marketplace-home` on pokoin.com (origin `api.pokoin.com`), else Pi `GET /api/marketplace-rails`, else Pi `GET /api/marketplace-home-page`. Recents: 24 ids per game locally (`pokoin.recentCardIds.{game}`), signed-in `GET/PUT/POST /api/marketplace-recents?game=` (`marketplace_user_recents` PK `(user_uid, game)`). Do not use Flutter `api.pokoin.com/api/marketplace-home` (~170 KB). **No Supabase.** First paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). |
-| Search | `GET /api/marketplace-search-page` + `GET /api/marketplace-suggest` (print_language; western tie-break on equal Meili score; suggest ids can stay hot for search-page) |
+| Search | `GET /api/marketplace-search-page` + `GET /api/marketplace-suggest` (print_language; western tie-break on equal Meili score; suggest ids can stay hot for search-page). Satellite games have no Meili: SQL requires every typed word inside the row's own name/expansion/text, hyphen aside, so `luffy op01` and `luffy op-01` are one search. |
 | Scan | `POST /cardscan/identify?catalog=pokemon_generic` — leftover-JPEG singles like old Milo; live default is TCGPlayer. Desk uses `public_id`. Leftover `ct_id` × 2 if `public_id` is missing. [SCAN.md](SCAN.md), [MARKET.md](MARKET.md) |
 | Extension auth | `/extension/auth-bridge` — Firebase ID token `postMessage` (`pokoin-auth-token` / `accessToken`) for the Chrome extension. Not an API. Skip marketplace chrome. |
 | Card | Desk first paint from the URL slug (no BFF). `GET /api/marketplace-card-page` hydrates in the background (`version` / `card.version` is the CLIP `pokoin_version_sets` key; `versionCount` is `member_count`, the **same-artwork** count; `rarities` is same English name + expansion for the desk `<select>`; `card.artist` is denormalized on candidates by public `card_id`). Set-symbol circles under the scan are `GET /api/marketplace-version-set?cardId=` (this illustration’s expansions), refetched when the select changes. Listings are a parallel `GET /api/marketplace-listings` (`listings-cache.js`; empty `[]` is a hit — invalidate after POST). Seller username on a Shop row opens `/marketplace/{lang}/users/{username}` (`GET /api/marketplace-listings?sellerUsername=&nativeOnly=1`; resolve `seller_uid` from `marketplace_user_listings.seller_name` first, Firebase `usernames` / `usernameLower` only when that misses). Related cards on the desk cap at **12** tiles. Sold-price graph loads `GET /api/marketplace-card-sales?cardId=&slices=1` (every stored daily combination). Filter toggles stay local (`sold-sales.js`). `localStorage` `pokoin.cardSales.v11.` paints first (TTL 15 days) then the desk refetches so a new persist day is not frozen. Header last-day PKN is the current local series (`lastMedianPkn`). Japanese/Korean printings keep Asian langs only in the SPA. Graph geometry: `market/src/sold-graph.js`. |
@@ -172,6 +176,8 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 `h1.page-title` only; [PRINT_FLAGS.md](PRINT_FLAGS.md).
 
 **Silver CT / CM / VT** (Best Deal pills; Firestore Silver **or** `pokoin.auth.session`)
+
+Silver is an unexpired `silverUntil` (365 days from purchase) or an admin; admins are permanent.
 
 | Pill | Behavior |
 | --- | --- |

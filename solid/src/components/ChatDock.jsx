@@ -19,13 +19,20 @@ import {
   removeChatTag,
   setChatTagQty,
   subscribeChatDock,
+  syncPokoPageChip,
 } from '@market/chat-dock-store.js';
 import { chatPersonName, chatPersonPhoto, chatTime } from '@market/chat-format.js';
 import { chatPreviewsLookSame, mergeChatPreviewRows, paintableChatPreviews, readChatPreviews, writeChatPreviews } from '@market/chat-history.js';
 import { readListingDrag, tagKey } from '@market/chat-listing.js';
 import { game } from '@market/game.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '@market/messages-unread.js';
-import { isPokoPeer, POKO_DISPLAY, POKO_PEER, resolvePokoCards } from '@market/poko-chat.js';
+import {
+  getActiveDeskCard,
+  isPokoPeer,
+  POKO_DISPLAY,
+  POKO_PEER,
+  subscribeActiveDeskCard,
+} from '@market/poko-chat.js';
 import { warmSellerFromChat } from '@market/seller-seed.js';
 import { acceptTrayDrop, messagesTrayId } from '@market/tray-drag.js';
 import { MAX_CHAT_PHOTOS, imageFilesFromClipboard, photoFileToJpeg } from '@market/user-photos.js';
@@ -46,6 +53,8 @@ import ChatText from './ChatText.jsx';
 
 /** The dock's open / view / peer / draft tags (market/src/chat-dock-store.js). */
 const dockState = fromExternalStore(subscribeChatDock, getChatDock);
+/** The card desk on screen (Card.jsx publishes it), offered to Poko as a chip. */
+const deskCard = fromExternalStore(subscribeActiveDeskCard, getActiveDeskCard);
 
 function draftLine(row, drafts) {
   const tags = drafts?.[row.peerUid]?.tags || [];
@@ -169,7 +178,7 @@ function ConversationList(props) {
 }
 
 /**
- * Floating messages dock (market/src/components/ChatDock.jsx): the chat
+ * Floating messages dock: the chat
  * button, the conversation list, person threads and the Poko assistant, with
  * card drops onto conversations. A lazy chunk the shell loads once the page
  * is idle — never on the first paint.
@@ -184,6 +193,9 @@ export default function ChatDock() {
   const [over, setOver] = createSignal(false);
   const [showDropHint, setShowDropHint] = createSignal(chatDropHintVisible());
   const [unread, setUnread] = createSignal(0);
+  // This Poko conversation's page-chip state: × turned it off, or these card ids were sent.
+  const [chipOff, setChipOff] = createSignal(false);
+  const [chipUsed, setChipUsed] = createSignal([]);
   let textNow = '';
   const poko = () => isPokoPeer(dock().peer);
   const threadOpen = () => dock().open && dock().view === 'thread';
@@ -260,6 +272,30 @@ export default function ChatDock() {
     },
   );
 
+  // A Poko conversation lasts while its thread stays open: reopening it offers the page card again.
+  createEffect(
+    () => threadOpen() && poko(),
+    (on, was) => {
+      if (on && !was) {
+        setChipOff(false);
+        setChipUsed([]);
+      }
+    },
+  );
+
+  // Keep the composer's page-card chip on the card being viewed (Poko only).
+  createEffect(
+    () => ({ state: dock(), pageCard: deskCard(), off: chipOff(), used: chipUsed() }),
+    ({ pageCard, off, used }) => {
+      syncPokoPageChip({ pageCard, off, used });
+    },
+  );
+
+  function removeTag(key) {
+    if (dock().tags.some((row) => row.pageCard && tagKey(row) === key)) setChipOff(true);
+    removeChatTag(key);
+  }
+
   onSettled(() => {
     const onUnread = (event) => {
       if (typeof event?.detail?.count === 'number') setUnread(event.detail.count);
@@ -322,13 +358,14 @@ export default function ChatDock() {
     event?.preventDefault();
     const state = dock();
     const message = text().trim();
-    const deskCards = resolvePokoCards({ tags: state.tags, pathname: location.pathname });
-    if (sending() || (!message && !state.tags.length && !photos().length && !deskCards.length)) return;
+    if (sending() || (!message && !state.tags.length && !photos().length)) return;
     setError('');
     try {
       if (poko()) {
         const tags = state.tags.slice();
         const attachedImages = photos().slice();
+        const sentChips = tags.filter((row) => row.pageCard).map((row) => String(row.cardId));
+        if (sentChips.length) setChipUsed((used) => [...used, ...sentChips]);
         updateText('');
         setPhotos([]);
         clearChatTags();
@@ -459,7 +496,7 @@ export default function ChatDock() {
                   <Show when={(event().listings || event().cards || []).length}>
                     <span class="chat-tags">
                       <For each={event().listings || event().cards || []}>
-                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} />}
+                        {(row) => <ChatListingTag row={row} peer={peerRef()} me={me()} defaultGame={poko() ? 'pokemon' : ''} />}
                       </For>
                     </span>
                   </Show>
@@ -507,10 +544,11 @@ export default function ChatDock() {
                       <ChatListingTag
                         row={row()}
                         trayId={messagesTrayId(dock().peer || POKO_PEER)}
-                        onRemove={removeChatTag}
+                        onRemove={removeTag}
                         onQty={setChatTagQty}
                         peer={peerRef()}
                         me={me()}
+                        defaultGame={poko() ? 'pokemon' : ''}
                       />
                     )}
                   </For>
@@ -535,7 +573,7 @@ export default function ChatDock() {
                       event.target.value = '';
                       addPhotoFiles(files);
                     }}
-                    disabled={sending() || photos().length >= MAX_CHAT_PHOTOS}
+                    disabled={busy() || photos().length >= MAX_CHAT_PHOTOS}
                   />
                 </label>
                 <label class="sr-only" for="chat-dock-input">Message</label>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# User-unit on nezopt: Oracle 127.0.0.1:15543 → local NVMe Postgres :25432.
+# User-unit on nezopt: Oracle 127.0.0.1:15543 → local NVMe Postgres :25433.
 # The CardTrader GET job stays on Oracle. Persist/SQL is this host.
 # Run as nez (Linger=yes). No sudo.
 set -euo pipefail
@@ -11,4 +11,4 @@ install -m 644 "$ROOT/pokoin-oracle-dump-pg-tunnel.service" \
 systemctl --user daemon-reload
 systemctl --user enable --now pokoin-oracle-dump-pg-tunnel.service
 systemctl --user --no-pager --full status pokoin-oracle-dump-pg-tunnel.service
-echo "Oracle dump persist tunnel: marketplace 127.0.0.1:15543 → nezopt 127.0.0.1:25432"
+echo "Oracle dump persist tunnel: marketplace 127.0.0.1:15543 → nezopt 127.0.0.1:25433"

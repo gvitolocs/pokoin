@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly encrypted pg_dump of every database on the Pi standby (mybook + off-site)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/pokoin/backup.env
+ExecStartPre=-%h/.local/bin/pokoin-ops hc-ping --unit %n start
+ExecStart=%h/.local/bin/pokoin-ops backup dump
+ExecStartPost=%h/.local/bin/pokoin-ops backup prune
+ExecStartPost=-%h/.local/bin/pokoin-ops hc-ping --unit %n
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=8h

@@ -262,7 +262,7 @@ function bubbleFace(bubble) {
   return { '--bfx-n': Number.parseFloat(bfx), '--bfy-n': Number.parseFloat(bfy) };
 }
 
-/** Careers page (market/src/pages/Careers.jsx). */
+/** Careers page. */
 export default function Careers() {
   const location = useLocation();
   let bubblesEl;

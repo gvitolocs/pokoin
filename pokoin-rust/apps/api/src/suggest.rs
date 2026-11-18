@@ -159,6 +159,20 @@ pub async fn suggest(
         },
         &query,
     );
+    if offset == 0 {
+        if let Some(pool) = state.db.read().await.clone() {
+            match pokoin_search_api::set_suggest::set_hits(&pool, &query).await {
+                Ok(hits) => {
+                    groups = pokoin_search_api::set_suggest::merge_set_groups(
+                        &hits,
+                        groups,
+                        group_limit as usize,
+                    );
+                }
+                Err(error) => tracing::warn!(%error, "set suggest lookup failed"),
+            }
+        }
+    }
     let (needs_nationality, needs_title) = catalog_sql_needed(&groups, &search_language);
     if let Some(pool) = state.db.read().await.clone() {
         let sql_started = Instant::now();
@@ -168,6 +182,7 @@ pub async fn suggest(
         if needs_title {
             overlay_titles(&pool, &search_language, &mut groups).await;
         }
+        overlay_lang_scans(&pool, &search_language, &mut groups).await;
         state.sql_ms.fetch_add(
             sql_started.elapsed().as_millis() as u64,
             std::sync::atomic::Ordering::Relaxed,
@@ -598,6 +613,65 @@ async fn lookup_pairs(
         .collect()
 }
 
+/// Card languages with TCGdex scans of western printings (docs/CARD_LANGUAGE_SCANS.md).
+const LANG_SCAN_LANGUAGES: &[&str] = &["it", "fr", "de", "es", "pt"];
+
+/// Same compact `langScans` string as the tile / desk reads (`de,fr,it:swsh/swsh3/136`),
+/// so a French popup row shows the French scan the desk shows. Keyed by leftover
+/// ct_id = public card id / 2. A failed lookup leaves the English scan.
+async fn overlay_lang_scans(pool: &sqlx::PgPool, language: &str, groups: &mut [Value]) {
+    if !LANG_SCAN_LANGUAGES.contains(&title_language(language).as_str()) {
+        return;
+    }
+    let ct_ids = suggest_ct_ids(groups);
+    if ct_ids.is_empty() {
+        return;
+    }
+    let Ok(rows) = sqlx::query_as::<_, (i64, String)>(
+        "select ct_id, string_agg(language, ',' order by language) || ':' || min(scan_path) from public.marketplace_leftover_lang_scans where ct_id = any($1::bigint[]) group by ct_id",
+    )
+    .bind(&ct_ids)
+    .fetch_all(pool)
+    .await
+    else {
+        return;
+    };
+    apply_lang_scans(groups, &rows.into_iter().collect());
+}
+
+fn printing_ct_id(printing: &Value) -> Option<i64> {
+    let id = printing
+        .get("card_id")
+        .or_else(|| printing.get("id"))
+        .and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_i64().map(|n| n.to_string())))?;
+    let id = id.trim().parse::<i64>().ok().filter(|n| *n > 0 && n % 2 == 0)?;
+    Some(id / 2)
+}
+
+fn suggest_ct_ids(groups: &[Value]) -> Vec<i64> {
+    let mut ids = groups
+        .iter()
+        .flat_map(|group| group.get("printings").and_then(|v| v.as_array()).into_iter().flatten())
+        .filter_map(printing_ct_id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn apply_lang_scans(groups: &mut [Value], scans: &HashMap<i64, String>) {
+    for group in groups {
+        let Some(printings) = group.get_mut("printings").and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for printing in printings {
+            if let Some(scan) = printing_ct_id(printing).and_then(|ct| scans.get(&ct)) {
+                printing["langScans"] = json!(scan);
+            }
+        }
+    }
+}
+
 fn title_language(value: &str) -> String {
     let language = value.trim().to_ascii_lowercase();
     match language.as_str() {
@@ -687,11 +761,33 @@ async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)
  let Some(pool)=crate::catalog_api::game_pool(&state,&game).await else{return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
  let cap=crate::catalog_api::limit(&p,"limit",12,24);
  let needle=query.to_lowercase();let like=format!("%{needle}%");
- let sql=r#"select c.card_id from public.marketplace_search_candidates c where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
- and (c.search_text like $2 or word_similarity($1,coalesce(c.set_name,''))>0.4 or word_similarity($1,coalesce(c.name,''))>0.4)
- order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 when word_similarity($1,coalesce(c.set_name,''))>0.4 then 4 else 5 end,
- case when c.item_kind='single' then 0 else 1 end,c.search_weight desc,c.card_id desc limit $3"#;
- let ids=match sqlx::query_scalar::<_,i64>(sql).bind(needle).bind(like).bind((cap*8).max(48)).fetch_all(&pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+    // Same token coverage as the satellite results page: a character plus an
+    // expansion code (`luffy op01`) or a code without its hyphen (`op01`) has to
+    // find that expansion, not the rows whose name happens to resemble the phrase.
+    let tokens = crate::game_search::query_tokens(&needle);
+    let coverage = crate::game_search::Coverage::new(tokens.len(), 4);
+    let sql = format!(
+        r#"select m.card_id from (
+ select c.card_id,c.item_kind,c.search_weight,
+  replace(lower(c.name),'-','') as nflat,replace(lower(coalesce(c.set_name,'')),'-','') as sflat,replace(lower(c.search_text),'-','') as tflat
+ from public.marketplace_search_candidates c
+ where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null) m
+ where ({predicate})
+ order by {ranking},case when m.item_kind='single' then 0 else 1 end,m.search_weight desc,m.card_id desc limit $3"#,
+        predicate = coverage.predicate("$1", "$2"),
+        ranking = coverage.ranking("$1")
+    );
+    let mut statement = sqlx::query_scalar::<_, i64>(&sql)
+        .bind(&needle)
+        .bind(like)
+        .bind((cap * 8).max(48));
+    for token in &tokens {
+        statement = statement.bind(format!("%{token}%"))
+    }
+    let ids = match statement.fetch_all(&pool).await {
+        Ok(r) => r,
+        Err(e) => return crate::catalog_api::failure(&e),
+    };
  let cards=match crate::catalog_api::cards(&pool,&ids,&game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
  let mut groups=vec![];let mut names=HashMap::<String,usize>::new();
  for raw in cards {
@@ -705,6 +801,37 @@ async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)
  }
  let shown=groups.iter().map(|g|g["printings"].as_array().unwrap().len()).sum::<usize>();
  json_ok(&json!({"query":query,"game":game,"groups":groups,"count":shown,"shown":shown}),"public, max-age=5, s-maxage=30")
+}
+
+#[cfg(test)]
+mod lang_scan_tests {
+    use super::*;
+
+    #[test]
+    fn popup_printings_take_the_leftover_language_scans() {
+        let mut groups = vec![json!({"name": "Scolipede", "printings": [
+            {"id": "684588", "card_id": "684588", "name": "Scolipede"},
+            {"id": 263748, "name": "Scolipede"},
+            {"id": "live:scolipede", "name": "Scolipede"},
+        ]})];
+        assert_eq!(suggest_ct_ids(&groups), vec![131874, 342294]);
+        let scans = HashMap::from([(342294, "de,es,fr,it,pt:sv/sv10.5b/056".to_string())]);
+        apply_lang_scans(&mut groups, &scans);
+        let rows = groups[0]["printings"].as_array().unwrap();
+        assert_eq!(rows[0]["langScans"], "de,es,fr,it,pt:sv/sv10.5b/056");
+        assert!(rows[1].get("langScans").is_none());
+        assert!(rows[2].get("langScans").is_none());
+    }
+
+    #[test]
+    fn only_scan_languages_are_looked_up() {
+        for lang in ["it", "fr", "de", "es", "pt"] {
+            assert!(LANG_SCAN_LANGUAGES.contains(&title_language(lang).as_str()), "{lang}");
+        }
+        for lang in ["en", "jp", "ja", "ko", "zh", "zht", "nl", ""] {
+            assert!(!LANG_SCAN_LANGUAGES.contains(&title_language(lang).as_str()), "{lang}");
+        }
+    }
 }
 
 #[cfg(test)]

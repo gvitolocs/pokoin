@@ -92,18 +92,11 @@ test('cart writes never throw on a full localStorage (the black-screen crash)', 
   assert.match(body, /pruneStoredCardPages\(0\)/);
 });
 
-test('cart and Desktop trays mount at most TRAY_VISIBLE thumbs and full scans only for a few cards', () => {
-  for (const file of ['components/CartDrop.jsx', 'components/DesktopDrop.jsx']) {
-    const src = fs.readFileSync(path.join(root, file), 'utf8');
-    assert.match(src, /items\.slice\(0, TRAY_VISIBLE\)/, file);
-    assert.match(src, /full=\{fullArt\}/, file);
-    assert.doesNotMatch(src, /alt="" (card=\{row\} )?full \/>/, file);
-    assert.match(src, /\{shown\.map\(/, file);
-  }
+// The tray components are guarded in solid/src/components/trays.test.js.
+test('an artist dropped on Desktop fetches at most DESKTOP_MAX cards', () => {
   const desktop = fs.readFileSync(path.join(root, 'desktop-drop-add.js'), 'utf8');
   assert.match(desktop, /fetchArtist\(bundle\.slug, \{ limit: DESKTOP_MAX \}\)/);
 });
-
 test('cart bundle drops add found cards in one burst, listed printings first', () => {
   const src = fs.readFileSync(path.join(root, 'cart-drop-add.js'), 'utf8');
   assert.match(src, /for \(const item of found\) onAdd\(item\);/);

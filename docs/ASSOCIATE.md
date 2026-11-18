@@ -33,7 +33,7 @@ inside their campaign window.
 | --- | --- |
 | Roster + deal terms | `public.marketplace_associates` on the nezopt NVMe writer — `scripts/sql/092_marketplace_associates.sql` (email PK, role, share_pct, royalty_pct, window_start/end, active); `city` from `096_ambassador_program.sql`) |
 | API | `pokoin-rust/crates/accounts` (`handlers/associate.rs`, `domain/associate.rs`) — `GET /api/marketplace-associate`, Firebase bearer; 403 for non-associates |
-| Page | `market/src/pages/Associate.jsx` + `market/src/associate.css`, route `/associate` (`market/src/App.jsx`) |
+| Page | `solid/src/pages/Associate.jsx` + `market/src/associate.css`, route `/associate` (`solid/src/router.js`) |
 | Deploy | `scripts/deploy-pokoin-rust.sh` after the commit is on origin/main |
 
 ## Seeding an associate
@@ -49,7 +49,7 @@ values
 on conflict (email) do update set role = excluded.role, updated_at = now();
 ```
 
-`role` is free text; `market/src/pages/Associate.jsx` `ROLES` owns the desk
+`role` is free text; `solid/src/pages/Associate.jsx` `ROLES` owns the desk
 presentation per role (distributor and ambassador are seeded; unknown roles
 fall back to the generic associate desk). The signed-in Firebase account
 matches the roster by **email**, so the associate must sign in with the exact

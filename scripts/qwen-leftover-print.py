@@ -140,7 +140,7 @@ def main() -> None:
     parser.add_argument("--jsonl", default="/tmp/expansion-english-ocr.jsonl")
     parser.add_argument(
         "--out",
-        default="/home/nez/Projects/pokoin-web/market/public/review/ocr-expansions.json",
+        default="/home/nez/Projects/Startup/Pokoin/pokoin-web/market/public/review/ocr-expansions.json",
     )
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()

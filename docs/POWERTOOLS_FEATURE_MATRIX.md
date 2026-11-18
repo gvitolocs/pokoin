@@ -139,5 +139,5 @@ Each is a separate PR; none blocks scanning.
 | 6 | Pokémon finish list parity (Poké Ball / Master Ball / Cosmos / Ice-cracked, stamped reverse) in `foil_state` or `variant_state` | catalog decision on CardTrader separate reverse blueprints |
 | 7 | CSV import/export of stock | 2 |
 | 8 | By-expansion listing mode (Enter / B / V walk) | — |
-| 9 | Pricing: price guide strategies, competitors, minimum prices, bot | sold series, CardTrader asks |
+| 9 | Pricing: price guide strategies, competitors, minimum prices, bot | sold series, CardTrader professional-seller floor ([PRICING.md](PRICING.md)) |
 | 10 | Channel sync (CardTrader push of a submitted batch, transactions table) | CardTrader integration |

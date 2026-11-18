@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin sentinel (Pi): replica, archiver, WAL spool, API errors, disk, failed units, writer reachability
+After=network-online.target docker.service
+# No OnFailure=: the sentinel mails on its own, and its healthchecks ping turns /fail
+# (or stops) when it cannot.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pokoin-ops sentinel --role pi
+Nice=5
+MemoryMax=100M
+TimeoutStartSec=4min

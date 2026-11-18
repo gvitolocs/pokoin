@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 QWEN_PID="${1:?qwen pid required}"
 MASKS="/home/nez/data/pokoin-leftovers/figure-masks-clean"
 JSONL="$ROOT/scripts/out/qwen-artwork-figures.jsonl"
-PY=/home/nez/Projects/ai-toolkit/venv/bin/python
+PY=/home/nez/Projects/AI/ai-toolkit/venv/bin/python
 LOG="$ROOT/scripts/out/figure-masks-ship.log"
 
 while kill -0 "$QWEN_PID" 2>/dev/null; do sleep 60; done

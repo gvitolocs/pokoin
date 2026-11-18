@@ -1,0 +1,433 @@
+#!/usr/bin/env bash
+# The fast local check for the Pokoin Rust API (pokoin-rust/), run in your worktree before a commit.
+# Only what the change touched, measured against the merge base. docs/CI.md.
+#
+# Usage: scripts/check-fast [--base REF] [--db] [--no-build] [--no-test]
+#   --base REF   compare against the merge base of REF and HEAD (default: origin/main)
+#   --db         start a throwaway Postgres for the DB-backed flow tests (needs docker)
+#   --no-build   skip the cargo steps (clippy, test)
+#   --no-test    skip only `cargo test`
+#
+# "Nothing new": rustfmt and clippy do not fail on old debt. The change is the diff from the merge base
+# to the working tree (commits, staged, unstaged and untracked files). A finding fails the check only
+# when it lands on a line that diff added or modified:
+#   rustfmt  each touched .rs file is formatted (stdin mode, edition of the workspace) and diffed against
+#            the file as it is; a hunk fails only if it overlaps added or modified lines.
+#   clippy   `cargo clippy -p <crate> --all-targets --message-format=json` on each touched crate; a warning
+#            fails only if its primary span (after macro expansion) overlaps added or modified lines.
+#            Any clippy or compiler error fails.
+#   the shell lint (ShellCheck) follows the same rule on changed shell scripts.
+# A skipped step is printed as SKIPPED with its reason and is never counted as passed.
+# Exit: 0 nothing failed, 1 a step failed, 2 usage error or refused to start (low disk, no git).
+set -euo pipefail
+
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit "${1:-2}"; }
+die() { echo "check-fast: $*" >&2; exit 2; }
+
+ref=origin/main
+do_db=0
+no_build=0
+no_test=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --base) [ $# -ge 2 ] || usage; ref=$2; shift 2 ;;
+        --db) do_db=1; shift ;;
+        --no-build) no_build=1; shift ;;
+        --no-test) no_test=1; shift ;;
+        -h | --help) usage 0 ;;
+        *) echo "check-fast: unknown argument: $1" >&2; usage ;;
+    esac
+done
+
+root=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel 2>/dev/null) || die "not inside a git checkout"
+cd "$root"
+rust_dir=pokoin-rust
+base=$(git merge-base "$ref" HEAD 2>/dev/null) || die "no merge base between $ref and HEAD (fetch it, or pass --base)"
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/pokoin-check-fast.XXXXXX")
+pg_name=""
+cleanup() {
+    # Only the container this run started, by the name it gave it.
+    if [ -n "$pg_name" ]; then docker rm -f "$pg_name" >/dev/null 2>&1 || true; fi
+    rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+# ---- helper: line-range logic (stdlib only) -----------------------------------------------------
+py=$tmp/helper.py
+cat >"$py" <<'PY'
+import json, os, re, sys
+
+
+def load_ranges(path):
+    ranges = {}
+    with open(path) as f:
+        for line in f:
+            p, a, b = line.rstrip("\n").split("\t")
+            ranges.setdefault(p, []).append((int(a), int(b)))
+    return ranges
+
+
+def hit(ranges, path, a, b):
+    return any(s <= b and a <= e for s, e in ranges.get(path, ()))
+
+
+def cmd_ranges(root, untracked):
+    # `git diff -U0` on stdin -> "path<TAB>first<TAB>last" for every added or modified line range.
+    cur = None
+    for line in sys.stdin:
+        if line.startswith("+++ "):
+            name = line[4:].rstrip("\n").rstrip("\t")
+            cur = name[2:] if name.startswith("b/") else None
+        elif line.startswith("@@") and cur:
+            m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
+            if not m:
+                continue
+            start = int(m.group(1))
+            count = int(m.group(2)) if m.group(2) is not None else 1
+            if count:
+                print(f"{cur}\t{start}\t{start + count - 1}")
+    with open(untracked, "rb") as f:
+        names = [n for n in f.read().split(b"\0") if n]
+    for raw in names:
+        p = os.fsdecode(raw)
+        try:
+            with open(os.path.join(root, p), "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        lines = data.count(b"\n") + (0 if not data or data.endswith(b"\n") else 1)
+        if lines:
+            print(f"{p}\t1\t{lines}")
+
+
+def cmd_fmt(ranges_file, path):
+    # `diff -U0 actual formatted` on stdin; fail on hunks that overlap changed lines of `path`.
+    ranges = load_ranges(ranges_file)
+    bad = False
+    hunk = []
+    hunk_hit = False
+
+    def flush():
+        nonlocal bad
+        if hunk and hunk_hit:
+            bad = True
+            print(f"{path}: rustfmt wants a change in lines you added or modified:")
+            print("".join(hunk), end="")
+
+    for line in sys.stdin:
+        m = re.match(r"@@ -(\d+)(?:,(\d+))? \+", line)
+        if m:
+            flush()
+            a = int(m.group(1))
+            n = int(m.group(2)) if m.group(2) is not None else 1
+            lo, hi = (a, a + n - 1) if n else (a, a + 1)
+            hunk = [line]
+            hunk_hit = hit(ranges, path, lo, hi)
+        elif hunk:
+            hunk.append(line)
+    flush()
+    sys.exit(1 if bad else 0)
+
+
+def cmd_clippy(json_file, ranges_file, prefix):
+    ranges = load_ranges(ranges_file)
+    seen = set()
+    bad = 0
+    with open(json_file) as f:
+        for line in f:
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(m, dict) or m.get("reason") != "compiler-message":
+                continue
+            msg = m["message"]
+            level = msg.get("level") or ""
+            rendered = msg.get("rendered") or msg.get("message") or ""
+            flag = False
+            if level.startswith("error"):
+                flag = True
+            elif level == "warning":
+                for s in msg.get("spans", []):
+                    if not s.get("is_primary"):
+                        continue
+                    while s.get("expansion") and s["expansion"].get("span"):
+                        s = s["expansion"]["span"]
+                    if hit(ranges, prefix + s["file_name"], s["line_start"], s["line_end"]):
+                        flag = True
+            if flag and rendered not in seen:
+                seen.add(rendered)
+                bad += 1
+                print(rendered, end="" if rendered.endswith("\n") else "\n")
+    sys.exit(1 if bad else 0)
+
+
+def cmd_gcc(ranges_file):
+    # shellcheck -f gcc on stdin: "path:line:col: severity: message".
+    ranges = load_ranges(ranges_file)
+    bad = False
+    for line in sys.stdin:
+        m = re.match(r"^(.+?):(\d+):\d+: ", line)
+        if m is None or hit(ranges, m.group(1), int(m.group(2)), int(m.group(2))):
+            bad = True
+            print(line, end="")
+    sys.exit(1 if bad else 0)
+
+
+cmd = sys.argv[1]
+if cmd == "ranges":
+    cmd_ranges(sys.argv[2], sys.argv[3])
+elif cmd == "fmt":
+    cmd_fmt(sys.argv[2], sys.argv[3])
+elif cmd == "clippy":
+    cmd_clippy(sys.argv[2], sys.argv[3], sys.argv[4])
+elif cmd == "gcc":
+    cmd_gcc(sys.argv[2])
+else:
+    sys.exit(2)
+PY
+pyrun() { python3 -I "$py" "$@"; }
+
+# ---- what the change touched ---------------------------------------------------------------------
+untracked_list=$tmp/untracked.lst
+git ls-files --others --exclude-standard -z >"$untracked_list"
+ranges=$tmp/ranges.tsv
+git -c core.quotePath=false diff --no-renames --no-ext-diff -U0 --diff-filter=ACMR "$base" -- | pyrun ranges "$root" "$untracked_list" >"$ranges"
+
+live=()   # added, copied, modified, untracked: files that exist now
+gone=()   # deleted files
+while IFS= read -r -d '' f; do live+=("$f"); done < <(git diff --no-renames --name-only -z --diff-filter=ACMR "$base" --; cat "$untracked_list")
+while IFS= read -r -d '' f; do gone+=("$f"); done < <(git diff --no-renames --name-only -z --diff-filter=D "$base" --)
+
+rs_files=()
+sh_files=()
+wf_files=()
+crates=()        # package names of touched crates
+crate_dirs=()
+ws_change=0
+for f in "${live[@]}"; do
+    case "$f" in
+        "$rust_dir"/*.rs) rs_files+=("$f") ;;
+    esac
+    case "$f" in
+        *.sh) sh_files+=("$f") ;;
+        *) if [ -f "$f" ] && [ "$(head -c 64 -- "$f" 2>/dev/null | head -n1 | grep -cE '^#!.*(ba|da|k)?sh( |$)')" = 1 ]; then sh_files+=("$f"); fi ;;
+    esac
+    case "$f" in
+        .github/workflows/*.yml | .github/workflows/*.yaml) wf_files+=("$f") ;;
+    esac
+done
+
+pkg_name() { awk '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^name[[:space:]]*=/{split($0,a,"\""); print a[2]; exit}' "$1"; }
+for f in "${live[@]}" "${gone[@]}"; do
+    case "$f" in "$rust_dir"/*) ;; *) continue ;; esac
+    d=$(dirname "$f")
+    while [ "$d" != "$rust_dir" ] && [ ! -f "$d/Cargo.toml" ]; do d=$(dirname "$d"); done
+    if [ "$d" = "$rust_dir" ]; then
+        case "$f" in
+            "$rust_dir"/Cargo.toml | "$rust_dir"/Cargo.lock | "$rust_dir"/rust-toolchain* | "$rust_dir"/.cargo/*) ws_change=1 ;;
+        esac
+        continue
+    fi
+    case " ${crate_dirs[*]:-} " in *" $d "*) continue ;; esac
+    name=$(pkg_name "$d/Cargo.toml" 2>/dev/null || true)
+    [ -n "$name" ] || continue
+    crate_dirs+=("$d")
+    crates+=("$name")
+done
+
+edition=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p && /^edition/{gsub(/[^0-9]/,""); print; exit}' "$rust_dir/Cargo.toml" 2>/dev/null || true)
+edition=${edition:-2021}
+
+# ---- the step runner -----------------------------------------------------------------------------
+# A step function returns 0 (passed), 1 (failed) or 3 (skipped), and sets REASON. Its output is kept in a
+# log and shown only when the step fails.
+res_names=()
+res_status=()
+res_secs=()
+res_note=()
+failed=0
+REASON=""
+run_step() {
+    local name=$1 fn=$2 rc=0 t0=$SECONDS log=$tmp/step.log
+    REASON=""
+    echo "check-fast: $name ..." >&2
+    "$fn" >"$log" 2>&1 || rc=$?
+    local st=PASS
+    case $rc in
+        0) st=PASS ;;
+        3) st=SKIPPED ;;
+        *) st=FAIL; failed=$((failed + 1)); sed 's/^/    /' "$log" >&2 ;;
+    esac
+    res_names+=("$name"); res_status+=("$st"); res_secs+=("$((SECONDS - t0))"); res_note+=("$REASON")
+}
+
+# ---- cargo environment ---------------------------------------------------------------------------
+# shellcheck disable=SC1091
+command -v cargo >/dev/null 2>&1 || { [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"; } || true
+# One shared target for every worktree's check, never pokoin-rust/target in the worktree.
+export CARGO_TARGET_DIR=${POKOIN_CHECK_TARGET:-$HOME/.cache/pokoin-check-target}
+export CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
+min_free=${POKOIN_CHECK_MIN_FREE_GB:-50}
+
+need_cargo=0
+if [ "$no_build" = 0 ] && [ "${#crates[@]}" -gt 0 ]; then need_cargo=1; fi
+if [ "$need_cargo" = 1 ]; then
+    mkdir -p "$CARGO_TARGET_DIR"
+    free=$(df -BG --output=avail "$CARGO_TARGET_DIR" | tail -1 | tr -dc 0-9)
+    if [ "$free" -lt "$min_free" ]; then
+        die "only ${free} GB free where the cargo target lives ($CARGO_TARGET_DIR), the floor is ${min_free} GB (POKOIN_CHECK_MIN_FREE_GB): refusing to build. nezopt also holds production; see docs/RUST_RUNTIME.md, Build disk on nezopt."
+    fi
+fi
+
+use_scope=0
+if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet true >/dev/null 2>&1; then use_scope=1; fi
+capped() {
+    if [ "$use_scope" = 1 ]; then
+        systemd-run --user --scope --quiet -p MemoryMax=8G -p CPUQuota=400% -- "$@"
+    else
+        "$@"
+    fi
+}
+
+# ---- steps ---------------------------------------------------------------------------------------
+step_diffgate() {
+    local dg=${POKOIN_DIFFGATE:-$HOME/.local/bin/diffgate}
+    [ -x "$dg" ] || { REASON="$dg not installed"; return 3; }
+    "$dg" --repo . --base "$base"
+}
+
+step_workspace() {
+    REASON="Cargo.toml, Cargo.lock or toolchain changed: effect is workspace-wide; the GitHub test job (cargo test --workspace) covers it, not this check"
+    return 3
+}
+
+step_rustfmt() {
+    command -v rustfmt >/dev/null 2>&1 || { REASON="rustfmt not installed"; return 3; }
+    [ "${#rs_files[@]}" -gt 0 ] || { REASON="no .rs file changed under $rust_dir/"; return 3; }
+    local f formatted bad=0
+    for f in "${rs_files[@]}"; do
+        formatted=$tmp/formatted.rs
+        if ! (cd "$(dirname "$root/$f")" && rustfmt --edition "$edition" --emit stdout <"$root/$f") >"$formatted"; then
+            echo "$f: rustfmt could not parse the file"
+            bad=1
+            continue
+        fi
+        { diff -U0 -- "$root/$f" "$formatted" || true; } | pyrun fmt "$ranges" "$f" || bad=1
+    done
+    REASON="${#rs_files[@]} file(s), edition $edition"
+    return "$bad"
+}
+
+cargo_precheck() {
+    if [ "$no_build" = 1 ]; then REASON="--no-build"; return 3; fi
+    if [ "${#crates[@]}" = 0 ]; then REASON="no crate under $rust_dir/ touched"; return 3; fi
+    command -v cargo >/dev/null 2>&1 || { REASON="cargo not installed"; return 3; }
+    return 0
+}
+
+step_clippy() {
+    cargo_precheck || return $?
+    cargo clippy --version >/dev/null 2>&1 || { REASON="clippy not installed"; return 3; }
+    local c bad=0
+    for c in "${crates[@]}"; do
+        echo "== clippy $c"
+        capped cargo clippy --manifest-path "$rust_dir/Cargo.toml" --locked -p "$c" --all-targets --message-format=json \
+            >"$tmp/clippy.json" 2>"$tmp/clippy.err" || {
+            if ! grep -q '"level":"error' "$tmp/clippy.json"; then cat "$tmp/clippy.err"; fi
+            bad=1
+        }
+        pyrun clippy "$tmp/clippy.json" "$ranges" "$rust_dir/" || bad=1
+    done
+    REASON="${crates[*]}"
+    return "$bad"
+}
+
+step_postgres() {
+    command -v docker >/dev/null 2>&1 || { echo "docker not installed"; return 1; }
+    local port i
+    port=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    pg_name=pokoin-check-pg-$$
+    docker run -d --rm --name "$pg_name" -e POSTGRES_PASSWORD=test -p "127.0.0.1:$port:5432" \
+        --tmpfs /var/lib/postgresql/data postgres:17-alpine >/dev/null
+    for i in $(seq 1 60); do
+        if docker exec "$pg_name" pg_isready -q -h 127.0.0.1 -U postgres; then
+            echo "postgres:17-alpine ready on 127.0.0.1:$port"
+            echo "export POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$port/postgres" >"$tmp/dburl.sh"
+            REASON="127.0.0.1:$port"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "postgres did not become ready in 60 s"
+    return 1
+}
+
+step_test() {
+    if [ "$no_test" = 1 ]; then REASON="--no-test"; return 3; fi
+    cargo_precheck || return $?
+    local c bad=0
+    # shellcheck disable=SC1091
+    if [ -f "$tmp/dburl.sh" ]; then . "$tmp/dburl.sh"; REASON="with Postgres; "; else REASON="no database, flow tests skip themselves; "; fi
+    for c in "${crates[@]}"; do
+        echo "== test $c"
+        capped cargo test --manifest-path "$rust_dir/Cargo.toml" --locked -p "$c" || bad=1
+    done
+    REASON+="${crates[*]}"
+    return "$bad"
+}
+
+step_shellcheck() {
+    [ "${#sh_files[@]}" -gt 0 ] || { REASON="no shell script changed"; return 3; }
+    command -v shellcheck >/dev/null 2>&1 || { REASON="shellcheck not installed"; return 3; }
+    { shellcheck -f gcc -- "${sh_files[@]}" || true; } | pyrun gcc "$ranges"
+}
+
+step_actionlint() {
+    [ "${#wf_files[@]}" -gt 0 ] || { REASON="no workflow changed"; return 3; }
+    command -v actionlint >/dev/null 2>&1 || { REASON="actionlint not installed"; return 3; }
+    actionlint "${wf_files[@]}"
+}
+
+step_gitleaks() {
+    [ "${#live[@]}" -gt 0 ] || { REASON="no file changed"; return 3; }
+    command -v gitleaks >/dev/null 2>&1 || { REASON="gitleaks not installed"; return 3; }
+    local scan=$tmp/scan
+    mkdir -p "$scan"
+    printf '%s\0' "${live[@]}" | tar --null -T - -cf - | tar -xf - -C "$scan"
+    gitleaks detect --no-git --no-banner --redact -s "$scan"
+}
+
+# ---- run -----------------------------------------------------------------------------------------
+echo "check-fast: base $(git rev-parse --short "$base") (merge base of $ref and HEAD), ${#live[@]} changed file(s), crates: ${crates[*]:-none}" >&2
+
+run_step diffgate step_diffgate
+[ "$ws_change" = 1 ] && run_step workspace step_workspace
+run_step rustfmt step_rustfmt
+if [ "$do_db" = 1 ]; then
+    if [ "$no_build" = 1 ] || [ "$no_test" = 1 ] || [ "${#crates[@]}" = 0 ]; then
+        res_names+=(postgres); res_status+=(SKIPPED); res_secs+=(0); res_note+=("no cargo test will run")
+    else
+        run_step postgres step_postgres
+    fi
+fi
+run_step clippy step_clippy
+run_step test step_test
+run_step shellcheck step_shellcheck
+run_step actionlint step_actionlint
+run_step gitleaks step_gitleaks
+
+total=$SECONDS
+echo
+printf '%-12s %-8s %6s  %s\n' step result secs note
+printf '%-12s %-8s %6s  %s\n' ------------ -------- ------ ----
+passed=0
+skipped=0
+for i in "${!res_names[@]}"; do
+    printf '%-12s %-8s %6s  %s\n' "${res_names[$i]}" "${res_status[$i]}" "${res_secs[$i]}" "${res_note[$i]}"
+    case "${res_status[$i]}" in PASS) passed=$((passed + 1)) ;; SKIPPED) skipped=$((skipped + 1)) ;; esac
+done
+echo
+echo "check-fast: ${total}s, $passed passed, $failed failed, $skipped skipped"
+[ "$failed" = 0 ]

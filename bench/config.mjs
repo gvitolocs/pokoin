@@ -4,7 +4,7 @@
 
 /** CSS selectors the journeys rely on. */
 export const SELECTORS = {
-  // Header search (market/src/components/Chrome.jsx)
+  // Header search (solid/src/components/SearchBox.jsx)
   searchInput: '#market-search',
   suggestPopup: '#market-suggest',
   // One element per visible suggestion row; rows carry data-suggest-id.
@@ -19,19 +19,19 @@ export const SELECTORS = {
   titleLangMenu: 'ul.lang-menu[role="listbox"][aria-label="Card title language"]',
   langOption: 'li[role="option"]',
 
-  // Card tiles (market/src/components/CardTile.jsx); href /marketplace/:lang/cards/:id/:slug
+  // Card tiles (solid/src/components/CardTile.jsx); href /marketplace/:lang/cards/:id/:slug
   tile: 'a.tile',
   resultsTile: '.grid a.tile',
-  // Search results page "Load more" button (market/src/pages/Search.jsx).
+  // Search results page "Load more" button (solid/src/pages/Search.jsx).
   loadMore: 'button.more',
 
-  // Card desk (market/src/pages/Card.jsx)
+  // Card desk (solid/src/pages/Card.jsx)
   deskRoot: 'article.card-page',
   deskHeading: 'article.card-page .asset-header h1',
   deskSkeleton: '.skel-line',
   deskArtFrame: '.art-frame',
   deskImage: '.art-frame img',
-  // "Related cards" panel tiles (market/src/components/RelatedCards.jsx).
+  // "Related cards" panel tiles (solid/src/components/desk/RelatedCards.jsx).
   relatedImage: '.related-panel a.tile img',
   deskNext: 'a[aria-label="Next card in set"]',
   deskPrev: 'a[aria-label="Previous card in set"]',

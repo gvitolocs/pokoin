@@ -1,7 +1,15 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '@market/api.js';
-import { game, isPokemonGame } from '@market/game.js';
-import { PROMO_BANNERS, promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '@market/promo-banners.js';
+import { game, gameHref, isPokemonGame } from '@market/game.js';
+import {
+  PROMO_BANNERS,
+  promoLogoIsName,
+  promoLogoSrc,
+  readStoredPromoBanners,
+  rememberPromoBanners,
+  samePromoBanners,
+  satellitePromoBanners,
+} from '@market/promo-banners.js';
 import { FAN_POOL, fillFan, pickFan } from '@market/promo-fan.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
@@ -40,7 +48,7 @@ function PromoFanCard(props) {
     <Show when={art()}>
       <a
         class={['promo-card', `is-${props.role}`, { 'is-ready': ready(), 'is-wide': wide() }]}
-        href={cardHref(props.card)}
+        href={gameHref(cardHref(props.card))}
         aria-label={props.card.name}
         onPointerEnter={(event) => {
           handOffCard(props.card);
@@ -129,20 +137,28 @@ function PromoWordmark(props) {
 }
 
 /**
- * Home hero (market/src/components/PromoCarousel.jsx): five current
+ * Home hero: five current
  * expansions with a fan of their chase cards, auto-advancing every 5.5 s
  * unless hovered, focused, hidden or reduced-motion. The stage paints with
  * its copy and fixed fan box on the first frame, so the scans landing later
  * never move the rails below, and it holds its tallest slide (see boxHeight).
+ * A satellite TCG's slides come from the expansions read: the ones this
+ * browser showed last paint first (readStoredPromoBanners), and a first
+ * visit reserves a slide's box while the read runs (`is-loading`).
  */
 export default function PromoCarousel() {
-  const pokemon = isPokemonGame();
-  const site = game();
+  const pokemon = () => isPokemonGame();
+  const site = () => game();
+  const initialPokemon = untrack(pokemon);
+  const initialName = untrack(() => site().name);
+  const initialId = untrack(() => site().id);
   const firstSlug = PROMO_BANNERS[0].slug;
-  const [banners, setBanners] = createSignal(pokemon ? PROMO_BANNERS : []);
+  const [banners, setBanners] = createSignal(initialPokemon ? PROMO_BANNERS : readStoredPromoBanners(initialId));
+  // A satellite read still on its way with no stored slides to show.
+  const [loadingSlides, setLoadingSlides] = createSignal(!initialPokemon && !untrack(banners).length);
   const [index, setIndex] = createSignal(0);
   const [cardsBySlug, setCardsBySlug] = createSignal((() => {
-    if (!pokemon) return {};
+    if (!initialPokemon) return {};
     const first = peekPromoFanPool(firstSlug);
     return first?.length ? { [firstSlug]: first } : {};
   })());
@@ -153,6 +169,14 @@ export default function PromoCarousel() {
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
 
+  /** The expansions read's slides for `id`: kept for the next visit, painted only if they differ. */
+  function showSlides(id, slides) {
+    rememberPromoBanners(id, slides);
+    // Same slides as the stored ones on screen: the keyed slide stays mounted.
+    if (!samePromoBanners(untrack(banners), slides)) setBanners(slides);
+    if (slides[0]?.slug) loadFanPool(slides[0].slug).catch(() => {});
+  }
+
   onSettled(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const onMotion = () => setReduceMotion(mq.matches);
@@ -160,15 +184,16 @@ export default function PromoCarousel() {
     const onVis = () => setHidden(document.hidden);
     document.addEventListener('visibilitychange', onVis);
     let cancel = false;
-    if (!pokemon) {
+    if (!initialPokemon) {
       getJson('/api/marketplace-expansion-page?limit=12')
         .then((data) => {
           if (cancel) return;
-          const slides = satellitePromoBanners(data?.expansions, site.name);
-          setBanners(slides);
-          if (slides[0]?.slug) loadFanPool(slides[0].slug).catch(() => {});
+          showSlides(initialId, satellitePromoBanners(data?.expansions, initialName));
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (!cancel) setLoadingSlides(false);
+        });
     }
     return () => {
       cancel = true;
@@ -176,6 +201,36 @@ export default function PromoCarousel() {
       document.removeEventListener('visibilitychange', onVis);
     };
   });
+
+  // A game switch keeps this carousel mounted and swaps its slides.
+  createEffect(() => site().id, (id) => {
+    const isPokemon = id === 'pokemon';
+    setIndex(0);
+    setLogoFailed('');
+    setCardsBySlug({});
+    if (isPokemon) {
+      setBanners(PROMO_BANNERS);
+      setLoadingSlides(false);
+      const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
+      if (first?.length) setCardsBySlug({ [PROMO_BANNERS[0].slug]: first });
+      loadFanPool(PROMO_BANNERS[0].slug).catch(() => {});
+      return undefined;
+    }
+    const stored = readStoredPromoBanners(id);
+    setBanners(stored);
+    setLoadingSlides(!stored.length);
+    let cancel = false;
+    getJson('/api/marketplace-expansion-page?limit=12')
+      .then((data) => {
+        if (cancel || game().id !== id) return;
+        showSlides(id, satellitePromoBanners(data?.expansions, game().name));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancel && game().id === id) setLoadingSlides(false);
+      });
+    return () => { cancel = true; };
+  }, { defer: true });
 
   // The current slide and its neighbours: paint a cached pool at once, fetch the rest.
   createEffect(
@@ -244,15 +299,16 @@ export default function PromoCarousel() {
 
   function go(delta) {
     const n = count();
+    if (!n) return;
     setIndex((current) => (current + delta + n) % n);
   }
 
   return (
-    <Show when={banner()} fallback={<section class="promo-stage" aria-hidden="true" />}>
       <section
-        class="promo-stage"
+        class={['promo-stage', { 'is-loading': loadingSlides() && !banners().length }]}
         aria-roledescription="carousel"
         aria-label="Featured expansions"
+        aria-hidden={banner() ? undefined : 'true'}
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
         onFocusIn={() => setPaused(true)}
@@ -291,15 +347,14 @@ export default function PromoCarousel() {
               return (
                 <div class="promo-slide">
                   <div class={['promo-copy', { 'is-logo-name': logoName() }]}>
-                    <p class="eyebrow">{slide.series}</p>
                     <Show when={logoFailed() !== slide.slug}>
-                      <PromoWordmark banner={slide} pokemon={pokemon} onFail={() => setLogoFailed(slide.slug)} />
+                      <PromoWordmark banner={slide} pokemon={pokemon()} onFail={() => setLogoFailed(slide.slug)} />
                     </Show>
                     <h1 class={logoName() ? 'sr-only' : undefined}>{slide.title}</h1>
                     <p class="promo-lede">{slide.lede}</p>
                     <a
                       class="btn"
-                      href={`/marketplace/sets/${slide.slug}`}
+                      href={gameHref(`/marketplace/sets/${slide.slug}`)}
                       onPointerEnter={() => prefetchExpansionPage(slide.slug)}
                       onClick={() => track(Action.clickBanner, untrack(fanCards)[0] || { id: slide.slug, name: slide.title })}
                     >
@@ -328,6 +383,5 @@ export default function PromoCarousel() {
           </For>
         </div>
       </section>
-    </Show>
   );
 }

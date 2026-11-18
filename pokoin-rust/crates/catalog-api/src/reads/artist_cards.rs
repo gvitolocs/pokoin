@@ -500,6 +500,37 @@ fn artist_bytes(page: &page_snapshot::Page) -> Vec<u8> {
 
 /// Artist desks are rebuilt daily (`build-lists-artists`).
 const ARTIST_CACHE: &str = "public, max-age=60, s-maxage=900, stale-while-revalidate=3600";
+const SUMMARY_CACHE: &str = "public, max-age=60, s-maxage=3600";
+
+/// Whether `game` has an artist catalog. Illustrators, profiles and covers
+/// (`marketplace_blueprint_artists`, `marketplace_artist_profiles`) exist only
+/// in the Pokémon database; the satellite game databases have no artist
+/// tables or columns, so their index and desks are empty rather than the
+/// Pokémon ones. The list builder asks the same question before it stores
+/// artist snapshots.
+pub fn has_artist_catalog(game: &str) -> bool {
+    pokoin_api_common::game::is_pokemon_game(game)
+}
+
+/// `parseGameFromRequest(req)`, as the page BFFs resolve it: `game` /
+/// `marketplaceGame` query (empty strings fall through), then headers, host.
+fn request_game(headers: &HeaderMap, q: &http::Query) -> String {
+    pokoin_api_common::game::parse_game_from_request(
+        &http::header_pairs(headers),
+        q.first("game").filter(|v| !v.is_empty()),
+        q.first("marketplaceGame").filter(|v| !v.is_empty()),
+    )
+}
+
+/// The answer for a game without an artist catalog: the same shapes as an
+/// empty Pokémon index and an unknown Pokémon artist.
+fn empty_body(summaries: bool) -> Value {
+    if summaries {
+        json!({ "artists": [] })
+    } else {
+        json!({ "artist": null, "profile": null, "cards": [] })
+    }
+}
 
 pub async fn handler(
     State(state): State<RouteState>,
@@ -513,7 +544,12 @@ pub async fn handler(
     let q = http::Query::from_uri(&uri);
     // Opt-in compact encoding; the default representation is unchanged.
     let wanted = util::wanted(&headers, &q);
-    if q.search_param("summaries") == Some("1") {
+    let summaries = q.search_param("summaries") == Some("1");
+    if !has_artist_catalog(&request_game(&headers, &q)) {
+        let cache = if summaries { SUMMARY_CACHE } else { ARTIST_CACHE };
+        return util::json_cache_c1(wanted, StatusCode::OK, empty_body(summaries), cache);
+    }
+    if summaries {
         let limit_raw = q.search_param("limit");
         let projected = artist_summary::read_artist_summary(state.api.read(), util::js_limit(limit_raw, 240, 5000)).await;
         let artists = match projected {
@@ -522,7 +558,7 @@ pub async fn handler(
             Err(error) => Err(error),
         };
         return match artists {
-            Ok(artists) => util::json_cache_c1(wanted, StatusCode::OK, json!({ "artists": artists }), "public, max-age=60, s-maxage=3600"),
+            Ok(artists) => util::json_cache_c1(wanted, StatusCode::OK, json!({ "artists": artists }), SUMMARY_CACHE),
             Err(error) => util::db_error("marketplace-artist-cards", &error, "Marketplace artist cards failed."),
         };
     }
@@ -566,6 +602,64 @@ mod tests {
         };
         let live = json!({ "artist": artist, "profile": null, "cards": cards });
         assert_eq!(String::from_utf8(artist_bytes(&page)).unwrap(), live.to_string());
+    }
+
+    /// Dead pool: a request that reaches the database answers a 5xx.
+    async fn serve(uri: &str, game_header: Option<&str>) -> (StatusCode, Value) {
+        use tower::ServiceExt;
+        let pool = pokoin_api_common::state::lazy_pool("postgres://x@127.0.0.1:1/x", 1).expect("lazy pool");
+        let router = crate::router(pokoin_api_common::RouteState::new(
+            pokoin_api_common::ApiState::new(pool.clone(), pool, None, 1),
+            pokoin_accounts::DomainState::default(),
+        ));
+        let mut request = axum::http::Request::builder().method("GET").uri(uri);
+        if let Some(game) = game_header {
+            request = request.header("x-pokoin-game", game);
+        }
+        let response = router.oneshot(request.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[test]
+    fn only_pokemon_has_an_artist_catalog() {
+        assert!(has_artist_catalog("pokemon"));
+        for game in ["magic", "lorcana", "one_piece", "yugioh"] {
+            assert!(!has_artist_catalog(game), "{game}");
+        }
+    }
+
+    #[tokio::test]
+    async fn satellite_games_answer_empty_artists_not_pokemon_ones() {
+        for (uri, header) in [
+            ("/api/marketplace-artist-cards?summaries=1&limit=5&game=magic", Some("magic")),
+            ("/api/marketplace-artist-cards?summaries=1&limit=5&game=lorcana", None),
+            ("/api/marketplace-artist-cards?summaries=1&limit=5", Some("one_piece")),
+            ("/api/marketplace-artist-cards?summaries=1&marketplaceGame=one-piece", None),
+        ] {
+            assert_eq!(serve(uri, header).await, (StatusCode::OK, json!({ "artists": [] })), "{uri}");
+        }
+        let desk = json!({ "artist": null, "profile": null, "cards": [] });
+        for uri in [
+            "/api/marketplace-artist-cards?artist=5ban-graphics&game=magic",
+            "/api/marketplace-artist-cards?artistSlug=5ban-graphics&limit=240&tiles=1&game=lorcana",
+            "/api/marketplace-artist-cards?slug=5ban-graphics&game=one_piece",
+        ] {
+            assert_eq!(serve(uri, None).await, (StatusCode::OK, desk.clone()), "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn pokemon_still_reads_its_catalog() {
+        for uri in [
+            "/api/marketplace-artist-cards?summaries=1&limit=5",
+            "/api/marketplace-artist-cards?summaries=1&limit=5&game=pokemon",
+            "/api/marketplace-artist-cards?artistSlug=5ban-graphics",
+        ] {
+            let (status, body) = serve(uri, None).await;
+            assert!(status.is_server_error(), "{uri} answered {status} {body}");
+        }
     }
 
     #[test]

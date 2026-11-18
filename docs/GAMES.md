@@ -2,7 +2,7 @@
 
 ## Marketplaces (live)
 
-One shared React SPA (`market/`, Vercel project `web`). The first path segment
+One shared Solid SPA (`solid/`, shared modules in `market/`). The first path segment
 picks the game via [`market/src/game.js`](../market/src/game.js). Pokemon stays
 on `pokoin.com` with no prefix. Every other TCG is `pokoin.com/{slug}`.
 API calls append `?game=` and send `x-pokoin-game`.
@@ -130,7 +130,7 @@ Pi.
 
 | Piece | Where | Role |
 | --- | --- | --- |
-| `api.pokoin.com` | **pi-home** CF tunnel (Rust edge `:18079` → in-process API; Cloudflare LB also sends ~10% to the nezopt k3s overflow) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
+| `api.pokoin.com` | **pi-home** CF tunnel (Rust edge `:18079` → in-process API; Cloudflare LB also sends ~10% to the nezopt k3s overflow) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily` of the card's game database (Pokémon: Oracle job; other CardTrader games: `pokoin-cardtrader-sold`, [CARDTRADER_DAILY_DUMP.md](CARDTRADER_DAILY_DUMP.md#sold-graph)). |
 | `cdn.pokoin.com` | **pi-home** `:18081` | Leftover JPEG origin (`/srv/pokoin/card-images/objects`). |
 | Meili + Redis | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. Cache is `pokoin-redis` on `:6380`. |
 
@@ -152,7 +152,7 @@ artist/profile identity once instead of on every card row
 | Postgres **writer** / historicization | **nezopt NVMe** `pokoin-marketplace-postgres-15t` (`127.0.0.1:25432`, LAN `192.168.178.55:25432`) | Snapshot book, `archiveMissing`, `sold_daily`, observations. Data dir `/home/nez/data/pokoin-marketplace-postgres/`. Always on (no 22:00 HDD night-off). HDD copy kept for rollback. |
 | Dump persist tunnel | nezopt user unit `pokoin-oracle-dump-pg-tunnel` | Oracle `127.0.0.1:15543` → nezopt `127.0.0.1:25432`. `MARKETPLACE_DATABASE_SSL=0`. |
 | Postgres on Pi | Docker `pokoin-marketplace-postgres-replica` | Streaming **replica of nezopt writer** (`primary_conninfo` `192.168.178.55:25432`, slot `pokoin_pi_replica`, `sslmode=disable`). `max_connections` must be ≥ primary (120). Never dump-write or migrate here. Oracle SSH tunnel `:15432` is disabled. |
-| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. Route-level lazy chunks (`App.jsx` — every page except `Home` is `React.lazy`; main bundle 1.75 MB raw / ~487 KB gzip since 2026-10-02), and `/market/assets/*` hashed files are `immutable` 1y via `vercel.json`. |
+| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. Route-level lazy chunks (`solid/src/router.js` — every page except `Home` is its own chunk), and `/market/s/*` hashed files are `immutable` 1y. |
 
 Install the persist tunnel on nezopt:
 `scripts/install-oracle-dump-nezopt-tunnel.sh`. Recreate the Oracle CardTrader
@@ -364,3 +364,46 @@ exclusive-locks `marketplace_cards`). Procedure:
 
 Public id = leftover `ct_id × 2`. Set desk path is `/marketplace/sets/{slug}`
 (no `/en/`). `ct_id` stays on candidates for CDN filenames and CardTrader.
+
+### New-set public readiness check
+
+The full per-game procedure (Pokémon, the 15 CardTrader satellites and the 9
+Cardmarket-only games, with hosts, dry-run vs production writes and what only
+Pokémon has) is [NEW_SET_IMPORT.md](NEW_SET_IMPORT.md). After the new-printing
+procedure above, run the read-only check:
+
+```bash
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh "Delta Reign"                       # Pokémon
+TMPDIR="$HOME/scratch/tmp" scripts/check-new-set.sh --game one_piece "EB-05: Heroines Edition Vol.2"
+```
+
+Each line is `OK`, `MISSING` or `SKIPPED: <reason>`; any `MISSING` (including a
+failed public request) exits 1, an unknown `--game` exits 2. It samples the
+public set page (real singles only), one card image and its key, the thumbnail,
+the version group, card-name and set-name suggest and the symbol URL. Pokémon
+also checks the bundled set vocabulary, the featured-set override
+(`market/src/data/featured-set.json`) and the New cards rail; other games skip
+those with the reason printed. A successful sample does not prove all cards have
+images or correct artwork matches; inspect those separately. A symbol URL
+returning an image can still be a generated text plate, so visually inspect it.
+The check does not write to the database.
+
+New-set release checklist:
+
+1. Import raw blueprints and project cards, candidates, versions and URLs as
+   described above; refresh the expansion counts.
+2. Ingest the leftover scans and homepage images, replicate them, and inspect
+   coverage. Run the targeted artwork matcher after scans are available, and
+   review singleton groups; see [VERSIONS.md](VERSIONS.md).
+3. Verify the Redis search delta has indexed the cards (the `search-delta` job
+   runs every two minutes); run `python3 scripts/export-suggest-names.py` and
+   `python3 scripts/export-suggest-catalog.py` against the catalog when the
+   bundled vocabulary needs refreshing. The latter also regenerates the
+   nationality table. These change repository files and need a web build and
+   deployment to reach users.
+4. Verify the expansion symbol visually. The CDN may serve a generated code
+   plate rather than the official mark; obtain and publish the correct symbol
+   through the existing expansion-symbol workflow.
+5. Verify set-name suggestions and the New cards homepage rail against the
+   public API. The rail is persisted by `scripts/sync-marketplace-rails.py`;
+   changing source code alone does not update its stored contents.

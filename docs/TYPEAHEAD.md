@@ -91,6 +91,29 @@ gaps).
 | 20 | Multi-token name+artist (`pika yuka` → intersection) | **New** |
 | 21 | Popup count = corrected lookup, not max-over-junk (the 51 bug) | **New** |
 
+### Set badges and era words (2026-11-07)
+
+- The badge printed on a set chip (`3CPD`, `3CSC`, `s8a`) is an exact set alias:
+  `espeon 3cpd` → 30th Celebration Premium Deck Set. Generated from
+  `tools/expansion-symbols/symbols.tsv` with
+  `expansion-symbols emit-codes --symbols symbols.tsv --js ../../market/src/data/set-badge-codes.js`.
+  Only letter+digit badges of 3+ characters; anything that reads as a collector
+  number (`3c`, `sv4`) or a card name stays that.
+- A set's TCG short name (`DEX`, `PLF`, `BKT`, `EVO`, `PRE`, `SVI`) is an exact set
+  alias as well: `scripts/export-suggest-catalog.py` collects each expansion's
+  `tcg_shortnames` rows of `marketplace_expansion_aliases` into the `codes` field
+  of `market/src/data/suggest-sets.js`, and `setShortCodeAliases()` registers them.
+  A suffix that is already part of the card name (`flareon ex`) keeps today's
+  meaning; a bare code beside a name is set intent, and the set reading wins, so
+  `flareon dex` leads with Dark Explorers and browses scoped to it.
+- Era words are typed set evidence in the scorer: `diamond`, `pearl`, `dp`,
+  `bw`, `xy`, `sm`, `swsh`, `sword`, `shield`, `sv`, `scarlet`, `violet`, and the
+  pairs `diamond pearl`, `black white`, `sun moon`, `sword shield`,
+  `scarlet violet`, `heartgold soulsilver`. `pikachu diamond` leads with DP-era
+  Pikachus. Generic halves (`sun`, `black`) only count as the pair.
+- The print chip stays a hard filter (owner, 2026-11-07): a Japanese print is
+  hidden under Western even when the query names its set.
+
 ## Known gaps / open edge cases (the honest list)
 
 G1. **Relaxed-tier hydration.** Chrome hydrates only best-hypothesis artist/set

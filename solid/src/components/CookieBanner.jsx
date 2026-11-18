@@ -1,9 +1,9 @@
 import { createEffect, createSignal, Show } from 'solid-js';
-import { COOKIE_BANNER_COPY, acceptCookieConsent, shouldShowCookieBanner } from '@market/cookie-consent.js';
+import { COOKIE_BANNER_COPY, COOKIE_CONSENT_ESSENTIAL, acceptCookieConsent, shouldShowCookieBanner } from '@market/cookie-consent.js';
 import AppLink from './AppLink.jsx';
 
 /**
- * Cookie notice (market/src/components/CookieBanner.jsx). While open it
+ * Cookie notice. While open it
  * publishes its height as --cookie-banner-h so the bottom-right chat button
  * and panel sit above it instead of covering Accept; the observer and resize
  * listener exist only while it is open.
@@ -41,15 +41,29 @@ export default function CookieBanner() {
           {' '}
           <AppLink to="/privacy">Privacy</AppLink>
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            acceptCookieConsent();
-            setOpen(false);
-          }}
-        >
-          Accept
-        </button>
+        <div class="cookie-actions">
+          {/* A real choice: essential-only keeps sign-in and cart, and skips Google's store badge. */}
+          <button
+            type="button"
+            class="cookie-essential"
+            onClick={() => {
+              acceptCookieConsent(undefined, COOKIE_CONSENT_ESSENTIAL);
+              setOpen(false);
+            }}
+          >
+            Essential only
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              acceptCookieConsent();
+              setOpen(false);
+              import('@market/google-reviews.js').then(({ showReviewsBadge }) => showReviewsBadge()).catch(() => {});
+            }}
+          >
+            Accept all
+          </button>
+        </div>
       </div>
     </Show>
   );

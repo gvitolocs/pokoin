@@ -25,7 +25,7 @@ test('extension auth request is the Chrome content-script shape', () => {
 
 test('token payload uses accessToken for pokoin-auth-bridge.js', () => {
   const payload = extensionAuthTokenPayload(
-    { uid: 'u1', email: 'a@pokoin.com' },
+    { uid: 'u1', email: 'a@pokoin.com', refreshToken: 'r'.repeat(24) },
     'x'.repeat(24),
     { expirationTime: '2099-01-01T00:00:00.000Z' },
   );
@@ -35,8 +35,23 @@ test('token payload uses accessToken for pokoin-auth-bridge.js', () => {
   assert.equal(payload.token.uid, 'u1');
   assert.equal(payload.token.email, 'a@pokoin.com');
   assert.equal(payload.token.expiresAt, '2099-01-01T00:00:00.000Z');
+  assert.equal(payload.token.refreshToken, 'r'.repeat(24));
   assert.equal(extensionAuthTokenPayload(null, 'short'), null);
   assert.equal(EXTENSION_AUTH_PATH, '/extension/auth-bridge');
+});
+
+test('token payload omits short refresh tokens', () => {
+  const without = extensionAuthTokenPayload(
+    { uid: 'u1', email: 'a@pokoin.com', refreshToken: 'short' },
+    'x'.repeat(24),
+  );
+  assert.equal(without.token.refreshToken, undefined);
+  const fromExtra = extensionAuthTokenPayload(
+    { uid: 'u1' },
+    'x'.repeat(24),
+    { refreshToken: 'y'.repeat(28) },
+  );
+  assert.equal(fromExtra.token.refreshToken, 'y'.repeat(28));
 });
 
 test('framedByChromeExtension is false outside a browser frame', () => {

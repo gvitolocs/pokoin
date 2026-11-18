@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  DKK_PER_EUR,
-  LIST_CURRENCIES,
   applyLastMedianPrices,
   countryFromLocale,
   currencyForCountry,
   currencyFromLocale,
+  DKK_PER_EUR,
   eurCentsFromPkn,
   fiatFromPkn,
-  moneyFromPkn,
   formatEurAndDkkFromPkn,
   formatFiatFromPkn,
   formatLocalFromEurCents,
@@ -19,9 +17,12 @@ import {
   idsMissingTilePrice,
   lastMedianFromSales,
   lastMedianMapFromBatch,
-  listPriceHint,
+  LIST_CURRENCIES,
   listingPriceToPkn,
+  listPriceHint,
+  moneyFromPkn,
   pknFromEur,
+  pknRateLabel,
   tilePricePkn,
 } from './pkn.js';
 
@@ -103,4 +104,10 @@ test('last-day sold median fills version tiles that have no catalog price', () =
   assert.equal(moneyFromPkn(64000, 'EUR').amount, '320.00');
   assert.equal(moneyFromPkn(64000, 'DKK').amount, '2400.00');
   assert.equal(moneyFromPkn(64000, 'DKK').eurCents, 32000);
+});
+
+test('pknRateLabel names the rate in the currency the price is shown in', () => {
+  assert.equal(pknRateLabel('EUR'), '1 PKN = €0.005');
+  assert.equal(pknRateLabel('USD'), '1 PKN = $0.005');
+  assert.equal(pknRateLabel('DKK'), '1 PKN = 0.0375 DKK');
 });

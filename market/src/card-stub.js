@@ -1,6 +1,6 @@
 import { rewriteCatalogLang } from './locale.js';
 import { PROVISIONAL_PUBLIC_OFFSET, leftoverCdnId, realPublicCardId } from './card-id.js';
-import { game } from './game.js';
+import { catalogImagePrefix, game } from './game.js';
 
 export { PROVISIONAL_PUBLIC_OFFSET, leftoverCdnId, realPublicCardId };
 
@@ -115,18 +115,20 @@ function prettySetSlug(slug) {
   return prettySlug(slug).replace(/^(Sv|Sm|Xy|Bw|Dp|Hg|Sw|Ssp|Mep) /, (_, code) => `${code.toUpperCase()} `);
 }
 
-export function leftoverUrl(cardId, nameSlug) {
+export function leftoverUrl(cardId, nameSlug, gameId) {
   const leftover = leftoverCdnId(cardId);
   if (!leftover) {
     return '';
   }
   const stem = String(nameSlug || '').replace(/^-+|-+$/g, '');
-  const prefix = game().slug ? `${game().slug}/` : '';
+  const prefix = gameId == null || String(gameId).trim() === ''
+    ? (game().slug ? `${game().slug}/` : '')
+    : catalogImagePrefix(gameId);
   return `/card-images/${prefix}${leftover}_${stem}.jpg`;
 }
 
 /** Leftover JPEG key (`ct_id`, public / 2). Used when the BFF only has a CardTrader preview_ (tiles drop those). */
-export function leftoverUrlFromCard(card = {}) {
+export function leftoverUrlFromCard(card = {}, gameId) {
   const id = String(card.id || card.card_id || '');
   if (!/^\d+$/.test(id)) {
     return '';
@@ -135,7 +137,7 @@ export function leftoverUrlFromCard(card = {}) {
   const slugPart = path.split('/').filter(Boolean).pop() || '';
   const fromPath = parseMarketplaceCardSlug(slugPart).nameSlug;
   if (fromPath && !/^\d+$/.test(fromPath)) {
-    return leftoverUrl(id, fromPath);
+    return leftoverUrl(id, fromPath, gameId);
   }
   const fromName = String(card.name || '')
     .trim()
@@ -143,7 +145,7 @@ export function leftoverUrlFromCard(card = {}) {
     .replace(/['’]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return leftoverUrl(id, fromName);
+  return leftoverUrl(id, fromName, gameId);
 }
 
 function stripTrailingSetCode(nameSlug) {

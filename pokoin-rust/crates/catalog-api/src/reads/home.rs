@@ -568,7 +568,9 @@ async fn refresh_hot_blueprints_if_stale(state: &RouteState) {
         end as refreshed_count
         from public.marketplace_hot_blueprints
       ";
-    if let Err(error) = pg::pool_rows(state.api.read(), sql, &[Bind::Text(HOT_REFRESH_INTERVAL.into())]).await {
+    // The refresh writes (SECURITY DEFINER, EXECUTE granted to pokoin_api_write
+    // only): the writer, never the Pi standby.
+    if let Err(error) = pg::pool_rows(state.api.write(), sql, &[Bind::Text(HOT_REFRESH_INTERVAL.into())]).await {
         tracing::warn!(%error, "marketplace-home hot blueprint refresh skipped");
     }
 }

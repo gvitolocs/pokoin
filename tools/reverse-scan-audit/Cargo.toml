@@ -1,0 +1,23 @@
+[package]
+name = "reverse-scan-audit"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Find reverse-holo / stamped scans among the scans we hold for each Pokemon printing (CDN stores, backups, older copies) by comparing them with the standard tcgdex scan"
+
+# Own workspace: image tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "reverse-scan-audit"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+jpeg-decoder = "0.3"
+rayon = "1"
+serde_json = "1"
+
+[profile.release]
+strip = true

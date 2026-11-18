@@ -11,6 +11,8 @@ import {
   preferFullImage,
   rasterSiblings,
   rewriteCatalogImageId,
+  withThumbToken,
+  withoutThumbToken,
 } from './image-urls.js';
 
 test('cdnFetchUrl skips the pokoin.com /card-images 301 hop', () => {
@@ -40,25 +42,25 @@ test('Scarlet Violet 312px leftovers bust after CardTrader full ingest', () => {
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/241905_magnemite-063-198-scarlet-violet.jpg'),
-    '/card-images/241905_magnemite-063-198-scarlet-violet_homepage.webp?v=sv312',
+    '/card-images/241905_magnemite-063-198-scarlet-violet_homepage.webp?v=sv312.t480',
   );
 });
 
-test('Chilling Reign Rapidash V leftover busts the 255px catalog thumb', () => {
+test('Chilling Reign Rapidash V leftover busts the 255px catalog thumb, then the hd1 upgrade', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg'),
-    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg?v=ctf1',
+    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg?v=hd1',
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign.jpg'),
-    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign_homepage.webp?v=ctf1',
+    '/card-images/158374_galarian-rapidash-v-rare-ultra-168-198-chilling-reign_homepage.webp?v=hd1.t480',
   );
 });
 
-test('Shiny Treasure ex 255px leftovers bust after CardTrader full ingest', () => {
+test('Shiny Treasure ex 255px leftovers bust after CardTrader full ingest, then the hd1 upgrade', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/269648_natu-078-190-shiny-treasure-ex.jpg'),
-    '/card-images/269648_natu-078-190-shiny-treasure-ex.jpg?v=ctf1',
+    '/card-images/269648_natu-078-190-shiny-treasure-ex.jpg?v=hd1',
   );
 });
 
@@ -69,7 +71,7 @@ test('Vivid Voltage leftovers bust orange-cloud cache after CardTrader ingest', 
   );
   assert.equal(
     homepageDerivativeUrl('https://cdn.pokoin.com/150266_zarude-v-022-185-vivid-voltage.jpg'),
-    '/card-images/150266_zarude-v-022-185-vivid-voltage_homepage.webp?v=vv1',
+    '/card-images/150266_zarude-v-022-185-vivid-voltage_homepage.webp?v=vv1.t480',
   );
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/351691_mega-lucario-ex.jpg'),
@@ -84,7 +86,7 @@ test('Chaos Rising leftovers bust cache after CardTrader placeholder ingest', ()
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/389942_weedle-001-086-chaos-rising.jpg'),
-    '/card-images/389942_weedle-001-086-chaos-rising_homepage.webp?v=cr2',
+    '/card-images/389942_weedle-001-086-chaos-rising_homepage.webp?v=cr2.t480',
   );
 });
 
@@ -95,7 +97,7 @@ test('World Championship Decks 2025 leftovers bust cache after PNG ingest', () =
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/385525_fan-rotom-wcd-2025-yuya-okita-world-championship-decks-2025.jpg'),
-    '/card-images/385525_fan-rotom-wcd-2025-yuya-okita-world-championship-decks-2025_homepage.webp?v=wcd25',
+    '/card-images/385525_fan-rotom-wcd-2025-yuya-okita-world-championship-decks-2025_homepage.webp?v=wcd25.t480',
   );
 });
 
@@ -106,7 +108,7 @@ test('Battle Party and SV-P Chinese leftovers bust cache after CardTrader webp i
   );
   assert.equal(
     homepageDerivativeUrl('https://cdn.pokoin.com/379040_fletchinder-022-svp-scarlet-violet-simplified-chinese-promos.jpg'),
-    '/card-images/379040_fletchinder-022-svp-scarlet-violet-simplified-chinese-promos_homepage.webp?v=ph2',
+    '/card-images/379040_fletchinder-022-svp-scarlet-violet-simplified-chinese-promos_homepage.webp?v=ph2.t480',
   );
 });
 
@@ -121,7 +123,7 @@ test('30th Celebration Darkrai LEGEND busts cache after portrait reorient', () =
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/413222_darkrai-cresselia-legend.jpg'),
-    '/card-images/413222_darkrai-cresselia-legend_homepage.webp?v=leg1',
+    '/card-images/413222_darkrai-cresselia-legend_homepage.webp?v=leg1.t480',
   );
 });
 
@@ -132,7 +134,7 @@ test('CardTrader 186×260 leftover backs bust cache after Pokoin missing-card st
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/286874_fighting-energy-unnumbered-latios-ex-half-deck.jpg'),
-    '/card-images/286874_fighting-energy-unnumbered-latios-ex-half-deck_homepage.webp?v=pkph1',
+    '/card-images/286874_fighting-energy-unnumbered-latios-ex-half-deck_homepage.webp?v=pkph1.t480',
   );
 });
 
@@ -158,7 +160,7 @@ test('CSM2d Shining Synergy leftovers bust cache after placeholder ingest', () =
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/373219_latios-csm2d-120-342-csm2d-shining-synergy-gx-starter-deck.jpg'),
-    '/card-images/373219_latios-csm2d-120-342-csm2d-shining-synergy-gx-starter-deck_homepage.webp?v=ph1',
+    '/card-images/373219_latios-csm2d-120-342-csm2d-shining-synergy-gx-starter-deck_homepage.webp?v=ph1.t480',
   );
 });
 
@@ -169,7 +171,7 @@ test('Team Up Charizard 397269 busts the pokemontcg.io leftover after CardTrader
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/397269_charizard.jpg'),
-    '/card-images/397269_charizard_homepage.webp?v=ct397',
+    '/card-images/397269_charizard_homepage.webp?v=ct397.t480',
   );
 });
 
@@ -180,7 +182,7 @@ test('30th Celebration WebP-as-jpg leftovers bust after real JPEG re-encode', ()
   );
   assert.equal(
     homepageDerivativeUrl('/card-images/406774_meowth.jpg'),
-    '/card-images/406774_meowth_homepage.webp?v=wj1',
+    '/card-images/406774_meowth_homepage.webp?v=wj1.t480',
   );
 });
 
@@ -191,15 +193,15 @@ test('Base Set leftovers bust 1st Edition / shadowless scans after unlimited rei
   );
   assert.equal(
     homepageDerivativeUrl('https://cdn.pokoin.com/55595_abra-43-102-base-set.jpg'),
-    '/card-images/55595_abra-43-102-base-set_homepage.webp?v=bsu2',
+    '/card-images/55595_abra-43-102-base-set_homepage.webp?v=bsu2.t480',
   );
 });
 
 test('grid tiles rewrite leftover JPEG to _homepage.webp', () => {
   const src = homepageDerivativeUrl('https://cdn.pokoin.com/351691_mega-lucario-ex.jpg?v=ct1');
-  assert.equal(src, '/card-images/351691_mega-lucario-ex_homepage.webp?v=ct1');
+  assert.equal(src, '/card-images/351691_mega-lucario-ex_homepage.webp?v=ct1.t480');
   assert.deepEqual(rasterSiblings(src), [
-    '/card-images/351691_mega-lucario-ex_homepage.webp?v=ct1',
+    '/card-images/351691_mega-lucario-ex_homepage.webp?v=ct1.t480',
     '/card-images/351691_mega-lucario-ex.jpg?v=ct1',
   ]);
 });
@@ -207,7 +209,7 @@ test('grid tiles rewrite leftover JPEG to _homepage.webp', () => {
 test('existing homepage URLs are kept for grid', () => {
   assert.equal(
     homepageDerivativeUrl('/card-images/138045_koffing-jp-expansion-pack-starter-pack_homepage.webp'),
-    '/card-images/138045_koffing-jp-expansion-pack-starter-pack_homepage.webp',
+    '/card-images/138045_koffing-jp-expansion-pack-starter-pack_homepage.webp?v=t480',
   );
 });
 
@@ -223,7 +225,7 @@ test('full raster prefers leftover JPEG then the leftover homepage tile', () => 
     rasterSiblings('/card-images/703354_lillie-s-determination_homepage.webp', { full: true }),
     [
       '/card-images/703354_lillie-s-determination.jpg',
-      '/card-images/703354_lillie-s-determination_homepage.webp',
+      '/card-images/703354_lillie-s-determination_homepage.webp?v=t480',
     ],
   );
 });
@@ -242,7 +244,7 @@ test('Juniper leftover 342356 keeps its own dump, not Pikachu V-UNION leftover/4
     rasterSiblings(leftoverUrlFromCard(juniper), { full: true }),
     [
       '/card-images/342356_professor-s-research-professor-juniper.jpg',
-      '/card-images/342356_professor-s-research-professor-juniper_homepage.webp',
+      '/card-images/342356_professor-s-research-professor-juniper_homepage.webp?v=t480',
     ],
   );
 });
@@ -346,7 +348,7 @@ test('ownCatalogImage rewrites preview_, public-id, and stale leftover keys to l
       name: 'Mega Lucario ex',
       canonicalPath: '/marketplace/en/cards/703072/card-mega-lucario-ex-ultra-rare-077-132-mega-evolution',
     }, '/card-images/21971_mega-lucario-ex.jpg'),
-    '/card-images/351536_mega-lucario-ex.jpg',
+    '/card-images/351536_mega-lucario-ex.jpg?v=ap1',
   );
   assert.equal(
     ownCatalogImage({ id: '689316' }, '/card-images/689316_mega-lucario-ex.jpg'),
@@ -425,4 +427,18 @@ test('League leftover dump slug can differ from the desk path and still count as
     ownCatalogImage(dusknoir, '/card-images/128721_dusknoir-fb-pokemon-league-26-147-supreme-victors-promos.jpg'),
     '/card-images/128721_dusknoir-fb-pokemon-league-26-147-supreme-victors-promos.jpg',
   );
+});
+
+test('thumbs carry the thumb token; their JPEG keeps only its own id token', () => {
+  assert.equal(withThumbToken('/card-images/1_x_homepage.webp'), '/card-images/1_x_homepage.webp?v=t480');
+  assert.equal(withThumbToken('/card-images/1_x_homepage.webp?v=hd1'), '/card-images/1_x_homepage.webp?v=hd1.t480');
+  assert.equal(withThumbToken('/card-images/1_x_homepage.webp?v=hd1.t480'), '/card-images/1_x_homepage.webp?v=hd1.t480');
+  assert.equal(withThumbToken('/card-images/1_x.jpg?v=hd1'), '/card-images/1_x.jpg?v=hd1');
+  assert.equal(withThumbToken('/card-images/magic/1_x_homepage.webp'), '/card-images/magic/1_x_homepage.webp');
+  assert.equal(withoutThumbToken('/card-images/1_x.jpg?v=hd1.t480'), '/card-images/1_x.jpg?v=hd1');
+  assert.equal(withoutThumbToken('/card-images/1_x.jpg?v=t480'), '/card-images/1_x.jpg');
+  assert.equal(withoutThumbToken('/card-images/1_x.jpg?a=1&v=t480#z'), '/card-images/1_x.jpg?a=1#z');
+  assert.equal(preferFullImage('/card-images/1_x_homepage.webp?v=hd1.t480'), '/card-images/1_x.jpg?v=hd1');
+  assert.equal(homepageDerivativeUrl('/card-images/114719_wigglytuff-rare-holo-13-100-ex-crystal-guardians.jpg'),
+    '/card-images/114719_wigglytuff-rare-holo-13-100-ex-crystal-guardians_homepage.webp?v=wg1.t480');
 });

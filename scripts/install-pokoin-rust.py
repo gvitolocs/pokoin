@@ -80,7 +80,10 @@ def install(args):
             atomic_bytes(backup / path.name, saved[path][0], saved[path][1])
     atomic_bytes(backup / "release.json", json.dumps({"previous": old_target, "next": args.commit, "sha256": args.sha256}).encode(), 0o600)
     values = env_values(saved[ENV][0].decode()) if saved[ENV] else {}
-    deployed = json.loads(run("docker", "inspect", "pokoin-oracle-api"))[0]["Config"]["Env"]
+    probe = subprocess.run(["docker", "inspect", "pokoin-oracle-api"], capture_output=True, text=True)
+    if probe.returncode != 0 and not saved[ENV]:
+        raise RuntimeError("Neither native settings nor legacy settings are available")
+    deployed = json.loads(probe.stdout)[0]["Config"]["Env"] if probe.returncode == 0 else []
     # Existing native settings win; the legacy image supplies configured service bindings.
     for entry in deployed:
         key, sep, value = entry.partition("=")
@@ -88,6 +91,9 @@ def install(args):
             values.setdefault(key, value)
     values["POKOIN_RUST_RELEASE"] = args.commit
     values["MARKETPLACE_SEARCH_ENGINE"] = "redis"
+    # Seller books are built on nezopt (k3s build-lists-sellers and the overflow
+    # pods' sweep), never on the Pi: its three workers serve the stored books.
+    values["POKOIN_SELLER_BOOK_WORKER"] = "0"
     destination = BASE / "releases" / f"pokoin-api-{args.commit[:12]}-aarch64"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != args.sha256:

@@ -3,9 +3,10 @@ import { clearWatchlist, hydrateWatchlist } from '@market/api.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
- * /marketplace/watchlist and /favorites (market/src/pages/Watchlist.jsx):
+ * /marketplace/watchlist and /favorites:
  * the starred card ids saved in this browser, hydrated to tiles.
  */
 export default function Watchlist() {
@@ -50,13 +51,13 @@ export default function Watchlist() {
             Clear
           </button>
         </Show>
-        <a class="btn ghost" href="/marketplace">Shop</a>
+        <a class="btn ghost" href={gameHref('/marketplace')}>Shop</a>
       </PageHead>
       <Alert message={error()} />
       <Show when={!ready()}><div class="skeleton-line" /></Show>
       <Show when={ready() && !list.cards.length}>
         <EmptyDesk title="Nothing watched" lede="Open a card and tap the star.">
-          <a class="btn" href="/marketplace">Browse marketplace</a>
+          <a class="btn" href={gameHref('/marketplace')}>Browse marketplace</a>
         </EmptyDesk>
       </Show>
       <CardSelectGrid class="grid" cards={list.cards}>

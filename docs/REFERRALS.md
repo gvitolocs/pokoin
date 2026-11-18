@@ -84,7 +84,7 @@ update public.marketplace_associates set city = 'Milano', updated_at = now()
 Andrea Paolo Ciliberti, the program's first ambassador — a one-off title. It
 progresses like any ambassador, shows a gold/violet "Founder Ambassador" badge
 on search and his shop, and `/associate` opens with a personal congratulations
-hero and the No. 001 founder medal (`market/src/components/FounderWelcome.jsx`).
+hero and the No. 001 founder medal (`solid/src/components/FounderWelcome.jsx`).
 Preview locally: `/associate?associatePreview&role=founder_ambassador`.
 
 Roster ambassadors see the program on `/associate` (missions, verified

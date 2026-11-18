@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WEB="${CARDVAULT_WEB:-/home/nez/Projects/cardvault/pokemon_card_vault/web}"
-BUILD="${CARDVAULT_BUILD:-/home/nez/Projects/cardvault/pokemon_card_vault/build/web}"
+WEB="${CARDVAULT_WEB:-/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/web}"
+BUILD="${CARDVAULT_BUILD:-/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/build/web}"
 cd "$ROOT/market"
 if [[ -f package-lock.json ]]; then
   npm ci

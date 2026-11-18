@@ -41,10 +41,19 @@ pub struct Claims {
 }
 
 impl Claims {
-    /// Same predicate as the Node `tokenHasAdminAccess`.
+    /// `email_verified`, or the `pok_email_verified` custom claim that
+    /// verify-email-signup sets. Both arrive in the flattened `custom` map.
+    pub fn email_verified(&self) -> bool {
+        let flag = |key: &str| self.custom.get(key).and_then(serde_json::Value::as_bool) == Some(true);
+        flag("email_verified") || flag("pok_email_verified")
+    }
+
+    /// Node `tokenHasAdminAccess`, except that the operator emails count only
+    /// when the token proves the email is verified (anyone can create an
+    /// unverified Firebase account with any address).
     pub fn has_admin_access(&self) -> bool {
         let email = self.email.trim().to_ascii_lowercase();
-        if email == "vitologiuseppe17@gmail.com" || email == "pokoinpos@gmail.com" {
+        if self.email_verified() && (email == "vitologiuseppe17@gmail.com" || email == "pokoinpos@gmail.com") {
             return true;
         }
         self.admin || self.is_admin || self.role.trim().eq_ignore_ascii_case("admin")
@@ -127,6 +136,25 @@ pub struct FirebaseVerifier {
     http: reqwest::Client,
     cache: RwLock<Option<JwksCache>>,
     ttl: Duration,
+    /// Last refetch an unknown `kid` forced; at most one per
+    /// [`UNKNOWN_KID_REFETCH_INTERVAL`].
+    last_forced: std::sync::Mutex<Option<Instant>>,
+}
+
+/// Random `kid`s must not turn every request into a Google JWKS round trip.
+pub const UNKNOWN_KID_REFETCH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// True (and the stamp moved to now) when a forced refetch may run.
+fn take_refetch_slot(last: &std::sync::Mutex<Option<Instant>>) -> bool {
+    let mut last = last.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    match *last {
+        Some(at) if now.duration_since(at) < UNKNOWN_KID_REFETCH_INTERVAL => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
+    }
 }
 
 impl FirebaseVerifier {
@@ -136,6 +164,7 @@ impl FirebaseVerifier {
             http,
             cache: RwLock::new(None),
             ttl: Duration::from_secs(6 * 60 * 60),
+            last_forced: std::sync::Mutex::new(None),
         }
     }
 
@@ -190,12 +219,13 @@ impl TokenVerifier for FirebaseVerifier {
         let keys = self.keys(false).await?;
         let (n, e) = match keys.get(&kid) {
             Some(pair) => pair.clone(),
-            None => self
+            None if take_refetch_slot(&self.last_forced) => self
                 .keys(true)
                 .await?
                 .get(&kid)
                 .cloned()
                 .ok_or_else(|| AuthError::Invalid("unknown signing key".into()))?,
+            None => return Err(AuthError::Invalid("unknown signing key".into())),
         };
 
         let mut validation = Validation::new(Algorithm::RS256);
@@ -314,11 +344,22 @@ mod tests {
 
     #[test]
     fn admin_access_matches_node_predicate() {
-        let email_admin = Claims {
+        let mut email_admin = Claims {
             email: "VitoloGiuseppe17@gmail.com".into(),
             ..Default::default()
         };
+        // An operator address alone is not enough: it must be verified.
+        assert!(!email_admin.has_admin_access());
+        email_admin.custom.insert("email_verified".into(), serde_json::json!(false));
+        assert!(!email_admin.has_admin_access());
+        email_admin.custom.insert("email_verified".into(), serde_json::json!(true));
         assert!(email_admin.has_admin_access());
+        let mut pok_verified = Claims {
+            email: "pokoinpos@gmail.com".into(),
+            ..Default::default()
+        };
+        pok_verified.custom.insert("pok_email_verified".into(), serde_json::json!(true));
+        assert!(pok_verified.has_admin_access());
         let role_admin = Claims {
             role: "Admin".into(),
             ..Default::default()
@@ -329,6 +370,33 @@ mod tests {
             ..Default::default()
         };
         assert!(!silver.has_admin_access());
+    }
+
+    #[test]
+    fn email_verified_survives_the_raw_claims_mapping() {
+        let raw: RawClaims = serde_json::from_value(serde_json::json!({
+            "sub": "u", "email": "pokoinpos@gmail.com", "email_verified": true
+        }))
+        .unwrap();
+        let claims = Claims {
+            uid: raw.sub,
+            email: raw.email,
+            role: raw.role,
+            admin: raw.admin,
+            is_admin: raw.is_admin,
+            custom: raw.custom,
+        };
+        assert!(claims.email_verified());
+        assert!(claims.has_admin_access());
+    }
+
+    #[test]
+    fn unknown_kid_refetch_is_throttled() {
+        let last = std::sync::Mutex::new(None);
+        assert!(take_refetch_slot(&last));
+        assert!(!take_refetch_slot(&last));
+        *last.lock().unwrap() = Some(Instant::now() - UNKNOWN_KID_REFETCH_INTERVAL);
+        assert!(take_refetch_slot(&last));
     }
 
     #[tokio::test]

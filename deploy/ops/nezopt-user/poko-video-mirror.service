@@ -1,0 +1,11 @@
+[Unit]
+Description=Mirror pi-home poko-video/ into the k3s CDN root (cdn.pokoin.com origin nez-k3s), additive
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Triggered by the Pi (pokoin-pi-hook video) when a file lands, plus the timer as a backstop.
+# Never deletes: see video_once in nezopt-k3s.sh.
+ExecStart=%h/pokoin-overflow/bin/nezopt-k3s.sh video
+Nice=10
+TimeoutStartSec=30min

@@ -105,10 +105,26 @@ test('auth responses ask crawlers not to index', () => {
   assert.doesNotMatch(headers, /Disallow/);
 });
 
-test('the CSP allows the React/Solid switch only when the build emitted it', () => {
-  const plain = headerLines();
-  assert.doesNotMatch(plain, /sha256-/);
-  const withSwitch = headerLines({ scriptHashes: ['sha256-abc='] });
-  assert.match(withSwitch, /script-src 'self' [^\n]*https:\/\/pokoin\.firebaseapp\.com 'sha256-abc='\n/);
-  assert.match(withSwitch, /\/market\/s\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/);
+test('the CSP allows no inline script and Solid chunks are immutable', () => {
+  const headers = headerLines();
+  assert.doesNotMatch(headers, /sha256-|unsafe-inline/);
+  assert.match(headers, /script-src 'self' [^\n]*https:\/\/pokoin\.firebaseapp\.com\n/);
+  assert.match(headers, /\/market\/s\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/);
+  assert.match(headers, /\/market\/app\.html\n {2}Cache-Control: public, max-age=0, must-revalidate/);
+});
+
+test('fonts and images under /home are cached, its CSS and JS are not', () => {
+  const headers = headerLines();
+  assert.match(headers, /\/home\/satoshi\.woff2\n {2}Cache-Control: public, max-age=31536000, immutable\n/);
+  assert.match(headers, /\/home\/pokoin-mascot\.png\n {2}Cache-Control: public, max-age=604800, stale-while-revalidate=604800\n/);
+  assert.doesNotMatch(headers, /\/home\/\*/);
+  assert.doesNotMatch(headers, /\/home\/[^\n]*\.(css|js)\n/);
+});
+
+test('/extension.zip is the gated SPA page, never a static zip', () => {
+  for (const from of ['/extension.zip', '/extension']) {
+    const hit = applyRedirect(from);
+    assert.equal(hit?.location, '/market/app', from);
+    assert.equal(hit?.code, 200, from);
+  }
 });

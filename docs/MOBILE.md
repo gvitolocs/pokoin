@@ -24,11 +24,11 @@ Chrome DevTools → device toolbar, or Playwright:
 
 ```bash
 playwright-cli close
-playwright-cli open http://127.0.0.1:5174/marketplace
+playwright-cli open http://127.0.0.1:5175/marketplace
 playwright-cli resize 393 852
 ```
 
-Vite market: `cd market && npm run dev` → `/marketplace`.
+Solid dev server: `cd solid && npm run dev` → `/marketplace`.
 
 Landing is not on the Vite port. Serve the repo root or use `https://pokoin.com/`
 at the same 393×852 viewport.
@@ -47,7 +47,7 @@ at the same 393×852 viewport.
 ## Phone-only (`≤480px`) — market
 
 Source: `market/src/styles.css` (block at the bottom). Chrome markup:
-`market/src/components/Chrome.jsx`.
+`solid/src/components/Chrome.jsx`.
 
 | Surface | What changes | Why |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Source: `market/src/styles.css` (block at the bottom). Chrome markup:
 | Sell callout | Stacks label above “Get started” | Horizontal flex overflowed |
 | **Card desk** | Areas: **art → Best Deal → shop → list form** | Compact `≤720px` puts Best Deal first (same breakpoint as search suggest); on a 852px-tall phone that hid the scan. Phone (`≤480px`) shows the printing first |
 | Asset header | **Fixed 5.75rem.** Two lines: name + watch/share; set line + last-day PKN / 24h. Name and set ellipsis. No type/rarity pills | Swiping printings must not jump the scan. Stop the name wrapping into a wall of navy |
-| Art ‹ › | 44×44 tap targets (SVG chevrons). Gold pill between them is the rarity label (dropdown chevron only if this set has another rarity). ‹ › walk the expansion, not rarity finishes. Set-symbol circles under the scan (drop when more than five expansions; gold **More versions...** halo stays) | Apple HIG; centering is in the SVG, not `‹`/`›` glyphs |
+| Art ‹ › | 44×44 tap targets (SVG chevrons). Gold pill between them is the rarity label (dropdown chevron only if this set has another rarity). ‹ › walk the expansion, not rarity finishes. Set-symbol circles under the scan (caps at six expansions; gold **More versions...** halo stays) | Apple HIG; centering is in the SVG, not `‹`/`›` glyphs |
 | Shop filters | One line with Shop / Condition / Language / Sort / trash; wrap if the phone is too narrow | Full-width stacked selects made the desk taller than it needed |
 | Footer | Extra `safe-area-inset-bottom` | Home indicator |
 | Burger panel | Left drawer **below** the top bar; full-page dim scrim underneath the drawer; 3-column gold icon tiles | Header dims with the rest of the page; tap the dim to close |
@@ -85,9 +85,9 @@ drawer) were already there and still apply.
 
 | File | Role |
 | --- | --- |
-| `market/index.html`, `index.html` | `viewport-fit=cover` |
+| `solid/index.html`, `index.html` | `viewport-fit=cover` |
 | `market/src/styles.css` | `≤720px` top-bar grid; `≤480px` phone sheet |
-| `market/src/components/Chrome.jsx` | Mag glass opens print-language; search is Enter; CardTrader-style suggest rows |
+| `solid/src/components/Chrome.jsx` | Mag glass opens print-language; search is Enter; CardTrader-style suggest rows |
 | `home/landing.css` | `≤480px` safe-area nav / hero / CTA |
 | `docs/MARKET.md` | Card stack exception on phone |
 

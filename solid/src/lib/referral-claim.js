@@ -10,7 +10,7 @@ import {
 import { authUser, getBearer } from '../stores/auth.js';
 
 /**
- * Invite & Earn plumbing (market/src/components/ReferralClaimer.jsx), set up
+ * Invite & Earn plumbing, set up
  * once by the app shell: remember the code from /join/<code> or ?ref=<code>,
  * then claim it once Firebase confirms a signed-in visitor. The server decides
  * whether the account is new enough to count.

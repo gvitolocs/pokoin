@@ -166,6 +166,22 @@ impl MarketplaceDb {
         })
     }
 
+    /// Build a pool without connecting, from parsed connect options. The
+    /// writer pool needs explicit TLS knobs (`MARKETPLACE_WRITER_DATABASE_SSL`
+    /// / `…_SSL_VERIFY`) that a URL string alone cannot carry.
+    pub fn connect_lazy_with(
+        options: sqlx::postgres::PgConnectOptions,
+        max_connections: u32,
+    ) -> Self {
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections.max(1))
+            .acquire_timeout(std::time::Duration::from_millis(2_000))
+            .connect_lazy_with(options);
+        Self {
+            pool: Arc::new(pool),
+        }
+    }
+
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
             pool: Arc::new(pool),

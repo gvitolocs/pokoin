@@ -107,19 +107,6 @@ test('select band stays off on touch, phone widths, and account pages', () => {
     }),
     false,
   );
-  const host = readFileSync(new URL('./select-band.jsx', import.meta.url), 'utf8');
-  assert.match(host, /selectBandAllowed/);
-});
-
-test('ShopList listens on main so a band from empty background can hit listings', () => {
-  const host = readFileSync(new URL('./select-band.jsx', import.meta.url), 'utf8');
-  assert.match(host, /marqueeStartAllowed/);
-  assert.match(host, /listingRects|shop-row/);
-  assert.match(host, /SelectBandProvider/);
-  assert.match(
-    readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8'),
-    /SelectBandProvider/,
-  );
 });
 
 test('a plain pointer outside selected shop rows clears the selection', () => {

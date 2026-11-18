@@ -149,7 +149,7 @@ function InviteDesk() {
   );
 }
 
-/** /invite (market/src/pages/Invite.jsx). The session hint paints before Firebase answers. */
+/** /invite. The session hint paints before Firebase answers. */
 export default function Invite() {
   document.title = 'Invite & Earn · Pokoin';
   return (

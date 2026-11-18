@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin native job fx-rates-daily (ECB euro reference rates)
+
+[Timer]
+# The ECB publishes the euro reference rates around 16:00 CET.
+OnCalendar=*-*-* 16:30:00 UTC
+RandomizedDelaySec=5min
+Persistent=true
+Unit=pokoin-rust-job@fx-rates-daily.service
+
+[Install]
+WantedBy=timers.target

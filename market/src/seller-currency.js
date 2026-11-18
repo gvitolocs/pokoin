@@ -1,21 +1,32 @@
 /**
- * Sellers who opt out of PKN payments (Profile → Seller setup → "Get paid in
- * PKN") price and read their listings in their local currency: the card-page
- * list tile, the scan desk and MyPokoin default to it. Listings are still
- * stored in PKN (1 PKN = €0.005) — this only changes what the seller types
- * and sees. Buyers of those sellers pay by card (pokoin-rust/crates/commerce/src/handlers/seller.rs).
+ * Sellers price and read listings in their local currency regardless of PKN
+ * payment preferences. Listings remain stored in PKN (1 PKN = €0.005).
  */
 import { currencyForCountry, currencyFromLocale, fiatFromPkn, formatFiatFromPkn, formatLocalFromPkn, formatPkn, formatPknNumber, listingPriceToPkn, localAndPknFromPkn } from './pkn.js';
 
-/** 'PKN' for PKN-accepting sellers, else the ship-from country's currency. */
-export function sellerListCurrency(settings) {
-  if (!settings || settings.acceptsPkn !== false) return 'PKN';
-  return currencyForCountry(settings.shipFromCountry) || 'EUR';
+/**
+ * Ship-from country's currency, falling back to the known country, then
+ * browser locale and EUR. Payment preferences do not change the price unit.
+ */
+export function sellerListCurrency(settings, fallbackCountry) {
+  const country = settings?.shipFromCountry || fallbackCountry;
+  return (country ? currencyForCountry(country) : currencyFromLocale()) || 'EUR';
 }
 
-/** Stored PKN → the seller's price label: 2642 PKN, or €13.21 (2642 PKN). */
-export function formatSellerPrice(pkn, currency = 'PKN') {
-  return currency === 'PKN' ? formatPkn(pkn) : formatLocalFromPkn(pkn, currency);
+/** Stored PKN → the seller's local price label, without a PKN amount. */
+export function formatSellerPrice(pkn, currency = sellerListCurrency()) {
+  return formatFiatFromPkn(pkn, currency === 'PKN' ? sellerListCurrency() : currency) || '';
+}
+
+/**
+ * A PKN valuation (Assets preview) in the viewer's currency only, never PKN.
+ * An unknown currency or missing rate falls back to EUR; zero reads as 0.
+ */
+export function formatAssetsValue(pkn, currency = sellerListCurrency()) {
+  const value = Number.isFinite(Number(pkn)) ? Number(pkn) : 0;
+  const shown = formatSellerPrice(value, currency) || formatFiatFromPkn(value, 'EUR');
+  if (shown) return shown;
+  return String(currency).toUpperCase() === 'DKK' ? '0 DKK' : String(currency).toUpperCase() === 'USD' ? '$0' : '€0';
 }
 
 /**
@@ -58,13 +69,15 @@ export function buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn = true) 
 
 /**
  * { local, pkn } labels for a buyer price stack. A currency pinned through
- * the URL keeps the two-line local + PKN stack; an unaffordable signed-in
- * price (or a card-only seller) shows the local currency only; everything
- * else — affordable prices and signed-out buyers — PKN only.
+ * the URL keeps the two-line local + PKN stack, and so does a signed-out
+ * visitor: they hold no PKN, so the local amount comes first and PKN under
+ * it. An unaffordable signed-in price (or a card-only seller) shows the
+ * local currency only; affordable signed-in prices stay PKN only.
  */
 export function buyerPriceParts({ pricePkn, currency, balancePkn, sellerAcceptsPkn = true, pinned = '' }) {
   const pin = String(pinned || '').toUpperCase();
   if (pin && pin !== 'PKN') return localAndPknFromPkn(pricePkn, currency);
+  if (!pin && balancePkn == null && sellerAcceptsPkn !== false) return localAndPknFromPkn(pricePkn, currency);
   if (buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn)) {
     return { local: formatFiatFromPkn(pricePkn, currency) || '', pkn: '' };
   }

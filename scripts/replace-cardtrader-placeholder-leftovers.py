@@ -27,7 +27,8 @@ WIDTH, HEIGHT = 630, 880
 CT_SIZE = (186, 260)
 CT_BYTES = 7920
 CACHE = "pkph1"
-IDS_JS = ROOT / "market" / "src" / "data" / "pokoin-placeholder-leftovers.js"
+# Read by market/src/image-urls.js and pokoin-rust desk_art.rs (catalog-image-cache.json).
+IDS_JSON = ROOT / "market" / "src" / "data" / "pokoin-placeholder-leftovers.json"
 
 
 def is_cardtrader_back(path: Path) -> bool:
@@ -76,8 +77,7 @@ def leftover_ct_id(path: Path) -> int:
 
 
 def write_ids_module(ids: list[int]) -> None:
-    body = ",".join(str(n) for n in ids)
-    IDS_JS.write_text(f"export default [{body}];\n")
+    IDS_JSON.write_text(json.dumps(ids, separators=(",", ":")) + "\n")
 
 
 def main() -> int:
@@ -93,7 +93,7 @@ def main() -> int:
     write_ids_module(ids)
     Path("/tmp/pokoin-placeholder-leftover-ids.json").write_text(json.dumps(ids) + "\n")
     if not args.apply:
-        print(f"dry-run wrote {IDS_JS.name} (pass --apply)", flush=True)
+        print(f"dry-run wrote {IDS_JSON.name} (pass --apply)", flush=True)
         return 0
     card = pokoin_card()
     out = Path("/tmp/pokoin-placeholder-leftovers")
@@ -105,7 +105,7 @@ def main() -> int:
     for path in hits:
         write_leftover(out / path.name, card)
         write_leftover(path, card)
-    print(f"wrote {len(hits)} leftovers + {IDS_JS.name} v={CACHE}", flush=True)
+    print(f"wrote {len(hits)} leftovers + {IDS_JSON.name} v={CACHE}", flush=True)
     if args.push:
         subprocess.run(["rsync", "-a", "--info=stats1", f"{out}/", f"{HOST}:{PI_OBJECTS}/"], check=True)
         print("pushed pi", flush=True)

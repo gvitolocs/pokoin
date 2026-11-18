@@ -15,7 +15,7 @@ import { printLang, searchLang } from '../stores/locale.js';
 
 /**
  * Same typeahead engine as the header search bar, as a flat list of pickable
- * printings: the Solid port of market/src/use-live-suggest.js (+ its
+ * printings: the Solid port of the React useLiveSuggest hook (+ its
  * use-progressive-suggest.js pool). Keystrokes paint from the local ranker
  * (paintCatalogGroups); progressive Meili pages and catalog hydration only
  * feed the suggest-live cache and bump a tick so the list re-reads it. Every
@@ -42,6 +42,8 @@ function flattenPickable(groups, isLiveStub) {
         set: printing.set_name || printing.set || '',
         number: printing.collector_number || printing.number || '',
         image: printing.image || printing.cdn_image_url || printing.image_url || '',
+        nationality: printing.nationality || '',
+        expansion_nationality: printing.expansion_nationality || printing.expansionNationality || '',
       };
       if (!/^\d+$/.test(card.id)) continue;
       if (!card.image) {
@@ -66,7 +68,8 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   const [engine, setEngine] = createSignal(null);
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
-  const pokemon = isPokemonGame();
+  const [namesTick, setNamesTick] = createSignal(0);
+  const pokemon = () => isPokemonGame();
   let current = '';
 
   onSettled(() => {
@@ -85,13 +88,21 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
     if (live && live.suggestLiveReady(String(current || '').trim())) setLiveTick((tick) => tick + 1);
   };
 
+  // Localized card names for the search language (`evoli` → Eevee), a lazy chunk.
+  createEffect(() => [engine(), searchLang()], ([live, lang]) => {
+    if (!live || live.localizedNamesReady(lang)) return;
+    live.loadLocalizedNames(lang).then((ok) => {
+      if (ok) setNamesTick((tick) => tick + 1);
+    });
+  });
+
   // Progressive network pool: pages for the current generation feed the cache.
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), String(query() || '').trim(), searchLang(), printLang()],
-    ([live, term, lang, print]) => {
-      if (!live || !pokemon) return undefined;
+    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon(), namesTick()],
+    ([live, term, lang, print, isPokemon]) => {
+      if (!live || !isPokemon) return undefined;
       pool ||= live.emptyPool();
       clock ||= live.createGenerationClock();
       const scope = live.buildScope({ lang, printLang: print, kind, game: 'pokemon', query: term });
@@ -108,7 +119,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
       const controller = new AbortController();
       let stopped = false;
       (async () => {
-        for (const lookup of live.catalogRecall(term)) {
+        for (const lookup of live.catalogRecall(term, { lang })) {
           if (stopped || pool.generation !== generation) return;
           let offset = 0;
           let chunks = 0;
@@ -149,12 +160,12 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   // Catalog hydration (name / artist / set printings the resolver points at),
   // and the satellite-game Meili suggest (no local catalog).
   createEffect(
-    () => [engine(), String(query() || '').trim(), searchLang(), printLang()],
-    ([live, term, lang, print]) => {
+    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon()],
+    ([live, term, lang, print, isPokemon]) => {
       current = term;
       if (!live || !term) return undefined;
       const ready = live.suggestLiveReady(term);
-      if (pokemon) {
+      if (isPokemon) {
         if (!ready) return undefined;
         const resolved = live.resolveSuggestQuery(term);
         const targets = [];
@@ -225,6 +236,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
     const term = String(query() || '');
     liveTick();
     epoch();
+    namesTick();
     if (!live || !live.suggestLiveReady(term)) return [];
     const groups = live.paintCatalogGroups(term, { printLang: printLang(), searchLang: searchLang(), kind, limit });
     return flattenPickable(groups, live.isLiveStub).slice(0, limit);

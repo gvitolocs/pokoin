@@ -2,6 +2,7 @@
 
 pub mod associate;
 pub mod auth;
+pub mod cardrails;
 pub mod chat;
 pub mod collection;
 pub mod forum;
@@ -10,6 +11,7 @@ pub mod partner;
 pub mod poko;
 pub mod portfolio;
 pub mod poko_bets;
+pub mod poko_bot_chat;
 pub mod poko_chat;
 pub mod poko_market;
 pub mod referral;

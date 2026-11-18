@@ -4,6 +4,8 @@
 - Do not introduce, restore, deploy, or retain a Node.js production runtime as the migration's completed state. Do not proxy Rust routes to Node or return placeholder success payloads for unfinished ports.
 - Node.js may be used for local builds, development tools, reference implementations, and isolated tests/benchmarks; it must not serve production requests or production backend jobs after cutover.
 - Complete native implementations and verify contract parity, authentication/authorization, persistence, and end-to-end flows before declaring migration complete. A partial Rust rollout does not satisfy this requirement.
+- A change that adds a user-visible flow, or changes one that exists, updates [docs/FEATURES.toml](docs/FEATURES.toml) in the same PR: its `money` flag, the files that carry it, the tests that prove it and its `status`, as `scripts/check-features.sh` checks ([docs/CI.md](docs/CI.md), "Feature map").
+- Run `scripts/check-fast` before committing a `pokoin-rust/` change ([docs/CI.md](docs/CI.md)): it checks only what the change touched, fails only on new fmt/clippy findings, and prints skipped steps as SKIPPED.
 - Preserve service availability while the migration is being prepared. Production replacement/removal follows the existing explicit push/deploy authorization rule; this requirement is not permission to shut down live services prematurely.
 
 ## Worktree isolation (Paseo) — required, not optional
@@ -12,7 +14,7 @@
 
 | Piece | Where | Notes |
 | --- | --- | --- |
-| Website / React SPA | **this repo** (`market/`, `home/`) | Deploy: `scripts/deploy-web.sh` |
+| Website / Solid SPA | **this repo** (`solid/`, shared modules in `market/`, `home/`) | Build: `scripts/build-web.sh`; deploy: [docs/WEB_HOST.md](docs/WEB_HOST.md) |
 | CardVault app | `gvitolocs/cardvault` | Flutter Android/iOS — **not** the shared API |
 | Shared Pokoin API | Pi `api.pokoin.com`, one native Rust binary (`pokoin-rust/`, unit `pokoin-rust-api`); the nezopt k3s overflow runs the same release | Both Web and CardVault call it. Deploy: `scripts/deploy-pokoin-rust.sh` ([docs/RUST_RUNTIME.md](docs/RUST_RUNTIME.md)). The Node backend (`pokoin-oracle-api`, CardVault’s `pokemon_card_vault/api`) is retired; what still runs on Node is listed in [docs/rust-migration/NODE_REMAINING.md](docs/rust-migration/NODE_REMAINING.md). |
 
@@ -44,6 +46,15 @@ checkout. It is **not** a development workspace:
   in the canonical checkout are rejected by `.githooks/pre-commit` unless
   `POKOIN_ALLOW_CANONICAL_COMMIT=1` is set for an intentional integration
   or maintenance operation.
+- A local push that updates `refs/heads/main` is a direct push, so
+  `.githooks/pre-push` refuses it unless that commit's required GitHub checks
+  are already green on it, and refuses deleting or rewriting `main` whatever
+  the checks say. It also secret-scans every commit before it is published.
+  Push your branch and open a pull request instead; an agent never overrides
+  this hook — if it refuses, stop and report. `git push --no-verify` skips the
+  hook, and the deploy entry points run `scripts/require-ci-green.sh` again, so
+  an unchecked commit is still unshippable
+  ([docs/CI.md](docs/CI.md), "Pushing to main").
 
 While operating inside a Paseo workspace:
 

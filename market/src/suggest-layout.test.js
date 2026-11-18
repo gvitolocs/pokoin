@@ -4,10 +4,62 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
-const desktopCss = css.slice(0, css.indexOf('@media (max-width: 720px)'));
-const phone720 = css.slice(css.indexOf('@media (max-width: 720px)'));
-const phone720First = phone720.slice(0, phone720.indexOf('@media (max-width: 480px)'));
+const read = (name) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), name), 'utf8');
+// styles.css opens with @import "./search-box.css" (the header search rules); inline it like the build does.
+const styles = read('styles.css');
+assert.match(styles, /^@import "\.\/search-box\.css";/);
+const searchBox = read('search-box.css');
+const css = styles.replace(/^@import "\.\/search-box\.css";/, searchBox);
+/** Desktop rules, the phone ≤720px block of the search UI, and what follows it — per file, search rules first.
+ * The cut anchors on the first ≤720px block restyling the suggest panel (`.suggest-`) or the topbar row the
+ * search pill sits in (`.topbar-row`), not on the first such block in the file: in styles.css that block is the
+ * unrelated `.nav-preview-dash` one 280bc4fe put ahead of the search rules (PKN-06), and cutting there drops
+ * thousands of desktop lines. A sheet that yields no anchor, or an empty or whole desktop slice, throws. */
+const PHONE720 = '@media (max-width: 720px)';
+const PHONE480 = '@media (max-width: 480px)';
+const SEARCH_RESTYLED = /\.suggest-|\.topbar-row\b/;
+/** Comments blanked to spaces, offsets and line breaks intact, so prose never moves the cut. */
+const noComments = (sheet) => sheet.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+/** Index of the `}` closing the block whose `@media` starts at `at`. */
+function blockEnd(sheet, at) {
+  let depth = 0;
+  for (let i = sheet.indexOf('{', at); i < sheet.length; i += 1) {
+    if (sheet[i] === '{') depth += 1;
+    else if (sheet[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return sheet.length;
+}
+function split(sheet, name) {
+  const flat = noComments(sheet);
+  let at = -1;
+  for (let i = flat.indexOf(PHONE720); i !== -1; i = flat.indexOf(PHONE720, i + 1)) {
+    if (SEARCH_RESTYLED.test(flat.slice(i, blockEnd(flat, i)))) {
+      at = i;
+      break;
+    }
+  }
+  assert.ok(at !== -1, `${name}: no ${PHONE720} block restyles the suggest panel or the topbar row`);
+  // Earlier ≤720px blocks are cut out of it: a phone-only rule is never a desktop rule.
+  let desktop = '';
+  let from = 0;
+  for (let i = flat.indexOf(PHONE720); i !== -1 && i < at; i = flat.indexOf(PHONE720, i + 1)) {
+    desktop += sheet.slice(from, i);
+    from = blockEnd(flat, i) + 1;
+  }
+  desktop += sheet.slice(from, at);
+  assert.ok(desktop.length > 0, `${name}: the desktop slice came out empty`);
+  assert.ok(desktop.length < sheet.length, `${name}: the desktop slice is the whole sheet, so nothing was cut`);
+  const phone = sheet.slice(at);
+  const narrow = phone.indexOf(PHONE480);
+  return { desktop, phone, phoneFirst: phone.slice(0, narrow === -1 ? phone.length : narrow) };
+}
+const [boxParts, styleParts] = [split(searchBox, 'search-box.css'), split(styles, 'styles.css')];
+const desktopCss = boxParts.desktop + styleParts.desktop;
+const phone720 = boxParts.phone + styleParts.phone;
+const phone720First = boxParts.phoneFirst + styleParts.phoneFirst;
 
 /** Desktop Playwright: `resize 1440 900`. Phone: `resize 393 852` (iPhone 16). */
 test('suggest row is two columns without a Singles cell', () => {
@@ -16,17 +68,7 @@ test('suggest row is two columns without a Singles cell', () => {
   assert.match(row[0], /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/);
   assert.equal(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto/.test(row[0]), false);
   assert.equal(desktopCss.includes('.suggest-row:has(.suggest-art)'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.equal(chrome.includes('suggest-kind'), false);
-  assert.equal(chrome.includes('suggest-meta'), false);
-  assert.equal(chrome.includes('suggest-pending'), false);
   assert.equal(desktopCss.includes('.suggest-pending'), false);
-  assert.match(chrome, /data-suggest-id/);
-  assert.match(chrome, /paintCatalogGroups/);
-  assert.match(chrome, /suggestLiveReady/);
-  assert.match(chrome, /identity\.suggestExpansionShort/);
-  assert.match(chrome, /<ExpansionMark/);
-  assert.match(chrome, /expansionSymbolUrl/);
   const api = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'api.js'), 'utf8');
   assert.match(api, /expansion_symbol_url/);
 });
@@ -42,13 +84,7 @@ test('desktop collector number is its own middle column; phone folds it into the
   assert.match(desktopCss, /\.suggest-number \{[^}]*text-align:\s*left/);
   assert.match(desktopCss, /\.suggest-number \{[^}]*min-width:\s*7\.5ch/);
   assert.equal(desktopCss.includes('suggest-copy-head'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /className="suggest-translated"/);
-  assert.match(chrome, /suggestTranslatedLine/);
-  assert.match(chrome, /suggestCardName/);
   assert.match(desktopCss, /\.suggest-translated \{/);
-  assert.match(chrome, /className="suggest-number"/);
-  assert.match(chrome, /clipSuggestCollector/);
   assert.match(desktopCss, /\.suggest-number \{[^}]*font-size:\s*1\.55rem/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*color:\s*var\(--yellow\)/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*font-size:\s*1\.4rem/);
@@ -76,18 +112,9 @@ test('desktop collector number is its own middle column; phone folds it into the
   assert.match(desktopCss, /\.set-shortcut\.is-on \.set-shortcut-sym,\s*\.set-mark-glow \.set-shortcut-sym[\s\S]*drop-shadow/);
   assert.match(desktopCss, /\.set-shortcut\.is-on,\s*\.set-mark-glow \{[^}]*border-color:\s*transparent/);
   assert.equal(/\.set-shortcut\.is-on,\s*\.set-mark-glow \{[^}]*border-color:\s*var\(--yellow\)/.test(desktopCss), false);
-  assert.match(chrome, /className="set-shortcut is-on"/);
-  const expansion = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'pages/Expansion.jsx'), 'utf8');
-  assert.match(expansion, /set-sym-wrap/);
-  const setGuide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SetGuideGrid.jsx'), 'utf8');
   const desk = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'desk.css'), 'utf8');
-  assert.match(setGuide, /className="set-shortcut is-on"/);
-  // Nationality goes through resolveExpansionNationality (pins for empty/unknown catalog values, PR 254).
-  assert.match(setGuide, /printFlagFromNationality\(resolveExpansionNationality\(row\)\)/);
-  assert.match(setGuide, /set-guide-print-flag/);
   assert.match(desk, /\.set-guide-print-flag img \{[^}]*border-radius:\s*50%/);
   assert.match(desk, /\.set-guide-card strong\.has-print-flag \{[^}]*display:\s*flex/);
-  assert.doesNotMatch(setGuide.match(/function SetGuideLogo[\s\S]*?\n\}/)[0], /printFlag/);
   assert.match(
     phone720First,
     /\.suggest-art-cluster:has\(\.suggest-art\) \.suggest-print-flag \{[^}]*position:\s*absolute/,
@@ -103,7 +130,6 @@ test('phone ≤720px suggest row stays two columns', () => {
 });
 
 test('suggest list never pans sideways; long names scale to fit beside the art', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   assert.match(desktopCss, /\.suggest-list \{[^}]*overflow-x:\s*hidden/);
   assert.match(desktopCss, /\.suggest-list \{[^}]*touch-action:\s*pan-y/);
   assert.match(desktopCss, /\.suggest-copy strong \{[^}]*max-width:\s*100%/);
@@ -111,50 +137,31 @@ test('suggest list never pans sideways; long names scale to fit beside the art',
   // Phone: the name may run to 1px before the artwork.
   const row = phone720First.match(/\.suggest-row \{[^}]+\}/g)?.find((block) => /grid-template-columns/.test(block));
   assert.match(row, /gap:\s*1px/);
-  // Titles are fitted before FLIP measures the rows.
-  assert.match(chrome, /useSuggestTitleFit\(listRef[\s\S]*useSuggestFlip\(listRef/);
 });
 
+// The SearchBox/SearchToggles/SetGuideGrid markup is guarded in solid/src/components/{SearchBox,SetGuideGrid}.test.js.
 test('LEGEND and BREAK suggest art is the full card rotated, not the art-cut', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /resolveArtLayout/);
-  assert.match(chrome, /artLayout === 'landscape'/);
-  assert.match(chrome, /is-landscape/);
-  assert.match(chrome, /cut=\{artLayout === 'window' \|\| artLayout === 'halfart'\}/);
   assert.match(desktopCss, /\.suggest-art\.is-landscape \{/);
   assert.match(desktopCss, /\.suggest-art\.is-landscape img \{[^}]*rotate\(90deg\)/);
   assert.match(phone720First, /\.suggest-art\.is-landscape \{ --suggest-art-w:\s*6\.75rem/);
 });
 
 test('full-bleed suggest art skips the illustration window crop', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /resolveArtLayout/);
-  assert.match(chrome, /is-bleed/);
   assert.match(desktopCss, /\.suggest-art\.is-bleed \{/);
   assert.match(desktopCss, /\.suggest-art\.is-bleed img \{[^}]*object-position:\s*center 18%/);
 });
 
 test('desktop suggest hover shows leftover JPEG beside the panel', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   assert.match(desktopCss, /\.suggest-hover \{[^}]*position:\s*fixed/);
   assert.match(desktopCss, /\.suggest-hover \{[^}]*pointer-events:\s*none/);
   assert.match(phone720First, /\.suggest-hover \{\s*display:\s*none/);
-  assert.match(chrome, /className="suggest-hover"/);
-  assert.match(chrome, /full=\{Boolean\(hoverHero\)\}/);
-  assert.match(chrome, /createPortal/);
-  assert.match(chrome, /<CardArt src=\{hoverSrc\} full=\{Boolean\(hoverHero\)\} alt="" \/>/);
 });
 
 test('suggest thumbs preload into a 128 LRU; hover JPEGs are not cached', () => {
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   const images = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'suggest-images.js'), 'utf8');
   const api = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'api.js'), 'utf8');
   assert.match(images, /SUGGEST_THUMB_CACHE = 128/);
   assert.equal(images.includes('preloadSuggestHero'), false);
-  assert.match(chrome, /preloadSuggestThumbs/);
-  assert.match(chrome, /loading=\{thumbLoading\}/);
-  assert.match(chrome, /fetchPriority=\{thumbPriority\}/);
-  assert.match(chrome, /SUGGEST_THUMB_EAGER/);
   assert.match(api, /preloadSuggestThumbs\(collectPrintingThumbUrls/);
 });
 
@@ -170,15 +177,5 @@ test('game and title language sit on the left of the search pill', () => {
   assert.match(phoneBar[0], /--topbar-flag:\s*32px/);
   assert.match(phone720First, /\.desktop-anchor \{ display: none; \}/);
   assert.equal(phone720First.includes('.topbar-row > .lang-toggle {'), false);
-  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  const toolbar = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SearchToolbar.jsx'), 'utf8');
-  assert.match(chrome, /className="search-pill"[\s\S]*<div className="search-lead">[\s\S]*<GameSelect \/>[\s\S]*<LangToggle \/>/);
-  assert.match(chrome, /function PrintLangToggle[\s\S]*search-lens-mark[\s\S]*search-go-icon/);
-  assert.match(chrome, /isPokemonGame\(\) \? <PrintLangToggle \/>/);
-  assert.match(chrome, /className="sr-only" type="submit"/);
-  assert.equal(chrome.includes('search-submit'), false);
-  assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
   assert.match(css, /\.search-pill > input:nth-last-child\(2\)\s*\{[^}]*border-radius:\s*0 999px 999px 0/s);
-  assert.match(toolbar, /aria-label="Card print"/);
-  assert.equal(chrome.includes('variant="drawer"'), false);
 });

@@ -6,12 +6,10 @@ import { authSession, refreshSession } from './session.js';
 
 /**
  * Who is signed in, for the header (avatar, PKN chip, menu account card):
- * the React AuthProvider's profile + availablePkn and WalletProvider's
- * balance. First paint reads the cached session (`pokoin.auth.session`);
+ * the profile, availablePkn and the wallet balance. First paint reads the cached session (`pokoin.auth.session`);
  * after it, one REST read of users/{uid} + balances/{uid}
- * (market/src/firestore-rest.js — the same read React's extension desk
- * uses) refreshes them without the Firestore SDK, and again whenever the
- * tab comes back. The fresh values are persisted to the session like React.
+ * (market/src/firestore-rest.js) refreshes them without the Firestore SDK, and again whenever the
+ * tab comes back. The fresh values are persisted to the session.
  * The readers (REST, profile shaping, wallet RPC) load with that first read.
  */
 const [live, setLive] = createSignal(null);
@@ -81,6 +79,7 @@ async function readAccount() {
     silverUntil: profile.silverUntil,
     availablePkn: pkn,
     photoUrl: profile.photoUrl,
+    username: profile.username,
   });
   refreshSession();
 }
@@ -95,8 +94,11 @@ export function patchAccountProfile(partial) {
   const base = accountProfile();
   if (!uid || !base) return;
   setLive({ uid, profile: { ...base, ...partial }, availablePkn: availablePkn() });
-  if ('photoUrl' in partial) {
-    writeAuthSession({ ...authSession(), uid, signedIn: true, photoUrl: partial.photoUrl });
+  if ('photoUrl' in partial || 'username' in partial) {
+    const session = { ...authSession(), uid, signedIn: true };
+    if ('photoUrl' in partial) session.photoUrl = partial.photoUrl;
+    if ('username' in partial) session.username = partial.username;
+    writeAuthSession(session);
     refreshSession();
   }
 }

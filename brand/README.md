@@ -13,7 +13,7 @@ bash scripts/sync-brand-assets.sh      # copy everything else in
 
 The topbar logo: heavy Fredoka "P·koin", the pixel coin mascot as the first **o**,
 a yellow coin dot on the **i**, navy drop shadow. In React use
-`market/src/components/PokoinWordmark.jsx`; everywhere else use the SVGs.
+`solid/src/components/PokoinWordmark.jsx`; everywhere else use the SVGs.
 
 | File | Use |
 | --- | --- |

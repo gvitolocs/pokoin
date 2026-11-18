@@ -53,7 +53,7 @@ async fn read_doc(
     collection: &str,
     id: &str,
 ) -> Result<Option<Value>, ApiError> {
-    Ok(fs.get_document(&fs.document_path(collection, id)).await?)
+    Ok(fs.get_document(&fs.document_path(collection, id)?).await?)
 }
 
 async fn write_doc(
@@ -62,7 +62,7 @@ async fn write_doc(
     id: &str,
     value: &Value,
 ) -> Result<(), ApiError> {
-    fs.set_document(&fs.document_path(collection, id), value)
+    fs.set_document(&fs.document_path(collection, id)?, value)
         .await?;
     Ok(())
 }
@@ -134,6 +134,8 @@ async fn crypto_purchase_request(
     if quote_id.is_empty() {
         return Err(ApiError::bad_request("Quote id is required."));
     }
+    crate::firestore::validate_client_id(&quote_id)
+        .map_err(|_| ApiError::bad_request("Invalid quote id."))?;
     if tx_hash.is_empty() {
         return Err(ApiError::bad_request(
             "Deposit transaction hash is required.",
@@ -156,7 +158,7 @@ async fn crypto_purchase_request(
     if state.now_ms() > expires_ms {
         let _ = firestore
             .update_document(
-                &firestore.document_path(store::CRYPTO_PURCHASE_QUOTES, &quote_id),
+                &firestore.document_path(store::CRYPTO_PURCHASE_QUOTES, &quote_id)?,
                 &json!({ "status": "expired", "updatedAt": state.now_iso() }),
                 Some(&["status", "updatedAt"]),
             )
@@ -277,7 +279,7 @@ async fn crypto_purchase_request(
 
     let _ = firestore
         .update_document(
-            &firestore.document_path(store::CRYPTO_PURCHASE_QUOTES, &quote_id),
+            &firestore.document_path(store::CRYPTO_PURCHASE_QUOTES, &quote_id)?,
             &json!({
                 "status": "credited",
                 "requestId": request_id,
@@ -504,6 +506,8 @@ async fn crypto_sale_request(
     if quote_id.is_empty() {
         return Err(ApiError::bad_request("Quote id is required."));
     }
+    crate::firestore::validate_client_id(&quote_id)
+        .map_err(|_| ApiError::bad_request("Invalid quote id."))?;
     let deposit_tx_hash = text_of(body, "depositTxHash", 80).to_ascii_lowercase();
     if deposit_tx_hash.is_empty() {
         return Err(ApiError::bad_request(
@@ -527,7 +531,7 @@ async fn crypto_sale_request(
     if state.now_ms() > expires_ms {
         let _ = firestore
             .update_document(
-                &firestore.document_path(store::CRYPTO_SALE_QUOTES, &quote_id),
+                &firestore.document_path(store::CRYPTO_SALE_QUOTES, &quote_id)?,
                 &json!({ "status": "expired", "updatedAt": state.now_iso() }),
                 Some(&["status", "updatedAt"]),
             )
@@ -629,7 +633,7 @@ async fn crypto_sale_request(
 
     let _ = firestore
         .set_document(
-            &firestore.document_path(store::CRYPTO_SALE_PAYOUTS, &request_id),
+            &firestore.document_path(store::CRYPTO_SALE_PAYOUTS, &request_id)?,
             &json!({
                 "uid": claims.uid,
                 "requestId": request_id,
@@ -651,7 +655,7 @@ async fn crypto_sale_request(
         (mode, Some(tx_hash)) => {
             let _ = firestore
                 .set_document(
-                    &firestore.document_path(store::CRYPTO_SALE_REQUESTS, &request_id),
+                    &firestore.document_path(store::CRYPTO_SALE_REQUESTS, &request_id)?,
                     &json!({
                         "status": "payout_sent",
                         "payoutTxHash": tx_hash,
@@ -665,7 +669,7 @@ async fn crypto_sale_request(
         (mode, None) => {
             let _ = firestore
                 .set_document(
-                    &firestore.document_path(store::CRYPTO_SALE_REQUESTS, &request_id),
+                    &firestore.document_path(store::CRYPTO_SALE_REQUESTS, &request_id)?,
                     &json!({ "settlementMode": mode, "updatedAt": state.now_iso() }),
                 )
                 .await;
@@ -792,6 +796,8 @@ async fn wpkn_exchange_request(
     if quote_id.is_empty() {
         return Err(ApiError::bad_request("Quote id is required."));
     }
+    crate::firestore::validate_client_id(&quote_id)
+        .map_err(|_| ApiError::bad_request("Invalid quote id."))?;
     let direction = wpkn::normalize_direction(&text_of(body, "direction", 40))?;
     let payout_address = crypto::normalize_address(
         &text_of(body, "toAddress", 120),
@@ -823,7 +829,7 @@ async fn wpkn_exchange_request(
     if state.now_ms() > expires_ms {
         let _ = firestore
             .update_document(
-                &firestore.document_path(store::WPKN_EXCHANGE_QUOTES, &quote_id),
+                &firestore.document_path(store::WPKN_EXCHANGE_QUOTES, &quote_id)?,
                 &json!({ "status": "expired", "updatedAt": state.now_iso() }),
                 Some(&["status", "updatedAt"]),
             )
@@ -940,7 +946,7 @@ async fn wpkn_exchange_request(
     .await?;
     let _ = firestore
         .update_document(
-            &firestore.document_path(store::WPKN_EXCHANGE_QUOTES, &quote_id),
+            &firestore.document_path(store::WPKN_EXCHANGE_QUOTES, &quote_id)?,
             &json!({
                 "status": initial_status,
                 "requestId": request_id,
@@ -960,7 +966,7 @@ async fn wpkn_exchange_request(
             Ok((mode, Some(tx_hash))) => {
                 let _ = firestore
                     .set_document(
-                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id),
+                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id)?,
                         &json!({
                             "status": "completed",
                             "payoutTxHash": tx_hash,
@@ -975,7 +981,7 @@ async fn wpkn_exchange_request(
             Ok(_) | Err(_) => {
                 let _ = firestore
                     .set_document(
-                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id),
+                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id)?,
                         &json!({
                             "settlementMode": "manual_pending",
                             "updatedAt": state.now_iso(),
@@ -996,7 +1002,7 @@ async fn wpkn_exchange_request(
             Ok((mode, Some(tx_hash))) => {
                 let _ = firestore
                     .set_document(
-                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id),
+                        &firestore.document_path(store::WPKN_EXCHANGE_REQUESTS, &request_id)?,
                         &json!({
                             "status": "processing",
                             "payoutTxHash": tx_hash,

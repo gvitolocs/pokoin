@@ -3,7 +3,12 @@ export const COOKIE_CONSENT_COOKIE = 'pokoin_cookie_consent';
 export const COOKIE_BANNER_COPY =
   'We use cookies to keep you signed in, remember your cart, and run the marketplace.';
 
+/** '1' = all cookies (Google's store badge too); 'essential' = sign-in and cart only. */
+export const COOKIE_CONSENT_ALL = '1';
+export const COOKIE_CONSENT_ESSENTIAL = 'essential';
+
 const ACCEPTED = new Set(['1', 'true']);
+const ANSWERED = new Set(['1', 'true', COOKIE_CONSENT_ESSENTIAL]);
 
 function safeStorage(override) {
   if (override) {
@@ -20,6 +25,10 @@ function isAcceptedValue(value) {
   return ACCEPTED.has(String(value || '').trim());
 }
 
+function isAnsweredValue(value) {
+  return ANSWERED.has(String(value || '').trim());
+}
+
 export function readConsentCookie(cookieSource) {
   const raw = cookieSource ?? (typeof document !== 'undefined' ? document.cookie : '');
   if (!raw) {
@@ -29,34 +38,45 @@ export function readConsentCookie(cookieSource) {
   return match ? decodeURIComponent(match[1].trim()) : '';
 }
 
-function writeConsentCookie() {
+function writeConsentCookie(value) {
   if (typeof document === 'undefined') {
     return;
   }
   const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
-  document.cookie = `${COOKIE_CONSENT_COOKIE}=1; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
+  document.cookie = `${COOKIE_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
 }
 
-export function hasCookieConsent(storage, cookieSource) {
+function storedConsent(storage, cookieSource) {
   try {
     const value = safeStorage(storage)?.getItem(COOKIE_CONSENT_KEY);
-    if (isAcceptedValue(value)) {
-      return true;
+    if (isAnsweredValue(value)) {
+      return String(value).trim();
     }
   } catch (_) {
     /* private mode / credentialless teardown */
   }
-  return isAcceptedValue(readConsentCookie(cookieSource));
+  return readConsentCookie(cookieSource);
 }
 
-export function acceptCookieConsent(storage) {
+/** The visitor answered the banner, with either button. */
+export function hasCookieConsent(storage, cookieSource) {
+  return isAnsweredValue(storedConsent(storage, cookieSource));
+}
+
+/** The visitor accepted all cookies, not only the essential ones (gates third-party widgets). */
+export function hasFullCookieConsent(storage, cookieSource) {
+  return isAcceptedValue(storedConsent(storage, cookieSource));
+}
+
+export function acceptCookieConsent(storage, level = COOKIE_CONSENT_ALL) {
+  const value = level === COOKIE_CONSENT_ESSENTIAL ? COOKIE_CONSENT_ESSENTIAL : COOKIE_CONSENT_ALL;
   try {
-    safeStorage(storage)?.setItem(COOKIE_CONSENT_KEY, '1');
+    safeStorage(storage)?.setItem(COOKIE_CONSENT_KEY, value);
   } catch (_) {
     /* private mode / credentialless iframe */
   }
   if (storage === undefined) {
-    writeConsentCookie();
+    writeConsentCookie(value);
   }
 }
 

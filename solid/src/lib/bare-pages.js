@@ -1,5 +1,5 @@
 /**
- * React AppShell "board" paths (market/src/App.jsx): test.pokoin.com review
+ * Bare "board" paths: test.pokoin.com review
  * boards and the extension sign-in bridge render bare — no header, cookie
  * notice, chat dock or origin-down page — and stay on the legacy dashboard host.
  */

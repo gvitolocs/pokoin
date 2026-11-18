@@ -10,13 +10,8 @@ test('unreadMessagesCount sums per-conversation unread counts', () => {
   assert.equal(unreadMessagesCount([null, undefined, { peerUsername: 'a' }, { unread: '4' }]), 4);
 });
 
-test('the nav dot is driven by the same /api/chat list seam as the Messages page', () => {
-  const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
-  assert.match(chrome, /listConversations/);
-  assert.match(chrome, /unreadMessagesCount/);
-  assert.match(chrome, /messages-unread-dot/);
-  assert.match(chrome, /MESSAGES_UNREAD_REFRESH_MS/);
-
+// The header dot and the chat FAB markup are guarded in solid/src/components/Chrome.test.js.
+test('the nav dot reads the same /api/chat list seam as the Messages page', () => {
   const chatClient = readFileSync(new URL('./chat-client.js', import.meta.url), 'utf8');
   assert.match(chatClient, /\/api\/chat\?action=list/);
 });
@@ -26,12 +21,8 @@ test('refresh cadence and event name are stable constants', () => {
   assert.equal(MESSAGES_UNREAD_EVENT, 'pokoin:messages-unread');
 });
 
-test('closed ChatDock shows a fixed bottom-right FAB that opens the list', () => {
-  const dock = readFileSync(new URL('./components/ChatDock.jsx', import.meta.url), 'utf8');
+test('the closed chat FAB is fixed bottom-right', () => {
   const css = readFileSync(new URL('./chat-dock.css', import.meta.url), 'utf8');
-  assert.match(dock, /className="chat-fab"/);
-  assert.match(dock, /openChatList\(\)/);
-  assert.match(dock, /chat-fab-badge/);
   assert.match(css, /\.chat-fab[\s\S]*position:\s*fixed/);
   assert.match(css, /\.chat-fab[\s\S]*bottom:/);
   assert.match(css, /\.chat-fab[\s\S]*right:/);

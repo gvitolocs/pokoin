@@ -1,16 +1,31 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
-import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '@market/api.js';
-import { inventoryRowsForLocation, liveInventoryListings } from '@market/inventory-listings.js';
+import { useLocation, useSearchParams } from '@solidjs/router';
+import { exportStockCsv } from '@market/api.js';
+import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { game } from '@market/game.js';
+import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
 import '@market/export-preview.css';
-import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import CollectionHoldings from '../components/inventory/CollectionHoldings.jsx';
 import InventoryBoard from '../components/inventory/InventoryBoard.jsx';
 import LocationBoard from '../components/inventory/LocationBoard.jsx';
-import PricingStrategies, { PricerDefaults } from '../components/inventory/PricingStrategies.jsx';
+import PricerDefaults from '../components/inventory/PricerDefaults.jsx';
+import PricerTab from '../components/pricer/PricerTab.jsx';
+import { createPricing } from '../components/pricer/pricing-store.js';
+import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
+import {
+  allowMypokoinPreview,
+  MYPOKOIN_PREVIEW_BANNER,
+  previewListings,
+  previewPricer,
+  previewComps,
+  previewGroups,
+  previewStrategies,
+} from './mypokoin-preview.js';
+import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import { sellerCurrency } from '../stores/buyer.js';
@@ -22,13 +37,7 @@ const FORMATS = [
   { id: 'tcgplayer', label: 'TCGPlayer' },
 ];
 
-// Paint the board off the first raw page, then top up the rest in the
-// background — one round trip to first row instead of the full inventory.
-const INVENTORY_FIRST_PAGE = 200;
-const INVENTORY_PAGE_LIMIT = 1000;
-// A first page still missing after this long is asked for again; whichever
-// answer lands first fills the board.
-const INVENTORY_RETRY_MS = 12000;
+const LISTING_METRICS = ['Live listings', 'Cards in stock', 'Total asking', 'Paused'];
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -91,113 +100,119 @@ function tabOf(pathname) {
   return {
     importTab: path === '/mypokoin/import',
     settingsTab: path === '/mypokoin/settings',
+    pricerTab: path === '/mypokoin/pricer',
     collectionTab: path === '/mypokoin/collection',
     locationName,
   };
 }
 
-function InventoryDesk() {
+function InventoryDesk(props) {
   const location = useLocation();
   const tab = createMemo(() => tabOf(location.pathname), {
-    equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab
+    equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab && a.pricerTab === b.pricerTab
       && a.collectionTab === b.collectionTab && a.locationName === b.locationName,
   });
-  // PKN opt-out sellers read their prices in local currency.
+  // Sellers read their prices in local currency.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
-  const [rows, setRows] = createSignal(null);
+  const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
+  // A first load paints page by page; its totals wait for the whole book.
+  const [partial, setPartial] = createSignal(false);
+  // A stored book answers from IndexedDB in a few ms: no skeleton flash before it.
+  const [waitShown, setWaitShown] = createSignal(Boolean(props.preview) || !hasStoredBooks());
+  if (!waitShown()) setTimeout(() => setWaitShown(true), 300);
   const [error, setError] = createSignal('');
   const [previewFormat, setPreviewFormat] = createSignal('powertools');
   const [preview, setPreview] = createSignal(null);
   const [previewBlob, setPreviewBlob] = createSignal(null);
   const [busy, setBusy] = createSignal('');
-  const [pricerDefaults, setPricerDefaults] = createSignal(null);
-  // Bumped by reload() so a stale background top-up stops writing rows.
-  let inventorySeq = 0;
-
-  async function topUpInventory(uid, token, gen) {
-    let offset = INVENTORY_FIRST_PAGE;
-    for (;;) {
-      let data;
-      try {
-        data = await fetchSellerListings(uid, token, { limit: INVENTORY_PAGE_LIMIT, offset });
-      } catch (_) {
-        return;
-      }
-      if (gen !== inventorySeq) return;
-      const raw = data.listings || data.items || [];
-      if (!raw.length) return;
-      const filtered = liveInventoryListings(raw);
-      const base = Array.isArray(untrack(rows)) ? untrack(rows) : [];
-      const known = new Set(base.map((row) => String(row.id || row.listingId || '')));
-      const fresh = filtered.filter((row) => !known.has(String(row.id || row.listingId || '')));
-      if (fresh.length) setRows([...base, ...fresh]);
-      if (raw.length < INVENTORY_PAGE_LIMIT) return;
-      offset += raw.length;
-    }
-  }
-
-  async function reload() {
-    const uid = listingsUid();
-    if (!uid) return;
-    const token = await getBearer();
-    inventorySeq += 1;
-    const data = await fetchSellerListings(uid, token, { limit: 1000 });
-    setRows(liveInventoryListings(data.listings || data.items || []));
-  }
+  const [collectionStats, setCollectionStats] = createSignal(null);
+  // Read once: the desk keeps the game it opened with.
+  const selectedGame = untrack(() => game().id);
+  let paintedKey = '';
 
   // One identity for the listings load: the cached session uid and the
   // restored Firebase uid are the same seller, so their arrival in either
   // order must not cancel a request already in flight.
   const listingsUid = createMemo(() => (signedIn() ? authUid() || accountProfile()?.uid || '' : ''));
+  // The seller's last pricer settings paint the market column with the book.
+  const [pricerDefaults, setPricerDefaults] = createSignal(
+    props.preview ? previewPricer() : readCachedPricerSettings(untrack(listingsUid)),
+  );
+
+  // Strategies, pricing groups and memberships: one source for the board and the Pricer tab.
+  const pricing = createPricing(props.preview
+    ? {
+      preview: true,
+      previewState: { strategies: previewStrategies(), groups: previewGroups().groups, pairs: previewGroups().memberships },
+      previewComps: previewComps(),
+      pricerSettings: previewPricer(),
+      rows,
+      setRows: (next) => setRows(() => next),
+    }
+    : {});
+
+  function readBook(uid, onUpdate, force = false) {
+    return loadOwnerBook(uid, selectedGame, onUpdate, { force });
+  }
+
+  async function reload() {
+    const uid = listingsUid();
+    if (!uid) return;
+    inventoryBooks.invalidate(uid, selectedGame);
+    return readBook(uid, (next, complete = true) => {
+      if (listingsUid() !== uid) return;
+      setPartial(!complete);
+      setRows(next);
+    }, true);
+  }
 
   createEffect(
     () => ({ uid: listingsUid(), ...tab() }),
-    ({ uid, importTab, settingsTab, collectionTab, locationName }) => {
+    ({ uid, importTab, settingsTab, pricerTab, collectionTab, locationName }) => {
       document.title = collectionTab
         ? 'Collection · MyPokoin'
         : settingsTab
         ? 'Settings · MyPokoin'
+        : pricerTab
+        ? 'Pricer · MyPokoin'
         : locationName
         ? `${locationName} · MyPokoin`
         : (importTab ? 'Export · MyPokoin' : 'MyPokoin · Pokoin');
       // The Collection tab loads holdings, not listings.
+      if (props.preview) return undefined;
       if (!uid || collectionTab) return undefined;
       let cancelled = false;
-      let settled = false;
-      const gen = ++inventorySeq;
-      const attempt = () => getBearer().then(async (token) => {
-        const data = await fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE });
-        if (cancelled || settled) return;
-        settled = true;
+      const key = `${uid}:${selectedGame}`;
+      if (paintedKey !== key) {
+        paintedKey = key;
+        // Another seller's rows never stay on screen; this seller's book
+        // paints now (memory) or as soon as IndexedDB answers.
+        setRows(inventoryBooks.peek(uid, selectedGame)?.rows ?? null);
+      }
+      readBook(uid, (next, complete = true) => {
+        if (cancelled) return;
         setError('');
-        setRows(liveInventoryListings(data.listings || data.items || []));
-        topUpInventory(uid, token, gen).catch(() => {});
+        setPartial(!complete);
+        setRows(next);
+      }).catch((err) => {
+        if (!cancelled) setError(err.message || 'Listings failed.');
       });
-      const fail = (err) => {
-        if (!cancelled && !settled) setError(err.message || 'Listings failed.');
-      };
-      attempt().catch(fail);
-      // A stalled token refresh or request must not leave the skeleton up for good.
-      const retry = setTimeout(() => {
-        if (!cancelled && !settled) attempt().catch(fail);
-      }, INVENTORY_RETRY_MS);
-      return () => {
-        cancelled = true;
-        clearTimeout(retry);
-      };
+      return () => { cancelled = true; };
     },
   );
 
   // Pricer defaults feed the board's market column and source preselect.
   createEffect(
-    () => signedIn() && !tab().importTab && !tab().collectionTab,
-    (on) => {
-      if (!on) return undefined;
+    () => (!tab().importTab && !tab().collectionTab ? listingsUid() : ''),
+    (uid) => {
+      if (props.preview || !uid) return undefined;
       let cancelled = false;
-      getBearer()
-        .then((token) => fetchPricingStrategies(token))
+      pricing.refresh()
         .then((data) => {
-          if (!cancelled) setPricerDefaults(() => data.pricerSettings || {});
+          if (cancelled || !data) return;
+          const settings = data.pricerSettings || {};
+          writeCachedPricerSettings(uid, settings);
+          setPricerDefaults(() => settings);
         })
         .catch(() => {});
       return () => { cancelled = true; };
@@ -239,20 +254,51 @@ function InventoryDesk() {
     downloadBlob(previewBlob(), `pokoin-stock-${previewFormat()}.csv`);
   }
 
-  const onListings = () => !tab().importTab && !tab().settingsTab && !tab().collectionTab;
+  const onListings = () => !tab().importTab && !tab().settingsTab && !tab().pricerTab && !tab().collectionTab;
   const locationName = () => tab().locationName;
+  const metrics = () => {
+    if (tab().collectionTab) {
+      const stats = collectionStats();
+      if (!stats) return [];
+      return [
+        { value: stats.owned, label: 'Cards owned' },
+        { value: stats.held, label: 'Held back' },
+        { value: stats.listed, label: 'Listed' },
+      ];
+    }
+    const live = rows();
+    if (!onListings()) return [];
+    // Hold the tiles' row while the first book loads, so it does not push the page.
+    if (!live || partial()) return LISTING_METRICS.map((label) => ({ value: '—', label }));
+    const scoped = locationName() ? inventoryRowsForLocation(live, locationName()) : live;
+    const summary = summarizeLiveInventory(scoped);
+    const paused = scoped.filter((row) => String(row.status || '').toLowerCase() === 'paused').length;
+    return [
+      { value: summary.listings, label: LISTING_METRICS[0] },
+      { value: summary.cards, label: LISTING_METRICS[1] },
+      { value: formatPrice(summary.listedPkn), label: LISTING_METRICS[2] },
+      { value: paused, label: LISTING_METRICS[3] },
+    ];
+  };
 
   return (
-    <div class="page desk">
-      <PageHead kicker="Seller" title="MyPokoin">
+    <div class="page desk mypokoin">
+      <Show when={props.preview}>
+        <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      </Show>
+      <StockNav
+        lede="Live listings, the cards you hold, and what you export."
+        metrics={metrics()}
+        forceActive={locationName() ? 'Listings' : ''}
+      >
         <a class="btn" href="/inventory/scan">Scan cards</a>
         <a class="btn ghost" href="/marketplace">List a card</a>
-      </PageHead>
-      <StockNav forceActive={locationName() ? 'Listings' : ''} />
+      </StockNav>
       <Alert>{error()}</Alert>
 
       <Show when={tab().importTab}>
         <DeskPanel title="Export stock">
+          <p class="mypokoin-help">Download the live book as CSV. The table below is the file you will save.</p>
           <div class="stock-csv-bar" role="group" aria-label="Export format">
             <For each={FORMATS}>
               {(row) => (
@@ -305,18 +351,79 @@ function InventoryDesk() {
         </DeskPanel>
       </Show>
 
-      <Show when={tab().collectionTab}><CollectionHoldings /></Show>
+      <Show when={tab().collectionTab}><CollectionHoldings preview={props.preview} onStats={setCollectionStats} /></Show>
 
-      <Show when={!tab().importTab && !tab().collectionTab && rows() == null && !error()}>
-        <DeskPanel title="Listings"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
+      <Show when={onListings() && rows() == null && !error()}>
+        {/* First visit only (later visits paint the stored book): holds the
+            footer below the fold so the board does not push it. */}
+        <Show when={waitShown()} fallback={<div class="mypokoin-wait" aria-hidden="true" />}>
+          <DeskPanel title="Listings" class="mypokoin-wait"><div class="skeleton-line" /><div class="skeleton-line" /></DeskPanel>
+        </Show>
       </Show>
       <Show when={tab().settingsTab}>
-        <DeskPanel title="Pricer defaults">
-          <PricerDefaults settings={pricerDefaults()} onSaved={(next) => setPricerDefaults(() => next)} />
-        </DeskPanel>
-        <DeskPanel title="Pricing strategies">
-          <PricingStrategies onApplied={() => reload().catch(() => {})} />
-        </DeskPanel>
+        <div class="mypokoin-settings">
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Shipping</h2>
+                <p class="mypokoin-help">Ship-from country is saved on your profile and copied onto every physical listing.</p>
+              </div>
+              <a class="btn" href="/profile">Edit shipping</a>
+            </div>
+          </section>
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Pricing defaults</h2>
+                <p class="mypokoin-help">Which market the listings board opens on.</p>
+              </div>
+            </div>
+            <PricerDefaults
+              preview={props.preview}
+              settings={pricerDefaults()}
+              onSaved={(next, rate) => {
+                setPricerDefaults(() => next);
+                // The pricer's money labels follow a settings save at once;
+                // the answer carries the fresh rate for a new currency.
+                pricing.setPricerSettings(() => next);
+                if (rate !== undefined) pricing.setCurrencyRate(() => rate);
+              }}
+            />
+          </section>
+          <section class="mypokoin-card">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Connections</h2>
+                <p class="mypokoin-help">CardTrader and Power Tools stay linked from Profile. Zero picking uses the same seller.</p>
+              </div>
+              <a class="btn" href="/profile">Open Profile</a>
+            </div>
+          </section>
+          <section class="mypokoin-card is-danger">
+            <div class="mypokoin-panel-head">
+              <div>
+                <h2>Danger zone</h2>
+                <p class="mypokoin-help">Deletes every Pokoin listing. CardTrader stock stays until you sync again.</p>
+              </div>
+            </div>
+            <div class="danger-row">
+              <Show
+                when={!props.preview}
+                fallback={<button type="button" class="btn ghost" disabled>Delete all Pokoin listings</button>}
+              >
+                <WipeAllInventory onError={(message) => setError(message)} />
+              </Show>
+            </div>
+          </section>
+        </div>
+      </Show>
+      <Show when={tab().pricerTab}>
+        <PricerTab
+          pricing={pricing}
+          rows={rows() || []}
+          preview={props.preview}
+          onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
+        />
       </Show>
       <Switch>
         <Match when={onListings() && rows() && !rows().length}>
@@ -337,8 +444,13 @@ function InventoryDesk() {
           <InventoryBoard
             rows={rows()}
             formatPrice={formatPrice}
-            defaultSource={pricerDefaults()?.defaultSource || ''}
+            showSummary={false}
+            defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
+            preview={props.preview}
+            previewComps={props.preview ? previewComps() : undefined}
+            pricing={pricing}
+            onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
           />
         </Match>
       </Switch>
@@ -347,15 +459,23 @@ function InventoryDesk() {
 }
 
 /**
- * Pokémon seller stock desk (market/src/pages/Inventory.jsx): /mypokoin and its
+ * Pokémon seller stock desk: /mypokoin and its
  * import / settings / collection / location tabs. Seller inventory lists only
  * active or paused rows with stock (liveInventoryListings, D00005R).
  */
 export default function Inventory() {
   const location = useLocation();
+  const [params] = useSearchParams();
   return (
-    <SignedIn from={untrack(() => location.pathname) || '/mypokoin'}>
-      <InventoryDesk />
-    </SignedIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={(
+        <SignedIn early from={untrack(() => location.pathname) || '/mypokoin'}>
+          <InventoryDesk />
+        </SignedIn>
+      )}
+    >
+      <InventoryDesk preview />
+    </Show>
   );
 }

@@ -1,0 +1,15 @@
+[Unit]
+Description=Upload the Pi standby's spooled WAL to off-site storage (wal-g)
+After=network-online.target docker.service
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pokoin-ops wal push-spool --spool /srv/pokoin/postgres/wal-spool --env-file /etc/pokoin/walg.env
+ExecStartPost=-/usr/local/bin/pokoin-ops hc-ping --unit %n
+# Background work on a 4-core Pi that serves the API: stay out of its way.
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryMax=300M
+TimeoutStartSec=50min

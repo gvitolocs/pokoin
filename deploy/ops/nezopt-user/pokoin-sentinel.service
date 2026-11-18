@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin sentinel (nezopt): writer connections, replication, slot, disk, backups, failed units
+After=network-online.target docker.service
+# No OnFailure=: the sentinel mails on its own, and its healthchecks ping turns /fail
+# (or stops) when it cannot.
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/pokoin/backup.env
+ExecStart=%h/.local/bin/pokoin-ops sentinel --role nezopt
+Nice=5
+TimeoutStartSec=4min

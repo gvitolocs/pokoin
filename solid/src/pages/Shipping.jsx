@@ -9,7 +9,7 @@ import { cartItems } from '../stores/cart.js';
 import { cartShippingChoice, setCartShippingChoice } from '../stores/cart-actions.js';
 import '@market/cart.css';
 
-/** /shipping (market/src/pages/Shipping.jsx): Packlink + letter rates, priced per seller parcel. */
+/** /shipping: Packlink + letter rates, priced per seller parcel. */
 export default function Shipping() {
   const delivery = createDeliveryCountry();
 
@@ -21,7 +21,12 @@ export default function Shipping() {
   const to = () => cartShippingChoice().country || delivery().country;
   const serviceId = () => cartShippingChoice().service;
   const toName = () => shipFromCountryName(to()) || to();
-  const live = createLiveShipping({ groups, to, service: serviceId });
+  const live = createLiveShipping({
+    groups,
+    to,
+    service: serviceId,
+    parcelPicks: () => cartShippingChoice().parcels || {},
+  });
   const active = () => (live.services().some((row) => row.id === serviceId())
     ? serviceId()
     : defaultShippingService(live.services()));

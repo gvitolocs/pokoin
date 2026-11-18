@@ -10,13 +10,34 @@ Never hotlink CardTrader from the SPA. Encode homepage webp here (not on
 the Pi). Set `POKOIN_INGEST_EXPANSION=World Championship Decks 2025` to
 refresh one set's singles from blueprint `image.url` / `show` (PNG or JPEG).
 After leftovers land, CLIP same-art groups those name buckets on nezopt 15T
-unless `POKOIN_SKIP_VERSION_MATCH=1`. Placeholder sweeps skip CLIP.
+unless `POKOIN_SKIP_VERSION_MATCH=1`, then reverse-holo pattern siblings join
+their base printing (`marketplace_join_reverse_pattern_versions`, foil
+overlays defeat CLIP). Placeholder sweeps skip CLIP.
 Set `POKOIN_INGEST_PLACEHOLDERS=1` to replace every leftover JPEG on the Pi
 that is still the 186×260 CardTrader logo (same key, full slug from the
 filename — `{ct_id}-{leftover-slug}.jpg` on CardTrader). CardTrader GET runs
 on Oracle `pokoin-marketplace` (home IP is rate-limited). Pillow JPEG/webp
 stays on nezopt. Do not HUP `pokoin-card-images` after rsync (HUP stops the
 Node process).
+`POKOIN_INGEST_IDS` / `POKOIN_INGEST_ID_FILE` are CardTrader ids and match
+`ct_id` only. Set `POKOIN_IDS_ARE_CARD_IDS=1` to take leftover public card ids
+instead, which match `card_id` only — never both kinds, because card_id is
+ct_id * 2 for most cards and a ct_id list would otherwise pull in unrelated
+cards whose card_id collides with one of the ids.
+Low-res upgrades: `POKOIN_MIN_SCAN_WIDTH` above the current leftover width so
+a wider scan replaces it. `POKOIN_TMP_DIR` moves the local jobs/out/id files
+(the Oracle side stays under /tmp); `POKOIN_BACKUP_DIR` copies the leftover jpg
+and its `_homepage.webp` out of the replica before they are overwritten
+(existing backups are never replaced); `POKOIN_NO_PUSH=1` stages and reports
+without rsync or CLIP and lists the keys in `POKOIN_TMP_DIR/replaced-keys.txt`.
+A scan no wider than the file already on the replica is refused
+(`skip-smaller`) and counted as a failure.
+`POKOIN_REGEN_PREVIEWS=1` re-cuts every `REPLICA_OBJECTS/previews/{ct_id}_*`
+thumb to the new scan at its own size and format (aspect differs by <2%, so the
+resize is exact-to-box with no crop) into `OUT/previews/`, backs the old preview
+up, and lists `previews/<name>` in replaced-keys.txt.
+`POKOIN_PREVIEWS_ONLY=1` with `POKOIN_PREVIEWS_KEYS_FILE` (one main jpg key per
+line) skips the DB and the fetch and re-cuts previews from the replica JPEGs.
 """
 from __future__ import annotations
 
@@ -25,6 +46,7 @@ import io
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -43,6 +65,14 @@ REPLICA_OBJECTS = Path(
         "/home/nez/data/pokoin-leftovers/objects",
     )
 )
+# Local scratch only; the Oracle side of prefetch stays under /tmp.
+TMP_DIR = Path(os.environ.get("POKOIN_TMP_DIR", "/tmp"))
+BACKUP_DIR: Path | None = (
+    Path(os.environ["POKOIN_BACKUP_DIR"])
+    if os.environ.get("POKOIN_BACKUP_DIR", "").strip()
+    else None
+)
+NO_PUSH = os.environ.get("POKOIN_NO_PUSH", "").strip().lower() in {"1", "true", "yes"}
 EXPANSION = os.environ.get("POKOIN_INGEST_EXPANSION", "").strip()
 IDS = [
     int(part)
@@ -57,6 +87,11 @@ if _ID_FILE:
         if part.strip().isdigit()
     )
 IDS = sorted(set(IDS))
+IDS_ARE_CARD_IDS = os.environ.get("POKOIN_IDS_ARE_CARD_IDS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 PLACEHOLDERS = os.environ.get("POKOIN_INGEST_PLACEHOLDERS", "").strip().lower() in {
     "1",
     "true",
@@ -69,20 +104,33 @@ PLACEHOLDER_BYTES = int(os.environ.get("POKOIN_PLACEHOLDER_BYTES", "7920"))
 # CardTrader full is ~749×1050. Desk upscales both; MIN_SCAN_WIDTH treats
 # them as placeholders so ingest can replace them.
 MIN_SCAN_WIDTH = int(os.environ.get("POKOIN_MIN_SCAN_WIDTH", "400"))
+REGEN_PREVIEWS = os.environ.get("POKOIN_REGEN_PREVIEWS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PREVIEWS_ONLY = os.environ.get("POKOIN_PREVIEWS_ONLY", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PREVIEWS_KEYS_FILE = os.environ.get("POKOIN_PREVIEWS_KEYS_FILE", "").strip()
+PREVIEW_WEBP_QUALITY = 82
+PREVIEW_JPG_QUALITY = 85
 CT_FETCH_HOST = os.environ.get("POKOIN_CT_FETCH_HOST", "pokoin-marketplace")
 CT_FETCH_WORKERS = int(os.environ.get("POKOIN_CT_FETCH_WORKERS", "4"))
 PG_CONTAINER = os.environ.get("POKOIN_MARKETPLACE_POSTGRES", "pokoin-marketplace-postgres-15t")
 VERSION_MATCH_PYTHON = os.environ.get(
     "POKOIN_VERSION_MATCH_PYTHON",
-    "/home/nez/Projects/ai-toolkit/venv/bin/python",
+    "/home/nez/Projects/AI/ai-toolkit/venv/bin/python",
 )
 VERSION_MATCH_SCRIPT = Path(
     os.environ.get(
         "POKOIN_VERSION_MATCH_SCRIPT",
-        "/home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py",
+        "/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py",
     )
 )
-REF = int(os.environ.get("HOMEPAGE_IMAGE_REFERENCE_WIDTH", "240"))
+REF = int(os.environ.get("HOMEPAGE_IMAGE_REFERENCE_WIDTH", "480"))  # 2026-10-20: thumbs are 480 px (catalog-image-cache.json thumbToken)
 QUALITY = int(os.environ.get("HOMEPAGE_IMAGE_QUALITY", "82"))
 UA = "Pokoin leftover ingest (https://pokoin.com)"
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
@@ -282,7 +330,8 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
         return {}
     if not CT_FETCH_HOST:
         return {key: data for key, urls in jobs.items() if (data := fetch_first(urls))}
-    jobs_path = Path("/tmp/pokoin-ct-fetch-jobs.json")
+    jobs_path = TMP_DIR / "pokoin-ct-fetch-jobs.json"
+    jobs_path.parent.mkdir(parents=True, exist_ok=True)
     jobs_path.write_text(json.dumps(jobs))
     script = Path(__file__).resolve()
     remote_script = "/tmp/ingest-missing-product-images.py"
@@ -292,7 +341,7 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
         ["ssh", *SSH_OPTS, CT_FETCH_HOST, "python3", remote_script, "--oracle-fetch"],
         check=True,
     )
-    raw = Path("/tmp/pokoin-ct-fetch-out")
+    raw = TMP_DIR / "pokoin-ct-fetch-out"
     raw.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["rsync", "-a", "--info=stats1", f"{CT_FETCH_HOST}:/tmp/pokoin-ct-fetch-out/", f"{raw}/"],
@@ -306,12 +355,51 @@ def prefetch_cardtrader(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     return bodies
 
 
+def existing_scan_width(name: str) -> int:
+    """Widest readable jpg already staged or shipped for `name` (0 = none)."""
+    from PIL import Image
+
+    width = 0
+    for path in (REPLICA_OBJECTS / name, OUT / name):
+        if not path.is_file():
+            continue
+        try:
+            with Image.open(path) as image:
+                width = max(width, int(image.size[0]))
+        except Exception:
+            continue
+    return width
+
+
+def backup_replica_file(rel: str) -> None:
+    """Copy one replica file out before this run replaces it; never overwrite a backup."""
+    if not BACKUP_DIR:
+        return
+    src = REPLICA_OBJECTS / rel
+    if not src.is_file():
+        return
+    dest = BACKUP_DIR / rel
+    if dest.exists():
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+def backup_leftover(key: str) -> None:
+    """Copy the leftover this run replaces out of the replica before push."""
+    for name in (key, Path(key).stem + "_homepage.webp"):
+        backup_replica_file(name)
+
+
 def write_jpeg(dest: Path, data: bytes) -> bool:
     from PIL import Image
 
     try:
         with Image.open(io.BytesIO(data)) as image:
             if image.size == (186, 260) or image.size[0] < MIN_SCAN_WIDTH:
+                return False
+            if image.size[0] <= existing_scan_width(dest.name):
+                print(f"skip-smaller {dest.name}", flush=True)
                 return False
             image.convert("RGB").save(dest, "JPEG", quality=92, optimize=True)
         return dest.exists() and dest.stat().st_size > 9000
@@ -348,9 +436,55 @@ def write_homepage(jpg_path: Path) -> Path | None:
         return None
 
 
+def ct_id_of(key: str) -> str:
+    """CardTrader blueprint id of a leftover key: digits before the first underscore."""
+    match = re.match(r"^(\d+)_", Path(str(key)).name)
+    return match.group(1) if match else ""
+
+
+def regen_previews(key: str, source: Path | None = None) -> list[str]:
+    """Re-cut each shipped preview of key's ct_id into OUT/previews at its old size."""
+    from PIL import Image
+
+    ct_id = ct_id_of(key)
+    full_path = OUT / key if source is None else source
+    replica_previews = REPLICA_OBJECTS / "previews"
+    if not ct_id or not replica_previews.is_dir():
+        return []
+    written: list[str] = []
+    try:
+        with Image.open(full_path) as full:
+            full = full.convert("RGB")
+            for old in sorted(replica_previews.glob(f"{ct_id}_*")):
+                if not old.is_file():
+                    continue
+                try:
+                    with Image.open(old) as thumb:
+                        size = (int(thumb.size[0]), int(thumb.size[1]))
+                        fmt = str(thumb.format or "").upper()
+                except Exception:
+                    print(f"preview unreadable {old.name}", file=sys.stderr)
+                    continue
+                if fmt not in {"WEBP", "JPEG"} or min(size) < 1:
+                    continue
+                backup_replica_file(f"previews/{old.name}")
+                dest = OUT / "previews" / old.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                image = full.resize(size, Image.LANCZOS)
+                if fmt == "WEBP":
+                    image.save(dest, "WEBP", quality=PREVIEW_WEBP_QUALITY, method=6)
+                else:
+                    image.save(dest, "JPEG", quality=PREVIEW_JPG_QUALITY, optimize=True)
+                written.append(f"previews/{old.name}")
+    except Exception as exc:
+        print(f"preview fail {key}: {exc}", file=sys.stderr)
+    return written
+
+
 def dump_sql() -> str:
     if IDS:
         needles = ",".join(str(n) for n in IDS)
+        id_column = "c.card_id" if IDS_ARE_CARD_IDS else "c.ct_id"
         return f"""
 COPY (
   SELECT
@@ -368,7 +502,7 @@ COPY (
   LEFT JOIN public.cardtrader_pokemon_blueprints b
     ON b.id = c.ct_id
   WHERE c.item_kind = 'single'
-    AND (c.ct_id IN ({needles}) OR c.card_id IN ({needles}))
+    AND {id_column} IN ({needles})
   ORDER BY c.card_id
 ) TO STDOUT WITH CSV HEADER
 """
@@ -528,11 +662,13 @@ def replica_has_scan(key: str) -> bool:
     return not is_placeholder(path)
 
 
-def ingest(rows: list[dict]) -> tuple[int, int, int]:
+def ingest(rows: list[dict]) -> tuple[int, int, int, list[str], list[str]]:
     OUT.mkdir(parents=True, exist_ok=True)
     jobs: dict[str, list[str]] = {}
     planned: list[tuple[dict, str, Path]] = []
     saved = skipped = failed = 0
+    replaced: list[str] = []
+    previews: list[str] = []
     for row in rows:
         key = leftover_key(row.get("ct_id") or "", row.get("name") or "", row.get("image_url") or "")
         if not key:
@@ -569,11 +705,27 @@ def ingest(rows: list[dict]) -> tuple[int, int, int]:
             print(f"placeholder {row.get('ct_id')} {row.get('name')}", file=sys.stderr)
             failed += 1
             continue
+        backup_leftover(key)
         write_homepage(dest)
+        if REGEN_PREVIEWS:
+            previews.extend(regen_previews(key))
         saved += 1
+        replaced.append(key)
         if index % 25 == 0 or saved <= 5:
             print(f"{index}/{len(planned)} saved={saved} skip={skipped} fail={failed} {key}", flush=True)
-    return saved, skipped, failed
+    return saved, skipped, failed, replaced, previews
+
+
+def write_replaced_keys(keys: list[str], previews: list[str] | None = None) -> None:
+    dest = TMP_DIR / "replaced-keys.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for key in sorted(set(keys)):
+        lines.append(key)
+        lines.append(Path(key).stem + "_homepage.webp")
+    lines.extend(sorted(set(previews or [])))
+    dest.write_text("".join(line + "\n" for line in lines))
+    print(f"replaced_keys={len(set(keys))} previews={len(set(previews or []))} {dest}", flush=True)
 
 
 def push() -> None:
@@ -608,7 +760,13 @@ def write_replaced_ids(rows: list[dict], saved: int) -> None:
             > PLACEHOLDER_MAX_BYTES
         }
     )
-    dest = Path(os.environ.get("POKOIN_PLACEHOLDER_ID_FILE", "/tmp/pokoin-placeholder-ingest-ids.json"))
+    dest = Path(
+        os.environ.get(
+            "POKOIN_PLACEHOLDER_ID_FILE",
+            str(TMP_DIR / "pokoin-placeholder-ingest-ids.json"),
+        )
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("[" + ",".join(str(n) for n in ids) + "]\n")
     print(f"replaced_ids={len(ids)} {dest}", flush=True)
 
@@ -627,6 +785,45 @@ def version_match_argv(expansion: str = "", ids: list[int] | None = None) -> lis
     return cmd
 
 
+# Reverse-holo patterns (Poké Ball / Master Ball / Energy / Gem Pack slot
+# 01-06) are the same card; CLIP misses them under the foil. A CLIP
+# re-cluster resets those printings, so join them again after every match.
+# scripts/sql/20261022_reverse_pattern_version_joins.sql
+REVERSE_PATTERN_JOIN_SQL = (
+    "SELECT count(*) AS joined_sets, coalesce(sum(moved_rows), 0) AS moved_rows"
+    " FROM public.marketplace_join_reverse_pattern_versions(true);"
+)
+
+
+def reverse_pattern_join_argv() -> list[str]:
+    return [
+        "docker",
+        "exec",
+        "-i",
+        PG_CONTAINER,
+        "psql",
+        "-U",
+        "pokoin_marketplace",
+        "-d",
+        "pokoin_marketplace",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-At",
+        "-c",
+        REVERSE_PATTERN_JOIN_SQL,
+    ]
+
+
+def join_reverse_pattern_versions() -> None:
+    result = subprocess.run(
+        reverse_pattern_join_argv(), capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        print("reverse-pattern join failed: " + (result.stderr or result.stdout).strip(), flush=True)
+        return
+    print("reverse-pattern join " + result.stdout.strip(), flush=True)
+
+
 def match_imported_version_sets(rows: list[dict]) -> None:
     if PLACEHOLDERS:
         return
@@ -642,22 +839,56 @@ def match_imported_version_sets(rows: list[dict]) -> None:
     env.setdefault("HIP_VISIBLE_DEVICES", "0")
     print("version match " + " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True, env=env)
+    join_reverse_pattern_versions()
+
+
+def previews_only() -> int:
+    """Re-cut previews from the replica JPEGs named by POKOIN_PREVIEWS_KEYS_FILE."""
+    if not PREVIEWS_KEYS_FILE or not Path(PREVIEWS_KEYS_FILE).is_file():
+        print("POKOIN_PREVIEWS_KEYS_FILE points at no file", file=sys.stderr)
+        return 1
+    OUT.mkdir(parents=True, exist_ok=True)
+    keys = [
+        line.strip()
+        for line in Path(PREVIEWS_KEYS_FILE).read_text().splitlines()
+        if line.strip()
+    ]
+    previews: list[str] = []
+    for key in keys:
+        found = regen_previews(key, REPLICA_OBJECTS / key)
+        previews.extend(found)
+        print(f"previews {key} {len(found)}", flush=True)
+    print(f"previews_only keys={len(keys)} previews={len(set(previews))}", flush=True)
+    write_replaced_keys([], previews)
+    if NO_PUSH:
+        print("POKOIN_NO_PUSH: skipped push", flush=True)
+        return 0
+    push()
+    print("pushed to Pi leftover objects", flush=True)
+    return 0
 
 
 def main() -> int:
+    if PREVIEWS_ONLY:
+        return previews_only()
     rows = placeholder_rows_from_pi() if PLACEHOLDERS else dump_rows()
     if PLACEHOLDERS:
         rows = enrich_blueprint_urls(rows)
         rows = [row for row in rows if has_cardtrader_scan(row)]
     print(f"missing_rows={len(rows)} out={OUT}", flush=True)
-    saved, skipped, failed = ingest(rows)
+    saved, skipped, failed, replaced, previews = ingest(rows)
     print(f"done saved={saved} skip={skipped} fail={failed}", flush=True)
+    write_replaced_keys(replaced, previews)
     write_replaced_ids(rows, saved)
-    if saved or skipped:
-        push()
-        print("pushed to Pi leftover objects", flush=True)
-        match_imported_version_sets(rows)
-    return 0 if saved or skipped else 1
+    if not (saved or skipped):
+        return 1
+    if NO_PUSH:
+        print("POKOIN_NO_PUSH: skipped push and version match", flush=True)
+        return 0
+    push()
+    print("pushed to Pi leftover objects", flush=True)
+    match_imported_version_sets(rows)
+    return 0
 
 
 if __name__ == "__main__":

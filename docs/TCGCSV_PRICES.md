@@ -14,8 +14,11 @@ The mode-600 connection file is on Nezopt at
 
 `marketplace-price-check` adds `tcgplayer` (all quotes for mapped products and
 variants) and `tcgplayerStatus` to each existing item. Existing fields retain
-their previous behavior. USD values remain exact PostgreSQL decimal strings;
-there is no conversion to PKN. Condition/language are explicitly unspecified.
+their previous behavior. The `tcgplayer` quotes stay in USD. Since 2026-11-07
+the comp's `sources.tcgplayer` block also converts them for the pricer, at
+the newest ECB rate (`fx_rates_daily`), and only a strategy whose source the
+seller set to TCGplayer uses it (docs/PRICING.md "Price sources").
+Condition/language are explicitly unspecified.
 Inventory shows the available market-price range and each variant/timestamp.
 Failure of this independent feed leaves existing price sources available.
 
@@ -30,6 +33,10 @@ The initial run created 270,359 explicit links across 25 inspected databases;
 16 games have matched quotes. Catalogs without IDs remain unmapped and their
 original price rows remain in the separate source store. No fuzzy identity
 matching, fabricated condition prices or synthetic sales are introduced.
+Pokémon printings CardTrader leaves unlinked are filled by the Rust
+set + collector-number + name matcher, tagged `match_source = 'pokoin-matcher'`
+(99.9% agreement with CardTrader on a blind holdout); see
+[TCGPLAYER_MATCH.md](TCGPLAYER_MATCH.md).
 
 Validation: six API/helper tests, compiled inventory JSX, real read-only latest
 and historical database queries for Mew (2 variants, 1,858 observations), and
@@ -89,4 +96,5 @@ dump day and listing/copy/seller counts. One bulk mapped-blueprint query supplie
 all requested cards. These are aggregate asks across facets, not a replacement
 for condition-matched live offers or sold medians. Missing analytics leave those
 existing comps unchanged; automated pricing must never silently use USD quotes
-or treat aggregate dump asks as condition-specific realized sales.
+(a TCGplayer strategy is the seller's explicit choice, converted at a dated
+ECB rate) or treat aggregate dump asks as condition-specific realized sales.

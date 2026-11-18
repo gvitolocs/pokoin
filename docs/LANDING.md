@@ -15,7 +15,7 @@ pokoin-web/                 scripts/build-web.sh          Pi: /srv/pokoin/web/cu
 index.html + home/  ──►     dist-web/                    (release f3aef6a of origin/main)
 market/             ──►     dist-web/market/
 pokoin-web-origin.mjs       GET /              = landing
-                            GET /marketplace*   = React SPA
+                            GET /marketplace*   = the SPA
                             /api/*              → 127.0.0.1:18079 (api.pokoin.com)
                             /card-images/*      → 127.0.0.1:18081 (cdn.pokoin.com)
 ```
@@ -26,7 +26,7 @@ pokoin-web/                 scripts/build-web.sh          pokoin-web (Workers St
 index.html + home/  ──►     dist-web/                    preview: pokoin-web.vitologiuseppe17.workers.dev
 market/             ──►     dist-web/market/
 dist-web/_redirects         GET /              = landing (index.html copy)
-                            GET /marketplace*   = React SPA (/market/app.html)
+                            GET /marketplace*   = Solid SPA (/market/app.html)
                             /api/*              = Worker proxy (run_worker_first)
                             /card-images/*      = Worker proxy (run_worker_first)
 ```
@@ -34,7 +34,7 @@ dist-web/_redirects         GET /              = landing (index.html copy)
 See [WEB_HOST.md](WEB_HOST.md) for the complete host map including DNS, ingress, and rollback.
 
 Wallet, auth, `/extension/auth-bridge`, cart, checkout, forum, signal, scan,
-inventory, and docs are React on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
+inventory, and docs are the Solid SPA on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
 [CHROME.md](CHROME.md). App leftovers: [APP.md](APP.md). Do not deploy
 `cardvault/.../build/web` as pokoin.com.
 
@@ -48,13 +48,14 @@ Local landing preview (relative `home/` URLs):
 python3 -m http.server 8766 --bind 0.0.0.0 --directory /home/nez/Projects/pokoin-web
 ```
 
-React market:
+Marketplace (Solid; run it in your own Paseo worktree, not the canonical checkout):
 
 ```bash
-cd /home/nez/Projects/pokoin-web/market
+(cd market && npm install)   # packages of the shared modules
+cd solid
 npm install
 npm run dev
-# http://127.0.0.1:5174/marketplace
+# http://127.0.0.1:5175/marketplace
 ```
 
 Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale
@@ -83,7 +84,7 @@ Vercel project `web` and its environment variables were not deleted. Rollback: r
 | Flag / file | Why |
 | --- | --- |
 | `env -u VERCEL_TOKEN` | A stale `VERCEL_TOKEN` in the environment fails CLI login. CLI session `giuseppevitolo17` works. |
-| `scripts/build-web.sh` | Writes `dist-web/` (landing with `/home/` paths + Vite `market/`). |
+| `scripts/build-web.sh` | Writes `dist-web/` (landing with `/home/` paths + the Solid build as `market/`). |
 | `dist-web/_redirects` | App routes rewrite to `/market/app.html`; hashed `/market/assets` are immutable. |
 | `run_worker_first` | Only `/api/*`, `/card-images/*`, `/__/auth/*`, `/__/firebase/*`, `/chain/*`, `/cardscan/identify` run the Worker. |
 
@@ -102,9 +103,9 @@ Filesystem `index.html` is evaluated **before** rewrites.
 | --- | --- | --- |
 | `GET /` | `index.html` (landing) | Static HTML |
 | `GET /home/landing.css` | `home/landing.css` | Static |
-| `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
+| `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | Solid SPA |
 | `GET /api/*` | Pi API proxy | `api.pokoin.com` (Raspberry Pi tunnel) |
-| `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | React SPA |
+| `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | Solid SPA |
 | `https://explorer.pokoin.com/*` | `/explorer/*` (host rewrite) | PokoinPoS explorer UI (static, vendored from pokoinpos) |
 
 `www.pokoin.com/` 301s to `https://pokoin.com/`.
@@ -163,7 +164,7 @@ A tiny inline script in `<head>` sets `document.documentElement.classList.add("j
 | `home/favicon-48x48.png` / `favicon-96x96.png` | Google Search favicon (multiples of 48px). First `<link rel="icon">` on `/`. |
 | `home/working.html` + `home/working.gif` | API-down page. Copied to `/working.html`. Never show Cloudflare Tunnel 1033. No cookie banner. |
 | `home/satoshi.woff2` | Self-hosted Satoshi variable font. |
-| `scripts/build-web.sh` | Production build: landing + `market/` into `dist-web/`. |
+| `scripts/build-web.sh` | Production build: landing + the Solid app (`/market/*`) into `dist-web/`. |
 | `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks 302 to `/marketplace/en/cards/:id` (fallback; live hop is Cloudflare Worker `pokoin-shortlink`), `/api/*` → `api.pokoin.com`. |
 | `scripts/sync-landing.sh` | Leftover CardVault copy. Not production. |
 | `docs/LANDING.md` | This file: pipeline, inventory, copy rules, proof. |
@@ -219,7 +220,7 @@ Phone (iPhone 16 393×852 CSS px): `viewport-fit=cover` and `≤480px` safe-area
 padding on the fixed nav, hero, and yellow CTA. Do not change desktop landing
 rules for this. [MOBILE.md](MOBILE.md).
 
-Crawlers get this HTML at `GET /`. `/marketplace` is the React market.
+Crawlers get this HTML at `GET /`. `/marketplace` is the Solid marketplace.
 
 ### `home/landing.css` — classes that matter
 

@@ -1,0 +1,14 @@
+# Exceptions read by scripts/flow-test-workers-check.sh (docs/CI.md "flow-db", PKN-09).
+#
+# One line per background worker a test that builds pokoin_commerce::router deliberately leaves RUNNING:
+#
+#   <tracked test file path><TAB><variable><TAB><reason of at least 15 characters>
+#
+# The path is relative to the repository root, the fields are separated by real tabs, and a line is part of the
+# contract: with --base <commit>, an exception the base does not already carry fails the gate. A new or reworded
+# line therefore ships only with the owner's logged override.
+#
+# This file is empty of entries today: every test that builds the router switches POKOIN_SELLER_BOOK_WORKER,
+# POKOIN_LISTING_SYNC_WORKER and POKOIN_SELLER_WEBHOOK_WORKER off. Do not add a line to make a red flow-db job
+# green; the workers exist to keep a real shop page fresh, and a test that needs one running is a bug in the test
+# until proven otherwise (see PK-R024 on the seller-book sweep racing its own assertion).

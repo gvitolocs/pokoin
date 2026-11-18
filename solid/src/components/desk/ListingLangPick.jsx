@@ -24,7 +24,7 @@ export function dismissWhileOpen(open, setOpen, root) {
   });
 }
 
-/** Listing language picker (market/src/components/ListingLangPick.jsx). */
+/** Listing language picker. */
 export default function ListingLangPick(props) {
   const [open, setOpen] = createSignal(false);
   let root;

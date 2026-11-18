@@ -7,7 +7,7 @@ import { suggestHoverAllowed } from '@market/suggest-hover.js';
 import CardArt from './CardArt.jsx';
 
 /**
- * CardTrader-style hover zoom (market/src/components/ThumbZoom.jsx): wrap a
+ * CardTrader-style hover zoom: wrap a
  * small thumbnail; on hover (fine pointer, desktop viewports) the full scan
  * floats beside the cursor in a fixed `.suggest-hover` portal.
  */
@@ -136,7 +136,7 @@ export function ThumbZoom(props) {
 }
 
 /**
- * Illustration window in a row (market/src/components/ArtworkZoom.jsx). Hover
+ * Illustration window in a row. Hover
  * floats the full scan at the shared shop/cart size.
  */
 export default function ArtworkZoom(props) {

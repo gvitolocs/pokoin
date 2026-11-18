@@ -4,7 +4,9 @@
  * not look like live inventory links.
  */
 
-import { indexToStackPos, stackPosToIndex } from './scan-model.js';
+import { game, gameIdFromPath, gamePublicPath, knownGameId, publicGamePath } from './game.js';
+import { listingOrigin } from './inventory-origin.js';
+import { stackPosToIndex } from './scan-model.js';
 
 export function isLiveInventoryListing(row) {
   if (!row || typeof row !== 'object') return false;
@@ -35,12 +37,20 @@ export function summarizeLiveInventory(rows) {
   };
 }
 
-export function inventoryListingHref(row) {
+/**
+ * Card desk for a seller row. The API's canonical paths are game-less, and a
+ * game-less desk URL opens the Pokémon catalog ("Card market not found." for a
+ * Battle Spirits Saga card), so the path gets the slug of the row's own
+ * `marketplaceGame`, else of `gameId` (the stock desk's selected game).
+ */
+export function inventoryListingHref(row, gameId = game().id) {
+  const target = knownGameId(row?.marketplaceGame || row?.marketplace_game) || knownGameId(gameId) || 'pokemon';
   const path = String(row?.canonicalPath || row?.canonical_path || '').trim();
-  if (path.startsWith('/marketplace/')) return path;
+  if (gameIdFromPath(path)) return path;
+  if (path.startsWith('/marketplace/')) return publicGamePath(path, target);
   const id = String(row?.cardId || row?.card_id || '').trim();
-  if (/^\d+$/.test(id)) return `/marketplace/en/cards/${id}`;
-  return '/marketplace';
+  if (/^\d+$/.test(id)) return publicGamePath(`/marketplace/en/cards/${id}`, target);
+  return gamePublicPath(target);
 }
 
 export function inventoryListingMeta(row, formatPkn) {
@@ -81,9 +91,16 @@ function inventoryRowHaystack(row) {
     .join(' ');
 }
 
-/** PowerTools-style client filters: text query, status, condition, language. */
-export function filterInventoryRows(rows, { query = '', status = '', condition = '', language = '' } = {}) {
+/**
+ * PowerTools-style client filters: text query, status, condition, language,
+ * origin (inventory-origin.js ids), and `duplicatesOnly` with `duplicates`
+ * (the findCrossSourceDuplicates map, or a Set of listing ids).
+ */
+export function filterInventoryRows(rows, {
+  query = '', status = '', condition = '', language = '', origin = '', duplicatesOnly = false, duplicates = null,
+} = {}) {
   const list = Array.isArray(rows) ? rows : [];
+  const wantOrigin = String(origin || '').toLowerCase();
   const needle = String(query || '').trim().toLowerCase();
   const wantStatus = String(status || '').toLowerCase();
   const wantCondition = String(condition || '').toUpperCase();
@@ -102,6 +119,8 @@ export function filterInventoryRows(rows, { query = '', status = '', condition =
       const rowLanguage = String(row?.language || '').toUpperCase();
       if (rowLanguage !== wantLanguage) return false;
     }
+    if (wantOrigin && listingOrigin(row) !== wantOrigin) return false;
+    if (duplicatesOnly && !duplicates?.has?.(String(row?.id ?? ''))) return false;
     return true;
   });
 }
@@ -209,6 +228,7 @@ export function groupInventoryStacks(rows) {
     const stack = stacks.get(key) || {
       key,
       cardId: row?.cardId || row?.card_id,
+      marketplaceGame: row?.marketplaceGame || row?.marketplace_game || '',
       cardName: row?.cardName || row?.name || 'Listing',
       setName: row?.setName || row?.set_name || '',
       collectorNumber: row?.collectorNumber || row?.collector_number || '',
@@ -376,15 +396,6 @@ export function lastOccupiedIndex(rows, box, stackSize = 1) {
   return max;
 }
 
-/** First free { stack, startPosition } after the stock already in a box, or null. */
-export function nextFreeSlot(rows, box, stackSize = 1) {
-  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
-  const last = lastOccupiedIndex(rows, box, size);
-  if (!last) return null;
-  const next = indexToStackPos(Math.min(9999 * size, last + 1), size);
-  return { stack: next.stack, startPosition: next.position, abs: last + 1 };
-}
-
 /**
  * Boxes in the order the rows are given (newest listing first). The first
  * name is the box the seller used last. Casing is kept from that first row.
@@ -401,63 +412,6 @@ export function recentBoxes(rows) {
     out.push(box);
   }
   return out;
-}
-
-function addedStamp(row) {
-  const ms = Date.parse(String(row?.createdAt || row?.created_at || '').trim());
-  return Number.isFinite(ms) ? ms : null;
-}
-
-/**
- * Where the next scan goes in a box the seller already uses.
- * The cursor is the slot after the last card added to that box (same
- * timestamp: the higher position). Stack size stays the seller's divider.
- * A size-1 batch cannot write `·stack·position`, so it adopts the fullest
- * earlier stack (the 80 already used) instead of growing the size to
- * "last position + 1", which made that one card look like a full stack
- * and opened the next divider. A position past the divider still opens
- * the next stack. Flat `box·7` locations keep the size-1 walk.
- */
-export function continueBoxCursor(rows, box, stackSize = 1) {
-  const configured = Math.max(1, Math.trunc(Number(stackSize)) || 1);
-  const wanted = String(box || '').trim();
-  const positioned = [];
-  const posByStack = new Map();
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const end = listingSlotEnd(row?.location);
-    if (!end.box || end.box !== wanted || end.stack == null || end.position == null) continue;
-    positioned.push({ row, stack: end.stack, position: end.position, stamp: addedStamp(row) });
-    posByStack.set(end.stack, Math.max(posByStack.get(end.stack) || 0, end.position));
-  }
-  if (!positioned.length) {
-    const next = nextFreeSlot(rows, box, configured);
-    if (!next) return null;
-    return { stack: next.stack, startPosition: next.startPosition, stackSize: configured };
-  }
-  const stacks = [...posByStack.keys()].sort((a, b) => a - b);
-  const openStack = stacks[stacks.length - 1];
-  let earlierMax = 0;
-  for (const stackNo of stacks) {
-    if (stackNo === openStack) continue;
-    earlierMax = Math.max(earlierMax, posByStack.get(stackNo));
-  }
-  const size = configured === 1 && earlierMax > 1 ? earlierMax : configured;
-  positioned.sort((a, b) => {
-    const as = a.stamp == null ? -1 : a.stamp;
-    const bs = b.stamp == null ? -1 : b.stamp;
-    if (as !== bs) return as - bs;
-    if (a.stack !== b.stack) return a.stack - b.stack;
-    if (a.position !== b.position) return a.position - b.position;
-    return String(a.row?.id || '').localeCompare(String(b.row?.id || ''));
-  });
-  const last = positioned[positioned.length - 1];
-  let stack = last.stack;
-  let startPosition = last.position + 1;
-  if (size > 1 && startPosition > size) {
-    stack += 1;
-    startPosition = 1;
-  }
-  return { stack, startPosition, stackSize: size };
 }
 
 /**
@@ -484,21 +438,56 @@ export function occupiedAbsForScanBoxes(scanRows, stockRows) {
  * when nothing is stored there yet. Returns size + 1 when the stack is full.
  */
 export function nextPositionInStack(rows, box, stack, stackSize = 1) {
-  const wanted = String(box || '').trim();
   const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
   const s = Math.trunc(Number(stack)) || 0;
   if (size === 1 || s < 1) return null;
-  let max = 0;
+  const top = stackOccupancy(rows, box, size).get(s) || 0;
+  return top ? top + 1 : null;
+}
+
+/**
+ * What a box already holds, stack by stack: Map stack number → highest
+ * position taken there, from stored listing locations (`box·4·12`, `box·7-9`,
+ * `box·3·5–9·2`). A stack a location only passes through is full; a location
+ * without a position (`box·7`) names the whole stack, so it is full too.
+ */
+export function stackOccupancy(rows, box, stackSize = 1) {
+  const wanted = String(box || '').trim().toLowerCase();
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const tops = new Map();
+  if (!wanted) return tops;
   for (const row of Array.isArray(rows) ? rows : []) {
     const start = parseListingLocation(row?.location);
     const end = listingSlotEnd(row?.location);
-    if (!end.box || end.box !== wanted || end.stack == null) continue;
-    if (s < (start.stack ?? end.stack) || s > end.stack) continue;
-    // Spanning into a later stack fills this one; a whole-stack location fills it too.
-    const pos = end.stack > s || end.position == null ? size : Math.min(size, end.position);
-    if (pos > max) max = pos;
+    if (!end.box || end.box.trim().toLowerCase() !== wanted || end.stack == null) continue;
+    const from = Math.max(1, Math.min(9999, start.stack ?? end.stack));
+    const to = Math.max(from, Math.min(9999, end.stack));
+    for (let s = from; s <= to; s += 1) {
+      const top = s < to || end.position == null ? size : Math.min(size, end.position);
+      if (top > (tops.get(s) || 0)) tops.set(s, top);
+    }
   }
-  return max ? max + 1 : null;
+  return tops;
+}
+
+/**
+ * Seed map for scan `nextBoxPositions`: box location → stack → highest
+ * position the stock in that box occupies. Uses each scan row's stackSize
+ * snapshot, like `occupiedAbsForScanBoxes`.
+ */
+export function occupancyForScanBoxes(scanRows, stockRows) {
+  const map = new Map();
+  const seen = new Set();
+  for (const row of Array.isArray(scanRows) ? scanRows : []) {
+    const loc = String(row?.location ?? '').trim();
+    if (!loc || seen.has(loc)) continue;
+    seen.add(loc);
+    const snap = row.defaultsSnapshot || row.defaults_snapshot || {};
+    const size = Math.max(1, Math.trunc(Number(snap.stackSize)) || 1);
+    const tops = stackOccupancy(stockRows, loc, size);
+    if (tops.size) map.set(loc, tops);
+  }
+  return map;
 }
 
 /** Highest stack number a seller already occupies in a box (inventory hint). */

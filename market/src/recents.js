@@ -27,7 +27,15 @@ export {
 } from './recents-storage.js';
 
 let remoteWriteTimer = 0;
+let remoteCardTimer = 0;
 let legacyCleared = false;
+/**
+ * Cards opened on this device whose POST the account has not answered yet,
+ * oldest first: every one is sent (two desks within 250 ms used to lose the
+ * first), and an account sync keeps them while their write is on its way.
+ */
+const unsentCards = [];
+let sendingCards = false;
 
 function resolveGameId(gameId) {
   return String(gameId || currentGame().id || 'pokemon').trim() || 'pokemon';
@@ -117,24 +125,45 @@ function scheduleRemoteCard(cardId, gameId) {
   if (!/^\d+$/.test(id)) {
     return;
   }
-  globalThis.clearTimeout(remoteWriteTimer);
-  remoteWriteTimer = globalThis.setTimeout(() => {
-    void getBearer()
-      .then(async (token) => {
-        if (!token) {
-          return;
-        }
-        const res = await postRemoteRecentCard(token, id, resolved);
-        if (!res || res.ok) {
-          return;
-        }
-        // Wrong-game or unknown card: do not keep it in this storefront's history.
-        if (res.status === 400) {
-          forgetLocalCardId(id, resolved);
-        }
-      })
-      .catch(() => {});
+  const at = unsentCards.findIndex((row) => row.id === id && row.game === resolved);
+  if (at >= 0) {
+    unsentCards.splice(at, 1);
+  }
+  unsentCards.push({ id, game: resolved });
+  globalThis.clearTimeout(remoteCardTimer);
+  remoteCardTimer = globalThis.setTimeout(() => {
+    void sendUnsentCards();
   }, 250);
+}
+
+/** POST the queued cards oldest first, so the account's newest-first order matches this device. */
+async function sendUnsentCards() {
+  if (sendingCards) {
+    return;
+  }
+  sendingCards = true;
+  try {
+    const token = await getBearer().catch(() => null);
+    if (!token) {
+      unsentCards.length = 0;
+      return;
+    }
+    while (unsentCards.length) {
+      const { id, game } = unsentCards[0];
+      const res = await postRemoteRecentCard(token, id, game).catch(() => null);
+      unsentCards.shift();
+      // Wrong-game or unknown card: do not keep it in this storefront's history.
+      if (res?.status === 400) {
+        forgetLocalCardId(id, game);
+      }
+    }
+  } finally {
+    sendingCards = false;
+  }
+}
+
+function unsentIds(gameId) {
+  return unsentCards.filter((row) => row.game === gameId).map((row) => row.id);
 }
 
 export async function loadRecentCardIds(gameId) {
@@ -153,14 +182,25 @@ export async function syncRemoteRecentCardIds(gameId) {
     }
     const remote = await fetchRemoteRecentIds(token, resolved);
     if (!remote) {
-      return local;
+      return readRecentCardIds(resolved);
     }
     // Server game row is authoritative. Do not re-upload polluted local cross-game ids.
-    replaceLocalRecentIds(remote, resolved);
-    return remote;
+    // Cards opened here whose POST is still on its way stay first: dropping them
+    // would empty the rail slot the desk just filled.
+    const pending = new Set(unsentIds(resolved));
+    const opened = readRecentCardIds(resolved).filter((id) => pending.has(id));
+    return replaceLocalRecentIds(mergeRecentIds(opened, remote), resolved);
   } catch {
-    return local;
+    return readRecentCardIds(resolved);
   }
+}
+
+/** Tests only: forget queued account writes. */
+export function resetRecentWritesForTests() {
+  globalThis.clearTimeout(remoteCardTimer);
+  globalThis.clearTimeout(remoteWriteTimer);
+  unsentCards.length = 0;
+  sendingCards = false;
 }
 
 /**

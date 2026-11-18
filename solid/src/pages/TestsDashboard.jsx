@@ -18,7 +18,7 @@ const ABOUT = {
 
 const BOARDS = tests.tests.filter((board) => board.path !== '/tests');
 
-/** test.pokoin.com Test boards index (market/src/pages/TestsDashboard.jsx, D00006L). */
+/** test.pokoin.com Test boards index (D00006L). */
 export default function TestsDashboard() {
   usePageTitle('Test boards · test.pokoin.com');
 

@@ -3,7 +3,9 @@
 //! optional Redis L2). The promotional seller-comment filter is not ported.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -21,6 +23,33 @@ pub const MAX_EXPLICIT_LIMIT: i64 = 1000;
 pub const CACHE_TTL_MS: i64 = 60_000;
 pub const CACHE_TTL_SEC: u64 = 60;
 pub const MAX_CACHE_ENTRIES: usize = 100;
+
+/// Public `limit` values snap up to one of these, so a cache key can only take
+/// a handful of shapes per blueprint instead of a thousand.
+pub const LIMIT_BUCKETS: [i64; 7] = [10, 25, 50, 100, 250, 500, MAX_EXPLICIT_LIMIT];
+
+/// CardTrader card languages accepted on the public route (lowercase input →
+/// the code sent upstream). Anything else is a 400, never a new cache key.
+const LANGUAGES: [(&str, &str); 18] = [
+    ("en", "en"),
+    ("jp", "jp"),
+    ("ja", "ja"),
+    ("it", "it"),
+    ("fr", "fr"),
+    ("de", "de"),
+    ("es", "es"),
+    ("pt", "pt"),
+    ("kr", "kr"),
+    ("ko", "ko"),
+    ("zh", "zh"),
+    ("zh-cn", "zh-CN"),
+    ("zh-tw", "zh-TW"),
+    ("ru", "ru"),
+    ("nl", "nl"),
+    ("pl", "pl"),
+    ("id", "id"),
+    ("th", "th"),
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveRequest {
@@ -88,6 +117,30 @@ fn clean_limit(value: Option<&str>) -> Option<i64> {
         .ok()
         .filter(|number| number.is_finite())
         .map(|number| (number.trunc() as i64).clamp(1, MAX_EXPLICIT_LIMIT))
+        .map(|limit| {
+            LIMIT_BUCKETS
+                .iter()
+                .copied()
+                .find(|bucket| *bucket >= limit)
+                .unwrap_or(MAX_EXPLICIT_LIMIT)
+        })
+}
+
+/// Allowlisted language code, `Ok("")` for none, `Err` for anything else.
+fn allowed_language(value: &str) -> ApiResult<String> {
+    let text = clean_language(value);
+    if text.is_empty() {
+        if value.trim().is_empty() {
+            return Ok(String::new());
+        }
+        return Err(ApiError::bad_request("Unsupported language."));
+    }
+    let lower = text.to_ascii_lowercase();
+    LANGUAGES
+        .iter()
+        .find(|(input, _)| *input == lower)
+        .map(|(_, code)| code.to_string())
+        .ok_or_else(|| ApiError::bad_request("Unsupported language."))
 }
 
 /// `parseLiveListingsRequest`.
@@ -120,9 +173,9 @@ pub fn parse_request(query: &[(String, String)]) -> ApiResult<LiveRequest> {
         blueprint_id,
         card_id,
         requested_id,
-        language: clean_language(
+        language: allowed_language(
             &first_search_value(query, &["language"]).or_nonempty(|| first_search_value(query, &["lang"])),
-        ),
+        )?,
         limit: clean_limit(Some(&first_search_value(query, &["limit"]))),
     })
 }
@@ -635,8 +688,61 @@ pub fn clear_cache() {
     cache().lock().expect("live cache").clear();
 }
 
+/// Known/unknown CardTrader blueprint ids per game, so the public route checks
+/// the catalog once per id rather than once per request.
+const KNOWN_BLUEPRINT_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+const UNKNOWN_BLUEPRINT_TTL: Duration = Duration::from_secs(10 * 60);
+const MAX_KNOWN_BLUEPRINTS: usize = 50_000;
+
+type KnownBlueprints = HashMap<(String, i64), (bool, Instant)>;
+
+fn known_blueprints() -> &'static Mutex<KnownBlueprints> {
+    static KNOWN: OnceLock<Mutex<KnownBlueprints>> = OnceLock::new();
+    KNOWN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn remember_blueprint(game: &str, id: i64, exists: bool) {
+    let now = Instant::now();
+    let ttl = if exists { KNOWN_BLUEPRINT_TTL } else { UNKNOWN_BLUEPRINT_TTL };
+    let mut known = known_blueprints().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if known.len() >= MAX_KNOWN_BLUEPRINTS {
+        known.retain(|_, (_, expires)| *expires > now);
+        if known.len() >= MAX_KNOWN_BLUEPRINTS {
+            known.retain(|_, (found, _)| *found);
+        }
+        if known.len() >= MAX_KNOWN_BLUEPRINTS {
+            known.clear();
+        }
+    }
+    known.insert((game.to_string(), id), (exists, now + ttl));
+}
+
+/// Whether `blueprint_id` is a CardTrader blueprint in this game's catalog
+/// (cached: 6 h when found, 10 min when not).
+pub async fn blueprint_exists(db: &DbPools, game: &str, blueprint_id: &str) -> ApiResult<bool> {
+    let Ok(id) = clean_numeric_id(blueprint_id).parse::<i64>() else {
+        return Ok(false);
+    };
+    let game = crate::db::normalize_game(game);
+    {
+        let known = known_blueprints().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((exists, expires)) = known.get(&(game.clone(), id)) {
+            if *expires > Instant::now() {
+                return Ok(*exists);
+            }
+        }
+    }
+    let sql = if game == "pokemon" {
+        "select 1 as found from public.cardtrader_pokemon_blueprints where id = $1::bigint limit 1"
+    } else {
+        "select 1 as found from public.marketplace_search_candidates where ct_id = $1::bigint limit 1"
+    };
+    let exists = !db.query(&game, sql, &[json!(id)]).await?.is_empty();
+    remember_blueprint(&game, id, exists);
+    Ok(exists)
+}
+
 /// `readLiveCardTraderListings`.
-#[allow(clippy::too_many_arguments)]
 pub async fn read_live_listings(
     db: &DbPools,
     ct: &CardTraderClient,
@@ -644,6 +750,25 @@ pub async fn read_live_listings(
     request: &LiveRequest,
     game: &str,
 ) -> ApiResult<Value> {
+    read_live_listings_guarded(db, ct, redis, request, game, |_| async { Ok(()) }).await
+}
+
+/// [`read_live_listings`] with a guard that runs only on a cache miss, right
+/// before the upstream CardTrader call, with the resolved blueprint id. The
+/// public route uses it for its catalog check and rate limits, so cache hits
+/// pay nothing extra and no unchecked request reaches CardTrader.
+pub async fn read_live_listings_guarded<G, F>(
+    db: &DbPools,
+    ct: &CardTraderClient,
+    redis: Option<&RedisCache>,
+    request: &LiveRequest,
+    game: &str,
+    before_upstream: G,
+) -> ApiResult<Value>
+where
+    G: FnOnce(String) -> F,
+    F: Future<Output = ApiResult<()>>,
+{
     let token = client::clean_token(
         &std::env::var("CARDTRADER_AUTH_TOKEN")
             .ok()
@@ -687,6 +812,7 @@ pub async fn read_live_listings(
         }
     }
 
+    before_upstream(blueprint_id.clone()).await?;
     let mut params: Vec<(&str, &str)> = vec![("blueprint_id", blueprint_id.as_str())];
     if !request.language.is_empty() {
         params.push(("language", request.language.as_str()));
@@ -765,6 +891,24 @@ mod tests {
         assert_eq!(request.blueprint_id, "123");
         assert_eq!(request.language, "en");
         assert_eq!(request.limit, Some(MAX_EXPLICIT_LIMIT));
+        // Limits snap up to a bucket; languages come from the allowlist only,
+        // so an attacker cannot mint new cache keys.
+        let limit = |raw: &str| parse_request(&q(&[("blueprintId", "1"), ("limit", raw)])).unwrap().limit;
+        assert_eq!(limit("1"), Some(10));
+        assert_eq!(limit("10"), Some(10));
+        assert_eq!(limit("11"), Some(25));
+        assert_eq!(limit("999"), Some(1000));
+        assert_eq!(limit(""), None);
+        let lang = |raw: &str| parse_request(&q(&[("blueprintId", "1"), ("language", raw)])).map(|r| r.language);
+        assert_eq!(lang("EN").unwrap(), "en");
+        assert_eq!(lang("zh-cn").unwrap(), "zh-CN");
+        assert!(lang("xx").is_err());
+        assert!(lang("en-aaaaaa").is_err());
+        assert!(lang("../../").is_err());
+        let keys: std::collections::HashSet<String> = (1..=1000)
+            .map(|n| cache_key(&parse_request(&q(&[("blueprintId", "1"), ("limit", &n.to_string())])).unwrap(), "1"))
+            .collect();
+        assert_eq!(keys.len(), LIMIT_BUCKETS.len());
         assert!(parse_request(&q(&[("blueprintId", "abc")])).is_err());
         assert!(parse_request(&q(&[])).is_err());
         let card = parse_request(&q(&[("cardId", "248856")])).unwrap();
@@ -807,6 +951,20 @@ mod tests {
         assert_eq!(listings[0]["condition"], "NM");
         let limited = listings_from_payload(&payload, "123", Some(1), 0.005);
         assert_eq!(limited.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn blueprint_existence_is_cached_per_game() {
+        // A disconnected pool: any query fails, so answers here come from the cache.
+        let db = DbPools::disconnected();
+        remember_blueprint("pokemon", 777_001, true);
+        remember_blueprint("pokemon", 777_002, false);
+        assert!(blueprint_exists(&db, "pokemon", "777001").await.unwrap());
+        assert!(!blueprint_exists(&db, "pokemon", "777002").await.unwrap());
+        assert!(!blueprint_exists(&db, "pokemon", "not-a-number").await.unwrap());
+        // Uncached ids hit the catalog; with no pool that is an error, not "exists".
+        assert!(blueprint_exists(&db, "pokemon", "777003").await.is_err());
+        assert!(blueprint_exists(&db, "one_piece", "777001").await.is_err());
     }
 
     #[test]

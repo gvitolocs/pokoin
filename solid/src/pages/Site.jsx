@@ -44,7 +44,7 @@ function SitePage(props) {
   );
 }
 
-/** /docs, /contact, /privacy, /earn, /whitepaper, /health (market/src/pages/Site.jsx). */
+/** /docs, /contact, /privacy, /earn, /whitepaper, /health. */
 export default function Site() {
   const location = useLocation();
   return (

@@ -2,19 +2,37 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buyerPriceLabel, buyerPriceParts, formatListingPrice, formatSellerPrice, pknFromPriceInput, priceInputFromPkn, sellerListCurrency } from './seller-currency.js';
 
-test('opted-out sellers list in their ship-from currency', () => {
-  assert.equal(sellerListCurrency(null), 'PKN');
-  assert.equal(sellerListCurrency({ acceptsPkn: true, shipFromCountry: 'IT' }), 'PKN');
+test('all sellers list in their ship-from currency regardless of payment preferences', () => {
+  assert.equal(sellerListCurrency({ acceptsPkn: true, shipFromCountry: 'IT' }), 'EUR');
   assert.equal(sellerListCurrency({ acceptsPkn: false, shipFromCountry: 'IT' }), 'EUR');
+  assert.equal(sellerListCurrency({ acceptsPkn: true, shipFromCountry: 'DK' }), 'DKK');
   assert.equal(sellerListCurrency({ acceptsPkn: false, shipFromCountry: 'DK' }), 'DKK');
-  assert.equal(sellerListCurrency({ acceptsPkn: false, shipFromCountry: '' }), 'EUR');
+  assert.equal(sellerListCurrency({ shipFromCountry: 'DK' }, 'US'), 'DKK');
+});
+
+test('seller currency uses the known country when ship-from is missing', () => {
+  assert.equal(sellerListCurrency(null, 'US'), 'USD');
+  assert.equal(sellerListCurrency({ acceptsPkn: true, shipFromCountry: '' }, 'US'), 'USD');
+});
+
+test('seller currency falls back to locale when no country is known', (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor);
+    else delete globalThis.navigator;
+  });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { language: 'da-DK' } });
+  assert.equal(sellerListCurrency(null), 'DKK');
+  assert.equal(sellerListCurrency({ acceptsPkn: true }), 'DKK');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { language: 'it-IT' } });
+  assert.equal(sellerListCurrency(null), 'EUR');
 });
 
 test('prices round-trip between stored PKN and the seller currency', () => {
-  assert.equal(formatSellerPrice(2642, 'PKN'), '2642 PKN');
-  assert.equal(formatSellerPrice(2642, 'EUR'), '€13.21 (2642 PKN)');
-  assert.equal(formatSellerPrice(2000, 'DKK'), '75 DKK (2000 PKN)');
+  assert.equal(formatSellerPrice(2642, 'EUR'), '€13.21');
+  assert.equal(formatSellerPrice(2000, 'DKK'), '75 DKK');
   assert.equal(priceInputFromPkn(2642, 'EUR'), '13.21');
+  assert.ok(Math.abs(pknFromPriceInput(priceInputFromPkn(366, 'DKK'), 'DKK') - 366) <= 1);
   assert.equal(priceInputFromPkn(null, 'EUR'), '');
   assert.equal(pknFromPriceInput('13.21', 'EUR'), 2642);
   assert.equal(pknFromPriceInput('75', 'DKK'), 2000);
@@ -61,15 +79,37 @@ test('a pinned URL currency keeps the two-line local + PKN stack', () => {
   assert.equal(parts.pkn, '86 PKN');
 });
 
-test('signed-out buyers keep plain PKN', () => {
+test('signed-out buyers see local currency first, PKN under it', () => {
   const parts = buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null });
-  assert.equal(parts.local, '');
+  assert.ok(parts.local.endsWith('DKK'));
   assert.equal(parts.pkn, '86 PKN');
+  assert.deepEqual(buyerPriceParts({ pricePkn: 352, currency: 'EUR', balancePkn: null }), { local: '€1.76', pkn: '352 PKN' });
+  assert.equal(buyerPriceLabel({ pricePkn: 352, currency: 'EUR', balancePkn: null }), '€1.76 (352 PKN)');
 });
 
-test('signed-out buyers see PKN, except card-only sellers in local currency', () => {
-  assert.deepEqual(buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null }), { local: '', pkn: '86 PKN' });
+test('signed-out buyers pinned to PKN keep plain PKN; card-only sellers stay local only', () => {
+  assert.deepEqual(buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null, pinned: 'PKN' }), { local: '', pkn: '86 PKN' });
   const cardOnly = buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: null, sellerAcceptsPkn: false });
   assert.equal(cardOnly.pkn, '');
   assert.ok(cardOnly.local.endsWith('DKK'));
+});
+
+test('local prices accept a decimal comma', () => {
+  assert.equal(pknFromPriceInput('13,50', 'DKK'), 360);
+  assert.equal(pknFromPriceInput('13.50', 'DKK'), 360);
+  assert.equal(pknFromPriceInput('1.500,5', 'EUR'), 300100);
+  assert.equal(pknFromPriceInput('1,500', 'EUR'), 300000);
+});
+
+test('Assets preview value is local currency only, with EUR fallback and no NaN', async () => {
+  const { formatAssetsValue } = await import('./seller-currency.js');
+  const dkk = formatAssetsValue(65110, 'DKK');
+  assert.match(dkk, /DKK$/);
+  assert.doesNotMatch(dkk, /PKN/);
+  assert.equal(formatAssetsValue(65110, 'GBP'), formatAssetsValue(65110, 'EUR'));
+  assert.match(formatAssetsValue(65110, 'EUR'), /^€/);
+  for (const bad of [0, undefined, NaN, null, '']) {
+    const out = formatAssetsValue(bad, 'DKK');
+    assert.ok(out && !/NaN|PKN/.test(out), String(out));
+  }
 });

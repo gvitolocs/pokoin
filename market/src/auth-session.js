@@ -11,6 +11,8 @@ import { safeAvatarUrl } from './avatar.js';
 export const AUTH_SESSION_KEY = 'pokoin.auth.session';
 export const AUTH_TOKEN_COOKIE = 'pokoin.auth.token';
 export const AUTH_SESSION_COOKIE = 'pokoin.auth.session.cookie';
+/** The landing binder's stored first page (landing-binder.js): one account's cards. */
+export const LANDING_BINDER_KEY = 'pokoin.landing.binder.v1';
 
 function store(override) {
   if (override) {
@@ -97,6 +99,11 @@ function clearCookie(name, { jar, hostname, shared = true } = {}) {
   writeCookie(name, '', { maxAgeSec: 0, jar, hostname, shared });
 }
 
+/** Username for the landing's account button: handle characters only. */
+export function sessionUsername(value) {
+  return String(value || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 32);
+}
+
 export function readAuthSession(overrideStore) {
   const storage = store(overrideStore);
   let raw = null;
@@ -122,7 +129,9 @@ export function readAuthSession(overrideStore) {
     const silverUntil = readDate(parsed.silverUntil);
     const untilLive = Boolean(silverUntil && silverUntil.getTime() > Date.now());
     const admin = parsed.admin === true;
-    const silver = admin || parsed.silver === true || untilLive;
+    // A cached silver:true without a live silverUntil is an expired (or
+    // legacy role) membership — only admins stay Silver permanently.
+    const silver = admin || untilLive;
     return {
       uid,
       signedIn: true,
@@ -131,6 +140,7 @@ export function readAuthSession(overrideStore) {
       silverUntil: untilLive ? silverUntil : null,
       availablePkn: Number(parsed.availablePkn) || 0,
       photoUrl: safeAvatarUrl(parsed.photoUrl),
+      username: sessionUsername(parsed.username),
     };
   } catch (_) {
     return null;
@@ -152,6 +162,7 @@ export function writeAuthSession(session, overrideStore) {
     silverUntil: silverUntil ? silverUntil.toISOString() : null,
     availablePkn: Number(session.availablePkn) || 0,
     photoUrl: safeAvatarUrl(session.photoUrl),
+    username: sessionUsername(session.username),
   });
   if (storage?.setItem) {
     try {
@@ -170,6 +181,7 @@ export function clearAuthSession(overrideStore) {
   const storage = store(overrideStore);
   try {
     storage?.removeItem?.(AUTH_SESSION_KEY);
+    storage?.removeItem?.(LANDING_BINDER_KEY);
   } catch (_) {
     /* private mode */
   }

@@ -1,420 +1,666 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Pokoin: The market belongs to the collectors</title>
-  <meta name="description" content="A global peer-to-peer marketplace built for everyone. Buy. Sell. Settle in PKN. Card Reserve, native wallet, and PokoinPoS in the browser.">
-  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
-  <meta name="googlebot" content="index, follow">
-  <meta name="author" content="Pokoin">
-  <meta name="application-name" content="Pokoin">
-  <meta name="theme-color" content="#000000">
-  <link rel="canonical" href="https://pokoin.com/">
-  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-  <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
-  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png">
-  <link rel="icon" href="/favicon.ico" sizes="48x48">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="manifest" href="/site.webmanifest">
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Pokoin">
-  <meta property="og:locale" content="en_US">
-  <meta property="og:title" content="Pokoin: The market belongs to the collectors">
-  <meta property="og:description" content="A global peer-to-peer marketplace built for everyone. Buy. Sell. Settle in PKN.">
-  <meta property="og:url" content="https://pokoin.com/">
-  <meta property="og:image" content="https://pokoin.com/pokoin-project-banner-1360x430.png">
-  <meta property="og:image:width" content="1360">
-  <meta property="og:image:height" content="430">
-  <meta property="og:image:type" content="image/png">
-  <meta property="og:image:alt" content="Pokoin: Buy. Sell. Settle in PKN.">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Pokoin: The market belongs to the collectors">
-  <meta name="twitter:description" content="A global peer-to-peer marketplace built for everyone. Buy. Sell. Settle in PKN.">
-  <meta name="twitter:image" content="https://pokoin.com/pokoin-project-banner-1360x430.png">
-  <meta name="twitter:image:alt" content="Pokoin: Buy. Sell. Settle in PKN.">
-  <link rel="preload" href="home/satoshi.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="home/logo.png" as="image">
-  <script src="home/landing-boot.js"></script>
-  <link rel="stylesheet" href="home/landing.css?v=20260927-wordmark">
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@graph": [
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>
+      Pokoin — Pokémon card scanner, collection tracker &amp; marketplace
+    </title>
+    <meta
+      name="description"
+      content="Scan Pokémon cards, track your collection, trade cards for PKN at 90% of market value, or use managed selling for real money."
+    />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta name="googlebot" content="index, follow" />
+    <meta name="author" content="Pokoin" />
+    <meta name="application-name" content="Pokoin" />
+    <meta name="theme-color" content="#08080a" />
+    <link rel="canonical" href="https://pokoin.com/" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Pokoin" />
+    <meta property="og:locale" content="en_US" />
+    <meta
+      property="og:title"
+      content="Pokoin — Pokémon card scanner, collection tracker &amp; marketplace"
+    />
+    <meta
+      property="og:description"
+      content="Scan Pokémon cards. Track your collection. Trade cards for PKN at 90% of market value, or use managed selling for real money."
+    />
+    <meta property="og:url" content="https://pokoin.com/" />
+    <meta
+      property="og:image"
+      content="https://pokoin.com/home/pokoin-product-1200x630.png"
+    />
+    <meta
+      property="og:image:secure_url"
+      content="https://pokoin.com/home/pokoin-product-1200x630.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta
+      property="og:image:alt"
+      content="Pokoin — Scan. Collect. Make your next move. Scanner, inventory, marketplace, and Poko assistant."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Pokoin — Pokémon card scanner, collection tracker &amp; marketplace"
+    />
+    <meta
+      name="twitter:description"
+      content="Scan Pokémon cards. Track your collection. Trade cards for PKN at 90% of market value, or use managed selling for real money."
+    />
+    <meta
+      name="twitter:image"
+      content="https://pokoin.com/home/pokoin-product-1200x630.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Pokoin — Scan. Collect. Make your next move. Scanner, inventory, marketplace, and Poko assistant."
+    />
+    <link
+      rel="preload"
+      href="/home/satoshi.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script src="/home/landing-boot.js?v=20261031-wordmark"></script>
+    <link rel="stylesheet" href="/home/landing.css?v=20261111-paint" />
+    <link rel="stylesheet" href="/home/home.css?v=20261111-paint" />
+    <script type="application/ld+json">
       {
-        "@type": "Organization",
-        "@id": "https://pokoin.com/#organization",
-        "name": "Pokoin",
-        "url": "https://pokoin.com/",
-        "email": "contact@pokoin.com",
-        "logo": {
-          "@type": "ImageObject",
-          "url": "https://pokoin.com/pokoin-512.png"
-        },
-        "sameAs": [
-          "https://explorer.pokoin.com",
-          "https://bscscan.com/token/0x91A17E2bddfF839078BD395482B38e4AC15276f4",
-          "https://pancakeswap.finance/swap?outputCurrency=0x91A17E2bddfF839078BD395482B38e4AC15276f4&chain=bsc"
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://pokoin.com/#organization",
+            "name": "Pokoin",
+            "url": "https://pokoin.com/",
+            "email": "contact@pokoin.com",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://pokoin.com/pokoin-512.png"
+            },
+            "sameAs": [
+              "https://explorer.pokoin.com"
+            ]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://pokoin.com/#website",
+            "url": "https://pokoin.com/",
+            "name": "Pokoin",
+            "description": "Card scanning, inventory, collections, the Pokémon card marketplace, and Poko assistant in one web experience.",
+            "publisher": { "@id": "https://pokoin.com/#organization" },
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://pokoin.com/marketplace/search?q={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "WebPage",
+            "@id": "https://pokoin.com/#webpage",
+            "url": "https://pokoin.com/",
+            "name": "Pokoin — Pokémon card scanner, collection tracker & marketplace",
+            "description": "Scan Pokémon cards. Track your collection. Trade cards for PKN at 90% of market value, or use managed selling for real money.",
+            "isPartOf": { "@id": "https://pokoin.com/#website" },
+            "about": { "@id": "https://pokoin.com/#organization" },
+            "primaryImageOfPage": {
+              "@type": "ImageObject",
+              "url": "https://pokoin.com/home/pokoin-product-1200x630.png",
+              "width": 1200,
+              "height": 630
+            }
+          }
         ]
-      },
-      {
-        "@type": "WebSite",
-        "@id": "https://pokoin.com/#website",
-        "url": "https://pokoin.com/",
-        "name": "Pokoin",
-        "description": "Peer-to-peer Pokémon card marketplace. Buy. Sell. Settle in PKN.",
-        "publisher": { "@id": "https://pokoin.com/#organization" },
-        "potentialAction": {
-          "@type": "SearchAction",
-          "target": "https://pokoin.com/marketplace/search?q={search_term_string}",
-          "query-input": "required name=search_term_string"
-        }
-      },
-      {
-        "@type": "WebPage",
-        "@id": "https://pokoin.com/#webpage",
-        "url": "https://pokoin.com/",
-        "name": "Pokoin: The market belongs to the collectors",
-        "description": "A global peer-to-peer marketplace built for everyone. Buy. Sell. Settle in PKN.",
-        "isPartOf": { "@id": "https://pokoin.com/#website" },
-        "about": { "@id": "https://pokoin.com/#organization" },
-        "primaryImageOfPage": {
-          "@type": "ImageObject",
-          "url": "https://pokoin.com/pokoin-project-banner-1360x430.png"
-        }
       }
-    ]
-  }
-  </script>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-
-  <header class="nav">
-    <div class="nav-glow" aria-hidden="true"></div>
-    <div class="nav-inner">
-      <a class="nav-logo" href="/" aria-label="Pokoin home">
-        <img class="brand-badge" src="home/logo.png" width="52" height="52" alt="">
-        <span class="brand-word" aria-hidden="true">P<img class="brand-coin" src="home/pokoin-mascot.png" width="26" height="24" alt="">ko<span class="brand-i">ı</span>n</span>
-      </a>
-      <nav class="nav-links" aria-label="Primary">
-        <a href="/marketplace">marketplace</a>
-        <a href="/wallet">wallet</a>
-        <a href="/scan">scan</a>
-        <a href="/docs">host node</a>
-        <a href="/forum">forum</a>
-      </nav>
-      <div class="nav-end">
-        <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false">
-          <span></span><span></span><span></span>
-        </button>
+    </script>
+  </head>
+  <body class="home-page">
+    <!-- Landing logo from brand/logo/pokoin-logo-landing.svg; shared by both links. -->
+    <svg xmlns="http://www.w3.org/2000/svg" id="pokoin-wordmark-defs" width="0" height="0" aria-hidden="true" focusable="false">
+      <symbol id="pokoin-wordmark" viewBox="0 0 3133 1000" overflow="visible"><path fill="#ffffff" d="M126.0 877.0Q81.0 877.0 62.0 863.5Q43.0 850.0 39.0 828.5Q35.0 807.0 35.0 785.0V269.0Q35.0 247.0 39.0 226.0Q43.0 205.0 62.0 191.5Q81.0 178.0 127.0 178.0H326.0Q364.0 178.0 408.0 193.5Q452.0 209.0 491.5 241.0Q531.0 273.0 556.0 321.0Q581.0 369.0 581.0 435.0Q581.0 500.0 556.0 548.0Q531.0 596.0 491.5 627.5Q452.0 659.0 408.0 674.5Q364.0 690.0 325.0 690.0H218.0V786.0Q218.0 808.0 214.0 829.0Q210.0 850.0 191.0 863.5Q172.0 877.0 126.0 877.0ZM218.0 507.0H326.0Q339.0 507.0 356.0 500.5Q373.0 494.0 386.0 478.0Q399.0 462.0 399.0 434.0Q399.0 413.0 389.0 396.5Q379.0 380.0 362.5 370.5Q346.0 361.0 325.0 361.0H218.0Z M1853.0 713.0Q1890.0 746.0 1892.5 775.5Q1895.0 805.0 1859.0 843.0Q1832.0 871.0 1812.5 879.5Q1793.0 888.0 1774.0 879.5Q1755.0 871.0 1729.0 848.0L1606.0 733.0V788.0Q1606.0 810.0 1602.0 831.0Q1598.0 852.0 1579.5 865.0Q1561.0 878.0 1515.0 878.0Q1470.0 878.0 1451.0 864.5Q1432.0 851.0 1428.5 830.0Q1425.0 809.0 1425.0 787.0V230.0Q1425.0 207.0 1429.0 186.5Q1433.0 166.0 1452.0 152.5Q1471.0 139.0 1516.0 139.0Q1561.0 139.0 1579.5 152.5Q1598.0 166.0 1602.0 187.0Q1606.0 208.0 1606.0 231.0V507.0L1691.0 424.0Q1715.0 401.0 1736.0 392.5Q1757.0 384.0 1777.5 391.5Q1798.0 399.0 1821.0 424.0Q1860.0 466.0 1858.5 492.0Q1857.0 518.0 1821.0 554.0L1740.0 625.0Z M2127.0 887.0Q2081.0 887.0 2034.0 868.5Q1987.0 850.0 1947.5 815.5Q1908.0 781.0 1884.5 732.5Q1861.0 684.0 1861.0 624.0Q1861.0 569.0 1882.0 521.0Q1903.0 473.0 1939.5 436.5Q1976.0 400.0 2023.5 379.0Q2071.0 358.0 2125.0 358.0Q2199.0 358.0 2259.0 393.5Q2319.0 429.0 2355.0 489.0Q2391.0 549.0 2391.0 623.0Q2391.0 686.0 2367.0 735.0Q2343.0 784.0 2304.0 818.0Q2265.0 852.0 2218.5 869.5Q2172.0 887.0 2127.0 887.0ZM2125.0 704.0Q2140.0 704.0 2159.5 696.5Q2179.0 689.0 2193.5 671.0Q2208.0 653.0 2208.0 622.0Q2208.0 597.0 2197.5 579.0Q2187.0 561.0 2168.0 551.0Q2149.0 541.0 2124.0 541.0Q2102.0 541.0 2084.0 551.5Q2066.0 562.0 2055.0 580.5Q2044.0 599.0 2044.0 623.0Q2044.0 653.0 2058.0 671.0Q2072.0 689.0 2091.0 696.5Q2110.0 704.0 2125.0 704.0Z M2498.0 878.0Q2453.0 878.0 2434.0 864.5Q2415.0 851.0 2411.5 830.0Q2408.0 809.0 2408.0 787.0V461.0Q2408.0 439.0 2412.0 418.5Q2416.0 398.0 2435.0 384.5Q2454.0 371.0 2499.0 371.0Q2544.0 371.0 2562.5 384.5Q2581.0 398.0 2585.0 419.0Q2589.0 440.0 2589.0 463.0V788.0Q2589.0 810.0 2585.0 831.0Q2581.0 852.0 2562.5 865.0Q2544.0 878.0 2498.0 878.0Z M2712.0 877.0Q2667.0 877.0 2648.0 863.5Q2629.0 850.0 2625.5 829.0Q2622.0 808.0 2622.0 786.0V457.0Q2622.0 435.0 2626.0 415.0Q2630.0 395.0 2649.0 382.5Q2668.0 370.0 2713.0 370.0Q2754.0 370.0 2772.5 380.5Q2791.0 391.0 2796.0 406.0Q2801.0 421.0 2800.5 433.5Q2800.0 446.0 2802.0 449.0L2794.0 455.0Q2793.0 440.0 2805.5 425.0Q2818.0 410.0 2838.5 397.5Q2859.0 385.0 2882.5 377.5Q2906.0 370.0 2927.0 370.0Q2977.0 370.0 3015.0 389.0Q3053.0 408.0 3078.5 442.5Q3104.0 477.0 3117.0 523.0Q3130.0 569.0 3130.0 623.0V787.0Q3130.0 809.0 3126.0 830.0Q3122.0 851.0 3103.5 864.0Q3085.0 877.0 3039.0 877.0Q2993.0 877.0 2974.0 863.5Q2955.0 850.0 2951.0 829.0Q2947.0 808.0 2947.0 786.0V623.0Q2947.0 600.0 2938.5 584.0Q2930.0 568.0 2914.5 559.5Q2899.0 551.0 2876.0 551.0Q2854.0 551.0 2837.5 560.0Q2821.0 569.0 2812.0 585.0Q2803.0 601.0 2803.0 623.0V787.0Q2803.0 809.0 2799.0 830.0Q2795.0 851.0 2776.5 864.0Q2758.0 877.0 2712.0 877.0Z"/><circle fill="#ffd23f" cx="2486.0" cy="265.0" r="95.0"/><g transform="translate(590.00 140.00) scale(30.0000)" shape-rendering="crispEdges"><rect x="10" y="0" width="1" height="1" fill="#040d34"/><rect x="11" y="0" width="1" height="1" fill="#040d33"/><rect x="12" y="0" width="1" height="1" fill="#040e33"/><rect x="13" y="0" width="1" height="1" fill="#030e34"/><rect x="14" y="0" width="1" height="1" fill="#050f33"/><rect x="15" y="0" width="1" height="1" fill="#030d33"/><rect x="8" y="1" width="1" height="1" fill="#020c34"/><rect x="9" y="1" width="1" height="1" fill="#030e32"/><rect x="10" y="1" width="1" height="1" fill="#030b34"/><rect x="11" y="1" width="1" height="1" fill="#ffd90a"/><rect x="12" y="1" width="1" height="1" fill="#fed90c"/><rect x="13" y="1" width="1" height="1" fill="#fed70b"/><rect x="14" y="1" width="1" height="1" fill="#ffd80a"/><rect x="15" y="1" width="1" height="1" fill="#040b35"/><rect x="16" y="1" width="1" height="1" fill="#040f34"/><rect x="17" y="1" width="1" height="1" fill="#040d35"/><rect x="6" y="2" width="1" height="1" fill="#040c34"/><rect x="7" y="2" width="1" height="1" fill="#040e33"/><rect x="8" y="2" width="1" height="1" fill="#040b34"/><rect x="9" y="2" width="3" height="1" fill="#ffffff"/><rect x="12" y="2" width="1" height="1" fill="#fdca02"/><rect x="13" y="2" width="1" height="1" fill="#fecb04"/><rect x="14" y="2" width="1" height="1" fill="#fcca04"/><rect x="15" y="2" width="1" height="1" fill="#ffcd03"/><rect x="16" y="2" width="1" height="1" fill="#ffce07"/><rect x="17" y="2" width="1" height="1" fill="#050d34"/><rect x="18" y="2" width="1" height="1" fill="#060e34"/><rect x="19" y="2" width="1" height="1" fill="#030d35"/><rect x="5" y="3" width="1" height="1" fill="#030d34"/><rect x="6" y="3" width="1" height="1" fill="#030d32"/><rect x="7" y="3" width="2" height="1" fill="#ffffff"/><rect x="9" y="3" width="1" height="1" fill="#fee00c"/><rect x="10" y="3" width="1" height="1" fill="#c07d00"/><rect x="11" y="3" width="1" height="1" fill="#be7f01"/><rect x="12" y="3" width="1" height="1" fill="#be7f00"/><rect x="13" y="3" width="1" height="1" fill="#bf7d00"/><rect x="14" y="3" width="1" height="1" fill="#bf7e00"/><rect x="15" y="3" width="1" height="1" fill="#bc7d00"/><rect x="16" y="3" width="1" height="1" fill="#bc7a00"/><rect x="17" y="3" width="1" height="1" fill="#ffd106"/><rect x="18" y="3" width="1" height="1" fill="#ffd308"/><rect x="19" y="3" width="1" height="1" fill="#040d34"/><rect x="20" y="3" width="1" height="1" fill="#040e33"/><rect x="4" y="4" width="1" height="1" fill="#030c34"/><rect x="5" y="4" width="2" height="1" fill="#ffffff"/><rect x="7" y="4" width="1" height="1" fill="#c18000"/><rect x="8" y="4" width="1" height="1" fill="#fee00c"/><rect x="9" y="4" width="1" height="1" fill="#fecc03"/><rect x="10" y="4" width="1" height="1" fill="#ffcc05"/><rect x="11" y="4" width="1" height="1" fill="#ffcb03"/><rect x="12" y="4" width="1" height="1" fill="#ffcc03"/><rect x="13" y="4" width="1" height="1" fill="#fecc02"/><rect x="14" y="4" width="1" height="1" fill="#ffcd03"/><rect x="15" y="4" width="2" height="1" fill="#ffca03"/><rect x="17" y="4" width="2" height="1" fill="#bc7a00"/><rect x="19" y="4" width="1" height="1" fill="#ffd80b"/><rect x="20" y="4" width="1" height="1" fill="#ffd509"/><rect x="21" y="4" width="1" height="1" fill="#030c35"/><rect x="4" y="5" width="1" height="1" fill="#050e33"/><rect x="5" y="5" width="1" height="1" fill="#fedb0c"/><rect x="6" y="5" width="1" height="1" fill="#c07e00"/><rect x="7" y="5" width="1" height="1" fill="#fee00c"/><rect x="8" y="5" width="1" height="1" fill="#ffcd04"/><rect x="9" y="5" width="1" height="1" fill="#ffcc05"/><rect x="10" y="5" width="1" height="1" fill="#ffcc04"/><rect x="11" y="5" width="1" height="1" fill="#ffcc05"/><rect x="12" y="5" width="1" height="1" fill="#fecb06"/><rect x="13" y="5" width="1" height="1" fill="#ffcc04"/><rect x="14" y="5" width="1" height="1" fill="#ffca05"/><rect x="15" y="5" width="1" height="1" fill="#feca05"/><rect x="16" y="5" width="1" height="1" fill="#ffcc03"/><rect x="17" y="5" width="1" height="1" fill="#ffcb04"/><rect x="18" y="5" width="1" height="1" fill="#ffcb03"/><rect x="19" y="5" width="1" height="1" fill="#be7b00"/><rect x="20" y="5" width="1" height="1" fill="#ffd50b"/><rect x="21" y="5" width="1" height="1" fill="#040a34"/><rect x="22" y="5" width="1" height="1" fill="#040e35"/><rect x="4" y="6" width="1" height="1" fill="#fedb0c"/><rect x="5" y="6" width="1" height="1" fill="#ffcd06"/><rect x="6" y="6" width="1" height="1" fill="#bf7d00"/><rect x="7" y="6" width="1" height="1" fill="#fee00c"/><rect x="8" y="6" width="1" height="1" fill="#ffcd04"/><rect x="9" y="6" width="1" height="1" fill="#ffcb05"/><rect x="10" y="6" width="2" height="1" fill="#ffcc04"/><rect x="12" y="6" width="1" height="1" fill="#ffcb05"/><rect x="13" y="6" width="1" height="1" fill="#ffca04"/><rect x="14" y="6" width="1" height="1" fill="#ffcb04"/><rect x="15" y="6" width="1" height="1" fill="#ffca04"/><rect x="16" y="6" width="2" height="1" fill="#ffcb03"/><rect x="18" y="6" width="1" height="1" fill="#fecb05"/><rect x="19" y="6" width="1" height="1" fill="#bd7b01"/><rect x="20" y="6" width="1" height="1" fill="#ffd60b"/><rect x="21" y="6" width="1" height="1" fill="#fbc80a"/><rect x="22" y="6" width="1" height="1" fill="#030933"/><rect x="4" y="7" width="1" height="1" fill="#ffcd06"/><rect x="5" y="7" width="1" height="1" fill="#ad6700"/><rect x="6" y="7" width="1" height="1" fill="#ffcc01"/><rect x="7" y="7" width="1" height="1" fill="#fecc04"/><rect x="8" y="7" width="1" height="1" fill="#fecc05"/><rect x="9" y="7" width="1" height="1" fill="#ffcd06"/><rect x="10" y="7" width="2" height="1" fill="#ffcc03"/><rect x="12" y="7" width="1" height="1" fill="#ffcc05"/><rect x="13" y="7" width="1" height="1" fill="#fecb03"/><rect x="14" y="7" width="1" height="1" fill="#ffcb04"/><rect x="15" y="7" width="1" height="1" fill="#fecb03"/><rect x="16" y="7" width="2" height="1" fill="#ffcc02"/><rect x="18" y="7" width="1" height="1" fill="#ffcd03"/><rect x="19" y="7" width="1" height="1" fill="#fdd102"/><rect x="20" y="7" width="1" height="1" fill="#ad6a00"/><rect x="21" y="7" width="1" height="1" fill="#ffd105"/><rect x="22" y="7" width="1" height="1" fill="#050b34"/><rect x="3" y="8" width="1" height="1" fill="#040e32"/><rect x="4" y="8" width="1" height="1" fill="#ffcd03"/><rect x="5" y="8" width="1" height="1" fill="#bf7d00"/><rect x="6" y="8" width="1" height="1" fill="#ffca02"/><rect x="7" y="8" width="1" height="1" fill="#fecc03"/><rect x="8" y="8" width="1" height="1" fill="#fecb03"/><rect x="9" y="8" width="1" height="1" fill="#ffcb05"/><rect x="10" y="8" width="1" height="1" fill="#ffca03"/><rect x="11" y="8" width="1" height="1" fill="#ffcd02"/><rect x="12" y="8" width="1" height="1" fill="#ffcd04"/><rect x="13" y="8" width="1" height="1" fill="#feca02"/><rect x="14" y="8" width="1" height="1" fill="#ffca03"/><rect x="15" y="8" width="1" height="1" fill="#ffca02"/><rect x="16" y="8" width="1" height="1" fill="#ffcb04"/><rect x="17" y="8" width="1" height="1" fill="#ffcb02"/><rect x="18" y="8" width="1" height="1" fill="#ffcb03"/><rect x="19" y="8" width="1" height="1" fill="#feca02"/><rect x="20" y="8" width="1" height="1" fill="#bc7d01"/><rect x="21" y="8" width="1" height="1" fill="#ffce02"/><rect x="22" y="8" width="1" height="1" fill="#281b2a"/><rect x="3" y="9" width="1" height="1" fill="#020b31"/><rect x="4" y="9" width="1" height="1" fill="#ffcb03"/><rect x="5" y="9" width="1" height="1" fill="#bf7e00"/><rect x="6" y="9" width="1" height="1" fill="#ffcb01"/><rect x="7" y="9" width="1" height="1" fill="#ffcc02"/><rect x="8" y="9" width="1" height="1" fill="#ffcc03"/><rect x="9" y="9" width="1" height="1" fill="#081131"/><rect x="10" y="9" width="1" height="1" fill="#061031"/><rect x="11" y="9" width="1" height="1" fill="#feca04"/><rect x="12" y="9" width="1" height="1" fill="#ffcd04"/><rect x="13" y="9" width="1" height="1" fill="#fdca04"/><rect x="14" y="9" width="1" height="1" fill="#feca04"/><rect x="15" y="9" width="1" height="1" fill="#021131"/><rect x="16" y="9" width="1" height="1" fill="#041033"/><rect x="17" y="9" width="1" height="1" fill="#ffcb04"/><rect x="18" y="9" width="2" height="1" fill="#ffcb03"/><rect x="20" y="9" width="1" height="1" fill="#bb7c00"/><rect x="21" y="9" width="1" height="1" fill="#ffce02"/><rect x="22" y="9" width="1" height="1" fill="#fecc03"/><rect x="1" y="10" width="1" height="1" fill="#040e34"/><rect x="2" y="10" width="1" height="1" fill="#030f35"/><rect x="3" y="10" width="1" height="1" fill="#040d34"/><rect x="4" y="10" width="1" height="1" fill="#fdc804"/><rect x="5" y="10" width="1" height="1" fill="#be7d00"/><rect x="6" y="10" width="1" height="1" fill="#ffcb02"/><rect x="7" y="10" width="1" height="1" fill="#ffcb03"/><rect x="8" y="10" width="1" height="1" fill="#ffc902"/><rect x="9" y="10" width="1" height="1" fill="#ffffff"/><rect x="10" y="10" width="1" height="1" fill="#050e34"/><rect x="11" y="10" width="1" height="1" fill="#feca03"/><rect x="12" y="10" width="1" height="1" fill="#fecc02"/><rect x="13" y="10" width="1" height="1" fill="#ffcb03"/><rect x="14" y="10" width="1" height="1" fill="#ffcb02"/><rect x="15" y="10" width="1" height="1" fill="#ffffff"/><rect x="16" y="10" width="1" height="1" fill="#020d33"/><rect x="17" y="10" width="1" height="1" fill="#ffcb03"/><rect x="18" y="10" width="1" height="1" fill="#ffc903"/><rect x="19" y="10" width="1" height="1" fill="#ffca02"/><rect x="20" y="10" width="1" height="1" fill="#bc7a00"/><rect x="21" y="10" width="1" height="1" fill="#ffca03"/><rect x="22" y="10" width="1" height="1" fill="#ffcc01"/><rect x="23" y="10" width="1" height="1" fill="#040c33"/><rect x="24" y="10" width="1" height="1" fill="#040d34"/><rect x="0" y="11" width="1" height="1" fill="#040a34"/><rect x="1" y="11" width="1" height="1" fill="#ffc902"/><rect x="2" y="11" width="1" height="1" fill="#ffce00"/><rect x="3" y="11" width="1" height="1" fill="#040d33"/><rect x="4" y="11" width="1" height="1" fill="#ffcb03"/><rect x="5" y="11" width="1" height="1" fill="#be7e00"/><rect x="6" y="11" width="1" height="1" fill="#ffcb02"/><rect x="7" y="11" width="1" height="1" fill="#ffcb04"/><rect x="8" y="11" width="1" height="1" fill="#ffcc01"/><rect x="9" y="11" width="1" height="1" fill="#040d34"/><rect x="10" y="11" width="1" height="1" fill="#030d34"/><rect x="11" y="11" width="1" height="1" fill="#ffcc02"/><rect x="12" y="11" width="1" height="1" fill="#ffca05"/><rect x="13" y="11" width="1" height="1" fill="#ffcb02"/><rect x="14" y="11" width="1" height="1" fill="#ffca01"/><rect x="15" y="11" width="1" height="1" fill="#030d33"/><rect x="16" y="11" width="1" height="1" fill="#020f35"/><rect x="17" y="11" width="1" height="1" fill="#ffcb03"/><rect x="18" y="11" width="1" height="1" fill="#fec902"/><rect x="19" y="11" width="1" height="1" fill="#ffcc02"/><rect x="20" y="11" width="1" height="1" fill="#bf7d00"/><rect x="21" y="11" width="1" height="1" fill="#ffcd01"/><rect x="22" y="11" width="1" height="1" fill="#ffcb02"/><rect x="23" y="11" width="1" height="1" fill="#ffcc00"/><rect x="24" y="11" width="1" height="1" fill="#ffcb01"/><rect x="25" y="11" width="1" height="1" fill="#090d35"/><rect x="0" y="12" width="1" height="1" fill="#050a35"/><rect x="1" y="12" width="1" height="1" fill="#fecb01"/><rect x="2" y="12" width="1" height="1" fill="#dc9700"/><rect x="3" y="12" width="1" height="1" fill="#030d31"/><rect x="4" y="12" width="1" height="1" fill="#feca04"/><rect x="5" y="12" width="1" height="1" fill="#c08000"/><rect x="6" y="12" width="1" height="1" fill="#ffcb03"/><rect x="7" y="12" width="1" height="1" fill="#ffca03"/><rect x="8" y="12" width="1" height="1" fill="#ffc902"/><rect x="9" y="12" width="1" height="1" fill="#fec802"/><rect x="10" y="12" width="1" height="1" fill="#fcc904"/><rect x="11" y="12" width="1" height="1" fill="#000a34"/><rect x="12" y="12" width="1" height="1" fill="#ffcc02"/><rect x="13" y="12" width="1" height="1" fill="#ffcc01"/><rect x="14" y="12" width="1" height="1" fill="#00053e"/><rect x="15" y="12" width="1" height="1" fill="#ffcc04"/><rect x="16" y="12" width="1" height="1" fill="#ffc901"/><rect x="17" y="12" width="1" height="1" fill="#feca02"/><rect x="18" y="12" width="1" height="1" fill="#ffcc03"/><rect x="19" y="12" width="1" height="1" fill="#ffc903"/><rect x="20" y="12" width="1" height="1" fill="#bf7c00"/><rect x="21" y="12" width="1" height="1" fill="#ffcd01"/><rect x="22" y="12" width="1" height="1" fill="#ffcb03"/><rect x="23" y="12" width="1" height="1" fill="#df9600"/><rect x="24" y="12" width="1" height="1" fill="#ffca00"/><rect x="25" y="12" width="1" height="1" fill="#080a37"/><rect x="0" y="13" width="1" height="1" fill="#050b33"/><rect x="1" y="13" width="1" height="1" fill="#d79001"/><rect x="2" y="13" width="1" height="1" fill="#d99300"/><rect x="3" y="13" width="1" height="1" fill="#030d35"/><rect x="4" y="13" width="1" height="1" fill="#fecc03"/><rect x="5" y="13" width="1" height="1" fill="#be7b01"/><rect x="6" y="13" width="2" height="1" fill="#fec904"/><rect x="8" y="13" width="1" height="1" fill="#e09a00"/><rect x="9" y="13" width="1" height="1" fill="#e09900"/><rect x="10" y="13" width="1" height="1" fill="#feca03"/><rect x="11" y="13" width="1" height="1" fill="#ffcb02"/><rect x="12" y="13" width="1" height="1" fill="#00003e"/><rect x="13" y="13" width="1" height="1" fill="#040d34"/><rect x="14" y="13" width="1" height="1" fill="#ffcc03"/><rect x="15" y="13" width="1" height="1" fill="#ffcb03"/><rect x="16" y="13" width="1" height="1" fill="#df9601"/><rect x="17" y="13" width="1" height="1" fill="#e19901"/><rect x="18" y="13" width="1" height="1" fill="#ffcb02"/><rect x="19" y="13" width="1" height="1" fill="#ffcb03"/><rect x="20" y="13" width="1" height="1" fill="#be7b00"/><rect x="21" y="13" width="1" height="1" fill="#ffcb01"/><rect x="22" y="13" width="1" height="1" fill="#da9100"/><rect x="23" y="13" width="1" height="1" fill="#d98e00"/><rect x="24" y="13" width="1" height="1" fill="#db9000"/><rect x="25" y="13" width="1" height="1" fill="#070b35"/><rect x="1" y="14" width="1" height="1" fill="#000c33"/><rect x="2" y="14" width="1" height="1" fill="#040d33"/><rect x="3" y="14" width="1" height="1" fill="#010e32"/><rect x="4" y="14" width="1" height="1" fill="#fdc903"/><rect x="5" y="14" width="1" height="1" fill="#feca03"/><rect x="6" y="14" width="1" height="1" fill="#be7c01"/><rect x="7" y="14" width="1" height="1" fill="#fecb03"/><rect x="8" y="14" width="1" height="1" fill="#ffcb03"/><rect x="9" y="14" width="1" height="1" fill="#ffca01"/><rect x="10" y="14" width="1" height="1" fill="#ffcd03"/><rect x="11" y="14" width="1" height="1" fill="#ffc901"/><rect x="12" y="14" width="1" height="1" fill="#ffcc02"/><rect x="13" y="14" width="1" height="1" fill="#fecc02"/><rect x="14" y="14" width="1" height="1" fill="#ffcc03"/><rect x="15" y="14" width="1" height="1" fill="#ffca02"/><rect x="16" y="14" width="1" height="1" fill="#ffca01"/><rect x="17" y="14" width="1" height="1" fill="#ffc903"/><rect x="18" y="14" width="1" height="1" fill="#ffcc01"/><rect x="19" y="14" width="1" height="1" fill="#be7d00"/><rect x="20" y="14" width="1" height="1" fill="#ffcc02"/><rect x="21" y="14" width="1" height="1" fill="#ffcd03"/><rect x="22" y="14" width="1" height="1" fill="#050a34"/><rect x="23" y="14" width="1" height="1" fill="#050c33"/><rect x="24" y="14" width="1" height="1" fill="#030d34"/><rect x="4" y="15" width="1" height="1" fill="#d78e01"/><rect x="5" y="15" width="1" height="1" fill="#ffcd04"/><rect x="6" y="15" width="1" height="1" fill="#be7d00"/><rect x="7" y="15" width="1" height="1" fill="#ffcb06"/><rect x="8" y="15" width="1" height="1" fill="#ffcb05"/><rect x="9" y="15" width="1" height="1" fill="#fec904"/><rect x="10" y="15" width="1" height="1" fill="#fecb05"/><rect x="11" y="15" width="1" height="1" fill="#fecc04"/><rect x="12" y="15" width="1" height="1" fill="#ffcb03"/><rect x="13" y="15" width="1" height="1" fill="#fecb04"/><rect x="14" y="15" width="1" height="1" fill="#fecb03"/><rect x="15" y="15" width="1" height="1" fill="#fecc03"/><rect x="16" y="15" width="1" height="1" fill="#ffcc02"/><rect x="17" y="15" width="1" height="1" fill="#ffcc04"/><rect x="18" y="15" width="1" height="1" fill="#ffc904"/><rect x="19" y="15" width="1" height="1" fill="#be7b00"/><rect x="20" y="15" width="1" height="1" fill="#ffcd02"/><rect x="21" y="15" width="1" height="1" fill="#d79000"/><rect x="22" y="15" width="1" height="1" fill="#060b36"/><rect x="4" y="16" width="1" height="1" fill="#d78d01"/><rect x="5" y="16" width="1" height="1" fill="#d68d01"/><rect x="6" y="16" width="1" height="1" fill="#fecc02"/><rect x="7" y="16" width="1" height="1" fill="#be7c01"/><rect x="8" y="16" width="1" height="1" fill="#ffcb03"/><rect x="9" y="16" width="1" height="1" fill="#feca04"/><rect x="10" y="16" width="1" height="1" fill="#ffcc02"/><rect x="11" y="16" width="1" height="1" fill="#ffcb05"/><rect x="12" y="16" width="1" height="1" fill="#fecc02"/><rect x="13" y="16" width="1" height="1" fill="#fecb02"/><rect x="14" y="16" width="1" height="1" fill="#fdca03"/><rect x="15" y="16" width="1" height="1" fill="#fdc704"/><rect x="16" y="16" width="1" height="1" fill="#ffca04"/><rect x="17" y="16" width="1" height="1" fill="#fdc904"/><rect x="18" y="16" width="1" height="1" fill="#bd7d01"/><rect x="19" y="16" width="1" height="1" fill="#ffcd03"/><rect x="20" y="16" width="1" height="1" fill="#d38c01"/><rect x="21" y="16" width="1" height="1" fill="#d99100"/><rect x="22" y="16" width="1" height="1" fill="#050a36"/><rect x="4" y="17" width="1" height="1" fill="#030e33"/><rect x="5" y="17" width="1" height="1" fill="#d58e01"/><rect x="6" y="17" width="1" height="1" fill="#d48d01"/><rect x="7" y="17" width="1" height="1" fill="#fdcb04"/><rect x="8" y="17" width="1" height="1" fill="#bc7d00"/><rect x="9" y="17" width="1" height="1" fill="#be7e00"/><rect x="10" y="17" width="1" height="1" fill="#fec904"/><rect x="11" y="17" width="2" height="1" fill="#ffcc03"/><rect x="13" y="17" width="1" height="1" fill="#ffcb02"/><rect x="14" y="17" width="1" height="1" fill="#ffcb03"/><rect x="15" y="17" width="1" height="1" fill="#fcc804"/><rect x="16" y="17" width="1" height="1" fill="#bc7b01"/><rect x="17" y="17" width="1" height="1" fill="#bf7d00"/><rect x="18" y="17" width="1" height="1" fill="#ffcc04"/><rect x="19" y="17" width="1" height="1" fill="#d38a00"/><rect x="20" y="17" width="1" height="1" fill="#d79001"/><rect x="21" y="17" width="1" height="1" fill="#040d34"/><rect x="22" y="17" width="1" height="1" fill="#050e34"/><rect x="4" y="18" width="1" height="1" fill="#030d36"/><rect x="5" y="18" width="1" height="1" fill="#040e35"/><rect x="6" y="18" width="1" height="1" fill="#d68e01"/><rect x="7" y="18" width="1" height="1" fill="#d08901"/><rect x="8" y="18" width="1" height="1" fill="#ffcc04"/><rect x="9" y="18" width="1" height="1" fill="#ffc904"/><rect x="10" y="18" width="1" height="1" fill="#bd7c01"/><rect x="11" y="18" width="1" height="1" fill="#bd7d00"/><rect x="12" y="18" width="1" height="1" fill="#bc7b01"/><rect x="13" y="18" width="1" height="1" fill="#bd7d00"/><rect x="14" y="18" width="1" height="1" fill="#bd7a01"/><rect x="15" y="18" width="1" height="1" fill="#ba7b01"/><rect x="16" y="18" width="1" height="1" fill="#fdc803"/><rect x="17" y="18" width="1" height="1" fill="#fec903"/><rect x="18" y="18" width="1" height="1" fill="#ca8401"/><rect x="19" y="18" width="1" height="1" fill="#d68f00"/><rect x="20" y="18" width="1" height="1" fill="#050f32"/><rect x="21" y="18" width="1" height="1" fill="#040f34"/><rect x="5" y="19" width="1" height="1" fill="#020e35"/><rect x="6" y="19" width="1" height="1" fill="#030b33"/><rect x="7" y="19" width="1" height="1" fill="#050c33"/><rect x="8" y="19" width="1" height="1" fill="#c17d00"/><rect x="9" y="19" width="1" height="1" fill="#c18000"/><rect x="10" y="19" width="1" height="1" fill="#ffcf02"/><rect x="11" y="19" width="1" height="1" fill="#ffcf01"/><rect x="12" y="19" width="1" height="1" fill="#ffcf02"/><rect x="13" y="19" width="1" height="1" fill="#ffd003"/><rect x="14" y="19" width="1" height="1" fill="#fecb02"/><rect x="15" y="19" width="1" height="1" fill="#fecc02"/><rect x="16" y="19" width="1" height="1" fill="#c07d00"/><rect x="17" y="19" width="1" height="1" fill="#c17d00"/><rect x="18" y="19" width="1" height="1" fill="#050c33"/><rect x="19" y="19" width="1" height="1" fill="#020c32"/><rect x="20" y="19" width="1" height="1" fill="#010f34"/><rect x="5" y="20" width="1" height="1" fill="#061034"/><rect x="6" y="20" width="1" height="1" fill="#030f34"/><rect x="7" y="20" width="1" height="1" fill="#d89000"/><rect x="8" y="20" width="1" height="1" fill="#db9200"/><rect x="9" y="20" width="1" height="1" fill="#d88f00"/><rect x="10" y="20" width="1" height="1" fill="#040b34"/><rect x="11" y="20" width="2" height="1" fill="#030c34"/><rect x="13" y="20" width="1" height="1" fill="#030b33"/><rect x="14" y="20" width="1" height="1" fill="#050c34"/><rect x="15" y="20" width="1" height="1" fill="#040a36"/><rect x="16" y="20" width="1" height="1" fill="#d38f01"/><rect x="17" y="20" width="1" height="1" fill="#d99300"/><rect x="18" y="20" width="1" height="1" fill="#d68e01"/><rect x="19" y="20" width="1" height="1" fill="#040f35"/><rect x="20" y="20" width="1" height="1" fill="#030f33"/><rect x="5" y="21" width="1" height="1" fill="#020d33"/><rect x="6" y="21" width="1" height="1" fill="#ffc700"/><rect x="7" y="21" width="1" height="1" fill="#ffcc00"/><rect x="8" y="21" width="1" height="1" fill="#ffcb00"/><rect x="9" y="21" width="1" height="1" fill="#d99100"/><rect x="10" y="21" width="1" height="1" fill="#021035"/><rect x="15" y="21" width="1" height="1" fill="#040e32"/><rect x="16" y="21" width="1" height="1" fill="#db8e00"/><rect x="17" y="21" width="1" height="1" fill="#ffcc02"/><rect x="18" y="21" width="1" height="1" fill="#fdca03"/><rect x="19" y="21" width="1" height="1" fill="#ffc501"/><rect x="20" y="21" width="1" height="1" fill="#050e36"/><rect x="5" y="22" width="1" height="1" fill="#040f33"/><rect x="6" y="22" width="1" height="1" fill="#b16b00"/><rect x="7" y="22" width="1" height="1" fill="#b46c00"/><rect x="8" y="22" width="1" height="1" fill="#b57000"/><rect x="9" y="22" width="1" height="1" fill="#c27c00"/><rect x="10" y="22" width="1" height="1" fill="#040d35"/><rect x="15" y="22" width="1" height="1" fill="#050e36"/><rect x="16" y="22" width="1" height="1" fill="#c17b01"/><rect x="17" y="22" width="1" height="1" fill="#b87200"/><rect x="18" y="22" width="1" height="1" fill="#b16e01"/><rect x="19" y="22" width="1" height="1" fill="#b36d00"/><rect x="20" y="22" width="1" height="1" fill="#030e37"/><rect x="5" y="23" width="1" height="1" fill="#030b34"/><rect x="6" y="23" width="1" height="1" fill="#000237"/><rect x="7" y="23" width="1" height="1" fill="#010239"/><rect x="8" y="23" width="1" height="1" fill="#00003a"/><rect x="9" y="23" width="1" height="1" fill="#02003b"/><rect x="10" y="23" width="1" height="1" fill="#040e35"/><rect x="15" y="23" width="1" height="1" fill="#030e36"/><rect x="16" y="23" width="2" height="1" fill="#01043b"/><rect x="18" y="23" width="1" height="1" fill="#03023b"/><rect x="19" y="23" width="1" height="1" fill="#02033b"/><rect x="20" y="23" width="1" height="1" fill="#040f35"/></g></symbol>
+    </svg>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="nav-logo" href="/" aria-label="Pokoin home"
+          ><svg class="brand-logo" viewBox="0 0 3133 1000" overflow="visible" width="131.586" height="42" aria-hidden="true" focusable="false"><use href="#pokoin-wordmark" /></svg></a
+        >
+        <nav class="nav-links" id="primary-nav" aria-label="Primary">
+          <a href="/marketplace">Marketplace</a><a href="/marketplace/sets">Sets</a
+          ><a href="/#scanner">Scanner</a><a href="/#sell">Sell</a
+          ><a href="/#poko">Meet Poko</a>
+          <a class="nav-mobile-account" href="/auth?from=%2Fmypokoin" rel="nofollow" data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span> ↗</a
+          >
+        </nav>
+        <div class="nav-end">
+          <a
+            class="button button-small button-outline nav-account"
+            href="/auth?from=%2Fmypokoin"
+            rel="nofollow"
+            data-account-link
+            ><span class="account-out">Log in</span><span class="account-in" data-account-name></span>
+            <span aria-hidden="true">↗</span></a
+          ><button
+            class="nav-toggle"
+            type="button"
+            aria-label="Open menu"
+            aria-controls="primary-nav"
+            aria-expanded="false"
+          >
+            <span></span><span></span><span></span>
+          </button>
+        </div>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <main id="main">
-    <section class="hero">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <div class="pad">
-        <div class="wrap hero-inner">
-          <div class="hero-copy">
-            <h1 class="reveal" data-delay="0"><span class="white">The market belongs to the collectors.<br></span>Buy. Sell. Settle in PKN.</h1>
-            <p class="lede reveal" data-delay="150">A global peer-to-peer marketplace built for everyone.</p>
-            <div class="downloads">
-              <a class="store-btn btn-white reveal" href="/marketplace" data-delay="300">
-                <span class="label">Explore<strong>cards</strong></span>
-              </a>
-              <a class="store-btn btn-yellow reveal" href="/inventory" data-delay="450">
-                <span class="label">Start<strong>selling</strong></span>
-              </a>
+    <main id="main">
+      <section class="home-hero" aria-labelledby="hero-heading">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="pad"><div class="wrap home-hero-inner">
+          <div class="home-hero-copy">
+            <!-- First paint of the marketplace header SearchBox (hero variant):
+                 the island swaps in the live box with the same markup. Without
+                 JavaScript it is a plain GET form to the search page. -->
+            <form
+              class="search search-hero"
+              action="/marketplace/search"
+              method="get"
+              role="search"
+              data-landing-search
+            >
+              <label class="sr-only" for="hero-q">Search Pokémon cards</label>
+              <div class="search-pill">
+                <div class="search-lead">
+                  <div class="game-select" data-landing-picker="game-select">
+                    <button type="button" aria-label="Game, Pokémon" title="Pokémon">
+                      <span class="game-icon" style="-webkit-mask-image: url(/market/games/pokemon.svg); mask-image: url(/market/games/pokemon.svg)" aria-hidden="true"></span>
+                      <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                    </button>
+                  </div>
+                  <div class="lang-toggle" data-landing-picker="lang-toggle">
+                    <button type="button" aria-label="Card title language, English" title="English">
+                      <img src="/market/flags/en.svg" alt="" width="40" height="40" />
+                      <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                    </button>
+                  </div>
+                </div>
+                <input
+                  id="hero-q"
+                  name="q"
+                  type="search"
+                  maxlength="200"
+                  placeholder="Search Pokémon cards…"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  enterkeyhint="search"
+                />
+                <div class="print-lang-toggle" data-landing-picker="print-lang-toggle">
+                  <button type="button" aria-label="Card print language, All prints" title="All prints">
+                    <span class="search-lens" aria-hidden="true">
+                      <span class="search-lens-mark"><svg class="print-lang-all" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" /></svg></span>
+                      <svg class="search-go-icon" viewBox="0 0 24 24" width="30" height="30"><circle cx="9.2" cy="9.2" r="7.1" fill="none" stroke="currentColor" stroke-width="1.7" /><path d="M14.3 14.3 21.2 21.2" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" /></svg>
+                    </span>
+                    <svg class="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true"><path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" /></svg>
+                  </button>
+                </div>
+                <button class="search-go" type="submit">Search</button>
+              </div>
+            </form>
+            <div class="hero-popular" aria-label="Popular searches">
+              <span>Popular</span
+              ><a href="/marketplace/search?q=charizard" data-landing-query="charizard"
+                >Charizard</a
+              ><a href="/marketplace/search?q=umbreon" data-landing-query="umbreon"
+                >Umbreon</a
+              ><a href="/marketplace/search?q=pikachu" data-landing-query="pikachu"
+                >Pikachu</a
+              ><a href="/marketplace/search?q=lugia" data-landing-query="lugia"
+                >Lugia</a
+              ><a href="/marketplace/search?q=151" data-landing-query="151"
+                >151</a
+              >
+            </div>
+            <p class="hero-pill">
+              <span class="hero-pill-dot" aria-hidden="true"></span>Scanner ·
+              Collection · Marketplace
+            </p>
+            <h1 id="hero-heading">
+              Your cards.<br /><span class="hero-mark">All together.</span>
+            </h1>
+            <p class="home-lede">
+              Find any Pokémon card, track your collection, and buy or sell at
+              real market prices.
+            </p>
+            <div class="button-row hero-ctas">
+              <a class="button button-yellow" href="/marketplace"
+                >Shop cards <span aria-hidden="true">→</span></a
+              ><a class="button button-outline" href="/#sell"
+                >Sell your collection</a
+              ><a class="button button-ghost" href="/scan"
+                ><svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M4 12h16" /></svg
+                >Scan a card</a
+              >
             </div>
           </div>
-          <img class="hero-mark reveal reveal-grow" src="home/logo.png" width="168" height="168" alt="Pokoin logo" data-delay="450">
-        </div>
-      </div>
-    </section>
 
-    <section class="section" aria-labelledby="features-heading">
-      <div class="glow glow-olive-right"></div>
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="features-heading" class="reveal reveal-fade">Shop. Wallet. Chain.</h2>
-            <p class="reveal reveal-fade">Three surfaces. Same project.</p>
-          </div>
-          <div class="features-grid">
-            <a class="feature reveal" href="/marketplace">
-              <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="8" y="3.5" width="11.5" height="15.5" rx="2"/><rect x="4.5" y="5.5" width="11.5" height="15.5" rx="2"/></svg>
+          <div class="hero-visual" aria-hidden="true">
+            <img
+              class="float-card float-card-a"
+              src="https://cdn.pokoin.com/825064_umbreon-ex_homepage.webp?v=t480"
+              width="280"
+              height="392"
+              alt=""
+            /><img
+              class="float-card float-card-b"
+              src="https://cdn.pokoin.com/790994_charizard_homepage.webp?v=t480"
+              width="280"
+              height="392"
+              alt=""
+            /><img
+              class="float-card float-card-c"
+              src="https://cdn.pokoin.com/813464_sylveon-ex_homepage.webp?v=t480"
+              width="280"
+              height="392"
+              alt=""
+            />
+            <div class="binder" data-landing-binder>
+              <div class="binder-head">
+                <div>
+                  <strong>My collection</strong>
+                  <span>Favourite pulls</span>
+                </div>
+                <span class="binder-count">9 / 18</span>
               </div>
-              <h3>Card Reserve</h3>
-              <p>Live Pokémon listings. Seller offers. Signal.</p>
-            </a>
-            <a class="feature reveal" href="/wallet">
-              <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M5.5 6.25h13A1.75 1.75 0 0 1 20.25 8v10.5A1.75 1.75 0 0 1 18.5 20.25h-13A1.75 1.75 0 0 1 3.75 18.5V8A1.75 1.75 0 0 1 5.5 6.25zm11.25 7.5a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z"/><rect x="4" y="4" width="16" height="1.75" rx="0.6"/></svg>
+              <div class="binder-progress"><span></span></div>
+              <div class="binder-grid">
+                <span class="binder-slot is-scanning"
+                  ><img
+                    src="https://cdn.pokoin.com/251437_snorlax-181-165-pokemon-card-151_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                    fetchpriority="high" /><span class="scan-line"></span
+                ></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/261321_pikachu-illustration-rare-173-165-151_homepage.webp?v=hd1.t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/261291_bulbasaur-illustration-rare-166-165-151_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/287883_eevee-illustration-rare-188-167-twilight-masquerade_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/261377_charizard-ex-special-illustration-rare-199-165-151_homepage.webp?v=hd1.t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/825058_espeon-ex_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/166430_dragonite-v-192-203-evolving-skies_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                    loading="lazy"
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/200493_gengar-vmax-271-264-fusion-strike_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                    loading="lazy"
+                /></span>
+                <span class="binder-slot"
+                  ><img
+                    src="https://cdn.pokoin.com/166456_rayquaza-vmax-secret-rare-218-203-evolving-skies_homepage.webp?v=t480"
+                    width="280"
+                    height="392"
+                    alt=""
+                    loading="lazy"
+                /></span>
               </div>
-              <h3>PKN wallet</h3>
-              <p>Native PKN on PokoinPoS. Chain ID 26062026.</p>
-            </a>
-            <a class="feature reveal" href="/scan">
-              <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H6a2 2 0 0 0-2 2v2M16 4h2a2 2 0 0 1 2 2v2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2"/></svg>
-              </div>
-              <h3>Scan</h3>
-              <p>Explorer, health, and card camera.</p>
-            </a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="protection" aria-labelledby="protection-heading">
-      <div class="glow glow-olive-left"></div>
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="protection-heading" class="reveal reveal-fade">You're protected when you buy on Pokoin</h2>
-            <p class="reveal reveal-fade">If a seller does not ship within 7 days, we return your PKN from escrow.</p>
-          </div>
-          <p class="protection-escrow reveal reveal-fade">Funds released only after delivery confirmed.</p>
-          <div class="features-grid">
-            <div class="feature reveal reveal-fade">
-              <h3>PKN escrow</h3>
-              <p>Checkout takes site PKN from the buyer and holds it. The seller is not paid until you confirm the card arrived.</p>
             </div>
-            <div class="feature reveal reveal-fade">
-              <h3>Seller does not ship</h3>
-              <p>If a seller does not ship within 7 days, we return your PKN from escrow.</p>
+            <span class="floating-chip chip-identified"
+              ><span class="chip-dot"></span>Card identified</span
+            ><span class="floating-chip chip-added"
+              ><span class="chip-plus">+</span>Added to collection</span
+            >
+          </div>
+        </div></div>
+        <div class="hero-marquee" aria-hidden="true">
+          <div class="hero-marquee-track">
+            <span>Scan from a photo</span><span>CardTrader listings</span
+            ><span>TCGplayer price data</span><span>Buyer protection</span
+            ><span>90% in PKN credit</span><span>Ask Poko</span
+            ><span>Scan from a photo</span><span>CardTrader listings</span
+            ><span>TCGplayer price data</span><span>Buyer protection</span
+            ><span>90% in PKN credit</span><span>Ask Poko</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="pad home-rail"
+        id="best-sellers"
+        aria-labelledby="best-heading"
+      >
+        <div class="wrap">
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Marketplace</p>
+              <h2 id="best-heading">Best sellers</h2>
+              <p class="home-head-sub">
+                The Pokémon cards selling most this week.
+              </p>
             </div>
-            <div class="feature reveal reveal-fade">
-              <h3>Disputes</h3>
-              <p>Report a problem from Orders. First reply within 48 hours. Decision within 5 business days. contact@pokoin.com.</p>
-            </div>
+            <a class="pill-link" href="/marketplace"
+              >View marketplace <span aria-hidden="true">→</span></a
+            >
           </div>
-          <p class="protection-more reveal reveal-fade">
-            <a class="store-btn btn-yellow" href="/protection">How buyer protection works</a>
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="live-heading">
-      <div class="glow glow-olive-left"></div>
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="live-heading" class="reveal reveal-fade">What is live</h2>
-            <p class="reveal reveal-fade">Numbers from the chain. Join the peer network.</p>
-          </div>
-          <div class="marquee reveal" aria-label="Surfaces">
-            <div class="marquee-track">
-              <div class="game"><span class="dot"></span>Card Reserve</div>
-              <div class="game"><span class="dot"></span>Native PKN</div>
-              <div class="game"><span class="dot"></span>PokoinPoS</div>
-              <div class="game"><span class="dot"></span>Permissioned PoS</div>
-              <div class="game"><span class="dot"></span>Public RPC</div>
-              <div class="game"><span class="dot"></span>Worldwide peers</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>Card Reserve</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>Native PKN</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>PokoinPoS</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>Permissioned PoS</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>Public RPC</div>
-              <div class="game" aria-hidden="true"><span class="dot"></span>Worldwide peers</div>
-            </div>
-          </div>
-          <div class="stats">
-            <div class="stat reveal"><strong data-count data-height>994</strong>Chain height</div>
-            <div class="stat reveal"><strong data-count data-peers>2</strong>Reachable peers</div>
-            <div class="stat reveal"><strong data-health>ok</strong>RPC health</div>
-            <div class="stat reveal"><strong>26062026</strong>Chain ID</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="security" aria-labelledby="security-heading">
-      <div class="glow glow-blue"></div>
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="security-heading" class="reveal reveal-fade">28 May 2026 security pass</h2>
-            <p class="reveal reveal-fade">Official PokoinPoS report. Go-native tools. Not Certik. Mythril N/A on the Go node.</p>
-          </div>
-          <div class="proof">
-            <article class="card reveal">
-              <h3>Node checks — all PASS</h3>
-              <ul>
-                <li>go test, go vet, go test -race</li>
-                <li>govulncheck: 0 reachable · gosec: 0 issues</li>
-                <li>GET /health, /ready, eth_chainId 0x18dacca</li>
-                <li>Docker tag 2026-05-28-security</li>
-                <li><a href="/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf">Read the 2-page PDF</a></li>
-              </ul>
-            </article>
-            <article class="card reveal">
-              <h3>Reserve proof</h3>
-              <ul>
-                <li>Owner is 0x0 — renounced</li>
-                <li>Max backed supply 2,000,000 PKN</li>
-                <li><a href="https://explorer.pokoin.com/wpkn-reserve.json">Reserve proof JSON</a></li>
-                <li><a href="https://bscscan.com/address/0x91A17E2bddfF839078BD395482B38e4AC15276f4#code">Contract on BscScan</a></li>
-                <li><a href="https://pancakeswap.finance/swap?outputCurrency=0x91A17E2bddfF839078BD395482B38e4AC15276f4&amp;chain=bsc">PancakeSwap</a></li>
-              </ul>
-            </article>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="peers" aria-labelledby="peers-heading">
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="peers-heading" class="reveal reveal-fade">Peer proof</h2>
-            <p class="reveal reveal-fade">From the community for the community. Snapshot 30 Aug 2026, then refreshed from the public peer-status file when the browser is idle.</p>
-          </div>
-          <div class="peers reveal" data-peer-list>
-            <div class="peer"><span><span class="dot"></span>🇩🇪 Frankfurt am Main, Germany [DE]</span><span class="live">bootstrap · height 994</span></div>
-            <div class="peer"><span><span class="dot"></span>🇩🇪 Frankfurt am Main, Germany [DE]</span><span class="live">bootstrap · height 994</span></div>
-          </div>
-          <p class="title-block" style="margin:1.5rem auto 0;font-size:1rem">
-            Live status: <a href="https://rpc.pokoin.com/network/peer-status.json">rpc.pokoin.com/network/peer-status.json</a>
-            · <a href="https://rpc.pokoin.com/rpc">RPC</a>
-            · <a href="https://explorer.pokoin.com">explorer.pokoin.com</a>
-            · <a href="/health">/health</a>
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="soon-heading">
-      <div class="glow glow-blue"></div>
-      <div class="pad">
-        <div class="wrap section-pad">
-          <div class="title-block center">
-            <h2 id="soon-heading" class="reveal reveal-fade">Not in the stores yet</h2>
-            <p class="reveal reveal-fade">The market is on the web. Native listings and extra peers are not a public signup.</p>
-          </div>
-          <div class="soon-grid">
-            <article class="soon-card reveal">
-              <div>
-                <span class="pill">Not listed</span>
-                <h3>iOS</h3>
-                <p>No App Store listing. Browse, sell, wallet, and card camera are in the browser today.</p>
-              </div>
-            </article>
-            <article class="soon-card reveal">
-              <div>
-                <span class="pill">Not listed</span>
-                <h3>Android</h3>
-                <p>No Google Play listing. Same web app — not a published Play build.</p>
-              </div>
-            </article>
-            <article class="soon-card reveal">
-              <div>
-                <span class="pill">Permissioned</span>
-                <h3>More peers</h3>
-                <p>Two live bootstrap peers. Host a node from the docs. New operators are approved — there is no open intake form.</p>
-              </div>
-            </article>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="cta-shell">
-      <div class="glow glow-cta"></div>
-      <div class="glow glow-cta-2"></div>
-      <div class="pad">
-        <div class="cta-box">
-          <div class="pad section-pad">
-            <div class="title-block center">
-              <h2 class="reveal reveal-fade">Open the market</h2>
-              <p class="reveal reveal-fade">Cards, wallet, and chain in the browser. No App Store or Play listing yet.</p>
-              <div class="cta-row">
-                <a class="btn-dark reveal" href="/marketplace">Marketplace</a>
-                <a class="btn-dark reveal" href="/marketplace/signal">Signal</a>
-                <a class="btn-dark reveal" href="/forum">Forum</a>
-                <a class="btn-dark reveal" href="/scan">Card scan</a>
-              </div>
-              <div class="downloads">
-                <span class="store-btn btn-white is-soon reveal" aria-disabled="true">
-                  <span class="icon" aria-hidden="true">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11.703 5.616c.029-.905.278-2.237 1.145-3.112.805-.813 1.785-1.209 2.395-1.39.236-.07.462.108.45.353-.041.866-.269 2.157-.856 2.849-.554.652-1.444 1.517-2.749 1.663-.214.024-.392-.148-.385-.363z"/><path d="M13.937 22.17c.627.24 1.26.482 1.833.482 1.227 0 4.798-2.83 4.926-5.768a.37.37 0 0 0-.215-.36c-.908-.508-2.392-1.774-2.443-3.615-.06-2.146 1.017-3.85 1.832-4.555a.375.375 0 0 0-.083-.618c-.742-.81-2.234-1.924-3.596-1.897-.991.02-1.883.39-2.65.706-.587.243-1.1.455-1.526.455-.403 0-.887-.211-1.443-.453-.748-.326-1.626-.708-2.61-.708-1.824 0-5.428 1.513-5.428 7.351 0 3.096 3.195 9.544 5.892 9.462.582 0 1.204-.241 1.822-.48.608-.236 1.211-.47 1.767-.47.537 0 1.143.232 1.756.467z"/></svg>
-                  </span>
-                  <span class="label">Coming soon<strong>App Store</strong></span>
-                </span>
-                <span class="store-btn btn-ghost is-soon reveal" aria-disabled="true">
-                  <span class="icon" aria-hidden="true">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6.974 19.974c-.082.081.016.214.117.159 2.589-1.4 6.083-3.291 9.036-4.895a.1.1 0 0 0 .022-.159l-2.081-2.049a.05.05 0 0 0-.07 0L6.974 19.974z"/><path d="M13.921 10.776a.05.05 0 0 0 .141 0l2.082-2.08a.075.075 0 0 0-.023-.159l-1.02-.55C13.874 7.325 12.231 6.438 10.563 5.538 9.314 4.864 8.052 4.184 6.942 3.585c-.102-.055-.2.078-.118.159l7.097 7.032z"/><path d="M3 3.196c0-.232.035-.427.096-.587.063-.165.272-.178.398-.053l9.365 9.279a.05.05 0 0 1 0 .142L3.46 21.348c-.138.138-.367.104-.411-.086A1.4 1.4 0 0 1 3 20.806V3.196z"/><path d="M17.688 14.389a.075.075 0 0 1-.118-.017l-2.438-2.4a.05.05 0 0 1 0-.142l2.451-2.437a.075.075 0 0 1 .119-.016c2.086 1.138 3.713 2.021 4.21 2.284a.1.1 0 0 1 .041.044c.045.104.056.208.04.308a.075.075 0 0 1-.049.066c-.285.15-1.241.67-2.572 1.394l-.008.004c-.51.277-1.074.584-1.676.912z"/></svg>
-                  </span>
-                  <span class="label">Coming soon<strong>Google Play</strong></span>
-                </span>
-              </div>
+          <div
+            class="landing-rail"
+            data-landing-rail="bestSellers"
+            data-title="Best sellers"
+          >
+            <div class="landing-rail-skeleton" aria-hidden="true">
+              <span></span><span></span><span></span><span></span
+              ><span></span><span></span>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-  </main>
+      </section>
 
-  <footer class="site-footer">
-    <div class="pad">
+      <section class="pad home-tools" aria-labelledby="tools-heading">
+        <div class="wrap">
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Tools</p>
+              <h2 id="tools-heading">Less admin.<br />More collecting.</h2>
+            </div>
+          </div>
+          <div class="home-tool-grid">
+            <a
+              class="home-tool"
+              id="scanner"
+              href="/features/card-scanner"
+              data-reveal
+              ><div class="home-tool-art tool-scan" aria-hidden="true">
+                <img
+                  src="https://cdn.pokoin.com/261321_pikachu-illustration-rare-173-165-151_homepage.webp?v=hd1.t480"
+                  width="280"
+                  height="392"
+                  alt=""
+                  loading="lazy"
+                /><span class="tool-bracket"></span
+                ><span class="tool-chip">Card identified</span>
+              </div>
+              <div class="home-tool-copy">
+                <span class="tool-step">01 · Scan</span>
+                <h3>Skip the typing.</h3>
+                <p>Find a Pokémon card from a photo.</p>
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+            <a
+              class="home-tool"
+              id="inventory"
+              href="/features/collection-tracker"
+              data-reveal
+              ><div class="home-tool-art tool-collect" aria-hidden="true">
+                <img
+                  src="https://cdn.pokoin.com/261377_charizard-ex-special-illustration-rare-199-165-151_homepage.webp?v=hd1.t480"
+                  width="280"
+                  height="392"
+                  alt=""
+                  loading="lazy"
+                /><img
+                  src="https://cdn.pokoin.com/200493_gengar-vmax-271-264-fusion-strike_homepage.webp?v=t480"
+                  width="280"
+                  height="392"
+                  alt=""
+                  loading="lazy"
+                /><span class="tool-chip">+ Your collection</span>
+              </div>
+              <div class="home-tool-copy">
+                <span class="tool-step">02 · Collect</span>
+                <h3>Keep it together.</h3>
+                <p>Your collection, portfolio and seller inventory.</p>
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+            <a
+              class="home-tool"
+              href="/features/pokemon-card-price-checker"
+              data-reveal
+              ><div class="home-tool-art tool-market" aria-hidden="true">
+                <img
+                  src="https://cdn.pokoin.com/166456_rayquaza-vmax-secret-rare-218-203-evolving-skies_homepage.webp?v=t480"
+                  width="280"
+                  height="392"
+                  alt=""
+                  loading="lazy"
+                /><span class="tool-chip">CardTrader · TCGplayer</span>
+              </div>
+              <div class="home-tool-copy">
+                <span class="tool-step">03 · Discover</span>
+                <h3>Real market data.</h3>
+                <p>CardTrader listings. TCGplayer price data.</p>
+              </div>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="pad home-sell" id="sell" aria-labelledby="sell-heading">
+        <div class="wrap">
+          <div class="home-head" data-reveal>
+            <div>
+              <p class="kicker">Sell</p>
+              <h2 id="sell-heading">Send your cards.<br />Choose your return.</h2>
+            </div>
+            <a class="pill-link" href="/features/seller-fees"
+              >Compare the options <span aria-hidden="true">→</span></a
+            >
+          </div>
+          <div class="home-return-grid">
+            <a
+              class="home-return return-credit"
+              href="/features/trade-cards-for-pkn"
+              data-reveal
+              ><p class="return-label">Instant PKN credit</p>
+              <div class="home-return-number">90<span>%</span></div>
+              <h3>New cards start here.</h3>
+              <p>
+                Of market value in PKN. At least 1 PKN per card you send us.
+              </p>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+            <a
+              class="home-return return-managed"
+              href="/features/managed-selling"
+              data-reveal
+              ><p class="return-label">Managed selling · real money</p>
+              <div class="home-return-number">15.5<span>%</span></div>
+              <h3>We sell. You get paid.</h3>
+              <p>
+                Send us your cards. We handle the sale. Get real money when
+                they sell.
+              </p>
+              <span class="tool-arrow" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+            ></a>
+          </div>
+          <div class="home-self-sell" data-reveal>
+            <p>
+              Selling yourself? <strong>No Pokoin seller commission.</strong>
+            </p>
+            <a class="button button-small button-outline" href="/mypokoin"
+              >Start listing <span aria-hidden="true">→</span></a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="pad home-companions" aria-label="More from Pokoin">
+        <div class="wrap home-companion-grid">
+          <a
+            class="home-companion companion-poko"
+            id="poko"
+            href="/messages/poko"
+            data-reveal
+            ><img
+              class="companion-mascot"
+              src="/home/pokoin-mascot.png"
+              width="110"
+              height="102"
+              alt=""
+              loading="lazy"
+            />
+            <div>
+              <h2>Ask Poko.</h2>
+              <p>Card research. Real market data.</p>
+            </div>
+            <span class="tool-arrow" aria-hidden="true"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+          ></a>
+          <a
+            class="home-companion companion-rails"
+            href="/features/cardrails-inventory"
+            data-reveal
+            ><span class="companion-glyph" aria-hidden="true"
+              ><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3">
+                <rect x="9" y="7" width="34" height="44" rx="4" />
+                <path d="M21 51v6h34V18H43M18 20h16M18 29h16M18 38h10" />
+              </svg></span>
+            <div>
+              <h2>CardRails inventory.</h2>
+              <p>Scan. Organise. Find every card.</p>
+            </div>
+            <span class="tool-arrow" aria-hidden="true"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17 17 7M8 7h9v9" /></svg></span
+          ></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer pad">
       <div class="wrap footer-top">
-        <div class="footer-brand reveal">
-          <a class="nav-logo" href="/" aria-label="Pokoin home"><img class="brand-badge" src="home/logo.png" width="52" height="52" alt=""><span class="brand-word" aria-hidden="true">P<img class="brand-coin" src="home/pokoin-mascot.png" width="26" height="24" alt="">ko<span class="brand-i">ı</span>n</span></a>
-          <p>Card Reserve and PokoinPoS. From the community for the community. Permissioned proof-of-stake.</p>
+        <div class="footer-brand">
+          <a class="nav-logo" href="/" aria-label="Pokoin home"
+            ><svg class="brand-logo" viewBox="0 0 3133 1000" overflow="visible" width="131.586" height="42" aria-hidden="true" focusable="false"><use href="#pokoin-wordmark" /></svg></a
+          >
+          <p>Your cards. All together.</p>
+          <a class="subtle-link" href="mailto:contact@pokoin.com"
+            >contact@pokoin.com</a
+          >
         </div>
-        <div class="footer-cols">
-          <div class="reveal">
-            <h3>Use</h3>
-            <a href="/marketplace">Marketplace</a>
-            <a href="/wallet">Wallet</a>
-            <a href="/scan">PokoinScan</a>
-            <a href="/scan">Card scan</a>
-            <a href="/forum">Forum</a>
-            <a href="/buy">Buy PKN</a>
-          </div>
-          <div class="reveal">
-            <h3>Network</h3>
-            <a href="/health">Health</a>
-            <a href="/docs">Host a node</a>
-            <a href="https://rpc.pokoin.com/rpc">RPC</a>
-            <a href="https://explorer.pokoin.com/wpkn-reserve.json">Reserve proof</a>
-            <a href="https://coinmarketcap.com/dexscan/bsc/0x86294c008542c2707b9f67e3e4ba2d03b7bf7451/">DexScan pair</a>
-          </div>
-          <div class="reveal">
-            <h3>Account</h3>
-            <a href="/profile">My account</a>
-            <a href="/earn">Earn PKN</a>
-            <a href="/about">About</a>
-            <a href="/careers">Careers</a>
-            <a href="/contact">Contact</a>
-            <a href="/protection">Buyer protection</a>
-            <a href="/privacy">Privacy</a>
-            <a href="/email-preferences">Email preferences</a>
-          </div>
-          <div class="reveal">
-            <h3>Docs</h3>
-            <a href="/whitepaper">Whitepaper</a>
-            <a href="/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf">Security PDF</a>
-            <a href="https://coinmarketcap.com/">CoinMarketCap</a>
-            <a href="mailto:contact@pokoin.com">contact@pokoin.com</a>
-          </div>
+        <div class="footer-col">
+          <h3>Tools</h3>
+          <a href="/features/card-scanner">Card scanner</a
+          ><a href="/features/collection-tracker">Collection tracker</a
+          ><a href="/features/card-inventory">Seller inventory</a
+          ><a href="/features/poko-assistant">Poko assistant</a
+          ><a href="/features/cardrails-inventory">CardRails inventory</a>
+        </div>
+        <div class="footer-col">
+          <h3>Explore</h3>
+          <a href="/marketplace">Marketplace</a
+          ><a href="/marketplace/sets">Pokémon sets</a
+          ><a href="/features/seller-fees">Selling fees</a
+          ><a href="/alternatives">Compare alternatives</a
+          ><a href="/learn">How-to guides</a>
+        </div>
+        <div class="footer-col">
+          <h3>Pokoin</h3>
+          <a href="/about">About</a><a href="/protection">Buyer protection</a
+          ><a href="/careers">Careers</a><a href="/contact">Contact</a><a href="/privacy">Privacy</a>
+          <details class="network-links">
+            <summary>PKN &amp; network</summary>
+            <a href="/wallet">Wallet</a><a href="/buy">Buy PKN</a
+            ><a href="https://explorer.pokoin.com">Block explorer</a
+            ><a href="/health">Network health</a><a href="/docs">Host a node</a
+            ><a href="/whitepaper">Whitepaper</a>
+          </details>
         </div>
       </div>
-      <div class="footer-bottom reveal reveal-fade">
-        <small>© 2026 Pokoin. Chain ID 26062026 · PKN.</small>
-        <small>Security pass is Go-native tooling, not a paid third-party audit.</small>
+      <div class="wrap footer-bottom">
+        <small>© 2026 Pokoin. From the community, for the community.</small
+        ><small>Made for your next discovery. ✦</small>
+      </div>
+    </footer>
+    <div
+      class="cookie-banner"
+      data-cookie-banner
+      role="region"
+      aria-label="Cookie notice"
+    >
+      <p>
+        We use cookies to keep you signed in, remember your cart, and run the
+        marketplace. <a href="/privacy">Privacy</a>
+      </p>
+      <div class="cookie-actions">
+        <button type="button" class="cookie-essential" data-cookie-essential>
+          Essential only
+        </button>
+        <button type="button" data-cookie-accept>Accept all</button>
       </div>
     </div>
-  </footer>
-  <div class="cookie-banner" data-cookie-banner role="dialog" aria-label="Cookies">
-    <p>We use cookies to keep you signed in, remember your cart, and run the marketplace. <a href="/privacy">Privacy</a></p>
-    <button type="button" data-cookie-accept>Accept</button>
-  </div>
-  <script src="home/landing.js?v=20260910-cookies-persist" defer></script>
-</body>
+    <script src="/home/landing.js?v=20261031-wordmark" defer></script>
+    <script type="module" src="/market/landing-island.js"></script>
+  </body>
 </html>
