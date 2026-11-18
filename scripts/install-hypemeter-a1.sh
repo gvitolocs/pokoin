@@ -5,7 +5,7 @@ set -euo pipefail
 TEN='ocid1.tenancy.oc1..aaaaaaaak3zcl33wj3lazht44cwa5rhm7uazxlqok22tfdfngrwtkoni67ia'
 VCN='ocid1.vcn.oc1.eu-frankfurt-1.amaaaaaaswfd3oiat73cnguklj4frboo6u76htuixsiwyypgap6hwschmfna'
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HYPE="${HYPEMETER_SRC:-/home/nez/Projects/hypemeter}"
+HYPE="${HYPEMETER_SRC:-/home/nez/Projects/Startup/Pokoin/hypemeter}"
 SECRETS="${HYPEMETER_SECRETS:-/home/nez/secrets/deploy/hypemeter}"
 SSH_KEY="${HYPEMETER_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 CUTOVER="${HYPEMETER_CUTOVER_DNS:-1}"

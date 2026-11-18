@@ -28,6 +28,9 @@ pub fn router(state: DomainState) -> Router {
         .route("/api/cardtrader-sync", get(cardtrader::sync_status).post(cardtrader::sync_start))
         .route("/api/cardtrader-assets", get(cardtrader::assets))
         .route("/api/cardtrader-zero", get(cardtrader::zero))
+        // `/api/cardtrader-zero-pick` and `-picked` move stock: pokoin-commerce.
+        .route("/api/cardtrader-zero-sort", post(cardtrader::zero_sort))
+        .route("/api/cardtrader-zero-pt-sort", post(cardtrader::zero_pt_sort))
         .route("/api/cardtrader-clean-listings", post(cardtrader::clean_listings))
         .route("/api/cardtrader-webhook/{uid}", post(cardtrader::webhook))
         .route("/api/cardtrader-blueprint-listings", get(cardtrader::blueprint_listings))
@@ -50,6 +53,10 @@ pub fn router(state: DomainState) -> Router {
             get(powertools::strategies_get)
                 .post(powertools::strategies_post)
                 .delete(powertools::strategies_delete),
+        )
+        .route(
+            "/api/marketplace-pricing-groups",
+            get(powertools::groups_get).post(powertools::groups_post).delete(powertools::groups_delete),
         )
         .route("/api/marketplace-price-check", get(powertools::price_check))
         // Recognition proxies.
@@ -94,6 +101,7 @@ pub fn router(state: DomainState) -> Router {
         .route("/api/cardtrader-redirect", get(redirects::cardtrader))
         .route("/api/tcgplayer-redirect", get(redirects::tcgplayer))
         .route("/api/cardmarket-redirect", get(redirects::cardmarket))
+        .route("/api/cardmarket-matches", get(redirects::cardmarket_matches))
         // Social autoposter (external-owned; live sends need provider env).
         .route(
             "/api/social-autopost",

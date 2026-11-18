@@ -15,6 +15,7 @@ export {
 } from '@market/suggest-live.js';
 export { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from '@market/suggest-catalog.js';
 export { resolveSuggestQuery } from '@market/suggest-resolve.js';
+export { loadLocalizedNames, localizedNamesReady } from '@market/localized-names.js';
 // Era of an expansion title, for the visitor's era taste (interest-profile.js).
 export { matchTcgEra } from '@market/tcg-eras.js';
 export { earlySetPrefixName } from '@market/search-score.js';

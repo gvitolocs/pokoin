@@ -113,6 +113,14 @@ test('the CSP allows no inline script and Solid chunks are immutable', () => {
   assert.match(headers, /\/market\/app\.html\n {2}Cache-Control: public, max-age=0, must-revalidate/);
 });
 
+test('fonts and images under /home are cached, its CSS and JS are not', () => {
+  const headers = headerLines();
+  assert.match(headers, /\/home\/satoshi\.woff2\n {2}Cache-Control: public, max-age=31536000, immutable\n/);
+  assert.match(headers, /\/home\/pokoin-mascot\.png\n {2}Cache-Control: public, max-age=604800, stale-while-revalidate=604800\n/);
+  assert.doesNotMatch(headers, /\/home\/\*/);
+  assert.doesNotMatch(headers, /\/home\/[^\n]*\.(css|js)\n/);
+});
+
 test('/extension.zip is the gated SPA page, never a static zip', () => {
   for (const from of ['/extension.zip', '/extension']) {
     const hit = applyRedirect(from);

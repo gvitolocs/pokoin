@@ -1,4 +1,4 @@
-//! OpenAI tool schemas for the fifteen market tools, and the in-process runner.
+//! OpenAI tool schemas for the sixteen market tools, and the in-process runner.
 //!
 //! Parameter names match what each Rust tool reads (`param_string`, `param_number`,
 //! `bounded`, and the sold-facet flags). Descriptions stay to one or two sentences.
@@ -321,6 +321,16 @@ pub(crate) fn tool_schemas() -> Vec<Json> {
             ]),
         ),
         tool(
+            "card_price_history",
+            "Price history of one printing per source (TCGplayer USD, Cardmarket EUR, CardTrader sold and lowest ask in PKN) for a range up to years, bucketed by day, week, month or quarter. Use it for 'older prices', 'a year ago', 'since release' and trend-over-months questions.",
+            &join(&card, &variant, &[
+                ("range", "string", "\"1m\", \"3m\", \"6m\", \"1y\", \"2y\" or \"all\". Defaults to 1y and is ignored when from or to is a date."),
+                ("from", "string", "First day as YYYY-MM-DD. Alone it runs to today."),
+                ("to", "string", "Last day as YYYY-MM-DD. Defaults to today."),
+                ("sources", "string", "Comma list of tcgplayer, cardmarket, cardtrader_sold, cardtrader_ask. Defaults to all four."),
+            ]),
+        ),
+        tool(
             "deal_check",
             "Compare the cheapest live asks with the sold median of the same slice. Give the verdict and the numbers, not buy-or-sell advice.",
             &join(&card, &variant, &[]),
@@ -470,6 +480,49 @@ mod tests {
             "priceDays",
         ] {
             assert!(properties.contains_key(key), "card_quote missing {key}");
+        }
+    }
+
+    #[test]
+    fn schemas_include_the_price_history_tool() {
+        use crate::handlers::poko_market::TOOLS;
+        let schemas = tool_schemas();
+        assert_eq!(schemas.len(), TOOLS.len());
+        let names: Vec<&str> = schemas
+            .iter()
+            .map(|schema| schema["function"]["name"].as_str().unwrap_or_default())
+            .collect();
+        assert!(names.contains(&"card_price_history"), "{names:?}");
+        // A name the schema lacks is a tool the brain can never call.
+        for name in tool_list() {
+            assert!(names.contains(name), "no schema for {name}");
+        }
+        let history = schemas
+            .iter()
+            .find(|schema| schema["function"]["name"] == "card_price_history")
+            .cloned()
+            .unwrap_or_default();
+        let properties = history["function"]["parameters"]["properties"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        for key in [
+            "cardId",
+            "query",
+            "artist",
+            "range",
+            "from",
+            "to",
+            "sources",
+            "condition",
+            "language",
+            "reverse",
+            "firstEdition",
+        ] {
+            assert!(
+                properties.contains_key(key),
+                "card_price_history missing {key}"
+            );
         }
     }
 

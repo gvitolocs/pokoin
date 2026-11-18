@@ -136,7 +136,10 @@ function TrashIcon() {
 /**
  * One shop listing. Same markup and
  * drag payloads: a mixed desk pile when tiles and listings are selected, the
- * selected listings (`dragOffers`), else the row itself.
+ * selected listings (`dragOffers`), else the row itself. `compact` is the
+ * Cheapest listings line: the seller, its facet, the price and the cart button —
+ * the card face, the seller's own photos and the message button stay with the
+ * full Shop rows.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
@@ -252,6 +255,7 @@ export default function ShopListingRow(props) {
         'is-profile': props.showCard,
         'is-editing': props.editing,
         'is-selected': props.selected,
+        'is-compact': props.compact,
       }]}
       data-listing-id={listingSelectId(offer())}
       draggable="true"
@@ -262,11 +266,11 @@ export default function ShopListingRow(props) {
         when={props.showCard}
         fallback={(
           <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
-          <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
-            <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
-              {seller()}
-            </a>
-          </Show>
+            <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
+              <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
+                {seller()}
+              </a>
+            </Show>
           </Show>
         )}
       >
@@ -277,11 +281,14 @@ export default function ShopListingRow(props) {
         </Show>
       </Show>
       <span class="shop-facets">
-        <span class="shop-txt">
-          <For each={tags()}>
-            {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
-          </For>
-        </span>
+        <Show when={!props.compact}>
+          {/* The tags a full Shop row names: Reverse, 1st Edition, graded. */}
+          <span class="shop-txt">
+            <For each={tags()}>
+              {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
+            </For>
+          </span>
+        </Show>
         <img
           class={['shop-cond', `is-${tone()}`]}
           src={conditionChipSrc(offer()?.condition)}
@@ -328,7 +335,7 @@ export default function ShopListingRow(props) {
       <Show when={!props.mine}>
         <span class="shop-row-actions">
           {/* Vault rows (props.anonymous) never name or message the account behind them. */}
-          <Show when={reference().sellerUid && !props.anonymous}>
+          <Show when={reference().sellerUid && !props.anonymous && !props.compact}>
             <button
               type="button"
               class="shop-icon"
@@ -404,7 +411,7 @@ export default function ShopListingRow(props) {
           </button>
         </span>
       </Show>
-      <Show when={photos().length}>
+      <Show when={photos().length && !props.compact}>
         <span class="shop-photos">
           <For each={photos()}>
             {(url) => (

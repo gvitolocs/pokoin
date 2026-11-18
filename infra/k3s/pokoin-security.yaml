@@ -229,6 +229,13 @@ spec:
     to:
     - ipBlock:
         cidr: 172.31.250.13/32
+  # The Pi CDN through pokoin-pi-cdn-bridge (POKOIN_CDN_FALLBACK_ORIGIN).
+  - ports:
+    - port: 18181
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 172.31.250.15/32
   - ports:
     - port: 443
       protocol: TCP

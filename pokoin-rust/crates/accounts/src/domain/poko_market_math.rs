@@ -1,6 +1,6 @@
 //! Poko market analytics — the pure decision layer of `poko-market.js`.
 //!
-//! This is the part every one of the fifteen tools shares: condition and
+//! This is the part every one of the sixteen tools shares: condition and
 //! language normalisation, the sold-slice maths (unit-weighted percentiles over
 //! `cardtrader_sold_daily` day slices), the variant snap-back, the liquidity
 //! bands, the sell-price ladder, live-ask summarisation and the deal verdict.
@@ -8,7 +8,7 @@
 //! database; the SQL and the service-token plumbing live in
 //! [`crate::handlers::poko_market`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -223,10 +223,22 @@ fn condition_map() -> &'static [(Regex, &'static str)] {
     static MAP: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     MAP.get_or_init(|| {
         [
-            (r"(?i)^(nm|near[ -]?mint|mint|pretty clean|mint condition)$", "NM"),
-            (r"(?i)^(sp|slightly[ -]?played|lightly[ -]?played|light play)$", "SP"),
-            (r"(?i)^(mp|played|moderately[ -]?played|moderate play)$", "MP"),
-            (r"(?i)^(pl|heavily[ -]?played|well[ -]?played|hp|quite played)$", "PL"),
+            (
+                r"(?i)^(nm|near[ -]?mint|mint|pretty clean|mint condition)$",
+                "NM",
+            ),
+            (
+                r"(?i)^(sp|slightly[ -]?played|lightly[ -]?played|light play)$",
+                "SP",
+            ),
+            (
+                r"(?i)^(mp|played|moderately[ -]?played|moderate play)$",
+                "MP",
+            ),
+            (
+                r"(?i)^(pl|heavily[ -]?played|well[ -]?played|hp|quite played)$",
+                "PL",
+            ),
             (
                 r"(?i)^(poor|damaged|very[ -]?damaged|really[ -]?damaged|badly[ -]?damaged)$",
                 "Poor",
@@ -270,7 +282,10 @@ fn language_map() -> &'static [(Regex, &'static str)] {
             (r"(?i)^(ru|russian|russo)$", "RU"),
             (r"(?i)^(ko|korean|coreano)$", "KO"),
             (r"(?i)^(zh|chinese|cinese)$", "ZH"),
-            (r"(?i)^(zht|traditional chinese|cinese tradizionale)$", "ZHT"),
+            (
+                r"(?i)^(zht|traditional chinese|cinese tradizionale)$",
+                "ZHT",
+            ),
             (r"(?i)^(id|indonesian|indonesiano)$", "ID"),
         ]
         .into_iter()
@@ -319,7 +334,10 @@ pub fn normalize_condition(value: &str) -> ConditionGuess {
             };
         }
     }
-    if vague_condition_res().iter().any(|pattern| pattern.is_match(&text)) {
+    if vague_condition_res()
+        .iter()
+        .any(|pattern| pattern.is_match(&text))
+    {
         return ConditionGuess {
             primary: "MP",
             alternatives: vec!["PL", "Poor"],
@@ -418,7 +436,11 @@ pub fn candidate_from_row(row: &Json) -> Json {
     } else {
         format!("/marketplace/en/cards/{card_id}")
     };
-    let version = if row.get("version").map(|value| !value.is_null()).unwrap_or(false) {
+    let version = if row
+        .get("version")
+        .map(|value| !value.is_null())
+        .unwrap_or(false)
+    {
         js_string(row.get("version"))
     } else {
         String::new()
@@ -480,10 +502,45 @@ pub fn stopwords() -> &'static HashSet<&'static str> {
     static WORDS: OnceLock<HashSet<&'static str>> = OnceLock::new();
     WORDS.get_or_init(|| {
         [
-            "the", "a", "an", "of", "from", "old", "in", "on", "for", "and", "or", "is", "are",
-            "was", "it", "its", "this", "that", "my", "your", "have", "has", "how", "much",
-            "what", "worth", "price", "cost", "value", "sell", "sold", "near", "mint", "played",
-            "damaged", "condition", "english", "italian", "japanese",
+            "the",
+            "a",
+            "an",
+            "of",
+            "from",
+            "old",
+            "in",
+            "on",
+            "for",
+            "and",
+            "or",
+            "is",
+            "are",
+            "was",
+            "it",
+            "its",
+            "this",
+            "that",
+            "my",
+            "your",
+            "have",
+            "has",
+            "how",
+            "much",
+            "what",
+            "worth",
+            "price",
+            "cost",
+            "value",
+            "sell",
+            "sold",
+            "near",
+            "mint",
+            "played",
+            "damaged",
+            "condition",
+            "english",
+            "italian",
+            "japanese",
         ]
         .into_iter()
         .collect()
@@ -526,8 +583,8 @@ pub fn strip_asking_prices(value: &str) -> String {
         )
         .expect("price regex")
     });
-    let symbol_re = SYMBOL_RE
-        .get_or_init(|| Regex::new(r"(?:€|\$)\s*\d+(?:[.,]\d+)?").expect("symbol regex"));
+    let symbol_re =
+        SYMBOL_RE.get_or_init(|| Regex::new(r"(?:€|\$)\s*\d+(?:[.,]\d+)?").expect("symbol regex"));
     let first = price_re.replace_all(value, " ");
     symbol_re.replace_all(&first, " ").to_string()
 }
@@ -580,9 +637,14 @@ pub fn digit_set_code(value: &str) -> String {
             continue;
         }
         let length = token.chars().count();
-        let has_letter = token.chars().any(|character| character.is_ascii_alphabetic());
+        let has_letter = token
+            .chars()
+            .any(|character| character.is_ascii_alphabetic());
         let has_digit = token.chars().any(|character| character.is_ascii_digit());
-        if (2..=8).contains(&length) && has_letter && has_digit && !seen.iter().any(|seen| seen == token)
+        if (2..=8).contains(&length)
+            && has_letter
+            && has_digit
+            && !seen.iter().any(|seen| seen == token)
         {
             seen.push(token.to_string());
         }
@@ -608,11 +670,30 @@ pub fn sold_flag(value: Option<&Json>) -> Option<bool> {
                 return None;
             }
             const TRUE_WORDS: [&str; 13] = [
-                "1", "true", "yes", "y", "si", "sì", "on", "reverse", "reverse holo", "graded",
-                "slab", "first", "1st",
+                "1",
+                "true",
+                "yes",
+                "y",
+                "si",
+                "sì",
+                "on",
+                "reverse",
+                "reverse holo",
+                "graded",
+                "slab",
+                "first",
+                "1st",
             ];
             const FALSE_WORDS: [&str; 9] = [
-                "0", "false", "no", "n", "off", "standard", "unlimited", "raw", "ungraded",
+                "0",
+                "false",
+                "no",
+                "n",
+                "off",
+                "standard",
+                "unlimited",
+                "raw",
+                "ungraded",
             ];
             let extra_true = ["1st edition", "first edition", "prima edizione"];
             let extra_false = ["normal"];
@@ -778,7 +859,11 @@ pub fn sold_stats(rows: &[Json]) -> Option<SoldStats> {
         let row_max = field_number(row, "max_pkn").unwrap_or(0.0);
         max_pkn = max_pkn.max(if row_max > 0.0 { row_max } else { median });
         if let Some(day) = day_of(row.get("observed_day")) {
-            if last_sale_day.as_deref().map(|current| day > current.to_string()).unwrap_or(true) {
+            if last_sale_day
+                .as_deref()
+                .map(|current| day.as_str() > current)
+                .unwrap_or(true)
+            {
                 last_sale_day = Some(day.clone());
             }
             days.insert(day);
@@ -846,12 +931,11 @@ pub fn resolve_facet(rows: &[Json], params: &Json) -> (Facet, bool) {
             let right = units.get(*b).copied().unwrap_or(0.0);
             // `max_by` keeps the LAST on ties, so compare reversed and keep the
             // first-seen key for equal unit counts.
-            pokoin_sort::cmp_f64_desc(left, right)
-                .then_with(|| {
-                    let left_index = order.iter().position(|key| key == *a).unwrap_or(0);
-                    let right_index = order.iter().position(|key| key == *b).unwrap_or(0);
-                    right_index.cmp(&left_index)
-                })
+            pokoin_sort::cmp_f64_desc(left, right).then_with(|| {
+                let left_index = order.iter().position(|key| key == *a).unwrap_or(0);
+                let right_index = order.iter().position(|key| key == *b).unwrap_or(0);
+                right_index.cmp(&left_index)
+            })
         })
         .cloned()
         .unwrap_or_default();
@@ -1004,7 +1088,10 @@ pub fn price_strategies(
     liquidity: Option<&Json>,
 ) -> Option<Json> {
     let summary = summary?;
-    let confidence = summary.get("confidence").and_then(Json::as_str).unwrap_or("");
+    let confidence = summary
+        .get("confidence")
+        .and_then(Json::as_str)
+        .unwrap_or("");
     if confidence == "none" || confidence == "low" {
         return None;
     }
@@ -1127,10 +1214,14 @@ pub fn deal_verdict(ask: f64, sold_median: f64) -> Option<Json> {
         }));
     }
     if ratio <= 0.8 {
-        return Some(json!({ "verdict": "below_sold_median", "ratio": round2_or_none(ratio).map(js_num) }));
+        return Some(
+            json!({ "verdict": "below_sold_median", "ratio": round2_or_none(ratio).map(js_num) }),
+        );
     }
     if ratio <= 1.2 {
-        return Some(json!({ "verdict": "in_line_with_sales", "ratio": round2_or_none(ratio).map(js_num) }));
+        return Some(
+            json!({ "verdict": "in_line_with_sales", "ratio": round2_or_none(ratio).map(js_num) }),
+        );
     }
     Some(json!({ "verdict": "above_sold_median", "ratio": round2_or_none(ratio).map(js_num) }))
 }
@@ -1163,7 +1254,10 @@ pub fn ask_history_from_source(source: Option<&Json>, days: i64) -> Json {
             .get("min")
             .and_then(Json::as_f64)
             .unwrap_or(0.0);
-        let current = series[index].get("min").and_then(Json::as_f64).unwrap_or(0.0);
+        let current = series[index]
+            .get("min")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0);
         if previous == 0.0 {
             continue;
         }
@@ -1202,6 +1296,400 @@ pub fn ask_history_from_source(source: Option<&Json>, days: i64) -> Json {
         "metric": "lowestAsk",
         "source": "cardtrader_listed",
     })
+}
+
+// ---------------------------------------------------------------------------
+// Price history (`card_price_history`)
+// ---------------------------------------------------------------------------
+
+/// The day `range: "all"` starts from: nothing older is stored.
+pub const HISTORY_ALL_FROM: &str = "2024-01-01";
+/// A `from`…`to` span wider than this is a mistake, not a question.
+pub const HISTORY_MAX_SPAN_DAYS: i64 = 3_660;
+/// The span boundaries for the day, week and month buckets; beyond the last one
+/// the series buckets by quarter.
+pub const HISTORY_DAY_MAX_DAYS: i64 = 26;
+pub const HISTORY_WEEK_MAX_DAYS: i64 = 182;
+pub const HISTORY_MONTH_MAX_DAYS: i64 = 790;
+/// The whole `card_price_history` result must stay a chat-sized answer, so this
+/// is the character ceiling its `points` are thinned down to.
+pub const HISTORY_RESULT_CHARS: usize = 5_500;
+/// How many sibling subtypes a TCGplayer block may name beside its own series.
+pub const HISTORY_OTHER_SUBTYPES_MAX: usize = 5;
+
+/// The positive, de-duplicated Cardmarket product ids of a blueprint, read as
+/// text because a `text` column arrives as a JSON string.
+pub fn cm_product_ids(rows: &[Json]) -> Vec<i64> {
+    let mut products: Vec<i64> = Vec::new();
+    for row in rows {
+        let text = match row.get("id_product") {
+            Some(Json::String(text)) => text.clone(),
+            Some(value) if !value.is_null() => js_num_or_text(value),
+            _ => continue,
+        };
+        if let Some(id) = text.trim().parse::<i64>().ok().filter(|id| *id > 0) {
+            if !products.contains(&id) {
+                products.push(id);
+            }
+        }
+    }
+    products
+}
+
+/// The `fx` block: EUR→USD kept to four decimals, because a card price of
+/// thousands of PKN must not inherit a two-decimal rounding of the rate.
+pub fn fx_eur_usd(day: &str, rate: f64) -> Option<Json> {
+    if day.is_empty() || !rate.is_finite() || rate <= 0.0 {
+        return None;
+    }
+    Some(json!({
+        "eurUsd": js_num((rate * 10_000.0).round() / 10_000.0),
+        "day": day,
+    }))
+}
+
+/// `thinHistoryPoints(body, limit)` — the result must stay a chat-sized answer,
+/// so while it is longer than `limit` the widest series keeps every other point
+/// and nothing else changes. True when it had to drop any point.
+pub fn thin_history_points(body: &mut Json, limit: usize) -> bool {
+    let mut thinned = false;
+    while history_char_count(body) > limit {
+        let Some(key) = longest_thinnable_series(body) else {
+            break;
+        };
+        halve_history_series(body, &key);
+        thinned = true;
+    }
+    thinned
+}
+
+/// The serialised length in characters, which is what the model actually sees.
+fn history_char_count(body: &Json) -> usize {
+    serde_json::to_string(body)
+        .map(|text| text.chars().count())
+        .unwrap_or(0)
+}
+
+/// The key of the source with the most points, when it can still lose some.
+fn longest_thinnable_series(body: &Json) -> Option<String> {
+    let sources = body.get("sources")?.as_object()?;
+    let mut best: Option<(String, usize)> = None;
+    for (key, block) in sources {
+        let count = block
+            .get("points")
+            .and_then(Json::as_array)
+            .map_or(0, Vec::len);
+        if count > 2 && best.as_ref().is_none_or(|(_, widest)| count > *widest) {
+            best = Some((key.clone(), count));
+        }
+    }
+    best.map(|(key, _)| key)
+}
+
+/// Half the series, evenly: every point at an even index plus the last one, so
+/// the first and the last day of the range always survive.
+fn halve_history_series(body: &mut Json, key: &str) {
+    let Some(points) = body
+        .get_mut("sources")
+        .and_then(Json::as_object_mut)
+        .and_then(|sources| sources.get_mut(key))
+        .and_then(|block| block.get_mut("points"))
+        .and_then(Json::as_array_mut)
+    else {
+        return;
+    };
+    let last = points.len().saturating_sub(1);
+    let mut index = last;
+    while index > 1 {
+        index -= 1;
+        if index % 2 == 0 {
+            continue;
+        }
+        points.remove(index);
+    }
+}
+
+/// A JSON scalar rendered as text without the quotes a `Json::String` would
+/// gain from `to_string`.
+fn js_num_or_text(value: &Json) -> String {
+    match value {
+        Json::String(text) => text.clone(),
+        Json::Number(number) => number.to_string(),
+        _ => value.to_string(),
+    }
+}
+
+/// `bucketForSpan(spanDays)` — the granularity that keeps a series short.
+pub fn bucket_for_span(span_days: i64) -> &'static str {
+    if span_days <= HISTORY_DAY_MAX_DAYS {
+        "day"
+    } else if span_days <= HISTORY_WEEK_MAX_DAYS {
+        "week"
+    } else if span_days <= HISTORY_MONTH_MAX_DAYS {
+        "month"
+    } else {
+        "quarter"
+    }
+}
+
+/// `isIsoDay(value)` — a real `YYYY-MM-DD`, nothing else.
+pub fn is_iso_day(value: &str) -> bool {
+    let value = value.trim();
+    value.len() == 10 && parse_history_day(value).is_some()
+}
+
+/// `spanDays(from, to)` — the day difference (negative when `from` is later).
+pub fn span_days(from: &str, to: &str) -> Option<i64> {
+    let from = parse_history_day(from)?;
+    let to = parse_history_day(to)?;
+    Some(to.signed_duration_since(from).num_days())
+}
+
+/// A real `YYYY-MM-DD` day as a date, `None` for anything else.
+pub fn parse_history_day(value: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok()
+}
+
+/// `bucketLabel(day, bucket)` — the bucket one day falls in: the day itself,
+/// its ISO week labelled by that week's Monday, `YYYY-MM` or `YYYY-Qn`.
+pub fn bucket_label(day: &str, bucket: &str) -> Option<String> {
+    use chrono::Datelike;
+    let date = parse_history_day(day)?;
+    Some(match bucket {
+        "week" => date
+            .checked_sub_days(chrono::Days::new(u64::from(
+                date.weekday().num_days_from_monday(),
+            )))
+            .map(|monday| monday.format("%Y-%m-%d").to_string())?,
+        "month" => date.format("%Y-%m").to_string(),
+        "quarter" => format!("{}-Q{}", date.year(), (date.month() - 1) / 3 + 1),
+        _ => date.format("%Y-%m-%d").to_string(),
+    })
+}
+
+/// One day of a price series, with the sold units when the source counts them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DailyValue {
+    pub day: String,
+    pub value: f64,
+    pub units: Option<i64>,
+}
+
+impl DailyValue {
+    /// A day of a series that counts no units (every source but sold).
+    pub fn new(day: &str, value: f64) -> DailyValue {
+        DailyValue {
+            day: day.to_string(),
+            value,
+            units: None,
+        }
+    }
+}
+
+/// `medianOf(values)` — the middle value, or the mean of the two middle ones.
+pub fn median_of(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| pokoin_sort::cmp_f64(*a, *b));
+    percentile_of(&sorted, 0.5)
+}
+
+/// `weightedMedian(pairs)` — the first value whose cumulative weight reaches
+/// half the total, so a row of 5 units counts five times.
+pub fn weighted_median(pairs: &[(f64, i64)]) -> Option<f64> {
+    let total: i64 = pairs.iter().map(|(_, weight)| (*weight).max(0)).sum();
+    if total <= 0 {
+        return None;
+    }
+    let mut sorted: Vec<(f64, i64)> = pairs
+        .iter()
+        .filter(|(value, _)| value.is_finite())
+        .copied()
+        .collect();
+    sorted.sort_by(|a, b| pokoin_sort::cmp_f64(a.0, b.0));
+    let mut run = 0i64;
+    for (value, weight) in sorted {
+        if weight <= 0 {
+            continue;
+        }
+        run += weight;
+        if run * 2 >= total {
+            return Some(value);
+        }
+    }
+    None
+}
+
+/// `bucketDays(rows, bucket)` — one point per bucket that has data: the median
+/// of the daily values inside it and the summed units. Empty buckets are
+/// omitted rather than filled, and the labels come back chronological.
+pub fn bucket_days(rows: &[DailyValue], bucket: &str) -> Vec<DailyValue> {
+    let mut groups: HashMap<String, Vec<&DailyValue>> = HashMap::new();
+    for row in rows {
+        if !row.value.is_finite() {
+            continue;
+        }
+        let Some(label) = bucket_label(&row.day, bucket) else {
+            continue;
+        };
+        groups.entry(label).or_default().push(row);
+    }
+    // Every label format (`YYYY-MM-DD`, `YYYY-MM`, `YYYY-Qn`) sorts correctly
+    // as text, so the bucket order is a plain string sort.
+    let mut labels: Vec<String> = groups.keys().cloned().collect();
+    labels.sort();
+    labels
+        .into_iter()
+        .filter_map(|label| {
+            let group = groups.remove(&label)?;
+            let values: Vec<f64> = group.iter().map(|row| row.value).collect();
+            let has_units = group.iter().any(|row| row.units.is_some());
+            let summed: i64 = group.iter().filter_map(|row| row.units).sum();
+            Some(DailyValue {
+                day: label,
+                value: median_of(&values)?,
+                units: if has_units { Some(summed) } else { None },
+            })
+        })
+        .collect()
+}
+
+/// `roundHistoryValue(value, currency)` — PKN reads as whole numbers, every
+/// other currency to two decimals.
+pub fn round_history_value(value: f64, currency: &str) -> f64 {
+    if currency == "PKN" {
+        value.round()
+    } else {
+        round2(value)
+    }
+}
+
+/// The day `back_days` before an `YYYY-MM-DD` day, or `None` for a bad day.
+pub fn shift_day(day: &str, back_days: i64) -> Option<String> {
+    let date = parse_history_day(day)?;
+    let shifted = if back_days >= 0 {
+        date.checked_sub_days(chrono::Days::new(back_days as u64))?
+    } else {
+        date.checked_add_days(chrono::Days::new(back_days.unsigned_abs()))?
+    };
+    Some(shifted.format("%Y-%m-%d").to_string())
+}
+
+/// `changePct(first, last)` — one decimal, `None` when `first` is 0 or either
+/// end is not a number.
+pub fn change_pct(first: f64, last: f64) -> Option<f64> {
+    if !first.is_finite() || !last.is_finite() || first == 0.0 {
+        return None;
+    }
+    let pct = (last - first) / first * 100.0;
+    round1_or_none(pct)
+}
+
+fn round1_or_none(value: f64) -> Option<f64> {
+    if !value.is_finite() {
+        return None;
+    }
+    Some((value * 10.0).round() / 10.0)
+}
+
+/// Which price source a history block reports, and what its numbers mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryKind {
+    /// The `sources` parameter name and the response key of this block.
+    pub key: &'static str,
+    /// The table or feed the values came from, e.g. `tcgcsv/tcgplayer`.
+    pub source: &'static str,
+    pub currency: &'static str,
+    pub metric: &'static str,
+}
+
+/// What one `sources.<name>` block of `card_price_history` is built from.
+pub struct HistorySource<'a> {
+    pub kind: HistoryKind,
+    pub bucket: &'a str,
+    /// The daily rows found inside the asked range, oldest first.
+    pub days: &'a [DailyValue],
+    /// An overriding status (`unavailable`, `unconfigured`, `unsupported_game`);
+    /// empty derives `available` or `empty` from `days`.
+    pub status: &'a str,
+    /// Source-specific fields that lead the block: subtype, latest, slice.
+    pub extra: Option<&'a Json>,
+}
+
+/// The `sources.<name>` block: what is stored, how it moved, and the dated
+/// bucket points. Anything but `available` carries no points.
+pub fn history_source_block(spec: HistorySource<'_>) -> Json {
+    let status = if !spec.status.is_empty() {
+        spec.status
+    } else if spec.days.is_empty() {
+        "empty"
+    } else {
+        "available"
+    };
+    let mut block = Map::new();
+    block.insert("status".into(), json!(status));
+    block.insert("source".into(), json!(spec.kind.source));
+    block.insert("currency".into(), json!(spec.kind.currency));
+    block.insert("metric".into(), json!(spec.kind.metric));
+    if let Some(Json::Object(fields)) = spec.extra {
+        for (key, value) in fields {
+            block.insert(key.clone(), value.clone());
+        }
+    }
+    if status != "available" {
+        return Json::Object(block);
+    }
+    let seen: BTreeSet<&str> = spec.days.iter().map(|day| day.day.as_str()).collect();
+    if let (Some(first), Some(last)) = (seen.first(), seen.last()) {
+        block.insert("storedFrom".into(), json!(first));
+        block.insert("storedTo".into(), json!(last));
+    }
+    block.insert("days".into(), json!(seen.len()));
+    let units: i64 = spec.days.iter().filter_map(|day| day.units).sum();
+    if spec.days.iter().any(|day| day.units.is_some()) {
+        block.insert("units".into(), json!(units));
+    }
+    let points: Vec<DailyValue> = bucket_days(spec.days, spec.bucket)
+        .into_iter()
+        .map(|point| DailyValue {
+            day: point.day,
+            value: round_history_value(point.value, spec.kind.currency),
+            units: point.units,
+        })
+        .collect();
+    let counts_units = points.iter().any(|point| point.units.is_some());
+    let point = |value: &DailyValue| match value.units {
+        Some(units) if counts_units => json!([value.day, js_num(value.value), units]),
+        _ => json!([value.day, js_num(value.value)]),
+    };
+    if let (Some(first), Some(last)) = (points.first(), points.last()) {
+        block.insert("first".into(), point(first));
+        block.insert("last".into(), point(last));
+        let mut min = first;
+        let mut max = first;
+        for point in &points {
+            if point.value < min.value {
+                min = point;
+            }
+            if point.value > max.value {
+                max = point;
+            }
+        }
+        block.insert("min".into(), point(min));
+        block.insert("max".into(), point(max));
+        if points.len() >= 2 {
+            if let Some(pct) = change_pct(first.value, last.value) {
+                block.insert("changePct".into(), json!(pct));
+            }
+        }
+    }
+    block.insert(
+        "points".into(),
+        Json::Array(points.iter().map(point).collect()),
+    );
+    Json::Object(block)
 }
 
 /// `requireCard`/`resolveCard` status codes: a not-found or ambiguous match is a
@@ -1333,13 +1821,25 @@ mod tests {
 
     #[test]
     fn blueprint_ids_need_an_explicit_positive_ct_id() {
-        assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": 109873 })), Some(109873));
-        assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": "42" })), Some(42));
+        assert_eq!(
+            blueprint_id_from_catalog_row(&json!({ "ct_id": 109873 })),
+            Some(109873)
+        );
+        assert_eq!(
+            blueprint_id_from_catalog_row(&json!({ "ct_id": "42" })),
+            Some(42)
+        );
         // Zero, negatives, decimals and junk are not a blueprint.
         assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": 0 })), None);
-        assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": "007" })), None);
+        assert_eq!(
+            blueprint_id_from_catalog_row(&json!({ "ct_id": "007" })),
+            None
+        );
         assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": -1 })), None);
-        assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": "1.5" })), None);
+        assert_eq!(
+            blueprint_id_from_catalog_row(&json!({ "ct_id": "1.5" })),
+            None
+        );
         assert_eq!(blueprint_id_from_catalog_row(&json!({ "ct_id": "" })), None);
         assert_eq!(blueprint_id_from_catalog_row(&json!({})), None);
     }
@@ -1365,7 +1865,10 @@ mod tests {
         let candidate = candidate_from_row(&row);
         assert_eq!(candidate["cardId"], json!("4242"));
         assert_eq!(candidate["blueprintId"], json!(2121));
-        assert_eq!(candidate["canonicalPath"], json!("/marketplace/en/cards/4242"));
+        assert_eq!(
+            candidate["canonicalPath"],
+            json!("/marketplace/en/cards/4242")
+        );
         assert_eq!(candidate["version"], json!("7"));
         let candidate = candidate_from_row(&json!({ "card_id": "" }));
         assert_eq!(candidate["cardId"], json!(""));
@@ -1392,7 +1895,8 @@ mod tests {
 
     #[test]
     fn query_variants_drop_chatter_but_keep_the_raw_phrase() {
-        let variants = query_variants("how much is Rocky Helmet Boundaries Crossed secret rare 153/149?");
+        let variants =
+            query_variants("how much is Rocky Helmet Boundaries Crossed secret rare 153/149?");
         assert_eq!(variants.len(), 2);
         assert!(variants[0].starts_with("Rocky Helmet Boundaries Crossed secret rare 153/149"));
         assert!(variants[1].starts_with("how much is"));
@@ -1407,12 +1911,18 @@ mod tests {
     #[test]
     fn asking_prices_are_stripped_from_seller_lines() {
         assert_eq!(strip_asking_prices("Solgaleo 70kr").trim(), "Solgaleo");
-        assert_eq!(strip_asking_prices("Solgaleo 70 Danish kroner").trim(), "Solgaleo");
+        assert_eq!(
+            strip_asking_prices("Solgaleo 70 Danish kroner").trim(),
+            "Solgaleo"
+        );
         assert_eq!(strip_asking_prices("Pikachu 12.50 eur").trim(), "Pikachu");
         assert_eq!(strip_asking_prices("Pikachu €12,50").trim(), "Pikachu");
         assert_eq!(strip_asking_prices("Pikachu $9").trim(), "Pikachu");
         // A collector number has no currency word and stays.
-        assert_eq!(strip_asking_prices("Solgaleo GX (30C SUM 89)").trim(), "Solgaleo GX (30C SUM 89)");
+        assert_eq!(
+            strip_asking_prices("Solgaleo GX (30C SUM 89)").trim(),
+            "Solgaleo GX (30C SUM 89)"
+        );
     }
 
     #[test]
@@ -1440,10 +1950,37 @@ mod tests {
     fn sold_flags_accept_the_documented_vocabulary() {
         assert_eq!(sold_flag(Some(&json!(true))), Some(true));
         assert_eq!(sold_flag(Some(&json!(false))), Some(false));
-        for word in ["1", "true", "yes", "y", "si", "sì", "on", "reverse", "reverse holo", "graded", "slab", "first", "1st", "1st edition", "prima edizione"] {
+        for word in [
+            "1",
+            "true",
+            "yes",
+            "y",
+            "si",
+            "sì",
+            "on",
+            "reverse",
+            "reverse holo",
+            "graded",
+            "slab",
+            "first",
+            "1st",
+            "1st edition",
+            "prima edizione",
+        ] {
             assert_eq!(sold_flag(Some(&json!(word))), Some(true), "{word}");
         }
-        for word in ["0", "false", "no", "n", "off", "standard", "unlimited", "raw", "ungraded", "normal"] {
+        for word in [
+            "0",
+            "false",
+            "no",
+            "n",
+            "off",
+            "standard",
+            "unlimited",
+            "raw",
+            "ungraded",
+            "normal",
+        ] {
             assert_eq!(sold_flag(Some(&json!(word))), Some(false), "{word}");
         }
         assert_eq!(sold_flag(Some(&json!("maybe"))), None);
@@ -1454,8 +1991,19 @@ mod tests {
     #[test]
     fn facets_default_to_standard_and_label_themselves() {
         let facet = sold_facet_from_params(&json!({}));
-        assert_eq!(facet, Facet { reverse: false, first_edition: false, graded: false, explicit: false });
-        assert_eq!(facet_label(facet), "Standard (unlimited, non-reverse, ungraded)");
+        assert_eq!(
+            facet,
+            Facet {
+                reverse: false,
+                first_edition: false,
+                graded: false,
+                explicit: false
+            }
+        );
+        assert_eq!(
+            facet_label(facet),
+            "Standard (unlimited, non-reverse, ungraded)"
+        );
 
         let facet = sold_facet_from_params(&json!({ "reverse": "yes" }));
         assert!(facet.reverse);
@@ -1478,14 +2026,35 @@ mod tests {
     fn facet_keys_and_row_matching() {
         let row = json!({ "reverse": true, "first_edition": false, "graded": false });
         assert_eq!(facet_key(&row), "true|false|false");
-        assert!(row_matches_facet(&row, Facet { reverse: true, first_edition: false, graded: false, explicit: false }));
-        assert!(!row_matches_facet(&row, Facet { reverse: false, first_edition: false, graded: false, explicit: false }));
+        assert!(row_matches_facet(
+            &row,
+            Facet {
+                reverse: true,
+                first_edition: false,
+                graded: false,
+                explicit: false
+            }
+        ));
+        assert!(!row_matches_facet(
+            &row,
+            Facet {
+                reverse: false,
+                first_edition: false,
+                graded: false,
+                explicit: false
+            }
+        ));
         // The camelCase spelling is honoured.
         let row = json!({ "reverse": false, "firstEdition": true, "graded": false });
         assert_eq!(facet_key(&row), "false|true|false");
 
         let row = json!({ "condition": "SP", "language": "it", "reverse": false });
-        let facet = Facet { reverse: false, first_edition: false, graded: false, explicit: false };
+        let facet = Facet {
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            explicit: false,
+        };
         assert!(row_matches_slice(&row, Some(facet), Some("SP"), Some("IT")));
         assert!(!row_matches_slice(&row, Some(facet), Some("NM"), None));
         assert!(!row_matches_slice(&row, Some(facet), None, Some("EN")));
@@ -1554,7 +2123,9 @@ mod tests {
     #[test]
     fn sold_estimates_carry_the_documented_fields() {
         let stats = sold_stats(&[sold_row("2026-10-01", 12, 100.0)]).unwrap();
-        let estimate = sold_estimate_from_stats(Some(&stats), "Standard (unlimited, non-reverse, ungraded)").unwrap();
+        let estimate =
+            sold_estimate_from_stats(Some(&stats), "Standard (unlimited, non-reverse, ungraded)")
+                .unwrap();
         assert_eq!(estimate["currency"], json!("PKN"));
         assert_eq!(estimate["pknEurRate"], json!(0.005));
         assert_eq!(estimate["median"], json!(100));
@@ -1563,7 +2134,10 @@ mod tests {
         assert_eq!(estimate["saleDays"], json!(1));
         assert_eq!(estimate["lastSaleDay"], json!("2026-10-01"));
         assert_eq!(estimate["confidence"], json!("high"));
-        assert!(estimate["methodology"].as_str().unwrap().contains("cardtrader_sold_daily"));
+        assert!(estimate["methodology"]
+            .as_str()
+            .unwrap()
+            .contains("cardtrader_sold_daily"));
         assert!(sold_estimate_from_stats(None, "x").is_none());
     }
 
@@ -1613,7 +2187,10 @@ mod tests {
         assert_eq!(variants[0]["variant"], json!("Reverse Holo"));
         assert_eq!(variants[0]["soldQty"], json!(9));
         assert_eq!(variants[0]["medianPkn"], json!(300));
-        assert_eq!(variants[1]["variant"], json!("Standard (unlimited, non-reverse, ungraded)"));
+        assert_eq!(
+            variants[1]["variant"],
+            json!("Standard (unlimited, non-reverse, ungraded)")
+        );
         assert_eq!(variants[1]["soldQty"], json!(5));
 
         let by_condition = sold_by_condition_language(&rows, 10);
@@ -1635,7 +2212,10 @@ mod tests {
         assert_eq!(bands["typicalDays"], json!(10));
         assert_eq!(bands["highDays"], json!(25));
         assert_eq!(bands["confidence"], json!("medium"));
-        assert!(bands["methodology"].as_str().unwrap().contains("marketplace_card_weights"));
+        assert!(bands["methodology"]
+            .as_str()
+            .unwrap()
+            .contains("marketplace_card_weights"));
 
         // Without weights the sell-through heuristic applies: 20 listed / 2 sold
         // per week -> 70 days.
@@ -1644,7 +2224,10 @@ mod tests {
         assert_eq!(bands["lowDays"], json!(28));
         assert_eq!(bands["highDays"], json!(175));
         assert_eq!(bands["confidence"], json!("low"));
-        assert!(bands["methodology"].as_str().unwrap().contains("sell-through"));
+        assert!(bands["methodology"]
+            .as_str()
+            .unwrap()
+            .contains("sell-through"));
 
         // Nothing usable.
         assert!(liquidity_bands(None, None, None).is_none());
@@ -1747,13 +2330,31 @@ mod tests {
         let verdict = deal_verdict(30.0, 100.0).unwrap();
         assert_eq!(verdict["verdict"], json!("far_below_sold_median"));
         assert_eq!(verdict["ratio"], json!(0.3));
-        assert!(verdict["caution"].as_str().unwrap().contains("delisted high asks"));
+        assert!(verdict["caution"]
+            .as_str()
+            .unwrap()
+            .contains("delisted high asks"));
         // Exactly at the boundary is still "below".
-        assert_eq!(deal_verdict(35.0, 100.0).unwrap()["verdict"], json!("below_sold_median"));
-        assert_eq!(deal_verdict(80.0, 100.0).unwrap()["verdict"], json!("below_sold_median"));
-        assert_eq!(deal_verdict(100.0, 100.0).unwrap()["verdict"], json!("in_line_with_sales"));
-        assert_eq!(deal_verdict(120.0, 100.0).unwrap()["verdict"], json!("in_line_with_sales"));
-        assert_eq!(deal_verdict(121.0, 100.0).unwrap()["verdict"], json!("above_sold_median"));
+        assert_eq!(
+            deal_verdict(35.0, 100.0).unwrap()["verdict"],
+            json!("below_sold_median")
+        );
+        assert_eq!(
+            deal_verdict(80.0, 100.0).unwrap()["verdict"],
+            json!("below_sold_median")
+        );
+        assert_eq!(
+            deal_verdict(100.0, 100.0).unwrap()["verdict"],
+            json!("in_line_with_sales")
+        );
+        assert_eq!(
+            deal_verdict(120.0, 100.0).unwrap()["verdict"],
+            json!("in_line_with_sales")
+        );
+        assert_eq!(
+            deal_verdict(121.0, 100.0).unwrap()["verdict"],
+            json!("above_sold_median")
+        );
     }
 
     #[test]
@@ -1800,7 +2401,10 @@ mod tests {
 
         // A single day never trends, and no source is an empty series.
         let single = json!({ "days": [{ "day": "2026-10-01", "lowestAskPkn": 100 }] });
-        assert_eq!(ask_history_from_source(Some(&single), 14)["trend"], json!("stable"));
+        assert_eq!(
+            ask_history_from_source(Some(&single), 14)["trend"],
+            json!("stable")
+        );
         let empty = ask_history_from_source(None, 14);
         assert_eq!(empty["series"], json!([]));
         assert_eq!(empty["trend"], json!("stable"));
@@ -1811,5 +2415,307 @@ mod tests {
         assert_eq!(resolve_status_code("invalid"), 400);
         assert_eq!(resolve_status_code("not_found"), 422);
         assert_eq!(resolve_status_code("ambiguous"), 422);
+    }
+
+    fn series(days: &[(&str, f64)]) -> Vec<DailyValue> {
+        days.iter()
+            .map(|(day, value)| DailyValue::new(day, *value))
+            .collect()
+    }
+
+    /// The CardTrader listing kind, for the block builder tests.
+    const ASK_KIND: HistoryKind = HistoryKind {
+        key: "cardtrader_ask",
+        source: "cardtrader_listed",
+        currency: "PKN",
+        metric: "lowestAsk",
+    };
+
+    #[test]
+    fn bucket_choice_walks_the_day_week_month_quarter_bounds() {
+        assert_eq!(bucket_for_span(-1), "day");
+        assert_eq!(bucket_for_span(0), "day");
+        assert_eq!(bucket_for_span(26), "day");
+        assert_eq!(bucket_for_span(27), "week");
+        assert_eq!(bucket_for_span(182), "week");
+        assert_eq!(bucket_for_span(183), "month");
+        assert_eq!(bucket_for_span(790), "month");
+        assert_eq!(bucket_for_span(791), "quarter");
+        assert_eq!(bucket_for_span(3_660), "quarter");
+    }
+
+    #[test]
+    fn bucket_labels_use_the_iso_monday_month_and_quarter() {
+        // Monday-labelled weeks, including across the year boundary.
+        assert_eq!(
+            bucket_label("2024-12-30", "week"),
+            Some("2024-12-30".to_string())
+        );
+        assert_eq!(
+            bucket_label("2025-01-01", "week"),
+            Some("2024-12-30".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-11-17", "week"),
+            Some("2026-11-16".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-11-16", "week"),
+            Some("2026-11-16".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-01-01", "month"),
+            Some("2026-01".to_string())
+        );
+        assert_eq!(
+            bucket_label("2026-12-31", "month"),
+            Some("2026-12".to_string())
+        );
+        for (day, quarter) in [
+            ("2026-01-01", "2026-Q1"),
+            ("2026-03-31", "2026-Q1"),
+            ("2026-04-01", "2026-Q2"),
+            ("2026-06-30", "2026-Q2"),
+            ("2026-07-01", "2026-Q3"),
+            ("2026-09-30", "2026-Q3"),
+            ("2026-10-01", "2026-Q4"),
+            ("2026-12-31", "2026-Q4"),
+        ] {
+            assert_eq!(
+                bucket_label(day, "quarter"),
+                Some(quarter.to_string()),
+                "{day}"
+            );
+        }
+        // A day bucket is the day itself; anything else is not a date.
+        assert_eq!(
+            bucket_label("2026-11-17", "day"),
+            Some("2026-11-17".to_string())
+        );
+        assert_eq!(bucket_label("17 Nov 2026", "week"), None);
+        assert_eq!(bucket_label("2026-02-30", "month"), None);
+        assert_eq!(
+            bucket_label("2026-11-17", ""),
+            Some("2026-11-17".to_string())
+        );
+    }
+
+    #[test]
+    fn iso_day_and_span_checks() {
+        assert!(is_iso_day("2026-11-17"));
+        assert!(!is_iso_day("2026-11-7"));
+        assert!(!is_iso_day("2026-11-17T00:00:00Z"));
+        assert!(!is_iso_day(""));
+        assert_eq!(span_days("2026-01-01", "2026-01-11"), Some(10));
+        assert_eq!(span_days("2026-01-11", "2026-01-01"), Some(-10));
+        assert_eq!(span_days("nope", "2026-01-01"), None);
+        assert_eq!(shift_day("2026-03-01", 30), Some("2026-01-30".to_string()));
+        assert_eq!(shift_day("2026-03-01", 0), Some("2026-03-01".to_string()));
+        assert_eq!(shift_day("2026-03-01", -1), Some("2026-03-02".to_string()));
+        assert_eq!(shift_day("2026-13-01", 30), None);
+    }
+
+    #[test]
+    fn bucket_days_medians_each_bucket_and_skips_the_empty_ones() {
+        use chrono::Datelike;
+        // One bucket of three (odd middle), one of two (mean of the pair).
+        let days = series(&[
+            ("2026-10-05", 300.0),
+            ("2026-10-02", 100.0),
+            ("2026-10-04", 200.0),
+            ("2026-10-13", 50.0),
+            ("2026-10-12", 60.0),
+        ]);
+        let buckets = bucket_days(&days, "week");
+        assert_eq!(
+            buckets
+                .iter()
+                .map(|bucket| (bucket.day.as_str(), bucket.value))
+                .collect::<Vec<_>>(),
+            vec![
+                ("2026-09-28", 150.0),
+                ("2026-10-05", 300.0),
+                ("2026-10-12", 55.0),
+            ]
+        );
+        // Every week bucket is labelled by its Monday.
+        assert!(buckets.iter().all(|bucket| {
+            parse_history_day(&bucket.day)
+                .map(|date| date.weekday() == chrono::Weekday::Mon)
+                .unwrap_or(false)
+        }));
+        // October 2026 has data, November only partly, December none at all.
+        let months = bucket_days(
+            &series(&[
+                ("2026-10-05", 100.0),
+                ("2026-10-06", 102.0),
+                ("2026-11-02", 200.0),
+            ]),
+            "month",
+        );
+        assert_eq!(
+            months
+                .iter()
+                .map(|bucket| (bucket.day.as_str(), bucket.value))
+                .collect::<Vec<_>>(),
+            vec![("2026-10", 101.0), ("2026-11", 200.0)]
+        );
+        // A non-finite value or a non-date never becomes a bucket.
+        assert!(bucket_days(&series(&[("2026-10-05", f64::NAN)]), "month").is_empty());
+        assert!(bucket_days(
+            &[DailyValue {
+                day: "last may".to_string(),
+                value: 100.0,
+                units: None,
+            }],
+            "month"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn bucket_days_sum_the_units_of_their_source_rows() {
+        let days = vec![
+            DailyValue {
+                day: "2026-10-02".to_string(),
+                value: 100.0,
+                units: Some(3),
+            },
+            DailyValue {
+                day: "2026-10-03".to_string(),
+                value: 120.0,
+                units: Some(4),
+            },
+        ];
+        let buckets = bucket_days(&days, "week");
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].units, Some(7));
+        // A source that counts nothing keeps counting nothing.
+        assert_eq!(
+            bucket_days(&series(&[("2026-10-02", 100.0)]), "week")[0].units,
+            None
+        );
+    }
+
+    #[test]
+    fn medians_ignore_order_and_weight_by_units() {
+        assert_eq!(median_of(&[]), None);
+        assert_eq!(median_of(&[7.0]), Some(7.0));
+        assert_eq!(median_of(&[3.0, 1.0, 2.0]), Some(2.0));
+        assert_eq!(median_of(&[4.0, 1.0, 3.0, 2.0]), Some(2.5));
+        // Five units at 100 outweigh one unit at 300.
+        assert_eq!(weighted_median(&[(100.0, 5), (300.0, 1)]), Some(100.0));
+        assert_eq!(weighted_median(&[(100.0, 1), (300.0, 5)]), Some(300.0));
+        // An even split takes the lower value, the first to reach half.
+        assert_eq!(weighted_median(&[(100.0, 2), (300.0, 2)]), Some(100.0));
+        assert_eq!(weighted_median(&[(100.0, 0), (300.0, 0)]), None);
+        assert_eq!(weighted_median(&[]), None);
+    }
+
+    #[test]
+    fn history_values_round_per_currency_and_change_needs_a_base() {
+        assert_eq!(round_history_value(156.456, "EUR"), 156.46);
+        assert_eq!(round_history_value(2642.6, "PKN"), 2643.0);
+        assert_eq!(round_history_value(2642.4, "PKN"), 2642.0);
+        assert_eq!(round_history_value(0.85, "USD"), 0.85);
+        assert_eq!(change_pct(100.0, 110.0), Some(10.0));
+        assert_eq!(change_pct(1.0, 1.045), Some(4.5));
+        assert_eq!(change_pct(0.0, 100.0), None);
+        assert_eq!(change_pct(100.0, 0.0), Some(-100.0));
+        assert_eq!(change_pct(f64::NAN, 1.0), None);
+    }
+
+    #[test]
+    fn history_source_block_reports_storage_before_points() {
+        let days = series(&[
+            ("2026-10-05", 100.4),
+            ("2026-10-06", 120.4),
+            ("2026-10-07", 110.4),
+        ]);
+        let block = history_source_block(HistorySource {
+            kind: HistoryKind {
+                key: "tcgplayer",
+                source: "tcgcsv/tcgplayer",
+                currency: "USD",
+                metric: "marketPrice",
+            },
+            bucket: "month",
+            days: &days,
+            status: "",
+            extra: None,
+        });
+        assert_eq!(block["status"], "available");
+        assert_eq!(block["source"], "tcgcsv/tcgplayer");
+        assert_eq!(block["storedFrom"], json!("2026-10-05"));
+        assert_eq!(block["storedTo"], json!("2026-10-07"));
+        assert_eq!(block["days"], json!(3));
+        assert_eq!(block["first"], json!(["2026-10", 110.4]));
+        assert_eq!(block["last"], json!(["2026-10", 110.4]));
+        assert_eq!(block["min"], json!(["2026-10", 110.4]));
+        assert_eq!(block["max"], json!(["2026-10", 110.4]));
+        // One bucket is not a trend.
+        assert!(block.get("changePct").is_none());
+        // Min and max name the earliest bucket holding that value.
+        let spread = series(&[
+            ("2026-10-05", 100.0),
+            ("2026-11-05", 300.0),
+            ("2026-12-05", 200.0),
+        ]);
+        let spread_block = history_source_block(HistorySource {
+            kind: ASK_KIND,
+            bucket: "month",
+            days: &spread,
+            status: "",
+            extra: Some(&json!({ "slice": { "condition": "NM" } })),
+        });
+        assert_eq!(spread_block["first"], json!(["2026-10", 100]));
+        assert_eq!(spread_block["last"], json!(["2026-12", 200]));
+        assert_eq!(spread_block["min"], json!(["2026-10", 100]));
+        assert_eq!(spread_block["max"], json!(["2026-11", 300]));
+        assert_eq!(spread_block["changePct"], json!(100.0));
+        assert_eq!(spread_block["slice"]["condition"], json!("NM"));
+        // A zero first value never produces a percentage.
+        let from_zero = series(&[("2026-10-05", 0.0), ("2026-11-05", 300.0)]);
+        let zero_block = history_source_block(HistorySource {
+            kind: ASK_KIND,
+            bucket: "month",
+            days: &from_zero,
+            status: "",
+            extra: None,
+        });
+        assert!(zero_block.get("changePct").is_none());
+    }
+
+    #[test]
+    fn cardmarket_product_ids_parse_from_text_and_number() {
+        // A `text` column arrives as a JSON string, which is how the guide reader
+        // gets its ids; a quoted value must still read as the id it names.
+        let rows = vec![
+            json!({ "id_product": "794461" }),
+            json!({ "id_product": " 794462 " }),
+            json!({ "id_product": 794463 }),
+            json!({ "id_product": "0" }),
+            json!({ "id_product": "-5" }),
+            json!({ "id_product": "" }),
+            json!({ "id_product": "not-a-product" }),
+            Json::Null,
+        ];
+        assert_eq!(cm_product_ids(&rows), vec![794461, 794462, 794463]);
+        assert!(cm_product_ids(&[]).is_empty());
+    }
+
+    #[test]
+    fn fx_keeps_four_decimals_and_never_a_bogus_rate() {
+        let rate = fx_eur_usd("2026-11-16", 1.09891).unwrap_or(Json::Null);
+        assert_eq!(rate["eurUsd"], js_num(1.0989));
+        assert_eq!(rate["day"], json!("2026-11-16"));
+        assert_eq!(
+            fx_eur_usd("2026-11-16", 1.09896).unwrap_or(Json::Null)["eurUsd"],
+            js_num(1.099)
+        );
+        assert_eq!(fx_eur_usd("", 1.0989), None);
+        assert_eq!(fx_eur_usd("2026-11-16", 0.0), None);
+        assert_eq!(fx_eur_usd("2026-11-16", -1.0), None);
+        assert_eq!(fx_eur_usd("2026-11-16", f64::NAN), None);
     }
 }

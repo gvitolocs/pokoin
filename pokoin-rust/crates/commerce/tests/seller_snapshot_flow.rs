@@ -132,6 +132,10 @@ async fn the_builder_writes_snapshots_and_fresh_reports_their_stamp() {
         eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
         return;
     };
+    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
+    std::env::set_var("POKOIN_READ_CACHE", "0");
     let pool = PgPoolOptions::new().max_connections(6).connect(&url).await.expect("test database");
     sqlx::raw_sql(SCHEMA).execute(&pool).await.expect("schema");
     sqlx::raw_sql(MIGRATION_116).execute(&pool).await.expect("migration 116");

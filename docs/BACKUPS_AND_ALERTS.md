@@ -29,10 +29,11 @@ Audit of 2026-10-15:
 | Local PITR copy | nezopt | `pokoin-backup-mirror.timer` runs at 06:00 UTC: `rclone sync` of the wal-g bucket to mybook, using a read-only key. |
 | Restore tests | nezopt | `pokoin-restore-test.timer` runs on the first Sunday of each month. (1) `backup verify` checks the sha256 of each file in the newest dump set, decrypts it, restores it into a throwaway container (`--network none`, data on mybook), and compares row counts per table between the archive and the restored database. The archive counts come from its COPY blocks, so they are exact. (2) `backup pitr-test` fetches the newest wal-g base backup and every later WAL segment from the mirror, replays them, and requires a last replayed transaction less than 30 h old. It then reads every table with `count(*)`. Both send a pass or fail mail. |
 | Slot cap | writer | `max_slot_wal_keep_size = 50GB` (reload only). A Pi outage can then no longer fill nezopt's NVMe. After roughly 4 days down (~12 GB WAL/day), the slot is invalidated and the Pi needs a fresh base backup; the sentinel alerts long before that, at 40 GB. |
-| Failure mail | all hosts | A `pokoin-notify@.service` template runs `pokoin-ops notify-unit`. It mails the unit's state and journal tail through the same Resend key, sender and inbox as `scripts/pokoin-uptime-mail.sh`, and pings the unit's dead-man check `/fail` as an independent second path. A 3 h per-unit cooldown folds repeat failures into the next mail. It is attached with `OnFailure=` drop-ins to `pokoin-rust-job@.service` and `pokoin-pi-watchdog` (Pi), to `pokoin-all-cardtrader-daily`, `pokoin-site-map-refresh`, `pokoin-overflow-sync` and `pokoin-shipping-rates-sync` (nezopt, user units), and to `pokoin-cardtrader-daily-market-refresh` (Oracle host `pokoin-marketplace`). |
+| Failure mail | all hosts | A `pokoin-notify@.service` template runs `pokoin-ops notify-unit`. It mails the unit's state and journal tail through the same Resend key, sender and inbox as `scripts/pokoin-uptime-mail.sh`, and pings the unit's dead-man check `/fail` as an independent second path. A 3 h per-unit cooldown folds repeat failures into the next mail. It is attached with `OnFailure=` drop-ins to `pokoin-rust-job@.service` and `pokoin-pi-watchdog` (Pi), to **every nezopt user service** through the type-wide `~/.config/systemd/user/service.d/90-alert.conf` (opt out with a same-named `<unit>.service.d/90-alert.conf` holding `OnFailure=`, as `pokoin-notify@` and `pokoin-uptime-mail` do), and to `pokoin-cardtrader-daily-market-refresh` (Oracle host `pokoin-marketplace`). Each failure is also pushed to the Secretary app (`POST /v1/notify`, see below). |
 | TERM summary | repo | `scripts/run-all-cardtrader-daily.sh` traps SIGTERM/SIGINT. It still sends its CardTrader summary, marked `interrupted`. Stages report only once they have finished. The drop-in sets `TimeoutStopSec=120` so the summary has time to go out. |
 | Dead-man pings | all hosts | healthchecks.io: one project and one ping key per host, one slug per timer (`ExecStartPre … start`, `ExecStartPost …` on success). `pokoin-ops hc-provision` creates every check with its period and grace from `tools/pokoin-ops/src/hc.rs`. Without a key the pings do nothing, so the drop-ins can go in first. |
 | Sentinel | Pi + nezopt | `pokoin-sentinel.timer` runs every 5 min (`pokoin-ops sentinel --role pi\|nezopt`). **nezopt** checks: writer client connections (warn at 100, crit at 120), a streaming standby present in `pg_stat_replication`, replay lag over 60 s, slot `wal_status` lost/unreserved or more than 40 GB retained, free space on `/` below 40 GB, the newest pg_dump older than 30 h or mybook unmounted, and failed system and user units. **Pi** checks: the replica is in recovery and its WAL receiver is streaming (if the receiver is down, nezopt is gone), replay lag, archiver failures plus the `.ready` backlog, the WAL spool backlog, API errors from `/metrics` (more than 25 new errors per run), disk on `/` and `/srv/pokoin` below 10 GB, failed units, and TCP to the writer. A problem mails after 2 consecutive bad runs (units and disk: 1), again on escalation, again every 6 h while it lasts, and once when it clears. Transient units (`systemd-run`) and desktop units are not reported. If a whole host dies, its sentinel's healthchecks ping stops. |
+| Secretary push (nezopt) | nezopt | `sentinel --role nezopt` also watches what OnFailure cannot see: restart storms (NRestarts/RestartCount in the last hour, warn ≥ 3, crit ≥ 10), units and containers listed in `~/.config/pokoin/expected-active.txt` that are not running, `unless-stopped`/`always` containers that are stopped or unhealthy, failed k3s Jobs in `pokoin-overflow` new since the previous run (warn for 1 h), the live API pods of that namespace (`pods.rs`, one `kubectl get pods -o json` per run: no Ready replica of `pokoin-api`/`cloudflared` at all, a container `restartCount` that rose in the last hour with its `lastState.terminated.reason`, so an OOM kill is named, memory at or over 80 % of the pod's own limit, and pods left in phase Failed), the local target of every active `ssh -R` unit plus Infisical `:8088`, silent degradation in logs (`no CARDTRADER_AUTH_TOKEN`, `invalid_grant`, `moderation_failed`), timers whose last run failed, disks below 10 %/5 % free and CPU Tctl ≥ 90/95 °C sustained for 15 minutes (every 5-minute sample in that window; short build bursts do not alert). Pod memory comes from `kubectl top pods`, and when that cannot answer from the container cgroup `memory.current` read inside the k3s container; a pod that neither could measure is a digest warning, never an all-clear. Every run posts the full snapshot (healthy checks included) to `POST $POKOIN_SECRETARY_URL/v1/system/health`. A change into crit pushes `POST /v1/notify` once (`dedupKey` `<host>:<check id>`, route `/server-health`); the return to ok pushes one "recovered" with the same key. The first run only records a baseline. Token: `POKOIN_SECRETARY_TOKEN_FILE` (default `/home/nez/Projects/Lucina/private/lucina/secretary-service.token`); a missing token or an HTTP error is logged and never fails the run. |
 
 Everything new is one Rust binary, `tools/pokoin-ops` (own Cargo workspace, so the API
 lockfile is untouched). The only shell is the archive command, which runs inside the
@@ -42,6 +43,42 @@ replica's BusyBox. Zero API latency cost:
 - The Pi does no compression for dumps.
 - Its background work runs with `Nice`, `IOSchedulingClass=idle` and `CPUQuota`, and the
   base backup is rate-limited (`WALG_DISK_RATE_LIMIT` 30 MB/s, network 12 MB/s).
+
+### What mails and what waits
+
+The immediate filters are opt-in. With them unset, failure mail, Secretary pushes,
+healthchecks failure pings and sentinel reminders keep their existing behavior.
+An invalid regex is logged and falls back to that behavior.
+
+- `POKOIN_NOTIFY_IMMEDIATE`: regex on the full unit name. Matching units use the
+  existing mail/cooldown, Secretary and healthchecks `/fail` path. Other failures
+  only enter the digest with their systemd Result.
+- `POKOIN_NOTIFY_BOOT_GRACE_S`: uptime grace in seconds (default 600). With the
+  notify filter enabled, all failures during this grace or while the relevant system
+  or user manager reports `stopping` only enter the digest, even matching units.
+- `POKOIN_SENTINEL_IMMEDIATE`: regex on the check key. Only matching critical
+  firing, escalation and reminder events mail; matching recoveries mail only when
+  the previous alert was critical and alerted. Secretary event pushes follow the
+  same selection; the full health snapshot stays unchanged. Other firing and
+  escalation events enter the digest; other reminders and recoveries are dropped.
+  Existing alerted state is preserved rather than replayed.
+  On nezopt the live pod outages are the things that must reach the owner at once:
+  `POKOIN_SENTINEL_IMMEDIATE='^pods\.(no-ready|restarted|over-memory)'`. The Failed-pod
+  count, a pod whose memory could not be measured and a `kubectl` that did not answer stay
+  in the digest, so the sentinel never looks like it is all clear when it did not look.
+
+`pokoin-ops digest` mails deferred events grouped by key, with still-failing sentinel
+keys first and counts, first/last UTC times and the latest detail. It shows at most
+100 keys. Unit entries use `unit.user.<unit>` or `unit.system.<unit>` to match the
+sentinel keys. The log is `digest.jsonl` (0600) in the sentinel state directory;
+a successful send replaces `digest.jsonl.sent`, while a failed send keeps the log
+for retry. Empty logs send nothing. `pokoin-ops digest --dry-run` prints the mail
+without sending or changing files.
+
+The alerts installers include `pokoin-digest.service` and `pokoin-digest.timer`
+for the nezopt user manager and the Pi system manager. The timer runs Monday at
+07:00 UTC with `Persistent=true`, catching up after downtime. No installation or
+host changes happen by merging these files.
 
 ### Trade-offs to know
 
@@ -63,7 +100,7 @@ replica's BusyBox. Zero API latency cost:
 
 ## 3. Verified in this branch
 
-- `cargo test` passes 31 unit tests: alert state machine, thresholds, retention,
+- `cargo test` passes 75 unit tests: alert state machine, thresholds, retention,
   COPY row counter, WAL ordering, slug coverage, age + zstd round trip.
 - `tools/pokoin-ops/tests/e2e-backup.sh` runs against a throwaway Postgres 17.11-alpine.
   It shows that the dump refuses a primary, that the files are encrypted, that the restore

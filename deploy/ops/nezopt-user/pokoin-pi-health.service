@@ -1,0 +1,11 @@
+[Unit]
+Description=Pi up/down state for nezopt: one alert per outage, restart Pi tunnels when it is back
+After=network-online.target
+
+[Service]
+Type=oneshot
+# hc-api.env holds POKOIN_HC_API_KEY, for pausing the Pi's healthchecks during an outage.
+EnvironmentFile=-%h/.config/pokoin/hc-api.env
+ExecStart=%h/.local/bin/pokoin-ops pi-health
+TimeoutStartSec=2min
+Nice=5

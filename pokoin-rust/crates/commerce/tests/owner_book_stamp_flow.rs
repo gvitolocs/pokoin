@@ -83,6 +83,9 @@ async fn the_owner_book_stamp_moves_with_every_change() {
         eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
         return;
     };
+    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("test database");
     sqlx::raw_sql(SCHEMA).execute(&pool).await.expect("schema");
     let state = DomainState::with_pools(CommerceConfig::default(), pool.clone(), pool.clone(), None, Arc::new(UidToken), None);

@@ -11,7 +11,7 @@ JSONL="$ROOT/scripts/out/qwen-artwork-figures.jsonl"
 REPORT="$ROOT/scripts/out/figure-masks-qa.jsonl"
 PASS="$ROOT/scripts/out/figure-masks-pass.txt"
 LOG="$ROOT/scripts/out/figure-masks-upload.log"
-PY=/home/nez/Projects/ai-toolkit/venv/bin/python
+PY=/home/nez/Projects/AI/ai-toolkit/venv/bin/python
 
 qa() {
   "$PY" "$ROOT/scripts/qa-figure-masks.py" \

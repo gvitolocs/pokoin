@@ -42,6 +42,8 @@ function flattenPickable(groups, isLiveStub) {
         set: printing.set_name || printing.set || '',
         number: printing.collector_number || printing.number || '',
         image: printing.image || printing.cdn_image_url || printing.image_url || '',
+        nationality: printing.nationality || '',
+        expansion_nationality: printing.expansion_nationality || printing.expansionNationality || '',
       };
       if (!/^\d+$/.test(card.id)) continue;
       if (!card.image) {
@@ -66,6 +68,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
   const [engine, setEngine] = createSignal(null);
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
+  const [namesTick, setNamesTick] = createSignal(0);
   const pokemon = () => isPokemonGame();
   let current = '';
 
@@ -85,11 +88,19 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
     if (live && live.suggestLiveReady(String(current || '').trim())) setLiveTick((tick) => tick + 1);
   };
 
+  // Localized card names for the search language (`evoli` → Eevee), a lazy chunk.
+  createEffect(() => [engine(), searchLang()], ([live, lang]) => {
+    if (!live || live.localizedNamesReady(lang)) return;
+    live.loadLocalizedNames(lang).then((ok) => {
+      if (ok) setNamesTick((tick) => tick + 1);
+    });
+  });
+
   // Progressive network pool: pages for the current generation feed the cache.
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon()],
+    () => [engine(), String(query() || '').trim(), searchLang(), printLang(), pokemon(), namesTick()],
     ([live, term, lang, print, isPokemon]) => {
       if (!live || !isPokemon) return undefined;
       pool ||= live.emptyPool();
@@ -108,7 +119,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
       const controller = new AbortController();
       let stopped = false;
       (async () => {
-        for (const lookup of live.catalogRecall(term)) {
+        for (const lookup of live.catalogRecall(term, { lang })) {
           if (stopped || pool.generation !== generation) return;
           let offset = 0;
           let chunks = 0;
@@ -225,6 +236,7 @@ export function createLiveSuggest(query, { kind = 'singles', limit = 20 } = {}) 
     const term = String(query() || '');
     liveTick();
     epoch();
+    namesTick();
     if (!live || !live.suggestLiveReady(term)) return [];
     const groups = live.paintCatalogGroups(term, { printLang: printLang(), searchLang: searchLang(), kind, limit });
     return flattenPickable(groups, live.isLiveStub).slice(0, limit);

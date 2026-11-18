@@ -48,14 +48,19 @@ function copy(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// `origin` as the owner's book read sends it (inventory-origin.js).
+// Pikachu (list-1/list-8) stays flagged (box1·2 and no location).
+// Snorlax (list-4/list-9) has two origins in separate exact slots: no flag.
 const LISTINGS = [
-  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z' },
-  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z' },
-  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z' },
-  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1', listedAt: '2026-10-05T00:00:00.000Z' },
-  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z' },
-  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z' },
-  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z' },
+  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z', origin: 'cardrails' },
+  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z', origin: 'cardmarket' },
+  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1·1', listedAt: '2026-10-05T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-8', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 450, status: 'active', location: '', listedAt: '2026-10-09T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-9', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 620, status: 'active', location: 'binder·1·2', listedAt: '2026-10-10T00:00:00.000Z', origin: 'cardrails' },
 ];
 
 const HELD = [
@@ -86,89 +91,331 @@ const COLLECTION_LISTINGS = [
   },
 ];
 
-export function previewListings() {
-  return copy(LISTINGS);
+function previewSize() {
+  if (typeof window === 'undefined') return 0;
+  const value = Number(new URLSearchParams(window.location.search).get('mypokoinPreview'));
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 5000) : 0;
 }
+
+function repeatRows(rows, count) {
+  return Array.from({ length: count }, (_, i) => {
+    const row = rows[i % rows.length];
+    return { ...row, id: `${row.id}-${i}`, cardId: `${row.cardId}-${Math.floor(i / rows.length)}` };
+  });
+}
+
+// One generated book per kind and size, handed back by reference. The desks treat
+// rows as immutable (every edit maps to a new array), so switching tabs reuses the
+// book instead of rebuilding 1,500 objects — and the boards' derivations, keyed by
+// array identity, then hit.
+const books = new Map();
+function previewBook(kind, build) {
+  const key = `${kind}:${previewSize()}`;
+  if (!books.has(key)) books.set(key, build(previewSize()));
+  return books.get(key);
+}
+
+export function previewListings() {
+  return previewBook('listings', (size) => copy(size ? repeatRows(LISTINGS, size) : LISTINGS));
+}
+
+export { previewGroups, previewStrategies } from './mypokoin-preview-rules.js';
 
 export function previewPricer() {
-  return { defaultSource: 'cardtrader', autoMarketColumn: false };
+  return { defaultSource: 'cardtrader', autoMarketColumn: false, currency: 'EUR' };
 }
 
-export function previewStrategies() {
-  return [{
-    id: 'preview-strategy-1',
-    name: 'Undercut CardTrader',
-    source: 'cardtrader',
-    action: 'undercut',
-    amountPct: 5,
-    amountPkn: 0,
-    minPkn: 1,
-    rounding: 'integer',
-    condition: '',
-    language: '',
-    enabled: true,
-  }];
+/**
+ * The `sources` block of a preview comp, like `allSources` in
+ * market/src/pricer.vectors.json: every source and basis with a number for
+ * each toggle combination the source honours. Cardmarket entries carry
+ * `eur`, TCGplayer `usd` plus the day's `usdPerEur` / `rateDay`
+ * (2 PKN = 1 euro cent, so 1 EUR = 200 PKN and 1 USD = 200 / usdPerEur PKN).
+ */
+function sourcesFor(ask) {
+  const eurOf = (pkn) => Math.round((pkn / 200) * 100) / 100;
+  const usdOf = (pkn) => Math.round(((pkn / 200) * 1.08) * 100) / 100;
+  const pknEntry = (pkn) => ({ grossPkn: pkn, pkn });
+  // CardTrader sold: every toggle combination, looser is cheaper.
+  const ctSold = {};
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    const gross = Math.round((ask * 1.05 - (4 - on) * 2) * 100) / 100;
+    ctSold[key] = { grossPkn: gross, pkn: Math.round(gross * 0.939 * 100) / 100 };
+  }
+  // Pokoin's own sales honour condition and language.
+  const pokoinSold = {
+    '': pknEntry(Math.round(ask * 0.9 * 100) / 100),
+    C: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    L: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    CL: pknEntry(Math.round(ask * 0.98 * 100) / 100),
+  };
+  // Cardmarket's price guide honours finish; prices are EUR.
+  const cardmarket = { asOf: '2026-11-07' };
+  for (const [basis, [plain, foil]] of Object.entries({
+    trend: [0.9, 1], low: [0.8, 0.85], avg1: [0.92, 0.98], avg7: [0.94, 1.02], avg30: [0.96, 1.05],
+  })) {
+    const plainPkn = Math.round(ask * plain * 100) / 100;
+    const foilPkn = Math.round(ask * foil * 100) / 100;
+    cardmarket[basis] = {
+      '': { eur: eurOf(plainPkn), grossPkn: plainPkn, pkn: plainPkn },
+      F: { eur: eurOf(foilPkn), grossPkn: foilPkn, pkn: foilPkn },
+    };
+  }
+  // TCGplayer honours finish and 1st edition; prices are USD at the ECB rate of the day.
+  const tcgplayer = { asOf: '2026-11-07', rateDay: '2026-11-07', usdPerEur: 1.08 };
+  const tcgKeys = ['', 'F', 'E', 'FE'];
+  for (const [basis, factors] of Object.entries({
+    market: [0.95, 1, 0.98, 1.05], low: [0.85, 0.9, 0.88, 0.95], mid: [0.92, 0.97, 0.95, 1.02],
+  })) {
+    tcgplayer[basis] = {};
+    factors.forEach((factor, index) => {
+      const pkn = Math.round(ask * factor * 100) / 100;
+      tcgplayer[basis][tcgKeys[index]] = { usd: usdOf(pkn), grossPkn: pkn, pkn };
+    });
+  }
+  // Our own walk of Cardmarket's listing pages honours all four toggles and
+  // separates the two kinds of seller; prices are EUR, a private ask cheaper.
+  const cardmarketoffers = { asOf: '2026-11-07', pro: {}, private: {} };
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    for (const [seller, factor] of [['pro', 1.02], ['private', 0.82]]) {
+      const pkn = Math.round((ask * factor - (4 - on) * 2) * 100) / 100;
+      cardmarketoffers[seller][key] = { eur: eurOf(pkn), grossPkn: pkn, pkn, offers: on + 1, countsComplete: true };
+    }
+  }
+  return { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, cardmarketoffers, tcgplayer };
+}
+
+/**
+ * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
+ * the price check returns them: CardTrader numbers net of the commission
+ * (`…Pkn`) beside the ask (`…GrossPkn`), and `ctMatch`, the cheapest offer
+ * per toggle combination (`matchKey`: C condition, L language, F finish,
+ * E 1st edition). Looser toggles find cheaper copies; a combination that is
+ * missing has no offer right now. `sources` carries the other markets' numbers.
+ */
+export function previewComps() {
+  const offer = (ask) => ({ grossPkn: ask, pkn: Math.round(ask * 0.939 * 100) / 100 });
+  const comp = (ask, net, extra = {}) => ({
+    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: Math.round(ask * 0.85 * 0.939 * 100) / 100, ctCheapestGrossPkn: Math.round(ask * 0.85 * 100) / 100,
+    ctBasis: 'pro',
+    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' },
+    pokoinCheapestPkn: Math.round(ask * 0.96 * 100) / 100,
+    sources: sourcesFor(ask),
+    ctMatch: {
+      CLFE: { grossPkn: ask, pkn: net },
+      CLF: offer(Math.round(ask * 0.97 * 100) / 100),
+      CL: offer(Math.round(ask * 0.94 * 100) / 100),
+      C: offer(Math.round(ask * 0.9 * 100) / 100),
+      L: offer(Math.round(ask * 0.88 * 100) / 100),
+      '': offer(Math.round(ask * 0.85 * 100) / 100),
+    },
+    ...extra,
+  });
+  return {
+    '222410:NM:EN:': comp(460, 431.94, { pokoinCheapestPkn: 440 }),
+    '222302:SP:EN:': comp(2100, 1971.9),
+    '222314:NM:JP:': comp(1040, 976.56),
+    '502874:NM:EN:': comp(560, 525.84),
+    '502862:NM:IT:': comp(28, 25.56),
+    '484062:MP:EN:': comp(150, 140.85),
+  };
 }
 
 export function previewCollection() {
-  const rows = copy(HELD);
-  const listings = copy(COLLECTION_LISTINGS);
+  // The rows stay identical across mounts; the asks are rebuilt per desk.
+  const book = previewBook('collection', (size) => ({
+    rows: copy(size ? repeatRows(HELD, size) : HELD),
+    listings: copy(size ? repeatRows(COLLECTION_LISTINGS, size) : COLLECTION_LISTINGS),
+  }));
   const asks = {};
-  for (const row of rows) asks[row.id] = 250;
-  return { rows, listings, asks };
+  for (const row of book.rows) asks[row.id] = 250;
+  return { rows: book.rows, listings: book.listings, asks };
 }
 
+// Already in the contract's picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then other games;
+// inside a game by box (natural), stacked lines before the bare box, unlocated lines last.
 const ZERO_LINES = [
-  { itemId: 'z-1', quantity: 1, location: 'box1·2', condition: 'NM', language: 'EN', lineCents: 1200, currency: 'EUR' },
-  { itemId: 'z-2', quantity: 2, location: 'box1·4', condition: 'NM', language: 'EN', lineCents: 2400, currency: 'EUR' },
-  { itemId: 'z-3', quantity: 1, location: 'binder·1', condition: 'SP', language: 'IT', lineCents: 800, currency: 'EUR' },
-  { itemId: 'z-4', quantity: 1, location: '', condition: 'NM', language: 'EN', lineCents: 450, currency: 'EUR' },
-  { itemId: 'z-5', quantity: 2, location: 'box2·1', condition: 'NM', language: 'JP', lineCents: 1600, currency: 'EUR' },
-  { itemId: 'z-6', quantity: 1, location: 'box2·3', condition: 'MP', language: 'EN', lineCents: 300, currency: 'EUR' },
-  { itemId: 'z-7', quantity: 1, location: '', condition: 'NM', language: 'EN', lineCents: 900, currency: 'EUR' },
-  { itemId: 'z-8', quantity: 1, location: 'box1·1', condition: 'NM', language: 'EN', lineCents: 700, currency: 'EUR' },
-  { itemId: 'z-9', quantity: 2, location: 'binder·2', condition: 'NM', language: 'EN', lineCents: 1100, currency: 'EUR' },
-  { itemId: 'z-10', quantity: 1, location: '', condition: 'SP', language: 'EN', lineCents: 500, currency: 'EUR' },
+  { itemId: 7001, game: 'magic', name: 'Lightning Bolt', expansion: 'Magic 2010', expansionCode: 'M10', collectorNumber: '146', rarity: 'Common', location: 'binder·1·1', slot: { box: 'binder', stack: 1, position: 1 }, unitCents: 180, condition: 'NM', language: 'EN', picked: 1, pt: 1 },
+  { itemId: 7002, listing: 'L22', game: 'magic', name: 'Fulmine', nameEn: 'Lightning Bolt', expansion: 'Fourth Edition', expansionCode: '4ED', collectorNumber: '208', rarity: 'Common', location: 'binder·1·4', slot: { box: 'binder', stack: 1, position: 4 }, unitCents: 250, condition: 'SP', language: 'IT', allocation: 'members', alsoIn: ['binder·2·7', 'binder·3·1'], candidates: [{ listingId: 'L22', location: 'binder·1·4', quantityAvailable: 0 }, { listingId: 'L23', location: 'binder·2·7', quantityAvailable: 2 }, { listingId: 'L24', location: 'binder·3·1', quantityAvailable: 1 }], available: 0, comment: 'Corner ding, priced as SP.', pt: 2 },
+  { itemId: 7003, game: 'pokemon', card: 0, rarity: 'Common', location: 'box2·1', slot: { box: 'box2', stack: 1, position: null }, unitCents: 120, condition: 'NM', language: 'EN', firstEdition: true, pt: 3 },
+  { itemId: 7004, game: 'pokemon', card: 1, rarity: 'Holo Rare', location: 'box10·1', slot: { box: 'box10', stack: 1, position: null }, unitCents: 18500, condition: 'MP', language: 'EN', pt: 5, mismatch: true },
+  { itemId: 7011, game: 'pokemon', card: 5, rarity: 'Illustration Rare', location: '', locationSource: 'powertools', sortLocation: 'FUOCOBOMBA 001 - 2', slot: { box: 'FUOCOBOMBA 001', stack: 2, position: null }, unitCents: 760, condition: 'NM', language: 'EN', pt: 4, mismatch: true },
+  { itemId: 7008, game: 'pokemon', card: 4, rarity: 'Illustration Rare', location: '', slot: null, unitCents: 900, condition: 'NM', language: 'JP', reverse: true, pt: 6, nameJa: 'コダック' },
+  { itemId: 7006, game: 'yugioh', name: 'Blue-Eyes White Dragon', expansion: 'Legend of Blue Eyes', collectorNumber: 'LOB-001', rarity: 'Ultra Rare', location: 'ygo·3', slot: { box: 'ygo', stack: 3, position: null }, unitCents: 3200, condition: 'NM', language: 'EN', pt: 7, issue: { type: 'wrong_condition', note: 'Edge wear, looks SP.', at: '2026-10-22T08:15:00.000Z' } },
+  { itemId: 7005, listing: 'L71', game: 'riftbound', name: 'Vendetta', expansion: 'Origins', collectorNumber: '41', rarity: 'Rare', location: 'megaevoluzionietb-41-20·2', slot: { box: 'megaevoluzionietb-41-20', stack: 2, position: null }, unitCents: 450, quantity: 3, itemQuantity: 5, allocation: 'event', picked: 1, foil: true, condition: 'NM', language: 'EN', pt: 8 },
+  { itemId: 7005, listing: 'L72', game: 'riftbound', name: 'Vendetta', expansion: 'Origins', collectorNumber: '41', rarity: 'Rare', location: 'megaevoluzionietb-41-20·5', slot: { box: 'megaevoluzionietb-41-20', stack: 5, position: null }, unitCents: 450, quantity: 2, itemQuantity: 5, allocation: 'event', foil: true, condition: 'NM', language: 'EN', pt: 8 },
+  { itemId: 7009, game: 'riftbound', name: 'Jinx, Loose Cannon', expansion: 'Origins', collectorNumber: '202', rarity: 'Epic', location: 'megaevoluzionietb-41-20', slot: { box: 'megaevoluzionietb-41-20', stack: null, position: null }, unitCents: 1290, condition: 'NM', language: 'EN', signed: true, pt: 9 },
+  { itemId: 7010, game: 'one_piece', name: 'Monkey.D.Luffy', expansion: 'Romance Dawn', collectorNumber: 'OP01-024', rarity: 'Super Rare', location: 'op·1', slot: { box: 'op', stack: 1, position: null }, unitCents: 640, condition: 'NM', language: 'JP', altered: true, pt: 10 },
 ].map((line, index) => {
-  const printing = card(index);
+  const printing = line.card != null ? card(line.card) : null;
+  const quantity = line.quantity || 1;
   return {
-    ...line,
-    cardId: printing.cardId,
-    name: printing.cardName,
-    expansion: printing.expansion,
-    collectorNumber: printing.collectorNumber,
-    imageUrl: printing.imageUrl || '',
-    powerTools: { position: index + 1, bin: line.location ? 'A' : '', orderState: 'to pick' },
+    itemId: line.itemId,
+    lineKey: line.listing ? `${line.itemId}@${line.listing}` : String(line.itemId),
+    ...(line.listing ? { listingId: line.listing } : {}),
+    ...(line.expansionCode ? { expansionCode: line.expansionCode } : {}),
+    ...(line.candidates ? { candidates: line.candidates } : {}),
+    ...(line.available != null ? { quantityAvailable: line.available } : {}),
+    ...(line.comment ? { comment: line.comment } : {}),
+    quantity,
+    itemQuantity: line.itemQuantity || quantity,
+    game: line.game,
+    cardId: printing?.cardId || '',
+    name: line.nameJa || printing?.cardName || line.name,
+    nameEn: line.nameEn || (line.nameJa ? printing.cardName : ''),
+    rarity: line.rarity || '',
+    expansion: printing?.expansion || line.expansion,
+    collectorNumber: printing?.collectorNumber || line.collectorNumber,
+    imageUrl: printing?.imageUrl || '',
+    condition: line.condition,
+    language: line.language,
+    reverse: Boolean(line.reverse),
+    foil: Boolean(line.foil),
+    firstEdition: Boolean(line.firstEdition),
+    signed: Boolean(line.signed),
+    altered: Boolean(line.altered),
+    graded: false,
+    unitCents: line.unitCents,
+    lineCents: line.unitCents * quantity,
+    currency: 'EUR',
+    location: line.location,
+    locationSource: line.locationSource ?? (line.location ? 'pokoin' : ''),
+    sortLocation: line.sortLocation ?? line.location,
+    listedAt: line.location ? `2026-09-${String(10 + index).padStart(2, '0')}T09:00:00.000Z` : null,
+    slot: line.slot,
+    allocation: line.allocation || (line.location ? 'listing' : 'none'),
+    alsoIn: line.alsoIn || [],
+    picked: line.picked || 0,
+    issue: line.issue || null,
+    powerTools: {
+      orderState: 'to pick',
+      isCtZeroClosing: true,
+      articleState: 'to_pick',
+      pickedQuantity: line.picked || 0,
+      location: line.sortLocation || line.location,
+      bin: 'B7',
+      position: line.pt,
+      ptQuantity: line.itemQuantity || quantity,
+      mismatch: Boolean(line.mismatch),
+    },
   };
 });
 
-export function seedPreviewPicked() {
-  try {
-    const key = 'pokoin.ctZero.picked.preview-zero';
-    if (localStorage.getItem(key) == null) localStorage.setItem(key, JSON.stringify(['z-3', 'z-7']));
-  } catch (_) { /* private mode */ }
+/**
+ * Local-only load test (dev server, or a build served on localhost): `?mypokoinPreview&previewLines=135` repeats the fixture
+ * to N lines, each with its own image URL, so a big pack can be measured.
+ */
+function previewLineCount() {
+  if (typeof window === 'undefined') return 0;
+  const host = window.location.hostname;
+  if (!import.meta.env?.DEV && host !== 'localhost' && host !== '127.0.0.1') return 0;
+  const n = Number(new URLSearchParams(window.location.search).get('previewLines'));
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), 1000) : 0;
+}
+
+function scaledZeroLines(count) {
+  const base = copy(ZERO_LINES);
+  return Array.from({ length: count }, (_, index) => {
+    const line = copy(base[index % base.length]);
+    const art = card(index).imageUrl || '';
+    line.itemId = String(80000 + index);
+    line.lineKey = line.listingId ? `${line.itemId}@${line.listingId}` : line.itemId;
+    line.imageUrl = art ? `${art}${art.includes('?') ? '&' : '?'}n=${index}` : '';
+    return line;
+  });
 }
 
 export function previewZero() {
-  const items = copy(ZERO_LINES);
+  const scaled = previewLineCount();
+  const items = scaled ? scaledZeroLines(scaled) : copy(ZERO_LINES);
   const units = items.reduce((sum, item) => sum + item.quantity, 0);
   const cents = items.reduce((sum, item) => sum + item.lineCents, 0);
   return {
     oneDayReady: false,
+    fetchedAt: '2026-10-22T09:41:00.000Z',
+    sorting: {
+      fields: ['game.asc', 'location.asc', 'none', 'none'],
+      defaultFields: ['game.asc', 'location.asc', 'none', 'none'],
+      smartLocations: true,
+    },
     cardtrader: { username: 'preview-seller' },
-    powerTools: { ok: true },
+    powerTools: {
+      connected: true,
+      ok: true,
+      username: 'preview-seller',
+      matchedOrders: 1,
+      matchedItems: items.length,
+      ptOrderCount: 1,
+      picking: { ok: true, source: 'articlesToPick', error: null },
+    },
     pending: { items: [], orderCount: 0 },
     totals: {
       weekly: { units, lines: items.length, cents },
       pending: { units: 0 },
     },
     weekly: [{
-      orderId: 'preview-zero',
+      orderId: '90421042',
       code: 'Z-1042',
       packingNumber: 12,
       paidAt: '2026-10-09T10:00:00.000Z',
+      pickedLines: items.filter((item) => item.picked >= item.quantity).length,
+      issueCount: items.filter((item) => item.issue).length,
+      ptPicking: {
+        listId: 'pt-preview',
+        listName: 'Ct Zero closed',
+        variant: 'ct_zero',
+        ctZeroClosed: true,
+        bin: 'B7',
+        sortingFields: ['location'],
+        comparable: true,
+        mismatches: 2,
+      },
       items,
     }],
+  };
+}
+
+// Picked Zero copies (GET /api/cardtrader-zero-picked rows): they left the inventory.
+const ZERO_PICKED = [
+  { id: 41, card: 3, itemId: '6901', listingId: 'L61', kind: 'finalize', locationFrom: 'box3·2·4', unitCents: 1450, condition: 'NM', language: 'EN', pickedAt: '2026-10-21T17:42:00.000Z' },
+  { id: 40, card: 1, itemId: '6902', listingId: 'L62', kind: 'swap', locationFrom: 'box1·1', unitCents: 18500, condition: 'MP', language: 'EN', pickedAt: '2026-10-21T17:40:00.000Z' },
+  { id: 39, card: 4, itemId: '6903', listingId: 'L63', kind: 'finalize', locationFrom: 'jp-binder·4', unitCents: 900, condition: 'NM', language: 'JP', reverse: true, quantity: 2, pickedAt: '2026-10-21T17:31:00.000Z' },
+  { id: 38, card: 0, itemId: '6904', listingId: 'L64', kind: 'finalize', locationFrom: 'box2·1', unitCents: 120, condition: 'NM', language: 'EN', firstEdition: true, pickedAt: '2026-10-14T16:05:00.000Z', orderId: '90420998', orderCode: 'Z-0998' },
+];
+
+export function previewZeroPicked() {
+  return {
+    rows: ZERO_PICKED.map((row) => {
+      const printing = card(row.card);
+      return {
+        id: row.id,
+        orderId: row.orderId || '90421042',
+        orderCode: row.orderCode || 'Z-1042',
+        itemId: row.itemId,
+        lineKey: `${row.itemId}@${row.listingId}`,
+        listingId: row.listingId,
+        kind: row.kind,
+        quantity: row.quantity || 1,
+        locationFrom: row.locationFrom,
+        cardId: printing.cardId,
+        name: printing.cardName,
+        expansion: printing.expansion,
+        collectorNumber: printing.collectorNumber,
+        condition: row.condition,
+        language: row.language,
+        reverse: Boolean(row.reverse),
+        firstEdition: Boolean(row.firstEdition),
+        imageUrl: printing.imageUrl,
+        game: 'pokemon',
+        unitCents: row.unitCents,
+        currency: 'EUR',
+        pickedAt: row.pickedAt,
+      };
+    }),
   };
 }
 

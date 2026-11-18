@@ -5,6 +5,34 @@
 parallel the raw listing books of every live game, one book per expansion,
 into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 
+## Local preflight and path fixes
+
+`scripts/cardtrader-daily-preflight.sh` checks local prerequisites in seconds,
+without network requests, GPU work or writes. It refuses missing required
+executables (including GPU lease, Node, Docker and transfer tools), unreadable
+CardVault importer/pg files or artwork script/caches, inaccessible image/output
+directories, and an AI Python that cannot `import numpy, PIL` within five seconds.
+Each problem names its path and affected stages. Shared runtime defaults live in
+`scripts/cardtrader-daily-paths.sh`; `POKOIN_AI_PYTHON` and the existing binary
+path overrides apply to both the runner and preflight. Missing optional dump,
+price, sold or card-refresh executables produce warnings; missing notification
+code also warns because delivery remains best effort. These local checks do not
+verify remote hosts, database contents, running containers or GPU/model health.
+
+The checkout deploy runs preflight before installing units. Failure restores
+the previous checkout commit when one existed and leaves units unchanged. The
+nightly runner records `preflight=<exit code>` first, marks the overall run failed
+if needed, and continues the other stages so independent work can still succeed.
+The notifier prints the summary (including failed stages) to the journal before
+its delivery status, so the existing OnFailure mail includes it even when chat
+delivery is pending.
+
+**Commit every nightly-job path fix.** The deploy script force-checks out
+`origin/main` by default and cleans the deployed checkout; edits made only there
+will be erased at the next deploy. The 2026-10-27 project reorganisation requires
+the grouped `~/Projects/Startup/Pokoin/…` and `~/Projects/AI/…` paths, and Rust
+binaries default to `~/services/pokoin-cardtrader/current/…`.
+
 ## Pieces
 
 | Where | What |
@@ -12,13 +40,14 @@ into `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`.
 | nezopt | `pokoin-cardtrader-listing-dump` (`pokoin-rust/apps/cardtrader-listing-dump`): order, resume, deadline, status, storage |
 | nezopt | `pokoin-cardtrader-price-cache` (`pokoin-rust/apps/cardtrader-price-cache`): those books → each game's price cache |
 | nezopt | `pokoin-cardtrader-sold` (`pokoin-rust/apps/cardtrader-sold`): those books → the sold graph of every game except Pokémon |
+| nezopt | `daily-card-refresh.sh` (BattleScan `server-rs`, `~/.local/lib/card-refresh/current`), the `cards` stage after artwork: CDN faces that are a placeholder get the real picture under the same key (same-card file, CardTrader full size, TCGdex, pokemontcg.io, Scryfall); new and recovered cards are embedded into the scan index, cards with no picture stay as rows that never match; the index is swapped after a health check; an app catalog revision is staged and published only with `CARDRAILS_CATALOG_AUTOPUBLISH=1` |
 | Oracle `pokoin-marketplace` | `pokoin-cardtrader-bridge` (`pokoin-rust/apps/cardtrader-bridge`): CardTrader GETs; the token never leaves Oracle |
 | both | `ctbook` (`pokoin-rust/crates/ctbook`): the `.ctb` book format and a CLI |
 
 The dump starts the bridge over ssh and talks one JSON line per request and
 reply (the protocol of the Python originals, `scripts/dump-all-cardtrader-listings.py`
 and `scripts/cardtrader-fetch-bridge.py`, which stay as the fallback: the run
-script uses the Python dump when `/home/nez/pokoin-cardtrader/current` is missing).
+script uses the Python dump when `/home/nez/services/pokoin-cardtrader/current` is missing).
 
 ## Behaviour
 
@@ -167,7 +196,7 @@ scripts/deploy-cardtrader-dump.sh   # clean origin/main checkout on nezopt
 ```
 
 It builds the binaries, installs the bridge on Oracle (checks glibc ≤ 2.35
-and a dry start), and switches `/home/nez/pokoin-cardtrader/current`. Rollback:
+and a dry start), and switches `/home/nez/services/pokoin-cardtrader/current`. Rollback:
 point `current` at the previous release, or remove it to fall back to Python.
 
 ### Job code (the scripts)
@@ -189,6 +218,11 @@ job (it takes the job's `daily.lock`), moves the checkout with
 checks that the unit's `WorkingDirectory` is that checkout. Rollback: run it
 with the previous sha. The nightly summary names the job's commit and how many
 newer commits to the job's files on `origin/main` are not deployed yet.
+
+### Artwork stage device
+
+The `artwork` stage (`match-refreshed-pokemon-artwork.py`) runs CLIP on the CPU by default, without a GPU lease; `POKOIN_ARTWORK_DEVICE=gpu` opts back into the GPU (with the lease) and `cpu` hides the card by setting `HIP_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES` empty before torch loads.
+From 2026-11-08 the local Qwen server holds 21.5 GB of the 23.5 GB card, and this job segfaulted in `libamdhip64.so` every night on the GPU; it embeds about a hundred images, so the CPU is enough.
 
 ## Nightly summary
 

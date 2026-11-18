@@ -87,7 +87,7 @@ publish() {
 # which bash has parsed in full before the first git command.
 main() {
   HERE="$(cd "$(dirname "$0")/.." && pwd)"
-  CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/pokoin-web}"
+  CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/Startup/Pokoin/pokoin-web}"
   [[ "$HERE" != "$CANONICAL" ]] || die "never run in the canonical checkout; use the site-map-refresh Paseo worktree"
   [[ "$(basename "$HERE")" == "site-map-refresh" ]] || die "$HERE is not the site-map-refresh worktree (this script resets its tree)"
   cd "$HERE"

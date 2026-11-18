@@ -14,6 +14,35 @@ test('unpriced CardTile copy is Out of stock, not an em dash', () => {
   assert.match(related, /\.slice\(0, 12\)/);
 });
 
+test('grid tiles cover the tile art frame: flush slot, 63:88 box, cover fit', () => {
+  assert.match(tile, /<span class="tile-art">\s*<Show when=\{art\(\)\} fallback=\{<span class="tile-ph" \/>}/);
+  const css = read('../../../market/src/styles.css');
+  const frames = css.match(/\.tile-art \{[^}]*\}/g) || [];
+  const flush = frames.find((block) => /border-radius:\s*16px 16px 0 0/.test(block));
+  assert.ok(flush, '.tile-art frame flush with the tile');
+  assert.match(flush, /padding:\s*0;/);
+  assert.match(flush, /overflow:\s*hidden;/);
+  assert.equal(frames.filter((block) => /padding:\s*0\.[45]rem/.test(block)).length, 0, 'inset art padding left');
+  // The aspect-ratio box reserves the slot height, so the grid does not shift on load.
+  assert.match(css, /\.tile-art img,\s*\.tile-art \.tile-ph \{[^}]*aspect-ratio:\s*63 \/ 88/);
+  assert.match(css, /\.tile-art img \{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center/);
+  assert.match(css, /\.tile-meta \{[^}]*padding:\s*0\.55rem 0\.55rem 0\.75rem/);
+  // The grid scan reaches the frame as a direct img, never the album crop wrapper.
+  assert.match(cardArt, /<Show when=\{props\.cut\} fallback=\{image\(\)\}>/);
+  // Hover and keyboard focus still pop the preview out of the frame; the shimmer fills it.
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):hover > \.tile-art,\s*\.tile:not\(\.tile-album\):focus-visible > \.tile-art \{[^}]*overflow:\s*visible/,
+  );
+  assert.match(
+    css,
+    /\.tile:not\(\.tile-album\):not\(\.tile-row\) \.tile-art > \.tile-ph \{[^}]*border-radius:\s*16px 16px 0 0/,
+  );
+  // List rows and album cells keep their own frames.
+  assert.match(css, /\.tile-row \.tile-art \{[^}]*border-radius:\s*0;[^}]*overflow:\s*visible/);
+  assert.match(css, /\.tile-album \.tile-art \{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;[^}]*border-radius:\s*0/);
+});
+
 test('album tiles are photos of the leftover illustration, not hover-scaled cards', () => {
   assert.match(tile, /const cut = \(\) => Boolean\(props\.cut\)/);
   assert.match(tile, /imageSrc\(card\(\), 'hero'\)/);

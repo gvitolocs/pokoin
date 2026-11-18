@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# pre-push guard of the Pokoin repository. docs/CI.md ("Pushing to main"), docs/SECRETS.md.
+#
+# git runs this as   pre-push <remote name> <remote url>  and writes one line per ref being pushed on stdin:
+#                    <local ref> <local sha> <remote ref> <remote sha>
+#
+# A pull request is merged on GitHub and never passes through a local git push, so every local push that updates
+# refs/heads/main IS a direct push to main. This hook is what such a push has to get past:
+#
+#   1. Secret scan, for every ref published to this repository (a deletion publishes nothing, so it is skipped).
+#      The repository is public: a pushed secret is public at once, and CI only finds it afterwards.
+#   2. main additionally takes only a fast-forward commit whose required GitHub checks are already green on it
+#      (scripts/require-ci-green.sh --no-wait, so a run that is still going is a refusal, never a wait).
+#
+# Both checks are refusals, not warnings, and this hook adds no switch of its own: the owner's emergency switch is
+# the gate's POKOIN_CI_OVERRIDE, which is logged and recorded in ops.
+#
+# It runs only where core.hooksPath=.githooks is set (scripts/setup-git-hooks.sh), and `git push --no-verify` skips
+# it. The deploy entry points call the same gate again: that is what makes an untested commit unshippable.
+#
+# This hook never touches the network by itself and never calls gh unless a line targets main.
+#
+# Environment:
+#   POKOIN_PUSH_GUARD_URL_RE   ERE of the remote url that counts as this repository (default below)
+#   GITLEAKS                   the gitleaks binary (default: gitleaks on PATH, else $HOME/.local/bin/gitleaks)
+#   GH                         the gh binary, inherited by scripts/require-ci-green.sh
+set -euo pipefail
+
+ZERO='0000000000000000000000000000000000000000'
+MAIN_REF=refs/heads/main
+URL_RE_DEFAULT='^(https?://|ssh://|git://|file://)?([^/@]+@)?github\.com[:/]gvitolocs/pokoin(\.git)?/?$'
+MAIN_TEXT='pre-push: main takes only a commit whose required checks are already green on GitHub. Push your branch and open a pull request; merge it there when its checks pass. (An agent never overrides this: stop and report.)'
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+url_re="${POKOIN_PUSH_GUARD_URL_RE:-$URL_RE_DEFAULT}"
+toplevel=
+unscanned_warned=0
+
+refuse() {
+  printf 'pre-push: REFUSED: %s\n' "$1" >&2
+  exit 1
+}
+
+# find_toplevel: the working tree this push runs from, once. It is refused without it: neither the scan nor the
+# gate can be pointed at the commits, and a silent pass is not an option.
+find_toplevel() {
+  if [ -z "$toplevel" ]; then
+    toplevel="$(git rev-parse --show-toplevel 2> /dev/null)" || toplevel=
+    [ -n "$toplevel" ] || refuse "no working tree here (a bare repository?), so neither the secret scan nor the CI gate could run."
+    cd "$toplevel" || refuse "cannot enter $toplevel."
+  fi
+}
+
+# gitleaks_binary: prints the binary to use, returns 1 when this host has none.
+gitleaks_binary() {
+  local gl="${GITLEAKS:-gitleaks}"
+  if [[ "$gl" == */* ]]; then
+    if [ -f "$gl" ] && [ -x "$gl" ]; then
+      printf '%s' "$gl"
+      return 0
+    fi
+  elif command -v "$gl" > /dev/null 2>&1; then
+    printf '%s' "$gl"
+    return 0
+  fi
+  if [ -f "$HOME/.local/bin/gitleaks" ] && [ -x "$HOME/.local/bin/gitleaks" ]; then
+    printf '%s' "$HOME/.local/bin/gitleaks"
+    return 0
+  fi
+  return 1
+}
+
+# publish_range <local sha> <remote sha>: the git log range of the commits this line publishes.
+publish_range() {
+  if [ "$2" != "$ZERO" ] && git cat-file -e "$2^{commit}" 2> /dev/null; then
+    printf '%s..%s' "$2" "$1"
+  else
+    printf '%s --not --remotes=%s' "$1" "$remote_name"
+  fi
+}
+
+# scan_published <local sha> <remote sha> <remote ref>
+scan_published() {
+  local gl range
+  gl="$(gitleaks_binary)" || {
+    if [ "$unscanned_warned" = 0 ]; then
+      unscanned_warned=1
+      echo "pre-push: WARNING gitleaks is not installed, so this push was NOT secret-scanned. The CI secret-gate still runs." >&2
+    fi
+    return 0
+  }
+  range="$(publish_range "$1" "$2")"
+  if ! "$gl" detect --redact --no-banner --log-opts="$range"; then
+    echo "pre-push: gitleaks found a secret in the commits this push publishes to $3 ($range)." >&2
+    cat >&2 << 'EOF'
+================================================================================
+pokoin-web: push rejected, gitleaks found a secret in the commits being published.
+
+The value above is redacted, but it is still live. Do not push and do not widen
+.gitleaks.toml. Remove it from history before pushing, rotate it in Infisical if
+it was ever pushed, and tell the owner of the credential. See docs/SECRETS.md.
+================================================================================
+EOF
+    exit 1
+  fi
+}
+
+# is_fast_forward <remote sha> <local sha>: a remote sha that is unknown locally is not an ancestor.
+is_fast_forward() {
+  [ "$1" != "$ZERO" ] || return 1
+  git cat-file -e "$1^{commit}" 2> /dev/null || return 1
+  git merge-base --is-ancestor "$1" "$2" 2> /dev/null
+}
+
+# guard_main <local ref> <local sha> <remote sha>
+guard_main() {
+  local local_ref=$1 local_sha=$2 remote_sha=$3 gate rc
+  if [ "$local_sha" = "$ZERO" ]; then
+    refuse "$local_ref -> $MAIN_REF on $remote_name: main is never deleted from a working tree."
+  fi
+  if ! is_fast_forward "$remote_sha" "$local_sha"; then
+    refuse "$local_ref -> $MAIN_REF on $remote_name would not fast-forward ($remote_sha is not an ancestor of $local_sha). A rewrite of published main never leaves this machine."
+  fi
+  find_toplevel
+  gate="$toplevel/scripts/require-ci-green.sh"
+  [ -f "$gate" ] || refuse "the CI gate script is not here ($gate); this checkout predates it or it was removed."
+  # git exports GIT_DIR (and GIT_PREFIX, GIT_EXEC_PATH, GIT_CONFIG_PARAMETERS) into the hook it runs. The calls
+  # above want exactly that repository, so they keep it; the gate does not: it names its own repository with
+  # --repo-dir/-C, and an inherited GIT_DIR would make it resolve its own file against the wrong work tree top
+  # and refuse every push to main. Taken away here rather than trusted to the gate's own defence.
+  rc=0
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_PREFIX -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+    POKOIN_CI_CALLER=pre-push bash "$gate" --no-wait "$local_sha" || rc=$?
+  if [ "$rc" != 0 ]; then
+    printf '%s\n' "$MAIN_TEXT" >&2
+    exit 1
+  fi
+}
+
+# Every other remote passes untouched and silently.
+if ! [[ "$remote_url" =~ $url_re ]]; then
+  exit 0
+fi
+
+lines=()
+while IFS= read -r ref_line; do
+  if [ -n "$ref_line" ]; then
+    lines+=("$ref_line")
+  fi
+done
+
+i=0
+while [ "$i" -lt "${#lines[@]}" ]; do
+  IFS=' ' read -r local_ref local_sha remote_ref remote_sha <<< "${lines[$i]}"
+  i=$((i + 1))
+  if [ "$local_sha" != "$ZERO" ]; then
+    find_toplevel
+    scan_published "$local_sha" "$remote_sha" "$remote_ref"
+  fi
+  if [ "$remote_ref" = "$MAIN_REF" ]; then
+    guard_main "$local_ref" "$local_sha" "$remote_sha"
+  fi
+done
+exit 0

@@ -1,0 +1,11 @@
+[Unit]
+Description=Tell nezopt when the Pi API release or env file changes (/srv/pokoin/rust)
+
+[Path]
+# The directory: install-pokoin-rust.py swaps the `current` symlink and edits of
+# pokoin-api.env land here too. A stray trigger only costs nezopt a no-op sync.
+PathChanged=/srv/pokoin/rust/
+Unit=pokoin-overflow-notify.service
+
+[Install]
+WantedBy=paths.target

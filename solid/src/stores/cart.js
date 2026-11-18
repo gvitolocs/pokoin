@@ -158,7 +158,9 @@ export async function startCartSync() {
     });
     createEffect(
       () => [uid(), items(), saved(), gift()],
-      ([owner]) => engine.changed(owner),
+      ([owner]) => {
+        engine.changed(owner);
+      },
     );
   }));
 }

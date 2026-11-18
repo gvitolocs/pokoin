@@ -32,52 +32,7 @@ use pokoin_commerce::config::CommerceConfig;
 use pokoin_commerce::state::DomainState;
 use pokoin_commerce::{listing_sync, seller_api};
 
-const LISTINGS_SQL: &str = "
-drop table if exists public.seller_api_listing_keys, public.seller_webhook_deliveries,
-  public.seller_api_events, public.seller_api_grants, public.marketplace_outbox,
-  public.marketplace_user_listings cascade;
-create table public.marketplace_user_listings (
-  id uuid primary key default gen_random_uuid(),
-  card_id text not null,
-  seller_uid text not null,
-  seller_name text not null default 'Pokoin seller',
-  seller_country text not null default 'EU',
-  seller_reputation_label text not null default 'New',
-  condition text not null default 'NM',
-  language text not null default 'EN',
-  price_pkn numeric not null check (price_pkn > 0),
-  quantity_available integer not null default 1 check (quantity_available >= 0),
-  signed boolean not null default false,
-  reverse boolean not null default false,
-  first_edition boolean not null default false,
-  foil_state text not null default 'standard',
-  variant_state text not null default '',
-  sealed boolean not null default false,
-  graded boolean not null default false,
-  grading_company text,
-  grade text,
-  certification_id text,
-  shipping_available boolean not null default true,
-  reserve_available boolean not null default false,
-  nft_available boolean not null default false,
-  seller_comment text not null default '',
-  source text not null default 'pokoin_user_listing',
-  source_listing_id text not null default '',
-  status text not null default 'active' check (status in ('active', 'paused', 'inactive', 'sold_out')),
-  card_name text not null default '',
-  card_image_url text not null default '',
-  set_name text not null default '',
-  collector_number text not null default '',
-  location text not null default '',
-  altered boolean not null default false,
-  marketplace_game text not null default 'pokemon',
-  photo_urls text[] not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create or replace function public.refresh_marketplace_blueprint_price_summary(text)
-  returns void language sql as 'select';
-";
+const LISTINGS_SQL: &str = include_str!("sql/flow_listings.sql");
 
 struct UidToken;
 #[async_trait]
@@ -125,6 +80,10 @@ async fn count(pool: &PgPool, sql: &str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.expect("count")
 }
 
+async fn shelf_text(pool: &PgPool, sql: &str) -> String {
+    sqlx::query_scalar(sql).fetch_one(pool).await.expect("text")
+}
+
 #[tokio::test]
 async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
@@ -135,11 +94,19 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     // posts a webhook to the network.
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", "11".repeat(32));
 
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("test database");
     run_sql(&pool, LISTINGS_SQL).await;
+    // The owner's book (`read_sql` through `card_ids_in_catalog`) keeps only rows whose
+    // card the game catalog holds, so these cards must be in it. Recreated rather than left
+    // to whatever an earlier flow test built in the same database: that catalog answers for
+    // its own cards and empties the book.
+    run_sql(&pool, "drop table if exists public.marketplace_search_candidates cascade;
+        create table public.marketplace_search_candidates (card_id bigint primary key, name text, set_name text);
+        insert into public.marketplace_search_candidates (card_id) values (220962), (555001), (741592);").await;
     run_sql(&pool, "drop table if exists public.scan_batches cascade;
         create table public.scan_batches (id uuid primary key default gen_random_uuid(), seller_uid text not null,
         defaults jsonb not null, status text not null default 'open', updated_at timestamptz not null default now());").await;
@@ -151,6 +118,8 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
         .execute(&pool).await.unwrap();
     run_sql(&pool, include_str!("../../../../scripts/sql/096_marketplace_outbox.sql")).await;
     run_sql(&pool, include_str!("../../../../scripts/sql/115_seller_api_grants.sql")).await;
+    run_sql(&pool, "drop table if exists public.seller_pricing_group_members, public.seller_pricing_groups cascade;").await;
+    run_sql(&pool, include_str!("../../../../scripts/sql/138_seller_pricing_groups.sql")).await;
     let mine: uuid::Uuid = sqlx::query_scalar(
         "insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, price_pkn, quantity_available, location, card_name) \
          values ('220962', 'seller-1', 'alice', 'IT', 400, 3, 'BIN-07', 'Espurr') returning id",
@@ -196,6 +165,12 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = call(&app, "GET", "/api/seller-api-grants", &token, Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // The cm-undercut bulk read takes the same grant auth on both paths.
+    let cm = json!({"action":"cm-undercut","listings":true});
+    let (status, _) = connector(&app, "pkn_not-a-real-token", cm.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(&app, "POST", "/api/seller-api/v1", "seller-1", cm.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, info) = connector(&app, &token, json!({"action":"connect"})).await;
     assert_eq!(status, StatusCode::OK, "{info}");
@@ -227,6 +202,15 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     let (status, _) = call(&app, "POST", "/api/seller-api/v1", &other_token, json!({"action":"connect"})).await;
     assert_eq!(status, StatusCode::OK);
+    let (status, refused) = connector(&app, &other_token, cm).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    // Past auth on the generic path, the call is validated: exactly one way to pick rows.
+    let no_picker = json!({"action":"cm-undercut"});
+    let (status, invalid) = call(&app, "POST", "/api/seller-api/v1", &other_token, no_picker).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+    let two_pickers = json!({"action":"cm-undercut","listings":true,"items":[{}]});
+    let (status, invalid) = connector(&app, &token, two_pickers).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
 
     // --- webhook registration, like CardTrader's PATCH /app -----------------
     let (status, _) = connector(&app, &token, json!({"action":"webhook","url":"http://hooks.example.com/x"})).await;
@@ -365,8 +349,9 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
       {"id":"it","identity":{"publicId":"741592"},"condition":"NM","language":"IT"},
       {"id":"en","identity":{"publicId":"741592"},"condition":"NM","language":"EN"},
       {"id":"absent","identity":{"publicId":"2"},"condition":"NM","language":"IT"}]})).await;
-    assert_eq!(quotes["prices"][0]["minEurCents"],19);assert_eq!(quotes["prices"][0]["priceSource"],"sold_exact_30d");
-    assert_eq!(quotes["prices"][1]["minEurCents"],22);assert_eq!(quotes["prices"][1]["priceSource"],"cardtrader_tile_minimum");
+    // Net of CardTrader's commission: €0.19 sold nets €0.1778, €0.22 tile nets €0.2066.
+    assert_eq!(quotes["prices"][0]["minEurCents"],18);assert_eq!(quotes["prices"][0]["priceSource"],"sold_exact_30d");
+    assert_eq!(quotes["prices"][1]["minEurCents"],21);assert_eq!(quotes["prices"][1]["priceSource"],"cardtrader_tile_minimum");
     assert_eq!(quotes["prices"][2]["minEurCents"],Value::Null);
 
     // Unpriced stock is inventory, never a free public sale; retries and restocks preserve it.
@@ -386,6 +371,39 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     let (status,restock)=connector(&app,&token,json!({"action":"stock","listingId":id,"targetQuantity":2})).await;
     assert_eq!(status,StatusCode::OK,"{restock}");assert_eq!(restock["status"],"paused");
     assert!(sqlx::query("UPDATE marketplace_user_listings SET status='active' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.is_err());
+    // Pricing it puts it on sale: it was paused only for want of a price
+    // (the 2026-10-20 Card Rails Riftbound rows). Repeating it changes nothing.
+    let price_it = json!({"action":"update","listingId":id,"item":{"priceEurCents":120}});
+    let (status, priced) = connector(&app, &token, price_it.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{priced}");
+    assert_eq!((priced["changed"].clone(), priced["listing"]["status"].clone()), (json!(true), json!("active")), "{priced}");
+    let (_, repeat) = connector(&app, &token, price_it).await;
+    assert_eq!(repeat["changed"], false, "{repeat}");
+    // A listing the seller paused with a price on it stays paused when repriced.
+    sqlx::query("UPDATE marketplace_user_listings SET status='paused' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.unwrap();
+    let (_, held) = connector(&app, &token, json!({"action":"update","listingId":id,"item":{"priceEurCents":130}})).await;
+    assert_eq!(held["listing"]["status"], "paused", "{held}");
+
+    // --- list idempotency: a crash after the claim, and two attempts at once --
+    // A claimed key with no row (the process died before the insert) is
+    // created by the next attempt, not answered "in doubt" for ever.
+    let grant_uuid = uuid::Uuid::parse_str(&grant_id).unwrap();
+    sqlx::query("insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, 'crashed-claim')")
+        .bind(grant_uuid).execute(&pool).await.unwrap();
+    let copy = |key: &str, cents: i64| json!({"action":"list","idempotencyKey":key,"item":{
+        "identity":{"publicId":"741592","game":"pokemon"},"quantity":1,"priceEurCents":cents,"condition":"NM","language":"IT"}});
+    let (status, recovered) = connector(&app, &token, copy("crashed-claim", 150)).await;
+    assert_eq!((status, recovered["created"].clone()), (StatusCode::OK, json!(true)), "{recovered}");
+    let (_, replay) = connector(&app, &token, copy("crashed-claim", 150)).await;
+    assert_eq!((replay["listingId"].clone(), replay["created"].clone()), (recovered["listingId"].clone(), json!(false)));
+    // Two attempts with one key at once: one row, both answer it.
+    let (first, second) = tokio::join!(connector(&app, &token, copy("race-1", 160)), connector(&app, &token, copy("race-1", 160)));
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["listingId"], second.1["listingId"]);
+    assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where card_id = '741592' and price_pkn = 320").await, 1);
+    assert_eq!(count(&pool, "select count(*) from public.marketplace_user_listings where card_id = '741592' and price_pkn = 300").await, 1);
+    assert_eq!(count(&pool, "select count(*) from public.seller_api_listing_keys where listing_id is null").await, 0);
 
     // --- update changes only what it carries; repeats change nothing --------
     let update = |item: Value, listing: &uuid::Uuid| {
@@ -483,6 +501,332 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(moved["changed"], true, "{moved}");
     assert_eq!(moved["listing"]["externalKey"], "cardrails:cr_ext");
     assert!(moved["listing"]["signed"].is_boolean() && moved["listing"]["altered"].is_boolean());
+
+    // --- the owner's book names each row's origin ---------------------------
+    // Only a `cardrails:` key marks a connector row (docs/INVENTORY_ORIGIN.md);
+    // the `list:cr_1` copy and the hand-made row stay Pokoin.
+    run_sql(&pool, include_str!("../../../../scripts/sql/137_seller_api_listing_keys_listing_idx.sql")).await;
+    let (status, book) = call(&app, "GET", "/api/marketplace-listings?sellerUid=seller-1&nativeOnly=1&limit=500", "seller-1", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{book}");
+    let origin_of = |id: &Value| book["listings"].as_array().unwrap().iter().find(|l| &l["id"] == id).map(|l| l["origin"].clone());
+    assert_eq!(origin_of(&saved["listingId"]), Some(json!("cardrails")), "{book}");
+    assert_eq!(origin_of(&listed["listingId"]), Some(json!("pokoin")));
+    assert_eq!(origin_of(&json!(mine.to_string())), Some(json!("pokoin")));
+    assert!(!book.to_string().contains("cardrails_key"));
+
+    // The pricing-group rules (one pricer) are price_ownership_flow.rs.
+
+    // --- a copy of CardTrader stock the shelf already has ------------------
+    // The CardTrader import listed product 456705610; a tool holding the same
+    // CardTrader stock lists its copy of it. Pokoin answers the imported
+    // listing instead of creating a second one (the 2026-10-22 duplicates).
+    let imported: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available, language, \
+           source, source_listing_id, location) \
+         values ('806382', 'seller-1', 'IT', 8767, 1, 'JP', 'cardtrader_seller_import', 'ct:456705610', 'HYPERBEAM BINDER·1') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let pushed: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available) \
+         values ('806384', 'seller-1', 'IT', 900, 1) returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // A product the seller pushed to CardTrader: linked, with no import id.
+    sqlx::query("insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, origin) values ('seller-1', '777', $1, 'push')")
+        .bind(pushed).execute(&pool).await.unwrap();
+    let ct_copy = |key: &str, product: Value| {
+        json!({"action":"list","channel":"pokoin","idempotencyKey":key,"item":{
+        "identity":{"publicId":"806382","game":"pokemon"},"quantity":1,"priceEurCents":4793,"condition":"NM","language":"JP",
+        "ctProductId":product}})
+    };
+    let (status, matched) =
+        connector(&app, &token, ct_copy("cardrails:cr_ct1", json!(456705610))).await;
+    assert_eq!(status, StatusCode::OK, "{matched}");
+    assert_eq!(
+        (
+            matched["listingId"].clone(),
+            matched["created"].clone(),
+            matched["matched"].clone()
+        ),
+        (
+            json!(imported.to_string()),
+            json!(false),
+            json!("cardtrader_product")
+        ),
+    );
+    // The retry answers the same listing through its now-bound key.
+    let (_, again) = connector(
+        &app,
+        &token,
+        ct_copy("cardrails:cr_ct1", json!("456705610")),
+    )
+    .await;
+    assert_eq!(
+        (again["listingId"].clone(), again["created"].clone()),
+        (json!(imported.to_string()), json!(false))
+    );
+    // A product linked by a push (no import id) matches too.
+    let (_, linked) = connector(&app, &token, ct_copy("cardrails:cr_ct2", json!("777"))).await;
+    assert_eq!(linked["listingId"], pushed.to_string(), "{linked}");
+    // No price, quantity or location was overwritten, and nothing new exists.
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.marketplace_user_listings where card_id = '806382'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(count(&pool, "select price_pkn::bigint from public.marketplace_user_listings where card_id = '806382'").await, 8767);
+    // The match writes nothing the item carried either: the import's own
+    // quantity and location still stand, so a tool that sends its whole item
+    // on every sync cannot quietly restock or move a shelf listing.
+    assert_eq!(
+        count(
+            &pool,
+            "select quantity_available::bigint from public.marketplace_user_listings where card_id = '806382'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        shelf_text(
+            &pool,
+            "select location from public.marketplace_user_listings where card_id = '806382'"
+        )
+        .await,
+        "HYPERBEAM BINDER·1"
+    );
+    let untouched: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, quantity_available, location, \
+           source, source_listing_id) \
+         values ('806390', 'seller-1', 'IT', 4321, 7, 'TIN·9', 'cardtrader_seller_import', 'ct:2600000001') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, quiet) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct6","item":{
+        "identity":{"publicId":"806390","game":"pokemon"},"quantity":2,"priceEurCents":10000,
+        "condition":"EX","language":"EN","location":"BIN-7","ctProductId":"2600000001"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quiet}");
+    assert_eq!(
+        (
+            quiet["listingId"].clone(),
+            quiet["created"].clone(),
+            quiet["matched"].clone()
+        ),
+        (
+            json!(untouched.to_string()),
+            json!(false),
+            json!("cardtrader_product")
+        )
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.marketplace_user_listings where card_id = '806390'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        shelf_text(
+            &pool,
+            "select quantity_available::text || '|' || location || '|' || condition || '|' || price_pkn::text \
+               from public.marketplace_user_listings where source_listing_id = 'ct:2600000001'"
+        )
+        .await,
+        "7|TIN·9|NM|4321"
+    );
+    // A matched item never reaches the pricing checks: the unknown group a
+    // new listing cannot name asks nothing of the shelf listing, and the
+    // answer carries no pricing field at all.
+    let other_product: uuid::Uuid = sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, \
+           source, source_listing_id) \
+         values ('806392', 'seller-1', 'IT', 1500, 'cardtrader_seller_import', 'ct:2600000002') returning id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let unknown_group = "22222222-2222-2222-2222-222222222222";
+    let (status, skipped) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct7","pricingGroupId":unknown_group,
+        "item":{"identity":{"publicId":"806392","game":"pokemon"},"quantity":1,"priceEurCents":4793,
+        "ctProductId":"2600000002"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{skipped}");
+    assert_eq!(
+        (
+            skipped["listingId"].clone(),
+            skipped["created"].clone(),
+            skipped["matched"].clone()
+        ),
+        (
+            json!(other_product.to_string()),
+            json!(false),
+            json!("cardtrader_product")
+        )
+    );
+    assert!(
+        !skipped.to_string().contains("pricing") && skipped["priced"].is_null(),
+        "{skipped}"
+    );
+    // The same unknown group is refused for an item that is not a copy of a
+    // product on the shelf, and claims no key.
+    let (status, refused) = connector(
+        &app,
+        &token,
+        json!({"action":"list","channel":"pokoin","idempotencyKey":"cardrails:cr_ct8","pricingGroupId":unknown_group,
+        "item":{"identity":{"publicId":"806396","game":"pokemon"},"quantity":1,"priceEurCents":4793}}),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("pricing_group_unknown")),
+        "{refused}"
+    );
+    // Another seller's import of that product is not this seller's shelf.
+    sqlx::query(
+        "update public.marketplace_user_listings set seller_uid = 'seller-2' where id = $1",
+    )
+    .bind(imported)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, own) = connector(&app, &token, ct_copy("cardrails:cr_ct3", json!(456705610))).await;
+    assert_eq!(own["created"], true, "{own}");
+    assert_ne!(own["listingId"], imported.to_string());
+    sqlx::query(
+        "update public.marketplace_user_listings set seller_uid = 'seller-1' where id = $1",
+    )
+    .bind(imported)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A copy of a product the shelf does not have yet carries the product's
+    // id, so the CardTrader import adopts it instead of adding a second one.
+    let (_, fresh) = connector(&app, &token, ct_copy("cardrails:cr_ct4", json!("888"))).await;
+    assert_eq!(fresh["created"], true, "{fresh}");
+    let fresh_id = uuid::Uuid::parse_str(fresh["listingId"].as_str().unwrap()).unwrap();
+    let source: String = sqlx::query_scalar(
+        "select source_listing_id from public.marketplace_user_listings where id = $1",
+    )
+    .bind(fresh_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(source, "ct:888");
+    // 144: the database refuses a second shape of one product, whatever writes it.
+    run_sql(
+        &pool,
+        include_str!("../../../../scripts/sql/144_listing_external_identity.sql"),
+    )
+    .await;
+    let import_too = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'cardtrader_seller_import', 'ct:888')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(import_too
+        .unwrap_err()
+        .to_string()
+        .contains("listing_ct_identity_taken"));
+    let second_import = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'cardtrader_seller_import', 'ct:456705610')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(second_import.is_err(), "one live import per product");
+    // Rule 1 by itself: for a product this seller has no listing of at all,
+    // the trigger lets both imports through (they are the same kind of row),
+    // so the partial unique index is what refuses the second one.
+    let import_ct = "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source, source_listing_id) \
+                     values ('806394', $1, 'IT', 100, 'cardtrader_seller_import', 'ct:2600000003')";
+    let first_import = sqlx::query(import_ct).bind("seller-1").execute(&pool).await;
+    assert!(
+        first_import.is_ok(),
+        "a seller's first live import of a free product: {first_import:?}"
+    );
+    let second_of_one_product = sqlx::query(import_ct).bind("seller-1").execute(&pool).await;
+    let index_error = second_of_one_product.unwrap_err().to_string();
+    assert!(
+        index_error.contains("marketplace_user_listings_ct_import_uidx"),
+        "rule 1 is the index, not the trigger: {index_error}"
+    );
+    // Another seller's import of the same CardTrader product is its own row.
+    let other_seller_import = sqlx::query(import_ct).bind("seller-2").execute(&pool).await;
+    assert!(
+        other_seller_import.is_ok(),
+        "the index is per seller: {other_seller_import:?}"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.marketplace_user_listings \
+             where source_listing_id = 'ct:2600000003' and status = 'active'"
+        )
+        .await,
+        2
+    );
+    let native_too = sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'ct:456705610')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(native_too
+        .unwrap_err()
+        .to_string()
+        .contains("listing_ct_identity_taken"));
+    // Grouped Pokoin copies may still share their product (133).
+    sqlx::query(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, seller_country, price_pkn, source_listing_id) \
+         values ('806382', 'seller-1', 'IT', 100, 'ct:888')",
+    )
+    .execute(&pool)
+    .await
+    .expect("a second grouped copy");
+    // Another key of this grant cannot become the same listing.
+    let (status, taken) =
+        connector(&app, &token, ct_copy("cardrails:cr_ct5", json!(456705610))).await;
+    assert_eq!(
+        (status, taken["code"].clone()),
+        (StatusCode::CONFLICT, json!("ct_product_listed")),
+        "{taken}"
+    );
+
+    // `listings` names each listing's CardTrader product, so the tool can
+    // pair its copies with them before it lists anything.
+    let (_, page) = connector(&app, &token, json!({"action":"listings","limit":500})).await;
+    let entries = page["listings"].as_array().unwrap();
+    let product_of = |id: &uuid::Uuid| {
+        entries
+            .iter()
+            .find(|l| l["listingId"] == id.to_string())
+            .map(|l| l["ctProductId"].clone())
+    };
+    assert_eq!(product_of(&imported), Some(json!("456705610")));
+    assert_eq!(product_of(&pushed), Some(json!("777")));
+    let plain = entries
+        .iter()
+        .find(|l| l["externalKey"] == "list:cr_1")
+        .expect("the first listed card");
+    assert_eq!(plain["ctProductId"], Value::Null);
 
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;

@@ -55,6 +55,18 @@ pub const HOLDINGS_SQL: &str = "\
 /// withdrawn joke listing that looked like a sale, not a market print.
 pub const SOLD_OUTLIER_RATIO: f64 = 20.0;
 
+/// Catalog identity and art for the mover blueprints — the table a listing
+/// joins to reach a card page. One row per printing, however it is listed.
+pub const CARDS_BY_BLUEPRINT_SQL: &str = "\
+  select distinct on (blueprint_id) \
+         blueprint_id::text as blueprint_id, \
+         card_id::text as card_id, \
+         name, expansion_name, expansion_number, \
+         cdn_image_url, image_url, preview_image_url, homepage_image_url \
+  from public.marketplace_card_versions \
+  where blueprint_id = any($1::bigint[]) \
+  order by blueprint_id, card_id";
+
 // ---------------------------------------------------------------------------
 // Dates
 // ---------------------------------------------------------------------------
@@ -170,7 +182,10 @@ fn field_bool(row: &Json, keys: &[&str]) -> bool {
 }
 
 fn field_str(row: &Json, key: &str) -> String {
-    row.get(key).and_then(Json::as_str).unwrap_or("").to_string()
+    row.get(key)
+        .and_then(Json::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn field_i64(row: &Json, key: &str) -> i64 {
@@ -201,9 +216,7 @@ pub fn movement_from_ledger(row: &Json) -> Option<Movement> {
         return None;
     }
     let ledger_type = field_str(row, "type");
-    let outbound = amount < 0.0
-        || ledger_type.contains("sent")
-        || ledger_type.contains("withdraw");
+    let outbound = amount < 0.0 || ledger_type.contains("sent") || ledger_type.contains("withdraw");
     let signed = if outbound && amount > 0.0 {
         -amount.abs()
     } else {
@@ -267,7 +280,10 @@ pub fn wallet_series(movements: &[Json], balance: f64, today_key: &str) -> Vec<J
     }
     let days: Vec<String> = by_day.keys().cloned().collect();
     let mut points: Vec<Json> = Vec::new();
-    let first = days.first().cloned().unwrap_or_else(|| today_key.to_string());
+    let first = days
+        .first()
+        .cloned()
+        .unwrap_or_else(|| today_key.to_string());
     let zero_date = add_utc_days(&first, -1);
     if !days.is_empty() && !zero_date.is_empty() {
         points.push(json!({ "date": zero_date, "currencyPkn": 0 }));
@@ -347,14 +363,24 @@ pub fn sold_slice_key(row: &Json) -> String {
         blueprint,
         condition_key(&field_str(row, "condition")),
         language_key(&field_str(row, "language")),
-        if field_bool(row, &["reverse"]) { "R" } else { "-" }.to_string(),
+        if field_bool(row, &["reverse"]) {
+            "R"
+        } else {
+            "-"
+        }
+        .to_string(),
         if field_bool(row, &["first_edition", "firstEdition"]) {
             "1"
         } else {
             "-"
         }
         .to_string(),
-        if field_bool(row, &["graded"]) { "G" } else { "-" }.to_string(),
+        if field_bool(row, &["graded"]) {
+            "G"
+        } else {
+            "-"
+        }
+        .to_string(),
     ]
     .join("|")
 }
@@ -589,7 +615,9 @@ pub fn basket_move(
             continue;
         };
         before += holding.qty as f64 * was.pkn;
-        let now = price_as_of(entries, day).map(|point| point.pkn).unwrap_or(was.pkn);
+        let now = price_as_of(entries, day)
+            .map(|point| point.pkn)
+            .unwrap_or(was.pkn);
         after += holding.qty as f64 * now;
     }
     if before > 0.0 {
@@ -597,6 +625,242 @@ pub fn basket_move(
     } else {
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// Top movers
+// ---------------------------------------------------------------------------
+
+/// A tile never draws more sparkline points than this.
+pub const MOVER_SPARK_POINTS: usize = 30;
+
+/// A slice whose last sold median sits below this is penny noise, not a mover.
+pub const MOVER_MIN_PKN: f64 = 100.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mover {
+    pub key: String,
+    pub blueprint_id: String,
+    pub condition: String,
+    pub language: String,
+    pub reverse: bool,
+    pub first_edition: bool,
+    pub graded: bool,
+    pub quantity: i64,
+    pub start_pkn: f64,
+    pub end_pkn: f64,
+    pub change_pkn: f64,
+    pub change_pct: f64,
+    pub series: Vec<PricePoint>,
+}
+
+impl Mover {
+    /// The public shape; the handler layers the card identity on top of it.
+    pub fn to_json(&self) -> Json {
+        json!({
+            "blueprintId": self.blueprint_id,
+            "condition": self.condition,
+            "language": self.language,
+            "reverse": self.reverse,
+            "firstEdition": self.first_edition,
+            "graded": self.graded,
+            "quantity": self.quantity,
+            "startPkn": num(round2(self.start_pkn)),
+            "endPkn": num(round2(self.end_pkn)),
+            "changePkn": num(round2(self.change_pkn)),
+            "changePct": num(round2(self.change_pct)),
+            "series": self
+                .series
+                .iter()
+                .map(|point| json!({ "day": point.day, "pkn": num(round2(point.pkn)) }))
+                .collect::<Vec<_>>(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TopMovers {
+    pub gainers: Vec<Mover>,
+    pub losers: Vec<Mover>,
+}
+
+/// The facets of a slice key, or nothing when it is not a printing.
+fn slice_parts(key: &str) -> Option<(String, String, String, bool, bool, bool)> {
+    let parts: Vec<&str> = key.split('|').collect();
+    let [blueprint, condition, language, reverse, first_edition, graded] = parts.as_slice() else {
+        return None;
+    };
+    if blueprint.is_empty() || !blueprint.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some((
+        blueprint.to_string(),
+        condition.to_string(),
+        language.to_string(),
+        *reverse == "R",
+        *first_edition == "1",
+        *graded == "G",
+    ))
+}
+
+/// Evenly spread over at most `cap` draws, keeping the first and last day.
+fn downsample(points: &[PricePoint], cap: usize) -> Vec<PricePoint> {
+    if cap == 0 || points.len() <= cap {
+        return points.to_vec();
+    }
+    if cap == 1 {
+        return vec![points[points.len() - 1].clone()];
+    }
+    let last = points.len() - 1;
+    (0..cap)
+        .map(|index| {
+            let position = ((index * last) as f64 / (cap - 1) as f64).round() as usize;
+            points[position.min(last)].clone()
+        })
+        .collect()
+}
+
+/// The seller's own printings whose sold value moved most inside the window.
+///
+/// A slice qualifies with at least two sold medians on or before `today` and at
+/// least one of them inside `[from_day, today]`; an empty `from_day` is all
+/// history. Both ends carry forward exactly as the stored series does, so the
+/// move is the market's and not the accident of the day a card sold.
+/// `change_pkn` is per copy, so a pile of five cannot out-earn one.
+pub fn top_movers(
+    holdings: &[Holding],
+    book: &HashMap<String, Vec<PricePoint>>,
+    from_day: &str,
+    today: &str,
+    limit: usize,
+) -> TopMovers {
+    if today.is_empty() || limit == 0 || (!from_day.is_empty() && from_day > today) {
+        return TopMovers::default();
+    }
+    // The same printing held as 1-DR stock and as a Pokoin listing is one slice.
+    let mut quantities: BTreeMap<String, i64> = BTreeMap::new();
+    for holding in holdings {
+        *quantities.entry(holding.key.clone()).or_default() += holding.qty;
+    }
+
+    let mut movers: Vec<Mover> = Vec::new();
+    for (key, quantity) in &quantities {
+        let Some(entries) = book.get(key) else {
+            continue;
+        };
+        let Some((blueprint_id, condition, language, reverse, first_edition, graded)) =
+            slice_parts(key)
+        else {
+            continue;
+        };
+        let priced: Vec<PricePoint> = entries
+            .iter()
+            .filter(|point| point.day.as_str() <= today && point.pkn > 0.0)
+            .cloned()
+            .collect();
+        if priced.len() < 2 {
+            continue;
+        }
+        // Two medians somewhere is not enough: one has to be inside the window.
+        if !from_day.is_empty() && !priced.iter().any(|point| point.day.as_str() >= from_day) {
+            continue;
+        }
+        let end_hit = priced[priced.len() - 1].clone();
+        let start_hit = if from_day.is_empty() {
+            priced[0].clone()
+        } else {
+            match price_as_of(Some(&priced), from_day) {
+                // The last median before the window, carried in.
+                Some(hit) => hit,
+                // Nothing sold yet at the window start: the first print inside it.
+                None => match priced.iter().find(|point| point.day.as_str() >= from_day) {
+                    Some(point) => point.clone(),
+                    None => continue,
+                },
+            }
+        };
+        let (start_pkn, end_pkn) = (round2(start_hit.pkn), round2(end_hit.pkn));
+        if start_pkn.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+            || end_pkn < MOVER_MIN_PKN
+        {
+            continue;
+        }
+        let mut day = if from_day.is_empty() {
+            priced[0].day.clone()
+        } else {
+            from_day.max(priced[0].day.as_str()).to_string()
+        };
+        let mut series: Vec<PricePoint> = Vec::new();
+        let mut cursor = 0usize;
+        let mut guard = 0i64;
+        while !day.is_empty() && day.as_str() <= today && guard <= HISTORY_DAYS {
+            guard += 1;
+            while cursor < priced.len() && priced[cursor].day.as_str() <= day.as_str() {
+                cursor += 1;
+            }
+            if cursor > 0 {
+                series.push(PricePoint {
+                    day: day.clone(),
+                    pkn: round2(priced[cursor - 1].pkn),
+                });
+            }
+            let next = add_utc_days(&day, 1);
+            if next == day {
+                break;
+            }
+            day = next;
+        }
+        movers.push(Mover {
+            key: key.clone(),
+            blueprint_id,
+            condition,
+            language,
+            reverse,
+            first_edition,
+            graded,
+            quantity: *quantity,
+            start_pkn,
+            end_pkn,
+            change_pkn: round2(end_pkn - start_pkn),
+            change_pct: round2((end_pkn / start_pkn - 1.0) * 100.0),
+            series: downsample(&series, MOVER_SPARK_POINTS),
+        });
+    }
+
+    // Equal move, equal money, then the printing id: one stable order.
+    let tie_break = |a: &Mover, b: &Mover| {
+        a.change_pkn
+            .abs()
+            .partial_cmp(&b.change_pkn.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .reverse()
+            .then_with(|| a.blueprint_id.cmp(&b.blueprint_id))
+    };
+    let mut gainers: Vec<Mover> = movers
+        .iter()
+        .filter(|mover| mover.change_pct > 0.0)
+        .cloned()
+        .collect();
+    gainers.sort_by(|a, b| {
+        b.change_pct
+            .partial_cmp(&a.change_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| tie_break(a, b))
+    });
+    gainers.truncate(limit);
+    let mut losers: Vec<Mover> = movers
+        .iter()
+        .filter(|mover| mover.change_pct < 0.0)
+        .cloned()
+        .collect();
+    losers.sort_by(|a, b| {
+        a.change_pct
+            .partial_cmp(&b.change_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| tie_break(a, b))
+    });
+    losers.truncate(limit);
+    TopMovers { gainers, losers }
 }
 
 /// `compactDay(row)` — the stored public day shape.
@@ -714,12 +978,7 @@ pub fn build_daily_series(
     }
     let mut wallet_days: Vec<(String, f64)> = wallet
         .iter()
-        .map(|row| {
-            (
-                day_of(row.get("date")),
-                non_neg(row.get("currencyPkn")),
-            )
-        })
+        .map(|row| (day_of(row.get("date")), non_neg(row.get("currencyPkn"))))
         .filter(|(date, _)| !date.is_empty() && date.as_str() <= today_key)
         .collect();
     wallet_days.sort_by(|a, b| a.0.cmp(&b.0));
@@ -872,7 +1131,10 @@ mod tests {
     fn day_of_prefers_a_plain_day_key() {
         assert_eq!(day_of(Some(&json!("2026-10-08"))), "2026-10-08");
         assert_eq!(day_of(Some(&json!("2026-10-08T12:00:00Z"))), "2026-10-08");
-        assert_eq!(day_of(Some(&json!({ "seconds": 1_791_417_600 }))), "2026-10-08");
+        assert_eq!(
+            day_of(Some(&json!({ "seconds": 1_791_417_600 }))),
+            "2026-10-08"
+        );
         assert_eq!(day_of(Some(&json!("nonsense"))), "");
         assert_eq!(day_of(None), "");
     }
@@ -983,8 +1245,14 @@ mod tests {
     #[test]
     fn price_as_of_carries_the_last_sale_forward() {
         let entries = vec![
-            PricePoint { day: "2026-09-20".into(), pkn: 10.0 },
-            PricePoint { day: "2026-09-25".into(), pkn: 20.0 },
+            PricePoint {
+                day: "2026-09-20".into(),
+                pkn: 10.0,
+            },
+            PricePoint {
+                day: "2026-09-25".into(),
+                pkn: 20.0,
+            },
         ];
         // Before the first sale there is no price.
         assert!(price_as_of(Some(&entries), "2026-09-19").is_none());
@@ -1020,9 +1288,21 @@ mod tests {
     #[test]
     fn holdings_are_valued_only_from_their_since_day() {
         let holdings = vec![
-            Holding { key: "a".into(), qty: 2, since: "2026-09-20".into() },
-            Holding { key: "b".into(), qty: 1, since: "2026-09-25".into() },
-            Holding { key: "c".into(), qty: 5, since: String::new() },
+            Holding {
+                key: "a".into(),
+                qty: 2,
+                since: "2026-09-20".into(),
+            },
+            Holding {
+                key: "b".into(),
+                qty: 1,
+                since: "2026-09-25".into(),
+            },
+            Holding {
+                key: "c".into(),
+                qty: 5,
+                since: String::new(),
+            },
         ];
         let book = book(&[
             ("a", &[("2026-09-20", 10.0)]),
@@ -1049,8 +1329,16 @@ mod tests {
     #[test]
     fn the_basket_move_ignores_new_members() {
         let holdings = vec![
-            Holding { key: "a".into(), qty: 1, since: "2026-09-20".into() },
-            Holding { key: "b".into(), qty: 1, since: "2026-09-24".into() },
+            Holding {
+                key: "a".into(),
+                qty: 1,
+                since: "2026-09-20".into(),
+            },
+            Holding {
+                key: "b".into(),
+                qty: 1,
+                since: "2026-09-24".into(),
+            },
         ];
         let book = book(&[
             ("a", &[("2026-09-20", 100.0), ("2026-09-25", 110.0)]),
@@ -1174,13 +1462,14 @@ mod tests {
 
     #[test]
     fn today_overwrites_the_wallet_point() {
-        let movements = vec![
-            json!({ "date": "2026-10-08", "amountPkn": 5 }),
-        ];
+        let movements = vec![json!({ "date": "2026-10-08", "amountPkn": 5 })];
         let series = wallet_series(&movements, 42.0, "2026-10-08");
         assert_eq!(series.len(), 2);
         assert_eq!(series[0], json!({ "date": "2026-10-07", "currencyPkn": 0 }));
-        assert_eq!(series[1], json!({ "date": "2026-10-08", "currencyPkn": 42 }));
+        assert_eq!(
+            series[1],
+            json!({ "date": "2026-10-08", "currencyPkn": 42 })
+        );
     }
 
     #[test]
@@ -1226,18 +1515,24 @@ mod tests {
 
     #[test]
     fn daily_series_is_empty_without_a_starting_point() {
-        assert!(build_daily_series(&[], &[], &HashMap::new(), &BTreeMap::new(), "2026-10-08")
-            .is_empty());
+        assert!(
+            build_daily_series(&[], &[], &HashMap::new(), &BTreeMap::new(), "2026-10-08")
+                .is_empty()
+        );
         // A holdings row in the future does not start the series.
         let future = vec![Holding {
             key: "a".into(),
             qty: 1,
             since: "2027-01-01".into(),
         }];
-        assert!(
-            build_daily_series(&[], &future, &HashMap::new(), &BTreeMap::new(), "2026-10-08")
-                .is_empty()
-        );
+        assert!(build_daily_series(
+            &[],
+            &future,
+            &HashMap::new(),
+            &BTreeMap::new(),
+            "2026-10-08"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1258,7 +1553,10 @@ mod tests {
             "seriesRevision": SERIES_REVISION,
             "updatedAt": "2026-10-07T23:59:00Z"
         });
-        assert!(!stored_is_fresh(Some(&yesterday), now), "a different UTC day is stale");
+        assert!(
+            !stored_is_fresh(Some(&yesterday), now),
+            "a different UTC day is stale"
+        );
         // Wrong basis or revision.
         let mut wrong = fresh.clone();
         wrong["priceBasis"] = json!("other");
@@ -1292,7 +1590,8 @@ mod tests {
 
     #[test]
     fn ledger_movements_sign_outbound_rows() {
-        let row = json!({ "amountPkn": 5, "type": "pkn_sent", "createdAt": "2026-10-08T00:00:00Z" });
+        let row =
+            json!({ "amountPkn": 5, "type": "pkn_sent", "createdAt": "2026-10-08T00:00:00Z" });
         assert_eq!(movement_from_ledger(&row).unwrap().amount_pkn, -5.0);
         let row = json!({ "amountPkn": -5, "type": "sale", "createdAt": "2026-10-08T00:00:00Z" });
         assert_eq!(movement_from_ledger(&row).unwrap().amount_pkn, -5.0);
@@ -1302,5 +1601,297 @@ mod tests {
         assert!(movement_from_ledger(&json!({ "amountPkn": 0 })).is_none());
         assert!(movement_from_ledger(&json!({ "amountPkn": "abc" })).is_none());
         assert!(movement_from_ledger(&json!({ "amountPkn": 5 })).is_none());
+    }
+
+    fn held(keys: &[(&str, i64)]) -> Vec<Holding> {
+        keys.iter()
+            .map(|(key, qty)| Holding {
+                key: (*key).to_string(),
+                qty: *qty,
+                since: String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_mover_carries_the_pre_window_median_into_the_range_start() {
+        let book = book(&[(
+            "10|NM|EN|-|-|-",
+            &[("2026-01-10", 100.0), ("2026-02-20", 150.0)],
+        )]);
+        let movers = top_movers(
+            &held(&[("10|NM|EN|-|-|-", 2)]),
+            &book,
+            "2026-02-01",
+            "2026-02-25",
+            6,
+        );
+        assert_eq!(movers.gainers.len(), 1);
+        let mover = &movers.gainers[0];
+        assert_eq!(mover.start_pkn, 100.0, "the last median before the window");
+        assert_eq!(mover.end_pkn, 150.0);
+        assert_eq!(mover.change_pkn, 50.0, "per copy, not per pile");
+        assert_eq!(mover.change_pct, 50.0);
+        assert_eq!(mover.quantity, 2);
+        assert_eq!(mover.blueprint_id, "10");
+        assert_eq!(mover.condition, "NM");
+        // The sparkline covers the whole window and starts on the carried value.
+        assert_eq!(mover.series[0].day, "2026-02-01");
+        assert_eq!(mover.series[0].pkn, 100.0);
+        assert_eq!(mover.series.last().unwrap().day, "2026-02-25");
+        assert_eq!(mover.series.last().unwrap().pkn, 150.0);
+        assert!(movers.losers.is_empty());
+    }
+
+    #[test]
+    fn a_mover_starts_at_its_first_sale_when_nothing_sold_before() {
+        let book = book(&[(
+            "11|SP|JP|R|-|-",
+            &[("2026-03-05", 200.0), ("2026-03-20", 100.0)],
+        )]);
+        let movers = top_movers(
+            &held(&[("11|SP|JP|R|-|-", 1)]),
+            &book,
+            "2026-03-01",
+            "2026-03-25",
+            6,
+        );
+        assert_eq!(movers.losers.len(), 1);
+        let mover = &movers.losers[0];
+        assert_eq!(mover.start_pkn, 200.0, "the first median inside the range");
+        assert_eq!(mover.change_pkn, -100.0);
+        assert_eq!(mover.change_pct, -50.0);
+        assert!(mover.reverse);
+        assert_eq!(mover.language, "JP");
+        assert_eq!(
+            mover.series[0].day, "2026-03-05",
+            "no price before the sale"
+        );
+    }
+
+    #[test]
+    fn a_joke_sale_never_makes_a_mover() {
+        let rows = vec![
+            json!({ "blueprint_id": "7", "condition": "NM", "language": "EN",
+                    "median_pkn": 100.0, "day": "2026-04-01" }),
+            json!({ "blueprint_id": "7", "condition": "NM", "language": "EN",
+                    "median_pkn": 110.0, "day": "2026-04-10" }),
+            json!({ "blueprint_id": "7", "condition": "NM", "language": "EN",
+                    "median_pkn": 5_000_000.0, "day": "2026-04-20" }),
+        ];
+        let movers = top_movers(
+            &held(&[("7|NM|EN|-|-|-", 1)]),
+            &sold_price_book(&rows),
+            "2026-04-05",
+            "2026-04-30",
+            6,
+        );
+        let mover = &movers.gainers[0];
+        assert_eq!(
+            mover.end_pkn, 110.0,
+            "the withdrawn listing is not a market print"
+        );
+        assert_eq!(mover.change_pct, 10.0);
+        assert_eq!(mover.series.last().unwrap().pkn, 110.0);
+    }
+
+    #[test]
+    fn penny_and_thin_slices_stay_off_the_dashboard() {
+        let price_book = book(&[
+            // Ends under the floor despite a large percentage move.
+            (
+                "1|NM|EN|-|-|-",
+                &[("2026-05-01", 10.0), ("2026-05-20", 99.0)],
+            ),
+            // Priced and flat: neither a gainer nor a loser.
+            (
+                "2|NM|EN|-|-|-",
+                &[("2026-05-01", 300.0), ("2026-05-20", 300.0)],
+            ),
+            // One median only: nothing moved, so nothing to show.
+            ("3|NM|EN|-|-|-", &[("2026-05-20", 500.0)]),
+            // Both sales are older than the window.
+            (
+                "4|NM|EN|-|-|-",
+                &[("2026-01-01", 100.0), ("2026-02-01", 400.0)],
+            ),
+        ]);
+        let holdings = held(&[
+            ("1|NM|EN|-|-|-", 1),
+            ("2|NM|EN|-|-|-", 1),
+            ("3|NM|EN|-|-|-", 1),
+            ("4|NM|EN|-|-|-", 1),
+            // Held but never sold, and the same printing on a second row.
+            ("5|NM|EN|-|-|-", 4),
+            ("2|NM|EN|-|-|-", 3),
+        ]);
+        let movers = top_movers(&holdings, &price_book, "2026-05-01", "2026-05-25", 6);
+        assert!(
+            movers.gainers.is_empty(),
+            "the penny floor and thin books drop out"
+        );
+        assert!(movers.losers.is_empty());
+
+        // Exactly at the floor counts, and one slice held twice is one tile.
+        let price_book = book(&[(
+            "6|NM|EN|-|-|-",
+            &[("2026-05-01", 40.0), ("2026-05-20", 100.0)],
+        )]);
+        let movers = top_movers(
+            &held(&[("6|NM|EN|-|-|-", 1), ("6|NM|EN|-|-|-", 2)]),
+            &price_book,
+            "2026-05-01",
+            "2026-05-25",
+            6,
+        );
+        assert_eq!(movers.gainers.len(), 1, "one tile per slice, not per row");
+        assert_eq!(movers.gainers[0].quantity, 3);
+        assert_eq!(movers.gainers[0].end_pkn, 100.0);
+    }
+
+    #[test]
+    fn mover_ranking_is_deterministic() {
+        let book = book(&[
+            // Same percent, fatter money move.
+            (
+                "21|NM|EN|-|-|-",
+                &[("2026-06-01", 200.0), ("2026-06-20", 300.0)],
+            ),
+            (
+                "12|NM|EN|-|-|-",
+                &[("2026-06-01", 100.0), ("2026-06-20", 150.0)],
+            ),
+            // Steepest percent first.
+            (
+                "5|NM|EN|-|-|-",
+                &[("2026-06-01", 100.0), ("2026-06-20", 400.0)],
+            ),
+            // Losers mirror the same rules.
+            (
+                "7|NM|EN|-|-|-",
+                &[("2026-06-01", 400.0), ("2026-06-20", 100.0)],
+            ),
+            (
+                "8|NM|EN|-|-|-",
+                &[("2026-06-01", 300.0), ("2026-06-20", 150.0)],
+            ),
+            (
+                "9|NM|EN|-|-|-",
+                &[("2026-06-01", 200.0), ("2026-06-20", 100.0)],
+            ),
+        ]);
+        let holdings: Vec<Holding> = book
+            .keys()
+            .map(|key| Holding {
+                key: key.clone(),
+                qty: 1,
+                since: String::new(),
+            })
+            .collect();
+        let movers = top_movers(&holdings, &book, "2026-06-01", "2026-06-25", 6);
+        let gainers: Vec<&str> = movers
+            .gainers
+            .iter()
+            .map(|mover| mover.blueprint_id.as_str())
+            .collect();
+        assert_eq!(gainers, vec!["5", "21", "12"]);
+        let losers: Vec<&str> = movers
+            .losers
+            .iter()
+            .map(|mover| mover.blueprint_id.as_str())
+            .collect();
+        assert_eq!(losers, vec!["7", "8", "9"]);
+        // The limit truncates each side on its own.
+        let movers = top_movers(&holdings, &book, "2026-06-01", "2026-06-25", 2);
+        assert_eq!(movers.gainers.len(), 2);
+        assert_eq!(movers.losers.len(), 2);
+    }
+
+    #[test]
+    fn mover_series_downsamples_to_thirty_points() {
+        // One sale every day for 200 days, so a wide window has to thin out.
+        let entries: Vec<PricePoint> = (0..200)
+            .map(|offset| PricePoint {
+                day: add_utc_days("2026-01-01", offset),
+                pkn: 100.0 + offset as f64,
+            })
+            .collect();
+        let mut book_map: HashMap<String, Vec<PricePoint>> = HashMap::new();
+        book_map.insert("1|NM|EN|-|-|-".to_string(), entries);
+        let movers = top_movers(
+            &held(&[("1|NM|EN|-|-|-", 1)]),
+            &book_map,
+            "2026-01-05",
+            "2026-07-19",
+            6,
+        );
+        let series = &movers.gainers[0].series;
+        assert!(
+            series.len() <= MOVER_SPARK_POINTS,
+            "{} points",
+            series.len()
+        );
+        assert_eq!(series.len(), MOVER_SPARK_POINTS);
+        assert_eq!(series[0].day, "2026-01-05");
+        assert_eq!(series[0].pkn, 104.0, "carried from the window start");
+        assert_eq!(series.last().unwrap().day, "2026-07-19");
+        assert_eq!(series.last().unwrap().pkn, 299.0);
+        assert!(series
+            .windows(2)
+            .all(|pair| pair[0].day.as_str() < pair[1].day.as_str()));
+
+        // A short window keeps every day.
+        let movers = top_movers(
+            &held(&[("1|NM|EN|-|-|-", 1)]),
+            &book_map,
+            "2026-07-10",
+            "2026-07-19",
+            6,
+        );
+        assert_eq!(movers.gainers[0].series.len(), 10);
+    }
+
+    #[test]
+    fn mover_json_carries_the_slice_and_its_sparkline() {
+        let book = book(&[(
+            "10|NM|EN|R|1|-",
+            &[("2026-07-01", 100.0), ("2026-07-10", 200.0)],
+        )]);
+        let movers = top_movers(
+            &held(&[("10|NM|EN|R|1|-", 3)]),
+            &book,
+            "2026-07-01",
+            "2026-07-10",
+            6,
+        );
+        let row = movers.gainers[0].to_json();
+        assert_eq!(row["blueprintId"], json!("10"));
+        assert_eq!(row["reverse"], json!(true));
+        assert_eq!(row["firstEdition"], json!(true));
+        assert_eq!(row["graded"], json!(false));
+        assert_eq!(row["quantity"], json!(3));
+        assert_eq!(row["changePkn"], json!(100));
+        assert_eq!(row["changePct"], json!(100));
+        assert_eq!(row["series"][0], json!({ "day": "2026-07-01", "pkn": 100 }));
+        assert_eq!(row["series"][9], json!({ "day": "2026-07-10", "pkn": 200 }));
+    }
+
+    #[test]
+    fn top_movers_needs_a_today_and_a_limit() {
+        let book = book(&[(
+            "1|NM|EN|-|-|-",
+            &[("2026-05-01", 100.0), ("2026-05-20", 300.0)],
+        )]);
+        let holdings = held(&[("1|NM|EN|-|-|-", 1)]);
+        assert!(top_movers(&holdings, &book, "2026-05-01", "", 6)
+            .gainers
+            .is_empty());
+        assert!(top_movers(&holdings, &book, "2026-05-01", "2026-05-25", 0)
+            .gainers
+            .is_empty());
+        // An all-history window (no from day) prices from the first sale.
+        let movers = top_movers(&holdings, &book, "", "2026-05-25", 6);
+        assert_eq!(movers.gainers[0].start_pkn, 100.0);
+        assert_eq!(movers.gainers[0].series[0].day, "2026-05-01");
     }
 }

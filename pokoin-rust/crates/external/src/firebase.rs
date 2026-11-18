@@ -223,6 +223,18 @@ pub struct FirestoreDoc {
 /// users. Production talks to the Firestore REST API; tests use Memory.
 pub trait FirestoreStore: Send + Sync {
     fn get_doc<'a>(&'a self, collection: &'a str, id: &'a str) -> futures_util::future::BoxFuture<'a, ApiResult<FirestoreDoc>>;
+    /// Several docs of one collection, in `ids` order (a missing doc has
+    /// `exists: false`). REST answers with one `documents:batchGet` per
+    /// [`BATCH_GET_MAX`] ids instead of a round trip per doc.
+    fn get_docs<'a>(&'a self, collection: &'a str, ids: &'a [String]) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            let mut out = Vec::with_capacity(ids.len());
+            for id in ids {
+                out.push(self.get_doc(collection, id).await?);
+            }
+            Ok(out)
+        })
+    }
     /// set(..., {merge: true})
     fn merge_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>>;
     /// doc.create() — fails with 409-style AlreadyExists when present.
@@ -237,6 +249,24 @@ pub trait FirestoreStore: Send + Sync {
         predicate: &'static (dyn Fn(&Value) -> bool + Send + Sync),
         fields: Value,
     ) -> futures_util::future::BoxFuture<'a, ApiResult<bool>>;
+
+    /// One structured query: the docs of `collection` whose string `field`
+    /// is >= `value`, at most `limit` of them (a `runQuery` with one
+    /// `GREATER_THAN_OR_EQUAL` field filter). The default errors, so stores
+    /// that cannot query keep compiling; the REST and in-memory stores
+    /// implement it.
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let _ = (collection, field, value, limit);
+        Box::pin(async move {
+            Err(ApiError::new(501, "This Firestore store cannot run queries.").with_code("firestore_query_unsupported"))
+        })
+    }
 
     /// False only for the in-memory test store. Production [`crate::state::DomainState`]
     /// construction refuses a non-durable store, so no handler can answer a
@@ -352,6 +382,34 @@ impl FirestoreStore for MemoryFirestore {
             Ok(true)
 })
     }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let collection = collection.to_string();
+        let field = field.to_string();
+        let value = value.to_string();
+        let docs = self.docs.clone();
+        Box::pin(async move {
+            let guard = docs.read().await;
+            let out: Vec<FirestoreDoc> = guard
+                .iter()
+                .filter(|((doc_collection, _), _)| doc_collection == &collection)
+                .filter(|(_, data)| {
+                    data.get(field.as_str())
+                        .and_then(Value::as_str)
+                        .is_some_and(|stored| stored >= value.as_str())
+                })
+                .take(limit as usize)
+                .map(|(_, data)| FirestoreDoc { exists: true, data: data.clone() })
+                .collect();
+            Ok(out)
+        })
+    }
 }
 
 /// Firestore over the Google REST API. Auth is a service-account JWT
@@ -365,6 +423,25 @@ pub struct FirestoreRest {
 }
 
 const FIRESTORE_SCOPE: &str = "https://www.googleapis.com/auth/datastore";
+
+/// Documents per `documents:batchGet` request.
+pub const BATCH_GET_MAX: usize = 100;
+
+/// A `documents:batchGet` answer (`[{found: doc} | {missing: name}]`, any
+/// order) back in `ids` order. `root` is `projects/<p>/databases/(default)/documents`.
+fn batch_get_docs(root: &str, collection: &str, ids: &[String], entries: &[Value]) -> Vec<FirestoreDoc> {
+    let found: HashMap<&str, &Value> = entries
+        .iter()
+        .filter_map(|entry| entry.get("found"))
+        .filter_map(|doc| Some((doc.get("name")?.as_str()?, doc)))
+        .collect();
+    ids.iter()
+        .map(|id| match found.get(format!("{root}/{collection}/{id}").as_str()) {
+            Some(doc) => FirestoreDoc { exists: true, data: FirestoreRest::unflatten(doc) },
+            None => FirestoreDoc { exists: false, data: json!({}) },
+        })
+        .collect()
+}
 
 /// Percent-encode a query parameter value (everything outside RFC 3986
 /// unreserved characters — field names are plain identifiers today, this keeps
@@ -588,6 +665,30 @@ impl FirestoreStore for FirestoreRest {
 })
     }
 
+    fn get_docs<'a>(&'a self, collection: &'a str, ids: &'a [String]) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let token = self.access_token().await?;
+            let root = format!("projects/{}/databases/(default)/documents", self.project_id);
+            let url = format!("https://firestore.googleapis.com/v1/{root}:batchGet");
+            let requests = ids.chunks(BATCH_GET_MAX).map(|chunk| {
+                let body = json!({ "documents": chunk.iter().map(|id| format!("{root}/{collection}/{id}")).collect::<Vec<_>>() });
+                let request = self.http.post(&url).bearer_auth(&token).json(&body);
+                async move {
+                    let entries: Vec<Value> = request.send().await?.error_for_status()?.json().await?;
+                    Ok::<_, ApiError>(entries)
+                }
+            });
+            let mut entries = Vec::new();
+            for answer in futures_util::future::join_all(requests).await {
+                entries.extend(answer?);
+            }
+            Ok(batch_get_docs(&root, collection, ids, &entries))
+        })
+    }
+
     fn merge_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>> {
         Box::pin(async move {
             let token = self.access_token().await?;
@@ -656,6 +757,56 @@ impl FirestoreStore for FirestoreRest {
             self.merge_doc(collection, id, fields).await?;
             Ok(true)
 })
+    }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            let token = self.access_token().await?;
+            let url = format!(
+                "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents:runQuery",
+                self.project_id
+            );
+            let body = json!({
+                "structuredQuery": {
+                    "from": [{ "collectionId": collection }],
+                    "where": {
+                        "fieldFilter": {
+                            "field": { "fieldPath": field },
+                            "op": "GREATER_THAN_OR_EQUAL",
+                            "value": { "stringValue": value },
+                        }
+                    },
+                    "limit": limit,
+                }
+            });
+            let response = self
+                .http
+                .post(&url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await?;
+            let status = response.status();
+            let payload: Value = response.json().await?;
+            if !status.is_success() {
+                return Err(ApiError::new(
+                    502,
+                    format!("Firestore runQuery failed ({status}): {payload}"),
+                ));
+            }
+            let entries = payload.as_array().cloned().unwrap_or_default();
+            Ok(entries
+                .iter()
+                .filter_map(|entry| entry.get("document"))
+                .map(|doc| FirestoreDoc { exists: true, data: Self::unflatten(doc) })
+                .collect())
+        })
     }
 }
 
@@ -823,5 +974,30 @@ mod tests {
         }
         // No refetch happened: the cached map is untouched.
         assert_eq!(verifier.keys.read().await.len(), 1);
+    }
+
+    #[test]
+    fn batch_get_answers_come_back_in_id_order() {
+        let root = "projects/p/databases/(default)/documents";
+        let entries = vec![
+            json!({ "missing": format!("{root}/events/b") }),
+            json!({ "found": { "name": format!("{root}/events/c"), "fields": { "n": { "integerValue": "3" } } } }),
+            json!({ "found": { "name": format!("{root}/events/a"), "fields": { "n": { "integerValue": "1" } } } }),
+        ];
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string(), "a".to_string()];
+        let docs = batch_get_docs(root, "events", &ids, &entries);
+        assert_eq!(docs.iter().map(|d| d.exists).collect::<Vec<_>>(), vec![true, false, true, true]);
+        assert_eq!(docs[0].data["n"], 1);
+        assert_eq!(docs[2].data["n"], 3);
+        assert_eq!(docs[3].data["n"], 1);
+    }
+
+    #[tokio::test]
+    async fn default_get_docs_reads_each_doc() {
+        let store = MemoryFirestore::new();
+        store.seed("c", "x", json!({ "v": 1 })).await;
+        let docs = store.get_docs("c", &["x".to_string(), "y".to_string()]).await.unwrap();
+        assert!(docs[0].exists && !docs[1].exists);
+        assert_eq!(docs[0].data["v"], 1);
     }
 }

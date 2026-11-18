@@ -10,7 +10,7 @@ the silhouette.  Output is ``OUT/{version}.png`` (8-bit alpha, clean-art size);
 ``clean-art-match warp`` carries it into the scan frame the SPA overlays.
 
   gpu-lease run --name clean-art-sam --mb 4096 -- \
-    /home/nez/Projects/ai-toolkit/venv/bin/python scripts/build-clean-art-figure-masks.py \
+    /home/nez/Projects/AI/ai-toolkit/venv/bin/python scripts/build-clean-art-figure-masks.py \
     --prompts prompts.jsonl --dump DUMP --out OUT
 """
 from __future__ import annotations

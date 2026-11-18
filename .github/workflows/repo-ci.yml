@@ -1,0 +1,138 @@
+# CI for the repository's own scripts (the deploy gate). docs/CI.md.
+# `repo-gate` is the check scripts/require-ci-green.sh and branch protection read. It always runs and passes only when every job it needs passed.
+# Nothing here deploys, uses a secret, or runs on a self-hosted runner.
+name: repo-ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate-tests:
+    # The deploy gate script and the entry points that call it, tested against fakes (no network, no deploy);
+    # and the k3s manifest check, which reads infra/k3s/*.yaml only (no cluster access).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: require-ci-green tests
+        run: bash scripts/require-ci-green.test.sh
+      - name: deploy entry points refuse on red CI
+        run: bash scripts/deploy-gate-callers.test.sh
+      - name: gitleaks for the pre-push hook tests
+        # scripts/pre-push-hook.test.sh runs the hook's secret scan with real gitleaks and exits 2 without it: a scan
+        # that silently skipped itself is never a pass. The same pinned 8.30.1 as .github/workflows/secrets-ci.yml.
+        env:
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d)
+          curl -sSfL -o "$dir/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "$GITLEAKS_SHA256  $dir/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          sudo install -m 0755 "$dir/gitleaks" /usr/local/bin/gitleaks
+          gitleaks version
+      - name: pre-push hook tests
+        run: bash scripts/pre-push-hook.test.sh
+      - name: auto-deploy-rust tests
+        run: bash scripts/auto-deploy-rust.test.sh
+      - name: run-flow-tests tests
+        run: bash scripts/run-flow-tests.test.sh
+      - name: flow tests switch the router's workers off
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/flow-test-workers-check.sh --base "$base"
+      - name: flow-test-workers-check tests
+        run: bash scripts/flow-test-workers-check.test.sh
+      - name: unsafe-code check tests
+        run: bash scripts/rust-lints-check.test.sh
+      - name: every pokoin-rust crate forbids unsafe code
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/rust-lints-check.sh --base "$base"
+      - name: migration rules tests
+        run: bash scripts/check-migrations.test.sh
+      - name: new and changed migrations follow the rules
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            # HEAD rather than the empty tree the other two checks fall back to: scripts/check-migrations.sh
+            # compares committed trees, so a base that is not a commit stops it with exit 2 instead of
+            # silently checking nothing. Only the repository's first commit can take this branch.
+            base=$(git rev-parse HEAD^ 2>/dev/null) || base=$(git rev-parse HEAD)
+          fi
+          bash scripts/check-migrations.sh --base "$base"
+      - name: k3s manifest check tests
+        run: bash scripts/k3s-manifest-check.test.sh
+      - name: k3s manifest keeps pokoin-api Guaranteed
+        run: bash scripts/k3s-manifest-check.sh
+      - name: check-features tests
+        run: bash scripts/check-features.test.sh
+      - name: feature map is true and may only grow
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "${PUSH_BEFORE//0/}" != "" ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          bash scripts/check-features.sh --base "$base"
+      - name: shellcheck
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh
+
+  repo-gate:
+    # Add later jobs to `needs`; the loop below checks every job listed there.
+    needs: [gate-tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          bad=0
+          for job in $(echo "$NEEDS" | jq -r 'keys[]'); do
+            result=$(echo "$NEEDS" | jq -r --arg j "$job" '.[$j].result')
+            echo "$job=$result"
+            if [ "$result" != success ]; then bad=1; fi
+          done
+          if [ "$bad" != 0 ]; then echo "::error::repo-gate: a needed job did not succeed"; exit 1; fi
+          echo "repo-gate: every needed job succeeded"

@@ -1,9 +1,18 @@
 //! Native one-shot Pi timer jobs. Never invoke the retired Node backend.
 mod cardtrader;
 mod eur;
+mod facet_prices;
+mod fallback_prices;
+mod fee_once;
+mod fee_profile;
+mod fx_rates;
+mod group_products;
+mod net_prices;
+mod pricing_groups;
 mod referral;
 mod reprice;
 mod search;
+mod unpriced;
 
 use anyhow::{bail, Context, Result};
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -19,6 +28,8 @@ struct Options {
     apply: bool,
     /// `--csv=<path>`: where a job writes its CSV report.
     csv: Option<String>,
+    /// `--game=<slug>`: the one game a per-game job works on.
+    game: Option<String>,
 }
 impl Options {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
@@ -41,6 +52,9 @@ impl Options {
             if let Some(path) = arg.strip_prefix("--csv=").filter(|v| !v.trim().is_empty()) {
                 options.csv.get_or_insert_with(|| path.trim().to_string());
             }
+            if let Some(game) = arg.strip_prefix("--game=").filter(|v| !v.trim().is_empty()) {
+                options.game.get_or_insert_with(|| game.trim().to_string());
+            }
         }
         options
     }
@@ -53,6 +67,15 @@ pub async fn run(name: &str) -> Result<()> {
         "referral-reconcile" => referral::run(&options).await,
         "cardtrader-seller-reconcile" => cardtrader::run(&options).await,
         "cardtrader-pro-floor-reprice" => reprice::run(&options).await,
+        "cardtrader-facet-prices" => facet_prices::run(&options).await,
+        "price-unpriced-listings" => unpriced::run(&options).await,
+        "price-fallback-listings" => fallback_prices::run(&options).await,
+        "cardtrader-net-prices" => net_prices::run(&options).await,
+        "cardtrader-fee-once" => fee_once::run(&options).await,
+        "cardtrader-fee-profile" => fee_profile::run(&options).await,
+        "cardtrader-group-products" => group_products::run(&options).await,
+        "pricing-groups-daily" => pricing_groups::run(&options).await,
+        "fx-rates-daily" => fx_rates::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
@@ -91,9 +114,10 @@ fn accounts_firestore() -> Result<pokoin_accounts::firestore::Firestore> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 async fn redis_connection() -> Result<redis::aio::ConnectionManager> {
-    let host = std::env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("REDIS_PORT").unwrap_or_else(|_| "6380".into());
-    let client = redis::Client::open(format!("redis://{host}:{port}"))?;
+    // The API's own Valkey (VALKEY_URL / REDIS_URL, else host and port), so a
+    // job's seller lock is the one the API's reconcile takes.
+    let url = pokoin_config::Config::from_env().valkey_url.unwrap_or_else(|| "redis://127.0.0.1:6380".into());
+    let client = redis::Client::open(url)?;
     tokio::time::timeout(Duration::from_secs(5), client.get_connection_manager())
         .await
         .context("Redis connect timed out")?
@@ -123,6 +147,7 @@ mod tests {
         assert!(options.apply && !options.dry_run);
         assert_eq!(options.csv.as_deref(), Some("/tmp/x.csv"));
         assert_eq!(Options::parse(["--seller=".into()]).seller, None);
+        assert_eq!(Options::parse(["--game=riftbound".into(), "--game=magic".into()]).game.as_deref(), Some("riftbound"));
     }
     #[test]
     fn timer_flags_keep_first_since_and_dry_run() {
@@ -144,5 +169,12 @@ mod tests {
     #[tokio::test]
     async fn unknown_job_fails_before_opening_dependencies() {
         assert!(run("not-a-job").await.is_err());
+    }
+    #[test]
+    fn the_fallback_reprice_job_is_registered() {
+        // The nightly timer runs `job price-fallback-listings`; a name the
+        // dispatcher does not know exits non-zero without touching anything.
+        let arm = "\"price-fallback-listings\" => fallback_prices::run(&options).await";
+        assert!(include_str!("mod.rs").contains(arm));
     }
 }

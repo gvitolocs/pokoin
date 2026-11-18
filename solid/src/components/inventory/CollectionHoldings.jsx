@@ -3,15 +3,16 @@ import {
   cancelListing,
   createListing,
   fetchOwnedCollection,
-  fetchPriceCheck,
+  fetchPriceChecksByGame,
   imageSrc,
   removeCollectionItem,
   requestNftShipping,
 } from '@market/api.js';
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
+import { formatSellerPrice, pknFromPriceInput, priceInputFromPkn } from '@market/seller-currency.js';
 import { game } from '@market/game.js';
 import { inventoryBooks } from '@market/inventory-book.js';
-import { priceCheckItem } from '@market/inventory-price.js';
+import { gamePrices, priceCheckGroups, priceGame } from '@market/inventory-price.js';
 import ScanImage from '../ScanImage.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
 import { loadOwnerBook } from '../../lib/owner-book.js';
@@ -19,13 +20,21 @@ import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { sellerCurrency, sellerSettings } from '../../stores/buyer.js';
-import { previewCollection } from '../../pages/mypokoin-preview-fixture.js';
+import { previewCollection } from '../../pages/mypokoin-preview.js';
+import { createTabCache } from '../../lib/tab-cache.js';
+import { memoizeByRows, memoizePair } from '../../lib/derived-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 
 const ADDRESS_FIELDS = ['name', 'line1', 'city', 'postalCode', 'country'];
 
 // The last holdings read, in memory only: a revisit of the tab repaints them
 // while they refresh instead of blanking to a skeleton.
-let holdingsMemo = { uid: '', rows: null };
+const holdingsCache = createTabCache();
+
+// Coming back to the tab rebuilds this desk over the same two arrays, and
+// splitting them is the same answer: both walks are remembered per book.
+const partitionOf = memoizeByRows(partitionHoldings);
+const deskOf = memoizePair(splitOwnedDesk);
 
 function canShip(row) {
   const status = String(row.physicalShippingStatus || '');
@@ -37,9 +46,7 @@ function cardLabel(row) {
 }
 
 function listingMeta(listing) {
-  const price = Number(listing?.pricePkn ?? listing?.price_pkn ?? 0);
   return [
-    Number.isFinite(price) && price > 0 ? `${price} PKN` : null,
     listing?.condition,
     listing?.language,
     Number(listing?.quantityAvailable ?? listing?.quantity_available) > 1
@@ -99,18 +106,16 @@ function HoldingRow(props) {
             <span>Ask</span>
             <span class="collection-ask-field">
               <input
-                inputmode="numeric"
+                inputmode="decimal"
                 class={{ 'is-suggested': Boolean(props.suggested) }}
-                value={props.ask}
+                value={priceInputFromPkn(props.ask, props.currency)}
                 placeholder="0"
                 aria-label={`Ask price for ${cardLabel(row())}`}
-                onInput={(event) => {
-                  const value = event.target.value.replace(/[^\d]/g, '');
-                  event.target.value = value;
-                  props.onAsk(row().id, value);
+                onChange={(event) => {
+                  props.onAsk(row().id, pknFromPriceInput(event.target.value, props.currency) ?? '');
                 }}
               />
-              <em class="collection-ask-unit">{props.currency || 'PKN'}</em>
+              <em class="collection-ask-unit">{props.currency || sellerCurrency()}</em>
             </span>
           </label>
         </Show>
@@ -143,7 +148,7 @@ function ListedRow(props) {
   const listing = () => props.entry.listing;
   const row = () => props.entry.holding || listing();
   const name = () => cardLabel(row());
-  const chips = () => listingMeta(listing()).filter((part) => !String(part).endsWith(' PKN'));
+  const chips = () => listingMeta(listing());
   const price = () => Number(listing()?.pricePkn ?? listing()?.price_pkn ?? 0);
   return (
     <article
@@ -161,7 +166,7 @@ function ListedRow(props) {
         <Show when={setLine(row())}><span class="thread-meta">{setLine(row())}</span></Show>
         <FacetChips chips={['Listed', ...chips()]} />
         <Show when={Number.isFinite(price()) && price() > 0}>
-          <p class="collection-tile-price">{price()} {props.currency || 'PKN'}</p>
+          <p class="collection-tile-price">{formatSellerPrice(price(), props.currency || sellerCurrency())}</p>
         </Show>
         <button type="button" class="btn ghost collection-move" disabled={props.busy} onClick={() => props.onHold(props.entry)}>
           ← Hold
@@ -210,7 +215,7 @@ function facetOptions(rows) {
 export default function CollectionHoldings(props) {
   const uid = () => authUid() || accountProfile()?.uid || '';
   const firstUid = untrack(uid);
-  const [rows, setRows] = createSignal(holdingsMemo.uid && holdingsMemo.uid === firstUid ? holdingsMemo.rows : null);
+  const [rows, setRows] = createSignal(holdingsCache.get(firstUid) ?? null);
   // Listed copies come from the seller's MyPokoin book (stored, stamp-checked).
   const [listings, setListings] = createSignal(inventoryBooks.peek(firstUid, game().id)?.rows || []);
   const [error, setError] = createSignal('');
@@ -227,6 +232,9 @@ export default function CollectionHoldings(props) {
   const [asks, setAsks] = createSignal({});
   const [suggestedAsks, setSuggestedAsks] = createSignal({});
   const editedAsks = new Set();
+  const [heldLimit, setHeldLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [listedLimit, setListedLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [nftLimit, setNftLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   async function loadCollection() {
     setError('');
@@ -241,7 +249,7 @@ export default function CollectionHoldings(props) {
           : null,
       ]);
       const items = Array.isArray(owned.items) ? owned.items : [];
-      holdingsMemo = { uid: seller, rows: items };
+      holdingsCache.set(seller, items);
       setRows(items);
     } catch (err) {
       console.error('collection load failed', err);
@@ -265,17 +273,31 @@ export default function CollectionHoldings(props) {
         setError('');
         return;
       }
+      // The stored book paints at once and is only asked for again once the
+      // cached one ages: switching tabs back and forth reads the memory copy.
+      const seller = uid();
+      setRows(holdingsCache.get(seller) ?? null);
+      if (holdingsCache.fresh(seller)) return undefined;
       loadCollection().catch(() => setRows([]));
     },
   );
 
-  const nft = createMemo(() => partitionHoldings(rows() || []).nft);
-  const desk = createMemo(() => splitOwnedDesk(rows() || [], listings()));
+  // Listing, holding, dragging and removing update the rows in place of a
+  // refetch; the cache has to carry the same book to the next visit.
+  createEffect(rows, (value) => {
+    const seller = uid();
+    if (seller && Array.isArray(value) && value.length && holdingsCache.get(seller) !== value) {
+      holdingsCache.set(seller, value);
+    }
+  });
+
+  const nft = createMemo(() => partitionOf(rows() || []).nft);
+  const desk = createMemo(() => deskOf(rows() || [], listings()));
   const shippable = () => nft().filter(canShip);
   const heldPhysical = createMemo(() => desk().held.filter((entry) => entry.kind !== 'nft'));
   const heldNft = () => desk().held.filter((entry) => entry.kind === 'nft');
-  const visibleHeld = () => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() }));
-  const visibleListed = () => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() }));
+  const visibleHeld = createMemo(() => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() })));
+  const visibleListed = createMemo(() => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() })));
   const heldFacets = () => facetOptions(heldPhysical().map((entry) => entry.holding));
   const listedFacets = () => facetOptions(desk().listed.map((entry) => entry.holding || entry.listing));
   const ownedCards = () => (rows() || []).reduce((sum, row) => sum + (Number(row.quantity) > 0 ? Number(row.quantity) : 0), 0)
@@ -306,6 +328,7 @@ export default function CollectionHoldings(props) {
 
   const heldKey = createMemo(() => heldPhysical().map((entry) => [
     entry.holding.id,
+    priceGame(entry.holding, game().id),
     entry.holding.cardId || entry.holding.blueprintId || '',
     entry.holding.condition || '',
     entry.holding.language || '',
@@ -320,17 +343,18 @@ export default function CollectionHoldings(props) {
       let cancelled = false;
       (async () => {
         try {
-          const items = holdings.map(priceCheckItem).filter((item) => /^\d+$/.test(item.cardId));
-          if (!items.length) return;
+          // One price check per game: card ids are per game.
+          const gameId = untrack(game).id;
+          const groups = priceCheckGroups(holdings, gameId);
+          if (!groups.length) return;
           const token = await getBearer();
-          const data = await fetchPriceCheck(items.slice(0, 100), token);
+          const byGame = await fetchPriceChecksByGame(groups, token);
           if (cancelled) return;
-          const prices = data?.prices || {};
           const marks = {};
           const next = { ...untrack(asks) };
           for (const holding of holdings) {
             if (editedAsks.has(holding.id)) continue;
-            const ask = suggestedHoldingAsk(prices, holding);
+            const ask = suggestedHoldingAsk(gamePrices(byGame, holding, gameId), holding);
             if (!ask) continue;
             next[holding.id] = ask;
             marks[holding.id] = true;
@@ -350,7 +374,7 @@ export default function CollectionHoldings(props) {
   async function listHolding(holding) {
     const price = Number(asks()[holding.id] || 0);
     if (!Number.isInteger(price) || price <= 0) {
-      setError(`Set an ask in PKN before listing ${cardLabel(holding)}.`);
+      setError(`Set an ask in ${sellerCurrency()} before listing ${cardLabel(holding)}.`);
       return;
     }
     if (props.preview) {
@@ -372,7 +396,7 @@ export default function CollectionHoldings(props) {
       setRows((current) => (current || []).map((row) => (
         row.id === holding.id ? { ...row, listingId: listing.id } : row
       )));
-      setMessage(`${cardLabel(holding)} is listed at ${price} PKN.`);
+      setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
       return;
     }
     const shipFrom = String(sellerSettings()?.shipFromCountry || '').trim().toUpperCase();
@@ -413,7 +437,7 @@ export default function CollectionHoldings(props) {
         row.id === holding.id ? { ...row, listingId: listing.id } : row
       )));
     }
-    setMessage(`${cardLabel(holding)} is listed at ${price} PKN.`);
+    setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
   }
 
   async function holdListing(entry) {
@@ -605,7 +629,7 @@ export default function CollectionHoldings(props) {
                   fallback={<p class="page-lede">{heldPhysical().length ? 'No cards match this search.' : 'Nothing held back. Drop a listed card here to stop selling it.'}</p>}
                 >
                   <div class="collection-tile-grid" data-testid="collection-physical">
-                    <For each={visibleHeld()} keyed={(entry) => entry.holding.id}>
+                    <For each={visibleHeld().slice(0, heldLimit())} keyed={(entry) => entry.holding.id}>
                       {(entry) => (
                         <HoldingRow
                           row={entry().holding}
@@ -625,12 +649,15 @@ export default function CollectionHoldings(props) {
                       )}
                     </For>
                   </div>
+                  <Show when={visibleHeld().length > heldLimit()}><button type="button" class="btn ghost" onClick={() => setHeldLimit(nextCollectionBatch(heldLimit(), visibleHeld().length))}>Show more</button></Show>
                 </Show>
                 <Show when={heldNft().length}>
                   <div class="collection-tile-grid" data-testid="collection-nft">
                     <p class="page-lede">NFT · {heldNft().length} holding{heldNft().length === 1 ? '' : 's'}</p>
-                    <For each={heldNft()}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <For each={heldNft().slice(0, nftLimit())}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <Show when={heldNft().length > nftLimit()}><button type="button" class="btn ghost" onClick={() => setNftLimit(nextCollectionBatch(nftLimit(), heldNft().length))}>Show more</button></Show>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>
@@ -652,7 +679,7 @@ export default function CollectionHoldings(props) {
                   fallback={<p class="page-lede">{desk().listed.length ? 'No cards match this search.' : 'No cards listed. Drop one here to sell it.'}</p>}
                 >
                   <div class="collection-tile-grid">
-                    <For each={visibleListed()} keyed={(entry) => String(entry.listing.id)}>
+                    <For each={visibleListed().slice(0, listedLimit())} keyed={(entry) => String(entry.listing.id)}>
                       {(entry) => (
                         <ListedRow
                           entry={entry()}
@@ -671,6 +698,7 @@ export default function CollectionHoldings(props) {
                       )}
                     </For>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>

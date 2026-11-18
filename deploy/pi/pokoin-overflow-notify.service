@@ -1,0 +1,12 @@
+[Unit]
+Description=Notify nezopt that the Pi API release or env changed (nezopt pulls, builds and rolls the overflow)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pokoin-notify
+# Let a deploy finish (the installer restarts pokoin-rust-api after switching `current`).
+ExecStartPre=/bin/sleep 10
+# `-`: nezopt being down is not a Pi failure; its hourly backstop catches up.
+ExecStart=-/usr/local/lib/pokoin/pokoin-overflow-notify release
+TimeoutStartSec=60

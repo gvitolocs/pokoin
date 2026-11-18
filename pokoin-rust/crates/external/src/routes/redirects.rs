@@ -117,6 +117,22 @@ pub async fn cardmarket(State(state): State<DomainState>, headers: HeaderMap, ur
     Ok(response)
 }
 
+/// `GET /api/cardmarket-matches` — what the Cardmarket button opens (`primary`, same as the redirect) and every
+/// stored verified product for the card, so the SPA can offer a chooser when there is more than one.
+pub async fn cardmarket_matches(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
+    let id=redirects::clean_marketplace_id(&query_first(&uri,"id").or_else(||query_first(&uri,"cardId")).unwrap_or_default());
+    let hint=redirects::clean_marketplace_id(&query_first(&uri,"blueprintId").or_else(||query_first(&uri,"ct_id")).or_else(||query_first(&uri,"ctId")).unwrap_or_default());
+    if id.is_empty()&&hint.is_empty(){return Err(ApiError::bad_request("Missing or invalid blueprint id."))}
+    let game=game_from_headers(&headers,&uri);
+    let locale=query_first(&uri,"locale").filter(|s|s.len()==2&&s.chars().all(|c|c.is_ascii_lowercase())).unwrap_or_else(||"en".into());
+    let (primary,matches)=match crate::cardmarket::matches(&state.db,&game,&id,&hint,&locale).await{
+        Ok(found)=>found,
+        Err(error)if error.status==409=>return Ok(json_response(409,json!({"code":error.code.unwrap_or_default(),"message":error.message}))),
+        Err(error)=>return Err(error),
+    };
+    send_redirect(&primary,true,json!({"primary":primary,"matches":matches}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
