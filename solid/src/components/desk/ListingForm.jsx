@@ -94,7 +94,8 @@ function CameraIcon() {
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
  * As the row editor (MyPokoin) `props.editing` is the inventory row and
- * `presets`, `currencies`, `moreFlags` and `onDelete` fill the edit side.
+ * `presets`, `currencies`, `moreFlags`, `onDelete` and `preview` fill the edit
+ * side; in preview a save writes the fixture row and never calls the API.
  */
 export default function ListingForm(props) {
   const navigate = useGameNavigate();
@@ -382,7 +383,50 @@ export default function ListingForm(props) {
     return sameBox ? keptLocation() : nextBoxLocation(stockBoxes(), current);
   };
 
+  /** The PATCH body of an edit, or null when the form does not validate. */
+  function editDraft() {
+    const amount = price()
+      ? listingPriceToPkn(price(), currency())
+      : listingPriceToPkn(graphPrice(), currency());
+    const quantity = Number.parseInt(qty(), 10);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
+      setError('Enter a valid price and quantity.');
+      return null;
+    }
+    const flags = chips();
+    if (flags.graded && (!company().trim() || !grade().trim() || !cert().trim())) {
+      setError('Enter grading company, grade and certification ID.');
+      return null;
+    }
+    return editListingBody({
+      amount,
+      quantity,
+      condition: condition(),
+      language: language(),
+      foil: foil(),
+      flags,
+      comment: comment(),
+      company: company(),
+      grade: grade(),
+      cert: cert(),
+      location: locationValue(),
+      // An edit only moves the box slot when the server said where it is.
+      sendLocation: stockReady() && ownLocation() !== null,
+      priceTyped,
+      sellerUid: uid() || props.editing?.sellerUid,
+      showSigned: Boolean(props.moreFlags),
+      showAltered: Boolean(props.moreFlags),
+    }, props.editing);
+  }
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
+    if (isEditing() && props.preview) {
+      // The layout preview has no API: the edit lands on the fixture row through
+      // the same callback the live save uses for its answer.
+      const draft = editDraft();
+      if (draft) props.onListed?.({ ...props.editing, ...draft, id: editingId() });
+      return;
+    }
     if (!signedIn()) {
       navigate(authFrom(props.fromPath));
       return;
@@ -394,6 +438,9 @@ export default function ListingForm(props) {
       setShipGateOpen(true);
       return;
     }
+    // An edit builds and validates its body in editDraft; below is the create path.
+    const edit = editing ? editDraft() : null;
+    if (editing && !edit) return;
     const amount = price()
       ? listingPriceToPkn(price(), currency())
       : listingPriceToPkn(graphPrice(), currency());
@@ -463,25 +510,7 @@ export default function ListingForm(props) {
         collectorNumber: props.identity.number,
       };
       const saved = editing
-        ? await updateListing(id, editListingBody({
-          amount,
-          quantity,
-          condition: condition(),
-          language: language(),
-          foil: foil(),
-          flags,
-          comment: comment(),
-          company: company(),
-          grade: grade(),
-          cert: cert(),
-          location: locationValue(),
-          // An edit only moves the box slot when the server said where it is.
-          sendLocation: stockReady() && ownLocation() !== null,
-          priceTyped,
-          sellerUid: uid() || props.editing?.sellerUid,
-          showSigned: Boolean(props.moreFlags),
-          showAltered: Boolean(props.moreFlags),
-        }, props.editing), token)
+        ? await updateListing(id, edit, token)
         : await createListing({
           cardId: publicCardId(row),
           sellerName: sellerName(),
@@ -656,8 +685,8 @@ export default function ListingForm(props) {
           <button
             type="button"
             class="btn list-btn"
-            disabled={!ready() || saving() || (!signedIn() && ready())}
-            title={signedIn() ? 'Save listing changes' : 'Sign in to list'}
+            disabled={saving() || (!props.preview && (!ready() || !signedIn()))}
+            title={props.preview || signedIn() ? 'Save listing changes' : 'Sign in to list'}
             onClick={() => submit()}
           >
             {saving() ? 'Saving…' : 'Save changes'}

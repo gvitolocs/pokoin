@@ -39,7 +39,7 @@ export default function ListingEditDialog(props) {
   onMount(() => {
     (async () => {
       if (props.preview) {
-        setPresets(listingPresets(props.previewComps?.() || {}, row()));
+        setPresets(listingPresets(props.previewComps || {}, row()));
         return;
       }
       try {
@@ -87,6 +87,7 @@ export default function ListingEditDialog(props) {
         presets={presets()}
         currencies={currencies()}
         moreFlags
+        preview={props.preview}
         fromPath="/mypokoin/inventory"
         onCancelEdit={() => props.onClose()}
         onListed={(saved) => {
