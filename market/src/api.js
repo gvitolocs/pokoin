@@ -25,6 +25,7 @@ import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.j
 import { withGameQuery, withGameQueryFor, isPokemonGame, gameHeadersForUrl, gameRequestHeaders, gameRequestHeadersFor, catalogGameFromUrl, game, publicGamePath } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
 import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
+import { cardmarketChoices } from './cardmarket-matches.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { SCAN_API_BASE, scanIdentifyUrl } from './scan-live.js';
 import { getSearchLang } from './locale.js';
@@ -707,7 +708,7 @@ export async function fetchLastMedianPknMap(cardIds) {
 }
 
 /** Batch cheapest listed PKN per card id (marketplace-card-cheapest-price). */
-export async function fetchCheapestPricePknMap(cardIds) {
+export async function fetchCheapestPricePknMap(cardIds, { strict = false } = {}) {
   const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 50);
   if (!ids.length) {
     return {};
@@ -723,7 +724,9 @@ export async function fetchCheapestPricePknMap(cardIds) {
       }
     }
     return byId;
-  } catch (_) {
+  } catch (err) {
+    // strict: a failed read is not "no listing"; the caller retries it.
+    if (strict) throw err;
     return {};
   }
 }
@@ -999,6 +1002,20 @@ export function fetchCardTraderAssets(token) {
 /** Stored collection-value days. The server prices the pile once per UTC day. */
 export function fetchPortfolioHistory(token) {
   return getJson('/api/marketplace-portfolio-history', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/**
+ * Dashboard top movers: the seller's own printings that moved most inside the
+ * chart's window. `days` is that window in days, or "max".
+ */
+export function fetchPortfolioMovers(token, days) {
+  const query = days === undefined || days === null || days === '' ? '' : `?days=${days}`;
+  return getJson(`/api/marketplace-portfolio-movers${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2948,6 +2965,17 @@ export async function fetchCardmarketRedirect(card) {
   return data.url || data.redirect || data.href || '';
 }
 
+/** Every stored verified Cardmarket product for the card, and what the redirect opens (cardmarket-matches.js). */
+export async function fetchCardmarketMatches(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const leftover = leftoverBlueprintId(card);
+  const params = new URLSearchParams({ id });
+  if (leftover && leftover !== id) {
+    params.set('blueprintId', leftover);
+  }
+  return cardmarketChoices(await getJson(`/api/cardmarket-matches?${params}`));
+}
+
 /** CardTrader leftover blueprint. Never a public card_id (those 404 on cardtrader.com). */
 export function leftoverBlueprintId(card) {
   if (card && typeof card === 'object') {
@@ -3270,7 +3298,51 @@ export function fetchSellerShop(username, {
   return request;
 }
 
-/** PowerTools pricing strategies + pricer defaults (users/{uid}). */
+/**
+ * Pricing groups: `{ groups, memberships: [[listingId, groupId]] }`
+ * (market/src/pricer.js, docs/PRICING.md "Pricer").
+ */
+export function fetchPricingGroups(token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Create or edit a group (`{ group: { id?, name, strategyId, autoDaily } }`,
+ * optionally `add` to start it with listings), or move listings
+ * (`{ groupId, add: [listingId], remove: [listingId] }`).
+ */
+export function savePricingGroup(body, token) {
+  return getJson('/api/marketplace-pricing-groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function deletePricingGroup(id, token) {
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-pricing-groups?${params}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/**
+ * Plan or apply prices: `{ groupId }` (the group's strategy over its
+ * listings) or `{ strategyId, listingIds }`, with `dryRun: true` for the plan
+ * only. Answers `{ plan, scoped, noComp, unchanged, activated, applied, failed }`.
+ */
+export function applyPricing(body, token) {
+  return getJson('/api/marketplace-pricing-groups/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+/** Named pricing strategies, the groups, and the pricer defaults (users/{uid}). */
 export function fetchPricingStrategies(token) {
   return getJson('/api/marketplace-pricing-strategies', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

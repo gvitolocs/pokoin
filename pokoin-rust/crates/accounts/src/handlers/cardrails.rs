@@ -2,7 +2,9 @@
 //! `cardrails-authorize` (the consent page's browser call) and
 //! `cardrails-token` (the Card Rails API's server-to-server code exchange,
 //! which also hands over a seller grant when asked — see
-//! [`crate::domain::cardrails`]).
+//! [`crate::domain::cardrails`]) and `cardrails-membership` (the Card Rails
+//! API's server-to-server Silver lookup, so Pokoin Silver members get Card
+//! Rails Pro for as long as they stay Silver).
 //!
 //! The one-time code is stored only as its SHA-256 hash, shared by every API
 //! instance through the marketplace **writer** database
@@ -11,8 +13,10 @@
 //! `POKOIN_CARDRAILS_CLIENT_SECRET`. Neither the code, the verifier nor the
 //! secret is ever logged.
 
+use std::collections::HashMap;
+
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -180,6 +184,104 @@ async fn cardrails_token_inner(
         }
     }
     Ok(no_store_json(StatusCode::OK, identity, false))
+}
+
+/// `GET /api/cardrails-membership?uid=<uid>` (or `?email=<email>`) —
+/// server-to-server, bearer `POKOIN_CARDRAILS_CLIENT_SECRET` like the token
+/// exchange, no CORS. Answers whether the Pokoin account is Silver, by the
+/// site's own rule (`users/{uid}.role` is `silver`/`admin`, or `silverUntil`
+/// lies in the future): `{uid, email, silver, silverUntil, role, profile}`.
+/// Card Rails grants its Pro features on `silver` and re-asks at least daily.
+pub async fn cardrails_membership(
+    State(state): State<DomainState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    match cardrails_membership_inner(&state, &headers, &params).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn cardrails_membership_inner(
+    state: &DomainState,
+    headers: &HeaderMap,
+    params: &HashMap<String, String>,
+) -> Result<Response> {
+    let secret = state
+        .config()
+        .cardrails_client_secret
+        .as_deref()
+        .filter(|secret| !secret.is_empty());
+    let Some(secret) = secret else {
+        return Err(ApiError::unavailable("not_configured"));
+    };
+    let provided = bearer_value(authorization(headers)).unwrap_or_default();
+    if !super::poko::timing_safe_equal_text(provided, secret) {
+        return Err(ApiError::unauthorized("invalid_client"));
+    }
+
+    let uid = params.get("uid").map(|v| v.trim()).unwrap_or_default();
+    let email = params
+        .get("email")
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if (uid.is_empty() && email.is_empty()) || uid.len() > 128 || email.len() > 254 {
+        return Err(ApiError::bad_request("invalid_request"));
+    }
+
+    // An email resolves to the Pokoin uid first; unknown emails are 404 so
+    // Card Rails can tell "not a Pokoin user" from "not Silver".
+    let (uid, email) = if uid.is_empty() {
+        match state.auth()?.get_user_by_email(&email).await {
+            Ok(user) => (user.uid, user.email.to_ascii_lowercase()),
+            Err(error) if error.code == "auth/user-not-found" => {
+                return Err(ApiError::not_found("user_not_found"));
+            }
+            Err(error) => {
+                tracing::error!(code = %error.code, status = error.status, "cardrails membership: identity lookup failed");
+                return Err(ApiError::unavailable("identity_unavailable"));
+            }
+        }
+    } else {
+        (uid.to_string(), email)
+    };
+
+    let firestore = state.firestore()?;
+    let document = firestore.doc(format!("users/{uid}")).get().await?;
+    let now_ms = state.clock().now().timestamp_millis();
+    let membership = match &document {
+        Some(document) => domain::membership_from_profile(
+            &document.get_str("role"),
+            document.get_timestamp_millis("silverUntil"),
+            now_ms,
+        ),
+        None => domain::Membership::default(),
+    };
+    let email = if email.is_empty() {
+        document
+            .as_ref()
+            .map(|document| document.get_str("email").trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    } else {
+        email
+    };
+    let silver_until = membership
+        .silver_until_ms
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+    Ok(no_store_json(
+        StatusCode::OK,
+        json!({
+            "uid": uid,
+            "email": email,
+            "silver": membership.silver,
+            "silverUntil": silver_until,
+            "role": membership.role,
+            "profile": document.is_some(),
+        }),
+        false,
+    ))
 }
 
 /// The seller grant for a Card Rails sign-in, replacing the previous one. The

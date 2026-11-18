@@ -153,31 +153,215 @@ Listing €0.13 instead (the old push) nets 11.78 c = 24 PKN: 2 PKN short.
 - The integer core (PKN, basis points, 10⁻⁸ PKN) is proved with Verus:
   `pokoin-rust/verus/README.md`.
 
-## The Pricer (Listings toolbar)
+## The Pricer (MyPokoin → Pricer, rebuilt 2026-11-04)
 
-**Pricer…** on the Listings board opens a dialog on the same saved
-strategies as the Pricing page (`users/{uid}` `pricingStrategies`, through
-`/api/pricing-strategies`), not a second model:
+The seller picks listings into **pricing groups**, and each group is priced
+by one **named strategy**.
 
-- **Source**: CardTrader, or Pokoin (the cheapest Pokoin ask, else the sold
-  median). eBay and TCGplayer are shown, not offered yet.
-- **Basis**: same card and facets (`ctMatchedPkn`), cheapest offer, sold
-  median. **Fee-exclusive** (default on) prices from the net; off, from the
-  CardTrader ask.
-- **Action**: match, undercut or premium, by % and by a fixed PKN amount.
-  **Rounding**: none, whole PKN (nearest), down, up. **Minimum** price:
-  rounding never goes below it; a target at or below 0 is skipped.
-- **Scope**: the board's current view or all listings, game, live or paused,
-  condition, language; "put paused listings on sale" sets them active.
-  Sold-out and removed listings are never repriced.
+- **Strategies** (`users/{uid}.pricingStrategies`, at most 50) are named
+  rules for *how* to price. They have no scope. Names are required and unique
+  per seller, ignoring case. The fields are:
+  - **Source and basis**: CardTrader (current offers, or the 30-day sold
+    median), Pokoin (the cheapest Pokoin ask, or Pokoin's own 90-day sold
+    median), Cardmarket (its price guide: trend, lowest ask, 1/7/30-day
+    averages) or TCGplayer (market, lowest listing, mid, in USD converted at
+    the day's ECB rate). See "Price sources" below.
+  - **Switches**: same condition, language, finish, 1st edition, and "All
+    exact". Only the switches the source's data can honour count; the rest
+    are greyed out and stay saved. **Fee-exclusive** (on by default) prices
+    from what the seller nets on CardTrader; off, it prices from the
+    CardTrader ask. Only CardTrader numbers have fees.
+  - **Action**: match, undercut or above, by % and by a fixed PKN amount.
+  - **Rounding**: exact (cents), nearest, down or up to whole PKN.
+  - **Never below**: a minimum that rounding never goes under. A target at or
+    below 0 is skipped.
+  - **Put paused listings on sale** when they get a price.
 
-Preview fetches the comps per game in chunks of 100 and lists the old price,
-the new one, the comp and the CardTrader ask; Apply writes each listing with
-`updateListing` (4 at a time). A CardTrader-linked listing then reaches
-CardTrader through the outbox edit at the gross-up. The planning code is
-`market/src/pricer.js` (tests in `pricer.test.js`); the server validates
-`basis`, `feeExclusive`, `status`, `game` and the roundings in
-`crates/external/src/pricing.rs`.
+  A strategy that a group uses can't be deleted (409 `strategy_in_use`).
+- **Pricing groups** (Postgres `seller_pricing_groups` and
+  `seller_pricing_group_members`, `scripts/sql/138_seller_pricing_groups.sql`,
+  at most 200) are named sets of listings picked on the Listings board, with
+  "Add to group" on the selection bar. A listing is in at most one group:
+  adding it to another group moves it, and deleting the listing takes it out.
+  A group has one strategy and an optional **Reprice every day** switch.
+- **Apply** (`POST /api/marketplace-pricing-groups/apply`, with `dryRun` for
+  the plan shown first) prices the group's live and paused listings:
+  1. It reads the same market comps as the board's price check, net of the
+     seller's own CardTrader commission.
+  2. It plans each listing: the comp, the strategy's target, and whether the
+     listing goes on sale. Listings with no comp are counted, never guessed;
+     sold-out and removed listings are skipped.
+  3. It writes each change through the seller's own listing update, so a
+     CardTrader-linked listing reaches CardTrader through the outbox edit at
+     the gross-up.
+
+  The group keeps a summary of its last apply (`last_applied`, with a trigger
+  of `apply`, `daily` or `batch`).
+- **Daily**: `pokoin-api job pricing-groups-daily [--dry-run]`
+  (`deploy/systemd/pokoin-rust-job-pricing-groups-daily.timer`, 05:15 UTC,
+  after the 04:30 price-store refill) applies every group with the daily
+  switch on, oldest apply first. It writes by default. A failing group is
+  counted and the run goes on.
+- **The scan fallback is repriced nightly**: `pokoin-api job
+  price-fallback-listings [--dry-run] [--seller=<uid>] [--game=…] [--csv=…]`
+  (`deploy/systemd/pokoin-rust-job-price-fallback-listings.timer`, 05:30 UTC,
+  after both runs above) takes every listing of every seller still sitting at
+  the 2,000,000 PKN the scan desk defaults to (10,000 EUR,
+  `SCAN_FALLBACK_PRICE_EUR` in `market/src/scan-pricing.js`,
+  docs/SCAN_LISTING_WORKFLOW.md) with stock, live or paused, and sets it to
+  the store's reference price of its facets net of the seller's own CardTrader
+  commission. Nothing else covered these listings: `pricing-groups-daily`
+  only works on grouped ones, `price-unpriced-listings` only on paused ones
+  at 0. It writes by default; `--dry-run` only reports. With no offer of
+  those facets the listing keeps the fallback, counted in `noOffer`.
+  **The status never changes**: a paused listing stays paused, only its price
+  moves. Each write compares-and-sets on "still at the fallback with stock",
+  so a price the seller set meanwhile wins and a rerun finds nothing to do.
+- **A manual price leaves the group** (2026-11-08). A new price typed by
+  hand on a grouped listing (the listing edit in MyPokoin, or a Card Rails
+  `update`) takes the listing out of its group in the same transaction, so
+  Apply and the daily run never overwrite it.
+  - Resending the same price, or a write with no price, keeps the group.
+    `pricingGroupId: null` takes the listing out even at the same price.
+  - A run's write holds only while the listing is still in the group, checked
+    under the row lock. A listing that left is counted in `left`, not
+    written.
+  - The edit form sends a price only when the seller changed it, and says so
+    under the price and after saving.
+  - The rule is `pricer::group_move`, and its invariants PO1–PO8 are
+    model-checked in `specs/tla/price-ownership`:
+    - PO1 `OneOwner`;
+    - PO2 `ManualPriceKept`;
+    - PO3 `NoPriceNoChange`;
+    - PO4 `NoPingPong`;
+    - PO5 `PriceMyselfHonoured`;
+    - PO6 `ListNeverRefused`;
+    - PO7 `UnpricedStaysPaused`;
+    - PO8 `CardRailsConverges`.
+  - Connector fields and the table: docs/pricer-cardrails-contract.md.
+- **One rule, three places**: `market/src/pricer.js` (web, tests in
+  `pricer.test.js`), `crates/external/src/pricing.rs` (server) and the
+  rounding-and-floor core `ct_fees::floor_price_rounded`, which Verus proves
+  never goes under the minimum in any rounding mode
+  (`pokoin-rust/verus/README.md`). The web uses the same fixed-point
+  arithmetic, and both test files use the same examples.
+- **Migration**: on the first read after the deploy, a strategy saved with a
+  scope (game, live/paused, condition, language) becomes a group of the same
+  name, holding the listings that scope took at that moment. A strategy
+  without a scope keeps its rule and gets no group. Names that clashed get a
+  " (2)" suffix.
+
+Routes: `GET/POST/DELETE /api/marketplace-pricing-strategies` (strategies,
+groups and board defaults), `GET/POST/DELETE /api/marketplace-pricing-groups`
+(groups and moves: `{ group }`, `{ groupId, add }`, `{ remove }`), and
+`POST /api/marketplace-pricing-groups/apply`. Card Rails picks a group or a
+strategy per batch through the connector (docs/SELLER_API.md, "Batch
+pricing").
+
+### Price sources (2026-11-10)
+
+Every price-check comp carries a `sources` block next to the CardTrader
+offers (`ctMatch`). Each entry is keyed by the switches the source honours
+(`price_check::Match::key`, letters C L F E; `""` = any copy) and holds
+`grossPkn` and `pkn` (net of fees for CardTrader, equal otherwise). A feed
+that fails, is not configured or is stale is left out and named in
+`sourceStatus`; the rest of the comp is unchanged.
+
+| Source | Data | Freshness | Switches |
+| --- | --- | --- | --- |
+| CardTrader sold | `cardtrader_sold_daily` in each game's database, last 30 days, median of the daily medians. The any-copy entry includes graded sales (as `soldMedianPkn` always did); the others leave them out. | Nightly | condition (other games: or better), language, finish, 1st edition |
+| Pokoin sold | Firestore `marketplace_sales`, last 90 days, voided sales left out; EUR sales at 2 PKN per cent. Cached for 10 minutes per API process. | Live, 10-minute cache | condition, language |
+| Cardmarket | Cardmarket's public price guide (`price_guide_<idGame>.json`) for every game: `pokoin-cardmarket-catalog guides --apply` (nezopt timer `pokoin-cardmarket-guides`, 02:45 UTC) stores the products our catalogs reference (`card_market_ids`) in `pokoin_marketplace.cardmarket_price_guide`, a row only when a product's values change, and one `cardmarket_price_guide_runs` row per game and day. The pricer uses a game's guide while its last run is at most 4 days old. Regular and foil columns; the lowest value when a card has several Cardmarket products. `low` is overridden by TCGNotify's ask when that feed is loaded (below). | Daily | finish |
+| Cardmarket sellers (`cardmarketoffers`) | The offers we capture ourselves by walking Cardmarket through CTCMDeals: `harvest-cm-offers.js` records the cheapest professional and cheapest private offer of each facet it asks, `pokoin-cardmarket-catalog cm-offers --file <minimums.jsonl> --apply` (migration `scripts/sql/141_cardmarket_offer_minimums.sql`) keeps the newest observation of each facet in `pokoin_marketplace.cardmarket_offer_minimums`, euros at 2 PKN per cent. Bases `pro` (professional or powerseller) and `private`. The pricer uses a facet while its own `observed_at` is at most 7 days old. Coverage is only what has been scanned. | Per scan, on demand | condition, language, finish (Pokémon: reverse holo), 1st edition |
+| TCGplayer | The TCGCSV store (docs/TCGCSV_PRICES.md) through `pokoin_product_links`; market, low and mid of each subtype. USD → EUR at the newest ECB rate (`fx_rates_daily`, `pokoin-api job fx-rates-daily`, 16:30 UTC), used while it is at most 10 days old; the comp shows `usdPerEur` and `rateDay`. | Daily | finish (Pokémon: reverse holo), 1st edition |
+
+**TCGNotify over the guide's `low`.** TCGNotify (tcgnotify.com, our own
+Cardmarket tracker) publishes a global `min_price` per product: the cheapest
+current listing across languages, the same number the guide calls `low`. Its
+`id` is the Cardmarket idProduct, so it joins the existing `card_market_ids`
+crosswalk with no new mapping. `pokoin-cardmarket-catalog tcgnotify --file
+<dump.json> --apply` (migration `scripts/sql/140_tcgnotify_price_guide.sql`)
+stores it in `pokoin_marketplace.tcgnotify_price_guide`, change-only and keyed
+by the product's own `updated_at` day, plus one `tcgnotify_price_guide_runs`
+row per game and day. The pricer prefers it while that run is at most 4 days
+old, independently of the guide's run, and it also covers products the guide
+has never priced. Only `low` is taken: the dump's `low_price`, `high_price`
+and both foil fields are zero on every row, so trend, the 1/7/30-day averages
+and every foil value stay with the official guide, as does `asOf`. A missing
+table, a stale run or a query error leaves the guide untouched. Games:
+Pokémon, Lorcana, Riftbound. The ingest reads a dump file; a daily walker
+still needs a TCGNotify credential (web session cookie or mobile JWT).
+
+**Cardmarket's seller floor.** The guide and TCGNotify answer with one
+global number per product: neither separates professional from private sellers,
+and neither knows a condition or a language. The scanned offers answer the
+question the price check cannot otherwise answer — what does the cheapest
+professional seller want for this NM Italian copy right now, and what does a
+private one want. CTCMDeals (the Cardmarket walking engine,
+`worker/scripts/harvest-cm-offers.js`) opens a product's offer pages through our
+own session, and `worker/lib/offerStore.js` appends, for every facet asked
+(condition × language × finish × 1st edition × seller type), the cheapest offer
+with the number of offers behind it and whether the page walk finished.
+`pokoin-cardmarket-catalog cm-offers --file minimums.jsonl --apply` stores
+those minima in `pokoin_marketplace.cardmarket_offer_minimums`, one row per
+facet and seller type, keyed by the Cardmarket `idProduct` already in
+`card_market_ids`; a facet is rewritten only by a newer `observed_at`.
+
+The comp entry is `sources.cardmarketoffers`: `asOf`, then one map per seller
+type, `pro` and `private`, each keyed like every other source. `""` is the
+cheapest facet the scan touched at all, `"CLFE"` the cheapest facet agreeing
+with the item on all four attributes, and a partial key the cheapest facet
+agreeing on the switches that are on. Every value carries the facet it came
+from (`condition`, `language`, `finish`, `firstEdition`), its `offers` count
+and `countsComplete`, so a reader can tell what question the number answers.
+
+"1 cent under" is that number, not a rule of its own. Read it in bulk with the
+`cm-undercut` connector action (docs/pricer-cardrails-contract.md), which
+answers both seller types of up to 2 000 items, of one group or of the whole
+stock, for a script or for valuing a lot; or let a strategy use it — source
+`cardmarketoffers`, basis `private` or `pro`, action `undercut` with
+`amountPkn` 2, because 2 PKN is exactly 1 cent. The strategy then goes through
+the same rounding, `minPkn` and cents core as every other basis, while the
+action gives the raw number and never a 0: a 1-cent minimum is no answer. Only
+what the collector has walked has a number, so a card of no Pokoin listing
+answers `no_offers` — see the "Coverage" note beside that action.
+
+Cardmarket's condition facet is the *worst* grade the query accepts, so an `NM`
+facet means NM or better, and a `*` facet is an unfiltered mix: it answers a
+switch that is off and never one that is on. A graded, signed or altered copy
+is no scanned facet's copy, so like the other sources it keeps only `""`. The
+feed has its own `sourceStatus` key, so an unmigrated table, an old scan or a
+query error leaves the guide and TCGNotify untouched and says `unavailable`
+instead of inventing a price. Coverage is exactly what has been harvested: a
+scan asked with `--finish '*' --first-edition '*'` stores no exact finish or
+edition, so those switches stay unanswered until the walk asks them or the
+captured offers are regrouped by the finish and edition each row already
+carries.
+
+Cardmarket idGames (measured from the overlap of our `card_market_ids` with
+each guide): Pokémon 6, Magic 1, Yu-Gi-Oh! 3, Flesh and Blood 16, Digimon 17,
+Dragon Ball Super 13, Vanguard 8, One Piece 18, Lorcana 19, Star Wars
+Unlimited 21, Riftbound 22, Cyberpunk 23, Gundam 24, Sorcery 25, and the
+Cardmarket-only games Final Fantasy 9, Star Wars Destiny 15, Weiss Schwarz
+10, Force of Will 7, World of Warcraft 2, Battle Spirits Saga 20, My Little
+Pony 12, The Spoils 5. Union Arena, Palworld and Dragoborne have no
+Cardmarket ids yet.
+
+Strategies saved before these sources (`rules` below 2) keep their price: a
+`sold` strategy reads with every switch off, which is the old median, and a
+Pokoin `sold` strategy, which priced from CardTrader's sold median, reads as
+CardTrader `sold`.
+
+Not built, the owner's call: eBay (the sold API needs eBay's approval; page
+scraping is against its terms). Cardmarket listings scraped by CTCMDeals stood
+on that list until 2026-11-10, when the owner reversed the call: keeping what
+the walk passes is the point, and the seller floor above is the first thing
+built from it.
+
+**Batch upload.** A Scan desk batch can pick a group or a strategy before it
+loads. Unpriced cards are listed paused at 0 and priced once by `applyPricing`
+after submit. A group keeps them for later applies or the daily job. See
+[SCAN_CONNECT.md](SCAN_CONNECT.md) "Batch pricing" for details.
 
 ## Games other than Pokémon
 

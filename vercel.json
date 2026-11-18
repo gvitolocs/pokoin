@@ -73,6 +73,24 @@
       ]
     },
     {
+      "source": "/home/:font(satoshi.woff2|fredoka-wordmark.ttf)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/home/:image*\\.:ext(png|svg|ico|webp|gif|jpg|jpeg)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
       "source": "/working.html",
       "headers": [
         {
@@ -1099,6 +1117,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/pricer/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/pricer",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/settings/",
       "destination": "/market/index.html"
     },
@@ -1203,6 +1229,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/extension/privacy/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension/privacy",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/email-preferences/",
       "destination": "/market/index.html"
     },
@@ -1272,6 +1306,22 @@
     },
     {
       "source": "/buy",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/buysell/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/buysell",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cardgts/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cardgts",
       "destination": "/market/index.html"
     },
     {

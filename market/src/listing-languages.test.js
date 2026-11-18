@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { releaseLanguagesForSet, sellLanguages, versionRedirects } from './listing-languages.js';
+import {
+  deskLanguageChips,
+  deskLanguageChoice,
+  releaseLanguagesForSet,
+  sellLanguages,
+  versionRedirects,
+} from './listing-languages.js';
 
 test('a longer set title still uses the 151 release list', () => {
   assert.deepEqual(releaseLanguagesForSet('Scarlet & Violet 151'), ['EN', 'IT', 'FR', 'DE', 'ES']);
@@ -70,4 +76,35 @@ test('a language the set was released in is not a redirect', () => {
     { id: '20', nationality: 'japanese' },
   ], '10', ['EN', 'JP']);
   assert.deepEqual(jumps, []);
+});
+
+test('a Chinese printing offers no English to an English reader', () => {
+  assert.deepEqual(deskLanguageChips({ nationality: 'chinese' }), ['ZH', 'ZHT']);
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', chosen: 'EN' }), 'ZH');
+});
+
+test('a Japanese printing offers no English either', () => {
+  const chips = deskLanguageChips({ nationality: 'japanese', setName: 'Nihil Zero' });
+  assert.equal(chips.includes('EN'), false);
+  assert.equal(deskLanguageChoice({ nationality: 'japanese', setName: 'Nihil Zero', chosen: 'EN' }), 'JP');
+});
+
+test('a western printing keeps the language the reader prefers', () => {
+  const western = { nationality: 'western', setName: '151' };
+  assert.equal(deskLanguageChoice({ ...western, chosen: 'EN' }), 'EN');
+  assert.equal(deskLanguageChoice({ ...western, chosen: 'IT' }), 'IT');
+  assert.equal(deskLanguageChoice(western), 'EN');
+});
+
+test('a language with data opens the desk, a preference adds no chip', () => {
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', data: ['ZHT'], chosen: 'EN' }), 'ZHT');
+  assert.deepEqual(deskLanguageChips({ nationality: 'chinese', data: ['EN'] }), ['ZH', 'ZHT', 'EN']);
+});
+
+test('a language asked for is kept only when this printing can exist in it', () => {
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', chosen: 'ZHT' }), 'ZHT');
+  // The listings say this card does exist in English: the ask is a real chip.
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', data: ['EN'], chosen: 'EN' }), 'EN');
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', data: ['ZH'], chosen: 'DE' }), 'ZH');
+  assert.equal(deskLanguageChoice({ nationality: 'chinese', chosen: 'DE' }), 'ZH');
 });

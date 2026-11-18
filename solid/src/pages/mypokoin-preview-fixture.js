@@ -48,14 +48,19 @@ function copy(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// `origin` as the owner's book read sends it (inventory-origin.js).
+// Pikachu (list-1/list-8) stays flagged (box1·2 and no location).
+// Snorlax (list-4/list-9) has two origins in separate exact slots: no flag.
 const LISTINGS = [
-  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z' },
-  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z' },
-  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z' },
-  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1', listedAt: '2026-10-05T00:00:00.000Z' },
-  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z' },
-  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z' },
-  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z' },
+  { id: 'preview-list-1', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 420, status: 'active', location: 'box1·2', listedAt: '2026-10-02T00:00:00.000Z', origin: 'cardrails' },
+  { id: 'preview-list-2', ...card(1), condition: 'SP', language: 'EN', quantityAvailable: 1, pricePkn: 1800, status: 'active', location: 'box1·4', listedAt: '2026-10-03T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-3', ...card(2), condition: 'NM', language: 'JP', quantityAvailable: 1, pricePkn: 960, status: 'paused', location: '', listedAt: '2026-10-04T00:00:00.000Z', origin: 'cardmarket' },
+  { id: 'preview-list-4', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 2, pricePkn: 620, status: 'active', location: 'binder·1·1', listedAt: '2026-10-05T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-5', ...card(4), condition: 'NM', language: 'IT', quantityAvailable: 1, pricePkn: 260, status: 'active', location: '', listedAt: '2026-10-06T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-6', ...card(5), condition: 'MP', language: 'EN', quantityAvailable: 1, pricePkn: 170, status: 'active', location: 'box2·1', listedAt: '2026-10-07T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-7', ...card(6), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 80, status: 'active', location: '', listedAt: '2026-10-08T00:00:00.000Z', origin: 'pokoin' },
+  { id: 'preview-list-8', ...card(0), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 450, status: 'active', location: '', listedAt: '2026-10-09T00:00:00.000Z', origin: 'cardtrader' },
+  { id: 'preview-list-9', ...card(3), condition: 'NM', language: 'EN', quantityAvailable: 1, pricePkn: 620, status: 'active', location: 'binder·1·2', listedAt: '2026-10-10T00:00:00.000Z', origin: 'cardrails' },
 ];
 
 const HELD = [
@@ -86,23 +91,129 @@ const COLLECTION_LISTINGS = [
   },
 ];
 
-export function previewListings() {
-  return copy(LISTINGS);
+function previewSize() {
+  if (typeof window === 'undefined') return 0;
+  const value = Number(new URLSearchParams(window.location.search).get('mypokoinPreview'));
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 5000) : 0;
 }
 
+function repeatRows(rows, count) {
+  return Array.from({ length: count }, (_, i) => {
+    const row = rows[i % rows.length];
+    return { ...row, id: `${row.id}-${i}`, cardId: `${row.cardId}-${Math.floor(i / rows.length)}` };
+  });
+}
+
+// One generated book per kind and size, handed back by reference. The desks treat
+// rows as immutable (every edit maps to a new array), so switching tabs reuses the
+// book instead of rebuilding 1,500 objects — and the boards' derivations, keyed by
+// array identity, then hit.
+const books = new Map();
+function previewBook(kind, build) {
+  const key = `${kind}:${previewSize()}`;
+  if (!books.has(key)) books.set(key, build(previewSize()));
+  return books.get(key);
+}
+
+export function previewListings() {
+  return previewBook('listings', (size) => copy(size ? repeatRows(LISTINGS, size) : LISTINGS));
+}
+
+export { previewGroups, previewStrategies } from './mypokoin-preview-rules.js';
+
 export function previewPricer() {
-  return { defaultSource: 'cardtrader', autoMarketColumn: false };
+  return { defaultSource: 'cardtrader', autoMarketColumn: false, currency: 'EUR' };
+}
+
+/**
+ * The `sources` block of a preview comp, like `allSources` in
+ * market/src/pricer.vectors.json: every source and basis with a number for
+ * each toggle combination the source honours. Cardmarket entries carry
+ * `eur`, TCGplayer `usd` plus the day's `usdPerEur` / `rateDay`
+ * (2 PKN = 1 euro cent, so 1 EUR = 200 PKN and 1 USD = 200 / usdPerEur PKN).
+ */
+function sourcesFor(ask) {
+  const eurOf = (pkn) => Math.round((pkn / 200) * 100) / 100;
+  const usdOf = (pkn) => Math.round(((pkn / 200) * 1.08) * 100) / 100;
+  const pknEntry = (pkn) => ({ grossPkn: pkn, pkn });
+  // CardTrader sold: every toggle combination, looser is cheaper.
+  const ctSold = {};
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    const gross = Math.round((ask * 1.05 - (4 - on) * 2) * 100) / 100;
+    ctSold[key] = { grossPkn: gross, pkn: Math.round(gross * 0.939 * 100) / 100 };
+  }
+  // Pokoin's own sales honour condition and language.
+  const pokoinSold = {
+    '': pknEntry(Math.round(ask * 0.9 * 100) / 100),
+    C: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    L: pknEntry(Math.round(ask * 0.95 * 100) / 100),
+    CL: pknEntry(Math.round(ask * 0.98 * 100) / 100),
+  };
+  // Cardmarket's price guide honours finish; prices are EUR.
+  const cardmarket = { asOf: '2026-11-07' };
+  for (const [basis, [plain, foil]] of Object.entries({
+    trend: [0.9, 1], low: [0.8, 0.85], avg1: [0.92, 0.98], avg7: [0.94, 1.02], avg30: [0.96, 1.05],
+  })) {
+    const plainPkn = Math.round(ask * plain * 100) / 100;
+    const foilPkn = Math.round(ask * foil * 100) / 100;
+    cardmarket[basis] = {
+      '': { eur: eurOf(plainPkn), grossPkn: plainPkn, pkn: plainPkn },
+      F: { eur: eurOf(foilPkn), grossPkn: foilPkn, pkn: foilPkn },
+    };
+  }
+  // TCGplayer honours finish and 1st edition; prices are USD at the ECB rate of the day.
+  const tcgplayer = { asOf: '2026-11-07', rateDay: '2026-11-07', usdPerEur: 1.08 };
+  const tcgKeys = ['', 'F', 'E', 'FE'];
+  for (const [basis, factors] of Object.entries({
+    market: [0.95, 1, 0.98, 1.05], low: [0.85, 0.9, 0.88, 0.95], mid: [0.92, 0.97, 0.95, 1.02],
+  })) {
+    tcgplayer[basis] = {};
+    factors.forEach((factor, index) => {
+      const pkn = Math.round(ask * factor * 100) / 100;
+      tcgplayer[basis][tcgKeys[index]] = { usd: usdOf(pkn), grossPkn: pkn, pkn };
+    });
+  }
+  // Our own walk of Cardmarket's listing pages honours all four toggles and
+  // separates the two kinds of seller; prices are EUR, a private ask cheaper.
+  const cardmarketoffers = { asOf: '2026-11-07', pro: {}, private: {} };
+  for (let bits = 0; bits < 16; bits += 1) {
+    const key = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).join('');
+    const on = ['C', 'L', 'F', 'E'].filter((_, i) => bits & (1 << i)).length;
+    for (const [seller, factor] of [['pro', 1.02], ['private', 0.82]]) {
+      const pkn = Math.round((ask * factor - (4 - on) * 2) * 100) / 100;
+      cardmarketoffers[seller][key] = { eur: eurOf(pkn), grossPkn: pkn, pkn, offers: on + 1, countsComplete: true };
+    }
+  }
+  return { cardtrader: { sold: ctSold }, pokoin: { sold: pokoinSold }, cardmarket, cardmarketoffers, tcgplayer };
 }
 
 /**
  * Price-check answers for the preview listings (`card:COND:LANG:` keys), as
  * the price check returns them: CardTrader numbers net of the commission
- * (`ctMatchedPkn`) beside the ask (`ctMatchedGrossPkn`).
+ * (`…Pkn`) beside the ask (`…GrossPkn`), and `ctMatch`, the cheapest offer
+ * per toggle combination (`matchKey`: C condition, L language, F finish,
+ * E 1st edition). Looser toggles find cheaper copies; a combination that is
+ * missing has no offer right now. `sources` carries the other markets' numbers.
  */
 export function previewComps() {
+  const offer = (ask) => ({ grossPkn: ask, pkn: Math.round(ask * 0.939 * 100) / 100 });
   const comp = (ask, net, extra = {}) => ({
-    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: net, ctCheapestGrossPkn: ask, ctBasis: 'pro',
-    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' }, ...extra,
+    ctMatchedPkn: net, ctMatchedGrossPkn: ask, ctCheapestPkn: Math.round(ask * 0.85 * 0.939 * 100) / 100, ctCheapestGrossPkn: Math.round(ask * 0.85 * 100) / 100,
+    ctBasis: 'pro',
+    ctFee: { pct: 5, vatPct: 22, minCents: 1, channel: 'direct' },
+    pokoinCheapestPkn: Math.round(ask * 0.96 * 100) / 100,
+    sources: sourcesFor(ask),
+    ctMatch: {
+      CLFE: { grossPkn: ask, pkn: net },
+      CLF: offer(Math.round(ask * 0.97 * 100) / 100),
+      CL: offer(Math.round(ask * 0.94 * 100) / 100),
+      C: offer(Math.round(ask * 0.9 * 100) / 100),
+      L: offer(Math.round(ask * 0.88 * 100) / 100),
+      '': offer(Math.round(ask * 0.85 * 100) / 100),
+    },
+    ...extra,
   });
   return {
     '222410:NM:EN:': comp(460, 431.94, { pokoinCheapestPkn: 440 }),
@@ -114,28 +225,15 @@ export function previewComps() {
   };
 }
 
-export function previewStrategies() {
-  return [{
-    id: 'preview-strategy-1',
-    name: 'Undercut CardTrader',
-    source: 'cardtrader',
-    action: 'undercut',
-    amountPct: 5,
-    amountPkn: 0,
-    minPkn: 1,
-    rounding: 'integer',
-    condition: '',
-    language: '',
-    enabled: true,
-  }];
-}
-
 export function previewCollection() {
-  const rows = copy(HELD);
-  const listings = copy(COLLECTION_LISTINGS);
+  // The rows stay identical across mounts; the asks are rebuilt per desk.
+  const book = previewBook('collection', (size) => ({
+    rows: copy(size ? repeatRows(HELD, size) : HELD),
+    listings: copy(size ? repeatRows(COLLECTION_LISTINGS, size) : COLLECTION_LISTINGS),
+  }));
   const asks = {};
-  for (const row of rows) asks[row.id] = 250;
-  return { rows, listings, asks };
+  for (const row of book.rows) asks[row.id] = 250;
+  return { rows: book.rows, listings: book.listings, asks };
 }
 
 // Already in the contract's picking order: Magic, Pokémon, Yu-Gi-Oh!, Riftbound, then other games;

@@ -8,7 +8,7 @@ import { portfolioTilesFromSummary, readPortfolioTilesCache, writePortfolioTiles
 import { orderActivity, sellerSetupSteps, timeAgo } from '@market/profile-overview.js';
 import { DASHBOARD_HOME } from '@market/punchouts.js';
 import { endActiveScanSessionForSignOut } from '@market/scan-api.js';
-import { sellerListCurrency } from '@market/seller-currency.js';
+import { formatSellerPrice, sellerListCurrency } from '@market/seller-currency.js';
 import Avatar from '../components/Avatar.jsx';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/profile/CardTraderConnectPanel.jsx';
@@ -20,7 +20,7 @@ import TelegramConnectPanel from '../components/profile/TelegramConnectPanel.jsx
 import UsernameEditor from '../components/profile/UsernameEditor.jsx';
 import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
-import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview.js';
 import { accountAdmin, accountProfile, accountSilver, availablePkn } from '../stores/account.js';
 import { authUid, authUser, getBearer } from '../stores/auth.js';
 import { publishSellerSettings, sellerSettings as loadedSellerSettings, sellerSettingsFailed } from '../stores/buyer.js';
@@ -485,7 +485,7 @@ function ProfileDesk() {
                   <span class="snapshot-sub">
                     {[
                       activity().salesEurCents30d ? money({ currency: 'EUR', amount: activity().salesEurCents30d }) : '',
-                      activity().salesPkn30d ? money({ currency: 'PKN', amount: activity().salesPkn30d }) : '',
+                      activity().salesPkn30d ? formatSellerPrice(activity().salesPkn30d, localCurrency()) : '',
                     ].filter(Boolean).join(' · ')}
                   </span>
                 </Show>

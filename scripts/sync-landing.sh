@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WEB="${CARDVAULT_WEB:-/home/nez/Projects/cardvault/pokemon_card_vault/web}"
+WEB="${CARDVAULT_WEB:-/home/nez/Projects/Startup/Pokoin/cardvault/pokemon_card_vault/web}"
 cp "$ROOT/index.html" "$WEB/home.html"
 rm -rf "$WEB/home"
 cp -a "$ROOT/home" "$WEB/home"

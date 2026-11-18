@@ -1,3 +1,5 @@
+import { createTabCache } from '../lib/tab-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { cancelEurOrder, confirmMarketplaceDelivery, reportMarketplaceProblem } from '@market/api.js';
@@ -23,11 +25,14 @@ import RowThumb from '../components/inventory/RowThumb.jsx';
 import RequireSignIn from '../components/RequireSignIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { authUser, getBearer } from '../stores/auth.js';
-import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewBought } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewBought } from './mypokoin-preview.js';
+
+const boughtCache = createTabCache();
 
 function BoughtDesk(props) {
   const uid = () => String(authUser()?.uid || '');
-  const [rows, setRows] = createSignal(null);
+  const [rows, setRows] = createSignal(props.preview ? null : boughtCache.get(untrack(uid)) ?? null);
+  const [limit, setLimit] = createSignal(COLLECTION_BATCH_SIZE);
   const [error, setError] = createSignal('');
   const [busyId, setBusyId] = createSignal('');
   const [now, setNow] = createSignal(Date.now());
@@ -45,9 +50,13 @@ function BoughtDesk(props) {
       setRows(null);
       return undefined;
     }
+    const cached = boughtCache.get(id);
+    if (cached) setRows(() => cached);
     return watchOrders(id, 'uid', {
       onRows: (list) => {
-        setRows(() => sortOrdersByDate(list));
+        const next = sortOrdersByDate(list);
+        boughtCache.set(id, next);
+        setRows(() => next);
         setError('');
       },
       onError: (err) => setError(err.message || 'Buy history failed.'),
@@ -116,7 +125,7 @@ function BoughtDesk(props) {
         >
           <div class="thread-list">
             <For
-              each={shown()}
+              each={shown().slice(0, limit())}
               fallback={(
                 <p class="page-lede" style={{ padding: '1rem' }}>
                   {archived()
@@ -218,6 +227,7 @@ function BoughtDesk(props) {
               }}
             </For>
           </div>
+          <Show when={shown().length > limit()}><button class="btn ghost" type="button" onClick={() => setLimit(nextCollectionBatch(limit(), shown().length))}>Show more</button></Show>
         </DeskPanel>
       </Show>
     </div>

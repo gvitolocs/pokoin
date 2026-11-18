@@ -1,12 +1,14 @@
 //! Route handlers. One module per route family.
 
 pub mod addresses;
+pub mod buy_orders;
 pub mod cart;
 pub mod channel_sync;
 pub mod crypto;
 pub mod extension;
 pub mod listings;
 pub mod orders;
+pub mod pricer;
 pub mod seller;
 pub mod seller_api;
 pub mod seller_book;

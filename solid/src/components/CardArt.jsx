@@ -1,11 +1,11 @@
-import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, onCleanup, onSettled, Show } from 'solid-js';
 import { artCutFor, artCutVars } from '@market/art-cut.js';
 import { artworkFigureMaskSrc, figureOrigin, loadFigureBox } from '@market/art-figure-mask.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { DEAD_IMAGE, rememberImageFallback, workingImage } from '@market/image-fallback-memo.js';
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
 import { heroOpen, onHeroGate } from '@market/hero-gate.js';
-import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '@market/missing-card.js';
+import { isCardTraderPlaceholderSize, MISSING_CARD_RETRY_MS, MISSING_CARD_SRC, retryImageUrl } from '@market/missing-card.js';
 import { langScanLanguage, langScanUrl } from '@market/lang-scans.js';
 import { searchLang } from '../stores/locale.js';
 
@@ -19,15 +19,16 @@ function artDebugEnabled() {
 
 function logCardArt(event, detail) {
   if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
-  if (event !== 'error' && event !== 'dead' && event !== 'placeholder' && !artDebugEnabled()) return;
+  if (event !== 'error' && event !== 'retry' && event !== 'dead' && event !== 'placeholder' && !artDebugEnabled()) return;
   console.warn('[pokoin:card-art]', event, detail);
 }
 
 /**
  * Card scan with CDN sibling fallback:
  * each failed URL, or a CardTrader grey placeholder size, steps to the next
- * raster sibling, then the Pokoin missing-card scan. Only the <img> src
- * changes on a fallback — nothing else re-renders.
+ * raster sibling; when the last one fails the list is fetched once more
+ * (`r=1`, after MISSING_CARD_RETRY_MS), then the Pokoin missing-card scan.
+ * Only the <img> src changes on a fallback — nothing else re-renders.
  *
  * `langScans` (a card row's `langScans`) puts the TCGdex scan in the picked
  * card language first (market/src/lang-scans.js); the leftover scan is its
@@ -45,12 +46,21 @@ export default function CardArt(props) {
   const firstIndex = (list) => Math.max(0, list.indexOf(workingImage(list[0])));
 
   const [index, setIndex] = createSignal(() => firstIndex(urls()));
-  // All siblings failed here before (within a day): the missing-card scan at once.
+  // All siblings failed here before, retry round included: the missing-card scan at once.
   const [dead, setDead] = createSignal(() => workingImage(urls()[0]) === DEAD_IMAGE);
+  // 0 on the first pass, 1 on the retry round. Memo keys stay un-busted.
+  const [retry, setRetry] = createSignal(() => (urls(), 0));
   const current = () => urls()[index()] || '';
+  const shown = () => retryImageUrl(current(), retry());
   const cardId = () => props.card?.id || props.card?.card_id || '';
   let errorSent = false;
   let img;
+  let retryTimer = 0;
+  const clearRetry = () => {
+    clearTimeout(retryTimer);
+    retryTimer = 0;
+  };
+  onCleanup(clearRetry);
   // Thumbnails wait while a desk hero loads (market/src/hero-gate.js); full
   // scans never do.
   const [gateOpen, setGateOpen] = createSignal(heroOpen());
@@ -60,7 +70,7 @@ export default function CardArt(props) {
     return stop;
   });
 
-  function failCurrent() {
+  function failCurrent({ retryable = true } = {}) {
     const list = urls();
     const at = index();
     const next = at + 1;
@@ -69,8 +79,22 @@ export default function CardArt(props) {
       setIndex(next);
       return;
     }
+    // One dropped request or a slow origin is not a missing scan: walk the
+    // list once more before the missing-card scan is shown and remembered.
+    if (retryable && !retry()) {
+      if (retryTimer) return;
+      logCardArt('retry', { full: props.full, cardId: cardId(), failed: list[at], inMs: MISSING_CARD_RETRY_MS });
+      retryTimer = setTimeout(() => {
+        retryTimer = 0;
+        if (urls() !== list) return;
+        setIndex(0);
+        setRetry(1);
+      }, MISSING_CARD_RETRY_MS);
+      return;
+    }
+    clearRetry();
     setDead(true);
-    rememberImageFallback(list[0], DEAD_IMAGE, { keepMs: 24 * 60 * 60_000 });
+    rememberImageFallback(list[0], DEAD_IMAGE, { keepMs: 6 * 60 * 60_000 });
     logCardArt('dead', { full: props.full, cardId: cardId(), src: props.src, siblings: list });
     if (!errorSent) {
       errorSent = true;
@@ -82,7 +106,8 @@ export default function CardArt(props) {
     if (!node || !node.complete || node.naturalWidth <= 0) return;
     if (isCardTraderPlaceholderSize(node.naturalWidth, node.naturalHeight)) {
       logCardArt('placeholder', { full: props.full, cardId: cardId(), src: node.currentSrc, natural: `${node.naturalWidth}x${node.naturalHeight}` });
-      failCurrent();
+      // A real placeholder file: fetching it again would not help.
+      failCurrent({ retryable: false });
       return;
     }
     if (index() > 0) rememberImageFallback(urls()[0], current());
@@ -91,6 +116,9 @@ export default function CardArt(props) {
     }
     props.onLoad?.(node);
   }
+
+  // A new sibling list starts its own first pass.
+  createEffect(urls, clearRetry);
 
   createEffect(() => urls().length, (length) => {
     if (length || errorSent) return;
@@ -204,12 +232,12 @@ export default function CardArt(props) {
       decoding={props.full ? 'sync' : 'async'}
       // src last, like React DOM does for <img>: loading / decoding /
       // fetchpriority must be on the element before the URL is.
-      src={props.full || gateOpen() ? current() : undefined}
+      src={props.full || gateOpen() ? shown() : undefined}
       // Enumerated attribute, not boolean: "false" stops the native image ghost.
       draggable={props.dragCard ? 'true' : 'false'}
       onClick={(event) => props.onClick?.(event)}
       onLoad={(event) => acceptIfScan(event.currentTarget)}
-      onError={failCurrent}
+      onError={() => failCurrent()}
       onDragStart={(event) => {
         const card = props.dragCard;
         if (!card) return;
@@ -246,7 +274,7 @@ export default function CardArt(props) {
             <img
               class="art-figure-layer art-figure-hover"
               data-figure={figurePhase()}
-              src={current()}
+              src={shown()}
               alt=""
               aria-hidden="true"
               loading="lazy"

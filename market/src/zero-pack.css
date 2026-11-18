@@ -287,6 +287,67 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
 .zero-issue-badge { border-color: rgb(255 101 101 / 0.5); background: rgb(255 101 101 / 0.1); color: #ffabab; }
 .zero-also { flex-basis: 100%; color: var(--muted); font-size: 0.7rem; overflow-wrap: anywhere; }
 
+/* Reverse holo: a glowing gold capital R so it is not overlooked. */
+.zero-reverse {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.3rem;
+  border: 1px solid rgb(255 211 61 / 0.55);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(255 211 61 / 0.28), rgb(255 211 61 / 0.08) 70%);
+  box-shadow: 0 0 8px rgb(255 211 61 / 0.45), inset 0 0 4px rgb(255 211 61 / 0.25);
+  cursor: help;
+  vertical-align: middle;
+  animation: zero-reverse-glow 2.4s ease-in-out infinite;
+}
+.zero-reverse-r {
+  color: #ffd23d;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 0 3px rgb(255 210 61 / 0.9), 0 0 7px rgb(255 210 61 / 0.45);
+}
+@keyframes zero-reverse-glow {
+  0%, 100% { box-shadow: 0 0 6px rgb(255 211 61 / 0.35), inset 0 0 4px rgb(255 211 61 / 0.2); filter: brightness(1); }
+  50% { box-shadow: 0 0 13px rgb(255 211 61 / 0.7), inset 0 0 6px rgb(255 211 61 / 0.35); filter: brightness(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zero-reverse { animation: none; }
+}
+
+/* Foil (any game but Pokémon): a holographic pill naming the finish, as hard to miss as the R. */
+.zero-foil {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  height: 1.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgb(255 255 255 / 0.55);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff6ec4, #f9d423, #7afcff, #a18cd1);
+  background-size: 220% 220%;
+  color: #17120a;
+  cursor: help;
+  vertical-align: middle;
+  animation: zero-foil-shimmer 3s ease-in-out infinite;
+}
+.zero-foil-text {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+@keyframes zero-foil-shimmer {
+  0%, 100% { background-position: 0% 50%; box-shadow: 0 0 6px rgb(122 252 255 / 0.35); }
+  50% { background-position: 100% 50%; box-shadow: 0 0 12px rgb(255 110 196 / 0.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zero-foil { animation: none; }
+}
+
 .zero-picked-count { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 
 .zero-card.has-issue { border-color: rgb(255 101 101 / 0.45); }
@@ -517,6 +578,10 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
   .zero-print-box { display: block; width: 10pt; height: 10pt; border: 1pt solid #000; }
   .zero-game-head { margin: 6pt 0 0; font-size: 10pt; break-after: avoid; page-break-after: avoid; }
   .zero-facet, .zero-take, .zero-split, .zero-pt-place, .zero-issue-badge { border-color: #000 !important; font-size: 7pt; }
+  .zero-reverse { border-color: #000 !important; background: none !important; box-shadow: none !important; animation: none !important; filter: none !important; }
+  .zero-reverse-r { color: #000 !important; font-size: 9pt; text-shadow: none !important; }
+  .zero-foil { border-color: #000 !important; background: none !important; box-shadow: none !important; animation: none !important; }
+  .zero-foil-text { color: #000 !important; font-size: 9pt; }
   .zero-row a { text-decoration: none; }
 }
 

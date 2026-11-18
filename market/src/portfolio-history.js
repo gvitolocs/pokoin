@@ -4,8 +4,8 @@
  * The API stores one point per UTC day: wallet PKN (liquidity) plus the
  * seller's cards marked at each printing slice's last sold median, carried
  * forward on days without a sale (pokoin-rust/crates/accounts/src/domain/portfolio_history.rs).
- * This module slices that series into a window, lays the window out on a
- * day scale with a projection third, and fits the projection.
+ * This module slices that series into a window and lays the window out on a
+ * day scale that ends today.
  */
 
 import { formatPknNumber } from './pkn.js';
@@ -143,6 +143,14 @@ export function historyPresetWindow(presetId, today = new Date()) {
   return { from: addUtcDays(todayKey, -preset.days), to: todayKey, preset: preset.id };
 }
 
+/** Actual observations from today and the preceding 29 UTC days. */
+export function previewHistoryMonth(series, today = new Date()) {
+  const end = utcDayKey(today);
+  if (!end) return [];
+  const start = addUtcDays(end, -29);
+  return (Array.isArray(series) ? series : []).filter((day) => day?.date >= start && day.date <= end);
+}
+
 /** 1M and MAX always; a longer window only when the first stored day is that old. */
 export function availableHistoryPresets(series, today = new Date()) {
   const days = normalizedSeries(series);
@@ -207,45 +215,34 @@ export function formatHistoryDelta(change) {
   return `${signed} (${pctSigned}) ${change.phrase}`;
 }
 
-/** The share of the realized plot when the window ends today. The rest is the projection. */
-export const HISTORY_REALIZED_SPLIT = 2 / 3;
-
 /**
- * Day scale of the chart. A window that ends today gets a projection of half
- * its length, so the realized days fill two thirds and the projection one
- * third on the same scale; any other window is realized end to end.
+ * Day scale of the chart: the realized window end to end across the plot, so
+ * the last day of a window that ends today sits on the right edge.
  */
 export function historyTimeline(points, today = new Date()) {
   const to = points?.[points.length - 1]?.date || '';
   let from = points?.[0]?.date || '';
   if (!from || !to) return null;
   if (daySpan(from, to) < 1) from = addUtcDays(to, -1);
-  const span = daySpan(from, to);
-  const live = to === utcDayKey(today);
-  const horizonDays = live ? Math.max(1, Math.round(span * (1 / HISTORY_REALIZED_SPLIT - 1))) : 0;
-  const total = span + horizonDays;
   return {
     from,
     to,
-    end: addUtcDays(to, horizonDays),
-    span,
-    horizonDays,
-    total,
-    split: span / total,
+    span: daySpan(from, to),
+    live: to === utcDayKey(today),
   };
 }
 
 /** 0..1 across the plot. */
 export function timelineRatio(timeline, date) {
-  if (!timeline?.total) return 0;
-  return Math.min(1, Math.max(0, daySpan(timeline.from, date) / timeline.total));
+  if (!timeline?.span) return 0;
+  return Math.min(1, Math.max(0, daySpan(timeline.from, date) / timeline.span));
 }
 
 /** Day under a 0..1 pointer ratio. */
 export function timelineDay(timeline, ratio) {
   if (!timeline) return '';
   const t = Math.min(1, Math.max(0, Number(ratio) || 0));
-  return addUtcDays(timeline.from, Math.round(t * timeline.total));
+  return addUtcDays(timeline.from, Math.round(t * timeline.span));
 }
 
 /** The value in force on a day: the last point on or before it. */
@@ -282,30 +279,29 @@ function monthTicks(from, end, months) {
 }
 
 /**
- * Round-date ticks across the whole scale (realized and projected): days,
- * Mondays, then month starts. Ticks crowding the Today mark are left to it.
+ * Round-date ticks across the day scale: days, Mondays, then month starts.
+ * Ticks crowding an edge are dropped, so the first day and the Today (or end
+ * day) label keep their room.
  */
 export function historyDateTicks(timeline, maxTicks = 7) {
-  if (!timeline?.total) return [];
-  const { from, end, total } = timeline;
+  if (!timeline?.span) return [];
+  const { from, to, span } = timeline;
   let dates = [];
-  const dayStep = TICK_DAY_STEPS.find((step) => total / step <= maxTicks);
+  const dayStep = TICK_DAY_STEPS.find((step) => span / step <= maxTicks);
   if (dayStep) {
     const epoch = '1970-01-05'; // a Monday
-    for (let day = from; day <= end; day = addUtcDays(day, 1)) {
+    for (let day = from; day <= to; day = addUtcDays(day, 1)) {
       const offset = daySpan(epoch, day);
       if (((offset % dayStep) + dayStep) % dayStep === 0) dates.push(day);
     }
   } else {
-    const months = TICK_MONTH_STEPS.find((step) => total / (step * 30.44) <= maxTicks) || 12;
-    dates = monthTicks(from, end, months);
+    const months = TICK_MONTH_STEPS.find((step) => span / (step * 30.44) <= maxTicks) || 12;
+    dates = monthTicks(from, to, months);
   }
-  const todayRatio = timeline.horizonDays ? timeline.split : null;
-  const withYear = from.slice(0, 4) !== end.slice(0, 4);
+  const withYear = from.slice(0, 4) !== to.slice(0, 4);
   return dates
     .map((date) => ({ date, ratio: timelineRatio(timeline, date) }))
-    .filter((tick) => tick.ratio > 0.04 && tick.ratio < 0.96)
-    .filter((tick) => todayRatio == null || Math.abs(tick.ratio - todayRatio) > 0.08)
+    .filter((tick) => tick.ratio > 0.04 && tick.ratio < (timeline.live ? 0.92 : 0.96))
     .map((tick, index) => ({
       ...tick,
       label: formatHistoryAxisLabel(tick.date, withYear && tick.date.slice(5, 7) === '01'),
@@ -365,69 +361,6 @@ export function stepHistoryPoints(coords) {
   return out;
 }
 
-const PROJECTION_Z = 1.2816; // 10th to 90th percentile
-const PROJECTION_MIN_MOVES = 7;
-const PROJECTION_MOVE_CAP = 0.25; // log move a day
-const PROJECTION_SHRINK_DAYS = 30;
-
-/** Daily log price moves of the held basket inside the window (first sales excluded server-side). */
-export function cardMoves(points) {
-  const moves = [];
-  for (const day of (points || []).slice(1)) {
-    if (day?.carried) continue;
-    const move = day?.assets?.cardsMove;
-    if (move == null || !Number.isFinite(move) || move <= -1) continue;
-    const log = Math.log1p(move);
-    moves.push(Math.min(PROJECTION_MOVE_CAP, Math.max(-PROJECTION_MOVE_CAP, log)));
-  }
-  return moves;
-}
-
-/**
- * The hatched third: a stock-style projection of the window's own price moves.
- * Cards follow a random walk fitted to their daily moves; liquidity stays
- * flat. The center grows at the mean move shrunk toward zero by
- * n / (n + 30), so one lucky sale cannot draw a trend; the band is the 10th
- * to 90th percentile of that walk, widening with the square root of the days.
- * Under a week of moves it holds today's value with no band.
- */
-export function projectPortfolio(points, timeline) {
-  const horizon = timeline?.horizonDays || 0;
-  const last = points?.[points.length - 1];
-  if (!horizon || !last) return null;
-  const liquidity = nonNeg(last.assets?.currencyPkn);
-  const cards = nonNeg(last.assets?.cardsValuePkn);
-  const moves = cards > 0 ? cardMoves(points) : [];
-  const n = moves.length;
-  const enough = n >= PROJECTION_MIN_MOVES;
-  const mean = n ? moves.reduce((sum, move) => sum + move, 0) / n : 0;
-  const drift = enough ? mean * (n / (n + PROJECTION_SHRINK_DAYS)) : 0;
-  const vol = enough
-    ? Math.sqrt(moves.reduce((sum, move) => sum + (move - mean) ** 2, 0) / (n - 1))
-    : null;
-  const days = [];
-  for (let h = 0; h <= horizon; h += 1) {
-    const spread = vol ? PROJECTION_Z * vol * Math.sqrt(h) : 0;
-    const center = cards * Math.exp(drift * h);
-    days.push({
-      date: addUtcDays(timeline.to, h),
-      value: round2(liquidity + center),
-      low: round2(liquidity + cards * Math.exp(drift * h - spread)),
-      high: round2(liquidity + cards * Math.exp(drift * h + spread)),
-      cards: round2(center),
-      liquidity,
-    });
-  }
-  return {
-    days,
-    moves: n,
-    drift,
-    vol,
-    band: Boolean(vol),
-    end: days[days.length - 1],
-  };
-}
-
 export const HISTORY_LAYERS = [
   { key: 'liquidity', label: 'Liquidity' },
   { key: 'cards', label: 'Cards' },
@@ -456,21 +389,5 @@ export function formatHistoryTip(day) {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
     rows,
-  };
-}
-
-/** Tip for a projected day. Projections are whole PKN; they are not prices. */
-export function formatProjectionTip(point, projection) {
-  if (!point || !projection) return null;
-  const whole = (value) => formatPknNumber(Math.round(value));
-  return {
-    dateLabel: `${formatDayLabel(point.date)} · Projection`,
-    totalLabel: `${whole(point.value)} PKN`,
-    rows: projection.band
-      ? [{ key: 'range', label: 'Likely range', value: `${whole(point.low)}–${whole(point.high)} PKN` }]
-      : [],
-    footnote: projection.band
-      ? `8 in 10 outcomes · from ${projection.moves} days of sold prices`
-      : 'Holds today’s value until a week of sold prices exists',
   };
 }

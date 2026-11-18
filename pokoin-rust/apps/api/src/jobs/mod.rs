@@ -2,10 +2,13 @@
 mod cardtrader;
 mod eur;
 mod facet_prices;
+mod fallback_prices;
 mod fee_once;
 mod fee_profile;
+mod fx_rates;
 mod group_products;
 mod net_prices;
+mod pricing_groups;
 mod referral;
 mod reprice;
 mod search;
@@ -66,10 +69,13 @@ pub async fn run(name: &str) -> Result<()> {
         "cardtrader-pro-floor-reprice" => reprice::run(&options).await,
         "cardtrader-facet-prices" => facet_prices::run(&options).await,
         "price-unpriced-listings" => unpriced::run(&options).await,
+        "price-fallback-listings" => fallback_prices::run(&options).await,
         "cardtrader-net-prices" => net_prices::run(&options).await,
         "cardtrader-fee-once" => fee_once::run(&options).await,
         "cardtrader-fee-profile" => fee_profile::run(&options).await,
         "cardtrader-group-products" => group_products::run(&options).await,
+        "pricing-groups-daily" => pricing_groups::run(&options).await,
+        "fx-rates-daily" => fx_rates::run(&options).await,
         "search-delta" => search::run(&options).await,
         "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
@@ -163,5 +169,12 @@ mod tests {
     #[tokio::test]
     async fn unknown_job_fails_before_opening_dependencies() {
         assert!(run("not-a-job").await.is_err());
+    }
+    #[test]
+    fn the_fallback_reprice_job_is_registered() {
+        // The nightly timer runs `job price-fallback-listings`; a name the
+        // dispatcher does not know exits non-zero without touching anything.
+        let arm = "\"price-fallback-listings\" => fallback_prices::run(&options).await";
+        assert!(include_str!("mod.rs").contains(arm));
     }
 }

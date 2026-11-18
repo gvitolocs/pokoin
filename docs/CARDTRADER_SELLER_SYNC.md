@@ -20,6 +20,11 @@ For every `marketplace_user_listings` row whose `source_listing_id` is
 `sold_out` rows remain in Postgres for audit/history but are excluded from the
 seller shop and inventory UI.
 
+Imported rows keep `source = 'cardtrader_seller_import'`; the inventory shows
+them with a CardTrader source tag and flags a live copy of the same card from
+another channel as a possible duplicate (read-only), see
+[INVENTORY_ORIGIN.md](INVENTORY_ORIGIN.md) (2026-11-01).
+
 ## Inventory link direction (2026-10-14)
 
 Connecting CardTrader links the two inventories; it is not a one-off import.
@@ -328,7 +333,7 @@ https://api.pokoin.com/api/cardtrader-webhook/<firebase-uid>
 
 Registration health is stored as non-secret `webhookRegistration` metadata on
 the seller integration. Failures do not discard a valid encrypted token, but
-they are no longer silently forgotten. Every periodic run retries registration.
+they are no longer silently forgotten. As of 2026-11-12 every periodic run reads the app's `webhook_url` with `GET /info` and writes `PATCH /app` only when it is missing or different, or when the read fails. Before that the URL was rewritten on every run. `webhookRegistration.verifiedBy` says which of the two (`info` or `patch`) confirmed it.
 
 `pokoin-rust-job-cardtrader-seller-reconcile.timer` runs on `pi-home` ten
 minutes after the previous run ends (`OnUnitInactiveSec`; counted from the
@@ -353,6 +358,16 @@ A linked listing an earlier run already settled (sold out at zero, its link
 when a product newly left the export. The export is parsed while it downloads
 and only the fields the reconcile reads are kept: read whole as JSON, a
 12,523-product export took the job to 1.77 GB on the 4 GB Pi (2026-10-10).
+
+2026-11-12: the export call (`/products/export`) has its own total timeout,
+180 s by default, matching CardTrader's documented 120-180 s read timeout for
+large collections. `CARDTRADER_EXPORT_TIMEOUT_SECS` (20-600) overrides it.
+Every other CardTrader call keeps the 20 s client timeout. The 20 s deadline
+failed the reconcile for a ~12,150-product seller on 2026-11-11 16:38-22:57 CET
+and again on 2026-11-12, because the export sometimes needs more than 20 s. A
+transport error while the body streams is now reported as a transport error,
+not as an export that is not an array, and each successful export logs its
+product count and read time.
 
 The sync ships in the Rust release (`scripts/deploy-pokoin-rust.sh`). The
 periodic run is the native job `pokoin-rust-job@cardtrader-seller-reconcile`

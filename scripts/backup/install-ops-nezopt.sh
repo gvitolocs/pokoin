@@ -2,9 +2,11 @@
 # Installs pokoin-ops pieces on nezopt as user units (no sudo). Each step is a host
 # change that needs Giuseppe's OK first (docs/BACKUPS_AND_ALERTS.md).
 #
-#   scripts/backup/install-ops-nezopt.sh alerts          # notify@, OnFailure + dead-man drop-ins, sentinel
+#   scripts/backup/install-ops-nezopt.sh alerts          # notify@, OnFailure for all services, dead-man drop-ins, sentinel
 #   scripts/backup/install-ops-nezopt.sh slot-cap        # writer max_slot_wal_keep_size = 50GB (reload only)
 #   scripts/backup/install-ops-nezopt.sh backups         # nightly pg_dump, wal-g mirror, monthly restore tests
+#   scripts/backup/install-ops-nezopt.sh pi-follow       # Pi offline = skip; pi-health; Pi notify hook; Pi CDN tunnel
+#   scripts/backup/install-ops-nezopt.sh pi-hooks-live   # after the Pi hooks run: sync/video timers become hourly backstops
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 ops="$repo/deploy/ops/nezopt-user"
@@ -31,15 +33,24 @@ alerts() {
     ( umask 077; printf 'POKOIN_HC_PING_KEY=\nPOKOIN_HC_SLUG_PREFIX=nezopt-\n' >"$cfg/alerts.env" )
     say "wrote $cfg/alerts.env; add the healthchecks ping key when the project exists"
   fi
-  install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$units/"
+  install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$ops/pokoin-digest.service" "$ops/pokoin-digest.timer" "$units/"
+  # OnFailure for every user service, the notifier's recursion guard, and the uptime-mail opt-out.
+  install -D -m 644 "$ops/service.d-90-alert.conf" "$units/service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-notify@.service.d-90-alert.conf" "$units/pokoin-notify@.service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-uptime-mail.service.d-90-alert.conf" "$units/pokoin-uptime-mail.service.d/90-alert.conf"
+  install -D -m 644 "$ops/pokoin-digest.service.d-90-alert.conf" "$units/pokoin-digest.service.d/90-alert.conf"
+  if [[ ! -f "$cfg/expected-active.txt" ]]; then
+    install -m 644 "$ops/expected-active.txt.example" "$cfg/expected-active.txt"
+    say "wrote $cfg/expected-active.txt (units/containers the sentinel expects to be running)"
+  fi
   for u in pokoin-all-cardtrader-daily.service pokoin-site-map-refresh.service pokoin-overflow-sync.service \
            pokoin-shipping-rates-sync.service pokoin-uptime-mail.service; do
     dropin "$u"
   done
   systemctl --user daemon-reload
   "$HOME/.local/bin/pokoin-ops" sentinel --role nezopt --dry-run
-  systemctl --user enable --now pokoin-sentinel.timer
-  systemctl --user list-timers pokoin-sentinel.timer --no-pager
+  systemctl --user enable --now pokoin-sentinel.timer pokoin-digest.timer
+  systemctl --user list-timers pokoin-sentinel.timer pokoin-digest.timer --no-pager
 }
 
 slot_cap() {
@@ -76,9 +87,45 @@ backups() {
   systemctl --user list-timers 'pokoin-pgdump*' 'pokoin-backup-mirror*' 'pokoin-restore-test*' --no-pager
 }
 
+# Units that need the Pi: they skip while it is offline (ExecCondition), and pokoin-pi-health
+# (POKOIN_PI_UNITS / POKOIN_PI_CATCHUP_UNITS in pi.rs) starts them again when it is back.
+# Their restarts back off to 5 min (70-backoff.conf).
+PI_UNITS=(pokoin-overflow-sync.service poko-video-mirror.service pokoin-scan-pi-tunnel.service
+          pokoin-honcho-pi-tunnel.service tcgprices-pi-reader-tunnel.service pokoin-pi-cdn-tunnel.service)
+
+pi_follow() {
+  install_bin
+  install -m 755 "$ops/pokoin-pi-up" "$ops/pokoin-pi-hook" "$HOME/.local/bin/"
+  install -m 644 "$ops/pokoin-pi-health.service" "$ops/pokoin-pi-health.timer" "$ops/pokoin-pi-cdn-tunnel.service" \
+    "$ops/poko-video-mirror.service" "$ops/poko-video-mirror.timer" "$units/"
+  for u in "${PI_UNITS[@]}"; do
+    install -D -m 644 "$ops/pi-dependent.d-60-pi-up.conf" "$units/$u.d/60-pi-up.conf"
+    install -D -m 644 "$ops/pi-dependent.d-70-backoff.conf" "$units/$u.d/70-backoff.conf"
+  done
+  # The sync script and manifest copies the units run (also rewrites the sync unit and timer).
+  "$repo/scripts/nezopt-k3s.sh" install
+  systemctl --user daemon-reload
+  "$HOME/.local/bin/pokoin-ops" pi-health
+  systemctl --user enable --now pokoin-pi-health.timer pokoin-pi-cdn-tunnel.service
+  systemctl --user restart poko-video-mirror.timer
+  say "next: the Pi side (scripts/install-pi-overflow-notify.sh, owner OK), then: $0 pi-hooks-live"
+}
+
+pi_hooks_live() {
+  local t
+  for t in pokoin-overflow-sync.timer poko-video-mirror.timer; do
+    install -D -m 644 "$ops/pi-hooks-live.timer.d-50-backstop.conf" "$units/$t.d/50-backstop.conf"
+  done
+  systemctl --user daemon-reload
+  systemctl --user restart pokoin-overflow-sync.timer poko-video-mirror.timer
+  systemctl --user list-timers pokoin-overflow-sync.timer poko-video-mirror.timer --no-pager
+}
+
 case "${1:-}" in
   alerts) alerts ;;
   slot-cap) slot_cap ;;
   backups) backups ;;
-  *) sed -n '2,8p' "$0"; exit 2 ;;
+  pi-follow) pi_follow ;;
+  pi-hooks-live) pi_hooks_live ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

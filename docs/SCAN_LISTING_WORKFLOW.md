@@ -131,7 +131,7 @@ Dense table, newest at the bottom, auto-scroll while the last row is in view.
 | Flags | 1st · Signed · Altered · Graded | `o`, `[` |
 | Loc | box name + position inside the box (`box1 · 47`, `box1 · 48-50`) | box name inline text |
 | Qty | 1–99 | digits, `+` `-` |
-| Price | PKN; greyed "suggested" when prefilled | inline |
+| Price | Seller's local currency (stored in PKN); greyed "suggested" when prefilled | inline |
 | State | matched / check / unmatched / merged ×n | `Enter` confirm |
 
 Prices prefill once per row+facet signature, 4 printings at a time. The
@@ -139,9 +139,16 @@ suggestion follows the row's facets from
 `GET /api/marketplace-card-sales?cardId=&slices=1` (per-day
 condition × language × reverse × 1st-edition medians): exact facets first,
 then relaxing the finish/1st flag, then the nearest condition in the same
-language, then the same condition in any language (English preferred), then
-anything. When the printing has no sold comps at all, the cheapest listed PKN
-(`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. Switching
+language, then other languages in tiers: KO → JP → European (IT, FR, DE,
+ES, PT, NL, PL, RU together) → EN → any other language, skipping the card’s
+own language. Within each tier, nearest condition wins, then freshness. When the printing has no sold comps at all, the cheapest listed PKN
+(`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. With neither sold comps nor a listing the default is 10,000 EUR
+converted to PKN (`scanFallbackPricePkn` in `market/src/scan-pricing.js`), so a row never needs a price before upload. Nobody buys at
+that price, so `pokoin-api job price-fallback-listings` (05:30 UTC,
+`deploy/systemd/pokoin-rust-job-price-fallback-listings.timer`) reprices
+every listing still at it from the CardTrader price store once its facets
+have an offer: the price only — a paused listing stays paused, and a price
+the seller set in the meantime wins (docs/PRICING.md "Pricer"). Switching
 the version (or language/condition/finish/1st facets) re-suggests for the new
 shape and clears the server-side price; a suggestion stays greyed
 `suggested` until edited or confirmed, and only clicking into the price field

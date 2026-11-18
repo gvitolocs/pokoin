@@ -13,7 +13,7 @@ const games = Object.values(GAMES).map((game) => game.slug).filter(Boolean);
 
 const spa = [
   'about', 'admin', 'ambassador', 'ambassadorprogram', 'artwork', 'associate', 'auth',
-  'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
+  'bought', 'buy', 'buysell', 'cardgts', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
   'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',
@@ -27,7 +27,7 @@ const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', '
 /** SPA prefixes that have child routes. Everything else is two static rewrites. */
 const SPA_WILDCARD = new Set([
   'marketplace', 'product', 'extension', 'messages', 'forum', 'mypokoin',
-  'inventory', 'join', 'dashboard',
+  'inventory', 'join', 'dashboard', 'buysell', 'cardgts',
   ...games,
 ]);
 
@@ -114,6 +114,20 @@ export function redirectLines() {
   return lines;
 }
 
+// Unhashed /home assets that hardly ever change, so a refresh needs no round trip for them.
+// A font is immutable: give a changed one a new file name. CSS and JS stay revalidated.
+const HOME_FONTS = ['satoshi.woff2', 'fredoka-wordmark.ttf'];
+const HOME_IMAGES = [
+  'apple-touch-icon.png', 'bimi.svg', 'favicon-32x32.png', 'favicon-48x48.png', 'favicon-96x96.png',
+  'favicon.ico', 'logo.png', 'missing-card.webp', 'pokoin-192.png', 'pokoin-logo.svg', 'pokoin-mascot.png',
+  'pokoin-product-1200x630.png', 'pokoin-share-1200x630.png', 'working.gif',
+];
+const homeCacheRule = (name, value) => `/home/${name}\n  Cache-Control: ${value}\n`;
+const homeCacheRules = [
+  ...HOME_FONTS.map((name) => homeCacheRule(name, 'public, max-age=31536000, immutable')),
+  ...HOME_IMAGES.map((name) => homeCacheRule(name, 'public, max-age=604800, stale-while-revalidate=604800')),
+].join('\n');
+
 export function headerLines() {
   return `/*
   X-Content-Type-Options: nosniff
@@ -139,6 +153,7 @@ export function headerLines() {
 /market/s/*
   Cache-Control: public, max-age=31536000, immutable
 
+${homeCacheRules}
 /auth
   X-Robots-Tag: noindex, nofollow
 

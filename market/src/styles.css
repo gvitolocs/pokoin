@@ -30,6 +30,9 @@
   --ct-blue: #5bbad5;
   --cm-blue: #1a4f9c;
   --vt-green: #007782;
+  /* BuySell mark: buy arrow in the site gold, sell arrow in the CardTrader blue. */
+  --buysell-buy: var(--yellow);
+  --buysell-sell: var(--ct-blue);
   --border: #5c5c5c;
   --font: Satoshi, ui-sans-serif, system-ui, sans-serif;
   --max: 80rem;
@@ -453,6 +456,27 @@ button, input, select { font: inherit; color: inherit; }
   width: 28rem;
 }
 
+.nav-preview-dash > div:first-child > svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 720px) {
+  .nav-preview-dash {
+    position: fixed;
+    top: 44px;
+    left: 0.625rem;
+    right: 0.625rem;
+    width: auto;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+  }
+}
+
+.nav-preview-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .nav-preview-total {
   margin: 0.2rem 0 0.35rem;
   color: var(--text);
@@ -460,7 +484,8 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .tile-cta,
-.nav-preview .nav-scan {
+.nav-preview .nav-scan,
+.nav-preview .nav-cardgts {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -557,27 +582,70 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.icon-nav .nav-preview .nav-scan {
+.icon-nav .nav-preview .nav-scan,
+.icon-nav .nav-preview .nav-cardgts {
   width: 100%;
   height: auto;
-  min-height: 8.75rem;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  white-space: nowrap;
 }
 
+/* `.icon-nav a:hover` turns every topbar link gold, and these two tiles are links
+   in that nav sitting on a gold ground: the label keeps its ink colour, or
+   #ffd33d on #ffe276 is barely readable. Same dark as the rest state above. */
 .nav-preview .nav-scan:hover,
-.nav-preview .nav-scan:focus-visible {
+.nav-preview .nav-scan:focus-visible,
+.nav-preview .nav-cardgts:hover,
+.nav-preview .nav-cardgts:focus-visible {
+  color: #17120a;
   background: #ffe276;
   box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
 }
 
-.nav-preview .nav-scan strong {
+.nav-preview .nav-scan strong,
+.nav-preview .nav-cardgts strong {
   margin: 0;
   color: inherit;
 }
 
 .icon-nav .nav-preview .nav-scan svg {
-  width: 4.5rem;
-  height: 6.25rem;
+  width: auto;
+  height: 2rem;
   flex: 0 0 auto;
+}
+
+.icon-nav .nav-preview .nav-cardgts svg {
+  width: 2rem;
+  height: 2rem;
+  padding: 0.2rem;
+  border-radius: 0.4rem;
+  background: #17131f;
+}
+
+@media (max-width: 720px) {
+  .icon-nav .nav-preview .nav-scan,
+  .icon-nav .nav-preview .nav-cardgts {
+    gap: 0.25rem;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .nav-preview .nav-scan strong,
+  .nav-preview .nav-cardgts strong {
+    font-size: 0.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-scan svg,
+  .icon-nav .nav-preview .nav-cardgts svg {
+    width: 1.75rem;
+  }
+
+  .icon-nav .nav-preview .nav-cardgts svg {
+    height: 1.75rem;
+  }
 }
 
 .cart-drop {
@@ -1898,7 +1966,16 @@ html.is-card-banding * {
 }
 
 .tile-art {
-  padding: 0.5rem;
+  /* 16px is .tile's own radius; the caption gap is .tile-meta padding. */
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0;
+}
+
+/* The hover preview still pops out of the frame, so the rail gutters reserved for it keep their purpose. */
+.tile:not(.tile-album):hover > .tile-art,
+.tile:not(.tile-album):focus-visible > .tile-art {
+  overflow: visible;
 }
 
 .prod-art.hero-art {
@@ -1925,6 +2002,17 @@ html.is-card-banding * {
 .tile-art .tile-ph {
   width: 100%;
   aspect-ratio: 63 / 88;
+}
+
+/* Off-ratio scans and thin scanner borders crop, never letterbox. */
+.tile-art img {
+  object-fit: cover;
+  object-position: center;
+}
+
+/* The loading shimmer fills the same flush slot, not a smaller card inside it. */
+.tile:not(.tile-album):not(.tile-row) .tile-art > .tile-ph {
+  border-radius: 16px 16px 0 0;
 }
 
 .hero-art img {
@@ -2057,6 +2145,7 @@ html.is-card-banding * {
   position: relative;
   padding: 0;
   overflow: hidden;
+  border-radius: 0;
 }
 
 .tile-album .art-cut,
@@ -2587,6 +2676,8 @@ html.is-card-banding * {
   width: auto;
   flex: 0 0 auto;
   padding: 0.35rem 0 0.35rem 0.45rem;
+  border-radius: 0;
+  overflow: visible;
 }
 .tile-row .thumb-zoom-host,
 .tile-row .art-cut {
@@ -2851,6 +2942,49 @@ html.desk-tinted.desk-ghost .card-page .asset-header.shaded {
   background: linear-gradient(100deg, #4c1d86, #6328a8);
   border-color: #6328a8;
   transition: none;
+}
+
+/* One-tile card desk (experiment): the whole .card-desk grid is a single
+   large tile with the normal panel look (tinted desks colour it like a panel);
+   the panels inside it are transparent and borderless so it reads as one
+   surface. Related cards and the sections below keep the shared .panel look.
+   The border stays 1px but transparent so nothing shifts. The doubled :root
+   outranks the desk-tinted/rainbow rules above. The title tile stays
+   separate, keeps its color and loses its border. Card page only. */
+html:root:root .card-page.flutter-page .card-desk {
+  box-sizing: border-box;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  padding: 0.95rem 1rem 1rem;
+}
+
+html.desk-tinted:root:root .card-page.flutter-page .card-desk {
+  background: var(--desk-surface);
+  border-color: var(--desk-border);
+}
+
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk {
+  background: #1a1030;
+  border-color: #5a3058;
+}
+
+html:root:root .card-page.flutter-page .card-desk .panel,
+html:root:root .card-page.flutter-page .card-desk .sell-form,
+html:root:root .card-page.flutter-page .card-desk .add-panel,
+html:root:root .card-page.flutter-page .card-desk .reserve-blurb,
+html:root:root .card-page.flutter-page .card-desk .shop-panel {
+  background: transparent;
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+html:root:root .card-page.flutter-page .asset-header,
+html:root:root .card-page.flutter-page .asset-header.shaded {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
 }
 
 .rarity-kind {
@@ -3156,27 +3290,6 @@ select.collector-badge.version-badge option {
   flex-wrap: nowrap;
 }
 
-.shop-tools {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.45rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.shop-tools .sort {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  font-size: 0.78rem;
-}
-
-.shop-tools .sort select {
-  margin-left: 0.3rem;
-  max-width: 10.5rem;
-}
-
 .shop-trash {
   width: 2rem;
   height: 2rem;
@@ -3395,6 +3508,29 @@ select.collector-badge.version-badge option {
     0 0 32px rgb(255 211 61 / 0.36);
 }
 
+/* On the card desk More versions is a circled plus at the end of the set-icon
+   row: the same round slot as the icons beside it, in the link's own yellow. */
+.more-versions.more-versions-ico,
+.more-versions.more-versions-ico.is-solo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--yellow);
+}
+
+.more-versions.more-versions-ico:hover,
+.more-versions.more-versions-ico:focus-visible {
+  background: rgb(255 211 61 / 0.14);
+  box-shadow: 0 0 14px rgb(255 211 61 / 0.4);
+}
+
 .versions-section {
   margin-top: 1.6rem;
   scroll-margin-top: 5.5rem;
@@ -3503,13 +3639,23 @@ a.era-link:focus-visible {
 
 .watch-btn:hover { filter: brightness(1.08); }
 
+/* The desk is one grid: the card on the left for the whole height, the price
+   band across the top, then the sold graph beside the listing form and the two
+   listing cells beside each other. The Vault and the full Shop are deliberately
+   NOT declared areas: a named area keeps its track and its gap even when nothing
+   renders in it, so the two optional rows auto-place as their own full-width row. */
 .card-desk {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
-    "art center deal"
-    "shop shop shop";
-  gap: 1rem;
+    "art band band"
+    "art graph graph"
+    "art cheap offers"
+    "art form form";
+  /* The graph row is the only elastic one: it takes whatever the card column
+     has left, so the right side ends level with the card and never on a void. */
+  grid-template-rows: auto 1fr auto auto;
+  gap: 0.65rem 1rem;
   align-items: stretch;
   margin-bottom: 2rem;
   min-width: 0;
@@ -3523,45 +3669,455 @@ a.era-link:focus-visible {
   min-height: 0;
 }
 
-.hero-center {
-  grid-area: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  min-height: 0;
-}
-
-.hero-deal {
-  grid-area: deal;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  min-height: 0;
-}
-
-.hero-art-col .art-panel,
-.hero-center .sell-form,
-.hero-deal .add-panel {
+/* The card is the only element that spans rows. It grows with the desk but the
+   scan keeps its own size: the version shortcuts sink to the bottom so the long
+   left column ends on something rather than on nothing. */
+.hero-art-col .art-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.hero-deal .add-panel {
-  gap: 1.2rem;
-  padding: 1.3rem 1.2rem 1.25rem;
+.hero-art-col .art-frame:has(+ .version-links) {
+  margin-bottom: 0.25rem;
 }
 
-.hero-deal .prod-px {
-  font-size: clamp(2.05rem, 3.6vw, 2.65rem);
-  text-align: center;
-  margin: 0.15rem 0;
+.hero-art-col .version-links {
+  margin-top: auto;
+  width: 100%;
+  container-type: inline-size;
+  --shortcut-size: min(2.5rem, (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
+}
+
+.hero-art-col .version-shortcuts {
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.hero-art-col .version-links .set-shortcut,
+.hero-art-col .version-links .more-versions.more-versions-ico {
+  box-sizing: border-box;
+  width: var(--shortcut-size);
+  height: var(--shortcut-size);
+}
+
+.hero-art-col .set-shortcut-code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Beside a tall desk the card column has free height under the card. The set
+   icons take it: the row fills what is left and the icons scale with it, from
+   their normal size up to a cap, instead of sitting small under a void. Only
+   where the card column spans the desk rows; a phone caps them at normal size. */
+@media (min-width: 1001px) {
+  .hero-art-col .version-links {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 2.9rem;
+    container-type: size;
+    --shortcut-size: min(clamp(2.5rem, 62cqh, 4.6rem), (100cqw - (var(--set-count) - 1) * 0.35rem) / var(--set-count));
+  }
+  .hero-art-col .version-links .more-versions-ico svg {
+    width: 76%;
+    height: 76%;
+  }
+}
+
+.desk-graph {
+  grid-area: graph;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.desk-form {
+  grid-area: form;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The graph is the elastic one: the row is as tall as the listing form needs to
+   be, and the chart takes the difference instead of the cell showing dead space. */
+.desk-graph .sold-graph {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 12rem;
+  max-height: none;
+}
+
+.desk-form .sell-form {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A signed-out visitor's List-your-card is one line. The cell beside it is as
+   tall as the graph, so the line keeps the box and sits in its middle: the old
+   column let the panel hug its content and leave the rest of the row empty. */
+.desk-form .sell-form.is-collapsed {
+  flex: none;
+  align-self: stretch;
+}
+
+/* The sell strip: one line for everyone, signed in or not. The opened form is
+   too big for a desk row beside the card, so it leaves the named area and
+   auto-places as a full-width row of its own, like the Vault and the Shop. */
+html:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  box-sizing: border-box;
+  background: var(--g3);
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  padding: 0.4rem 0.7rem;
+}
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
+  border-color: var(--desk-border);
+}
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .sell-form.is-collapsed {
+  background: #241540;
+  border-color: #5a3058;
+}
+.desk-form .sell-form.is-collapsed .add-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  margin: 0;
+}
+.desk-form .sell-form.is-collapsed h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.sell-strip-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-width: 0;
+}
+.sell-strip-actions {
+  display: inline-flex;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+.desk-form .sell-form.is-collapsed .sell-open {
+  min-height: 2rem;
+  padding: 0 0.9rem;
+  font-size: 0.82rem;
+}
+.desk-form:has(> .sell-form:not(.is-collapsed)) {
+  grid-area: auto;
+  grid-column: 1 / -1;
+}
+.sell-form .sell-close {
+  margin-left: 0.6rem;
+}
+
+/* The band ends on its chips: the desk's flat-panel padding under them only
+   pushed the graph caption away from the selection it describes. */
+@media (min-width: 721px) {
+  html:root:root .card-page.flutter-page .card-desk .desk-band {
+    padding-top: 0.4rem;
+    padding-bottom: 0;
+  }
+}
+
+/* Linked to the desk chips and with no toggle of its own, the graph keeps
+   nothing above the plot: the unit count sits on the date line at its foot. */
+.sold-graph-filters.is-bare {
+  top: auto;
+  bottom: 0.1rem;
+  justify-content: center;
+  pointer-events: none;
+}
+.sold-graph-filters.is-bare .sold-graph-units {
+  margin: 0 auto;
+  height: 1.2rem;
+}
+
+/* Every chip is a live button (it also drives the graph), so none is greyed
+   out: an unlisted grade or language is drawn in full colour like the rest,
+   and only the yellow ring says which one is picked. Each sits in a faint
+   outline so it reads as a button before it is hovered. */
+.desk-band .deal-chip,
+.desk-band .deal-chip.is-off {
+  cursor: pointer;
+  opacity: 1;
+  filter: none;
+  border-color: rgb(255 255 255 / 0.12);
+}
+.desk-band .deal-chip:hover { border-color: rgb(255 211 61 / 0.45); }
+.desk-band .deal-chip.is-on,
+.desk-band .deal-chip.is-on:hover { border-color: var(--yellow); }
+.desk-band .deal-facet-row[aria-label="Finish"] { display: flex; width: auto; }
+.desk-band .deal-chip-reverse { display: inline-flex; align-items: center; gap: 0.3rem; }
+.desk-band .deal-chip-reverse svg { width: 14px; height: 14px; }
+/* Reverse, 1st Ed. and Graded carry no flag, so they get the height of the
+   flagged language chips beside them: an 18px flag, the padding and the border. */
+.desk-band .deal-facet-row[aria-label="Finish"] .deal-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(18px + 0.5rem + 4px);
+}
+@media (max-width: 720px) {
+  .desk-band .deal-facet-row[aria-label="Finish"] .deal-chip { min-height: calc(18px + 0.8rem + 4px); }
+}
+
+/* Opened from the strip, the form is a full-width desk row: its five stacked
+   lines become two. Price, currency and quantity share a line with the facet
+   pickers and extras; location and comment share the next with the marketplace
+   switch and the List button. Notes and the graded fields keep full lines. */
+@media (min-width: 1001px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form {
+    display: grid;
+    grid-template-columns: minmax(20rem, 1fr) minmax(0, 1.6fr);
+    grid-template-areas:
+      "head head"
+      "price options"
+      "place targets";
+    align-items: end;
+    gap: 0.55rem 1rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > * {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    margin-bottom: 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head { grid-area: head; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .add-head + .sell-row { grid-area: price; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-options-row { grid-area: options; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-location-row {
+    grid-area: place;
+    flex-wrap: nowrap;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .location-pick {
+    flex: 0 1 11rem;
+    min-width: 7rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-location-row > .comment {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-targets-row { grid-area: targets; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form > .sell-pkn-eq { order: 9; }
+
+  /* Editing a listing has no marketplace switch: Save changes is the price
+     row's own button. The row's fields join the form's grid, so the first line
+     reads price, currency, quantity, the pickers, then Save changes at the right
+     end; location and comment take the whole second line. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: 5.5rem 6rem 4rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "head head head head head"
+      "price cur qty options save"
+      "place place place place place";
+    column-gap: 0.6rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing > .add-head + .sell-row { display: contents; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.price { grid-area: price; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.currency { grid-area: cur; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field.qty { grid-area: qty; min-width: 0; }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn {
+    grid-area: save;
+    width: auto;
+    height: 2.5rem;
+    min-height: 0;
+    margin: 0;
+    padding: 0 1.2rem;
+    white-space: nowrap;
+  }
+
+  /* On one line with the price inputs, the pickers and extras take the inputs'
+     height and type size instead of their small stacked-form size. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row { align-items: stretch; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-field.sell-pick select,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button {
+    box-sizing: border-box;
+    height: 2.5rem;
+    font-size: 0.88rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips { align-items: center; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.95rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 8.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .listing-photo-add {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  /* The pickers and extras are one line, always: they never wrap under the
+     price. Each keeps its content width and the row sits at the inputs' foot. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-photos {
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row > * { flex: none; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { white-space: nowrap; }
+}
+
+/* A narrower desk gives the same line less room: the chips and the finish
+   picker tighten instead of dropping to a second line. */
+@media (min-width: 1001px) and (max-width: 1320px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-field.sell-pick select,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button {
+    font-size: 0.78rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.5rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .lang-pick-btn { padding-left: 0.4rem; padding-right: 0.4rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 6.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form { column-gap: 0.6rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) {
+    grid-template-columns: minmax(15rem, 0.7fr) minmax(0, 1.6fr);
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: 5.5rem 6rem 4rem minmax(0, 1fr) auto;
+    column-gap: 0.4rem;
+  }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn { padding: 0 0.8rem; }
+  /* Price, currency and quantity stay one line too: the price field gives way. */
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row { flex-wrap: nowrap; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row > .sell-field.price {
+    flex: 1 1 4.5rem;
+    min-width: 4.5rem;
+  }
+}
+
+/* The narrowest desk that still has the two-line form: one more notch tighter. */
+@media (min-width: 1001px) and (max-width: 1120px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row,
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips { gap: 0.22rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .sell-chips button { padding: 0 0.38rem; font-size: 0.74rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .foil-pick { width: 5.9rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-options-row .listing-photo-add { width: 2.2rem; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form.is-editing {
+    grid-template-columns: 5rem 5.8rem 3.8rem minmax(0, 1fr) auto;
+  }
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .list-btn { padding: 0 0.6rem; font-size: 0.86rem; }
+}
+
+.cell-cheap {
+  grid-area: cheap;
+  min-width: 0;
+}
+
+.cell-offers {
+  grid-area: offers;
+  min-width: 0;
+}
+
+.card-desk > .vault-panel,
+.card-desk > .shop-terminal {
+  grid-column: 1 / -1;
+}
+
+/* When Pokoin has the card in its Vault, the Vault takes the cell beside the
+   buy offers and the cheapest listings become the row under the desk rows: the
+   two swap places. With no Vault stock nothing changes. The Vault scrolls
+   inside the cell so a long one cannot stretch the desk. */
+@media (min-width: 1001px) {
+  .card-desk:has(> .vault-panel) > .vault-panel {
+    grid-area: cheap;
+    max-height: 11.5rem;
+    overflow-y: auto;
+  }
+  .card-desk:has(> .vault-panel) > .cell-cheap {
+    grid-area: auto;
+    grid-column: 1 / -1;
+  }
+}
+
+/* The "Offer posted · Undo" line (and an offer error) floats over the tile's
+   top padding instead of pushing the band taller: posting an offer must not
+   move the desk. */
+@media (min-width: 721px) {
+  .band-actions .offer-wrap { position: relative; }
+  .band-actions .offer-wrap > .sell-msg {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.15rem);
+    z-index: 5;
+    margin: 0;
+    padding: 0.1rem 0.5rem;
+    border-radius: 8px;
+    background: var(--g2);
+    white-space: nowrap;
+  }
+}
+
+.deal-offer-cancel { color: var(--muted); }
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible { color: #f87171; border-color: #f87171; }
+
+/* Best Deal as one horizontal strip: label and marketplace links on their own
+   compact line, then two content lines that never become three — the price and
+   the chips share the first, the offer bar and the cart button take the second.
+   The chips fold inside their own box when the desk narrows, so the line count
+   stays the same from 1360px down to the width where the desk stacks. */
+.desk-band {
+  grid-area: band;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.7rem 0.9rem 0.75rem;
+}
+
+.band-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  min-width: 0;
+}
+
+.band-head .band-title {
+  margin: 0;
+  flex: none;
+}
+
+.band-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1rem;
+  min-width: 0;
+}
+
+.band-price {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: none;
+  min-width: 0;
+}
+
+.desk-band .prod-px {
+  font-size: clamp(1.5rem, 2.3vw, 2rem);
+  margin: 0;
+}
+
+.desk-band .px-stack {
+  align-items: flex-start;
+  line-height: 1.12;
+  gap: 0.1rem;
 }
 
 .deal-sold-by {
-  margin: -0.35rem 0 0;
-  text-align: center;
-  font-size: 0.95rem;
+  margin: 0;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -3576,29 +4132,84 @@ a.era-link:focus-visible {
   color: var(--yellow);
 }
 
-.hero-deal .px-stack {
+/* Best Deal with no Pokoin offer: a sentence in the price slot, not a dead button. */
+.desk-band .deal-none {
+  margin: 0;
+  max-width: 14rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* The two chip rows sit side by side in the band, so neither keeps the desk
+   rail's full width: five condition images, then the languages as they come. A
+   western printing names nine of them, so that row folds inside the band. */
+.desk-band .deal-facets {
+  flex: 1 1 0;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  width: 100%;
-  line-height: 1.15;
+  width: auto;
+  min-width: 0;
+  gap: 0.3rem 0.55rem;
+}
+
+.desk-band .deal-facet-row[aria-label="Condition"] {
+  width: auto;
+  grid-template-columns: repeat(5, minmax(0, 2.6rem));
   gap: 0.18rem;
 }
 
-.hero-deal .own-k {
-  margin: 0;
+.desk-band .deal-facet-row[aria-label="Language"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  width: auto;
+  gap: 0.18rem;
 }
 
-.hero-deal .buy-btn {
-  margin-top: auto;
+.desk-band .deal-chip {
+  padding: 0.25rem 0.42rem;
+  font-size: 0.76rem;
 }
 
-
-/* Best Deal with no Pokoin offer: a sentence, not a dead grey button. */
-.hero-deal .deal-none {
-  margin: auto 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.35;
+.desk-band .deal-chip .deal-flag {
+  width: 18px;
+  height: 18px;
 }
+
+/* The buy side always starts its own line, right-aligned, so the band is two
+   content lines at every desk width rather than a price line the chips fall off. */
+.band-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: 1 1 100%;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* The bar is a size container, so inside a content-sized flex line it has no
+   width of its own and would collapse to nothing: the band gives it one. The
+   page already carries the preview notice, so the bar's own copy is dropped. */
+.band-actions .offer-wrap { flex: none; width: 17rem; }
+
+/* Under 1280px the price, the marketplace links, the bar and the cart button no
+   longer fit one line: the links take a line of their own rather than slide
+   under the bar. */
+@media (min-width: 721px) and (max-width: 1279px) {
+  html:root .desk-band {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "price actions"
+      "head head"
+      "facets facets";
+  }
+}
+.band-actions .offer-wrap .seller-preview-banner { display: none; }
+.band-actions .buy-btn { width: auto; min-width: 9.5rem; }
 
 .hero-art-col .art-frame {
   flex: none;
@@ -3610,31 +4221,20 @@ a.era-link:focus-visible {
   aspect-ratio: 88 / 63;
 }
 
-.hero-center .sell-field.comment {
+.desk-form .sell-field.comment {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.hero-center .sell-field.comment textarea {
+.desk-form .sell-field.comment textarea {
   flex: 1;
   min-height: 4.5rem;
 }
 
-.hero-deal .add-panel .fee-lines {
-  margin-top: auto;
-}
-
-/* Vault (Pokoin's own stock) and Shop share the shop row half and half; narrower screens stack them, Vault first. */
-.shop-split {
-  grid-area: shop;
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 1rem;
-  min-width: 0;
-}
-.shop-split > .shop-panel { min-width: 0; }
+/* The Vault (Pokoin's own stock) and the full Shop are each a row of their own
+   under the desk grid: they auto-place, so an absent one costs no track. */
 /* The Vault is tighter than the Shop: no seller column, the fields close together. */
 .vault-panel .shop-row .shop-seller { display: none; }
 @media (min-width: 721px) {
@@ -3647,8 +4247,106 @@ a.era-link:focus-visible {
     grid-column: 4;
   }
 }
-@media (max-width: 1100px) {
-  .shop-split { grid-template-columns: minmax(0, 1fr); }
+
+/* Inside the one-tile desk every panel is flat; the Vault is the exception
+   and sits in its own slightly raised box (tokens follow the desk tint). */
+/* Inside the one-tile desk every panel is flat; the Vault and the two listing
+   cells are the exception and sit in their own slightly raised boxes (tokens
+   follow the desk tint). */
+html:root:root .card-page.flutter-page .card-desk .vault-panel,
+html:root:root .card-page.flutter-page .card-desk .desk-cell {
+  box-sizing: border-box;
+  background: var(--g3);
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  padding: 0.95rem 0.7rem 0.7rem; /* top matches .shop-terminal so the header rows share a baseline */
+}
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted:root:root .card-page.flutter-page .card-desk .desk-cell {
+  background: color-mix(in srgb, var(--desk-surface) 93%, #fff);
+  border-color: var(--desk-border);
+}
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .vault-panel,
+html.desk-tinted.desk-rainbow:root:root .card-page.flutter-page .card-desk .desk-cell {
+  background: #241540;
+  border-color: #5a3058;
+}
+/* Same header band as the Shop column row so the baselines line up. */
+.vault-panel .vault-title {
+  display: flex;
+  flex: 1;
+  box-sizing: border-box;
+  min-height: calc(1.7rem + 0.45rem + 1px);
+  padding: 0.1rem 0.15rem 0.35rem;
+  border-bottom: 1px solid var(--g5);
+  font-size: 0.72rem;
+}
+
+/* A list cell's title is one tight line: icon and name, the count, and See all
+   at the right end. No divider and no footer row: the rows start right under it. */
+html:root:root .card-page.flutter-page .card-desk .desk-cell {
+  padding: 0.5rem 0.7rem 0.55rem;
+}
+.desk-cell .cell-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0.15rem;
+  min-height: 1.4rem;
+  font-size: 0.72rem;
+}
+.desk-cell .cell-title .cell-count {
+  color: var(--muted);
+  font-weight: 700;
+}
+.desk-cell .cell-title .cell-more {
+  display: inline;
+  margin: 0 0 0 auto;
+  font-size: 0.76rem;
+}
+
+/* The two cells under the graph are as tall as what they hold: one row is one
+   row, never a block of empty slots that stretches the page. They still show at
+   most three rows (deal-book.js caps them), and the pair stays level because
+   the grid stretches the shorter one to its neighbour. While the offer book is
+   loading the skeleton is one row too. */
+.desk-cell .cell-skel > span:nth-child(n + 2) { display: none; }
+
+@media (min-width: 721px) {
+  /* The band is one line: price on the left, the marketplace links after it,
+     the offer bar and the cart button on the right; the chips take the line
+     under it. band-main's children join the band's own grid. */
+  .desk-band {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "price head actions"
+      "facets facets facets";
+    align-items: center;
+    gap: 0.45rem 1rem;
+    padding: 0.2rem 0.15rem 0;
+  }
+  .desk-band .band-main { display: contents; }
+  .desk-band .band-price { grid-area: price; }
+  .desk-band .band-head { grid-area: head; }
+  .desk-band .band-head .band-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .desk-band .band-actions {
+    grid-area: actions;
+    flex: none;
+    flex-wrap: nowrap;
+  }
+  .desk-band .deal-facets {
+    grid-area: facets;
+    flex: none;
+  }
 }
 
 .prod-layout {
@@ -3741,25 +4439,15 @@ a.era-link:focus-visible {
   margin-bottom: 0.35rem;
 }
 
-.add-panel .add-head {
-  flex-wrap: wrap;
-  column-gap: 0.85rem;
-  row-gap: 0.55rem;
-  margin-bottom: 0;
-}
-
-.add-panel .add-head h2 {
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
 .silver-tools {
   text-align: right;
 }
 
-.hero-deal .silver-tools.is-locked {
-  flex: 1 0 100%;
-  text-align: center;
+/* The locked prompt is a compact link line in the band's head, next to the
+   label — the old deal column gave it a row of its own. */
+.band-head .silver-tools.is-locked {
+  flex: 0 1 auto;
+  text-align: left;
 }
 
 .silver-tools.is-pending {
@@ -4334,7 +5022,7 @@ a.era-link:focus-visible {
   min-width: 0;
 }
 
-.hero-center .sell-field.comment.comment-inline {
+.desk-form .sell-field.comment.comment-inline {
   min-height: 0;
 }
 
@@ -4789,6 +5477,139 @@ span.shop-flag {
     justify-self: end;
   }
 }
+/* Card page Shop header: the column headers are the filters. On desktop the
+   rows of .shop-terminal and this header share one grid (seller | tags +
+   condition + language | price | qty | actions); the tag / condition / flag
+   cells inside the facets column have fixed tracks so the chips line up under
+   their buttons. The menus are absolute under their button: the panel and the
+   desk tile do not clip (overflow stays visible). */
+.shop-header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.15rem 0.35rem;
+  border-bottom: 1px solid var(--g5);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Icon + word label shared by the Shop header's Seller and the Vault title. */
+.shop-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.shop-hcell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.shop-hseller,
+.shop-hqty { display: none; }
+
+.shop-hmenu { position: relative; display: inline-flex; }
+
+.shop-hbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  height: 1.7rem;
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shop-hbtn:hover,
+.shop-hbtn:focus-visible,
+.shop-hmenu.is-open > .shop-hbtn {
+  border-color: var(--g5);
+  color: var(--text);
+  outline: none;
+}
+
+.shop-hbtn.is-active { color: var(--yellow); }
+
+.shop-hbtn img {
+  width: 1.55rem;
+  height: 1.1rem;
+  object-fit: contain;
+}
+
+.shop-hbtn img:not(.shop-cond) {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.shop-hlist { min-width: 9rem; }
+.shop-hlist.is-end { left: auto; right: 0; }
+.shop-hlist em { margin-left: auto; font-style: normal; color: var(--yellow); }
+.shop-hlist button { width: 100%; }
+.shop-hlist button:focus-visible { outline: 1px solid var(--yellow); }
+
+.shop-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--yellow);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (min-width: 721px) {
+  .shop-header,
+  .shop-terminal .shop-row:not(.is-profile) {
+    display: grid;
+    grid-template-columns: minmax(9rem, 1.6fr) minmax(0, 1.3fr) minmax(5.5rem, 1fr) minmax(2.5rem, 0.5fr) 4.25rem;
+    column-gap: 1rem;
+  }
+  .shop-hseller,
+  .shop-hqty { display: inline-flex; }
+  .shop-hfacets,
+  .shop-terminal .shop-row:not(.is-profile) .shop-facets {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2.6rem 2.6rem;
+    column-gap: 0.4rem;
+    justify-content: stretch;
+    justify-items: start;
+    align-items: center;
+  }
+  .shop-terminal .shop-row:not(.is-profile) .shop-facets .shop-txt { justify-self: end; }
+  .shop-hfacets .shop-hbtn { justify-self: start; margin-left: -0.35rem; }
+  .shop-hsort { grid-column: 5; justify-self: end; }
+  .shop-hlist.is-end { right: 0; }
+}
+
+@media (max-width: 720px) {
+  .shop-header {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+  .shop-hfacets { display: contents; }
+  .shop-hfacet-txt { display: none; }
+  .shop-hsort { margin-left: auto; }
+}
+
 .shop-act { text-align: right; color: var(--muted); }
 
 .ct-qty {
@@ -7236,11 +8057,7 @@ dialog.zoom:not([open]) {
 
 @media (max-width: 1100px) {
   .card-desk {
-    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-    grid-template-areas:
-      "art center"
-      "deal deal"
-      "shop shop";
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr) minmax(0, 1fr);
   }
   .prod-layout {
     grid-template-columns: minmax(12rem, 16rem) 1fr;
@@ -7253,15 +8070,61 @@ dialog.zoom:not([open]) {
   }
 }
 
+/* Beside the listing form the graph cell is about half the desk, and its
+   overlay filter row is a single nowrap line of two selects. Tighten the line
+   before it starts cutting option text. */
+@media (max-width: 1200px) {
+  .sold-graph-filters {
+    left: 2.4rem;
+    right: 0.4rem;
+    gap: 0.14rem;
+  }
+
+  .sold-graph-filters select,
+  .sold-graph-filters button,
+  .sold-graph-units {
+    height: 1.5rem;
+    font-size: 0.64rem;
+  }
+
+  .sold-graph-filters select {
+    flex: 1 1 0;
+    padding: 0.1rem 0.3rem;
+  }
+
+  .sold-graph-filters button {
+    padding: 0.1rem 0.4rem;
+  }
+}
+
+/* Below 1000px even the tightened line is wider than half the desk, and a
+   half-desk listing cell cuts the price out of a compact Shop row. The rows
+   take the full desk and the art column stops spanning them, the way the desk
+   already behaved here: a column that ran beside five stacked rows would be
+   one long empty strip. */
+@media (max-width: 1000px) {
+  .card-desk {
+    grid-template-areas:
+      "art band band"
+      "graph graph graph"
+      "cheap cheap cheap"
+      "offers offers offers"
+      "form form form";
+    grid-template-rows: none;
+  }
+}
+
 /* Compact chrome, search suggest, and card desk share 720px. */
 @media (max-width: 720px) {
   .card-desk {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "deal"
       "art"
-      "shop"
-      "center";
+      "band"
+      "cheap"
+      "offers"
+      "graph"
+      "form";
   }
 
   .sold-graph-filters {
@@ -7286,8 +8149,6 @@ dialog.zoom:not([open]) {
     padding: 0.1rem 0.28rem;
   }
 
-  /* Phone shop tile: "Shop" is the title row; the filters sit on one row
-     under it, each label a small caption above its select. */
   .shop-head {
     flex-wrap: wrap;
     row-gap: 0.55rem;
@@ -7297,78 +8158,74 @@ dialog.zoom:not([open]) {
     flex: 1 0 100%;
   }
 
-  .shop-head > .shop-tools {
-    flex: 1 1 100%;
-    align-items: end;
-    justify-content: stretch;
-    gap: 0.4rem;
-  }
-
-  .shop-tools .sort {
-    display: grid;
-    flex: 1 1 auto;
-    gap: 0.2rem;
-    min-width: 0;
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .shop-tools .sort select {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    margin-left: 0;
-    color: var(--text);
-    font-size: 0.78rem;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
-  }
-
   .hero-art-col {
     max-width: 22.5rem;
     width: 100%;
     margin: 0 auto;
   }
   .hero-art-col .art-panel,
-  .hero-center .sell-form,
-  .hero-deal .add-panel {
+  .desk-form .sell-form {
     flex: none;
   }
 
-  .hero-deal .add-panel {
-    align-items: stretch;
+  /* The band cannot keep one line on a phone: price, chips, offer bar and the
+     cart button each take a row of their own. */
+  .desk-band {
     text-align: center;
   }
 
-  .hero-deal .add-head {
-    width: 100%;
+  .desk-band .band-head {
     text-align: left;
   }
 
-  .hero-deal .prod-px,
-  .hero-deal .own-k {
-    text-align: center;
+  .desk-band .band-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
   }
 
-  .hero-deal .deal-facet-row {
+  .desk-band .band-price {
+    align-items: center;
+  }
+
+  .desk-band .deal-facets {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 0.45rem;
+  }
+
+  .desk-band .deal-facet-row[aria-label="Condition"] {
+    grid-template-columns: repeat(auto-fit, minmax(3.4rem, 1fr));
+    width: 100%;
+    gap: 0.4rem;
+  }
+
+  .desk-band .deal-facet-row[aria-label="Language"] {
     justify-content: center;
-    gap: 0.45rem 0.4rem;
+    width: 100%;
+    gap: 0.4rem;
   }
 
+  .desk-band .deal-chip {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.82rem;
+  }
 
-  .hero-deal .buy-btn {
+  .desk-band .band-actions {
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .desk-band .band-actions .buy-btn {
     width: 100%;
     max-width: 100%;
-  }
-
-  .hero-deal .buy-btn {
     display: flex;
     align-self: stretch;
-    margin-left: auto;
-    margin-right: auto;
   }
 }
 
@@ -7687,8 +8544,8 @@ dialog.zoom:not([open]) {
   }
 
   .promo-arrow {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
     top: 5.15rem;
   }
 
@@ -7761,13 +8618,6 @@ dialog.zoom:not([open]) {
     width: 4.4rem;
   }
 
-  .tile-art {
-    padding: 0.45rem;
-  }
-
-  .tile-album .tile-art {
-    padding: 0;
-  }
   .tile-album .tile-meta {
     padding: 0.12rem 0.36rem 0.14rem;
   }
@@ -7796,12 +8646,6 @@ dialog.zoom:not([open]) {
   }
 
   .card-desk {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "art"
-      "deal"
-      "shop"
-      "center";
     gap: 0.75rem;
   }
 
@@ -7889,18 +8733,18 @@ dialog.zoom:not([open]) {
   }
 
   .art-nav {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .collector-badge {
-    height: 2.75rem;
+    height: 2.5rem;
     line-height: calc(2.75rem - 2px);
   }
 
   .set-shortcut {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .add-panel,
@@ -8865,10 +9709,6 @@ dialog.zoom:not([open]) {
     text-align: left;
     margin-left: 0;
     justify-content: flex-start;
-  }
-
-  .hero-deal .silver-tools.is-locked {
-    text-align: center;
   }
 }
 
@@ -11186,3 +12026,1381 @@ img.is-lang-scan {
 }
 
 .cart-toast a { color: var(--yellow); font-weight: 800; }
+
+/* BuySell: the offer bar in Best Deal, and the page that lists them. */
+.buysell-ico {
+  vertical-align: -0.16em;
+  flex: 0 0 auto;
+}
+
+.buysell-ico .bs-buy { fill: var(--buysell-buy); }
+.buysell-ico .bs-sell { fill: var(--buysell-sell); }
+
+/* Header: the BuySell mark keeps its two colours at rest; hover and the active ring are the other icons' own. */
+.icon-nav a.buysell-link {
+  color: var(--buysell-buy);
+}
+
+.page-title .buysell-title-ico {
+  margin-right: 0.35em;
+  vertical-align: -0.04em;
+}
+
+/* The desk's two listing cells. The row count is not a CSS hide:
+ * deal-book.js caps the rows for the viewport (three on desktop, two on a
+ * phone) and the same number feeds the See all line, so a row that is cut is
+ * counted and one click away, never lost. */
+.desk-cell .cell-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-top: 0.3rem;
+}
+
+.desk-cell .empty-shop { padding: 0.3rem 0.15rem 0; }
+.desk-cell .empty-shop .status { margin: 0; text-align: left; }
+
+.desk-cell .cell-empty {
+  margin: 0;
+  padding: 0.3rem 0.15rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* One line per listing: seller | facet | price and copies | cart, out of the
+   Shop's own parts. The full Shop row keeps its wrapping flex line. */
+.cell-cheap .shop-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  padding: 0;
+  border-bottom: 0;
+  min-height: 2.4rem;
+}
+
+.cell-cheap .shop-seller {
+  min-width: 0;
+}
+
+.cell-cheap .shop-offer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* A phone cell is one narrow column: the compact line splits in two, seller and
+   facet above, price, copies and cart below. */
+@media (max-width: 720px) {
+  .cell-cheap .shop-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0.3rem;
+  }
+}
+
+/* One line per offer: grade | best price | how many want it | Sell. */
+.deal-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.4rem;
+  padding: 0 0.25rem;
+  min-width: 0;
+  border-radius: 0.55rem;
+}
+
+.deal-offer-cond {
+  flex: none;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 0.55rem;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.deal-offer-cond:hover { border-color: rgb(255 211 61 / 0.45); }
+
+.deal-offer-cond .shop-cond {
+  width: 2.2rem;
+  height: 1.5rem;
+}
+
+.deal-offer-px {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deal-offer-want {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.deal-offer-sell {
+  flex: none;
+  height: 1.7rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--yellow);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.deal-offer-sell:hover,
+.deal-offer-sell:focus-visible {
+  border-color: var(--yellow);
+  outline: none;
+}
+
+/* The row whose grade the chips above already picked. */
+.deal-offer.is-current { background: rgb(255 211 61 / 0.07); }
+
+.deal-offer.is-current .deal-offer-cond { border-color: var(--yellow); }
+/* Offer bar: the best buy offer, same size as Add to cart, above it. Opens the offer form in place. */
+.offer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.offer-wrap.is-above {
+  order: -1;
+}
+
+.offer-bar {
+  container-type: inline-size;
+  display: flex;
+  align-items: stretch;
+  min-height: 3rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  overflow: hidden;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.offer-bar-price {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.7rem;
+  color: #fff;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.offer-bar-price:hover:not(:disabled),
+.offer-bar-price:focus-visible {
+  background: var(--g3);
+  outline: 2px solid var(--yellow);
+  outline-offset: -2px;
+}
+
+.offer-bar-price:disabled { cursor: progress; }
+
+.offer-bar-price .buysell-ico {
+  flex: none;
+}
+
+.offer-bar-label {
+  color: var(--muted);
+}
+
+.offer-bar-amount,
+.offer-bar-none {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.offer-bar-amount {
+  color: var(--yellow);
+}
+
+.offer-bar-btn {
+  flex: none;
+  margin: 0.25rem 0;
+  padding: 0 0.8rem;
+  border: 0;
+  border-radius: 8px;
+  background: var(--yellow);
+  color: #161616;
+  font: inherit;
+  cursor: pointer;
+}
+
+.offer-bar-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.offer-bar-btn:active:not(:disabled) { filter: brightness(0.9); }
+.offer-bar-btn:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+
+.offer-bar-none-short {
+  display: none;
+}
+
+/* A narrow bar (the desktop column) drops the word Offer and shortens "No offers yet" before it would truncate or wrap. */
+@container (max-width: 300px) {
+  .offer-bar-label {
+    display: none;
+  }
+
+  .offer-bar-none-long {
+    display: none;
+  }
+
+  .offer-bar-none-short {
+    display: inline;
+  }
+
+  .offer-bar-price {
+    padding: 0 0.45rem 0 0.6rem;
+    gap: 0.3rem;
+  }
+
+  .offer-bar-btn {
+    padding: 0 0.65rem;
+  }
+
+  .offer-bar-amount {
+    font-size: 0.9em;
+  }
+}
+
+.offer-bar-gear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--g5);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.offer-bar-gear:hover,
+.offer-bar-gear:focus-visible,
+.offer-bar-gear[aria-expanded='true'] {
+  background: var(--g3);
+  color: var(--yellow);
+}
+
+.offer-bar-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Settings popup: a floating panel anchored to the bar, in <body> so no panel overflow clips it. */
+.offer-pop {
+  position: fixed;
+  z-index: 1500;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #14121a;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+}
+
+.offer-scrim {
+  display: none;
+}
+
+/* The price field's label line: the unit on the left, the switch to the other unit on the right. */
+.offer-unit-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.offer-unit-switch {
+  font-size: 0.74rem;
+}
+
+.offer-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.offer-open-head {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.offer-pop-close {
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.offer-pop-close:hover,
+.offer-pop-close:focus-visible {
+  background: var(--g3);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .offer-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1499;
+    background: rgb(0 0 0 / 55%);
+  }
+
+  .offer-pop {
+    inset: auto 0 0 0;
+    width: auto;
+    max-height: 88vh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.buy-form {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.buy-toggles {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.buy-toggle {
+  min-width: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  border-color: var(--g5);
+}
+
+.buy-cross {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+.sell-now {
+  display: grid;
+  gap: 0.4rem;
+}
+
+/* Sell is the row's one labelled action: the BuySell mark leads the word. */
+.sell-now-btn .buysell-ico {
+  margin-right: 0.35rem;
+}
+
+.sell-now-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.sell-now-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Quick Sell: the dialog every Sell action opens. Same surfaces, borders,
+   radius and yellow primary as the Define offer popup above it: a centred
+   floating card on desktop, the same bottom sheet at 720px and below. */
+.qs-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1499;
+  background: rgb(0 0 0 / 55%);
+}
+
+.qs-pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1500;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  overflow-y: auto;
+  width: min(26rem, calc(100vw - 1.5rem));
+  max-height: min(88vh, 46rem);
+  translate: -50% -50%;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #14121a;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+  text-align: left;
+  animation: qs-in 160ms ease-out;
+}
+
+/* The container itself is the first focus target, so it never shows a ring. */
+.qs-pop:focus,
+.qs-pop:focus-visible {
+  outline: none;
+}
+
+@keyframes qs-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.qs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qs-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.qs-close {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qs-close:hover:not(:disabled),
+.qs-close:focus-visible {
+  background: var(--g3);
+  color: #fff;
+}
+
+.qs-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+}
+
+/* The facets the seller can change: the desk's own chips, smaller, one line each. */
+.qs-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.qs-facet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.qs-pop .qs-chip {
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.2rem 0.45rem;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  border: 2px solid rgb(255 255 255 / 0.12);
+  border-radius: 10px;
+}
+.qs-pop .qs-chip:hover:not(:disabled) { border-color: rgb(255 211 61 / 0.45); }
+.qs-pop .qs-chip.is-on { border-color: var(--yellow); }
+.qs-pop .qs-chip .shop-cond { width: 34px; height: 24px; border-radius: 6px; }
+.qs-pop .qs-chip .deal-flag { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; }
+
+.qs-art {
+  flex: none;
+  width: 48px;
+  height: 67px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--g3);
+}
+
+.qs-card-lines {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.qs-card-name {
+  font-size: 0.9rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.qs-card-set,
+.qs-card-facets {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-offer,
+.qs-copies {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qs-offer {
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--g3);
+}
+
+.qs-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.qs-offer-what,
+.qs-offer-price {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.qs-offer-who {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-offer-price {
+  justify-items: end;
+  text-align: right;
+}
+
+.qs-offer-price strong {
+  color: var(--yellow);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.qs-offer-pkn {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.qs-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g2);
+}
+
+.qs-step {
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qs-step:hover:not(:disabled),
+.qs-step:focus-visible {
+  background: var(--g3);
+}
+
+.qs-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.qs-qty {
+  min-width: 2.2rem;
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-hint {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.qs-field {
+  width: 100%;
+}
+
+/* The note is what the seller wrote, so it is body text, not label text. */
+.qs-field textarea {
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.qs-label-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.qs-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-count.is-over {
+  color: #f87171;
+}
+
+.qs-fine {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qs-help {
+  margin: -0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .qs-pop {
+    top: auto;
+    left: auto;
+    inset: auto 0 0 0;
+    width: auto;
+    max-height: 88vh;
+    translate: 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Every control keeps its 40px target on the sheet. */
+  .qs-offer,
+  .qs-copies {
+    align-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qs-pop {
+    animation: none;
+  }
+}
+
+/* The three steps, behind the one info button by the title. */
+.buysell-how {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.buysell-how li {
+  counter-increment: how;
+  font-size: 0.85rem;
+}
+
+.buysell-how li::before {
+  content: counter(how);
+  display: inline-block;
+  margin-right: 0.5rem;
+  color: var(--buysell-buy);
+  font-weight: 800;
+}
+
+.buysell-how li:nth-child(2)::before {
+  color: var(--buysell-sell);
+}
+
+.buysell-fine {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* The two doors: Seek is everybody's board, Offer is what matches your listings. */
+.buysell-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.buysell-panel {
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  background: var(--g2);
+}
+
+.buysell-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.8rem;
+  margin-bottom: 0.7rem;
+}
+
+.buysell-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* Seek takes the buy gold, Offer the sell blue — the two arrows of the mark. */
+.is-seek .buysell-panel-title svg {
+  color: var(--buysell-buy);
+}
+
+.is-offer .buysell-panel-title svg {
+  color: var(--buysell-sell);
+}
+
+.buysell-panel-tools,
+.buysell-sort,
+.buysell-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Every row and header action: a 36px target, the text colour, and a gold ring.
+   Text and icon are #fff on --g3 (15:1) and --yellow on hover (11:1). */
+.buysell-act {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.buysell-act:hover {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.buysell-act:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.buysell-act[aria-pressed="true"] {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.14);
+  color: var(--yellow);
+}
+
+.buysell-act:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* The row's facts: copies, time left, buyer, your own listing. */
+.buysell-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.7rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.buysell-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.buysell-about {
+  position: relative;
+  display: inline-flex;
+}
+
+.buysell-about-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g3);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.55);
+  text-align: left;
+}
+
+/* The signed-out Offer door says one line and hands over a sign-in button. */
+.buysell-ask {
+  margin: 0 0 0.7rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* The history the Seek header opens, under both doors. */
+.buysell-history {
+  margin-top: 0.9rem;
+}
+
+/* Phones stack the doors, Seek first, the way the panels are written. */
+@media (max-width: 900px) {
+  .buysell-panels {
+    grid-template-columns: 1fr;
+  }
+
+  /* The title actions sit at the left of a stacked head, so the pop runs right. */
+  .buysell-about-pop {
+    right: auto;
+    left: 0;
+  }
+}
+
+.buysell-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.buysell-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g2);
+}
+
+.buysell-row img.buysell-thumb {
+  width: 3.4rem;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.buysell-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.buysell-main strong,
+.buysell-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buysell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.buysell-meta .shop-cond {
+  height: 1.3rem;
+  width: auto;
+}
+
+.buysell-meta .deal-flag {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* The seller's note under a fill on My offers: it is private text, so it takes
+   its own line and never truncates into the shared row. */
+.buysell-meta .buysell-note {
+  flex: 1 1 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: var(--g2);
+  color: #fff;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* The Seek board's tag on a row the caller posted themselves, where the pencil
+   and the bin replace Sell. */
+.buysell-own {
+  width: fit-content;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.buysell-side {
+  display: grid;
+  justify-items: end;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.buysell-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.buysell-group {
+  margin: 1.1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 720px) {
+  .buysell-row {
+    grid-template-columns: 3rem 1fr;
+  }
+
+  .buysell-side {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: space-between;
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+/* The price is a few digits: its field is short in the opened desk form, so the
+   rest of the line has the room. */
+@media (min-width: 1001px) {
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row { flex-wrap: nowrap; }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) > .add-head + .sell-row > .sell-field.price {
+    flex: 0 1 6.5rem;
+    min-width: 4.5rem;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form:not(.is-editing) {
+    grid-template-columns: minmax(18.5rem, 0.55fr) minmax(0, 1.6fr);
+  }
+}
+
+/* In the edit line each field fills its own column and no more, so quantity
+   cannot run under the first picker; and a label never breaks into two lines. */
+@media (min-width: 1001px) {
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field input,
+  .desk-form .sell-form.is-editing > .add-head + .sell-row > .sell-field select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .desk-form:has(> .sell-form:not(.is-collapsed)) .sell-form .sell-field { white-space: nowrap; }
+}
+
+/* A steady card desk on load and reload.
+   - The page column is a viewport tall from the first frame, so the footer is
+     never on screen above content that is still arriving.
+   - The price slot keeps the height of a full price (PKN line, local line,
+     seller line) while it still shows the dash.
+   - The offer bar and the Buy offers cell are there from the first paint at
+     their final size, as skeletons, until the offer book is known. */
+.card-page.flutter-page { min-height: 100vh; }
+
+@media (min-width: 721px) {
+  .desk-band .band-price { min-height: 4.6rem; }
+}
+
+.offer-bar-skel,
+.cell-skel > span {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.05));
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.2s ease-in-out infinite;
+}
+.offer-bar-skel { width: 4.2rem; height: 1rem; }
+.cell-skel > span { height: 2.4rem; }
+.offer-wrap.is-loading .offer-bar-btn,
+.offer-wrap.is-loading .offer-bar-gear { opacity: 0.55; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .offer-bar-skel,
+  .cell-skel > span { animation: none; }
+}
+
+/* The visitor's own offer in the Buy offers cell: a red cross deletes it. An
+   offer in another language than the chips' carries its flag. */
+.deal-offer-cancel,
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid rgb(248 113 113 / 0.45);
+  border-radius: 8px;
+  background: rgb(248 113 113 / 0.1);
+  color: #f87171;
+  cursor: pointer;
+}
+.deal-offer-cancel:hover,
+.deal-offer-cancel:focus-visible { background: rgb(248 113 113 / 0.22); border-color: #f87171; outline: none; }
+.deal-offer-cancel:disabled { opacity: 0.5; cursor: default; }
+.deal-offer.is-mine { background: rgb(255 211 61 / 0.05); }
+.deal-offer-lang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.deal-offer-lang .deal-flag { width: 16px; height: 16px; }
+
+/* Comparing sold series on the card desk graph.
+   The default facet's line stays under the picked one. A pick in the default's
+   language keeps the grade colours; a pick in another language uses the second
+   palette, so a language is never mistaken for a grade. */
+.sold-graph.is-alt.is-nm { --sold-line: #5fb8e8; --sold-fill: rgb(95 184 232 / 0.16); --sold-guide: rgb(95 184 232 / 0.45); }
+.sold-graph.is-alt.is-sp { --sold-line: #38d6c4; --sold-fill: rgb(56 214 196 / 0.15); --sold-guide: rgb(56 214 196 / 0.42); }
+.sold-graph.is-alt.is-mp { --sold-line: #e45fd0; --sold-fill: rgb(228 95 208 / 0.15); --sold-guide: rgb(228 95 208 / 0.42); }
+.sold-graph.is-alt.is-pl { --sold-line: #a78bfa; --sold-fill: rgb(167 139 250 / 0.16); --sold-guide: rgb(167 139 250 / 0.42); }
+.sold-graph.is-alt.is-poor { --sold-line: #ff8fb1; --sold-fill: rgb(255 143 177 / 0.15); --sold-guide: rgb(255 143 177 / 0.42); }
+.sold-graph.is-alt.is-all { --sold-line: #9ad7f5; --sold-fill: rgb(154 215 245 / 0.14); --sold-guide: rgb(154 215 245 / 0.4); }
+
+.sold-graph-under {
+  fill: none;
+  stroke: var(--under-line, #f3f4f7);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+.u-all { --under-line: #f3f4f7; }
+.u-nm { --under-line: #147a3f; }
+.u-sp { --under-line: #3dcf74; }
+.u-mp { --under-line: var(--yellow); }
+.u-pl { --under-line: #b87333; }
+.u-poor { --under-line: #e44545; }
+
+.sold-graph-legend {
+  position: absolute;
+  z-index: 4;
+  top: 0.35rem;
+  left: 2.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.9rem;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.sold-graph-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+.sold-graph-key::before {
+  content: "";
+  width: 0.95rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--under-line, #f3f4f7);
+}
+.sold-graph-key.is-picked { color: inherit; }
+.sold-graph-key.is-picked::before { background: var(--sold-line, var(--yellow)); }
+
+/* Several sold series on one graph. Each overlay brings its own colour
+   (--under-line / --key-line, set inline); Reverse is the same colour dashed.
+   A carried price (before a series' first sale, after its last) is a faint
+   dashed line: it is where the price stood, not a sale. */
+.sold-graph-under polyline {
+  fill: none;
+  stroke: var(--under-line, #f3f4f7);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+.sold-graph-under.is-dashed polyline { stroke-dasharray: 7 4; }
+.sold-graph-under-dot { fill: var(--under-line, #f3f4f7); }
+.sold-graph-under polyline.sold-graph-carry,
+.sold-graph-line.sold-graph-carry {
+  stroke-width: 1.4;
+  stroke-dasharray: 2 5;
+  opacity: 0.55;
+}
+
+.sold-graph-legend {
+  right: 2.85rem;
+  flex-wrap: nowrap;
+  gap: 0.2rem 0.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+.sold-graph-legend::-webkit-scrollbar { display: none; }
+.sold-graph-key { flex: none; white-space: nowrap; }
+.sold-graph-key::before { background: var(--key-line, #f3f4f7); }
+.sold-graph-key.is-dashed::before {
+  background: repeating-linear-gradient(90deg, var(--key-line, #f3f4f7) 0 4px, transparent 4px 7px);
+}
+.sold-graph-key-x {
+  margin-left: -0.1rem;
+  padding: 0 0.2rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sold-graph-key-x:hover,
+.sold-graph-key-x:focus-visible { color: #f87171; outline: none; }
+
+/* The current series is dashed too when it is the Reverse one, in the line and in its legend key. */
+.sold-graph.is-dashed-line .sold-graph-line:not(.sold-graph-carry) { stroke-dasharray: 7 4; }
+.sold-graph-key.is-picked.is-dashed::before {
+  background: repeating-linear-gradient(90deg, var(--sold-line, var(--yellow)) 0 4px, transparent 4px 7px);
+}
+
+/* Every price source inside the panel the sold graph already has.
+   The legend keys and the four range buttons share one line at the plot's top,
+   so nothing new is added above or below it: the chart only starts lower.
+   The source colours are the only literals here; everything else is the page's
+   own variables, because the desk is tinted per card. */
+.sold-graph-topline {
+  position: absolute;
+  z-index: 4;
+  top: 0.35rem;
+  left: 2.85rem;
+  right: 2.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+/* The keys give room first: they are the part that scrolls, the buttons are not. */
+.sold-graph-topline .sold-graph-legend {
+  position: static;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.sold-graph-ranges {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.16rem;
+  margin-left: auto;
+  pointer-events: auto;
+}
+.sold-graph-range {
+  height: 20px;
+  padding: 0 0.32rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sold-graph-range:hover { color: var(--text); border-color: var(--muted); }
+.sold-graph-range[aria-pressed="true"] {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+}
+.sold-graph-range:focus-visible { outline: 1px solid var(--yellow); outline-offset: 1px; }
+
+/* A source key is the same swatch-plus-text chip, but pressable: it takes the
+   line off the chart. Turned off, or with nothing to draw in this range, it is
+   dimmed; the latter cannot be pressed at all. */
+button.sold-graph-key.is-source {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+button.sold-graph-key.is-source:hover { color: var(--text); }
+.sold-graph-key.is-source.is-off,
+.sold-graph-key.is-source.is-empty { opacity: 0.45; }
+.sold-graph-key.is-source.is-off:hover { color: var(--muted); }
+.sold-graph-key.is-source:disabled { cursor: default; }
+.sold-graph-key.is-source:focus-visible { outline: 1px solid var(--yellow); outline-offset: 2px; }
+
+/* An outer price source is a thinner line than a sold series, and it is drawn
+   under it. Where it stopped quoting the line breaks and a faint dotted segment
+   bridges the hole, so a gap reads as a gap instead of a flat price. */
+.sold-graph-under.is-source polyline { stroke-width: 1.6; opacity: 0.95; }
+.sold-graph-under.is-source.is-dashed polyline:not(.sold-graph-gap) { stroke-dasharray: 5 4; }
+.sold-graph-under.is-source polyline.sold-graph-gap,
+.sold-graph-under.is-source.is-dashed polyline.sold-graph-gap {
+  stroke-width: 1.3;
+  stroke-dasharray: 1 4;
+  opacity: 0.38;
+}
+
+/* Pokoin now has no history to draw: the cheapest live listing is one dot at
+   the right edge, with a short dotted stub pointing at it. */
+.sold-graph-now-stub { stroke: var(--yellow); stroke-width: 1.4; stroke-dasharray: 1 4; opacity: 0.5; stroke-linecap: round; }
+.sold-graph-now-dot { fill: var(--yellow); stroke: none; }
+/* Every visible line gets a mark on the guide for the day it quotes. */
+.sold-graph-hover-dot { fill: var(--dot-fill, var(--muted)); stroke: none; }
+
+/* Several lines on the plot: the hover is one small table at its top, beside the
+   guide on whichever side is free, and it never leaves the panel. */
+.sold-graph-tip.is-rows {
+  display: grid;
+  gap: 0.02rem;
+  padding: 0.28rem 0.42rem;
+  white-space: nowrap;
+}
+.sold-graph-tip.is-rows.is-start { transform: translate(0.55rem, 2px); margin-left: 0; }
+.sold-graph-tip.is-rows.is-end { transform: translate(calc(-100% - 0.55rem), 2px); margin-left: 0; }
+.sold-graph-tip.is-rows strong {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+  margin-top: 0.1rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-row.is-picked { color: var(--text); }
+.sold-graph-tip.is-rows .sold-graph-tip-swatch {
+  flex: none;
+  width: 0.7rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--row-line, var(--muted));
+}
+.sold-graph-tip.is-rows .sold-graph-tip-swatch.is-dashed {
+  background: repeating-linear-gradient(90deg, var(--row-line, var(--muted)) 0 4px, transparent 4px 7px);
+}
+.sold-graph-tip.is-rows .sold-graph-tip-label {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-value {
+  margin: 0 0 0 auto;
+  max-width: none;
+  padding-left: 0.5rem;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+}
+.sold-graph-tip.is-rows .sold-graph-tip-value.is-none { color: var(--muted); font-weight: 600; }
+.sold-graph-tip.is-rows .sold-graph-tip-more {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* On a phone the same line stays one row: the keys scroll, the buttons stay put. */
+@media (max-width: 720px) {
+  .sold-graph-topline { gap: 0.24rem; }
+  .sold-graph-topline .sold-graph-legend { gap: 0.16rem 0.5rem; }
+  .sold-graph-ranges { gap: 0.1rem; }
+  .sold-graph-range { padding: 0 0.22rem; }
+}
+
+/* A panel under 560 px (the measured width, like the short key labels): the top
+   line spans the whole panel, the key gap and the buttons tighten, so the four
+   source keys in short form and the four range buttons fit a 314 px phone
+   panel. At 560 px and wider nothing here changes. */
+.sold-graph.is-narrow .sold-graph-topline { left: 0.5rem; right: 0.5rem; }
+.sold-graph.is-narrow .sold-graph-topline .sold-graph-legend { gap: 0.16rem 6px; }
+.sold-graph.is-narrow .sold-graph-key::before { width: 0.75rem; }
+.sold-graph.is-narrow .sold-graph-range { padding: 0 5px; }
+/* Keys that still overflow (overlay keys joined in) fade over their last
+   16 px: the mask clears to the panel's own background, so the row reads as
+   scrollable instead of cut off. */
+.sold-graph-legend.is-overflow {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}

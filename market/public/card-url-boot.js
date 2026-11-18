@@ -99,6 +99,14 @@ function cardBootPlan(pathname, hostname) {
 // hit (card-page max-age=10) instead of a second request through the Worker.
 var API_ORIGIN = "https://api.pokoin.com";
 
+// The canonical path replaces the address bar, but the visitor's own query and hash
+// (?mypokoinPreview, ?utm_source=…) belong to the page and ride along.
+function canonicalUrlKeepingQuery(next, search, hash) {
+  var target = String(next);
+  if (/[?#]/.test(target)) return target;
+  return target + (search || "") + (hash || "");
+}
+
 function startCardUrlBoot() {
   if (typeof location === "undefined" || typeof fetch !== "function") return;
   var plan = cardBootPlan(location.pathname, location.hostname);
@@ -112,7 +120,7 @@ function startCardUrlBoot() {
     if (!next) return;
     var clean = String(next).split(/[?#]/)[0].replace(/\/$/, "");
     if (clean && clean !== location.pathname.replace(/\/$/, "")) {
-      history.replaceState(history.state, "", next);
+      history.replaceState(history.state, "", canonicalUrlKeepingQuery(next, location.search, location.hash));
     }
   }).catch(function () {});
   // One card-page prefetch. The desk's fetchCard uses this same URL and

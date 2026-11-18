@@ -7,7 +7,7 @@ Output: sibling artcut/ JPEGs for CLIP / version matching.
 Never writes into objects/. Never _art.webp. SPA tiles stay full-card.
 Rectangle: market/src/art-cut.js POKEMON_ART_CUT.
 
-  /home/nez/Projects/BattleScan/.venv/bin/python \\
+  /home/nez/Projects/Startup/Pokoin/BattleScan/.venv/bin/python \\
     scripts/export-leftover-artcut.py
 """
 from __future__ import annotations

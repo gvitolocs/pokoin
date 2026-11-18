@@ -97,7 +97,7 @@ fn query_map(uri: &Uri) -> HashMap<String, String> {
     }
     map
 }
-fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
+pub(crate) fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
     let q = http::Query::from_uri(uri);
     pokoin_api_common::game::parse_game_from_request(
         &http::header_pairs(headers),
@@ -105,12 +105,12 @@ fn request_game(headers: &HeaderMap, uri: &Uri) -> String {
         q.first("marketplaceGame"),
     )
 }
-async fn auth(state: &DomainState, headers: &HeaderMap) -> Result<crate::Claims, ApiError> {
+pub(crate) async fn auth(state: &DomainState, headers: &HeaderMap) -> Result<crate::Claims, ApiError> {
     let token = crate::auth::bearer(headers.get("authorization").and_then(|h| h.to_str().ok()))
         .map_err(ApiError::from)?;
     state.verifier().verify(token).await.map_err(ApiError::from)
 }
-fn response(result: Result<Value, ApiError>, private: bool) -> Response {
+pub(crate) fn response(result: Result<Value, ApiError>, private: bool) -> Response {
     match result {
         Ok(v) => {
             if private {
@@ -274,11 +274,17 @@ async fn listing_game(
     }
     Ok(game)
 }
+/// A listing the Card Rails Seller API connector created for its own seller.
+const CARDRAILS_KEY_SQL: &str = "exists (select 1 from public.seller_api_listing_keys k \
+join public.seller_api_grants g on g.id = k.grant_id \
+where k.listing_id = listings.id and g.seller_uid = listings.seller_uid \
+and k.idempotency_key like 'cardrails:%')";
 fn read_sql(
     query: &HashMap<String, String>,
     seller: &str,
     game: &str,
     catalog: Option<&[String]>,
+    cardrails: bool,
 ) -> (String, Vec<Value>) {
     let mut values = vec![];
     let mut clauses = vec![];
@@ -338,7 +344,14 @@ fn read_sql(
     // `order=price-desc`: MyPokoin opens on price high → low, so a first load
     // that paints its first page shows the rows that stay on top.
     let price = if query.get("order").map(String::as_str) == Some("price-desc") { "desc" } else { "asc" };
-    (format!("select to_jsonb(listings) as listing from public.marketplace_user_listings listings {} order by price_pkn {price}, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
+    // The owner's own book also says which rows the Card Rails connector
+    // created (their `source` stays the default): one semi-join, no per-row read.
+    let listing = if cardrails && own && !seller.is_empty() {
+        format!("to_jsonb(listings) || jsonb_build_object('cardrails_key', {CARDRAILS_KEY_SQL})")
+    } else {
+        "to_jsonb(listings)".to_string()
+    };
+    (format!("select {listing} as listing from public.marketplace_user_listings listings {} order by price_pkn {price}, updated_at desc, created_at desc limit ${lp}{offset_sql}",if clauses.is_empty(){String::new()}else{format!("where {}",clauses.join(" and "))}),values)
 }
 pub async fn read_listings(
     state: &DomainState,
@@ -388,12 +401,21 @@ pub async fn read_listings(
     } else {
         None
     };
-    let (sql, values) = read_sql(query, &seller, game, catalog.as_deref());
-    let mut builder = sqlx::query(&sql);
-    for v in &values {
-        builder = bind_json(builder, v);
-    }
-    let rows = builder.fetch_all(state.read_db()).await?;
+    let read = |cardrails: bool| {
+        let (sql, values) = read_sql(query, &seller, game, catalog.as_deref(), cardrails);
+        async move {
+            let mut builder = sqlx::query(&sql);
+            for v in &values {
+                builder = bind_json(builder, v);
+            }
+            builder.fetch_all(state.read_db()).await
+        }
+    };
+    // Before migration 115 there are no seller API tables: no Card Rails flag.
+    let rows = match read(true).await {
+        Err(error) if crate::seller_api::is_missing_table(&error) => read(false).await?,
+        rows => rows?,
+    };
     let mut rows: Vec<Value> = rows
         .into_iter()
         .map(|r| r.try_get("listing"))
@@ -588,7 +610,7 @@ pub(crate) async fn owner_book_stamp(read_db: &sqlx::PgPool, uid: &str) -> Resul
     .await?;
     Ok(format!("{count}:{}", super::seller::stamp_text(last)))
 }
-fn parse_body(headers: &HeaderMap, body: &Bytes) -> Result<Value, ApiError> {
+pub(crate) fn parse_body(headers: &HeaderMap, body: &Bytes) -> Result<Value, ApiError> {
     http::parse_body(headers, body)
         .map(|b| b.json().clone())
         .map_err(|_| ApiError::bad_request("Invalid JSON body."))
@@ -881,6 +903,54 @@ pub(crate) async fn create_listing_keyed(
     requested_game: &str,
     api_key: Option<(uuid::Uuid, &str)>,
 ) -> Result<Value, ApiError> {
+    let draft = match prepare_listing(state, claims, body, requested_game).await? {
+        Prepared::CardtraderOnly(result) => return Ok(result),
+        Prepared::Insert(draft) => draft,
+    };
+    let mut tx = state.write_db().begin().await?;
+    let (row, queued) = insert_listing(state, &mut tx, claims, &draft).await?;
+    if let Some((grant, key)) = api_key {
+        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
+            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
+        let bound = sqlx::query(BIND_API_KEY_SQL)
+            .bind(grant)
+            .bind(key)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if bound != 1 {
+            tx.rollback().await?;
+            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
+        }
+    }
+    tx.commit().await?;
+    finish_created(state, claims, &row, queued, &draft).await
+}
+
+/// A listing that passed every check and is ready to insert.
+pub(crate) struct ListingDraft {
+    values: Vec<Value>,
+    game: String,
+    targets: Value,
+}
+
+pub(crate) enum Prepared {
+    /// CardTrader-only create: pushed, no Pokoin row.
+    CardtraderOnly(Value),
+    Insert(ListingDraft),
+}
+
+/// Every check `POST /api/marketplace-listings` makes before it writes: the
+/// body, seller country, price and quantity, reserve and NFT rights, the
+/// catalog game. Reads only; a caller with its own transaction inserts the
+/// draft with [`insert_listing`].
+pub(crate) async fn prepare_listing(
+    state: &DomainState,
+    claims: &crate::Claims,
+    body: &Value,
+    requested_game: &str,
+) -> Result<Prepared, ApiError> {
     let card = live::field(body, "cardId", 80);
     let price = live::number(&body["pricePkn"]);
     let qty = live::number(&body["quantityAvailable"]);
@@ -900,7 +970,6 @@ pub(crate) async fn create_listing_keyed(
         require_reserve(state, claims).await?;
     }
     let targets = sync::targets(&body["targets"]);
-    let mut cardtrader = json!({"ok":true,"skipped":true,"reason":"not_requested"});
     if targets["pokoin"] == false && targets["cardtrader"] == true {
         let pushed = sync::push_listing(state, &claims.uid, body, false).await;
         let cardtrader = match pushed {
@@ -909,7 +978,9 @@ pub(crate) async fn create_listing_keyed(
             }
             Err(e) => json!({"ok":false,"error":e.message}),
         };
-        return Ok(json!({"listing":null,"cardtrader":cardtrader,"targets":targets}));
+        return Ok(Prepared::CardtraderOnly(
+            json!({"listing":null,"cardtrader":cardtrader,"targets":targets}),
+        ));
     }
     verify_nft(state, &claims.uid, body, qty as i64, reserve).await?;
     let meta = metadata(state, &card).await;
@@ -918,45 +989,55 @@ pub(crate) async fn create_listing_keyed(
         pokoin_api_common::game::normalize_game(if g.is_empty() { requested_game } else { &g });
     let game = listing_game(state, &card, &game, &live::field(body, "cardName", 240)).await?;
     let values = create_values(body, &claims.uid, &game, &meta)?;
+    Ok(Prepared::Insert(ListingDraft {
+        values,
+        game,
+        targets,
+    }))
+}
+
+/// Insert a prepared listing and queue its sync event in `tx`. Returns the
+/// new row and whether an outbox event was queued.
+pub(crate) async fn insert_listing(
+    state: &DomainState,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claims: &crate::Claims,
+    draft: &ListingDraft,
+) -> Result<(Value, bool), ApiError> {
     let sql =
         format!("with written as ({CREATE_SQL}) select to_jsonb(written) as listing from written");
-    let mut tx = state.write_db().begin().await?;
     let mut builder = sqlx::query(&sql);
-    for value in &values {
+    for value in &draft.values {
         builder = bind_json(builder, value);
     }
-    let row = builder.fetch_one(&mut *tx).await?;
+    let row = builder.fetch_one(&mut **tx).await?;
     let row: Value = row.try_get("listing")?;
     let event = sync::event(
         &row,
-        &json!({"game":game,"sellerUid":claims.uid,"mutation":"LISTING_CREATED","wantsCardtrader":targets["cardtrader"],"cardtraderListing":if targets["cardtrader"]==true{ct_listing(&row)}else{Value::Null}}),
+        &json!({"game":draft.game,"sellerUid":claims.uid,"mutation":"LISTING_CREATED","wantsCardtrader":draft.targets["cardtrader"],"cardtraderListing":if draft.targets["cardtrader"]==true{ct_listing(&row)}else{Value::Null}}),
         state.now_ms(),
     );
-    let queued = sync::enqueue(&mut tx, event).await?;
-    if let Some((grant, key)) = api_key {
-        let id = uuid::Uuid::parse_str(&live::field(&row, "id", 80))
-            .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
-        let bound = sqlx::query(BIND_API_KEY_SQL)
-            .bind(grant)
-            .bind(key)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        if bound != 1 {
-            tx.rollback().await?;
-            return Err(ApiError::conflict("Another attempt with this key created the listing.").with_code("list_key_bound"));
-        }
-    }
-    tx.commit().await?;
-    let mut listing = finish_write(state, &row, queued, &game, &claims.uid).await?;
-    if targets["cardtrader"] == true {
-        // The seller reconcile lists it, in one CardTrader product with its
-        // identical copies (cardtrader::group), queued or not.
-        cardtrader = json!({"ok":true,"pending":true});
-    }
-    listing["cardtrader"] = cardtrader;
-    listing["targets"] = targets;
+    let queued = sync::enqueue(tx, event).await?;
+    Ok((row, queued))
+}
+
+/// After the commit: caches, price summary, and the response a create returns.
+pub(crate) async fn finish_created(
+    state: &DomainState,
+    claims: &crate::Claims,
+    row: &Value,
+    queued: bool,
+    draft: &ListingDraft,
+) -> Result<Value, ApiError> {
+    let mut listing = finish_write(state, row, queued, &draft.game, &claims.uid).await?;
+    // The seller reconcile lists it, in one CardTrader product with its
+    // identical copies (cardtrader::group), queued or not.
+    listing["cardtrader"] = if draft.targets["cardtrader"] == true {
+        json!({"ok":true,"pending":true})
+    } else {
+        json!({"ok":true,"skipped":true,"reason":"not_requested"})
+    };
+    listing["targets"] = draft.targets.clone();
     Ok(listing)
 }
 async fn decrement_listing(
@@ -1239,7 +1320,21 @@ pub async fn marketplace_listings_patch(
             ));
         }
         let body = parse_body(&headers, &bytes)?;
-        update_listing(&state, &claims, &id, &body).await
+        // A price typed by hand on a grouped listing takes it out of its
+        // group, in the write's transaction under the row lock (the rule of a
+        // Card Rails `update`; specs/tla/price-ownership), so the next Apply
+        // or daily run never overwrites it. `pricingGroupId: null` takes it out
+        // at any price. The edit never joins a group.
+        let guard = super::pricer::GroupGuard::Manual { named: super::pricer::named_group(&body), may_join: false };
+        let (mut listing, outcome) = update_listing_guarded(&state, &claims, &id, &body, &guard).await?;
+        if let Some(object) = listing.as_object_mut() {
+            // `{ id, name }` of the group the edit took the listing out of.
+            object.insert(
+                "leftPricingGroup".into(),
+                outcome.left.map(|(id, name)| json!({ "id": id, "name": name })).unwrap_or(Value::Null),
+            );
+        }
+        Ok(listing)
     }
     .await;
     let mut out = response(result, false);
@@ -1257,6 +1352,19 @@ pub(crate) async fn update_listing(
     id: &str,
     body: &Value,
 ) -> Result<Value, ApiError> {
+    Ok(update_listing_guarded(state, claims, id, body, &super::pricer::GroupGuard::None).await?.0)
+}
+
+/// [`update_listing`] with what it does about the listing's pricing group,
+/// decided and applied in the same transaction, under the row lock
+/// (`pricer::apply_guard`).
+pub(crate) async fn update_listing_guarded(
+    state: &DomainState,
+    claims: &crate::Claims,
+    id: &str,
+    body: &Value,
+    guard: &super::pricer::GroupGuard,
+) -> Result<(Value, super::pricer::GroupOutcome), ApiError> {
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|_| ApiError::not_found("Listing not found for this seller."))?;
     let existing=sqlx::query_scalar::<_,Value>("select to_jsonb(v) from (select seller_uid, card_id, quantity_available, reserve_available, source, source_listing_id from public.marketplace_user_listings where id = $1 limit 1) v").bind(uuid).fetch_optional(state.read_db()).await?.ok_or_else(||ApiError::not_found("Listing not found for this seller."))?;
@@ -1304,6 +1412,7 @@ pub(crate) async fn update_listing(
     .fetch_optional(&mut *tx)
     .await?
     .unwrap_or_else(|| json!({}));
+    let outcome = super::pricer::apply_guard(&mut tx, &claims.uid, uuid, live::number(&before["price_pkn"]), body, guard).await?;
     let source = live::field(&before, "source_listing_id", 160);
     // Identical copies on the same CardTrader product (cardtrader::group).
     let siblings: i64 = if pokoin_external::cardtrader::sync_core::parse_ct_product_id(&source).is_empty() {
@@ -1355,7 +1464,7 @@ pub(crate) async fn update_listing(
         )
         .await;
     }
-    Ok(listing)
+    Ok((listing, outcome))
 }
 pub async fn marketplace_listings_other(
     State(state): State<DomainState>,
@@ -2193,7 +2302,7 @@ mod parity_tests {
             ("offset".into(), "7".into()),
         ]);
         let ids = vec!["801170".to_string()];
-        let (sql, values) = read_sql(&q, "u1", "riftbound", Some(&ids));
+        let (sql, values) = read_sql(&q, "u1", "riftbound", Some(&ids), true);
         assert!(sql.contains("or (coalesce(nullif(marketplace_game, ''), 'pokemon') = 'pokemon'"));
         assert!(sql.contains("listings.card_id = any($3::text[])"));
         assert_eq!(
@@ -2204,9 +2313,24 @@ mod parity_tests {
                 .clone()
         );
         let q = HashMap::from([("cardId".into(), "801170".into())]);
-        let (sql, values) = read_sql(&q, "", "riftbound", None);
+        let (sql, values) = read_sql(&q, "", "riftbound", None, true);
         assert!(!sql.contains("marketplace_game"));
+        assert!(!sql.contains("seller_api_listing_keys"));
         assert_eq!(values[0], "801170");
+    }
+    #[test]
+    fn only_the_owner_book_reads_the_card_rails_flag() {
+        let own = HashMap::from([("sellerUid".into(), "u1".into())]);
+        let (sql, values) = read_sql(&own, "u1", "pokemon", None, true);
+        assert!(sql.starts_with("select to_jsonb(listings) || jsonb_build_object('cardrails_key', exists ("));
+        assert!(sql.contains("k.listing_id = listings.id and g.seller_uid = listings.seller_uid"));
+        assert!(sql.contains("like 'cardrails:%'"));
+        assert_eq!(values[0], "u1");
+        let (sql, _) = read_sql(&own, "u1", "pokemon", None, false);
+        assert!(sql.starts_with("select to_jsonb(listings) as listing"));
+        let shop = HashMap::from([("sellerUsername".into(), "alice".into())]);
+        let (sql, _) = read_sql(&shop, "u1", "pokemon", None, true);
+        assert!(!sql.contains("cardrails_key"));
     }
     #[test]
     fn update_plan_has_node_defaults_and_zero_quantity_pause() {

@@ -108,6 +108,32 @@ export function inventoryMarketValue(prices, row, source) {
         + '\nTCGplayer aggregate market quotes in USD; condition is unspecified. Variants remain separate; no conversion to PKN.',
     };
   }
+  if (source === 'cardmarketpro' || source === 'cardmarketprivate') {
+    // Our own walk of Cardmarket's listing pages, not its guide: the guide
+    // cannot say who is selling. `CLFE` is the cheapest offer agreeing with
+    // this row on all four attributes; a graded, signed or altered copy is
+    // one of a kind, so only the cheapest copy scanned at all answers it.
+    const scanned = entry.sources?.cardmarketoffers;
+    const seller = source === 'cardmarketpro' ? 'pro' : 'private';
+    const key = /[GSA]/.test(finishFlags(row)) ? '' : 'CLFE';
+    const offer = scanned?.[seller]?.[key];
+    const value = positive(offer?.pkn);
+    if (value == null) return null;
+    const who = seller === 'pro' ? 'professional or powerseller' : 'private';
+    const facet = key === ''
+      ? `Cheapest ${who} Cardmarket offer scanned for the card, any copy`
+      : `Cheapest ${who} Cardmarket offer with this card's condition, language, finish and 1st edition`;
+    const other = positive(scanned?.[seller === 'pro' ? 'private' : 'pro']?.[key]?.pkn);
+    const compare = other != null
+      ? ` The other kind of seller asks ${formatPknNumber(other, { maximumFractionDigits: 0 })} PKN.`
+      : '';
+    const seen = Number(offer?.offers) > 0 ? ` ${Number(offer.offers)} ${Number(offer.offers) === 1 ? 'offer' : 'offers'} seen.` : '';
+    const short = offer?.countsComplete === false ? ' The scan stopped before the last page, so this is an upper bound.' : '';
+    const asOf = /^\d{4}-\d{2}-\d{2}/.test(String(scanned?.asOf || ''))
+      ? ` Scanned ${String(scanned.asOf).slice(0, 10)}; kept 7 days.`
+      : '';
+    return { currency: 'PKN', value, title: `${facet}, as listed.${seen}${compare}${short}${asOf}` };
+  }
   if (source === 'cardtrader') {
     // Only the cheapest professional seller with the same condition,
     // language and finishes counts: another condition, a private one-off

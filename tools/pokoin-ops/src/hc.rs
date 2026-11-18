@@ -56,11 +56,25 @@ pub fn host_prefix() -> String {
 }
 
 pub fn ping(slug: &str, kind: Kind, body: &str) -> Result<bool> {
+    ping_with(slug, kind, body, true)
+}
+
+/// A /fail from `notify-unit` for any failing unit: never creates a check. With `create=1`
+/// every unit that once failed became a permanent check (the account filled up with them on
+/// 2026-10-28, after which new pings 404'd). Only units with a `CheckSpec` have a dead-man.
+pub fn ping_existing(slug: &str, kind: Kind, body: &str) -> Result<bool> {
+    if !CHECKS.iter().any(|c| c.slug == slug) {
+        return Ok(false);
+    }
+    ping_with(slug, kind, body, false)
+}
+
+fn ping_with(slug: &str, kind: Kind, body: &str, create: bool) -> Result<bool> {
     let Some(key) = env::get("POKOIN_HC_PING_KEY") else {
         return Ok(false);
     };
     let base = env::get_or("POKOIN_HC_PING_BASE", "https://hc-ping.com");
-    let url = format!("{}/{}/{}{}?create=1", base.trim_end_matches('/'), key, slug, kind.suffix());
+    let url = format!("{}/{}/{}{}{}", base.trim_end_matches('/'), key, slug, kind.suffix(), if create { "?create=1" } else { "" });
     if env::get("POKOIN_OPS_DRY_RUN").is_some() {
         eprintln!("[dry-run ping] {slug}{}", kind.suffix());
         return Ok(true);
@@ -103,7 +117,8 @@ pub const CHECKS: &[CheckSpec] = &[
     CheckSpec { slug: "nezopt-all-cardtrader-daily", period_s: DAY, grace_s: 13 * HOUR, what: "nezopt CardTrader daily, 23:00 UTC, up to 12 h" },
     CheckSpec { slug: "nezopt-site-map-refresh", period_s: 7 * DAY, grace_s: 2 * HOUR, what: "nezopt site map, weekly" },
     CheckSpec { slug: "nezopt-uptime-mail", period_s: 2 * MIN, grace_s: 10 * MIN, what: "nezopt /healthz mailer, every 2 min" },
-    CheckSpec { slug: "nezopt-overflow-sync", period_s: 5 * MIN, grace_s: 20 * MIN, what: "nezopt overflow sync, about every 5 min" },
+    // Pi release hook + hourly backstop; pi-health pauses it while the Pi is offline.
+    CheckSpec { slug: "nezopt-overflow-sync", period_s: HOUR, grace_s: 90 * MIN, what: "nezopt overflow sync, hourly backstop + Pi release hook" },
     CheckSpec { slug: "nezopt-shipping-rates-sync", period_s: DAY, grace_s: 2 * HOUR, what: "nezopt shipping rates, daily" },
     CheckSpec { slug: "nezopt-pgdump", period_s: DAY, grace_s: 6 * HOUR, what: "nezopt nightly pg_dump of the Pi replica" },
     CheckSpec { slug: "nezopt-backup-mirror", period_s: DAY, grace_s: 3 * HOUR, what: "nezopt mirror of the wal-g store to mybook" },

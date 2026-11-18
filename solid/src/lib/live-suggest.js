@@ -42,6 +42,8 @@ function flattenPickable(groups, isLiveStub) {
         set: printing.set_name || printing.set || '',
         number: printing.collector_number || printing.number || '',
         image: printing.image || printing.cdn_image_url || printing.image_url || '',
+        nationality: printing.nationality || '',
+        expansion_nationality: printing.expansion_nationality || printing.expansionNationality || '',
       };
       if (!/^\d+$/.test(card.id)) continue;
       if (!card.image) {

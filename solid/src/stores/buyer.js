@@ -70,8 +70,8 @@ export function publishSellerSettings(next) {
   rememberCountry(next);
 }
 
-/** useSellerCurrency().currency: PKN, or local fiat for sellers who turned PKN payments off. */
-export const sellerCurrency = () => sellerListCurrency(settings());
+/** The seller's local currency, using the cached country while settings load. */
+export const sellerCurrency = () => sellerListCurrency(settings(), knownCountry()?.country);
 
 /** A `?currency=` pin (LIST_CURRENCIES) or '' — same rule as useBuyerCurrency(pinned). */
 function pinOf(pinned) {

@@ -1,3 +1,6 @@
+import { createTabCache } from '../lib/tab-cache.js';
+import { authUid } from '../stores/auth.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import { useLocation, useSearchParams } from '@solidjs/router';
 import { fetchSoldHistory, imageSrc, markMarketplaceShipped, refundMarketplaceOrder } from '@market/api.js';
@@ -26,7 +29,7 @@ import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { getBearer } from '../stores/auth.js';
-import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewSales } from './mypokoin-preview-fixture.js';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER, previewSales } from './mypokoin-preview.js';
 import '@market/sales-row.css';
 
 function SaleThumb(props) {
@@ -118,9 +121,12 @@ function RefundForm(props) {
   );
 }
 
+const salesCache = createTabCache();
+
 function SalesDesk(props) {
   const location = useLocation();
-  const [sales, setSales] = createSignal(null);
+  const [sales, setSales] = createSignal(props.preview ? null : salesCache.get(untrack(authUid)) ?? null);
+  const [limit, setLimit] = createSignal(COLLECTION_BATCH_SIZE);
   const [error, setError] = createSignal('');
   const [notice, setNotice] = createSignal('');
   const [source, setSource] = createSignal('all');
@@ -129,15 +135,19 @@ function SalesDesk(props) {
   const [trackingDraft, setTrackingDraft] = createSignal({});
   const [shipBusy, setShipBusy] = createSignal('');
 
-  onSettled(() => {
-    if (props.preview) {
+  createEffect(() => props.preview ? 'preview' : authUid(), (uid) => {
+    if (uid === 'preview') {
       setSales(previewSales());
       return undefined;
     }
+    if (!uid) { setSales(null); return undefined; }
+    const cached = salesCache.get(uid);
+    setSales(() => cached ?? null);
+    if (salesCache.fresh(uid)) return undefined;
     let cancelled = false;
     getBearer()
       .then((token) => fetchSoldHistory(token))
-      .then((data) => { if (!cancelled) setSales(() => data.sales || []); })
+      .then((data) => { if (!cancelled && authUid() === uid) { salesCache.set(uid, data.sales || []); setSales(() => data.sales || []); } })
       .catch((err) => { if (!cancelled) setError(err.message || 'Sold history failed.'); });
     return () => {
       cancelled = true;
@@ -148,7 +158,10 @@ function SalesDesk(props) {
   createEffect(
     () => (openId() && sales() ? openId() : ''),
     (id) => {
-      if (id) document.getElementById(`sale-${id}`)?.scrollIntoView({ block: 'center' });
+      if (!id) return;
+      const index = (sales() || []).findIndex((row) => row.orderId === id);
+      if (index >= limit()) setLimit(index + 1);
+      requestAnimationFrame(() => document.getElementById(`sale-${id}`)?.scrollIntoView({ block: 'center' }));
     },
   );
 
@@ -156,6 +169,7 @@ function SalesDesk(props) {
   const totals = createMemo(() => salesTotals(sales()));
 
   function applyRefund(orderId, result) {
+    salesCache.delete(authUid());
     setOpenId('');
     setNotice(`Refunded ${formatOrderMoney(result.refund?.amount, result.currency)} on ${orderId}.`);
     if (result.sale) {
@@ -166,6 +180,7 @@ function SalesDesk(props) {
   }
 
   async function shipOrder(orderId) {
+    salesCache.delete(authUid());
     const trackingCode = String(trackingDraft()[orderId] || '').trim();
     if (!trackingCode) {
       setError('Add the shipping tracking code before marking shipped.');
@@ -238,7 +253,7 @@ function SalesDesk(props) {
           )}
         >
           <div class="thread-list">
-            <For each={shown()}>
+            <For each={shown().slice(0, limit())}>
               {(row) => {
                 const ct = row.source === 'cardtrader';
                 const status = () => saleStatus(row, orderStatus);
@@ -346,6 +361,7 @@ function SalesDesk(props) {
               }}
             </For>
           </div>
+          <Show when={shown().length > limit()}><button class="btn ghost" type="button" onClick={() => setLimit(nextCollectionBatch(limit(), shown().length))}>Show more</button></Show>
         </DeskPanel>
       </Show>
     </div>

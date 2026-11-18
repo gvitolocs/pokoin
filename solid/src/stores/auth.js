@@ -8,6 +8,7 @@ import {
   isExtensionDeskSession,
   isTrustedDeskSessionEvent,
 } from '@market/extension-auth-bridge.js';
+import { clearPortfolioHistory } from '@market/portfolio-history-cache.js';
 import { authSession, refreshSession } from './session.js';
 
 /**
@@ -37,11 +38,14 @@ function applyDeskSession(data = {}) {
 }
 
 function dropSession() {
+  // Whichever account is leaving, its portfolio graph leaves with it.
+  const leaving = deskSession.uid || readAuthSession()?.uid || '';
   deskSession = { token: '', uid: '', expiresAt: 0 };
   setDeskUid('');
   clearAuthSession();
   // The seller's stored MyPokoin book never outlives the session.
   wipePrivateBooks();
+  clearPortfolioHistory(leaving);
   refreshSession();
 }
 

@@ -322,6 +322,35 @@ pub fn floor_price(target_scaled: i128, whole: bool, floor_pkn_scaled: i128) -> 
     }
 }
 
+/// How the pricer rounds a target (`pricing::ROUNDINGS`: `none`, `integer`,
+/// `down`, `up`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rounding {
+    Exact,
+    Nearest,
+    Down,
+    Up,
+}
+
+/// The pricer's last step for every rounding mode: a target in 1 / `SCALE`
+/// PKN rounded to whole PKN (nearest, down or up) or kept exact, never under
+/// the floor. `floor_price` is its nearest/exact case. (Verified as
+/// `floor_price_rounded`: the result is at least the floor, and is either
+/// the floor or the target rounded in that mode.)
+pub fn floor_price_rounded(target_scaled: i128, rounding: Rounding, floor_pkn_scaled: i128) -> i128 {
+    let rounded = match rounding {
+        Rounding::Exact => target_scaled,
+        Rounding::Nearest => round_pkn(target_scaled) * SCALE,
+        Rounding::Down => target_scaled.div_euclid(SCALE) * SCALE,
+        Rounding::Up => -(-target_scaled).div_euclid(SCALE) * SCALE,
+    };
+    if rounded < floor_pkn_scaled {
+        floor_pkn_scaled
+    } else {
+        rounded
+    }
+}
+
 /// CardTrader Safeguard, the buyer's fee per item on top of the ask, in euro
 /// cents (VAT included), by the item price in cents.
 pub fn safeguard_cents(ask_cents: i128) -> i128 {
@@ -721,6 +750,21 @@ mod tests {
         assert_eq!(floor_price(25 * SCALE + SCALE / 2, true, 0), 26 * SCALE);
         assert_eq!(floor_price(3 * SCALE, true, 5 * SCALE), 5 * SCALE);
         assert_eq!(floor_price(5 * SCALE + 1, false, 5 * SCALE), 5 * SCALE + 1);
+        // Every rounding mode, then the floor.
+        let t = 25 * SCALE + 56 * SCALE / 100;
+        assert_eq!(floor_price_rounded(t, Rounding::Nearest, 0), 26 * SCALE);
+        assert_eq!(floor_price_rounded(t, Rounding::Down, 0), 25 * SCALE);
+        assert_eq!(floor_price_rounded(t, Rounding::Up, 0), 26 * SCALE);
+        assert_eq!(floor_price_rounded(26 * SCALE, Rounding::Up, 0), 26 * SCALE, "a whole price is not pushed up");
+        assert_eq!(floor_price_rounded(t, Rounding::Exact, 0), t);
+        assert_eq!(floor_price_rounded(-SCALE / 2, Rounding::Up, -10 * SCALE), 0, "ceil of a negative is toward zero");
+        assert_eq!(floor_price_rounded(-SCALE / 2, Rounding::Down, -10 * SCALE), -SCALE);
+        assert_eq!(floor_price_rounded(-SCALE / 2, Rounding::Down, 0), 0, "the floor lifts it");
+        assert_eq!(floor_price_rounded(3 * SCALE + 4 * SCALE / 10, Rounding::Down, 35 * SCALE / 10), 35 * SCALE / 10);
+        for whole in [true, false] {
+            let mode = if whole { Rounding::Nearest } else { Rounding::Exact };
+            assert_eq!(floor_price_rounded(t, mode, 30 * SCALE), floor_price(t, whole, 30 * SCALE));
+        }
         assert_eq!(safeguard_cents(14), 9);
         assert_eq!(safeguard_cents(26), 10);
         assert_eq!(safeguard_cents(4001), 64);

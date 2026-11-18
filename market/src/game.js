@@ -380,7 +380,7 @@ export function knownGameId(value) {
   return SLUG_TO_ID[raw] || '';
 }
 
-const CATALOG_API_PREFIXES = ['/api/marketplace', '/api/cardtrader-redirect', '/api/cardmarket-redirect', '/api/tcgplayer-redirect'];
+const CATALOG_API_PREFIXES = ['/api/marketplace', '/api/cardtrader-redirect', '/api/cardmarket-redirect', '/api/cardmarket-matches', '/api/tcgplayer-redirect'];
 
 function isCatalogApiPath(path) {
   const text = String(path || '');

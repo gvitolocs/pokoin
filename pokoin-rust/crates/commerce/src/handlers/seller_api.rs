@@ -25,7 +25,7 @@ use crate::listing_live as live;
 use crate::seller_api::{self as api, Grant};
 use crate::state::{AuthedUser, DomainState};
 use pokoin_external::facet_store::{self, Basis, FacetPrice};
-use pokoin_external::price_check::{condition_key, PriceItem};
+use pokoin_external::price_check::{condition_key, Match, PriceItem};
 
 const GRANT_COLUMNS: &str = "id, client, label, scope, token_prefix, webhook_url, created_at, last_used_at";
 
@@ -270,7 +270,17 @@ fn cardrails_settings(defaults: &Value) -> Value {
         "startPosition": defaults["startPosition"], "quantity": defaults["quantity"],
         "mergeRepeats": defaults["mergeRepeats"], "paused": false,
         "locationConfigured": defaults["location"].as_str().is_some_and(|s| !s.is_empty()),
+        // The batch's pricing (a group, or a strategy alone), `null` when none.
+        "pricingGroupId": non_empty(&defaults["pricingGroupId"]),
+        "pricingStrategyId": non_empty(&defaults["pricingStrategyId"]),
     })
+}
+
+fn non_empty(value: &Value) -> Value {
+    match value.as_str().map(str::trim) {
+        Some(text) if !text.is_empty() => json!(text),
+        _ => Value::Null,
+    }
 }
 
 /// Exact-variant key into `cardtrader_sold_daily`: blueprint, condition,
@@ -369,7 +379,122 @@ async fn external_keys(state: &DomainState, grant: uuid::Uuid, listing_ids: &[uu
     }
 }
 
-fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &HashMap<String, String>) -> Value {
+/// The CardTrader products these listings are linked to, by listing id
+/// (`marketplace_cardtrader_product_links`: imported, pushed or matched).
+async fn ct_product_links(
+    state: &DomainState,
+    seller_uid: &str,
+    listing_ids: &[uuid::Uuid],
+) -> HashMap<String, String> {
+    if listing_ids.is_empty() {
+        return HashMap::new();
+    }
+    let rows: Result<Vec<(uuid::Uuid, String)>, _> = sqlx::query_as(
+        "select listing_id, ct_product_id from public.marketplace_cardtrader_product_links \
+         where seller_uid = $1 and listing_id = any($2)",
+    )
+    .bind(seller_uid)
+    .bind(listing_ids)
+    .fetch_all(state.write_db())
+    .await;
+    match rows {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|(id, product)| (id.to_string(), product))
+            .collect(),
+        Err(error) => {
+            // Never fails the page over this: the source id still names imports.
+            tracing::warn!(error = %error, "CardTrader product lookup failed for a cardrails listings page");
+            HashMap::new()
+        }
+    }
+}
+
+/// A CardTrader product id as digits, or `None`.
+fn ct_product_digits(raw: &str) -> Option<String> {
+    let id = raw.trim();
+    if id.is_empty()
+        || id.len() > 20
+        || !id.bytes().all(|b| b.is_ascii_digit())
+        || id.trim_start_matches('0').is_empty()
+    {
+        return None;
+    }
+    Some(id.to_string())
+}
+
+/// The CardTrader product a listing is: its import id (`ct:<product>`), else
+/// its product link. A tool that holds the same CardTrader stock matches its
+/// copies on this, so the same card is never listed twice.
+fn listing_ct_product(row: &Value, links: &HashMap<String, String>) -> Option<String> {
+    live::field(row, "source_listing_id", 80)
+        .strip_prefix("ct:")
+        .and_then(ct_product_digits)
+        .or_else(|| {
+            links
+                .get(&live::field(row, "id", 80))
+                .and_then(|id| ct_product_digits(id))
+        })
+}
+
+/// The CardTrader product a tool's item says it is (`ctProductId`).
+fn item_ct_product(item: &Value) -> Option<String> {
+    ct_product_digits(&live::first(
+        item,
+        &["ctProductId", "cardtraderProductId"],
+        24,
+    ))
+}
+
+/// Each listing's pricing group, keyed by listing id, as the tool shows it
+/// ("Priced by Pokoin · <group>", price field locked). One query for the
+/// page; the seller's strategies are read once, and only when a listing is
+/// grouped. A failed read never fails the page: the fields stay null.
+async fn listing_pricing(state: &DomainState, uid: &str, ids: &[uuid::Uuid]) -> HashMap<String, Value> {
+    let rows = match pokoin_external::pricing_store::listing_groups(state.write_db(), uid, ids).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "pricing-group lookup failed for a cardrails listings page");
+            return HashMap::new();
+        }
+    };
+    if rows.is_empty() {
+        return HashMap::new();
+    }
+    let strategies = super::pricer::seller_strategies(uid).await.unwrap_or_else(|error| {
+        tracing::warn!(error = %error.message, "strategy names unavailable for a cardrails listings page");
+        Vec::new()
+    });
+    rows.into_iter().map(|(id, group)| (id, pricing_view(&group, &strategies))).collect()
+}
+
+/// A grouped listing's pricing fields. `pricingStrategyName` is null when
+/// the group's strategy was deleted (or the names could not be read).
+fn pricing_view(group: &Value, strategies: &[Value]) -> Value {
+    let strategy = strategies.iter().find(|s| s["id"] == group["strategyId"]);
+    json!({
+        "pricingGroupId": group["id"],
+        "pricingGroupName": group["name"],
+        "pricingStrategyId": group["strategyId"],
+        "pricingStrategyName": strategy.map(|s| s["name"].clone()).unwrap_or(Value::Null),
+        "pricingAutoDaily": group["autoDaily"] == true,
+    })
+}
+
+/// A listing in no group: the seller prices it.
+fn no_pricing() -> Value {
+    json!({
+        "pricingGroupId": null, "pricingGroupName": null, "pricingStrategyId": null,
+        "pricingStrategyName": null, "pricingAutoDaily": false,
+    })
+}
+
+fn tool_listing(
+    row: &Value,
+    sold: &HashMap<SoldVariantKey, i64>,
+    external: &HashMap<String, String>,
+    pricing: &HashMap<String, Value>,
+) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
     let last_sold_min_eur_cents = blueprint_id_of(&row["card_id"]).and_then(|blueprint_id| {
         let key = (
@@ -381,7 +506,7 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
         );
         sold.get(&key).copied()
     });
-    json!({
+    let mut out = json!({
         "listingId": row["id"],
         "cardId": row["card_id"],
         "game": if live::field(row, "marketplace_game", 40).is_empty() { json!("pokemon") } else { row["marketplace_game"].clone() },
@@ -408,7 +533,14 @@ fn tool_listing(row: &Value, sold: &HashMap<SoldVariantKey, i64>, external: &Has
         // The tool item this listing was created from (`list`'s
         // idempotency key on this grant); null when Pokoin did not make it.
         "externalKey": external.get(&live::field(row, "id", 80)).map(|key| json!(key)).unwrap_or(Value::Null),
-    })
+    });
+    // Its pricing group: while it is in one, Pokoin prices it
+    // (docs/pricer-cardrails-contract.md, "Pricing on the pull").
+    let group = pricing.get(&live::field(row, "id", 80)).cloned().unwrap_or_else(no_pricing);
+    if let (Some(out), Some(group)) = (out.as_object_mut(), group.as_object()) {
+        out.extend(group.clone());
+    }
+    out
 }
 
 /// The seller's live and sold-out listings, keyset-paged by id.
@@ -428,9 +560,18 @@ async fn listings(state: &DomainState, grant: &Grant, body: &Value) -> Result<Va
     let ids: Vec<uuid::Uuid> =
         rows.iter().filter_map(|row| uuid::Uuid::parse_str(&live::field(row, "id", 80)).ok()).collect();
     let external = external_keys(state, grant.id, &ids).await;
+    let links = ct_product_links(state, &grant.seller_uid, &ids).await;
     let sold = last_sold_minimums(state, &rows).await;
+    let pricing = listing_pricing(state, &grant.seller_uid, &ids).await;
     Ok(json!({
-        "listings": rows.iter().map(|row| tool_listing(row, &sold, &external)).collect::<Vec<_>>(),
+        "listings": rows
+            .iter()
+            .map(|row| {
+                let mut listing = tool_listing(row, &sold, &external, &pricing);
+                listing["ctProductId"] = listing_ct_product(row, &links).map(Value::String).unwrap_or(Value::Null);
+                listing
+            })
+            .collect::<Vec<_>>(),
         "cursor": next.unwrap_or(Value::Null),
     }))
 }
@@ -560,6 +701,12 @@ pub fn listing_body(item: &Value, seller_name: &str, country: &str) -> Result<Va
     let game = live::field(identity, "game", 40);
     if !game.is_empty() {
         body["marketplaceGame"] = json!(game);
+    }
+    // A copy of a CardTrader product is that product on Pokoin too: the same
+    // `ct:<product>` id the CardTrader import and the reconcile key on, so the
+    // import adopts this listing instead of adding a second one (144).
+    if let Some(product) = item_ct_product(item) {
+        body["sourceListingId"] = json!(format!("ct:{product}"));
     }
     Ok(body)
 }
@@ -706,6 +853,26 @@ async fn sold_prices(state:&DomainState,grant:&Grant,body:&Value)->Result<Value,
     Ok(json!({"prices":prices,"windowDays":LAST_SOLD_WINDOW_DAYS}))
 }
 
+/// The seller's listing on the shelf for this CardTrader product: the import
+/// (`source_listing_id = 'ct:<product>'`) first, else a product link.
+async fn shelf_listing_for_ct_product(
+    state: &DomainState,
+    seller_uid: &str,
+    product: &str,
+) -> Result<Option<uuid::Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "select l.id from public.marketplace_user_listings l \
+         where l.seller_uid = $1 and l.status in ('active', 'paused', 'sold_out') \
+           and (l.source_listing_id = 'ct:' || $2 or exists (select 1 from public.marketplace_cardtrader_product_links k \
+                where k.seller_uid = $1 and k.ct_product_id = $2 and k.listing_id = l.id)) \
+         order by (l.source_listing_id = 'ct:' || $2) desc, l.created_at limit 1",
+    )
+    .bind(seller_uid)
+    .bind(product)
+    .fetch_optional(state.write_db())
+    .await
+}
+
 /// Create a listing from a tool's item, at most once per idempotency key.
 ///
 /// The key row is claimed first (`seller_api_listing_keys`), and the listing
@@ -744,6 +911,54 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     let (name, country) = seller_profile(state, &grant.seller_uid).await;
     // A refused item never claims its key.
     let listing_body = listing_body(&body["item"], if name.is_empty() { "Pokoin seller" } else { &name }, &country)?;
+    // The item is a CardTrader product this seller's shelf already has (the
+    // CardTrader import listed it): answer that listing, never a second one.
+    // Pricing never applies to it either — the shelf listing keeps its own
+    // price and quantity. Before 2026-10-23 a tool holding the same CardTrader
+    // stock re-listed every copy (12,115 duplicate listings on 2026-10-22).
+    if let Some(product) = item_ct_product(&body["item"]) {
+        let matched = shelf_listing_for_ct_product(state, &grant.seller_uid, &product)
+            .await
+            .map_err(api::store_error)?;
+        if let Some(id) = matched {
+            let claimed: Option<Option<uuid::Uuid>> = sqlx::query_scalar(
+                "insert into public.seller_api_listing_keys (grant_id, idempotency_key, listing_id) values ($1, $2, $3) \
+                 on conflict (grant_id, idempotency_key) do update set listing_id = excluded.listing_id \
+                 where seller_api_listing_keys.listing_id is null returning listing_id",
+            )
+            .bind(grant.id)
+            .bind(&key)
+            .bind(id)
+            .fetch_optional(db)
+            .await
+            .map_err(|error| match error.as_database_error().and_then(|e| e.constraint()) {
+                // Another item of this tool already is that listing (144).
+                Some("seller_api_listing_keys_listing_uidx") => ApiError::conflict(
+                    "Another item of this tool is already this CardTrader product's listing.",
+                )
+                .with_code("ct_product_listed"),
+                _ => api::store_error(error),
+            })?;
+            // Another attempt bound the key first: that listing.
+            let id = match claimed.flatten() {
+                Some(id) => id,
+                None => bound().await?.unwrap_or(id),
+            };
+            let mut answer = existing(id);
+            answer["matched"] = json!("cardtrader_product");
+            return Ok(answer);
+        }
+    }
+    // An unknown group or strategy is refused before the key is claimed.
+    let unpriced = listing_body["status"] == "paused" && live::number(&listing_body["pricePkn"]) <= 0.0;
+    let mut pricing = list_pricing(body);
+    pricing.check(state, &grant.seller_uid).await?;
+    let from_account = pricing == super::pricer::BatchPricing::None && unpriced;
+    if from_account {
+        // No choice on the item or the call: the account default prices an
+        // unpriced item. A priced item keeps its price and no group.
+        pricing = account_default_pricing(state, grant).await;
+    }
     sqlx::query(
         "insert into public.seller_api_listing_keys (grant_id, idempotency_key) values ($1, $2) \
          on conflict (grant_id, idempotency_key) do nothing",
@@ -786,13 +1001,527 @@ async fn list(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value,
     };
     let id = uuid::Uuid::parse_str(&live::field(&listing, "id", 80))
         .map_err(|_| ApiError::internal("Pokoin did not confirm the listing."))?;
-    Ok(json!({
+    let mut out = json!({
         "confirmed": true,
         "listingId": id.to_string(),
         "stockMode": "absolute",
         "created": true,
         "quantity": listing["quantityAvailable"],
+    });
+    // The listing exists and the key is bound: pricing never undoes that.
+    if pricing != super::pricer::BatchPricing::None {
+        let priced = price_listed_item(state, &grant.seller_uid, &pricing, id, unpriced).await;
+        if let Some(object) = out.as_object_mut() {
+            object.extend(priced.as_object().cloned().unwrap_or_default());
+            // Priced by the seller's account default, not the item or the call.
+            object.insert("pricingFromAccountDefault".into(), json!(from_account));
+        }
+    }
+    Ok(out)
+}
+
+/// The pricing a Card Rails `list` asked for: `item.pricingGroupId` /
+/// `item.pricingStrategyId`, else the call's own (the batch default).
+fn list_pricing(body: &Value) -> super::pricer::BatchPricing {
+    match super::pricer::BatchPricing::from_fields(&body["item"]) {
+        super::pricer::BatchPricing::None => super::pricer::BatchPricing::from_fields(body),
+        chosen => chosen,
+    }
+}
+
+/// The seller's account default (`scan-settings`' `pricingGroupId` /
+/// `pricingStrategyId`), for an unpriced `list` item with no choice of its
+/// own or on the call. A default whose group or strategy is gone, or that
+/// cannot be read, is no default: the item stays paused at 0, as with none.
+async fn account_default_pricing(state: &DomainState, grant: &Grant) -> super::pricer::BatchPricing {
+    use super::pricer::BatchPricing;
+    let settings = match scan_settings(state, grant).await {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "account default pricing unreadable for a cardrails list");
+            return BatchPricing::None;
+        }
+    };
+    let pricing = BatchPricing::from_fields(&settings["scanSettings"]);
+    if pricing == BatchPricing::None {
+        return pricing;
+    }
+    match pricing.check(state, &grant.seller_uid).await {
+        Ok(()) => pricing,
+        Err(error) => {
+            tracing::warn!(error = %error.message, "account default pricing no longer exists; the item stays unpriced");
+            BatchPricing::None
+        }
+    }
+}
+
+/// A just-listed item and its batch pricing: an unpriced item gets the
+/// strategy's price (and goes on sale when the strategy says so and a comp
+/// exists); a priced item keeps its price and only joins the group.
+/// Answers `{ pricingGroupId?, pricingStrategyId?, priced, pricePkn, status, pricingError? }`.
+async fn price_listed_item(
+    state: &DomainState,
+    uid: &str,
+    pricing: &super::pricer::BatchPricing,
+    id: uuid::Uuid,
+    unpriced: bool,
+) -> Value {
+    use super::pricer::BatchPricing;
+    let mut out = match pricing {
+        BatchPricing::Group(group) => json!({ "pricingGroupId": group }),
+        BatchPricing::Strategy(strategy) => json!({ "pricingStrategyId": strategy }),
+        BatchPricing::None => json!({}),
+    };
+    let ids = [id];
+    let result = if unpriced {
+        pricing.price_new_listings(state, uid, &ids).await.map(|plan| plan["applied"].as_u64().unwrap_or(0) > 0)
+    } else if let BatchPricing::Group(group) = pricing {
+        pokoin_external::pricing_store::add_members(state.write_db(), uid, group, &ids)
+            .await
+            .map(|_| false)
+            .map_err(super::pricer::from_external)
+    } else {
+        Ok(false)
+    };
+    match result {
+        Ok(priced) => out["priced"] = json!(priced),
+        Err(error) => {
+            out["priced"] = json!(false);
+            out["pricingError"] = json!(error.message);
+        }
+    }
+    if let Ok(Some(row)) = sqlx::query_as::<_, (f64, String)>(
+        "select price_pkn::float8, status from public.marketplace_user_listings where id = $1",
+    )
+    .bind(id)
+    .fetch_optional(state.write_db())
+    .await
+    {
+        out["pricePkn"] = json!(row.0);
+        // The euro price of that PKN price, rounded as `price-quote` does.
+        out["priceEurCents"] = json!((row.0 / PKN_PER_EUR_CENT as f64).round());
+        out["status"] = json!(row.1);
+    }
+    out
+}
+
+/// `pricing-groups`: the seller's groups and strategies, for a tool's
+/// "pricing" picker before a batch is loaded.
+async fn pricing_groups(state: &DomainState, grant: &Grant) -> Result<Value, ApiError> {
+    let strategies = super::pricer::seller_strategies(&grant.seller_uid).await?;
+    let groups = pokoin_external::pricing_store::list_groups(state.write_db(), &grant.seller_uid)
+        .await
+        .map_err(super::pricer::from_external)?;
+    Ok(pricing_groups_view(&groups, &strategies))
+}
+
+/// At most this many items per `cm-undercut`.
+const MAX_CM_ITEMS: usize = 2_000;
+
+/// How `cm-undercut` picks its rows: exactly one of these.
+#[derive(Debug, PartialEq)]
+enum CmMode {
+    Items,
+    Group(String),
+    Listings,
+}
+
+/// The single row-picker the call names, else a 400.
+#[allow(clippy::result_large_err)]
+fn cm_mode(body: &Value) -> Result<CmMode, ApiError> {
+    let group = body["pricingGroupId"]
+        .as_str()
+        .filter(|id| !id.trim().is_empty());
+    let named = usize::from(body.get("items").is_some())
+        + usize::from(group.is_some())
+        + usize::from(body["listings"] == true);
+    if named != 1 {
+        return Err(ApiError::bad_request(
+            "Send exactly one of items, pricingGroupId or listings: true.",
+        ));
+    }
+    if body.get("items").is_some() {
+        let items = body["items"]
+            .as_array()
+            .ok_or_else(|| ApiError::bad_request("items must be an array."))?;
+        if items.is_empty() || items.len() > MAX_CM_ITEMS {
+            return Err(ApiError::bad_request(format!(
+                "Send 1 to {MAX_CM_ITEMS} items."
+            )));
+        }
+        Ok(CmMode::Items)
+    } else if let Some(group) = group {
+        Ok(CmMode::Group(group.trim().to_string()))
+    } else {
+        Ok(CmMode::Listings)
+    }
+}
+
+/// Rows per `cm-undercut` page: 200 by default, at most 500.
+fn cm_limit(body: &Value) -> usize {
+    body["limit"].as_i64().unwrap_or(200).clamp(1, 500) as usize
+}
+
+/// The window of `items` this call answers: `offset .. offset + limit`, and
+/// the offset to ask for the rest (`None` at the end).
+fn cm_item_page(body: &Value, len: usize) -> (usize, usize, Option<usize>) {
+    let offset = body["offset"].as_u64().unwrap_or(0).min(len as u64) as usize;
+    let end = (offset + cm_limit(body)).min(len);
+    (offset, end, (end < len).then_some(end))
+}
+
+/// The cursor to echo for the listing pickers: the last listing id of a full
+/// page, else nothing, because a short page is the end.
+fn cm_cursor(rows: &[Value], limit: usize) -> Value {
+    if rows.len() == limit {
+        rows.last()
+            .map(|row| row["id"].clone())
+            .unwrap_or(Value::Null)
+    } else {
+        Value::Null
+    }
+}
+
+/// One seller type of one row: 1 cent under its cheapest Cardmarket offer, in
+/// cents and PKN, beside the minimum and the facet it was read at. A 1-cent
+/// (or smaller) minimum has nothing to undercut and is no answer, so a tool
+/// never sees a 0.
+fn cm_side(entry: &Value) -> Value {
+    let Some(gross_pkn) = entry["grossPkn"].as_f64() else {
+        return Value::Null;
+    };
+    let min_eur_cents = (gross_pkn / 2.0).round() as i64;
+    if min_eur_cents <= 1 {
+        return Value::Null;
+    }
+    json!({
+        "minEurCents": min_eur_cents,
+        "undercutEurCents": min_eur_cents - 1,
+        "undercutPkn": (min_eur_cents - 1) * PKN_PER_EUR_CENT,
+        "offers": entry["offers"],
+        "countsComplete": entry["countsComplete"],
+        "facet": {
+            "condition": entry["condition"], "language": entry["language"],
+            "finish": entry["finish"], "firstEdition": entry["firstEdition"],
+        },
+    })
+}
+
+/// One answer row: what the listing is, the comp key it was read at, and each
+/// seller type's undercut price (`None` where Cardmarket has no such offer).
+fn cm_response_row(
+    input: &Value,
+    row: Option<&Value>,
+    comp: Option<&Value>,
+    m: Match,
+    listed: bool,
+) -> Value {
+    let row_value = row.cloned().unwrap_or_else(|| json!({}));
+    let item = facet_store::item_from_listing(&row_value);
+    let game = row_value["marketplace_game"].as_str().unwrap_or("pokemon");
+    // A graded, signed or altered copy is no scanned facet's copy, so every
+    // source, this one included, holds only the any-copy key for it.
+    let key = if item.one_of_a_kind() { Match::ANY } else { m }.key();
+    let offers = comp
+        .and_then(|comp| comp.get("sources"))
+        .and_then(|sources| sources.get("cardmarketoffers"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let private = cm_side(&offers["private"][&key]);
+    let pro = cm_side(&offers["pro"][&key]);
+    let status = if row.is_none() || comp.is_none() {
+        "card_unmapped"
+    } else if comp.is_some_and(|comp| comp["sourceStatus"]["cardmarketoffers"] == "unavailable") {
+        "unavailable"
+    } else if !private.is_null() || !pro.is_null() {
+        "priced"
+    } else {
+        "no_offers"
+    };
+    json!({
+        "itemId": if listed { Value::Null } else { input["itemId"].clone() },
+        "listingId": if listed { row_value["id"].clone() } else { Value::Null },
+        "cardId": if item.card_id.is_empty() { Value::Null } else { json!(item.card_id) },
+        "game": game,
+        "condition": item.condition,
+        "language": item.language,
+        "finish": if pokoin_external::price_sources::item_finish(&item, game) { "Y" } else { "N" },
+        "firstEdition": if item.first_edition { "Y" } else { "N" },
+        "quantity": if listed {
+            row_value["quantity_available"].as_i64().unwrap_or(1)
+        } else {
+            input["quantity"].as_i64().unwrap_or(1).max(1)
+        },
+        "key": key,
+        "status": status,
+        "private": private,
+        "pro": pro,
+    })
+}
+
+/// The quantity-weighted value of the page under each seller type.
+fn cm_totals(rows: &[Value]) -> Value {
+    let mut out = json!({});
+    for side in ["private", "pro"] {
+        let (mut cents, mut pkn, mut priced) = (0i64, 0i64, 0usize);
+        for row in rows {
+            if let Some(undercut_pkn) = row[side]["undercutPkn"].as_i64() {
+                let quantity = row["quantity"].as_i64().unwrap_or(1);
+                cents += row[side]["undercutEurCents"].as_i64().unwrap_or(0) * quantity;
+                pkn += undercut_pkn * quantity;
+                priced += 1;
+            }
+        }
+        out[side] = json!({ "eurCents": cents, "pkn": pkn, "priced": priced, "missing": rows.len() - priced });
+    }
+    out
+}
+
+/// `cm-undercut`: 1 cent under the cheapest Cardmarket offer of each row, from
+/// private and from professional sellers, for a script or for valuing a lot.
+/// Read-only, and it prices nothing: no strategy and no write.
+#[allow(clippy::result_large_err)]
+async fn cm_undercut(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
+    use pokoin_external::pricing_store;
+    let mode = cm_mode(body)?;
+    let m = pokoin_external::pricing::strategy_match(body);
+    let limit = cm_limit(body);
+    let listed = mode != CmMode::Items;
+    let (mut next_offset, mut cursor) = (None, Value::Null);
+    let mut as_of: Option<&str> = None;
+    let (inputs, rows): (Vec<Value>, Vec<Option<Value>>) = match mode {
+        CmMode::Items => {
+            let items = body["items"].as_array().expect("validated items");
+            let (start, end, next) = cm_item_page(body, items.len());
+            next_offset = next;
+            let inputs = items[start..end].to_vec();
+            let rows = inputs
+                .iter()
+                .enumerate()
+                .map(|(index, item)| quote_row(item, start + index))
+                .collect();
+            (inputs, rows)
+        }
+        mode => {
+            let group = match &mode {
+                CmMode::Group(id) => {
+                    if pricing_store::group(state.write_db(), &grant.seller_uid, id)
+                        .await
+                        .map_err(super::pricer::from_external)?
+                        .is_none()
+                    {
+                        return Err(ApiError::bad_request("Pricing group not found.")
+                            .with_code("pricing_group_unknown"));
+                    }
+                    Some(id.clone())
+                }
+                _ => None,
+            };
+            let after = uuid::Uuid::parse_str(&text_field(body, &["cursor"], 80)).ok();
+            let rows: Vec<Value> = sqlx::query_scalar(
+                "select to_jsonb(l) from public.marketplace_user_listings l \
+                  where l.seller_uid = $1 and l.status in ('active', 'paused') \
+                    and ($2::uuid is null or l.id > $2) \
+                    and ($3::text is null or exists (select 1 from public.seller_pricing_group_members m \
+                           where m.listing_id = l.id and m.seller_uid = $1 and m.group_id = $3)) \
+                  order by l.id limit $4",
+            )
+            .bind(grant.seller_uid.as_str())
+            .bind(after)
+            .bind(group)
+            .bind(limit as i64)
+            .fetch_all(state.write_db())
+            .await?;
+            cursor = cm_cursor(&rows, limit);
+            let inputs = rows.clone();
+            (inputs, rows.into_iter().map(Some).collect())
+        }
+    };
+    let listing_rows: Vec<Value> = rows
+        .iter()
+        .filter_map(|row| row.as_ref())
+        .cloned()
+        .collect();
+    let comps = super::pricer::comps_for(state, &grant.seller_uid, &listing_rows).await?;
+    let out: Vec<Value> = inputs
+        .iter()
+        .zip(&rows)
+        .map(|(input, row)| {
+            let comp = row
+                .as_ref()
+                .and_then(|row| row["id"].as_str())
+                .and_then(|id| comps.get(id));
+            // The day the offers were seen, newest of the page: rows age apart.
+            if let Some(day) =
+                comp.and_then(|comp| comp["sources"]["cardmarketoffers"]["asOf"].as_str())
+            {
+                as_of = Some(as_of.map_or(day, |seen| seen.max(day)));
+            }
+            cm_response_row(input, row.as_ref(), comp, m, listed)
+        })
+        .collect();
+    Ok(json!({
+        "rows": out,
+        "totals": cm_totals(&out),
+        "asOf": as_of,
+        "nextOffset": next_offset,
+        "cursor": cursor,
+        "pknPerEurCent": PKN_PER_EUR_CENT,
     }))
+}
+
+/// At most this many rows per `price-quote`.
+const MAX_QUOTE_ITEMS: usize = 500;
+
+/// `price-quote`: what the pricer would price each row at, before upload.
+/// Read-only. Each row is priced by its own group or strategy, else the
+/// call's; a group's strategy is used for its rows. The engine is the one
+/// Pokoin listings use (`handlers::pricer::comps_for` + `pokoin_external::pricing`).
+async fn price_quote(state: &DomainState, grant: &Grant, body: &Value) -> Result<Value, ApiError> {
+    use super::pricer::BatchPricing;
+    let uid = grant.seller_uid.as_str();
+    let items = body["items"].as_array().cloned().unwrap_or_default();
+    if items.is_empty() || items.len() > MAX_QUOTE_ITEMS {
+        return Err(ApiError::bad_request(format!("Send 1 to {MAX_QUOTE_ITEMS} items.")));
+    }
+    let default = BatchPricing::from_fields(body);
+    default.check(state, uid).await?;
+    let strategies = super::pricer::seller_strategies(uid).await?;
+    let groups = pokoin_external::pricing_store::list_groups(state.write_db(), uid)
+        .await
+        .map_err(super::pricer::from_external)?;
+    // Each row as a listing row the pricer reads, plus what prices it.
+    let mut rows = Vec::new();
+    let mut quotes: Vec<Value> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let item_id = item["itemId"].clone();
+        let chosen = match BatchPricing::from_fields(item) {
+            BatchPricing::None => default.clone(),
+            own => own,
+        };
+        let (strategy, group_id, status) = match &chosen {
+            BatchPricing::None => (None, Value::Null, "no_pricing"),
+            BatchPricing::Group(id) => match groups.iter().find(|g| g["id"] == id.as_str()) {
+                Some(group) => match strategies.iter().find(|s| s["id"] == group["strategyId"]) {
+                    Some(strategy) => (Some(strategy.clone()), json!(id), ""),
+                    None => (None, json!(id), "unknown_strategy"),
+                },
+                None => (None, json!(id), "unknown_group"),
+            },
+            BatchPricing::Strategy(id) => match strategies.iter().find(|s| s["id"] == id.as_str()) {
+                Some(strategy) => (Some(strategy.clone()), Value::Null, ""),
+                None => (None, Value::Null, "unknown_strategy"),
+            },
+        };
+        let mut quote = json!({
+            "itemId": item_id, "strategyId": strategy.as_ref().map(|s| s["id"].clone()).unwrap_or(Value::Null),
+            "pricingGroupId": group_id, "status": status,
+            "compPkn": Value::Null, "askPkn": Value::Null, "pricePkn": Value::Null, "priceEurCents": Value::Null,
+        });
+        if strategy.is_some() {
+            match quote_row(item, index) {
+                Some(row) => rows.push((index, row, strategy.clone().unwrap_or(Value::Null))),
+                None => quote["status"] = json!("card_unmapped"),
+            }
+        }
+        quotes.push(quote);
+    }
+    let listing_rows: Vec<Value> = rows.iter().map(|(_, row, _)| row.clone()).collect();
+    let comps = super::pricer::comps_for(state, uid, &listing_rows).await?;
+    for (index, row, strategy) in &rows {
+        let comp = comps.get(row["id"].as_str().unwrap_or(""));
+        let quote = &mut quotes[*index];
+        let comp_pkn = comp.and_then(|comp| pokoin_external::pricing::strategy_comp(comp, strategy));
+        let target = pokoin_external::pricing::evaluate_strategy_target(comp_pkn, strategy);
+        quote["compPkn"] = json!(comp_pkn);
+        quote["askPkn"] = json!(comp.and_then(|comp| quote_ask(comp, strategy)));
+        quote["pricePkn"] = json!(target);
+        quote["priceEurCents"] = json!(target.map(|pkn| (pkn / PKN_PER_EUR_CENT as f64).round()));
+        quote["status"] = json!(match (comp_pkn, target) {
+            (None, _) => "no_comp",
+            (Some(_), None) => "no_price",
+            _ => "priced",
+        });
+    }
+    Ok(json!({ "quotes": quotes, "pknPerEurCent": PKN_PER_EUR_CENT }))
+}
+
+/// A connector item as the listing row the price check reads (the same
+/// identity and facets as `list`), or `None` without a Pokoin card id.
+fn quote_row(item: &Value, index: usize) -> Option<Value> {
+    let body = listing_body(&with_quote_defaults(item), "", "").ok()?;
+    let game = live::first(&item["identity"], &["game"], 40);
+    let game = if game.is_empty() { live::field(item, "game", 40) } else { game };
+    Some(json!({
+        "id": format!("q{index}"), "card_id": body["cardId"], "condition": body["condition"],
+        "language": body["language"], "foil_state": body["foilState"], "reverse": body["reverse"],
+        "first_edition": body["firstEdition"], "signed": body["signed"], "altered": body["altered"],
+        "graded": false, "marketplace_game": if game.is_empty() { "pokemon".to_string() } else { game.to_lowercase() },
+        "status": "paused", "price_pkn": 0,
+    }))
+}
+
+/// `listing_body` wants a quantity and a price; a quote has neither.
+fn with_quote_defaults(item: &Value) -> Value {
+    let mut item = item.clone();
+    if let Some(object) = item.as_object_mut() {
+        object.entry("quantity").or_insert(json!(1));
+        object.insert("status".into(), json!("paused"));
+        object.insert("priceEurCents".into(), json!(0));
+        object.remove("pricePkn");
+        object.remove("price");
+    }
+    item
+}
+
+/// The CardTrader ask of the offer a strategy priced from (its toggles'
+/// `ctMatch` entry), for the tool to show beside the net.
+fn quote_ask(comp: &Value, strategy: &Value) -> Option<f64> {
+    // Only CardTrader offers have an ask (an unknown source reads as CardTrader).
+    if !matches!(strategy["source"].as_str(), None | Some("cardtrader")) || strategy["basis"] == "sold" {
+        return None;
+    }
+    let key = pokoin_external::pricing::strategy_match(strategy).key();
+    comp.get("ctMatch")
+        .and_then(|map| map.get(&key))
+        .and_then(|entry| entry["grossPkn"].as_f64())
+        .or_else(|| (key == "CLFE").then(|| comp["ctMatchedGrossPkn"].as_f64()).flatten())
+}
+
+/// `pricing-strategy-save` / `pricing-strategy-delete`: the same strategies,
+/// and the same checks, as the Pricer on Pokoin.
+async fn pricing_strategy_write(state: &DomainState, grant: &Grant, body: &Value, delete: bool) -> Result<Value, ApiError> {
+    use pokoin_external::pricing_strategies as strategies;
+    let fs = pokoin_external::firebase::FirestoreRest::from_env()
+        .ok_or_else(|| ApiError::internal("Firebase Admin credentials are not configured."))?;
+    let uid = grant.seller_uid.as_str();
+    if delete {
+        let id = text_field(body, &["id"], 40);
+        let left = strategies::delete(&fs, state.write_db(), uid, &id).await.map_err(super::pricer::from_external)?;
+        return Ok(json!({ "strategies": left.iter().map(strategies::view).collect::<Vec<_>>() }));
+    }
+    if !body["strategy"].is_object() {
+        return Err(ApiError::bad_request("Send the strategy in `strategy`."));
+    }
+    let (saved, all) = strategies::save(&fs, uid, &body["strategy"], json!({})).await.map_err(super::pricer::from_external)?;
+    Ok(json!({ "strategy": strategies::view(&saved), "strategies": all.iter().map(strategies::view).collect::<Vec<_>>() }))
+}
+
+fn pricing_groups_view(groups: &[Value], strategies: &[Value]) -> Value {
+    let strategy = |id: &Value| strategies.iter().find(|s| &s["id"] == id);
+    json!({
+        "groups": groups.iter().map(|group| {
+            let used = strategy(&group["strategyId"]);
+            json!({
+                "id": group["id"], "name": group["name"], "strategyId": group["strategyId"],
+                "strategyName": used.map(|s| s["name"].clone()).unwrap_or(Value::Null),
+                "summary": used.map(|s| json!(pokoin_external::pricing::strategy_summary(s))).unwrap_or(Value::Null),
+                "autoDaily": group["autoDaily"], "listingCount": group["listingCount"],
+            })
+        }).collect::<Vec<_>>(),
+        // The whole strategy, so a tool shows the rule without its own engine.
+        "strategies": strategies.iter().map(pokoin_external::pricing_strategies::view).collect::<Vec<_>>(),
+    })
 }
 
 /// A connector listing id the grant can never name: unknown, not malformed.
@@ -820,7 +1549,19 @@ async fn seller_listing_row(state: &DomainState, seller_uid: &str, id: uuid::Uui
 pub fn update_patch(item: &Value) -> Result<Value, ApiError> {
     let given = |key: &str| item.get(key).is_some_and(|value| !value.is_null());
     let mut patch = json!({});
-    if given("priceEurCents") {
+    // An exact PKN price wins over euro cents, as in `list`: an odd PKN
+    // price has no exact cent (docs/pricer-cardrails-contract.md).
+    if given("pricePkn") {
+        let pkn = live::number(&item["pricePkn"]);
+        if !pkn.is_finite() || pkn < 0.0 {
+            return Err(ApiError::bad_request("This item has no valid price."));
+        }
+        if pkn <= 0.0 {
+            patch["status"] = json!("paused");
+        } else {
+            patch["pricePkn"] = json!((pkn * 100.0).round() / 100.0);
+        }
+    } else if given("priceEurCents") {
         let cents = live::number(&item["priceEurCents"]);
         if !cents.is_finite() {
             return Err(ApiError::bad_request("This item has no valid price."));
@@ -932,9 +1673,34 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     if !matches!(live::field(&row, "status", 20).as_str(), "active" | "paused" | "sold_out") {
         return Err(ApiError::conflict("This listing was removed on Pokoin.").with_code("listing_removed"));
     }
-    let changed = patch_differs(&row, &patch);
-    let row = if changed {
-        super::listings::update_listing(state, &seller_claims(grant), &uuid.to_string(), &patch).await?;
+    // A manual price takes the listing out of its pricing group, unless the
+    // item names that group (`item.pricingGroupId`); `pricingGroupId: null`
+    // takes it out at any price, another group id moves it there. The move
+    // is decided and applied in the write's transaction, under the row lock
+    // (`pricer::apply_guard`; specs/tla/price-ownership).
+    let uid = grant.seller_uid.as_str();
+    let named = super::pricer::named_group(&body["item"]);
+    if let Some(group) = named.as_deref().filter(|g| !g.is_empty()) {
+        // An unknown group is refused before anything is written.
+        super::pricer::BatchPricing::Group(group.to_string()).check(state, uid).await?;
+    }
+    // What the guard would do as the listing reads now: a call that changes
+    // no field and moves no group writes nothing (a retry re-queues nothing).
+    let current = pokoin_external::pricing_store::listing_groups(state.write_db(), uid, &[uuid])
+        .await
+        .map_err(super::pricer::from_external)?
+        .into_iter()
+        .next()
+        .and_then(|(_, group)| group["id"].as_str().map(str::to_string));
+    let manual = super::pricer::is_manual_price(live::number(&row["price_pkn"]), patch.get("pricePkn").map(live::number));
+    let movement = super::pricer::group_move(current.as_deref(), named.as_deref(), manual);
+    let differs = patch_differs(&row, &patch);
+    let mut outcome = super::pricer::GroupOutcome::default();
+    let row = if differs || movement != super::pricer::GroupMove::Keep {
+        let guard = super::pricer::GroupGuard::Manual { named, may_join: true };
+        outcome = super::listings::update_listing_guarded(state, &seller_claims(grant), &uuid.to_string(), &patch, &guard)
+            .await?
+            .1;
         // The marketplace update returns its public shape; read the raw row
         // back for the tool's listing shape.
         sqlx::query_scalar::<_, Value>("select to_jsonb(l) from public.marketplace_user_listings l where id = $1")
@@ -946,11 +1712,14 @@ async fn update(state: &DomainState, grant: &Grant, body: &Value) -> Result<Valu
     };
     let sold = last_sold_minimums(state, std::slice::from_ref(&row)).await;
     let external = external_keys(state, grant.id, &[uuid]).await;
+    let pricing = listing_pricing(state, uid, &[uuid]).await;
     Ok(json!({
         "confirmed": true,
         "listingId": id,
-        "changed": changed,
-        "listing": tool_listing(&row, &sold, &external),
+        "changed": differs || outcome.moved,
+        // The group this update took the listing out of, else null.
+        "leftPricingGroupId": outcome.left.map(|(id, _)| id),
+        "listing": tool_listing(&row, &sold, &external, &pricing),
     }))
 }
 
@@ -1055,9 +1824,14 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         return Err(ApiError::forbidden("This token is not a Card Rails grant.").with_code("seller_api/wrong-scope"));
     }
     let body = parse_json_body(bytes)?;
-    let out = match text_field(&body, &["action"], 20).as_str() {
+    let out = match action_of(&body).as_str() {
         "connect" | "info" => connect(state, &grant).await?,
         "scan-settings" => scan_settings(state, &grant).await?,
+        "pricing-groups" => pricing_groups(state, &grant).await?,
+        "cm-undercut" => cm_undercut(state, &grant, &body).await?,
+        "price-quote" => price_quote(state, &grant, &body).await?,
+        "pricing-strategy-save" => pricing_strategy_write(state, &grant, &body, false).await?,
+        "pricing-strategy-delete" => pricing_strategy_write(state, &grant, &body, true).await?,
         "locations" => json!({ "locations": locations(state, &grant.seller_uid).await? }),
         "webhook" => {
             let url = set_webhook(state, grant.id, &grant.seller_uid, &text_field(&body, &["url", "webhookUrl"], 600)).await?;
@@ -1074,6 +1848,36 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
         _ => return Err(ApiError::bad_request("Unknown action.").with_code("seller_api/unknown-action")),
     };
     Ok(private_json(out))
+}
+
+/// Every connector action (`connector` dispatches on these).
+#[cfg(test)]
+const ACTIONS: [&str; 18] = [
+    "connect",
+    "info",
+    "scan-settings",
+    "pricing-groups",
+    "cm-undercut",
+    "price-quote",
+    "pricing-strategy-save",
+    "pricing-strategy-delete",
+    "locations",
+    "webhook",
+    "listings",
+    "stock",
+    "list",
+    "update",
+    "unlist",
+    "sold-prices",
+    "sales",
+    "events",
+];
+
+/// The action a connector call names. Long enough for every action: at 20
+/// characters `pricing-strategy-save` and `pricing-strategy-delete` were cut
+/// and answered "Unknown action." (found by CardRails, 2026-11-05).
+fn action_of(body: &Value) -> String {
+    text_field(body, &["action"], 64)
 }
 
 /// `POST /api/cardrails/connector`
@@ -1139,12 +1943,12 @@ mod tests {
         // Exact facet match: picked up.
         let sold: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), false, false), 1250)]);
-        assert_eq!(tool_listing(&row, &sold, &none)["lastSoldMinEurCents"], 1250);
+        assert_eq!(tool_listing(&row, &sold, &none, &HashMap::new())["lastSoldMinEurCents"], 1250);
         // No row for this exact variant (e.g. only a reverse sold): omitted, not guessed.
         let other: HashMap<SoldVariantKey, i64> =
             HashMap::from([((399364, "NM".to_string(), "EN".to_string(), true, false), 1250)]);
-        assert_eq!(tool_listing(&row, &other, &none)["lastSoldMinEurCents"], Value::Null);
-        assert_eq!(tool_listing(&row, &HashMap::new(), &none)["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &other, &none, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
+        assert_eq!(tool_listing(&row, &HashMap::new(), &none, &HashMap::new())["lastSoldMinEurCents"], Value::Null);
     }
 
     #[test]
@@ -1157,16 +1961,118 @@ mod tests {
             "foil_state": "standard", "location": "box·1", "updated_at": "2026-10-13T00:00:00Z",
         });
         let external: HashMap<String, String> = HashMap::from([("l1".to_string(), "cardrails:cr_9".to_string())]);
-        let listing = tool_listing(&row, &HashMap::new(), &external);
+        let listing = tool_listing(&row, &HashMap::new(), &external, &HashMap::new());
         assert_eq!(listing["externalKey"], "cardrails:cr_9");
         assert_eq!(listing["signed"], true);
         assert_eq!(listing["altered"], false);
         // A row without the flag columns and without a key: booleans false, key null.
         let bare = json!({"id": "l2", "card_id": "1"});
-        let listing = tool_listing(&bare, &HashMap::new(), &HashMap::new());
+        let listing = tool_listing(&bare, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(listing["externalKey"], Value::Null);
         assert_eq!(listing["signed"], false);
         assert_eq!(listing["altered"], false);
+    }
+
+    #[test]
+    fn tool_listing_says_which_group_prices_it() {
+        let row = json!({"id": "l1", "card_id": "1", "price_pkn": 38.0});
+        // In no group: every pricing field null, so the tool shows its own price.
+        let listing = tool_listing(&row, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(
+            (listing["pricingGroupId"].clone(), listing["pricingGroupName"].clone(), listing["pricingStrategyId"].clone()),
+            (Value::Null, Value::Null, Value::Null)
+        );
+        assert_eq!((listing["pricingStrategyName"].clone(), listing["pricingAutoDaily"].clone()), (Value::Null, json!(false)));
+        let strategies = [json!({"id": "st_a", "name": "Undercut 5%"})];
+        let group = json!({"id": "pg_1", "name": "Riftbound bulk", "strategyId": "st_a", "autoDaily": true});
+        let pricing = HashMap::from([("l1".to_string(), pricing_view(&group, &strategies))]);
+        let listing = tool_listing(&row, &HashMap::new(), &HashMap::new(), &pricing);
+        assert_eq!(listing["pricingGroupId"], "pg_1");
+        assert_eq!(listing["pricingGroupName"], "Riftbound bulk");
+        assert_eq!(listing["pricingStrategyId"], "st_a");
+        assert_eq!(listing["pricingStrategyName"], "Undercut 5%");
+        assert_eq!(listing["pricingAutoDaily"], true);
+        assert_eq!(listing["pricePkn"], 38.0, "the price is still the listing's own");
+        // A deleted strategy: the group still prices nothing until it gets one.
+        assert_eq!(pricing_view(&group, &[])["pricingStrategyName"], Value::Null);
+    }
+
+    #[test]
+    fn update_takes_an_exact_pkn_price_over_euro_cents() {
+        assert_eq!(update_patch(&json!({"pricePkn": 27})).unwrap()["pricePkn"], 27.0, "an odd PKN price stays exact");
+        assert_eq!(update_patch(&json!({"pricePkn": 27, "priceEurCents": 13})).unwrap()["pricePkn"], 27.0, "pricePkn wins");
+        assert_eq!(update_patch(&json!({"priceEurCents": 13})).unwrap()["pricePkn"], 26.0);
+        assert_eq!(update_patch(&json!({"pricePkn": 0})).unwrap()["status"], "paused");
+        assert!(update_patch(&json!({"pricePkn": -1})).is_err());
+        assert!(update_patch(&json!({"pricePkn": "x"})).is_err());
+    }
+
+    #[test]
+    fn a_listing_names_its_cardtrader_product_from_the_import_or_the_link() {
+        let imported = json!({"id": "l1", "source_listing_id": "ct:456705610"});
+        let links: HashMap<String, String> = HashMap::from([("l2".to_string(), "99".to_string())]);
+        assert_eq!(
+            listing_ct_product(&imported, &links).as_deref(),
+            Some("456705610")
+        );
+        assert_eq!(
+            listing_ct_product(&json!({"id": "l2", "source_listing_id": ""}), &links).as_deref(),
+            Some("99")
+        );
+        assert_eq!(
+            listing_ct_product(&json!({"id": "l3", "source_listing_id": "ct:abc"}), &links),
+            None
+        );
+        assert_eq!(
+            listing_ct_product(&json!({"id": "l3"}), &HashMap::new()),
+            None
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId": 456705610})).as_deref(),
+            Some("456705610")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId": "456705610"})).as_deref(),
+            Some("456705610")
+        );
+        assert_eq!(item_ct_product(&json!({"ctProductId": "0"})), None);
+        assert_eq!(item_ct_product(&json!({"ctProductId": "12; drop"})), None);
+        assert_eq!(item_ct_product(&json!({})), None);
+        // `cardtraderProductId` is the alias; the canonical key wins when the
+        // item carries both, and an empty one falls through to the alias.
+        assert_eq!(
+            item_ct_product(&json!({"cardtraderProductId": "777"})).as_deref(),
+            Some("777")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"888","cardtraderProductId":"777"})).as_deref(),
+            Some("888")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"","cardtraderProductId":"777"})).as_deref(),
+            Some("777")
+        );
+        // Spaces are trimmed, and an id longer than 20 digits is not an id.
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId": " 456705610 "})).as_deref(),
+            Some("456705610")
+        );
+        assert_eq!(
+            item_ct_product(&json!({"ctProductId":"123456789012345678901"})),
+            None
+        );
+        let copy = json!({"identity":{"publicId":"806382"},"quantity":1,"priceEurCents":4793,"ctProductId":456705610});
+        assert_eq!(
+            listing_body(&copy, "s", "IT").unwrap()["sourceListingId"],
+            "ct:456705610"
+        );
+        let scan = json!({"identity":{"publicId":"806382"},"quantity":1,"priceEurCents":4793});
+        assert_eq!(
+            listing_body(&scan, "s", "IT")
+                .unwrap()
+                .get("sourceListingId"),
+            None
+        );
     }
 
     #[test]
@@ -1381,5 +2287,363 @@ mod listings_limit_tests {
         assert_eq!(listings_limit(&json!(0)), 200);
         assert_eq!(listings_limit(&json!(50)), 50);
         assert_eq!(listings_limit(&json!(9999)), 500);
+    }
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+    use crate::handlers::pricer::BatchPricing;
+
+    #[test]
+    fn every_action_name_reaches_the_dispatch_whole() {
+        for name in ACTIONS {
+            assert_eq!(action_of(&json!({ "action": name })), name, "{name} must not be cut");
+        }
+        assert_eq!(action_of(&json!({"action": "pricing-strategy-save"})), "pricing-strategy-save");
+        assert_eq!(action_of(&json!({"action": "pricing-strategy-delete"})), "pricing-strategy-delete");
+        // Every dispatched name is listed (so the test above covers it).
+        let source = include_str!("seller_api.rs");
+        let dispatch = source.split("let out = match action_of(&body).as_str() {").nth(1).unwrap().split("_ => return Err").next().unwrap();
+        for arm in dispatch.lines().filter_map(|line| line.trim().strip_prefix('"')) {
+            for name in arm.split(" | ").map(|part| part.trim_matches(|c| c == '"' || c == ' ')) {
+                let name = name.split('"').next().unwrap();
+                assert!(ACTIONS.contains(&name), "{name} is dispatched but not in ACTIONS");
+            }
+        }
+    }
+
+    #[test]
+    fn a_list_call_names_its_pricing_per_item_or_per_batch() {
+        assert_eq!(list_pricing(&json!({"item": {}})), BatchPricing::None);
+        assert_eq!(list_pricing(&json!({"item": {}, "pricingGroupId": "pg_batch"})), BatchPricing::Group("pg_batch".into()));
+        assert_eq!(
+            list_pricing(&json!({"item": {"pricingStrategyId": "st_row"}, "pricingGroupId": "pg_batch"})),
+            BatchPricing::Strategy("st_row".into()),
+            "the row's own choice wins over the batch default"
+        );
+    }
+
+    #[test]
+    fn scan_settings_carry_the_batch_pricing() {
+        let mut defaults = pokoin_external::scan_connect::default_batch_defaults();
+        assert_eq!(cardrails_settings(&defaults)["pricingGroupId"], Value::Null);
+        defaults["pricingGroupId"] = json!(" pg_1 ");
+        defaults["pricingStrategyId"] = json!("");
+        let settings = cardrails_settings(&defaults);
+        assert_eq!((settings["pricingGroupId"].clone(), settings["pricingStrategyId"].clone()), (json!("pg_1"), Value::Null));
+    }
+
+    #[test]
+    fn a_quote_row_reads_like_a_listed_item() {
+        let item = json!({"itemId": "q-uuid", "identity": {"publicId": "220962", "game": "Riftbound"},
+                          "condition": "sp", "language": "it", "printing": "Reverse Holo", "firstEdition": true, "priceEurCents": 999});
+        let row = quote_row(&item, 3).unwrap();
+        assert_eq!((row["id"].clone(), row["card_id"].clone(), row["marketplace_game"].clone()), (json!("q3"), json!("220962"), json!("riftbound")));
+        assert_eq!((row["condition"].clone(), row["language"].clone(), row["reverse"].clone(), row["first_edition"].clone()), (json!("SP"), json!("IT"), json!(true), json!(true)));
+        assert_eq!(row["status"], "paused", "a quote never reads the tool's own price");
+        assert!(quote_row(&json!({"itemId": "x", "identity": {}}), 0).is_none(), "no Pokoin card id: card_unmapped");
+        assert_eq!(quote_row(&json!({"identity": {"publicId": "1"}, "game": "lorcana"}), 0).unwrap()["marketplace_game"], "lorcana");
+    }
+
+    #[test]
+    fn a_quote_shows_the_ask_of_the_offer_the_toggles_picked() {
+        let comp = json!({"ctMatchedGrossPkn": 28, "ctMatch": {"CLFE": {"grossPkn": 28, "pkn": 25.56}, "L": {"grossPkn": 18, "pkn": 16.38}}});
+        let language_only = json!({"source": "cardtrader", "basis": "offers", "match": {"condition": false, "language": true, "finish": false, "firstEdition": false}});
+        assert_eq!(quote_ask(&comp, &language_only), Some(18.0));
+        assert_eq!(quote_ask(&comp, &json!({"source": "cardtrader"})), Some(28.0));
+        assert_eq!(quote_ask(&json!({"ctMatchedGrossPkn": 28}), &json!({})), Some(28.0), "before ctMatch: the exact copy");
+        assert_eq!(quote_ask(&comp, &json!({"basis": "sold"})), None);
+        assert_eq!(quote_ask(&comp, &json!({"source": "pokoin"})), None);
+    }
+
+    #[test]
+    fn the_pricing_picker_names_each_groups_strategy() {
+        let strategies = [json!({"id": "st_a", "name": "Match CardTrader", "source": "cardtrader", "action": "match", "rounding": "integer", "minPkn": 1})];
+        let groups = [
+            json!({"id": "pg_1", "name": "Vintage", "strategyId": "st_a", "autoDaily": true, "listingCount": 12}),
+            json!({"id": "pg_2", "name": "Orphan", "strategyId": "st_gone", "autoDaily": false, "listingCount": 0}),
+        ];
+        let view = pricing_groups_view(&groups, &strategies);
+        assert_eq!(view["groups"][0]["strategyName"], "Match CardTrader");
+        assert_eq!(view["groups"][0]["summary"], "CardTrader · all exact · net of CardTrader fees · match · whole PKN · min 1 PKN");
+        assert_eq!(view["groups"][1]["strategyName"], Value::Null);
+        assert_eq!(view["strategies"][0]["id"], "st_a");
+    }
+}
+
+#[cfg(test)]
+mod cm_undercut_tests {
+    use super::*;
+    use axum::http::StatusCode;
+
+    /// The `sources.cardmarketoffers` block of a comp the offers feed answered.
+    fn offers(private: Value, pro: Value) -> Value {
+        json!({ "sources": { "cardmarketoffers": { "asOf": "2026-11-10", "private": private, "pro": pro } },
+                "sourceStatus": { "cardmarketoffers": "available" } })
+    }
+
+    /// One scanned floor: EUR cents × 2 PKN, with the facet it was read at.
+    fn entry(gross_pkn: f64) -> Value {
+        json!({ "eur": gross_pkn / 200.0, "grossPkn": gross_pkn, "pkn": gross_pkn, "offers": 41,
+                "countsComplete": false, "condition": "NM", "language": "IT", "finish": "Y", "firstEdition": "N" })
+    }
+
+    #[test]
+    fn the_row_picker_is_exactly_one_of_items_group_or_listings() {
+        let wrong = [
+            json!({}),
+            json!({"pricingGroupId": "  "}),
+            json!({"items": [{}], "listings": true}),
+            json!({"items": [{}], "pricingGroupId": "pg_1"}),
+            json!({"pricingGroupId": "pg_1", "listings": true}),
+            json!({"items": []}),
+            json!({"items": vec![json!({}); 2_001]}),
+            json!({"items": {}}),
+        ];
+        for body in wrong {
+            assert_eq!(
+                cm_mode(&body).unwrap_err().status,
+                StatusCode::BAD_REQUEST,
+                "{body}"
+            );
+        }
+        assert_eq!(
+            cm_mode(&json!({"items": vec![json!({}); 2_000]})).unwrap(),
+            CmMode::Items,
+            "2000 is the most a call may carry"
+        );
+        assert_eq!(
+            cm_mode(&json!({"pricingGroupId": " pg_1 "})).unwrap(),
+            CmMode::Group("pg_1".into())
+        );
+        assert_eq!(
+            cm_mode(&json!({"listings": true})).unwrap(),
+            CmMode::Listings
+        );
+        assert_eq!(
+            cm_mode(&json!({"listings": false, "items": [{}]})).unwrap(),
+            CmMode::Items,
+            "only a true listings flag picks rows"
+        );
+    }
+
+    #[test]
+    fn items_page_by_offset_and_listings_by_cursor() {
+        assert_eq!(cm_item_page(&json!({}), 2_000), (0, 200, Some(200)));
+        assert_eq!(
+            cm_item_page(&json!({"offset": 1_800}), 2_000),
+            (1_800, 2_000, None)
+        );
+        assert_eq!(
+            cm_item_page(&json!({"offset": 2_001}), 2_000),
+            (2_000, 2_000, None),
+            "past the end answers nothing"
+        );
+        assert_eq!(
+            cm_item_page(&json!({"offset": 10, "limit": 5}), 12),
+            (10, 12, None)
+        );
+        assert_eq!(cm_limit(&json!({})), 200);
+        assert_eq!(cm_limit(&json!({"limit": 0})), 1);
+        assert_eq!(cm_limit(&json!({"limit": -2})), 1);
+        assert_eq!(cm_limit(&json!({"limit": 501})), 500);
+        assert_eq!(
+            cm_cursor(&[json!({"id": "l1"}), json!({"id": "l2"})], 2),
+            json!("l2"),
+            "a full page hands back its last id"
+        );
+        assert_eq!(
+            cm_cursor(&[json!({"id": "l1"})], 2),
+            Value::Null,
+            "a short page is the end"
+        );
+        assert_eq!(cm_cursor(&[], 2), Value::Null);
+    }
+
+    #[test]
+    fn a_side_is_one_cent_under_the_cheapest_offer_of_its_facet() {
+        let side = cm_side(&entry(20.0));
+        assert_eq!(
+            (
+                side["minEurCents"].clone(),
+                side["undercutEurCents"].clone()
+            ),
+            (json!(10), json!(9))
+        );
+        assert_eq!(side["undercutPkn"], 18);
+        assert_eq!(
+            (side["offers"].clone(), side["countsComplete"].clone()),
+            (json!(41), json!(false))
+        );
+        assert_eq!(
+            side["facet"],
+            json!({"condition": "NM", "language": "IT", "finish": "Y", "firstEdition": "N"})
+        );
+        assert_eq!(
+            cm_side(&entry(2.0)),
+            Value::Null,
+            "a 1-cent minimum would undercut to 0"
+        );
+        assert_eq!(
+            cm_side(&entry(0.0)),
+            Value::Null,
+            "an offer of nothing is no offer"
+        );
+        assert_eq!(
+            cm_side(&Value::Null),
+            Value::Null,
+            "this key was never scanned"
+        );
+    }
+
+    #[test]
+    fn a_row_names_its_facets_and_each_status_explains_the_nulls() {
+        let input = json!({"itemId": "r1", "cardId": "200", "condition": "nm", "language": "it",
+                           "printing": "Reverse Holo", "firstEdition": false, "quantity": 3});
+        let row = quote_row(&input, 0).unwrap();
+        let priced = cm_response_row(
+            &input,
+            Some(&row),
+            Some(&offers(
+                json!({"CLFE": entry(20.0)}),
+                json!({"CLFE": entry(40.0)}),
+            )),
+            Match::EXACT,
+            false,
+        );
+        assert_eq!(priced["status"], "priced");
+        assert_eq!(
+            (priced["itemId"].clone(), priced["listingId"].clone()),
+            (json!("r1"), Value::Null)
+        );
+        assert_eq!(
+            (
+                priced["game"].clone(),
+                priced["condition"].clone(),
+                priced["language"].clone()
+            ),
+            (json!("pokemon"), json!("NM"), json!("IT"))
+        );
+        assert_eq!(
+            (priced["finish"].clone(), priced["firstEdition"].clone()),
+            (json!("Y"), json!("N"))
+        );
+        assert_eq!(
+            (priced["key"].clone(), priced["quantity"].clone()),
+            (json!("CLFE"), json!(3))
+        );
+        assert_eq!(
+            (
+                priced["private"]["undercutEurCents"].clone(),
+                priced["pro"]["undercutEurCents"].clone()
+            ),
+            (json!(9), json!(19))
+        );
+        let one_sided = cm_response_row(
+            &input,
+            Some(&row),
+            Some(&offers(json!({"CLFE": entry(20.0)}), json!({}))),
+            Match::EXACT,
+            false,
+        );
+        assert_eq!(
+            (one_sided["status"].clone(), one_sided["pro"].clone()),
+            (json!("priced"), Value::Null),
+            "one seller type is enough"
+        );
+        assert_eq!(
+            cm_response_row(
+                &input,
+                Some(&row),
+                Some(&offers(json!({}), json!({}))),
+                Match::EXACT,
+                false
+            )["status"],
+            "no_offers"
+        );
+        let mut unread = offers(json!({}), json!({}));
+        unread["sourceStatus"]["cardmarketoffers"] = json!("unavailable");
+        assert_eq!(
+            cm_response_row(&input, Some(&row), Some(&unread), Match::EXACT, false)["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            cm_response_row(&input, Some(&row), None, Match::EXACT, false)["status"],
+            "card_unmapped",
+            "no comp for the row"
+        );
+        let unmapped = json!({"itemId": "r2", "identity": {}});
+        assert!(
+            quote_row(&unmapped, 1).is_none(),
+            "an item with no Pokoin card id has no row"
+        );
+        let answer = cm_response_row(&unmapped, None, None, Match::EXACT, false);
+        assert_eq!(
+            (answer["status"].clone(), answer["cardId"].clone()),
+            (json!("card_unmapped"), Value::Null)
+        );
+    }
+
+    #[test]
+    fn a_one_of_a_kind_copy_reads_the_any_key_and_a_listing_its_own_quantity() {
+        let input = json!({"itemId": "r3", "cardId": "201", "condition": "NM", "language": "EN", "signed": true});
+        let row = quote_row(&input, 0).unwrap();
+        let comp = offers(json!({"": entry(60.0)}), json!({}));
+        let answer = cm_response_row(&input, Some(&row), Some(&comp), Match::EXACT, false);
+        assert_eq!(
+            (answer["key"].clone(), answer["status"].clone()),
+            (json!(""), json!("priced")),
+            "a signed copy is no scanned facet's copy"
+        );
+        assert_eq!(answer["private"]["undercutEurCents"], 29);
+        let listing = json!({"id": "l1", "card_id": "202", "condition": "NM", "language": "EN", "quantity_available": 2});
+        let answer = cm_response_row(&listing, Some(&listing), Some(&comp), Match::EXACT, true);
+        assert_eq!(
+            (
+                answer["listingId"].clone(),
+                answer["itemId"].clone(),
+                answer["quantity"].clone()
+            ),
+            (json!("l1"), Value::Null, json!(2))
+        );
+        let unknown = json!({"id": "l2", "card_id": "203", "condition": "NM", "language": "EN"});
+        assert_eq!(
+            cm_response_row(&unknown, Some(&unknown), Some(&comp), Match::EXACT, true)["quantity"],
+            1,
+            "a missing quantity is one"
+        );
+    }
+
+    #[test]
+    fn the_totals_weight_each_side_by_the_rows_quantity_over_the_page() {
+        let input = json!({"itemId": "r1", "cardId": "200", "condition": "NM", "language": "IT", "quantity": 3});
+        let row = quote_row(&input, 0).unwrap();
+        let priced = cm_response_row(
+            &input,
+            Some(&row),
+            Some(&offers(
+                json!({"CLFE": entry(20.0)}),
+                json!({"CLFE": entry(40.0)}),
+            )),
+            Match::EXACT,
+            false,
+        );
+        let missing = cm_response_row(
+            &json!({"itemId": "r2", "identity": {}}),
+            None,
+            None,
+            Match::EXACT,
+            false,
+        );
+        let totals = cm_totals(&[priced, missing]);
+        assert_eq!(
+            totals["private"],
+            json!({"eurCents": 27, "pkn": 54, "priced": 1, "missing": 1})
+        );
+        assert_eq!(
+            totals["pro"],
+            json!({"eurCents": 57, "pkn": 114, "priced": 1, "missing": 1})
+        );
     }
 }

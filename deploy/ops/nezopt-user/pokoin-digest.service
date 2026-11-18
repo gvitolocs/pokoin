@@ -1,0 +1,11 @@
+[Unit]
+Description=Pokoin weekly deferred alert digest
+After=network-online.target
+# Opt out of the type-wide failure notifier: failed delivery keeps the digest for retry.
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/pokoin/backup.env
+ExecStart=%h/.local/bin/pokoin-ops digest
+Nice=5
+TimeoutStartSec=2min

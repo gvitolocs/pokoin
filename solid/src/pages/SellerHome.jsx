@@ -1,17 +1,25 @@
 import { createEffect, createSignal, onSettled, Show, untrack } from 'solid-js';
-import { useSearchParams } from '@solidjs/router';
+import { useLocation, useSearchParams } from '@solidjs/router';
 import {
   cardFromCatalogRow,
   fetchCardTraderAssets,
   fetchCollectionSummary,
   fetchPortfolioHistory,
+  fetchPortfolioMovers,
 } from '@market/api.js';
 import { game } from '@market/game.js';
 import { inventoryBooks } from '@market/inventory-book.js';
 import { inventoryListingHref, summarizeLiveInventory } from '@market/inventory-listings.js';
 import { fetchRail, RAIL } from '@market/lists.js';
+import { currencyFromSearch } from '@market/pkn.js';
 import { addUtcDays, utcDayKey } from '@market/portfolio-history.js';
-import { loadPortfolioHistory, peekPortfolioHistory } from '@market/portfolio-history-cache.js';
+import {
+  loadPortfolioHistory,
+  peekPortfolioHistory,
+  subscribePortfolioHistory,
+} from '@market/portfolio-history-cache.js';
+import { normalizeMovers } from '@market/portfolio-movers.js';
+import { loadPortfolioMovers, peekPortfolioMovers } from '@market/portfolio-movers-cache.js';
 import {
   portfolioTilesFingerprint,
   portfolioTilesFromSummary,
@@ -25,6 +33,7 @@ import SignedIn from '../components/SignedIn.jsx';
 import { loadOwnerBook } from '../lib/owner-book.js';
 import { accountProfile, availablePkn } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
+import { buyerPending, sellerCurrency } from '../stores/buyer.js';
 
 const MOVER_LIMIT = 10;
 // Owner reads come back cheapest-first and include cancelled rows. One page
@@ -61,6 +70,74 @@ const PREVIEW_FIXTURE = {
     { id: '105', name: 'Charizard', set: '151', number: '006/165', price: 28 },
   ].map(cardFromCatalogRow),
 };
+
+/** What the chart opens on, so the movers sheet has a window before it reports. */
+const DEFAULT_MOVER_RANGE = { id: '1M', days: 30, label: 'in the last month' };
+
+/**
+ * Layout fixtures for the movers sheet: the same item shape
+ * /api/marketplace-portfolio-movers answers with, so the tiles and sparklines
+ * are the production ones. Card ids follow the leftover convention (blueprint ×2).
+ */
+const PREVIEW_TOP_MOVERS = normalizeMovers({
+  ok: true,
+  days: 30,
+  gainers: [
+    {
+      blueprintId: '218047', cardId: '436094', name: 'Mewtwo V', setName: 'Pokémon GO',
+      collectorNumber: '072/078', imageUrl: '/card-images/218047_mewtwo-v-ultra-rare-072-078-pokemon-tcg-pokemon-go.jpg',
+      condition: 'NM', language: 'EN', reverse: true, quantity: 2,
+      startPkn: 1180, endPkn: 1450, changePkn: 270, changePct: 22.9,
+      series: [
+        { day: '2026-10-16', pkn: 1180 }, { day: '2026-10-23', pkn: 1240 },
+        { day: '2026-10-30', pkn: 1310 }, { day: '2026-11-07', pkn: 1400 },
+        { day: '2026-11-14', pkn: 1450 },
+      ],
+    },
+    {
+      blueprintId: '145059', cardId: '290118', name: 'Charizard VMAX', setName: 'Darkness Ablaze',
+      collectorNumber: '020/189', imageUrl: '/card-images/145059_charizard-vmax-020-189-darkness-ablaze.jpg',
+      condition: 'LP', language: 'JP', quantity: 1,
+      startPkn: 240, endPkn: 292, changePkn: 52, changePct: 21.7,
+      series: [
+        { day: '2026-10-16', pkn: 240 }, { day: '2026-10-29', pkn: 255 },
+        { day: '2026-11-09', pkn: 278 }, { day: '2026-11-14', pkn: 292 },
+      ],
+    },
+    {
+      blueprintId: '127479', cardId: '254958', name: 'Zoroark GX', setName: 'Shining Legends',
+      collectorNumber: '053/073', imageUrl: '/card-images/127479_zoroark-gx-rare-holo-53-73-shining-legends.jpg',
+      condition: 'NM', language: 'EN', firstEdition: true, quantity: 1,
+      startPkn: 860, endPkn: 940, changePkn: 80, changePct: 9.3,
+      series: [
+        { day: '2026-10-16', pkn: 860 }, { day: '2026-11-02', pkn: 880 },
+        { day: '2026-11-14', pkn: 940 },
+      ],
+    },
+  ],
+  losers: [
+    {
+      blueprintId: '158378', cardId: '316756', name: 'Shadow Rider Calyrex V', setName: 'Chilling Reign',
+      collectorNumber: '172/198', imageUrl: '/card-images/158378_shadow-rider-calyrex-v-rare-ultra-172-198-chilling-reign.jpg',
+      condition: 'NM', language: 'EN', quantity: 3,
+      startPkn: 210, endPkn: 168, changePkn: -42, changePct: -20,
+      series: [
+        { day: '2026-10-16', pkn: 210 }, { day: '2026-10-26', pkn: 199 },
+        { day: '2026-11-06', pkn: 181 }, { day: '2026-11-14', pkn: 168 },
+      ],
+    },
+    {
+      blueprintId: '130450', cardId: '260900', name: 'Reshiram & Charizard GX', setName: 'Unbroken Bonds',
+      collectorNumber: '020/214', imageUrl: '/card-images/130450_reshiram-charizard-gx-rare-holo-20-214-unbroken-bonds.jpg',
+      condition: 'DM', language: 'EN', quantity: 1,
+      startPkn: 55, endPkn: 44, changePkn: -11, changePct: -20,
+      series: [
+        { day: '2026-10-16', pkn: 55 }, { day: '2026-11-01', pkn: 49 },
+        { day: '2026-11-14', pkn: 44 },
+      ],
+    },
+  ],
+});
 
 /**
  * One point per day like the API: wallet 15 PKN for months, then 227 1-DR
@@ -116,7 +193,14 @@ const HREFS = {
   marketplace: () => marketUrl('/marketplace'),
 };
 
+/** A mover tile is one printing, so it opens that printing's card page. */
+function moverHref(mover) {
+  return marketUrl(inventoryListingHref({ cardId: mover?.cardId || '' }));
+}
+
 function PreviewDashboard() {
+  // Fixtures only, but the movers window still follows the chart's own range.
+  const [previewRange, setPreviewRange] = createSignal(DEFAULT_MOVER_RANGE);
   return (
     <SellerDashboardView
       previewBanner
@@ -129,6 +213,13 @@ function PreviewDashboard() {
       listed={PREVIEW_FIXTURE.listed}
       listingRows={PREVIEW_FIXTURE.listingRows}
       movers={PREVIEW_FIXTURE.movers}
+      topMovers={PREVIEW_TOP_MOVERS}
+      moverRange={previewRange()}
+      // No account behind the fixtures: the movers tiles price in DKK, the
+      // currency the owner reviews this desk in.
+      moverCurrency="DKK"
+      onHistoryRange={setPreviewRange}
+      moverHrefFor={moverHref}
       historySeries={previewHistorySeries()}
       loading={false}
       error=""
@@ -143,6 +234,17 @@ function PreviewDashboard() {
 }
 
 function LiveDashboard() {
+  const uid = () => authUid() || accountProfile()?.uid || '';
+  const sellerUid = () => (signedIn() ? uid() : '');
+  // The movers tiles price in the seller's display currency: the `?currency=`
+  // pin, else the profile country's currency (docs/BUYSELL.md "Currency",
+  // docs/MARKET.md "Buyer display currency"). A PKN pin or a PKN seller keeps PKN.
+  const location = useLocation();
+  const moverPin = () => currencyFromSearch(location.search);
+  const moverCurrency = () => moverPin() || sellerCurrency();
+  // Until the profile country is known the tiles hold their skeleton, so they
+  // never paint one unit and swap to another.
+  const moverCurrencyPending = () => !moverPin() && buyerPending();
   const [ownedCards, setOwnedCards] = createSignal(null);
   const [physicalOwned, setPhysicalOwned] = createSignal(0);
   const [nftOwned, setNftOwned] = createSignal(0);
@@ -153,11 +255,14 @@ function LiveDashboard() {
   const [listingsLoaded, setListingsLoaded] = createSignal(false);
   const [movers, setMovers] = createSignal([]);
   const [cardTraderAssets, setCardTraderAssets] = createSignal(null);
-  const [historySeries, setHistorySeries] = createSignal([]);
-  const [historyPending, setHistoryPending] = createSignal(false);
+  // The last known series is on the first frame: no empty graph to swap out.
+  const [historySeries, setHistorySeries] = createSignal(untrack(() => peekPortfolioHistory(uid()) || []));
+  const [historyPending, setHistoryPending] = createSignal(untrack(() => Boolean(signedIn() && !peekPortfolioHistory(uid()))));
+  const [topMovers, setTopMovers] = createSignal(null);
+  const [moversPending, setMoversPending] = createSignal(true);
+  // The chart owns the window; the movers sheet prices whatever it shows.
+  const [moverRange, setMoverRange] = createSignal(DEFAULT_MOVER_RANGE);
   const [error, setError] = createSignal('');
-  const uid = () => authUid() || accountProfile()?.uid || '';
-  const sellerUid = () => (signedIn() ? uid() : '');
 
   function applyTiles(entry) {
     setOwnedCards(entry.ownedCards);
@@ -250,12 +355,34 @@ function LiveDashboard() {
     const cached = peekPortfolioHistory(id);
     if (cached) setHistorySeries(cached);
     setHistoryPending(!cached);
+    const show = (series) => { if (!cancelled) setHistorySeries(series); };
+    const unsubscribe = subscribePortfolioHistory(id, show);
     loadPortfolioHistory(id, () => getBearer().then((token) => fetchPortfolioHistory(token)))
-      .then((series) => { if (!cancelled) setHistorySeries(series); })
-      .catch(() => { if (!cancelled) setHistorySeries([]); })
+      .then(show)
+      .catch(() => { /* a failed refresh keeps the painted series */ })
       .finally(() => { if (!cancelled) setHistoryPending(false); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   });
+
+  // Top movers over the window the chart is showing, one request per window.
+  createEffect(
+    () => [sellerUid(), moverRange().days],
+    ([id, days]) => {
+      if (!id) return undefined;
+      let cancelled = false;
+      const cached = peekPortfolioMovers(id, days);
+      if (cached) setTopMovers(cached);
+      setMoversPending(!cached);
+      loadPortfolioMovers(id, days, () => getBearer().then((token) => fetchPortfolioMovers(token, days)))
+        .then((payload) => { if (!cancelled) setTopMovers(payload); })
+        .catch(() => { if (!cancelled) setTopMovers(null); })
+        .finally(() => { if (!cancelled) setMoversPending(false); });
+      return () => { cancelled = true; };
+    },
+  );
 
   // Trending reads the table-backed best_sellers rail (~90 ms), then featured.
   onSettled(() => {
@@ -310,6 +437,13 @@ function LiveDashboard() {
         listingRows={listingRows()}
         listingsLoading={!listingsLoaded()}
         movers={movers()}
+        topMovers={topMovers()}
+        moverRange={moverRange()}
+        topMoversPending={moversPending()}
+        moverCurrency={moverCurrency()}
+        moverCurrencyPending={moverCurrencyPending()}
+        moverHrefFor={moverHref}
+        onHistoryRange={setMoverRange}
         loading={ownedCards() == null}
         error={error()}
         collectionHref={HREFS.collection()}
@@ -325,7 +459,7 @@ function LiveDashboard() {
 
 /**
  * /dashboard: Portfolio / Your collection,
- * asking value, collection chart, Sell and Buy. Ownership first (D00006G).
+ * asking value, collection chart, top movers. Ownership first (D00006G).
  * `?dashPreview` on dev/localhost shows fixtures.
  */
 export default function SellerHome() {

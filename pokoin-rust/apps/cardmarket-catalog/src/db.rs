@@ -3,10 +3,14 @@
 //! candidates, migration 112 (`marketplace_card_daily_median`) and 126
 //! (`cardmarket_price_guide_daily`). No DDL here.
 
+use std::collections::HashSet;
+
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 
+use crate::cm_offers::Minimum;
 use crate::sources::PriceGuide;
+use crate::tcgnotify::Ask;
 
 /// A row of `<schema>.cardmarket_products`, with its public card id.
 #[derive(Debug, Clone)]
@@ -141,6 +145,22 @@ pub async fn has_table(pool: &PgPool, name: &str) -> Result<bool, sqlx::Error> {
         .await
 }
 
+/// The distinct Cardmarket idProducts a game's catalog references
+/// (`card_market_ids` of `catalog_table`, e.g. `"marketplace_magic".cardtrader_blueprints`).
+pub async fn referenced_products(
+    pool: &PgPool,
+    catalog_table: &str,
+) -> Result<HashSet<i64>, sqlx::Error> {
+    let sql = format!(
+        r#"select distinct v::bigint from {catalog_table} b
+           cross join lateral jsonb_array_elements_text(
+             case when jsonb_typeof(b.card_market_ids) = 'array' then b.card_market_ids else '[]'::jsonb end) v
+           where v ~ '^[0-9]+$'"#
+    );
+    let ids: Vec<i64> = sqlx::query_scalar(&sql).fetch_all(pool).await?;
+    Ok(ids.into_iter().collect())
+}
+
 /// One Cardmarket build of the price guide, keyed by idProduct and day.
 pub async fn store_guide(
     pool: &PgPool,
@@ -189,6 +209,279 @@ pub async fn store_guide(
         written += done.rows_affected();
     }
     Ok(written)
+}
+
+/// One game's price guide as change-only history in
+/// `public.cardmarket_price_guide` (migration 139): a row is written only
+/// when the product's values differ from its newest stored row on or before
+/// `day`, plus the `cardmarket_price_guide_runs` bookkeeping row. All in one
+/// transaction, committed only when `apply` — a dry run still executes every
+/// statement (so the counts are real) and then rolls back. Returns
+/// (products in the guide, rows written).
+pub async fn store_guide_changes(
+    pool: &PgPool,
+    game: &str,
+    id_game: i64,
+    day: &str,
+    rows: &[PriceGuide],
+    apply: bool,
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "create temp table incoming (
+           id_product bigint primary key,
+           id_category integer,
+           avg numeric, low numeric, trend numeric, avg1 numeric, avg7 numeric, avg30 numeric,
+           avg_foil numeric, low_foil numeric, trend_foil numeric,
+           avg1_foil numeric, avg7_foil numeric, avg30_foil numeric
+         ) on commit drop",
+    )
+    .execute(&mut *tx)
+    .await?;
+    for chunk in rows.chunks(5000) {
+        let col = |f: fn(&PriceGuide) -> Option<f64>| chunk.iter().map(f).collect::<Vec<_>>();
+        let ids: Vec<i64> = chunk.iter().map(|r| r.id).collect();
+        let cats: Vec<Option<i64>> = chunk.iter().map(|r| r.category).collect();
+        sqlx::query(
+            "insert into incoming (id_product, id_category, avg, low, trend, avg1, avg7, avg30,
+               avg_foil, low_foil, trend_foil, avg1_foil, avg7_foil, avg30_foil)
+             select u.id_product, u.id_category::int, u.avg::numeric, u.low::numeric, u.trend::numeric,
+               u.avg1::numeric, u.avg7::numeric, u.avg30::numeric, u.avg_foil::numeric, u.low_foil::numeric,
+               u.trend_foil::numeric, u.avg1_foil::numeric, u.avg7_foil::numeric, u.avg30_foil::numeric
+             from unnest($1::bigint[], $2::bigint[], $3::float8[], $4::float8[], $5::float8[],
+               $6::float8[], $7::float8[], $8::float8[], $9::float8[], $10::float8[], $11::float8[],
+               $12::float8[], $13::float8[], $14::float8[])
+               as u(id_product, id_category, avg, low, trend, avg1, avg7, avg30,
+                 avg_foil, low_foil, trend_foil, avg1_foil, avg7_foil, avg30_foil)
+             on conflict (id_product) do nothing",
+        )
+        .bind(&ids)
+        .bind(&cats)
+        .bind(col(|r| r.avg))
+        .bind(col(|r| r.low))
+        .bind(col(|r| r.trend))
+        .bind(col(|r| r.avg1))
+        .bind(col(|r| r.avg7))
+        .bind(col(|r| r.avg30))
+        .bind(col(|r| r.avg_foil))
+        .bind(col(|r| r.low_foil))
+        .bind(col(|r| r.trend_foil))
+        .bind(col(|r| r.avg1_foil))
+        .bind(col(|r| r.avg7_foil))
+        .bind(col(|r| r.avg30_foil))
+        .execute(&mut *tx)
+        .await?;
+    }
+    let changed = sqlx::query(
+        "insert into public.cardmarket_price_guide (game, id_product, day, id_category, avg, low, trend, avg1, avg7, avg30,
+           avg_foil, low_foil, trend_foil, avg1_foil, avg7_foil, avg30_foil, loaded_at)
+         select $1, i.id_product, $2::date, i.id_category, i.avg, i.low, i.trend, i.avg1, i.avg7, i.avg30,
+           i.avg_foil, i.low_foil, i.trend_foil, i.avg1_foil, i.avg7_foil, i.avg30_foil, now()
+         from incoming i
+         left join lateral (
+           select * from public.cardmarket_price_guide g
+           where g.game = $1 and g.id_product = i.id_product and g.day <= $2::date
+           order by g.day desc limit 1) l on true
+         where l.id_product is null
+            or (l.id_category, l.avg, l.low, l.trend, l.avg1, l.avg7, l.avg30, l.avg_foil, l.low_foil, l.trend_foil, l.avg1_foil, l.avg7_foil, l.avg30_foil)
+               is distinct from
+               (i.id_category, i.avg, i.low, i.trend, i.avg1, i.avg7, i.avg30, i.avg_foil, i.low_foil, i.trend_foil, i.avg1_foil, i.avg7_foil, i.avg30_foil)
+         on conflict (game, id_product, day) do update set id_category = excluded.id_category, avg = excluded.avg, low = excluded.low,
+           trend = excluded.trend, avg1 = excluded.avg1, avg7 = excluded.avg7, avg30 = excluded.avg30, avg_foil = excluded.avg_foil,
+           low_foil = excluded.low_foil, trend_foil = excluded.trend_foil, avg1_foil = excluded.avg1_foil, avg7_foil = excluded.avg7_foil,
+           avg30_foil = excluded.avg30_foil, loaded_at = now()",
+    )
+    .bind(game)
+    .bind(day)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let products: i64 = sqlx::query_scalar("select count(*) from incoming")
+        .fetch_one(&mut *tx)
+        .await?;
+    sqlx::query(
+        "insert into public.cardmarket_price_guide_runs (game, day, id_game, products, changed, loaded_at)
+         values ($1, $2::date, $3, $4, $5, now())
+         on conflict (game, day) do update set id_game = excluded.id_game, products = excluded.products,
+           changed = excluded.changed, loaded_at = now()",
+    )
+    .bind(game)
+    .bind(day)
+    .bind(id_game as i32)
+    .bind(products as i32)
+    .bind(changed as i32)
+    .execute(&mut *tx)
+    .await?;
+    if apply {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
+    Ok((products as u64, changed))
+}
+
+/// Change-only history of TCGNotify's cheapest ask, one game and day at a
+/// time (migration 140). Same shape as `store_guide_changes`: a row is written
+/// only when the ask differs from the product's newest stored row, and the run
+/// is recorded either way. Without `apply` the transaction rolls back.
+pub async fn store_asks(
+    pool: &PgPool,
+    game: &str,
+    day: &str,
+    rows: &[Ask],
+    apply: bool,
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "create temp table incoming_asks (
+           id_product bigint primary key,
+           min_price numeric
+         ) on commit drop",
+    )
+    .execute(&mut *tx)
+    .await?;
+    for chunk in rows.chunks(5000) {
+        let ids: Vec<i64> = chunk.iter().map(|r| r.id_product).collect();
+        let prices: Vec<Option<f64>> = chunk.iter().map(|r| r.min_price).collect();
+        sqlx::query(
+            "insert into incoming_asks (id_product, min_price)
+             select u.id_product, u.min_price::numeric
+             from unnest($1::bigint[], $2::float8[]) as u(id_product, min_price)
+             on conflict (id_product) do nothing",
+        )
+        .bind(&ids)
+        .bind(&prices)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let changed = sqlx::query(
+        "insert into public.tcgnotify_price_guide (game, id_product, day, min_price, loaded_at)
+         select $1, i.id_product, $2::date, i.min_price, now()
+         from incoming_asks i
+         left join lateral (
+           select * from public.tcgnotify_price_guide g
+           where g.game = $1 and g.id_product = i.id_product and g.day <= $2::date
+           order by g.day desc limit 1) l on true
+         where l.id_product is null or l.min_price is distinct from i.min_price
+         on conflict (game, id_product, day) do update set min_price = excluded.min_price,
+           loaded_at = now()",
+    )
+    .bind(game)
+    .bind(day)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let products: i64 = sqlx::query_scalar("select count(*) from incoming_asks")
+        .fetch_one(&mut *tx)
+        .await?;
+    sqlx::query(
+        "insert into public.tcgnotify_price_guide_runs (game, day, products, changed, loaded_at)
+         values ($1, $2::date, $3, $4, now())
+         on conflict (game, day) do update set products = excluded.products,
+           changed = excluded.changed, loaded_at = now()",
+    )
+    .bind(game)
+    .bind(day)
+    .bind(products as i32)
+    .bind(changed as i32)
+    .execute(&mut *tx)
+    .await?;
+    if apply {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
+    Ok((products as u64, changed))
+}
+
+/// The newest Cardmarket offer minimum of every facet the harvest settled
+/// (migration 141), one row per facet. A re-harvest replaces its answer only
+/// when the observation is newer, so replaying an old file cannot roll the
+/// pricer back to a stale ask. Returns the facets offered and the rows that
+/// changed. Without `apply` the transaction rolls back.
+pub async fn store_offer_minimums(
+    pool: &PgPool,
+    rows: &[Minimum],
+    apply: bool,
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "create temp table incoming_minimums (
+           cm_product_id bigint,
+           language text,
+           condition text,
+           finish text,
+           first_edition text,
+           seller_type text,
+           min_cents integer,
+           offers integer,
+           counts_complete boolean,
+           observed_at timestamptz,
+           primary key (cm_product_id, language, condition, finish, first_edition, seller_type)
+         ) on commit drop",
+    )
+    .execute(&mut *tx)
+    .await?;
+    for chunk in rows.chunks(5000) {
+        let ids: Vec<i64> = chunk.iter().map(|r| r.id_product).collect();
+        let languages: Vec<String> = chunk.iter().map(|r| r.language.clone()).collect();
+        let conditions: Vec<String> = chunk.iter().map(|r| r.condition.clone()).collect();
+        let finishes: Vec<String> = chunk.iter().map(|r| r.finish.clone()).collect();
+        let editions: Vec<String> = chunk.iter().map(|r| r.first_edition.clone()).collect();
+        let sellers: Vec<String> = chunk.iter().map(|r| r.seller_type.clone()).collect();
+        let cents: Vec<i64> = chunk.iter().map(|r| r.min_cents).collect();
+        let offers: Vec<Option<i32>> = chunk.iter().map(|r| r.offers.map(|n| n as i32)).collect();
+        let complete: Vec<Option<bool>> = chunk.iter().map(|r| r.counts_complete).collect();
+        let observed: Vec<String> = chunk.iter().map(|r| r.observed_at.clone()).collect();
+        sqlx::query(
+            "insert into incoming_minimums (cm_product_id, language, condition, finish,
+               first_edition, seller_type, min_cents, offers, counts_complete, observed_at)
+             select u.cm_product_id, u.language, u.condition, u.finish, u.first_edition,
+               u.seller_type, u.min_cents::integer, u.offers, u.counts_complete,
+               u.observed_at::timestamptz
+             from unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
+               $6::text[], $7::bigint[], $8::integer[], $9::boolean[], $10::text[])
+               as u(cm_product_id, language, condition, finish, first_edition, seller_type,
+                    min_cents, offers, counts_complete, observed_at)",
+        )
+        .bind(&ids)
+        .bind(&languages)
+        .bind(&conditions)
+        .bind(&finishes)
+        .bind(&editions)
+        .bind(&sellers)
+        .bind(&cents)
+        .bind(&offers)
+        .bind(&complete)
+        .bind(&observed)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let changed = sqlx::query(
+        "insert into public.cardmarket_offer_minimums as minimum (cm_product_id, language,
+           condition, finish, first_edition, seller_type, min_cents, offers, counts_complete,
+           observed_at, loaded_at)
+         select i.cm_product_id, i.language, i.condition, i.finish, i.first_edition,
+           i.seller_type, i.min_cents, i.offers, i.counts_complete, i.observed_at, now()
+         from incoming_minimums i
+         on conflict (cm_product_id, language, condition, finish, first_edition, seller_type)
+         do update set min_cents = excluded.min_cents, offers = excluded.offers,
+           counts_complete = excluded.counts_complete, observed_at = excluded.observed_at,
+           loaded_at = now()
+         where excluded.observed_at > minimum.observed_at",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let facets: i64 = sqlx::query_scalar("select count(*) from incoming_minimums")
+        .fetch_one(&mut *tx)
+        .await?;
+    if apply {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
+    Ok((facets as u64, changed))
 }
 
 /// Upsert the display price per public card id; drop rows of cards that no

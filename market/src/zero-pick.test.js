@@ -6,6 +6,11 @@ import {
   dropUnsentPicks,
   inventoryNote,
   lineCopies,
+  lineFacets,
+  lineFinishLabel,
+  lineIsFoil,
+  lineIsReverse,
+  lineTextFacets,
   lineSetText,
   locationTakeText,
   normalizeView,
@@ -323,4 +328,35 @@ test('the last pack is kept per seller for a week and never half-written', () =>
   const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
   assert.equal(readLastPack(broken, 'u1'), null);
   assert.equal(writeLastPack(broken, 'u1', pack), false);
+});
+
+test('reverse lines get the glowing mark; lineFacets still names Reverse for text callers', () => {
+  const line = { condition: 'NM', language: 'EN', reverse: true, firstEdition: true };
+  assert.deepEqual(lineFacets(line), ['NM', 'EN', 'Reverse', '1st ed.']);
+  assert.deepEqual(lineTextFacets(line), ['NM', 'EN', '1st ed.']);
+  assert.equal(lineIsReverse(line), true);
+  assert.equal(lineIsReverse({ foil: true }), false);
+  assert.equal(lineIsReverse(null), false);
+  assert.deepEqual(lineTextFacets({ foil: true }), []);
+});
+
+test('foil lines get the rainbow mark; lineFacets still names the finish for text callers', () => {
+  const line = { condition: 'NM', language: 'EN', foil: true, finish: 'Rainbow Foil', firstEdition: true };
+  assert.deepEqual(lineFacets(line), ['NM', 'EN', 'Rainbow Foil', '1st ed.']);
+  assert.deepEqual(lineTextFacets(line), ['NM', 'EN', '1st ed.']);
+  assert.equal(lineIsFoil(line), true);
+  assert.equal(lineIsFoil({ reverse: true }), false);
+  assert.equal(lineIsFoil(null), false);
+  assert.equal(lineFinishLabel({ foil: true, finish: 'Rainbow Foil' }), 'Rainbow Foil');
+  assert.equal(lineFinishLabel({ foil: true, finish: '' }), 'Foil');
+  assert.equal(lineFinishLabel({ foil: true, finish: '  ' }), 'Foil');
+  assert.equal(lineFinishLabel({ foil: false, finish: 'Rainbow Foil' }), '');
+  const order = { items: [
+    { name: 'Frigid Jewel', foil: true, finish: 'Foil', quantity: 1 },
+    { name: 'Cold', foil: true, finish: 'Cold Foil', quantity: 1 },
+    { name: 'Pika', reverse: true, quantity: 1 },
+    { name: 'Plain', quantity: 1 },
+  ] };
+  const finishes = zeroPickCsv(order).trim().split('\r\n').slice(1).map((row) => row.split(',')[14]);
+  assert.deepEqual(finishes, ['Foil', 'Cold Foil', 'Reverse', '']);
 });

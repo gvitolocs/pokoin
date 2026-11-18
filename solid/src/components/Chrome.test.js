@@ -44,3 +44,27 @@ test('satellite eras and set icons stay off the Pokémon catalogs', () => {
   assert.match(sets, /satelliteGroups/);
   assert.match(sets, /pokemon\s*\?\s*groupExpansions/);
 });
+
+test('Dashboard uses the CardGTS arrows; CardGTS remains in the preview, footer and phone menu', () => {
+  const menu = read('./MobileMenu.jsx');
+  assert.match(chrome, /<BuySellIcon size=\{20\} \/>/);
+  assert.doesNotMatch(chrome, /buysell: BUYSELL_ICON/);
+  assert.doesNotMatch(chrome, /class="buysell-link"/);
+  assert.match(chrome, /<NavHover id="dashboard"[^>]*>\s*<AppLink to=\{DASHBOARD_HOME\} aria-label="Dashboard"><BuySellIcon size=\{20\} \/><\/AppLink>/);
+  assert.match(read('./NavPreviews.jsx'), /class="nav-cardgts tile-cta" href="\/cardgts"/);
+  assert.match(chrome, /<AppLink to="\/cardgts">CardGTS<\/AppLink>/);
+  assert.match(menu, /<Row to="\/cardgts" mark="buysell" label="CardGTS"/);
+});
+
+test('Assets nav preview prints the viewer-currency value, not PKN', () => {
+  const src = read('./NavPreviews.jsx');
+  assert.match(src, /formatAssetsValue\(last\(\), sellerCurrency\(\)\)/);
+  assert.doesNotMatch(src, /formatPknNumber/);
+  assert.doesNotMatch(src, /\} PKN/);
+});
+
+test('Dashboard preview tiles keep icons beside single-line labels', () => {
+  const css = read('../../../market/src/styles.css');
+  assert.match(css, /\.icon-nav \.nav-preview \.nav-scan,\s*\.icon-nav \.nav-preview \.nav-cardgts \{[^}]*flex-direction: row;[^}]*align-items: center;/);
+  assert.match(css, /\.icon-nav \.nav-preview \.nav-scan,\s*\.icon-nav \.nav-preview \.nav-cardgts \{[^}]*white-space: nowrap;/);
+});
