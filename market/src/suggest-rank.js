@@ -186,6 +186,24 @@ export function namePoolHasCompact(compact) {
   return Boolean(key) && NAME_POOL.some((row) => row.compact === key);
 }
 
+/** The pool sorted for prefix probes; built once, on the first compound name. */
+let namePoolCompactsSorted = null;
+
+/** True when some card name starts with this compact word (`jolte` → Jolteon …). */
+function poolHasNamePrefix(compact) {
+  const key = String(compact || '');
+  if (!key) return false;
+  const sorted = namePoolCompactsSorted ||= NAME_POOL.map((row) => row.compact).sort();
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (sorted[mid] < key) low = mid + 1;
+    else high = mid;
+  }
+  return low < sorted.length && sorted[low].startsWith(key);
+}
+
 let namePoolCompacts = null;
 
 /**
@@ -1697,7 +1715,10 @@ export function parseTypedQuery(query) {
     return empty;
   }
   if (namePoolHasCompact(compactQuery(raw))) {
-    return empty;
+    // Say so, instead of returning a bare empty parse: every stage that ranks
+    // the whole query is already right, and the stages that widen must widen to
+    // `compoundNameToken`, not to the first word (PH-05).
+    return { ...empty, exactCompoundName: true };
   }
   const peeled = [];
   const rarityTokens = [];
@@ -1775,6 +1796,28 @@ export function parseTypedQuery(query) {
     rarityTokens,
     eras: [...new Set(setTokens.map((token) => token.eraId).filter(Boolean))],
   };
+}
+
+/**
+ * The name the popup and the recall may widen an exact compound card name to:
+ * the LAST typed word that still opens card names (`dark jolteon` → `jolteon`,
+ * `rocket's zapdos` → `zapdos`), skipping mechanic words. The FIRST word of a
+ * compound name is often another species' own prefix (`dark` → Darkrai), so it
+ * is never the widening stem by itself (PH-05). Empty for a query that is not an
+ * exact pool name, and when the species word IS the first word (`pikachu gx`),
+ * where today's stem already carries that name pool.
+ */
+export function compoundNameToken(query) {
+  const words = String(query || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2 || !namePoolHasCompact(compactQuery(words.join('')))) return '';
+  for (let index = words.length - 1; index > 0; index -= 1) {
+    const word = words[index];
+    if (isModifierWord(word)) continue;
+    const compact = compactQuery(word);
+    if (compact.length < 3 || !poolHasNamePrefix(compact)) continue;
+    return word;
+  }
+  return '';
 }
 
 function hasSetTokens(parsed) {
