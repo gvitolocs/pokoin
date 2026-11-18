@@ -3335,7 +3335,7 @@
 .inv-head,
 .inv-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) 56px 72px 52px 110px 84px 64px 18px;
+  grid-template-columns: minmax(170px, 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
   gap: 12px;
   align-items: center;
   padding: 8px 16px;
@@ -3569,10 +3569,10 @@
   }
 
   .inv-row {
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto 44px;
     grid-template-areas:
-      'card  card  status status'
-      'cond  lang  qty    price';
+      'card  card  status status actions'
+      'cond  lang  qty    price  actions';
     padding: 12px 14px;
     row-gap: 8px;
   }
@@ -3637,7 +3637,7 @@
 
 .inv-table.has-mkt .inv-head,
 .inv-table.has-mkt .inv-row {
-  grid-template-columns: minmax(180px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px;
+  grid-template-columns: minmax(150px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
 }
 
 .inv-mkt {
@@ -3671,10 +3671,10 @@
   }
 
   .inv-table.has-mkt .inv-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto 44px;
     grid-template-areas:
-      'card  card   status'
-      'mkt   qty    price';
+      'card  card   status  actions'
+      'mkt   qty    price   actions';
   }
 
   .inv-mkt {
@@ -4867,12 +4867,12 @@ html.is-pointer-dragging body {
 
 .inv-table.has-pick .inv-head,
 .inv-table.has-pick .inv-row {
-  grid-template-columns: 44px minmax(200px, 1fr) 56px 72px 52px 110px 84px 64px 18px;
+  grid-template-columns: 44px minmax(150px, 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
 }
 
 .inv-table.has-pick.has-mkt .inv-head,
 .inv-table.has-pick.has-mkt .inv-row {
-  grid-template-columns: 44px minmax(180px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px;
+  grid-template-columns: 44px minmax(140px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
 }
 
 /* The row link spans every cell but the checkbox. */
@@ -4935,17 +4935,17 @@ html.is-pointer-dragging body {
   }
 
   .inv-table.has-pick .inv-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto auto 44px;
     grid-template-areas:
-      'pick card card status status'
-      'pick cond lang qty    price';
+      'pick card card status status actions'
+      'pick cond lang qty    price actions';
   }
 
   .inv-table.has-pick.has-mkt .inv-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto 44px;
     grid-template-areas:
-      'pick card card status'
-      'pick mkt  qty  price';
+      'pick card card status actions'
+      'pick mkt  qty  price  actions';
   }
 
   .inv-row .inv-pick {
@@ -5460,4 +5460,202 @@ html.is-pointer-dragging body {
 .pricer-confirm-leave p {
   margin: 0;
   font-size: 0.9rem;
+}
+
+/* Row actions: every listing of the seller's own book carries its own Edit and
+   Delete. They sit beside the row link, never inside it: a button in an anchor
+   is unclickable and unreachable by keyboard. */
+
+.inv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inv-act-head {
+  text-align: right;
+}
+
+.inv-actions .icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--g5);
+  border-radius: 9px;
+  background: var(--g3);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.inv-actions .icon-btn:hover:not(:disabled) {
+  border-color: var(--yellow);
+  color: var(--text);
+}
+
+.inv-actions .icon-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.inv-actions .icon-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.inv-del {
+  color: #ff8a73;
+  border-color: rgb(255 120 96 / 0.35);
+}
+
+.inv-del:hover:not(:disabled) {
+  border-color: rgb(255 120 96 / 0.6);
+  background: rgb(255 80 60 / 0.12);
+  color: #ffb3a3;
+}
+
+/* Stacks and Titles: the posting keeps its line, the buttons sit at its end. */
+
+.loc-posting-line {
+  display: flex;
+  align-items: center;
+}
+
+.loc-posting-line > .loc-posting {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.loc-posting-line .inv-actions {
+  padding-right: 16px;
+}
+
+/* Grid: the bar hangs under the tile, outside its anchor. */
+
+.inv-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inv-tile > .collection-tile {
+  flex: 1 1 auto;
+}
+
+.inv-tile-actions {
+  justify-content: center;
+}
+
+/* The edit dialog: the desk form in the shared shell, so the panel chrome and
+   the editing outline of the card desk are the card's own border. */
+
+.modal-card.zero-dialog:has(.sell-form) {
+  width: min(46rem, 100%);
+  max-height: min(88vh, 46rem);
+  overflow-y: auto;
+}
+
+.zero-dialog .sell-form {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.zero-dialog .sell-form.is-editing {
+  outline: 0;
+}
+
+.listing-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--g4);
+}
+
+.listing-edit-id {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.listing-edit-note {
+  margin: 8px 0 0;
+}
+
+/* The row's market quotes, one click from the price field. */
+
+.sell-market-quotes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sell-quote-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+button.sell-quote {
+  padding: 4px 10px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g3);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+button.sell-quote:hover {
+  border-color: var(--yellow);
+}
+
+button.sell-quote:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+button.sell-quote b {
+  color: var(--yellow);
+}
+
+.sell-quote.is-reference {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* Phone and narrow: the actions column is its own slot, tap targets grow, and
+   the MyPokoin chip row keeps the two buttons side by side. */
+
+@media (max-width: 860px) {
+  .inv-row .inv-actions {
+    grid-area: actions;
+    align-self: center;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .inv-actions .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .loc-posting-line .inv-actions,
+  .inv-tile-actions {
+    flex-direction: row;
+  }
+}
+
+@media (max-width: 720px) {
+  .mypokoin .inv-actions {
+    flex-direction: row;
+  }
 }
