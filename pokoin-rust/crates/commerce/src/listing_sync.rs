@@ -850,6 +850,7 @@ pub async fn push_facets(
 /// `Err` when the document cannot be read: whether this seller's edit goes to
 /// CardTrader at all comes from it, so without it we cannot promise either
 /// way and nothing is saved.
+#[allow(clippy::result_large_err)]
 async fn seller_writes_to_cardtrader(
     fs: &dyn FirestoreStore,
     seller: &str,

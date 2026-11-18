@@ -185,7 +185,7 @@ id = "listing-edit-stock"
 name = "Seller edits price, quantity, status, condition, language or properties of a listing"
 money = true
 entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/pages/Inventory.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved"]
+proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_flag_turned_off_is_sent_as_false", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::an_import_only_seller_is_never_refused_a_facet"]
 status = "proved"
 
 [[flow]]

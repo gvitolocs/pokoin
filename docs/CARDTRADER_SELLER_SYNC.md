@@ -318,8 +318,16 @@ stands on: the product is gone, the row is written and the answer carries
 product still has live siblings is never refaceted for one of them
 (`sync::group_leave` treats a facet like a price: it leaves the group and the
 reconcile pushes it again), and the `listing.changed` event keeps carrying price
-and quantity only, so no facet is ever sent twice. Proved by
-`pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs`.
+and quantity only, so no facet is ever sent twice. A flag travels both ways: the
+mapping names a boolean only when it is on and a `PUT` says nothing of a property
+it does not name, so a reverse or first edition turned **off** is sent explicitly
+as `false` under the same key (`pokemon_reverse`, `riftbound_foil`, …), while a
+flag that was never on stays unnamed — a product whose blueprint carries no such
+property is refused it in strict mode. The seller's own settings are read before
+any of that: `link::edit_skip_reason` decides whether Pokoin writes for this
+seller before the blueprint is read and the body is built, so an import-only or
+1-Day Ready seller is never refused over a facet nobody is asked to carry. Proved
+by `pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs`.
 
 ## Power Tools location import
 
