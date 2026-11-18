@@ -324,10 +324,28 @@ impl Env {
         .expect("listing")
     }
 
+    /// A linked copy of a reverse first edition: both flags on, so an edit
+    /// that turns them off is a facet CardTrader's product has to be told.
+    async fn linked_flagged_listing(&self) -> Uuid {
+        sqlx::query_scalar(
+            "insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, \
+               seller_country, marketplace_game, source, source_listing_id, price_pkn, \
+               quantity_available, condition, language, card_name, reverse, foil_state, first_edition) \
+             values ($1, $2, 'alice', 'IT', 'pokemon', 'cardtrader', 'ct:99', 400, 2, 'NM', 'EN', 'Espurr', \
+               true, 'reverse', true) \
+             returning id",
+        )
+        .bind(CARD)
+        .bind(SELLER)
+        .fetch_one(&self.pool)
+        .await
+        .expect("flagged listing")
+    }
+
     async fn row(&self, id: Uuid) -> Value {
         sqlx::query_scalar::<_, Value>(
             "select to_jsonb(v) from (select condition, language, signed, source_listing_id, \
-               price_pkn, quantity_available, status \
+               price_pkn, quantity_available, status, reverse, first_edition, foil_state \
              from public.marketplace_user_listings where id = $1) v",
         )
         .bind(id)
@@ -571,4 +589,83 @@ async fn a_price_only_edit_sends_no_facet() {
     assert!(updated.get("cardtrader").is_none(), "{updated}");
     assert!(env.puts().is_empty(), "and sends no facet either");
     assert_eq!(env.row(id).await["price_pkn"].as_f64(), Some(500.0));
+}
+
+/// A flag the seller turned off is a facet CardTrader's product has to be told
+/// about: a PUT says nothing of a property it does not name, so leaving
+/// `pokemon_reverse` out would keep the card on sale as a reverse.
+#[tokio::test]
+async fn a_flag_turned_off_is_sent_as_false() {
+    let _serial = serial().lock().await;
+    let Some(env) = setup(Answer::Accepted, Some(integration_doc("pokoin_to_ct"))).await else {
+        return;
+    };
+    let id = env.linked_flagged_listing().await;
+    let (status, body) = env
+        .edit(
+            id,
+            json!({"reverse": false, "foilState": "standard", "firstEdition": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["cardtrader"],
+        json!({"ok": true, "facets": "updated"}),
+        "{body}"
+    );
+    let puts = env.puts();
+    assert_eq!(puts.len(), 1, "one PUT: {puts:?}");
+    assert_eq!(
+        puts[0].body["properties"]["pokemon_reverse"],
+        json!(false),
+        "reverse off goes explicitly, not unsaid: {}",
+        puts[0].body["properties"]
+    );
+    assert_eq!(
+        puts[0].body["properties"]["pokemon_first_edition"],
+        json!(false),
+        "{}",
+        puts[0].body["properties"]
+    );
+    // The create always names signed and altered, so they stay as they are,
+    // and nothing else was switched off: only the two flags gained a `false`.
+    assert_eq!(
+        puts[0].body["properties"]["signed"],
+        json!(false),
+        "{}",
+        puts[0].body["properties"]
+    );
+    assert_eq!(
+        puts[0].body["properties"]["altered"],
+        json!(false),
+        "{}",
+        puts[0].body["properties"]
+    );
+    let row = env.row(id).await;
+    assert_eq!(row["reverse"], false, "and Pokoin saved the row");
+    assert_eq!(row["foil_state"], "standard");
+    assert_eq!(row["first_edition"], false);
+    assert_eq!(row["source_listing_id"], "ct:99", "still linked");
+}
+
+/// A seller Pokoin never writes for is never refused over a facet nobody is
+/// asked to carry: their integration is read, and its skip applied, before the
+/// blueprint or the mapping is consulted.
+#[tokio::test]
+async fn an_import_only_seller_is_never_refused_a_facet() {
+    let _serial = serial().lock().await;
+    let Some(env) = setup(Answer::Accepted, Some(integration_doc("ct_to_pokoin"))).await else {
+        return;
+    };
+    // The Riftbound blueprint of this card carries English only, so a pushing
+    // seller is refused this language (`an_unmappable_facet_is_refused_before_any_request`).
+    let id = env.linked_riftbound_listing().await;
+    let (status, body) = env.edit(id, json!({"language": "IT"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.get("cardtrader").is_none(),
+        "an import-only seller gets no CardTrader answer: {body}"
+    );
+    assert!(env.puts().is_empty(), "nothing reached CardTrader");
+    assert_eq!(env.row(id).await["language"], "IT", "Pokoin saved it");
 }
