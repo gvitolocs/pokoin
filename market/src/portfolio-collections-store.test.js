@@ -17,6 +17,11 @@ function answer(collections, days) {
   };
 }
 
+/** One card line of a draft, with the facets the server reads the slice by. */
+function item(cardId = '129552') {
+  return { game: 'pokemon', cardId, condition: 'NM', language: 'EN', quantity: 1, name: 'Charizard' };
+}
+
 function binder(items = [{ game: 'pokemon', cardId: '129552', condition: 'NM', language: 'EN', quantity: 1, name: 'Charizard', pricePkn: 480 }]) {
   return { id: 'c1', name: 'Charizard binder', items };
 }
@@ -292,6 +297,84 @@ test('the fixture store writes memory and asks nothing', async () => {
   await store.remove('c1');
   assert.deepEqual(store.get().collections.map((row) => row.name), ['Sealed 2023']);
   assert.equal(calls.drop, 0);
+});
+
+test('a write whose seller left before the token is in hand is never sent', async () => {
+  let token = 't';
+  let releaseToken = null;
+  const { store, calls } = engine({
+    read: () => Promise.resolve(answer([binder()])),
+    bearer: () => token,
+    save: () => Promise.resolve(answer([])),
+    drop: () => Promise.resolve(answer([])),
+  });
+  await store.load('u1');
+  // The token now takes its time, and the seller goes while it is out.
+  token = new Promise((resolve) => {
+    releaseToken = resolve;
+  });
+  const saving = store.save({ id: 'c1', name: 'Theirs', items: [item()] });
+  const dropping = store.remove('c1');
+  await tick();
+  assert.equal(store.get().saving, 'c1', 'both writes think they are still on');
+  await store.load('');
+  releaseToken('t');
+  assert.deepEqual(await saving, { ok: false, message: 'Could not save the collection.' });
+  assert.deepEqual(await dropping, { ok: false, message: 'Could not delete the collection.' });
+  assert.equal(calls.save.length, 0, 'the POST was never made');
+  assert.equal(calls.drop.length, 0, 'nor the DELETE');
+  assert.deepEqual(store.get().collections, [], 'and nothing of the previous seller came back');
+  assert.equal(store.get().saving, '', 'the sign-out cleared the flag it was holding');
+});
+
+test('a write answering after the seller changed never lands on the new one', async () => {
+  const posts = [];
+  const reads = [];
+  const { store, calls } = engine({
+    read: () => new Promise((resolve) => {
+      reads.push(resolve);
+    }),
+    save: () => new Promise((resolve) => {
+      posts.push(resolve);
+    }),
+    drop: () => new Promise((resolve) => {
+      posts.push(resolve);
+    }),
+  });
+  const first = store.load('u1');
+  await tick();
+  reads[0](answer([binder()]));
+  await first;
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Charizard binder']);
+
+  const saving = store.save({ id: 'c1', name: 'Theirs', items: [item()] });
+  await tick();
+  assert.equal(posts.length, 1, 'the write did go out for the seller who asked');
+
+  // The seller switches while the POST is out, and their own lists answer.
+  const second = store.load('u2');
+  await tick();
+  reads[1](answer([{ id: 'z9', name: 'Mine', items: [] }]));
+  await second;
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Mine']);
+
+  // u1’s answer arrives: it is the previous desk's business now.
+  posts[0](answer([{ id: 'c1', name: 'Theirs', items: [item()] }]));
+  assert.deepEqual(await saving, { ok: false, message: 'Could not save the collection.' });
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Mine'], 'the new seller’s state is untouched');
+  assert.equal(store.get().uid, 'u2');
+  assert.ok(store.model(), "and their level is still only their own lists");
+
+  // A sign-out with a delete out does the same: no answer, no lists.
+  const dropping = store.remove('z9');
+  await tick();
+  assert.equal(posts.length, 2);
+  await store.load('');
+  posts[1](answer([]));
+  assert.deepEqual(await dropping, { ok: false, message: 'Could not delete the collection.' });
+  assert.deepEqual(store.get().collections, []);
+  assert.equal(store.model(), null, 'nobody is here to have a level');
+  assert.equal(calls.read, 2, 'the sign-out asked for nothing of its own');
 });
 
 test('subscribers follow every change and stop when they let go', async () => {

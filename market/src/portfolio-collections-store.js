@@ -161,6 +161,19 @@ export function createCollectionsStore(deps = {}) {
     return state.collections.length >= state.limits.collections;
   }
 
+  /**
+   * Which seller a write was made for, and where the request line stood when it
+   * started. Every load takes the line — another seller, a sign-out, a refresh —
+   * so this is how a write learns that nobody is waiting for its answer any more.
+   */
+  function owner() {
+    return { uid: state.uid, seq };
+  }
+
+  function overtaken(run) {
+    return run.uid !== state.uid || run.seq !== seq;
+  }
+
   function savedBody(draft) {
     const clean = saveBody(draft);
     return { ...clean, name: String(clean.name || '').trim() };
@@ -184,23 +197,32 @@ export function createCollectionsStore(deps = {}) {
       return Promise.resolve({ ok: true, saved: saved[here >= 0 ? here : saved.length - 1].id });
     }
     const key = String(draft?.id || '') || 'new';
+    const run = owner();
     publish({ ...state, saving: key });
     return Promise.resolve()
       .then(() => deps.bearer())
       .then((token) => {
+        // The seller is gone by the time we would have asked: nothing goes out.
+        if (overtaken(run)) throw new Error('gone');
         if (!token) throw new Error('no bearer');
         return deps.saveCollection(token, savedBody(draft));
       })
       .then(
         (data) => {
-          apply(state.uid, data);
+          // An answer of the previous seller never lands on the new one.
+          if (overtaken(run)) return { ok: false, message: 'Could not save the collection.' };
+          apply(run.uid, data);
           return { ok: true, saved: String(data?.saved || '') || String(draft?.id || '') };
         },
-        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err), { limits: state.limits }) }),
+        (err) => {
+          if (overtaken(run)) return { ok: false, message: 'Could not save the collection.' };
+          return { ok: false, message: collectionErrorMessage(errorCode(err), { limits: state.limits }) };
+        },
       )
       .finally(() => {
-        // The answer already cleared it; only a write that never answered has to.
-        if (state.saving) publish({ ...state, saving: '' });
+        // The answer already cleared it; only a write that never answered has to,
+        // and never one whose seller has been replaced.
+        if (!overtaken(run) && state.saving) publish({ ...state, saving: '' });
       });
   }
 
@@ -211,26 +233,32 @@ export function createCollectionsStore(deps = {}) {
       apply(state.uid, deps.previewAnswer(state.collections.filter((row) => row.id !== clean)));
       return Promise.resolve({ ok: true, saved: '' });
     }
+    const run = owner();
     publish({ ...state, saving: clean });
     return Promise.resolve()
       .then(() => deps.bearer())
       .then((token) => {
+        if (overtaken(run)) throw new Error('gone');
         if (!token) throw new Error('no bearer');
         return deps.deleteCollection(token, clean);
       })
       .then(
         (data) => {
-          apply(state.uid, data);
+          if (overtaken(run)) return { ok: false, message: 'Could not delete the collection.' };
+          apply(run.uid, data);
           return { ok: true, saved: '' };
         },
-        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err), {
+        (err) => {
+          if (overtaken(run)) return { ok: false, message: 'Could not delete the collection.' };
+          return { ok: false, message: collectionErrorMessage(errorCode(err), {
             fallback: 'Could not delete the collection.',
             limits: state.limits,
-          }) }),
+          }) };
+        },
       )
       .finally(() => {
         // The answer already cleared it; only a write that never answered has to.
-        if (state.saving) publish({ ...state, saving: '' });
+        if (!overtaken(run) && state.saving) publish({ ...state, saving: '' });
       });
   }
 
