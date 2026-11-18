@@ -20,7 +20,8 @@ use crate::handlers::poko_market::era_for_code;
 
 /// Bump it when the table below or the rules in `segment_keys` change: the
 /// stored per-segment days are then rebuilt. The totals are not touched.
-pub const SEGMENTS_REVISION: i64 = 1;
+/// 2: a game id is sanitised before it enters a key (`game_of`).
+pub const SEGMENTS_REVISION: i64 = 2;
 
 /// One Pokémon era band: what the dashboard calls it and which catalog eras
 /// fall inside it.
@@ -106,14 +107,27 @@ const POKEMON_GRADED: &str = "pokemon:graded";
 /// `product_type` means; jumbo and accessory printings are singles too.
 const LOOSE_PRODUCT_TYPES: [&str; 3] = ["card", "jumbo", "accessory"];
 
-/// The game a holdings row belongs to, lower-cased; Pokémon when it says nothing.
+/// The longest game id that still fits a key. An id that sanitises to nothing,
+/// or is longer than this, is reported as [`UNKNOWN_GAME`] rather than as a
+/// blank or arbitrary key nobody can draw.
+const GAME_MAX_LEN: usize = 40;
+const UNKNOWN_GAME: &str = "unknown";
+
+/// The game a holdings row belongs to, sanitised for a key; Pokémon when it says
+/// nothing.
 fn game_of(row: &Json) -> String {
-    let game = field_str(row, "game").trim().to_ascii_lowercase();
-    if game.is_empty() {
-        POKEMON.to_string()
-    } else {
-        game
+    let raw = field_str(row, "game").trim().to_ascii_lowercase();
+    if raw.is_empty() {
+        return POKEMON.to_string();
     }
+    let game: String = raw
+        .chars()
+        .filter(|letter| letter.is_ascii_lowercase() || letter.is_ascii_digit() || *letter == '_')
+        .collect();
+    if game.is_empty() || game.len() > GAME_MAX_LEN {
+        return UNKNOWN_GAME.to_string();
+    }
+    game
 }
 
 /// Sealed product: what the listing itself says, or a catalog product type that
@@ -473,6 +487,32 @@ mod tests {
         assert_eq!(keys, vec!["game:pokemon", "pokemon:era:other"]);
         assert_eq!(keys_of(&json!({ "game": "" })), keys);
         assert_eq!(keys_of(&json!({ "game": "  " })), keys);
+    }
+
+    #[test]
+    fn game_of_keeps_only_what_a_stored_key_can_carry() {
+        for (input, expected) in [
+            ("  Riftbound ", "riftbound"),
+            ("one piece", "onepiece"),
+            ("a:b", "ab"),
+            ("rift_bound_2", "rift_bound_2"),
+            ("POKÉMON", "pokmon"),
+        ] {
+            assert_eq!(game_of(&json!({ "game": input })), expected, "{input:?}");
+        }
+        // The length limit is what a key can still carry, not an arbitrary cut.
+        let at_limit = "x".repeat(40);
+        assert_eq!(game_of(&json!({ "game": at_limit })), at_limit);
+        // Too long, or nothing a key can carry at all, is not an id.
+        assert_eq!(game_of(&json!({ "game": "x".repeat(60) })), "unknown");
+        assert_eq!(game_of(&json!({ "game": "!!!" })), "unknown");
+        // A row that says nothing about its game is the collection's own game.
+        assert_eq!(game_of(&json!({ "game": "" })), "pokemon");
+        assert_eq!(game_of(&json!({})), "pokemon");
+        // The key carries the sanitised id, and a Pokémon row with an accent is
+        // not Pokémon: it gets no era key.
+        let keys = keys_of(&json!({ "game": "POKÉMON", "set_code": "sv1" }));
+        assert_eq!(keys, vec!["game:pokmon"]);
     }
 
     #[test]
