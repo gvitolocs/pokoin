@@ -361,6 +361,234 @@ export function stepHistoryPoints(coords) {
   return out;
 }
 
+/** The same days as one stepped stroke: the true day the value changed. */
+export function stepHistoryPath(coords) {
+  const stepped = stepHistoryPoints(coords);
+  if (!stepped.length) return '';
+  return [`M ${historyPoint(stepped[0])}`, ...stepped.slice(1).map((point) => `L ${historyPoint(point)}`)].join(' ');
+}
+
+/**
+ * The points a curve can be built from: finite x and y, and x still moving
+ * the way the series started. A day that repeats or steps back has no width
+ * and is dropped, so no segment ever divides by zero.
+ */
+function usableHistoryCoords(coords) {
+  const finite = [];
+  for (const point of coords || []) {
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) finite.push({ x, y });
+  }
+  let direction = 0;
+  for (let i = 1; i < finite.length && direction === 0; i += 1) {
+    direction = Math.sign(finite[i].x - finite[i - 1].x);
+  }
+  if (!direction) return finite.slice(0, 1);
+  const out = [];
+  for (const point of finite) {
+    const previous = out[out.length - 1];
+    if (previous && Math.sign(point.x - previous.x) !== direction) continue;
+    out.push(point);
+  }
+  return out;
+}
+
+function historySlope(from, to) {
+  return (to.y - from.y) / (to.x - from.x);
+}
+
+function slopeSign(slope) {
+  return slope > 0 ? 1 : (slope < 0 ? -1 : 0);
+}
+
+/**
+ * Tangent at a point between two runs, held inside the monotone-X rules: it
+ * vanishes at a turning point and never exceeds the shallower neighbouring
+ * slope, which is what keeps every curve between the values it joins.
+ */
+function historyTangent(left, right) {
+  if (slopeSign(left.slope) !== slopeSign(right.slope)) return 0;
+  const chord = (left.slope * right.width + right.slope * left.width) / (left.width + right.width);
+  return slopeSign(left.slope)
+    * Math.min(Math.abs(left.slope), Math.abs(right.slope), Math.abs(chord) / 2);
+}
+
+/**
+ * Cubic Bezier segments of a monotone-X (Fritsch-Carlson) interpolation
+ * through `coords`, as {x0, y0, cx1, cy1, cx2, cy2, x1, y1}. The curve passes
+ * through every point, and both control points of a segment sit inside that
+ * segment's x and y box, so a smooth run never rises above or dips below the
+ * two real values it joins. A flat run stays flat, fewer than two usable
+ * points give no segments, and the result is unchanged by reading `coords`
+ * backwards, so a reversed edge is the same curve.
+ */
+export function smoothHistorySegments(coords) {
+  const points = usableHistoryCoords(coords);
+  if (points.length < 2) return [];
+  const runs = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    runs.push({ width: points[i + 1].x - points[i].x, slope: historySlope(points[i], points[i + 1]) });
+  }
+  const tangents = [
+    runs[0].slope,
+    ...runs.slice(1).map((right, i) => historyTangent(runs[i], right)),
+    runs[runs.length - 1].slope,
+  ];
+  return runs.map((run, i) => ({
+    x0: points[i].x,
+    y0: points[i].y,
+    cx1: points[i].x + run.width / 3,
+    cy1: points[i].y + (tangents[i] * run.width) / 3,
+    cx2: points[i + 1].x - run.width / 3,
+    cy2: points[i + 1].y - (tangents[i + 1] * run.width) / 3,
+    x1: points[i + 1].x,
+    y1: points[i + 1].y,
+  }));
+}
+
+function historyNumber(value) {
+  return value.toFixed(2);
+}
+
+function historyPoint(point) {
+  return `${historyNumber(point.x)} ${historyNumber(point.y)}`;
+}
+
+/** The curve commands of segments; the pen must already sit on the first one. */
+function historyCurve(segments) {
+  return segments.map((s) => [
+    `C ${historyPoint({ x: s.cx1, y: s.cy1 })}`,
+    historyPoint({ x: s.cx2, y: s.cy2 }),
+    historyPoint({ x: s.x1, y: s.y1 }),
+  ].join(', ')).join(' ');
+}
+
+/** Move to the first point, then one smooth curve through all of them. */
+export function smoothHistoryPath(coords) {
+  const points = usableHistoryCoords(coords);
+  if (!points.length) return '';
+  return [`M ${historyPoint(points[0])}`, historyCurve(smoothHistorySegments(points))].filter(Boolean).join(' ');
+}
+
+/**
+ * The curve's own point at an x. Both control points of a segment sit a third
+ * and two thirds of the way across it, which makes x linear in the segment
+ * parameter, so solving t from x is exact and never needs a length measure.
+ * Outside the drawn range it lands on the end it passed.
+ */
+export function smoothHistoryPointAt(coords, x) {
+  const points = usableHistoryCoords(coords);
+  if (!points.length) return null;
+  const last = points[points.length - 1];
+  const at = Math.min(Math.max(Number(x) || 0, points[0].x), last.x);
+  if (at <= points[0].x) return { x: at, y: points[0].y };
+  const segments = smoothHistorySegments(points);
+  const segment = segments.find((row) => at <= row.x1) || segments[segments.length - 1];
+  const t = (at - segment.x0) / (segment.x1 - segment.x0);
+  const u = 1 - t;
+  return {
+    x: at,
+    y: (u ** 3) * segment.y0
+      + 3 * (u ** 2) * t * segment.cy1
+      + 3 * u * (t ** 2) * segment.cy2
+      + (t ** 3) * segment.y1,
+  };
+}
+
+/**
+ * Closed shape between two smooth curves that share their x: out along
+ * `upper`, a vertical step at the last x, back along `lower`, closed with a
+ * vertical step at the first. Reading `lower` backwards draws the same curve,
+ * so two shapes that share an edge meet it exactly instead of gapping.
+ */
+export function smoothHistoryBandPath(upper, lower) {
+  const top = usableHistoryCoords(upper);
+  const bottom = usableHistoryCoords(lower);
+  if (top.length < 2 || bottom.length < 2) return '';
+  return [
+    `M ${historyPoint(top[0])}`,
+    historyCurve(smoothHistorySegments(top)),
+    `L ${historyPoint(bottom[bottom.length - 1])}`,
+    historyCurve(smoothHistorySegments([...bottom].reverse())),
+    'Z',
+  ].filter(Boolean).join(' ');
+}
+
+/**
+ * The entry the dashboard graph plays on first paint and on every range
+ * change: the curve reveals left to right over this many milliseconds.
+ */
+export const HISTORY_DRAW_MS = 900;
+
+/** The headline starts the draw at this share of its own value. */
+export const HISTORY_COUNT_FROM = 0.85;
+
+/**
+ * Ease-out-quart of the draw-in reveal: 0 at the start, 1 at and past
+ * `durationMs`, clamped either side so a stray frame never overdraws.
+ */
+export function historyDrawProgress(elapsedMs, durationMs) {
+  const elapsed = Number(elapsedMs);
+  const total = Number(durationMs);
+  if (!(total > 0)) return 1;
+  if (!(elapsed > 0)) return 0;
+  if (elapsed >= total) return 1;
+  const t = elapsed / total;
+  return 1 - (1 - t) ** 4;
+}
+
+/** The headline number at a draw progress: 85% of `value` up to `value`. */
+export function historyCountValue(value, progress) {
+  const target = Number(value);
+  if (!Number.isFinite(target)) return 0;
+  const t = Math.min(1, Math.max(0, Number(progress) || 0));
+  return round2(target * (HISTORY_COUNT_FROM + (1 - HISTORY_COUNT_FROM) * t));
+}
+
+/**
+ * Where the one-line hover label anchors, in plot pixels: centred on the day
+ * and `gap` above it, then pushed back inside the plot so a label at either
+ * edge, or over the top of a high value, stays whole. The panel pairs the
+ * result with translate(-50%, -100%), so `left`/`top` are that anchor.
+ */
+export function historyLabelAnchor({
+  x = 0,
+  y = 0,
+  plotWidth = 0,
+  plotHeight = 0,
+  labelWidth = 0,
+  labelHeight = 0,
+  gap = 14,
+  pad = 6,
+} = {}) {
+  const width = Math.max(0, Number(labelWidth) || 0);
+  const height = Math.max(0, Number(labelHeight) || 0);
+  const plot = Math.max(0, Number(plotWidth) || 0);
+  const frame = Math.max(0, Number(plotHeight) || 0);
+  const half = width / 2;
+  const leftLo = pad + half;
+  const leftHi = plot - pad - half;
+  const left = leftHi < leftLo ? plot / 2 : Math.min(Math.max(Number(x) || 0, leftLo), leftHi);
+  const topLo = pad + height;
+  const topHi = frame - pad;
+  const top = topLo > topHi ? topHi : Math.min(Math.max((Number(y) || 0) - gap, topLo), topHi);
+  return { left, top };
+}
+
+/**
+ * The liquidity sub-pane scales on its own: the window's peak fills the band,
+ * so a small wallet in a large portfolio is still a readable line instead of a
+ * flat piece of the baseline.
+ */
+export function liquidityBandRatio(value, peak) {
+  const top = Number(peak);
+  if (!(top > 0)) return 0;
+  const amount = Number(value);
+  if (!(amount > 0)) return 0;
+  return Math.min(1, amount / top);
+}
+
 export const HISTORY_LAYERS = [
   { key: 'liquidity', label: 'Liquidity' },
   { key: 'cards', label: 'Cards' },

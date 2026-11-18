@@ -107,6 +107,7 @@ import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
+import { peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory } from '@market/price-history-cache.js';
 import {
   PRICE_HISTORY_DEFAULT_RANGE,
   fetchCardPriceHistory,
@@ -156,6 +157,7 @@ import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { createBuyBook, sellTarget } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
+import { accountSilver } from '../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
 import { buyerCurrency, buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
@@ -183,9 +185,6 @@ function rowsFrom(list) {
 function offerCopies(rows) {
   return (rows || []).map((row) => ({ ...row }));
 }
-
-/** Other sources' history, per card and window: a range switch revisits what was read. */
-const priceHistoryCache = new Map();
 
 /**
  * Card desk route. One desk per `lang:cardId`:
@@ -447,6 +446,83 @@ function CardDesk(props) {
       }
       if (!cached && !untrack(stubCard)) setError(err.message || 'Card not found.');
     });
+  // The other price sources join the graph, they do not replace it. Their
+  // history is read with the sales, not after the hero, and kept beside them in
+  // localStorage (market/src/price-history-cache.js), so a card seen before
+  // draws complete on the first frame. One read per card and window; the lines
+  // already drawn stay while another window loads.
+  // Silver only: everybody else keeps the graph that was here before the
+  // sources — the sold median, its facet overlays and its tooltip. For them
+  // nothing is asked of the history and its cache is neither read nor written,
+  // so the graph never waits on a read that is not coming.
+  const GRAPH_HISTORY_WAIT_MS = 1500;
+  const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
+  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
+  /** This desk's window: read fresh, or the last one read before it went stale. */
+  const readGraphHistory = (range) => peekCardPriceHistory(cardId, range)
+    || rememberStaleCardPriceHistory(cardId, range);
+  const [priceHistory, setPriceHistory] = createSignal(
+    untrack(accountSilver) ? readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE) : null,
+  );
+  // Nothing is plotted until the sales and the history are both in, at the
+  // latest GRAPH_HISTORY_WAIT_MS after the sales: the graph is drawn once, not
+  // twice. A history that lands after that cap still joins it. The two reads
+  // here are the desk's setup values, so they are taken untracked like the rest
+  // of this scope (Solid 2: STRICT_READ_UNTRACKED).
+  const [graphDrawn, setGraphDrawn] = createSignal(
+    Boolean(untrack(priceHistory) && untrack(salesSlices) != null),
+  );
+  let graphHistoryAsked = '';
+
+  function askGraphHistory(range) {
+    if (!untrack(accountSilver)) return;
+    const askedFor = `${cardId}|${range}`;
+    if (disposed || graphHistoryAsked === askedFor) return;
+    graphHistoryAsked = askedFor;
+    // A cached window paints at once and is still re-read below: what the desk
+    // knew is only the first frame, never the data it keeps showing. The first
+    // call runs in the component scope with the entry the signal was
+    // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
+    const known = readGraphHistory(range);
+    if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
+    const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
+    fetchCardPriceHistory(cardId, bounds).then((history) => {
+      // Dropped if this card or window is not the one asked for anymore.
+      if (disposed || untrack(graphHistoryKey) !== askedFor) return;
+      // An answer of nothing is not cached, so the next visit asks again.
+      if (!history) return;
+      const entry = { range, from: bounds.from, to: bounds.to, history };
+      saveCardPriceHistory(cardId, range, entry);
+      // Already drawn from the cache: data that has not changed never redraws.
+      setPriceHistory((prev) => (prev && JSON.stringify(prev) === JSON.stringify(entry) ? prev : entry));
+    });
+  }
+
+  askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);
+  createEffect(graphHistoryKey, (key) => {
+    if (key) askGraphHistory(key.slice(cardId.length + 1));
+  });
+  // Silver can arrive after this first paint, with the confirmed profile: the
+  // window is asked for then, and its lines join the graph already on screen.
+  createEffect(accountSilver, (silver) => {
+    if (silver) askGraphHistory(untrack(graphRange));
+  });
+  createEffect(
+    () => {
+      if (salesSlices() == null) return 'no-sales';
+      if (!accountSilver()) return 'sold';
+      return priceHistory() == null ? 'history' : 'both';
+    },
+    (state) => {
+      if (untrack(graphDrawn) || state === 'no-sales') return undefined;
+      if (state !== 'history') {
+        setGraphDrawn(true);
+        return undefined;
+      }
+      const timer = window.setTimeout(() => setGraphDrawn(true), GRAPH_HISTORY_WAIT_MS);
+      return () => window.clearTimeout(timer);
+    },
+  );
   fetchCardSales(cardId, { slices: true }).then((data) => {
     if (disposed) return;
     if (!Array.isArray(data?.slices)) {
@@ -731,6 +807,7 @@ function CardDesk(props) {
     ].filter(Boolean);
   };
   const graphSeries = () => {
+    if (!graphDrawn()) return null;
     const series = salesSeries();
     if (series == null || !graphMissing().length) return series;
     return { ...series, days: [], soldQty: 0, sampleCount: 0 };
@@ -768,6 +845,7 @@ function CardDesk(props) {
   const currentFacet = () => (pickedCond() && pickedLang() ? { cond: pickedCond(), lang: pickedLang(), reverse: dealReverse() } : null);
   const graphColor = () => (currentFacet() ? facetColor(currentFacet()) : '');
   const graphOverlays = () => {
+    if (!graphDrawn()) return [];
     const now = currentFacet() ? facetKey(currentFacet()) : '';
     return graphPicks()
       .filter((facet) => facetKey(facet) !== now)
@@ -790,42 +868,21 @@ function CardDesk(props) {
   // The graph's axis is in the visitor's currency, like its tooltip: how many
   // units of it one PKN is. 1 while the currency is unknown, so the axis is PKN.
   const graphAxisFactor = () => fiatFromPkn(1, buyerCurrency(pinnedCurrency()) || 'PKN') || 1;
-  // The other price sources join the graph, they do not replace it: they are
-  // context, so their history is asked for only once the card is painted and the
-  // browser is idle again. One fetch per card and window, kept in memory; the
-  // lines already drawn stay while another window loads.
-  const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
-  const [priceHistory, setPriceHistory] = createSignal(null);
-  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
-  createEffect(
-    () => (salesSlices() == null ? '' : graphHistoryKey()),
-    (key) => {
-      if (!key || disposed) return;
-      const known = priceHistoryCache.get(key);
-      if (known) { setPriceHistory(known); return; }
-      const askedFor = key;
-      const range = key.slice(cardId.length + 1);
-      afterHero(() => whenIdle(() => {
-        if (disposed || untrack(graphHistoryKey) !== askedFor) return;
-        const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
-        fetchCardPriceHistory(cardId, bounds).then((history) => {
-          if (disposed || untrack(graphHistoryKey) !== askedFor) return;
-          const entry = { range, from: bounds.from, to: bounds.to, history };
-          priceHistoryCache.set(askedFor, entry);
-          setPriceHistory(entry);
-        });
-      }));
-    },
-  );
   // The window the lines on the plot were read for, so the chart clips to it
-  // even while a longer one is still loading.
+  // even while a longer one is still loading. Nothing of the graph is passed
+  // until it is drawn (see GRAPH_HISTORY_WAIT_MS), so no key or line jumps in
+  // after the sold median. The source keys, their lines, the Pokoin dot and the
+  // range buttons are Silver's alone (see askGraphHistory).
   const graphRangeProps = () => {
+    if (!graphDrawn() || !accountSilver()) return null;
     const entry = priceHistory();
     return entry ? { key: entry.range, from: entry.from, to: entry.to } : null;
   };
-  const graphSources = createMemo(() => priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() }));
+  const graphSources = createMemo(() => (graphDrawn() && accountSilver()
+    ? priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() })
+    : []));
   // Pokoin's own price right now: the cheapest live listing, one point, today.
-  const graphNowPoint = () => Number(nativeLive()[0]?.pricePkn) || 0;
+  const graphNowPoint = () => (graphDrawn() && accountSilver() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);
   // The tooltip rows round the PKN amount to a whole number ("114 PKN", never
   // "114.41 PKN"); the visitor-currency part keeps the exact price's format.
   const graphRowPrice = (pkn) => {
@@ -1504,7 +1561,7 @@ function CardDesk(props) {
                   sources={graphSources()}
                   nowPoint={graphNowPoint()}
                   range={graphRangeProps()}
-                  onRange={setGraphRange}
+                  onRange={accountSilver() ? setGraphRange : undefined}
                   onCondition={setSalesCondition}
                   onLanguage={setSalesLanguage}
                   onReverse={setSalesReverse}

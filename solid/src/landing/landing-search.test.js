@@ -116,13 +116,13 @@ test('a Popular chip is warmed ahead and fills the box in one update', () => {
   assert.equal((box.match(/await suggestPage\(/g) || []).length, 1);
   assert.match(box, /async function pageUniverse\(live, text, \{ lang, print, signal, alive = \(\) => true, onPage \} = \{\}\)/);
   assert.match(box, /const ended = await pageUniverse\(live, text, \{/);
-  assert.match(box, /pageUniverse\(live, q, \{ lang, print \}\),/);
+  assert.match(box, /pageUniverse\(live, q, \{ lang, print, signal: controller\.signal \}\),/);
   // Catalog hydration and row warming are shared too.
-  assert.match(box, /for \(const target of catalogTargets\(live, text, lang\)\) \{\s*hydrateTarget\(live, target, lang\)/);
-  assert.match(box, /\.\.\.catalogTargets\(live, q, lang\)\.map\(\(target\) => hydrateTarget\(live, target, lang\)/);
+  assert.match(box, /for \(const target of catalogTargets\(live, text, lang\)\) \{\s*hydrateTarget\(live, target, lang, \{ signal \}\)/);
+  assert.match(box, /\.\.\.catalogTargets\(live, q, lang\)\.map\(\(target\) => hydrateTarget\(live, target, lang, \{ signal: controller\.signal \}\)/);
   assert.match(box, /warmRows\(rows, rotatePreload\.length \? rows\.concat\(rotatePreload\) : rows\);/);
   // The results total is asked for with the same options as the popup's count.
-  assert.match(box, /prefetchSearchPage\(q, lang, \{ fetchSearchPage: fetchSearchRecall, tab, printLang: print \}\)/);
+  assert.match(box, /prefetchSearchPage\(q, lang, \{ fetchSearchPage: fetchSearchRecall, tab, printLang: print, signal: controller\.signal \}\)/);
   // fillSuggest commits query and term together and takes the warmed total at once.
   assert.match(box, /node\.addEventListener\('suggest-fill', \(event\) => fillWhole\(String\(event\.detail \|\| ''\)\)\)/);
   assert.match(box, /function fillWhole\(value\) \{[\s\S]*?setQuery\(value\);\s*setTerm\(value\);[\s\S]*?takeHotSearchPage\(text, searchLang\(\), searchTab\(\), printLang\(\)\)/);

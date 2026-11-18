@@ -337,15 +337,15 @@ id = "search-page"
 name = "Visitor searches the marketplace"
 money = false
 entry = ["solid/src/pages/Search.jsx", "solid/src/routes/browse.js", "market/src/api.js"]
-proof = ["pokoin-rust/apps/api/src/search_page.rs", "pokoin-rust/crates/search/src/page.rs", "market/src/search-recall-core.test.js"]
+proof = ["pokoin-rust/apps/api/src/search_page.rs", "pokoin-rust/crates/search/src/page.rs", "market/src/search-recall-core.test.js", "market/src/search-hot.test.js", "market/src/suggest-two-word-names.test.js"]
 status = "partial"
 
 [[flow]]
 id = "typeahead"
 name = "Header search popup suggests ranked printings"
 money = false
-entry = ["solid/src/components/Chrome.jsx", "market/src/suggest-rank.js", "market/src/suggest-catalog.js"]
-proof = ["market/src/suggest-rank.test.js", "market/src/suggest-catalog.test.js", "market/src/suggest-images.test.js", "pokoin-rust/crates/search-api/src/autocomplete/mod.rs"]
+entry = ["solid/src/components/Chrome.jsx", "solid/src/components/SearchBox.jsx", "market/src/suggest-rank.js", "market/src/suggest-live.js", "market/src/suggest-pool.js", "market/src/suggest-catalog.js"]
+proof = ["market/src/suggest-rank.test.js", "market/src/suggest-two-word-names.test.js", "market/src/suggest-pool.test.js", "market/src/suggest-live.test.js", "market/src/name-printings.test.js", "solid/src/components/SearchBox.test.js", "market/src/suggest-catalog.test.js", "market/src/suggest-images.test.js", "pokoin-rust/crates/search-api/src/autocomplete/mod.rs"]
 status = "partial"
 
 [[flow]]
@@ -362,6 +362,14 @@ name = "Tiles and homepage rails show the cached cheapest PKN"
 money = false
 entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
 proof = ["pokoin-rust/apps/cardtrader-price-cache/tests/rules.rs", "pokoin-rust/apps/cardtrader-price-cache/tests/db.rs", "pokoin-rust/apps/api/src/rails.rs"]
+status = "partial"
+
+[[flow]]
+id = "home-rails"
+name = "Visitor browses the marketplace home rails"
+money = false
+entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
+proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs"]
 status = "partial"
 
 [[flow]]

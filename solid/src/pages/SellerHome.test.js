@@ -105,8 +105,21 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
-  // Multi-day polyline only; a single live day is a point — no flat underline.
-  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><polyline class="seller-history-line"/);
+  // Multi-day smooth path only; a single live day is a point — no flat underline.
+  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><path class="seller-history-line"/);
+  // The draw-in reveal rides a clip rect that rests at the full plot width, so
+  // nothing is hidden unless an animation is actually running.
+  assert.match(historySrc, /prefers-reduced-motion/);
+  assert.match(historySrc, /<clipPath id=\{REVEAL_CLIP\}>[\s\S]*?width=\{CHART_W\}/);
+  assert.match(historySrc, /clip-path=\{`url\(#\$\{REVEAL_CLIP\}\)`\}/);
+  assert.match(historySrc, /requestAnimationFrame\(step\)/);
+  assert.match(historySrc, /cancelAnimationFrame\(revealFrame\)/);
+  assert.match(historySrc, /onCleanup\(showWholeChart\)/);
+  // The end dot joins late; the hover dot and the tip are never hidden.
+  assert.match(historySrc, /ref=\{\(el\) => \{ endDotNode = el; \}\}/);
+  assert.match(historySrc, /class="seller-history-point is-hover" style=/);
+  // One dot under the cursor: the last-day dot yields while a hover is active.
+  assert.match(historySrc, /display: hovered\(\)\.dot \? 'none' : ''/);
   assert.match(historySrc, /seller-history-liquidity/);
   assert.match(historySrc, /seller-history-legend/);
   assert.match(historySrc, /seller-history-point/);
@@ -117,7 +130,8 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   assert.match(historySrc, /seller-history-today/);
   assert.doesNotMatch(historySrc, /CHART_W \* 0\.85/);
   assert.doesNotMatch(historySrc, /<circle[\s\S]*seller-history-point/);
-  assert.match(historySrc, /seller-history-y/);
+  // No value axis is painted any more: the curve owns the whole frame.
+  assert.doesNotMatch(historySrc, /seller-history-y|chart\(\)\.axis/);
   assert.match(historySrc, /seller-history-x/);
   assert.match(historySrc, /collection-history-tip/);
   assert.doesNotMatch(dashSrc, /seller-history-ghost-line/);
@@ -149,4 +163,117 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   assert.match(viewSrc, /'has-1dr': oneDayReadyCards\(\) > 0/);
   // The desk never offers CardTrader as a target for a 1-Day Ready account.
   assert.match(targetsSrc, /data\?\.status\?\.connected === true && !ready1d/);
+});
+
+test('Top movers tiles never underline on hover', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // The Top movers tile is one link; the global a:hover underline must not
+  // reach into it — the tile's own outline is the hover affordance.
+  const linkRule = css.match(/\.mover-tile-link:hover[^\0]*?\}/)?.[0] || '';
+  assert.match(linkRule, /:focus/);
+  assert.match(linkRule, /:active/);
+  assert.match(linkRule, /text-decoration: none/);
+  // The Trending rail tile keeps its no-underline hover.
+  assert.match(css, /\.seller-mover:hover \{[^}]*text-decoration: none/);
+});
+
+test('Top movers tiles have no native tooltip, one screen-reader sentence', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  // The link carries the whole tile as an aria-label, not a title that
+  // repeats the visible text as a native tooltip over the change line.
+  const linkTag = panelSrc.match(/<a class="mover-tile-link"[^>]*>/)?.[0] || '';
+  assert.match(linkTag, /aria-label=\{moverTitle\(mover\(\), props\.currency\)\}/);
+  assert.doesNotMatch(linkTag, / title=/);
+  // Nothing inside the tile carries a title either.
+  assert.doesNotMatch(panelSrc, / title=/);
+});
+
+test('the movers spark tip lives inside the sparkline box', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  const css = read('../../../market/src/seller-home.css');
+  // Placement is the pure helper: anchored to the day, clamped to the box
+  // edges, never over the copy above the sparkline.
+  assert.match(panelSrc, /moverSparkTipPlacement\(sparkPoint\(\), spark\(\)\)/);
+  const tipRule = css.match(/\.mover-spark-tip \{[^}]*\}/)?.[0] || '';
+  assert.doesNotMatch(tipRule, /bottom:/);
+  assert.doesNotMatch(tipRule, /top:/);
+});
+
+test('the plot is one curve over its steps: no fill, no band, no shadow', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // Nothing is painted under the curve: no stacked areas, no gradient fill.
+  assert.doesNotMatch(historySrc, /cardsArea|liquidityArea|smoothHistoryBandPath|seller-history-fill|linearGradient/);
+  assert.doesNotMatch(css, /\.seller-history-(fill|rule)\s*\{/);
+  const lineRule = css.match(/\.seller-history-grid \.seller-history-line \{[^}]*\}/)?.[0] || '';
+  assert.match(lineRule, /stroke:\s*var\(--history-cards\)/);
+  assert.match(lineRule, /stroke-width:\s*2\.5/);
+  assert.doesNotMatch(lineRule, /filter|shadow/);
+  // The true steps ride in the same revealed group, painted before the curve.
+  const clipAt = historySrc.indexOf('clip-path={`url(#${REVEAL_CLIP})`}');
+  const stepAt = historySrc.indexOf('class="seller-history-step"');
+  const lineAt = historySrc.indexOf('class="seller-history-line"');
+  assert.ok(clipAt > 0 && stepAt > clipAt && stepAt < lineAt,
+    'the stepped stroke must be revealed with the curve and sit under it');
+  const stepRule = css.match(/\.seller-history-grid \.seller-history-step \{[^}]*\}/)?.[0] || '';
+  assert.match(stepRule, /stroke:\s*var\(--muted\)/);
+  assert.match(stepRule, /stroke-width:\s*1;/);
+  // One baseline hairline instead of a grid, and no value axis to label it.
+  assert.match(historySrc, /<line class="seller-history-baseline"/);
+  assert.doesNotMatch(historySrc, /seller-history-rule/);
+});
+
+test('hover is a hollow dot with one line floating over the day', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // The label is placed by the pure anchor helper, not by a corner card.
+  assert.match(historySrc, /historyLabelAnchor\(\{/);
+  assert.match(historySrc, /class="seller-history-tip collection-history-tip"/);
+  assert.doesNotMatch(historySrc, /seller-history-tip-(day|total|note)/);
+  const tipRule = css.match(/\.seller-history-tip \{[^}]*\}/)?.[0] || '';
+  assert.match(tipRule, /white-space: nowrap/);
+  assert.match(tipRule, /transform: translate\(-50%, -100%\)/);
+  assert.doesNotMatch(tipRule, /box-shadow|min-width/);
+  const hoverRule = css.match(/\.seller-history-point\.is-hover \{[^}]*\}/)?.[0] || '';
+  assert.match(hoverRule, /background:\s*var\(--surface\)/);
+  assert.match(hoverRule, /border:\s*2px solid var\(--history-cards\)/);
+});
+
+test('liquidity is an option that is remembered, off until the seller asks', () => {
+  const css = read('../../../market/src/seller-home.css');
+  const toggle = historySrc.match(/<button[^>]*seller-history-liquidity-toggle[\s\S]*?<\/button>/)?.[0] || '';
+  assert.match(toggle, />\s*Show liquidity\s*</);
+  assert.match(toggle, /aria-pressed=\{String\(band\(\)\)\}/);
+  assert.match(toggle, /onClick=\{toggleBand\}/);
+  assert.match(historySrc, /pokoin\.dashboard\.showLiquidity/);
+  assert.match(historySrc, /localStorage\.getItem\(SHOW_LIQUIDITY_KEY\) === '1'/);
+  assert.match(historySrc, /localStorage\.setItem\(SHOW_LIQUIDITY_KEY, on \? '1' : '0'\)/);
+  // A browser that refuses storage starts from off and simply forgets.
+  assert.ok((historySrc.match(/try \{/g) || []).length >= 2);
+  // Its own scale, in its own strip under the baseline, dashed.
+  assert.match(historySrc, /liquidityBandRatio\(c\.day\.assets\.currencyPkn, peak\)/);
+  assert.match(historySrc, /Liquidity, own scale \(peak /);
+  const bandRule = css.match(/\.seller-history-grid \.seller-history-liquidity \{[^}]*\}/)?.[0] || '';
+  assert.match(bandRule, /stroke:\s*var\(--history-liquidity\)/);
+  assert.match(bandRule, /stroke-dasharray: 5 4/);
+  assert.doesNotMatch(bandRule, /fill-opacity/);
+});
+
+test('reduced motion skips the draw, the count-up and the pulse', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // drawIn bails before the first frame, so the numbers and the curve land
+  // finished: the count-up and the head dot only ever move inside that rAF.
+  const draw = historySrc.match(/function drawIn\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(draw, /if \(reducedMotion\(\) \|\| !revealRect\) return;/);
+  assert.match(draw, /setCounted\(historyCountValue\(target, progress\)\)/);
+  assert.match(draw, /smoothHistoryPointAt\(chart\(\)\.curve, CHART_W \* progress\)/);
+  assert.match(draw, /HISTORY_DRAW_MS/);
+  assert.match(historySrc, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)/);
+  // A single point has no stroke to draw and no ring to breathe with.
+  assert.match(historySrc, /if \(!hasLine \|\| key === playedRange\) return;/);
+  const point = historySrc.match(/class="seller-history-point"[\s\S]*?<\/span>/)?.[0] || '';
+  assert.match(point, /<Show when=\{chart\(\)\.hasLine\}>[\s\S]*?seller-history-pulse/);
+  // The ring is CSS-only, so one media query stops it too.
+  const pulseRule = css.match(/\.seller-history-pulse \{[^}]*\}/)?.[0] || '';
+  assert.match(pulseRule, /animation: seller-history-breathe 1\.3s/);
+  const reduce = css.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(reduce, /\.seller-history-pulse \{\s*animation: none;/);
 });

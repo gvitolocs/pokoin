@@ -1,3 +1,7 @@
+> X-POKO preparation (2026-10-22): native OAuth/token handling, X transport/text
+> helpers and Hospital configuration are being added. Hermes retirement is not
+> complete. See [the evidence, gaps and gated cutover runbook](../../../docs/x-poko/RUNBOOK.md).
+
 # poko-bot (phase 2 of the Rust Poko) — design
 
 Date: 2026-10-16. Goal: Poko's Telegram and Discord chat on Oracle peer1 answered by a small Rust daemon that uses the

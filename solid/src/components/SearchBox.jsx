@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { useLocation } from '@solidjs/router';
 import { useGameNavigate } from '../lib/game-navigate.js';
@@ -196,6 +196,7 @@ async function pageUniverse(live, text, { lang, print, signal, alive = () => tru
     let chunks = 0;
     let fetched = 0;
     const compactLength = compactQuery(lookup).length;
+    const budget = live.recallChunkBudget(text, lookup);
     while (alive()) {
       const size = live.chunkSize(chunks);
       const page = await suggestPage(lookup, {
@@ -210,7 +211,7 @@ async function pageUniverse(live, text, { lang, print, signal, alive = () => tru
       offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
       const exhaustive = page?.exhaustive === true || incoming < size;
       if (exhaustive || incoming === 0) break;
-      if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
+      if (fetched >= budget.rows || chunks >= budget.chunks) break;
       // One letter prefetches a page. A real name keeps paging its printings.
       if (compactLength <= 2) break;
     }
@@ -247,7 +248,7 @@ function catalogTargets(live, text, lang) {
 }
 
 /** One catalog's cards, remembered: `{ cards }` once landed. */
-function hydrateTarget(live, target, lang) {
+function hydrateTarget(live, target, lang, { signal } = {}) {
   const landed = (cards, remember) => {
     live.rememberPrintings(target.key, cards);
     if (remember) live.rememberSuggestGroups(live.groupsFromCards(cards));
@@ -255,10 +256,10 @@ function hydrateTarget(live, target, lang) {
     return { cards };
   };
   if (target.kind === 'name') {
-    return fetchNamePrintings(target.name, { lang }).then((cards) => landed(cards, false));
+    return fetchNamePrintings(target.name, { lang, signal }).then((cards) => landed(cards, false));
   }
   if (target.kind === 'artist') {
-    return fetchArtist(target.slug, { limit: 80 }).then((data) => landed(live.cardsWithCatalogArtist(data), true));
+    return fetchArtist(target.slug, { limit: 80, signal }).then((data) => landed(live.cardsWithCatalogArtist(data), true));
   }
   // A matching name may sit beyond the first set page: hydrate the whole catalog.
   return fetchExpansionCards({ slug: target.slug }).then((data) => landed(data?.cards || [], true));
@@ -302,6 +303,8 @@ function loadedImage(url) {
 }
 
 const prewarmed = new Map();
+/** One chip warm at a time: a newer chip supersedes an abandoned one's pages. */
+let prewarmAbort = null;
 
 /**
  * Run a whole query ahead of time (the landing's Popular chips): the engine,
@@ -318,14 +321,19 @@ export function prewarmSuggest(text, { lang, printLang: print = 'all', tab = 'si
   const key = `${lang}\0${print}\0${tab}\0${q}`;
   let entry = prewarmed.get(key);
   if (!entry) {
+    // The chip the pointer left keeps asking for pages nobody will read, and its
+    // rows land in the caches the next chip paints from. Supersede it (PH-05 §5.2).
+    if (prewarmAbort) prewarmAbort.abort();
+    const controller = new AbortController();
+    prewarmAbort = controller;
     entry = {
       data: (async () => {
         const live = await loadSuggestEngine();
         await ensureLocalizedNames(live, lang);
         await Promise.all([
-          pageUniverse(live, q, { lang, print }),
-          ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang).catch(() => null)),
-          prefetchSearchPage(q, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print }).catch(() => null),
+          pageUniverse(live, q, { lang, print, signal: controller.signal }),
+          ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang, { signal: controller.signal }).catch(() => null)),
+          prefetchSearchPage(q, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print, signal: controller.signal }).catch(() => null),
         ]);
         return live;
       })(),
@@ -396,8 +404,9 @@ export default function SearchBox(props) {
   const [activeIndex, setActiveIndex] = createSignal(-1);
   const [pointerHoverId, setPointerHoverId] = createSignal(null);
   const [hoverBox, setHoverBox] = createSignal(null);
-  const [hitCount, setHitCount] = createSignal(0);
-  let countedQuery = '';
+  // "View all N": unknown (`null`) until the search page of the committed text
+  // answers it. A real 0 is an answer; a missing total is not (PH-05 §5.3).
+  const [hitCount, setHitCount] = createSignal(null);
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [shadeTick, setShadeTick] = createSignal(0);
@@ -445,10 +454,7 @@ export default function SearchBox(props) {
     setActiveIndex(-1);
     setOpen(true);
     const hot = takeHotSearchPage(text, searchLang(), searchTab(), printLang());
-    if (hot?.count > 0) {
-      countedQuery = text;
-      setHitCount(hot.count);
-    }
+    if (Number.isFinite(hot?.count)) setHitCount(hot.count);
   }
 
   function commitTerm(value) {
@@ -548,8 +554,6 @@ export default function SearchBox(props) {
             alive: () => !stopped && pool.generation === generation,
             onPage: (page, incoming) => {
               pool.transferred = (pool.transferred || 0) + incoming;
-              // Placeholder until the search-page total lands: "View all N" = rows the page lists.
-              if (countedQuery !== text) setHitCount(Number(page?.count) || 0);
               repaint.page();
             },
           });
@@ -579,23 +583,26 @@ export default function SearchBox(props) {
       if (!text) {
         setOtherPending(false);
         setOtherGroups([]);
-        setHitCount(0);
+        setHitCount(null);
         return undefined;
       }
       const ready = liveReady(text);
       if (isPokemon) {
         if (!ready) {
           setOtherGroups([]);
-          setHitCount(0);
+          setHitCount(null);
         } else if (live) {
-          hydrateCatalog(live, text, lang);
+          // Solid runs a cleanup from an effect only through onCleanup.
+          const controller = new AbortController();
+          onCleanup(() => controller.abort());
+          hydrateCatalog(live, text, lang, controller.signal);
         }
         return undefined;
       }
       if (!ready) {
         setOtherPending(false);
         setOtherGroups([]);
-        setHitCount(0);
+        setHitCount(null);
         return undefined;
       }
       const controller = new AbortController();
@@ -627,10 +634,11 @@ export default function SearchBox(props) {
     },
   );
 
-  function hydrateCatalog(live, text, lang) {
+  function hydrateCatalog(live, text, lang, signal) {
     for (const target of catalogTargets(live, text, lang)) {
-      hydrateTarget(live, target, lang)
+      hydrateTarget(live, target, lang, { signal })
         .then(() => {
+          if (signal?.aborted) return;
           if (liveReady(String(untrack(searchTerm) || '').trim())) setLiveTick((tick) => tick + 1);
         })
         .catch(() => {});
@@ -661,20 +669,25 @@ export default function SearchBox(props) {
 
   // "View all N": the search-page total for this exact query + tab + print
   // family, asked once typing pauses. Each keystroke used to fetch a results
-  // page (and its recall lookups) for a prefix nobody would open; the count
-  // shows the suggest estimate until the real one lands, and Enter prefetches
-  // on its own (goSearch).
+  // page (and its recall lookups) for a prefix nobody would open; this is the
+  // footer count's ONLY owner — the suggest payload's `count` is an engine
+  // candidate estimate, never a results total (PH-05 §5.2) — and Enter
+  // prefetches on its own (goSearch).
   createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon(), namesTick()], ([isOpen, text, tab, lang, print, isPokemon]) => {
     if (!isOpen || !isPokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
       prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
         .then((payload) => {
+          if (cancelled) return;
+          // A page that answers other text never writes the count, and only a
+          // number is an answer: a missing total stays unknown, a real 0 is
+          // applied — "no results" is information, not a blank.
+          const pageQuery = String(payload?.query ?? '').trim();
+          if (pageQuery && pageQuery !== text) return;
+          const answered = payload?.total !== null && payload?.total !== undefined;
           const total = Number(payload?.total);
-          if (!cancelled && Number.isFinite(total) && total > 0) {
-            countedQuery = text;
-            setHitCount(total);
-          }
+          if (answered && Number.isFinite(total)) setHitCount(total);
         })
         .catch(() => {});
     }, RESULTS_COUNT_DELAY_MS);
@@ -1031,7 +1044,7 @@ export default function SearchBox(props) {
           </Show>
           <Show when={query().trim().length >= 2 && searchTab() !== 'users'}>
             <button class="suggest-all" type="submit">
-              {hitCount() > 0
+              {hitCount() !== null
                 ? `View all ${hitCount().toLocaleString('en-US')} results`
                 : `View all results for “${query().trim()}”`}
             </button>
