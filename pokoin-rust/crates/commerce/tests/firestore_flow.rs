@@ -3023,3 +3023,64 @@ async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() 
         assert!(stored["transferIds"].is_null());
     }
 }
+
+#[tokio::test]
+async fn a_non_eur_escrow_refund_is_handled_by_hand() {
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    let app = pokoin_commerce::router(state.clone());
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 500, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let order = json!({
+        "buyerUid": "customer", "paymentMethod": "pkn", "currency": "PKN",
+        "paymentStatus": "escrow",
+        "items": [{"sellerUid": "buyer-1", "quantity": 1, "unitPricePkn": 500}]
+    });
+    firestore
+        .create_document("orders", "order-escrow-pkn", &order)
+        .await
+        .unwrap();
+    let ledger_before = mock.keys_with_prefix("ledger_entries/").len();
+    let idempotency_before = mock.keys_with_prefix("commerce_idempotency/").len();
+    let (status, payload) = call(
+        &app,
+        "POST",
+        "/api/marketplace-orders",
+        Some(json!({
+            "action": "refund", "orderId": "order-escrow-pkn",
+            "clientToken": "manual", "amount": 100
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{payload}");
+    assert_eq!(payload["code"], "refund_needs_manual_handling");
+    assert_eq!(
+        mock.keys_with_prefix("ledger_entries/").len(),
+        ledger_before
+    );
+    assert_eq!(
+        mock.keys_with_prefix("commerce_idempotency/").len(),
+        idempotency_before
+    );
+    let seller = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(seller.available_pkn, 500);
+    let buyer = store::balance(&firestore, "customer").await.unwrap();
+    assert_eq!(buyer.available_pkn, 0);
+    let stored = firestore
+        .get_document(
+            &firestore
+                .document_path("orders", "order-escrow-pkn")
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(stored["settlementOperation"].is_null());
+    // The store adds the document id; nothing else may differ from the fixture.
+    let mut expected = order.clone();
+    expected["id"] = json!("order-escrow-pkn");
+    assert_eq!(stored, expected);
+}
