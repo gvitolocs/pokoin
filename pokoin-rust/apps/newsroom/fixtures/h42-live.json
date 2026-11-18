@@ -1,0 +1,86 @@
+{
+  "base": "http://127.0.0.1:8788",
+  "capturedAt": "2026-10-22T19:40:29.545896+00:00",
+  "method": "GET",
+  "rows": [
+    {
+      "query": "",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "ok": true,
+        "count": 0,
+        "articles": []
+      }
+    },
+    {
+      "query": "slug=missing-rust-parity",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "error": "not_found"
+      }
+    },
+    {
+      "query": "story=missing-rust-parity",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "ok": true,
+        "count": 0,
+        "articles": []
+      }
+    },
+    {
+      "query": "export=invalid",
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "error": "export must be published or all"
+      }
+    },
+    {
+      "query": "export=all",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    {
+      "query": "export=published",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*"
+      },
+      "body": {
+        "ok": true,
+        "scope": "published",
+        "count": 0,
+        "articles": []
+      }
+    }
+  ]
+}

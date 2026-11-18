@@ -1,0 +1,90 @@
+{
+  "task": "draft_article",
+  "instructions": [
+    "Choose one template from validTemplates, or null when the evidence does not support a website article.",
+    "Every claim must come from the evidence pack. Use sourceIds from sourceList ids.",
+    "Report source disagreements (conflicts) explicitly; never pick a side silently.",
+    "first_reported_source_id: only a source that broke the story itself; null when the sources cite another outlet (e.g. \"citing PokeBeach\").",
+    "Never write market numbers; place market/chart/related blocks only when listed in availableModules.",
+    "This is Pokémon TCG news: use that game's own terminology.",
+    "Return only JSON matching the schema."
+  ],
+  "validTemplates": [],
+  "allowed_values": {
+    "section": [
+      "sets",
+      "cards",
+      "market",
+      "competitive",
+      "collectors",
+      "fact-check",
+      "analysis",
+      "industry"
+    ],
+    "articleType": [
+      "NEWS",
+      "BREAKING",
+      "FACT CHECK",
+      "ANALYSIS",
+      "EXPLAINER",
+      "MARKET",
+      "DATA"
+    ],
+    "image_plan_hero": [
+      "catalog_card",
+      "source_image",
+      "fallback"
+    ],
+    "related_entity_type": [
+      "card",
+      "set",
+      "pokemon",
+      "artist",
+      "product"
+    ],
+    "verdict": [
+      "CONFIRMED",
+      "SUPPORTED",
+      "UNVERIFIED",
+      "DISPUTED",
+      "MISLEADING",
+      "FALSE"
+    ]
+  },
+  "hints": {},
+  "availableModules": {
+    "market": false,
+    "charts": [],
+    "relatedCards": [],
+    "relatedSets": [],
+    "galleryImages": []
+  },
+  "reporter_memory": "",
+  "now": "2026-10-22T19:35:15.780Z",
+  "previous_article": null,
+  "evidence_pack": {
+    "canonicalStoryId": null,
+    "game": "pokemon",
+    "gameName": "Pokémon TCG",
+    "summaryOfEvent": "",
+    "status": null,
+    "angle": null,
+    "sourceList": [],
+    "claimLedger": [],
+    "conflicts": [],
+    "confirmedClaims": [],
+    "pressClaims": [],
+    "unconfirmedClaims": [],
+    "dates": [],
+    "numbers": [],
+    "entities": [],
+    "isUpdate": false,
+    "previousCoverage": null,
+    "market": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "images": []
+  }
+}
