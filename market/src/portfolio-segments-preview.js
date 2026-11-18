@@ -38,8 +38,22 @@ const SEALED_FROM_CARD_DAY = 10;
 const SEALED_CARDS = 4;
 const SEALED_SHARE = 0.09;
 
-/** Riftbound is the unpriced row: a pile with no sale behind it. */
+/**
+ * Riftbound is a priced game: 40 cards worth 6 % of the day's Pokémon value,
+ * added on top of it. The day's own `cardsValuePkn` grows by that amount, so
+ * the collection line the chart compares against is the whole book.
+ */
 const RIFTBOUND_HELD = 40;
+const RIFTBOUND_SHARE = 0.06;
+/** Its cards sit in two sets, and every card of a priced game is priced. */
+const RIFTBOUND_SETS = [
+  { key: 'riftbound:set:origins', label: 'Origins', share: 0.7 },
+  { key: 'riftbound:set:spiritforged', label: 'Spiritforged', share: 0.3 },
+];
+
+/** A third game with cards and no price at all: the row that reads "No price data yet". */
+const UNPRICED_GAME_KEY = 'game:battle_spirits_saga';
+const UNPRICED_GAME_HELD = 12;
 
 function round2(value) {
   return Math.round(value * 100) / 100;
@@ -82,6 +96,18 @@ function splitWhole(total, weights) {
 }
 
 /**
+ * `total` split over `weights` to the cent, the rounding residual on the
+ * biggest part so the pieces add up to the total exactly.
+ */
+function splitAmount(total, weights) {
+  const sum = weights.reduce((acc, weight) => acc + weight, 0);
+  const parts = weights.map((weight) => round2(sum > 0 ? (total * weight) / sum : 0));
+  const biggest = weights.indexOf(Math.max(...weights));
+  parts[biggest] = round2(parts[biggest] + round2(total - parts.reduce((acc, part) => acc + part, 0)));
+  return parts;
+}
+
+/**
  * Below this many cards in the day a band's share is smaller than one card, and
  * the whole-card split rightly drops it; at or above it every band with a share
  * of its own holds at least one card, so a preview row reads as held stock.
@@ -117,13 +143,20 @@ function splitCards(total, weights, everyBandHeld) {
 
 /**
  * The API's rows in the API's order and with the API's own labels: games, the
- * cross-game types, the eight Pokémon era bands, then Pokémon's own Sealed and
- * Graded. A game row carries no label, exactly as `segment_defs` answers.
+ * cross-game types, then per game its eras or sets followed by its two type
+ * rows. A game row carries no label, exactly as `segment_defs` answers.
+ *
+ * Riftbound's and Battle Spirits Saga's own Sealed/Graded rows are left out
+ * rather than sent empty: the server answers them for every game, but here
+ * neither game holds sealed product or a slab, and a fixture that listed them
+ * would review a table of "None held" rows instead of the two sets and the
+ * unpriced pile this layout is for.
  */
 function previewDefs() {
   const defs = [
     { key: 'game:pokemon', group: 'game', game: 'pokemon' },
     { key: 'game:riftbound', group: 'game', game: 'riftbound' },
+    { key: UNPRICED_GAME_KEY, group: 'game', game: 'battle_spirits_saga' },
     { key: 'all:sealed', group: 'type', game: 'all', label: 'Sealed' },
     { key: 'all:graded', group: 'type', game: 'all', label: 'Graded' },
   ];
@@ -132,13 +165,17 @@ function previewDefs() {
   }
   defs.push({ key: 'pokemon:sealed', group: 'type', game: 'pokemon', label: 'Sealed' });
   defs.push({ key: 'pokemon:graded', group: 'type', game: 'pokemon', label: 'Graded' });
+  for (const set of RIFTBOUND_SETS) {
+    defs.push({ key: set.key, group: 'set', game: 'riftbound', label: set.label });
+  }
   return defs;
 }
 
 /**
  * Raw answer for one preview history series: every day that carries a card
  * value gets the split, the days before it get none, exactly like a live
- * series that only started recording segments recently.
+ * series that only started recording segments recently. The series' own value
+ * is the Pokémon book; the priced games on top of it grow the day.
  */
 export function previewSegmentsFrom(series) {
   const rows = Array.isArray(series) ? series : [];
@@ -184,8 +221,17 @@ export function previewSegmentsFrom(series) {
       segments['pokemon:sealed'] = sealed;
       segments['all:sealed'] = sealed;
     }
-    segments['game:riftbound'] = [0, 0, RIFTBOUND_HELD];
-    days.push({ date, cardsValuePkn: round2(value), segments });
+    // The other games ride on top of the Pokémon value: Riftbound is priced and
+    // splits over its two sets, Battle Spirits Saga holds cards with no price.
+    const setWeights = RIFTBOUND_SETS.map((set) => set.share);
+    const riftValue = round2(value * RIFTBOUND_SHARE);
+    const riftHeld = splitWhole(RIFTBOUND_HELD, setWeights);
+    segments['game:riftbound'] = [riftValue, RIFTBOUND_HELD, RIFTBOUND_HELD];
+    splitAmount(riftValue, setWeights).forEach((part, index) => {
+      segments[RIFTBOUND_SETS[index].key] = [part, riftHeld[index], riftHeld[index]];
+    });
+    segments[UNPRICED_GAME_KEY] = [0, 0, UNPRICED_GAME_HELD];
+    days.push({ date, cardsValuePkn: round2(value + riftValue), segments });
   }
   return { days, segmentDefs: previewDefs() };
 }

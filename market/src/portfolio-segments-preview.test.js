@@ -13,6 +13,7 @@ const rustSegmentsSrc = fs.readFileSync(
 const API_ORDER = [
   'game:pokemon',
   'game:riftbound',
+  'game:battle_spirits_saga',
   'all:sealed',
   'all:graded',
   'pokemon:era:vintage',
@@ -25,6 +26,8 @@ const API_ORDER = [
   'pokemon:era:other',
   'pokemon:sealed',
   'pokemon:graded',
+  'riftbound:set:origins',
+  'riftbound:set:spiritforged',
 ];
 
 function flatCardDays(count, value = 1000) {
@@ -41,8 +44,12 @@ test('the fixture answers the shape normalizeSegments takes', () => {
   const model = normalizeSegments(raw);
   assert.ok(model, 'the fixture must feed the same reader as the live API');
   assert.deepEqual(model.defs.map((def) => def.key), API_ORDER);
-  assert.deepEqual(segmentLevels(model).map((level) => level.id), ['all', 'pokemon']);
-  assert.deepEqual(segmentGroups(model, 'all', {})[0].rows.map((row) => row.label), ['Pokémon', 'Riftbound']);
+  assert.deepEqual(segmentLevels(model).map((level) => level.id), ['all', 'pokemon', 'riftbound']);
+  assert.deepEqual(segmentLevels(model).map((level) => level.label), ['All games', 'Pokémon', 'Riftbound']);
+  assert.deepEqual(
+    segmentGroups(model, 'all', {})[0].rows.map((row) => row.label),
+    ['Pokémon', 'Riftbound', 'Battle Spirits Saga'],
+  );
   assert.deepEqual(collectionSeries(model, {}).length, 14);
   // Junk series is an empty answer, not a crash.
   assert.deepEqual(previewSegmentsFrom(null).days, []);
@@ -51,14 +58,20 @@ test('the fixture answers the shape normalizeSegments takes', () => {
   assert.equal(normalizeSegments(previewSegmentsFrom([{ nope: true }, { date: 'later', cardsValuePkn: 5 }])), null);
 });
 
-test('the eras add up to the day value and to the day counts', () => {
+test('the eras add up to the Pokémon value and to the day counts', () => {
   const raw = previewSegmentsFrom(flatCardDays(6));
   for (const day of raw.days) {
     const eras = Object.entries(day.segments).filter(([key]) => key.startsWith('pokemon:era'));
     const valueSum = eras.reduce((acc, [, entry]) => acc + entry[0], 0);
     const heldSum = eras.reduce((acc, [, entry]) => acc + entry[2], 0);
     const pricedSum = eras.reduce((acc, [, entry]) => acc + entry[1], 0);
-    assert.ok(Math.abs(valueSum - day.cardsValuePkn) <= 0.01, `${day.date}: ${valueSum} vs ${day.cardsValuePkn}`);
+    // The eras price the Pokémon book; the other priced games sit on top of it,
+    // so the day is their sum and never one of them alone.
+    assert.ok(Math.abs(valueSum - day.segments['game:pokemon'][0]) <= 0.01, `${day.date}: ${valueSum} vs ${day.segments['game:pokemon'][0]}`);
+    assert.ok(
+      Math.abs(valueSum + day.segments['game:riftbound'][0] - day.cardsValuePkn) <= 0.01,
+      `${day.date}: ${valueSum} + ${day.segments['game:riftbound'][0]} vs ${day.cardsValuePkn}`,
+    );
     assert.equal(heldSum, 100);
     assert.equal(pricedSum, 50);
     for (const [, entry] of eras) {
@@ -125,12 +138,14 @@ test('vintage is never held, sealed starts on the 10th card day, graded stays em
   assert.equal(raw.days[8].segments['pokemon:sealed'], undefined);
   assert.deepEqual(raw.days[9].segments['pokemon:sealed'], [90, 4, 4]);
   assert.deepEqual(raw.days[11].segments['all:sealed'], [90, 4, 4]);
-  // The preview still answers the row states the desk paints.
+  // The preview still answers the row states the desk paints. Riftbound is a
+  // priced pile now, and Battle Spirits Saga is the one that is not.
   const model = normalizeSegments(raw);
   const rows = segmentGroups(model, 'all', {}).flatMap((group) => group.rows);
   assert.deepEqual(Object.fromEntries(rows.map((row) => [row.key, row.state])), {
     'game:pokemon': 'ok',
-    'game:riftbound': 'unpriced',
+    'game:riftbound': 'ok',
+    'game:battle_spirits_saga': 'unpriced',
     'all:sealed': 'ok',
     'all:graded': 'empty',
   });
@@ -187,27 +202,59 @@ test('a day of 20 cards or more holds at least one of every band with a share', 
     assert.equal(bands.reduce((acc, [, , held]) => acc + held, 0), cards, 'the held counts still add up');
     assert.equal(bands.reduce((acc, [, priced]) => acc + priced, 0), Math.round(cards * 0.6), 'and the priced ones');
   }
-  // The values are untouched by the card floor: the eras still price the day.
+  // The values are untouched by the card floor: the eras still price the
+  // Pokémon half of the day to the cent.
   const big = bandsOf(227);
   const valueSum = Object.entries(big.day.segments)
     .filter(([key]) => key.startsWith('pokemon:era:'))
     .reduce((acc, [, entry]) => acc + entry[0], 0);
-  assert.ok(Math.abs(valueSum - big.day.cardsValuePkn) <= 0.01, `${valueSum} vs ${big.day.cardsValuePkn}`);
+  assert.ok(Math.abs(valueSum - big.day.segments['game:pokemon'][0]) <= 0.01, `${valueSum} vs ${big.day.segments['game:pokemon'][0]}`);
   assert.equal(big.bands.length, 7);
   // Below the floor a band thinner than one card is simply absent, as the API.
   assert.ok(bandsOf(19).bands.every(([id]) => id !== 'vintage'));
   assert.ok(bandsOf(19).bands.length < 7);
 });
 
-test('riftbound holds an unpriced pile on every card day and nothing before', () => {
+test('riftbound prices 6 % on top of the day, battle spirits saga holds cards with no price', () => {
   const raw = previewSegmentsFrom([
     { date: '2026-10-01', currencyPkn: 15 },
     { date: '2026-10-02', cardsValuePkn: 500, cardsHeld: 10, cardsPriced: 4 },
   ]);
   assert.deepEqual(raw.days[0].segments, {});
   assert.equal(raw.days[0].cardsValuePkn, null);
-  assert.deepEqual(raw.days[1].segments['game:riftbound'], [0, 0, 40]);
+  // The Pokémon half is the series' own value; Riftbound's 6 % rides on top.
   assert.deepEqual(raw.days[1].segments['game:pokemon'], [500, 4, 10]);
+  assert.equal(raw.days[1].cardsValuePkn, 530);
+  assert.deepEqual(raw.days[1].segments['game:riftbound'], [30, 40, 40]);
+  assert.deepEqual(raw.days[1].segments['game:battle_spirits_saga'], [0, 0, 12]);
+});
+
+test('riftbound is one Sets group; the unpriced game gets no level of its own', () => {
+  const raw = previewSegmentsFrom(flatCardDays(14));
+  const model = normalizeSegments(raw);
+  for (const day of raw.days) {
+    const pokemon = day.segments['game:pokemon'][0];
+    const [total, priced, held] = day.segments['game:riftbound'];
+    assert.ok(Math.abs(total - pokemon * 0.06) <= 0.01, `${day.date}: ${total} vs 6% of ${pokemon}`);
+    assert.deepEqual([priced, held], [40, 40], 'a priced pile has its cards priced');
+    const origins = day.segments['riftbound:set:origins'];
+    const spiritforged = day.segments['riftbound:set:spiritforged'];
+    // 70/30 of its own value and of its 40 cards, whole and adding up.
+    assert.ok(Math.abs(origins[0] + spiritforged[0] - total) <= 0.01, `${day.date}: the sets lose value`);
+    assert.ok(Math.abs(origins[0] / total - 0.7) < 0.001, `${day.date}: origins ${origins[0]} of ${total}`);
+    assert.deepEqual([origins[2] + spiritforged[2], origins[1] + spiritforged[1]], [40, 40]);
+  }
+  const sets = segmentGroups(model, 'riftbound', {});
+  assert.deepEqual(sets.map((group) => group.title), ['Sets'], 'no empty Sealed or Graded rows beside them');
+  assert.deepEqual(sets[0].rows.map((row) => [row.key, row.label, row.state]), [
+    ['riftbound:set:origins', 'Origins', 'ok'],
+    ['riftbound:set:spiritforged', 'Spiritforged', 'ok'],
+  ]);
+  // 12 cards and no price is the "No price data yet" row, and nothing to drill
+  // into, so it never becomes a level of its own.
+  const saga = segmentGroups(model, 'all', {})[0].rows.find((row) => row.key === 'game:battle_spirits_saga');
+  assert.deepEqual([saga.held, saga.valuePkn, saga.state], [12, 0, 'unpriced']);
+  assert.deepEqual(segmentGroups(model, 'battle_spirits_saga', {}), []);
 });
 
 test('the fixture is deterministic and reads the normalized day shape too', () => {
