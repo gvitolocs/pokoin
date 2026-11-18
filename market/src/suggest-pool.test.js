@@ -137,18 +137,60 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   for (let index = 0; index < 2000; index += 1) {
     rows.push(card(String(index), names[index % names.length], { number: `${index}/200` }));
   }
-  // Deploy hosts are busy; keep a 3-frame budget so a contested CPU does not
-  // fail the gate while still catching a real regression (tens of ms → seconds).
-  const budgetMs = 48;
+  // Wall time measures the host, not the code: the 48 ms budget this test carried failed
+  // 7 of 66 runs on a busy nezopt while the code stayed green, and a ratio against a
+  // same-run calibration moves with load too (finding PKN-17). What the budget guards is
+  // the algorithm doing far more work per keystroke — a sort comparator that re-filters,
+  // or the dedup of `groupCandidates` (suggest-pool.js:267) growing past its scan of one
+  // name group — and work is countable. So every row is wrapped in a Proxy that counts
+  // its property reads, and READ_BUDGET is a number of reads: 3x each step's count as
+  // measured on nezopt on 2026-11-18 (node v22.23.4, three identical `node --test
+  // market/src/suggest-pool.test.js` runs of this file), rounded up to a round number.
+  // The counts are reads of plain properties and V8's sort; a Node upgrade that changes
+  // them shows here first.
+  // CEILING_MS keeps the one case a count cannot see, the comment's "tens of ms ->
+  // seconds": 2,000 rows needing a full second is broken on any host, busy or idle.
+  const READ_BUDGET = {
+    'rank:p': 150000,
+    'rank:pi': 150000,
+    'rank:pik': 150000,
+    'rank:pika': 130000,
+    'rank:pikac': 100000,
+    'rank:pikachu': 85000,
+    'project:pika': 650000,
+    'project:pikac': 440000,
+    'project:pikachu': 425000,
+  };
+  // Doubling the rows may not double-and-a-half the work: linear or n log n reads about
+  // 2.0x, quadratic reads about 4x.
+  const MAX_GROWTH = 2.6;
+  const CEILING_MS = 1000;
+  let reads = 0;
+  const countingRow = (row) => new Proxy(row, {
+    get(target, key) { reads += 1; return Reflect.get(target, key); },
+    has(target, key) { reads += 1; return Reflect.has(target, key); },
+    ownKeys(target) { reads += 1; return Reflect.ownKeys(target); },
+  });
+  for (let index = 0; index < rows.length; index += 1) rows[index] = countingRow(rows[index]);
+  const work = {};
   const steps = ['p', 'pi', 'pik', 'pika', 'pikac', 'pikachu'];
   let available = rows;
   const timings = [];
   for (const step of steps) {
     const started = performance.now();
+    reads = 0;
     available = rankCandidates(rows, step);
     const localMs = performance.now() - started;
     timings.push({ step, localMs, kept: available.length });
-    assert.ok(localMs < budgetMs, `${step} local rank ${localMs.toFixed(2)}ms`);
+    work[`rank:${step}`] = reads;
+    assert.ok(
+      reads <= READ_BUDGET[`rank:${step}`],
+      `${step} local rank read ${reads} row properties, over the ${READ_BUDGET[`rank:${step}`]}-read budget`,
+    );
+    assert.ok(
+      localMs < CEILING_MS,
+      `${step} local rank took ${localMs.toFixed(2)}ms of ${reads} row reads, over the ${CEILING_MS}ms ceiling`,
+    );
   }
   assert.ok(timings.find((row) => row.step === 'pikac').kept > 0);
   assert.equal(timings.find((row) => row.step === 'pikac').kept < timings.find((row) => row.step === 'pika').kept, true);
@@ -156,12 +198,56 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   const ranked = [];
   for (const step of ['pika', 'pikac', 'pikachu']) {
     const started = performance.now();
+    reads = 0;
     const groups = projectPoolGroups(step, rows, { limit: 20 });
     const ms = performance.now() - started;
     ranked.push({ step, ms: Number(ms.toFixed(3)), groups: groups.length });
-    assert.ok(ms < budgetMs, `${step} project ${ms.toFixed(2)}ms`);
+    work[`project:${step}`] = reads;
+    assert.ok(
+      reads <= READ_BUDGET[`project:${step}`],
+      `${step} project read ${reads} row properties, over the ${READ_BUDGET[`project:${step}`]}-read budget`,
+    );
+    assert.ok(
+      ms < CEILING_MS,
+      `${step} project took ${ms.toFixed(2)}ms of ${reads} row reads, over the ${CEILING_MS}ms ceiling`,
+    );
   }
-  console.log(JSON.stringify({ local: timings, ranked }));
+  // The same nine steps over 4,000 rows: work that is linear or n log n in the rows
+  // about doubles, so a step that grows past MAX_GROWTH has turned quadratic inside one
+  // keystroke. The bigger pool is the same shape at twice the rows — every name gets a
+  // twin (`Pika II`), so each name group keeps its ~333 rows and only the rows and the
+  // groups double, the way a real pool grows. Doubling the rows inside the same six
+  // names instead would double each group, and `groupCandidates` already scans one name
+  // group per row (suggest-pool.js:267): that pool grows 3.5x on green code and 3.8x for
+  // a dedup scanning every group (nezopt, 2026-11-18), so no limit separates them, while
+  // at constant shape green code grows 2.0-2.4x and that dedup 3.7-3.9x.
+  const twins = names.map((name) => `${name} II`);
+  const more = [];
+  for (let index = 2000; index < 4000; index += 1) {
+    more.push(card(String(index), twins[index % twins.length], { number: `${index}/200` }));
+  }
+  const doubled = rows.concat(more.map(countingRow));
+  const scaled = {};
+  for (const step of steps) {
+    reads = 0;
+    rankCandidates(doubled, step);
+    scaled[`rank:${step}`] = reads;
+  }
+  for (const step of ['pika', 'pikac', 'pikachu']) {
+    reads = 0;
+    projectPoolGroups(step, doubled, { limit: 20 });
+    scaled[`project:${step}`] = reads;
+  }
+  const growth = {};
+  for (const key of Object.keys(work)) {
+    growth[key] = Number((scaled[key] / work[key]).toFixed(3));
+    assert.ok(
+      growth[key] <= MAX_GROWTH,
+      `${key} grew ${growth[key]}x from ${work[key]} to ${scaled[key]} row reads over twice the rows, ` +
+        `over the ${MAX_GROWTH}x limit (budget ${READ_BUDGET[key]} reads at 2,000 rows)`,
+    );
+  }
+  console.log(JSON.stringify({ local: timings, ranked, reads: work, growth }));
 });
 
 test('recall asks Redis for the stem, plus the full string when a mechanic stays on the name', () => {
