@@ -377,6 +377,47 @@ test('a write answering after the seller changed never lands on the new one', as
   assert.equal(calls.read, 2, 'the sign-out asked for nothing of its own');
 });
 
+test('a preview list is never given an id that was already used', async () => {
+  const store = createCollectionsStore({
+    bearer: () => 't',
+    fetchCollections: () => Promise.reject(new Error('the preview asks nothing')),
+    saveCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    deleteCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    previewAnswer: (collections) => answer(collections),
+  });
+  await store.load('preview');
+  const first = await store.save({ name: 'One', items: [item()] });
+  assert.equal(first.saved, 'preview-1');
+  await store.remove(first.saved);
+  const second = await store.save({ name: 'Two', items: [item()] });
+  // An id handed to a deleted list must not come back: the desk keys its open
+  // row and its editor on it, and a row that reappears under an old id is a row
+  // the seller deleted.
+  assert.equal(second.saved, 'preview-2', 'the counter only grows');
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Two']);
+});
+
+test('a save whose answer does not carry the list is refused, not reported done', async () => {
+  const { store } = engine({
+    read: () => Promise.resolve(answer([binder()])),
+    save: () => Promise.resolve({ ...answer([binder()]), saved: 'c9' }),
+  });
+  await store.load('u1');
+  assert.deepEqual(await store.save({ id: 'c1', name: 'Charizard binder', items: [item()] }), {
+    ok: false,
+    message: 'The saved collection did not come back. Try again.',
+  }, 'an answer naming a list it does not contain saved nothing');
+  assert.equal(store.get().saving, '');
+  const blank = engine({
+    read: () => Promise.resolve(answer([])),
+    save: () => Promise.resolve(answer([])),
+  });
+  await blank.store.load('u1');
+  const fresh = await blank.store.save({ name: 'Sealed', items: [item()] });
+  assert.equal(fresh.ok, false, 'a new list missing from its own answer is the same refusal');
+  assert.equal(blank.store.get().collections.length, 0);
+});
+
 test('subscribers follow every change and stop when they let go', async () => {
   const { store } = engine({
     read: () => Promise.resolve(answer([binder()])),

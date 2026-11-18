@@ -49,6 +49,10 @@ export function createCollectionsStore(deps = {}) {
   let state = snapshot();
   const watchers = new Set();
   let seq = 0;
+  // The fixture invents ids for lists a preview adds, and an id it has used is
+  // never used again: a delete must not hand the next new list the row of one
+  // that is gone.
+  let previewSeq = 0;
 
   function publish(next) {
     // The two questions the table asks of every state — is there a Collections
@@ -174,6 +178,19 @@ export function createCollectionsStore(deps = {}) {
     return run.uid !== state.uid || run.seq !== seq;
   }
 
+  /**
+   * The outcome of a save, read off the state its answer produced: the list the
+   * answer says it saved has to be in the answer. One that comes back without it
+   * saved nothing the desk can show, so the editor stays open with the reason
+   * instead of closing on a lie.
+   */
+  function landResult(savedId) {
+    if (!state.collections.some((row) => row.id === savedId)) {
+      return { ok: false, message: 'The saved collection did not come back. Try again.' };
+    }
+    return { ok: true, saved: savedId };
+  }
+
   function savedBody(draft) {
     const clean = saveBody(draft);
     return { ...clean, name: String(clean.name || '').trim() };
@@ -192,9 +209,10 @@ export function createCollectionsStore(deps = {}) {
       const here = state.collections.findIndex((row) => row.id === clean.id);
       const saved = here >= 0
         ? state.collections.map((row, index) => (index === here ? { ...row, ...clean } : row))
-        : [...state.collections, { ...clean, id: `preview-${state.collections.length + 1}`, createdAt: '', updatedAt: '' }];
+        : [...state.collections, { ...clean, id: `preview-${(previewSeq += 1)}`, createdAt: '', updatedAt: '' }];
+      const savedId = saved[here >= 0 ? here : saved.length - 1].id;
       apply(state.uid, deps.previewAnswer(saved));
-      return Promise.resolve({ ok: true, saved: saved[here >= 0 ? here : saved.length - 1].id });
+      return Promise.resolve(landResult(savedId));
     }
     const key = String(draft?.id || '') || 'new';
     const run = owner();
@@ -212,7 +230,7 @@ export function createCollectionsStore(deps = {}) {
           // An answer of the previous seller never lands on the new one.
           if (overtaken(run)) return { ok: false, message: 'Could not save the collection.' };
           apply(run.uid, data);
-          return { ok: true, saved: String(data?.saved || '') || String(draft?.id || '') };
+          return landResult(String(data?.saved || '') || String(draft?.id || ''));
         },
         (err) => {
           if (overtaken(run)) return { ok: false, message: 'Could not save the collection.' };
