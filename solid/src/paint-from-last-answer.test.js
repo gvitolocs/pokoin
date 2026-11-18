@@ -10,6 +10,7 @@ const guide = read('./components/SetGuideGrid.jsx');
 const mark = read('./components/ExpansionMark.jsx');
 const silver = read('./components/desk/SilverHead.jsx');
 const form = read('./components/desk/ListingForm.jsx');
+const cheap = read('./components/deal/CheapestListings.jsx');
 const seller = read('./pages/Seller.jsx');
 const artist = read('./pages/Artist.jsx');
 const rails = read('./lib/cart-rails.js');
@@ -17,10 +18,16 @@ const styles = read('../../market/src/styles.css');
 
 test('a desk reload paints its last listings, print language and version select, then reconciles', () => {
   assert.match(card, /readDeskListings\(deskGame, cardId\)/);
-  assert.match(card, /createSignal\(peekHasListingRows\(listed\) \|\| Boolean\(stored\)\)/);
+  // CARD-01 P1: "an answer" and "rows to show" are different questions, and the
+  // first paint is decided by the first one.
+  assert.match(card, /const listedKnown = listingsKnown\(cardId\)/);
+  assert.match(card, /offers: offerCopies\(listedKnown \? listed\.listings :/);
+  assert.match(card, /createSignal\(listedKnown \|\| Boolean\(stored\)\)/);
   assert.match(card, /if \(seq === listingsSeq\) writeDeskListings\(deskGame, cardId, rows\)/);
   assert.match(card, /peekPrintNationality\(setSlug\(/);
   assert.match(card, /readDeskVersions\(deskGame, cardId\)/);
+  // The blank line is only for a desk that has no answer; `ready` is the answer.
+  assert.match(cheap, /<Show when=\{props\.ready\} fallback=\{<p class="status"> <\/p>\}>/);
   // Equal rows from a revalidation keep their nodes.
   assert.match(card, /<For each=\{versionRows\(\)\} keyed=\{\(row\) => String\(row\.id\)\}>/);
   assert.match(card, /<For each=\{setShortcuts\(\)\} keyed=\{\(row\) => String\(row\.id\)\}>/);

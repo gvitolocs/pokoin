@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { soldFilterShowsAll, soldFilterValue } from './sold-graph.js';
-import { soldGraphView, soldTraitsForGraphDay, sharedSoldTraits, buildSalesSeries } from './sold-sales.js';
+import { sameSoldSlices, soldGraphView, soldTraitsForGraphDay, sharedSoldTraits, buildSalesSeries } from './sold-sales.js';
 
 const LEDIAN = [
   {
@@ -381,4 +381,59 @@ test('sold change waits three days before comparing medians', () => {
     { day: '2026-09-26', medianPkn: 150 },
   ]);
   assert.equal(confirmed.change24hPct, 0.5);
+});
+
+// PH-R034 P6: the desk re-reads the sold slices after every visit, and an answer
+// that equals what it already drew used to hand the graph a fresh array — a full
+// SVG re-plot for nothing. `sameSoldSlices` is the equality the plot needs, so
+// it is tested against what the plot actually reads.
+const reread = (rows) => JSON.parse(JSON.stringify(rows));
+
+test('a sold re-read that drew the same line is the same answer', () => {
+  assert.equal(sameSoldSlices(LEDIAN, reread(LEDIAN)), true);
+  assert.equal(sameSoldSlices(LEDIAN, [...LEDIAN].reverse()), true, 'the order of arrival is not the plot');
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({ ...row, cardId: '7' }))), true, 'a field the graph never reads');
+  assert.equal(
+    sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({
+      day: row.day,
+      condition: row.condition,
+      language: row.language,
+      reverse: row.reverse,
+      first_edition: row.firstEdition,
+      graded: row.graded,
+      median_pkn: row.medianPkn,
+      sold_qty: row.soldQty,
+      listings: row.listings,
+      sample_count: row.sampleCount,
+    }))),
+    true,
+    'the same answer spelled with the API’s other keys',
+  );
+  assert.equal(sameSoldSlices([], []), true, 'a card that has never sold, twice');
+  const sameRow = [{ day: '2026-09-01', condition: 'NM', medianPkn: 10 }];
+  assert.equal(sameSoldSlices(sameRow, sameRow), true);
+});
+
+test('a sold answer that moves the line is not the same answer', () => {
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row, i) => (i ? row : { ...row, medianPkn: 11 }))), false);
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({ ...row, day: '2026-09-02' }))), false, 'a day that moved');
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({ ...row, soldQty: row.soldQty + 1 }))), false, 'one more sold');
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({ ...row, listings: row.listings + 1 }))), false);
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.map((row) => ({ ...row, reverse: true }))), false, 'the plotted facet');
+  assert.equal(sameSoldSlices(LEDIAN, LEDIAN.slice(1)), false, 'a slice that went away');
+  assert.equal(sameSoldSlices(LEDIAN, [...LEDIAN, { ...LEDIAN[0], day: '2026-09-02' }]), false, 'a slice that arrived');
+  assert.equal(
+    sameSoldSlices(LEDIAN, [...LEDIAN, { ...LEDIAN[1], comments: ['PSA 10'] }]),
+    false,
+    'a comment the hover reads',
+  );
+});
+
+test('nothing drawn is never equal to something', () => {
+  // The desk signal starts at `null` for a card this device has not seen: that
+  // first answer has to plot whatever it holds, `[]` included.
+  assert.equal(sameSoldSlices(null, []), false);
+  assert.equal(sameSoldSlices(null, LEDIAN), false);
+  assert.equal(sameSoldSlices(LEDIAN, null), false);
+  assert.equal(sameSoldSlices(undefined, undefined), true, 'the identity case the setter short-circuits');
 });

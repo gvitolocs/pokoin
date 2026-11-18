@@ -13,6 +13,7 @@ import {
 import { realPublicCardId } from '@market/card-stub.js';
 import { gameBasename } from '@market/game.js';
 import { afterHero } from '@market/hero-gate.js';
+import { warmCardPriceHistory } from '@market/price-history.js';
 import { relatedFromPage } from '@market/related-cards.js';
 import { peekHandoffCard } from './card-handoff.js';
 import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-queue.js';
@@ -26,14 +27,19 @@ import { createPrefetchQueue, linkTarget, prefetchBlocked } from './prefetch-que
  *   artist and seller pages it warms the route code and queues the page data here.
  * - Viewport: after each navigation, the first few visible card / set tiles.
  * - Desk: once a card desk loads, its related cards and its set.
+ * - Arrows: the previous and the next card, with everything their desk shows
+ *   (`warmDeskNeighbor`, asked once per neighbour per desk).
  * Loads run at idle with `priority: 'low'`, at most 4 at once, newest intent
- * first; a click elsewhere or Back aborts the rest. Nothing on Save-Data / 2g.
+ * first; a click elsewhere or Back aborts the rest. Nothing on Save-Data / 2g,
+ * and nothing while the tab is hidden.
  * No edge logic: freshness is the API's Cache-Control / ETag, read through
  * the browser HTTP cache.
  */
 const VIEWPORT_PER_PAGE = 6;
 
-const blocked = () => prefetchBlocked(typeof navigator === 'undefined' ? null : navigator.connection);
+// A hidden tab is not a user about to click: nothing is prefetched behind it.
+const blocked = () => prefetchBlocked(typeof navigator === 'undefined' ? null : navigator.connection)
+  || (typeof document !== 'undefined' && document.visibilityState === 'hidden');
 
 function idle(fn) {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 150 });
@@ -47,6 +53,29 @@ function load(target, signal, intent) {
       return prefetchCardDesk(target.card || peekHandoffCard(target.id) || { id: target.id }, {
         lang: target.lang, slug: target.slug, art: intent, listings: intent, signal,
       });
+    case 'desk': {
+      // The whole neighbour desk, every panel the arrow click opens, in the order
+      // the desk shows them.
+      const page = prefetchCardDesk(target.card || peekHandoffCard(target.id) || { id: target.id }, {
+        lang: target.lang,
+        slug: target.slug,
+        art: true,
+        listings: true,
+        sales: true,
+        versions: true,
+        book: true,
+        names: true,
+        native: true,
+        signal,
+      });
+      // The graph window last, because it is last on the desk and it is a Silver
+      // feature: `price` is the account check the desk itself already made, so a
+      // warm for anybody else asks nothing and stores nothing.
+      return page.then(() => warmCardPriceHistory(target.id, {
+        signal,
+        silver: () => Boolean(target.price),
+      }));
+    }
     case 'versions':
       return Promise.all([
         fetchVersionSet(target.id, { prefetch: true, signal }),
@@ -66,6 +95,29 @@ const queue = createPrefetchQueue({ load, idle, blocked });
 // Router base is '' — the slug is stripped only for matching. Catalogue hrefs
 // are still prefixed, so peel the live game prefix before classifying them.
 const targetOf = (url) => linkTarget(url.pathname, { base: gameBasename(), cardId: realPublicCardId });
+
+/**
+ * Warm the desk an arrow points at (PH-R034 P5) through the queue every other
+ * prefetch uses: it starts at browser idle — behind the reads of the page already
+ * on screen, which were scheduled first — runs at most four loads at once with
+ * `priority: 'low'`, and a click or Back aborts what has not started. Nothing is
+ * queued on a hidden tab or a Save-Data connection, because `blocked` is the same
+ * check the hover and the viewport scan use.
+ *
+ * `desk:` is a key of its own, apart from the `card:` a hover queues: one does not
+ * cancel the other's need, and the queue's 30 s repeat window is what keeps a
+ * neighbour this desk has already seen from being warmed again.
+ *
+ * `price` is whether the account is Silver — the desk knows, the queue must not
+ * ask — and gates only the graph window, the one warm that is not everybody's.
+ */
+export function warmDeskNeighbor(card, { lang = 'en', slug = '', price = false } = {}) {
+  const id = String(card?.id || card || '');
+  if (!/^\d+$/.test(id)) return false;
+  return queue.add({
+    kind: 'desk', key: `desk:${lang}:${id}`, id, lang, slug, price, card,
+  });
+}
 
 let scanTimers = [];
 let scannedPage = '';

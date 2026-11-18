@@ -32,8 +32,13 @@ test('desk title, set and artist drag their own bundles without starting a tile 
 test('a desk not painted from a peek shows the stored copy and merges the revalidated page', () => {
   assert.match(page, /fresh: Boolean\(cached\),\n\s+onUpdate: showCard,/);
   assert.match(page, /fetchVersionSet\(cardId, \{ onUpdate: showVersionSet \}\)\.then\(showVersionSet\)/);
-  // Listings stay live: never a stored copy.
+  // The mount read is a forced re-read, and `maxAgeMs` is how recent a warm the
+  // desk adopts instead of sending one (CARD-01 P2: two minutes, so the neighbour
+  // the desk just warmed answers without a `=_` request).
   assert.match(page, /fetchListings\(cardId, \{ fresh: true, maxAgeMs \}\)/);
+  assert.match(page, /const PREFETCH_FRESH_MS = 120_000;/);
+  assert.match(page, /maxAgeMs = 0/);
+  assert.match(page, /refreshListings\(listingsSeq, PREFETCH_FRESH_MS\)/);
   assert.match(page, /includeOffers: false/);
 });
 
@@ -160,7 +165,9 @@ test('an empty Vault is not a panel at any width: the row is conditional markup'
 });
 
 test('the desk loads one buy book and hands it to the bar and the Buy offers cell', () => {
-  assert.match(page, /const buy = createBuyBook\(\{ cardId, ready: offersReady, language: shownLang \}\)/);
+  // CARD-01 P4: the sell side does not wait for the buy side, so the book is not
+  // gated on the listings landing any more.
+  assert.match(page, /const buy = createBuyBook\(\{ cardId, language: shownLang \}\)/);
   assert.match(page, /<OfferBar\n\s*buy=\{buy\}/);
   assert.match(page, /<BuyOffers\n\s*buy=\{buy\}/);
   // The bar reads the book itself; only the cells need to know the listings landed.
@@ -287,18 +294,20 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.doesNotMatch(bar, /canSellNow|sellToHouse/);
   assert.match(bar, /const cur = \(\) => offerUnit\(unitChoice\(\), currency\(\)\);/);
   assert.match(cells, /props\.buy\.askOffer\(\)/);
-  // The cell is on the page from the first paint: until the book is known it is
-  // a skeleton of the same three row slots, so nothing moves when it answers.
+  // The cell is on the page from the first paint. Since CARD-01 P4 the book it
+  // paints into is never nothing — an unknown book is an empty one, and the
+  // empty branch names Pokoin's own starting offer — so the three-slot skeleton
+  // below is the fallback for a book that is not a row list at all.
   assert.match(cells, /<Show\s+when=\{Array\.isArray\(book\(\)\)\}\s+fallback=\{\(/);
   assert.match(cells, /class="panel desk-cell cell-offers is-loading"[\s\S]*class="cell-rows cell-skel"/);
   // The bar too: always mounted, a skeleton price and waiting buttons while loading.
   const steadyBar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(steadyBar, /<Show when=\{book\(\)\}>/);
-  assert.match(steadyBar, /const loading = \(\) => book\(\) == null;/);
+  assert.match(steadyBar, /const loading = \(\) => !buy\.known\(\);/);
   assert.match(steadyBar, /disabled=\{busy\(\) \|\| loading\(\)\}/);
   // A reload paints the book this device last saw, then asks again.
   const bookLib = fs.readFileSync(new URL('../lib/buy-book.js', import.meta.url), 'utf8');
-  assert.match(bookLib, /createSignal\(stored\(\)\)/);
+  assert.match(bookLib, /createSignal\(first \|\| \[\]\)/);
   assert.match(bookLib, /writeBookCache\(id, rows\);/);
   // The graph never shows another grade's sales under the picked one.
   assert.match(page, /series=\{graphSeries\(\)\}/);
@@ -494,6 +503,27 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
 
+test('a sold re-read that changed nothing does not re-plot the graph', () => {
+  // PH-R034 P6: every desk visit re-reads the sold slices, and writing a fresh
+  // array for the answer that is already drawn recomputed `soldGraphView` and
+  // re-rendered the whole SVG. This is the history write's own rule, on the sold
+  // line: the desk keeps the array it painted when the new one plots the same.
+  assert.match(page, /import \{ sameSoldSlices, soldGraphView, soldTraitsForGraphDay \} from '@market\/sold-sales\.js';/);
+  const guard = page.slice(page.indexOf('function showSalesSlices('), page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.match(guard, /setSalesSlices\(\(prev\) => \(sameSoldSlices\(prev, slices\) \? prev : slices\)\);/);
+  assert.equal((page.match(/setSalesSlices\(/g) || []).length, 1, 'the signal is written from the guard alone');
+  // Every arrival path goes through it, and none of them stops the revalidation:
+  // the answer is still stored, only the redraw stands down.
+  const read = page.slice(page.indexOf('fetchCardSales(cardId, { slices: true })'), page.indexOf('function showVersionSet'));
+  assert.doesNotMatch(read, /setSalesSlices\(/);
+  assert.match(read, /if \(!peekCardSales\(cardId\)\) showSalesSlices\(\[\]\);/);
+  assert.ok(read.indexOf('saveCardSales(cardId, data.slices)') < read.indexOf('showSalesSlices(data.slices)'), 'stored, then painted');
+  assert.match(read, /showSalesSlices\(stale\?\.slices \?\? \[\]\);/);
+  // P6 stops at the plot: the draw-once rule, its cap and the Silver gate belong
+  // to the history path and an equality guard must not reach them.
+  assert.doesNotMatch(guard, /graphDrawn|accountSilver|GRAPH_HISTORY_WAIT_MS|priceHistory/);
+});
+
 test('a cached window is still re-read: the cache paints the first frame, not the data', () => {
   const asked = page.slice(
     page.indexOf('function askGraphHistory'),
@@ -597,6 +627,63 @@ test('on a narrow panel the keys span it and drop the picked key without overlay
   assert.match(graph, /'is-overflow': keysOverflow\(\)/);
   assert.match(graph, /legendEl\.scrollWidth > legendEl\.clientWidth/);
   assert.match(css, /\.sold-graph-legend\.is-overflow \{[^}]*mask-image: linear-gradient\(to right, #000 calc\(100% - 16px\), transparent\);/);
+});
+
+/**
+ * PH-R034 P8 (N11): `later` gates the "All <name>" rail and the catalog fold, and
+ * the desk remounts on every arrow press. Raised a frame and a task after each
+ * mount, it tore a rail down and rebuilt it on a step — for a neighbour whose page
+ * the warm has already put in this device's cache, so nothing about it is late.
+ */
+test('a desk that mounted from a warm cache keeps its rail up', () => {
+  const settled = page.slice(
+    page.indexOf('onSettled(() => {'),
+    page.indexOf('// Print nationality of the expansion fills a card without one.'),
+  );
+  assert.match(settled, /if \(cached\) \{\n\s*setLater\(true\);\n\s*\} else \{\n\s*laterFrame = requestAnimationFrame\(\(\) => \{/);
+  // A cold desk still waits: a tile click must paint the desk above the fold first,
+  // and that is what the frame and the task exist for.
+  assert.match(settled, /laterTimer = window\.setTimeout\(\(\) => setLater\(true\), 0\);/);
+  // `cached` is the desk's own warm-mount test, the one its neighbor remembrance
+  // and its warm-on-paint already use.
+  assert.equal((page.match(/\(cached\)/g) || []).length >= 3, true, 'the same test the desk paints from');
+  // The teardown still cancels both, whoever raised the signal.
+  assert.match(settled, /cancelAnimationFrame\(laterFrame\);/);
+  assert.match(settled, /window\.clearTimeout\(laterTimer\);/);
+  assert.equal((page.match(/<Show when=\{later\(\)\}>/g) || []).length, 1, 'one gate for the rail and the fold');
+});
+
+/**
+ * PH-R034 P9 (N12): the live-listings handler returned as soon as the cell had no
+ * rows — which is exactly the state P1 made paintable as an answer. A frame that
+ * put the first listing on a card nobody was selling was thrown away, and the desk
+ * kept saying "No listings yet." until some later read disagreed with it.
+ */
+test('a live listing frame lands on an empty cell whose answer is known', () => {
+  const live = page.slice(
+    page.indexOf('subscribeListingLive(cardId, (event) => {'),
+    page.indexOf('      disposed = true;'),
+  );
+  assert.match(live, /if \(!shop\.offers\.length && !listingsKnown\(cardId\)\) return;/);
+  assert.doesNotMatch(live, /if \(!shop\.offers\.length\) return;/, 'rows are no longer the only reason to listen');
+  const steps = [
+    'const plain = snapshot(shop.offers);',
+    'const next = applyListingLive(plain, event);',
+    'if (next === plain) return;',
+    'setOffers(next);',
+    'rememberListingRows(cardId, next);',
+  ];
+  let at = -1;
+  for (const needle of steps) {
+    const found = live.indexOf(needle);
+    assert.ok(found > at, `${needle} comes after the step before it`);
+    at = found;
+  }
+  assert.match(page, /import \{ listingsKnown, rememberListingRows \} from '@market\/listings-cache\.js';/);
+  // One channel per desk, and it still closes with the desk.
+  assert.equal((page.match(/subscribeListingLive\(/g) || []).length, 1, 'one channel per desk');
+  assert.match(page, /import \{ applyListingLive, subscribeListingLive \} from '@market\/listing-live\.js';/);
+  assert.match(page, /unsubscribe\?\.\(\);/);
 });
 
 /**

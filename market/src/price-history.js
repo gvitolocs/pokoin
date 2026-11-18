@@ -1,4 +1,5 @@
 import { getJson } from './api.js';
+import { saveCardPriceHistory } from './price-history-cache.js';
 
 /**
  * The price sources the card-desk graph plots beside the CardTrader sold median.
@@ -101,7 +102,7 @@ export function priceHistoryRange(rangeKey, todayIso) {
  * the one series `reverse` picks. A server that does not know the parameter still
  * answers the full shape, which reads the same way here.
  */
-export async function fetchCardPriceHistory(cardId, { from, to, reverse } = {}) {
+export async function fetchCardPriceHistory(cardId, { from, to, reverse, signal } = {}) {
   const id = String(cardId || '').trim();
   if (!/^\d+$/.test(id)) {
     return null;
@@ -118,11 +119,32 @@ export async function fetchCardPriceHistory(cardId, { from, to, reverse } = {}) 
     params.set('reverse', '1');
   }
   try {
-    const data = await getJson(`/api/marketplace-card-price-history?${params}`);
+    const data = await getJson(`/api/marketplace-card-price-history?${params}`, { signal });
     return data && typeof data === 'object' ? data : null;
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * A neighbour's graph window, asked ahead by the arrow warmer (PH-R034 P5) so the
+ * plot is already on this device when the click lands. It asks exactly what the
+ * neighbour desk asks first — the default window of the plain facet — and stores
+ * it under the key its `peekCardPriceHistory` reads, so nothing is asked twice.
+ * No `_=`: that read is the one the edge is allowed to answer from its cache.
+ *
+ * `silver` is the gate, and it lives here rather than at each call site because
+ * the history is a Silver feature: an account that is not Silver asks nothing and
+ * writes nothing, in the warmer exactly as on the desk.
+ */
+export async function warmCardPriceHistory(cardId, { signal, silver = () => true } = {}) {
+  if (!silver()) return null;
+  const { key: range, from, to } = priceHistoryRange(PRICE_HISTORY_DEFAULT_RANGE, new Date().toISOString().slice(0, 10));
+  const history = await fetchCardPriceHistory(cardId, { from, to, signal });
+  if (!history) return null;
+  const entry = { range, from, to, history };
+  saveCardPriceHistory(cardId, range, entry);
+  return entry;
 }
 
 /** `[{ day, pkn }]`, oldest first, days without a positive price dropped. */

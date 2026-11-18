@@ -2664,6 +2664,20 @@ html.is-card-banding * {
   animation-fill-mode: both;
 }
 
+/* The desk's own shimmer rows — the Buy offers cell and the offer bar — follow
+   the same rule, with the shimmer kept as the second animation: the desk paints
+   from its cache, and a page that already knows the answer must never show one
+   (CARD-01 P3). `animation` shorthand here would reset the 250 ms delay. */
+.offer-bar-skel,
+.cell-skel > span {
+  animation-name: skel-appear, skel-shimmer;
+  animation-duration: 1ms, 1.2s;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: 1, infinite;
+  animation-delay: 250ms, 0s;
+  animation-fill-mode: both, none;
+}
+
 @keyframes skel-shimmer {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
@@ -12091,7 +12105,12 @@ img.is-lang-scan {
 }
 
 .desk-cell .empty-shop { padding: 0.3rem 0.15rem 0; }
-.desk-cell .empty-shop .status { margin: 0; text-align: left; }
+/* A cell with no answer yet shows the same <p class="status"> with nothing in it
+   but a space. Whitespace-only text collapses to no line box at all, so the
+   sentence that replaced it arrived 6 px taller and the whole grid row moved
+   with it; a preserved space costs exactly the line it will be replaced by
+   (CARD-01 P3). */
+.desk-cell .empty-shop .status { margin: 0; text-align: left; white-space: pre-wrap; }
 
 .desk-cell .cell-empty {
   margin: 0;
@@ -12099,6 +12118,14 @@ img.is-lang-scan {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* CARD-01 P3: the body of a desk cell always costs at least one row, so the
+   answer — a row, a "No listings yet." line or the house-offer line — cannot
+   change the cell's height. cheap and offers are one grid row stretched
+   together, so a cell that grows drags its neighbour and everything under them
+   (the 84 → 90 px move of the measured trace). A cell with rows to show is
+   taller than this, so nothing reserves an empty slot. */
+.desk-cell > :not(.cell-title) { min-height: 2.4rem; }
 
 /* One line per listing: seller | facet | price and copies | cart, out of the
    Shop's own parts. The full Shop row keeps its wrapping flex line. */
@@ -13111,7 +13138,6 @@ img.is-lang-scan {
   border-radius: 8px;
   background: linear-gradient(90deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.05));
   background-size: 200% 100%;
-  animation: skel-shimmer 1.2s ease-in-out infinite;
 }
 .offer-bar-skel { width: 4.2rem; height: 1rem; }
 .cell-skel > span { height: 2.4rem; }

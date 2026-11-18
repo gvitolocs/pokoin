@@ -353,7 +353,7 @@ id = "card-page"
 name = "Visitor opens a card desk with listings, sold data and versions"
 money = false
 entry = ["solid/src/pages/Card.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js"]
+proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js", "market/src/api-listings-window.test.js", "market/src/card-arrows-heights.test.js", "solid/src/lib/buy-book.test.js", "solid/src/components/deal-panels.test.js", "market/src/card-desk-warm.test.js", "market/src/card-arrows-trace.test.js", "solid/src/lib/desk-warm.test.js", "market/src/native-sales-cache.test.js", "solid/src/components/desk/native-sales-panel.test.js", "solid/src/pages/Card.test.js"]
 status = "partial"
 
 [[flow]]
@@ -385,7 +385,7 @@ id = "sold-prices"
 name = "Visitor sees sold medians and price history"
 money = false
 entry = ["solid/src/components/desk/SoldPriceGraph.jsx", "solid/src/pages/Card.jsx", "market/src/price-history.js", "market/src/price-history-cache.js"]
-proof = ["pokoin-rust/crates/catalog-api/src/sales/core.rs", "pokoin-rust/crates/catalog-api/src/sales/history_sources.rs", "pokoin-rust/crates/catalog-api/tests/price_history_pokoin_flow.rs", "market/src/price-history.test.js", "market/src/price-history-cache.test.js", "market/src/sold-graph.test.js", "solid/src/pages/Card.test.js"]
+proof = ["pokoin-rust/crates/catalog-api/src/sales/core.rs", "pokoin-rust/crates/catalog-api/src/sales/history_sources.rs", "pokoin-rust/crates/catalog-api/tests/price_history_pokoin_flow.rs", "market/src/price-history.test.js", "market/src/price-history-cache.test.js", "market/src/sold-graph.test.js", "market/src/sold-sales.test.js", "solid/src/pages/Card.test.js", "market/src/card-desk-warm.test.js"]
 status = "partial"
 
 [[flow]]
