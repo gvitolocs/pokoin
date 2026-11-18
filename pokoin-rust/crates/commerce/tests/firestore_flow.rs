@@ -744,6 +744,90 @@ async fn lock_then_unlock_burn_models_a_withdrawal() {
     assert_eq!(balance.locked_pkn, 0);
 }
 
+/// A release gives back what the lock holds and no more: an amount larger than
+/// the lock is refused as a conflict, and the wallet and the ledger stay as
+/// they were.
+#[tokio::test]
+async fn a_release_returns_no_more_pkn_than_the_lock_holds() {
+    use pokoin_commerce::error::StoreError;
+
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("u1", 500, "account_top_up"))
+        .await
+        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("u1", 200, "order_discount_held").with_ref("release-bound"),
+    )
+    .await
+    .expect("lock");
+    let entries = mock.keys_with_prefix("ledger_entries/").len();
+
+    let error = store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 201, "order_discount_released", true).with_ref("release-bound"),
+    )
+    .await
+    .expect_err("a release larger than the lock is refused");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error:?}");
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 200);
+    assert_eq!(
+        mock.keys_with_prefix("ledger_entries/").len(),
+        entries,
+        "a refused release writes no ledger entry"
+    );
+
+    // What the lock holds goes back, and the total is what the mint made it.
+    store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 200, "order_discount_released", true).with_ref("release-bound"),
+    )
+    .await
+    .expect("release");
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 500);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// A payout that settled outside the ledger burns what the lock holds. The
+/// difference is never taken from the buyer's available balance; it is written
+/// on the entry as `lockedShortfallPkn` for a reconciliation to find.
+#[tokio::test]
+async fn a_settled_payout_burns_no_more_pkn_than_the_lock_holds() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("u1", 500, "account_top_up"))
+        .await
+        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("u1", 120, "withdraw_requested").with_ref("wr-shortfall"),
+    )
+    .await
+    .expect("lock");
+    store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 200, "withdraw_paid", false).with_ref("wr-shortfall"),
+    )
+    .await
+    .expect("a settled payout is never refused");
+
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 380, "the lock alone was burned");
+    assert_eq!(balance.locked_pkn, 0);
+    let entry = mock
+        .keys_with_prefix("ledger_entries/")
+        .into_iter()
+        .find_map(|key| {
+            let entry = mock.get(&key)?;
+            (entry["type"] == "withdraw_paid").then_some(entry)
+        })
+        .expect("the settled payout entry");
+    assert_eq!(entry["amountPkn"], json!(200));
+    assert_eq!(entry["lockedShortfallPkn"], json!(80));
+}
+
 #[tokio::test]
 async fn an_insufficient_transfer_is_refused_and_changes_nothing() {
     let (_, firestore) = harness().await;

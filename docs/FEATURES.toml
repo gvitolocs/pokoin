@@ -73,7 +73,7 @@ id = "order-cancel-release"
 name = "Buyer cancels an unpaid order; expired EUR holds release"
 money = true
 entry = ["solid/src/pages/Orders.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::releasing_an_expired_order_cancels_it_and_returns_the_held_discount_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_order_is_never_released"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::releasing_an_expired_order_cancels_it_and_returns_the_held_discount_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_order_is_never_released", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_release_returns_no_more_pkn_than_the_lock_holds"]
 status = "proved"
 
 [[flow]]
@@ -121,7 +121,7 @@ id = "wpkn-exchange"
 name = "User swaps PKN and wPKN at a quoted price"
 money = true
 entry = ["solid/src/pages/Exchange.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/src/domain/wpkn.rs::quote_applies_spread_plus_size_impact"]
+proof = ["pokoin-rust/crates/commerce/src/domain/wpkn.rs::quote_applies_spread_plus_size_impact", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_release_returns_no_more_pkn_than_the_lock_holds", "pokoin-rust/crates/commerce/src/store.rs::a_lock_gives_up_only_what_it_holds"]
 status = "partial"
 
 [[flow]]
@@ -129,7 +129,7 @@ id = "pkn-withdraw"
 name = "User withdraws PKN to an on-chain address"
 money = true
 entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_settled_payout_burns_no_more_pkn_than_the_lock_holds", "pokoin-rust/crates/commerce/src/store.rs::a_lock_gives_up_only_what_it_holds"]
 status = "partial"
 
 [[flow]]

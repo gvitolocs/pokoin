@@ -61,9 +61,11 @@ pub enum MoveMode {
     Burn,
     /// `from.availablePkn -= amount`, `from.lockedPkn += amount`.
     Lock,
-    /// `from.lockedPkn -= amount` (payout settled).
+    /// A settled payout: the lock gives up what it holds, up to `amount`, and
+    /// what it could not give is recorded on the entry (`lockedShortfallPkn`).
     UnlockBurn,
-    /// `from.lockedPkn -= amount`, `from.availablePkn += amount`.
+    /// A returned hold: `from.lockedPkn -= amount`,
+    /// `from.availablePkn += amount`, and never more than that lock holds.
     UnlockRelease,
     /// Ledger-only entry (no balance change).
     RecordOnly,
@@ -296,7 +298,7 @@ pub async fn apply_all(
     let result = fs
         .run_transaction(move |transaction| {
             let client = client_for_tx.clone();
-            let ops = ops_for_tx.clone();
+            let mut ops = ops_for_tx.clone();
             let uids = uids_for_tx.clone();
             let key = key_for_tx.clone();
             let apply_id = apply_id_for_tx.clone();
@@ -336,8 +338,16 @@ pub async fn apply_all(
                         )
                     })
                     .collect();
-                for op in &ops {
-                    apply_mode(&mut balances, op)?;
+                for op in &mut ops {
+                    let locked_shortfall = apply_mode(&mut balances, op)?;
+                    if locked_shortfall > 0 {
+                        if !op.meta.is_object() {
+                            op.meta = json!({});
+                        }
+                        if let Some(object) = op.meta.as_object_mut() {
+                            object.insert("lockedShortfallPkn".into(), json!(locked_shortfall));
+                        }
+                    }
                 }
                 let mut writes = build_writes(&client, &uids, &balances, &ops)?;
                 if let (Some(path), Some(key)) = (marker_path, key) {
@@ -398,10 +408,13 @@ fn party_balances(balances: &[(String, FirestoreBalance)], op: &LedgerOp) -> (i6
     (available(op.from_uid.as_ref()), available(op.to_uid.as_ref()))
 }
 
+/// Apply one operation to the balances. The `Ok` value is the PKN the
+/// operation asked for beyond the lock it found — only a settled payout
+/// accepts that, and the entry records it; every other operation reports zero.
 fn apply_mode(
     balances: &mut [(String, FirestoreBalance)],
     op: &LedgerOp,
-) -> Result<(), StoreError> {
+) -> Result<i64, StoreError> {
     let from_uid = op.from_uid.clone().filter(|uid| !uid.is_empty());
     let to_uid = op.to_uid.clone().filter(|uid| !uid.is_empty());
     let index_of = |balances: &[(String, FirestoreBalance)], uid: &str| {
@@ -453,19 +466,29 @@ fn apply_mode(
                 return Err(StoreError::Invalid("Unlock needs a source.".into()));
             };
             let index = index_of(balances, from).expect("locked");
-            balances[index].1.locked_pkn = (balances[index].1.locked_pkn - op.amount).max(0);
+            // The payout or the purchase settled outside the ledger, so this
+            // cannot be refused: the lock gives up what it holds and the
+            // remainder is reported for the entry to record.
+            let burned = op.amount.min(balances[index].1.locked_pkn);
+            balances[index].1.locked_pkn -= burned;
+            return Ok(op.amount - burned);
         }
         MoveMode::UnlockRelease => {
             let Some(from) = from_uid.as_ref() else {
                 return Err(StoreError::Invalid("Unlock needs a source.".into()));
             };
             let index = index_of(balances, from).expect("locked");
-            balances[index].1.locked_pkn = (balances[index].1.locked_pkn - op.amount).max(0);
+            if balances[index].1.locked_pkn < op.amount {
+                return Err(StoreError::Conflict(
+                    "release exceeds the locked amount".into(),
+                ));
+            }
+            balances[index].1.locked_pkn -= op.amount;
             balances[index].1.available_pkn += op.amount;
         }
         MoveMode::RecordOnly => {}
     }
-    Ok(())
+    Ok(0)
 }
 
 fn build_writes(
@@ -1038,6 +1061,8 @@ mod properties {
     struct Step {
         mode: MoveMode,
         amount: i64,
+        /// The account the operation acted on, as an index into the state.
+        subject: usize,
         /// The lock of the account the operation acted on, before it ran.
         locked_before: i64,
         accepted: bool,
@@ -1082,6 +1107,7 @@ mod properties {
         Step {
             mode: plan.mode,
             amount,
+            subject,
             locked_before: subject_before.locked_pkn,
             accepted,
             supply_before,
@@ -1223,6 +1249,69 @@ mod properties {
                         step.mode,
                         step.amount
                     );
+                }
+            }
+        }
+
+        /// A lock gives up only what it holds. A release returns exactly the
+        /// amount it asked for; a settled payout burns the smaller of its
+        /// amount and the lock, and the total falls by just that much.
+        #[test]
+        fn a_lock_gives_up_only_what_it_holds(sequence in sequence_strategy()) {
+            let (accounts, plans) = sequence;
+            let mut state = accounts_of(&accounts);
+            for plan in &plans {
+                let step = run_step(&mut state, plan);
+                if !step.accepted {
+                    continue;
+                }
+                let before = step.before[step.subject].1;
+                let after = step.after[step.subject].1;
+                match step.mode {
+                    MoveMode::UnlockRelease => {
+                        prop_assert_eq!(
+                            before.locked_pkn - after.locked_pkn,
+                            step.amount,
+                            "a release of {} against a lock of {} gave up something else",
+                            step.amount,
+                            step.locked_before
+                        );
+                        prop_assert_eq!(
+                            after.available_pkn - before.available_pkn,
+                            step.amount,
+                            "a release of {} moved something else into available",
+                            step.amount
+                        );
+                        prop_assert_eq!(supply(&step.after), step.supply_before);
+                    }
+                    MoveMode::UnlockBurn => {
+                        let burned = before.locked_pkn - after.locked_pkn;
+                        prop_assert_eq!(
+                            burned,
+                            step.amount.min(before.locked_pkn),
+                            "a settled payout of {} against a lock of {} burned something else",
+                            step.amount,
+                            step.locked_before
+                        );
+                        prop_assert_eq!(
+                            supply(&step.after) - step.supply_before,
+                            -burned,
+                            "a settled payout of {} changed the total by something else",
+                            step.amount
+                        );
+                    }
+                    MoveMode::Lock => {
+                        prop_assert_eq!(
+                            after.locked_pkn - before.locked_pkn,
+                            step.amount,
+                            "a lock of {} moved something else into the lock",
+                            step.amount
+                        );
+                        prop_assert_eq!(supply(&step.after), step.supply_before);
+                    }
+                    _ => {
+                        prop_assert_eq!(after.locked_pkn, before.locked_pkn);
+                    }
                 }
             }
         }
