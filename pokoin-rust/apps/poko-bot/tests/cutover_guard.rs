@@ -50,8 +50,7 @@ fn every_entry_being_verified_is_not_the_same_as_a_complete_parity() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(
-        stderr,
-        "CUTOVER BLOCKED: X-POKO parity is incomplete.\n",
+        stderr, "CUTOVER BLOCKED: X-POKO parity is incomplete.\n",
         "only the flag, and no gap lines for a verified entry"
     );
     assert!(!stderr.contains("realpath"));
