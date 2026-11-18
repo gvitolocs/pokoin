@@ -167,6 +167,65 @@ test('segmentGroups lays out both levels and skips an empty group', () => {
   assert.deepEqual(segmentGroups(null, 'all', {}), []);
 });
 
+test('a game whose only drill-down rows are sets gets its own level', () => {
+  // DG-R007 sends `<game>:set:<slug>` rows for the games without era bands, so
+  // `set` is a level group too and a def of that group survives normalization.
+  const model = normalizeSegments({
+    ok: true,
+    days: [{ date: '2026-11-01', cardsValuePkn: 10, segments: { 'game:riftbound': [10, 1, 1] } }],
+    segmentDefs: [
+      { key: 'game:pokemon', group: 'game', game: 'pokemon' },
+      { key: 'game:riftbound', group: 'game', game: 'riftbound' },
+      { key: 'all:sealed', group: 'type', game: 'all', label: 'Sealed' },
+      { key: 'all:graded', group: 'type', game: 'all', label: 'Graded' },
+      { key: 'riftbound:set:origins', group: 'set', game: 'riftbound', label: 'Origins' },
+      { key: 'riftbound:set:other', group: 'set', game: 'riftbound', label: 'Other sets' },
+    ],
+  });
+  assert.ok(model, 'a set row is a segment def like any other');
+  assert.deepEqual(segmentLevels(model).map((level) => level.id), ['all', 'riftbound']);
+  assert.equal(segmentLevels(model)[1].label, 'Riftbound');
+});
+
+test('segmentGroups puts Sets between Eras and Types and keeps the defs order', () => {
+  const model = normalizeSegments(answer([
+    {
+      date: '2026-11-01',
+      cardsValuePkn: 1000,
+      segments: {
+        'game:pokemon': [940, 9, 30],
+        'game:riftbound': [60, 4, 40],
+        'riftbound:set:origins': [42, 3, 28],
+        'riftbound:set:spiritforged': [18, 1, 12],
+      },
+    },
+  ], [
+    ...DEFS,
+    { key: 'riftbound:set:spiritforged', group: 'set', game: 'riftbound', label: 'Spiritforged' },
+    { key: 'riftbound:set:origins', group: 'set', game: 'riftbound', label: 'Origins' },
+  ]));
+  // The rows come in `segmentDefs` order, not sorted by name or value.
+  const riftbound = segmentGroups(model, 'riftbound', {});
+  assert.deepEqual(riftbound.map((group) => group.title), ['Sets']);
+  assert.deepEqual(riftbound[0].rows.map((row) => row.label), ['Spiritforged', 'Origins']);
+  assert.deepEqual(riftbound[0].rows.map((row) => row.state), ['ok', 'ok']);
+  assert.equal(riftbound[0].rows[1].valuePkn, 42);
+  // A game with all three groups reads Eras, Sets, Types.
+  const withEras = normalizeSegments(answer(
+    [{ date: '2026-11-01', cardsValuePkn: 10, segments: { 'riftbound:era:one': [10, 1, 1] } }],
+    [
+      { key: 'game:riftbound', group: 'game', game: 'riftbound' },
+      { key: 'riftbound:era:one', group: 'era', game: 'riftbound', label: 'First era' },
+      { key: 'riftbound:set:origins', group: 'set', game: 'riftbound', label: 'Origins' },
+      { key: 'riftbound:graded', group: 'type', game: 'riftbound', label: 'Graded' },
+    ],
+  ));
+  assert.deepEqual(
+    segmentGroups(withEras, 'riftbound', {}).map((group) => group.title),
+    ['Eras', 'Sets', 'Types'],
+  );
+});
+
 test('segment rows carry the last day, a gap-free series and the window change', () => {
   const model = normalizeSegments(answer([
     { date: '2026-11-01', cardsValuePkn: 100, segments: { 'game:pokemon': [100, 10, 10] } },
