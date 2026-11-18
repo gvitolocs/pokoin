@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  CARDMARKET_OFFERS_SOURCE,
+  CM_OFFER_FLOORS,
+  cmOfferFacet,
   fetchCardPriceHistory,
   graphGapDays,
   priceHistoryRange,
@@ -9,7 +12,7 @@ import {
   PRICE_SOURCES,
   PRICE_SOURCE_RANGES,
 } from './price-history.js';
-import { soldGraphGapSegments } from './sold-graph.js';
+import { soldGraphGapSegments, soldGraphHoverRows } from './sold-graph.js';
 
 test('a range button is its own window ending today', () => {
   const today = '2026-11-16';
@@ -257,6 +260,153 @@ test('a card id that is not a number and a failed request both resolve null', as
     assert.equal(calls, 0, 'a non-numeric id never asks the API');
     assert.equal(await fetchCardPriceHistory('612376', { from: '2026-08-18', to: '2026-11-16' }), null);
     assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+/** One product's offer day: a series per floor the window has days for, best first. */
+const OFFERS = {
+  source: 'cardmarket_offers',
+  currency: 'PKN',
+  metric: 'lowestOffer',
+  status: 'available',
+  idProduct: 279646,
+  language: 'EN',
+  conditionIsFloor: true,
+  series: [
+    {
+      condition: 'NM',
+      days: [
+        { day: '2026-11-16', lowestPkn: 2200, sellerType: 'private', asked: true },
+        { day: '2026-11-09', lowestPkn: 1840, sellerType: 'pro', asked: true },
+      ],
+    },
+    { condition: 'SP', days: [{ day: '2026-11-09', lowestPkn: 2000, sellerType: 'pro', asked: true }] },
+  ],
+};
+
+test('the Cardmarket floor line is the asked floor, in the words of the ask', () => {
+  const history = { ...HISTORY, cardmarketOffers: OFFERS };
+  const rows = priceSourceSeries(history, { cmCondition: 'NM', cmLanguage: 'EN' });
+  // Drawn beside the trend it belongs to, which is now named for what it is.
+  assert.deepEqual(rows.map((row) => row.key), ['tcgplayer', 'cardmarket', 'cardmarket_offers', 'cardtrader_ask']);
+  const offers = rows.find((row) => row.key === 'cardmarket_offers');
+  assert.deepEqual(
+    {
+      label: offers.label,
+      short: offers.short,
+      color: offers.color,
+      dashed: offers.dashed,
+      gapDays: offers.gapDays,
+      carry: offers.carry,
+    },
+    {
+      label: 'Cardmarket · NM · EN',
+      short: 'CM·NM',
+      color: CARDMARKET_OFFERS_SOURCE.color,
+      dashed: false,
+      gapDays: 2,
+      carry: 'none',
+    },
+  );
+  assert.notEqual(offers.color, rows.find((row) => row.key === 'cardmarket').color, 'not the trend’s colour');
+  // The asked series, oldest first, without the facets the line does not plot.
+  assert.deepEqual(offers.days, [{ day: '2026-11-09', pkn: 1840 }, { day: '2026-11-16', pkn: 2200 }]);
+  // Another floor of the same answer: its own days and its own words.
+  const sp = priceSourceSeries(history, { cmCondition: 'SP' }).find((row) => row.key === 'cardmarket_offers');
+  assert.deepEqual(sp.days, [{ day: '2026-11-09', pkn: 2000 }]);
+  assert.deepEqual({ label: sp.label, short: sp.short }, { label: 'Cardmarket · SP · EN', short: 'CM·SP' });
+  // A floor the answer has no series for is no line, and the rest reads on.
+  assert.deepEqual(
+    priceSourceSeries(history, { cmCondition: 'MP' }).map((row) => row.key),
+    ['tcgplayer', 'cardmarket', 'cardtrader_ask'],
+  );
+});
+
+test('an answer without the Cardmarket offers block is simply one line less', () => {
+  assert.deepEqual(
+    priceSourceSeries(HISTORY, { cmCondition: 'NM' }).map((row) => row.key),
+    ['tcgplayer', 'cardmarket', 'cardtrader_ask'],
+  );
+  for (const status of ['empty', 'unavailable', 'unsupported_game']) {
+    const history = { ...HISTORY, cardmarketOffers: { status, series: [] } };
+    assert.deepEqual(
+      priceSourceSeries(history).map((row) => row.key),
+      ['tcgplayer', 'cardmarket', 'cardtrader_ask'],
+      status,
+    );
+  }
+  // The other lines are untouched by the block, and read it or not they are the same.
+  assert.deepEqual(
+    priceSourceSeries({ ...HISTORY, cardmarketOffers: OFFERS })[0].days,
+    priceSourceSeries(HISTORY)[0].days,
+  );
+});
+
+test('a day the collector did not reach breaks the floor line, and is not priced', () => {
+  // What the plot is given: a hover row reads `value`, the line's own days.
+  const days = [
+    { day: '2026-11-09', value: 1840 },
+    { day: '2026-11-11', value: 1900 },
+    { day: '2026-11-17', value: 2000 },
+  ];
+  // Two days is a gap it holds; six is the collector not having reached the card.
+  const split = soldGraphGapSegments(days, CARDMARKET_OFFERS_SOURCE.gapDays);
+  assert.equal(split.segments.length, 2);
+  assert.equal(split.bridges.length, 1);
+  const line = {
+    key: 'cardmarket_offers', label: 'Cardmarket · NM · EN', kind: 'source', carry: 'none', gapDays: 2, days,
+  };
+  const missed = soldGraphHoverRows([line], '2026-11-13').rows[0];
+  assert.equal(missed.value, null);
+  assert.equal(missed.text, 'no data', 'a day it did not quote has no price');
+  assert.deepEqual(soldGraphHoverRows([line], '2026-11-11').rows[0].value, 1900);
+  // The same series with a carry would have answered the 13th from the 11th.
+  const carried = soldGraphHoverRows([{ ...line, carry: 'near' }], '2026-11-13').rows[0];
+  assert.equal(carried.value, 1900);
+  // A weekly answer moves the gap with the week it is thinned into, like the rest.
+  assert.equal(graphGapDays(CARDMARKET_OFFERS_SOURCE, 'day'), 2);
+  assert.equal(graphGapDays(CARDMARKET_OFFERS_SOURCE, 'week'), 9);
+});
+
+test('the facet asked is a floor and a language Cardmarket keeps', () => {
+  // No floor and "any language" are the server's own default facet.
+  assert.deepEqual(cmOfferFacet('', ''), { condition: 'NM', language: 'EN' });
+  assert.deepEqual(cmOfferFacet(undefined, undefined), { condition: 'NM', language: 'EN' });
+  assert.deepEqual(cmOfferFacet('poor', 'de'), { condition: 'Poor', language: 'DE' });
+  // A grade that is not one of the five floors, and a language the desk lists
+  // but Cardmarket is never collected in, both ask the default rather than a
+  // parameter the endpoint would refuse for the whole window.
+  assert.deepEqual(cmOfferFacet('EX', 'ID'), { condition: 'NM', language: 'EN' });
+  assert.deepEqual(cmOfferFacet('Mint', 'th'), { condition: 'NM', language: 'EN' });
+  assert.deepEqual(cmOfferFacet('NM', 'zht'), { condition: 'NM', language: 'ZHT' });
+  // The five floors are the desk's grades, "any" left out of them.
+  assert.deepEqual(CM_OFFER_FLOORS, ['NM', 'SP', 'MP', 'PL', 'Poor']);
+});
+
+test('the graph asks the floor and the language it plots', async () => {
+  const original = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ cardId: '612376', bucket: 'day' }), { status: 200 });
+  };
+  try {
+    await fetchCardPriceHistory('612376', { from: '2026-08-18', to: '2026-11-16' });
+    assert.match(urls[0], /[?&]cmCondition=NM(&|$)/);
+    assert.match(urls[0], /[?&]cmLanguage=EN(&|$)/);
+    await fetchCardPriceHistory('612376', {
+      from: '2026-08-18', to: '2026-11-16', reverse: true, cmCondition: 'SP', cmLanguage: 'JP',
+    });
+    assert.match(urls[1], /[?&]cmCondition=SP(&|$)/);
+    assert.match(urls[1], /[?&]cmLanguage=JP(&|$)/);
+    assert.match(urls[1], /[?&]reverse=1(&|$)/);
+    // Anything the desk picks that the daily table does not keep is asked as
+    // the default, never as a word the endpoint answers 400 for.
+    await fetchCardPriceHistory('612376', { from: '2026-08-18', to: '2026-11-16', cmCondition: '', cmLanguage: 'ID' });
+    assert.match(urls[2], /[?&]cmCondition=NM(&|$)/);
+    assert.match(urls[2], /[?&]cmLanguage=EN(&|$)/);
   } finally {
     globalThis.fetch = original;
   }

@@ -162,6 +162,52 @@ test('the reverse-holo window is a key of its own', () => {
   assert.equal(peekCardPriceHistory('813622', '1y', { reverse: true }), null);
 });
 
+test('the Cardmarket floor and language are part of the key', () => {
+  // A `fields=graph` answer holds the series of the one floor it was read for,
+  // so another grade is another window: `NM` and `SP` cannot share one entry.
+  const asked = (condition, language) => ({
+    ...entryOf(),
+    history: { cardmarketOffers: { status: 'available', series: [{ condition, days: [{ day: '2026-11-16', lowestPkn: condition === 'NM' ? 1840 : 1200 }] }] } },
+  });
+  const nm = saveCardPriceHistory('813622', '3m', asked('NM', 'EN'), { condition: 'NM', language: 'EN' });
+  const sp = saveCardPriceHistory('813622', '3m', asked('SP', 'EN'), { condition: 'SP', language: 'EN' });
+  const de = saveCardPriceHistory('813622', '3m', asked('NM', 'DE'), { condition: 'NM', language: 'DE' });
+  const poor = saveCardPriceHistory('813622', '3m', asked('Poor', 'JP'), { condition: 'poor', language: 'jp' });
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'SP' }), sp);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'NM', language: 'DE' }), de);
+  // The spelling is not part of the key: the desk's `Poor` and the API's are one.
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'Poor', language: 'JP' }), poor);
+  assert.deepEqual(nm, peekCardPriceHistory('813622', '3m'), 'the default facet needs no option');
+  assert.deepEqual([...store.keys()].sort(), [
+    `${PREFIX}813622.3m`,
+    `${PREFIX}813622.3m.DE`,
+    `${PREFIX}813622.3m.POOR.JP`,
+    `${PREFIX}813622.3m.SP`,
+  ]);
+  // The foil facet and the grade facet are one key each of their own.
+  const reverseSp = saveCardPriceHistory('813622', '3m', asked('SP', 'EN'), { reverse: true, condition: 'SP' });
+  assert.ok(store.has(`${PREFIX}813622.3m.r.SP`), 'the reverse window of the same floor');
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { reverse: true, condition: 'SP' }), reverseSp);
+  assert.deepEqual(rememberStaleCardPriceHistory('813622', '3m', { condition: 'SP' }), sp);
+  // A floor nobody stored, and the same floor of another window.
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'MP' }), null);
+  assert.equal(peekCardPriceHistory('813622', '1y', { condition: 'SP' }), null);
+});
+
+test('a window stored without a grade facet is read as the default one', () => {
+  // What every device already holds: the key of the facet nobody asked about.
+  store.set(`${PREFIX}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
+  const known = entryOf();
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'NM', language: 'EN' }), known);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', {}), known);
+  // Not another floor's: the ask that follows reads as nothing cached, and the
+  // window it writes is a key beside it, never over it.
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'SP' }), null);
+  saveCardPriceHistory('813622', '3m', { ...known, history: { cardtrader: { days: [{ day: '2026-11-16', lowestAskPkn: 1 }] } } }, { condition: 'SP' });
+  assert.deepEqual(peekCardPriceHistory('813622', '3m'), known, 'the default window is still the old one');
+  assert.equal(store.size, 2);
+});
+
 test('a v1 window is never read and goes with the first write', () => {
   store.set(`${V1_PREFIX}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
   store.set(`${V1_PREFIX}813622.1y`, 'null');

@@ -1,9 +1,12 @@
 /**
- * The desk's other price sources, per card, window and foil facet, kept beside
+ * The desk's other price sources, per card, window and facet, kept beside
  * the sold slices (market/src/sold-sales-cache.js): a card seen before draws its
  * graph complete at once, instead of the sold line first and the rest a second
  * later. v2 because a `fields=graph` answer holds the series of one facet, so the
- * facet is part of the key; what v1 left behind is dropped, never read.
+ * facet is part of the key — the foil facet, and since PH-C025 the Cardmarket
+ * grade floor and language the desk asked for; what v1 left behind is dropped,
+ * never read. A key of the default facet is the one without those two, so a
+ * window written before them is still read.
  */
 
 import { CARD_SALES_TTL_MS } from './sold-sales-cache.js';
@@ -16,6 +19,13 @@ export const CARD_PRICE_HISTORY_TTL_MS = CARD_SALES_TTL_MS;
 const MEMORY_CAP = 32;
 /** One copy per card, window and facet: the oldest of these keys goes first. */
 const STORE_CAP = 40;
+/**
+ * The facet the server answers for nobody asked: what a `fields=graph` window
+ * of no `cmCondition`/`cmLanguage` holds. A key with no facet in it is exactly
+ * this one, so what is already stored is read as the default facet, never lost.
+ */
+const DEFAULT_CONDITION = 'NM';
+const DEFAULT_LANGUAGE = 'EN';
 const memory = new Map();
 
 function store() {
@@ -30,13 +40,16 @@ function store() {
   return null;
 }
 
-function keyOf(cardId, rangeKey, { reverse } = {}) {
+function keyOf(cardId, rangeKey, { reverse, condition, language } = {}) {
   const id = String(cardId || '').trim();
   const range = String(rangeKey || '').trim();
   if (!id || !range) {
     return '';
   }
-  return `${PREFIX}${id}.${range}${reverse === true ? '.r' : ''}`;
+  const floor = String(condition || DEFAULT_CONDITION).trim().toUpperCase();
+  const code = String(language || DEFAULT_LANGUAGE).trim().toUpperCase();
+  const facet = `${floor === DEFAULT_CONDITION ? '' : `.${floor}`}${code === DEFAULT_LANGUAGE ? '' : `.${code}`}`;
+  return `${PREFIX}${id}.${range}${reverse === true ? '.r' : ''}${facet}`;
 }
 
 /** What the graph needs to draw one window: its own shape, nothing else. */
@@ -100,7 +113,12 @@ function peek(cardId, rangeKey, freshOnly, options) {
   return payload.entry;
 }
 
-/** `{ reverse: true }` is the reverse-holo window: another key, another answer. */
+/**
+ * `{ reverse: true }` is the reverse-holo window: another key, another answer.
+ * `{ condition, language }` is the Cardmarket facet of the same read: an answer
+ * of another floor or another language is not this window, and the default facet
+ * keeps the key it always had.
+ */
 export function peekCardPriceHistory(cardId, rangeKey, options) {
   return peek(cardId, rangeKey, true, options);
 }
