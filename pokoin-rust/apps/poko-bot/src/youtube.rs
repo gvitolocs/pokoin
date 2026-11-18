@@ -489,6 +489,8 @@ async fn callback(
     }
     if let Some(denied) = query.get("error").filter(|s| !s.is_empty()) {
         // Google errors are public callback parameters, not token response bodies.
+        // Only the code: the query string also carries the authorization code.
+        tracing::warn!(error = denied.as_str(), "YouTube OAuth callback denied");
         return error(
             StatusCode::BAD_REQUEST,
             "Poko YouTube auth denied",
@@ -509,6 +511,12 @@ async fn callback(
     };
     match youtube.exchange_code(code).await {
         Ok(result) => {
+            // One line, identity only: no code, no token, no query string.
+            tracing::info!(
+                channel_id = result["channelId"].as_str().unwrap_or(""),
+                title = result["title"].as_str().unwrap_or(""),
+                "YouTube OAuth connected"
+            );
             let s = |v: &Value| v.as_str().unwrap_or("no handle").to_string();
             let channels = result["channels"].as_array().cloned().unwrap_or_default();
             let list = channels
