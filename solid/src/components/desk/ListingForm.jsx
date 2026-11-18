@@ -12,13 +12,14 @@ import {
   saveSellerSettings,
   updateListing,
 } from '@market/api.js';
-import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
-import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
+import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation, offerLanguage } from '@market/card-desk.js';
+import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
+import { editListingBody } from '@market/listing-row-edit.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox } from '@market/inventory-listings.js';
-import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
-import { sellLanguages, versionRedirects } from '@market/listing-languages.js';
+import { inventoryMarketLabel, priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
+import { deskLanguageChips, versionRedirects } from '@market/listing-languages.js';
 import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
@@ -92,6 +93,8 @@ function CameraIcon() {
  * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
+ * As the row editor (MyPokoin) `props.editing` is the inventory row and
+ * `presets`, `currencies`, `moreFlags` and `onDelete` fill the edit side.
  */
 export default function ListingForm(props) {
   const navigate = useGameNavigate();
@@ -146,17 +149,43 @@ export default function ListingForm(props) {
   // The cached session is enough to paint the form enabled; a save waits for
   // the bearer (getBearer) anyway.
   const ready = () => authReady() || signedIn();
-  const listLangs = createMemo(() => sellLanguages({
-    nationality: card().nationality,
-    setName: props.identity?.set || card().set,
-    releaseLanguages: card().releaseLanguages,
-  }));
+  const listLangs = createMemo(() => {
+    // Editing an inventory row: its own language stays selectable even when the
+    // card's catalog languages do not list it (an old card can be sold in Indonesian).
+    const stored = editingId() ? [offerLanguage(props.editing, card())] : [];
+    return deskLanguageChips({
+      nationality: card().nationality,
+      setName: props.identity?.set || card().set,
+      releaseLanguages: card().releaseLanguages,
+      data: stored,
+    });
+  });
   const redirects = createMemo(() => versionRedirects(props.versions || [], card().id, listLangs(), {
     nationality: card().nationality,
   }));
   const langKey = createMemo(() => listLangs().join(','));
   const editingId = createMemo(() => props.editing?.id || '');
   const isEditing = () => Boolean(editingId());
+  // "From the market" quotes for the price of the listing being edited.
+  const presets = () => (isEditing() && Array.isArray(props.presets) ? props.presets : []);
+  // The inventory editor shows the desk's Signed and Altered chips too.
+  const extraChips = () => (props.moreFlags
+    ? [...listChips, { key: 'signed', label: 'Signed' }, { key: 'altered', label: 'Altered' }]
+    : listChips);
+  // Currency choices: the seller's own first, or the desk's fixed list.
+  const currencies = () => (Array.isArray(props.currencies) && props.currencies.length
+    ? props.currencies
+    : [...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()]);
+  const presetPrice = (pkn) => (currency() === 'PKN'
+    ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
+    : formatPknNumber(fiatFromPkn(pkn, currency()), { maximumFractionDigits: 2 }));
+
+  function takePreset(row) {
+    setPrice(presetPrice(row.pkn));
+    priceManual = true;
+    priceTyped = true;
+  }
+
   // The pricing group of the listing being edited: a new price takes it out.
   const [priceGroup, setPriceGroup] = createSignal(null);
   createEffect(editingId, (id) => {
@@ -433,14 +462,26 @@ export default function ListingForm(props) {
         setName: props.identity.set,
         collectorNumber: props.identity.number,
       };
-      const { pricePkn: _typedPrice, ...editFields } = fields;
       const saved = editing
-        ? await updateListing(id, {
-          ...editFields,
-          ...editPriceFields(amount, props.editing?.pricePkn ?? props.editing?.price_pkn, priceTyped),
+        ? await updateListing(id, editListingBody({
+          amount,
+          quantity,
+          condition: condition(),
+          language: language(),
+          foil: foil(),
+          flags,
+          comment: comment(),
+          company: company(),
+          grade: grade(),
+          cert: cert(),
+          location: locationValue(),
+          // An edit only moves the box slot when the server said where it is.
+          sendLocation: stockReady() && ownLocation() !== null,
+          priceTyped,
           sellerUid: uid() || props.editing?.sellerUid,
-          status: 'active',
-        }, token)
+          showSigned: Boolean(props.moreFlags),
+          showAltered: Boolean(props.moreFlags),
+        }, props.editing), token)
         : await createListing({
           cardId: publicCardId(row),
           sellerName: sellerName(),
@@ -602,7 +643,7 @@ export default function ListingForm(props) {
               setCurrency(event.currentTarget.value);
             }}
           >
-            <For each={[...new Set([...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()])]}>
+            <For each={[...new Set(currencies())]}>
               {(code) => <option value={code} selected={code === currency()}>{code}</option>}
             </For>
           </select>
@@ -621,8 +662,33 @@ export default function ListingForm(props) {
           >
             {saving() ? 'Saving…' : 'Save changes'}
           </button>
+          <Show when={props.onDelete}>
+            <button
+              type="button"
+              class="btn ghost pricer-danger sell-delete"
+              disabled={saving()}
+              title="Unlist this card"
+              onClick={() => props.onDelete()}
+            >
+              Delete listing
+            </button>
+          </Show>
         </Show>
       </div>
+      <Show when={presets().length}>
+        <div class="sell-market-quotes" role="group" aria-label="From the market">
+          <span class="sell-quote-label">From the market</span>
+          <For each={presets()}>
+            {(row) => (row.reference ? (
+              <span class="sell-quote is-reference" title={row.title}>{row.label} {inventoryMarketLabel({ currency: 'USD', low: row.usdLow, high: row.usdHigh })}</span>
+            ) : (
+              <button type="button" class="sell-quote" title={row.title} onClick={() => takePreset(row)}>
+                {row.label} <b>{presetPrice(row.pkn)}</b>
+              </button>
+            ))}
+          </For>
+        </div>
+      </Show>
       <Show when={priceGroup()}>
         <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
       </Show>
@@ -675,7 +741,7 @@ export default function ListingForm(props) {
           </select>
         </label>
         <div class="sell-chips" role="group" aria-label="Listing extras">
-          <For each={listChips}>
+          <For each={extraChips()}>
             {(chip) => (
               <button
                 type="button"
