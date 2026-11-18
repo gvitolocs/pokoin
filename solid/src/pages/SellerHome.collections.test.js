@@ -232,9 +232,15 @@ test('the collections CSS is tokens, and a phone gets the whole screen', () => {
   assert.match(phone, /border-radius: 0;/);
   // Every control a thumb works with, and nothing that can widen the page.
   assert.match(phone, /min-height: 44px;/);
-  for (const selector of ['.collections-field input', '.collections-field select', '.collections-mini select', '.collections-foot .btn']) {
+  for (const selector of ['.collections-field input', '.collections-field select', '.collections-mini select', '.collections-foot .btn', '.segment-collections-new']) {
     assert.ok(phone.includes(selector), `the phone block leaves ${selector} at its desktop height`);
   }
+  // The button that opens the whole dialog is a thumb target too, and the body
+  // keeps its own scroll: a flick past the end of the list must not move the
+  // dashboard behind it, and the page itself cannot scroll while it is up.
+  assert.match(css, /\.collections-body \{\n\s*overscroll-behavior: contain;/);
+  assert.match(editorSrc, /const overflow = document\.body\.style\.overflow;\n\s*document\.body\.style\.overflow = 'hidden';/);
+  assert.match(editorSrc, /return \(\) => \{\n\s*document\.body\.style\.overflow = overflow;/);
   assert.match(css, /overflow-wrap: anywhere;/);
   assert.match(css, /\.collections-editor \{[^}]*width: min\(46rem, calc\(100vw - 1\.5rem\)\);/);
 });

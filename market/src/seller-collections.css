@@ -177,7 +177,10 @@
   color: var(--text);
 }
 
+/* `contain` so a flick that reaches the end of this list stops here instead of
+   handing the scroll to the dashboard behind the dialog. */
 .collections-body {
+  overscroll-behavior: contain;
   display: grid;
   align-content: start;
   gap: 0.7rem;
@@ -470,7 +473,8 @@
   .collections-foot .btn,
   .collections-item-remove,
   .segment-collections-actions button,
-  .segment-collections-error button {
+  .segment-collections-error button,
+  .segment-collections-new {
     min-height: 44px;
   }
 

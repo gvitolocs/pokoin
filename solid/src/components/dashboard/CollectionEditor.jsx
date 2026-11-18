@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show, onSettled } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { cardFromCatalogRow, fetchSearch } from '@market/api.js';
 import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
@@ -258,6 +258,17 @@ export default function CollectionEditor(props) {
   // The typeahead ranks one name pool — the page's own game, and Pokémon only.
   // Any other game the picker offers goes to the marketplace search instead.
   const liveSearch = () => pickedGame() === (props.hostGame || game().id) && isPokemonGame();
+
+  // The page behind a dialog that covers it must not move: the wheel over the
+  // scrim scrolled the dashboard out of sight under the editor. Whatever path
+  // closes this — Escape, Cancel, the scrim, a saved draft — runs the cleanup.
+  onSettled(() => {
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = overflow;
+    };
+  });
 
   let box;
   let nameBox;
