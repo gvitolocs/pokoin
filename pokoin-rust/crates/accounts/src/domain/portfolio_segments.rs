@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{json, Map, Value as Json};
 
+use crate::domain::marketplace_game::{is_pokemon_ingest_game, normalize_game};
 use crate::domain::portfolio_history::{field_bool, field_i64, field_str, holding_slices, Holding};
 use crate::handlers::poko_market::era_for_code;
 
@@ -118,36 +119,53 @@ const OTHER_SETS_LABEL: &str = "Other sets";
 /// `product_type` means; jumbo and accessory printings are singles too.
 const LOOSE_PRODUCT_TYPES: [&str; 3] = ["card", "jumbo", "accessory"];
 
-/// The longest game id that still fits a key. An id that sanitises to nothing,
-/// or is longer than this, is reported as [`UNKNOWN_GAME`] rather than as a
-/// blank or arbitrary key nobody can draw.
-const GAME_MAX_LEN: usize = 40;
-const UNKNOWN_GAME: &str = "unknown";
+/// The game id of a row the platform cannot name a database for: no query is
+/// made for it, so its cards stay held and unpriced rather than being looked up
+/// in Pokémon's catalog by a card id that only looks alike.
+pub const UNKNOWN_GAME: &str = "unknown";
 
-/// The longest [`set_slug`] a key can carry, for the same reason.
+/// The longest game id a key can carry. Only a nameless game is ever cut, since
+/// the ids that survive [`game_of`] come from the platform's own game table.
+const GAME_MAX_LEN: usize = 40;
+
+/// The words the key scheme uses for itself: `all:sealed` is the cross-game cut
+/// and `game:` is its prefix, so a game called either one stays unnamed.
+const RESERVED_GAMES: [&str; 2] = ["all", "game"];
+
+/// The game a holdings row belongs to, as its id in the platform's game table;
+/// Pokémon when the row says nothing.
+///
+/// The id goes through [`normalize_game`] so a listing written `one-piece` is the
+/// game the rest of the API resolves a database for, `one_piece`. An id the table
+/// does not know is [`UNKNOWN_GAME`] and never [`POKEMON`], because a row of an
+/// unknown game is still not a Pokémon card: the Pokémon catalog join matched it
+/// on a public card id of the same number.
+pub fn game_of(row: &Json) -> String {
+    let raw = field_str(row, "game").trim().to_string();
+    if raw.is_empty() {
+        return POKEMON.to_string();
+    }
+    // `normalize_game` answers Pokémon for a name it does not know, so only an
+    // alias of Pokémon itself may land there.
+    let game = normalize_game(&raw);
+    let named = game != POKEMON || is_pokemon_ingest_game(&raw.to_lowercase());
+    if !named
+        || game.is_empty()
+        || game.len() > GAME_MAX_LEN
+        || RESERVED_GAMES.contains(&game.as_str())
+    {
+        return UNKNOWN_GAME.to_string();
+    }
+    game
+}
+
+/// The longest [`set_slug`] a key can carry.
 const SET_SLUG_MAX_LEN: usize = 40;
 
 /// How many sets of one game get a line of their own. A collector of a hundred
 /// sets wants the handful they actually care about, not a hundred graphs, so the
 /// rest of that game's cards share its `other` segment.
 pub const SETS_PER_GAME: usize = 6;
-
-/// The game a holdings row belongs to, sanitised for a key; Pokémon when it says
-/// nothing.
-pub fn game_of(row: &Json) -> String {
-    let raw = field_str(row, "game").trim().to_ascii_lowercase();
-    if raw.is_empty() {
-        return POKEMON.to_string();
-    }
-    let game: String = raw
-        .chars()
-        .filter(|letter| letter.is_ascii_lowercase() || letter.is_ascii_digit() || *letter == '_')
-        .collect();
-    if game.is_empty() || game.len() > GAME_MAX_LEN {
-        return UNKNOWN_GAME.to_string();
-    }
-    game
-}
 
 /// A set name as a key can carry it: lower case, every run of characters outside
 /// `[a-z0-9]` one `-`, trimmed of `-`, at most [`SET_SLUG_MAX_LEN`] characters,
@@ -781,29 +799,48 @@ mod tests {
     }
 
     #[test]
-    fn game_of_keeps_only_what_a_stored_key_can_carry() {
+    fn game_of_is_the_games_own_id_in_the_platform_table() {
         for (input, expected) in [
             ("  Riftbound ", "riftbound"),
-            ("one piece", "onepiece"),
-            ("a:b", "ab"),
-            ("rift_bound_2", "rift_bound_2"),
-            ("POKÉMON", "pokmon"),
+            ("one piece", "one_piece"),
+            ("one-piece", "one_piece"),
+            ("One Piece", "one_piece"),
+            ("magic", "magic"),
+            ("flesh-and-blood", "flesh_and_blood"),
+            // A name of Pokémon is Pokémon, accents and abbreviations included.
+            ("POKÉMON", "pokemon"),
+            ("pkm", "pokemon"),
+            ("default", "pokemon"),
         ] {
             assert_eq!(game_of(&json!({ "game": input })), expected, "{input:?}");
         }
-        // The length limit is what a key can still carry, not an arbitrary cut.
-        let at_limit = "x".repeat(40);
-        assert_eq!(game_of(&json!({ "game": at_limit })), at_limit);
-        // Too long, or nothing a key can carry at all, is not an id.
-        assert_eq!(game_of(&json!({ "game": "x".repeat(60) })), "unknown");
-        assert_eq!(game_of(&json!({ "game": "!!!" })), "unknown");
         // A row that says nothing about its game is the collection's own game.
         assert_eq!(game_of(&json!({ "game": "" })), "pokemon");
         assert_eq!(game_of(&json!({})), "pokemon");
-        // The key carries the sanitised id, and a Pokémon row with an accent is
-        // not Pokémon: it gets no era key, and slices as an unnamed set instead.
-        let keys = keys_of(&json!({ "game": "POKÉMON", "set_code": "sv1" }));
-        assert_eq!(keys, vec!["game:pokmon", "pokmon:set:unknown"]);
+    }
+
+    #[test]
+    fn a_game_the_table_does_not_know_is_never_pokemon() {
+        for input in ["a:b", "rift_bound_2", "x".repeat(60).as_str(), "!!!"] {
+            assert_eq!(game_of(&json!({ "game": input })), "unknown", "{input:?}");
+        }
+        // An unnamed game gets no era band: it is not a Pokémon card that the
+        // catalog join happened to match on its public id.
+        let keys = keys_of(&json!({ "game": "rift_bound_2", "set_code": "sv1" }));
+        assert_eq!(keys, vec!["game:unknown", "unknown:set:unknown"]);
+    }
+
+    #[test]
+    fn a_game_never_takes_a_reserved_word_of_the_key_scheme() {
+        // `all:sealed` is the cross-game cut and `game:` the game prefix, so a
+        // game called either one would draw another game's line.
+        for input in ["all", "game"] {
+            assert_eq!(game_of(&json!({ "game": input })), "unknown", "{input:?}");
+        }
+        assert_eq!(
+            game_of(&json!({ "game": "flesh_and_blood" })),
+            "flesh_and_blood"
+        );
     }
 
     #[test]
@@ -1211,7 +1248,7 @@ mod tests {
         vec![
             held_set("A Wrong Name", 1),
             json!({ "card_id": "9001", "blueprint_id": "500", "quantity": 1, "game": "pokemon", "set_code": "sv1" }),
-            json!({ "card_id": "9001", "blueprint_id": "600", "quantity": 1, "game": "onepiece" }),
+            json!({ "card_id": "9001", "blueprint_id": "600", "quantity": 1, "game": "one_piece" }),
             json!({
                 "card_id": "9002", "blueprint_id": "700", "quantity": 1,
                 "game": "riftbound", "set_name": "Lost", "product_type": "card"
@@ -1255,7 +1292,7 @@ mod tests {
     fn an_unpriced_game_is_still_held_while_another_is_priced() {
         let mut rows = four_rows_around_one_card_id();
         rows.push(
-            json!({ "card_id": "4242", "blueprint_id": "800", "quantity": 3, "game": "fbecho" }),
+            json!({ "card_id": "4242", "blueprint_id": "800", "quantity": 3, "game": "gundam" }),
         );
         apply_catalog_rows(
             "riftbound",
@@ -1264,8 +1301,8 @@ mod tests {
                 json!({ "card_id": "9001", "blueprint_id": "777", "set_name": "Outcast", "product_type": "card" }),
             ],
         );
-        // FBEcho's database answered with nothing at all.
-        apply_catalog_rows("fbecho", &mut rows, &[]);
+        // Gundam's database answered with nothing at all.
+        apply_catalog_rows("gundam", &mut rows, &[]);
         let groups = segment_holdings(&rows);
         let riftbound: Vec<&str> = groups["game:riftbound"]
             .iter()
@@ -1279,8 +1316,8 @@ mod tests {
             riftbound.iter().any(|key| key.starts_with("unpriced|")),
             "the card it did not is still held: {riftbound:?}"
         );
-        assert_eq!(groups["game:fbecho"].iter().map(|h| h.qty).sum::<i64>(), 3);
-        for holding in &groups["game:fbecho"] {
+        assert_eq!(groups["game:gundam"].iter().map(|h| h.qty).sum::<i64>(), 3);
+        for holding in &groups["game:gundam"] {
             assert!(
                 holding.key.starts_with("unpriced|"),
                 "{} is priced by a blueprint the catalog never confirmed",
@@ -1310,7 +1347,7 @@ mod tests {
         );
         // FBEcho's cards are still held, so the segment reports them at zero.
         let unpriced = crate::domain::portfolio_history::value_holdings_on(
-            &groups["game:fbecho"],
+            &groups["game:gundam"],
             &book,
             "2026-10-08",
         )
