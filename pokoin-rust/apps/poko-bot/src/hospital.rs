@@ -13,6 +13,22 @@ pub struct Hospital {
     timeout: Duration,
 }
 
+/// The retired p2 tunnel listened on loopback 18789 under several spellings, so the guard compares
+/// the parsed host: `host_str` keeps the brackets, which made the "::1" arm unreachable.
+fn is_loopback(host: Option<url::Host<&str>>) -> bool {
+    match host {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => {
+            address.is_loopback()
+                || address
+                    .to_ipv4_mapped()
+                    .is_some_and(|mapped| mapped.is_loopback())
+        }
+        None => false,
+    }
+}
+
 pub fn validate_url(value: &str) -> anyhow::Result<Url> {
     let url = Url::parse(value).context("POKO_HOSPITAL_URL is not a URL")?;
     if !matches!(url.scheme(), "http" | "https")
@@ -28,9 +44,7 @@ pub fn validate_url(value: &str) -> anyhow::Result<Url> {
     if url.path() != "/api/internal/bot-hospital/incident" {
         bail!("POKO_HOSPITAL_URL must target Lucina Rust /api/internal/bot-hospital/incident");
     }
-    if matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
-        && url.port() == Some(18789)
-    {
+    if url.port() == Some(18789) && is_loopback(url.host()) {
         bail!("POKO_HOSPITAL_URL points to the retired p2 port 18789; configure the P-OPS Rust endpoint");
     }
     Ok(url)
@@ -88,6 +102,11 @@ impl Hospital {
         let data: Value = response.json().await.unwrap_or_else(|_| json!({}));
         if !status.is_success() {
             bail!("Bot hospital alert failed {}", status.as_u16());
+        }
+        // The old client reported success as `response.ok && body?.ok !== false`: a receiver that
+        // answers 200 with ok:false rejected the incident, and a false success loses the alert.
+        if data.get("ok").is_some_and(|ok| ok == &Value::Bool(false)) {
+            bail!("Bot hospital alert rejected by the receiver");
         }
         Ok(json!({"ok":true,"data":data}))
     }
