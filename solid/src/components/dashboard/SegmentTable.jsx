@@ -1,14 +1,15 @@
-import { createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
 import { formatPknNumber } from '@market/pkn.js';
 import { formatAssetsValue } from '@market/seller-currency.js';
-import { addUtcDays, utcDayKey } from '@market/portfolio-history.js';
 import {
   ALL_LEVEL,
   collectionSeries,
+  defaultSegmentLevel,
   formatSegmentChange,
   indexedSeries,
   segmentGroups,
   segmentLevels,
+  segmentWindow,
   smoothPath,
   sparkEndPoint,
   sparkPoints,
@@ -120,7 +121,7 @@ function VersusChart(props) {
   const paths = createMemo(() => versusPaths(props.segmentPct, props.collectionPct, props.width, CHART_H, CHART_PAD));
   return (
     <div class="segment-chart-svg" data-testid="segment-chart">
-      <svg width={props.width} height={CHART_H} viewBox={`0 0 ${props.width} ${CHART_H}`}>
+      <svg width={props.width} height={CHART_H} viewBox={`0 0 ${props.width} ${CHART_H}`} aria-hidden="true">
         <line class="segment-zero-line" x1={CHART_PAD} x2={Math.max(CHART_PAD, props.width - CHART_PAD)} y1={paths().zeroY} y2={paths().zeroY} />
         <text class="segment-zero-label" x={2} y={paths().zeroY - 4}>0%</text>
         <Show when={paths().collection}>
@@ -155,30 +156,29 @@ function VersusChart(props) {
 export default function SegmentTable(props) {
   const model = () => props.model || null;
   const currency = () => String(props.currency || 'PKN').trim().toUpperCase() || 'PKN';
-  const skeleton = () => Boolean(props.currencyPending) || (model() == null && Boolean(props.pending));
   // An amount is a price, so the rows wait for the display currency rather
   // than painting PKN first and swapping to DKK.
+  const skeleton = () => model() == null || Boolean(props.currencyPending);
+  // A table with no split and no request for one has nothing to say: not even
+  // three skeleton rows that flash and vanish.
+  const visible = () => model() != null || Boolean(props.pending);
   const painting = () => model() != null && !skeleton();
   const levels = createMemo(() => segmentLevels(model()));
-  const windowRange = createMemo(() => {
-    const days = Number(props.range?.days);
-    const to = utcDayKey();
-    return Number.isFinite(days) && days > 0 ? { from: addUtcDays(to, -days), to } : { from: '', to };
-  });
+  const windowRange = createMemo(() => segmentWindow(model(), props.range));
 
-  // `all` is only worth a switch when it has more than one row to show; a
-  // one-game collection opens straight on that game's own segments.
-  const allRowCount = createMemo(() => segmentGroups(model(), ALL_LEVEL, windowRange())
-    .reduce((count, group) => count + group.rows.length, 0));
   const [picked, setPicked] = createSignal('');
   const [open, setOpen] = createSignal('');
-  const defaultLevel = () => (allRowCount() > 1 ? ALL_LEVEL : (levels()[1]?.id || ALL_LEVEL));
+  const defaultLevel = () => defaultSegmentLevel(model());
   const levelId = () => (levels().some((level) => level.id === picked()) ? picked() : defaultLevel());
   const levelName = () => levels().find((level) => level.id === levelId())?.label || 'All games';
 
   const groups = createMemo(() => segmentGroups(model(), levelId(), windowRange()));
   const rows = createMemo(() => groups().flatMap((group) => group.rows));
-  const openRow = createMemo(() => rows().find((row) => row.key === open()) || null);
+  // Only a row that is on this level and can be plotted holds a chart open:
+  // one that leaves the level or loses its prices closes with it, so an open
+  // chart never outlives the button that would close it.
+  const openRow = createMemo(() => rows().find((row) => row.key === open() && row.state === 'ok') || null);
+  const isOpen = (key) => openRow()?.key === key;
 
   function chooseLevel(id) {
     setPicked(id);
@@ -217,37 +217,41 @@ export default function SegmentTable(props) {
   });
 
   // Both charts are drawn in device pixels, so an end dot never stretches into
-  // an ellipse: the widths come from the measured boxes.
+  // an ellipse: the widths come from the measured boxes. The disconnect is the
+  // effect's own return value — an effect body has no owner here, so an
+  // `onCleanup` registered inside it would land nowhere and leak the observer.
   let box;
   const [sparkSize, setSparkSize] = createSignal(SPARK);
   // The section only exists once there is something to draw, so the observer
   // is attached when the gate opens rather than once at mount.
-  createEffect(() => (model() || skeleton() ? 1 : 0), (mounted) => {
+  createEffect(() => (visible() ? 1 : 0), (mounted) => {
     const node = mounted ? box : null;
-    if (!node || typeof ResizeObserver !== 'function') return;
+    if (!node || typeof ResizeObserver !== 'function') return undefined;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect?.width;
       if (width > 0) setSparkSize(width <= PHONE_MAX_WIDTH ? SPARK_PHONE : SPARK);
     });
     observer.observe(node);
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
   let chartBox;
   const [chartWidth, setChartWidth] = createSignal(CHART_FALLBACK_W);
-  createEffect(open, (key) => {
+  // Keyed on the row that is actually open, so a chart that closes because its
+  // row left the level or lost its prices disconnects its observer too.
+  createEffect(() => openRow()?.key || '', (key) => {
     const node = key ? chartBox : null;
-    if (!node || typeof ResizeObserver !== 'function') return;
+    if (!node || typeof ResizeObserver !== 'function') return undefined;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect?.width;
       if (width > 0) setChartWidth(Math.round(width));
     });
     observer.observe(node);
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
   return (
-    <Show when={model() || skeleton()}>
+    <Show when={visible()}>
       <section
         class="segment-table"
         data-testid="segment-table"
@@ -293,40 +297,40 @@ export default function SegmentTable(props) {
             <span class="segment-head-spark" />
           </div>
 
-          <For each={groups()}>
+          <For each={groups()} keyed={(group) => group.title}>
             {(group) => (
               <div class="segment-group">
                 <Show when={groups().length > 1}>
-                  <h4 class="segment-group-title">{group.title}</h4>
+                  <h4 class="segment-group-title">{group().title}</h4>
                 </Show>
                 <div class="segment-rows">
-                  <For each={group.rows}>
+                  <For each={group().rows} keyed={(row) => row.key}>
                     {(row) => (
                       <>
-                        <Switch fallback={<PlainRow row={row} />}>
-                          <Match when={row.state === 'ok'}>
+                        <Switch fallback={<PlainRow row={row()} />}>
+                          <Match when={row().state === 'ok'}>
                             <button
                               type="button"
-                              class={['segment-row', { 'is-open': open() === row.key }]}
-                              data-testid={`segment-row-${row.key}`}
-                              aria-expanded={String(open() === row.key)}
-                              aria-controls={`segment-chart-${row.key}`}
-                              onClick={() => setOpen((current) => (current === row.key ? '' : row.key))}
+                              class={['segment-row', { 'is-open': isOpen(row().key) }]}
+                              data-testid={`segment-row-${row().key}`}
+                              aria-expanded={String(isOpen(row().key))}
+                              aria-controls={isOpen(row().key) ? `segment-chart-${row().key}` : undefined}
+                              onClick={() => setOpen((current) => (current === row().key ? '' : row().key))}
                             >
-                              <Label row={row} />
-                              <span class="segment-cards">{cards(row.held)}</span>
-                              <span class="segment-value">{amount(row.valuePkn, currency())}</span>
-                              <span class={['segment-change', 'mover-tile-change', tone(row.changePct)]}>{formatSegmentChange(row.changePct)}</span>
-                              <SegmentSpark row={row} size={sparkSize()} />
+                              <Label row={row()} />
+                              <span class="segment-cards">{cards(row().held)}</span>
+                              <span class="segment-value">{amount(row().valuePkn, currency())}</span>
+                              <span class={['segment-change', 'mover-tile-change', tone(row().changePct)]}>{formatSegmentChange(row().changePct)}</span>
+                              <SegmentSpark row={row()} size={sparkSize()} />
                               <Chevron />
                             </button>
                           </Match>
                         </Switch>
-                        <Show when={open() === row.key && chart()}>
-                          <div class="segment-open" id={`segment-chart-${row.key}`} ref={chartBox}>
+                        <Show when={isOpen(row().key) && chart()}>
+                          <div class="segment-open" id={`segment-chart-${row().key}`} ref={chartBox}>
                             <p class="segment-legend">
                               <span class="segment-key is-segment" />
-                              {row.label}
+                              {row().label}
                               <strong class={['mover-tile-change', tone(chart().segmentChange)]}>{formatSegmentChange(chart().segmentChange)}</strong>
                               <span class="segment-key is-collection" />
                               {levelName()}
