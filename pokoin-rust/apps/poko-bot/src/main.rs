@@ -114,12 +114,9 @@ async fn run() -> anyhow::Result<()> {
     let mut workers = Vec::new();
     // Opt-in native OAuth listener. Bind before starting either gateway so a
     // configuration/port failure cannot leave a partially started daemon.
-    if let Ok(raw) = std::env::var("POKO_BOT_OAUTH_ADDR") {
-        let addr = poko_bot::youtube::listener_addr(&raw)?;
-        let data_dir = std::env::var("POKO_BOT_DATA_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| config.state_dir.clone());
-        let youtube_config = poko_bot::youtube::YoutubeConfig::from_env(&data_dir)?;
+    if let Some(addr) = poko_bot::youtube::oauth_listener_addr()? {
+        let youtube_config =
+            poko_bot::youtube::YoutubeConfig::from_env(&poko_bot::youtube::data_dir())?;
         let youtube = Arc::new(poko_bot::youtube::Youtube::new(
             deps.http.clone(),
             youtube_config,
@@ -189,9 +186,7 @@ async fn run_command(command: &str, args: &[String]) -> anyhow::Result<()> {
         .build()?;
     match command {
         "youtube-auth" => {
-            let config = YoutubeConfig::from_env(std::path::Path::new(
-                &std::env::var("POKO_BOT_DATA_DIR").unwrap_or_else(|_| "/var/lib/poko-bot".into()),
-            ))?;
+            let config = YoutubeConfig::from_env(&poko_bot::youtube::data_dir())?;
             let youtube = Youtube::new(http, config);
             if args.is_empty() {
                 println!("{}", youtube.config.authorize_url()?);
@@ -211,12 +206,11 @@ async fn run_command(command: &str, args: &[String]) -> anyhow::Result<()> {
         }
         "youtube-oauth-serve" => {
             anyhow::ensure!(args.is_empty(), "youtube-oauth-serve takes no arguments");
-            let addr = poko_bot::youtube::listener_addr(
-                &std::env::var("POKO_BOT_OAUTH_ADDR").unwrap_or_else(|_| "127.0.0.1:8791".into()),
-            )?;
-            let config = YoutubeConfig::from_env(std::path::Path::new(
-                &std::env::var("POKO_BOT_DATA_DIR").unwrap_or_else(|_| "/var/lib/poko-bot".into()),
-            ))?;
+            let addr = match poko_bot::youtube::oauth_listener_addr()? {
+                Some(addr) => addr,
+                None => poko_bot::youtube::listener_addr(poko_bot::youtube::DEFAULT_OAUTH_ADDR)?,
+            };
+            let config = YoutubeConfig::from_env(&poko_bot::youtube::data_dir())?;
             let app = poko_bot::youtube::router(Arc::new(Youtube::new(http, config)));
             let listener = tokio::net::TcpListener::bind(addr).await?;
             axum::serve(listener, app)

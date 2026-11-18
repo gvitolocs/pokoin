@@ -520,6 +520,9 @@ async fn callback(
     }
 }
 
+/// Used by `youtube-oauth-serve` when POKO_BOT_OAUTH_ADDR is absent or empty.
+pub const DEFAULT_OAUTH_ADDR: &str = "127.0.0.1:8791";
+
 /// Shared by the daemon's opt-in listener and the standalone OAuth command.
 pub fn listener_addr(raw: &str) -> anyhow::Result<std::net::SocketAddr> {
     let addr: std::net::SocketAddr = raw.parse().context("invalid POKO_BOT_OAUTH_ADDR")?;
@@ -528,6 +531,25 @@ pub fn listener_addr(raw: &str) -> anyhow::Result<std::net::SocketAddr> {
         "POKO_BOT_OAUTH_ADDR must bind loopback"
     );
     Ok(addr)
+}
+
+/// An absent or empty POKO_BOT_OAUTH_ADDR means no OAuth listener.
+pub fn oauth_listener_addr() -> anyhow::Result<Option<std::net::SocketAddr>> {
+    let raw = env_alias(&["POKO_BOT_OAUTH_ADDR"]);
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(listener_addr(&raw)?))
+}
+
+/// Directory the Poko YouTube token lives in when POKO_YOUTUBE_TOKEN_PATH is unset.
+/// Empty counts as absent, as in the old chain: POKO_BOT_DATA_DIR, then POKO_BOT_STATE_DIR.
+pub fn data_dir() -> PathBuf {
+    let dir = env_alias(&["POKO_BOT_DATA_DIR", "POKO_BOT_STATE_DIR"]);
+    if dir.is_empty() {
+        return PathBuf::from("/var/lib/poko-bot");
+    }
+    PathBuf::from(dir)
 }
 
 /// google-auth-library emits partial token updates; preserve a usable refresh
