@@ -16,6 +16,8 @@ use crate::config::CommerceConfig;
 use crate::error::{ApiError, StoreError};
 use crate::firestore::FirestoreClient;
 use crate::ports::{ChainClient, Clock, PriceOracle, StripeClient, SystemClock};
+use pokoin_external::cardtrader::client::CardTraderClient;
+use pokoin_external::firebase::{FirestoreRest, FirestoreStore};
 
 #[derive(Clone)]
 pub struct DomainState {
@@ -41,6 +43,12 @@ pub struct Inner {
     /// CardTrader integration boundary; the integrations crate supplies the
     /// implementation. Defaults to [`crate::cardtrader::UnavailableCardTrader`].
     pub cardtrader: Arc<dyn crate::cardtrader::CardTraderPort>,
+    /// The CardTrader write boundary of a request that must not answer before
+    /// CardTrader has: the seller's integration documents (Firestore) and the
+    /// API client. Tests inject both ([`DomainState::with_cardtrader_access`]);
+    /// otherwise they come from the environment, as the outbox paths read them
+    /// today.
+    pub cardtrader_access: Option<(Arc<dyn FirestoreStore>, CardTraderClient)>,
 }
 
 /// A satellite game's read/write pools.
@@ -92,6 +100,7 @@ impl DomainState {
                 prices,
                 firestore,
                 cardtrader: Arc::new(crate::cardtrader::UnavailableCardTrader),
+                cardtrader_access: None,
             }),
         }
     }
@@ -131,6 +140,7 @@ impl DomainState {
                 prices,
                 firestore,
                 cardtrader: Arc::new(crate::cardtrader::UnavailableCardTrader),
+                cardtrader_access: None,
             }),
         }
     }
@@ -224,6 +234,38 @@ impl DomainState {
     /// CardTrader integration boundary.
     pub fn cardtrader(&self) -> &Arc<dyn crate::cardtrader::CardTraderPort> {
         &self.inner.cardtrader
+    }
+
+    /// Replace the CardTrader write boundary (tests): both the integration
+    /// documents and the API client come from the caller, so a save that
+    /// pushes facets to CardTrader never reaches a real Firestore or
+    /// `api.cardtrader.com` — it reaches the router the test started.
+    pub fn with_cardtrader_access(
+        mut self,
+        firestore: Arc<dyn FirestoreStore>,
+        client: CardTraderClient,
+    ) -> Self {
+        let inner = Arc::get_mut(&mut self.inner).expect("unshared state");
+        inner.cardtrader_access = Some((firestore, client));
+        self
+    }
+
+    /// The CardTrader write boundary for a request that waits for CardTrader's
+    /// answer. `Err` when Firebase Admin credentials are not configured:
+    /// whether this seller's edit goes to CardTrader is decided from their
+    /// integration document, so it is never guessed at.
+    #[allow(clippy::result_large_err)]
+    pub fn cardtrader_access(
+        &self,
+    ) -> Result<(Arc<dyn FirestoreStore>, CardTraderClient), ApiError> {
+        if let Some((firestore, client)) = &self.inner.cardtrader_access {
+            return Ok((firestore.clone(), client.clone()));
+        }
+        let firestore =
+            Arc::new(FirestoreRest::from_env().ok_or_else(|| {
+                ApiError::internal("Firebase Admin credentials are not configured.")
+            })?);
+        Ok((firestore, CardTraderClient::new()))
     }
 
     /// Backwards-compatible alias for [`DomainState::write_db`].

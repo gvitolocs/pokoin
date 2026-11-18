@@ -572,7 +572,7 @@ pub fn facets_to_push(before: &Value, after: &Value) -> Option<String> {
         return None;
     }
     let qty = number(&after["quantity_available"]);
-    if ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0) {
+    if ct_push::off_sale(&field(after, "status", 20)) || !qty.is_finite() || qty <= 0.0 {
         return None;
     }
     facets_changed(before, after).then_some(product)
@@ -757,6 +757,172 @@ pub async fn edit_cardtrader(
     }
     payload["steps"]["cardtraderEdit"] = json!("done");
     Ok(())
+}
+
+/// What Pokoin tells the seller when CardTrader no longer has the product.
+pub const GONE_FACETS: &str = "The CardTrader product no longer exists; the next sync relinks it.";
+
+/// What the facet half of a save did.
+///
+/// A facet says what the CardTrader product *is*, so unlike a price it is not
+/// queued: it is written inside the seller's request and CardTrader's answer
+/// becomes that request's answer. [`push_saved_facets`] returns `Err` for the
+/// two outcomes that mean Pokoin and CardTrader would disagree (a refusal, no
+/// answer) and the caller's transaction rolls back; `Skipped` and `Gone` are
+/// the cases where the Pokoin save is right on its own.
+#[derive(Debug)]
+pub enum FacetWrite {
+    /// CardTrader's product carries the new facets now.
+    Applied,
+    /// CardTrader was never asked, for the reason [`link::edit_skip_reason`]
+    /// gives: not connected, 1-Day Ready, or the seller chose import-only. The
+    /// same skips the price and quantity sync takes.
+    Skipped(&'static str),
+    /// CardTrader has no such product: the row is saved and the next sync
+    /// relinks it.
+    Gone,
+}
+
+impl FacetWrite {
+    /// The `cardtrader` key of the save's answer. `None` when CardTrader was
+    /// skipped by the seller's own settings: their answer stays exactly what a
+    /// price edit gives them today.
+    pub fn answer(&self) -> Option<Value> {
+        match self {
+            Self::Applied => Some(json!({ "ok": true, "facets": "updated" })),
+            Self::Gone => Some(json!({ "ok": false, "error": GONE_FACETS })),
+            Self::Skipped(_) => None,
+        }
+    }
+}
+
+/// CardTrader answered and said no, so Pokoin changes nothing. The message
+/// says so in the seller's words: they have to pick another value, retrying
+/// this one would be refused again.
+fn refused_error(message: &str) -> ApiError {
+    ApiError::conflict(format!(
+        "CardTrader refused the change: {}. Nothing was changed.",
+        message.trim_end_matches('.')
+    ))
+    .with_code("cardtrader_refused")
+}
+
+/// Ask CardTrader to rewrite one product's facets, and turn its answer into
+/// what the seller's save answers (`docs/CARDTRADER_SELLER_SYNC.md`).
+#[allow(clippy::result_large_err)]
+pub async fn push_facets(
+    fs: &dyn FirestoreStore,
+    ct: &CardTraderClient,
+    seller: &str,
+    product: &str,
+    body: &Value,
+) -> Result<FacetWrite, ApiError> {
+    let doc = match integration::read_integration_doc(fs, seller).await {
+        Ok(doc) => doc,
+        Err(error) => {
+            // Whether this seller's edit goes to CardTrader at all is decided
+            // from their integration document: without it we cannot promise
+            // either way, so nothing is saved.
+            tracing::warn!(msg = "cardtrader_facet_integration_unreadable", seller, product, error = %error.message);
+            return Err(ApiError::unavailable(
+                "Pokoin could not read your CardTrader connection, so nothing was changed. Try again.",
+            )
+            .with_code("cardtrader_integration_unreadable"));
+        }
+    };
+    if let Some(reason) = link::edit_skip_reason(&doc) {
+        return Ok(FacetWrite::Skipped(reason));
+    }
+    let token = integration::token_from_doc(&doc).map_err(|error| refused_error(&error.message))?;
+    match EditOutcome::of(ct.update_product(&token, product, body.clone()).await) {
+        EditOutcome::Applied => Ok(FacetWrite::Applied),
+        EditOutcome::Gone => {
+            tracing::warn!(msg = "cardtrader_facet_product_gone", seller, product);
+            Ok(FacetWrite::Gone)
+        }
+        EditOutcome::Refused(error) => {
+            tracing::warn!(msg = "cardtrader_facet_refused", seller, product, error = %error.message);
+            Err(refused_error(&error.message))
+        }
+        EditOutcome::InDoubt(error) => {
+            tracing::warn!(msg = "cardtrader_facet_unreachable", seller, product, error = %error.message);
+            Err(ApiError::new(
+                axum::http::StatusCode::BAD_GATEWAY,
+                "CardTrader did not answer, so nothing was changed. Try again.",
+            )
+            .with_code("cardtrader_unreachable"))
+        }
+    }
+}
+
+/// A facet the mapping cannot express is refused before anything is sent: the
+/// seller's own value is the problem, so 422 with the message the mapping gave
+/// (`push::facet_body`).
+fn facet_mapping_error(error: pokoin_external::ApiError) -> ApiError {
+    let code = error
+        .code
+        .unwrap_or_else(|| "cardtrader_facet_unsupported".to_string());
+    ApiError::new(axum::http::StatusCode::UNPROCESSABLE_ENTITY, error.message).with_code(code)
+}
+
+/// `editable_properties` of this row's blueprint, for a game other than
+/// Pokémon, whose facet names and values come from its blueprint row
+/// (`marketplace_<game>.cardtrader_blueprints`). `None` when there is nothing
+/// to map with: Pokémon needs no row, and a satellite catalog that is not
+/// mounted here or has no such blueprint leaves [`push_facets`] undecided —
+/// `facet_body` refuses then, exactly as a create does
+/// (`push::product_body_for_game`).
+#[allow(clippy::result_large_err)]
+async fn blueprint_editable_properties(
+    state: &DomainState,
+    row: &Value,
+) -> Result<Option<Vec<Value>>, ApiError> {
+    let game = ct_push::listing_game(row);
+    if game == "pokemon" {
+        return Ok(None);
+    }
+    let Some(sql) = link::blueprint_properties_sql(&game) else {
+        return Ok(None);
+    };
+    let Some(blueprint) = ct_push::blueprint(&field(row, "card_id", 80)) else {
+        return Ok(None);
+    };
+    let Some(pools) = state.game_pools(&game).await else {
+        return Ok(None);
+    };
+    let found = sqlx::query(&sql)
+        .bind(vec![blueprint])
+        .fetch_optional(&pools.read)
+        .await?;
+    let Some(found) = found else { return Ok(None) };
+    let properties: Option<Value> = found.try_get("editable_properties")?;
+    Ok(properties.and_then(|value| value.as_array().cloned()))
+}
+
+/// The facet half of a listing save, for a listing that stands alone on its
+/// product (`siblings == 0`, so no [`group_leave`] took it out of a shared
+/// one): map the row's facets onto a product body and write it to CardTrader
+/// while the row lock is still held and before the transaction commits.
+///
+/// `Ok(None)` is every edit that changed no facet of a linked, on-sale
+/// listing: the price and quantity still follow through the outbox, which
+/// never carries properties.
+#[allow(clippy::result_large_err)]
+pub async fn push_saved_facets(
+    state: &DomainState,
+    seller: &str,
+    before: &Value,
+    row: &Value,
+) -> Result<Option<FacetWrite>, ApiError> {
+    let Some(product) = facets_to_push(before, row) else {
+        return Ok(None);
+    };
+    let editable = blueprint_editable_properties(state, row).await?;
+    let body = ct_push::facet_body(row, editable.as_deref()).map_err(facet_mapping_error)?;
+    let (fs, ct) = state.cardtrader_access()?;
+    push_facets(fs.as_ref(), &ct, seller, &product, &body)
+        .await
+        .map(Some)
 }
 
 pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value) -> Result<(), ApiError> {

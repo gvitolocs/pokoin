@@ -150,6 +150,7 @@ pub fn pokemon_properties(listing: &Value) -> serde_json::Map<String, Value> {
 }
 
 /// CardTrader `POST /products` body for a Pokoin listing.
+#[allow(clippy::result_large_err)]
 pub fn product_body(listing: &Value) -> ApiResult<Value> {
     let id = blueprint(&first(listing, &["cardId", "card_id"], 80)).ok_or_else(|| {
         ApiError::bad_request("CardTrader listing needs a CardTrader blueprint id.")
@@ -291,6 +292,7 @@ pub fn ct_condition(condition: &str, possible: &[Value]) -> Option<String> {
 /// cannot carry is refused, so nothing is created or rewritten rather than
 /// listed on CardTrader as another copy. One mapping for both a create
 /// ([`product_body_for_blueprint`]) and a facet edit ([`facet_body`]).
+#[allow(clippy::result_large_err)]
 pub fn blueprint_properties(
     listing: &Value,
     editable: &[Value],
@@ -338,6 +340,7 @@ pub fn blueprint_properties(
 /// `POST /products` body for a listing of a game other than Pokémon, built on
 /// [`blueprint_properties`]; the create also needs the blueprint's own
 /// Pokémon-shaped fields, which `product_body` supplies.
+#[allow(clippy::result_large_err)]
 pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiResult<Value> {
     let mut body = product_body(listing)?;
     body["properties"] = Value::Object(blueprint_properties(listing, editable)?);
@@ -366,6 +369,7 @@ pub fn product_body_for_game(listing: &Value, editable: Option<&[Value]>) -> Api
 
 /// The properties a listing's product must carry, dispatched exactly as the
 /// create body is ([`product_body_for_game`]) so the two never disagree.
+#[allow(clippy::result_large_err)]
 fn facet_properties(
     listing: &Value,
     editable: Option<&[Value]>,
@@ -389,6 +393,7 @@ fn facet_properties(
 /// that product, which would leave the seller's listing describing a card
 /// CardTrader sells as another one. With it a refused facet answers 4xx and
 /// nothing changes ([docs/CARDTRADER_SELLER_SYNC.md]).
+#[allow(clippy::result_large_err)]
 pub fn facet_body(listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
     Ok(json!({
         "properties": Value::Object(facet_properties(listing, editable)?),
