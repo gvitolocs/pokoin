@@ -397,8 +397,9 @@ export default function SearchBox(props) {
   const [activeIndex, setActiveIndex] = createSignal(-1);
   const [pointerHoverId, setPointerHoverId] = createSignal(null);
   const [hoverBox, setHoverBox] = createSignal(null);
-  const [hitCount, setHitCount] = createSignal(0);
-  let countedQuery = '';
+  // "View all N": unknown (`null`) until the search page of the committed text
+  // answers it. A real 0 is an answer; a missing total is not (PH-05 §5.3).
+  const [hitCount, setHitCount] = createSignal(null);
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [shadeTick, setShadeTick] = createSignal(0);
@@ -446,10 +447,7 @@ export default function SearchBox(props) {
     setActiveIndex(-1);
     setOpen(true);
     const hot = takeHotSearchPage(text, searchLang(), searchTab(), printLang());
-    if (hot?.count > 0) {
-      countedQuery = text;
-      setHitCount(hot.count);
-    }
+    if (Number.isFinite(hot?.count)) setHitCount(hot.count);
   }
 
   function commitTerm(value) {
@@ -549,8 +547,6 @@ export default function SearchBox(props) {
             alive: () => !stopped && pool.generation === generation,
             onPage: (page, incoming) => {
               pool.transferred = (pool.transferred || 0) + incoming;
-              // Placeholder until the search-page total lands: "View all N" = rows the page lists.
-              if (countedQuery !== text) setHitCount(Number(page?.count) || 0);
               repaint.page();
             },
           });
@@ -580,14 +576,14 @@ export default function SearchBox(props) {
       if (!text) {
         setOtherPending(false);
         setOtherGroups([]);
-        setHitCount(0);
+        setHitCount(null);
         return undefined;
       }
       const ready = liveReady(text);
       if (isPokemon) {
         if (!ready) {
           setOtherGroups([]);
-          setHitCount(0);
+          setHitCount(null);
         } else if (live) {
           hydrateCatalog(live, text, lang);
         }
@@ -596,7 +592,7 @@ export default function SearchBox(props) {
       if (!ready) {
         setOtherPending(false);
         setOtherGroups([]);
-        setHitCount(0);
+        setHitCount(null);
         return undefined;
       }
       const controller = new AbortController();
@@ -662,20 +658,25 @@ export default function SearchBox(props) {
 
   // "View all N": the search-page total for this exact query + tab + print
   // family, asked once typing pauses. Each keystroke used to fetch a results
-  // page (and its recall lookups) for a prefix nobody would open; the count
-  // shows the suggest estimate until the real one lands, and Enter prefetches
-  // on its own (goSearch).
+  // page (and its recall lookups) for a prefix nobody would open; this is the
+  // footer count's ONLY owner — the suggest payload's `count` is an engine
+  // candidate estimate, never a results total (PH-05 §5.2) — and Enter
+  // prefetches on its own (goSearch).
   createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang(), pokemon(), namesTick()], ([isOpen, text, tab, lang, print, isPokemon]) => {
     if (!isOpen || !isPokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
       prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
         .then((payload) => {
+          if (cancelled) return;
+          // A page that answers other text never writes the count, and only a
+          // number is an answer: a missing total stays unknown, a real 0 is
+          // applied — "no results" is information, not a blank.
+          const pageQuery = String(payload?.query ?? '').trim();
+          if (pageQuery && pageQuery !== text) return;
+          const answered = payload?.total !== null && payload?.total !== undefined;
           const total = Number(payload?.total);
-          if (!cancelled && Number.isFinite(total) && total > 0) {
-            countedQuery = text;
-            setHitCount(total);
-          }
+          if (answered && Number.isFinite(total)) setHitCount(total);
         })
         .catch(() => {});
     }, RESULTS_COUNT_DELAY_MS);
@@ -1032,7 +1033,7 @@ export default function SearchBox(props) {
           </Show>
           <Show when={query().trim().length >= 2 && searchTab() !== 'users'}>
             <button class="suggest-all" type="submit">
-              {hitCount() > 0
+              {hitCount() !== null
                 ? `View all ${hitCount().toLocaleString('en-US')} results`
                 : `View all results for “${query().trim()}”`}
             </button>

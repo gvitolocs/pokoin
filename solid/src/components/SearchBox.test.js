@@ -23,13 +23,20 @@ test('the header ranks locally from the first keystrokes; the network pool only 
   assert.equal(/term\(\)\.length < 2|term\.length < 2/.test(box), false);
 });
 
-test('View-all count prefers the payload total, keeps the suggest baseline', () => {
+test('View-all count has one owner: the search page of the committed text', () => {
   assert.doesNotMatch(box, /setHitCount\(count\)/);
   assert.doesNotMatch(box, /count:\s*hitCount/);
-  // Exact totals override; the suggest estimate survives where the payload has none.
-  assert.match(box, /const total = Number\(payload\?\.total\);/);
-  assert.match(box, /Number\.isFinite\(total\) && total > 0/);
-  assert.match(box, /setHitCount\(Number\(page\?\.count\) \|\| 0\)/);
+  // The suggest payload's `count` is an engine candidate estimate, never a
+  // results total, so it may not write the footer (PH-05 §5.2). One owner:
+  // the search page asked for the committed text below.
+  assert.doesNotMatch(box, /setHitCount\(Number\(page\?\.count\)/);
+  assert.match(box, /if \(pageQuery && pageQuery !== text\) return;/);
+  // A real 0 is an answer and is applied; a missing total is unknown, and
+  // unknown renders the plain "View all results for …" line.
+  assert.match(box, /const \[hitCount, setHitCount\] = createSignal\(null\);/);
+  assert.match(box, /if \(answered && Number\.isFinite\(total\)\) setHitCount\(total\);/);
+  assert.doesNotMatch(box, /Number\.isFinite\(total\) && total > 0/);
+  assert.match(box, /\{hitCount\(\) !== null/);
 });
 
 test('suggest rows: two columns, no Singles cell, set mark, collector and translation', () => {
