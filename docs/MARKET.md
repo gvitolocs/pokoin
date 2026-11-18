@@ -827,18 +827,47 @@ cardsHeld] }`. Keys are opaque — `market/src/portfolio-segments.js` groups on
 `group` and `game` alone, so a new segment needs no front-end change, and a
 server that knows neither simply has no table.
 
-The Dashboard paints it in `SegmentTable` under the value graph: the `all`
-level is one row per game plus the cross-game Sealed and Graded rows, a game
-level is that game's eras plus its Sealed and Graded. Each row carries cards
-held, value, change over the window the graph is showing, and a sparkline;
-opening it draws the segment as percent change against the whole collection
-(against that game's own total on a game level). Nothing held is `None held`,
-stock with no sale in the window is `No price data yet`. Amounts follow the
-seller's display currency, like the movers tiles.
+Four groups exist. `game` is one row per game the seller holds cards in. `era`
+is a Pokémon era band. `set` is one expansion of any other game: at most six
+`<game>:set:<slug>` rows for that game plus `<game>:set:other`, labelled `Other
+sets`, which keeps the remainder of its value in the table. `type` is
+`<game>:sealed` and `<game>:graded`, answered for every game and not only
+Pokémon, plus the same two rows for the whole book as `all:sealed` and
+`all:graded`. The list order is the table's order: the game rows, `all:sealed`,
+`all:graded`, then per game its eras or sets followed by its two type rows. A
+game other than Pokémon therefore carries values in its rows, not only card
+counts — a set row is worth something or the seller holds nothing of it.
+
+The Dashboard paints it in `SegmentTable` under the value graph. The `all`
+level is one row per game plus the cross-game Sealed and Graded rows. Every
+game that has at least one `era`, `set` or `type` row gets a level of its own,
+labelled with its name from `GAMES` (`market/src/game.js`); on it the rows are
+grouped "Eras", "Sets", "Types", each group skipped when that game has no row
+in it, in `segmentDefs` order. Each row carries cards held, value, change over
+the window the graph is showing, and a sparkline; opening it draws the segment
+as percent change against the whole collection (against that game's own total on
+a game level). Nothing held is `None held`, stock with no sale in the window is
+`No price data yet`. Amounts follow the seller's display currency, like the
+movers tiles.
+
+The table opens on what `defaultSegmentLevel` says — "All games" only once two
+or more games actually hold cards, otherwise on the one game that does — and
+never on the game the header switch is showing: the desk is the whole book, and
+its level switch is its own. Up to four levels (two, once the tile measures at
+phone width) the switch lays its pills out in one row as before. Past that it
+does not wrap into lines or widen the tile: it keeps one line and scrolls
+sideways inside itself, the active level is brought back into view without
+moving the page, and the pills stay plain buttons so Tab walks them and each
+scrolls itself in.
 
 `market/src/portfolio-segments-preview.js` builds the same shape for
 `/dashboard?dashPreview` from the graph's own fixture series, so the layout is
-reviewable while the API still answers plain days.
+reviewable while the API still answers plain days. There Riftbound is a priced
+game — 40 cards worth 6 % of the day's Pokémon value, on top of it, over its two
+sets — and Battle Spirits Saga holds 12 cards with no price at all, so the
+preview shows a set level and the `No price data yet` row. The fixture leaves
+out the Sealed and Graded rows of a game that holds neither, so what is reviewed
+is the table a real book would show rather than a list of empty rows.
 
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
