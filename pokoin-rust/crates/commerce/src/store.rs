@@ -94,7 +94,13 @@ pub struct LedgerOp {
 }
 
 impl LedgerOp {
-    fn base(from: Option<&str>, to: Option<&str>, amount: i64, reason: &str, mode: MoveMode) -> Self {
+    fn base(
+        from: Option<&str>,
+        to: Option<&str>,
+        amount: i64,
+        reason: &str,
+        mode: MoveMode,
+    ) -> Self {
         Self {
             idem_key: None,
             reason: reason.to_string(),
@@ -180,7 +186,11 @@ impl LedgerOp {
         self
     }
 
-    pub fn with_counterparty(mut self, uid: impl Into<String>, username: impl Into<String>) -> Self {
+    pub fn with_counterparty(
+        mut self,
+        uid: impl Into<String>,
+        username: impl Into<String>,
+    ) -> Self {
         self.counterparty = Some(uid.into());
         self.counterparty_username = Some(username.into());
         self
@@ -298,7 +308,10 @@ pub async fn apply_all(
 
     let mut uids: Vec<String> = Vec::new();
     for op in ops {
-        for uid in [op.from_uid.as_ref(), op.to_uid.as_ref()].into_iter().flatten() {
+        for uid in [op.from_uid.as_ref(), op.to_uid.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             if !uid.is_empty() && !uids.contains(uid) {
                 uids.push(uid.clone());
             }
@@ -361,19 +374,6 @@ pub async fn apply_all(
                         return Ok(Vec::new());
                     }
                 }
-                // A record already written under this path is a request that
-                // exists: this call starts nothing, so nothing of it is
-                // committed.
-                if let Some(foreign) = documents[uids.len()..]
-                    .iter()
-                    .position(|document| document.is_some())
-                {
-                    if let Some((path, _)) = creates.get(foreign) {
-                        return Err(StoreError::Conflict(format!(
-                            "That request is already recorded: {path}"
-                        )));
-                    }
-                }
                 let mut balances: Vec<(String, FirestoreBalance)> = uids
                     .iter()
                     .zip(documents.iter())
@@ -387,13 +387,17 @@ pub async fn apply_all(
                         )
                     })
                     .collect();
-                for op in &ops {
-                    apply_mode(&mut balances, op)?;
-                }
-                let mut writes = build_writes(&client, &uids, &balances, &ops)?;
-                for (path, value) in creates {
-                    writes.push(FirestoreWrite::Create { path, value });
-                }
+                // A record already written under this path is a request that
+                // exists: this call starts nothing, so nothing of it is
+                // committed. Otherwise the record is created in this same
+                // commit, beside the balances and the ledger entries.
+                let mut writes = writes_for_unrecorded_request(
+                    &client,
+                    &uids,
+                    &mut balances,
+                    &ops,
+                    &documents[uids.len()..],
+                )?;
                 if let (Some(path), Some(key)) = (marker_path, key) {
                     let (from_available, to_available) = party_balances(&balances, &ops[0]);
                     let mut marker = json!({
@@ -435,7 +439,9 @@ pub async fn apply_all(
                     result: None,
                 })
             }
-            None => Err(StoreError::Cache("Ledger transaction returned no result.".into())),
+            None => Err(StoreError::Cache(
+                "Ledger transaction returned no result.".into(),
+            )),
         },
         Err(error) => {
             // A racing caller committed the marker first (precondition
@@ -457,7 +463,10 @@ fn party_balances(balances: &[(String, FirestoreBalance)], op: &LedgerOp) -> (i6
             .map(|(_, balance)| balance.available_pkn)
             .unwrap_or(0)
     };
-    (available(op.from_uid.as_ref()), available(op.to_uid.as_ref()))
+    (
+        available(op.from_uid.as_ref()),
+        available(op.to_uid.as_ref()),
+    )
 }
 
 fn apply_mode(
@@ -528,6 +537,39 @@ fn apply_mode(
         MoveMode::RecordOnly => {}
     }
     Ok(())
+}
+
+/// The money writes for a request whose record is not already present.
+///
+/// A present record refuses the commit before any balance moves, so that
+/// request's money stays where it was. A new record is a create in the same
+/// write list as the balances and the ledger entries: one commit carries both.
+fn writes_for_unrecorded_request(
+    client: &FirestoreClient,
+    uids: &[String],
+    balances: &mut [(String, FirestoreBalance)],
+    ops: &[LedgerOp],
+    create_documents: &[Option<Value>],
+) -> Result<Vec<FirestoreWrite>, StoreError> {
+    let creates: Vec<(String, Value)> = ops.iter().filter_map(|op| op.create.clone()).collect();
+    if let Some(foreign) = create_documents
+        .iter()
+        .position(|document| document.is_some())
+    {
+        if let Some((path, _)) = creates.get(foreign) {
+            return Err(StoreError::Conflict(format!(
+                "That request is already recorded: {path}"
+            )));
+        }
+    }
+    for op in ops {
+        apply_mode(balances, op)?;
+    }
+    let mut writes = build_writes(client, uids, balances, ops)?;
+    for (path, value) in creates {
+        writes.push(FirestoreWrite::Create { path, value });
+    }
+    Ok(writes)
 }
 
 fn build_writes(
@@ -688,7 +730,9 @@ pub async fn idempotency_result(
     key: &str,
 ) -> Result<Option<Value>, StoreError> {
     let id = idempotency_doc_id(key);
-    let document = fs.get_document(&fs.document_path(IDEMPOTENCY, &id)?).await?;
+    let document = fs
+        .get_document(&fs.document_path(IDEMPOTENCY, &id)?)
+        .await?;
     Ok(document.map(merged_record))
 }
 
@@ -790,7 +834,10 @@ pub async fn uid_for_username(
     if crate::firestore::validate_document_id(&clean).is_err() {
         return Ok(None);
     }
-    if let Some(document) = fs.get_document(&fs.document_path(USERNAMES, &clean)?).await? {
+    if let Some(document) = fs
+        .get_document(&fs.document_path(USERNAMES, &clean)?)
+        .await?
+    {
         let uid = document
             .get("uid")
             .and_then(Value::as_str)
@@ -1000,7 +1047,11 @@ mod tests {
         assert!(amounts.contains(&250));
         let kinds: Vec<&str> = ledger
             .iter()
-            .map(|json| json["update"]["fields"]["type"]["stringValue"].as_str().unwrap())
+            .map(|json| {
+                json["update"]["fields"]["type"]["stringValue"]
+                    .as_str()
+                    .unwrap()
+            })
             .collect();
         assert!(kinds.contains(&"account_transfer_sent"));
         assert!(kinds.contains(&"account_transfer_received"));
@@ -1025,6 +1076,82 @@ mod tests {
         assert_eq!(clean_offset(None), 0);
         assert_eq!(clean_offset(Some(&json!(-5))), 0);
         assert_eq!(clean_offset(Some(&json!(1_000_000))), 50_000);
+    }
+
+    #[test]
+    fn a_request_record_is_created_in_the_same_commit_as_its_money() {
+        let client = test_client();
+        let request = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+        let path = client.document_path(WITHDRAW_REQUESTS, request).unwrap();
+        let record = json!({ "uid": "a", "status": "pending", "amountPkn": 250 });
+        let op = LedgerOp::lock("a", 250, "withdraw_requested")
+            .with_ref(request)
+            .with_create(path, record);
+        let uids = vec!["a".to_string()];
+        let mut state = balances(&[("a", 1_000, 0)]);
+        let writes = writes_for_unrecorded_request(
+            &client,
+            &uids,
+            &mut state,
+            std::slice::from_ref(&op),
+            &[None],
+        )
+        .unwrap();
+        assert_eq!(state[0].1.available_pkn, 750);
+        assert_eq!(state[0].1.locked_pkn, 250);
+        let body = commit_body_for(Some("tx"), &writes);
+        let committed = body["writes"].as_array().unwrap();
+        let names: Vec<&str> = committed
+            .iter()
+            .filter_map(|write| write["update"]["name"].as_str())
+            .collect();
+        assert!(
+            names.iter().any(|name| name.contains("/balances/")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name.contains("/ledger_entries/")),
+            "{names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name.contains("/withdraw_requests/")),
+            "{names:?}"
+        );
+        let created = committed
+            .iter()
+            .find(|write| {
+                write["update"]["name"]
+                    .as_str()
+                    .is_some_and(|name| name.contains("/withdraw_requests/"))
+            })
+            .expect("record create");
+        assert_eq!(created["currentDocument"]["exists"], json!(false));
+        assert_eq!(body["transaction"], json!("tx"));
+    }
+
+    #[test]
+    fn a_request_record_that_already_exists_moves_nothing() {
+        let client = test_client();
+        let request = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+        let path = client.document_path(WITHDRAW_REQUESTS, request).unwrap();
+        let record = json!({ "uid": "a", "status": "pending" });
+        let op = LedgerOp::lock("a", 250, "withdraw_requested").with_create(path, record);
+        let uids = vec!["a".to_string()];
+        let mut state = balances(&[("a", 1_000, 0)]);
+        let existing = json!({ "uid": "a", "status": "pending" });
+        let error = writes_for_unrecorded_request(
+            &client,
+            &uids,
+            &mut state,
+            std::slice::from_ref(&op),
+            &[Some(existing)],
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::Conflict(_)), "{error:?}");
+        assert_eq!(state[0].1.available_pkn, 1_000);
+        assert_eq!(state[0].1.locked_pkn, 0);
     }
 
     #[test]

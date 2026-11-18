@@ -70,6 +70,44 @@ fn is_reused_id(stored: Option<&str>, current: &str) -> bool {
     !request_id::same_request(stored, current)
 }
 
+/// What a transfer body is: the recipient account and the amount. The marker
+/// stores this, and a later body is the same request only when it matches.
+fn transfer_body_fingerprint(recipient_uid: &str, amount_pkn: i64) -> String {
+    request_id::fingerprint(recipient_uid, amount_pkn)
+}
+
+/// What a withdrawal body is: the payout address, in one case, and the amount.
+fn withdraw_body_fingerprint(address: &str, amount_pkn: i64) -> String {
+    request_id::fingerprint(&address.to_ascii_lowercase(), amount_pkn)
+}
+
+/// The answer a repeated transfer id gets: the response the first call stored,
+/// or the move's own facts when that call stored nothing.
+fn transfer_replay_response(stored: Option<Value>) -> Value {
+    stored.unwrap_or_else(|| json!({ "ok": true, "creditedAccountBalance": true }))
+}
+
+/// The answer a repeated withdrawal id gets from the record written with its
+/// lock. The status the record carries is the answer. A record left at
+/// `paying` says the payout is being checked, so it is not read as unpaid.
+fn withdraw_replay_response(request_id: &str, stored: &Value) -> Value {
+    let mut answer = json!({
+        "ok": true,
+        "requestId": request_id,
+        "status": stored["status"],
+        "payoutTxHash": stored.get("payoutTxHash").cloned().unwrap_or(Value::Null),
+    });
+    // The warning the first answer carried is the record's own, so the
+    // replay of that request carries the same text.
+    if let Some(warning) = stored.get("warning").cloned() {
+        answer["warning"] = warning;
+    }
+    if stored["status"] == json!("paying") {
+        answer["message"] = json!(PAYOUT_IN_DOUBT_MESSAGE);
+    }
+    answer
+}
+
 /// The 409 that says this id already stands for a different request.
 fn reused_id() -> ApiError {
     ApiError::conflict(REUSED_ID_MESSAGE).with_code("request_id_reused")
@@ -377,7 +415,7 @@ pub async fn transfer_account_balance(
     let key = request_id
         .as_ref()
         .map(|id| format!("account_transfer:{}:{id}", claims.uid));
-    let fingerprint = request_id::fingerprint(&recipient_uid, amount);
+    let fingerprint = transfer_body_fingerprint(&recipient_uid, amount);
     let mut op = LedgerOp::transfer(&claims.uid, &recipient_uid, amount, "account_transfer_sent")
         .with_meta(json!({}));
     if let Some(key) = &key {
@@ -396,10 +434,7 @@ pub async fn transfer_account_balance(
         if is_reused_id(outcome.fingerprint.as_deref(), &fingerprint) {
             return Err(reused_id());
         }
-        let answer = outcome
-            .result
-            .unwrap_or_else(|| json!({ "ok": true, "creditedAccountBalance": true }));
-        return Ok(private_json(answer));
+        return Ok(private_json(transfer_replay_response(outcome.result)));
     }
 
     // Delivery goes through the real Resend path (`_email.js`); a missing key is
@@ -546,7 +581,7 @@ pub async fn request_pkn_withdraw(
     let key = intent_id
         .as_ref()
         .map(|id| format!("withdraw:{}:{id}", claims.uid));
-    let fingerprint = request_id::fingerprint(&address.to_ascii_lowercase(), amount);
+    let fingerprint = withdraw_body_fingerprint(&address, amount);
     let request_path = firestore.document_path(store::WITHDRAW_REQUESTS, &request_id)?;
     let mut record = json!({
         "uid": claims.uid,
@@ -604,23 +639,7 @@ pub async fn request_pkn_withdraw(
         if stored.get("uid").and_then(Value::as_str) != Some(claims.uid.as_str()) {
             return Err(reused_id());
         }
-        let mut answer = json!({
-            "ok": true,
-            "requestId": request_id,
-            "status": stored["status"],
-            "payoutTxHash": stored.get("payoutTxHash").cloned().unwrap_or(Value::Null),
-        });
-        // The warning the first answer carried is the record's own, so the
-        // replay of that request carries the same text.
-        if let Some(warning) = stored.get("warning").cloned() {
-            answer["warning"] = warning;
-        }
-        // A record left at `paying` may already have its payout on the chain, so
-        // the answer says it stands checked, never that it stands unpaid.
-        if stored["status"] == json!("paying") {
-            answer["message"] = json!(PAYOUT_IN_DOUBT_MESSAGE);
-        }
-        return Ok(private_json(answer));
+        return Ok(private_json(withdraw_replay_response(&request_id, &stored)));
     }
 
     if key.is_none() {
@@ -1366,6 +1385,85 @@ mod tests {
             silver_until_ms(&json!({ "role": "silver" })),
             NOW
         ));
+    }
+
+    #[test]
+    fn a_body_fingerprint_matches_only_the_request_it_was_applied_for() {
+        let transfer = transfer_body_fingerprint("bob-1", 250);
+        assert!(!is_reused_id(
+            Some(&transfer),
+            &transfer_body_fingerprint("bob-1", 250)
+        ));
+        // Another recipient, or another amount, is another request.
+        assert!(is_reused_id(
+            Some(&transfer),
+            &transfer_body_fingerprint("carol-1", 250)
+        ));
+        assert!(is_reused_id(
+            Some(&transfer),
+            &transfer_body_fingerprint("bob-1", 251)
+        ));
+        // A key that recorded no fingerprint matches no body.
+        assert!(is_reused_id(None, &transfer));
+
+        let address = "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01";
+        let withdraw = withdraw_body_fingerprint(address, 400);
+        assert_eq!(
+            withdraw,
+            request_id::fingerprint(&address.to_ascii_lowercase(), 400)
+        );
+        assert!(!is_reused_id(
+            Some(&withdraw),
+            &withdraw_body_fingerprint(&address.to_ascii_uppercase(), 400)
+        ));
+        assert!(is_reused_id(
+            Some(&withdraw),
+            &withdraw_body_fingerprint("0x1111111111111111111111111111111111111111", 400)
+        ));
+        assert!(is_reused_id(
+            Some(&withdraw),
+            &withdraw_body_fingerprint(address, 401)
+        ));
+    }
+
+    #[test]
+    fn a_replay_answers_with_the_request_that_was_applied() {
+        let stored = json!({
+            "ok": true,
+            "creditedAccountBalance": true,
+            "emailNotification": { "ok": true }
+        });
+        assert_eq!(transfer_replay_response(Some(stored.clone())), stored);
+        assert_eq!(
+            transfer_replay_response(None),
+            json!({ "ok": true, "creditedAccountBalance": true })
+        );
+
+        let id = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+        let completed = withdraw_replay_response(
+            id,
+            &json!({ "status": "completed", "payoutTxHash": "0xhash" }),
+        );
+        assert_eq!(completed["ok"], json!(true));
+        assert_eq!(completed["requestId"], json!(id));
+        assert_eq!(completed["status"], json!("completed"));
+        assert_eq!(completed["payoutTxHash"], json!("0xhash"));
+        assert!(completed.get("message").is_none(), "{completed}");
+        assert!(completed.get("warning").is_none(), "{completed}");
+
+        let paying = withdraw_replay_response(id, &json!({ "status": "paying" }));
+        assert_eq!(paying["status"], json!("paying"));
+        assert_eq!(paying["payoutTxHash"], json!(null));
+        assert_eq!(paying["message"], json!(PAYOUT_IN_DOUBT_MESSAGE));
+
+        let manual = withdraw_replay_response(
+            id,
+            &json!({ "status": "pending", "warning": MANUAL_REVIEW_WARNING }),
+        );
+        assert_eq!(manual["status"], json!("pending"));
+        assert_eq!(manual["payoutTxHash"], json!(null));
+        assert_eq!(manual["warning"], json!(MANUAL_REVIEW_WARNING));
+        assert!(manual.get("message").is_none(), "{manual}");
     }
 
     #[test]
