@@ -13,6 +13,7 @@ feed stays in its own document, linked in the last column.
 | TCGplayer (TCGCSV) | Every product and price row of all TCGplayer categories, USD | Oracle `pokoin-marketplace` downloads; nezopt imports | `tcgcsv-daily.timer` (Oracle), tunnel `tcgcsv-oracle-storage-tunnel.service` (nezopt) | hourly check 10:10–21:10 Europe/Copenhagen, one real pull per 24 h | snapshots in `/home/nez/mnt/mybook/tcgprices/tcgcsv/snapshots/`, database `tcgprices` (container `tcgprices-postgres-15t`, localhost 27432) | `tcgcsv-notify-failure.service` (Flareon Telegram notifier) | [TCGCSV_PRICES.md](TCGCSV_PRICES.md), project `tcgprices` |
 | Cardmarket price guide | Cardmarket's public guide: one global low/avg/trend per product, every game | nezopt (user unit) | `pokoin-cardmarket-guides.timer` | daily 02:45 UTC | `pokoin_marketplace.cardmarket_price_guide` | mail, `OnFailure=pokoin-notify@%n.service` | [PRICING.md](PRICING.md) "Price sources" |
 | Cardmarket seller prices | Cheapest professional and cheapest private offer per product, language and condition | nezopt (user units) | `pokoin-cm-price-collector.service` (the walk), `pokoin-cm-price-ingest.timer`, `pokoin-cm-price-publish.timer` | walk continuous on a 7-day cycle; load hourly; publish Monday 03:00 UTC | schema `cm_prices` in `pokoin_marketplace`; readers use the view `cm_prices.current_minimums` | mail, `OnFailure=pokoin-notify@%n.service` on all three | project `cm-price-engine` |
+| Cardmarket watchlist | The products the seller-price walk should visit that day, capped: one JSON line per `idProduct` with a reason and a rank | nezopt (user unit) | `pokoin-cm-watchlist.timer` | daily 02:35 UTC, ahead of the guide load | `%h/scratch/cm-watchlist/watchlist.jsonl`; `pokoin_marketplace` is read only and nothing is written. The collector that consumes it lives in the price-engine project, not this repository | mail, `OnFailure=pokoin-notify@%n.service` | [site-side.md](../reports/cm-conditions/site-side.md) §6 W2 |
 | eBay | not built | — | — | — | — | — | [PRICING.md](PRICING.md) lists it as the owner's call |
 
 ## State on 2026-11-11
@@ -27,7 +28,16 @@ feed stays in its own document, linked in the last column.
   settings to `~/.config/cm-price-engine/collector.env`. Until then the Monday publish mails that
   nothing new was observed.
 - The older table `pokoin_marketplace.cardmarket_offer_minimums` (loaded by
-  `pokoin-cardmarket-catalog cm-offers`) is what the pricer reads today. Nothing reads `cm_prices` yet.
+  `pokoin-cardmarket-catalog cm-offers`) is one of two Cardmarket floors the pricer reads, not the
+  only one: it queries `cm_prices.current_minimums` first
+  (`pokoin-rust/crates/external/src/price_sources.rs:620`, `cm_engine_floor_sql`) and merges the two
+  in `fetch_cm_floors` (`pokoin-rust/crates/external/src/price_sources.rs:767`), so an unpublished or
+  stale engine snapshot still prices from the hand-loaded table. This bullet used to end "nothing
+  reads `cm_prices` yet"; the engine read above is in the tree now (finding PRICE-03, report §1.5).
+- Cardmarket watchlist: the command and its unit files are in the tree
+  (`pokoin-cardmarket-catalog cm-watchlist`, `deploy/ops/nezopt-user/pokoin-cm-watchlist.{service,timer}`),
+  not installed or enabled yet; until somebody runs the timer no `watchlist.jsonl` appears under
+  `~/scratch/cm-watchlist/`.
 
 ## Conventions a new feed should follow
 
@@ -44,5 +54,7 @@ feed stays in its own document, linked in the last column.
 ## Gaps
 
 - Alerts differ: TCGplayer reports through Telegram, the others through mail or hc-ping.
-- The `pokoin-cm-price-*` units are not in `~/.config/pokoin/expected-active.txt`.
+- The `pokoin-cm-price-*` units and `pokoin-cm-watchlist.timer` are not in
+  `~/.config/pokoin/expected-active.txt`, so a Cardmarket day in which one of them never runs is
+  silent: only a run that *starts and fails* raises the `OnFailure` mail.
 - No dashboard reads all feeds; `dumpdashboard` (mybook) was not checked against this list.
