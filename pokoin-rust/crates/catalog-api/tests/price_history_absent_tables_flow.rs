@@ -5,7 +5,7 @@
 //! ```text
 //! docker run -d --rm --name pokoin-ph02-test-pg -e POSTGRES_PASSWORD=test \
 //!   -p 127.0.0.1:55492:5432 --tmpfs /var/lib/postgresql/data \
-//!   -c log_min_error_statement=error postgres:17-alpine
+//!   postgres:17-alpine -c log_min_error_statement=error
 //! POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55492/postgres \
 //!   cargo test -p pokoin-catalog-api --locked --test price_history_absent_tables_flow -- --nocapture
 //! ```
