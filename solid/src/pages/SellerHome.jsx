@@ -21,6 +21,7 @@ import {
 import {
   peekSegments,
   rememberSegments,
+  segmentsEpoch,
   subscribeSegments,
 } from '@market/portfolio-segments-cache.js';
 import { normalizeSegments } from '@market/portfolio-segments.js';
@@ -372,20 +373,33 @@ function LiveDashboard() {
     if (cached) setHistorySeries(cached);
     setHistoryPending(!cached);
     const cachedSegments = peekSegments(id);
-    if (cachedSegments) setSegments(cachedSegments);
+    // Never carry over what the previous uid was holding: this is either that
+    // user's own copy or nothing at all.
+    setSegments(cachedSegments || null);
     setSegmentsPending(!cachedSegments);
     const show = (series) => { if (!cancelled) setHistorySeries(series); };
     const unsubscribe = subscribePortfolioHistory(id, show);
     const unsubscribeSegments = subscribeSegments(id, (model) => {
       if (!cancelled) setSegments(model);
     });
-    loadPortfolioHistory(id, () => getBearer()
-      .then((token) => fetchPortfolioHistory(token))
-      .then((data) => {
-        // An answer that lands after sign-out belongs to nobody.
-        if (!cancelled) rememberSegments(id, data);
-        return data;
-      }))
+    loadPortfolioHistory(id, () => {
+      // Read at the start of this request, so a follow-up retry of the history
+      // cache stamps its own epoch and a sign-out between the two drops it.
+      const epoch = segmentsEpoch(id);
+      return getBearer()
+        .then((token) => fetchPortfolioHistory(token))
+        .then((data) => {
+          // Every answer feeds the segment table, mounted here or not: the
+          // history cache retries on its own and this fetcher is what it
+          // retries. Losing the split must never fail the history load.
+          try {
+            rememberSegments(id, data, epoch);
+          } catch {
+            /* the graph still paints */
+          }
+          return data;
+        });
+    })
       .then(show)
       .catch(() => { /* a failed refresh keeps the painted series */ })
       .finally(() => {
