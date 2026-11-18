@@ -1,0 +1,15 @@
+[Unit]
+Description=Purge the homepage rail urls from Cloudflare after a rails publish
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID, never in the unit or in argv.
+EnvironmentFile=%h/.config/pokoin/cloudflare.env
+# The release checkout marketplace-rails-sync published from; the urls the purge
+# sends are read from the SPA modules in the same checkout.
+ExecStart=%h/pokoin-deploy/rust-release/scripts/marketplace-home-purge.sh
+TimeoutStartSec=120
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
