@@ -360,3 +360,48 @@ export function soldGraphView(slices, slice = {}) {
     chips,
   };
 }
+
+/**
+ * Everything the graph reads off one sold slice, reduced the way the plot
+ * reduces it: two slices with the same signature draw the same line. The flags
+ * are read the way the facet menus read them, `first_edition` included.
+ */
+function soldSliceSignature(slice) {
+  const row = slice && typeof slice === 'object' ? slice : {};
+  const median = numberValue(row.medianPkn ?? row.median_pkn);
+  return JSON.stringify([
+    dayKey(row.day),
+    String(row.condition || '').trim(),
+    String(row.language || '').trim().toUpperCase(),
+    strictFlagValue(row.reverse),
+    strictFlagValue(row.firstEdition ?? row.first_edition),
+    strictFlagValue(row.graded),
+    roundPkn(median),
+    roundPkn(numberValue(row.minPkn ?? row.min_pkn, median)),
+    roundPkn(numberValue(row.maxPkn ?? row.max_pkn, median)),
+    Math.max(0, Math.trunc(numberValue(row.soldQty ?? row.sold_qty))),
+    Math.max(0, Math.trunc(numberValue(row.listings))),
+    sampleCountOf(row),
+    commentList(row.comments ?? row.graded_comments),
+  ]);
+}
+
+/**
+ * Whether an arriving sold answer plots exactly what is already drawn: the same
+ * slices, in any order, under either spelling of the API's keys. A repeat read
+ * of an unchanged card is the common case, and a fresh array for it is a full
+ * SVG re-plot for nothing.
+ */
+export function sameSoldSlices(drawn, next) {
+  if (drawn === next) {
+    return true;
+  }
+  if (!Array.isArray(drawn) || !Array.isArray(next) || drawn.length !== next.length) {
+    return false;
+  }
+  if (!drawn.length) {
+    return true;
+  }
+  const known = drawn.map(soldSliceSignature).sort();
+  return next.map(soldSliceSignature).sort().every((signature, i) => signature === known[i]);
+}

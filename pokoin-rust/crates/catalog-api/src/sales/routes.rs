@@ -614,6 +614,16 @@ fn current_game(headers: &HeaderMap, q: &http::Query) -> String {
     game::parse_game_from_request(&http::header_pairs(headers), q.first("game").filter(|v| !v.is_empty()), q.first("marketplaceGame").filter(|v| !v.is_empty()))
 }
 
+/// The price-history query's `fields=graph` ask and its `reverse` flag, which
+/// chooses the TCGplayer series of the graph answer. `reverse` is the same flag
+/// the sold slice reads, so one parameter serves both.
+fn graph_request(q: &http::Query) -> (bool, bool) {
+    let graph = q
+        .search_param("fields")
+        .is_some_and(|fields| fields.eq_ignore_ascii_case(history_sources::GRAPH_FIELDS));
+    (graph, SoldSlice::from_query(q).reverse.unwrap_or(false))
+}
+
 fn day_of(v: &Value) -> String {
     js::string_or_empty(Some(v)).chars().take(10).collect()
 }
@@ -779,10 +789,11 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
     // holds, so a satellite game's TCGplayer days get their `marketPkn` too.
     // For Pokémon that is the very pool the request already uses.
     let fx_pool = state.api.read();
-    let (cardtrader, tcg, cardmarket, rates) = tokio::join!(
+    let (cardtrader, tcg, cardmarket, pokoin, rates) = tokio::join!(
         cardtrader_history(&pool, ct.as_deref(), &from, &to),
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
         history_sources::cardmarket_history(&pool, &game_id, ct.as_deref(), &from, &to),
+        history_sources::pokoin_history(&pool, &card_id, &from, &to),
         history_sources::read_fx_rates(fx_pool, &to),
     );
     let tcgplayer = match &tcg {
@@ -790,13 +801,21 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         Err(TcgError::Unconfigured) => tcgplayer_source(&[], &rates, Some(unconfigured_status())),
         Err(TcgError::Db(_)) => tcgplayer_source(&[], &rates, Some("unavailable")),
     };
-    let blocks = [&cardtrader, &tcgplayer, &cardmarket];
+    let blocks = [&cardtrader, &tcgplayer, &cardmarket, &pokoin];
     let degraded = blocks.iter().copied().any(status_failed);
     let body = json!({
         "game": game_id, "cardId": js::js_string(&card["card_id"]), "ctId": ct, "from": from, "to": to,
         "printing": { "name": card["name"], "setName": card["expansion_name"], "number": card["card_number"] },
-        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "fx": history_sources::fx_json(&rates),
+        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "pokoin": pokoin, "fx": history_sources::fx_json(&rates),
     });
+    // `fields=graph` answers the same blocks thinned to what the desk graph draws
+    // (PH-06); without it the response is the full one above.
+    let (graph, reverse) = graph_request(&q);
+    let body = if graph {
+        history_sources::graph_answer(&body, reverse)
+    } else {
+        body
+    };
     with_headers(StatusCode::OK, body, &cors, &[("cache-control", if degraded { "no-store" } else { "public, max-age=20, s-maxage=120" })])
 }
 
@@ -872,6 +891,20 @@ mod tests {
         let block = cardtrader_history(&pool, None, "2026-10-01", "2026-11-01").await;
         assert_eq!(block["status"], "empty");
         assert!(block["days"].as_array().expect("days").is_empty());
+    }
+
+    /// `fields=graph` asks for the small answer, `reverse` for the reverse-holo
+    /// series of it; anything else keeps the full one.
+    #[test]
+    fn graph_request_flags() {
+        let asked = |query| graph_request(&http::Query::parse(query));
+        assert_eq!(asked("cardId=239324"), (false, false));
+        assert_eq!(asked("cardId=239324&fields="), (false, false));
+        assert_eq!(asked("cardId=239324&fields=days"), (false, false));
+        assert_eq!(asked("cardId=239324&fields=graph"), (true, false));
+        assert_eq!(asked("cardId=239324&fields=GRAPH&reverse=1"), (true, true));
+        assert_eq!(asked("cardId=239324&fields=graph&reverse=0"), (true, false));
+        assert_eq!(asked("cardId=239324&reverse=true"), (false, true));
     }
 
     #[test]

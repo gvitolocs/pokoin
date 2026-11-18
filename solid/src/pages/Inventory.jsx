@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untra
 import { useLocation, useSearchParams } from '@solidjs/router';
 import { exportStockCsv } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { applyEditedRow, removeListingRow } from '@market/listing-row-edit.js';
 import { game } from '@market/game.js';
 import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
@@ -112,7 +113,8 @@ function InventoryDesk(props) {
     equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab && a.pricerTab === b.pricerTab
       && a.collectionTab === b.collectionTab && a.locationName === b.locationName,
   });
-  // Sellers read their prices in local currency.
+  // Sellers read their prices in local currency; the market column of the
+  // board prints in the same unit as the Price cell beside it.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
   const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
   // A first load paints page by page; its totals wait for the whole book.
@@ -164,6 +166,14 @@ function InventoryDesk(props) {
       setPartial(!complete);
       setRows(next);
     }, true);
+  }
+
+  // A row's edit or unlist is already on the server: paint the new book and keep
+  // the memory copy in step, so another tab of the desk does not show the old row.
+  function paintRows(next) {
+    setRows(next);
+    const book = inventoryBooks.peek(listingsUid(), selectedGame);
+    if (book) book.rows = next;
   }
 
   createEffect(
@@ -444,11 +454,14 @@ function InventoryDesk(props) {
           <InventoryBoard
             rows={rows()}
             formatPrice={formatPrice}
+            priceCurrency={sellerCurrency()}
             showSummary={false}
             defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
             preview={props.preview}
             previewComps={props.preview ? previewComps() : undefined}
+            onRowSaved={(saved) => paintRows(applyEditedRow(rows(), saved))}
+            onRowRemoved={(id) => paintRows(removeListingRow(rows(), id))}
             pricing={pricing}
             onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
           />

@@ -1,0 +1,809 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "template": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "breaking",
+            "reveal",
+            "fact_check",
+            "market_pulse",
+            "explainer",
+            "developing",
+            "comparison",
+            "data_deep_dive",
+            "trend",
+            "analysis"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "headline": {
+      "type": "string"
+    },
+    "dek": {
+      "type": "string"
+    },
+    "articleType": {
+      "type": "string",
+      "enum": [
+        "NEWS",
+        "BREAKING",
+        "FACT CHECK",
+        "ANALYSIS",
+        "EXPLAINER",
+        "MARKET",
+        "DATA"
+      ]
+    },
+    "section": {
+      "type": "string",
+      "enum": [
+        "sets",
+        "cards",
+        "market",
+        "competitive",
+        "collectors",
+        "fact-check",
+        "analysis",
+        "industry"
+      ]
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "paragraph"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "sourceIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "text",
+              "sourceIds"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "heading"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "key_facts"
+                ]
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "sourceIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "sourceIds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "title",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknowns"
+                ]
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "title",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "fact_check"
+                ]
+              },
+              "claim": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "CONFIRMED",
+                  "SUPPORTED",
+                  "UNVERIFIED",
+                  "DISPUTED",
+                  "MISLEADING",
+                  "FALSE"
+                ]
+              },
+              "explanation": {
+                "type": "string"
+              },
+              "supportedBy": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "contradictedBy": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "primarySourceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "claim",
+              "verdict",
+              "explanation",
+              "supportedBy",
+              "contradictedBy",
+              "primarySourceId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "source_comparison"
+                ]
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "claim": {
+                      "type": "string"
+                    },
+                    "says": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "sourceId": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceId",
+                          "text"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "claim",
+                    "says"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "rows"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "why_it_matters"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "context"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "analysis"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "market"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "chart"
+                ]
+              },
+              "chartId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "chartId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gallery"
+                ]
+              },
+              "imageIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "imageIds"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "timeline"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "sourceIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "text",
+                    "sourceIds"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "comparison"
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "values"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "columns",
+              "rows"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "faq"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    },
+                    "a": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "q",
+                    "a"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "related_card"
+                ]
+              },
+              "cardId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "cardId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "related_set"
+                ]
+              },
+              "slug": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "slug"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "methodology"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "quote"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text",
+              "sourceId"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "update_note"
+                ]
+              },
+              "at": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "at",
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    "image_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hero": {
+          "type": "string",
+          "enum": [
+            "catalog_card",
+            "source_image",
+            "fallback"
+          ]
+        },
+        "heroCardId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gallery": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "hero",
+        "heroCardId",
+        "gallery"
+      ]
+    },
+    "related_entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "card",
+              "set",
+              "pokemon",
+              "artist",
+              "product"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "pokoinId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "pokoinId"
+        ]
+      }
+    },
+    "fact_check_status": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISPUTED",
+            "MISLEADING",
+            "FALSE"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "analysis_required": {
+      "type": "boolean"
+    },
+    "market_module_required": {
+      "type": "boolean"
+    },
+    "first_reported_source_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "telegram": {
+      "type": "string"
+    },
+    "discord": {
+      "type": "string"
+    },
+    "x": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "template",
+    "headline",
+    "dek",
+    "articleType",
+    "section",
+    "blocks",
+    "image_plan",
+    "related_entities",
+    "fact_check_status",
+    "analysis_required",
+    "market_module_required",
+    "first_reported_source_id",
+    "telegram",
+    "discord",
+    "x",
+    "notes"
+  ]
+}

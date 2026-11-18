@@ -710,6 +710,25 @@ fn payment_status_of(order: &Value) -> &str {
         .unwrap_or_default()
 }
 
+/// How a refund is settled. A non-EUR order whose payment is still in escrow
+/// is refunded by hand: the ledger is not touched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefundLedgerPlan {
+    Transfer,
+    Manual,
+    Stripe,
+}
+
+fn refund_ledger_plan(eur: bool, payment_status: &str) -> RefundLedgerPlan {
+    if eur {
+        RefundLedgerPlan::Stripe
+    } else if payment_status.trim() == "escrow" {
+        RefundLedgerPlan::Manual
+    } else {
+        RefundLedgerPlan::Transfer
+    }
+}
+
 async fn patch_order(state: &DomainState, order_id: &str, patch: Value) -> Result<Value, ApiError> {
     let firestore = state.firestore()?;
     let mut patch = patch;
@@ -2697,6 +2716,14 @@ async fn order_refund(
     let amount_input = crate::domain::js_number(body.get("amount"));
     let (amount, share) = refunds::assert_refundable(&order, &claims.uid, amount_input)?;
     let eur = refunds::is_eur_order(&order);
+    if refund_ledger_plan(eur, payment_status_of(&order)) == RefundLedgerPlan::Manual {
+        // A non-EUR order in escrow is settled by hand; nothing here may write before this point.
+        tracing::warn!(order_id = %order_id, "refund refused: handled by the Pokoin team");
+        return Err(ApiError::conflict(
+            "This refund was not completed: it is handled by the Pokoin team. Contact support.",
+        )
+        .with_code("refund_needs_manual_handling"));
+    }
     let operation_token = if eur && order["settlementModel"] == crate::domain::settlement::MODEL {
         // Freeze real costs before reserving monetary mutation. This is a read
         // from Stripe, and pending fees remain retryable without a money claim.
@@ -2738,12 +2765,8 @@ async fn order_refund(
     });
 
     if !eur {
-        let escrow = payment_status_of(&order) == "escrow";
-        let op = if escrow {
-            // Funds are still in escrow: the buyer is credited from escrow.
-            store::LedgerOp::mint(&buyer_uid, amount, "marketplace_order_refund")
-        } else {
-            // The seller was already paid: it comes out of their balance.
+        // The seller was already paid: it comes out of their balance.
+        let op = {
             let mut op = store::LedgerOp::transfer(
                 &claims.uid,
                 &buyer_uid,
@@ -3523,6 +3546,33 @@ fn eur_order_shipments(shipments: &[crate::domain::shipping::ShipmentQuote]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_non_eur_escrow_refund_is_handled_by_hand() {
+        assert_eq!(
+            refund_ledger_plan(false, "escrow"),
+            RefundLedgerPlan::Manual
+        );
+    }
+
+    #[test]
+    fn a_non_eur_paid_refund_transfers_from_the_seller() {
+        assert_eq!(
+            refund_ledger_plan(false, "paid"),
+            RefundLedgerPlan::Transfer
+        );
+        assert_eq!(refund_ledger_plan(false, ""), RefundLedgerPlan::Transfer);
+        assert_eq!(
+            refund_ledger_plan(false, " escrow"),
+            RefundLedgerPlan::Manual
+        );
+    }
+
+    #[test]
+    fn a_eur_refund_goes_through_stripe_whatever_the_payment_status() {
+        assert_eq!(refund_ledger_plan(true, "escrow"), RefundLedgerPlan::Stripe);
+        assert_eq!(refund_ledger_plan(true, "paid"), RefundLedgerPlan::Stripe);
+    }
 
     #[test]
     fn order_checkout_sends_stripe_product_data_and_the_server_charge() {

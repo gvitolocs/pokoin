@@ -41,7 +41,6 @@ import {
   omitListings,
   peekCanonicalPath,
   peekCard,
-  peekHasListingRows,
   peekListings,
   peekRecentTile,
   postWatchlist,
@@ -54,7 +53,6 @@ import {
   toggleWatchlist,
   versionsHref,
   warmupCard,
-  warmupNeighbors,
 } from '@market/api.js';
 import {
   albumShade,
@@ -103,8 +101,9 @@ import { cardDocumentTitle, displayName, printingIdentity } from '@market/identi
 import { deskLanguageChips, deskLanguageChoice } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
+import { listingsKnown, rememberListingRows } from '@market/listings-cache.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
-import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
+import { currencyFromSearch, fiatFromPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import { peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory } from '@market/price-history-cache.js';
@@ -129,8 +128,8 @@ import {
 import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
-import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
-import { soldSeriesColor } from '@market/sold-graph.js';
+import { sameSoldSlices, soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
+import { soldGraphRowPrice, soldSeriesColor } from '@market/sold-graph.js';
 import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -156,6 +155,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { createBuyBook, sellTarget } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
+import { warmDeskNeighbor } from '../lib/local-prefetch.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
 import { accountSilver } from '../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -166,8 +166,24 @@ import { listingSelected } from '../lib/select-band.js';
 import { afterPaint } from '../lib/yield-nav.js';
 import { BUYSELL_PREVIEW_BANNER, previewListings, previewScale } from './buysell-preview-fixture.js';
 
-/** A hover / intent prefetch this recent counts as the desk's own first read. */
-const PREFETCH_FRESH_MS = 10_000;
+/**
+ * A hover / intent prefetch this recent counts as the desk's own first read.
+ * Two minutes and not ten seconds: the desk warms the neighbour it is about to
+ * open, and a visitor who reads a card longer than that still paints from that
+ * warm copy instead of sending a cache-busting `_=` and waiting on it. What
+ * really changes a listing reaches this desk over the live channel
+ * (market/src/listing-live.js), and the visitor's own write re-reads with no
+ * window at all (`onListed`).
+ */
+const PREFETCH_FRESH_MS = 120_000;
+
+/**
+ * How long the neighbour warm waits for the browser to be idle before it runs
+ * anyway. Long enough that this page's own reads — issued at mount — are on the
+ * wire first, short enough that a neighbour is warm before a visitor decides to
+ * step to it.
+ */
+const NEIGHBOR_WARM_IDLE_MS = 400;
 
 const DESK_VARS = ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint'];
 
@@ -256,9 +272,12 @@ function CardDesk(props) {
 
   const cached = peekCard(cardId, { lang });
   const listed = peekListings(cardId);
+  // An answer of `[]` is an answer — nobody is selling it — so the cell says so
+  // in this frame instead of opening blank and repainting when the read lands.
+  const listedKnown = listingsKnown(cardId);
   // A reload paints the last answer of this desk; the live read reconciles it.
   const deskGame = untrack(() => game().id);
-  const stored = peekHasListingRows(listed) ? null : readDeskListings(deskGame, cardId);
+  const stored = listedKnown ? null : readDeskListings(deskGame, cardId);
   let paintedFromStore = Boolean(stored);
   const firstStub = untrack(stubCard);
   const [page, setPage] = createSignal(
@@ -267,9 +286,9 @@ function CardDesk(props) {
       : (firstStub ? { card: firstStub, versions: [], neighbors: neighborsOrPeek(cardId) } : null),
   );
   const [shop, setShop] = createStore({
-    offers: offerCopies(peekHasListingRows(listed) ? listed.listings : (stored ? stored.rows : (cached?.offers || []))),
+    offers: offerCopies(listedKnown ? listed.listings : (stored ? stored.rows : (cached?.offers || []))),
   });
-  const [offersReady, setOffersReady] = createSignal(peekHasListingRows(listed) || Boolean(stored));
+  const [offersReady, setOffersReady] = createSignal(listedKnown || Boolean(stored));
   const [error, setError] = createSignal('');
   // Same-id cards of other games, offered when a game-less link cannot pick one.
   const [ownerChoices, setOwnerChoices] = createSignal([]);
@@ -364,11 +383,30 @@ function CardDesk(props) {
     navigate(`${prefixed}${untrack(() => location.search)}`, { replace: true, scroll: false });
   }
 
+  // PH-R034 P5: the two cards the arrows lead to, each warmed once for this desk.
+  // One warmer for both, and the queue behind it runs the loads at idle — after
+  // this page's own reads, which were scheduled before — so the neighbour's data
+  // is already on this device when the click lands.
+  const neighborWarmed = new Set();
+  function warmNeighbors(neighborWindow) {
+    for (const row of [neighborWindow?.next?.[0], neighborWindow?.prev?.[0]]) {
+      const id = String(row?.id || '');
+      if (!/^\d+$/.test(id) || neighborWarmed.has(id)) continue;
+      neighborWarmed.add(id);
+      // Behind the hero: the neighbour's scan must not compete with this card's
+      // (market/src/hero-gate.js). `price` is the Silver gate — the graph history
+      // is a Silver feature, so a warm for anybody else never asks for it.
+      afterHero(() => whenIdle(() => warmDeskNeighbor(row, {
+        lang,
+        price: untrack(accountSilver),
+      }), NEIGHBOR_WARM_IDLE_MS));
+    }
+  }
+
   function showCard(data) {
     if (disposed || !data?.card) return;
     const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
-    // The next card's scan waits for this one's (market/src/hero-gate.js).
-    afterHero(() => warmupNeighbors(neighborWindow, { lang }));
+    warmNeighbors(neighborWindow);
     const current = untrack(page);
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
@@ -449,18 +487,25 @@ function CardDesk(props) {
   // The other price sources join the graph, they do not replace it. Their
   // history is read with the sales, not after the hero, and kept beside them in
   // localStorage (market/src/price-history-cache.js), so a card seen before
-  // draws complete on the first frame. One read per card and window; the lines
-  // already drawn stay while another window loads.
+  // draws complete on the first frame. One read per card, window and facet; the
+  // lines already drawn stay while another window loads.
   // Silver only: everybody else keeps the graph that was here before the
   // sources — the sold median, its facet overlays and its tooltip. For them
   // nothing is asked of the history and its cache is neither read nor written,
   // so the graph never waits on a read that is not coming.
   const GRAPH_HISTORY_WAIT_MS = 1500;
   const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
-  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
-  /** This desk's window: read fresh, or the last one read before it went stale. */
-  const readGraphHistory = (range) => peekCardPriceHistory(cardId, range)
-    || rememberStaleCardPriceHistory(cardId, range);
+  // A `fields=graph` answer holds the one TCGplayer series and the one Cardmarket
+  // trend of the facet it was read for, so the Reverse chip is another read and
+  // not just another plot: the facet belongs to the key.
+  const graphAskKey = (range, reverse) => `${cardId}|${range}|${reverse ? 'r' : 'n'}`;
+  const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse());
+  /** This desk's window, of the facet being plotted: fresh, or stale before it. */
+  const readGraphHistory = (range) => {
+    const reverse = untrack(salesReverse);
+    return peekCardPriceHistory(cardId, range, { reverse })
+      || rememberStaleCardPriceHistory(cardId, range, { reverse });
+  };
   const [priceHistory, setPriceHistory] = createSignal(
     untrack(accountSilver) ? readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE) : null,
   );
@@ -476,7 +521,8 @@ function CardDesk(props) {
 
   function askGraphHistory(range) {
     if (!untrack(accountSilver)) return;
-    const askedFor = `${cardId}|${range}`;
+    const reverse = untrack(salesReverse);
+    const askedFor = graphAskKey(range, reverse);
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
     // A cached window paints at once and is still re-read below: what the desk
@@ -485,14 +531,14 @@ function CardDesk(props) {
     // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
     const known = readGraphHistory(range);
     if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
-    const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
+    const bounds = { ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)), reverse };
     fetchCardPriceHistory(cardId, bounds).then((history) => {
-      // Dropped if this card or window is not the one asked for anymore.
+      // Dropped if this card, window or facet is not the one asked for anymore.
       if (disposed || untrack(graphHistoryKey) !== askedFor) return;
       // An answer of nothing is not cached, so the next visit asks again.
       if (!history) return;
       const entry = { range, from: bounds.from, to: bounds.to, history };
-      saveCardPriceHistory(cardId, range, entry);
+      saveCardPriceHistory(cardId, range, entry, { reverse });
       // Already drawn from the cache: data that has not changed never redraws.
       setPriceHistory((prev) => (prev && JSON.stringify(prev) === JSON.stringify(entry) ? prev : entry));
     });
@@ -500,7 +546,7 @@ function CardDesk(props) {
 
   askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);
   createEffect(graphHistoryKey, (key) => {
-    if (key) askGraphHistory(key.slice(cardId.length + 1));
+    if (key) askGraphHistory(key.slice(cardId.length + 1).split('|')[0]);
   });
   // Silver can arrive after this first paint, with the confirmed profile: the
   // window is asked for then, and its lines join the graph already on screen.
@@ -523,18 +569,25 @@ function CardDesk(props) {
       return () => window.clearTimeout(timer);
     },
   );
+  // The sold slices are re-read on every visit, and an answer that equals what is
+  // already drawn is not new data: handing the graph a fresh array for it
+  // recomputes `soldGraphView` and re-plots the whole SVG. The history write above
+  // keeps `prev` on an equal entry; this is the same rule for the sold line.
+  function showSalesSlices(slices) {
+    setSalesSlices((prev) => (sameSoldSlices(prev, slices) ? prev : slices));
+  }
   fetchCardSales(cardId, { slices: true }).then((data) => {
     if (disposed) return;
     if (!Array.isArray(data?.slices)) {
-      if (!peekCardSales(cardId)) setSalesSlices([]);
+      if (!peekCardSales(cardId)) showSalesSlices([]);
       return;
     }
     saveCardSales(cardId, data.slices);
-    setSalesSlices(data.slices);
+    showSalesSlices(data.slices);
   }).catch(() => {
     if (disposed || peekCardSales(cardId)) return;
     const stale = rememberStaleCardSales(cardId);
-    setSalesSlices(stale?.slices ?? []);
+    showSalesSlices(stale?.slices ?? []);
   });
   function showVersionSet(data) {
     if (disposed) return;
@@ -547,10 +600,7 @@ function CardDesk(props) {
   if (cached) rememberNeighbors(cached.card, cached.neighbors);
   // Arrows painted from the cache: warm the next hop now, not after this
   // card's own page loads, so fast clicking keeps finding neighbours.
-  if (!cached) {
-    const painted = untrack(page)?.neighbors;
-    if (painted?.prev?.length || painted?.next?.length) afterHero(() => warmupNeighbors(painted, { lang }));
-  }
+  if (!cached) warmNeighbors(untrack(page)?.neighbors);
   const landedWithoutSlug = !untrack(() => props.slug);
   const knownPath = landedWithoutSlug
     ? (peekCanonicalPath(cardId, { lang }) || firstStub?.canonicalPath || firstStub?.canonical_path || '')
@@ -566,14 +616,30 @@ function CardDesk(props) {
   }
 
   onSettled(() => {
-    laterFrame = requestAnimationFrame(() => {
-      laterTimer = window.setTimeout(() => setLater(true), 0);
-    });
+    // A desk that mounted from a warm cache has what the rail is built from
+    // already: the frame and the task only hid, on every arrow press, a rail that
+    // was on screen before the click (N11). The wait is for a visitor arriving from
+    // a tile, who must see the desk above the fold first.
+    if (cached) {
+      setLater(true);
+    } else {
+      laterFrame = requestAnimationFrame(() => {
+        laterTimer = window.setTimeout(() => setLater(true), 0);
+      });
+    }
     const unsubscribe = subscribeListingLive(cardId, (event) => {
-      if (!shop.offers.length) return;
+      // An empty cell whose answer is known is an answered cell, and the event that
+      // puts the first listing on a card nobody was selling is the one the old guard
+      // threw away: the desk then kept saying "No listings yet." until a later read
+      // corrected it (N12).
+      if (!shop.offers.length && !listingsKnown(cardId)) return;
       const plain = snapshot(shop.offers);
       const next = applyListingLive(plain, event);
-      if (next !== plain) setOffers(next);
+      if (next === plain) return;
+      setOffers(next);
+      // The rows the desk adopted (P2) came from this cache: unless the event moves
+      // them there too, a step away and back paints what the channel replaced.
+      rememberListingRows(cardId, next);
     });
     return () => {
       disposed = true;
@@ -871,8 +937,8 @@ function CardDesk(props) {
   // The window the lines on the plot were read for, so the chart clips to it
   // even while a longer one is still loading. Nothing of the graph is passed
   // until it is drawn (see GRAPH_HISTORY_WAIT_MS), so no key or line jumps in
-  // after the sold median. The source keys, their lines, the Pokoin dot and the
-  // range buttons are Silver's alone (see askGraphHistory).
+  // after the sold median. The source keys, their lines, today's Pokoin price and
+  // the range buttons are Silver's alone (see askGraphHistory).
   const graphRangeProps = () => {
     if (!graphDrawn() || !accountSilver()) return null;
     const entry = priceHistory();
@@ -881,17 +947,16 @@ function CardDesk(props) {
   const graphSources = createMemo(() => (graphDrawn() && accountSilver()
     ? priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() })
     : []));
-  // Pokoin's own price right now: the cheapest live listing, one point, today.
+  // Pokoin's own price right now: the cheapest live listing, the line's last point.
   const graphNowPoint = () => (graphDrawn() && accountSilver() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);
-  // The tooltip rows round the PKN amount to a whole number ("114 PKN", never
-  // "114.41 PKN"); the visitor-currency part keeps the exact price's format.
-  const graphRowPrice = (pkn) => {
-    const parts = buyerParts(pkn, true, pinnedCurrency());
-    if (parts.pending) return '';
-    const whole = formatPkn(Math.round(pkn));
-    if (parts.local && parts.pkn) return `${parts.local} (${whole})`;
-    return parts.local || whole;
-  };
+  // A row is a quote, not a charge: soldGraphRowPrice says it in the visitor's
+  // currency whatever the buyer rule makes of the same amount as a price, and
+  // rounds only the PKN number it may add in brackets.
+  const graphRowPrice = (pkn) => soldGraphRowPrice(
+    pkn,
+    buyerParts(pkn, true, pinnedCurrency()),
+    buyerCurrency(pinnedCurrency()),
+  );
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();
@@ -1014,7 +1079,7 @@ function CardDesk(props) {
   });
 
   // One book for the desk: the offer bar and the Best Deal rows read this signal.
-  const buy = createBuyBook({ cardId, ready: offersReady, language: shownLang });
+  const buy = createBuyBook({ cardId, language: shownLang });
 
   /** The Shop row's cart path, so the book rows add listings the same way. */
   function addListingToCart(offer, qty = 1) {
@@ -1029,11 +1094,11 @@ function CardDesk(props) {
   /** A Buy offers row is a request for a facet: pick it. A language this printing cannot be listed in stays out. */
   // The sell strip's Sell now: the best open offer for the facet the chips
   // picked when it is not the visitor's own, and Pokoin's starting offer when
-  // no buyer has posted one. So there is always something to sell into.
+  // no buyer has posted one — including when this device has not seen the book
+  // yet, because an unseen book is an empty one. So there is always something to
+  // sell into, in the first frame and not after `marketplace-buy-orders` answers.
   const sellNowRow = () => {
-    const book = buy.book();
-    if (!Array.isArray(book)) return null;
-    const row = selectionBid(book, { condition: shownCond(), language: shownLang() });
+    const row = selectionBid(buy.book(), { condition: shownCond(), language: shownLang() });
     if (!row) return withHouseOffer(null);
     return buyOfferSellable(row, buy.mine()) ? row : null;
   };

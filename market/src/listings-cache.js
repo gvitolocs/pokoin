@@ -138,6 +138,16 @@ export function peekHasListingRows(listed) {
   return Array.isArray(listed?.listings) && listed.listings.length > 0;
 }
 
+/**
+ * The cache holds an *answer* for this card. `[]` is an answer — it says nobody
+ * is selling it — so a cell can paint "No listings yet." in its first frame
+ * instead of waiting for a request (`peekHasListingRows` only answers "are there
+ * rows to show", which is the other question).
+ */
+export function listingsKnown(cardId) {
+  return Array.isArray(peekListings(cardId)?.listings);
+}
+
 export function invalidateListings(cardId) {
   const id = String(cardId || '');
   listingsCache.delete(id);
@@ -170,6 +180,20 @@ export function rememberListings(cardId, data, epochAtStart) {
   rememberMap(listingsCache, id, data, 24);
   rememberMap(listingsAt, id, Date.now(), 24);
   return data;
+}
+
+/**
+ * The rows of the cached answer moved under the desk — a live listing event, the
+ * one channel that knows about a sale before the next read does. The answer stays
+ * what the desk is showing, or a step away and back adopts the rows the channel has
+ * already corrected. Nothing is invented: a card with no cached answer gets none.
+ */
+export function rememberListingRows(cardId, rows) {
+  const known = peekListings(cardId);
+  if (!Array.isArray(known?.listings) || !Array.isArray(rows)) {
+    return null;
+  }
+  return rememberListings(cardId, { ...known, listings: rows }, listingsFetchEpoch(cardId));
 }
 
 /** Milliseconds since this card's listings were fetched; Infinity when not cached. */

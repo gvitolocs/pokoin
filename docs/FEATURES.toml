@@ -65,7 +65,7 @@ id = "refund"
 name = "Seller refunds a buyer, full or partial"
 money = true
 entry = ["solid/src/pages/Orders.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::pending_financial_operations_block_refunds_and_payouts_before_stripe", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_partially_refunded_order_reaches_pending_transfer_state"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_non_eur_escrow_refund_is_handled_by_hand", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::pending_financial_operations_block_refunds_and_payouts_before_stripe", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_partially_refunded_order_reaches_pending_transfer_state"]
 status = "partial"
 
 [[flow]]
@@ -182,10 +182,18 @@ status = "proved"
 
 [[flow]]
 id = "listing-edit-stock"
-name = "Seller edits price, quantity or status of a listing"
+name = "Seller edits price, quantity, status, condition, language or properties of a listing"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/pages/Inventory.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/lib/dialog-focus.js", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/inventory-price.js", "market/src/desk.css", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_flag_turned_off_is_sent_as_false", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::an_import_only_seller_is_never_refused_a_facet", "market/src/listing-row-edit.test.js", "solid/src/components/inventory/row-actions.test.js", "solid/src/components/inventory/listing-edit-drawer.test.js", "solid/src/components/pricer/strategy-editor-shared.test.js", "market/src/inventory-price.test.js", "solid/src/components/inventory/market-cell.test.js"]
+status = "proved"
+
+[[flow]]
+id = "listing-unlist"
+name = "Seller takes a listing off sale, and off CardTrader when linked"
+money = true
+entry = ["solid/src/components/inventory/InventoryBoard.jsx", "solid/src/components/inventory/CollectionHoldings.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/listing_unlist_flow.rs"]
 status = "proved"
 
 [[flow]]
@@ -233,7 +241,7 @@ id = "cardtrader-connect"
 name = "Seller connects CardTrader; webhooks decrement stock and write sales"
 money = true
 entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle"]
+proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js"]
 status = "partial"
 
 [[flow]]
@@ -345,23 +353,23 @@ id = "card-page"
 name = "Visitor opens a card desk with listings, sold data and versions"
 money = false
 entry = ["solid/src/pages/Card.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js"]
+proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js", "market/src/api-listings-window.test.js", "market/src/card-arrows-heights.test.js", "solid/src/lib/buy-book.test.js", "solid/src/components/deal-panels.test.js", "market/src/card-desk-warm.test.js", "market/src/card-arrows-trace.test.js", "solid/src/lib/desk-warm.test.js", "market/src/native-sales-cache.test.js", "solid/src/components/desk/native-sales-panel.test.js", "solid/src/pages/Card.test.js"]
 status = "partial"
 
 [[flow]]
 id = "cheapest-price-stamps"
 name = "Tiles and homepage rails show the cached cheapest PKN"
 money = false
-entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
-proof = ["pokoin-rust/apps/cardtrader-price-cache/tests/rules.rs", "pokoin-rust/apps/cardtrader-price-cache/tests/db.rs", "pokoin-rust/apps/api/src/rails.rs"]
+entry = ["solid/src/pages/Home.jsx", "market/src/lists.js", "solid/src/components/ArtworkPile.jsx"]
+proof = ["pokoin-rust/apps/cardtrader-price-cache/tests/rules.rs", "pokoin-rust/apps/cardtrader-price-cache/tests/db.rs", "pokoin-rust/apps/api/src/rails.rs", "solid/src/components/tiles.test.js"]
 status = "partial"
 
 [[flow]]
 id = "home-rails"
 name = "Visitor browses the marketplace home rails"
 money = false
-entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
-proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs"]
+entry = ["solid/src/pages/Home.jsx", "market/src/lists.js", "pokoin-rust/apps/api/src/rails.rs", "pokoin-rust/crates/edge/src/edge.rs", "scripts/marketplace-home-purge.sh"]
+proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs", "pokoin-rust/crates/edge/src/edge.rs::a_rail_is_refetched_rather_than_replayed_stale", "pokoin-rust/crates/edge/src/edge.rs::a_stale_replay_says_its_age_and_is_not_for_a_shared_cache"]
 status = "partial"
 
 [[flow]]
@@ -376,8 +384,8 @@ status = "partial"
 id = "sold-prices"
 name = "Visitor sees sold medians and price history"
 money = false
-entry = ["solid/src/components/desk/SoldPriceGraph.jsx", "market/src/price-history.js"]
-proof = ["pokoin-rust/crates/catalog-api/src/sales/core.rs", "market/src/price-history.test.js", "market/src/sold-graph.test.js"]
+entry = ["solid/src/components/desk/SoldPriceGraph.jsx", "solid/src/pages/Card.jsx", "market/src/price-history.js", "market/src/price-history-cache.js"]
+proof = ["pokoin-rust/crates/catalog-api/src/sales/core.rs", "pokoin-rust/crates/catalog-api/src/sales/history_sources.rs", "pokoin-rust/crates/catalog-api/tests/price_history_pokoin_flow.rs", "market/src/price-history.test.js", "market/src/price-history-cache.test.js", "market/src/sold-graph.test.js", "market/src/sold-sales.test.js", "solid/src/pages/Card.test.js", "market/src/card-desk-warm.test.js"]
 status = "partial"
 
 [[flow]]
@@ -392,8 +400,8 @@ status = "partial"
 id = "dashboard-segment-graphs"
 name = "Seller sees collection value per segment (era, sealed, graded, game)"
 money = false
-entry = ["solid/src/pages/SellerHome.jsx", "solid/src/components/dashboard/SegmentTable.jsx", "solid/src/components/dashboard/CollectionHistoryPanel.jsx"]
-proof = ["pokoin-rust/crates/accounts/src/handlers/portfolio.rs::the_history_body_describes_the_segments_its_days_carry", "pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs", "market/src/portfolio-segments.test.js", "market/src/portfolio-segments-cache.test.js", "solid/src/pages/SellerHome.segments.test.js"]
+entry = ["solid/src/pages/SellerHome.jsx", "solid/src/components/dashboard/SegmentTable.jsx", "solid/src/components/dashboard/CollectionHistoryPanel.jsx", "solid/src/components/dashboard/SellerDashboardView.jsx"]
+proof = ["pokoin-rust/crates/accounts/src/handlers/portfolio.rs::the_history_body_describes_the_segments_its_days_carry", "pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs", "market/src/portfolio-segments.test.js", "market/src/portfolio-segments-cache.test.js", "solid/src/pages/SellerHome.segments.test.js", "solid/src/components/dashboard/collection-history-currency.test.js", "solid/src/components/dashboard/dashboard-amount-currency.test.js"]
 status = "partial"
 
 [[flow]]

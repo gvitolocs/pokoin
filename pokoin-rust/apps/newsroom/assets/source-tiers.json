@@ -1,0 +1,68 @@
+{
+  "A": {
+    "label": "primary_official",
+    "domains": [
+      "pokemon.com",
+      "pokemon.co.jp",
+      "pokemoncenter.com",
+      "tcg.pokemon.com",
+      "assets.pokemon.com",
+      "press.pokemon.com",
+      "pokemon-card.com",
+      "onepiece-cardgame.com",
+      "magic.wizards.com",
+      "wizards.com",
+      "yugioh-card.com",
+      "disneylorcana.com",
+      "riftbound.leagueoflegends.com",
+      "fabtcg.com",
+      "digimoncard.com",
+      "starwarsunlimited.com"
+    ]
+  },
+  "B": {
+    "label": "tcg_specialist",
+    "domains": [
+      "pokebeach.com",
+      "pokeguardian.com",
+      "elitesfourum.com",
+      ".limitlesstcg.com",
+      "pkmncards.com",
+      "justinbasil.com",
+      "mtggoldfish.com",
+      "starcitygames.com",
+      "ygoprodeck.com",
+      "ygorganization.com",
+      "onepiecetopdecks.com",
+      "lorcanaplayer.com"
+    ]
+  },
+  "C": {
+    "label": "gaming_press",
+    "domains": [
+      "ign.com",
+      "polygon.com",
+      "gamerant.com",
+      "screenrant.com",
+      "mashable.com",
+      "kotaku.com",
+      "eurogamer.net",
+      "nintendolife.com",
+      "pokemontimes.com",
+      "imdb.com",
+      "facebook.com",
+      "instagram.com",
+      "youtube.com"
+    ]
+  },
+  "D": {
+    "label": "unverified_social",
+    "domains": [
+      "reddit.com",
+      "x.com",
+      "twitter.com",
+      "4chan.org",
+      "discord.com"
+    ]
+  }
+}

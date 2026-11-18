@@ -42,29 +42,40 @@ export function sellTarget(row, facets = {}) {
   };
 }
 
+/** What this device last saw for `cardId`, or null when it has never seen it. */
+function storedBook(cardId, preview) {
+  return preview || !cardId ? null : readBookCache(String(cardId));
+}
+
 /**
  * The card's buy-order book, loaded once for the desk: the offer bar and the
- * Best Deal book rows read the same signal, so the panel never asks twice. It
- * waits for the listings (`ready`) and defers to idle, like everything else
- * behind the first paint; a request that never answers leaves the book null and
- * nothing is drawn, and one that answers with nothing to show leaves an empty
- * book, so the bar and the rows say so instead of vanishing.
+ * Best Deal book rows read the same signal, so the panel never asks twice.
+ *
+ * `book` is what to draw and is never nothing: a card nobody has offered for and
+ * a card whose book this device has not seen both draw Pokoin's own starting
+ * offer, which comes from `HOUSE_OFFER_PKN` and so needs no answer to say. The
+ * book is asked for at idle with a short cap, like everything else behind the
+ * first paint, and it no longer waits for the listings to land: nothing about a
+ * buyer's offer depends on them. `known` is the separate question — has this
+ * device seen the book at all — and is the only thing that may hold a skeleton.
+ *
+ * A request that never answers leaves an empty book and nothing else; one that
+ * answers leaves its rows.
  * `?mypokoinPreview` paints the fixture rows instead, `?mypokoinPreview=100` a
  * hundred offers of them.
  *
  * Orders the visitor posts from this page are remembered, because the book
  * never names a buyer and their own offer must not come back as Sell now.
  */
-export function createBuyBook({ cardId, ready, language } = {}) {
+export function createBuyBook({ cardId, language } = {}) {
   const [params] = useSearchParams();
   const preview = untrack(() => allowMypokoinPreview(params));
   const scale = untrack(() => previewScale(params));
   // A book this device saw for the card paints at once (a reload, a second
-  // visit); the request below still runs and replaces it. `loading` is true
-  // only while there is nothing at all to show, which the bar and the cell
-  // draw as a skeleton of their final size.
-  const stored = () => (preview || !cardId ? null : readBookCache(String(cardId)));
-  const [book, setBook] = createSignal(stored());
+  // visit); the request below still runs and replaces it.
+  const first = storedBook(cardId, preview);
+  const [book, setBook] = createSignal(first || []);
+  const [known, setKnown] = createSignal(first !== null);
   const [mine, setMine] = createSignal([]);
   // The same orders with their own price and copies, so the offer bar can edit
   // one instead of guessing from the aggregate row of the public book.
@@ -81,6 +92,7 @@ export function createBuyBook({ cardId, ready, language } = {}) {
     seq = run;
     if (preview) {
       setBook(() => previewBook(untrack(language), scale).book);
+      setKnown(true);
       return Promise.resolve();
     }
     loadMine(id, run);
@@ -88,14 +100,17 @@ export function createBuyBook({ cardId, ready, language } = {}) {
       (data) => {
         if (run !== seq) return;
         const rows = Array.isArray(data?.book) ? data.book : [];
-        setBook(() => rows);
+        // An answer that changed nothing is the book already on screen: re-setting
+        // the signal would rebuild every row of the cell for nothing (rule 3).
+        setBook((current) => (JSON.stringify(current) === JSON.stringify(rows) ? current : rows));
+        setKnown(true);
         writeBookCache(id, rows);
       },
       () => {
-        // A failed first read still leaves the desk silent about nothing: the
-        // empty book paints the bar's Make offer and the cell's one line. A
-        // failed reload keeps the rows already on screen.
-        if (run === seq) setBook((current) => (current === null ? [] : current));
+        // A book that never answers stays the empty one it started as: the bar
+        // offers Make offer and the cell names Pokoin's own line rather than
+        // holding a skeleton forever. Rows a previous answer put on screen stay.
+        if (run === seq) setKnown(true);
       },
     );
   }
@@ -156,11 +171,15 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   }
 
   createEffect(
-    () => ((preview || ready()) && cardId ? String(cardId) : ''),
+    () => (cardId ? String(cardId) : ''),
     (id) => {
       if (!id) return undefined;
-      setBook(() => stored());
-      return whenIdle(() => { load(id); });
+      const seed = storedBook(id, preview);
+      setBook(seed || []);
+      setKnown(seed !== null);
+      // 300 ms, not the 4 s default: this is the desk's own sell side, and an
+      // offer bar that waits four seconds for idle waits for nothing.
+      return whenIdle(() => { load(id); }, 300);
     },
   );
   onCleanup(() => { seq += 1; });
@@ -168,6 +187,8 @@ export function createBuyBook({ cardId, ready, language } = {}) {
   return {
     preview,
     book,
+    /** Has this device seen this card's book, as an answer or as a stored copy? */
+    known,
     mine,
     /** The visitor's own open order `id` on this card, or null when unseen yet. */
     order: (id) => untrack(mineRows).find((row) => String(row?.id) === String(id || '')) || null,

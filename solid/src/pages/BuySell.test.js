@@ -131,7 +131,7 @@ test('a row is a name, a set line, then icon facts', () => {
   assert.match(facts, /<span class="buysell-fact" title=\{left\(\)\.title\}>\s*<ClockGlyph \/>\{left\(\)\.value\}/);
   assert.match(facts, /<span class="buysell-fact" title="Buyer">\s*<BuyerGlyph \/>\{item\(\)\.buyer_name\}/);
   // The Offer door adds the caller's own listing price to the same line.
-  assert.match(facts, /<TagGlyph \/>\{formatPknNumber\(item\(\)\.my_price_pkn\)\}/);
+  assert.match(facts, /<TagGlyph \/>\{priceLabel\(item\(\)\.my_price_pkn\)\}/);
   // The old sentence is gone from both doors.
   assert.doesNotMatch(seek, /wanted ·|days left|expiryLabel\(/);
   assert.doesNotMatch(offer, /wanted ·|days left/);
@@ -215,4 +215,16 @@ test('preview mode still paints both doors and the board pages with Load more', 
   assert.match(page, /<Show when=\{preview\}><p class="seller-preview-banner" role="status">\{BUYSELL_PREVIEW_BANNER\}<\/p><\/Show>/);
   assert.match(seek, /<Show when=\{next\(\)\}>[\s\S]*onClick=\{\(\) => load\(false\)\}/);
   assert.match(seek, /<Show when=\{items\(\)\?\.length\}>/);
+});
+
+test('every price the board paints reads in the visitors currency', () => {
+  // The same label the desk buy panel uses for these very orders
+  // (docs/BUYSELL.md, "Currency"): PKN is what an offer is stored in.
+  assert.match(src, /const priceLabel = \(pkn\) => offerPriceLabel\(pkn, buyerCurrency\(\) \|\| 'PKN'\);/);
+  // Six painted amounts: the board row, the own-listing chip and its title,
+  // the Sell-door row, the history row and the price its fills sold at.
+  assert.equal((src.match(/\bpriceLabel\(/g) || []).length, 6);
+  assert.doesNotMatch(src, /formatPkn\(/);
+  // A typed amount is not a painted price: the edit field still holds PKN.
+  assert.match(src, /Price \(PKN\)/);
 });

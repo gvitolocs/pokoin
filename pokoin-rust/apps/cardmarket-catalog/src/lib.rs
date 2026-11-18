@@ -9,6 +9,7 @@
 //! pokoin-cardmarket-catalog guides [--game <slug>] [--apply]
 //! pokoin-cardmarket-catalog tcgnotify --file dump.json [--apply]
 //! pokoin-cardmarket-catalog cm-offers --file minimums.jsonl [--apply]
+//! pokoin-cardmarket-catalog cm-watchlist [--days 7] [--cap 1200] [--out watchlist.jsonl]
 //! ```
 //!
 //! `match` only reads the database. It pairs Cardmarket singles with catalog
@@ -52,6 +53,18 @@
 //! product id, facet code, price or timestamp is not usable. Without
 //! `--apply` it is a dry run, like `guides`.
 //!
+//! `cm-watchlist` asks the writer which Cardmarket products the price
+//! collector (`cm-price-engine`, another repository) should open per condition
+//! tomorrow: the cards that were viewed by a member, listed with stock,
+//! scanned, or viewed by anybody in `--days`, mapped to their idProducts and
+//! cut to the `--cap` of products one day of collecting can afford
+//! (`watchlist.rs`). The cut is not strict precedence — a member view or a scan
+//! holds its place, then listings and viewed cards alternate, `--viewed-share`
+//! percent of the alternation to the viewers, because production's day was
+//! otherwise all listings. With `--out` it writes one JSON line per product;
+//! without it the read is a dry run that prints how many products each reason
+//! had before the cut and how many it kept. It writes nothing to the database.
+//!
 //! `links` pairs printings with Cardmarket product pages (`links.rs`) and
 //! writes `<cache>/raw/cardmarket-links.json`. `--urls` is the harvested pages
 //! as a JSON array of `{id, url}` (`sqlite3 -json cardmarket-links.sqlite
@@ -70,6 +83,7 @@ pub mod matcher;
 pub mod sources;
 pub mod tcgnotify;
 pub mod twins;
+pub mod watchlist;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -119,6 +133,14 @@ struct Options {
     apply_jp: bool,
     images: Option<PathBuf>,
     max_art_distance: u32,
+    /// `cm-watchlist --days`: how far back a card stays worth collecting.
+    days: i32,
+    /// `cm-watchlist --cap`: how many products one day of collecting is.
+    cap: i64,
+    /// `cm-watchlist --viewed-share`: percent of the cut given to viewed cards.
+    viewed_share: i64,
+    /// `cm-watchlist --out`: where the ranked list lands for the collector.
+    out: Option<PathBuf>,
 }
 
 /// The cache root: `$POKOIN_CATALOG_DIR`, else `~/pokoin-catalogs`.
@@ -134,20 +156,48 @@ fn cache_root() -> PathBuf {
 fn options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
-    if !matches!(command.as_str(), "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers") {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--apply]".into());
+    if !matches!(
+        command.as_str(),
+        "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers" | "cm-watchlist"
+    ) {
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers|cm-watchlist [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--days 7] [--cap 1200] [--viewed-share 50] [--out watchlist.jsonl] [--apply]".into());
     }
     let mut slug: Option<String> = None;
     let mut cache = None;
     let (mut refresh, mut apply, mut file) = (false, false, None);
     let (mut urls, mut generated) = (None, false);
     let (mut jp_twins, mut apply_jp, mut images, mut max_art_distance) = (false, false, None, twins::MAX_DISTANCE);
+    let (mut days, mut cap, mut viewed_share, mut out) = (
+        watchlist::DEFAULT_DAYS,
+        watchlist::DEFAULT_CAP,
+        watchlist::DEFAULT_SHARE,
+        None,
+    );
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--game" => slug = Some(args.next().ok_or("--game needs a slug")?),
             "--cache" => cache = Some(PathBuf::from(args.next().ok_or("--cache needs a dir")?)),
             "--file" => file = Some(PathBuf::from(args.next().ok_or("--file needs a path")?)),
             "--urls" => urls = Some(PathBuf::from(args.next().ok_or("--urls needs a path")?)),
+            "--out" => out = Some(PathBuf::from(args.next().ok_or("--out needs a path")?)),
+            "--days" => {
+                days = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--days needs a number of days")?
+            }
+            "--cap" => {
+                cap = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--cap needs a number of products")?
+            }
+            "--viewed-share" => {
+                viewed_share = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--viewed-share needs a percent from 0 to 100")?
+            }
             "--generated" => generated = true,
             "--jp-twins" => jp_twins = true,
             "--apply-jp" => (jp_twins, apply_jp) = (true, true),
@@ -181,6 +231,22 @@ fn options() -> Result<Options, String> {
         // A harvest file is a finished answer per facet: no game, no cache.
         let cache = cache.unwrap_or_else(|| cache_root().join("cm-offers"));
         (None, None, cache)
+    } else if command == "cm-watchlist" {
+        // A ranking over the writer: no game registry, no cache of its own.
+        if days < 1 {
+            return Err(format!("--days must be at least 1, not {days}"));
+        }
+        if cap < 1 {
+            return Err(format!("--cap must be at least 1 product, not {cap}"));
+        }
+        if !(0..=watchlist::SHARE_TOTAL).contains(&viewed_share) {
+            return Err(format!(
+                "--viewed-share must be a percent from 0 to {}, not {viewed_share}",
+                watchlist::SHARE_TOTAL
+            ));
+        }
+        let cache = cache.unwrap_or_else(|| cache_root().join("cm-watchlist"));
+        (None, None, cache)
     } else {
         let slug = slug.unwrap_or_else(|| "battle_spirits_saga".to_string());
         let game =
@@ -202,6 +268,10 @@ fn options() -> Result<Options, String> {
         apply_jp,
         images,
         max_art_distance,
+        days,
+        cap,
+        viewed_share,
+        out,
     })
 }
 
@@ -213,6 +283,7 @@ pub async fn run() -> Result<i32, String> {
         "guides" => run_guides(&o).await,
         "tcgnotify" => run_tcgnotify(&o).await,
         "cm-offers" => run_cm_offers(&o).await,
+        "cm-watchlist" => run_watchlist(&o).await,
         _ => run_prices(&o).await,
     }
 }
@@ -797,6 +868,43 @@ async fn run_cm_offers(o: &Options) -> Result<i32, String> {
         "{}",
         json!({"apply": o.apply, "facets": facets, "changed": changed, "skipped": skipped})
     );
+    Ok(0)
+}
+
+/// Export the day's Cardmarket watchlist (`watchlist.rs`): the products the
+/// price collector can afford to open per condition, ranked by why they matter
+/// and cut to `--cap`. The cut is not strict precedence: the head list
+/// (`viewed_member`, `scanned`) keeps its place and then listings and viewed
+/// cards alternate, `--viewed-share` percent of the alternation to the viewers.
+/// With `--out` the list is written as JSONL; without it the run is a dry one
+/// that only prints the counts per reason, like the other commands of this app.
+/// The read itself is guarded: bounded by
+/// `watchlist::STATEMENT_TIMEOUT_SECS` and unable to write.
+async fn run_watchlist(o: &Options) -> Result<i32, String> {
+    let list = watchlist::Watchlist {
+        days: o.days,
+        cap: o.cap,
+        viewed_share: o.viewed_share,
+    };
+    let pool = db::connect("pokoin_marketplace", true).await?;
+    let run = watchlist::fetch(&pool, &list)
+        .await
+        .map_err(|e| e.to_string())?;
+    print!("{}", watchlist::report(&list, &run));
+    match &o.out {
+        Some(path) => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(path, watchlist::body(&run.entries))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("wrote {} ({} lines)", path.display(), run.entries.len());
+        }
+        None => println!(
+            "dry run: --out <file.jsonl> writes the {} ranked lines",
+            run.entries.len()
+        ),
+    }
     Ok(0)
 }
 

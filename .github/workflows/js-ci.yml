@@ -27,7 +27,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: bash scripts/js-test-inventory.test.sh
-      - name: Every test file is covered, and scripts/js-tests-not-in-gate.txt did not grow
+      - run: bash scripts/js-wallclock-check.test.sh
+      - name: The base commit both lists below are compared against
+        id: base
         env:
           BASE_REF: ${{ github.base_ref }}
           PUSH_BEFORE: ${{ github.event.before }}
@@ -39,7 +41,11 @@ jobs:
           else
             base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
-          bash scripts/js-test-inventory.sh --base "$base"
+          echo "base=$base" >>"$GITHUB_OUTPUT"
+      - name: Every test file is covered, and scripts/js-tests-not-in-gate.txt did not grow
+        run: bash scripts/js-test-inventory.sh --base "${{ steps.base.outputs.base }}"
+      - name: Every wall-clock budget under one second is listed, and scripts/js-wallclock-allowed.txt did not grow
+        run: bash scripts/js-wallclock-check.sh --base "${{ steps.base.outputs.base }}"
 
   market:
     runs-on: ubuntu-24.04

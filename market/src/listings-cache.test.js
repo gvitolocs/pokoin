@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   dropListing,
   invalidateListings,
+  listingsAgeMs,
+  listingsKnown,
   mergeCreatedListing,
   mergeListingRows,
   omitListings,
@@ -11,6 +13,7 @@ import {
   peekSellerListings,
   rememberCreatedListing,
   rememberListings,
+  rememberListingRows,
   rememberSellerListings,
   resetListingsCacheForTests,
 } from './listings-cache.js';
@@ -68,6 +71,20 @@ test('empty listings cache is a hit but does not count as ready rows', () => {
   assert.equal(peekHasListingRows(peekListings('236234')), true);
 });
 
+test('a known listings answer includes the empty one (CARD-01 P1)', () => {
+  resetListingsCacheForTests();
+  assert.equal(listingsKnown('236234'), false, 'nothing cached is the only unknown');
+  rememberListings('236234', { listings: [] }, 0);
+  assert.equal(listingsKnown('236234'), true, 'nobody selling it is an answer');
+  rememberListings('236234', { listings: [{ id: '1', pricePkn: 12 }] }, 0);
+  assert.equal(listingsKnown('236234'), true);
+  // The same answer from a revalidation never takes the known state away.
+  rememberListings('236234', { listings: [] }, 0);
+  assert.equal(listingsKnown('236234'), true, 'an empty answer keeps an answer');
+  invalidateListings('236234');
+  assert.equal(listingsKnown('236234'), false, 'only the visitors own write forgets it');
+});
+
 test('dropListing removes that ask from the shop cache', () => {
   resetListingsCacheForTests();
   rememberListings('713832', {
@@ -109,4 +126,33 @@ test('seller shop cache is isolated by selected game', () => {
   rememberSellerListings('redshakkio', { listings: [{ id: 'sorcery' }] }, { ...base, game: 'sorcery' });
   assert.equal(peekSellerListings('redshakkio', { ...base, game: 'pokemon' }).listings[0].id, 'pokemon');
   assert.equal(peekSellerListings('redshakkio', { ...base, game: 'sorcery' }).listings[0].id, 'sorcery');
+});
+
+/**
+ * PH-R034 P9 (N12): the live channel is the one thing on a desk that knows about a
+ * listing before the next read does. Its frame has to reach both the cell the
+ * visitor sees and the answer the next desk adopts (P2) — and it may only ever
+ * correct an answer this card already has.
+ */
+test('a live frame moves the cached answer without inventing one', () => {
+  resetListingsCacheForTests();
+  const rows = [{ id: 'just-listed', pricePkn: 120 }];
+  // A card nobody was selling: `[]` is an answer (P1), and the event that ends it
+  // must land on the copy, not only on the painted cell.
+  rememberListings('236234', { listings: [], total: 0, limit: 40 }, 0);
+  assert.deepEqual(rememberListingRows('236234', rows).listings, rows);
+  assert.deepEqual(peekListings('236234').listings, rows);
+  assert.equal(peekListings('236234').limit, 40, 'the answer stays the answer it was');
+  assert.equal(listingsAgeMs('236234'), 0, 'the patch is as fresh as the event that made it');
+  // Nothing cached is nothing to correct: the desk cannot manufacture an answer
+  // for a card it never asked about, or for rows that are not rows.
+  assert.equal(rememberListingRows('999999', rows), null);
+  assert.equal(rememberListingRows('236234', undefined), null);
+  assert.deepEqual(peekListings('236234').listings, rows, 'and a rejected patch changed nothing');
+  assert.equal(rememberListingRows('', rows), null);
+  // The visitor own write forgets the answer, so the event that races it has
+  // nothing left to patch.
+  invalidateListings('236234');
+  assert.equal(rememberListingRows('236234', [{ id: 'late' }]), null);
+  assert.equal(listingsKnown('236234'), false);
 });
