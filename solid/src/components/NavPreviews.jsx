@@ -14,6 +14,7 @@ import { previewHistoryMonth } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN } from '@market/punchouts.js';
 import { formatAssetsValue } from '@market/seller-currency.js';
 import BuySellIcon from './buysell/BuySellIcon.jsx';
+import { GameIcon } from './SearchToggles.jsx';
 import { chatDock } from '../lib/chat-dock-loader.js';
 import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -28,9 +29,16 @@ export function MarketPreview() {
   const others = () => Object.values(GAMES).filter((row) => row.id !== game().id);
   return (
     <div class="nav-preview" role="region" aria-label="Card games">
-      <ul>
+      <ul class="nav-preview-games">
         <For each={others()}>
-          {(row) => <li><a href={gamePreviewHref(row.id)}>{row.name}</a></li>}
+          {(row) => (
+            <li>
+              <a class="nav-game" href={gamePreviewHref(row.id)}>
+                <GameIcon game={row} />
+                <span class="nav-game-name">{row.name}</span>
+              </a>
+            </li>
+          )}
         </For>
       </ul>
     </div>

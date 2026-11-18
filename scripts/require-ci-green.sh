@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Refuse to ship a commit unless every required GitHub check run is green on it. docs/CI.md, "Deploy gate".
 #
-#   scripts/require-ci-green.sh [--repo-dir DIR] [--no-wait] <commit>
+#   scripts/require-ci-green.sh [--repo-dir DIR] [--no-wait] [--caller-script PATH] [--self-check-only] <commit>
 #
-# Exit 0: every check named in scripts/ci-required-checks (as committed in <commit>) is a green GitHub Actions
-# check run on <commit>, or the owner's override was given. Exit 1: refused. Exit 2: usage error.
-# Any doubt is a refusal: an API error, an answer that does not parse, a missing run, a missing list.
+# Exit 0: this checkout's own gate and deploy scripts are byte-identical to origin/main's, and every check named
+# in scripts/ci-required-checks (as committed in <commit>) is a green GitHub Actions check run on <commit>, or
+# the owner's override was given. Exit 1: refused. Exit 2: usage error.
+# Any doubt is a refusal: an API error, an answer that does not parse, a missing run, a missing list, a script
+# this checkout changed.
+#
+# --caller-script <path> (repeatable) names the script that is calling the gate, so its own bytes are compared
+# with origin/main too. --self-check-only does that comparison and nothing else: exit 0 when every compared file
+# is origin/main's, 1 when one is not (no GitHub call, no log line, no commit needed).
 #
 # Environment (all optional):
 #   GH                          the gh binary (default: gh on PATH, else $HOME/.local/bin/gh)
@@ -18,25 +24,44 @@
 #   POKOIN_CI_CALLER            who is calling, for the log (default: unknown)
 #   POKOIN_CI_OVERRIDE          the owner's emergency switch: <full 40-hex commit id>:<reason>
 #   POKOIN_OPS_RECORD_CMD       command that takes one JSON object on stdin (default: lucina-rs ops record)
+#   POKOIN_CANONICAL_CHECKOUT   the integration checkout to warn about when it is dirty (default, if it exists:
+#                               /home/nez/Projects/Startup/Pokoin/pokoin-web); a warning only, never a refusal
 set -euo pipefail
+
+# git exports GIT_DIR (and GIT_PREFIX, GIT_EXEC_PATH, GIT_CONFIG_PARAMETERS) into the hooks it runs; with GIT_DIR
+# set and no GIT_WORK_TREE, git takes the current directory as the top of the work tree, so a relative
+# `rev-parse --show-toplevel` answers the directory the gate happens to sit in. Drop them: the gate always names
+# the repository it means with -C / --repo-dir and never needs the caller's hook environment.
+unset GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_INDEX_FILE GIT_COMMON_DIR
 
 BEFORE_SHA_PREFIX="require-ci-green"
 OVERRIDE_NOTE="POKOIN_CI_OVERRIDE is the owner's emergency switch: it needs the exact commit id and a reason, and every use is written to the log and to the ops record. An agent never sets it (worker environments do not pass it): if you are an agent, stop and report."
 
 usage() {
-  echo "usage: require-ci-green.sh [--repo-dir DIR] [--no-wait] <commit>" >&2
+  echo "usage: require-ci-green.sh [--repo-dir DIR] [--no-wait] [--caller-script PATH] [--self-check-only] [<commit>]" >&2
   exit 2
 }
 
 repo_dir=.
 no_wait=0
+self_check_only=0
 commit_arg=
+caller_scripts=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir)
       [ $# -ge 2 ] || usage
       repo_dir="$2"
       shift 2
+      ;;
+    --caller-script)
+      [ $# -ge 2 ] || usage
+      caller_scripts+=("$2")
+      shift 2
+      ;;
+    --self-check-only)
+      self_check_only=1
+      shift
       ;;
     --no-wait)
       no_wait=1
@@ -51,13 +76,19 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
-[ -n "$commit_arg" ] || usage
 
-SHA="$(git -C "$repo_dir" rev-parse --verify "${commit_arg}^{commit}" 2> /dev/null)" || {
-  echo "$BEFORE_SHA_PREFIX: cannot resolve '$commit_arg' to a commit in $repo_dir" >&2
-  exit 2
-}
-SHORT="${SHA:0:12}"
+# --self-check-only compares files with origin/main and needs no commit; every other mode ships one.
+if [ "$self_check_only" = 1 ] && [ -z "$commit_arg" ]; then
+  SHA=
+  SHORT=-
+else
+  [ -n "$commit_arg" ] || usage
+  SHA="$(git -C "$repo_dir" rev-parse --verify "${commit_arg}^{commit}" 2> /dev/null)" || {
+    echo "$BEFORE_SHA_PREFIX: cannot resolve '$commit_arg' to a commit in $repo_dir" >&2
+    exit 2
+  }
+  SHORT="${SHA:0:12}"
+fi
 
 GH_BIN="${GH:-}"
 REPO="${POKOIN_CI_REPO:-gvitolocs/pokoin}"
@@ -98,7 +129,117 @@ refuse() {
 
 safe_word() { printf '%s' "$1" | tr -c 'A-Za-z0-9._@-' '_'; }
 
-# ---- override, checked first -------------------------------------------------------------------------------
+# ---- this checkout's own scripts must be origin/main's ------------------------------------------------------
+# The gate only protects a checkout that already contains it: an old checkout runs old deploy scripts, and those
+# do whatever their own commit said. Comparing the bytes of the scripts themselves is the only way to close that,
+# so it runs before the override and before any GitHub call. It has no override: POKOIN_CI_OVERRIDE answers the
+# CI question, never the question of which checkout is shipping.
+SELF_CHECK_NO_OVERRIDE="This check has no override."
+repo_common=
+
+# abspath <path>: the same file written absolutely, or failure when its directory cannot be read. Parameter
+# expansion and a subshell only: the gate has to keep working with a bare PATH (test case 9h).
+abspath() {
+  local p="$1" dir base
+  case "$p" in
+    */*) dir="${p%/*}" base="${p##*/}" ;;
+    *) dir=. base="$p" ;;
+  esac
+  dir="$(cd "$dir" 2> /dev/null && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
+self_check_refuse() { # <path> <why>
+  local message
+  message="this checkout's deploy scripts are not origin/main's ($1: $2): update the checkout (git merge --ff-only origin/main) or run from a worktree at origin/main. $SELF_CHECK_NO_OVERRIDE"
+  if [ "$self_check_only" = 1 ]; then
+    # this mode only answers the comparison question: the caller decides how loud the answer is
+    echo "$BEFORE_SHA_PREFIX: $message" >&2
+  else
+    echo "$BEFORE_SHA_PREFIX: REFUSED $SHORT: $message" >&2
+    log_line refused "$1: $2" || true
+  fi
+  exit 1
+}
+
+# self_check_file <path>: its bytes must equal origin/main's copy of the same path, in the repository being
+# shipped (or in another work tree of it). Any git call that fails is a refusal.
+self_check_file() {
+  local file="$1" abs root file_common rel local_blob remote_blob
+  abs="$(abspath "$file")" || self_check_refuse "$file" "its directory cannot be read"
+  [ -f "$abs" ] || self_check_refuse "$file" "it is not a readable file"
+  root="$(git -C "${abs%/*}" rev-parse --show-toplevel 2> /dev/null)" \
+    || self_check_refuse "$file" "it is not inside a git work tree"
+  case "$abs" in
+    "$root"/*) rel="${abs#"$root"/}" ;;
+    *) self_check_refuse "$file" "it lies outside the work tree $root" ;;
+  esac
+  file_common="$(git -C "${abs%/*}" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" \
+    || self_check_refuse "$file" "its repository cannot be resolved"
+  [ "$file_common" = "$repo_common" ] \
+    || self_check_refuse "$file" "it belongs to another repository ($file_common), not the one being shipped"
+  local_blob="$(git -C "$root" hash-object -- "$abs" 2> /dev/null)" \
+    || self_check_refuse "$file" "git hash-object failed on it"
+  remote_blob="$(git -C "$repo_dir" rev-parse --verify --quiet "origin/main:$rel" 2> /dev/null)" \
+    || self_check_refuse "$file" "origin/main has no $rel"
+  [ "$local_blob" = "$remote_blob" ] \
+    || self_check_refuse "$file" "$rel differs from origin/main's copy"
+}
+
+self_check_all() {
+  local file own own_dir
+  own="$(abspath "${BASH_SOURCE[0]}")" \
+    || self_check_refuse "${BASH_SOURCE[0]}" "the gate's own path cannot be resolved"
+  repo_common="$(git -C "$repo_dir" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" \
+    || self_check_refuse "--repo-dir $repo_dir" "it is not a git repository"
+  git -C "$repo_dir" rev-parse --verify --quiet origin/main > /dev/null \
+    || self_check_refuse "origin/main" "this checkout has not fetched it"
+  self_check_file "$own"
+  own_dir="${own%/*}"
+  self_check_file "$own_dir/ci-required-checks"
+  for file in "${caller_scripts[@]}"; do
+    self_check_file "$file"
+  done
+}
+
+self_check_all
+if [ "$self_check_only" = 1 ]; then
+  exit 0
+fi
+
+# ---- the canonical checkout, if this host has one ----------------------------------------------------------
+# Every deploy runs from the canonical integration checkout, so uncommitted work there — left by a generator or by
+# another agent — blocks its next fast-forward to origin/main. The gate only says so: it is not a refusal, it is not
+# logged, it does not change the result, and it never shows the contents of the files listed.
+CANONICAL_DEFAULT=/home/nez/Projects/Startup/Pokoin/pokoin-web
+CANONICAL_KNOWN='?? server/node_modules/'
+CANONICAL_MAX=15
+
+canonical_warning() {
+  local dir lines line shown=0 total=0
+  dir="${POKOIN_CANONICAL_CHECKOUT:-}"
+  if [ -z "$dir" ]; then dir="$CANONICAL_DEFAULT"; fi
+  if [ ! -d "$dir" ]; then return 0; fi
+  lines="$(git -C "$dir" status --porcelain 2> /dev/null)" || return 0
+  while IFS= read -r line; do
+    if [ -z "$line" ] || [ "$line" = "$CANONICAL_KNOWN" ]; then continue; fi
+    total=$((total + 1))
+    if [ "$shown" -eq 0 ]; then
+      echo "$BEFORE_SHA_PREFIX: WARNING the canonical checkout has uncommitted changes: a generator or an agent wrote there; it blocks its next fast-forward. ($dir)" >&2
+    fi
+    if [ "$shown" -lt "$CANONICAL_MAX" ]; then
+      echo "$BEFORE_SHA_PREFIX: WARNING   $line" >&2
+      shown=$((shown + 1))
+    fi
+  done <<< "$lines"
+  if [ "$total" -gt "$shown" ]; then
+    echo "$BEFORE_SHA_PREFIX: WARNING   and $((total - shown)) more" >&2
+  fi
+}
+
+canonical_warning
+
+# ---- override (the self-check above is not part of it) -----------------------------------------------------
 if [ -n "${POKOIN_CI_OVERRIDE:-}" ]; then
   ov="$POKOIN_CI_OVERRIDE"
   if [ -n "${LANE_WORKER+x}" ]; then
@@ -174,6 +315,22 @@ fi
 FILTER='.check_runs[] | select((.app.slug? // "") == "github-actions") | [.id, .name, .status, (.conclusion // "none")] | @tsv'
 ENDPOINT="repos/$REPO/commits/$SHA/check-runs?per_page=100"
 
+# The answer's stderr is captured so a commit GitHub has never seen is named the first time it is asked for, instead
+# of being retried and reported as an unreadable API. A host with no mktemp — the gate must keep working with a bare
+# PATH (test 9h) — falls back to /dev/null, which keeps the old wording.
+gh_err=/dev/null
+gh_err_mine=0
+if gh_err_new="$(mktemp "${TMPDIR:-/tmp}/require-ci-green-gh.XXXXXX" 2> /dev/null)"; then
+  gh_err="$gh_err_new"
+  gh_err_mine=1
+fi
+
+# shellcheck disable=SC2317,SC2329  # called through the trap cleanup EXIT below, never directly
+gh_err_cleanup() {
+  if [ "$gh_err_mine" = 1 ]; then rm -f "$gh_err"; fi
+}
+trap gh_err_cleanup EXIT
+
 api_fails=0
 while true; do
   elapsed=$(($(date +%s) - start))
@@ -181,9 +338,12 @@ while true; do
   api_ok=1
   api_note=
   out=
-  if ! out="$("$GH_BIN" api --paginate "$ENDPOINT" --jq "$FILTER" 2> /dev/null)"; then
+  if ! out="$("$GH_BIN" api --paginate "$ENDPOINT" --jq "$FILTER" 2> "$gh_err")"; then
     api_ok=0
     api_note="gh api exited non-zero"
+    if [ "$gh_err_mine" = 1 ] && grep -qE '\(HTTP (404|422)\)' "$gh_err" 2> /dev/null; then
+      refuse "GitHub has no commit $SHORT: it was never pushed. Push a branch and open a pull request." --no-advice
+    fi
   else
     while IFS= read -r row; do
       [ -n "$row" ] || continue

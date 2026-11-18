@@ -1017,15 +1017,12 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
         return Err(too_many(rules::LIMIT_SCAN_PER_SESSION, received_at_ms));
     }
     limit_increment(&mut tx, &scan_bucket, rules::LIMIT_SCAN_PER_SESSION, received_at_ms).await?;
-    if session.get("batch_status").and_then(Value::as_str) != Some("open") {
-        return Err(ApiError::conflict("This batch is closed.").with_code("batch_closed"));
-    }
     let batch_id = session["batch_id"].as_str().unwrap_or_default().to_string();
-    let batch_row = sqlx::query("select * from public.scan_batches where id = $1::uuid for update")
-        .bind(&batch_id)
-        .fetch_one(&mut *tx)
-        .await?;
-    let batch = row_value(&batch_row);
+    let batch_seller = session["seller_uid"].as_str().unwrap_or_default();
+    // Open or closed is decided by the row this transaction has just locked. The
+    // `batch_status` joined with the session is the value that was committed before
+    // the lock, so a submit that closed the batch in between stayed invisible here.
+    let batch = lock_batch(&mut tx, batch_seller, &batch_id, true).await?;
     if batch.get("item_position").and_then(Value::as_i64).unwrap_or(0) >= MAX_BATCH_ROWS {
         return Err(ApiError::conflict("This batch is full. Add it to inventory and start a new one.")
             .with_code("batch_full"));
@@ -1403,22 +1400,24 @@ pub async fn set_defaults(db: &DbPools, seller_uid: &str, batch_id: &str, defaul
     }
     let mut items: Vec<Value> = Vec::new();
     if !sets.is_empty() {
-        let _ = bump_batch(&mut tx, batch_id, 0).await?;
+        // Every fanned row takes the batch's new item_seq: the desk cursor is
+        // that seq, so a row left behind it would never replay on the stream.
+        let (fan_seq, _) = bump_batch(&mut tx, batch_id, 0).await?;
+        values.push(json!(fan_seq));
+        sets.push(format!("seq = ${}", values.len()));
         values.push(json!(batch_id));
         let sql = format!(
             "update public.scan_items
-                set {}, seq = seq + 1, updated_at = now()
-              where batch_id = ${} and status = 'active'
+                set {}, updated_at = now()
+              where batch_id = ${}::uuid and status = 'active'
               returning {}",
             sets.join(", "),
             values.len(),
             ITEM_COLUMNS
         );
-        let mut query = sqlx::query(&sql);
-        for value in &values {
-            query = query.bind(value.clone());
-        }
-        let rows = query.fetch_all(&mut *tx).await?;
+        let rows = crate::db::bound_query(&sql, &values)
+            .fetch_all(&mut *tx)
+            .await?;
         items = rows.iter().map(row_value).collect();
     }
     tx.commit().await?;
@@ -1481,14 +1480,23 @@ pub async fn patch_item(
     let mut values: Vec<Value> = vec![json!(item_id), json!(seq)];
     for (column, value) in &changes {
         values.push(value.clone());
-        sets.push(format!("{column} = ${}", values.len()));
+        // A NULL from the desk has to be cast to the column's type: an untyped
+        // jsonb null has no assignment cast to numeric/jsonb.
+        let cast = match column.as_str() {
+            "price_pkn" => "::numeric",
+            "pricing" => "::jsonb",
+            _ => "",
+        };
+        sets.push(format!("{column} = ${}{cast}", values.len()));
     }
-    let sql = format!("update public.scan_items set {} where id = $1::uuid returning {}", sets.join(", "), ITEM_COLUMNS);
-    let mut query = sqlx::query(&sql);
-    for value in &values {
-        query = query.bind(value.clone());
-    }
-    let updated = query.fetch_one(&mut *tx).await?;
+    let sql = format!(
+        "update public.scan_items set {} where id = $1::uuid returning {}",
+        sets.join(", "),
+        ITEM_COLUMNS
+    );
+    let updated = crate::db::bound_query(&sql, &values)
+        .fetch_one(&mut *tx)
+        .await?;
     touch_sessions(&mut tx, &batch_id).await?;
     tx.commit().await?;
     Ok(json!({ "items": [rules::item_view(&row_value(&updated))] }))
@@ -1868,9 +1876,9 @@ pub async fn submit_batch(
             .bind(row.get("first_edition") == Some(&Value::Bool(true)))
             .bind(row.get("foil_state").and_then(Value::as_str).unwrap_or("standard"))
             .bind(row.get("graded") == Some(&Value::Bool(true)))
-            .bind(row.get("grading_company").cloned().unwrap_or(Value::Null))
-            .bind(row.get("grade").cloned().unwrap_or(Value::Null))
-            .bind(row.get("certification_id").cloned().unwrap_or(Value::Null))
+            .bind(row.get("grading_company").and_then(Value::as_str))
+            .bind(row.get("grade").and_then(Value::as_str))
+            .bind(row.get("certification_id").and_then(Value::as_str))
             .bind(row.get("seller_comment").and_then(Value::as_str).unwrap_or(""))
             .bind(&source_listing_id)
             .bind(row.get("card_name").and_then(Value::as_str).unwrap_or(""))
@@ -2214,7 +2222,11 @@ pub async fn mutate_batch(
         }
         "item" => {
             let patch = payload.get("patch").cloned().unwrap_or_else(|| payload.clone());
-            patch_item(db, seller_uid, item_id, &patch, payload.get("onlyIfEmptyPrice") == Some(&Value::Bool(true))).await
+            // The desk sends the guard inside `patch` (market/src/scan-api.js);
+            // a top-level `true` stays accepted.
+            let flag = |value: &Value| value.get("onlyIfEmptyPrice") == Some(&Value::Bool(true));
+            let guard = flag(&patch) || flag(payload);
+            patch_item(db, seller_uid, item_id, &patch, guard).await
         }
         "add" => add_manual(db, seller_uid, batch_id, payload).await,
         "remove" => set_status(db, seller_uid, item_id, "active", "removed").await,

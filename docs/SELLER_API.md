@@ -64,10 +64,10 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | `pricing-strategy-save` / `pricing-strategy-delete` | `strategy` / `id` | `{ strategy, strategies }` / `{ strategies }`: the account's named strategies, with the Pricer's checks |
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
-| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, signed, altered, foilState, location, updatedAt, lastSoldMinEurCents, externalKey }], cursor }` |
+| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, signed, altered, foilState, location, updatedAt, lastSoldMinEurCents, externalKey, ctProductId }], cursor }` |
 | `sold-prices` | `items` (≤ 500, id, identity.publicId, condition, language, printing, firstEdition) | `{ prices: [{ itemId, publicId, minEurCents, priceSource }], windowDays: 30 }`; exact sold facets first, CardTrader tile minimum if absent, null if neither exists |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
-| `list` | `item`, `idempotencyKey`, `channel?`, `pricingGroupId?` / `pricingStrategyId?` (also per item) | `{ confirmed: true, listingId, stockMode: "absolute", created }`, plus `pricingGroupId` / `pricingStrategyId`, `priced`, `pricePkn`, `status`, `pricingError?` when the call named pricing |
+| `list` | `item`, `idempotencyKey`, `channel?`, `pricingGroupId?` / `pricingStrategyId?` (also per item) | `{ confirmed: true, listingId, stockMode: "absolute", created, matched? }`, plus `pricingGroupId` / `pricingStrategyId`, `priced`, `pricePkn`, `status`, `pricingError?` when the call named pricing — none of those pricing fields when `matched` is set |
 | `update` | `listingId`, `item` (any of `pricePkn` (exact, wins over cents), `priceEurCents`, `condition`, `language`, `printing`, `firstEdition`, `signed`, `altered`, `location`), `channel?` | `{ confirmed: true, listingId, changed, listing }` — `listing` is one `listings[]` entry, after the change |
 | `unlist` | `listingId`, `channel?` | `{ confirmed: true, listingId, changed }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
@@ -114,6 +114,32 @@ Rules worth knowing:
   grant, verbatim (Card Rails sends `cardrails:<item id>`). It is null for listings the
   tool did not create, so a tool can match its inventory against Pokoin
   without keeping its own crosswalk.
+- **`ctProductId`: one listing per CardTrader product.** A listing that is
+  one of the seller's CardTrader products (the CardTrader import made it, or
+  Pokoin linked or pushed it) names that product id in `listings`; else null.
+  A tool that also holds the seller's CardTrader stock passes the product id
+  as `item.ctProductId` on `list` (`cardtraderProductId` is accepted in its
+  place, and `ctProductId` wins when the item carries both). It is read as
+  digits: spaces around it are ignored and a number is read as its digits, so
+  `456705610` and `"456705610"` are the same product. An id that is not up to
+  20 digits, or is only zeros, is ignored: the item is listed as a new Pokoin
+  listing of its own. When the seller's shelf already has that product,
+  `list` creates nothing: it answers that listing with
+  `created: false, matched: "cardtrader_product"` and binds the key to it
+  (`409 ct_product_listed` if another key of this grant already is that
+  listing). That listing keeps its own price, quantity and location, and the
+  call's pricing asks nothing of it: the pricing checks do not run for a
+  matched item, so an unknown `pricingGroupId` is not refused and the answer
+  carries no pricing field. Already has means live — a listing that is active,
+  paused or sold out, which is what 144 counts too; an unlisted or removed one
+  is not matched, and the item becomes a new listing. Otherwise the new
+  listing is stored as `ct:<product>`, so the CardTrader import adopts it
+  instead of importing a second copy. The database enforces it
+  (`scripts/sql/144_listing_external_identity.sql`): at most one live import
+  per product, and never an import next to Pokoin's own listings of the same
+  product. Another seller's listing of that product is never matched. Before
+  2026-10-23 Card Rails listed a seller's CardTrader copies without it and
+  every card was on sale twice.
 - **`lastSoldMinEurCents`** is the lowest confirmed Pokoin sale price for
   that exact card version/printing (same blueprint, condition, language,
   reverse and first-edition state — never a graded slab, never mixed) over
