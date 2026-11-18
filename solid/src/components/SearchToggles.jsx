@@ -144,9 +144,19 @@ export function PrintLangToggle() {
   );
 }
 
-function GameIcon(props) {
+export function GameIcon(props) {
   const src = () => `url(${gameIconSrc(props.game)})`;
-  return <span class="game-icon" style={{ '-webkit-mask-image': src(), 'mask-image': src() }} aria-hidden="true" />;
+  // A game with no icon file (unknown id) still needs a mark, and an empty
+  // url() mask would blank the box out.
+  const initial = () => {
+    const name = typeof props.game === 'string' ? (GAMES[props.game]?.name || '') : (props.game?.name || '');
+    return name ? name[0].toUpperCase() : '•';
+  };
+  return (
+    <Show when={gameIconSrc(props.game)} fallback={<span class="game-icon game-icon-fallback" aria-hidden="true">{initial()}</span>}>
+      <span class="game-icon" style={{ '-webkit-mask-image': src(), 'mask-image': src() }} aria-hidden="true" />
+    </Show>
+  );
 }
 
 /** Game switcher (market Chrome.jsx GameSelect): another game is another host or path. */
