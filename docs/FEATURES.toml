@@ -345,7 +345,7 @@ id = "card-page"
 name = "Visitor opens a card desk with listings, sold data and versions"
 money = false
 entry = ["solid/src/pages/Card.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js", "market/src/api-listings-window.test.js", "market/src/card-arrows-heights.test.js", "solid/src/lib/buy-book.test.js", "solid/src/components/deal-panels.test.js", "market/src/card-desk-warm.test.js", "solid/src/lib/desk-warm.test.js", "market/src/native-sales-cache.test.js", "solid/src/components/desk/native-sales-panel.test.js", "solid/src/pages/Card.test.js"]
+proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js", "market/src/api-listings-window.test.js", "market/src/card-arrows-heights.test.js", "solid/src/lib/buy-book.test.js", "solid/src/components/deal-panels.test.js", "market/src/card-desk-warm.test.js", "market/src/card-arrows-trace.test.js", "solid/src/lib/desk-warm.test.js", "market/src/native-sales-cache.test.js", "solid/src/components/desk/native-sales-panel.test.js", "solid/src/pages/Card.test.js"]
 status = "partial"
 
 [[flow]]
