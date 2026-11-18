@@ -143,7 +143,8 @@ test('a save answer is the state: no second read after a write', async () => {
   assert.deepEqual(result, { ok: true, saved: 'c1' });
   assert.equal(calls.read, 1, 'the POST answer carries the lists and the days');
   assert.equal(store.get().collections[0].items[0].quantity, 2);
-  // What goes on the wire is the draft with the item identity left at home.
+  // What goes on the wire is the draft with the item identity and the price left
+  // at home: the server resolves prices, so none is claimed here.
   assert.deepEqual(calls.save[0], {
     token: 't',
     body: {
@@ -160,7 +161,6 @@ test('a save answer is the state: no second read after a write', async () => {
         quantity: 2,
         name: 'Charizard',
         setName: '',
-        pricePkn: 480,
       }],
     },
   });

@@ -240,15 +240,18 @@ test('draftErrors lists every reason this draft cannot be saved', () => {
   assert.deepEqual(draftErrors({ name: 'Fine', items: [{ id: 'x', cardId: '1', quantity: 1 }] }, others), []);
 });
 
-test('the save body carries the items the server reads back', () => {
+test('the save body carries the items the server reads back, and no price', () => {
   const draft = newDraft({ id: 'c1', name: 'Charizard binder', items: [{ game: 'pokemon', cardId: '1', condition: 'NM', language: 'EN', reverse: false, firstEdition: true, graded: false, quantity: 2, name: 'Charizard', setName: 'Base Set', pricePkn: 900 }] });
   assert.deepEqual(saveBody(draft), {
     id: 'c1',
     name: 'Charizard binder',
     items: [{
-      game: 'pokemon', cardId: '1', condition: 'NM', language: 'EN', reverse: false, firstEdition: true, graded: false, quantity: 2, name: 'Charizard', setName: 'Base Set', pricePkn: 900,
+      game: 'pokemon', cardId: '1', condition: 'NM', language: 'EN', reverse: false, firstEdition: true, graded: false, quantity: 2, name: 'Charizard', setName: 'Base Set',
     }],
   });
+  // The server prices a list itself: a body that sent one along would be a
+  // claim about the market it never asked for.
+  assert.equal('pricePkn' in saveBody(draft).items[0], false, 'no price in the body');
   assert.equal('id' in saveBody(newDraft({ name: 'New', items: [] })), false, 'a new list sends no id');
   assert.equal(saveBody({ name: 'x', items: [{ id: 'slice', cardId: '1', quantity: 1 }] }).items[0].id, undefined, 'the client slice key stays home');
 });

@@ -310,7 +310,9 @@ export function draftErrors(draft, others = [], limits = DEFAULT_LIMITS) {
 }
 
 /**
- * The POST body: only the fields the server reads back, no client slice id.
+ * The POST body: only the fields the server reads back, no client slice id and
+ * no price — the server resolves every price itself, so one sent here would
+ * only be a claim about the market it never asked for.
  * Each item is normalized first, so a draft assembled by hand sends the same
  * shape the server answers with — the facets included, a card without a public
  * id left out (the checks above name it before a save is ever asked).
@@ -322,7 +324,7 @@ export function saveBody(draft) {
     items: clean.items.reduce((acc, item) => {
       const row = normalizeItem(item, DEFAULT_LIMITS);
       if (!row) return acc;
-      const { id, ...fields } = row;
+      const { id, rowId, pricePkn, ...fields } = row;
       acc.push(fields);
       return acc;
     }, []),
