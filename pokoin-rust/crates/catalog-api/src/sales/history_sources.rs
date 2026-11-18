@@ -4,12 +4,14 @@
 //! handlers pass their rows to the pure builders below.
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use pokoin_api_common::pg::{self, Bind};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::shared::js;
+use crate::shared::table_presence::{self, Presence};
 
 /// PKN per euro, the same 200 the token's reference price uses
 /// (`reads::blueprint_price::PKN_USD_REFERENCE_PRICE` is `1 / 200` USD).
@@ -50,6 +52,17 @@ pub const CM_GUIDE_HISTORY_SQL: &str = "select r.day::text as day, p.id_product:
 pub const FX_RATES_SQL: &str =
     "select day::text as day, rate::float8 as rate from public.fx_rates_daily \
      where base = 'EUR' and quote = 'USD' and day <= $1::date order by day";
+
+/// The table of `FX_RATES_SQL`, which only the Pokémon database has.
+pub const FX_TABLE: &str = "public.fx_rates_daily";
+
+/// The tables `CM_PRODUCT_IDS_SQL` and `CM_GUIDE_HISTORY_SQL` read, none of
+/// which a satellite game's database has.
+pub const CARDMARKET_TABLES: [&str; 3] = [
+    "public.cardtrader_pokemon_blueprints",
+    "public.cardmarket_price_guide_runs",
+    "public.cardmarket_price_guide",
+];
 
 /// `YYYY-MM-DD` of a day cell (a `date` without the `::text` cast still arrives
 /// as the node-pg timestamp string).
@@ -253,19 +266,40 @@ pub async fn cm_guide_rows(
     .await
 }
 
-/// The EUR→USD rates up to `to`; no rates when the table is missing or empty.
-pub async fn read_fx_rates(pool: &PgPool, to: &str) -> FxRates {
-    match pg::pool_rows(pool, FX_RATES_SQL, &[Bind::Text(to.to_owned())]).await {
-        Ok(rows) => FxRates::from_rows(&rows),
-        Err(error) => {
-            warn_query("fx_rates_daily", &error);
-            FxRates::default()
-        }
+/// The `cardmarket` block of one blueprint: its products, then the guide rows
+/// carried onto the run days. A failed query fails this block alone.
+async fn cardmarket_block(pool: &PgPool, ct_id: &str, from: &str, to: &str) -> Value {
+    let products = match cm_product_ids(pool, ct_id).await {
+        Ok(products) => products,
+        Err(error) => return failed_cardmarket(&error),
+    };
+    match cm_guide_rows(pool, &products, from, to).await {
+        Ok(rows) => cardmarket_source(&rows, None),
+        Err(error) => failed_cardmarket(&error),
     }
 }
 
+/// The `cardmarket` block with the probe already answered. `read` runs the two
+/// Cardmarket queries and is reached only when `presence` says their tables are
+/// there, so a database without them answers `empty` and logs no Postgres error
+/// (PH-02).
+pub async fn cardmarket_leg<R, Fut>(presence: Presence, read: R) -> Value
+where
+    R: FnOnce() -> Fut,
+    Fut: Future<Output = Value>,
+{
+    table_presence::guarded(
+        presence,
+        read,
+        || cardmarket_source(&[], None),
+        || cardmarket_source(&[], Some("unavailable")),
+    )
+    .await
+}
+
 /// The `cardmarket` block of the response. Only Pokémon has a guide; every other
-/// game gets the stub without a query, and a failed query fails this block alone.
+/// game gets the stub without a query, and a database without the guide tables
+/// answers `empty` without one either.
 pub async fn cardmarket_history(
     pool: &PgPool,
     game: &str,
@@ -279,14 +313,37 @@ pub async fn cardmarket_history(
     let Some(ct_id) = ct_id.filter(|ct_id| !ct_id.is_empty()) else {
         return cardmarket_source(&[], None);
     };
-    let products = match cm_product_ids(pool, ct_id).await {
-        Ok(products) => products,
-        Err(error) => return failed_cardmarket(&error),
-    };
-    match cm_guide_rows(pool, &products, from, to).await {
-        Ok(rows) => cardmarket_source(&rows, None),
-        Err(error) => failed_cardmarket(&error),
+    let presence = table_presence::presence_all(pool, &CARDMARKET_TABLES).await;
+    cardmarket_leg(presence, || cardmarket_block(pool, ct_id, from, to)).await
+}
+
+/// The rates of `FX_RATES_SQL`; a failed query is no rates, exactly as before.
+async fn fx_rows(pool: &PgPool, to: &str) -> FxRates {
+    match pg::pool_rows(pool, FX_RATES_SQL, &[Bind::Text(to.to_owned())]).await {
+        Ok(rows) => FxRates::from_rows(&rows),
+        Err(error) => {
+            warn_query(FX_TABLE, &error);
+            FxRates::default()
+        }
     }
+}
+
+/// The rates with the probe already answered: no rates — and no query — when the
+/// database has no `fx_rates_daily` (PH-02).
+pub async fn fx_rates_leg<R, Fut>(presence: Presence, read: R) -> FxRates
+where
+    R: FnOnce() -> Fut,
+    Fut: Future<Output = FxRates>,
+{
+    table_presence::guarded(presence, read, FxRates::default, FxRates::default).await
+}
+
+/// The EUR→USD rates up to `to`; no rates when the table is missing or empty.
+pub async fn read_fx_rates(pool: &PgPool, to: &str) -> FxRates {
+    fx_rates_leg(table_presence::presence(pool, FX_TABLE).await, || {
+        fx_rows(pool, to)
+    })
+    .await
 }
 
 fn failed_cardmarket(error: &sqlx::Error) -> Value {
@@ -486,6 +543,91 @@ mod tests {
         assert_eq!(foil["trendPkn"], json!(160));
         assert_eq!(foil["trendFoilPkn"], json!(500));
         assert_eq!(products[1]["days"][0]["trendPkn"], Value::Null);
+    }
+
+    /// PH-02: the FX read reaches Postgres only when the probe found
+    /// `fx_rates_daily`; otherwise it answers "no rates" and `fx` stays `null`.
+    #[tokio::test]
+    async fn fx_leg_queries_only_a_present_table() {
+        for (presence, expected_calls) in [
+            (Presence::Present, 1usize),
+            (Presence::Missing, 0),
+            (Presence::ProbeFailed, 0),
+        ] {
+            let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = std::sync::Arc::clone(&calls);
+            let got = fx_rates_leg(presence, move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { rates() }
+            })
+            .await;
+            if presence == Presence::Present {
+                assert_eq!(
+                    got.rate_for("2026-09-15"),
+                    Some(ChosenRate {
+                        rate: 1.15,
+                        approx: false
+                    }),
+                    "a present table is read"
+                );
+            } else {
+                assert_eq!(got, FxRates::default(), "{presence:?}");
+                assert_eq!(fx_json(&got), Value::Null, "{presence:?}");
+            }
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected_calls,
+                "{presence:?}"
+            );
+        }
+    }
+
+    /// PH-02: a game database without the guide tables answers the Cardmarket
+    /// block as `empty` and sends no query; a probe that itself failed stays
+    /// `unavailable` as today's failed query does.
+    #[tokio::test]
+    async fn cardmarket_leg_queries_only_a_present_table() {
+        for (presence, expected_status, expected_calls) in [
+            (Presence::Present, "available", 1usize),
+            (Presence::Missing, "empty", 0),
+            (Presence::ProbeFailed, "unavailable", 0),
+        ] {
+            let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = std::sync::Arc::clone(&calls);
+            let block = cardmarket_leg(presence, move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async {
+                    cardmarket_source(
+                        &[json!({ "product_id": "794461", "day": "2026-11-07", "trend": 0.78 })],
+                        None,
+                    )
+                }
+            })
+            .await;
+            assert_eq!(block["status"], expected_status, "{presence:?}");
+            assert_eq!(block["source"], "cardmarket_price_guide", "{presence:?}");
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected_calls,
+                "{presence:?}"
+            );
+        }
+    }
+
+    /// A game with no Cardmarket guide keeps the `unsupported_game` stub, which
+    /// is answered before the probe: even a pool that cannot be reached is never
+    /// touched.
+    #[tokio::test]
+    async fn other_games_stay_unsupported_before_any_probe() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://pokoin_test@127.0.0.1:1/pokoin_magic")
+            .expect("lazy pool");
+        let block =
+            cardmarket_history(&pool, "magic", Some("239324"), "2026-10-01", "2026-11-01").await;
+        assert_eq!(block["status"], "unsupported_game");
+        assert_eq!(block["products"].as_array().expect("products").len(), 0);
     }
 
     #[test]
