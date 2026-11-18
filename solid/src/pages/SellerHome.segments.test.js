@@ -119,6 +119,27 @@ test('the row sparkline puts its end dot on the line, not the corner', () => {
   assert.match(circle[0], /\bcy=\{[^{}]+\.y\}/);
 });
 
+test('a phone row is one line: name, sparkline, amount with its change', () => {
+  const css = read('../../../market/src/seller-segments.css');
+  // The phone block alone: a nested rule closes indented, so the first
+  // column-zero brace ends the media query.
+  const phone = /@media \(max-width: 520px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] || '';
+  assert.ok(phone, 'the segment CSS has no phone block');
+  // Four tracks of the same width in every row, so the columns line down the
+  // table; only the name is flexible and it ellipsizes before anything else.
+  assert.match(phone, /grid-template-columns: minmax\(0, 1fr\) 72px minmax\(0, 5\.5rem\) 1rem;/);
+  assert.match(phone, /\.segment-row \.segment-label \{\s*grid-column: 1;\s*grid-row: 1 \/ span 2;/);
+  assert.match(phone, /\.segment-row \.segment-spark \{\s*grid-column: 2;\s*grid-row: 1 \/ span 2;/);
+  assert.match(phone, /\.segment-row \.segment-value \{\s*grid-column: 3;\s*grid-row: 1;/);
+  assert.match(phone, /\.segment-row \.segment-change \{\s*grid-column: 3;\s*grid-row: 2;/);
+  // The chevron stays, and the years go under the name instead of beside it.
+  assert.match(phone, /\.segment-row \.segment-chevron \{\s*grid-column: 4;\s*grid-row: 1 \/ span 2;/);
+  assert.match(phone, /\.segment-label \{[^}]*flex-direction: column;/);
+  const hidden = [...phone.matchAll(/([^{}]+)\{\s*display: none;/g)].map((m) => m[1]).join(' ');
+  assert.ok(hidden.includes('.segment-cards'), 'the cards count is what the phone drops');
+  assert.ok(!hidden.includes('.segment-chevron'), 'the phone row keeps its chevron');
+});
+
 test('the fixture preview carries the segment table', () => {
   assert.match(homeSrc, /segments=\{normalizeSegments\(previewSegmentsFrom\(previewHistorySeries\(\)\)\)\}/);
 });
