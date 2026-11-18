@@ -4,6 +4,7 @@ import { cardFromCatalogRow, fetchSearch } from '@market/api.js';
 import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
 import {
   addItem,
+  commitQuantity,
   newDraft,
   newItem,
   removeItem,
@@ -166,10 +167,25 @@ function CatalogCardSearch(props) {
  * One card in the draft: what it is, and the five facets and copies the server
  * prices it by. The vocabulary is the listing forms' own — `MOOD_CONDS` and
  * `LIST_LANGS` — because a collection row means the same thing as a listing.
+ *
+ * `props.item` is the row's accessor: the row is keyed on its own id, so this
+ * component is never re-made by an edit of its own and every focus in it
+ * survives the edit.
  */
 function ItemRow(props) {
   const item = () => props.item;
   const patch = (changes) => props.onPatch(item().id, changes);
+  // What the seller is typing, until the field lets go of it. The row's quantity
+  // is a committed number; an empty field is a number still being written, not a
+  // quantity of none, so it stays on screen exactly as typed until blur or Enter.
+  const [typed, setTyped] = createSignal(null);
+  const copies = createMemo(() => typed() ?? String(item().quantity));
+  function commit() {
+    if (typed() === null) return;
+    const value = commitQuantity(typed(), item().quantity, props.limits);
+    setTyped(null);
+    if (value !== item().quantity) patch({ quantity: value });
+  }
   // An amount is only an amount in the currency the desk shows. While that read
   // is out the cell keeps its shape with a dash and guesses no unit at all.
   const price = () => {
@@ -192,8 +208,15 @@ function ItemRow(props) {
             type="number"
             min="1"
             max={props.limits.quantity}
-            value={item().quantity}
-            onInput={(event) => patch({ quantity: Number(event.currentTarget.value) })}
+            value={copies()}
+            onInput={(event) => setTyped(event.currentTarget.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              // Enter commits from the keyboard; Tab and a click commit on blur.
+              event.preventDefault();
+              commit();
+            }}
             aria-label={`Copies of ${item().name || 'card'}`}
             data-testid="collections-item-quantity"
           />
@@ -396,10 +419,12 @@ export default function CollectionEditor(props) {
 
           <Show when={draft().items.length}>
             <ul class="collections-items" data-testid="collections-items">
-              <For each={draft().items}>
+              {/* Keyed on the row, not the slice: a facet edit writes a new object
+                  into the list, and a row re-made for it loses the focus in it. */}
+              <For each={draft().items} keyed={(row) => row.rowId}>
                 {(item) => (
                   <ItemRow
-                    item={item}
+                    item={item()}
                     limits={limits()}
                     currency={props.currency}
                     currencyPending={Boolean(props.currencyPending)}

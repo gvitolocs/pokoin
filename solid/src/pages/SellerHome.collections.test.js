@@ -215,6 +215,24 @@ test('the item rows use the listing forms vocabulary and clamp copies', () => {
   assert.match(editorSrc, /\$\{draft\(\)\.items\.length\} of \$\{limits\(\)\.items\} cards/);
 });
 
+test('one card in the draft is one row, and keeps what is typed in it', () => {
+  // Keyed on the id the draft mints when the row enters — not the slice key,
+  // which every facet change rewrites. A new object under the same key updates
+  // the row in place, and the focus in it survives.
+  assert.match(editorSrc, /<For each=\{draft\(\)\.items\} keyed=\{\(row\) => row\.rowId\}>/);
+  assert.match(editorSrc, /\{\(item\) => \(\n\s+<ItemRow\n\s+item=\{item\(\)\}/);
+  // The copies field is the seller's text until it lets go of it: an empty field
+  // stays empty instead of being rewritten under the caret.
+  assert.match(editorSrc, /const copies = createMemo\(\(\) => typed\(\) \?\? String\(item\(\)\.quantity\)\)/);
+  assert.match(editorSrc, /value=\{copies\(\)\}/);
+  assert.match(editorSrc, /onInput=\{\(event\) => setTyped\(event\.currentTarget\.value\)\}/);
+  assert.match(editorSrc, /onBlur=\{commit\}/);
+  // Committing is the module's own clamp, and only ever writes a change.
+  assert.match(editorSrc, /commitQuantity\(typed\(\), item\(\)\.quantity, props\.limits\)/);
+  assert.match(editorSrc, /if \(value !== item\(\)\.quantity\) patch\(\{ quantity: value \}\)/);
+  assert.doesNotMatch(editorSrc, /onInput=\{\(event\) => patch\(\{ quantity: Number/);
+});
+
 test('the collections CSS is tokens, and a phone gets the whole screen', () => {
   // No hex: both colour schemes come from the dashboard tokens alone.
   assert.deepEqual([...css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]), []);

@@ -123,7 +123,21 @@ function normalizeItem(row, limits) {
     setName: text(row?.setName ?? row?.set_name),
     pricePkn: pricePknOf(row),
   };
-  return { id: itemIdOf(item), ...item };
+  const id = itemIdOf(item);
+  // `id` is the slice this row prices at and changes with every facet; `rowId`
+  // is the row itself, minted when it entered the draft and kept through every
+  // edit, so the form can hold a row open — and the focus in it — while the
+  // slice under it changes.
+  return { id, rowId: text(row?.rowId) || id, ...item };
+}
+
+/** A row id of its own: no two rows in one draft are the same row. */
+function uniqueRowId(items, wanted) {
+  const used = new Set(items.map((row) => text(row?.rowId)));
+  if (!used.has(wanted)) return wanted;
+  let n = 2;
+  while (used.has(`${wanted}#${n}`)) n += 1;
+  return `${wanted}#${n}`;
 }
 
 function normalizeCollection(row, limits) {
@@ -212,6 +226,9 @@ function draftOf(draft) {
 function mergeRow(existing, incoming, limits) {
   return {
     ...incoming,
+    // The row that was already there is the one that survives, and with it the
+    // identity the form holds its open field on.
+    rowId: text(existing.rowId) || incoming.rowId,
     quantity: Math.min(existing.quantity + incoming.quantity, limits.quantity),
     name: incoming.name || existing.name,
     setName: incoming.setName || existing.setName,
@@ -234,7 +251,7 @@ export function addItem(draft, item, limits = DEFAULT_LIMITS) {
     return next;
   }
   if (next.items.length >= clean.items) return next;
-  next.items.push(row);
+  next.items.push({ ...row, rowId: uniqueRowId(next.items, row.rowId) });
   return next;
 }
 
@@ -263,6 +280,20 @@ export function setItem(draft, id, patch = {}, limits = DEFAULT_LIMITS) {
     next.items.splice(index, 1);
   }
   return next;
+}
+
+/**
+ * What the copies field commits to when the seller leaves it: what they typed,
+ * inside the server's range. An empty or unreadable field is not a change of
+ * quantity — the row keeps what it had, which is also what the field then shows.
+ */
+export function commitQuantity(typed, previous, limits = DEFAULT_LIMITS) {
+  const clean = normalizeLimits(limits);
+  const raw = String(typed ?? '').trim();
+  const was = Math.min(Math.max(1, wholeNumber(previous, 1)), clean.quantity);
+  const n = Math.trunc(Number(raw));
+  if (!raw || !Number.isFinite(n)) return was;
+  return Math.min(Math.max(1, n), clean.quantity);
 }
 
 /** The name's own problem, or '' when it is usable. Taken names ignore case. */
@@ -310,9 +341,9 @@ export function draftErrors(draft, others = [], limits = DEFAULT_LIMITS) {
 }
 
 /**
- * The POST body: only the fields the server reads back, no client slice id and
- * no price — the server resolves every price itself, so one sent here would
- * only be a claim about the market it never asked for.
+ * The POST body: only the fields the server reads back — no client slice or row
+ * id and no price, because the server resolves every price itself, so one sent
+ * here would only be a claim about the market it never asked for.
  * Each item is normalized first, so a draft assembled by hand sends the same
  * shape the server answers with — the facets included, a card without a public
  * id left out (the checks above name it before a save is ever asked).

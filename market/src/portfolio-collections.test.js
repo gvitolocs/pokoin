@@ -6,6 +6,7 @@ import {
   collectionErrorMessage,
   collectionIdFromKey,
   collectionKey,
+  commitQuantity,
   draftErrors,
   DEFAULT_LIMITS,
   emptyCollections,
@@ -57,6 +58,9 @@ test('normalizeCollections answers limits, saved lists and a segments model', ()
   assert.equal(state.collections[0].items.length, 2);
   assert.deepEqual(state.collections[0].items[1], {
     id: 'pokemon|397269|SP|JP|R|-|G',
+    // A saved row starts as its own slice; the row id then outlives every facet
+    // change, so the form keeps the row — and the caret in it — open.
+    rowId: 'pokemon|397269|SP|JP|R|-|G',
     game: 'pokemon',
     cardId: '397269',
     condition: 'SP',
@@ -198,6 +202,53 @@ test('remove one row, change one row, and a facet that lands on another row', ()
   assert.deepEqual(fresh.items.map((item) => item.id), ['pokemon|1|NM|JP|-|-|-', 'pokemon|1|SP|EN|-|-|-'], 'the row stays where it was');
   assert.equal(fresh.items[0].quantity, 4, 'a facet that is free moves the row on its own');
   assert.deepEqual(setItem(two, 'pokemon|1|NM|EN|-|-|-', { cardId: 'oops' }).items.map((item) => item.id), two.items.map((item) => item.id), 'a row without a usable id is left alone');
+});
+
+test('the copies field commits what was typed, inside the server range', () => {
+  assert.equal(commitQuantity('7', 2), 7);
+  assert.equal(commitQuantity('  7 ', 2), 7);
+  assert.equal(commitQuantity('2.9', 1), 2, 'a fraction of a card is not a card');
+  assert.equal(commitQuantity('0', 5), 1);
+  assert.equal(commitQuantity('-3', 5), 1);
+  assert.equal(commitQuantity('5000', 5), 999, 'it stops at the limit the server set');
+  assert.equal(commitQuantity('50', 1, { ...DEFAULT_LIMITS, quantity: 9 }), 9, 'and at the limit of the answer it was given');
+  assert.equal(commitQuantity('', 5), 5, 'an empty field is not a change of quantity');
+  assert.equal(commitQuantity('  ', 5), 5);
+  assert.equal(commitQuantity('abc', 5), 5);
+  assert.equal(commitQuantity(null, 5), 5);
+  assert.equal(commitQuantity('3', 0), 3, 'the typed value needs nothing usable to leave');
+  assert.equal(commitQuantity('', 0), 1, 'a previous outside the range is pulled back in');
+});
+
+test('the row keeps its id across the edits that keep the row', () => {
+  const draft = addItem(addItem(newDraft(), { cardId: '1', quantity: 4 }), { cardId: '1', condition: 'SP', quantity: 5 });
+  const [nm, sp] = draft.items;
+  assert.equal(nm.rowId, nm.id, 'a row is born with the slice it entered on');
+  // A facet change that lands on a free slice moves the row; the row is the same.
+  const moved = setItem(draft, nm.id, { language: 'JP' });
+  assert.equal(moved.items[0].id, 'pokemon|1|NM|JP|-|-|-');
+  assert.equal(moved.items[0].rowId, nm.rowId, 'the row the form holds its caret on is still there');
+  // A facet change that lands on another row's slice merges: the row that was
+  // already there is the one that survives, with its identity.
+  const merged = setItem(draft, sp.id, { condition: 'NM' });
+  assert.deepEqual(merged.items.map((item) => item.id), ['pokemon|1|NM|EN|-|-|-']);
+  assert.equal(merged.items[0].rowId, nm.rowId);
+  assert.equal(merged.items[0].quantity, 9);
+});
+
+test('no two rows in a draft are ever the same row', () => {
+  let draft = addItem(addItem(newDraft(), { cardId: '1' }), { cardId: '1', condition: 'SP' });
+  const nm = draft.items[0].id;
+  // The NM row moves off its slice but keeps the row id it was born with...
+  draft = setItem(draft, nm, { condition: 'MP' });
+  assert.equal(draft.items[0].rowId, nm);
+  // ...so the NM slice coming back from the search wants an id already in use.
+  const again = addItem(draft, { cardId: '1' });
+  assert.equal(again.items.length, 3);
+  assert.equal(new Set(again.items.map((item) => item.rowId)).size, 3, 'the third row takes an id of its own');
+  const third = addItem(again, { cardId: '1' });
+  assert.equal(third.items.length, 3, 'the same slice as that third row still merges into it');
+  assert.deepEqual(third.items.map((item) => item.rowId), again.items.map((item) => item.rowId));
 });
 
 test('the name check: 1 to 40 characters, taken names compared case-insensitively', () => {
