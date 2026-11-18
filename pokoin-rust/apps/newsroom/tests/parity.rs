@@ -1534,3 +1534,122 @@ fn cli_replay_does_not_mutate_cms_or_claim_production_readiness() {
     assert_eq!(report["plan"], f["expected"]);
     assert_eq!(before, handover::validate_state(&data).unwrap());
 }
+
+/// The snapshot is a copy, so a destination inside the source would have the
+/// copy read the files it is writing and the original stops being one.
+#[test]
+fn snapshot_refuses_a_destination_inside_the_source_and_creates_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let src = root.path().join("src");
+    fs::create_dir(&src).unwrap();
+    let f = fixture("schedule.json");
+    for (name, value) in [
+        (store::RECORDS, &f["records"]),
+        (store::STORIES, &f["stories"]),
+        (store::STATE, &f["state"]),
+    ] {
+        store::atomic_json(&src.join(name), value).unwrap();
+    }
+    let inside = src.join("snapshots/today");
+    let error = handover::snapshot(&src, &inside).unwrap_err().to_string();
+    assert!(error.contains("inside the source directory"), "{error}");
+    assert!(!inside.exists(), "the check runs before anything is made");
+    assert!(!src.join("snapshots").exists());
+    // The source itself is refused too, however it is spelled.
+    assert!(handover::snapshot(&src, &src).is_err());
+    let back_again = src
+        .join("snapshots")
+        .join("..")
+        .join(src.file_name().unwrap());
+    assert!(handover::snapshot(&src, &back_again).is_err());
+    // Only outside the source does the snapshot run.
+    let dest = root.path().join("snapshot");
+    assert!(handover::snapshot(&src, &dest).is_ok());
+}
+
+/// No command silently reads a relative "data" directory, and `serve` never
+/// substitutes the v2 export directory for the F16 legacy mount.
+#[test]
+fn cli_commands_fail_closed_without_an_explicit_data_directory() {
+    use std::process::Command;
+    let bin = env!("CARGO_BIN_EXE_pokoin-newsroom");
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().join("cwd");
+    fs::create_dir(&cwd).unwrap();
+    let out = cwd.join("out.json");
+    let cases: Vec<Vec<String>> = vec![
+        vec!["preflight".into()],
+        vec!["plan".into()],
+        vec![
+            "snapshot".into(),
+            "--output".into(),
+            out.display().to_string(),
+        ],
+        vec![
+            "dry-run".into(),
+            "--input".into(),
+            cwd.join("missing.json").display().to_string(),
+            "--output".into(),
+            out.display().to_string(),
+        ],
+    ];
+    for case in &cases {
+        let run = Command::new(bin)
+            .args(case)
+            .env_remove("NEWSROOM_DATA_DIR")
+            .current_dir(&cwd)
+            .output()
+            .unwrap();
+        assert!(!run.status.success(), "{case:?}");
+        let error = String::from_utf8_lossy(&run.stderr).to_lowercase();
+        assert!(
+            error.contains("--data-dir") && error.contains("newsroom_data_dir"),
+            "{case:?} names neither way to give a data directory: {error}"
+        );
+    }
+    assert!(
+        !cwd.join("data").exists() && !out.exists(),
+        "a missing data directory must not be created relative to the cwd"
+    );
+    // The stateless commands keep working, and report the mount they lack.
+    let status = Command::new(bin)
+        .arg("status")
+        .env_remove("NEWSROOM_DATA_DIR")
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(
+        array(&status["gaps"])
+            .iter()
+            .any(|gap| gap.as_str().unwrap_or("")
+                == "Mount F16 legacy newsroom-articles.json from the checkout data directory"),
+        "{status}"
+    );
+    // `serve` fails on the legacy mount before it ever binds a socket.
+    let mut serve = Command::new(bin)
+        .args(["serve", "--bind", "127.0.0.1:28317", "--data-dir"])
+        .arg(&cwd)
+        .env_remove("NEWSROOM_DATA_DIR")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match serve.try_wait().unwrap() {
+            Some(_) => break,
+            None if std::time::Instant::now() > deadline => {
+                let _ = serve.kill();
+                panic!("serve accepted a missing --legacy-data-dir and started listening");
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+    let served = serve.wait_with_output().unwrap();
+    assert!(!served.status.success());
+    assert!(
+        String::from_utf8_lossy(&served.stderr).contains("--legacy-data-dir"),
+        "{}",
+        String::from_utf8_lossy(&served.stderr)
+    );
+}

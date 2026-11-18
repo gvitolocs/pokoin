@@ -178,8 +178,12 @@ pub fn load_env_file(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-pub fn data_dir() -> PathBuf {
+/// Where the newsroom state lives. There is no relative default: a "data"
+/// fallback would read or write whichever checkout the binary happened to run
+/// in, so the operator has to name the directory.
+pub fn data_dir() -> Result<PathBuf> {
     std::env::var_os("NEWSROOM_DATA_DIR")
+        .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("data"))
+        .with_context(|| "no newsroom data directory: pass --data-dir DIR or set NEWSROOM_DATA_DIR")
 }

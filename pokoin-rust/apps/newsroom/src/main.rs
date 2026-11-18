@@ -34,9 +34,12 @@ fn main() {
 }
 async fn run(args: &[String]) -> Result<()> {
     let command = args.first().map(String::as_str).unwrap_or("help");
-    let dir = option(args, "--data-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(store::data_dir);
+    // Only the commands that read state need a data directory, and they fail
+    // closed when the operator has not named one.
+    let data_dir = || match option(args, "--data-dir") {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => store::data_dir(),
+    };
     let now = option(args, "--now")
         .map(|s| pokoin_newsroom::timestamp(&s).context("invalid --now"))
         .transpose()?
@@ -49,7 +52,7 @@ async fn run(args: &[String]) -> Result<()> {
             );
         }
         "preflight" => {
-            let state = handover::validate_state(&dir)?;
+            let state = handover::validate_state(&data_dir()?)?;
             if args.iter().any(|s| s == "--activate") {
                 handover::activation_preflight()?;
             }
@@ -58,16 +61,17 @@ async fn run(args: &[String]) -> Result<()> {
         "snapshot" => {
             let dest =
                 PathBuf::from(option(args, "--output").context("snapshot requires --output")?);
-            println!("{}", handover::snapshot(&dir, &dest)?);
+            println!("{}", handover::snapshot(&data_dir()?, &dest)?);
         }
         "capture-h42" => capture_h42(args).await?,
         "plan" => {
+            let dir = data_dir()?;
             let stories = store::load_array(&dir.join(store::STORIES));
             let records = store::load_array(&dir.join(store::RECORDS));
             let state = store::strict_read(&dir.join(store::STATE))?;
             println!("{}", cadence::plan(&stories, &records, &state, now));
         }
-        "dry-run" => dry_run(args, &dir, now).await?,
+        "dry-run" => dry_run(args, &data_dir()?, now).await?,
         "serve" => {
             let bind = option(args, "--bind")
                 .context("serve requires an explicit --bind 127.0.0.1:<workspace-port>")?;
@@ -76,10 +80,14 @@ async fn run(args: &[String]) -> Result<()> {
                 bail!("standalone H42 listener must be loopback");
             }
             let config = website::Website {
-                data_dir: dir.clone(),
-                legacy_data_dir: option(args, "--legacy-data-dir")
-                    .map(PathBuf::from)
-                    .unwrap_or(dir),
+                data_dir: data_dir()?,
+                // NEWSROOM_RUST.md F16: the shared API must receive the correct
+                // legacy mount, so v1 records are never substituted from --data-dir.
+                legacy_data_dir: PathBuf::from(
+                    option(args, "--legacy-data-dir").context(
+                        "serve requires an explicit --legacy-data-dir for the F16 legacy articles; --data-dir holds v2 CMS exports, never v1 records",
+                    )?,
+                ),
                 export_token: env::var("POKO_NEWS_EXPORT_TOKEN").unwrap_or_default(),
             };
             axum::serve(
@@ -105,7 +113,8 @@ async fn run(args: &[String]) -> Result<()> {
             );
             println!("capture-h42 --base URL --output FILE; six public GETs of /api/poko/news.");
             println!("dry-run --input FILE --output FILE [--env-file FILE] [--max-model-calls N]");
-            println!("serve --bind IP:PORT; use --data-dir DIR and --now RFC3339 for replay.");
+            println!("Every state-reading command needs --data-dir DIR or NEWSROOM_DATA_DIR.");
+            println!("serve --bind IP:PORT --legacy-data-dir DIR; use --now RFC3339 for replay.");
             println!("Production run/ready fail closed until J17 parity is complete.");
         }
     }
