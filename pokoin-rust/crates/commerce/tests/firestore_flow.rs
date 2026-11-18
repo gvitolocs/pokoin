@@ -3144,8 +3144,43 @@ async fn put_unversioned_discount_order(
         .expect("order");
 }
 
+/// The same order as an order written on the settlement model: EUR 10.30
+/// including EUR 0.30 of buyer markup, so its money part is EUR 9.30 once the
+/// EUR 1.00 discount is taken off.
+async fn put_versioned_discount_order(
+    firestore: &FirestoreClient,
+    order_id: &str,
+    order_status: &str,
+    payment_status: &str,
+    discount: Value,
+) {
+    firestore
+        .create_document(
+            "orders",
+            order_id,
+            &json!({
+                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+                "paymentMethod":"stripe", "paymentStatus":payment_status,
+                "status":order_status, "settlementModel":"buyer_markup_processor_costs_v1",
+                "stripeCheckoutSessionId":format!("cs_{order_id}"),
+                "totalEURCents":1030,
+                "buyerMarkupCents":30, "shippingEURCents":0, "insuranceEURCents":0,
+                "pknDiscount":discount,
+                "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                    "shippingAmountEURCents":0,"sellerGrossCents":1000,
+                    "sellerTransferCents":null}],
+                "items":[{"sellerUid":"seller-1","quantity":1,
+                    "unitPriceEURCents":1000}],
+                "inventory":{"state":"committed","lines":[]},
+                "fulfillment":{"state":"done","steps":{}}
+            }),
+        )
+        .await
+        .expect("order");
+}
+
 /// Stripe's report that the EUR 9.30 money part of such an order was paid.
-fn unversioned_paid_report(order_id: &str) -> Value {
+fn paid_report(order_id: &str) -> Value {
     json!({
         "id":format!("evt_{order_id}"), "type":"checkout.session.completed",
         "data":{"object":{
@@ -3176,7 +3211,7 @@ async fn a_paid_report_on_an_ended_unversioned_order_leaves_its_discount_with_th
         json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
     )
     .await;
-    process_verified_event(&state, &unversioned_paid_report("order-report-ended"))
+    process_verified_event(&state, &paid_report("order-report-ended"))
         .await
         .unwrap();
 
@@ -3217,7 +3252,7 @@ async fn a_paid_report_after_an_unversioned_discount_release_leaves_it_with_the_
         json!({ "pkn": 200, "eurCents": 100, "state": "released" }),
     )
     .await;
-    process_verified_event(&state, &unversioned_paid_report("order-report-released"))
+    process_verified_event(&state, &paid_report("order-report-released"))
         .await
         .unwrap();
 
@@ -3251,7 +3286,7 @@ async fn a_paid_report_consumes_an_unversioned_held_discount() {
         json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
     )
     .await;
-    process_verified_event(&state, &unversioned_paid_report("order-report-held"))
+    process_verified_event(&state, &paid_report("order-report-held"))
         .await
         .unwrap();
 
@@ -3283,7 +3318,7 @@ async fn a_paid_report_consumes_an_unversioned_discount_whose_release_was_never_
                 "restoreError": "ledger write refused" }),
     )
     .await;
-    process_verified_event(&state, &unversioned_paid_report("order-report-unrecorded"))
+    process_verified_event(&state, &paid_report("order-report-unrecorded"))
         .await
         .unwrap();
 
@@ -3309,30 +3344,15 @@ async fn a_versioned_order_that_ended_answers_a_paid_report_with_a_conflict() {
     let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
     top_up_buyer(&firestore, 500).await;
     hold_for_order(&firestore, "order-report-versioned", 200).await;
-    firestore
-        .create_document(
-            "orders",
-            "order-report-versioned",
-            &json!({
-                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
-                "paymentMethod":"stripe", "paymentStatus":"expired",
-                "status":"cancelled", "settlementModel":"buyer_markup_processor_costs_v1",
-                "stripeCheckoutSessionId":"cs_order-report-versioned",
-                "totalEURCents":1030,
-                "buyerMarkupCents":30, "shippingEURCents":0, "insuranceEURCents":0,
-                "pknDiscount":{"pkn":200,"eurCents":100,"state":"released"},
-                "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
-                    "shippingAmountEURCents":0,"sellerGrossCents":1000,
-                    "sellerTransferCents":null}],
-                "items":[{"sellerUid":"seller-1","quantity":1,
-                    "unitPriceEURCents":1000}],
-                "inventory":{"state":"committed","lines":[]},
-                "fulfillment":{"state":"done","steps":{}}
-            }),
-        )
-        .await
-        .unwrap();
-    let report = process_verified_event(&state, &unversioned_paid_report("order-report-versioned"))
+    put_versioned_discount_order(
+        &firestore,
+        "order-report-versioned",
+        "cancelled",
+        "expired",
+        json!({ "pkn": 200, "eurCents": 100, "state": "released" }),
+    )
+    .await;
+    let report = process_verified_event(&state, &paid_report("order-report-versioned"))
         .await
         .unwrap_err();
     assert_eq!(report.status, StatusCode::CONFLICT);
@@ -3345,6 +3365,37 @@ async fn a_versioned_order_that_ended_answers_a_paid_report_with_a_conflict() {
     let balance = store::balance(&firestore, "buyer-1").await.unwrap();
     assert_eq!(balance.available_pkn, 300);
     assert_eq!(balance.locked_pkn, 200);
+}
+
+/// The same order on the same model with the very same report, and the order not
+/// ended: the checks pass and the discount is consumed. What refused the report
+/// above was the state the order had reached, not the model it was written on.
+#[tokio::test]
+async fn a_versioned_order_that_has_not_ended_accepts_the_same_paid_report() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    hold_for_order(&firestore, "order-report-open", 200).await;
+    put_versioned_discount_order(
+        &firestore,
+        "order-report-open",
+        "pending",
+        "pending_stripe",
+        json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-open"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-open").await;
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    assert_eq!(discount_consumes(&mock, "order-report-open"), 1);
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
 }
 
 #[tokio::test]
