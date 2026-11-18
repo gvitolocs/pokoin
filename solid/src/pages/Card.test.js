@@ -646,3 +646,36 @@ test('a desk that mounted from a warm cache keeps its rail up', () => {
   assert.match(settled, /window\.clearTimeout\(laterTimer\);/);
   assert.equal((page.match(/<Show when=\{later\(\)\}>/g) || []).length, 1, 'one gate for the rail and the fold');
 });
+
+/**
+ * PH-R034 P9 (N12): the live-listings handler returned as soon as the cell had no
+ * rows — which is exactly the state P1 made paintable as an answer. A frame that
+ * put the first listing on a card nobody was selling was thrown away, and the desk
+ * kept saying "No listings yet." until some later read disagreed with it.
+ */
+test('a live listing frame lands on an empty cell whose answer is known', () => {
+  const live = page.slice(
+    page.indexOf('subscribeListingLive(cardId, (event) => {'),
+    page.indexOf('      disposed = true;'),
+  );
+  assert.match(live, /if \(!shop\.offers\.length && !listingsKnown\(cardId\)\) return;/);
+  assert.doesNotMatch(live, /if \(!shop\.offers\.length\) return;/, 'rows are no longer the only reason to listen');
+  const steps = [
+    'const plain = snapshot(shop.offers);',
+    'const next = applyListingLive(plain, event);',
+    'if (next === plain) return;',
+    'setOffers(next);',
+    'rememberListingRows(cardId, next);',
+  ];
+  let at = -1;
+  for (const needle of steps) {
+    const found = live.indexOf(needle);
+    assert.ok(found > at, `${needle} comes after the step before it`);
+    at = found;
+  }
+  assert.match(page, /import \{ listingsKnown, rememberListingRows \} from '@market\/listings-cache\.js';/);
+  // One channel per desk, and it still closes with the desk.
+  assert.equal((page.match(/subscribeListingLive\(/g) || []).length, 1, 'one channel per desk');
+  assert.match(page, /import \{ applyListingLive, subscribeListingLive \} from '@market\/listing-live\.js';/);
+  assert.match(page, /unsubscribe\?\.\(\);/);
+});

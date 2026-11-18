@@ -101,7 +101,7 @@ import { cardDocumentTitle, displayName, printingIdentity } from '@market/identi
 import { deskLanguageChips, deskLanguageChoice } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
-import { listingsKnown } from '@market/listings-cache.js';
+import { listingsKnown, rememberListingRows } from '@market/listings-cache.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
@@ -628,10 +628,18 @@ function CardDesk(props) {
       });
     }
     const unsubscribe = subscribeListingLive(cardId, (event) => {
-      if (!shop.offers.length) return;
+      // An empty cell whose answer is known is an answered cell, and the event that
+      // puts the first listing on a card nobody was selling is the one the old guard
+      // threw away: the desk then kept saying "No listings yet." until a later read
+      // corrected it (N12).
+      if (!shop.offers.length && !listingsKnown(cardId)) return;
       const plain = snapshot(shop.offers);
       const next = applyListingLive(plain, event);
-      if (next !== plain) setOffers(next);
+      if (next === plain) return;
+      setOffers(next);
+      // The rows the desk adopted (P2) came from this cache: unless the event moves
+      // them there too, a step away and back paints what the channel replaced.
+      rememberListingRows(cardId, next);
     });
     return () => {
       disposed = true;

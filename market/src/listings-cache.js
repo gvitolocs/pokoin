@@ -182,6 +182,20 @@ export function rememberListings(cardId, data, epochAtStart) {
   return data;
 }
 
+/**
+ * The rows of the cached answer moved under the desk — a live listing event, the
+ * one channel that knows about a sale before the next read does. The answer stays
+ * what the desk is showing, or a step away and back adopts the rows the channel has
+ * already corrected. Nothing is invented: a card with no cached answer gets none.
+ */
+export function rememberListingRows(cardId, rows) {
+  const known = peekListings(cardId);
+  if (!Array.isArray(known?.listings) || !Array.isArray(rows)) {
+    return null;
+  }
+  return rememberListings(cardId, { ...known, listings: rows }, listingsFetchEpoch(cardId));
+}
+
 /** Milliseconds since this card's listings were fetched; Infinity when not cached. */
 export function listingsAgeMs(cardId, now = Date.now()) {
   const id = String(cardId || '');
