@@ -111,8 +111,8 @@ page and applies one file by hand, to one of 27 databases (the writer
 `pokoin_marketplace`, one satellite per game, and a few others), in whatever order the
 file names suggest. So the name and the header of a file are the only apply
 instructions it will ever have, and `scripts/check-migrations.sh` enforces them for
-every file a change adds or edits under `scripts/sql/` ([CI.md](CI.md), "Migration
-rules" row). A new migration is:
+every file a change adds or edits under `scripts/sql/` and under `scripts/sql-reverts/`
+([CI.md](CI.md), "Migration rules" row). A new migration is:
 
 ```sql
 -- scripts/sql/145_<snake_case>.sql        the next number above the highest here
@@ -146,6 +146,55 @@ create index …;
 - **A file that has once been on `main` is never edited, renamed or removed.** Add a
   new number. The one exception is a file whose header carried `-- migration: draft`
   when it merged: it has not been applied yet, so it may still change.
+
+**Every new migration is undoable, or says why it is not** (rule (g), PK-C019). Either the
+change adds its revert to `scripts/sql-reverts/` — named exactly like the migration, with
+`.revert.sql` appended — or the migration's first 10 lines carry one line of at least 15
+characters saying it is a ratchet:
+
+```sql
+-- revert: irreversible: the update rewrote 1.2 million rows no source keeps any more
+```
+
+An honest `irreversible` is worth more than a revert file nobody tested, and both are
+written by the person who still knows what the migration touched. A revert is:
+
+```sql
+-- scripts/sql-reverts/145_<snake_case>.revert.sql  same number and name as the migration
+-- reverts: scripts/sql/145_<snake_case>.sql        that one file, which must exist
+-- db: writer                                       the migration's own `-- db:` target
+-- destructive: <what this drops, and why nothing still running needs what 145 built>
+begin;
+set local lock_timeout = '3s';
+
+do $$ begin
+  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;
+end $$;
+```
+
+- **The file name is the link.** `145_foo.sql` ↔ `145_foo.revert.sql`; the `-- reverts:`
+  line repeats it so a reader holding one file can find the other. Anything in that
+  directory whose name does not end in `.revert.sql` is a finding (rule (i)): the
+  directory holds reverts and nothing else.
+- **`-- db:`** is compared against the migration's. A revert run on another database
+  either stops on the first missing object or finds a same-named table there and drops
+  it. When the migration predates the `-- db:` rule and names no target — `144` is one —
+  any valid target is accepted and the check prints that it could not be compared, so
+  confirm the host by hand.
+- **The replica refusal is not decoration.** The Pi replica is one `psql` line from the
+  writer, and a revert is run in a hurry after something already went wrong. Without the
+  `raise`, every statement fails with `cannot execute … in a read-only transaction`,
+  which reads like the migration having failed rather than like the wrong host. See
+  `scripts/sql-reverts/144_listing_external_identity.revert.sql`.
+- **`-- destructive:`** is required, and rule (d) is not: a revert drops by definition,
+  so `-- phase: contract` would be true of every file there and says nothing.
+- **A revert on `main` is never edited, renamed or deleted** — the same rule as a
+  migration, because someone may already have run it. Land a corrected revert beside it
+  and say which one was applied, in docs.
+- Reverts are only ever asked for in the pull request that adds the migration; nothing
+  retro-fits them, and rules (g)–(i) read only what a change adds or edits. The three
+  `2026*_*.revert.sql` files that predate this rule stay in `scripts/sql/`, where they
+  were applied from: a file never moves out of `scripts/sql/` once it is on `main`.
 
 ### Shared API change (example: Recently Seen)
 
