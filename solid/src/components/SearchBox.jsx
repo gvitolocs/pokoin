@@ -196,6 +196,7 @@ async function pageUniverse(live, text, { lang, print, signal, alive = () => tru
     let chunks = 0;
     let fetched = 0;
     const compactLength = compactQuery(lookup).length;
+    const budget = live.recallChunkBudget(text, lookup);
     while (alive()) {
       const size = live.chunkSize(chunks);
       const page = await suggestPage(lookup, {
@@ -210,7 +211,7 @@ async function pageUniverse(live, text, { lang, print, signal, alive = () => tru
       offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
       const exhaustive = page?.exhaustive === true || incoming < size;
       if (exhaustive || incoming === 0) break;
-      if (fetched >= live.SAFETY_BUDGET || chunks >= live.MAX_CHUNKS) break;
+      if (fetched >= budget.rows || chunks >= budget.chunks) break;
       // One letter prefetches a page. A real name keeps paging its printings.
       if (compactLength <= 2) break;
     }
