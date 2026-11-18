@@ -401,9 +401,9 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
-  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
+  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
   // Pokoin now is the cheapest live listing this desk already has.
-  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
 });
@@ -422,7 +422,7 @@ test('the card graph draws once, complete: no sold line alone while the history 
   // line arrives after the first draw.
   assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
   assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
-  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\) \|\| !accountSilver\(\)\) return null;/);
   assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\)/);
 });
 
@@ -433,11 +433,52 @@ test('an uncached graph waits for both reads, at most 1.5s after the sales', () 
   assert.match(page, /return \(\) => window\.clearTimeout\(timer\);/);
 });
 
+test('the other price sources are Silver only: nothing asked or cached without them', () => {
+  // PH-10: the desk has one Silver signal, the account store's (the header and
+  // /extension gate on it too): cached session at the first paint, confirmed
+  // profile afterwards.
+  assert.match(page, /import \{ accountSilver \} from '\.\.\/stores\/account\.js';/);
+  // The read is the gate's own: a visitor without Silver sends this desk's
+  // graph to no /api/marketplace-card-price-history at all.
+  assert.match(page, /function askGraphHistory\(range\) \{\n\s*if \(!untrack\(accountSilver\)\) return;/);
+  assert.equal((page.match(/fetchCardPriceHistory\(/g) || []).length, 1, 'the one history read is the gated one');
+  // Neither is its cache: no peek before the gate, and the write lives inside
+  // the read the gate guards.
+  assert.match(page, /untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null/);
+  const asked = page.slice(page.indexOf('function askGraphHistory'), page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'));
+  assert.ok(asked.indexOf('if (!untrack(accountSilver)) return;') < asked.indexOf('readGraphHistory(range)'), 'the cache peek sits behind the gate');
+  assert.ok(asked.indexOf('if (!untrack(accountSilver)) return;') < asked.indexOf('saveCardPriceHistory(cardId'), 'the cache write sits behind the gate');
+  // What SoldPriceGraph takes for the sources is Silver's alone; without these
+  // four props it draws the sold median, its overlays and its tooltip only.
+  assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\) && accountSilver\(\)/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\)/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\) \|\| !accountSilver\(\)\) return null;/);
+  assert.match(page, /onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
+  // The sold line and its overlays never depended on the sources: they stay.
+  assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
+});
+
+test('Silver turning on later asks then; without it the graph waits for nothing', () => {
+  const gate = page.slice(
+    page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
+    page.indexOf('fetchCardSales(cardId, { slices: true })'),
+  );
+  // The cached session can say Silver at the first paint and the confirmed
+  // profile can arrive after it: the window is read at that moment and its
+  // lines join the graph in one draw.
+  assert.match(gate, /createEffect\(accountSilver, \(silver\) => \{\n\s*if \(silver\) askGraphHistory\(untrack\(graphRange\)\);/);
+  // 'sold' is the state nobody but Silver is in: the graph draws with the
+  // sales, not 1.5s after them waiting for a read that is never coming.
+  assert.match(gate, /if \(!accountSilver\(\)\) return 'sold';/);
+  assert.match(gate, /if \(state !== 'history'\) \{\n\s*setGraphDrawn\(true\);/);
+});
+
 test('the desk peeks the persisted history cache, stale included, and redraws only on new data', () => {
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
   assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
   assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
-  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\)\);/);
+  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null,\n\s*\);/);
   assert.match(history, /const known = readGraphHistory\(range\);/);
   // A range button is the same read: cached paints at once, uncached keeps the
   // lines that are drawn until it answers.

@@ -78,6 +78,13 @@ export function catalogRecall(query, { limit = 6, lang = 'en' } = {}) {
   const accepted = ranked.filter((row) => row.withinCap !== false);
   const stem = String(token).trim();
   const full = words.length >= 2 && compactQuery(raw) !== compactQuery(stem) ? raw : '';
+  if (full && parsed.exactCompoundName) {
+    // The query IS a card name, so the name itself is asked before any prefix
+    // of it — a prefix that merely contains it (`dark` inside `dark jolteon`)
+    // tops up the answer, it does not own it (PH-05 §5.2). Its pages are bounded
+    // by `recallChunkBudget`.
+    return [full, stem];
+  }
   if (accepted.some((row) => row.distance === 0)) {
     return full ? [stem, full] : [stem];
   }
@@ -96,6 +103,27 @@ export function catalogRecall(query, { limit = 6, lang = 'en' } = {}) {
     names.push(full);
   }
   return names;
+}
+
+/**
+ * Pages one recall lookup is worth.
+ *
+ * The stem of an exact compound name is a prefix of other species' names
+ * (`dark` → Darkrai, Dark Patch, Darkness Energy), so it tops up the answer and
+ * never owns it. Left unbounded it takes the whole budget, and the compound's
+ * own pages are scheduled behind eight stem pages — the measured 322 ms that
+ * let the stem repaint the popup after the compound answered (PH-05 §5.2).
+ * Every other query keeps the transport defaults.
+ */
+export const STEM_RECALL_CHUNKS = 3;
+const STEM_RECALL_ROWS = FIRST_CHUNK + FOLLOW_CHUNK * (STEM_RECALL_CHUNKS - 1);
+
+export function recallChunkBudget(query, lookup) {
+  const raw = String(query || '').trim();
+  if (!parseTypedQuery(raw).exactCompoundName || compactQuery(lookup) === compactQuery(raw)) {
+    return { chunks: MAX_CHUNKS, rows: SAFETY_BUDGET };
+  }
+  return { chunks: STEM_RECALL_CHUNKS, rows: STEM_RECALL_ROWS };
 }
 
 export function buildScope({ lang = 'en', printLang = 'all', kind = 'singles', game = 'pokemon', query = '' } = {}) {
