@@ -3023,3 +3023,45 @@ async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() 
         assert!(stored["transferIds"].is_null());
     }
 }
+
+#[tokio::test]
+async fn a_non_eur_escrow_refund_is_handled_by_hand() {
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    let app = pokoin_commerce::router(state.clone());
+    let order = json!({
+        "buyerUid": "customer", "paymentMethod": "pkn", "currency": "PKN",
+        "paymentStatus": "escrow",
+        "items": [{"sellerUid": "buyer-1", "quantity": 1, "unitPricePkn": 500}]
+    });
+    firestore
+        .create_document("orders", "order-escrow-pkn", &order)
+        .await
+        .unwrap();
+    let before = mock.keys_with_prefix("ledger_entries/").len();
+    let (status, payload) = call(
+        &app,
+        "POST",
+        "/api/marketplace-orders",
+        Some(json!({
+            "action": "refund", "orderId": "order-escrow-pkn",
+            "clientToken": "manual", "amount": 100
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{payload}");
+    assert_eq!(payload["code"], "refund_needs_manual_handling");
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), before);
+    for uid in ["customer", "buyer-1"] {
+        let balance = store::balance(&firestore, uid).await.unwrap();
+        assert_eq!(balance.available_pkn, 0);
+    }
+    let stored = firestore
+        .get_document(&firestore.document_path("orders", "order-escrow-pkn").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    for key in ["paymentStatus", "items", "currency", "buyerUid"] {
+        assert_eq!(stored[key], order[key]);
+    }
+    assert!(stored["refunds"].is_null());
+}
