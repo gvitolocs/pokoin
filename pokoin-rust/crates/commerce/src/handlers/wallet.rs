@@ -38,6 +38,12 @@ const REUSED_ID_MESSAGE: &str =
 const MANUAL_REVIEW_WARNING: &str =
     "Withdraw request created, but automatic bank payout is pending manual review.";
 
+/// What a request whose record stands at `paying` is answered with: the bank
+/// may already have paid it, so nobody — client or team — may read it as a
+/// withdrawal that was never asked for.
+const PAYOUT_IN_DOUBT_MESSAGE: &str =
+    "This payout is being checked by the Pokoin team. Do not send it again.";
+
 /// The body's `requestId`: the name the browser gave this intent, so however
 /// often the body arrives the request behind it is applied once.
 /// `None` is a client that names nothing — logged and served as before.
@@ -462,9 +468,9 @@ async fn load_withdraw_request(
     firestore.get_document(&path).await
 }
 
-/// Write an intent's record after its payout is known. The client has nothing
-/// to retry at that point — the bank has been asked — so the write is repeated
-/// here rather than left to another call. `false` means every attempt failed.
+/// Write an intent's record and say whether it landed. What a request stands
+/// as is only known once the record says it, so the write is repeated here
+/// rather than left to another call. `false` means every attempt failed.
 async fn record_withdraw_request(firestore: &FirestoreClient, path: &str, record: &Value) -> bool {
     for _ in 0..RECORD_ATTEMPTS {
         if firestore.set_document(path, record).await.is_ok() {
@@ -532,21 +538,23 @@ pub async fn request_pkn_withdraw(
     }
     let outcome = match store::apply(firestore, &lock).await {
         Ok(outcome) => outcome,
-        // A record already stands at this path, so this call is not the request
-        // that id belongs to, and nothing of it was committed.
-        Err(StoreError::Conflict(_)) => return Err(reused_id()),
+        // A named intent's record stands at this path already, so this call is
+        // not the request that id belongs to and nothing of it was committed.
+        // An unnamed intent commits no record, so its error stays the store's.
+        Err(StoreError::Conflict(_)) if key.is_some() => return Err(reused_id()),
         Err(error) => return Err(error.into()),
     };
     if !outcome.applied {
         if is_reused_id(outcome.fingerprint.as_deref(), &fingerprint) {
             return Err(reused_id());
         }
-        // The call that committed this id locked the PKN and asked the bank;
-        // its own record says where that stands, and this call starts nothing.
+        // This id's PKN is locked and its record was created with that lock.
+        // This call starts no payout: the status the record carries is the
+        // answer, whatever the call that committed it got as far as doing.
         let stored = load_withdraw_request(firestore, &request_id).await?;
         let Some(stored) = stored else {
-            // A row written before records joined the commit: what that
-            // withdrawal stands as is the team's to say, not this call's.
+            // A marker with no record beside it: what that withdrawal stands as
+            // is the team's to say, not this call's.
             tracing::warn!(
                 route = "request-pkn-withdraw",
                 "withdraw replay has no request record"
@@ -572,6 +580,11 @@ pub async fn request_pkn_withdraw(
         if let Some(warning) = stored.get("warning").cloned() {
             answer["warning"] = warning;
         }
+        // A record left at `paying` may already have its payout on the chain, so
+        // the answer says it stands checked, never that it stands unpaid.
+        if stored["status"] == json!("paying") {
+            answer["message"] = json!(PAYOUT_IN_DOUBT_MESSAGE);
+        }
         return Ok(private_json(answer));
     }
 
@@ -579,6 +592,24 @@ pub async fn request_pkn_withdraw(
         // An unnamed request is keyed to nothing, so it records itself the way
         // it always did and no later call reads this write back.
         let _ = firestore.set_document(&request_path, &record).await;
+    } else {
+        // The record names this request `paying` before the bank is asked, so
+        // from here on a replay of the id answers a payout that stands checked
+        // rather than one that was never asked. Nothing reaches the chain until
+        // that write lands: the lock keeps its PKN and the client is told to
+        // come back, instead of a payout the record cannot name.
+        if let Some(object) = record.as_object_mut() {
+            object.insert("status".into(), json!("paying"));
+            object.insert("payoutStartedAt".into(), json!(store::now_iso()));
+            object.insert("updatedAt".into(), json!(store::now_iso()));
+        }
+        if !record_withdraw_request(firestore, &request_path, &record).await {
+            tracing::error!(request_id = %request_id, "withdraw payout state not recorded");
+            return Err(ApiError::unavailable(
+                "Pokoin could not note this payout down. Nothing was sent; try again in a while.",
+            )
+            .with_code("withdraw_not_recorded"));
+        }
     }
 
     match state.chain().send_bank_pkn(&address, amount as f64).await {
@@ -591,8 +622,8 @@ pub async fn request_pkn_withdraw(
                     object.insert("completedAt".into(), json!(store::now_iso()));
                     object.insert("updatedAt".into(), json!(store::now_iso()));
                 }
-                // The bank has paid, so the record is written first: what this
-                // intent is stays kept whatever the unlock does next.
+                // The record is written before the unlock: what the bank
+                // answered stands recorded ahead of the lock being released.
                 if !record_withdraw_request(firestore, &request_path, &record).await {
                     tracing::error!(request_id = %request_id, "withdraw payout not recorded");
                 }
@@ -600,9 +631,9 @@ pub async fn request_pkn_withdraw(
                     .with_ref(&request_id)
                     .with_meta(json!({ "payoutTxHash": tx_hash, "toAddress": address }));
                 if store::apply(firestore, &unlock).await.is_err() {
-                    // The payout and its record stand; releasing the lock is a
-                    // step for the team. Answering an error here would send the
-                    // client to ask the bank again.
+                    // The payout stands and this answer reports it. Releasing
+                    // the lock is a step for the team; the record already holds
+                    // the result, so a replay of this id answers from it.
                     tracing::error!(request_id = %request_id, "withdraw lock not released");
                 }
                 Ok(private_json(json!({
@@ -612,7 +643,11 @@ pub async fn request_pkn_withdraw(
             }
             None => {
                 if let Some(object) = record.as_object_mut() {
+                    // The bank was not asked for this one: the record leaves
+                    // `paying` and says what the answer says.
+                    object.insert("status".into(), json!("pending"));
                     object.insert("payoutMode".into(), json!(mode));
+                    object.insert("updatedAt".into(), json!(store::now_iso()));
                 }
                 if !record_withdraw_request(firestore, &request_path, &record).await {
                     tracing::error!(request_id = %request_id, "withdraw payout not recorded");
@@ -625,9 +660,13 @@ pub async fn request_pkn_withdraw(
         },
         Err(error) => {
             if let Some(object) = record.as_object_mut() {
+                // No payout was asked of the bank, so the record says so: it
+                // waits for the team, and it does not stand `paying`.
+                object.insert("status".into(), json!("pending"));
                 object.insert("payoutMode".into(), json!("manual_pending"));
                 object.insert("payoutError".into(), json!(error.to_string()));
                 object.insert("warning".into(), json!(MANUAL_REVIEW_WARNING));
+                object.insert("updatedAt".into(), json!(store::now_iso()));
             }
             if !record_withdraw_request(firestore, &request_path, &record).await {
                 tracing::error!(
