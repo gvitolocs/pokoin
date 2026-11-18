@@ -6,7 +6,7 @@ any service is stopped. This is not a completed Rust migration.
 
 ## Reference and ownership
 
-- Worktree `/home/nez/Projects/pokoin-newsroom-rust`, branch `feat/newsroom-rust`.
+- Repository `/home/nez/Projects/pokoin-web`, branch `feat/newsroom-rust`.
 - Lucina reference `d372ecffb3846115e403ea6befc08759789f013a` (`secretary-live`).
 - Live publisher checkout `f2acfd3e4c8be9fcb58c7cf8419d9176e09c314b` under
   `/home/nez/services/pokoin-newsroom/app`. All 24 newsroom modules were
@@ -36,8 +36,9 @@ projection, not Telegram or Discord posts. Do not silently start social sends.
 
 ## Implemented and tested
 
-The isolated Cargo crate lives at `pokoin-rust/apps/newsroom` (own lockfile and
-`[workspace]`; excluded from the root workspace until production parity).
+The crate lives at `pokoin-rust/apps/newsroom` and is a member of the
+`pokoin-rust` workspace, so `cargo test --workspace` builds and tests it in CI.
+It is still **not deployed** and registers no route in the shared API.
 
 | Entry | Implemented pieces | Remaining integration |
 | --- | --- | --- |
@@ -91,7 +92,7 @@ nice -n 10 "$HOME/.cache/pokoin-newsroom-target/debug/pokoin-newsroom" dry-run \
   --data-dir /home/nez/services/pokoin-newsroom/data \
   --input pokoin-rust/apps/newsroom/fixtures/live-evidence.json \
   --now 2026-10-22T19:39:50.083Z --max-model-calls 10 \
-  --output /tmp/pokoin-newsroom-rust-dry-run.json
+  --output "$HOME/scratch/newsroom/pokoin-newsroom-rust-dry-run.json"
 ```
 
 This establishes **skip parity**, not generated-draft parity. It would be

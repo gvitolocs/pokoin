@@ -1,8 +1,10 @@
 # Native newsroom work in progress
 
 **X-NEWS is incomplete. Do not cut over this revision.** `run`, `ready`, and
-`preflight --activate` fail closed. Node remains the production owner. This is
-an isolated Cargo workspace so the partial port does not change API releases.
+`preflight --activate` fail closed. Node remains the production owner. The
+crate is a member of the `pokoin-rust` workspace, so `cargo test --workspace`
+in CI builds and tests it, but it is still **not deployed** and serves no
+production request.
 
 Inventory: J17 (publisher), H42 (`GET /api/poko/news`), F16 (legacy article file).
 The full scope and operator procedure are in
