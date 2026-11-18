@@ -23,7 +23,9 @@ import {
 function snapshot(extra) {
   return {
     uid: '',
-    answered: false,
+    // Nothing of this seller has been asked for and come back yet: neither an
+    // answer nor a failure. See publish(), which decides the level from it.
+    settled: false,
     pending: false,
     saving: '',
     error: '',
@@ -54,7 +56,11 @@ export function createCollectionsStore(deps = {}) {
     // wrapper mirrors values instead of re-deriving them outside the signals.
     state = {
       ...next,
-      levelModel: next.answered || next.error ? next.model : null,
+      // A level exists once the seller's own lists have been asked for and the
+      // desk knows the outcome — including a failure, which is a level with a
+      // line in it. A retry settles nothing new, so the level stays on screen
+      // while it is out.
+      levelModel: next.settled ? next.model : null,
       atLimit: next.collections.length >= next.limits.collections,
     };
     for (const fn of [...watchers]) fn(state);
@@ -79,7 +85,7 @@ export function createCollectionsStore(deps = {}) {
     publish({
       ...state,
       uid,
-      answered: true,
+      settled: true,
       pending: false,
       saving: '',
       error: '',
@@ -87,8 +93,9 @@ export function createCollectionsStore(deps = {}) {
     });
   }
 
+  /** A failure is an outcome too: the level stays, with its line and a retry. */
   function fail(message) {
-    publish({ ...state, error: message });
+    publish({ ...state, settled: true, pending: false, error: message });
   }
 
   function load(uid) {
@@ -109,6 +116,8 @@ export function createCollectionsStore(deps = {}) {
     // of theirs can paint. The uid is claimed at once so a failed load can be
     // retried by the button that says “Try again”.
     if (state.uid !== clean) reset({ pending: true, uid: clean });
+    // The same seller, so a retry: what is on screen stays there, un-errored,
+    // and the bar says it is working.
     else publish({ ...state, pending: true, error: '' });
     return Promise.resolve()
       .then(() => deps.bearer())

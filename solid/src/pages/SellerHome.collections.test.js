@@ -120,8 +120,11 @@ test('the Collections level says what it cannot do yet', () => {
   assert.match(tableSrc, /You can keep up to \$\{limit\(\)\} collections\. Delete one first\./);
   assert.match(tableSrc, /disabled=\{!book\(\) \|\| full\(\)\}/);
   assert.match(tableSrc, /data-testid="segment-collections-new"/);
-  // A load that failed is this level's line and its retry, not a dead table.
-  assert.match(tableSrc, /data-testid="segment-collections-retry" onClick=\{\(\) => book\(\)\?\.reload\(\)\}>Try again</);
+  // A load that failed is this level's line and its retry, not a dead table,
+  // and the retry says so while it is out instead of taking the level with it.
+  assert.match(tableSrc, /<Show when=\{book\(\)\?\.error\(\) \|\| book\(\)\?\.pending\(\)\}>/);
+  assert.match(tableSrc, /\{book\(\)\.pending\(\) \? 'Loading…' : message\(\)\}/);
+  assert.match(tableSrc, /disabled=\{Boolean\(book\(\)\.pending\(\)\)\} data-testid="segment-collections-retry" onClick=\{\(\) => book\(\)\?\.reload\(\)\}>Try again</);
   // An empty saved list still says so; an empty row says no cards yet.
   assert.match(tableSrc, /emptyNote=\{isCollections\(\) \? 'No cards yet' : ''\}/);
   assert.match(tableSrc, /data-testid="segment-collections-none"/);

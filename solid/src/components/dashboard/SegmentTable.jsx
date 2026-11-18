@@ -217,11 +217,13 @@ function CollectionsBar(props) {
       <span class="segment-collections-count">
         {limit() ? `${saved()} of ${limit()} collections` : `${saved()} collections`}
       </span>
-      <Show when={book()?.error()}>
+      {/* A retry clears the sentence but not the level: the line says the desk
+          is working and the button waits for it instead of stacking requests. */}
+      <Show when={book()?.error() || book()?.pending()}>
         {(message) => (
           <span class="segment-collections-error" data-testid="segment-collections-error">
-            {message()}
-            <button type="button" data-testid="segment-collections-retry" onClick={() => book()?.reload()}>Try again</button>
+            {book().pending() ? 'Loading…' : message()}
+            <button type="button" disabled={Boolean(book().pending())} data-testid="segment-collections-retry" onClick={() => book()?.reload()}>Try again</button>
           </span>
         )}
       </Show>

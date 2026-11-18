@@ -130,6 +130,30 @@ test('a failed load leaves the level its line and a retry', async () => {
   assert.equal(calls.read, 2);
 });
 
+test('a retry keeps the level on screen while it is out', async () => {
+  let fail = true;
+  let release = null;
+  const { store } = engine({
+    read: () => (fail ? Promise.reject(err(500, '')) : new Promise((resolve) => {
+      release = resolve;
+    })),
+  });
+  await store.load('u1');
+  assert.ok(store.model(), 'the failure is a level with a line in it');
+  fail = false;
+  const retrying = store.reload();
+  // Clearing the stale sentence must not clear the level it was drawn on.
+  assert.ok(store.model(), 'the level does not blink out for the duration of the retry');
+  assert.equal(store.get().error, '', 'the old line is gone while the desk works');
+  assert.equal(store.get().pending, true);
+  await tick();
+  release(answer([binder()]));
+  await retrying;
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Charizard binder']);
+  assert.equal(store.get().pending, false);
+  assert.ok(store.model());
+});
+
 test('a save answer is the state: no second read after a write', async () => {
   const saved = answer([binder([{ game: 'pokemon', cardId: '129552', condition: 'NM', language: 'EN', quantity: 2, name: 'Charizard', pricePkn: 480 }])]);
   const { store, calls } = engine({
