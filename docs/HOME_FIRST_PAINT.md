@@ -148,11 +148,19 @@ data seventeen minutes old).
 | `pokoin-rust` in-process edge (`crates/edge/src/edge.rs`) | rail urls (`/api/marketplace-home/<name>`, `/api/marketplace-rails`) are capped at `RAIL_MAX_TTL` = **15 s** and are **never** replayed stale; every cache answer carries `age`. A STALE answer of any path rewrites its own `cache-control` to `s-maxage=0` and drops `stale-while-revalidate`, so it cannot be stored downstream. HIT keeps the handler header untouched. |
 | Cloudflare | the handler's own `public, max-age=30, s-maxage=120, stale-while-revalidate=600`, cleared by `scripts/marketplace-home-purge.sh` |
 
-The purge script sends the urls the homepage actually asks for — three
-`/api/marketplace-home/<name>`, the `?id=` rails those fall back to plus
-`spotlight`, and one `set:<slug>` per promo-fan slide — each three ways (plain,
-`{"url":…,"headers":{"Origin":"https://pokoin.com"}}` because the handlers send
-`vary: Origin`, and the `www` mirror), thirty files per request. It reads the fan
+The purge script sends the urls the homepage actually asks for, **on the host it
+asks them on**: every rail fetch goes through `publicApiUrl()`, so it is
+`https://api.pokoin.com/api/…` (`PUBLIC_API_ORIGIN`,
+`market/src/extension-auth-bridge.js:90`, used at `market/src/lists.js:144`) —
+purging the same path on `pokoin.com` would remove nothing the page reads. The
+paths are three `/api/marketplace-home/<name>`, the `?id=` rails those fall back
+to plus `spotlight`, and one `set:<slug>` per promo-fan slide. Each path is five
+files entries: the API host plain (curl, crawlers, same-site tools), the API host
+under `Origin: https://pokoin.com` **and** under `Origin:
+https://www.pokoin.com` (the handlers send `vary: Origin`, so Cloudflare keeps one
+copy per value), and the `pokoin.com` and `www.pokoin.com` same-origin copies in
+case the site Worker's `/api/` route answers. Thirty files per request, so six
+paths at a time and a path's five entries are never split. It reads the fan
 slugs from `market/src/promo-banners.js` and
 `market/src/data/featured-set.json`, needs no credentials, and does not go stale
 when a set is featured. `marketplace-home-purge.service` runs it after the
@@ -185,7 +193,7 @@ The rails handlers answer from Postgres per request (`apps/api/src/rails.rs`,
 | `market/src/home-browse.js` | Pokemon home grid: shuffle western expansions, walk 48-card pages, paint 14 tiles, **Show more** keeps the same walk. Drop JP/CN `card.nationality` even inside a western set. Independent of the rails vector. |
 | `scripts/sync-marketplace-rails.py` | Writes Pi `marketplace_rails` / `marketplace_card_tiles`. `TILE_SQL` grid/tile → leftover `_homepage.webp`; hero stays leftover JPEG. Image keys are leftover `ct_id`. |
 | `pokoin-rust/crates/edge/src/edge.rs` | Origin-side cache. `RAIL_MAX_TTL` caps rail urls at 15 s with no stale window; `stale_cache_control` rewrites a STALE replay to `s-maxage=0` so a shared cache cannot store it; `age` on every served entry. |
-| `scripts/marketplace-home-purge.sh` | Cloudflare purge of exactly the rail urls above, three variants each, thirty files per request. `--dry-run` prints the list. |
+| `scripts/marketplace-home-purge.sh` | Cloudflare purge of exactly the rail urls above: `https://api.pokoin.com` plain plus one entry per page Origin, and the same-origin site/www copies (five files entries per path), thirty files per request. `--dry-run` prints the list. |
 | `scripts/marketplace-home-purge.service` | Runs it after the publish with the zone and token from `%h/.config/pokoin/cloudflare.env`. |
 
 Tests: `market/src/home-cache.test.js`, `lists.recents.test.js`,

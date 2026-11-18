@@ -2,9 +2,10 @@
 # Tests scripts/marketplace-home-purge.sh against a stub curl: no Cloudflare call,
 # no production host, no real token. The stub records every argument, the curl
 # config file it is handed, and the request body on stdin, so the checks cover what
-# must be true of the purge: three variants per rail URL, at most 30 files per
-# request with a URL's variants never split, the token and zone id never in an
-# argument or in the output, a refused purge reported as a failure, a missing
+# must be true of the purge: five variants per rail path (the api. host plain and
+# under each page Origin, plus the site and www same-origin copies), at most 30
+# files per request with a path's variants never split, the token and zone id never
+# in an argument or in the output, a refused purge reported as a failure, a missing
 # variable reported by name only, and --dry-run sending nothing at all.
 # Run: sh scripts/marketplace-home-purge.test.sh
 set -eu
@@ -66,22 +67,42 @@ printf '%s\n' "$dry" >"$base/dry.txt"
 if [ -s "$STUB_ARGV" ]; then
     fail 'dry-run called curl'
 fi
-n_urls=$(( $(wc -l <"$base/dry.txt") / 3 ))
+n_urls=$(( $(wc -l <"$base/dry.txt") / 5 ))
 if [ "$n_urls" -lt 10 ]; then
     fail "dry-run listed only $n_urls urls"
 fi
-grep -q '^https://pokoin\.com/api/marketplace-home/new-cards$' "$base/dry.txt" ||
-    fail 'dry-run lost the new-cards rail'
-grep -q '^https://pokoin\.com/api/marketplace-rails?id=set%3A' "$base/dry.txt" ||
+# The rail lives on the API host the SPA fetches it from (PUBLIC_API_ORIGIN in
+# market/src/extension-auth-bridge.js), cached once per request Origin.
+grep -qx 'https://api.pokoin.com/api/marketplace-home/new-cards' "$base/dry.txt" ||
+    fail 'dry-run lost the new-cards rail on the api host'
+grep -qx 'https://api.pokoin.com/api/marketplace-home/new-cards with Origin https://pokoin.com' \
+    "$base/dry.txt" || fail 'the pokoin.com Origin variant of the api host is missing'
+grep -qx 'https://api.pokoin.com/api/marketplace-home/new-cards with Origin https://www.pokoin.com' \
+    "$base/dry.txt" || fail 'the www Origin variant of the api host is missing'
+grep -qx 'https://pokoin.com/api/marketplace-home/new-cards' "$base/dry.txt" ||
+    fail 'dry-run lost the same-origin site copy'
+grep -qx 'https://www.pokoin.com/api/marketplace-home/new-cards' "$base/dry.txt" ||
+    fail 'dry-run lost the same-origin www copy'
+grep -q '^https://api\.pokoin\.com/api/marketplace-rails?id=set%3A' "$base/dry.txt" ||
     fail 'dry-run lost the encoded set rail'
-if [ "$(grep -c ' with Origin https://pokoin\.com$' "$base/dry.txt")" != "$n_urls" ]; then
-    fail 'not every url carries one Origin variant'
+count() { grep -c "$1" "$base/dry.txt" || true; }
+if [ "$(count '^https://api\.pokoin\.com/.* with Origin https://pokoin\.com$')" != "$n_urls" ]; then
+    fail 'not every url carries the pokoin.com Origin variant on the api host'
 fi
-if [ "$(grep -c '^https://www\.pokoin\.com/' "$base/dry.txt")" != "$n_urls" ]; then
-    fail 'not every url carries one www mirror variant'
+if [ "$(count '^https://api\.pokoin\.com/.* with Origin https://www\.pokoin\.com$')" != "$n_urls" ]; then
+    fail 'not every url carries the www Origin variant on the api host'
 fi
-if [ "$(grep -vc ' with Origin ' "$base/dry.txt")" != $((n_urls * 2)) ]; then
-    fail 'the plain variants are not two per url'
+if [ "$(count '^https://api\.pokoin\.com/')" != $((n_urls * 3)) ]; then
+    fail 'the api host does not carry three entries per url'
+fi
+if [ "$(count '^https://pokoin\.com/')" != "$n_urls" ]; then
+    fail 'not every url carries one same-origin site entry'
+fi
+if [ "$(count '^https://www\.pokoin\.com/')" != "$n_urls" ]; then
+    fail 'not every url carries one same-origin www entry'
+fi
+if [ "$(grep -vc ' with Origin ' "$base/dry.txt")" != $((n_urls * 3)) ]; then
+    fail 'the plain entries are not three per url'
 fi
 sort "$base/dry.txt" >"$base/dry.sorted"
 
@@ -128,8 +149,20 @@ jq -s '[ .[].files | length ]' "$base/bodies.log" >"$base/sizes.json"
 if [ "$(jq 'map(select(. > 30)) | length' "$base/sizes.json")" != 0 ]; then
     fail 'a request sent more than 30 files'
 fi
-if [ "$(jq 'map(. % 3) | add' "$base/sizes.json")" != 0 ]; then
+# Inside every request, every url that appears appears with all five of its
+# entries: an Origin variant left for the next batch would keep serving the old rail.
+jq -s -c '[ .[] | .files | (length) as $n |
+    ([ .[] | (if type == "object" then .url else . end) |
+        sub("^https://api\\.pokoin\\.com"; "") | sub("^https://www\\.pokoin\\.com"; "") |
+        sub("^https://pokoin\\.com"; "") ] | unique | length) as $k |
+    [$n, $k] ]' "$base/bodies.log" >"$base/groups.json"
+if [ "$(jq 'map(select(.[0] != .[1] * 5)) | length' "$base/groups.json")" != 0 ]; then
     fail 'a url variant group was split across requests'
+fi
+reported=$(sed -n 's/^purged \([0-9]*\) urls: ok$/\1/p' "$base/out.log" |
+    awk '{ total += $1 } END { print total + 0 }')
+if [ "$reported" != "$n_urls" ]; then
+    fail "the requests covered $reported urls, not $n_urls"
 fi
 
 # Cloudflare refusing is a failure the publish chain has to see.

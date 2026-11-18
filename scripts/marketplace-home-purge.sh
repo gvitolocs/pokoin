@@ -5,10 +5,11 @@
 # s-maxage=120 and then a further stale-while-revalidate=600, so a new order took
 # up to twenty minutes to reach browsers. marketplace-rails-sync runs this after it.
 #
-# The URLs are exactly the ones the homepage asks for, spelled the way it spells
-# them (market/src/lists.js): the three dedicated rails, the ?id= rails those three
-# fall back to plus the grid rail, and one set rail per promo-fan slide. The fan's
-# slugs come from the SPA's own list, so featuring another set needs no change here.
+# The URLs are exactly the ones the homepage asks for, on the host it asks the API
+# on, spelled the way it spells them (market/src/lists.js): the three dedicated
+# rails, the ?id= rails those three fall back to plus the grid rail, and one set
+# rail per promo-fan slide. The fan's slugs come from the SPA's own list, so
+# featuring another set needs no change here.
 #
 # Usage: marketplace-home-purge.sh [--dry-run | --help]
 #   --dry-run  print the URLs that would be purged and call nothing.
@@ -19,13 +20,19 @@
 set -euo pipefail
 
 api='https://api.cloudflare.com/client/v4'
+# Cloudflare caches the rails under this host, one copy per request Origin, because
+# the handlers answer `vary: Origin`. The homepage reaches it through publicApiUrl()
+# -> PUBLIC_API_ORIGIN, which market/src/extension-auth-bridge.js:90 sets, and
+# market/src/lists.js:144 sends every rail fetch through it.
+origin='https://api.pokoin.com'
 site='https://pokoin.com'
 mirror='https://www.pokoin.com'
+variants=5
 max_files=30
 max_time=30
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2
+    awk '/^set -euo/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0" >&2
     exit "${1:-2}"
 }
 
@@ -70,13 +77,16 @@ done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
-# Three files entries per URL: the one a browser without the Vary'd Origin header
-# hits, the one cached under Origin: https://pokoin.com, and the www mirror's copy.
+# Five files entries per rail path: the API host the browser reads (plain, plus one
+# per Origin the page can be opened on), and the same-origin site/mirror paths the
+# site Worker can also answer.
 printf '%s\n' "${paths[@]}" | jq -Rcn \
-    --arg site "$site" --arg mirror "$mirror" \
+    --arg origin "$origin" --arg site "$site" --arg mirror "$mirror" \
     '[inputs | . as $path |
+        ($origin + $path),
+        {url: ($origin + $path), headers: {Origin: $site}},
+        {url: ($origin + $path), headers: {Origin: $mirror}},
         ($site + $path),
-        {url: ($site + $path), headers: {Origin: $site}},
         ($mirror + $path)]' >"$work/files.json"
 
 if [ "$dry_run" = 1 ]; then
@@ -113,7 +123,7 @@ conf=$work/curl.conf
 chmod 600 "$conf"
 
 files=$(jq 'length' "$work/files.json")
-per_request=$((max_files / 3 * 3))
+per_request=$((max_files / variants * variants))
 failed=0
 for ((lo = 0; lo < files; lo += per_request)); do
     hi=$((lo + per_request))
@@ -132,7 +142,7 @@ for ((lo = 0; lo < files; lo += per_request)); do
          end' "$work/response" 2>/dev/null); then
         verdict="Cloudflare answered http $http without json"
     fi
-    echo "purged $count urls: $verdict"
+    echo "purged $((count / variants)) urls: $verdict"
     [ "$verdict" = "ok" ] || failed=1
 done
 

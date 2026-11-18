@@ -636,13 +636,19 @@ every CDN node in front of us (that stack is what served a nine-minute-old
 order at `age: 96`).
 
 `scripts/marketplace-home-purge.sh` clears the second hop: it purges the exact
-urls the homepage asks for — the three `/api/marketplace-home/<name>` rails, the
-`/api/marketplace-rails?id=` rails those three fall back to plus the grid rail,
-and one `set:<slug>` per promo-fan slide (slugs read from
-`market/src/promo-banners.js` + `market/src/data/featured-set.json`, so featuring
-a set needs no change here). Each url goes three ways: plain, with
-`headers: {"Origin": "https://pokoin.com"}` because the handlers send
-`vary: Origin`, and on the `www` mirror. Thirty files per Cloudflare request.
+urls the homepage asks for, on **`https://api.pokoin.com`** — the host the SPA
+actually fetches from (`publicApiUrl()` → `PUBLIC_API_ORIGIN`,
+`market/src/extension-auth-bridge.js:90`) — the three
+`/api/marketplace-home/<name>` rails, the `/api/marketplace-rails?id=` rails
+those three fall back to plus the grid rail, and one `set:<slug>` per promo-fan
+slide (slugs read from `market/src/promo-banners.js` +
+`market/src/data/featured-set.json`, so featuring a set needs no change here).
+Each path goes five ways: the API host plain, the API host with
+`headers: {"Origin": "https://pokoin.com"}` and again with `"https://www.pokoin.com"`
+because the handlers send `vary: Origin` and Cloudflare keeps one copy per value,
+then the `pokoin.com` and `www.pokoin.com` same-origin paths in case the site
+Worker's `/api/` route answers. Thirty files per Cloudflare request, six paths at
+a time, a path's entries never split.
 `marketplace-rails-sync` runs it after a publish, so a new order reaches browsers
 in about a minute instead of up to twenty. Proofs:
 `scripts/marketplace-home-purge.test.sh` (stub curl, no CDN call) and the
