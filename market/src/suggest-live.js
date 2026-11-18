@@ -20,6 +20,7 @@ import {
   absorbNames,
   NAME_POOL,
   compactQuery,
+  compoundNameToken,
   fillSuggestGroups,
   isArtAwareQuery,
   isBareCollectorQuery,
@@ -505,7 +506,13 @@ export function liveSuggestGroups(query, {
       && new Set(tokens.map((token) => token.compact)).size === tokens.length
       && !tokens.some((token, index) => index < tokens.length - 1 && isModifierWord(token.raw))
       && !earlySetPrefixName(query, { lang });
-    const cached = nameCandidate ? allCachedGroups() : [];
+    // The cache is a source of SPELLINGS for an unfinished name only: once the
+    // typed text IS a catalog name, `absorbNames` would let spellings cached
+    // under other queries enter this ranking (PH-05 A2). The candidate rows
+    // themselves stay filtered to the eligible names below, which is what lets
+    // a mixed set bucket answer a name query (`mewtwo ex` from Evolutions).
+    const exactName = Boolean(parsed.exactCompoundName);
+    const cached = nameCandidate && !exactName ? allCachedGroups() : [];
     const nameRanked = nameCandidate ? rank(nameQuery, absorbNames(pool ?? NAME_POOL, cached)) : [];
     if (nameCandidate && (tokens.length === 1 || nameRanked[0]?.withinCap === true)) {
       // The documented compact-name probability pool owns name relevance.
@@ -649,7 +656,17 @@ function printingCount(groups) {
   return count;
 }
 
-function firstNameToken(query) {
+/** The cached printings of every name this token ranks within its cap. */
+function cachedNameGroups(token, rank, pool) {
+  const ranked = rank(token, pool);
+  const groups = ranked.filter((row) => row.withinCap !== false).flatMap((row) => {
+    const printings = cachedPrintings(row.display);
+    return printings.length ? [{ name: row.display, printings }] : [];
+  });
+  return { ranked, groups };
+}
+
+function firstWordToken(query) {
   const parsed = parseTypedQuery(query);
   if (isBareCollectorQuery(parsed) || isSetOnlyQuery(parsed)) return '';
   const words = String(parsed.nameQuery || query || '').trim().split(/\s+/).filter(Boolean);
@@ -657,9 +674,22 @@ function firstNameToken(query) {
 }
 
 /**
+ * The stem the fill may widen to — never simply the first word. A query that
+ * is exactly a two-word card name widens to its species (`dark jolteon` →
+ * `jolteon`): the first word there is another species' own prefix, and rows of
+ * Darkrai cover less of the typed query than rows of Jolteon (PH-05 §5.1).
+ */
+function firstNameToken(query) {
+  return compoundNameToken(query) || firstWordToken(query);
+}
+
+/**
  * Rows for the popup. A query that already fills 20 keeps that order.
- * Otherwise the first name token's cached printings fill the list, so a
- * second word cannot replace the local catalog with an empty singles row.
+ * Otherwise the fill widens by token coverage — the whole query first (already
+ * in `live.groups`), then the printings of the name the query names, then the
+ * broad prefix that only shares its first word — so a second word cannot
+ * replace the local catalog with an empty singles row, and a compound name is
+ * never topped up by a row that covers less of it.
  */
 export function paintCatalogGroups(query, options = {}) {
   const english = englishQuery(query, options.searchLang);
@@ -671,17 +701,14 @@ export function paintCatalogGroups(query, options = {}) {
   const token = firstNameToken(query);
   if (!suggestLiveReady(token)) return live.groups;
   const rank = options.rank || rankNames;
-  const ranked = rank(token, options.pool);
-  const groups = ranked.filter((row) => row.withinCap !== false).flatMap((row) => {
-    const printings = cachedPrintings(row.display);
-    return printings.length ? [{ name: row.display, printings }] : [];
-  });
-  if (!groups.length) return live.groups;
-  // The stem tops up the whole-query rows, it never replaces them: `dark`
-  // also prefixes Darkrai, and a compound name (`dark jolteon`) must not be
-  // dropped because its printings are fewer than the stem's.
+  const tiers = [cachedNameGroups(token, rank, options.pool)];
+  const broad = firstWordToken(query);
+  if (broad !== token && suggestLiveReady(broad)) tiers.push(cachedNameGroups(broad, rank, options.pool));
+  const orderedTiers = tiers.map((tier) => orderSuggestGroups(tier.groups, tier.ranked));
+  if (orderedTiers.every((tier) => !tier.length)) return live.groups;
+  // The widening tiers top up the whole-query rows, they never replace them.
   const filled = fillSuggestGroups(
-    popupGroups(mergeSuggestGroups([live.groups, orderSuggestGroups(groups, ranked)]), options.printLang),
+    popupGroups(mergeSuggestGroups([live.groups, ...orderedTiers]), options.printLang),
     limit,
     limit,
     {

@@ -8,18 +8,25 @@ import {
   formatHistoryDelta,
   formatHistoryTip,
   historyAxis,
+  historyCountValue,
   historyDateTicks,
   historyDayAt,
   historyDrawProgress,
+  historyLabelAnchor,
   historyPresetWindow,
   historyTimeline,
   historyWindowChange,
+  HISTORY_COUNT_FROM,
+  HISTORY_DRAW_MS,
+  liquidityBandRatio,
   normalizeHistoryDay,
   previewHistoryMonth,
   sliceHistorySeries,
   smoothHistoryBandPath,
   smoothHistoryPath,
+  smoothHistoryPointAt,
   smoothHistorySegments,
+  stepHistoryPath,
   stepHistoryPoints,
   timelineDay,
   timelineRatio,
@@ -288,20 +295,95 @@ test('the area band keeps the line curve and closes on its own edges', () => {
   assert.ok(area.includes(`L ${bottom[bottom.length - 1].x.toFixed(2)} 212.00`), area.slice(-40));
 });
 
-test('the draw-in reveal eases in and out and clamps at both ends', () => {
-  assert.equal(historyDrawProgress(0, 800), 0);
-  assert.equal(historyDrawProgress(400, 800), 0.5);
-  assert.equal(historyDrawProgress(800, 800), 1);
-  assert.equal(historyDrawProgress(1600, 800), 1);
-  assert.equal(historyDrawProgress(-20, 800), 0);
-  assert.equal(historyDrawProgress(Number.NaN, 800), 0);
+test('the draw-in eases out over 900 ms and clamps at both ends', () => {
+  assert.equal(HISTORY_DRAW_MS, 900);
+  assert.equal(historyDrawProgress(0, HISTORY_DRAW_MS), 0);
+  assert.equal(historyDrawProgress(HISTORY_DRAW_MS / 2, HISTORY_DRAW_MS), 0.9375);
+  assert.equal(historyDrawProgress(HISTORY_DRAW_MS, HISTORY_DRAW_MS), 1);
+  assert.equal(historyDrawProgress(HISTORY_DRAW_MS * 2, HISTORY_DRAW_MS), 1);
+  assert.equal(historyDrawProgress(-20, HISTORY_DRAW_MS), 0);
+  assert.equal(historyDrawProgress(Number.NaN, HISTORY_DRAW_MS), 0);
   let previous = 0;
-  for (let elapsed = -100; elapsed <= 1000; elapsed += 10) {
-    const value = historyDrawProgress(elapsed, 800);
+  for (let elapsed = -100; elapsed <= 1100; elapsed += 10) {
+    const value = historyDrawProgress(elapsed, HISTORY_DRAW_MS);
     assert.ok(value >= 0 && value <= 1, `${elapsed} is out of range`);
     assert.ok(value >= previous, `${elapsed} went backwards`);
     previous = value;
   }
+});
+
+test('the headline counts up from 85% of its value to the value', () => {
+  assert.equal(HISTORY_COUNT_FROM, 0.85);
+  assert.equal(historyCountValue(20000, 0), 17000);
+  assert.equal(historyCountValue(20000, 0.5), 18500);
+  assert.equal(historyCountValue(20000, 1), 20000);
+  assert.equal(historyCountValue(20000, 4), 20000);
+  assert.equal(historyCountValue(20000, -1), 17000);
+  assert.equal(historyCountValue(16300, historyDrawProgress(0, HISTORY_DRAW_MS)), 13855);
+  assert.equal(historyCountValue(16300, historyDrawProgress(HISTORY_DRAW_MS, HISTORY_DRAW_MS)), 16300);
+  assert.equal(historyCountValue(undefined, 0.5), 0);
+});
+
+test('the head dot of the draw rides the curve at the revealed x', () => {
+  const coords = jaggedCoords();
+  const start = smoothHistoryPointAt(coords, 0);
+  assert.deepEqual([start.x, start.y], [coords[0].x, coords[0].y]);
+  const end = smoothHistoryPointAt(coords, 640);
+  assert.ok(Math.abs(end.x - 640) < 1e-9, String(end.x));
+  assert.ok(Math.abs(end.y - coords[coords.length - 1].y) < 1e-9, String(end.y));
+  // Every real day is on the curve, so the tip never detaches from the stroke.
+  for (const point of coords) {
+    const at = smoothHistoryPointAt(coords, point.x);
+    assert.ok(Math.abs(at.y - point.y) < 1e-6, `${point.x}: ${at.y} vs ${point.y}`);
+  }
+  // Between two days it stays inside the value they join.
+  const between = smoothHistoryPointAt(coords, (coords[2].x + coords[3].x) / 2);
+  const lo = Math.min(coords[2].y, coords[3].y);
+  const hi = Math.max(coords[2].y, coords[3].y);
+  assert.ok(between.y >= lo - 1e-9 && between.y <= hi + 1e-9, String(between.y));
+  assert.equal(smoothHistoryPointAt([], 10), null);
+});
+
+test('the hover label is centred over the day and clamped at both edges', () => {
+  const box = {
+    plotWidth: 640, plotHeight: 200, labelWidth: 120, labelHeight: 24, gap: 14, pad: 6,
+  };
+  assert.deepEqual(historyLabelAnchor({ ...box, x: 300, y: 100 }), { left: 300, top: 86 });
+  // Left edge: the label's own left stops on the padding, not the point.
+  assert.equal(historyLabelAnchor({ ...box, x: 4, y: 100 }).left, 66);
+  // Right edge: its right stops inside the plot instead of over the frame.
+  assert.equal(historyLabelAnchor({ ...box, x: 638, y: 100 }).left, 574);
+  // A value near the top or the bottom keeps the whole line inside the plot.
+  assert.equal(historyLabelAnchor({ ...box, x: 300, y: 12 }).top, 30);
+  assert.equal(historyLabelAnchor({ ...box, x: 300, y: 210 }).top, 194);
+  // Before the label is measured only the anchor x is known.
+  assert.deepEqual(historyLabelAnchor({ x: 0, y: 100, plotWidth: 640, plotHeight: 200 }), { left: 6, top: 86 });
+});
+
+test('the liquidity band scales on the window peak, not on the portfolio', () => {
+  assert.equal(liquidityBandRatio(0, 500), 0);
+  assert.equal(liquidityBandRatio(250, 500), 0.5);
+  assert.equal(liquidityBandRatio(500, 500), 1);
+  assert.equal(liquidityBandRatio(900, 500), 1);
+  assert.equal(liquidityBandRatio(-5, 500), 0);
+  assert.equal(liquidityBandRatio(10, 0), 0);
+  assert.equal(liquidityBandRatio(null, 500), 0);
+});
+
+test('the stepped stroke holds a day and jumps on the day it changes', () => {
+  assert.equal(
+    stepHistoryPath([{ x: 0, y: 180 }, { x: 320, y: 100 }]),
+    'M 0.00 180.00 L 320.00 180.00 L 320.00 100.00',
+  );
+  assert.equal(stepHistoryPath([{ x: 5, y: 5 }]), 'M 5.00 5.00');
+  assert.equal(stepHistoryPath([]), '');
+});
+
+test('a flat window draws a straight line through the middle of the plot', () => {
+  const axis = historyAxis([200, 200, 200, 200]);
+  assert.equal((200 - axis.yMin) / (axis.yMax - axis.yMin), 0.5);
+  const levels = [0, 160, 320, 480].map((x) => ({ x, y: 112 }));
+  assert.equal(smoothHistoryPath(levels), 'M 0.00 112.00 C 53.33 112.00, 106.67 112.00, 160.00 112.00 C 213.33 112.00, 266.67 112.00, 320.00 112.00 C 373.33 112.00, 426.67 112.00, 480.00 112.00');
 });
 
 test('the tip lists every layer at that day, cards with how many have a sale', () => {

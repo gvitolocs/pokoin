@@ -10,11 +10,13 @@ import {
   filterCandidates,
   FIRST_CHUNK,
   FOLLOW_CHUNK,
+  MAX_CHUNKS,
   mergeCandidates,
   paintSource,
   prepareCandidate,
   projectPoolGroups,
   rankCandidates,
+  recallChunkBudget,
   reuseDecision,
   shouldContinue,
   catalogRecall,
@@ -168,7 +170,10 @@ test('recall asks Redis for the stem, plus the full string when a mechanic stays
   assert.deepEqual(catalogRecall('mewtwo evol'), ['mewtwo']);
   assert.deepEqual(catalogRecall('palkia legend'), ['palkia']);
   // Mechanic words stay on the name (`gx`); bare `pikachu` omits Tag Team.
-  assert.deepEqual(catalogRecall('pikachu gx'), ['pikachu', 'pikachu gx']);
+  // The name the visitor typed is asked FIRST (PH-05 §5.2): `pikachu gx` is a
+  // card name in its own right, so the prefix that only contains it cannot own
+  // the answer by arriving earlier.
+  assert.deepEqual(catalogRecall('pikachu gx'), ['pikachu gx', 'pikachu']);
   assert.deepEqual(catalogRecall('reshiram charizard'), ['reshiram', 'reshiram charizard']);
   assert.deepEqual(catalogRecall('p'), ['p']);
   const swapped = catalogRecall('ipk');
@@ -207,4 +212,19 @@ test('merged chunks keep identity and do not duplicate', () => {
   );
   assert.deepEqual(merged.rows.map((row) => row._id), ['1', '2']);
   assert.equal(merged.added, 1);
+});
+
+test('a compound name is asked before its stem, and the stem pages are bounded (PH-05)', () => {
+  assert.deepEqual(catalogRecall('dark jolteon'), ['dark jolteon', 'dark']);
+  const name = recallChunkBudget('dark jolteon', 'dark jolteon');
+  assert.deepEqual(name, { chunks: MAX_CHUNKS, rows: 2000 }, 'the typed name keeps the full budget');
+  const stem = recallChunkBudget('dark jolteon', 'dark');
+  assert.ok(stem.chunks < name.chunks, `stem got ${stem.chunks} of ${name.chunks} chunks`);
+  assert.ok(stem.rows < name.rows / 4, `stem got ${stem.rows} of ${name.rows} rows`);
+  assert.equal(stem.rows, FIRST_CHUNK + FOLLOW_CHUNK * (stem.chunks - 1), 'the bound is reachable in its own chunks');
+  // Everything that is not an exact compound name keeps the defaults it had.
+  for (const [query, lookup] of [['jolteon', 'jolteon'], ['dark', 'dark'], ['hgss energy', 'hgss'], ['pikachu 25', '25']]) {
+    const kept = recallChunkBudget(query, lookup);
+    assert.deepEqual(kept, name, `${query} → ${lookup}`);
+  }
 });

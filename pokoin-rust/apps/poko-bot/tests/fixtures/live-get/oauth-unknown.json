@@ -1,0 +1,11 @@
+{
+  "captured_at_utc": "2026-10-22T19:43:42.633296+00:00",
+  "source": "p2 /opt/hermes-poko",
+  "method": "GET",
+  "path": "/oauth2callback?state=unknown",
+  "status": 400,
+  "headers": {
+    "content-type": "text/html; charset=utf-8"
+  },
+  "body": "<html><body style=\"font-family:sans-serif;margin:2rem\"><h1>Unknown OAuth callback</h1><p>No handler for OAuth state <code>unknown</code>.</p><p>Gmail was removed from Hermes on 2026-09-20. Supported flows: CityHop, Griffin, and Poko YouTube.</p></body></html>"
+}

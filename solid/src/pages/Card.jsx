@@ -157,6 +157,7 @@ import { handOffCard, peekHandoffCard } from '../lib/card-handoff.js';
 import { createBuyBook, sellTarget } from '../lib/buy-book.js';
 import { whenIdle } from '../lib/idle.js';
 import { readDeskListings, readDeskVersions, writeDeskListings, writeDeskVersions } from '@market/desk-listings-store.js';
+import { accountSilver } from '../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../stores/auth.js';
 import { buyerCurrency, buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
@@ -450,6 +451,10 @@ function CardDesk(props) {
   // localStorage (market/src/price-history-cache.js), so a card seen before
   // draws complete on the first frame. One read per card, window and facet; the
   // lines already drawn stay while another window loads.
+  // Silver only: everybody else keeps the graph that was here before the
+  // sources — the sold median, its facet overlays and its tooltip. For them
+  // nothing is asked of the history and its cache is neither read nor written,
+  // so the graph never waits on a read that is not coming.
   const GRAPH_HISTORY_WAIT_MS = 1500;
   const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
   // A `fields=graph` answer holds the one TCGplayer series and the one Cardmarket
@@ -457,11 +462,14 @@ function CardDesk(props) {
   // not just another plot: the facet belongs to the key.
   const graphAskKey = (range, reverse) => `${cardId}|${range}|${reverse ? 'r' : 'n'}`;
   const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse());
-  /** This desk's window: read fresh, or the last one read before it went stale. */
-  const readGraphHistory = (range, reverse) => peekCardPriceHistory(cardId, range, { reverse })
-    || rememberStaleCardPriceHistory(cardId, range, { reverse });
+  /** This desk's window, of the facet being plotted: fresh, or stale before it. */
+  const readGraphHistory = (range) => {
+    const reverse = untrack(salesReverse);
+    return peekCardPriceHistory(cardId, range, { reverse })
+      || rememberStaleCardPriceHistory(cardId, range, { reverse });
+  };
   const [priceHistory, setPriceHistory] = createSignal(
-    readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE, untrack(salesReverse)),
+    untrack(accountSilver) ? readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE) : null,
   );
   // Nothing is plotted until the sales and the history are both in, at the
   // latest GRAPH_HISTORY_WAIT_MS after the sales: the graph is drawn once, not
@@ -474,6 +482,7 @@ function CardDesk(props) {
   let graphHistoryAsked = '';
 
   function askGraphHistory(range) {
+    if (!untrack(accountSilver)) return;
     const reverse = untrack(salesReverse);
     const askedFor = graphAskKey(range, reverse);
     if (disposed || graphHistoryAsked === askedFor) return;
@@ -482,7 +491,7 @@ function CardDesk(props) {
     // knew is only the first frame, never the data it keeps showing. The first
     // call runs in the component scope with the entry the signal was
     // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
-    const known = readGraphHistory(range, reverse);
+    const known = readGraphHistory(range);
     if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
     const bounds = { ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)), reverse };
     fetchCardPriceHistory(cardId, bounds).then((history) => {
@@ -501,11 +510,20 @@ function CardDesk(props) {
   createEffect(graphHistoryKey, (key) => {
     if (key) askGraphHistory(key.slice(cardId.length + 1).split('|')[0]);
   });
+  // Silver can arrive after this first paint, with the confirmed profile: the
+  // window is asked for then, and its lines join the graph already on screen.
+  createEffect(accountSilver, (silver) => {
+    if (silver) askGraphHistory(untrack(graphRange));
+  });
   createEffect(
-    () => (salesSlices() == null ? 'no-sales' : priceHistory() == null ? 'history' : 'both'),
+    () => {
+      if (salesSlices() == null) return 'no-sales';
+      if (!accountSilver()) return 'sold';
+      return priceHistory() == null ? 'history' : 'both';
+    },
     (state) => {
       if (untrack(graphDrawn) || state === 'no-sales') return undefined;
-      if (state === 'both') {
+      if (state !== 'history') {
         setGraphDrawn(true);
         return undefined;
       }
@@ -861,17 +879,18 @@ function CardDesk(props) {
   // The window the lines on the plot were read for, so the chart clips to it
   // even while a longer one is still loading. Nothing of the graph is passed
   // until it is drawn (see GRAPH_HISTORY_WAIT_MS), so no key or line jumps in
-  // after the sold median.
+  // after the sold median. The source keys, their lines, the Pokoin dot and the
+  // range buttons are Silver's alone (see askGraphHistory).
   const graphRangeProps = () => {
-    if (!graphDrawn()) return null;
+    if (!graphDrawn() || !accountSilver()) return null;
     const entry = priceHistory();
     return entry ? { key: entry.range, from: entry.from, to: entry.to } : null;
   };
-  const graphSources = createMemo(() => (graphDrawn()
+  const graphSources = createMemo(() => (graphDrawn() && accountSilver()
     ? priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() })
     : []));
   // Pokoin's own price right now: the cheapest live listing, one point, today.
-  const graphNowPoint = () => (graphDrawn() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);
+  const graphNowPoint = () => (graphDrawn() && accountSilver() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);
   // The tooltip rows round the PKN amount to a whole number ("114 PKN", never
   // "114.41 PKN"); the visitor-currency part keeps the exact price's format.
   const graphRowPrice = (pkn) => {
@@ -1550,7 +1569,7 @@ function CardDesk(props) {
                   sources={graphSources()}
                   nowPoint={graphNowPoint()}
                   range={graphRangeProps()}
-                  onRange={setGraphRange}
+                  onRange={accountSilver() ? setGraphRange : undefined}
                   onCondition={setSalesCondition}
                   onLanguage={setSalesLanguage}
                   onReverse={setSalesReverse}

@@ -25,6 +25,7 @@ export {
   chunkSize,
   createGenerationClock,
   emptyPool,
+  recallChunkBudget,
   reuseDecision,
   MAX_CHUNKS,
   SAFETY_BUDGET,

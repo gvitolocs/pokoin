@@ -6,6 +6,7 @@ import {
   absorbNames,
   capSuggestGroups,
   compactQuery,
+  compoundNameToken,
   extraSuggestQueries,
   fetchSuggestRanked,
   fillSuggestGroups,
@@ -1537,4 +1538,31 @@ test('a null printing does not throw while painting mimikyu gx', () => {
   const painted = paintCatalogGroups('mimikyu gx', { printLang: 'all', searchLang: 'en', kind: 'singles' });
   assert.ok(painted.some((group) => (group.printings || []).some((row) => row.id === 'gx')));
   assert.ok(painted.every((group) => (group.printings || []).every((row) => row && typeof row === 'object')));
+});
+
+test('a query that is exactly a two-word card name says so instead of parsing empty (PH-05)', () => {
+  const parsed = parseTypedQuery('dark jolteon');
+  assert.equal(parsed.exactCompoundName, true, JSON.stringify(parsed));
+  assert.equal(parsed.nameQuery, 'dark jolteon', 'the whole query is the name; nothing is peeled');
+  assert.deepEqual(parsed.setTokens, []);
+  assert.deepEqual(parsed.artTokens, []);
+  assert.deepEqual(parsed.numberTokens, []);
+  assert.deepEqual(parsed.rarityTokens, []);
+  assert.equal(parsed.eras.length, 0);
+  // The branch must fire for exact compound names and for nothing else, so
+  // every other query keeps the parse it had before.
+  for (const other of ['dark', 'jolteon', 'darkrai', 'hgss energy', 'rocket gang', 'dark jolteon ex']) {
+    assert.equal(parseTypedQuery(other).exactCompoundName, undefined, `${other} is not a compound card name`);
+  }
+});
+
+test('the widening token is the species word, never the qualifier (PH-05)', () => {
+  assert.equal(compoundNameToken('dark jolteon'), 'jolteon');
+  assert.equal(compoundNameToken('dark charizard'), 'charizard');
+  assert.equal(compoundNameToken("rocket's zapdos"), 'zapdos');
+  assert.equal(compoundNameToken('shining magikarp'), 'magikarp');
+  assert.equal(compoundNameToken('pikachu gx'), '', 'the first word already carries that name pool');
+  assert.equal(compoundNameToken('jolteon'), '', 'a one-word query has nothing to widen');
+  assert.equal(compoundNameToken('dark jolte'), '', 'a half-typed compound is not a name yet');
+  assert.equal(compoundNameToken('dark'), '', 'a prefix of another species is not a compound name');
 });
