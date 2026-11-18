@@ -116,6 +116,11 @@ pub enum StoreError {
     Upstream(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    /// A release asked for more PKN than the lock that is meant to return it.
+    /// Its own variant because [`StoreError::Conflict`] is what an already
+    /// applied write reports.
+    #[error("release exceeds the locked amount")]
+    ReleaseExceedsLock,
     #[error("not found: {0}")]
     NotFound(String),
     #[error("insufficient balance")]
@@ -137,6 +142,10 @@ impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
         match error {
             StoreError::Conflict(message) => ApiError::conflict(message),
+            StoreError::ReleaseExceedsLock => {
+                ApiError::conflict("That release is larger than the amount on hold.")
+                    .with_code("release_exceeds_lock")
+            }
             StoreError::NotFound(message) => ApiError::not_found(message),
             StoreError::Insufficient => ApiError::bad_request("Your account balance is too low."),
             StoreError::Forbidden(message) => ApiError::forbidden(message),

@@ -479,9 +479,7 @@ fn apply_mode(
             };
             let index = index_of(balances, from).expect("locked");
             if balances[index].1.locked_pkn < op.amount {
-                return Err(StoreError::Conflict(
-                    "release exceeds the locked amount".into(),
-                ));
+                return Err(StoreError::ReleaseExceedsLock);
             }
             balances[index].1.locked_pkn -= op.amount;
             balances[index].1.available_pkn += op.amount;
