@@ -178,3 +178,53 @@ fn tied_nonnumeric_ids_keep_node_stable_sort_order() {
     // JavaScript word boundaries are ASCII even next to Unicode text.
     assert!(!s::is_safe("ésexé Pokémon cards", true));
 }
+
+#[tokio::test]
+async fn x_api_errors_carry_the_response_body_cut_like_slice_500() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let server = MockServer::start().await;
+    let client = x::XClient::new(
+        reqwest::Client::new(),
+        url::Url::parse(&server.uri()).unwrap(),
+        creds(),
+    );
+    let denied = r#"{"code":344,"message":"Updating status in response to or quoting a tweet is not allowed."}"#;
+    Mock::given(method("POST"))
+        .and(path("/2/tweets"))
+        .respond_with(ResponseTemplate::new(403).set_body_string(denied))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The later jobs match the 403 fallback on exactly this text.
+    assert_eq!(
+        client
+            .post_tweet("hello", Some("123"))
+            .await
+            .unwrap_err()
+            .to_string(),
+        format!("X API POST /2/tweets failed 403: {denied}")
+    );
+    server.reset().await;
+    let long = format!("{}{}", "x".repeat(400), "🐱".repeat(200));
+    Mock::given(method("POST"))
+        .and(path("/2/tweets"))
+        .respond_with(ResponseTemplate::new(500).set_body_string(&long))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = client
+        .post_tweet("hello", None)
+        .await
+        .unwrap_err()
+        .to_string();
+    let kept = error
+        .strip_prefix("X API POST /2/tweets failed 500: ")
+        .unwrap_or_else(|| panic!("unexpected error text: {error}"));
+    assert_eq!(kept, s::js_slice(&long, 500));
+    assert_eq!(kept.encode_utf16().count(), 500);
+    assert_eq!(kept.matches('🐱').count(), 50, "a byte cut would keep 100");
+    assert!(!kept.chars().any(|c| c == '\u{fffd}'));
+}

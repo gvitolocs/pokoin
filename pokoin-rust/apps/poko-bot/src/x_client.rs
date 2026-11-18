@@ -199,11 +199,17 @@ impl XClient {
             .await
             .map_err(|_| anyhow::anyhow!("X API transport failed"))?;
         let status = response.status();
-        let data: Value = response.json().await.unwrap_or_else(|_| json!({}));
         if !status.is_success() {
-            bail!("X API {method} {path} failed {}", status.as_u16());
+            // The old client put X's own error text in the message and the later jobs match on it
+            // (the 403 "reply to or quote" fallback), so it is carried here, cut like `text.slice`.
+            let body = response.text().await.unwrap_or_default();
+            bail!(
+                "X API {method} {path} failed {}: {}",
+                status.as_u16(),
+                crate::social_text::js_slice(&body, 500)
+            );
         }
-        Ok(data)
+        Ok(response.json().await.unwrap_or_else(|_| json!({})))
     }
 
     pub async fn post_tweet(&self, text: &str, reply_id: Option<&str>) -> anyhow::Result<Value> {
