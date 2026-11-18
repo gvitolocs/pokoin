@@ -5,6 +5,7 @@ import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
 import {
   addItem,
   commitQuantity,
+  itemPriceLine,
   newDraft,
   newItem,
   removeItem,
@@ -25,7 +26,22 @@ const SEARCH_LIMIT = 12;
 /** Two hundred ms: the seller is typing a name, not running a query. */
 const SEARCH_DEBOUNCE = 200;
 
+/** What the price cell says for the three lines that are not an amount. */
+const PRICE_TEXT = {
+  pending: '—',
+  later: 'Priced after saving',
+  sold: 'No sold price',
+};
+const PRICE_TITLE = {
+  amount: 'What this exact printing last sold for, as the server answered it for this saved list.',
+  pending: 'The server has priced this card; the currency the desk writes amounts in is still being read.',
+  later: 'The server prices a card with the list: this row is new to the list, or a facet has changed since the last answer.',
+  sold: 'The server answered this list and nothing had sold on this exact printing.',
+};
+
 function searchRows(rows, gameId) {
+  // No price from the search: what a result carries is what somebody asks for a
+  // card, and a collection row is priced by the server and nothing else.
   return (rows || []).map((row) => ({
     cardId: String(row.id || row.card_id || ''),
     game: gameId,
@@ -33,7 +49,6 @@ function searchRows(rows, gameId) {
     setName: row.setName || row.set || row.set_name || '',
     number: row.number || '',
     image: row.image || row.imageUrl || row.gridImageUrl || '',
-    pricePkn: row.pricePkn ?? row.price ?? null,
   })).filter((row) => /^\d+$/.test(row.cardId));
 }
 
@@ -186,19 +201,21 @@ function ItemRow(props) {
     setTyped(null);
     if (value !== item().quantity) patch({ quantity: value });
   }
-  // An amount is only an amount in the currency the desk shows. While that read
-  // is out the cell keeps its shape with a dash and guesses no unit at all.
-  const price = () => {
-    if (props.currencyPending) return '—';
-    return Number(item().pricePkn) > 0 ? amount(item().pricePkn, props.currency) : 'No sold price';
-  };
+  // An amount is only an amount in the currency the desk shows, and only ever
+  // the server's own price for this exact slice: the module decides which of the
+  // four lines the cell says, this only writes it.
+  const line = createMemo(() => itemPriceLine(item(), { currencyPending: Boolean(props.currencyPending) }));
   return (
     <li class="collections-item" data-testid="collections-item">
       <div class="collections-item-identity">
         <strong>{item().name || 'Card'}</strong>
         <em>{[item().setName, item().game].filter(Boolean).join(' · ')}</em>
-        <span class="collections-item-price" title="What this printing is worth today: the last sold price the server answers with, or the price the search showed when it was added. Neither says No sold price.">
-          {price()}
+        <span
+          class={`collections-item-price${line() === 'amount' ? '' : ' is-note'}`}
+          title={PRICE_TITLE[line()]}
+          data-testid="collections-item-price"
+        >
+          {line() === 'amount' ? amount(item().pricePkn, props.currency) : PRICE_TEXT[line()]}
         </span>
       </div>
       <div class="collections-item-facets">
@@ -266,7 +283,10 @@ function ItemRow(props) {
  * draft of its own: Cancel and Escape throw it away without asking the server
  * anything, and a save that comes back refused keeps both the dialog and every
  * field in it. A saved row and its copies are what the answer says they are —
- * the server resolves every price, so nothing here asks for one.
+ * the server resolves every price, so nothing here asks for one. The amount a
+ * row shows is the server's own for that exact slice: a card added from the
+ * search, or one whose facets have moved since the answer, waits to be priced
+ * by the save.
  *
  * The card search is the header typeahead when the seller is in the page's own
  * game (`createLiveSuggest`, one ranker for one name pool) and the marketplace

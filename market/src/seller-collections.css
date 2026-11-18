@@ -363,6 +363,13 @@
   text-align: right;
 }
 
+/* Not an amount: the row waits for the save to price it, or nothing sold on it.
+   Either reads as a note, so it does not wear the gold of a number. */
+.collections-item-price.is-note {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .collections-item-facets {
   display: flex;
   flex-wrap: wrap;

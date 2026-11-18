@@ -12,6 +12,7 @@ import {
   emptyCollections,
   errorCode,
   itemIdOf,
+  itemPriceLine,
   nameProblem,
   newDraft,
   newItem,
@@ -72,6 +73,8 @@ test('normalizeCollections answers limits, saved lists and a segments model', ()
     name: 'Charizard',
     setName: 'Team Up',
     pricePkn: null,
+    // The answer priced exactly this slice, which is all a price is worth.
+    pricedId: 'pokemon|397269|SP|JP|R|-|G',
   });
   assert.deepEqual(state.model.defs.map((def) => def.key), ['collection:c1', 'collection:c2']);
   assert.deepEqual(state.model.days.map((day) => day.date), ['2026-11-16', '2026-11-17']);
@@ -251,6 +254,31 @@ test('no two rows in a draft are ever the same row', () => {
   assert.deepEqual(third.items.map((item) => item.rowId), again.items.map((item) => item.rowId));
 });
 
+test('a row is priced by the server answer for its exact slice, and by nothing else', () => {
+  const saved = normalizeCollections(payload()).collections[0];
+  const [priced, sold] = saved.items;
+  assert.equal(priced.pricedId, priced.id, 'the answer priced the slice it named');
+  assert.equal(itemPriceLine(priced), 'amount');
+  assert.equal(itemPriceLine(priced, { currencyPending: true }), 'pending', 'an amount needs the currency it is written in');
+  assert.equal(itemPriceLine(sold), 'sold', 'an answer of no price says so, and is still an answer');
+  // Straight from the search: no answer has priced this row.
+  const fresh = newItem({ id: priced.cardId, name: 'Charizard', pricePkn: 4400 });
+  assert.equal(fresh.pricePkn, null, 'a search row never brings a price along');
+  assert.equal(fresh.pricedId, '');
+  assert.equal(itemPriceLine(fresh), 'later');
+  // The priced slice, moved by a facet: the number belongs to the slice it left.
+  const moved = setItem(newDraft(saved), priced.id, { condition: 'MP' }).items[0];
+  assert.equal(moved.pricedId, priced.id, 'the row remembers the slice it was priced at');
+  assert.equal(itemPriceLine(moved), 'later');
+  assert.equal(itemPriceLine(moved, { currencyPending: true }), 'later', 'waiting to be priced needs no currency either');
+  // Re-adding a card already in the draft is the same row, with the same price.
+  const again = addItem(newDraft(saved), { cardId: priced.cardId, condition: 'NM', language: 'EN', firstEdition: true });
+  assert.equal(again.items.length, 2);
+  assert.deepEqual(again.items[0], { ...priced, quantity: 3 });
+  assert.equal(itemPriceLine(again.items[0]), 'amount');
+  assert.equal(itemPriceLine(null), 'later', 'a row that is not there prices nothing');
+});
+
 test('the name check: 1 to 40 characters, taken names compared case-insensitively', () => {
   const others = [{ name: 'Charizard binder' }, { name: 'Sealed' }];
   assert.equal(nameProblem('My Charizards', others), '');
@@ -303,6 +331,8 @@ test('the save body carries the items the server reads back, and no price', () =
   // The server prices a list itself: a body that sent one along would be a
   // claim about the market it never asked for.
   assert.equal('pricePkn' in saveBody(draft).items[0], false, 'no price in the body');
+  assert.equal('rowId' in saveBody(draft).items[0], false, 'no client row identity in the body');
+  assert.equal('pricedId' in saveBody(draft).items[0], false, 'which slice the desk last saw priced stays home');
   assert.equal('id' in saveBody(newDraft({ name: 'New', items: [] })), false, 'a new list sends no id');
   assert.equal(saveBody({ name: 'x', items: [{ id: 'slice', cardId: '1', quantity: 1 }] }).items[0].id, undefined, 'the client slice key stays home');
 });

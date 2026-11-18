@@ -195,8 +195,25 @@ test('an amount is written in the currency the desk shows, or not at all', () =>
   assert.match(tableSrc, /import \{ assetsAmountLabel as amount \} from '@market\/seller-currency\.js';/);
   assert.doesNotMatch(editorSrc, /formatPknNumber|formatAssetsValue/);
   assert.doesNotMatch(editorSrc, /props\.currency \|\| 'PKN'/);
-  assert.match(editorSrc, /if \(props\.currencyPending\) return '—';/);
+  assert.match(editorSrc, /pending: '—',/);
+  assert.match(editorSrc, /itemPriceLine\(item\(\), \{ currencyPending: Boolean\(props\.currencyPending\) \}\)/);
   assert.match(viewSrc, /currency=\{props\.moverCurrency \|\| ''\}\n\s*currencyPending=\{Boolean\(props\.moverCurrencyPending\)\}/);
+});
+
+test('a row shows the server price of its exact slice, or says it has none', () => {
+  // Which line a row shows is the module's decision (itemPriceLine); the form
+  // only writes it, and only the server's answer ever becomes an amount.
+  assert.match(editorSrc, /itemPriceLine,[\s\S]*\} from '@market\/portfolio-collections\.js';/);
+  assert.match(editorSrc, /const line = createMemo\(\(\) => itemPriceLine\(item\(\), \{ currencyPending: Boolean\(props\.currencyPending\) \}\)\)/);
+  assert.match(editorSrc, /\{line\(\) === 'amount' \? amount\(item\(\)\.pricePkn, props\.currency\) : PRICE_TEXT\[line\(\)\]\}/);
+  // A card new to the list, or one a facet has moved off its priced slice, waits
+  // for the save. A search result's number is what somebody asks for a card.
+  assert.match(editorSrc, /later: 'Priced after saving'/);
+  assert.match(editorSrc, /sold: 'No sold price'/);
+  assert.doesNotMatch(editorSrc, /pricePkn:/);
+  // Only an amount wears the gold of a number.
+  assert.match(editorSrc, /collections-item-price\$\{line\(\) === 'amount' \? '' : ' is-note'\}/);
+  assert.match(css, /\.collections-item-price\.is-note \{\n\s*color: var\(--muted\);/);
 });
 
 test('the item rows use the listing forms vocabulary and clamp copies', () => {

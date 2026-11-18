@@ -99,6 +99,24 @@ export function itemIdOf(item = {}) {
   ].join('|');
 }
 
+/**
+ * Which of its four lines an item row shows for a price — the decision only;
+ * the words and the formatting are the form's.
+ *
+ * - `later` — nothing answers for this slice: the row came straight from the
+ *   search, or a facet has moved it off the slice the server priced.
+ * - `pending` — the server priced this slice, but the desk does not yet know
+ *   the currency an amount in it would be written.
+ * - `amount` — the server's sold price for exactly this slice.
+ * - `sold` — the server answered this slice and said nothing had sold on it.
+ */
+export function itemPriceLine(item, { currencyPending = false } = {}) {
+  const slice = text(item?.id);
+  if (!slice || text(item?.pricedId) !== slice) return 'later';
+  if (currencyPending) return 'pending';
+  return Number(item?.pricePkn) > 0 ? 'amount' : 'sold';
+}
+
 function pricePknOf(row) {
   const price = numberOrNull(row?.pricePkn ?? row?.price_pkn);
   return price == null || price < 0 ? null : price;
@@ -128,7 +146,10 @@ function normalizeItem(row, limits) {
   // is the row itself, minted when it entered the draft and kept through every
   // edit, so the form can hold a row open — and the focus in it — while the
   // slice under it changes.
-  return { id, rowId: text(row?.rowId) || id, ...item };
+  // `pricedId` is the slice the server last answered a price for, and is what
+  // `pricePkn` is worth: nothing else. A row straight from the search, or one
+  // whose facets have moved since that answer, carries a price for no slice.
+  return { id, rowId: text(row?.rowId) || id, pricedId: text(row?.pricedId), ...item };
 }
 
 /** A row id of its own: no two rows in one draft are the same row. */
@@ -146,8 +167,11 @@ function normalizeCollection(row, limits) {
   const items = [];
   const seen = new Set();
   for (const raw of Array.isArray(row?.items) ? row.items : []) {
-    const item = normalizeItem(raw, limits);
-    if (!item || seen.has(item.id)) continue;
+    const answered = normalizeItem(raw, limits);
+    if (!answered || seen.has(answered.id)) continue;
+    // The answer is the only thing that prices a row, and it prices the exact
+    // slice it names. Every edit the seller makes moves away from that slice.
+    const item = { ...answered, pricedId: answered.id };
     seen.add(item.id);
     items.push(item);
   }
@@ -205,7 +229,8 @@ export function newItem(card, limits = DEFAULT_LIMITS) {
     quantity: card?.quantity,
     name: card?.name,
     setName: card?.setName ?? card?.set,
-    pricePkn: card?.pricePkn ?? null,
+    // Deliberately no price: what a search row carries is what somebody is
+    // asking for the card, and only the server's answer prices a collection.
   }, normalizeLimits(limits));
 }
 
@@ -224,12 +249,17 @@ function draftOf(draft) {
 }
 
 function mergeRow(existing, incoming, limits) {
+  // Both rows price the same slice — that is why they merge — so the price
+  // belongs to whichever of them the server actually answered for it.
+  const priced = existing.pricedId === existing.id ? existing : incoming;
   return {
     ...incoming,
     // The row that was already there is the one that survives, and with it the
     // identity the form holds its open field on.
     rowId: text(existing.rowId) || incoming.rowId,
     quantity: Math.min(existing.quantity + incoming.quantity, limits.quantity),
+    pricedId: text(priced.pricedId),
+    pricePkn: priced.pricePkn,
     name: incoming.name || existing.name,
     setName: incoming.setName || existing.setName,
   };
@@ -341,9 +371,10 @@ export function draftErrors(draft, others = [], limits = DEFAULT_LIMITS) {
 }
 
 /**
- * The POST body: only the fields the server reads back — no client slice or row
- * id and no price, because the server resolves every price itself, so one sent
- * here would only be a claim about the market it never asked for.
+ * The POST body: only the fields the server reads back — no client slice, row
+ * or priced-slice id and no price, because the server resolves every price
+ * itself, so one sent here would only be a claim about the market it never
+ * asked for.
  * Each item is normalized first, so a draft assembled by hand sends the same
  * shape the server answers with — the facets included, a card without a public
  * id left out (the checks above name it before a save is ever asked).
@@ -355,7 +386,7 @@ export function saveBody(draft) {
     items: clean.items.reduce((acc, item) => {
       const row = normalizeItem(item, DEFAULT_LIMITS);
       if (!row) return acc;
-      const { id, rowId, pricePkn, ...fields } = row;
+      const { id, rowId, pricedId, pricePkn, ...fields } = row;
       acc.push(fields);
       return acc;
     }, []),
