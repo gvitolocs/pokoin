@@ -9,15 +9,17 @@ inventory=${X_POKO_INVENTORY:-"$here/../../../../docs/x-poko/inventory.json"}
 mode=${1:---check}
 [[ $mode == --check || $mode == --apply ]] || { echo 'usage: x-poko-cutover.sh [--check|--apply] /prepared/bundle' >&2; exit 2; }
 # This gate is before root checks, locks, mkdir, installs or systemctl mutations.
-python3 - "$inventory" <<'PY'
-import json,sys
-with open(sys.argv[1]) as f: inventory=json.load(f)
-gaps=[e for e in inventory['entries'] if not e.get('verified')]
-if not inventory.get('complete') or gaps:
-    print('CUTOVER BLOCKED: X-POKO parity is incomplete.',file=sys.stderr)
-    for entry in gaps: print(f"  {entry['id']}: {entry['reason']}",file=sys.stderr)
-    sys.exit(1)
-PY
+# It fails closed: without jq, or with an inventory that cannot be read and parsed, nothing runs.
+command -v jq >/dev/null 2>&1 || { echo 'CUTOVER BLOCKED: jq is required to read the parity inventory.' >&2; exit 1; }
+jq -e '(.entries | type) == "array"' "$inventory" >/dev/null 2>&1 \
+    || { echo "CUTOVER BLOCKED: the parity inventory is unreadable or not valid JSON: $inventory" >&2; exit 1; }
+complete=$(jq -r '.complete' "$inventory")
+gaps=$(jq -r '.entries[] | select(.verified != true) | "  \(.id): \(.reason)"' "$inventory")
+if [[ $complete != true || -n $gaps ]]; then
+    echo 'CUTOVER BLOCKED: X-POKO parity is incomplete.' >&2
+    [[ -z $gaps ]] || printf '%s\n' "$gaps" >&2
+    exit 1
+fi
 bundle=$(realpath -- "${2:?prepared release bundle required}")
 for path in bin/poko-bot bin/poko-bot.sha256 config/env config/switch.env units/poko-bot.service units/poko-card-x.service units/poko-youtube-replies.service; do
     [[ -f $bundle/$path && ! -L $bundle/$path ]] || { echo "Missing regular bundle file: $path" >&2; exit 1; }
