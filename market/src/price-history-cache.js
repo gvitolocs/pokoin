@@ -4,8 +4,11 @@
  * complete at once, instead of the sold line first and the rest a second later.
  */
 
+import { CARD_SALES_TTL_MS } from './sold-sales-cache.js';
+
 const PREFIX = 'pokoin.cardPriceHistory.v1.';
-export const CARD_PRICE_HISTORY_TTL_MS = 15 * 24 * 60 * 60 * 1000;
+/** As fresh as the sold slices it is drawn with. */
+export const CARD_PRICE_HISTORY_TTL_MS = CARD_SALES_TTL_MS;
 const MEMORY_CAP = 32;
 /** One copy per card and range window: the oldest of these keys goes first. */
 const STORE_CAP = 40;
@@ -127,7 +130,7 @@ function savedAtOf(raw) {
 }
 
 /** Keep only the newest `keep` history windows of this cache's own keys. */
-export function pruneStoredPriceHistory(keep = STORE_CAP) {
+function pruneStoredPriceHistory(keep = STORE_CAP) {
   const local = store();
   if (!local) {
     return 0;

@@ -7,6 +7,7 @@ import {
   resetCardPriceHistoryCacheForTests,
   saveCardPriceHistory,
 } from './price-history-cache.js';
+import { CARD_SALES_TTL_MS } from './sold-sales-cache.js';
 
 const store = new Map();
 
@@ -47,6 +48,7 @@ beforeEach(() => {
 
 test('a saved window peeks back with everything the graph draws', () => {
   assert.equal(CARD_PRICE_HISTORY_TTL_MS, 15 * 24 * 60 * 60 * 1000);
+  assert.equal(CARD_PRICE_HISTORY_TTL_MS, CARD_SALES_TTL_MS, 'as fresh as the sold slices');
   const entry = entryOf();
   assert.deepEqual(saveCardPriceHistory('813622', '3m', entry), entry);
   const peeked = peekCardPriceHistory('813622', '3m');
