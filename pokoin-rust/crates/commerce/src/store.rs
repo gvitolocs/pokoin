@@ -961,3 +961,355 @@ mod tests {
         assert_eq!(MONEY_REQUESTS, "money_requests");
     }
 }
+
+/// The rules `apply_mode` holds for any sequence of operations: PKN enters a
+/// balance only through a Mint, a release returns no more than its lock held,
+/// a refusal changes nothing, and no accepted operation leaves a balance below
+/// zero.
+#[cfg(test)]
+mod properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    const BALANCE_MAX: i64 = 10_000;
+    const AMOUNT_MAX: i64 = 20_000;
+
+    /// Where an operation's amount comes from: a plain figure, or an edge of
+    /// the balance the operation is measured against.
+    #[derive(Clone, Copy, Debug)]
+    enum Amount {
+        Plain(i64),
+        WholeBalance,
+        JustAboveBalance,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct Planned {
+        mode: MoveMode,
+        from: usize,
+        to: usize,
+        amount: Amount,
+    }
+
+    /// A transfer between two accounts, its amount within the sender's
+    /// available balance or beyond it.
+    #[derive(Clone, Copy, Debug)]
+    struct Transfer {
+        sender_available: i64,
+        sender_locked: i64,
+        receiver_available: i64,
+        receiver_locked: i64,
+        amount: i64,
+    }
+
+    /// The balance an operation is measured against.
+    fn measured(balance: FirestoreBalance, mode: MoveMode) -> i64 {
+        match mode {
+            MoveMode::UnlockBurn | MoveMode::UnlockRelease => balance.locked_pkn,
+            _ => balance.available_pkn,
+        }
+    }
+
+    fn accounts_of(values: &[(i64, i64)]) -> Vec<(String, FirestoreBalance)> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, (available, locked))| {
+                (
+                    format!("account-{index}"),
+                    FirestoreBalance {
+                        available_pkn: *available,
+                        locked_pkn: *locked,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Total PKN across every account: what a Mint alone is allowed to raise.
+    fn supply(state: &[(String, FirestoreBalance)]) -> i64 {
+        state
+            .iter()
+            .map(|(_, balance)| balance.available_pkn + balance.locked_pkn)
+            .sum()
+    }
+
+    /// One operation as it met the balances.
+    struct Step {
+        mode: MoveMode,
+        amount: i64,
+        /// The lock of the account the operation acted on, before it ran.
+        locked_before: i64,
+        accepted: bool,
+        supply_before: i64,
+        before: Vec<(String, FirestoreBalance)>,
+        after: Vec<(String, FirestoreBalance)>,
+    }
+
+    /// Build one operation the way the handlers build it, with its amount read
+    /// from the balance it will meet, and apply it.
+    fn run_step(state: &mut Vec<(String, FirestoreBalance)>, plan: &Planned) -> Step {
+        let from = plan.from % state.len();
+        let to = plan.to % state.len();
+        let subject = if plan.mode == MoveMode::Mint {
+            to
+        } else {
+            from
+        };
+        let subject_before = state[subject].1;
+        let amount = match plan.amount {
+            Amount::Plain(value) => value,
+            Amount::WholeBalance => measured(subject_before, plan.mode),
+            Amount::JustAboveBalance => measured(subject_before, plan.mode) + 1,
+        };
+        let uid = |index: usize| state[index].0.clone();
+        let op = match plan.mode {
+            MoveMode::Transfer => {
+                LedgerOp::transfer(&uid(from), &uid(to), amount, "account_transfer_sent")
+            }
+            MoveMode::Mint => LedgerOp::mint(&uid(to), amount, "account_top_up"),
+            MoveMode::Burn => LedgerOp::burn(&uid(from), amount, "crypto_pkn_sale"),
+            MoveMode::Lock => LedgerOp::lock(&uid(from), amount, "withdraw_requested"),
+            MoveMode::UnlockBurn => LedgerOp::unlock(&uid(from), amount, "withdraw_paid", false),
+            MoveMode::UnlockRelease => {
+                LedgerOp::unlock(&uid(from), amount, "wpkn_exchange_released", true)
+            }
+            MoveMode::RecordOnly => LedgerOp::record(&uid(from), amount, "crypto_pkn_sale_deposit"),
+        };
+        let before = state.clone();
+        let supply_before = supply(&before);
+        let accepted = apply_mode(state, &op).is_ok();
+        Step {
+            mode: plan.mode,
+            amount,
+            locked_before: subject_before.locked_pkn,
+            accepted,
+            supply_before,
+            before,
+            after: state.clone(),
+        }
+    }
+
+    /// The change in total PKN that an accepted operation of this mode is
+    /// allowed to make.
+    fn allowed_supply_change(mode: MoveMode, amount: i64, locked_before: i64) -> i64 {
+        match mode {
+            MoveMode::Mint => amount,
+            MoveMode::Burn => -amount,
+            // A settled payout burns what is locked, and never more of it.
+            MoveMode::UnlockBurn => -amount.min(locked_before.max(0)),
+            MoveMode::Transfer
+            | MoveMode::Lock
+            | MoveMode::UnlockRelease
+            | MoveMode::RecordOnly => 0,
+        }
+    }
+
+    fn plan_strategy() -> impl Strategy<Value = Planned> {
+        let mode = prop_oneof![
+            Just(MoveMode::Transfer),
+            Just(MoveMode::Mint),
+            Just(MoveMode::Burn),
+            Just(MoveMode::Lock),
+            Just(MoveMode::UnlockBurn),
+            Just(MoveMode::UnlockRelease),
+            Just(MoveMode::RecordOnly),
+        ];
+        (mode, 0usize..4, 0usize..4, amount_strategy()).prop_map(|(mode, from, to, amount)| {
+            Planned {
+                mode,
+                from,
+                to,
+                amount,
+            }
+        })
+    }
+
+    fn amount_strategy() -> impl Strategy<Value = Amount> {
+        prop_oneof![
+            (0i64..=AMOUNT_MAX).prop_map(Amount::Plain),
+            Just(Amount::WholeBalance),
+            Just(Amount::JustAboveBalance),
+        ]
+    }
+
+    fn sequence_strategy() -> impl Strategy<Value = (Vec<(i64, i64)>, Vec<Planned>)> {
+        (
+            prop::collection::vec((0i64..=BALANCE_MAX, 0i64..=BALANCE_MAX), 1..=4),
+            prop::collection::vec(plan_strategy(), 0..=16),
+        )
+    }
+
+    fn transfer_strategy() -> impl Strategy<Value = Transfer> {
+        (0i64..=BALANCE_MAX).prop_flat_map(|sender_available| {
+            (
+                Just(sender_available),
+                0i64..=sender_available,
+                0i64..=BALANCE_MAX,
+                0i64..=BALANCE_MAX,
+                0i64..=BALANCE_MAX,
+                any::<bool>(),
+            )
+                .prop_map(
+                    |(
+                        sender_available,
+                        amount,
+                        sender_locked,
+                        receiver_available,
+                        receiver_locked,
+                        overspend,
+                    )| Transfer {
+                        sender_available,
+                        sender_locked,
+                        receiver_available,
+                        receiver_locked,
+                        amount: if overspend {
+                            amount + sender_available + 1
+                        } else {
+                            amount
+                        },
+                    },
+                )
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// Total PKN rises with a Mint and falls with a burn; every other
+        /// accepted operation leaves the total where it was.
+        #[test]
+        fn supply_changes_only_by_mint_and_burn(sequence in sequence_strategy()) {
+            let (accounts, plans) = sequence;
+            let mut state = accounts_of(&accounts);
+            for plan in &plans {
+                let step = run_step(&mut state, plan);
+                if !step.accepted {
+                    continue;
+                }
+                let expected = allowed_supply_change(step.mode, step.amount, step.locked_before);
+                prop_assert_eq!(
+                    supply(&step.after) - step.supply_before,
+                    expected,
+                    "{:?} of {} against a lock of {}",
+                    step.mode,
+                    step.amount,
+                    step.locked_before
+                );
+            }
+        }
+
+        /// No accepted operation leaves a balance below zero. These are the
+        /// balances the transaction computed, before any write is prepared.
+        #[test]
+        fn accepted_operations_leave_no_balance_below_zero(sequence in sequence_strategy()) {
+            let (accounts, plans) = sequence;
+            let mut state = accounts_of(&accounts);
+            for plan in &plans {
+                let step = run_step(&mut state, plan);
+                if !step.accepted {
+                    continue;
+                }
+                for (uid, balance) in &step.after {
+                    prop_assert!(
+                        balance.available_pkn >= 0,
+                        "{uid} available below zero after {:?} of {}",
+                        step.mode,
+                        step.amount
+                    );
+                    prop_assert!(
+                        balance.locked_pkn >= 0,
+                        "{uid} lock below zero after {:?} of {}",
+                        step.mode,
+                        step.amount
+                    );
+                }
+            }
+        }
+
+        /// An operation the ledger refuses leaves every balance as it found
+        /// them.
+        #[test]
+        fn a_refused_operation_leaves_every_balance_unchanged(sequence in sequence_strategy()) {
+            let (accounts, plans) = sequence;
+            let mut state = accounts_of(&accounts);
+            for plan in &plans {
+                let step = run_step(&mut state, plan);
+                if step.accepted {
+                    continue;
+                }
+                prop_assert_eq!(
+                    &step.after,
+                    &step.before,
+                    "a refused {:?} of {} changed the balances",
+                    step.mode,
+                    step.amount
+                );
+            }
+        }
+
+        /// A transfer moves the amount from the sender to the receiver and
+        /// touches nothing else: neither lock, and no new PKN anywhere.
+        #[test]
+        fn a_transfer_moves_exactly_the_amount_between_the_two_parties(case in transfer_strategy()) {
+            let mut state = accounts_of(&[
+                (case.sender_available, case.sender_locked),
+                (case.receiver_available, case.receiver_locked),
+            ]);
+            let total = supply(&state);
+            let op = LedgerOp::transfer(
+                "account-0",
+                "account-1",
+                case.amount,
+                "account_transfer_sent",
+            );
+            let accepted = apply_mode(&mut state, &op).is_ok();
+            if accepted {
+                prop_assert!(
+                    case.amount <= case.sender_available,
+                    "a transfer of {} out of {} available was accepted",
+                    case.amount,
+                    case.sender_available
+                );
+                prop_assert_eq!(state[0].1.available_pkn, case.sender_available - case.amount);
+                prop_assert_eq!(state[0].1.locked_pkn, case.sender_locked);
+                prop_assert_eq!(state[1].1.available_pkn, case.receiver_available + case.amount);
+                prop_assert_eq!(state[1].1.locked_pkn, case.receiver_locked);
+                prop_assert_eq!(supply(&state), total);
+            } else {
+                prop_assert_eq!(&state, &accounts_of(&[
+                    (case.sender_available, case.sender_locked),
+                    (case.receiver_available, case.receiver_locked),
+                ]));
+            }
+        }
+
+        /// An operation that stays within the balance it is measured against
+        /// is accepted, at the boundary and below it.
+        #[test]
+        fn an_operation_within_its_balance_is_accepted(
+            available in 0i64..=BALANCE_MAX,
+            locked in 0i64..=BALANCE_MAX,
+        ) {
+            let state = accounts_of(&[(available, locked), (available, locked)]);
+            let ops = vec![
+                LedgerOp::lock("account-0", available, "withdraw_requested"),
+                LedgerOp::burn("account-0", available, "crypto_pkn_sale"),
+                LedgerOp::transfer("account-0", "account-1", available, "account_transfer_sent"),
+                LedgerOp::unlock("account-0", locked, "wpkn_exchange_released", true),
+                LedgerOp::unlock("account-0", locked, "withdraw_paid", false),
+                LedgerOp::mint("account-0", 1, "account_top_up"),
+                LedgerOp::record("account-0", available, "crypto_pkn_sale_deposit"),
+            ];
+            for op in &ops {
+                let mut step_state = state.clone();
+                prop_assert!(
+                    apply_mode(&mut step_state, op).is_ok(),
+                    "{:?} of {} within its balance was refused",
+                    op.mode,
+                    op.amount
+                );
+            }
+        }
+    }
+}
