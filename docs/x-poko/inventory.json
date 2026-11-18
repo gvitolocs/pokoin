@@ -11,7 +11,7 @@
     {"id":"H38","verified":false,"status":"pending","reason":"Observation/Honcho writes not ported"},
     {"id":"H39-H40","verified":false,"status":"pending","reason":"Social operation routing and publication pipeline not ported"},
     {"id":"H41","verified":false,"status":"pending","reason":"Privileged admin brain and memory not ported"},
-    {"id":"X27-X28","verified":false,"status":"partial","reason":"Native X REST client implemented; full social and Riot/YouTube jobs not ported"},
+    {"id":"X27-X28","verified":false,"status":"partial","reason":"Native X REST client implemented; signature method HMAC-SHA256 as in live Node, not verified against a live X call; full social and Riot/YouTube jobs not ported"},
     {"id":"H17-F17","verified":false,"status":"partial","reason":"Poko OAuth callback, token exchange/refresh, secure token files and YouTube REST client implemented; public callback dispatch/deployment wiring pending"},
     {"id":"J15","verified":false,"status":"pending","reason":"Shorts scheduler, upload and Europe/Rome slot rules not ported"},
     {"id":"J16","verified":false,"status":"partial","reason":"Truth-friend pure selection/text ported; composeHook and daily job not ported"},

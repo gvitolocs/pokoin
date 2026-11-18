@@ -61,17 +61,27 @@ The daemon may use the same loopback-only OAuth listener through POKO_BOT_OAUTH_
 The auth commands use credentials from the environment. The callback server
 binds loopback only and starts no poller. No command above was run against a
 production OAuth account. Public proxy routing is not installed by this change.
-`POKO_BOT_DATA_DIR` defaults to `/var/lib/poko-bot`; `POKO_YOUTUBE_TOKEN_PATH`
-overrides its `youtube-poko-token.json`. Preserve the existing live token path
-at handover, or copy it privately with owner/mode checks before changing config.
+One resolver sets the YouTube data directory for the daemon, `youtube-auth` and
+`youtube-oauth-serve`: `POKO_BOT_DATA_DIR`, else `POKO_BOT_STATE_DIR`, else
+`/var/lib/poko-bot`, and an empty value is absent rather than a directory.
+`POKO_YOUTUBE_TOKEN_PATH` overrides its `youtube-poko-token.json`. Preserve the
+existing live token path at handover, or copy it privately with owner/mode checks
+before changing config. `POKO_BOT_OAUTH_ADDR` follows the same rule: empty means no
+OAuth listener at all, so an unset or empty value cannot abort the daemon on address
+parsing.
 Client id/secret precedence follows live Cityhop/Gmail then Google aliases;
 the redirect defaults to the live `http://127.0.0.1:8788/oauth2callback`.
 Set `CITYHOP_YOUTUBE_REDIRECT_URI` explicitly to the registered public callback.
 
 Intentional changes: OAuth recovery text names the Rust CLI, authorization codes
 come from 0600 files rather than process arguments, token errors redact provider
-bodies, and token files are repaired to 0600 on replacement. This callback
-implements the Poko flow; the old Cityhop/Griffin dispatcher is not restored.
+bodies, and token files are repaired to 0600 on replacement. The hospital client
+floors `POKO_HOSPITAL_TIMEOUT_MS` at 10 seconds. A token save that fails after a
+successful refresh is an error, not a warning: the caller must not carry on with an
+access token that was never persisted. The OAuth `state` stays the constant `poko`
+as in Node, so it is not a CSRF nonce; that is only acceptable because the listener
+binds loopback and starts no poller. This callback implements the Poko flow; the old
+Cityhop/Griffin dispatcher is not restored.
 General HTTP method/dispatcher and success/error HTML parity are not yet fully
 certified, so H17/F17 remains unverified in the retirement gate.
 
@@ -117,9 +127,12 @@ POKO_HOSPITAL_TIMEOUT_MS=60000
 
 The endpoint belongs to P-OPS H45, not the Poko health server. `18789` on p2 is
 not that endpoint. The live Node source defaults to a different local tunnel,
-`18788`, and its live env file was confirmed to override this with the dead `18789`. The native
-client does not guess either tunnel, rejects loopback port 18789, and requires
-a token whenever a URL is configured. Secret aliases retain Node precedence:
+`18788`, and its live env file was confirmed to override this with the dead
+`18789`. The native client does not guess either tunnel and rejects port 18789 on
+every loopback spelling — `localhost` in any case, any `127.` address including the
+`127.1` shorthand, `[::1]` and the IPv4-mapped `[::ffff:127.0.0.1]` — compared on the
+parsed host, so brackets and case do not slip past it. It requires a token whenever
+a URL is configured. Secret aliases retain Node precedence:
 POKO_HOSPITAL_TOKEN, POKO_NEWS_ALERT_TOKEN, BOT_HOSPITAL_TOKEN,
 HERMES_INTERNAL_ALERT_TOKEN. URL aliases: POKO_HOSPITAL_URL then POKO_NEWS_ALERT_URL.
 Timeout minimum 10 seconds, default 60 seconds. No request is sent by the
@@ -140,9 +153,12 @@ cargo fmt --manifest-path pokoin-rust/Cargo.toml -p poko-bot --check
 bash -n pokoin-rust/apps/poko-bot/deploy/x-poko-cutover.sh
 ```
 
-`token_refresh_model.rs` model-checks two refresh callers and crash boundaries
-around temp-file writes/rename. It checks serialization, refresh-token retention,
-committed access tokens and reachability of both completed callers. This is a
+`token_refresh_model.rs` model-checks two refresh callers and a crash at any step,
+over the ordering of the refresh call and the real token merge. Its write and rename
+steps are model states, so it does not exercise `write_token`, the temporary file,
+fsync or the rename itself; those are covered by the `youtube_oauth` tests, not by
+the model. What it checks is serialization, refresh-token retention, committed
+access tokens and reachability of both completed callers. This is a
 finite protocol abstraction, not a proof of OS durability or of unported money
 flows. LoL bets need their own Stateright/Verus work before J10 can be verified.
 

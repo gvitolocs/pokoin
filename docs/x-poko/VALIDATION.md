@@ -19,7 +19,10 @@ youtube_oauth:    test result: ok. 10 passed; 0 failed
 ```
 
 Total 82 tests. Binary unit and doc suites also passed with 0 tests.
-The social parity test replays 167 cases generated from the exact p2 sources.
+The social parity test replays 167 cases: 152 of them are outputs of functions
+imported from the exact p2 sources, and the 15 `clamp_reply` cases come from a copy
+of the Node expression written inside `gen_x_poko_cases.mjs` rather than from a
+function the generator imports.
 The denied OAuth callback test replays one captured GET response, replacing only
 the Node recovery command with its documented native CLI equivalent. Other GET
 captures are evidence for future routes, not claims of implemented parity.
