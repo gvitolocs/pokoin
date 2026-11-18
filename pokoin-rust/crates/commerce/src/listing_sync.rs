@@ -8,7 +8,7 @@ use pokoin_external::{
         push::{self as ct_push, PushOutcome},
         sync_core::{facet_key_of_row, parse_ct_product_id},
     },
-    firebase::{FirestoreRest, FirestoreStore},
+    firebase::{FirestoreDoc, FirestoreRest, FirestoreStore},
 };
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row, Transaction};
@@ -809,31 +809,20 @@ fn refused_error(message: &str) -> ApiError {
 
 /// Ask CardTrader to rewrite one product's facets, and turn its answer into
 /// what the seller's save answers (`docs/CARDTRADER_SELLER_SYNC.md`).
+///
+/// The caller read `doc` and [`link::edit_skip_reason`] left it undecided
+/// whether Pokoin writes for this seller ([`push_saved_facets`]): nothing here
+/// re-decides it, so a seller Pokoin never writes for is never asked and never
+/// refused over a facet nobody is waiting on.
 #[allow(clippy::result_large_err)]
 pub async fn push_facets(
-    fs: &dyn FirestoreStore,
     ct: &CardTraderClient,
     seller: &str,
     product: &str,
+    doc: &FirestoreDoc,
     body: &Value,
 ) -> Result<FacetWrite, ApiError> {
-    let doc = match integration::read_integration_doc(fs, seller).await {
-        Ok(doc) => doc,
-        Err(error) => {
-            // Whether this seller's edit goes to CardTrader at all is decided
-            // from their integration document: without it we cannot promise
-            // either way, so nothing is saved.
-            tracing::warn!(msg = "cardtrader_facet_integration_unreadable", seller, product, error = %error.message);
-            return Err(ApiError::unavailable(
-                "Pokoin could not read your CardTrader connection, so nothing was changed. Try again.",
-            )
-            .with_code("cardtrader_integration_unreadable"));
-        }
-    };
-    if let Some(reason) = link::edit_skip_reason(&doc) {
-        return Ok(FacetWrite::Skipped(reason));
-    }
-    let token = integration::token_from_doc(&doc).map_err(|error| refused_error(&error.message))?;
+    let token = integration::token_from_doc(doc).map_err(|error| refused_error(&error.message))?;
     match EditOutcome::of(ct.update_product(&token, product, body.clone()).await) {
         EditOutcome::Applied => Ok(FacetWrite::Applied),
         EditOutcome::Gone => {
@@ -855,6 +844,26 @@ pub async fn push_facets(
     }
 }
 
+/// Whether Pokoin writes this seller's listings to CardTrader, decided from
+/// their integration document before any facet mapping or request.
+///
+/// `Err` when the document cannot be read: whether this seller's edit goes to
+/// CardTrader at all comes from it, so without it we cannot promise either
+/// way and nothing is saved.
+async fn seller_writes_to_cardtrader(
+    fs: &dyn FirestoreStore,
+    seller: &str,
+    product: &str,
+) -> Result<FirestoreDoc, ApiError> {
+    integration::read_integration_doc(fs, seller).await.map_err(|error| {
+        tracing::warn!(msg = "cardtrader_facet_integration_unreadable", seller, product, error = %error.message);
+        ApiError::unavailable(
+            "Pokoin could not read your CardTrader connection, so nothing was changed. Try again.",
+        )
+        .with_code("cardtrader_integration_unreadable")
+    })
+}
+
 /// A facet the mapping cannot express is refused before anything is sent: the
 /// seller's own value is the problem, so 422 with the message the mapping gave
 /// (`push::facet_body`).
@@ -869,7 +878,7 @@ fn facet_mapping_error(error: pokoin_external::ApiError) -> ApiError {
 /// Pokémon, whose facet names and values come from its blueprint row
 /// (`marketplace_<game>.cardtrader_blueprints`). `None` when there is nothing
 /// to map with: Pokémon needs no row, and a satellite catalog that is not
-/// mounted here or has no such blueprint leaves [`push_facets`] undecided —
+/// mounted here or has no such blueprint leaves [`push_saved_facets`] undecided —
 /// `facet_body` refuses then, exactly as a create does
 /// (`push::product_body_for_game`).
 #[allow(clippy::result_large_err)]
@@ -907,6 +916,10 @@ async fn blueprint_editable_properties(
 /// `Ok(None)` is every edit that changed no facet of a linked, on-sale
 /// listing: the price and quantity still follow through the outbox, which
 /// never carries properties.
+///
+/// The seller's own settings come first: a facet Pokoin is never going to send
+/// is never mapped, so a value CardTrader does not carry cannot refuse a seller
+/// it is not connected as ([`link::edit_skip_reason`]).
 #[allow(clippy::result_large_err)]
 pub async fn push_saved_facets(
     state: &DomainState,
@@ -917,10 +930,15 @@ pub async fn push_saved_facets(
     let Some(product) = facets_to_push(before, row) else {
         return Ok(None);
     };
-    let editable = blueprint_editable_properties(state, row).await?;
-    let body = ct_push::facet_body(row, editable.as_deref()).map_err(facet_mapping_error)?;
     let (fs, ct) = state.cardtrader_access()?;
-    push_facets(fs.as_ref(), &ct, seller, &product, &body)
+    let doc = seller_writes_to_cardtrader(fs.as_ref(), seller, &product).await?;
+    if let Some(reason) = link::edit_skip_reason(&doc) {
+        return Ok(Some(FacetWrite::Skipped(reason)));
+    }
+    let editable = blueprint_editable_properties(state, row).await?;
+    let body =
+        ct_push::facet_body(before, row, editable.as_deref()).map_err(facet_mapping_error)?;
+    push_facets(&ct, seller, &product, &doc, &body)
         .await
         .map(Some)
 }
