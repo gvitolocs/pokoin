@@ -267,6 +267,20 @@ test('every error code reads as a sentence', () => {
   assert.equal(collectionErrorMessage('401'), 'Sign in again to save your collections.');
   assert.equal(collectionErrorMessage(''), 'Could not save the collection.');
   assert.equal(collectionErrorMessage(undefined), 'Could not save the collection.');
+  // The number in a limit sentence is the one the answer carried; 20 and 300
+  // stand only when it said nothing.
+  assert.equal(
+    collectionErrorMessage('collection_limit', { limits: { collections: 5 } }),
+    'You can keep up to 5 collections. Delete one first.',
+  );
+  assert.equal(
+    collectionErrorMessage('collection_items_limit', { limits: { items: 12 } }),
+    'A collection holds up to 12 cards.',
+  );
+  assert.equal(
+    collectionErrorMessage('collection_items_limit', { limits: { items: 0 } }),
+    'A collection holds up to 300 cards.',
+  );
 });
 
 test('the code of a thrown request is the body code, else its status', () => {

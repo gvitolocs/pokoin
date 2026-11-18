@@ -335,18 +335,26 @@ export function saveBody(draft) {
 
 const ERROR_MESSAGES = {
   collection_name_required: 'A collection needs a name.',
-  collection_limit: 'You can keep up to 20 collections. Delete one first.',
-  collection_items_limit: 'A collection holds up to 300 cards.',
   collection_item_invalid: 'One of the cards in this collection is not a card we know.',
   collection_not_found: 'That collection is not there any more.',
   collection_name_taken: 'You already have a collection with that name.',
   unauthorized: 'Sign in again to save your collections.',
 };
 
-/** The sentence for one API error code, in plain words. */
-export function collectionErrorMessage(code, fallback = 'Could not save the collection.') {
+/**
+ * The sentence for one API error code, in plain words.
+ *
+ * A limit quoted in a sentence is the one the answer carried (`limits`),
+ * because the server may raise it and tell the seller 20 anyway; the defaults
+ * stand only for an answer that said nothing. `fallback` is the line for a code
+ * this table does not know.
+ */
+export function collectionErrorMessage(code, { fallback = 'Could not save the collection.', limits = DEFAULT_LIMITS } = {}) {
+  const clean = normalizeLimits(limits);
   const key = text(code).toLowerCase();
   if (key === '401') return ERROR_MESSAGES.unauthorized;
+  if (key === 'collection_limit') return `You can keep up to ${clean.collections} collections. Delete one first.`;
+  if (key === 'collection_items_limit') return `A collection holds up to ${clean.items} cards.`;
   return ERROR_MESSAGES[key] || fallback;
 }
 

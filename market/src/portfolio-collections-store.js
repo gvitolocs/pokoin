@@ -125,7 +125,10 @@ export function createCollectionsStore(deps = {}) {
         (err) => {
           // A list that never answered is still a level, with its own line and
           // a retry: the graph and the other levels are untouched by it.
-          if (run === seq) fail(collectionErrorMessage(errorCode(err), 'Could not load your collections.'));
+          if (run === seq) fail(collectionErrorMessage(errorCode(err), {
+            fallback: 'Could not load your collections.',
+            limits: state.limits,
+          }));
           return state;
         },
       )
@@ -184,7 +187,7 @@ export function createCollectionsStore(deps = {}) {
           apply(state.uid, data);
           return { ok: true, saved: String(data?.saved || '') || String(draft?.id || '') };
         },
-        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err)) }),
+        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err), { limits: state.limits }) }),
       )
       .finally(() => {
         // The answer already cleared it; only a write that never answered has to.
@@ -211,7 +214,10 @@ export function createCollectionsStore(deps = {}) {
           apply(state.uid, data);
           return { ok: true, saved: '' };
         },
-        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err), 'Could not delete the collection.') }),
+        (err) => ({ ok: false, message: collectionErrorMessage(errorCode(err), {
+            fallback: 'Could not delete the collection.',
+            limits: state.limits,
+          }) }),
       )
       .finally(() => {
         // The answer already cleared it; only a write that never answered has to.

@@ -255,7 +255,7 @@ function CollectionActions(props) {
   const confirmUi = (
     <span class="segment-collections-confirm">
       <span id={`segment-collection-confirm-${props.row.key}`}>
-        Delete “{props.row.label}” and its history? The cards themselves stay in your collection.
+        Delete “{props.row.label}” and its history? Only the list goes: the cards themselves are untouched.
       </span>
       <button
         type="button"
@@ -630,7 +630,7 @@ export default function SegmentTable(props) {
             <p class="segment-collections-none" data-testid="segment-collections-none">
               {book()?.error()
                 ? 'Nothing came back, and what you did save is not lost.'
-                : 'No collections yet. New collection keeps a list of the cards you own, and the Dashboard follows what it is worth from the day you save it.'}
+                : 'No collections yet. A collection is a list of cards you name — ones you own or ones you are watching — and the table prices it on each past day at the quantities you set.'}
             </p>
           </Show>
         </Show>
