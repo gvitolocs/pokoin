@@ -5,6 +5,7 @@ import {
   peekSegments,
   rememberSegments,
   resetSegmentsCacheForTests,
+  segmentsEpoch,
   subscribeSegments,
 } from './portfolio-segments-cache.js';
 
@@ -167,6 +168,36 @@ test('private mode keeps the session copy and never throws', () => {
     assert.equal(peekSegments('blocked'), null);
     const blockedListener = () => {};
     assert.equal(typeof subscribeSegments('blocked', blockedListener), 'function');
+  } finally {
+    resetSegmentsCacheForTests();
+    delete globalThis.localStorage;
+  }
+});
+
+test('an answer that crossed a sign-out is not filed under that uid', () => {
+  globalThis.localStorage = memoryStorage();
+  try {
+    resetSegmentsCacheForTests();
+    // The page reads the epoch when it starts the request and hands it to
+    // `rememberSegments`; a follow-up retry reads it again, so only an answer
+    // from before the sign-out is dropped.
+    const epoch = segmentsEpoch('user-1');
+    forgetSegments('user-1');
+    assert.notEqual(segmentsEpoch('user-1'), epoch, 'signing out moves the epoch');
+    assert.equal(rememberSegments('user-1', answer(), epoch), null);
+    assert.equal(peekSegments('user-1'), null);
+    assert.equal(globalThis.localStorage.getItem(storageKeyFor('user-1')), null);
+
+    const fresh = segmentsEpoch('user-1');
+    const model = rememberSegments('user-1', answer(1200), fresh);
+    assert.ok(model, 'an answer of the current session is kept');
+    assert.deepEqual(peekSegments('user-1'), model);
+
+    // A caller that starts no request keeps writing (the preview fixture).
+    assert.ok(rememberSegments('user-2', answer()));
+    assert.ok(peekSegments('user-2'));
+    assert.equal(segmentsEpoch(''), 0);
+    assert.equal(rememberSegments('', answer(), 0), null);
   } finally {
     resetSegmentsCacheForTests();
     delete globalThis.localStorage;

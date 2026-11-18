@@ -6,6 +6,9 @@ import { normalizeSegments } from './portfolio-segments.js';
 // paints the table at once instead of waiting on the network.
 const entries = new Map();
 const listeners = new Map();
+// Bumped by a sign-out so an in-flight answer does not re-persist a copy the
+// user asked to forget.
+const epochs = new Map();
 
 const STORAGE_PREFIX = 'pokoin.portfolioSegments.v1';
 /** A copy older than this is not worth painting. */
@@ -13,6 +16,19 @@ const STORED_MAX_AGE_MS = 30 * 86400000;
 
 function keyFor(uid) {
   return String(uid || '').trim();
+}
+
+function epochFor(id) {
+  return Number(epochs.get(id)) || 0;
+}
+
+/**
+ * This user's current epoch. A caller that starts a request reads it first and
+ * hands it to `rememberSegments`, so an answer arriving after a `forgetSegments`
+ * is dropped instead of repainting another session's table.
+ */
+export function segmentsEpoch(uid) {
+  return epochFor(keyFor(uid));
 }
 
 function localStore() {
@@ -71,12 +87,14 @@ function emit(id, model) {
 /**
  * Keep the segment split of one raw portfolio-history answer. A null model (an
  * old server, junk) stores nothing and clears nothing: a painted table keeps
- * its last known rows.
+ * its last known rows. `epoch`, when given, is the `segmentsEpoch` read before
+ * the request: a copy that no longer matches one has crossed a sign-out.
  */
-export function rememberSegments(uid, data) {
+export function rememberSegments(uid, data, epoch) {
   const key = keyFor(uid);
   const model = normalizeSegments(data);
   if (!key || !model) return null;
+  if (epoch !== undefined && Number(epoch) !== epochFor(key)) return null;
   entries.set(key, model);
   writeStoredModel(key, model);
   emit(key, model);
@@ -112,6 +130,7 @@ export function subscribeSegments(uid, listener) {
 export function forgetSegments(uid) {
   const key = keyFor(uid);
   if (!key) return;
+  epochs.set(key, epochFor(key) + 1);
   entries.delete(key);
   listeners.delete(key);
   const store = localStore();
@@ -126,4 +145,5 @@ export function forgetSegments(uid) {
 export function resetSegmentsCacheForTests() {
   entries.clear();
   listeners.clear();
+  epochs.clear();
 }
