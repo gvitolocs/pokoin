@@ -6,9 +6,9 @@ use pokoin_external::{
         client::{self as ct_client, CardTraderClient},
         integration, link,
         push::{self as ct_push, PushOutcome},
-        sync_core::parse_ct_product_id,
+        sync_core::{facet_key_of_row, parse_ct_product_id},
     },
-    firebase::{FirestoreRest, FirestoreStore},
+    firebase::{FirestoreDoc, FirestoreRest, FirestoreStore},
 };
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row, Transaction};
@@ -546,13 +546,45 @@ pub fn cardtrader_edit(before: &Value, after: &Value) -> Option<Value> {
     (edit.get("pricePkn").is_some() || edit.get("quantityDelta").is_some()).then_some(edit)
 }
 
+/// Did this edit change a facet CardTrader's product carries: condition,
+/// language, the finish (foil_state or reverse), first edition, signed,
+/// altered or graded? Compared by [`facet_key_of_row`], the same normalised
+/// key the product is built with and a seller's copies are grouped by, so
+/// `NM`→`nm` and an empty→default are no change. Two spellings of one
+/// CardTrader value (`JP` and `JA`) do read as one: the write is a PUT of
+/// absolute property values, so a repeated one changes nothing.
+pub fn facets_changed(before: &Value, after: &Value) -> bool {
+    facet_key_of_row(before) != facet_key_of_row(after)
+}
+
+/// The CardTrader product a facet edit has to be written to: `Some(product_id)`
+/// when the listing is linked (its push not still pending), the link itself did
+/// not change, the listing stays on sale, and a facet changed. Unlike a price
+/// edit, a facet edit is never queued: it goes to CardTrader inside the save
+/// (`handlers::listings::update_listing_guarded`), so the seller learns that
+/// CardTrader cannot take it. A copy that shares its product with live siblings
+/// is not one of these: `group_leave` takes it out of the group instead, and the
+/// reconcile pushes it again with its new facets.
+pub fn facets_to_push(before: &Value, after: &Value) -> Option<String> {
+    let source = field(before, "source_listing_id", 160);
+    let product = parse_ct_product_id(&source);
+    if product.is_empty() || field(after, "source_listing_id", 160) != source {
+        return None;
+    }
+    let qty = number(&after["quantity_available"]);
+    if ct_push::off_sale(&field(after, "status", 20)) || !qty.is_finite() || qty <= 0.0 {
+        return None;
+    }
+    facets_changed(before, after).then_some(product)
+}
+
 /// A listing that shares its CardTrader product with identical copies
 /// (`siblings` other live members, pokoin_external::cardtrader::group) and
-/// goes off sale or changes price leaves the group instead: its copies come
-/// off the product (`quantityDelta`, an increment), the caller clears its
-/// source, and the seller reconcile pushes it again into the group of its new
-/// price. The product stays for the other copies: never deleted, never
-/// repriced for one of them.
+/// goes off sale, changes price or changes a facet leaves the group instead:
+/// its copies come off the product (`quantityDelta`, an increment), the caller
+/// clears its source, and the seller reconcile pushes it again into the group
+/// of its new price and facets. The product stays for the other copies: never
+/// deleted, never repriced or refaceted for one of them.
 pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value> {
     let source = field(before, "source_listing_id", 160);
     let product = parse_ct_product_id(&source);
@@ -563,7 +595,7 @@ pub fn group_leave(before: &Value, after: &Value, siblings: i64) -> Option<Value
     let off = ct_push::off_sale(&field(after, "status", 20)) || !(qty > 0.0);
     let price = number(&after["price_pkn"]);
     let repriced = price.is_finite() && price > 0.0 && (price - number(&before["price_pkn"])).abs() >= 0.005;
-    if !off && !repriced {
+    if !off && !repriced && !facets_changed(before, after) {
         return None;
     }
     let mut edit = json!({ "productId": product, "leaveGroup": true });
@@ -725,6 +757,191 @@ pub async fn edit_cardtrader(
     }
     payload["steps"]["cardtraderEdit"] = json!("done");
     Ok(())
+}
+
+/// What Pokoin tells the seller when CardTrader no longer has the product.
+pub const GONE_FACETS: &str = "The CardTrader product no longer exists; the next sync relinks it.";
+
+/// What the facet half of a save did.
+///
+/// A facet says what the CardTrader product *is*, so unlike a price it is not
+/// queued: it is written inside the seller's request and CardTrader's answer
+/// becomes that request's answer. [`push_saved_facets`] returns `Err` for the
+/// two outcomes that mean Pokoin and CardTrader would disagree (a refusal, no
+/// answer) and the caller's transaction rolls back; `Skipped` and `Gone` are
+/// the cases where the Pokoin save is right on its own.
+#[derive(Debug)]
+pub enum FacetWrite {
+    /// CardTrader's product carries the new facets now.
+    Applied,
+    /// CardTrader was never asked, for the reason [`link::edit_skip_reason`]
+    /// gives: not connected, 1-Day Ready, or the seller chose import-only. The
+    /// same skips the price and quantity sync takes.
+    Skipped(&'static str),
+    /// CardTrader has no such product: the row is saved and the next sync
+    /// relinks it.
+    Gone,
+}
+
+impl FacetWrite {
+    /// The `cardtrader` key of the save's answer. `None` when CardTrader was
+    /// skipped by the seller's own settings: their answer stays exactly what a
+    /// price edit gives them today.
+    pub fn answer(&self) -> Option<Value> {
+        match self {
+            Self::Applied => Some(json!({ "ok": true, "facets": "updated" })),
+            Self::Gone => Some(json!({ "ok": false, "error": GONE_FACETS })),
+            Self::Skipped(_) => None,
+        }
+    }
+}
+
+/// CardTrader answered and said no, so Pokoin changes nothing. The message
+/// says so in the seller's words: they have to pick another value, retrying
+/// this one would be refused again.
+fn refused_error(message: &str) -> ApiError {
+    ApiError::conflict(format!(
+        "CardTrader refused the change: {}. Nothing was changed.",
+        message.trim_end_matches('.')
+    ))
+    .with_code("cardtrader_refused")
+}
+
+/// Ask CardTrader to rewrite one product's facets, and turn its answer into
+/// what the seller's save answers (`docs/CARDTRADER_SELLER_SYNC.md`).
+///
+/// The caller read `doc` and [`link::edit_skip_reason`] left it undecided
+/// whether Pokoin writes for this seller ([`push_saved_facets`]): nothing here
+/// re-decides it, so a seller Pokoin never writes for is never asked and never
+/// refused over a facet nobody is waiting on.
+#[allow(clippy::result_large_err)]
+pub async fn push_facets(
+    ct: &CardTraderClient,
+    seller: &str,
+    product: &str,
+    doc: &FirestoreDoc,
+    body: &Value,
+) -> Result<FacetWrite, ApiError> {
+    let token = integration::token_from_doc(doc).map_err(|error| refused_error(&error.message))?;
+    match EditOutcome::of(ct.update_product(&token, product, body.clone()).await) {
+        EditOutcome::Applied => Ok(FacetWrite::Applied),
+        EditOutcome::Gone => {
+            tracing::warn!(msg = "cardtrader_facet_product_gone", seller, product);
+            Ok(FacetWrite::Gone)
+        }
+        EditOutcome::Refused(error) => {
+            tracing::warn!(msg = "cardtrader_facet_refused", seller, product, error = %error.message);
+            Err(refused_error(&error.message))
+        }
+        EditOutcome::InDoubt(error) => {
+            tracing::warn!(msg = "cardtrader_facet_unreachable", seller, product, error = %error.message);
+            Err(ApiError::new(
+                axum::http::StatusCode::BAD_GATEWAY,
+                "CardTrader did not answer, so nothing was changed. Try again.",
+            )
+            .with_code("cardtrader_unreachable"))
+        }
+    }
+}
+
+/// Whether Pokoin writes this seller's listings to CardTrader, decided from
+/// their integration document before any facet mapping or request.
+///
+/// `Err` when the document cannot be read: whether this seller's edit goes to
+/// CardTrader at all comes from it, so without it we cannot promise either
+/// way and nothing is saved.
+#[allow(clippy::result_large_err)]
+async fn seller_writes_to_cardtrader(
+    fs: &dyn FirestoreStore,
+    seller: &str,
+    product: &str,
+) -> Result<FirestoreDoc, ApiError> {
+    integration::read_integration_doc(fs, seller).await.map_err(|error| {
+        tracing::warn!(msg = "cardtrader_facet_integration_unreadable", seller, product, error = %error.message);
+        ApiError::unavailable(
+            "Pokoin could not read your CardTrader connection, so nothing was changed. Try again.",
+        )
+        .with_code("cardtrader_integration_unreadable")
+    })
+}
+
+/// A facet the mapping cannot express is refused before anything is sent: the
+/// seller's own value is the problem, so 422 with the message the mapping gave
+/// (`push::facet_body`).
+fn facet_mapping_error(error: pokoin_external::ApiError) -> ApiError {
+    let code = error
+        .code
+        .unwrap_or_else(|| "cardtrader_facet_unsupported".to_string());
+    ApiError::new(axum::http::StatusCode::UNPROCESSABLE_ENTITY, error.message).with_code(code)
+}
+
+/// `editable_properties` of this row's blueprint, for a game other than
+/// Pokémon, whose facet names and values come from its blueprint row
+/// (`marketplace_<game>.cardtrader_blueprints`). `None` when there is nothing
+/// to map with: Pokémon needs no row, and a satellite catalog that is not
+/// mounted here or has no such blueprint leaves [`push_saved_facets`] undecided —
+/// `facet_body` refuses then, exactly as a create does
+/// (`push::product_body_for_game`).
+#[allow(clippy::result_large_err)]
+async fn blueprint_editable_properties(
+    state: &DomainState,
+    row: &Value,
+) -> Result<Option<Vec<Value>>, ApiError> {
+    let game = ct_push::listing_game(row);
+    if game == "pokemon" {
+        return Ok(None);
+    }
+    let Some(sql) = link::blueprint_properties_sql(&game) else {
+        return Ok(None);
+    };
+    let Some(blueprint) = ct_push::blueprint(&field(row, "card_id", 80)) else {
+        return Ok(None);
+    };
+    let Some(pools) = state.game_pools(&game).await else {
+        return Ok(None);
+    };
+    let found = sqlx::query(&sql)
+        .bind(vec![blueprint])
+        .fetch_optional(&pools.read)
+        .await?;
+    let Some(found) = found else { return Ok(None) };
+    let properties: Option<Value> = found.try_get("editable_properties")?;
+    Ok(properties.and_then(|value| value.as_array().cloned()))
+}
+
+/// The facet half of a listing save, for a listing that stands alone on its
+/// product (`siblings == 0`, so no [`group_leave`] took it out of a shared
+/// one): map the row's facets onto a product body and write it to CardTrader
+/// while the row lock is still held and before the transaction commits.
+///
+/// `Ok(None)` is every edit that changed no facet of a linked, on-sale
+/// listing: the price and quantity still follow through the outbox, which
+/// never carries properties.
+///
+/// The seller's own settings come first: a facet Pokoin is never going to send
+/// is never mapped, so a value CardTrader does not carry cannot refuse a seller
+/// it is not connected as ([`link::edit_skip_reason`]).
+#[allow(clippy::result_large_err)]
+pub async fn push_saved_facets(
+    state: &DomainState,
+    seller: &str,
+    before: &Value,
+    row: &Value,
+) -> Result<Option<FacetWrite>, ApiError> {
+    let Some(product) = facets_to_push(before, row) else {
+        return Ok(None);
+    };
+    let (fs, ct) = state.cardtrader_access()?;
+    let doc = seller_writes_to_cardtrader(fs.as_ref(), seller, &product).await?;
+    if let Some(reason) = link::edit_skip_reason(&doc) {
+        return Ok(Some(FacetWrite::Skipped(reason)));
+    }
+    let editable = blueprint_editable_properties(state, row).await?;
+    let body =
+        ct_push::facet_body(before, row, editable.as_deref()).map_err(facet_mapping_error)?;
+    push_facets(&ct, seller, &product, &doc, &body)
+        .await
+        .map(Some)
 }
 
 pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value) -> Result<(), ApiError> {
@@ -964,6 +1181,129 @@ mod tests {
         assert!(SIBLINGS_SQL.contains("id <> $3") && LEAVE_GROUP_SQL.contains("source_listing_id = $2"));
         // The link row moves with the product, never left naming the leaver.
         assert!(HAND_OVER_LINK_SQL.contains("where listing_id = $1") && DROP_LEFT_LINK_SQL.contains("listing_id = $1"));
+    }
+
+    #[test]
+    fn a_facet_change_is_a_change_and_a_resend_or_a_price_is_not() {
+        let card = json!({"card_id": "220962", "condition": "NM", "language": "EN"});
+        // Every facet CardTrader's product carries, in one direction and back.
+        for (key, value) in [
+            ("condition", json!("LP")),
+            ("language", json!("IT")),
+            ("foil_state", json!("reverse")),
+            ("reverse", json!(true)),
+            ("first_edition", json!(true)),
+            ("signed", json!(true)),
+            ("altered", json!(true)),
+            ("graded", json!(true)),
+        ] {
+            let after =
+                json!({ "card_id": "220962", "condition": "NM", "language": "EN", key: value });
+            assert!(facets_changed(&card, &after), "{key}");
+            assert!(facets_changed(&after, &card), "{key} back");
+        }
+        // The push normalises case and empties: neither is a change.
+        assert!(!facets_changed(
+            &card,
+            &json!({"card_id":"220962","condition":"nm","language":"en"})
+        ));
+        assert!(
+            !facets_changed(&json!({"card_id":"220962"}), &card),
+            "empty is NM|EN"
+        );
+        assert!(
+            !facets_changed(
+                &card,
+                &json!({"card_id":"220962","condition":"NM","language":"EN","reverse":false,"graded":false})
+            ),
+            "a facet that is already the default"
+        );
+        // foil_state 'holo' is not the product's reverse; 'reverse' and the
+        // reverse column are the same facet, so switching spelling is not one.
+        assert!(!facets_changed(
+            &card,
+            &json!({"card_id":"220962","condition":"NM","language":"EN","foil_state":"holo"})
+        ));
+        assert!(!facets_changed(
+            &json!({"card_id":"220962","condition":"NM","language":"EN","foil_state":"reverse"}),
+            &json!({"card_id":"220962","condition":"NM","language":"EN","reverse":true})
+        ));
+        // Price, quantity, status, a comment: what the price sync already sends.
+        let priced = json!({"card_id":"220962","condition":"NM","language":"EN","price_pkn":30.0,"quantity_available":4,"status":"active","seller_comment":"x"});
+        assert!(!facets_changed(&card, &priced));
+        assert!(!facets_changed(&priced, &priced));
+    }
+
+    #[test]
+    fn facets_to_push_names_the_linked_product_the_facet_changed_on() {
+        let before = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "EN", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        let relabelled = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "nm", "language": "EN", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        assert_eq!(
+            facets_to_push(&before, &relabelled),
+            None,
+            "the same facets resend nothing"
+        );
+        let italian = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "IT", "quantity_available": 1, "status": "active", "price_pkn": 26.0});
+        assert_eq!(facets_to_push(&before, &italian).as_deref(), Some("900"));
+        // Off sale, at zero, unlinked, still pending its push, or relinked:
+        // no product to facet, and the reconcile owns that case.
+        for after in [
+            json!({"source_listing_id":"ct:900","card_id":"220962","condition":"NM","language":"IT","quantity_available":1,"status":"inactive"}),
+            json!({"source_listing_id":"ct:900","card_id":"220962","condition":"NM","language":"IT","quantity_available":0,"status":"active"}),
+        ] {
+            assert_eq!(facets_to_push(&before, &after), None, "{after}");
+        }
+        for before in [
+            json!({"card_id":"220962","condition":"NM","language":"EN","quantity_available":1,"status":"active"}),
+            json!({"source_listing_id":"ct:pending:900","card_id":"220962","condition":"NM","language":"EN","quantity_available":1,"status":"active"}),
+        ] {
+            let mut italian = before.clone();
+            italian["language"] = json!("IT");
+            assert_eq!(
+                facets_to_push(&before, &italian).as_deref(),
+                None,
+                "{before}"
+            );
+        }
+        // The link moving to another product is that product's business, not a
+        // facet edit of this one.
+        let mut moved = before.clone();
+        moved["source_listing_id"] = json!("ct:901");
+        let mut moved_italian = moved.clone();
+        moved_italian["language"] = json!("IT");
+        assert_eq!(
+            facets_to_push(&moved, &moved_italian).as_deref(),
+            Some("901")
+        );
+        assert_eq!(
+            facets_to_push(&before, &moved_italian),
+            None,
+            "the link changed"
+        );
+    }
+
+    #[test]
+    fn a_grouped_copy_that_changes_a_facet_leaves_the_group_instead_of_refaceting_it() {
+        let before = json!({"source_listing_id": "ct:900", "card_id": "220962", "condition": "NM", "language": "EN", "price_pkn": 26.0, "quantity_available": 1, "status": "active"});
+        let mut italian = before.clone();
+        italian["language"] = json!("IT");
+        assert_eq!(
+            group_leave(&before, &italian, 3),
+            Some(json!({"productId": "900", "leaveGroup": true, "quantityDelta": -1}))
+        );
+        // The facets are never PUT to a shared product, and a facet-only edit
+        // is no price/quantity edit at all: the group decision owns it.
+        assert_eq!(
+            cardtrader_edit(&before, &italian),
+            None,
+            "a facet-only edit queues no price"
+        );
+        // Alone on its product the facet goes to the PUT (step 4), not to a leave.
+        assert_eq!(group_leave(&before, &italian, 0), None);
+        // Same facets in another spelling: it stays in the group.
+        let mut relabelled = before.clone();
+        relabelled["condition"] = json!("nm");
+        assert_eq!(group_leave(&before, &relabelled, 3), None);
     }
 
     #[test]
