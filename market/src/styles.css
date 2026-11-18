@@ -13347,10 +13347,6 @@ button.sold-graph-key.is-source:hover { color: var(--text); }
   opacity: 0.38;
 }
 
-/* Pokoin's dot stands alone when its own line does not reach today: the short
-   dotted stub points at it. A joined line is already the lead, so no stub. */
-.sold-graph-now-stub { stroke: var(--yellow); stroke-width: 1.4; stroke-dasharray: 1 4; opacity: 0.5; stroke-linecap: round; }
-.sold-graph-now-dot { fill: var(--yellow); stroke: none; }
 /* Every visible line gets a mark on the guide for the day it quotes. */
 .sold-graph-hover-dot { fill: var(--dot-fill, var(--muted)); stroke: none; }
 

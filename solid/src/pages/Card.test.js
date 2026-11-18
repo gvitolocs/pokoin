@@ -378,12 +378,12 @@ test('every price source is a line inside the graph the desk already had', () =>
   // A source with no sale of its own still draws: the empty message waits for both.
   assert.match(graph, /<Show when=\{!hasLines\(\) && props\.series != null\}>/);
   // Sources are thinner than sold lines, break where they stopped quoting, and
-  // bridge the hole dotted. Pokoin's dot today joins its own line or stands with
-  // a stub at it.
+  // bridge the hole dotted. Today's Pokoin price ends the line and is never a
+  // marker: the plot draws no dot for it and no stub pointing at one.
   assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
   assert.match(graph, /class="sold-graph-gap"/);
-  assert.match(graph, /class="sold-graph-now-dot"/);
-  assert.match(graph, /x1=\{now\(\)\.x - 44\}/);
+  assert.doesNotMatch(graph, /sold-graph-now/);
+  assert.doesNotMatch(graph, /now: nowPt|geo\(\)\.now/);
   // The hover lists every visible line, and the helper caps the rows.
   assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
 });
@@ -529,9 +529,10 @@ test('long windows read their dates with the year', () => {
   assert.match(graph, /<strong>\{formatSoldDayWithYear\(day\(\), geo\(\)\.dateLocale, geo\(\)\.withYear\)\}<\/strong>/);
 });
 
-test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN', () => {
+test('tooltip rows: Pokoin only on the last day, and every row in the visitor currency', () => {
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
-  // A Pokoin dot with no line of its own quotes today only: its row joins when
+  const rows = fs.readFileSync(new URL('../../../market/src/sold-graph.js', import.meta.url), 'utf8');
+  // A Pokoin value with no line of its own quotes today only: its row joins when
   // the guide stands on the last day of the drawn range, left out before that.
   // With a line the one source row already is the Pokoin row, so there is never
   // a second one.
@@ -540,10 +541,14 @@ test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN'
   // The rows format through the desk's row formatter when the desk gives one.
   assert.match(graph, /props\.formatRowPrice \? props\.formatRowPrice\(pkn\) \|\| formatValue\(pkn\) : formatValue\(pkn\)/);
   assert.match(page, /formatRowPrice=\{graphRowPrice\}/);
-  // The row's PKN amount is whole; the visitor-currency part keeps its format.
-  assert.match(page, /const graphRowPrice = \(pkn\) => \{/);
-  assert.match(page, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
-  assert.match(page, /if \(parts\.local && parts\.pkn\) return `\$\{parts\.local\} \(\$\{whole\}\)`;/);
+  // The desk gives it the buyer's own parts and currency; the shared formatter says
+  // every positive price in the visitor's currency, the whole PKN number as the
+  // desk's bracket only.
+  assert.match(page, /const graphRowPrice = \(pkn\) => soldGraphRowPrice\(/);
+  assert.match(page, /buyerParts\(pkn, true, pinnedCurrency\(\)\),\n\s*buyerCurrency\(pinnedCurrency\(\)\),/);
+  assert.match(rows, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
+  assert.match(rows, /if \(parts\?\.local && parts\?\.pkn && local\) return `\$\{local\} \(\$\{whole\}\)`;/);
+  assert.match(rows, /return local \|\| whole;/);
 });
 
 test('Pokoin is one line: its own history, with today as the last point', () => {
@@ -558,16 +563,17 @@ test('Pokoin is one line: its own history, with today as the last point', () => 
     'Pokoin is one source, not a line and a fourth key beside it',
   );
   assert.doesNotMatch(graph, /POKOIN_NOW_SOURCE|pokoin_now|Pokoin now/);
-  // The dot is that line's next point when the line stops today or yesterday…
+  // Today's value is that line's last point when the line stops today or
+  // yesterday: one more plain segment in the line's own stroke…
   assert.match(graph, /const reachesNow = nowPt && bounds\(\) && pokoinLine\n\s*\? soldGraphNearDay\(pokoinLine\.days, bounds\(\)\.to, 1\)/);
   assert.match(graph, /const nowJoin = reachesNow \? join\(\[place\(reachesNow\), \[nowPt\.x, nowPt\.y\]\]\) : '';/);
   assert.match(graph, /join: row\.key === POKOIN_SOURCE\.key \? nowJoin : '',/);
   assert.match(graph, /<Show when=\{row\.join\}><polyline points=\{row\.join\} \/><\/Show>/);
-  // …and stands alone, stub included, when it does not reach.
-  assert.match(graph, /now: nowPt \? \{ \.\.\.nowPt, joined: Boolean\(nowJoin\) \} : null,/);
-  assert.match(graph, /<Show when=\{!now\(\)\.joined\}>\n\s*<line x1=\{now\(\)\.x - 44\}/);
+  // …and where it does not reach, and with no Pokoin line at all, the drawing ends
+  // with the line: no point geometry for today is returned, so nothing is drawn.
+  assert.doesNotMatch(graph, /now: nowPt|joined:|now\(\)\.(x|y|joined)/);
   // Today's price is a plotted value, so the scale holds it and no key appears
-  // twice: the dot's own key is there only while there is no Pokoin line.
+  // twice: the value's own key is there only while there is no Pokoin line.
   assert.match(graph, /if \(nowOn\(\)\) values\.push\(nowValue\(\) \* factor\);/);
   assert.match(graph, /const nowLine = createMemo\(\(\) => \(nowValue\(\) && !sourceLines\(\)\.some\(\(row\) => row\.key === POKOIN_SOURCE\.key\)/);
   assert.match(graph, /const nowOn = createMemo\(\(\) => nowValue\(\) > 0 && shown\(POKOIN_SOURCE\.key\)\);/);

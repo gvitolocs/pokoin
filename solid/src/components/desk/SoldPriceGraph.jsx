@@ -197,8 +197,8 @@ export default function SoldPriceGraph(props) {
         .filter((day) => day.value > 0),
     })));
   // Pokoin's own listings are a line like any other source. What the desk knows
-  // right now is that line's next point; with no line at all it is a dot alone,
-  // and the key stays either way.
+  // right now is that line's next point; with no line of its own it is one point
+  // and draws nothing, and the key stays either way.
   const nowLine = createMemo(() => (nowValue() && !sourceLines().some((row) => row.key === POKOIN_SOURCE.key)
     ? { ...POKOIN_SOURCE, days: [], isNow: true, hasData: true }
     : null));
@@ -319,9 +319,10 @@ export default function SoldPriceGraph(props) {
       marksOfRow.forEach((list, day) => map.set(day, (map.get(day) || []).concat(list)));
       return map;
     }, new Map());
-    // The dot at the right edge is today's Pokoin price. Pokoin's own line is
-    // drawn into it when that line stops today or yesterday — the price right now
-    // is its next point — and the dot stands alone with its stub otherwise.
+    // Today's Pokoin price is the Pokoin line's next point: when that line stops
+    // today or yesterday the segment is drawn to it and the line ends there. It is
+    // a line end, never a marker: nothing is drawn at the right edge when the line
+    // does not reach, and one point with no line of its own draws no line at all.
     const nowPt = nowOn()
       ? { x: pad.l + plotW, y: soldGraphY(nowValue() * factor, scale.max, pad.t, plotH) }
       : null;
@@ -364,8 +365,6 @@ export default function SoldPriceGraph(props) {
         const endsOf = carry(pts);
         return { key: row.key, color: row.color, dashed: Boolean(row.dashed), isSource: false, line: join(pts), lead: hasSourceLine ? '' : endsOf.lead, tail: endsOf.tail, solo: pts.length === 1 ? pts[0] : null };
       }),
-      // Today's Pokoin price at the right edge, joined to the Pokoin line or alone.
-      now: nowPt ? { ...nowPt, joined: Boolean(nowJoin) } : null,
       // The fill follows the line across the whole range it is drawn for.
       area: `${left},${pad.t + plotH} ${lead ? `${pad.l},${points[0][1]} ` : ''}${line}${tail ? ` ${pad.l + plotW},${points[points.length - 1][1]}` : ''} ${right},${pad.t + plotH}`,
       withYear,
@@ -694,7 +693,8 @@ export default function SoldPriceGraph(props) {
                       <For each={row.bridges}>
                         {(points) => <polyline points={points} class="sold-graph-gap" />}
                       </For>
-                      {/* Pokoin's last quote into today's dot, in the line's own colour. */}
+                      {/* Pokoin's last quote into today, in the line's own stroke:
+                          this plain segment is where the line ends. */}
                       <Show when={row.join}><polyline points={row.join} /></Show>
                     </Show>
                     <Show when={!row.isSource}>
@@ -713,18 +713,6 @@ export default function SoldPriceGraph(props) {
               <Show when={geo().lead}><polyline points={geo().lead} class="sold-graph-line sold-graph-carry" /></Show>
               <polyline points={geo().line} class="sold-graph-line" />
               <Show when={geo().tail}><polyline points={geo().tail} class="sold-graph-line sold-graph-carry" /></Show>
-              <Show when={geo().now}>
-                {(now) => (
-                  <>
-                    {/* The stub points at a dot nothing leads into: a joined line
-                        is already the lead. */}
-                    <Show when={!now().joined}>
-                      <line x1={now().x - 44} x2={now().x} y1={now().y} y2={now().y} class="sold-graph-now-stub" />
-                    </Show>
-                    <circle cx={now().x} cy={now().y} r="4" class="sold-graph-now-dot" />
-                  </>
-                )}
-              </Show>
               <Show when={guideX() != null}>
                 <line
                   x1={guideX()}
