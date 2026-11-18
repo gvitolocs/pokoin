@@ -5,24 +5,22 @@
  * The holder keeps one intent for one mount: a changed intent, a press after a
  * landing, a reload or a new mount gives a new id, and the request it names. */
 
-/** A new intent's id: the v4 UUID text the wallet API accepts. */
+/** What the wallet page shows when this browser cannot name a request. */
+export const UNSAFE_BROWSER_MESSAGE = 'This browser cannot send PKN safely; update it.';
+
+/** A new intent's id: the v4 UUID text the wallet API accepts.
+ * `crypto.randomUUID` when the page has it, otherwise a v4 UUID from
+ * `crypto.getRandomValues`. A page with neither cannot name an intent, so it
+ * does not send one. */
 export function newRequestId() {
-  const minted = globalThis.crypto?.randomUUID?.();
-  if (minted) {
-    return minted;
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw new Error(UNSAFE_BROWSER_MESSAGE);
   }
   const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    // A page served outside a secure context has no randomUUID; its wallet
-    // still names every intent it sends.
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    // No Web Crypto here either, so the id is drawn from Math.random: one per
-    // intent, which is all an id that names an intent has to be.
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
+  globalThis.crypto.getRandomValues(bytes);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');

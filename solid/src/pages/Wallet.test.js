@@ -28,6 +28,17 @@ test('a sheet asks its request id from the intent it is sending', () => {
   assert.match(src, /amountPkn: Math\.round\(Number\(amount\)\),\n {16}requestId,\n {14}\}, token\);/);
 });
 
+test('a browser that cannot name a request shows that it cannot send PKN safely', () => {
+  // The id module throws this sentence, and the page paints the error it caught.
+  assert.equal(
+    ids.match(/export const UNSAFE_BROWSER_MESSAGE = '([^']+)';/)?.[1],
+    'This browser cannot send PKN safely; update it.',
+  );
+  assert.match(ids, /throw new Error\(UNSAFE_BROWSER_MESSAGE\)/);
+  assert.match(src, /setError\(err\.message \|\| 'Something went wrong\.'\)/);
+  assert.match(src, /class="wallet-error">\{error\(\)\}/);
+});
+
 test('a request id is spent only once its request answered', () => {
   const sheets = [
     {

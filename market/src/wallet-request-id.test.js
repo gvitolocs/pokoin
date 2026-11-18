@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createRequestIds, newRequestId, walletIntent } from './wallet-request-id.js';
+import {
+  UNSAFE_BROWSER_MESSAGE,
+  createRequestIds,
+  newRequestId,
+  walletIntent,
+} from './wallet-request-id.js';
 
 const IS_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -89,25 +94,45 @@ test('a page with only getRandomValues fills its id from it', () => {
   }
 });
 
-test('a page with no Web Crypto at all still mints valid request ids', () => {
+test('a page with randomUUID names its request from that', () => {
   const stored = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   try {
-    // Neither call exists in this context: the id is still a v4 UUID text the
-    // wallet API accepts, and no two intents share one.
+    let calls = 0;
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
       writable: true,
-      value: { randomUUID: undefined, getRandomValues: undefined },
+      value: {
+        randomUUID: () => {
+          calls += 1;
+          return '6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f';
+        },
+        getRandomValues: () => {
+          throw new Error('getRandomValues is not this branch');
+        },
+      },
     });
-    const seen = new Set();
-    for (let index = 0; index < 50; index += 1) {
-      const id = newRequestId();
-      assert.match(id, IS_UUID, id);
-      assert.equal(id.length, 36);
-      seen.add(id);
+    assert.equal(newRequestId(), '6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f');
+    assert.equal(calls, 1);
+  } finally {
+    if (stored) Object.defineProperty(globalThis, 'crypto', stored);
+  }
+});
+
+test('a page with neither randomUUID nor getRandomValues does not send', () => {
+  const stored = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  try {
+    for (const value of [undefined, {}, { randomUUID: undefined, getRandomValues: undefined }]) {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        writable: true,
+        value,
+      });
+      assert.throws(() => newRequestId(), { message: UNSAFE_BROWSER_MESSAGE });
+      assert.throws(
+        () => createRequestIds().idFor(walletIntent('transfer', 'bob', 250)),
+        { message: UNSAFE_BROWSER_MESSAGE },
+      );
     }
-    assert.equal(seen.size, 50);
-    assert.equal(createRequestIds().idFor(walletIntent('transfer', 'bob', 250)).length, 36);
   } finally {
     if (stored) Object.defineProperty(globalThis, 'crypto', stored);
   }
