@@ -126,6 +126,110 @@ fn candidates_node_cases() {
         "scg"
     );
 }
+/// JS Date.parse reads a bare YYYY-MM-DD as UTC midnight, so the port does the
+/// same; nothing looser is a date at all.
+#[test]
+fn timestamp_accepts_rfc3339_and_a_bare_utc_day() {
+    assert_eq!(timestamp("2026-10-05"), timestamp("2026-10-05T00:00:00Z"));
+    assert_eq!(timestamp("2026-10-05"), Some(1_791_158_400_000));
+    assert_eq!(
+        timestamp("2026-10-05T18:00:00+02:00"),
+        Some(1_791_158_400_000 + 16 * HOUR)
+    );
+    for bad in [
+        "",
+        " ",
+        "2026-10",
+        "20261005",
+        "2026-1-5",
+        "2026-02-30",
+        "2026-13-01",
+        "05/10/2026",
+        "yesterday",
+        "2026-10-05T18:00:00",
+        "2026-10-05 18:00:00",
+    ] {
+        assert_eq!(timestamp(bad), None, "{bad} must stay unparseable");
+    }
+}
+
+/// A published record nobody can date is not an empty slot: cadence.js:38-39
+/// would let its NaN count nothing and keep the slot open.
+#[test]
+fn slot_open_fails_closed_on_an_unparseable_date_published() {
+    let broken = json!({"id":"art_broken_en","game":"pokemon","status":"published",
+        "datePublished":"05/10/2026"});
+    let slot = cadence::slot_open("pokemon", std::slice::from_ref(&broken), &[], now());
+    assert_eq!(slot["open"], false);
+    assert_eq!(slot["reason"], "unparseable datePublished on art_broken_en");
+    // Another game's broken record is not this slot's problem.
+    assert_eq!(
+        cadence::slot_open("magic", &[broken], &[], now())["open"],
+        true
+    );
+    // A missing date is not a broken one.
+    let undated =
+        json!({"id":"art_x_en","game":"pokemon","status":"published","datePublished":null});
+    assert_eq!(
+        cadence::slot_open("pokemon", &[undated], &[], now())["open"],
+        true
+    );
+    // A bare day is a date, and a weekly slot filled by it stays shut.
+    let dated =
+        json!({"id":"art_y_en","game":"gundam","status":"published","datePublished":"2026-10-01"});
+    assert_eq!(
+        cadence::slot_open("gundam", &[dated], &[], now())["reason"],
+        "1/1 published or in review this week"
+    );
+}
+
+/// The living-update rule fails a record closed on any date it cannot read.
+#[test]
+fn a_living_update_needs_every_source_date_to_parse() {
+    let state = json!({"attempts":[],"updates":{}});
+    let story = |added: Value| {
+        json!([{"id":"story_1","game":"pokemon",
+            "first_seen_at":"2026-10-05T17:00:00Z","last_updated_at":"2026-10-05T17:00:00Z",
+            "sources":added}])
+    };
+    let record = |modified: Value| {
+        json!([{"id":"art_1_en","game":"pokemon","status":"published","slug":"a",
+            "canonicalStoryId":"story_1","datePublished":"2026-09-01T00:00:00Z",
+            "dateModified":modified}])
+    };
+    let updates = |stories: Value, records: Value| {
+        cadence::plan(array(&stories), array(&records), &state, now())["updates"].clone()
+    };
+    let fresh = json!([{"added_at":"2026-10-05T12:00:00Z"}]);
+    // The baseline: a source newer than the article earns the update.
+    assert_eq!(
+        updates(story(fresh.clone()), record(json!("2026-10-01T00:00:00Z"))),
+        json!([{"id":"art_1_en","storyId":"story_1","slug":"a"}])
+    );
+    // One unreadable added_at poisons the record, however new the rest are.
+    assert_eq!(
+        updates(
+            story(json!([{"added_at":"2026-10-05T12:00:00Z"},{"added_at":"05/10/2026"}])),
+            record(json!("2026-10-01T00:00:00Z"))
+        ),
+        json!([])
+    );
+    // A published record with a null or unreadable dateModified gets no update.
+    assert_eq!(
+        updates(story(fresh.clone()), record(Value::Null)),
+        json!([])
+    );
+    assert_eq!(
+        updates(story(fresh.clone()), record(json!("tomorrow"))),
+        json!([])
+    );
+    // A bare-day dateModified is a date: the article is older than the source.
+    assert_eq!(
+        updates(story(fresh.clone()), record(json!("2026-10-04"))),
+        json!([{"id":"art_1_en","storyId":"story_1","slug":"a"}])
+    );
+}
+
 #[test]
 fn live_node_schedule_exact() {
     let f = fixture("schedule.json");

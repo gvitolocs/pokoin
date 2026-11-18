@@ -54,9 +54,24 @@ pub fn slot_open(id: &str, records: &[Value], attempts: &[Value], now: i64) -> V
     } else {
         now - c.period_ms
     };
-    let published: Vec<_> = records
+    let published_records: Vec<_> = records
         .iter()
-        .filter(|r| game(r) == id && text(r, "status") == "published")
+        .filter(|r| {
+            game(r) == id
+                && text(r, "status") == "published"
+                && !text(r, "datePublished").is_empty()
+        })
+        .collect();
+    // cadence.js:38-39 lets a bad date pass as NaN and quietly counts nothing.
+    // Here it closes the slot instead: a record nobody can date is not a slot.
+    if let Some(broken) = published_records
+        .iter()
+        .find(|r| timestamp(text(r, "datePublished")).is_none())
+    {
+        return json!({"open":false,"reason":format!("unparseable datePublished on {}",text(broken,"id")),"cadence":c});
+    }
+    let published: Vec<_> = published_records
+        .iter()
         .filter_map(|r| timestamp(text(r, "datePublished")))
         .collect();
     let drafted = records
@@ -172,15 +187,21 @@ pub fn plan(stories: &[Value], records: &[Value], state: &Value, now: i64) -> Va
         .filter(|r| text(r, "status") == "published")
         .filter_map(|r| {
             let story = stories.iter().find(|s| s["id"] == r["canonicalStoryId"])?;
-            let newest = array(&story["sources"])
-                .iter()
-                .filter_map(|s| timestamp(text(s, "added_at")))
-                .max()?;
+            // newsroom-publisher.mjs:104-106 compares Math.max over Date.parse,
+            // so one source that cannot be dated, or a record with no
+            // dateModified, fails the whole record closed: no update.
+            let mut newest = None;
+            for source in array(&story["sources"]) {
+                match timestamp(text(source, "added_at")) {
+                    Some(at) => newest = Some(newest.map_or(at, |max: i64| max.max(at))),
+                    None => return None,
+                }
+            }
             let modified = timestamp(text(r, "dateModified"))?;
             // Node Date.parse(0) = 2000-01-01, long before any newsroom record.
             let last = timestamp(state["updates"][text(r, "id")].as_str().unwrap_or(""))
                 .unwrap_or(946684800000);
-            (newest > modified && now - last >= 12 * HOUR)
+            (newest.is_some_and(|newest| newest > modified) && now - last >= 12 * HOUR)
                 .then(|| json!({"id":r["id"],"storyId":story["id"],"slug":r["slug"]}))
         })
         .collect();
