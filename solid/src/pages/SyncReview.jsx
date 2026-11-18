@@ -8,17 +8,18 @@ import {
   fetchSearch,
   fetchSellerListings,
   fetchSellerSettings,
-  formatPkn,
   updateListing,
 } from '@market/api.js';
 import { GAMES } from '@market/game.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
+import { formatSellerPrice } from '@market/seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from '../components/inventory/collection-batch.js';
 import RowThumb from '../components/inventory/RowThumb.jsx';
 import StockNav from '../components/StockNav.jsx';
 import { accountProfile } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
+import { sellerCurrency } from '../stores/buyer.js';
 import { authSession } from '../stores/session.js';
 import { RequireSignIn } from './tools/auth-gate.jsx';
 import { usePageTitle } from './tools/board.jsx';
@@ -310,7 +311,7 @@ function SyncReviewDesk() {
                         {row.reverse ? ' · reverse' : ''}
                         {' · '}
                         qty {row.quantity}
-                        {row.pricePkn ? ` · ${formatPkn(row.pricePkn)}` : ''}
+                        {row.pricePkn ? ` · ${formatSellerPrice(row.pricePkn, sellerCurrency())}` : ''}
                         {listing()?.location ? ` · now ${listing().location}` : ''}
                       </span>
                       <label class="ct-pt-inline">
@@ -371,7 +372,7 @@ function SyncReviewDesk() {
                         {' · '}
                         {row.condition} {row.language}
                         {row.reverse ? ' · reverse' : ''}
-                        {row.pricePkn ? ` · ${formatPkn(row.pricePkn)}` : ''}
+                        {row.pricePkn ? ` · ${formatSellerPrice(row.pricePkn, sellerCurrency())}` : ''}
                         {' · '}
                         qty {row.quantity}
                       </span>
