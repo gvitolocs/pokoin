@@ -17,8 +17,16 @@
    its tile and the names never stack into second and third lines. The bar is
    hidden because the active pill is always brought back into view and Tab
    walks the buttons one by one; containing the axis keeps a flick at the end
-   of the row from dragging the page with it. */
+   of the row from dragging the page with it.
+
+   `max-width: 100%` alone does not do it: the pill row is an inline-flex box,
+   so one line of pills is its tile's intrinsic width and the tile grows to
+   meet it, page scrollbar and all. A definite `width: 0` contributes nothing
+   to that sizing, and `min-width: 100%` then stretches the bar back to the
+   tile it scrolls inside. */
 .segment-levels.is-many {
+  width: 0;
+  min-width: 100%;
   max-width: 100%;
   flex-wrap: nowrap;
   overflow-x: auto;

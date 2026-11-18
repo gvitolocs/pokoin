@@ -228,6 +228,18 @@ export default function SegmentTable(props) {
   // measured at is the width the switch has, so one reading decides both.
   const manyLevels = createMemo(() => levels().length > (sparkSize() === SPARK_PHONE ? 2 : 4));
   let levelsBox;
+  // Solid 2 has no `classList` prop: an object there is written as an attribute
+  // and reads `[object Object]`. The scrolling class is therefore set on the
+  // node itself — once when the row is built, since a row created after the
+  // width already made it "many" would otherwise never hear about it, and again
+  // whenever the count of levels or the measured width moves the threshold.
+  function levelsRef(node) {
+    levelsBox = node;
+    node.classList.toggle('is-many', manyLevels());
+  }
+  createEffect(() => manyLevels(), (many) => {
+    if (levelsBox) levelsBox.classList.toggle('is-many', many);
+  });
   // A scrolling switch can hide the very level it is painting, so the active
   // pill is brought back — but only when it is really out of view, because a
   // click on a half-visible pill must not shove the row around. The two boxes
@@ -299,10 +311,9 @@ export default function SegmentTable(props) {
           <Show when={levels().length > 1}>
             <div
               class="segment-levels seller-history-presets"
-              classList={{ 'is-many': manyLevels() }}
               role="group"
               aria-label="Collection level"
-              ref={levelsBox}
+              ref={levelsRef}
             >
               <For each={levels()}>
                 {(level) => (

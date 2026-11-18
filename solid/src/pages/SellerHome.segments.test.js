@@ -135,13 +135,23 @@ test('a long level switch scrolls inside itself, and the active pill stays seen'
   assert.match(many, /flex-wrap: nowrap;/);
   assert.match(many, /overflow-x: auto;/);
   assert.match(many, /max-width: 100%;/);
+  // The pill row is an inline-flex box, so one line of pills *is* the tile's
+  // intrinsic width and `max-width: 100%` alone still stretches the panel:
+  // the box gives up its own width and takes the tile's back.
+  assert.match(many, /width: 0;/);
+  assert.match(many, /min-width: 100%;/);
   // A flick past either end is the switch's own business, not the page's.
   assert.match(many, /overscroll-behavior-x: contain;/);
   assert.match(css, /\.segment-levels\.is-many button \{[^}]*flex: none;[^}]*white-space: nowrap;/);
   // Four pills on a desktop tile and two on a phone still read as before, so
   // the threshold is the width the table itself was measured at.
   assert.match(tableSrc, /levels\(\)\.length > \(sparkSize\(\) === SPARK_PHONE \? 2 : 4\)/);
-  assert.match(tableSrc, /classList=\{\{ 'is-many': manyLevels\(\) \}\}/);
+  // Solid 2 has no `classList` prop (its CHEATSHEET: the array+object form of
+  // `class` replaces it), so an object there is written as an attribute and
+  // reads `[object Object]` — the scrolling class is toggled on the node.
+  assert.match(tableSrc, /node\.classList\.toggle\('is-many', manyLevels\(\)\)/);
+  assert.match(tableSrc, /if \(levelsBox\) levelsBox\.classList\.toggle\('is-many', many\);/);
+  assert.doesNotMatch(tableSrc, /classList=/);
   // The active level is revealed with `scrollLeft` on the switch and the two
   // rectangles, not `scrollIntoView` (which takes the page with it, vertically
   // included) and not `offsetLeft` (the pill row is not a positioned box).
