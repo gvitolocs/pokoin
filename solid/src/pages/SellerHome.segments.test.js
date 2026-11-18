@@ -112,3 +112,23 @@ test('the charts are measured, not stretched, and honour reduced motion', () => 
 test('the fixture preview carries the segment table', () => {
   assert.match(homeSrc, /segments=\{normalizeSegments\(previewSegmentsFrom\(previewHistorySeries\(\)\)\)\}/);
 });
+
+test('the segment CSS paints with dashboard tokens only and copies no chrome', () => {
+  const css = read('../../../market/src/seller-segments.css');
+  // The documented liquidity fallback is the one colour literal allowed; every
+  // other colour, including the panel chrome, is a variable the dashboard
+  // already defines.
+  const literals = [...css.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g)].map((m) => m[0]);
+  assert.deepEqual([...new Set(literals)], ['#9085e9']);
+  // And every one of those variables exists — an undefined token would paint
+  // nothing at all rather than fail loudly.
+  const tokens = [...new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))];
+  const defined = read('../../../market/src/styles.css') + read('../../../market/src/seller-home.css');
+  for (const token of tokens) {
+    assert.ok(defined.includes(`${token}:`), `${token} is used but never defined`);
+  }
+  // The level switch is the history range presets' own class, not a copy of
+  // their rules: seller-home.css is another workstream's file.
+  assert.match(tableSrc, /class="segment-levels seller-history-presets"/);
+  assert.doesNotMatch(css, /\.segment-level\b/);
+});

@@ -60,7 +60,7 @@ function lastPercent(list) {
 function Label(props) {
   return (
     <span class="segment-label">
-      {props.row.label}
+      <span class="segment-name">{props.row.label}</span>
       <Show when={props.row.sub}><em class="segment-sub">{props.row.sub}</em></Show>
     </span>
   );
@@ -268,13 +268,12 @@ export default function SegmentTable(props) {
 
         <Show when={painting()}>
           <Show when={levels().length > 1}>
-            <div class="segment-levels" role="group" aria-label="Collection level">
+            <div class="segment-levels seller-history-presets" role="group" aria-label="Collection level">
               <For each={levels()}>
                 {(level) => (
                   <button
                     type="button"
                     data-testid={`segment-level-${level.id}`}
-                    class={['segment-level', { 'is-on': level.id === levelId() }]}
                     aria-pressed={String(level.id === levelId())}
                     onClick={() => chooseLevel(level.id)}
                   >
@@ -288,8 +287,8 @@ export default function SegmentTable(props) {
           <div class="segment-head" aria-hidden="true">
             <span>Segment</span>
             <span class="segment-col-cards">Cards</span>
-            <span>Value</span>
-            <span>Change</span>
+            <span class="segment-col-value">Value</span>
+            <span class="segment-col-change">Change</span>
             <span class="segment-head-spark" />
           </div>
 
