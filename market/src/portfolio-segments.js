@@ -324,32 +324,21 @@ function firstIndex(lists) {
   return -1;
 }
 
-function lastIndex(lists) {
-  let found = -1;
-  for (const list of lists) {
-    for (let i = list.length - 1; i >= 0; i -= 1) {
-      if (list[i] != null && Number.isFinite(list[i])) {
-        found = Math.max(found, i);
-        break;
-      }
-    }
-  }
-  return found;
-}
-
 /**
  * The opened chart: segment and collection as percent change on one shared
- * scale that always holds 0, leading nulls skipped. `last` is the segment's
- * end point, for the dot.
+ * scale that always holds 0. A day's x is its index in the window — both lists
+ * carry one entry per day of the range — so a series whose first value comes
+ * later starts its line at its own date instead of at the left edge, and the
+ * labels under the chart (the window's first and last day) stay true.
+ * `last` is the segment's end point, for the dot.
  */
 export function versusPaths(segmentPct, collectionPct, width, height, pad = 12) {
   const box = { width: positiveOr(width, 320), height: positiveOr(height, 150) };
   const inner = padFor(pad, box.width, box.height);
   const lists = [percentList(segmentPct), percentList(collectionPct)];
   const empty = { segment: '', collection: '', zeroY: box.height / 2, last: null };
-  const start = firstIndex(lists);
-  if (start < 0) return empty;
-  const end = lastIndex(lists);
+  if (firstIndex(lists) < 0) return empty;
+  const days = Math.max(lists[0].length, lists[1].length);
   const values = lists.flat().filter((value) => value != null && Number.isFinite(value));
   let hi = Math.max(0, ...values);
   let lo = Math.min(0, ...values);
@@ -360,7 +349,7 @@ export function versusPaths(segmentPct, collectionPct, width, height, pad = 12) 
   const span = Math.max(1e-9, hi - lo);
   const usableW = Math.max(0, box.width - inner * 2);
   const usableH = Math.max(0, box.height - inner * 2);
-  const xOf = (index) => (end === start ? box.width / 2 : inner + ((index - start) / (end - start)) * usableW);
+  const xOf = (index) => (days === 1 ? box.width / 2 : inner + (index / (days - 1)) * usableW);
   const yOf = (value) => inner + ((hi - value) / span) * usableH;
   const pathFor = (list) => smoothPath(list
     .map((value, index) => (value == null || !Number.isFinite(value) ? null : [xOf(index), yOf(value)]))

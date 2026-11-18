@@ -347,6 +347,46 @@ test('versusPaths shares one percent scale that always holds zero', () => {
   assert.equal(mixed.last.x, 300);
 });
 
+/** The first and last point a `smoothPath` draws: its `M` and its last end. */
+function pathEnds(d) {
+  const numbers = (text) => (text.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/g) || []).map(Number);
+  const commands = d.match(/[MC][^MC]*/g) || [];
+  const head = numbers(commands[0]);
+  const tail = numbers(commands[commands.length - 1]);
+  return {
+    first: { x: head[0], y: head[1] },
+    last: { x: tail[tail.length - 2], y: tail[tail.length - 1] },
+  };
+}
+
+test('versusPaths plots each day at its own date in the window', () => {
+  const width = 320;
+  const pad = 10;
+  const days = 10;
+  const xOf = (index) => pad + (index / (days - 1)) * (width - pad * 2);
+  // The collection has been priced since the 2nd day of the window, the segment
+  // only since the 4th: neither line may pretend to start on the 1st.
+  const segment = [null, null, null, 0, 3, 2, 6, 5, 9, 12];
+  const collection = [null, 0, 1, 2, 1, 3, 2, 4, 3, 5];
+  const drawn = versusPaths(segment, collection, width, 150, pad);
+  const seg = pathEnds(drawn.segment);
+  const coll = pathEnds(drawn.collection);
+
+  assert.ok(Math.abs(seg.first.x - xOf(3)) < 0.01, `segment starts at ${seg.first.x}, wanted ${xOf(3)}`);
+  assert.ok(Math.abs(coll.first.x - xOf(1)) < 0.01, `collection starts at ${coll.first.x}, wanted ${xOf(1)}`);
+  assert.ok(seg.first.x > coll.first.x, 'a later series must start later, not at the same edge');
+  // Nothing at all is drawn for the days before a series has a value.
+  for (const x of (drawn.segment.match(/-?\d+(?:\.\d+)?/g) || []).map(Number).filter((_, i) => i % 2 === 0)) {
+    assert.ok(x >= xOf(3) - 0.01, `the segment line reaches x ${x}, before its first day`);
+  }
+  // Both series end on the window's last day, so the labels underneath hold.
+  assert.ok(Math.abs(seg.last.x - xOf(9)) < 0.01, `segment ends at ${seg.last.x}`);
+  assert.ok(Math.abs(coll.last.x - xOf(9)) < 0.01, `collection ends at ${coll.last.x}`);
+  // The end dot sits on the segment's last plotted point.
+  assert.ok(Math.abs(drawn.last.x - xOf(9)) < 0.01, `dot at ${drawn.last.x}`);
+  assert.ok(Math.abs(drawn.last.y - seg.last.y) < 0.01, `dot at ${drawn.last.y}, line ends at ${seg.last.y}`);
+});
+
 test('formatSegmentChange signs, rounds and blanks', () => {
   assert.equal(formatSegmentChange(8.6), '+8.6%');
   assert.equal(formatSegmentChange(-3.24), '-3.2%');
