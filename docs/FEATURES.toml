@@ -80,8 +80,8 @@ status = "proved"
 id = "pkn-transfer"
 name = "User sends PKN to another username"
 money = true
-entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_insufficient_transfer_is_refused_and_changes_nothing"]
+entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js", "market/src/wallet-request-id.js"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_insufficient_transfer_is_refused_and_changes_nothing", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_transfer_request_id_is_applied_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_transfer_request_id_stands_for_one_request", "pokoin-rust/crates/commerce/src/domain/request_id.rs::a_wallet_request_id_is_applied_once_and_an_absent_one_is_still_accepted", "market/src/wallet-request-id.test.js", "market/src/api-wallet-request-id.test.js", "solid/src/pages/Wallet.test.js"]
 status = "partial"
 
 [[flow]]
@@ -128,8 +128,8 @@ status = "partial"
 id = "pkn-withdraw"
 name = "User withdraws PKN to an on-chain address"
 money = true
-entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal"]
+entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js", "market/src/wallet-request-id.js"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_withdraw_request_id_pays_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_withdraw_request_id_stands_for_one_request", "pokoin-rust/crates/commerce/src/domain/request_id.rs::a_wallet_request_id_is_applied_once_and_an_absent_one_is_still_accepted", "market/src/wallet-request-id.test.js", "market/src/api-wallet-request-id.test.js", "solid/src/pages/Wallet.test.js"]
 status = "partial"
 
 [[flow]]
