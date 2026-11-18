@@ -378,7 +378,8 @@ test('every price source is a line inside the graph the desk already had', () =>
   // A source with no sale of its own still draws: the empty message waits for both.
   assert.match(graph, /<Show when=\{!hasLines\(\) && props\.series != null\}>/);
   // Sources are thinner than sold lines, break where they stopped quoting, and
-  // bridge the hole dotted. Pokoin now is one dot today with a stub at it.
+  // bridge the hole dotted. Pokoin's dot today joins its own line or stands with
+  // a stub at it.
   assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
   assert.match(graph, /class="sold-graph-gap"/);
   assert.match(graph, /class="sold-graph-now-dot"/);
