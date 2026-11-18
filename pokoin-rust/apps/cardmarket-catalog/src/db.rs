@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPoolOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 
+use crate::cm_daily::{self, DailyOffer};
 use crate::cm_offers::Minimum;
 use crate::sources::PriceGuide;
 use crate::tcgnotify::Ask;
@@ -156,6 +157,14 @@ pub async fn read_session(
     .await?;
     Ok(())
 }
+
+/// The timeout one `cm-daily` load runs under, as the first statement of its
+/// own transaction. Transaction scope, not [`read_session`]'s session scope:
+/// this runs on a pooled connection, and a 60-second timeout left on the
+/// session would be handed to whatever borrows that connection next, including
+/// a load this command did not aim at. `cm_daily::STATEMENT_TIMEOUT_SECS` is
+/// the number; the value reaches Postgres as a bind.
+pub const DAILY_TIMEOUT_SQL: &str = "select set_config('statement_timeout', $1, true)";
 
 pub async fn has_table(pool: &PgPool, name: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>("select to_regclass($1) is not null")
@@ -503,6 +512,122 @@ pub async fn store_offer_minimums(
     Ok((facets as u64, changed))
 }
 
+/// The staging table of one day's file: the facet is keyed exactly as the
+/// permanent table is, so a file that names one facet twice cannot reach the
+/// load twice (`cm_daily::parse` folds the duplicates first; this is the second
+/// line of defence, and `on conflict do nothing` in the stage keeps it from
+/// aborting the day).
+pub const DAILY_STAGING_SQL: &str = r#"create temp table incoming_daily (
+           cm_product_id bigint,
+           day date,
+           language text,
+           condition text,
+           seller_type text,
+           finish text,
+           first_edition text,
+           min_cents integer,
+           offer_count integer,
+           counts_complete boolean,
+           asked boolean,
+           observed_at timestamptz,
+           primary key (cm_product_id, day, language, condition, seller_type, finish, first_edition)
+         ) on commit drop"#;
+
+/// One chunk of the day's file into the staging table, every value a bind: the
+/// day and the observation time arrive as text and are cast in the select, so
+/// no value is ever written into the statement's text.
+pub const DAILY_STAGE_SQL: &str = r#"insert into incoming_daily (cm_product_id, day, language,
+           condition, seller_type, finish, first_edition, min_cents, offer_count,
+           counts_complete, asked, observed_at)
+         select u.cm_product_id, u.day::date, u.language, u.condition, u.seller_type,
+           u.finish, u.first_edition, u.min_cents::integer, u.offer_count,
+           u.counts_complete, u.asked, u.observed_at::timestamptz
+         from unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
+           $6::text[], $7::text[], $8::bigint[], $9::integer[], $10::boolean[],
+           $11::boolean[], $12::text[])
+           as u(cm_product_id, day, language, condition, seller_type, finish,
+                first_edition, min_cents, offer_count, counts_complete, asked, observed_at)
+         on conflict (cm_product_id, day, language, condition, seller_type, finish, first_edition)
+           do nothing"#;
+
+/// The binds [`DAILY_STAGE_SQL`] takes; the stage builder binds exactly this
+/// many, and the unit test says so.
+pub const DAILY_PARAM_COUNT: usize = 12;
+
+/// The day's file into `cardmarket_offer_daily` (migration 145): one row per
+/// facet per day. A facet already stored for that day is replaced only by a
+/// newer observation, so replaying a rewritten file — the collector writes it
+/// whole and atomically — cannot roll a day back to an older answer, and
+/// `asked` is true for the day once any line said the walk aimed at the facet:
+/// a price that only rode along on a wider page later must not erase the fact
+/// that the facet was asked for. `loaded_at` says when this row arrived, which
+/// is what a freshness check reads; the observation time stays separate.
+pub const DAILY_LOAD_SQL: &str = r#"insert into public.cardmarket_offer_daily as daily
+         (cm_product_id, day, language, condition, seller_type, finish, first_edition,
+          min_cents, offer_count, counts_complete, asked, observed_at, loaded_at)
+         select i.cm_product_id, i.day, i.language, i.condition, i.seller_type,
+           i.finish, i.first_edition, i.min_cents, i.offer_count, i.counts_complete,
+           i.asked, i.observed_at, now()
+         from incoming_daily i
+         on conflict (cm_product_id, day, language, condition, seller_type, finish, first_edition)
+         do update set min_cents = excluded.min_cents, offer_count = excluded.offer_count,
+           counts_complete = excluded.counts_complete,
+           asked = excluded.asked or daily.asked,
+           observed_at = excluded.observed_at, loaded_at = now()
+         where excluded.observed_at > daily.observed_at"#;
+
+/// Load one day's file into `public.cardmarket_offer_daily` (migration 145) in
+/// one transaction: the timeout, then stage every row, then one upsert. Returns
+/// (rows staged, rows that changed), so replaying the same file answers
+/// `changed = 0` and a run whose table is missing answers an error, not a
+/// silent zero. Nothing is committed here that a row of the file did not say.
+pub async fn store_daily_offers(
+    pool: &PgPool,
+    rows: &[DailyOffer],
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(DAILY_TIMEOUT_SQL)
+        .bind(format!("{}s", cm_daily::STATEMENT_TIMEOUT_SECS))
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(DAILY_STAGING_SQL).execute(&mut *tx).await?;
+    for chunk in rows.chunks(5000) {
+        let col = |get: fn(&DailyOffer) -> String| chunk.iter().map(get).collect::<Vec<_>>();
+        let ids: Vec<i64> = chunk.iter().map(|row| row.id_product).collect();
+        let cents: Vec<i64> = chunk.iter().map(|row| row.min_cents).collect();
+        let counts: Vec<Option<i32>> = chunk
+            .iter()
+            .map(|row| row.offer_count.map(|count| count as i32))
+            .collect();
+        let complete: Vec<Option<bool>> = chunk.iter().map(|row| row.counts_complete).collect();
+        let asked: Vec<bool> = chunk.iter().map(|row| row.asked).collect();
+        sqlx::query(DAILY_STAGE_SQL)
+            .bind(&ids)
+            .bind(col(|row| row.day.clone()))
+            .bind(col(|row| row.language.clone()))
+            .bind(col(|row| row.condition.clone()))
+            .bind(col(|row| row.seller_type.clone()))
+            .bind(col(|row| row.finish.clone()))
+            .bind(col(|row| row.first_edition.clone()))
+            .bind(&cents)
+            .bind(&counts)
+            .bind(&complete)
+            .bind(&asked)
+            .bind(col(|row| row.observed_at.clone()))
+            .execute(&mut *tx)
+            .await?;
+    }
+    let changed = sqlx::query(DAILY_LOAD_SQL)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    let staged: i64 = sqlx::query_scalar("select count(*) from incoming_daily")
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok((staged as u64, changed))
+}
+
 /// Upsert the display price per public card id; drop rows of cards that no
 /// longer have a Cardmarket price (Cardmarket-only games have no other source).
 pub async fn store_medians(
@@ -646,4 +771,106 @@ pub async fn store_printing_links(
     }
     tx.commit().await?;
     Ok((written, skipped))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One row of a real day: Dialga's IT NM private facet, with values chosen
+    /// so that no one of them can be confused with a column or a keyword.
+    fn offer() -> DailyOffer {
+        DailyOffer {
+            id_product: 279646,
+            day: "2026-11-12".into(),
+            language: "IT".into(),
+            condition: "NM".into(),
+            seller_type: "private".into(),
+            finish: "Y".into(),
+            first_edition: "N".into(),
+            min_cents: 1955,
+            offer_count: Some(4321),
+            counts_complete: Some(true),
+            asked: true,
+            observed_at: "2026-11-12T13:09:30.235Z".into(),
+        }
+    }
+
+    /// The statements that load a day carry no value in their text: what the
+    /// file said reaches Postgres as a bind or a staged column, never as SQL.
+    /// A price, a day or a product id found in the text would mean the loader
+    /// writes SQL it built from the input.
+    #[test]
+    fn the_daily_statements_hold_no_value_from_the_file() {
+        let row = offer();
+        // The statements are all lower-case SQL with nothing but column names in
+        // it, so a value that appears anywhere in one of them got there from the
+        // file, not from the schema.
+        let values: Vec<String> = [
+            row.id_product.to_string(),
+            row.day.clone(),
+            row.language.clone(),
+            row.condition.clone(),
+            row.seller_type.clone(),
+            row.finish.clone(),
+            row.first_edition.clone(),
+            row.min_cents.to_string(),
+            row.offer_count.map(|c| c.to_string()).unwrap_or_default(),
+            row.observed_at.clone(),
+        ]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect();
+        for sql in [
+            DAILY_STAGING_SQL,
+            DAILY_STAGE_SQL,
+            DAILY_LOAD_SQL,
+            DAILY_TIMEOUT_SQL,
+        ] {
+            for value in &values {
+                assert!(!sql.contains(value.as_str()), "{sql} interpolates {value}");
+            }
+            // A surviving `format!` brace is the other half of the same story.
+            assert!(!sql.contains(['{', '}']), "{sql} was formatted");
+            // Nor a comment that carried a value into the statement.
+            assert!(!sql.contains("--"), "{sql} carries a comment");
+        }
+    }
+
+    /// The stage takes exactly the columns the file has, in the order the loader
+    /// binds them: a new field is a new bind, and `DAILY_PARAM_COUNT` is what
+    /// says it was added on both sides.
+    #[test]
+    fn the_daily_stage_binds_one_parameter_per_column() {
+        for number in 1..=DAILY_PARAM_COUNT {
+            let placeholder = format!("${number}::");
+            assert!(
+                DAILY_STAGE_SQL.contains(&placeholder),
+                "bind {number} is missing from {DAILY_STAGE_SQL}"
+            );
+        }
+        assert!(
+            !DAILY_STAGE_SQL.contains(&format!("${}", DAILY_PARAM_COUNT + 1)),
+            "a bind past the {DAILY_PARAM_COUNT} columns"
+        );
+        // The timeout is a bind too, not the number written into the statement.
+        assert!(DAILY_TIMEOUT_SQL.contains("$1"));
+        assert!(!DAILY_TIMEOUT_SQL.contains(&format!("{}", cm_daily::STATEMENT_TIMEOUT_SECS)));
+    }
+
+    /// The facet key the file is unique on, the staging table's key and the
+    /// upsert's conflict target must be the same seven columns in the same
+    /// order, or a replayed file writes a facet twice.
+    #[test]
+    fn the_daily_key_is_the_same_seven_columns_everywhere() {
+        let key = "cm_product_id, day, language, condition, seller_type, finish, first_edition";
+        assert!(DAILY_STAGING_SQL.contains(&format!("primary key ({key})")));
+        assert!(DAILY_STAGE_SQL.contains(&format!("on conflict ({key})")));
+        assert!(DAILY_LOAD_SQL.contains(&format!("on conflict ({key})")));
+        // Newest observation wins, and `asked` is sticky once the walk aimed at
+        // the facet: both rules live in the SQL the loader actually sends.
+        assert!(DAILY_LOAD_SQL.contains("where excluded.observed_at > daily.observed_at"));
+        assert!(DAILY_LOAD_SQL.contains("asked = excluded.asked or daily.asked"));
+        assert!(DAILY_LOAD_SQL.contains("loaded_at = now()"));
+    }
 }

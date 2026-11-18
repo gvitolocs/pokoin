@@ -9,6 +9,7 @@
 //! pokoin-cardmarket-catalog guides [--game <slug>] [--apply]
 //! pokoin-cardmarket-catalog tcgnotify --file dump.json [--apply]
 //! pokoin-cardmarket-catalog cm-offers --file minimums.jsonl [--apply]
+//! pokoin-cardmarket-catalog cm-daily --file daily-minimums-2026-11-12.jsonl [--apply]
 //! pokoin-cardmarket-catalog cm-watchlist [--days 7] [--cap 1200] [--out watchlist.jsonl]
 //! ```
 //!
@@ -53,6 +54,23 @@
 //! product id, facet code, price or timestamp is not usable. Without
 //! `--apply` it is a dry run, like `guides`.
 //!
+//! `cm-daily` loads one day of the collector's per-condition file
+//! (`--file`: `<state-dir>/daily/daily-minimums-YYYY-MM-DD.jsonl`, the append
+//! of every facet its pages showed that day) into
+//! `pokoin_marketplace.cardmarket_offer_daily` (migration 145): the cheapest
+//! offer per product, language, condition floor, finish, first edition and
+//! seller type *per day* — the series the card-page graph draws, where
+//! `cm-offers` holds only the newest answer per facet (`cm_daily.rs`). The day
+//! comes from the file name and every line is required to agree with it; a
+//! facet seen twice that day keeps its newest observation, and a facet already
+//! stored is replaced only by a newer one, so the collector's rewritten file
+//! can be replayed. `asked` is true for the day once one line said the walk
+//! aimed at that facet. An unusable line is a counted skip, printed under the
+//! day's counts, and never stops the load: the two refusals are a file name
+//! with no day and a file with nothing loadable in it, which exit non-zero
+//! having written nothing. Without `--apply` the run is a dry one that reads no
+//! database at all — it prints what `--apply` would write.
+//!
 //! `cm-watchlist` asks the writer which Cardmarket products the price
 //! collector (`cm-price-engine`, another repository) should open per condition
 //! tomorrow: the cards that were viewed by a member, listed with stock,
@@ -74,6 +92,7 @@
 //! `--jp-twins` gives Japanese printings their English twin's page (`twins.rs`);
 //! `--apply-jp` writes those to `pokoin_printing_cm_links` (migration 130).
 
+pub mod cm_daily;
 pub mod cm_offers;
 pub mod db;
 pub mod game;
@@ -158,9 +177,16 @@ fn options() -> Result<Options, String> {
     let command = args.next().unwrap_or_default();
     if !matches!(
         command.as_str(),
-        "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers" | "cm-watchlist"
+        "match"
+            | "prices"
+            | "links"
+            | "guides"
+            | "tcgnotify"
+            | "cm-offers"
+            | "cm-daily"
+            | "cm-watchlist"
     ) {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers|cm-watchlist [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--days 7] [--cap 1200] [--viewed-share 50] [--out watchlist.jsonl] [--apply]".into());
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers|cm-daily|cm-watchlist [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--days 7] [--cap 1200] [--viewed-share 50] [--out watchlist.jsonl] [--apply]".into());
     }
     let mut slug: Option<String> = None;
     let mut cache = None;
@@ -231,6 +257,10 @@ fn options() -> Result<Options, String> {
         // A harvest file is a finished answer per facet: no game, no cache.
         let cache = cache.unwrap_or_else(|| cache_root().join("cm-offers"));
         (None, None, cache)
+    } else if command == "cm-daily" {
+        // One day of that answer, keyed by the file's own name: no game, no cache.
+        let cache = cache.unwrap_or_else(|| cache_root().join("cm-daily"));
+        (None, None, cache)
     } else if command == "cm-watchlist" {
         // A ranking over the writer: no game registry, no cache of its own.
         if days < 1 {
@@ -283,6 +313,7 @@ pub async fn run() -> Result<i32, String> {
         "guides" => run_guides(&o).await,
         "tcgnotify" => run_tcgnotify(&o).await,
         "cm-offers" => run_cm_offers(&o).await,
+        "cm-daily" => run_cm_daily(&o).await,
         "cm-watchlist" => run_watchlist(&o).await,
         _ => run_prices(&o).await,
     }
@@ -867,6 +898,69 @@ async fn run_cm_offers(o: &Options) -> Result<i32, String> {
     println!(
         "{}",
         json!({"apply": o.apply, "facets": facets, "changed": changed, "skipped": skipped})
+    );
+    Ok(0)
+}
+
+/// Load one day of the collector's per-condition file
+/// (`--file`: `daily-minimums-YYYY-MM-DD.jsonl`) into
+/// `cardmarket_offer_daily` (migration 145): the cheapest offer per product
+/// facet *per day*, the series the card-page graph draws, where `cm-offers`
+/// keeps only the newest answer per facet. The day comes from the file name, so
+/// the file is what says which day it is; a name with no day, or a file with
+/// nothing loadable in it, exits non-zero without writing. A dry run reads no
+/// database at all — it prints the counts `--apply` would load, and the reason
+/// each line did not become a row (`cm_daily.rs`).
+async fn run_cm_daily(o: &Options) -> Result<i32, String> {
+    let path = o
+        .file
+        .as_ref()
+        .ok_or("cm-daily needs --file <daily-minimums-YYYY-MM-DD.jsonl>")?;
+    let day = cm_daily::file_day(path).ok_or_else(|| {
+        format!(
+            "{}: the file name carries no YYYY-MM-DD day, and a load that has to be told \
+             which day it is loading would one day load it into the wrong one",
+            path.display()
+        )
+    })?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = cm_daily::parse(&text, &day);
+    print!("{}", file.summary());
+    if file.valid() == 0 {
+        return Err(format!(
+            "{}: nothing loadable in the day's file ({} lines, {} skipped)",
+            path.display(),
+            file.lines,
+            file.skipped_total()
+        ));
+    }
+    if !o.apply {
+        println!(
+            "dry run: --apply writes the {} rows of {day} to public.cardmarket_offer_daily",
+            file.valid()
+        );
+        return Ok(0);
+    }
+    // Only a real load opens a session, and it opens a writable one: the dry run
+    // above answered everything from the file.
+    let write = db::connect("pokoin_marketplace", false).await?;
+    if !db::has_table(&write, "public.cardmarket_offer_daily")
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(
+            "cardmarket_offer_daily is not migrated; apply scripts/sql/145_cardmarket_offer_daily.sql"
+                .into(),
+        );
+    }
+    let (rows, changed) = db::store_daily_offers(&write, &file.offers)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!(
+        "{}",
+        json!({"apply": true, "day": day, "file": path.display().to_string(),
+               "lines": file.lines, "rows": rows, "changed": changed,
+               "skipped": file.skipped_total(), "products": file.products()})
     );
     Ok(0)
 }
