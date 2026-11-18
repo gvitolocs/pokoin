@@ -8,6 +8,7 @@
 import { inventoryMarketValue } from './inventory-price.js';
 import { editPriceFields } from './pricing-group-note.js';
 import { localizeStrategyName } from './pricer.js';
+import { MAX_LISTING_PHOTOS } from './user-photos.js';
 
 /**
  * Board rows come from two places: an API answer (camelCase) or the stored
@@ -316,4 +317,141 @@ export function pricingSavePlan(choice, listingId) {
     steps.push({ call: 'apply', body: { strategyId: picked, listingIds: [id] } });
   }
   return steps;
+}
+
+/** The menu's "Custom price" entry: the seller's own number, no rule behind it. */
+export const CUSTOM_PRICING = { kind: 'custom', id: '', name: 'Custom price', label: 'Custom price' };
+
+/**
+ * The editor's fields as one snapshot, with the price in PKN. The form lists
+ * in the seller's currency, so comparing the typed string would call every
+ * currency flip an edit, and a row opened and never touched would look dirty.
+ */
+export function listingFormState(form = {}) {
+  const flags = form.chips || {};
+  return {
+    pricePkn: number(form.pricePkn),
+    qty: text(form.qty),
+    condition: text(form.condition),
+    language: text(form.language),
+    foil: text(form.foil),
+    comment: text(form.comment),
+    company: text(form.company),
+    grade: text(form.grade),
+    cert: text(form.cert),
+    firstEd: flags.firstEd === true,
+    sealed: flags.sealed === true,
+    graded: flags.graded === true,
+    shipping: flags.shipping === true,
+    signed: flags.signed === true,
+    altered: flags.altered === true,
+    photos: Array.isArray(form.photos) ? form.photos.join('|') : text(form.photos),
+    pricing: Boolean(form.pricing),
+  };
+}
+
+/**
+ * Whether the seller changed anything since the row came in. `baseline` is a
+ * `listingFormState` snapshot taken after the form's own conversion.
+ */
+export function listingFormEdited(baseline, current) {
+  if (!baseline) return false;
+  const next = listingFormState(current);
+  for (const [key, value] of Object.entries(next)) {
+    if (baseline[key] !== value) return true;
+  }
+  return false;
+}
+
+/**
+ * What the editor clears when it moves to another row. The drawer keeps its
+ * form mounted across a switch, so anything not taken from the new row would
+ * be saved onto it — the previous row's photos above all.
+ */
+export function rowEditorReset(offer = null) {
+  const photos = Array.isArray(offer?.photoUrls) ? offer.photoUrls.slice(0, MAX_LISTING_PHOTOS) : [];
+  return { photos, ownLocation: null, stockBoxes: [], stockReady: false, boxTouched: false, priceTyped: false };
+}
+
+/**
+ * Whether the PATCH carries a price. A chosen group or strategy prices the
+ * listing itself, so a number typed before the pick must not go with it.
+ */
+export function patchCarriesPrice(choice, priceTyped) {
+  const kind = text(choice?.kind);
+  if (kind && kind !== 'custom') return false;
+  return priceTyped === true;
+}
+
+/**
+ * A dry-run answer only counts while it is the newest one for this row: after
+ * a switch or another pick, the answer still in flight would overwrite a price
+ * the seller has since chosen.
+ */
+export function pricingAnswerCounts({ token, latest, listingId, currentId } = {}) {
+  const run = number(token);
+  return run != null && run === number(latest) && text(listingId) === text(currentId);
+}
+
+/**
+ * The price the field shows for a menu entry: a group or strategy has none of
+ * its own (its dry run fills it in), and the seller's own price goes back to
+ * what the listing has, because a rule's preview was never their number.
+ */
+export function pricingFieldPkn(choice, originalPkn) {
+  return text(choice?.kind) === 'custom' ? number(originalPkn) : null;
+}
+
+/** What a 200 answer says about the CardTrader side: its error, or nothing. */
+export function cardtraderWarning(answer) {
+  const pushed = answer?.cardtrader;
+  if (!pushed || typeof pushed !== 'object' || pushed.ok !== false) return '';
+  return text(pushed.error) || 'CardTrader push failed.';
+}
+
+/**
+ * What one "Save changes" click leaves behind: the row the board writes — the
+ * PATCH answer, because the listing saved even when the pricing step after it
+ * did not — the note for the board's action line, and whether the editor keeps
+ * itself open.
+ */
+export function listingSaveOutcome({ saved = null, pricedPkn = null, pricingFailed = '' } = {}) {
+  const found = saved && (saved.id ? saved : saved.listing) || null;
+  const row = found && pricedPkn != null ? { ...found, pricePkn: pricedPkn } : found;
+  const failed = text(pricingFailed);
+  return { row, note: cardtraderWarning(saved), pricingFailed: failed, keepOpen: Boolean(failed) };
+}
+
+/**
+ * The board node of one listing, by its id: what the row looked like when the
+ * drawer opened is gone after a switch or a re-render, so the board asks for
+ * the node by id at the moment it needs it (focus back on close).
+ */
+export function listingRowNode(nodes, id) {
+  const want = text(id);
+  if (!want) return null;
+  for (const node of nodes || []) {
+    if (text(node?.dataset?.listingId) === want) return node;
+  }
+  return null;
+}
+
+/**
+ * Whether the drawer is about to lose edits the seller has not saved. Another
+ * row and closing the panel both lose them; opening the row it already shows,
+ * or losing a clean form, does not — so the same rule answers for a switch and
+ * a close, and the two can never ask differently.
+ */
+export function dropsUnsavedEdits({ dirty, openId, nextId = '' } = {}) {
+  return dirty === true && text(openId) !== '' && text(nextId) !== text(openId);
+}
+
+/** The drawer's two chip rows: what the card is, and what the listing offers. */
+export function drawerChipSplit(chips = []) {
+  const offered = ['sealed', 'shipping'];
+  const list = Array.isArray(chips) ? chips : [];
+  return {
+    property: list.filter((chip) => !offered.includes(text(chip?.key))),
+    listing: list.filter((chip) => offered.includes(text(chip?.key))),
+  };
 }

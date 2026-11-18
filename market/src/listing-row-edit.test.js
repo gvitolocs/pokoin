@@ -4,17 +4,29 @@ import {
   applyEditedRow,
   cardFromInventoryRow,
   cardtraderLinked,
+  cardtraderWarning,
+  CUSTOM_PRICING,
+  drawerChipSplit,
+  dropsUnsavedEdits,
   editListingBody,
   identityFromInventoryRow,
+  listingFormEdited,
+  listingFormState,
   listingPresets,
+  listingRowNode,
+  listingSaveOutcome,
   offerFromInventoryRow,
+  patchCarriesPrice,
+  pricingAnswerCounts,
   pricingDryRunBody,
   pricingDryRunPrice,
+  pricingFieldPkn,
   pricingGroupOf,
   pricingMenuEntries,
   pricingMenuLabel,
   pricingSavePlan,
   removeListingRow,
+  rowEditorReset,
 } from './listing-row-edit.js';
 
 const CARRIED = [
@@ -346,4 +358,134 @@ test('one save click patches first, then joins the group and prices', () => {
   ]);
   // A row with no id cannot be priced: only the patch.
   assert.deepEqual(pricingSavePlan({ kind: 'group', id: 'g1' }, ''), [{ call: 'patch', priceInPatch: false }]);
+});
+
+// ── MI-R002 review: the drawer's own rules ──────────────────────────────────
+
+const FIELDS = {
+  pricePkn: 1800,
+  qty: '1',
+  condition: 'NM',
+  language: 'EN',
+  foil: 'standard',
+  comment: '',
+  company: 'PSA',
+  grade: '',
+  cert: '',
+  chips: { firstEd: false, sealed: false, graded: false, shipping: true, signed: false, altered: false },
+  photos: [],
+  pricing: null,
+};
+
+test('the dirty check compares the price in PKN, not the string in the field', () => {
+  const baseline = listingFormState(FIELDS);
+  // A DKK seller: the field shows 28.58 for the same 1800 PKN, which is not an edit.
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, pricePkn: 1800 }), false);
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, pricePkn: 1799 }), true, 'another number is an edit');
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, qty: '2' }), true);
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, comment: 'sharp edges' }), true);
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, chips: { ...FIELDS.chips, graded: true } }), true);
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, photos: ['https://cdn/a.jpg'] }), true);
+  assert.equal(listingFormEdited(baseline, { ...FIELDS, pricing: { kind: 'strategy', id: 's1' } }), true, 'a pricing pick is an edit');
+  assert.equal(listingFormEdited(null, FIELDS), false, 'nothing to compare against is not dirty');
+});
+
+test('switching rows carries nothing of the row left behind', () => {
+  const rowA = offerFromInventoryRow({ id: 'l-1', photoUrls: ['https://cdn/a.jpg', 'https://cdn/b.jpg', 'https://cdn/c.jpg'] });
+  const rowB = offerFromInventoryRow({ id: 'l-2' });
+  assert.deepEqual(rowEditorReset(rowA).photos, ['https://cdn/a.jpg', 'https://cdn/b.jpg'], 'at most what the form shows');
+  const reset = rowEditorReset(rowB);
+  assert.deepEqual(reset.photos, [], 'row A has two photos; they must not be saved onto row B');
+  assert.equal(reset.ownLocation, null, 'the server has not said where this row is kept yet');
+  assert.equal(reset.stockReady, false, 'so a save cannot reuse the other row\'s answer');
+  assert.deepEqual(reset.stockBoxes, []);
+  assert.equal(reset.boxTouched, false);
+  assert.equal(reset.priceTyped, false);
+  assert.deepEqual(rowEditorReset(null).photos, []);
+});
+
+test('a group or strategy pick takes the typed price out of the PATCH', () => {
+  assert.equal(patchCarriesPrice(null, true), true, 'a typed price with no pick is the seller\'s');
+  assert.equal(patchCarriesPrice(CUSTOM_PRICING, true), true);
+  assert.equal(patchCarriesPrice({ kind: 'strategy', id: 's1' }, true), false, 'typing 500 then picking Undercut sends no price');
+  assert.equal(patchCarriesPrice({ kind: 'group', id: 'g1' }, true), false);
+  assert.equal(patchCarriesPrice(CUSTOM_PRICING, false), false);
+  const typed = { ...form, priceTyped: patchCarriesPrice({ kind: 'strategy', id: 's1' }, form.priceTyped) };
+  const body = editListingBody(typed, { id: 'l-1', status: 'active', pricePkn: 420 });
+  assert.equal(Object.hasOwn(body, 'pricePkn'), false, 'the rule sets the price after the PATCH');
+  assert.equal(Object.hasOwn(body, 'pricingGroupId'), false, 'and the listing is not pushed out of its group');
+});
+
+test('only the newest dry run answers for the row it was asked on', () => {
+  assert.equal(pricingAnswerCounts({ token: 3, latest: 3, listingId: 'l-1', currentId: 'l-1' }), true);
+  assert.equal(pricingAnswerCounts({ token: 2, latest: 3, listingId: 'l-1', currentId: 'l-1' }), false, 'a later pick or a typed price wins');
+  assert.equal(pricingAnswerCounts({ token: 3, latest: 3, listingId: 'l-1', currentId: 'l-2' }), false, 'the drawer moved to another row');
+  assert.equal(pricingAnswerCounts({ token: 0, latest: 0, listingId: 'l-1', currentId: 'l-1' }), true);
+  assert.equal(pricingAnswerCounts({ latest: 1, listingId: 'l-1', currentId: 'l-1' }), false, 'no request, no answer');
+});
+
+test('Custom price goes back to the listing\'s own number, not the rule\'s preview', () => {
+  assert.equal(pricingFieldPkn(CUSTOM_PRICING, 1800), 1800);
+  assert.equal(pricingFieldPkn({ kind: 'strategy', id: 's1' }, 1800), null, 'a rule has no number until its dry run');
+  assert.equal(pricingFieldPkn(CUSTOM_PRICING, null), null);
+});
+
+test('a 200 answer that failed the CardTrader side leaves a note for the board', () => {
+  assert.equal(cardtraderWarning({ cardtrader: { ok: false, error: 'CardTrader refused that change.' } }), 'CardTrader refused that change.');
+  assert.equal(cardtraderWarning({ cardtrader: { ok: false } }), 'CardTrader push failed.', 'an error without a message still says something');
+  assert.equal(cardtraderWarning({ cardtrader: { ok: true } }), '', 'a good push says nothing extra');
+  assert.equal(cardtraderWarning({ listing: { id: 'l-1' } }), '', 'an unlinked listing has no CardTrader side');
+
+  const saved = { id: 'l-1', pricePkn: 1800, condition: 'LP' };
+  const priced = listingSaveOutcome({ saved, pricedPkn: 1650 });
+  assert.deepEqual(priced.row, { id: 'l-1', pricePkn: 1650, condition: 'LP' }, 'the row shows the price the rule set');
+  assert.equal(saved.pricePkn, 1800, 'the answer itself is never rewritten');
+  assert.equal(priced.keepOpen, false);
+  assert.equal(priced.note, '');
+
+  // The PATCH worked and the pricing step after it did not: the board row still
+  // takes the saved fields, and the seller stays in the drawer.
+  const failed = listingSaveOutcome({ saved, pricingFailed: 'the market was unreachable' });
+  assert.equal(failed.keepOpen, true);
+  assert.equal(failed.pricingFailed, 'the market was unreachable');
+  assert.deepEqual(failed.row, { id: 'l-1', pricePkn: 1800, condition: 'LP' });
+
+  assert.deepEqual(listingSaveOutcome({ saved: { listing: { id: 'l-2' } } }).row, { id: 'l-2' });
+  assert.equal(listingSaveOutcome({}).row, null, 'nothing to write back');
+});
+
+test('focus goes back to the row the drawer last showed', () => {
+  const nodes = [
+    { dataset: { listingId: 'l-1' } },
+    { dataset: { listingId: 'l-2' } },
+  ];
+  assert.equal(listingRowNode(nodes, 'l-2'), nodes[1], 'looked up by row id when it is needed');
+  assert.equal(listingRowNode(nodes, 'l-gone'), null, 'a row that left the book has no node');
+  assert.equal(listingRowNode([{ dataset: {} }, nodes[0]], 'l-1'), nodes[0], 'rows without an id are passed over');
+  assert.equal(listingRowNode(nodes, ''), null);
+  assert.equal(listingRowNode(null, 'l-1'), null);
+});
+
+test('a close over unsaved edits is a discard exactly when a switch is', () => {
+  // Item 9: Escape and X asked nothing while a row switch asked, so the same
+  // edits were discarded silently one way and refused the other.
+  assert.equal(dropsUnsavedEdits({ dirty: true, openId: 'l-1', nextId: 'l-2' }), true, 'another row');
+  assert.equal(dropsUnsavedEdits({ dirty: true, openId: 'l-1' }), true, 'closing the panel drops them too');
+  assert.equal(dropsUnsavedEdits({ dirty: true, openId: 'l-1', nextId: 'l-1' }), false, 'the same row again keeps them');
+  assert.equal(dropsUnsavedEdits({ dirty: false, openId: 'l-1' }), false, 'nothing to discard, nothing to ask');
+  assert.equal(dropsUnsavedEdits({ dirty: true, openId: '' }), false, 'no row open');
+});
+
+test('the drawer keeps Sealed and Shipping out of the card\'s properties', () => {
+  const chips = [
+    { key: 'firstEd', label: '1st Ed.' },
+    { key: 'sealed', label: 'Sealed' },
+    { key: 'graded', label: 'Graded' },
+    { key: 'shipping', label: 'Shipping' },
+  ];
+  const split = drawerChipSplit(chips);
+  assert.deepEqual(split.property.map((chip) => chip.key), ['firstEd', 'graded']);
+  assert.deepEqual(split.listing.map((chip) => chip.key), ['sealed', 'shipping']);
+  assert.deepEqual(drawerChipSplit([]), { property: [], listing: [] });
+  assert.deepEqual(drawerChipSplit(null), { property: [], listing: [] });
 });
