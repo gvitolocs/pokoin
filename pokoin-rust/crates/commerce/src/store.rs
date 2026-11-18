@@ -983,10 +983,9 @@ mod tests {
     }
 }
 
-/// The rules `apply_mode` holds for any sequence of operations: PKN enters a
-/// balance only through a Mint, a release returns no more than its lock held,
-/// a refusal changes nothing, and no accepted operation leaves a balance below
-/// zero.
+/// The rules `apply_mode` holds for any sequence of operations: total PKN rises
+/// only through a Mint, a release returns no more than its lock held, a refusal
+/// changes nothing, and no accepted operation leaves a balance below zero.
 #[cfg(test)]
 mod properties {
     use super::*;
@@ -1064,6 +1063,9 @@ mod properties {
         /// The lock of the account the operation acted on, before it ran.
         locked_before: i64,
         accepted: bool,
+        /// What `apply_mode` reported beyond the balance it took: a settled
+        /// payout names the PKN its lock could not give.
+        shortfall: i64,
         supply_before: i64,
         before: Vec<(String, FirestoreBalance)>,
         after: Vec<(String, FirestoreBalance)>,
@@ -1101,13 +1103,16 @@ mod properties {
         };
         let before = state.to_vec();
         let supply_before = supply(&before);
-        let accepted = apply_mode(state, &op).is_ok();
+        let outcome = apply_mode(state, &op);
+        let accepted = outcome.is_ok();
+        let shortfall = outcome.unwrap_or(0);
         Step {
             mode: plan.mode,
             amount,
             subject,
             locked_before: subject_before.locked_pkn,
             accepted,
+            shortfall,
             supply_before,
             before,
             after: state.to_vec(),
@@ -1201,7 +1206,9 @@ mod properties {
         #![proptest_config(ProptestConfig::with_cases(512))]
 
         /// Total PKN rises with a Mint and falls with a burn; every other
-        /// accepted operation leaves the total where it was.
+        /// accepted operation leaves the total where it was. A settled payout
+        /// reports the PKN its lock held short of the amount, and no other
+        /// operation reports a difference at all.
         #[test]
         fn supply_changes_only_by_mint_and_burn(sequence in sequence_strategy()) {
             let (accounts, plans) = sequence;
@@ -1212,14 +1219,34 @@ mod properties {
                     continue;
                 }
                 let expected = allowed_supply_change(step.mode, step.amount, step.locked_before);
+                let delta = supply(&step.after) - step.supply_before;
                 prop_assert_eq!(
-                    supply(&step.after) - step.supply_before,
+                    delta,
                     expected,
                     "{:?} of {} against a lock of {}",
                     step.mode,
                     step.amount,
                     step.locked_before
                 );
+                // The total fell by what the burn removed, so the amount over
+                // that fall is what the lock could not give.
+                if matches!(step.mode, MoveMode::UnlockBurn) {
+                    prop_assert_eq!(
+                        step.shortfall,
+                        step.amount + delta,
+                        "a payout of {} against a lock of {} reported its difference wrongly",
+                        step.amount,
+                        step.locked_before
+                    );
+                } else {
+                    prop_assert_eq!(
+                        step.shortfall,
+                        0,
+                        "{:?} of {} reported a difference it cannot have",
+                        step.mode,
+                        step.amount
+                    );
+                }
             }
         }
 
