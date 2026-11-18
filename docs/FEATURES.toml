@@ -65,7 +65,7 @@ id = "refund"
 name = "Seller refunds a buyer, full or partial"
 money = true
 entry = ["solid/src/pages/Orders.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::pending_financial_operations_block_refunds_and_payouts_before_stripe", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_partially_refunded_order_reaches_pending_transfer_state"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_non_eur_escrow_refund_is_handled_by_hand", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::pending_financial_operations_block_refunds_and_payouts_before_stripe", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_partially_refunded_order_reaches_pending_transfer_state"]
 status = "partial"
 
 [[flow]]

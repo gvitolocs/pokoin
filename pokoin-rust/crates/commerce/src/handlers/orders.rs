@@ -722,7 +722,7 @@ enum RefundLedgerPlan {
 fn refund_ledger_plan(eur: bool, payment_status: &str) -> RefundLedgerPlan {
     if eur {
         RefundLedgerPlan::Stripe
-    } else if payment_status == "escrow" {
+    } else if payment_status.trim() == "escrow" {
         RefundLedgerPlan::Manual
     } else {
         RefundLedgerPlan::Transfer
@@ -2717,11 +2717,10 @@ async fn order_refund(
     let (amount, share) = refunds::assert_refundable(&order, &claims.uid, amount_input)?;
     let eur = refunds::is_eur_order(&order);
     if refund_ledger_plan(eur, payment_status_of(&order)) == RefundLedgerPlan::Manual {
-        // Refused before any reservation, Stripe call or write, so the order
-        // document is left exactly as it was.
+        // A non-EUR order in escrow is settled by hand; nothing here may write before this point.
         tracing::warn!(order_id = %order_id, "refund refused: handled by the Pokoin team");
         return Err(ApiError::conflict(
-            "This order's refund is handled by the Pokoin team. Contact support.",
+            "This refund was not completed: it is handled by the Pokoin team. Contact support.",
         )
         .with_code("refund_needs_manual_handling"));
     }
@@ -3563,6 +3562,10 @@ mod tests {
             RefundLedgerPlan::Transfer
         );
         assert_eq!(refund_ledger_plan(false, ""), RefundLedgerPlan::Transfer);
+        assert_eq!(
+            refund_ledger_plan(false, " escrow"),
+            RefundLedgerPlan::Manual
+        );
     }
 
     #[test]
