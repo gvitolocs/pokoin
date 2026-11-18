@@ -7,6 +7,7 @@
 
 import { inventoryMarketValue } from './inventory-price.js';
 import { editPriceFields } from './pricing-group-note.js';
+import { localizeStrategyName } from './pricer.js';
 
 /**
  * Board rows come from two places: an API answer (camelCase) or the stored
@@ -206,4 +207,113 @@ export function editListingBody(form = {}, editing = null) {
   if (form.showAltered) body.altered = flags.altered === true;
   if (form.sellerUid) body.sellerUid = form.sellerUid;
   return body;
+}
+
+/** The group id of one listing; `memberships` is the store's Map or the server's pairs. */
+export function pricingGroupOf(memberships, listingId) {
+  const id = text(listingId);
+  if (!id) return '';
+  if (memberships instanceof Map) return text(memberships.get(id));
+  for (const pair of memberships || []) {
+    if (Array.isArray(pair) && text(pair[0]) === id) return text(pair[1]);
+  }
+  return '';
+}
+
+/** A strategy's own name, in the seller's currency; '' when the id is not one. */
+export function strategyNameOf(strategies, id, ctx) {
+  const strategy = (strategies || []).find((entry) => text(entry?.id) === text(id));
+  return strategy ? text(localizeStrategyName(strategy.name, ctx)) : '';
+}
+
+/**
+ * What the drawer's Pricing menu shows as chosen: the listing's group with
+ * its strategy, or the price the seller typed.
+ */
+export function pricingMenuLabel({ memberships, groups, strategies, listingId, ctx } = {}) {
+  const group = (groups || []).find((entry) => text(entry?.id) === pricingGroupOf(memberships, listingId));
+  if (!group) return 'Custom price';
+  const name = text(group.name) || 'Group';
+  const strategy = strategyNameOf(strategies, group.strategyId, ctx);
+  return `Group: ${name}${strategy ? ` · ${strategy}` : ''}`;
+}
+
+/**
+ * The menu's entries in order: the seller's own price, every group with the
+ * strategy it prices by, every strategy on its own, then "New strategy…".
+ */
+export function pricingMenuEntries({ groups, strategies, ctx } = {}) {
+  const entries = [{ kind: 'custom', id: '', label: 'Custom price' }];
+  for (const group of groups || []) {
+    const id = text(group?.id);
+    if (!id) continue;
+    const name = text(group.name) || 'Group';
+    const strategy = strategyNameOf(strategies, group.strategyId, ctx);
+    entries.push({
+      kind: 'group',
+      id,
+      name,
+      strategyId: text(group.strategyId),
+      label: `Group ${name}${strategy ? ` · ${strategy}` : ''}`,
+    });
+  }
+  for (const strategy of strategies || []) {
+    const id = text(strategy?.id);
+    if (!id) continue;
+    const name = strategyNameOf(strategies, id, ctx) || 'Strategy';
+    entries.push({ kind: 'strategy', id, name, label: name });
+  }
+  entries.push({ kind: 'separator', id: '', label: '' });
+  entries.push({ kind: 'new', id: '', label: 'New strategy…' });
+  return entries;
+}
+
+/**
+ * The dry run of one listing under the picked group or strategy: the group's
+ * strategy prices it, and it joins the group only on save. Null when there is
+ * nothing to check (a typed price, or a group with no strategy).
+ */
+export function pricingDryRunBody(choice, groups, listingId) {
+  const id = text(listingId);
+  const kind = text(choice?.kind);
+  if (!id || (kind !== 'group' && kind !== 'strategy')) return null;
+  const strategyId = kind === 'strategy'
+    ? text(choice.id)
+    : text((groups || []).find((entry) => text(entry?.id) === text(choice.id))?.strategyId);
+  if (!strategyId) return null;
+  return { strategyId, listingIds: [id], dryRun: true };
+}
+
+/**
+ * The price a dry run gives this listing. An empty plan with `unchanged` set
+ * means the price is already what the strategy says, so it stays; `noComp`
+ * leaves no price at all, which the editor says outright.
+ */
+export function pricingDryRunPrice(answer, current = null) {
+  const plan = Array.isArray(answer?.plan) ? answer.plan : [];
+  const target = number(plan[0]?.target);
+  if (target != null && target > 0) return target;
+  if (Number(answer?.unchanged) > 0) return number(current);
+  return null;
+}
+
+/**
+ * The calls one "Save changes" click makes, in order: the listing PATCH first
+ * (it carries the price only for a typed price — a group or strategy sets it),
+ * then the pricing step. A group takes the listing in, then prices it as the
+ * pricer pop-up does; a strategy only prices it.
+ */
+export function pricingSavePlan(choice, listingId) {
+  const kind = text(choice?.kind) || 'custom';
+  const steps = [{ call: 'patch', priceInPatch: kind === 'custom' }];
+  const id = text(listingId);
+  const picked = text(choice?.id);
+  if (!id || !picked) return steps;
+  if (kind === 'group') {
+    steps.push({ call: 'saveGroup', body: { groupId: picked, add: [id] } });
+    steps.push({ call: 'apply', body: { groupId: picked, listingIds: [id] } });
+  } else if (kind === 'strategy') {
+    steps.push({ call: 'apply', body: { strategyId: picked, listingIds: [id] } });
+  }
+  return steps;
 }

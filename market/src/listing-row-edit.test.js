@@ -8,6 +8,12 @@ import {
   identityFromInventoryRow,
   listingPresets,
   offerFromInventoryRow,
+  pricingDryRunBody,
+  pricingDryRunPrice,
+  pricingGroupOf,
+  pricingMenuEntries,
+  pricingMenuLabel,
+  pricingSavePlan,
   removeListingRow,
 } from './listing-row-edit.js';
 
@@ -280,4 +286,64 @@ test('a graded edit carries company, grade and certification', () => {
   const bare = editListingBody({ ...form, flags: { ...form.flags, graded: false }, company: 'PSA', grade: '9' }, { id: 'l-1', pricePkn: 420 });
   assert.equal(bare.gradingCompany, null);
   assert.equal(bare.grade, null);
+});
+
+const STRATEGIES = [
+  { id: 's1', name: 'Undercut 5%' },
+  { id: 's2', name: 'Match CardTrader' },
+];
+const GROUPS = [
+  { id: 'g1', name: 'Riftbound bulk', strategyId: 's1' },
+  { id: 'g2', name: 'Bulk cheap', strategyId: 's2' },
+];
+
+test('the Pricing menu names what the listing follows now', () => {
+  const inGroup = { memberships: new Map([['l-1', 'g1']]), groups: GROUPS, strategies: STRATEGIES, listingId: 'l-1' };
+  assert.equal(pricingMenuLabel(inGroup), 'Group: Riftbound bulk · Undercut 5%');
+  assert.equal(pricingGroupOf(inGroup.memberships, 'l-1'), 'g1');
+  // Not a member of anything: the price is the seller's own.
+  assert.equal(pricingMenuLabel({ ...inGroup, memberships: new Map() }), 'Custom price');
+  assert.equal(pricingMenuLabel({ ...inGroup, memberships: [['l-2', 'g2']] }), 'Custom price');
+  // The server's pairs and the store's Map say the same thing.
+  assert.equal(pricingMenuLabel({ ...inGroup, memberships: [['l-1', 'g2']] }), 'Group: Bulk cheap · Match CardTrader');
+});
+
+test('the Pricing menu lists custom, the groups, the strategies, then new', () => {
+  const kinds = pricingMenuEntries({ groups: GROUPS, strategies: STRATEGIES }).map((entry) => `${entry.kind}:${entry.id}`);
+  assert.deepEqual(kinds, ['custom:', 'group:g1', 'group:g2', 'strategy:s1', 'strategy:s2', 'separator:', 'new:']);
+  const entries = pricingMenuEntries({ groups: GROUPS, strategies: STRATEGIES });
+  assert.equal(entries[0].label, 'Custom price');
+  assert.equal(entries[1].label, 'Group Riftbound bulk · Undercut 5%');
+  assert.equal(entries[4].label, 'Match CardTrader');
+  assert.equal(entries[entries.length - 1].label, 'New strategy…');
+  assert.deepEqual(pricingMenuEntries({}), [
+    { kind: 'custom', id: '', label: 'Custom price' },
+    { kind: 'separator', id: '', label: '' },
+    { kind: 'new', id: '', label: 'New strategy…' },
+  ]);
+});
+
+test('a picked group or strategy is dry-run for this listing alone', () => {
+  assert.deepEqual(pricingDryRunBody({ kind: 'group', id: 'g1' }, GROUPS, 'l-1'), { strategyId: 's1', listingIds: ['l-1'], dryRun: true });
+  assert.deepEqual(pricingDryRunBody({ kind: 'strategy', id: 's2' }, GROUPS, 'l-1'), { strategyId: 's2', listingIds: ['l-1'], dryRun: true });
+  assert.equal(pricingDryRunBody({ kind: 'custom', id: '' }, GROUPS, 'l-1'), null);
+  assert.equal(pricingDryRunBody({ kind: 'group', id: 'g1' }, [{ id: 'g1', name: 'No strategy' }], 'l-1'), null);
+  assert.deepEqual(pricingDryRunPrice({ plan: [{ target: 610, current: 585 }] }, 585), 610);
+  assert.equal(pricingDryRunPrice({ plan: [], unchanged: 1 }, 585), 585, 'already at the strategy price');
+  assert.equal(pricingDryRunPrice({ plan: [], noComp: 1 }, 585), null, 'no market price for this card');
+});
+
+test('one save click patches first, then joins the group and prices', () => {
+  assert.deepEqual(pricingSavePlan({ kind: 'custom', id: '' }, 'l-1'), [{ call: 'patch', priceInPatch: true }]);
+  assert.deepEqual(pricingSavePlan({ kind: 'strategy', id: 's1' }, 'l-1'), [
+    { call: 'patch', priceInPatch: false },
+    { call: 'apply', body: { strategyId: 's1', listingIds: ['l-1'] } },
+  ]);
+  assert.deepEqual(pricingSavePlan({ kind: 'group', id: 'g1' }, 'l-1'), [
+    { call: 'patch', priceInPatch: false },
+    { call: 'saveGroup', body: { groupId: 'g1', add: ['l-1'] } },
+    { call: 'apply', body: { groupId: 'g1', listingIds: ['l-1'] } },
+  ]);
+  // A row with no id cannot be priced: only the patch.
+  assert.deepEqual(pricingSavePlan({ kind: 'group', id: 'g1' }, ''), [{ call: 'patch', priceInPatch: false }]);
 });
