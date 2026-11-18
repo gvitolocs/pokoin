@@ -624,6 +624,28 @@ fn graph_request(q: &http::Query) -> (bool, bool) {
     (graph, SoldSlice::from_query(q).reverse.unwrap_or(false))
 }
 
+/// The `cmLanguage`/`cmCondition` facet of the `cardmarketOffers` leg: what the
+/// desk's condition chip and language chip asked, as the stored keys. Absent is
+/// the leg's default facet; anything else is the 400 this handler gives every
+/// other bad parameter, with the vocabulary it accepts.
+fn cm_offer_facet(q: &http::Query) -> Result<(String, String), String> {
+    let language =
+        history_sources::cm_offer_language(q.search_param("cmLanguage")).ok_or_else(|| {
+            format!(
+                "cmLanguage must be one of {}.",
+                history_sources::CM_OFFER_LANGUAGES.join(", ")
+            )
+        })?;
+    let condition =
+        history_sources::cm_offer_condition(q.search_param("cmCondition")).ok_or_else(|| {
+            format!(
+                "cmCondition must be one of {}.",
+                history_sources::CM_OFFER_FLOORS.join(", ")
+            )
+        })?;
+    Ok((language.to_owned(), condition.to_owned()))
+}
+
 fn day_of(v: &Value) -> String {
     js::string_or_empty(Some(v)).chars().take(10).collect()
 }
@@ -773,6 +795,22 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         Err(message) => return with_headers(StatusCode::BAD_REQUEST, json!({ "error": message }), &cors, &[]),
     };
     let game_id = current_game(&headers, &q);
+    // The graph shape and the Cardmarket offers facet are read off the query
+    // before any statement runs: `reverse` picks which finish the daily table is
+    // read at, `fields=graph` which shape goes out, the facet which language and
+    // condition floor the desk asked for.
+    let (graph, reverse) = graph_request(&q);
+    let (cm_language, cm_condition) = match cm_offer_facet(&q) {
+        Ok(facet) => facet,
+        Err(message) => {
+            return with_headers(
+                StatusCode::BAD_REQUEST,
+                json!({ "error": message }),
+                &cors,
+                &[],
+            );
+        }
+    };
     let Some(pool) = state.api.game_pool(&game_id).await else {
         return with_headers(StatusCode::SERVICE_UNAVAILABLE, json!({ "error": "Card price history unavailable." }), &cors, &[]);
     };
@@ -789,10 +827,23 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
     // holds, so a satellite game's TCGplayer days get their `marketPkn` too.
     // For Pokémon that is the very pool the request already uses.
     let fx_pool = state.api.read();
-    let (cardtrader, tcg, cardmarket, pokoin, rates) = tokio::join!(
+    // A reverse pick reads the day's offers as sold-with-foil; first editions are
+    // not a chip of this desk, so the leg always reads the non-first facet.
+    let finish = if reverse { "Y" } else { "N" };
+    let (cardtrader, tcg, cardmarket, cardmarket_offers, pokoin, rates) = tokio::join!(
         cardtrader_history(&pool, ct.as_deref(), &from, &to),
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
         history_sources::cardmarket_history(&pool, &game_id, ct.as_deref(), &from, &to),
+        history_sources::cardmarket_offers_history(
+            &pool,
+            &game_id,
+            ct.as_deref(),
+            &from,
+            &to,
+            &cm_language,
+            finish,
+            "N",
+        ),
         history_sources::pokoin_history(&pool, &card_id, &from, &to),
         history_sources::read_fx_rates(fx_pool, &to),
     );
@@ -801,18 +852,23 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         Err(TcgError::Unconfigured) => tcgplayer_source(&[], &rates, Some(unconfigured_status())),
         Err(TcgError::Db(_)) => tcgplayer_source(&[], &rates, Some("unavailable")),
     };
-    let blocks = [&cardtrader, &tcgplayer, &cardmarket, &pokoin];
+    let blocks = [
+        &cardtrader,
+        &tcgplayer,
+        &cardmarket,
+        &cardmarket_offers,
+        &pokoin,
+    ];
     let degraded = blocks.iter().copied().any(status_failed);
     let body = json!({
         "game": game_id, "cardId": js::js_string(&card["card_id"]), "ctId": ct, "from": from, "to": to,
         "printing": { "name": card["name"], "setName": card["expansion_name"], "number": card["card_number"] },
-        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "pokoin": pokoin, "fx": history_sources::fx_json(&rates),
+        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "cardmarketOffers": cardmarket_offers, "pokoin": pokoin, "fx": history_sources::fx_json(&rates),
     });
     // `fields=graph` answers the same blocks thinned to what the desk graph draws
     // (PH-06); without it the response is the full one above.
-    let (graph, reverse) = graph_request(&q);
     let body = if graph {
-        history_sources::graph_answer(&body, reverse)
+        history_sources::graph_answer(&body, reverse, &cm_condition)
     } else {
         body
     };
