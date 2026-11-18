@@ -20,7 +20,7 @@ test('recallOrder puts the full query first and drops duplicates', () => {
   assert.deepEqual(recallOrder('mew', ['mew'], compact), ['mew']);
 });
 
-test('the union lists full-query matches first, then the stem printings, with the stem total', async () => {
+test('the union lists full-query matches first, then the stem printings, with the typed query total', async () => {
   const stem = Array.from({ length: 207 }, (_, i) => i + 1);
   const { fetchSearchPage } = catalog({ 'dialga legend': [150, 151, 152], dialga: stem });
   const search = createRecallSearch({
@@ -30,7 +30,9 @@ test('the union lists full-query matches first, then the stem printings, with th
   });
   const first = await search({ query: 'dialga legend', offset: 0, limit: 48, productType: 'card' });
   assert.deepEqual(first.cards.slice(0, 4).map((c) => c.id), ['150', '151', '152', '1']);
-  assert.equal(first.total, 207);
+  // Was 207 — the widest sibling lookup. `dialga legend` names three cards, and
+  // a stem of 207 printings is a different predicate (PH-05 §5.3).
+  assert.equal(first.total, 3);
   assert.equal(first.hasMore, true);
   const ids = first.cards.map((c) => c.id);
   let offset = first.nextOffset;
@@ -88,4 +90,40 @@ test('a failed page does not poison the next request', async () => {
   fail = false;
   const page = await search({ query: 'xx', offset: 0, limit: 48, productType: 'card' });
   assert.equal(page.cards.length, 1);
+});
+
+test('a later sibling page never widens the counted universe (PH-05 §5.3)', async () => {
+  const { fetchSearchPage } = catalog({
+    'dark jolteon': [1, 2, 3, 4, 5],
+    dark: Array.from({ length: 247 }, (_, index) => 1000 + index),
+  });
+  const search = createRecallSearch({
+    fetchSearchPage,
+    pageSize: 2,
+    recallLookups: async () => ['dark jolteon', 'dark'],
+  });
+  const first = await search({ query: 'dark jolteon', offset: 0, limit: 2, productType: 'card' });
+  assert.equal(first.total, 5, `got ${first.total}`);
+  const second = await search({ query: 'dark jolteon', offset: 2, limit: 2, productType: 'card' });
+  assert.equal(second.total, 5, `the count drifted to ${second.total} as the stem paged`);
+  assert.ok(second.cards.length > 0, 'the stem does still contribute rows to look at');
+});
+
+test('an answered zero is a total and a missing one is unknown, not zero', async () => {
+  const empty = createRecallSearch({
+    fetchSearchPage: async () => ({ cards: [], total: 0, hasMore: false, nextOffset: 0 }),
+    recallLookups: async () => ['no such card'],
+  });
+  const zero = await empty({ query: 'no such card', offset: 0, limit: 48, productType: 'card' });
+  assert.equal(zero.total, 0, 'a query that matched nothing says so');
+
+  const silent = createRecallSearch({
+    pageSize: 1,
+    fetchSearchPage: async ({ query, offset = 0 }) => (query === 'no total'
+      ? { cards: [{ id: `a${offset}` }], hasMore: offset < 1, nextOffset: offset + 1 }
+      : { cards: [{ id: 'b' }], total: 300, hasMore: false, nextOffset: 1 }),
+    recallLookups: async () => ['no total', 'sibling'],
+  });
+  const unknown = await silent({ query: 'no total', offset: 0, limit: 1, productType: 'card' });
+  assert.equal(unknown.total, null, 'the typed lookup answered no total: unknown, not the sibling’s 300');
 });

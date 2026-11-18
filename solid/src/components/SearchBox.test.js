@@ -23,13 +23,20 @@ test('the header ranks locally from the first keystrokes; the network pool only 
   assert.equal(/term\(\)\.length < 2|term\.length < 2/.test(box), false);
 });
 
-test('View-all count prefers the payload total, keeps the suggest baseline', () => {
+test('View-all count has one owner: the search page of the committed text', () => {
   assert.doesNotMatch(box, /setHitCount\(count\)/);
   assert.doesNotMatch(box, /count:\s*hitCount/);
-  // Exact totals override; the suggest estimate survives where the payload has none.
-  assert.match(box, /const total = Number\(payload\?\.total\);/);
-  assert.match(box, /Number\.isFinite\(total\) && total > 0/);
-  assert.match(box, /setHitCount\(Number\(page\?\.count\) \|\| 0\)/);
+  // The suggest payload's `count` is an engine candidate estimate, never a
+  // results total, so it may not write the footer (PH-05 §5.2). One owner:
+  // the search page asked for the committed text below.
+  assert.doesNotMatch(box, /setHitCount\(Number\(page\?\.count\)/);
+  assert.match(box, /if \(pageQuery && pageQuery !== text\) return;/);
+  // A real 0 is an answer and is applied; a missing total is unknown, and
+  // unknown renders the plain "View all results for …" line.
+  assert.match(box, /const \[hitCount, setHitCount\] = createSignal\(null\);/);
+  assert.match(box, /if \(answered && Number\.isFinite\(total\)\) setHitCount\(total\);/);
+  assert.doesNotMatch(box, /Number\.isFinite\(total\) && total > 0/);
+  assert.match(box, /\{hitCount\(\) !== null/);
 });
 
 test('suggest rows: two columns, no Singles cell, set mark, collector and translation', () => {
@@ -112,4 +119,14 @@ test('one typing session: the popup and its rows follow suggest-hold, not each k
   assert.match(box, /when=\{shownRows\(\)\.length\}/);
   // Visibility no longer re-derives readiness from the raw input on every keystroke.
   assert.doesNotMatch(box, /suggestVisible = \(\) => open\(\) && \(liveReady\(query\(\)\)/);
+});
+
+test('a stale catalog or chip page is bound to the input that asked for it', () => {
+  // PH-05 §5.2: the effect's controller aborts the page and its repaint; the
+  // landing prewarm supersedes the chip the pointer left.
+  assert.match(box, /const controller = new AbortController\(\);\s*onCleanup\(\(\) => controller\.abort\(\)\);\s*hydrateCatalog\(live, text, lang, controller\.signal\);/);
+  assert.match(box, /function hydrateCatalog\(live, text, lang, signal\) \{[\s\S]*?hydrateTarget\(live, target, lang, \{ signal \}\)[\s\S]*?if \(signal\?\.aborted\) return;/);
+  assert.match(box, /if \(prewarmAbort\) prewarmAbort\.abort\(\);/);
+  assert.match(box, /pageUniverse\(live, q, \{ lang, print, signal: controller\.signal \}\),/);
+  assert.match(box, /printLang: print, signal: controller\.signal \}\)\.catch\(\(\) => null\),/);
 });
