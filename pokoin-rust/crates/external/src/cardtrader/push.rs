@@ -393,10 +393,27 @@ fn facet_properties(
 /// that product, which would leave the seller's listing describing a card
 /// CardTrader sells as another one. With it a refused facet answers 4xx and
 /// nothing changes ([docs/CARDTRADER_SELLER_SYNC.md]).
+///
+/// `was` is the row as it was before the edit, for the flags: the mapping
+/// names a boolean only when it is on, and a `PUT` says nothing about a
+/// property it does not name, so a flag that was on and is now off goes
+/// explicitly as `false` under the name the mapping gave it
+/// (`pokemon_reverse`, `riftbound_foil`, …). A flag that was never on stays
+/// unnamed: a product whose blueprint has no such property is refused it.
 #[allow(clippy::result_large_err)]
-pub fn facet_body(listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
+pub fn facet_body(
+    was: &Value,
+    listing: &Value,
+    editable: Option<&[Value]>,
+) -> ApiResult<Value> {
+    let mut properties = facet_properties(listing, editable)?;
+    for (name, value) in facet_properties(was, editable).unwrap_or_default() {
+        if value.as_bool() == Some(true) && !properties.contains_key(&name) {
+            properties.insert(name, json!(false));
+        }
+    }
     Ok(json!({
-        "properties": Value::Object(facet_properties(listing, editable)?),
+        "properties": Value::Object(properties),
         "graded": listing["graded"] == true,
         "error_mode": "strict",
     }))
@@ -722,7 +739,7 @@ mod tests {
         let row = json!({"id": "6f1c", "card_id": "238", "marketplace_game": "pokemon", "condition": "LP",
                          "language": "IT", "foil_state": "reverse", "first_edition": true, "signed": true,
                          "altered": false, "graded": false, "price_pkn": 200, "quantity_available": 1});
-        let body = facet_body(&row, None).unwrap();
+        let body = facet_body(&row, &row, None).unwrap();
         assert_eq!(
             body,
             json!({"properties": {"condition": "Slightly Played", "pokemon_language": "it",
@@ -749,19 +766,19 @@ mod tests {
         // (a PUT of absolute values: omitting one would keep the old one).
         let mut slab = row.clone();
         slab["graded"] = json!(true);
-        let slab = facet_body(&slab, None).unwrap();
+        let slab = facet_body(&slab, &slab, None).unwrap();
         assert_eq!(slab["graded"], json!(true));
         assert_eq!(slab["properties"]["condition"], json!("Slightly Played"));
         let plain = json!({"card_id": "238", "price_pkn": 200, "quantity_available": 1});
         assert_eq!(
-            facet_body(&plain, None).unwrap()["properties"],
+            facet_body(&plain, &plain, None).unwrap()["properties"],
             json!({"condition": "Near Mint", "pokemon_language": "en", "signed": false, "altered": false})
         );
         // Another game: the blueprint's own property names and allowed values.
         let listing = json!({"id": "l1", "card_id": "801106", "marketplace_game": "riftbound",
                              "price_pkn": 240, "quantity_available": 1,
                              "condition": "HP", "language": "KO", "foil_state": "foil"});
-        let body = facet_body(&listing, Some(&riftbound_props())).unwrap();
+        let body = facet_body(&listing, &listing, Some(&riftbound_props())).unwrap();
         assert_eq!(
             body["properties"],
             json!({"condition": "Played", "riftbound_language": "kr", "riftbound_foil": true})
@@ -774,7 +791,7 @@ mod tests {
         // sent, and so is a game whose blueprint we cannot read.
         let mut italian = listing.clone();
         italian["language"] = json!("IT");
-        let refused = facet_body(&italian, Some(&riftbound_props())).unwrap_err();
+        let refused = facet_body(&listing, &italian, Some(&riftbound_props())).unwrap_err();
         assert_eq!(refused.status, 400);
         assert_eq!(
             refused.code.as_deref(),
@@ -784,18 +801,75 @@ mod tests {
         assert!(refused.message.contains("language"), "{refused:?}");
         let mut first_edition = listing.clone();
         first_edition["first_edition"] = json!(true);
-        let refused = facet_body(&first_edition, Some(&riftbound_props())).unwrap_err();
+        let refused = facet_body(&listing, &first_edition, Some(&riftbound_props())).unwrap_err();
         assert_eq!(
             refused.code.as_deref(),
             Some("cardtrader_facet_unsupported")
         );
-        let unknown = facet_body(&listing, None).unwrap_err();
+        let unknown = facet_body(&listing, &listing, None).unwrap_err();
         assert_eq!(
             unknown.code.as_deref(),
             Some("cardtrader_blueprint_unknown")
         );
         // Pokémon never needs the blueprint: its mapping is fixed.
-        assert!(facet_body(&row, Some(&riftbound_props())).is_ok());
+        assert!(facet_body(&row, &row, Some(&riftbound_props())).is_ok());
+    }
+
+    /// A flag the seller turned off is a change the product has to be told
+    /// about: the PUT names only what it is given, so an omitted
+    /// `pokemon_reverse` would keep CardTrader selling it as reverse.
+    #[test]
+    fn facet_body_sends_a_flag_that_was_turned_off() {
+        let on = json!({"card_id": "238", "marketplace_game": "pokemon", "condition": "NM", "language": "EN",
+                        "foil_state": "reverse", "first_edition": true, "graded": true,
+                        "price_pkn": 200, "quantity_available": 1});
+        let off = json!({"card_id": "238", "marketplace_game": "pokemon", "condition": "NM", "language": "EN",
+                         "foil_state": "standard", "first_edition": false, "graded": false,
+                         "price_pkn": 200, "quantity_available": 1});
+        let body = facet_body(&on, &off, None).unwrap();
+        assert_eq!(body["properties"]["pokemon_reverse"], json!(false), "{body}");
+        assert_eq!(
+            body["properties"]["pokemon_first_edition"],
+            json!(false),
+            "{body}"
+        );
+        // Both are still the create's own names, and a slab that is no longer
+        // one says so in its own key.
+        assert_eq!(body["graded"], json!(false), "{body}");
+        assert!(
+            body["properties"].get("signed").is_some() && body["properties"].get("altered").is_some(),
+            "signed and altered are always named: {}",
+            body["properties"]
+        );
+        // A flag that was never on is not named: a product whose blueprint has
+        // no such property is refused it in strict mode.
+        let never = facet_body(&off, &off, None).unwrap();
+        assert!(
+            never["properties"].get("pokemon_reverse").is_none()
+                && never["properties"].get("pokemon_first_edition").is_none(),
+            "{}",
+            never["properties"]
+        );
+        // The create does not change: it has nothing to turn off.
+        assert!(
+            product_body(&off).unwrap()["properties"]
+                .get("pokemon_reverse")
+                .is_none(),
+            "the create still omits an off flag"
+        );
+        // Another game names its own foil flag, on then off.
+        let props = riftbound_props();
+        let foil = json!({"card_id": "801106", "marketplace_game": "riftbound", "condition": "NM",
+                          "language": "KO", "foil_state": "foil"});
+        let plain = json!({"card_id": "801106", "marketplace_game": "riftbound", "condition": "NM",
+                           "language": "KO", "foil_state": "standard"});
+        let body = facet_body(&foil, &plain, Some(&props)).unwrap();
+        assert_eq!(body["properties"]["riftbound_foil"], json!(false), "{body}");
+        assert_eq!(
+            facet_body(&foil, &foil, Some(&props)).unwrap()["properties"]["riftbound_foil"],
+            json!(true),
+            "a flag still on is not overwritten"
+        );
     }
 
     #[test]
