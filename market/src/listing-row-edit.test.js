@@ -16,10 +16,12 @@ import {
   listingRowNode,
   listingSaveOutcome,
   offerFromInventoryRow,
+  ownPriceChoice,
   patchCarriesPrice,
   pricingAnswerCounts,
   pricingDryRunBody,
   pricingDryRunPrice,
+  pricingEntryChosen,
   pricingFieldPkn,
   pricingGroupOf,
   pricingMenuEntries,
@@ -422,6 +424,28 @@ test('only the newest dry run answers for the row it was asked on', () => {
   assert.equal(pricingAnswerCounts({ token: 3, latest: 3, listingId: 'l-1', currentId: 'l-2' }), false, 'the drawer moved to another row');
   assert.equal(pricingAnswerCounts({ token: 0, latest: 0, listingId: 'l-1', currentId: 'l-1' }), true);
   assert.equal(pricingAnswerCounts({ latest: 1, listingId: 'l-1', currentId: 'l-1' }), false, 'no request, no answer');
+});
+
+test('a typed price takes the listing out of the group it is already in', () => {
+  // Nothing had been picked in this edit: the menu still read the membership,
+  // so 40 typed into the price field left it saying "Group: Base Set holos".
+  assert.equal(ownPriceChoice({ picked: null, inGroup: true }).label, 'Custom price');
+  assert.equal(ownPriceChoice({ picked: { kind: 'strategy', id: 's-1' }, inGroup: false }).label, 'Custom price');
+  assert.equal(ownPriceChoice({ picked: { kind: 'group', id: 'g-1' }, inGroup: true }).label, 'Custom price');
+  assert.equal(ownPriceChoice({ picked: CUSTOM_PRICING, inGroup: true }), CUSTOM_PRICING, 'a second keystroke changes nothing');
+  // A listing that follows no rule at all already reads "Custom price", so the
+  // field keeps its own value rather than a pick that says the same thing.
+  assert.equal(ownPriceChoice({ picked: null, inGroup: false }), null, 'there was nothing to leave');
+  assert.equal(pricingMenuLabel({ memberships: [], groups: [], strategies: [], listingId: 'l-1', ctx: null }), 'Custom price');
+  // The menu marks which row is in force, and only rows that can be in force.
+  const custom = { kind: 'custom', id: '' };
+  assert.equal(pricingEntryChosen({ entry: custom, picked: null, inGroup: false }), true, 'a price with no rule behind it already reads custom');
+  assert.equal(pricingEntryChosen({ entry: custom, picked: null, inGroup: true }), false, 'the group still prices it');
+  assert.equal(pricingEntryChosen({ entry: custom, picked: CUSTOM_PRICING, inGroup: true }), true, 'typing made it the seller\'s');
+  assert.equal(pricingEntryChosen({ entry: custom, picked: { kind: 'group', id: 'g-1' } }), false);
+  assert.equal(pricingEntryChosen({ entry: { kind: 'group', id: 'g-1' }, picked: { kind: 'group', id: 'g-1' } }), true);
+  assert.equal(pricingEntryChosen({ entry: { kind: 'group', id: 'g-2' }, picked: CUSTOM_PRICING, inGroup: true }), false);
+  assert.equal(pricingEntryChosen({ entry: { kind: 'new', id: '' }, picked: CUSTOM_PRICING, inGroup: true }), false, '"New strategy…" is an action, never the choice');
 });
 
 test('Custom price goes back to the listing\'s own number, not the rule\'s preview', () => {

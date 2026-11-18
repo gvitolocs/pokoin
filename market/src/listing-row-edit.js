@@ -270,6 +270,17 @@ export function pricingMenuEntries({ groups, strategies, ctx } = {}) {
 }
 
 /**
+ * Whether a menu row is the one in force: "Custom price" when the seller picked
+ * it or nothing prices the listing at all, every other entry only by its own id
+ * — so an entry without one, like "New strategy…", is an action and never reads
+ * as chosen.
+ */
+export function pricingEntryChosen({ entry, picked = null, inGroup = false } = {}) {
+  if (entry?.kind === 'custom') return picked ? picked.kind === 'custom' : !inGroup;
+  return Boolean(entry?.id) && text(picked?.id) === text(entry.id);
+}
+
+/**
  * The dry run of one listing under the picked group or strategy: the group's
  * strategy prices it, and it joins the group only on save. Null when there is
  * nothing to check (a typed price, or a group with no strategy).
@@ -321,6 +332,16 @@ export function pricingSavePlan(choice, listingId) {
 
 /** The menu's "Custom price" entry: the seller's own number, no rule behind it. */
 export const CUSTOM_PRICING = { kind: 'custom', id: '', name: 'Custom price', label: 'Custom price' };
+
+/**
+ * What the menu follows once the seller put their own number in the price
+ * field, or took a quote: theirs, whether the rule was picked in this edit or
+ * the listing only sits in a group the store has. With nothing behind the price
+ * there is nothing to leave, and the menu already reads "Custom price" then.
+ */
+export function ownPriceChoice({ picked = null, inGroup = false } = {}) {
+  return picked || inGroup ? CUSTOM_PRICING : null;
+}
 
 /**
  * The editor's fields as one snapshot, with the price in PKN. The form lists
