@@ -380,7 +380,7 @@ export function SellerDashboardView(props) {
               </Show>
 
               <HistoryBoundary>
-                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} onRange={(range) => { setSegmentsRange(range || {}); props.onHistoryRange?.(range); }} />
+                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} currency={props.moverCurrency || ''} live={historyLive()} onRange={(range) => { setSegmentsRange(range || {}); props.onHistoryRange?.(range); }} />
               </HistoryBoundary>
 
               <HistoryBoundary>

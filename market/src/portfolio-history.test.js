@@ -5,6 +5,7 @@ import {
   availableHistoryPresets,
   daySpan,
   formatDayLabel,
+  formatHistoryAmount,
   formatHistoryDelta,
   formatHistoryTip,
   historyAxis,
@@ -403,6 +404,24 @@ test('the tip lists every layer at that day, cards with how many have a sale', (
   ]);
   const wallet = formatHistoryTip(normalizeHistoryDay({ date: '2026-09-20', currencyPkn: 15 }));
   assert.deepEqual(wallet.rows.map((row) => row.label), ['Liquidity']);
+});
+
+test('the chart amounts read in the seller display currency, PKN only as their own unit', () => {
+  // 63 PKN = 0.32 EUR at 1 PKN = €0.005, and 2.4 DKK at 7.5 DKK per EUR.
+  assert.equal(formatHistoryAmount(63), '63 PKN', 'no currency: the stored unit');
+  assert.equal(formatHistoryAmount(63, 'PKN'), '63 PKN');
+  assert.equal(formatHistoryAmount(63, ''), '63 PKN');
+  assert.equal(formatHistoryAmount(63, 'DKK'), '2.4 DKK');
+  assert.equal(formatHistoryAmount(0, 'DKK'), '0 DKK');
+  assert.equal(formatHistoryAmount(63, 'EUR'), '€0.32');
+  // The delta and the tip state the same figures the headline and legend do.
+  assert.equal(formatHistoryDelta({ last: 100, delta: 63, pct: null, phrase: 'in the last month' }, 'DKK'), '+2.4 DKK in the last month');
+  assert.equal(formatHistoryDelta({ last: 100, delta: 63, pct: null, phrase: 'in the last month' }), '+63 PKN in the last month');
+  const dkk = formatHistoryTip(normalizeHistoryDay({
+    date: '2026-09-23', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 16285, cardsPriced: 106, cardsHeld: 227,
+  }), 'DKK');
+  assert.equal(dkk.totalLabel, '611.25 DKK');
+  assert.deepEqual(dkk.rows.map((row) => [row.label, row.value]), [['Cards', '610.73 DKK'], ['Liquidity', '0.6 DKK']]);
 });
 
 

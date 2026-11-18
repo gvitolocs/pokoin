@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
-import { formatPknNumber } from '@market/pkn.js';
 import { moverDaysForPreset } from '@market/portfolio-movers.js';
 import {
   DEFAULT_HISTORY_PRESET,
   availableHistoryPresets,
   daySpan,
   formatDayLabel,
+  formatHistoryAmount,
   formatHistoryDelta,
   formatHistoryTip,
   historyAxis,
@@ -152,6 +152,11 @@ export default function CollectionHistoryPanel(props) {
   const chart = createMemo(() => layoutChart(points(), timeline(), band()));
   const change = () => historyWindowChange(points(), custom() ? 'custom' : presetId());
 
+  // Amounts follow the seller's display currency, like the movers tiles and the
+  // segment table under this chart (docs/MARKET.md, "Segment graphs"); PKN is
+  // only the unit the series itself is stored in.
+  const currency = () => String(props.currency || 'PKN').trim().toUpperCase() || 'PKN';
+
   // The top movers sheet prices the window the graph is drawing, so it reports
   // the range instead of keeping its own switch.
   createEffect(
@@ -254,7 +259,7 @@ export default function CollectionHistoryPanel(props) {
     if (!at || !line || !c.hasData) return fallback;
     const date = timelineDay(line, at.ratio);
     const day = historyDayAt(list, date);
-    const tip = formatHistoryTip(day);
+    const tip = formatHistoryTip(day, currency());
     if (tip) tip.dateLabel = formatDayLabel(date);
     return { tip, dot: { x: c.xOf(date), y: c.yOf(day?.totalPkn) }, legendDay: day };
   });
@@ -307,7 +312,7 @@ export default function CollectionHistoryPanel(props) {
     const list = points();
     return chart().hasData
       ? `Collection value from ${formatDayLabel(list[0].date)} to ${formatDayLabel(list[list.length - 1].date)}: `
-        + `${formatPknNumber(list[0].totalPkn)} PKN to ${formatPknNumber(list[list.length - 1].totalPkn)} PKN`
+        + `${formatHistoryAmount(list[0].totalPkn, currency())} to ${formatHistoryAmount(list[list.length - 1].totalPkn, currency())}`
       : 'Collection value history chart';
   };
   const pct = (value, of) => `${(value / of) * 100}%`;
@@ -323,8 +328,8 @@ export default function CollectionHistoryPanel(props) {
         <Show when={change()}>
           {(delta) => (
             <div class="seller-history-value">
-              <strong>{formatPknNumber(counted() ?? delta().last)} PKN</strong>
-              <span class={['seller-history-delta', delta().delta < 0 ? 'is-down' : 'is-up']}>{formatHistoryDelta(delta())}</span>
+              <strong>{formatHistoryAmount(counted() ?? delta().last, currency())}</strong>
+              <span class={['seller-history-delta', delta().delta < 0 ? 'is-down' : 'is-up']}>{formatHistoryDelta(delta(), currency())}</span>
             </div>
           )}
         </Show>
@@ -378,7 +383,7 @@ export default function CollectionHistoryPanel(props) {
             <li class="is-cards">
               <span class="seller-history-key" aria-hidden="true" />
               <span>Cards</span>
-              <strong>{legendCards() != null ? `${formatPknNumber(legendCards())} PKN` : '—'}</strong>
+              <strong>{legendCards() != null ? formatHistoryAmount(legendCards(), currency()) : '—'}</strong>
               <Show when={legendDay()?.assets?.cardsHeld}>
                 <em>
                   {legendDay().assets.cardsPriced.toLocaleString('en-US')} of {legendDay().assets.cardsHeld.toLocaleString('en-US')} with a sale
@@ -388,7 +393,7 @@ export default function CollectionHistoryPanel(props) {
             <li class="is-liquidity">
               <span class="seller-history-key" aria-hidden="true" />
               <span>Liquidity</span>
-              <strong>{formatPknNumber(legendDay()?.assets?.currencyPkn || 0)} PKN</strong>
+              <strong>{formatHistoryAmount(legendDay()?.assets?.currencyPkn || 0, currency())}</strong>
             </li>
           </ul>
         </Show>
@@ -483,7 +488,7 @@ export default function CollectionHistoryPanel(props) {
           </Show>
           <Show when={chart().liquidityLine}>
             <span class="seller-history-liquidity-label">
-              {`Liquidity, own scale (peak ${formatPknNumber(chart().liquidityPeak)} PKN)`}
+              {`Liquidity, own scale (peak ${formatHistoryAmount(chart().liquidityPeak, currency())})`}
             </span>
           </Show>
         </div>
@@ -515,9 +520,9 @@ export default function CollectionHistoryPanel(props) {
               {(day) => (
                 <tr>
                   <th scope="row">{day.date}</th>
-                  <td>{day.assets.cardsValuePkn != null ? `${formatPknNumber(day.assets.cardsValuePkn)} PKN` : '—'}</td>
-                  <td>{formatPknNumber(day.assets.currencyPkn)} PKN</td>
-                  <td>{formatPknNumber(day.totalPkn)} PKN</td>
+                  <td>{day.assets.cardsValuePkn != null ? formatHistoryAmount(day.assets.cardsValuePkn, currency()) : '—'}</td>
+                  <td>{formatHistoryAmount(day.assets.currencyPkn, currency())}</td>
+                  <td>{formatHistoryAmount(day.totalPkn, currency())}</td>
                 </tr>
               )}
             </For>
