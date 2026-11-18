@@ -1,16 +1,20 @@
 /**
- * The desk's other price sources, per card and window, kept beside the sold
- * slices (market/src/sold-sales-cache.js): a card seen before draws its graph
- * complete at once, instead of the sold line first and the rest a second later.
+ * The desk's other price sources, per card, window and foil facet, kept beside
+ * the sold slices (market/src/sold-sales-cache.js): a card seen before draws its
+ * graph complete at once, instead of the sold line first and the rest a second
+ * later. v2 because a `fields=graph` answer holds the series of one facet, so the
+ * facet is part of the key; what v1 left behind is dropped, never read.
  */
 
 import { CARD_SALES_TTL_MS } from './sold-sales-cache.js';
 
-const PREFIX = 'pokoin.cardPriceHistory.v1.';
+const PREFIX = 'pokoin.cardPriceHistory.v2.';
+/** v1 keys hold an answer of the other facet's series: unreadable, so removed. */
+const LEGACY_PREFIX = 'pokoin.cardPriceHistory.v1.';
 /** As fresh as the sold slices it is drawn with. */
 export const CARD_PRICE_HISTORY_TTL_MS = CARD_SALES_TTL_MS;
 const MEMORY_CAP = 32;
-/** One copy per card and range window: the oldest of these keys goes first. */
+/** One copy per card, window and facet: the oldest of these keys goes first. */
 const STORE_CAP = 40;
 const memory = new Map();
 
@@ -26,10 +30,13 @@ function store() {
   return null;
 }
 
-function keyOf(cardId, rangeKey) {
+function keyOf(cardId, rangeKey, { reverse } = {}) {
   const id = String(cardId || '').trim();
   const range = String(rangeKey || '').trim();
-  return id && range ? `${PREFIX}${id}.${range}` : '';
+  if (!id || !range) {
+    return '';
+  }
+  return `${PREFIX}${id}.${range}${reverse === true ? '.r' : ''}`;
 }
 
 /** What the graph needs to draw one window: its own shape, nothing else. */
@@ -76,8 +83,8 @@ function read(key) {
 }
 
 /** The stored window of this card and range, or null when there is none. */
-function peek(cardId, rangeKey, freshOnly) {
-  const key = keyOf(cardId, rangeKey);
+function peek(cardId, rangeKey, freshOnly, options) {
+  const key = keyOf(cardId, rangeKey, options);
   if (!key) {
     return null;
   }
@@ -93,19 +100,20 @@ function peek(cardId, rangeKey, freshOnly) {
   return payload.entry;
 }
 
-export function peekCardPriceHistory(cardId, rangeKey) {
-  return peek(cardId, rangeKey, true);
+/** `{ reverse: true }` is the reverse-holo window: another key, another answer. */
+export function peekCardPriceHistory(cardId, rangeKey, options) {
+  return peek(cardId, rangeKey, true, options);
 }
 
-export function rememberStaleCardPriceHistory(cardId, rangeKey) {
-  return peek(cardId, rangeKey, false);
+export function rememberStaleCardPriceHistory(cardId, rangeKey, options) {
+  return peek(cardId, rangeKey, false, options);
 }
 
-export function saveCardPriceHistory(cardId, rangeKey, entry) {
+export function saveCardPriceHistory(cardId, rangeKey, entry, options) {
   if (!isEntry(entry)) {
     return null;
   }
-  const key = keyOf(cardId, rangeKey);
+  const key = keyOf(cardId, rangeKey, options);
   if (!key) {
     return null;
   }
@@ -129,7 +137,11 @@ function savedAtOf(raw) {
   return match ? Number(match[1]) : 0;
 }
 
-/** Keep only the newest `keep` history windows of this cache's own keys. */
+/**
+ * Remove every v1 window this cache wrote — its key has no facet, so v2 can
+ * never read it — and keep only the newest `keep` of this cache's own keys.
+ * A key of another cache is left alone either way.
+ */
 function pruneStoredPriceHistory(keep = STORE_CAP) {
   const local = store();
   if (!local) {
@@ -137,14 +149,24 @@ function pruneStoredPriceHistory(keep = STORE_CAP) {
   }
   try {
     const rows = [];
+    const legacy = [];
     for (let i = 0; i < local.length; i += 1) {
       const key = local.key(i);
-      if (key && key.startsWith(PREFIX)) {
+      if (!key) {
+        continue;
+      }
+      if (key.startsWith(LEGACY_PREFIX)) {
+        legacy.push(key);
+      } else if (key.startsWith(PREFIX)) {
         rows.push([key, savedAtOf(local.getItem(key))]);
       }
     }
+    for (const key of legacy) {
+      local.removeItem(key);
+      memory.delete(key);
+    }
     if (rows.length <= keep) {
-      return 0;
+      return legacy.length;
     }
     rows.sort((a, b) => a[1] - b[1]);
     const drop = rows.slice(0, rows.length - keep);
@@ -152,7 +174,7 @@ function pruneStoredPriceHistory(keep = STORE_CAP) {
       local.removeItem(key);
       memory.delete(key);
     }
-    return drop.length;
+    return legacy.length + drop.length;
   } catch {
     return 0;
   }
