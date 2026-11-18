@@ -49,7 +49,7 @@ fn live_source_pure_function_goldens() {
                 "1700000000"
             )
             .unwrap()),
-            "crc" => json!(x::crc_response_token(str_arg(0), "consumer-secret")),
+            "crc" => json!(x::crc_response_token(str_arg(0), "consumer-secret").unwrap()),
             other => panic!("unhandled fixture {other}"),
         };
         assert_eq!(
@@ -63,7 +63,8 @@ fn live_source_pure_function_goldens() {
 #[test]
 fn raw_signature_authentication_rejects_tampering() {
     let body = b"{\"tweet_create_events\":[]}";
-    let signature = x::crc_response_token(std::str::from_utf8(body).unwrap(), "consumer-secret");
+    let signature =
+        x::crc_response_token(std::str::from_utf8(body).unwrap(), "consumer-secret").unwrap();
     assert!(x::verify_webhook_signature(
         &signature,
         body,
@@ -227,4 +228,25 @@ async fn x_api_errors_carry_the_response_body_cut_like_slice_500() {
     assert_eq!(kept.encode_utf16().count(), 500);
     assert_eq!(kept.matches('🐱').count(), 50, "a byte cut would keep 100");
     assert!(!kept.chars().any(|c| c == '\u{fffd}'));
+}
+
+#[test]
+fn an_unconfigured_webhook_secret_is_refused_by_both_primitives() {
+    let body = b"hello";
+    let valid =
+        x::crc_response_token(std::str::from_utf8(body).unwrap(), "consumer-secret").unwrap();
+    assert!(x::verify_webhook_signature(&valid, body, "consumer-secret"));
+    for secret in ["", " ", "\t\n"] {
+        assert!(
+            x::crc_response_token(std::str::from_utf8(body).unwrap(), secret).is_err(),
+            "CRC must fail closed on secret {secret:?}"
+        );
+        assert!(
+            !x::verify_webhook_signature(&valid, body, secret),
+            "verification must reject secret {secret:?}"
+        );
+        // An empty key is public: anyone could sign with it.
+        let attacker = x::crc_response_token(std::str::from_utf8(body).unwrap(), "x").unwrap();
+        assert!(!x::verify_webhook_signature(&attacker, body, secret));
+    }
 }

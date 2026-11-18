@@ -66,14 +66,28 @@ fn mac(key: &str, value: &[u8]) -> Hmac<Sha256> {
     mac
 }
 
-pub fn crc_response_token(token: &str, secret: &str) -> String {
-    format!(
+/// The live route refused an unconfigured app secret before computing anything; the route is not
+/// ported, so the guard belongs to the primitive.
+fn require_secret(secret: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !secret.trim().is_empty(),
+        "X webhook secret is not configured"
+    );
+    Ok(())
+}
+
+pub fn crc_response_token(token: &str, secret: &str) -> anyhow::Result<String> {
+    require_secret(secret)?;
+    Ok(format!(
         "sha256={}",
         STANDARD.encode(mac(secret, token.as_bytes()).finalize().into_bytes())
-    )
+    ))
 }
 
 pub fn verify_webhook_signature(signature: &str, body: &[u8], secret: &str) -> bool {
+    if require_secret(secret).is_err() {
+        return false;
+    }
     let Some(value) = signature.strip_prefix("sha256=") else {
         return false;
     };
