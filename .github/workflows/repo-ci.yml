@@ -102,6 +102,9 @@ jobs:
         run: bash scripts/k3s-manifest-check.sh
       - name: check-features tests
         run: bash scripts/check-features.test.sh
+      - name: marketplace-home-purge tests
+        # scripts/marketplace-home-purge.sh against a stub curl: no Cloudflare call, no token.
+        run: bash scripts/marketplace-home-purge.test.sh
       - name: feature map is true and may only grow
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -116,7 +119,7 @@ jobs:
           fi
           bash scripts/check-features.sh --base "$base"
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh scripts/marketplace-home-purge.sh scripts/marketplace-home-purge.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.

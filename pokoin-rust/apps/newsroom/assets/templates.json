@@ -1,0 +1,328 @@
+{
+  "breaking": {
+    "id": "breaking",
+    "label": "Breaking",
+    "articleType": "BREAKING",
+    "defaultSection": "sets",
+    "required": [
+      "paragraph",
+      "key_facts",
+      "why_it_matters"
+    ],
+    "optional": [
+      "unknowns"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 200,
+      "max": 400
+    }
+  },
+  "reveal": {
+    "id": "reveal",
+    "label": "Reveal",
+    "articleType": "NEWS",
+    "defaultSection": "cards",
+    "required": [
+      "paragraph",
+      "key_facts",
+      "context",
+      "why_it_matters"
+    ],
+    "optional": [
+      "gallery",
+      "related_card",
+      "related_set",
+      "market",
+      "heading"
+    ],
+    "modules": {
+      "market": "optional",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 6,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 300,
+      "max": 700
+    }
+  },
+  "fact_check": {
+    "id": "fact_check",
+    "label": "Fact check",
+    "articleType": "FACT CHECK",
+    "defaultSection": "fact-check",
+    "required": [
+      "fact_check",
+      "key_facts",
+      "source_comparison",
+      "unknowns"
+    ],
+    "optional": [
+      "timeline",
+      "paragraph"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 1
+    },
+    "length": {
+      "min": 400,
+      "max": 900
+    }
+  },
+  "market_pulse": {
+    "id": "market_pulse",
+    "label": "Market pulse",
+    "articleType": "MARKET",
+    "defaultSection": "market",
+    "required": [
+      "paragraph",
+      "market",
+      "chart",
+      "context",
+      "analysis",
+      "methodology"
+    ],
+    "optional": [
+      "heading",
+      "unknowns"
+    ],
+    "modules": {
+      "market": "required",
+      "analysis": "optional"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 1,
+      "chartsMax": 3,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 300,
+      "max": 800
+    }
+  },
+  "explainer": {
+    "id": "explainer",
+    "label": "Explainer",
+    "articleType": "EXPLAINER",
+    "defaultSection": "industry",
+    "required": [
+      "paragraph",
+      "heading",
+      "why_it_matters"
+    ],
+    "optional": [
+      "faq",
+      "context",
+      "list"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 3,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 700,
+      "max": 1600
+    }
+  },
+  "developing": {
+    "id": "developing",
+    "label": "Developing",
+    "articleType": "NEWS",
+    "defaultSection": "sets",
+    "required": [
+      "update_note",
+      "paragraph",
+      "timeline",
+      "key_facts",
+      "unknowns"
+    ],
+    "optional": [
+      "heading"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 300,
+      "max": 900
+    }
+  },
+  "comparison": {
+    "id": "comparison",
+    "label": "Comparison",
+    "articleType": "EXPLAINER",
+    "defaultSection": "sets",
+    "required": [
+      "paragraph",
+      "comparison",
+      "key_facts",
+      "context",
+      "why_it_matters"
+    ],
+    "optional": [
+      "heading"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "forbidden"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 2,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 2,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 400,
+      "max": 1000
+    }
+  },
+  "data_deep_dive": {
+    "id": "data_deep_dive",
+    "label": "Data deep dive",
+    "articleType": "DATA",
+    "defaultSection": "market",
+    "required": [
+      "paragraph",
+      "methodology",
+      "chart",
+      "heading",
+      "analysis",
+      "unknowns",
+      "market"
+    ],
+    "optional": [
+      "context"
+    ],
+    "modules": {
+      "market": "required",
+      "analysis": "optional"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 2,
+      "chartsMax": 6,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 600,
+      "max": 1800
+    }
+  },
+  "trend": {
+    "id": "trend",
+    "label": "Trend",
+    "articleType": "NEWS",
+    "defaultSection": "collectors",
+    "required": [
+      "paragraph",
+      "key_facts",
+      "context",
+      "why_it_matters"
+    ],
+    "optional": [
+      "market",
+      "analysis",
+      "heading"
+    ],
+    "modules": {
+      "market": "optional",
+      "analysis": "optional"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 500,
+      "max": 1200
+    }
+  },
+  "analysis": {
+    "id": "analysis",
+    "label": "Analysis",
+    "articleType": "ANALYSIS",
+    "defaultSection": "analysis",
+    "required": [
+      "key_facts",
+      "analysis",
+      "context",
+      "unknowns"
+    ],
+    "optional": [
+      "paragraph",
+      "heading"
+    ],
+    "modules": {
+      "market": "forbidden",
+      "analysis": "required"
+    },
+    "imagePlan": {
+      "hero": 1,
+      "galleryMax": 0,
+      "chartsMin": 0,
+      "chartsMax": 0,
+      "contextualMax": 0,
+      "evidenceMax": 0
+    },
+    "length": {
+      "min": 500,
+      "max": 1200
+    }
+  }
+}

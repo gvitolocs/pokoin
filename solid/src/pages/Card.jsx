@@ -103,7 +103,7 @@ import { applyListingLive, subscribeListingLive } from '@market/listing-live.js'
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
 import { listingsKnown, rememberListingRows } from '@market/listings-cache.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
-import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
+import { currencyFromSearch, fiatFromPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import { peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory } from '@market/price-history-cache.js';
@@ -129,7 +129,7 @@ import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
 import { sameSoldSlices, soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
-import { soldSeriesColor } from '@market/sold-graph.js';
+import { soldGraphRowPrice, soldSeriesColor } from '@market/sold-graph.js';
 import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -937,8 +937,8 @@ function CardDesk(props) {
   // The window the lines on the plot were read for, so the chart clips to it
   // even while a longer one is still loading. Nothing of the graph is passed
   // until it is drawn (see GRAPH_HISTORY_WAIT_MS), so no key or line jumps in
-  // after the sold median. The source keys, their lines, the Pokoin dot and the
-  // range buttons are Silver's alone (see askGraphHistory).
+  // after the sold median. The source keys, their lines, today's Pokoin price and
+  // the range buttons are Silver's alone (see askGraphHistory).
   const graphRangeProps = () => {
     if (!graphDrawn() || !accountSilver()) return null;
     const entry = priceHistory();
@@ -947,17 +947,16 @@ function CardDesk(props) {
   const graphSources = createMemo(() => (graphDrawn() && accountSilver()
     ? priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() })
     : []));
-  // Pokoin's own price right now: the cheapest live listing, one point, today.
+  // Pokoin's own price right now: the cheapest live listing, the line's last point.
   const graphNowPoint = () => (graphDrawn() && accountSilver() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);
-  // The tooltip rows round the PKN amount to a whole number ("114 PKN", never
-  // "114.41 PKN"); the visitor-currency part keeps the exact price's format.
-  const graphRowPrice = (pkn) => {
-    const parts = buyerParts(pkn, true, pinnedCurrency());
-    if (parts.pending) return '';
-    const whole = formatPkn(Math.round(pkn));
-    if (parts.local && parts.pkn) return `${parts.local} (${whole})`;
-    return parts.local || whole;
-  };
+  // A row is a quote, not a charge: soldGraphRowPrice says it in the visitor's
+  // currency whatever the buyer rule makes of the same amount as a price, and
+  // rounds only the PKN number it may add in brackets.
+  const graphRowPrice = (pkn) => soldGraphRowPrice(
+    pkn,
+    buyerParts(pkn, true, pinnedCurrency()),
+    buyerCurrency(pinnedCurrency()),
+  );
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const [priceHelp, setPriceHelp] = createSignal(false);
   const pricePending = () => !pinnedCurrency() && buyerPending();

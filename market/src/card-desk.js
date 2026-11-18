@@ -187,6 +187,8 @@ export function blankListingForm(card) {
       sealed: false,
       graded: false,
       shipping: true,
+      signed: false,
+      altered: false,
     },
     comment: '',
     company: 'PSA',
@@ -208,6 +210,9 @@ export function listingFormFromOffer(offer, card) {
       sealed: Boolean(offer?.sealed),
       graded: Boolean(offer?.graded),
       shipping: offer?.shippingAvailable !== false,
+      // The desk's Signed / Altered chips (the inventory editor shows them).
+      signed: Boolean(offer?.signed),
+      altered: Boolean(offer?.altered),
     },
     comment: String(offer?.sellerComment || ''),
     company: String(offer?.gradingCompany || 'PSA'),

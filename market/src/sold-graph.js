@@ -1,4 +1,6 @@
+import { offerPriceLabel } from './buy-orders.js';
 import { langMeta } from './locale.js';
+import { formatPkn } from './pkn.js';
 
 /** Geometry for the card-desk sold-median chart. */
 
@@ -416,6 +418,26 @@ export function formatSoldDayWithYear(isoDay, locale, withYear) {
 }
 
 export const SOLD_GRAPH_TIP_ROWS = 6;
+
+/**
+ * One tooltip row's price: the visitor's currency for every positive amount.
+ * `parts` is the desk's buyer answer for the same price, and that rule is about
+ * what the visitor would *pay* — with a PKN balance that covers it there is no
+ * local part at all, which left one bare "4 PKN" row among DKK ones. A graph row
+ * is a quote, not a charge, so the amount is converted here with the desk's own
+ * small-amount format (1 PKN is "0.0375 DKK", never "0.00"). The whole PKN number
+ * is added in brackets only where the buyer rule shows both of its parts, and a
+ * PKN visitor or an amount with no rate keeps the bare PKN. '' while the buyer's
+ * currency is still unknown, like every other desk price.
+ */
+export function soldGraphRowPrice(pkn, parts, currency = '') {
+  if (parts?.pending) return '';
+  const code = String(currency || '').toUpperCase();
+  const local = code && code !== 'PKN' ? offerPriceLabel(pkn, code) : '';
+  const whole = formatPkn(Math.round(pkn));
+  if (parts?.local && parts?.pkn && local) return `${local} (${whole})`;
+  return local || whole;
+}
 
 /**
  * What the hover popup lists for one day: one row per visible series, in the

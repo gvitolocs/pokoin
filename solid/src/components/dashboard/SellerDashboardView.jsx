@@ -10,6 +10,7 @@ import '@market/sell-spreadsheet.css';
 import { Alert, EmptyDesk, PageHead } from '../Desk.jsx';
 import MiniCardTile from '../MiniCardTile.jsx';
 import CollectionHistoryPanel from './CollectionHistoryPanel.jsx';
+import SegmentTable from './SegmentTable.jsx';
 import TopMoversPanel from './TopMoversPanel.jsx';
 
 /** React DashboardBoundary: a render error leaves a one-line notice, not a blank page. */
@@ -258,9 +259,14 @@ function CardTraderAssetsPanel(props) {
 /**
  * Presentational seller dashboard.
  * Data is passed in so the fixture preview renders without Firebase.
+ * `segments` is the normalized portfolio-history segment model and
+ * `segmentsPending` says the first read has not answered yet.
  */
 export function SellerDashboardView(props) {
   const [showAllListings, setShowAllListings] = createSignal(false);
+  // The range buttons belong to the value graph, so the table keeps its own
+  // copy of the window the graph reports; 1M is that graph's opening window.
+  const [segmentsRange, setSegmentsRange] = createSignal({ id: '1M', days: 30 });
   const listed = () => props.listed;
   const listingRows = () => props.listingRows || [];
   const movers = () => props.movers || [];
@@ -374,7 +380,17 @@ export function SellerDashboardView(props) {
               </Show>
 
               <HistoryBoundary>
-                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} onRange={props.onHistoryRange} />
+                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} onRange={(range) => { setSegmentsRange(range || {}); props.onHistoryRange?.(range); }} />
+              </HistoryBoundary>
+
+              <HistoryBoundary>
+                <SegmentTable
+                  model={props.segments || null}
+                  pending={Boolean(props.segmentsPending)}
+                  range={segmentsRange()}
+                  currency={props.moverCurrency || ''}
+                  currencyPending={Boolean(props.moverCurrencyPending)}
+                />
               </HistoryBoundary>
 
               <div class="seller-tile-actions">

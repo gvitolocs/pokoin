@@ -1,0 +1,374 @@
+{
+  "now": "2026-10-22T19:39:50.083Z",
+  "pack": {
+    "canonicalStoryId": "fixture",
+    "game": "magic",
+    "summaryOfEvent": "Set reveal",
+    "status": "multi_source",
+    "angle": "SET_REVEAL",
+    "sourceList": [
+      {
+        "id": "s1",
+        "outlet": "IGN",
+        "tier": "C",
+        "title": "Set reveal",
+        "url": "https://ign.com/x"
+      }
+    ],
+    "claimLedger": [],
+    "conflicts": [],
+    "confirmedClaims": [],
+    "pressClaims": [],
+    "unconfirmedClaims": [],
+    "dates": [],
+    "numbers": [],
+    "isUpdate": false,
+    "market": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "images": []
+  },
+  "hints": {
+    "sourceCount": 1
+  },
+  "validTemplates": [
+    "breaking",
+    "explainer"
+  ],
+  "memory": "Desk lesson.",
+  "previous": {
+    "template": "breaking",
+    "headline": "Before",
+    "dek": "Before",
+    "blocks": [],
+    "datePublished": "2026-10-22T19:39:50.083Z"
+  },
+  "draft": {
+    "template": "breaking",
+    "headline": "Headline",
+    "dek": "Dek",
+    "articleType": "BREAKING",
+    "section": "sets",
+    "blocks": [],
+    "image_plan": {
+      "hero": "fallback",
+      "heroCardId": null,
+      "gallery": []
+    },
+    "related_entities": [],
+    "fact_check_status": null,
+    "analysis_required": false,
+    "market_module_required": false,
+    "first_reported_source_id": null,
+    "telegram": "",
+    "discord": "",
+    "x": "",
+    "notes": ""
+  },
+  "requests": {
+    "reporter": {
+      "task": "draft_article",
+      "instructions": [
+        "Choose one template from validTemplates, or null when the evidence does not support a website article.",
+        "Every claim must come from the evidence pack. Use sourceIds from sourceList ids.",
+        "Report source disagreements (conflicts) explicitly; never pick a side silently.",
+        "first_reported_source_id: only a source that broke the story itself; null when the sources cite another outlet (e.g. \"citing PokeBeach\").",
+        "Never write market numbers; place market/chart/related blocks only when listed in availableModules.",
+        "This is Magic: The Gathering news: use that game's own terminology.",
+        "Return only JSON matching the schema."
+      ],
+      "validTemplates": [
+        "breaking",
+        "explainer"
+      ],
+      "allowed_values": {
+        "section": [
+          "sets",
+          "cards",
+          "market",
+          "competitive",
+          "collectors",
+          "fact-check",
+          "analysis",
+          "industry"
+        ],
+        "articleType": [
+          "NEWS",
+          "BREAKING",
+          "FACT CHECK",
+          "ANALYSIS",
+          "EXPLAINER",
+          "MARKET",
+          "DATA"
+        ],
+        "image_plan_hero": [
+          "catalog_card",
+          "source_image",
+          "fallback"
+        ],
+        "related_entity_type": [
+          "card",
+          "set",
+          "pokemon",
+          "artist",
+          "product"
+        ],
+        "verdict": [
+          "CONFIRMED",
+          "SUPPORTED",
+          "UNVERIFIED",
+          "DISPUTED",
+          "MISLEADING",
+          "FALSE"
+        ]
+      },
+      "hints": {
+        "sourceCount": 1
+      },
+      "availableModules": {
+        "market": false,
+        "charts": [],
+        "relatedCards": [],
+        "relatedSets": [],
+        "galleryImages": []
+      },
+      "reporter_memory": "Desk lesson.",
+      "now": "2026-10-22T19:39:50.083Z",
+      "previous_article": null,
+      "evidence_pack": {
+        "canonicalStoryId": "fixture",
+        "game": "magic",
+        "gameName": "Magic: The Gathering",
+        "summaryOfEvent": "Set reveal",
+        "status": "multi_source",
+        "angle": "SET_REVEAL",
+        "sourceList": [
+          {
+            "id": "s1",
+            "outlet": "IGN",
+            "tier": "C",
+            "title": "Set reveal",
+            "url": "https://ign.com/x",
+            "publishedAt": null
+          }
+        ],
+        "claimLedger": [],
+        "conflicts": [],
+        "confirmedClaims": [],
+        "pressClaims": [],
+        "unconfirmedClaims": [],
+        "dates": [],
+        "numbers": [],
+        "entities": [],
+        "isUpdate": false,
+        "previousCoverage": null,
+        "market": null,
+        "related": {
+          "cards": [],
+          "sets": []
+        },
+        "images": []
+      }
+    },
+    "update": {
+      "task": "draft_article",
+      "instructions": [
+        "Choose one template from validTemplates, or null when the evidence does not support a website article.",
+        "Every claim must come from the evidence pack. Use sourceIds from sourceList ids.",
+        "Report source disagreements (conflicts) explicitly; never pick a side silently.",
+        "first_reported_source_id: only a source that broke the story itself; null when the sources cite another outlet (e.g. \"citing PokeBeach\").",
+        "Never write market numbers; place market/chart/related blocks only when listed in availableModules.",
+        "This is Magic: The Gathering news: use that game's own terminology.",
+        "previous_article is already published at a permanent URL. Revise it: keep what is still true, change what the new evidence changes, keep the same template unless the evidence no longer fits it.",
+        "Start blocks with one update_note block (at = now) stating in one sentence what changed since the previous version.",
+        "If the previous version stated something the evidence now shows was wrong, say so plainly in that update note.",
+        "Return only JSON matching the schema."
+      ],
+      "validTemplates": [
+        "breaking",
+        "explainer"
+      ],
+      "allowed_values": {
+        "section": [
+          "sets",
+          "cards",
+          "market",
+          "competitive",
+          "collectors",
+          "fact-check",
+          "analysis",
+          "industry"
+        ],
+        "articleType": [
+          "NEWS",
+          "BREAKING",
+          "FACT CHECK",
+          "ANALYSIS",
+          "EXPLAINER",
+          "MARKET",
+          "DATA"
+        ],
+        "image_plan_hero": [
+          "catalog_card",
+          "source_image",
+          "fallback"
+        ],
+        "related_entity_type": [
+          "card",
+          "set",
+          "pokemon",
+          "artist",
+          "product"
+        ],
+        "verdict": [
+          "CONFIRMED",
+          "SUPPORTED",
+          "UNVERIFIED",
+          "DISPUTED",
+          "MISLEADING",
+          "FALSE"
+        ]
+      },
+      "hints": {
+        "sourceCount": 1
+      },
+      "availableModules": {
+        "market": false,
+        "charts": [],
+        "relatedCards": [],
+        "relatedSets": [],
+        "galleryImages": []
+      },
+      "reporter_memory": "Desk lesson.",
+      "now": "2026-10-22T19:39:50.083Z",
+      "previous_article": {
+        "template": "breaking",
+        "headline": "Before",
+        "dek": "Before",
+        "blocks": [],
+        "datePublished": "2026-10-22T19:39:50.083Z"
+      },
+      "evidence_pack": {
+        "canonicalStoryId": "fixture",
+        "game": "magic",
+        "gameName": "Magic: The Gathering",
+        "summaryOfEvent": "Set reveal",
+        "status": "multi_source",
+        "angle": "SET_REVEAL",
+        "sourceList": [
+          {
+            "id": "s1",
+            "outlet": "IGN",
+            "tier": "C",
+            "title": "Set reveal",
+            "url": "https://ign.com/x",
+            "publishedAt": null
+          }
+        ],
+        "claimLedger": [],
+        "conflicts": [],
+        "confirmedClaims": [],
+        "pressClaims": [],
+        "unconfirmedClaims": [],
+        "dates": [],
+        "numbers": [],
+        "entities": [],
+        "isUpdate": false,
+        "previousCoverage": null,
+        "market": null,
+        "related": {
+          "cards": [],
+          "sets": []
+        },
+        "images": []
+      }
+    },
+    "editor": {
+      "task": "edit_article",
+      "instructions": [
+        "You are the editor. You may approve, revise or reject.",
+        "Check every sentence against the evidence pack: unsupported claims, numbers, certainty language, hidden conflicts, analysis that adds facts, prose market numbers, attribution, template fit.",
+        "Return revised headline, dek and blocks only when the fixes are local; reject when the draft cannot be fixed locally.",
+        "Return only JSON."
+      ],
+      "evidence_pack": {
+        "canonicalStoryId": "fixture",
+        "game": "magic",
+        "gameName": "Magic: The Gathering",
+        "summaryOfEvent": "Set reveal",
+        "status": "multi_source",
+        "angle": "SET_REVEAL",
+        "sourceList": [
+          {
+            "id": "s1",
+            "outlet": "IGN",
+            "tier": "C",
+            "title": "Set reveal",
+            "url": "https://ign.com/x",
+            "publishedAt": null
+          }
+        ],
+        "claimLedger": [],
+        "conflicts": [],
+        "confirmedClaims": [],
+        "pressClaims": [],
+        "unconfirmedClaims": [],
+        "dates": [],
+        "numbers": [],
+        "entities": [],
+        "isUpdate": false,
+        "previousCoverage": null,
+        "market": null,
+        "related": {
+          "cards": [],
+          "sets": []
+        },
+        "images": []
+      },
+      "draft": {
+        "template": "breaking",
+        "headline": "Headline",
+        "dek": "Dek",
+        "articleType": "BREAKING",
+        "section": "sets",
+        "blocks": []
+      }
+    }
+  },
+  "trimmed": {
+    "canonicalStoryId": "fixture",
+    "game": "magic",
+    "gameName": "Magic: The Gathering",
+    "summaryOfEvent": "Set reveal",
+    "status": "multi_source",
+    "angle": "SET_REVEAL",
+    "sourceList": [
+      {
+        "id": "s1",
+        "outlet": "IGN",
+        "tier": "C",
+        "title": "Set reveal",
+        "url": "https://ign.com/x",
+        "publishedAt": null
+      }
+    ],
+    "claimLedger": [],
+    "conflicts": [],
+    "confirmedClaims": [],
+    "pressClaims": [],
+    "unconfirmedClaims": [],
+    "dates": [],
+    "numbers": [],
+    "entities": [],
+    "isUpdate": false,
+    "previousCoverage": null,
+    "market": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "images": []
+  }
+}

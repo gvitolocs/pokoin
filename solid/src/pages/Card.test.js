@@ -387,12 +387,12 @@ test('every price source is a line inside the graph the desk already had', () =>
   // A source with no sale of its own still draws: the empty message waits for both.
   assert.match(graph, /<Show when=\{!hasLines\(\) && props\.series != null\}>/);
   // Sources are thinner than sold lines, break where they stopped quoting, and
-  // bridge the hole dotted. Pokoin's dot today joins its own line or stands with
-  // a stub at it.
+  // bridge the hole dotted. Today's Pokoin price ends the line and is never a
+  // marker: the plot draws no dot for it and no stub pointing at one.
   assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
   assert.match(graph, /class="sold-graph-gap"/);
-  assert.match(graph, /class="sold-graph-now-dot"/);
-  assert.match(graph, /x1=\{now\(\)\.x - 44\}/);
+  assert.doesNotMatch(graph, /sold-graph-now/);
+  assert.doesNotMatch(graph, /now: nowPt|geo\(\)\.now/);
   // The hover lists every visible line, and the helper caps the rows.
   assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
 });
@@ -559,9 +559,10 @@ test('long windows read their dates with the year', () => {
   assert.match(graph, /<strong>\{formatSoldDayWithYear\(day\(\), geo\(\)\.dateLocale, geo\(\)\.withYear\)\}<\/strong>/);
 });
 
-test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN', () => {
+test('tooltip rows: Pokoin only on the last day, and every row in the visitor currency', () => {
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
-  // A Pokoin dot with no line of its own quotes today only: its row joins when
+  const rows = fs.readFileSync(new URL('../../../market/src/sold-graph.js', import.meta.url), 'utf8');
+  // A Pokoin value with no line of its own quotes today only: its row joins when
   // the guide stands on the last day of the drawn range, left out before that.
   // With a line the one source row already is the Pokoin row, so there is never
   // a second one.
@@ -570,10 +571,14 @@ test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN'
   // The rows format through the desk's row formatter when the desk gives one.
   assert.match(graph, /props\.formatRowPrice \? props\.formatRowPrice\(pkn\) \|\| formatValue\(pkn\) : formatValue\(pkn\)/);
   assert.match(page, /formatRowPrice=\{graphRowPrice\}/);
-  // The row's PKN amount is whole; the visitor-currency part keeps its format.
-  assert.match(page, /const graphRowPrice = \(pkn\) => \{/);
-  assert.match(page, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
-  assert.match(page, /if \(parts\.local && parts\.pkn\) return `\$\{parts\.local\} \(\$\{whole\}\)`;/);
+  // The desk gives it the buyer's own parts and currency; the shared formatter says
+  // every positive price in the visitor's currency, the whole PKN number as the
+  // desk's bracket only.
+  assert.match(page, /const graphRowPrice = \(pkn\) => soldGraphRowPrice\(/);
+  assert.match(page, /buyerParts\(pkn, true, pinnedCurrency\(\)\),\n\s*buyerCurrency\(pinnedCurrency\(\)\),/);
+  assert.match(rows, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
+  assert.match(rows, /if \(parts\?\.local && parts\?\.pkn && local\) return `\$\{local\} \(\$\{whole\}\)`;/);
+  assert.match(rows, /return local \|\| whole;/);
 });
 
 test('Pokoin is one line: its own history, with today as the last point', () => {
@@ -588,16 +593,17 @@ test('Pokoin is one line: its own history, with today as the last point', () => 
     'Pokoin is one source, not a line and a fourth key beside it',
   );
   assert.doesNotMatch(graph, /POKOIN_NOW_SOURCE|pokoin_now|Pokoin now/);
-  // The dot is that line's next point when the line stops today or yesterday…
+  // Today's value is that line's last point when the line stops today or
+  // yesterday: one more plain segment in the line's own stroke…
   assert.match(graph, /const reachesNow = nowPt && bounds\(\) && pokoinLine\n\s*\? soldGraphNearDay\(pokoinLine\.days, bounds\(\)\.to, 1\)/);
   assert.match(graph, /const nowJoin = reachesNow \? join\(\[place\(reachesNow\), \[nowPt\.x, nowPt\.y\]\]\) : '';/);
   assert.match(graph, /join: row\.key === POKOIN_SOURCE\.key \? nowJoin : '',/);
   assert.match(graph, /<Show when=\{row\.join\}><polyline points=\{row\.join\} \/><\/Show>/);
-  // …and stands alone, stub included, when it does not reach.
-  assert.match(graph, /now: nowPt \? \{ \.\.\.nowPt, joined: Boolean\(nowJoin\) \} : null,/);
-  assert.match(graph, /<Show when=\{!now\(\)\.joined\}>\n\s*<line x1=\{now\(\)\.x - 44\}/);
+  // …and where it does not reach, and with no Pokoin line at all, the drawing ends
+  // with the line: no point geometry for today is returned, so nothing is drawn.
+  assert.doesNotMatch(graph, /now: nowPt|joined:|now\(\)\.(x|y|joined)/);
   // Today's price is a plotted value, so the scale holds it and no key appears
-  // twice: the dot's own key is there only while there is no Pokoin line.
+  // twice: the value's own key is there only while there is no Pokoin line.
   assert.match(graph, /if \(nowOn\(\)\) values\.push\(nowValue\(\) \* factor\);/);
   assert.match(graph, /const nowLine = createMemo\(\(\) => \(nowValue\(\) && !sourceLines\(\)\.some\(\(row\) => row\.key === POKOIN_SOURCE\.key\)/);
   assert.match(graph, /const nowOn = createMemo\(\(\) => nowValue\(\) > 0 && shown\(POKOIN_SOURCE\.key\)\);/);
@@ -678,4 +684,63 @@ test('a live listing frame lands on an empty cell whose answer is known', () => 
   assert.equal((page.match(/subscribeListingLive\(/g) || []).length, 1, 'one channel per desk');
   assert.match(page, /import \{ applyListingLive, subscribeListingLive \} from '@market\/listing-live\.js';/);
   assert.match(page, /unsubscribe\?\.\(\);/);
+});
+
+/**
+ * Solid 2 runs the first argument of createEffect, createMemo and createRenderEffect
+ * when the call is made, so a value that argument calls has to be declared above it:
+ * a `const` below is still in its temporal dead zone there and the page throws
+ * (PRICE-04, the keys' overflow effect created above the `plot` it read). Reports
+ * every such call of one component, so the next line added is held to it too.
+ */
+function createdBeforeItsDeclaration(src, componentName) {
+  const from = src.indexOf(`export default function ${componentName}(`);
+  const line = (at) => src.slice(0, at).split('\n').length;
+  const pastQuoted = (i) => {                       // index after the '…', "…" or `…` starting at i
+    const quote = src[i];
+    let j = i + 1;
+    while (j < src.length && src[j] !== quote) j += src[j] === '\\' ? 2 : 1;
+    return j + 1;
+  };
+  const firstArgument = (open) => {                 // from the call's `(` to its top-level `,` or `)`
+    let depth = 0;
+    let i = open;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') { i = pastQuoted(i); continue; }
+      if (c === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); i = i < 0 ? src.length : i; continue; }
+      if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i); i = i < 0 ? src.length : i + 2; continue; }
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 1) return src.slice(open + 1, i); depth -= 1; }
+      else if (c === ',' && depth === 1) return src.slice(open + 1, i);
+      i += 1;
+    }
+    return src.slice(open + 1);
+  };
+  const declaredUnder = (name, after) => {          // `const name =` / `const [name` on the component's own line
+    const at = src.slice(after).search(new RegExp(`\\n  const (?:\\[)?(?:[\\w$]+, )?${name.replaceAll('$', '\\$')}[ ,\\]=]`));
+    return at < 0 ? null : after + at;
+  };
+  const late = [];
+  for (const call of ['createEffect(', 'createMemo(', 'createRenderEffect(', 'createComputed(']) {
+    for (let at = src.indexOf(call, from); at >= 0; at = src.indexOf(call, at + 1)) {
+      const arg = firstArgument(at + call.length - 1);
+      const used = [...new Set([...arg.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*\(/g)].map((row) => row[1]))];
+      for (const name of used) {
+        if (arg.includes(`const ${name}`)) continue;   // the argument declares this one itself
+        const under = declaredUnder(name, at);
+        if (under !== null) late.push(`${call.slice(0, -1)} at line ${line(at)} calls ${name}, declared at line ${line(under)}`);
+      }
+    }
+  }
+  return late;
+}
+
+test('what the graph creates at mount reads only what it declared above', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  assert.deepEqual(
+    createdBeforeItsDeclaration(graph, 'SoldPriceGraph'),
+    [],
+    'these functions run when they are created, so every value they call is declared first',
+  );
 });

@@ -516,8 +516,11 @@ const PUSH_CANDIDATES_WHERE: &str = r#"
 "#;
 
 /// `editable_properties` of these blueprints in a game's own database. The
-/// schema name comes from the API's game table, never from a request.
-fn blueprint_properties_sql(game: &str) -> Option<String> {
+/// schema name comes from the API's game table, never from a request; `None`
+/// for a game this crate does not know, so a caller reads no properties and
+/// refuses rather than guesses (`push::product_body_for_game`,
+/// `commerce::listing_sync::push_saved_facets`).
+pub fn blueprint_properties_sql(game: &str) -> Option<String> {
     let known = crate::db::INGEST_GAMES.iter().any(|(id, _, _)| *id == game);
     known.then(|| {
         format!(

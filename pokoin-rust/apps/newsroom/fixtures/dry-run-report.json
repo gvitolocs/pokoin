@@ -1,0 +1,412 @@
+{
+  "at": "2026-10-22T19:39:50.083Z",
+  "dryRun": true,
+  "inputKind": "captured-evidence-pack",
+  "productionReady": false,
+  "plan": {
+    "games": [
+      {
+        "game": "pokemon",
+        "slot": {
+          "open": false,
+          "reason": "generation attempts used up for this period",
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "one_piece",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 4,
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "riftbound",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 4,
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": [
+          "story_20261022_hy8wyn",
+          "story_20261022_sbxhay",
+          "story_20261021_wnjk31",
+          "story_20261021_fswi5b"
+        ]
+      },
+      {
+        "game": "magic",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 1,
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": [
+          "story_20261021_a1lxkm"
+        ]
+      },
+      {
+        "game": "yugioh",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 4,
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": [
+          "story_20261021_zrujxi"
+        ]
+      },
+      {
+        "game": "lorcana",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 4,
+          "cadence": {
+            "kind": "daily",
+            "perPeriod": 2,
+            "periodMs": 86400000,
+            "minGapMs": 21600000,
+            "maxAttemptsPerPeriod": 4,
+            "minStoryAgeMs": 0,
+            "maxStoryAgeMs": 129600000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "flesh_and_blood",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261016_dv0sr9"
+        ]
+      },
+      {
+        "game": "digimon",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "dragon_ball_super",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "vanguard",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "star_wars",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261015_3atyhb"
+        ]
+      },
+      {
+        "game": "union_arena",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261019_4gyv9p",
+          "story_20261019_i0p4xy"
+        ]
+      },
+      {
+        "game": "gundam",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261017_3hbkzs"
+        ]
+      },
+      {
+        "game": "sorcery",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "palworld",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "cyberpunk",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261020_lns5ls",
+          "story_20261020_lda0b5"
+        ]
+      },
+      {
+        "game": "weiss_schwarz",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": [
+          "story_20261020_s23g85"
+        ]
+      },
+      {
+        "game": "final_fantasy",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "force_of_will",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      },
+      {
+        "game": "battle_spirits_saga",
+        "slot": {
+          "open": true,
+          "reason": "slot open",
+          "attemptsLeft": 2,
+          "cadence": {
+            "kind": "weekly",
+            "perPeriod": 1,
+            "periodMs": 604800000,
+            "minGapMs": 604800000,
+            "maxAttemptsPerPeriod": 2,
+            "minStoryAgeMs": 172800000,
+            "maxStoryAgeMs": 604800000
+          }
+        },
+        "candidates": []
+      }
+    ],
+    "updates": []
+  },
+  "modelCalls": 0,
+  "passes": {
+    "ok": true,
+    "action": "skip",
+    "reason": "editorial_worthiness_skip",
+    "worthiness": {
+      "score": 0.22,
+      "components": {
+        "recency": 0.6827242071759259,
+        "sourceReliability": 0.45,
+        "independentSources": 0,
+        "relevance": 0.2,
+        "pokoinValue": 0,
+        "conflictValue": 0,
+        "alreadyCovered": 0
+      },
+      "decision": "skip"
+    }
+  }
+}

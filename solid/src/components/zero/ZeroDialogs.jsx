@@ -1,8 +1,7 @@
-import { createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createSignal, For, Show, untrack } from 'solid-js';
 import { ISSUE_NOTE_MAX, ISSUE_TYPES } from '@market/zero-pick.js';
+import { useDialogFocus } from '../../lib/dialog-focus.js';
 import { LocationText } from './zero-bits.jsx';
-
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Modal shell for the Zero picking dialogs: focuses the first control on open,
@@ -10,24 +9,15 @@ const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textarea:not([
  */
 export function ZeroDialog(props) {
   let box;
-  onSettled(() => {
-    const opener = document.activeElement;
-    box?.querySelector(FOCUSABLE)?.focus();
-    return () => {
-      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
-    };
-  });
+  // `trap: false` keeps these dialogs exactly as they were: only the listing
+  // drawer holds Tab inside itself.
+  const onKeyDown = useDialogFocus(() => box, { onClose: () => props.onClose(), trap: false });
   return (
     <div
       class="modal-backdrop zero-dialog-backdrop"
       role="presentation"
       onClick={(event) => event.target === event.currentTarget && props.onClose()}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation();
-        props.onClose();
-      }}
+      onKeyDown={onKeyDown}
     >
       <div ref={box} class="modal-card zero-dialog" role="dialog" aria-modal="true" aria-labelledby={props.titleId}>
         <h2 id={props.titleId} class="zero-dialog-title">{props.title}</h2>

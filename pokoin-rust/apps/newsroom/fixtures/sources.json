@@ -1,0 +1,77 @@
+[
+  {
+    "input": "",
+    "host": "",
+    "tier": "D"
+  },
+  {
+    "input": "Pokémon",
+    "host": "xn--pokmon-dva",
+    "tier": "C"
+  },
+  {
+    "input": "PokeBeach",
+    "host": "pokebeach.com",
+    "tier": "B"
+  },
+  {
+    "input": "Screen Rant",
+    "host": "screenrant.com",
+    "tier": "C"
+  },
+  {
+    "input": "pokemonblog.com",
+    "host": "pokemonblog.com",
+    "tier": "C"
+  },
+  {
+    "input": "https://pokemon.com/a",
+    "host": "pokemon.com",
+    "tier": "A"
+  },
+  {
+    "input": "https://notpokemon.com",
+    "host": "notpokemon.com",
+    "tier": "C"
+  },
+  {
+    "input": "pokemon.com.evil.example",
+    "host": "pokemon.com.evil.example",
+    "tier": "C"
+  },
+  {
+    "input": "www.pokeguardian.com",
+    "host": "pokeguardian.com",
+    "tier": "B"
+  },
+  {
+    "input": "x.com",
+    "host": "x.com",
+    "tier": "D"
+  },
+  {
+    "input": "IGN",
+    "host": "ign.com",
+    "tier": "C"
+  },
+  {
+    "input": "randomblog.example",
+    "host": "randomblog.example",
+    "tier": "C"
+  },
+  {
+    "input": "https://foo.limitlesstcg.com",
+    "host": "foo.limitlesstcg.com",
+    "tier": "C"
+  },
+  {
+    "input": "screen rant news",
+    "host": "screenrant.com",
+    "tier": "C"
+  },
+  {
+    "input": "youtube",
+    "host": "youtube",
+    "tier": "C"
+  }
+]

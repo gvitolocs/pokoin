@@ -3335,7 +3335,7 @@
 .inv-head,
 .inv-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) 56px 72px 52px 110px 84px 64px 18px;
+  grid-template-columns: minmax(var(--inv-card-min, 170px), 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
   gap: 12px;
   align-items: center;
   padding: 8px 16px;
@@ -3569,10 +3569,10 @@
   }
 
   .inv-row {
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto 44px;
     grid-template-areas:
-      'card  card  status status'
-      'cond  lang  qty    price';
+      'card  card  status status actions'
+      'cond  lang  qty    price  actions';
     padding: 12px 14px;
     row-gap: 8px;
   }
@@ -3637,7 +3637,7 @@
 
 .inv-table.has-mkt .inv-head,
 .inv-table.has-mkt .inv-row {
-  grid-template-columns: minmax(180px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px;
+  grid-template-columns: minmax(150px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
 }
 
 .inv-mkt {
@@ -3671,10 +3671,10 @@
   }
 
   .inv-table.has-mkt .inv-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto 44px;
     grid-template-areas:
-      'card  card   status'
-      'mkt   qty    price';
+      'card  card   status  actions'
+      'mkt   qty    price   actions';
   }
 
   .inv-mkt {
@@ -4867,12 +4867,12 @@ html.is-pointer-dragging body {
 
 .inv-table.has-pick .inv-head,
 .inv-table.has-pick .inv-row {
-  grid-template-columns: 44px minmax(200px, 1fr) 56px 72px 52px 110px 84px 64px 18px;
+  grid-template-columns: 44px minmax(var(--inv-card-min, 150px), 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
 }
 
 .inv-table.has-pick.has-mkt .inv-head,
 .inv-table.has-pick.has-mkt .inv-row {
-  grid-template-columns: 44px minmax(180px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px;
+  grid-template-columns: 44px minmax(var(--inv-card-min, 140px), 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
 }
 
 /* The row link spans every cell but the checkbox. */
@@ -4935,17 +4935,17 @@ html.is-pointer-dragging body {
   }
 
   .inv-table.has-pick .inv-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto auto 44px;
     grid-template-areas:
-      'pick card card status status'
-      'pick cond lang qty    price';
+      'pick card card status status actions'
+      'pick cond lang qty    price actions';
   }
 
   .inv-table.has-pick.has-mkt .inv-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto 44px;
     grid-template-areas:
-      'pick card card status'
-      'pick mkt  qty  price';
+      'pick card card status actions'
+      'pick mkt  qty  price  actions';
   }
 
   .inv-row .inv-pick {
@@ -5460,4 +5460,573 @@ html.is-pointer-dragging body {
 .pricer-confirm-leave p {
   margin: 0;
   font-size: 0.9rem;
+}
+
+/* Row actions: every listing of the seller's own book carries its own Edit and
+   Delete. They sit beside the row link, never inside it: a button in an anchor
+   is unclickable and unreachable by keyboard. */
+
+.inv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inv-act-head {
+  text-align: right;
+}
+
+.inv-actions .icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--g5);
+  border-radius: 9px;
+  background: var(--g3);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.inv-actions .icon-btn:hover:not(:disabled) {
+  border-color: var(--yellow);
+  color: var(--text);
+}
+
+.inv-actions .icon-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.inv-actions .icon-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.inv-del {
+  color: #ff8a73;
+  border-color: rgb(255 120 96 / 0.35);
+}
+
+.inv-del:hover:not(:disabled) {
+  border-color: rgb(255 120 96 / 0.6);
+  background: rgb(255 80 60 / 0.12);
+  color: #ffb3a3;
+}
+
+/* Stacks and Titles: the posting keeps its line, the buttons sit at its end. */
+
+.loc-posting-line {
+  display: flex;
+  align-items: center;
+}
+
+.loc-posting-line > .loc-posting {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.loc-posting-line .inv-actions {
+  padding-right: 16px;
+}
+
+/* Grid: the bar hangs under the tile, outside its anchor. */
+
+.inv-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inv-tile > .collection-tile {
+  flex: 1 1 auto;
+}
+
+.inv-tile-actions {
+  justify-content: center;
+}
+
+/* The listing drawer: the desk's own form in a panel on the right edge, the
+   board still readable behind a light dim. The panel is a column — head, the
+   scrolling fields, and a footer pinned to its bottom. */
+
+.listing-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  /* Above the chat dock's bubble (200), which would otherwise sit on the
+     drawer's own controls; below the pricer pop-up (1000). */
+  z-index: 900;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(4 6 10 / 0.45);
+  /* Only a dim: the board stays clickable, so Edit on another row switches this panel. */
+  pointer-events: none;
+}
+
+/* Wide enough, the board gives the panel its width plus a gutter, so another
+   row's Edit and Delete buttons stay out from under it and switching rows is
+   a click away. The card column is the row's only flexible track: it takes the
+   loss, because a row wider than the table would be clipped by it and its
+   buttons would be unreachable rather than merely covered. With the market
+   columns on the row is wider still, so the inset waits for a larger board. */
+@media (min-width: 1280px) {
+  .inv-board.has-edit-drawer {
+    --inv-card-min: 96px;
+    padding-right: min(460px, 42vw);
+  }
+
+  .inv-board.has-edit-drawer .inv-head,
+  .inv-board.has-edit-drawer .inv-row {
+    gap: 8px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .inv-board.has-edit-drawer:has(.inv-table.has-mkt) {
+    padding-right: 0;
+  }
+}
+
+.listing-drawer {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100vw);
+  height: 100dvh;
+  border-left: 1px solid var(--g5);
+  background: var(--desk-bg, #0a0d13);
+  box-shadow: -22px 0 48px rgb(0 0 0 / 0.5);
+}
+
+.listing-drawer-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--g4);
+}
+
+.listing-drawer-id {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.listing-drawer-id .thread-title {
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-drawer-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.listing-drawer-close:hover {
+  border-color: var(--yellow);
+}
+
+.listing-drawer-close:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.listing-drawer-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.listing-drawer-note {
+  flex: none;
+  margin: 10px 16px 0;
+  color: var(--muted);
+}
+
+/* Inside the drawer the form is not a desk panel: no border, no card outline. */
+
+.sell-form.is-drawer {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  outline: 0;
+}
+
+.sell-drawer-fields {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.sell-drawer-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sell-drawer-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sell-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sell-price-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sell-price-eq {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.sell-pricing-note {
+  margin: 0;
+}
+
+/* The pricing menu: one button that says whose rule the price follows. */
+
+.sell-pricing-menu {
+  position: relative;
+}
+
+.sell-pricing-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-pricing-btn:hover {
+  border-color: var(--yellow);
+}
+
+.sell-pricing-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.sell-pricing-caret {
+  color: var(--muted);
+}
+
+.sell-pricing-list {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: #0d1118;
+  box-shadow: 0 18px 36px rgb(0 0 0 / 0.5);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.sell-pricing-list button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-pricing-list button:hover {
+  background: var(--g4);
+}
+
+.sell-pricing-list button[aria-selected='true'] {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.sell-pricing-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--g4);
+}
+
+/* "New strategy…" is the second step of the same panel. */
+
+.sell-drawer-step {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px 16px 18px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sell-drawer-step .pricer-panel {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* The footer sits at the bottom of the panel; on phones at the bottom of the sheet. */
+
+.sell-drawer-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--g4);
+  background: var(--desk-bg, #0a0d13);
+}
+
+.sell-drawer-foot .sell-save {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.sell-drawer-foot .sell-delete {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0;
+}
+
+.sell-drawer-foot .sell-delete svg {
+  flex: none;
+}
+
+/* A quantity the seller can also type, in the drawer's own row. The chat dock's
+   .chat-qty is pinned to a card thumb, so this stepper keeps its own class. */
+
+.sell-qty {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g2);
+  color: inherit;
+}
+
+.sell-qty button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sell-qty button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chat-qty-input {
+  width: 4ch;
+  padding: 2px 4px;
+  border: 1px solid var(--g5);
+  border-radius: 6px;
+  background: var(--g3);
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.chat-qty-input:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
+
+/* The row's market quotes, one click from the price field. */
+
+.sell-market-quotes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sell-quote-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+button.sell-quote {
+  padding: 4px 10px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g3);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+button.sell-quote:hover {
+  border-color: var(--yellow);
+}
+
+button.sell-quote:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+button.sell-quote b {
+  color: var(--yellow);
+}
+
+.sell-quote.is-reference {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* Phone and narrow: the actions column is its own slot, tap targets grow, and
+   the MyPokoin chip row keeps the two buttons side by side. */
+
+@media (max-width: 860px) {
+  .inv-row .inv-actions {
+    grid-area: actions;
+    align-self: center;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .inv-actions .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .loc-posting-line .inv-actions,
+  .inv-tile-actions {
+    flex-direction: row;
+  }
+}
+
+@media (max-width: 720px) {
+  .mypokoin .inv-actions {
+    flex-direction: row;
+  }
+}
+
+/* Phone: the drawer becomes a bottom sheet — full width, rounded top, a grab
+   bar, its fields scrolling inside and the footer stuck at the bottom. */
+
+@media (max-width: 600px) {
+  .listing-drawer-scrim {
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+
+  .listing-drawer {
+    width: 100vw;
+    max-height: 90vh;
+    height: auto;
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -18px 40px rgb(0 0 0 / 0.55);
+  }
+
+  .listing-drawer::before {
+    content: '';
+    flex: none;
+    width: 44px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 999px;
+    background: var(--g5);
+  }
+
+  .listing-drawer-head {
+    padding: 10px 14px;
+  }
+
+  .listing-drawer-note,
+  .sell-drawer-fields,
+  .sell-drawer-step {
+    padding-inline: 14px;
+  }
+
+  .sell-drawer-foot {
+    position: sticky;
+    padding-inline: 14px;
+  }
+
+  .sell-drawer-foot .sell-save,
+  .sell-drawer-foot .sell-delete {
+    min-height: 44px;
+  }
 }
