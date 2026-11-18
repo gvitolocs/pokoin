@@ -298,6 +298,37 @@ get a write.
   reconcile copies quantity only), and `POST /api/marketplace-listings?action=decrement`
   does not reach CardTrader.
 
+## Facets are written inside the save (2026-11-18)
+
+Condition, language and the printing properties of a linked listing (first
+edition, reverse/foil, signed, altered, graded) go to CardTrader **inside the
+seller's request**, under the row's lock and before it commits
+(`listing_sync::push_saved_facets`, `push::facet_body`), not through the outbox
+like a price. A facet says what the product *is*, so queueing it would tell the
+seller "saved" for a value CardTrader refuses and leave the two describing
+different cards until someone compared them; sending `error_mode: "strict"` and
+waiting for the answer costs one request and cannot lie. Pokoin's answer is
+CardTrader's: a facet the mapping cannot express is `422
+cardtrader_facet_unsupported` before a byte is sent, CardTrader's own refusal is
+`409 cardtrader_refused`, and no answer or a 5xx is `502 cardtrader_unreachable`
+(`PUT /products/:id` rewrites absolute values, so trying again is safe) — all
+three with nothing written, the row included. A 404 is the one case the save
+stands on: the product is gone, the row is written and the answer carries
+`cardtrader: {ok: false, error: "… the next sync relinks it."}`. A listing whose
+product still has live siblings is never refaceted for one of them
+(`sync::group_leave` treats a facet like a price: it leaves the group and the
+reconcile pushes it again), and the `listing.changed` event keeps carrying price
+and quantity only, so no facet is ever sent twice. A flag travels both ways: the
+mapping names a boolean only when it is on and a `PUT` says nothing of a property
+it does not name, so a reverse or first edition turned **off** is sent explicitly
+as `false` under the same key (`pokemon_reverse`, `riftbound_foil`, …), while a
+flag that was never on stays unnamed — a product whose blueprint carries no such
+property is refused it in strict mode. The seller's own settings are read before
+any of that: `link::edit_skip_reason` decides whether Pokoin writes for this
+seller before the blueprint is read and the body is built, so an import-only or
+1-Day Ready seller is never refused over a facet nobody is asked to carry. Proved
+by `pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs`.
+
 ## Power Tools location import
 
 Profile → CardTrader → **Import locations** uploads one Power Tools stock CSV

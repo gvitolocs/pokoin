@@ -1,0 +1,260 @@
+{
+  "now": "2026-10-22T19:39:50.083Z",
+  "story": {
+    "id": "story_20261021_a1lxkm",
+    "canonical_story_id": null,
+    "game": "magic",
+    "topic": "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+    "entities": [
+      "gathering",
+      "confirms",
+      "all",
+      "star",
+      "trek",
+      "products",
+      "prices",
+      "exclusive",
+      "magic",
+      "arena",
+      "pass",
+      "rewards"
+    ],
+    "event_type": "news",
+    "first_seen_at": "2026-10-21T13:12:19.569Z",
+    "last_updated_at": "2026-10-22T13:27:50.135Z",
+    "last_posted_at": null,
+    "status": "single_source",
+    "confidence": 0.4,
+    "primary_source": "VICE",
+    "sources": [
+      {
+        "articleId": "https://news.google.com/rss/articles/CBMioAFBVV95cUxOUWVqOHR0cHczTFphTUxxZTE5YjFqV3hscy1GaW1aY3UwYXV0a0wzczVGLUlPUWs1UUtsNk9sQkhDdmFsdkNCeTNXT1VkTVBzUWFET3hidVNoSUpCdWJQSmJiRUxQUjQyTEQ0T1R2a2J3RVJoTEVQempSYXY1NnNLOUU1eEdtUzEzajVRNFBmVTlsNzhSYk1IRWo1NHp5SjZY?oc=5",
+        "source": "VICE",
+        "link": "https://news.google.com/rss/articles/CBMioAFBVV95cUxOUWVqOHR0cHczTFphTUxxZTE5YjFqV3hscy1GaW1aY3UwYXV0a0wzczVGLUlPUWs1UUtsNk9sQkhDdmFsdkNCeTNXT1VkTVBzUWFET3hidVNoSUpCdWJQSmJiRUxQUjQyTEQ0T1R2a2J3RVJoTEVQempSYXY1NnNLOUU1eEdtUzEzajVRNFBmVTlsNzhSYk1IRWo1NHp5SjZY?oc=5",
+        "source_url": "https://www.vice.com",
+        "title": "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+        "added_at": "2026-10-21T13:12:19.569Z"
+      },
+      {
+        "articleId": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxPNW9sOFR2NUZ6eHk1U2tPXzVZSTZRRVF5Y2RMT21ad1VzQ19RRXRTX1ZjbEVvVmdZd0FuanBMclgwbTU2UTZQcFNFSUNGTXdRb3NLbUN5cTBOU2dZNTlQWnJHQy1ScUFEYmQ5dVVXWnNXMDc5MGduZllvdDNwM3N3SVNjSjhvT213MzZEOGVMbmhUWFVNSERkeEc3UjNmVXpsbVhHcFE2NzFmQjVZZmhhU3hwQ0piU1BIYy1uSENTejByWk8taWtXTW51b1I2OFdZYXVsTXZRSVBWNFA1elE?oc=5",
+        "source": "IGN",
+        "link": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxPNW9sOFR2NUZ6eHk1U2tPXzVZSTZRRVF5Y2RMT21ad1VzQ19RRXRTX1ZjbEVvVmdZd0FuanBMclgwbTU2UTZQcFNFSUNGTXdRb3NLbUN5cTBOU2dZNTlQWnJHQy1ScUFEYmQ5dVVXWnNXMDc5MGduZllvdDNwM3N3SVNjSjhvT213MzZEOGVMbmhUWFVNSERkeEc3UjNmVXpsbVhHcFE2NzFmQjVZZmhhU3hwQ0piU1BIYy1uSENTejByWk8taWtXTW51b1I2OFdZYXVsTXZRSVBWNFA1elE?oc=5",
+        "source_url": "https://www.ign.com",
+        "title": "Magic: The Gathering Star Trek Exclusive 7-Card Reveal",
+        "added_at": "2026-10-21T16:12:19.616Z"
+      },
+      {
+        "articleId": "https://news.google.com/rss/articles/CBMiwgFBVV95cUxNVXZDWi1IdF9ucWVLNVVidHV6aTVqZVl6YUNVNmRUVnVpbXM4cHFqa0MxcjFpdXY0LUdLVFhwaXQxeTZtWUR2SkJ6cjJRZ19ZVmJ0SkpiTnBIczJUNFFGWWx5TkE3aEs0R093SjFfM2ttTHp1ZG10ZHdVQjdfaTQ1eDA4LVNvUFpYY2dvSmt2MjRuNWJQTXRpQXpvb25uZGUxdVhIdEpWcndaMTFzVlYzbFFxMWpkaHlSZi1SbzF3V0xVZw?oc=5",
+        "source": "IGN Nordic",
+        "link": "https://news.google.com/rss/articles/CBMiwgFBVV95cUxNVXZDWi1IdF9ucWVLNVVidHV6aTVqZVl6YUNVNmRUVnVpbXM4cHFqa0MxcjFpdXY0LUdLVFhwaXQxeTZtWUR2SkJ6cjJRZ19ZVmJ0SkpiTnBIczJUNFFGWWx5TkE3aEs0R093SjFfM2ttTHp1ZG10ZHdVQjdfaTQ1eDA4LVNvUFpYY2dvSmt2MjRuNWJQTXRpQXpvb25uZGUxdVhIdEpWcndaMTFzVlYzbFFxMWpkaHlSZi1SbzF3V0xVZw?oc=5",
+        "source_url": "https://nordic.ign.com",
+        "title": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals",
+        "added_at": "2026-10-21T17:12:19.626Z"
+      },
+      {
+        "articleId": "https://news.google.com/rss/articles/CBMixwFBVV95cUxQTlhYRWpSZUNLZ01kNk5qeU10Q19qZ1ZGN1Uxa0tJMEZDc1hVUXJKTDd1NnBYVHlNNXo1ZGdQQXo5UTFGQlRlSDV0ZFllNnRsbC1zS3BNclJTajNXeGMwTzBqYTYtaU9uMEltR2lMd1ctdU9KVTctTVBiQ0FocHhNbE9IdHR4aUF2TTYzNjB1WW83dzdELXZ1Wm1NQ3VIRFhocU1yM3NUaHZWSHd0ZENKS0NOUVYtWG84RUNrckFRSDFHLWg3MXQ4?oc=5",
+        "source": "IGN Nordic",
+        "link": "https://news.google.com/rss/articles/CBMixwFBVV95cUxQTlhYRWpSZUNLZ01kNk5qeU10Q19qZ1ZGN1Uxa0tJMEZDc1hVUXJKTDd1NnBYVHlNNXo1ZGdQQXo5UTFGQlRlSDV0ZFllNnRsbC1zS3BNclJTajNXeGMwTzBqYTYtaU9uMEltR2lMd1ctdU9KVTctTVBiQ0FocHhNbE9IdHR4aUF2TTYzNjB1WW83dzdELXZ1Wm1NQ3VIRFhocU1yM3NUaHZWSHd0ZENKS0NOUVYtWG84RUNrckFRSDFHLWg3MXQ4?oc=5",
+        "source_url": "https://nordic.ign.com",
+        "title": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals",
+        "added_at": "2026-10-21T20:27:49.722Z"
+      },
+      {
+        "articleId": "https://news.google.com/rss/articles/CBMijgFBVV95cUxNQ3U0amtRSFJlN3V3dzY1Mm15VnJoUHhwSTF2NHJDQW5tb0w4TDdpNkh0U3ZBcWFPOVZTOHNFWjE5WGRZblBMeVRMYVZPbVczYnB0NTV4Q3R0aHpLTHJRc1FCNHBncllJRzktR3dxdlhwcUMyMUdjTk03Q1RaaFN6MFBJSWotYTAtS2RIZ2J3?oc=5",
+        "source": "VICE",
+        "link": "https://news.google.com/rss/articles/CBMijgFBVV95cUxNQ3U0amtRSFJlN3V3dzY1Mm15VnJoUHhwSTF2NHJDQW5tb0w4TDdpNkh0U3ZBcWFPOVZTOHNFWjE5WGRZblBMeVRMYVZPbVczYnB0NTV4Q3R0aHpLTHJRc1FCNHBncllJRzktR3dxdlhwcUMyMUdjTk03Q1RaaFN6MFBJSWotYTAtS2RIZ2J3?oc=5",
+        "source_url": "https://www.vice.com",
+        "title": "Magic: The Gathering – All Star Trek Arena Pass Rewards",
+        "added_at": "2026-10-22T13:27:50.135Z"
+      }
+    ],
+    "tokens": [
+      "magic",
+      "gathering",
+      "confirms",
+      "all",
+      "star",
+      "trek",
+      "products",
+      "prices",
+      "exclusive",
+      "slideshow",
+      "ign",
+      "arena",
+      "pass",
+      "rewards"
+    ],
+    "anchors": [
+      "star trek",
+      "gathering star",
+      "trek exclusive",
+      "gathering star trek",
+      "star trek exclusive",
+      "gathering star trek exclusive",
+      "trek arena",
+      "arena pass",
+      "pass rewards",
+      "star trek arena",
+      "trek arena pass",
+      "arena pass rewards",
+      "star trek arena pass",
+      "trek arena pass rewards"
+    ],
+    "claims": [],
+    "novelty_score": 1,
+    "collector_relevance": null,
+    "player_relevance": null,
+    "seller_relevance": null,
+    "market_relevance": null,
+    "pokoinData": null,
+    "updateHistory": []
+  },
+  "pack": {
+    "canonicalStoryId": "story_20261021_a1lxkm",
+    "summaryOfEvent": "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+    "confirmedClaims": [],
+    "unconfirmedClaims": [],
+    "pressClaims": [
+      "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+      "Magic: The Gathering Star Trek Exclusive 7-Card Reveal",
+      "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals",
+      "Magic: The Gathering – All Star Trek Arena Pass Rewards"
+    ],
+    "conflictingClaims": [],
+    "entities": [
+      "gathering",
+      "confirms",
+      "all",
+      "star",
+      "trek",
+      "products",
+      "prices",
+      "exclusive",
+      "magic",
+      "arena",
+      "pass",
+      "rewards"
+    ],
+    "dates": [],
+    "numbers": [],
+    "quotes": [],
+    "sourceList": [
+      {
+        "outlet": "VICE",
+        "link": "https://news.google.com/rss/articles/CBMioAFBVV95cUxOUWVqOHR0cHczTFphTUxxZTE5YjFqV3hscy1GaW1aY3UwYXV0a0wzczVGLUlPUWs1UUtsNk9sQkhDdmFsdkNCeTNXT1VkTVBzUWFET3hidVNoSUpCdWJQSmJiRUxQUjQyTEQ0T1R2a2J3RVJoTEVQempSYXY1NnNLOUU1eEdtUzEzajVRNFBmVTlsNzhSYk1IRWo1NHp5SjZY?oc=5",
+        "tier": "C",
+        "headline": "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+        "addedAt": "2026-10-21T13:12:19.569Z",
+        "id": "s1",
+        "url": "https://news.google.com/rss/articles/CBMioAFBVV95cUxOUWVqOHR0cHczTFphTUxxZTE5YjFqV3hscy1GaW1aY3UwYXV0a0wzczVGLUlPUWs1UUtsNk9sQkhDdmFsdkNCeTNXT1VkTVBzUWFET3hidVNoSUpCdWJQSmJiRUxQUjQyTEQ0T1R2a2J3RVJoTEVQempSYXY1NnNLOUU1eEdtUzEzajVRNFBmVTlsNzhSYk1IRWo1NHp5SjZY?oc=5",
+        "publishedAt": null,
+        "title": "Magic: The Gathering Confirms All Star Trek Set Products and Prices"
+      },
+      {
+        "outlet": "IGN",
+        "link": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxPNW9sOFR2NUZ6eHk1U2tPXzVZSTZRRVF5Y2RMT21ad1VzQ19RRXRTX1ZjbEVvVmdZd0FuanBMclgwbTU2UTZQcFNFSUNGTXdRb3NLbUN5cTBOU2dZNTlQWnJHQy1ScUFEYmQ5dVVXWnNXMDc5MGduZllvdDNwM3N3SVNjSjhvT213MzZEOGVMbmhUWFVNSERkeEc3UjNmVXpsbVhHcFE2NzFmQjVZZmhhU3hwQ0piU1BIYy1uSENTejByWk8taWtXTW51b1I2OFdZYXVsTXZRSVBWNFA1elE?oc=5",
+        "tier": "C",
+        "headline": "Magic: The Gathering Star Trek Exclusive 7-Card Reveal",
+        "addedAt": "2026-10-21T16:12:19.616Z",
+        "id": "s2",
+        "url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxPNW9sOFR2NUZ6eHk1U2tPXzVZSTZRRVF5Y2RMT21ad1VzQ19RRXRTX1ZjbEVvVmdZd0FuanBMclgwbTU2UTZQcFNFSUNGTXdRb3NLbUN5cTBOU2dZNTlQWnJHQy1ScUFEYmQ5dVVXWnNXMDc5MGduZllvdDNwM3N3SVNjSjhvT213MzZEOGVMbmhUWFVNSERkeEc3UjNmVXpsbVhHcFE2NzFmQjVZZmhhU3hwQ0piU1BIYy1uSENTejByWk8taWtXTW51b1I2OFdZYXVsTXZRSVBWNFA1elE?oc=5",
+        "publishedAt": null,
+        "title": "Magic: The Gathering Star Trek Exclusive 7-Card Reveal"
+      },
+      {
+        "outlet": "IGN Nordic",
+        "link": "https://news.google.com/rss/articles/CBMiwgFBVV95cUxNVXZDWi1IdF9ucWVLNVVidHV6aTVqZVl6YUNVNmRUVnVpbXM4cHFqa0MxcjFpdXY0LUdLVFhwaXQxeTZtWUR2SkJ6cjJRZ19ZVmJ0SkpiTnBIczJUNFFGWWx5TkE3aEs0R093SjFfM2ttTHp1ZG10ZHdVQjdfaTQ1eDA4LVNvUFpYY2dvSmt2MjRuNWJQTXRpQXpvb25uZGUxdVhIdEpWcndaMTFzVlYzbFFxMWpkaHlSZi1SbzF3V0xVZw?oc=5",
+        "tier": "C",
+        "headline": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals",
+        "addedAt": "2026-10-21T17:12:19.626Z",
+        "id": "s3",
+        "url": "https://news.google.com/rss/articles/CBMiwgFBVV95cUxNVXZDWi1IdF9ucWVLNVVidHV6aTVqZVl6YUNVNmRUVnVpbXM4cHFqa0MxcjFpdXY0LUdLVFhwaXQxeTZtWUR2SkJ6cjJRZ19ZVmJ0SkpiTnBIczJUNFFGWWx5TkE3aEs0R093SjFfM2ttTHp1ZG10ZHdVQjdfaTQ1eDA4LVNvUFpYY2dvSmt2MjRuNWJQTXRpQXpvb25uZGUxdVhIdEpWcndaMTFzVlYzbFFxMWpkaHlSZi1SbzF3V0xVZw?oc=5",
+        "publishedAt": null,
+        "title": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals"
+      },
+      {
+        "outlet": "IGN Nordic",
+        "link": "https://news.google.com/rss/articles/CBMixwFBVV95cUxQTlhYRWpSZUNLZ01kNk5qeU10Q19qZ1ZGN1Uxa0tJMEZDc1hVUXJKTDd1NnBYVHlNNXo1ZGdQQXo5UTFGQlRlSDV0ZFllNnRsbC1zS3BNclJTajNXeGMwTzBqYTYtaU9uMEltR2lMd1ctdU9KVTctTVBiQ0FocHhNbE9IdHR4aUF2TTYzNjB1WW83dzdELXZ1Wm1NQ3VIRFhocU1yM3NUaHZWSHd0ZENKS0NOUVYtWG84RUNrckFRSDFHLWg3MXQ4?oc=5",
+        "tier": "C",
+        "headline": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals",
+        "addedAt": "2026-10-21T20:27:49.722Z",
+        "id": "s4",
+        "url": "https://news.google.com/rss/articles/CBMixwFBVV95cUxQTlhYRWpSZUNLZ01kNk5qeU10Q19qZ1ZGN1Uxa0tJMEZDc1hVUXJKTDd1NnBYVHlNNXo1ZGdQQXo5UTFGQlRlSDV0ZFllNnRsbC1zS3BNclJTajNXeGMwTzBqYTYtaU9uMEltR2lMd1ctdU9KVTctTVBiQ0FocHhNbE9IdHR4aUF2TTYzNjB1WW83dzdELXZ1Wm1NQ3VIRFhocU1yM3NUaHZWSHd0ZENKS0NOUVYtWG84RUNrckFRSDFHLWg3MXQ4?oc=5",
+        "publishedAt": null,
+        "title": "Slideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals"
+      },
+      {
+        "outlet": "VICE",
+        "link": "https://news.google.com/rss/articles/CBMijgFBVV95cUxNQ3U0amtRSFJlN3V3dzY1Mm15VnJoUHhwSTF2NHJDQW5tb0w4TDdpNkh0U3ZBcWFPOVZTOHNFWjE5WGRZblBMeVRMYVZPbVczYnB0NTV4Q3R0aHpLTHJRc1FCNHBncllJRzktR3dxdlhwcUMyMUdjTk03Q1RaaFN6MFBJSWotYTAtS2RIZ2J3?oc=5",
+        "tier": "C",
+        "headline": "Magic: The Gathering – All Star Trek Arena Pass Rewards",
+        "addedAt": "2026-10-22T13:27:50.135Z",
+        "id": "s5",
+        "url": "https://news.google.com/rss/articles/CBMijgFBVV95cUxNQ3U0amtRSFJlN3V3dzY1Mm15VnJoUHhwSTF2NHJDQW5tb0w4TDdpNkh0U3ZBcWFPOVZTOHNFWjE5WGRZblBMeVRMYVZPbVczYnB0NTV4Q3R0aHpLTHJRc1FCNHBncllJRzktR3dxdlhwcUMyMUdjTk03Q1RaaFN6MFBJSWotYTAtS2RIZ2J3?oc=5",
+        "publishedAt": null,
+        "title": "Magic: The Gathering – All Star Trek Arena Pass Rewards"
+      }
+    ],
+    "primarySource": "VICE",
+    "confidence": "single_source",
+    "previousCoverage": [],
+    "pokoinData": null,
+    "suggestedAngles": [],
+    "status": "single_source",
+    "lastUpdated": "2026-10-22T13:27:50.135Z",
+    "isUpdate": false,
+    "sourceDocs": [],
+    "claimLedger": [],
+    "conflicts": [],
+    "primarySources": [],
+    "firstSeenAt": "2026-10-21T13:12:19.569Z",
+    "excerptsCorpus": "Magic: The Gathering Confirms All Star Trek Set Products and Prices\nMagic: The Gathering Star Trek Exclusive 7-Card Reveal\nSlideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals\nSlideshow: Magic the Gathering: Star Trek – IGN Exclusive Card Reveals\nMagic: The Gathering – All Star Trek Arena Pass Rewards",
+    "market": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "images": [],
+    "game": "magic",
+    "topic": "Magic: The Gathering Confirms All Star Trek Set Products and Prices",
+    "angle": "OFFICIAL_CONFIRMATION",
+    "rejectedCards": [],
+    "resolvedEntities": []
+  },
+  "hints": {
+    "angle": "OFFICIAL_CONFIRMATION",
+    "storyStatus": "single_source",
+    "sourceCount": 5,
+    "independentSourceCount": 2,
+    "imageCount": 0,
+    "marketDataAvailable": false,
+    "entityCount": 12,
+    "evolving": true,
+    "claimVerificationCentral": false,
+    "conflictCount": 0,
+    "originalReportingScore": 0,
+    "firstSeenHoursAgo": 30.45847611111111,
+    "revealClaims": 0,
+    "comparableProducts": 0
+  },
+  "validTemplates": [
+    "developing",
+    "trend",
+    "explainer"
+  ],
+  "memory": "Desk lessons:\n- (editor_flag, seen 55×) Keep the house style: short, concrete, no filler intros.\n- (editor_flag, seen 6×) When sources disagree, name both values and both outlets.\n- (editor_flag, seen 4×) Write in your own words; never echo a source sentence.\n- (correction_lesson, seen 1×) A card image must be the exact printing the story names (card name plus collector number, or name plus set in the same sentence). A Pokemon name alone, even with ex, is not a printing: the 30th Celebration Battle Deck Espeon ex was wrongly illustrated with the Prismatic Evolutions SIR 155/131. When the evidence names no printing, use no card image, no related card and no market module.",
+  "worthiness": {
+    "score": 0.22,
+    "components": {
+      "recency": 0.6827242071759259,
+      "sourceReliability": 0.45,
+      "independentSources": 0,
+      "relevance": 0.2,
+      "pokoinValue": 0,
+      "conflictValue": 0,
+      "alreadyCovered": 0
+    },
+    "decision": "skip"
+  },
+  "getRequests": 5
+}

@@ -1,0 +1,21 @@
+[package]
+name = "ct-ask-unpad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# One-off data fix: drop the 200 PKN shipping pad the price cache added to the
+# stored CardTrader lowest ask before 2026-09-21 (see README.md).
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ct-ask-unpad"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

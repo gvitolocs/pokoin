@@ -12,13 +12,34 @@ import {
   saveSellerSettings,
   updateListing,
 } from '@market/api.js';
-import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation } from '@market/card-desk.js';
-import { editPriceFields, groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
+import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation, offerLanguage } from '@market/card-desk.js';
+import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
+import {
+  CUSTOM_PRICING,
+  drawerChipSplit,
+  editListingBody,
+  listingFormEdited,
+  listingFormState,
+  listingSaveOutcome,
+  ownPriceChoice,
+  patchCarriesPrice,
+  pricingAnswerCounts,
+  pricingDryRunBody,
+  pricingDryRunPrice,
+  pricingEntryChosen,
+  pricingFieldPkn,
+  pricingGroupOf,
+  pricingMenuEntries,
+  pricingMenuLabel,
+  pricingSavePlan,
+  rowEditorReset,
+} from '@market/listing-row-edit.js';
+import { localizeStrategyName } from '@market/pricer.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
 import { game as currentGame } from '@market/game.js';
 import { listingBox } from '@market/inventory-listings.js';
-import { priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
-import { sellLanguages, versionRedirects } from '@market/listing-languages.js';
+import { inventoryMarketLabel, priceCheckItem, priceCheckKey } from '@market/inventory-price.js';
+import { deskLanguageChips, versionRedirects } from '@market/listing-languages.js';
 import { listingExtraChips, listingFoilOptions } from '@market/listing-faces.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { defaultCardLanguage, getSearchLang } from '@market/locale.js';
@@ -35,6 +56,16 @@ import { sellerNameOf } from '@market/auth-session.js';
 import InventoryTargets from './InventoryTargets.jsx';
 import ListingLangPick, { dismissWhileOpen } from './ListingLangPick.jsx';
 import ShipFromCountryGate from './ShipFromCountryGate.jsx';
+import QtyStepper from '../QtyStepper.jsx';
+import StrategyEditor, { createStrategyEditor } from '../pricer/StrategyEditor.jsx';
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 9h2l.7 8.2a1 1 0 0 0 1 .8h5.6a1 1 0 0 0 1-.8L19 12h2l-.8 9.3a2 2 0 0 1-2 1.7H8.8a2 2 0 0 1-2-1.7L6 12Z" />
+    </svg>
+  );
+}
 
 function ConditionPick(props) {
   const [open, setOpen] = createSignal(false);
@@ -88,10 +119,19 @@ function CameraIcon() {
   );
 }
 
+// CardTrader answers a facet it cannot take, a refusal, or a timeout with one
+// of these codes; the seller reads the server's message, never the code.
+const CARDTRADER_REFUSALS = new Set(['cardtrader_facet_unsupported', 'cardtrader_refused', 'cardtrader_unreachable']);
+
 /**
  * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
  * that only gained fields (page hydrate) does not reset what the seller typed.
+ * As the row editor (MyPokoin) `props.editing` is the inventory row and
+ * `presets`, `currencies`, `moreFlags`, `onDelete` and `preview` fill the edit
+ * side; in preview a save writes the fixture row and never calls the API.
+ * `variant="drawer"` lays the same fields out in the inventory drawer, with the
+ * pricing menu the board's own `createPricing` store drives.
  */
 export default function ListingForm(props) {
   const navigate = useGameNavigate();
@@ -108,6 +148,7 @@ export default function ListingForm(props) {
   let currencyManual = false;
   let boxTouched = false;
   let formEl;
+  let errorEl;
   const [currency, setCurrency] = createSignal(untrack(sellerCurrency));
   const [qty, setQty] = createSignal(blank.qty);
   const [condition, setCondition] = createSignal(blank.condition);
@@ -146,17 +187,44 @@ export default function ListingForm(props) {
   // The cached session is enough to paint the form enabled; a save waits for
   // the bearer (getBearer) anyway.
   const ready = () => authReady() || signedIn();
-  const listLangs = createMemo(() => sellLanguages({
-    nationality: card().nationality,
-    setName: props.identity?.set || card().set,
-    releaseLanguages: card().releaseLanguages,
-  }));
+  const editingId = createMemo(() => props.editing?.id || '');
+  const isEditing = () => Boolean(editingId());
+  const listLangs = createMemo(() => {
+    // Editing an inventory row: its own language stays selectable even when the
+    // card's catalog languages do not list it (an old card can be sold in Indonesian).
+    const stored = editingId() ? [offerLanguage(props.editing, card())] : [];
+    return deskLanguageChips({
+      nationality: card().nationality,
+      setName: props.identity?.set || card().set,
+      releaseLanguages: card().releaseLanguages,
+      data: stored,
+    });
+  });
   const redirects = createMemo(() => versionRedirects(props.versions || [], card().id, listLangs(), {
     nationality: card().nationality,
   }));
   const langKey = createMemo(() => listLangs().join(','));
-  const editingId = createMemo(() => props.editing?.id || '');
-  const isEditing = () => Boolean(editingId());
+  // "From the market" quotes for the price of the listing being edited.
+  const presets = () => (isEditing() && Array.isArray(props.presets) ? props.presets : []);
+  // The inventory editor shows the desk's Signed and Altered chips too.
+  const extraChips = () => (props.moreFlags
+    ? [...listChips, { key: 'signed', label: 'Signed' }, { key: 'altered', label: 'Altered' }]
+    : listChips);
+  // Currency choices: the seller's own first, or the desk's fixed list.
+  const currencies = () => (Array.isArray(props.currencies) && props.currencies.length
+    ? props.currencies
+    : [...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()]);
+  const presetPrice = (pkn) => (currency() === 'PKN'
+    ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
+    : formatPknNumber(fiatFromPkn(pkn, currency()), { maximumFractionDigits: 2 }));
+
+  function takePreset(row) {
+    setPrice(presetPrice(row.pkn));
+    priceManual = true;
+    priceTyped = true;
+    takeOwnPrice();
+  }
+
   // The pricing group of the listing being edited: a new price takes it out.
   const [priceGroup, setPriceGroup] = createSignal(null);
   createEffect(editingId, (id) => {
@@ -174,12 +242,189 @@ export default function ListingForm(props) {
     })();
   });
 
-  function applyFields(next) {
+  // ── The row editor's drawer (MyPokoin): the same fields, plus pricing ─────
+  const drawer = () => props.variant === 'drawer';
+  // Which pricing the listing follows: none picked is the seller's own price.
+  const [pricingPick, setPricingPick] = createSignal(null);
+  const [pricingOpen, setPricingOpen] = createSignal(false);
+  // A picked group or strategy prices the listing itself: shown, never typed.
+  const [pricingTarget, setPricingTarget] = createSignal(null);
+  const [pricingChecked, setPricingChecked] = createSignal(false);
+  // "New strategy…" is a second step of the same drawer, the listing behind it.
+  const [strategyStep, setStrategyStep] = createSignal(false);
+  // Every pick and every row switch invalidates the dry runs asked before it.
+  let pricingRun = 0;
+  const pricingCtx = () => props.pricing?.currencyCtx();
+  const originalPkn = () => {
+    const value = Number(props.editing?.pricePkn ?? props.editing?.price_pkn);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const priceText = (value) => (value > 0 ? `${presetPrice(value)} ${currency()}` : '');
+  const strategyEditor = drawer() && props.pricing
+    ? createStrategyEditor({
+      ctx: pricingCtx,
+      strategies: () => props.pricing.strategies(),
+      exampleComp: () => props.pricing.compFor(props.editing),
+      save: (draft) => props.pricing.saveStrategy(draft),
+      onSaved: (strategy) => pickStrategy(strategy),
+    })
+    : null;
+  const pricingEntries = () => pricingMenuEntries({
+    groups: props.pricing?.groups() || [],
+    strategies: props.pricing?.strategies() || [],
+    ctx: pricingCtx(),
+  });
+  /** The menu's button: the entry chosen in this edit, else the group the listing is in. */
+  const pricingLabel = () => {
+    const pick = pricingPick();
+    if (pick) return pick.label;
+    return pricingMenuLabel({
+      memberships: props.pricing?.memberships(),
+      groups: props.pricing?.groups() || [],
+      strategies: props.pricing?.strategies() || [],
+      listingId: editingId(),
+      ctx: pricingCtx(),
+    });
+  };
+  /** The group whose note sits under the price: the store's in the drawer. */
+  const rowGroup = () => {
+    if (!drawer() || !props.pricing) return priceGroup();
+    const groupId = pricingGroupOf(props.pricing.memberships(), editingId());
+    return (props.pricing.groups() || []).find((entry) => String(entry?.id ?? '') === groupId) || null;
+  };
+  // A group or strategy prices the listing; the seller's own price never does.
+  const followsPricing = () => {
+    const pick = pricingPick();
+    return Boolean(pick) && pick.kind !== 'custom';
+  };
+  /** Whether a menu row is the one in force. */
+  const pricingChosen = (entry) => pricingEntryChosen({
+    entry,
+    picked: pricingPick(),
+    inGroup: Boolean(rowGroup()),
+  });
+  /** What a picked group or strategy did to this listing's price. */
+  const pricingNoteLine = () => {
+    const pick = pricingPick();
+    if (!followsPricing()) return '';
+    const was = priceText(originalPkn());
+    if (!pricingChecked()) return `Checking ${pick.name}…`;
+    if (pricingTarget() == null) return `No market price for this card; it stays at ${was || 'its current price'}.`;
+    return `Set by ${pick.name}${was ? ` · was ${was}` : ''}`;
+  };
+
+  function backToCustom() {
+    pricingRun += 1;
+    setPricingPick(null);
+    setPricingTarget(null);
+    setPricingChecked(false);
+  }
+
+  /** The seller prices this listing: the field's number is theirs, and a new one leaves the group. */
+  function takeOwnPrice() {
+    // A rule can sit on the price two ways — picked in this edit, or the group
+    // the listing is already in — and an own number leaves either one.
+    const next = ownPriceChoice({ picked: pricingPick(), inGroup: Boolean(rowGroup()) });
+    if (!next) return;
+    pricingRun += 1;
+    setPricingPick(next);
+    setPricingTarget(null);
+    setPricingChecked(false);
+  }
+
+  /** The dry run of the picked entry on this listing alone. */
+  async function priceByPricing(pick, run) {
+    const body = pricingDryRunBody(pick, props.pricing?.groups() || [], editingId());
+    setPricingChecked(true);
+    if (!body) return;
+    const listing = editingId();
+    // The answer only counts while nothing else took the field over: the check
+    // is `pricingRun` plus the row, both read again after the await.
+    const stillOurs = () => pricingAnswerCounts({
+      token: run,
+      latest: pricingRun,
+      listingId: listing,
+      currentId: editingId(),
+    });
+    try {
+      const answer = await props.pricing.apply(body);
+      if (!stillOurs()) return;
+      const target = pricingDryRunPrice(answer, originalPkn());
+      setPricingTarget(target);
+      // The field shows the strategy's price; it is not a typed one, so the
+      // PATCH leaves the price alone and `apply` sets it.
+      if (target) setPrice(presetPrice(target));
+    } catch (err) {
+      if (!stillOurs()) return;
+      backToCustom();
+      setError(err.message || 'The market price was not available.');
+    }
+  }
+
+  let pricingTrigger;
+  let pricingList;
+  let pricingRoot;
+
+  /** Follow a group or strategy: dry-run it on this listing and show its price. */
+  function followPricing(entry) {
+    setPricingPick(entry);
+    setPricingTarget(null);
+    setPricingChecked(false);
+    // The rule owns the number now, so a price typed before the pick is not the
+    // seller's ask any more and must not ride along in the PATCH.
+    priceTyped = false;
+    pricingRun += 1;
+    void priceByPricing(entry, pricingRun);
+  }
+
+  /** The menu's choice: custom, a group, a strategy, or a new strategy. */
+  function choosePricing(entry) {
+    pricingTrigger?.focus();
+    setPricingOpen(false);
+    if (entry.kind === 'new') {
+      strategyEditor?.open(null);
+      setStrategyStep(true);
+      return;
+    }
+    if (entry.kind === 'custom') {
+      pricingRun += 1;
+      setPricingPick(CUSTOM_PRICING);
+      setPricingTarget(null);
+      setPricingChecked(false);
+      // A rule's preview was never the seller's number: the field goes back to
+      // the price the listing has, which they may now overwrite.
+      const was = pricingFieldPkn(entry, originalPkn());
+      if (was != null) setPrice(presetPrice(was));
+      // The price in the field becomes the seller's own, and a new one leaves the group.
+      priceManual = true;
+      priceTyped = true;
+      return;
+    }
+    followPricing(entry);
+  }
+
+  /** Back from the strategy step with the saved strategy picked and priced. */
+  function pickStrategy(strategy) {
+    setStrategyStep(false);
+    const entry = pricingEntries().find((row) => row.kind === 'strategy' && row.id === strategy?.id);
+    if (entry) followPricing(entry);
+  }
+
+  /**
+   * Put one row's fields into the form, and answer with the snapshot of what
+   * the form now holds. The snapshot is built from these values rather than
+   * read back: within one update the writes are not visible to a read yet, and
+   * a baseline taken from the values before them calls a row that only opened
+   * an edited one.
+   */
+  function applyFields(next, withPhotos = null) {
     // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
     const listIn = untrack(currencyManual ? currency : sellerCurrency);
-    setPrice(listIn === next.currency || !next.price
+    const shown = listIn === next.currency || !next.price
       ? next.price
-      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
+      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn);
+    const pics = withPhotos === null ? untrack(photos) : withPhotos;
+    setPrice(shown);
     setCurrency(listIn);
     setQty(next.qty);
     setCondition(next.condition);
@@ -190,24 +435,66 @@ export default function ListingForm(props) {
     setCompany(next.company);
     setGrade(next.grade);
     setCert(next.cert);
+    setPhotos(pics);
     setError('');
     setDone('');
+    return listingFormState({
+      pricePkn: listingPriceToPkn(shown || untrack(graphPrice), listIn),
+      qty: next.qty,
+      condition: next.condition,
+      language: next.language,
+      foil: next.foil,
+      comment: next.comment,
+      company: next.company,
+      grade: next.grade,
+      cert: next.cert,
+      chips: next.chips,
+      photos: pics,
+      pricing: false,
+    });
   }
 
   // [card.id, editingId]
   const resetKey = createMemo(() => `${card().id}|${editingId()}`);
+  // The fields as this row came in: the row editor compares against them to
+  // ask before it switches listings with something unsaved.
+  const [baselineForm, setBaselineForm] = createSignal(null);
   createEffect(resetKey, () => {
     const editing = untrack(() => props.editing);
     const row = untrack(card);
-    priceTyped = false;
-    if (editing?.id) {
-      applyFields(listingFormFromOffer(editing, row));
-      priceManual = true;
-      formEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
-    }
-    priceManual = false;
-    applyFields(blankListingForm(row));
+    // The drawer keeps this form mounted when it moves to another row, so
+    // nothing of the row left behind may survive — its photos above all, since
+    // a save would write them onto the new listing.
+    const fresh = rowEditorReset(editing);
+    priceTyped = fresh.priceTyped;
+    boxTouched = fresh.boxTouched;
+    setOwnLocation(fresh.ownLocation);
+    setStockBoxes(fresh.stockBoxes);
+    setStockReady(fresh.stockReady);
+    backToCustom();
+    setPricingTarget(null);
+    setStrategyStep(false);
+    // The baseline is the form as it now stands, after the currency conversion:
+    // the raw fields hold PKN while the field shows the seller's unit, and a
+    // signal written in this pass cannot be read back in it — so applyFields
+    // hands back what it just wrote.
+    setBaselineForm(applyFields(
+      editing?.id ? listingFormFromOffer(editing, row) : blankListingForm(row),
+      fresh.photos,
+    ));
+    priceManual = Boolean(editing?.id);
+    if (editing?.id) formEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  const edited = createMemo(() => {
+    // A memo runs once the moment it is created, before the row's fields are
+    // applied: without a baseline there is nothing to have changed.
+    const base = baselineForm();
+    return base ? listingFormEdited(base, formFields()) : false;
+  });
+  // The drawer asks "Discard your changes?" before it opens another row.
+  createEffect(edited, (dirty) => {
+    if (drawer()) props.onFieldEdit?.(dirty);
   });
 
   // [preferredLanguage, langKey, editingId]
@@ -276,6 +563,25 @@ export default function ListingForm(props) {
     return currency() === 'PKN'
       ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
       : formatPknNumber(fiatFromPkn(pkn, currency()), { maximumFractionDigits: 2 });
+  });
+
+  // The price the form would send, in PKN: what the field shows, else the suggestion.
+  const amountPkn = () => listingPriceToPkn(price() || graphPrice(), currency());
+  /** The editor's fields as the dirty check compares them, price in PKN. */
+  const formFields = (over = {}) => ({
+    pricePkn: amountPkn(),
+    qty: qty(),
+    condition: condition(),
+    language: language(),
+    foil: foil(),
+    comment: comment(),
+    company: company(),
+    grade: grade(),
+    cert: cert(),
+    chips: chips(),
+    photos: photos(),
+    pricing: pricingPick(),
+    ...over,
   });
 
   // [graphPrice, editingId, card.id, currency]
@@ -353,7 +659,92 @@ export default function ListingForm(props) {
     return sameBox ? keptLocation() : nextBoxLocation(stockBoxes(), current);
   };
 
+  /** The PATCH body of an edit, or null when the form does not validate. */
+  function editDraft() {
+    const amount = amountPkn();
+    const quantity = Number.parseInt(qty(), 10);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
+      setError('Enter a valid price and quantity.');
+      return null;
+    }
+    const flags = chips();
+    if (flags.graded && (!company().trim() || !grade().trim() || !cert().trim())) {
+      setError('Enter grading company, grade and certification ID.');
+      return null;
+    }
+    return editListingBody({
+      amount,
+      quantity,
+      condition: condition(),
+      language: language(),
+      foil: foil(),
+      flags,
+      comment: comment(),
+      company: company(),
+      grade: grade(),
+      cert: cert(),
+      location: locationValue(),
+      // An edit only moves the box slot when the server said where it is.
+      sendLocation: stockReady() && ownLocation() !== null,
+      // A chosen rule prices the listing itself, so no price goes with its PATCH.
+      priceTyped: patchCarriesPrice(pricingPick(), priceTyped),
+      sellerUid: uid() || props.editing?.sellerUid,
+      showSigned: Boolean(props.moreFlags),
+      showAltered: Boolean(props.moreFlags),
+    }, props.editing);
+  }
+
+  /** The listing saved, the rule behind its price did not: the editor stays open on the seller's own price. */
+  function stayOnOwnPrice(outcome) {
+    setDone('Listing updated.');
+    setError(`Saved, but the price was not applied: ${outcome.pricingFailed}`);
+    setPricingPick(CUSTOM_PRICING);
+    setPricingTarget(null);
+    setPricingChecked(false);
+    priceTyped = false;
+    priceManual = true;
+    setPrice(presetPrice(originalPkn()));
+    // The board's row follows the PATCH answer, and these fields become the
+    // row's starting point: closing over the message is not a discard prompt.
+    if (outcome.row) props.onRowUpdate?.(outcome.row);
+    setBaselineForm(listingFormState(formFields({
+      pricePkn: listingPriceToPkn(presetPrice(originalPkn()), currency()),
+      pricing: CUSTOM_PRICING,
+    })));
+  }
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
+    if (isEditing() && props.preview) {
+      // The layout preview has no API: the edit and the pricing land on the
+      // fixture through the same callbacks the live save uses.
+      const draft = editDraft();
+      if (!draft) return;
+      let pricedPkn = null;
+      let pricingFailed = '';
+      if (pricingPick()) {
+        for (const step of pricingSavePlan(pricingPick(), editingId())) {
+          if (step.call === 'patch') continue;
+          try {
+            if (step.call === 'saveGroup') await props.pricing.saveGroup(step.body);
+            else pricedPkn = pricingDryRunPrice(await props.pricing.apply(step.body), originalPkn());
+          } catch (err) {
+            pricingFailed = err.message || 'the price was not applied.';
+            break;
+          }
+        }
+      }
+      const outcome = listingSaveOutcome({
+        saved: { ...props.editing, ...draft, id: editingId() },
+        pricedPkn,
+        pricingFailed,
+      });
+      if (outcome.pricingFailed) {
+        stayOnOwnPrice(outcome);
+        return;
+      }
+      props.onListed?.(outcome.row, outcome.note);
+      return;
+    }
     if (!signedIn()) {
       navigate(authFrom(props.fromPath));
       return;
@@ -365,9 +756,10 @@ export default function ListingForm(props) {
       setShipGateOpen(true);
       return;
     }
-    const amount = price()
-      ? listingPriceToPkn(price(), currency())
-      : listingPriceToPkn(graphPrice(), currency());
+    // An edit builds and validates its body in editDraft; below is the create path.
+    const edit = editing ? editDraft() : null;
+    if (editing && !edit) return;
+    const amount = amountPkn();
     const quantity = Number.parseInt(qty(), 10);
     if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
       setError('Enter a valid price and quantity.');
@@ -433,14 +825,8 @@ export default function ListingForm(props) {
         setName: props.identity.set,
         collectorNumber: props.identity.number,
       };
-      const { pricePkn: _typedPrice, ...editFields } = fields;
       const saved = editing
-        ? await updateListing(id, {
-          ...editFields,
-          ...editPriceFields(amount, props.editing?.pricePkn ?? props.editing?.price_pkn, priceTyped),
-          sellerUid: uid() || props.editing?.sellerUid,
-          status: 'active',
-        }, token)
+        ? await updateListing(id, edit, token)
         : await createListing({
           cardId: publicCardId(row),
           sellerName: sellerName(),
@@ -454,10 +840,37 @@ export default function ListingForm(props) {
           ...fields,
         }, token);
       track(Action.sell, row);
-      if (saved?.cardtrader && saved.cardtrader.ok === false) {
+      // One click, one order: the listing first, then the pricing it follows.
+      const pricing = pricingPick();
+      let pricedPkn = null;
+      let pricingFailed = '';
+      if (editing && pricing) {
+        for (const step of pricingSavePlan(pricing, id)) {
+          if (step.call === 'patch') continue;
+          try {
+            if (step.call === 'saveGroup') await props.pricing.saveGroup(step.body);
+            else {
+              const answer = await props.pricing.apply(step.body);
+              pricedPkn = pricingDryRunPrice(answer, originalPkn());
+            }
+          } catch (err) {
+            // The listing saved; the price did not follow. The seller stays in
+            // the drawer with their own price and can save again.
+            pricingFailed = err.message || 'the price was not applied.';
+            break;
+          }
+        }
+      }
+      const outcome = listingSaveOutcome({ saved, pricedPkn, pricingFailed });
+      if (outcome.pricingFailed) {
+        stayOnOwnPrice(outcome);
+        return;
+      }
+      if (outcome.note) {
         setDone(editing ? 'Listing updated.' : 'Listed on Pokoin.');
-        setError(saved.cardtrader.error || 'CardTrader push failed.');
+        setError(outcome.note);
       } else if (saved?.listing === null && saved?.cardtrader?.ok) {
+        // A CardTrader push that came with the save is the desk's own line.
         setDone('Listed on CardTrader.');
       } else if (editing && leftGroupLine(saved)) {
         // The new price took the listing out of its pricing group.
@@ -468,13 +881,14 @@ export default function ListingForm(props) {
       }
       if (!editing) setQty('1');
       setStockVersion((n) => n + 1);
-      const listingRow = saved?.id ? saved : saved?.listing;
+      let listingRow = outcome.row;
       if (listingRow?.id && photos().length) {
         const attached = await saveListingPhotos(token, listingRow.id, photos());
-        listingRow.photoUrls = attached?.photoUrls || photos();
+        listingRow = { ...listingRow, photoUrls: attached?.photoUrls || photos() };
       }
       if (listingRow?.id) {
-        props.onListed?.(pendingId ? { ...listingRow, replaceId: pendingId } : listingRow);
+        // The drawer shows the CardTrader side of the save in the board's line.
+        props.onListed?.(pendingId ? { ...listingRow, replaceId: pendingId } : listingRow, outcome.note);
       } else if (pendingId) {
         props.onListed?.({ remove: true, id: pendingId });
       }
@@ -484,7 +898,11 @@ export default function ListingForm(props) {
         navigate(authFrom(props.fromPath));
         return;
       }
-      setError(err.message || (editing ? 'Update failed.' : 'Listing failed.'));
+      setError(
+        (drawer() && CARDTRADER_REFUSALS.has(err.message) && (err.body?.message || err.body?.error))
+        || err.message
+        || (editing ? 'Update failed.' : 'Listing failed.'),
+      );
     } finally {
       setSaving(false);
     }
@@ -513,11 +931,436 @@ export default function ListingForm(props) {
     }
   }
 
+  // The drawer reads its error where it appears: the server's own message for
+  // a change CardTrader refuses (422 / 409 / 502) or a pricing step that failed.
+  createEffect(error, (message) => {
+    if (drawer() && message) errorEl?.focus();
+  });
+
   // Every visitor came to buy first, signed in or not: the sell form waits
   // behind one strip instead of being the biggest panel on the desk. The strip
   // is the same for both, so the desk has one layout.
   const [opened, setOpened] = createSignal(false);
   const collapsed = () => !isEditing() && !opened();
+
+  // ── Pieces both layouts show, so no field is marked up twice ──────────────
+  function priceField() {
+    return (
+      <label class="sell-field grow price">
+        Price
+        <input
+          inputmode="decimal"
+          value={price()}
+          placeholder={hint()}
+          readOnly={drawer() && followsPricing()}
+          // A rule owns the number until the seller starts typing their own.
+          onKeyDown={(event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') takeOwnPrice();
+          }}
+          onFocus={() => {
+            priceFocused = true;
+            if (!priceManual) setPrice('');
+          }}
+          onBlur={() => {
+            priceFocused = false;
+            if (!priceManual && graphPrice()) setPrice(graphPrice());
+          }}
+          onInput={(event) => {
+            const next = event.currentTarget.value;
+            setPrice(next);
+            priceManual = next.trim() !== '';
+            priceTyped = true;
+            takeOwnPrice();
+          }}
+        />
+      </label>
+    );
+  }
+
+  function quotesRow() {
+    return (
+      <Show when={presets().length}>
+        <div class="sell-market-quotes" role="group" aria-label="From the market">
+          <span class="sell-quote-label">From the market</span>
+          <For each={presets()}>
+            {(row) => (row.reference ? (
+              <span class="sell-quote is-reference" title={row.title}>{row.label} {inventoryMarketLabel({ currency: 'USD', low: row.usdLow, high: row.usdHigh })}</span>
+            ) : (
+              <button type="button" class="sell-quote" title={row.title} onClick={() => takePreset(row)}>
+                {row.label} <b>{presetPrice(row.pkn)}</b>
+              </button>
+            ))}
+          </For>
+        </div>
+      </Show>
+    );
+  }
+
+  function gradedRow() {
+    return (
+      <Show when={chips().graded}>
+        <div class="sell-row">
+          <label class="sell-field grow">
+            Grading company
+            <input value={company()} onInput={(event) => setCompany(event.currentTarget.value)} />
+          </label>
+          <label class="sell-field">
+            Grade
+            <input value={grade()} onInput={(event) => setGrade(event.currentTarget.value)} />
+          </label>
+          <label class="sell-field grow">
+            Certification
+            <input value={cert()} onInput={(event) => setCert(event.currentTarget.value)} />
+          </label>
+        </div>
+      </Show>
+    );
+  }
+
+  function photosRow() {
+    return (
+      <div class="sell-photos">
+        <For each={photos()}>
+          {(url) => (
+            <button
+              type="button"
+              class="listing-photo"
+              aria-label="Remove photo"
+              onClick={() => setPhotos((current) => current.filter((item) => item !== url))}
+            >
+              <img src={url} alt="" />
+            </button>
+          )}
+        </For>
+        <Show when={photos().length < MAX_LISTING_PHOTOS}>
+          <label class="listing-photo-add" aria-label="Add photo">
+            <CameraIcon />
+            <input type="file" accept="image/*" multiple hidden disabled={saving()} onChange={addPhotos} />
+          </label>
+        </Show>
+      </div>
+    );
+  }
+
+  function messages() {
+    return (
+      <>
+        <Show when={error()}>
+          <p class="sell-msg error" role={drawer() ? 'alert' : undefined} tabindex={drawer() ? '-1' : undefined} ref={(el) => { errorEl = el; }}>
+            {error()}
+          </p>
+        </Show>
+        <Show when={done()}><p class="sell-msg ok">{done()}</p></Show>
+      </>
+    );
+  }
+
+  // ── The drawer ────────────────────────────────────────────────────────────
+  dismissWhileOpen(pricingOpen, setPricingOpen, () => pricingRoot);
+
+  const otherCode = () => [...new Set(currencies())].find((code) => code !== currency()) || '';
+  /** The same price in the unit the field is not using. */
+  const otherUnitLine = () => {
+    const code = otherCode();
+    const value = amountPkn();
+    if (!code || !(value > 0)) return '';
+    return code === 'PKN'
+      ? `= ${formatPknNumber(Math.round(value), { maximumFractionDigits: 0 })} PKN`
+      : `= ${formatPknNumber(fiatFromPkn(value, code), { maximumFractionDigits: 2 })} ${code}`;
+  };
+
+  /** The drawer changes the unit written in the field, not the price itself. */
+  function switchUnit(code) {
+    if (code === currency()) return;
+    const typed = price();
+    currencyManual = true;
+    if (typed) setPrice(priceInputFromPkn(listingPriceToPkn(typed, currency()), code));
+    setCurrency(code);
+  }
+
+  function currencyChips() {
+    return (
+      <div class="sell-chip-row is-currency" role="group" aria-label="Currency">
+        <For each={[...new Set(currencies())]}>
+          {(code) => (
+            <button
+              type="button"
+              class={['inv-chip', { on: code === currency() }]}
+              aria-pressed={String(code === currency())}
+              onClick={() => switchUnit(code)}
+            >
+              {code}
+            </button>
+          )}
+        </For>
+      </div>
+    );
+  }
+
+  function pricingKeys(event) {
+    const options = pricingList ? [...pricingList.querySelectorAll('[role="option"]')] : [];
+    if (!options.length) return;
+    const at = options.indexOf(document.activeElement);
+    const move = (next) => {
+      event.preventDefault();
+      options[(next + options.length) % options.length]?.focus();
+    };
+    if (event.key === 'ArrowDown') move(at + 1);
+    else if (event.key === 'ArrowUp') move(at - 1);
+    else if (event.key === 'Home') move(0);
+    else if (event.key === 'End') move(options.length - 1);
+    else if (event.key === 'Escape') {
+      // The menu swallows it, so the drawer stays open.
+      event.preventDefault();
+      event.stopPropagation();
+      setPricingOpen(false);
+      pricingTrigger?.focus();
+    } else if (event.key === 'Tab') setPricingOpen(false);
+  }
+
+  function pricingMenu() {
+    return (
+      <div class={['sell-pricing-menu', { 'is-open': pricingOpen() }]} ref={(el) => { pricingRoot = el; }}>
+        <button
+          type="button"
+          class="sell-pricing-btn"
+          ref={(el) => { pricingTrigger = el; }}
+          aria-haspopup="listbox"
+          aria-expanded={pricingOpen() ? 'true' : 'false'}
+          onClick={() => setPricingOpen((next) => !next)}
+        >
+          <strong>{pricingLabel()}</strong>
+          <span class="sell-pricing-caret" aria-hidden="true">▾</span>
+        </button>
+        <Show when={pricingOpen()}>
+          <ul class="sell-pricing-list" role="listbox" aria-label="Pricing" ref={(el) => { pricingList = el; }} onKeyDown={pricingKeys}>
+            <For each={pricingEntries()}>
+              {(entry) => (entry.kind === 'separator' ? (
+                <li class="sell-pricing-sep" role="presentation" />
+              ) : (
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={String(pricingChosen(entry))}
+                    onClick={() => choosePricing(entry)}
+                  >
+                    {entry.label}
+                  </button>
+                </li>
+              ))}
+            </For>
+          </ul>
+        </Show>
+      </div>
+    );
+  }
+
+  // The Reverse chip (Pokémon) or the game's own foil chip, and the rest in a select.
+  const reverseFoil = () => foils.find((row) => row.value === 'reverse') || null;
+  const chipFinishes = () => (reverseFoil() ? [] : foils.filter((row) => row.value !== 'standard'));
+  const selectFinishes = () => (reverseFoil() ? foils.filter((row) => row.value !== 'reverse') : []);
+  const shownFinish = () => (foil() === 'reverse' ? 'standard' : foil());
+
+  /** Every chip of the row, in the desk's order with the finishes after 1st Ed. */
+  function chipList() {
+    const order = ['firstEd', 'signed', 'altered', 'graded', 'sealed', 'shipping'];
+    const byKey = Object.fromEntries(extraChips().map((chip) => [chip.key, chip]));
+    const list = order.map((key) => byKey[key]).filter(Boolean);
+    const finishes = [reverseFoil(), ...chipFinishes()].filter(Boolean)
+      .map((row) => ({ key: `foil:${row.value}`, label: row.label }));
+    list.splice(list.findIndex((chip) => chip.key === 'firstEd') + 1, 0, ...finishes);
+    return list;
+  }
+
+  function chipButtons(list) {
+    return (
+      <For each={list}>
+        {(chip) => {
+          const isFoil = String(chip.key).startsWith('foil:');
+          const value = isFoil ? chip.key.slice(5) : '';
+          const on = () => (isFoil ? foil() === value : chips()[chip.key] === true);
+          return (
+            <button
+              type="button"
+              class={['inv-chip', { on: on() }]}
+              aria-pressed={String(on())}
+              onClick={() => (isFoil ? setFoil(foil() === value ? 'standard' : value) : toggleChip(chip.key))}
+            >
+              {chip.label}
+            </button>
+          );
+        }}
+      </For>
+    );
+  }
+
+  // The desk lists every chip together; the drawer splits what the card *is*
+  // from what this listing *offers*, since sealed and shipping are the offer.
+  const propertyChips = () => chipButtons(chipList());
+  const drawerChips = createMemo(() => drawerChipSplit(chipList()));
+
+  function drawerBody() {
+    return (
+      <>
+        <div class="sell-drawer-fields" hidden={strategyStep()}>
+          <div class="sell-drawer-block sell-pricing">
+            <span class="sell-drawer-label">Pricing</span>
+            {pricingMenu()}
+            <div class="sell-price-line">
+              {priceField()}
+              <Show when={otherUnitLine()}><span class="sell-price-eq">{otherUnitLine()}</span></Show>
+            </div>
+            {currencyChips()}
+            <Show when={pricingNoteLine()}>
+              <p class="mypokoin-help sell-pricing-note" role="status">{pricingNoteLine()}</p>
+            </Show>
+            {quotesRow()}
+            <Show when={!followsPricing() && rowGroup()}>
+              <p class="mypokoin-help listing-group-note">{groupPriceNote(rowGroup())}</p>
+            </Show>
+          </div>
+          <div class="sell-drawer-block">
+            <span class="sell-drawer-label">Quantity</span>
+            <QtyStepper editable class="sell-qty" qty={qty()} min={1} max={99} onChange={setQty} />
+          </div>
+          <div class="sell-drawer-block">
+            <span class="sell-drawer-label">Condition</span>
+            <div class="sell-chip-row" role="group" aria-label="Condition">
+              <For each={MOOD_CONDS}>
+                {(row) => (
+                  <button
+                    type="button"
+                    class={['inv-chip', { on: condition() === row.value }]}
+                    aria-pressed={String(condition() === row.value)}
+                    title={row.label}
+                    onClick={() => setCondition(row.value)}
+                  >
+                    {row.value}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <div class="sell-drawer-block">
+            <span class="sell-drawer-label">Language</span>
+            <div class="sell-chip-row" role="group" aria-label="Language">
+              <For each={listLangs()}>
+                {(code) => (
+                  <button
+                    type="button"
+                    class={['inv-chip', { on: code === language() }]}
+                    aria-pressed={String(code === language())}
+                    onClick={() => setLanguage(code)}
+                  >
+                    {code}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <div class="sell-drawer-block">
+            <span class="sell-drawer-label">Properties</span>
+            <div class="sell-chip-row" role="group" aria-label="Card properties">
+              {chipButtons(drawerChips().property)}
+            </div>
+            <Show when={selectFinishes().length > 1}>
+              <label class="sell-field sell-pick foil-pick">
+                <span class="sell-drawer-label">Finish</span>
+                <select value={shownFinish()} onChange={(event) => setFoil(event.currentTarget.value)}>
+                  <For each={selectFinishes()}>
+                    {(row) => <option value={row.value} selected={row.value === shownFinish()}>{row.label}</option>}
+                  </For>
+                </select>
+              </label>
+            </Show>
+            {gradedRow()}
+          </div>
+          <Show when={drawerChips().listing.length}>
+            <div class="sell-drawer-block">
+              <span class="sell-drawer-label">Listing</span>
+              <div class="sell-chip-row" role="group" aria-label="Listing offers">
+                {chipButtons(drawerChips().listing)}
+              </div>
+            </div>
+          </Show>
+          <label class="sell-drawer-block sell-comment">
+            <span class="sell-drawer-label">Seller comment · public</span>
+            <input value={comment()} onInput={(event) => setComment(event.currentTarget.value)} />
+          </label>
+          <div class="sell-drawer-block sell-location">
+            <label class="sell-field location-pick">
+              <span class="sell-drawer-label">Location · private</span>
+              <select
+                value={box()}
+                onChange={(event) => {
+                  boxTouched = true;
+                  setBox(event.currentTarget.value);
+                }}
+              >
+                <option value="" selected={!box()}>None</option>
+                <For each={boxOptions()}>
+                  {(name) => <option value={name} selected={name === box()}>{name}</option>}
+                </For>
+              </select>
+            </label>
+            <Show when={locationValue() && locationValue() !== box()}>
+              <span class="sell-slot">{locationValue().slice(box().length)}</span>
+            </Show>
+          </div>
+          <div class="sell-drawer-block sell-photos-block">
+            <span class="sell-drawer-label">Photos</span>
+            {photosRow()}
+          </div>
+          {messages()}
+        </div>
+        <Show when={strategyStep() && strategyEditor}>
+          <div class="sell-drawer-step">
+            <button type="button" class="pricer-back" onClick={() => setStrategyStep(false)}>← Back to the listing</button>
+            <StrategyEditor editor={strategyEditor} />
+          </div>
+        </Show>
+        <footer class="sell-drawer-foot">
+          <Show
+            when={signedIn() || props.preview}
+            fallback={(
+              <a
+                class="signin-link"
+                href={authFrom(props.fromPath)}
+                rel={authAnchorRel(authFrom(props.fromPath)) || undefined}
+                onClick={() => track(Action.sell, card())}
+              >
+                Sign in
+              </a>
+            )}
+          >
+            <button
+              type="button"
+              class="btn list-btn sell-save"
+              disabled={saving() || (!props.preview && !ready())}
+              title="Save listing changes"
+              onClick={() => submit()}
+            >
+              {saving() ? 'Saving…' : 'Save changes'}
+            </button>
+          </Show>
+          <Show when={props.onDelete}>
+            <button
+              type="button"
+              class="btn ghost pricer-danger sell-delete sell-delete-icon"
+              disabled={saving()}
+              title="Unlist this card"
+              aria-label="Delete listing"
+              onClick={() => props.onDelete()}
+            >
+              <TrashIcon />
+            </button>
+          </Show>
+        </footer>
+      </>
+    );
+  }
 
   return (
     <Show
@@ -539,7 +1382,9 @@ export default function ListingForm(props) {
         </section>
       )}
     >
-    <section class={['panel sell-form', { 'is-editing': isEditing() }]} ref={(el) => { formEl = el; }}>
+    <section class={['panel sell-form', { 'is-editing': isEditing(), 'is-drawer': drawer() }]} ref={(el) => { formEl = el; }}>
+      {drawer() ? drawerBody() : (
+        <>
       <div class="add-head">
         <h2>{isEditing() ? 'Edit listing' : 'List your card'}</h2>
         <Show
@@ -571,28 +1416,7 @@ export default function ListingForm(props) {
         </Show>
       </div>
       <div class="sell-row">
-        <label class="sell-field grow price">
-          Price
-          <input
-            inputmode="decimal"
-            value={price()}
-            placeholder={hint()}
-            onFocus={() => {
-              priceFocused = true;
-              if (!priceManual) setPrice('');
-            }}
-            onBlur={() => {
-              priceFocused = false;
-              if (!priceManual && graphPrice()) setPrice(graphPrice());
-            }}
-            onInput={(event) => {
-              const next = event.currentTarget.value;
-              setPrice(next);
-              priceManual = next.trim() !== '';
-              priceTyped = true;
-            }}
-          />
-        </label>
+        {priceField()}
         <label class="sell-field currency">
           Currency
           <select
@@ -602,7 +1426,7 @@ export default function ListingForm(props) {
               setCurrency(event.currentTarget.value);
             }}
           >
-            <For each={[...new Set([...LIST_CURRENCIES.filter((code) => code !== 'PKN'), sellerCurrency()])]}>
+            <For each={[...new Set(currencies())]}>
               {(code) => <option value={code} selected={code === currency()}>{code}</option>}
             </For>
           </select>
@@ -615,14 +1439,26 @@ export default function ListingForm(props) {
           <button
             type="button"
             class="btn list-btn"
-            disabled={!ready() || saving() || (!signedIn() && ready())}
-            title={signedIn() ? 'Save listing changes' : 'Sign in to list'}
+            disabled={saving() || (!props.preview && (!ready() || !signedIn()))}
+            title={props.preview || signedIn() ? 'Save listing changes' : 'Sign in to list'}
             onClick={() => submit()}
           >
             {saving() ? 'Saving…' : 'Save changes'}
           </button>
+          <Show when={props.onDelete}>
+            <button
+              type="button"
+              class="btn ghost pricer-danger sell-delete"
+              disabled={saving()}
+              title="Unlist this card"
+              onClick={() => props.onDelete()}
+            >
+              Delete listing
+            </button>
+          </Show>
         </Show>
       </div>
+      {quotesRow()}
       <Show when={priceGroup()}>
         <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
       </Show>
@@ -675,7 +1511,7 @@ export default function ListingForm(props) {
           </select>
         </label>
         <div class="sell-chips" role="group" aria-label="Listing extras">
-          <For each={listChips}>
+          <For each={extraChips()}>
             {(chip) => (
               <button
                 type="button"
@@ -688,26 +1524,7 @@ export default function ListingForm(props) {
             )}
           </For>
         </div>
-        <div class="sell-photos">
-          <For each={photos()}>
-            {(url) => (
-              <button
-                type="button"
-                class="listing-photo"
-                aria-label="Remove photo"
-                onClick={() => setPhotos((current) => current.filter((item) => item !== url))}
-              >
-                <img src={url} alt="" />
-              </button>
-            )}
-          </For>
-          <Show when={photos().length < MAX_LISTING_PHOTOS}>
-            <label class="listing-photo-add" aria-label="Add photo">
-              <CameraIcon />
-              <input type="file" accept="image/*" multiple hidden disabled={saving()} onChange={addPhotos} />
-            </label>
-          </Show>
-        </div>
+        {photosRow()}
       </div>
       <div class="sell-location-row">
         <label class="sell-field location-pick">
@@ -733,24 +1550,10 @@ export default function ListingForm(props) {
           <input value={comment()} onInput={(event) => setComment(event.currentTarget.value)} />
         </label>
       </div>
-      <Show when={chips().graded}>
-        <div class="sell-row">
-          <label class="sell-field grow">
-            Grading company
-            <input value={company()} onInput={(event) => setCompany(event.currentTarget.value)} />
-          </label>
-          <label class="sell-field">
-            Grade
-            <input value={grade()} onInput={(event) => setGrade(event.currentTarget.value)} />
-          </label>
-          <label class="sell-field grow">
-            Certification
-            <input value={cert()} onInput={(event) => setCert(event.currentTarget.value)} />
-          </label>
-        </div>
-      </Show>
-      <Show when={error()}><p class="sell-msg error">{error()}</p></Show>
-      <Show when={done()}><p class="sell-msg ok">{done()}</p></Show>
+      {gradedRow()}
+      {messages()}
+        </>
+      )}
       <Show when={jump()}>
         <Portal mount={document.body}>
           <div class="lang-redirect" role="dialog" aria-modal="true" aria-labelledby="lang-redirect-title">

@@ -1,0 +1,96 @@
+{
+  "prechecks": [
+    {
+      "input": "DM me seller@example.com",
+      "expected": {
+        "decision": "hold",
+        "reason": "contains contact details",
+        "categories": [
+          "personal_data"
+        ]
+      }
+    },
+    {
+      "input": "call +39 123 456 7890",
+      "expected": {
+        "decision": "hold",
+        "reason": "contains contact details",
+        "categories": [
+          "personal_data"
+        ]
+      }
+    },
+    {
+      "input": "https://a.example https://b.example",
+      "expected": {
+        "decision": "hold",
+        "reason": "several links",
+        "categories": [
+          "links"
+        ]
+      }
+    },
+    {
+      "input": "Pokoin got this wrong",
+      "expected": null
+    },
+    {
+      "input": "www.example.com",
+      "expected": null
+    },
+    {
+      "input": "a123456789b",
+      "expected": {
+        "decision": "hold",
+        "reason": "contains contact details",
+        "categories": [
+          "personal_data"
+        ]
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "input": "{\"decision\":\"PUBLISH\",\"reason\":\"ok\"}",
+      "expected": {
+        "decision": "publish",
+        "reason": "ok",
+        "categories": []
+      }
+    },
+    {
+      "input": "no json",
+      "expected": null
+    },
+    {
+      "input": "{\"decision\":\"maybe\"}",
+      "expected": null
+    },
+    {
+      "input": {
+        "decision": "hold",
+        "categories": [
+          1,
+          null,
+          true,
+          {},
+          [
+            "x",
+            "y"
+          ]
+        ]
+      },
+      "expected": {
+        "decision": "hold",
+        "reason": "",
+        "categories": [
+          "1",
+          "null",
+          "true",
+          "[object Object]",
+          "x,y"
+        ]
+      }
+    }
+  ]
+}

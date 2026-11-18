@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untra
 import { useLocation, useSearchParams } from '@solidjs/router';
 import { exportStockCsv } from '@market/api.js';
 import { inventoryRowsForLocation, summarizeLiveInventory } from '@market/inventory-listings.js';
+import { applyEditedRow, removeListingRow } from '@market/listing-row-edit.js';
 import { game } from '@market/game.js';
 import { hasStoredBooks, inventoryBooks, readCachedPricerSettings, writeCachedPricerSettings } from '@market/inventory-book.js';
 import { formatSellerPrice } from '@market/seller-currency.js';
@@ -164,6 +165,14 @@ function InventoryDesk(props) {
       setPartial(!complete);
       setRows(next);
     }, true);
+  }
+
+  // A row's edit or unlist is already on the server: paint the new book and keep
+  // the memory copy in step, so another tab of the desk does not show the old row.
+  function paintRows(next) {
+    setRows(next);
+    const book = inventoryBooks.peek(listingsUid(), selectedGame);
+    if (book) book.rows = next;
   }
 
   createEffect(
@@ -449,6 +458,8 @@ function InventoryDesk(props) {
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}
             preview={props.preview}
             previewComps={props.preview ? previewComps() : undefined}
+            onRowSaved={(saved) => paintRows(applyEditedRow(rows(), saved))}
+            onRowRemoved={(id) => paintRows(removeListingRow(rows(), id))}
             pricing={pricing}
             onApplied={() => (props.preview ? undefined : reload().catch(() => {}))}
           />
