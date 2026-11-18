@@ -56,6 +56,8 @@ test('one row asks once, unlists and never reloads the book', () => {
   assert.match(board, /await cancelListing\(id, token, authUser\(\)\?\.uid \|\| authSession\(\)\?\.uid \|\| ''\)/);
   assert.match(board, /props\.onRowRemoved\?\.\(id\)/);
   assert.match(board, /props\.onRowSaved\?\.\(saved\)/);
+  assert.match(board, /queueMicrotask\(\(\) => focusRowEdit\(rowId\(saved\)\)\)/);
+  assert.match(board, /queueMicrotask\(\(\) => focusRowEdit\(rowId\(neighbour\)\)\)/);
   assert.match(board, /querySelector\('\.inv-edit'\)/);
   assert.doesNotMatch(board, /reload\(\)/);
 });

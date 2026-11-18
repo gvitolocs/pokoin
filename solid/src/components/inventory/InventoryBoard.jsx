@@ -550,6 +550,9 @@ export default function InventoryBoard(props) {
     // The new price can take the listing out of its pricing group, as on the desk.
     const left = leftGroupLine(saved);
     setActionLine(left ? `Listing updated. ${left}` : 'Listing updated.');
+    // The dialog closes after this and its focus restore finds a detached
+    // button, because the changed row re-rendered: hand the keyboard back to it.
+    queueMicrotask(() => focusRowEdit(rowId(saved)));
   }
 
   /** One confirm, then the soft unlist. True only when the listing went away. */

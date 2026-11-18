@@ -150,6 +150,8 @@ export default function ListingForm(props) {
   // The cached session is enough to paint the form enabled; a save waits for
   // the bearer (getBearer) anyway.
   const ready = () => authReady() || signedIn();
+  const editingId = createMemo(() => props.editing?.id || '');
+  const isEditing = () => Boolean(editingId());
   const listLangs = createMemo(() => {
     // Editing an inventory row: its own language stays selectable even when the
     // card's catalog languages do not list it (an old card can be sold in Indonesian).
@@ -165,8 +167,6 @@ export default function ListingForm(props) {
     nationality: card().nationality,
   }));
   const langKey = createMemo(() => listLangs().join(','));
-  const editingId = createMemo(() => props.editing?.id || '');
-  const isEditing = () => Boolean(editingId());
   // "From the market" quotes for the price of the listing being edited.
   const presets = () => (isEditing() && Array.isArray(props.presets) ? props.presets : []);
   // The inventory editor shows the desk's Signed and Altered chips too.

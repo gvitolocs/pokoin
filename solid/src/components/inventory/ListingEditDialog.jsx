@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, Show } from 'solid-js';
 import { fetchPriceCheck } from '@market/api.js';
 import { priceCheckItem } from '@market/inventory-price.js';
 import { listingOrigin, originLabel } from '@market/inventory-origin.js';
@@ -28,7 +28,9 @@ export default function ListingEditDialog(props) {
   const card = createMemo(() => cardFromInventoryRow(row()));
   const identity = createMemo(() => identityFromInventoryRow(row()));
   const origin = createMemo(() => listingOrigin(row()));
-  const [presets, setPresets] = createSignal([]);
+  const [fetched, setFetched] = createSignal([]);
+  // Preview has no API: the quotes come straight from the fixture's comps.
+  const presets = createMemo(() => (props.preview ? listingPresets(props.previewComps || {}, row()) : fetched()));
   const currencies = () => [...new Set(['PKN', sellerCurrency()])];
   // Imported listings are mirrored on the other side by the server, not the UI.
   const syncNote = () => {
@@ -36,21 +38,25 @@ export default function ListingEditDialog(props) {
     return origin() === 'cardrails' ? 'Card Rails picks up the change on its next sync.' : '';
   };
 
-  // One price check for the whole dialog, when it opens.
-  void (async () => {
-    if (props.preview) {
-      setPresets(listingPresets(props.previewComps || {}, row()));
-      return;
-    }
-    try {
-      const token = await getBearer();
-      if (!token) return;
-      const data = await fetchPriceCheck([priceCheckItem(row())], token, { game: props.game });
-      setPresets(listingPresets(data?.prices, row()));
-    } catch {
-      // The quotes are a convenience; the form works without them.
-    }
-  })();
+  // One price check for the row the dialog opened on. The quotes are a
+  // convenience, so a failure leaves the form without them, not blocked.
+  createEffect(
+    () => (props.preview ? null : { id: row()?.id, game: props.game }),
+    (target) => {
+      if (!target) return undefined;
+      (async () => {
+        try {
+          const token = await getBearer();
+          if (!token) return;
+          const data = await fetchPriceCheck([priceCheckItem(row())], token, { game: props.game });
+          setFetched(listingPresets(data?.prices, row()));
+        } catch (_) {
+          // The seller still types a price.
+        }
+      })();
+      return undefined;
+    },
+  );
 
   async function removeRow() {
     if (await props.onDelete?.()) props.onClose();

@@ -5659,3 +5659,9 @@ button.sell-quote b {
     flex-direction: row;
   }
 }
+
+/* The dialog is titled already, so the panel's own heading would repeat it. */
+
+.zero-dialog .sell-form .add-head h2 {
+  display: none;
+}
