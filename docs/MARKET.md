@@ -818,6 +818,28 @@ Applies to the desk shop rows, Best Deal, the cart rows and the checkout
 render local first. Settlement stays PKN; the cart/checkout display keeps
 the PKN value in brackets (`formatLocalFromPkn`).
 
+### Segment graphs
+
+`GET /api/marketplace-portfolio-history` also answers the collection split:
+`segmentDefs` (ordered `{ key, group, game, label?, years? }` rows) and, on a
+day that holds something, `segments: { "<key>": [valuePkn, cardsPriced,
+cardsHeld] }`. Keys are opaque — `market/src/portfolio-segments.js` groups on
+`group` and `game` alone, so a new segment needs no front-end change, and a
+server that knows neither simply has no table.
+
+The Dashboard paints it in `SegmentTable` under the value graph: the `all`
+level is one row per game plus the cross-game Sealed and Graded rows, a game
+level is that game's eras plus its Sealed and Graded. Each row carries cards
+held, value, change over the window the graph is showing, and a sparkline;
+opening it draws the segment as percent change against the whole collection
+(against that game's own total on a game level). Nothing held is `None held`,
+stock with no sale in the window is `No price data yet`. Amounts follow the
+seller's display currency, like the movers tiles.
+
+`market/src/portfolio-segments-preview.js` builds the same shape for
+`/dashboard?dashPreview` from the graph's own fixture series, so the layout is
+reviewable while the API still answers plain days.
+
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
 ```
