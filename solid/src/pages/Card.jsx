@@ -616,9 +616,17 @@ function CardDesk(props) {
   }
 
   onSettled(() => {
-    laterFrame = requestAnimationFrame(() => {
-      laterTimer = window.setTimeout(() => setLater(true), 0);
-    });
+    // A desk that mounted from a warm cache has what the rail is built from
+    // already: the frame and the task only hid, on every arrow press, a rail that
+    // was on screen before the click (N11). The wait is for a visitor arriving from
+    // a tile, who must see the desk above the fold first.
+    if (cached) {
+      setLater(true);
+    } else {
+      laterFrame = requestAnimationFrame(() => {
+        laterTimer = window.setTimeout(() => setLater(true), 0);
+      });
+    }
     const unsubscribe = subscribeListingLive(cardId, (event) => {
       if (!shop.offers.length) return;
       const plain = snapshot(shop.offers);

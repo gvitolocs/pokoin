@@ -622,3 +622,27 @@ test('on a narrow panel the keys span it and drop the picked key without overlay
   assert.match(graph, /legendEl\.scrollWidth > legendEl\.clientWidth/);
   assert.match(css, /\.sold-graph-legend\.is-overflow \{[^}]*mask-image: linear-gradient\(to right, #000 calc\(100% - 16px\), transparent\);/);
 });
+
+/**
+ * PH-R034 P8 (N11): `later` gates the "All <name>" rail and the catalog fold, and
+ * the desk remounts on every arrow press. Raised a frame and a task after each
+ * mount, it tore a rail down and rebuilt it on a step — for a neighbour whose page
+ * the warm has already put in this device's cache, so nothing about it is late.
+ */
+test('a desk that mounted from a warm cache keeps its rail up', () => {
+  const settled = page.slice(
+    page.indexOf('onSettled(() => {'),
+    page.indexOf('// Print nationality of the expansion fills a card without one.'),
+  );
+  assert.match(settled, /if \(cached\) \{\n\s*setLater\(true\);\n\s*\} else \{\n\s*laterFrame = requestAnimationFrame\(\(\) => \{/);
+  // A cold desk still waits: a tile click must paint the desk above the fold first,
+  // and that is what the frame and the task exist for.
+  assert.match(settled, /laterTimer = window\.setTimeout\(\(\) => setLater\(true\), 0\);/);
+  // `cached` is the desk's own warm-mount test, the one its neighbor remembrance
+  // and its warm-on-paint already use.
+  assert.equal((page.match(/\(cached\)/g) || []).length >= 3, true, 'the same test the desk paints from');
+  // The teardown still cancels both, whoever raised the signal.
+  assert.match(settled, /cancelAnimationFrame\(laterFrame\);/);
+  assert.match(settled, /window\.clearTimeout\(laterTimer\);/);
+  assert.equal((page.match(/<Show when=\{later\(\)\}>/g) || []).length, 1, 'one gate for the rail and the fold');
+});
