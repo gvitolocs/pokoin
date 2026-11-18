@@ -127,9 +127,9 @@
   white-space: nowrap;
 }
 
-/* Chart frame — axis labels on the borders, plot area stays clean */
+/* Chart frame — date ticks under the plot, no value axis on it */
 .seller-history {
-  --history-cards: #ffd33d;
+  --history-cards: var(--yellow);
   --history-liquidity: #9085e9;
   flex: 1;
   display: flex;
@@ -213,6 +213,28 @@
   box-shadow: inset 0 0 0 1px rgb(255 211 61 / 0.5);
 }
 
+/* A chart option, not a range: it rides beside the pills and pushes the date
+   inputs to the right edge. */
+.seller-history-liquidity-toggle {
+  margin-right: auto;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.35);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+}
+
+.seller-history-liquidity-toggle[aria-pressed="true"] {
+  border-color: var(--history-liquidity);
+  background: rgb(0 0 0 / 0.5);
+  color: var(--history-liquidity);
+}
+
 .seller-history-dates {
   display: inline-flex;
   align-items: center;
@@ -283,6 +305,8 @@
   min-height: 12.5rem;
 }
 
+/* Design C paints no value axis: the y track of the chart grid stays empty and
+   the plot owns the width. */
 .seller-history-y {
   grid-row: 1;
   grid-column: 1;
@@ -291,25 +315,6 @@
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   line-height: 1;
-}
-
-.seller-history-y-sizer {
-  display: block;
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-}
-
-.seller-history-y-ticks {
-  position: absolute;
-  inset: 1px 0;
-}
-
-.seller-history-y-ticks span {
-  position: absolute;
-  right: 0;
-  transform: translateY(-50%);
-  white-space: nowrap;
 }
 
 .seller-history-frame {
@@ -334,13 +339,29 @@
   height: 100%;
 }
 
-.seller-history-grid .seller-history-fill {
-  fill: url(#collection-history-fill);
+.seller-history-grid .seller-history-step {
+  fill: none;
+  stroke: var(--muted);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
+.seller-history-grid .seller-history-baseline {
+  stroke: var(--g5);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The liquidity sub-pane: its own scale, under the baseline, dashed and thin. */
 .seller-history-grid .seller-history-liquidity {
-  fill: var(--history-liquidity);
-  fill-opacity: 0.3;
+  fill: none;
+  stroke: var(--history-liquidity);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .seller-history-grid .seller-history-today {
@@ -349,16 +370,10 @@
   vector-effect: non-scaling-stroke;
 }
 
-.seller-history-grid .seller-history-rule {
-  stroke: rgb(255 255 255 / 0.07);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
 .seller-history-grid .seller-history-line {
   fill: none;
   stroke: var(--history-cards);
-  stroke-width: 2;
+  stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
@@ -377,21 +392,57 @@
 .seller-history-point {
   position: absolute;
   z-index: 1;
-  width: 10px;
-  height: 10px;
-  margin: -5px 0 0 -5px;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
   border-radius: 50%;
   background: var(--history-cards);
-  border: 2px solid #0c0b10;
+  border: 2px solid var(--surface);
   box-sizing: border-box;
   pointer-events: none;
 }
 
+/* The draw ends on this ring: it breathes out of the last day and fades. */
+.seller-history-pulse {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  box-sizing: border-box;
+  border: 2px solid var(--history-cards);
+  border-radius: 50%;
+  animation: seller-history-breathe 1.3s ease-out infinite;
+}
+
+.seller-history-pulse.is-drawing {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes seller-history-breathe {
+  from { transform: scale(0.36); opacity: 0.7; }
+  to { transform: scale(1); opacity: 0; }
+}
+
+/* Reduced motion: the panel paints the finished chart and nothing breathes. */
+@media (prefers-reduced-motion: reduce) {
+  .seller-history-pulse {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* The hovered day is hollow, so the curve under it stays readable. */
 .seller-history-point.is-hover {
   z-index: 2;
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
+  background: var(--surface);
+  border: 2px solid var(--history-cards);
 }
 
 .seller-history-grid .seller-history-crosshair {
@@ -459,93 +510,35 @@
   line-height: 1.4;
 }
 
+/* One line, floating over the hovered day. Placed by historyLabelAnchor:
+   left/top is the anchor point, the label grows around it and never leaves
+   the plot. No shadow — the frame is the whole surface. */
 .seller-history-tip {
   position: absolute;
-  top: 8px;
   z-index: 3;
   width: max-content;
-  min-width: 11rem;
-  max-width: min(17rem, 100%);
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 4px 8px;
   border: 1px solid var(--g5);
-  background: rgb(12 11 16 / 0.94);
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.45);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1.2;
+  transform: translate(-50%, -100%);
   pointer-events: none;
 }
 
-.seller-history-tip-day {
-  margin: 0 0 2px;
+/* The sub-pane under the baseline says which scale it is drawn on. */
+.seller-history-liquidity-label {
+  position: absolute;
+  left: 8px;
+  bottom: 5px;
   font-size: 0.72rem;
+  line-height: 1;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.seller-history-tip-total {
-  margin: 0 0 8px;
-  font-size: 1rem;
-  font-weight: 750;
-  color: var(--text);
-}
-
-.seller-history-tip-note {
-  margin: 8px 0 0;
-  font-size: 0.7rem;
-  line-height: 1.35;
-  color: var(--muted);
-}
-
-.seller-history-tip ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-}
-
-.seller-history-tip li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
-.seller-history-tip li {
-  flex-wrap: wrap;
-}
-
-.seller-history-tip li > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.seller-history-tip li.is-cards > span::before,
-.seller-history-tip li.is-liquidity > span::before {
-  content: '';
-  width: 10px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--history-cards);
-}
-
-.seller-history-tip li.is-liquidity > span::before {
-  background: var(--history-liquidity);
-}
-
-.seller-history-tip li strong {
-  color: var(--text);
-  font-weight: 650;
   font-variant-numeric: tabular-nums;
-}
-
-.seller-history-tip li em {
-  flex-basis: 100%;
-  font-style: normal;
-  font-size: 0.7rem;
-  text-align: right;
 }
 
 .seller-history-skel {

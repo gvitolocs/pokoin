@@ -9,16 +9,21 @@ import {
   formatHistoryDelta,
   formatHistoryTip,
   historyAxis,
+  historyCountValue,
   historyDateTicks,
   historyDayAt,
   historyDrawProgress,
+  historyLabelAnchor,
   historyPresetWindow,
   historyTimeline,
   historyWindowChange,
+  HISTORY_DRAW_MS,
   HISTORY_PRESETS,
+  liquidityBandRatio,
   sliceHistorySeries,
-  smoothHistoryBandPath,
   smoothHistoryPath,
+  smoothHistoryPointAt,
+  stepHistoryPath,
   timelineDay,
   timelineRatio,
   withLiveToday,
@@ -32,71 +37,106 @@ const PLOT_BOTTOM = 8;
 // Today is the right edge; the rule sits a little inside it so the stroke is
 // never clipped by the frame.
 const TODAY_X = CHART_W - 2;
-// The draw-in: a clip rect widens across the plot, the fills fade up behind
-// it and the end dot joins over its last stretch.
-const REVEAL_MS = 800;
-const REVEAL_DOT_MS = 200;
+// The liquidity sub-pane under the baseline. The plot stretches its y, so this
+// is viewBox units: about 30 CSS px at the panel's usual frame height.
+const BAND_H = 34;
+const BAND_GAP = 6;
+const BAND_INSET = 3;
+// The hover label floats this many CSS pixels above the curve at that day.
+const LABEL_GAP = 14;
+// The draw-in: a clip rect widens across the plot and the head dot rides its
+// edge. The clip rests at the full plot width, so only a running draw hides.
 const REVEAL_CLIP = 'collection-history-reveal';
+const SHOW_LIQUIDITY_KEY = 'pokoin.dashboard.showLiquidity';
+
+/** Off by default; a browser that refuses storage simply starts from off. */
+function readShowLiquidity() {
+  try {
+    return localStorage.getItem(SHOW_LIQUIDITY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeShowLiquidity(on) {
+  try {
+    localStorage.setItem(SHOW_LIQUIDITY_KEY, on ? '1' : '0');
+  } catch {
+    /* private mode or a disabled store: the choice just is not remembered */
+  }
+}
 
 /** Everything the chart draws for one window (React rendered this inline). */
-function layoutChart(points, timeline) {
+function layoutChart(points, timeline, showBand) {
   const axis = historyAxis(points.map((day) => day.totalPkn));
+  const bandBottom = CHART_H - PLOT_BOTTOM;
+  const bandTop = bandBottom - BAND_H;
+  const hasLine = points.length >= 2;
+  const band = showBand && hasLine;
+  // The sub-pane takes its height off the plot, so the baseline lifts when it
+  // is on; the curve keeps its own scale either way.
+  const baseY = band ? bandTop - BAND_GAP : bandBottom;
   const xOf = (date) => timelineRatio(timeline, date) * CHART_W;
   const yOf = (value) => {
     const span = Math.max(1e-9, axis.yMax - axis.yMin);
     const clamped = Math.min(axis.yMax, Math.max(axis.yMin, Number(value) || 0));
     const t = (clamped - axis.yMin) / span;
-    return CHART_H - PLOT_BOTTOM - t * (CHART_H - PLOT_TOP - PLOT_BOTTOM);
+    return baseY - t * (baseY - PLOT_TOP);
   };
-  const hasLine = points.length >= 2;
   const hasData = points.length > 0;
-  const baseY = CHART_H - PLOT_BOTTOM;
   const out = {
-    axis, xOf, yOf, hasLine, hasData,
+    xOf, yOf, baseY, hasLine, hasData,
     hasPoint: points.length === 1,
-    totalLine: '', cardsArea: '', liquidityArea: '', endDot: null,
+    totalLine: '', stepLine: '', liquidityLine: '', liquidityPeak: 0,
+    curve: [], endDot: null,
     ticks: historyDateTicks(timeline),
     live: Boolean(timeline?.live),
   };
   if (hasData) {
     const coords = points.map((day) => ({ x: xOf(day.date), day }));
     const totalTop = coords.map((c) => ({ x: c.x, y: yOf(c.day.totalPkn) }));
-    const liquidityTop = coords.map((c) => ({ x: c.x, y: yOf(c.day.assets.currencyPkn) }));
     if (hasLine) {
-      // The areas share their edges with the line and with each other, so the
-      // stack reads as one pile rather than three separately stepped shapes.
+      // The curve is the picture; the steps under it say which day the value
+      // actually moved, which the smoothing alone would hide.
+      out.curve = totalTop;
+      out.stepLine = stepHistoryPath(totalTop);
       out.totalLine = smoothHistoryPath(totalTop);
-      out.cardsArea = smoothHistoryBandPath(totalTop, liquidityTop);
-      out.liquidityArea = smoothHistoryBandPath(
-        liquidityTop,
-        liquidityTop.map((c) => ({ x: c.x, y: baseY })),
-      );
     }
     const last = coords[coords.length - 1];
     out.endDot = { x: last.x, y: yOf(last.day.totalPkn) };
+    if (band) {
+      const peak = points.reduce((high, day) => Math.max(high, Number(day.assets.currencyPkn) || 0), 0);
+      const floor = bandBottom - BAND_INSET;
+      const reach = floor - (bandTop + BAND_INSET);
+      out.liquidityPeak = peak;
+      out.liquidityLine = smoothHistoryPath(coords.map((c) => ({
+        x: c.x,
+        y: floor - liquidityBandRatio(c.day.assets.currencyPkn, peak) * reach,
+      })));
+    }
   }
-  out.widestTick = axis.ticks.reduce((wide, tick) => {
-    const text = formatPknNumber(tick);
-    return text.length > wide.length ? text : wide;
-  }, '0');
   return out;
 }
 
 /**
  * Collection value chart (was in the React SellerDashboardView,
- * CollectionHistoryPanel): cards stacked on liquidity (wallet PKN), one point
- * per day across the whole plot; a window that ends today stops at the Today
- * mark. Opens on the last month.
+ * CollectionHistoryPanel): one smooth curve of the daily total over the true
+ * steps of the same days, with the wallet PKN in a sub-pane only when the
+ * seller asks for it. One point per day across the whole plot; a window that
+ * ends today stops at the Today mark. Opens on the last month.
  */
 export default function CollectionHistoryPanel(props) {
   const [hover, setHover] = createSignal(null);
   const [preset, setPreset] = createSignal(DEFAULT_HISTORY_PRESET);
   const [custom, setCustom] = createSignal(null);
+  const [band, setBand] = createSignal(readShowLiquidity());
+  // null once the draw is over: the headline then renders the real number.
+  const [counted, setCounted] = createSignal(null);
   let frame;
-  let tipNode;
+  let labelNode;
   let revealRect;
-  let areaGroup;
   let endDotNode;
+  let pulseNode;
   let revealFrame;
   let playedRange = '';
   const days = createMemo(() => withLiveToday(props.series || null, props.live || {}));
@@ -109,7 +149,7 @@ export default function CollectionHistoryPanel(props) {
     : historyPresetWindow(presetId() || 'MAX')));
   const points = createMemo(() => sliceHistorySeries(days(), bounds()));
   const timeline = createMemo(() => historyTimeline(points()));
-  const chart = createMemo(() => layoutChart(points(), timeline()));
+  const chart = createMemo(() => layoutChart(points(), timeline(), band()));
   const change = () => historyWindowChange(points(), custom() ? 'custom' : presetId());
 
   // The top movers sheet prices the window the graph is drawing, so it reports
@@ -128,16 +168,22 @@ export default function CollectionHistoryPanel(props) {
     },
   );
 
-  // Resting state is always the whole chart: only a running reveal hides
-  // anything, so a skipped or interrupted one still shows the series.
+  // Resting state is always the whole chart: only a running draw hides
+  // anything, so a skipped or interrupted one still shows the series, lands
+  // the head dot on the last day, and lets the ring pulse again.
   function showWholeChart() {
     if (revealFrame != null) {
       cancelAnimationFrame(revealFrame);
       revealFrame = undefined;
     }
     if (revealRect) revealRect.setAttribute('width', String(CHART_W));
-    if (areaGroup) areaGroup.removeAttribute('opacity');
-    if (endDotNode) endDotNode.style.opacity = '';
+    if (pulseNode) pulseNode.classList.remove('is-drawing');
+    const dot = chart().endDot;
+    if (endDotNode && dot) {
+      endDotNode.style.left = pct(dot.x, CHART_W);
+      endDotNode.style.top = pct(dot.y, CHART_H);
+    }
+    setCounted(null);
   }
 
   function reducedMotion() {
@@ -149,16 +195,20 @@ export default function CollectionHistoryPanel(props) {
   function drawIn() {
     if (reducedMotion() || !revealRect) return;
     if (revealFrame != null) cancelAnimationFrame(revealFrame);
+    // The ring belongs to the finished chart, so it waits for the draw.
+    if (pulseNode) pulseNode.classList.add('is-drawing');
+    const target = Number(change()?.last) || 0;
     let started = 0;
     const step = (now) => {
       if (!started) started = now;
       const elapsed = now - started;
-      const progress = historyDrawProgress(elapsed, REVEAL_MS);
+      const progress = historyDrawProgress(elapsed, HISTORY_DRAW_MS);
       revealRect.setAttribute('width', (CHART_W * progress).toFixed(2));
-      if (areaGroup) areaGroup.setAttribute('opacity', progress.toFixed(3));
-      if (endDotNode) {
-        const dotIn = historyDrawProgress(elapsed - (REVEAL_MS - REVEAL_DOT_MS), REVEAL_DOT_MS);
-        endDotNode.style.opacity = dotIn.toFixed(3);
+      setCounted(historyCountValue(target, progress));
+      const tip = smoothHistoryPointAt(chart().curve, CHART_W * progress);
+      if (endDotNode && tip) {
+        endDotNode.style.left = pct(tip.x, CHART_W);
+        endDotNode.style.top = pct(tip.y, CHART_H);
       }
       if (progress >= 1) {
         revealFrame = undefined;
@@ -171,7 +221,8 @@ export default function CollectionHistoryPanel(props) {
   }
 
   // Only a new range draws in. The same window with fresher numbers, a hover,
-  // a live today tick or a parent re-render keeps the chart as it is.
+  // the liquidity sub-pane, a live today tick or a parent re-render keeps the
+  // chart as it is.
   createEffect(
     () => [custom() ? 'custom' : presetId(), bounds().from, bounds().to, chart().hasLine],
     ([id, from, to, hasLine]) => {
@@ -182,6 +233,12 @@ export default function CollectionHistoryPanel(props) {
     },
   );
   onCleanup(showWholeChart);
+
+  function toggleBand() {
+    const next = !band();
+    setBand(next);
+    writeShowLiquidity(next);
+  }
 
   // Hover: the day under the pointer.
   const hovered = createMemo(() => {
@@ -197,11 +254,12 @@ export default function CollectionHistoryPanel(props) {
     if (tip) tip.dateLabel = formatDayLabel(date);
     return { tip, dot: { x: c.xOf(date), y: c.yOf(day?.totalPkn) }, legendDay: day };
   });
-  const tipLeftPct = () => (hovered().dot ? (hovered().dot.x / CHART_W) * 100 : 50);
-  // The tip sits beside the crosshair so it never covers the point it describes.
-  const tipOnRight = () => tipLeftPct() < 55;
   const legendDay = () => hovered().legendDay;
   const legendCards = () => legendDay()?.assets?.cardsValuePkn;
+  const hoverLabel = () => {
+    const tip = hovered().tip;
+    return tip ? `${tip.dateLabel} · ${tip.totalLabel}` : '';
+  };
 
   function onPointer(event) {
     if (!chart().hasData || !timeline()) {
@@ -213,17 +271,24 @@ export default function CollectionHistoryPanel(props) {
     setHover({ ratio: Math.min(1, Math.max(0, ratio)) });
   }
 
-  // Keep the tip inside the plot on a narrow screen.
-  createEffect(hovered, () => {
-    if (!frame || !tipNode) return;
-    tipNode.style.transform = '';
-    const frameBox = frame.getBoundingClientRect();
-    const tipBox = tipNode.getBoundingClientRect();
-    const pad = 6;
-    let nudge = 0;
-    if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
-    else if (tipBox.right > frameBox.right - pad) nudge = (frameBox.right - pad) - tipBox.right;
-    if (nudge) tipNode.style.transform = `translateX(${nudge}px)`;
+  // Keep the floating label inside the plot: it is only measured once it is
+  // in the frame, and the frame stretches, so the anchor is recomputed here.
+  createEffect(() => hovered().dot, (dot) => {
+    if (!frame || !labelNode || !dot) return;
+    const box = frame.getBoundingClientRect();
+    const plotWidth = Math.max(1, box.width - 2);
+    const plotHeight = Math.max(1, box.height - 2);
+    const anchor = historyLabelAnchor({
+      x: (dot.x / CHART_W) * plotWidth,
+      y: (dot.y / CHART_H) * plotHeight,
+      plotWidth,
+      plotHeight,
+      labelWidth: labelNode.offsetWidth,
+      labelHeight: labelNode.offsetHeight,
+      gap: LABEL_GAP,
+    });
+    labelNode.style.left = `${anchor.left}px`;
+    labelNode.style.top = `${anchor.top}px`;
   });
 
   function pickDates(nextFrom, nextTo) {
@@ -254,7 +319,7 @@ export default function CollectionHistoryPanel(props) {
         <Show when={change()}>
           {(delta) => (
             <div class="seller-history-value">
-              <strong>{formatPknNumber(delta().last)} PKN</strong>
+              <strong>{formatPknNumber(counted() ?? delta().last)} PKN</strong>
               <span class={['seller-history-delta', delta().delta < 0 ? 'is-down' : 'is-up']}>{formatHistoryDelta(delta())}</span>
             </div>
           )}
@@ -277,6 +342,14 @@ export default function CollectionHistoryPanel(props) {
                 )}
               </For>
             </div>
+            <button
+              type="button"
+              class="seller-history-liquidity-toggle"
+              aria-pressed={String(band())}
+              onClick={toggleBand}
+            >
+              Show liquidity
+            </button>
             <div class="seller-history-dates">
               <input
                 type="date"
@@ -317,14 +390,6 @@ export default function CollectionHistoryPanel(props) {
         </Show>
       </div>
       <div class="seller-history-chart">
-        <div class="seller-history-y" aria-hidden="true">
-          <span class="seller-history-y-sizer">{chart().widestTick}</span>
-          <div class="seller-history-y-ticks">
-            <For each={chart().axis.ticks}>
-              {(tick) => <span style={{ top: pct(chart().yOf(tick), CHART_H) }}>{formatPknNumber(tick)}</span>}
-            </For>
-          </div>
-        </div>
         <div
           ref={(el) => { frame = el; }}
           class="seller-history-frame"
@@ -341,26 +406,18 @@ export default function CollectionHistoryPanel(props) {
             aria-hidden="true"
           >
             <defs>
-              <linearGradient id="collection-history-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#ffd33d" stop-opacity="0.24" />
-                <stop offset="100%" stop-color="#ffd33d" stop-opacity="0.03" />
-              </linearGradient>
               {/* The draw-in reveal. It rests at the full plot width, so only a
                   running animation hides the series. */}
               <clipPath id={REVEAL_CLIP}>
                 <rect ref={(el) => { revealRect = el; }} x="0" y="0" height={CHART_H} width={CHART_W} />
               </clipPath>
             </defs>
-            <For each={chart().axis.ticks}>
-              {(tick) => <line class="seller-history-rule" x1="0" x2={CHART_W} y1={chart().yOf(tick)} y2={chart().yOf(tick)} />}
-            </For>
+            <line class="seller-history-baseline" x1="0" x2={CHART_W} y1={chart().baseY} y2={chart().baseY} />
+            <Show when={chart().liquidityLine}>
+              {(path) => <path class="seller-history-liquidity" d={path()} />}
+            </Show>
             <g clip-path={`url(#${REVEAL_CLIP})`}>
-              <Show when={chart().hasLine}>
-                <g ref={(el) => { areaGroup = el; }}>
-                  <path class="seller-history-liquidity" d={chart().liquidityArea} />
-                  <path class="seller-history-fill" d={chart().cardsArea} />
-                </g>
-              </Show>
+              <Show when={chart().hasLine}><path class="seller-history-step" d={chart().stepLine} /></Show>
               <Show when={chart().hasLine}><path class="seller-history-line" d={chart().totalLine} /></Show>
             </g>
             <Show when={chart().live}>
@@ -377,12 +434,13 @@ export default function CollectionHistoryPanel(props) {
             </div>
           </Show>
         </div>
-        {/* Dots and the tip sit over the frame without its clipping. CSS
-            circles, because an SVG circle stretches under preserveAspectRatio=none. */}
+        {/* Dots and the floating label sit over the frame without its clipping.
+            CSS circles, because an SVG circle stretches under
+            preserveAspectRatio=none. */}
         <div class="seller-history-overlay" aria-hidden="true">
-          {/* One dot only: the cursor dot replaces the last-day dot while a
-              hover is active, and it stays the very node the reveal fades, so
-              a hover in the middle of a draw-in cannot flash it back. */}
+          {/* One dot only: it is the head of the draw-in and then the last day,
+              and the cursor dot replaces it while a hover is active, so a
+              hover in the middle of a draw cannot flash it back. */}
           <Show when={chart().endDot}>
             {(dot) => (
               <span
@@ -394,7 +452,11 @@ export default function CollectionHistoryPanel(props) {
                   top: pct(dot().y, CHART_H),
                   display: hovered().dot ? 'none' : '',
                 }}
-              />
+              >
+                <Show when={chart().hasLine}>
+                  <span ref={(el) => { pulseNode = el; }} class="seller-history-pulse" />
+                </Show>
+              </span>
             )}
           </Show>
           <Show when={hovered().dot}>
@@ -403,31 +465,22 @@ export default function CollectionHistoryPanel(props) {
             )}
           </Show>
           <Show when={hovered().tip}>
-            {(tip) => (
-              <div
-                ref={(el) => { tipNode = el; }}
-                class="seller-history-tip"
-                data-testid="collection-history-tip"
-                style={tipOnRight() ? { left: `calc(${tipLeftPct()}% + 14px)` } : { right: `calc(${100 - tipLeftPct()}% + 14px)` }}
-              >
-                <p class="seller-history-tip-day">{tip().dateLabel}</p>
-                <p class="seller-history-tip-total">{tip().totalLabel}</p>
-                <Show when={tip().rows.length}>
-                  <ul>
-                    <For each={tip().rows}>
-                      {(row) => (
-                        <li class={`is-${row.key}`}>
-                          <span>{row.label}</span>
-                          <strong>{row.value}</strong>
-                          <Show when={row.note}><em>{row.note}</em></Show>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                </Show>
-                <Show when={tip().footnote}><p class="seller-history-tip-note">{tip().footnote}</p></Show>
-              </div>
-            )}
+            <div
+              ref={(el) => { labelNode = el; }}
+              class="seller-history-tip collection-history-tip"
+              data-testid="collection-history-tip"
+              style={{
+                left: pct(hovered().dot.x, CHART_W),
+                top: `calc(${pct(hovered().dot.y, CHART_H)} - ${LABEL_GAP}px)`,
+              }}
+            >
+              {hoverLabel()}
+            </div>
+          </Show>
+          <Show when={chart().liquidityLine}>
+            <span class="seller-history-liquidity-label">
+              {`Liquidity, own scale (peak ${formatPknNumber(chart().liquidityPeak)} PKN)`}
+            </span>
           </Show>
         </div>
         <div class="seller-history-x" aria-hidden="true">
