@@ -459,10 +459,10 @@ export async function fetchExactNameCards(name, {
 /** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
  * 1,000-row bound keeps hydration finite; the shared scorer chooses the popup. */
 export const fetchNamePrintings = createNamePrintingsFetcher({
-  fetchRows: ({ name, lang, limit }) => {
+  fetchRows: ({ name, lang, limit, signal }) => {
     const params = new URLSearchParams({ query: name, limit: String(limit),
       productType: 'card', search_language: lang });
-    return getJsonC1(`/api/marketplace-card-versions?${params}`);
+    return getJsonC1(`/api/marketplace-card-versions?${params}`, { signal });
   },
   mapCard: cardFromCatalogRow,
 });

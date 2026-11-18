@@ -55,7 +55,6 @@ export function createRecallSearch({
       offsets: [],
       more: [],
       totals: [],
-      headTotal: 0,
       cursor: 0,
       pages: 0,
       done: false,
@@ -89,14 +88,17 @@ export function createRecallSearch({
     session.base = firsts[0] || {};
     firsts.forEach((page, index) => {
       session.buffered[index] = page;
-      session.totals[index] = Number(page?.total) || 0;
+      // The lookup's own total, or unknown. `|| 0` here would let a missing
+      // total read as an answered zero.
+      const total = Number(page?.total);
+      const answered = page?.total !== null && page?.total !== undefined;
+      session.totals[index] = answered && Number.isFinite(total) ? total : null;
       session.offsets[index] = nextOffsetOf(page, 0);
       session.more[index] = Boolean(page?.hasMore) && (page?.cards || []).length > 0;
     });
     session.pages += firsts.length;
     if (Array.isArray(headRows)) {
       absorb(session, headRows);
-      session.headTotal = session.rows.length;
     }
   }
 
@@ -137,8 +139,14 @@ export function createRecallSearch({
       if (!session.lookups) await start(session, options, request);
       await fill(session, offset + limit + 1, request);
       const cards = session.rows.slice(offset, offset + limit);
-      const known = Math.max(session.headTotal, ...session.totals, 0);
-      const total = session.done ? session.rows.length : Math.max(known, session.rows.length);
+      // One universe per number. `recallOrder` always puts the typed query
+      // first, so `totals[0]` is the count of the predicate the visitor named;
+      // the sibling lookups are different predicates, and the widest of them
+      // must not be reported as this query's total (`dark` = 247 Darkrai-family
+      // rows is not the count of `dark jolteon` — PH-05 §5.3). Once every
+      // lookup is consumed, the union's own deduped length is exact.
+      const typedTotal = session.totals[0];
+      const total = session.done ? session.rows.length : Number.isFinite(typedTotal) ? typedTotal : null;
       return {
         ...session.base,
         query: String(request.query || '').trim(),
