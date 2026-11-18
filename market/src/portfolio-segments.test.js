@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ALL_LEVEL,
+  COLLECTIONS_LEVEL,
   collectionSeries,
+  collectionSeriesOn,
+  collectionsModel,
   defaultSegmentLevel,
   formatSegmentChange,
   indexedSeries,
+  normalizeSegmentDefs,
   normalizeSegments,
   segmentGroups,
   segmentLevels,
@@ -14,6 +18,7 @@ import {
   sparkEndPoint,
   sparkPoints,
   versusPaths,
+  withCollections,
 } from './portfolio-segments.js';
 
 const DEFS = [
@@ -521,4 +526,133 @@ test('formatSegmentChange signs, rounds and blanks', () => {
   assert.equal(formatSegmentChange(null), '');
   assert.equal(formatSegmentChange(Number.NaN), '');
   assert.equal(formatSegmentChange(200), '+200.0%');
+});
+
+/** The book itself: two days of one game, the whole value on each. */
+function bookModel() {
+  return normalizeSegments(answer([
+    { date: '2026-11-16', cardsValuePkn: 1000, segments: { 'game:pokemon': [1000, 9, 30] } },
+    { date: '2026-11-17', cardsValuePkn: 1200, segments: { 'game:pokemon': [1200, 9, 30] } },
+  ]));
+}
+
+/** The saved lists' own model, as `normalizeCollections` hands it over. */
+function savedModel() {
+  return {
+    defs: [
+      { key: 'collection:c1', group: 'collection', game: '', label: 'Charizard binder', years: undefined },
+      { key: 'collection:c2', group: 'collection', game: '', label: 'Sealed', years: undefined },
+    ],
+    days: [
+      { date: '2026-11-16', cardsValuePkn: null, segments: { 'collection:c1': { valuePkn: 500, priced: 2, held: 3 }, 'collection:c2': { valuePkn: 0, priced: 0, held: 4 } } },
+      { date: '2026-11-17', cardsValuePkn: null, segments: { 'collection:c1': { valuePkn: 600, priced: 2, held: 3 }, 'collection:c2': { valuePkn: 0, priced: 0, held: 4 } } },
+      { date: '2026-11-18', cardsValuePkn: null, segments: { 'collection:c1': { valuePkn: 660, priced: 2, held: 3 }, 'collection:c2': { valuePkn: 0, priced: 0, held: 4 } } },
+    ],
+  };
+}
+
+test('normalizeSegmentDefs is the def half of normalizeSegments', () => {
+  assert.deepEqual(normalizeSegmentDefs(undefined), []);
+  assert.deepEqual(normalizeSegmentDefs('junk'), []);
+  assert.deepEqual(
+    normalizeSegmentDefs([
+      { key: 'game:pokemon', group: 'game', game: 'pokemon' },
+      { key: 'game:pokemon', group: 'game', game: 'pokemon' },
+      { key: 'collection:c1', group: 'collection', label: 'Charizard binder' },
+      { key: 'x', group: 'nonsense' },
+      { group: 'game' },
+    ]),
+    [
+      { key: 'game:pokemon', group: 'game', game: 'pokemon', label: '', years: undefined },
+      { key: 'collection:c1', group: 'collection', game: '', label: 'Charizard binder', years: undefined },
+    ],
+    'a saved list is a segment like any other, once',
+  );
+});
+
+test('the Collections level is there whenever a collections model is supplied', () => {
+  const book = bookModel();
+  assert.deepEqual(segmentLevels(book), [
+    { id: 'all', label: 'All games' },
+    { id: 'pokemon', label: 'Pokémon' },
+  ]);
+  // Nothing saved yet still lists it: the level is where the first one is made.
+  assert.deepEqual(segmentLevels(withCollections(book, savedModel())).map((level) => level.id), ['all', 'pokemon', COLLECTIONS_LEVEL]);
+  assert.deepEqual(segmentLevels(withCollections(book, { defs: [], days: [] })).map((level) => level.id), ['all', 'pokemon', COLLECTIONS_LEVEL]);
+  assert.deepEqual(segmentLevels(withCollections(book, null)), segmentLevels(book), 'no answer, no level');
+  assert.deepEqual(segmentLevels(withCollections(null, { defs: [], days: [] })).map((level) => level.id), [COLLECTIONS_LEVEL]);
+  assert.equal(segmentLevels(withCollections(book, savedModel()))[2].label, 'Collections');
+  assert.deepEqual(collectionsModel(book), null);
+  assert.equal(collectionsModel(withCollections(book, null)), null);
+  assert.deepEqual(collectionsModel(withCollections(book, savedModel())), savedModel());
+  assert.equal(withCollections(null, null), null);
+  // The saved rows are never a level of their own on another group, and the
+  // levels that already existed keep their order.
+  const withSets = normalizeSegments(answer(
+    [{ date: '2026-11-17', cardsValuePkn: 10, segments: { 'game:riftbound': [10, 1, 1], 'riftbound:set:smoky': [4, 1, 1] } }],
+    [
+      { key: 'game:pokemon', group: 'game', game: 'pokemon' },
+      { key: 'game:riftbound', group: 'game', game: 'riftbound' },
+      { key: 'riftbound:set:smoky', group: 'set', game: 'riftbound', label: 'Smoky' },
+    ],
+  ));
+  assert.deepEqual(
+    segmentLevels(withCollections(withSets, savedModel())).map((level) => level.id),
+    ['all', 'riftbound', COLLECTIONS_LEVEL],
+  );
+});
+
+test('the Collections level is one group of the saved rows', () => {
+  const model = withCollections(bookModel(), savedModel());
+  const groups = segmentGroups(model, COLLECTIONS_LEVEL, {});
+  assert.deepEqual(groups.map((group) => group.title), ['Collections']);
+  assert.deepEqual(groups[0].rows.map((row) => row.label), ['Charizard binder', 'Sealed']);
+  const binder = groups[0].rows[0];
+  assert.equal(binder.key, 'collection:c1');
+  assert.deepEqual(binder.series.map((point) => [point.date, point.valuePkn]), [
+    ['2026-11-16', 500],
+    ['2026-11-17', 600],
+    ['2026-11-18', 660],
+  ]);
+  assert.equal(binder.valuePkn, 660);
+  assert.equal(binder.held, 3, 'the cards of the list, not of the book');
+  assert.equal(binder.priced, 2);
+  assert.equal(binder.sub, '', 'a saved list carries no years line');
+  // The window is the same one the other levels use, and it cuts the saved days too.
+  const week = segmentGroups(model, COLLECTIONS_LEVEL, { from: '2026-11-17', to: '2026-11-18' })[0].rows[0];
+  assert.deepEqual(week.series.map((point) => point.valuePkn), [600, 660]);
+  assert.equal(week.changePct, 10);
+  // A list with nothing priced in it is a row of its own state, not a hole.
+  const sealed = groups[0].rows[1];
+  assert.equal(sealed.state, 'unpriced');
+  assert.equal(sealed.held, 4);
+  assert.equal(segmentGroups(withCollections(bookModel(), { defs: [], days: [] }), COLLECTIONS_LEVEL, {}).length, 0);
+  assert.equal(segmentGroups(withCollections(bookModel(), null), COLLECTIONS_LEVEL, {}).length, 0);
+});
+
+test('the saved rows never leak into the levels that already existed', () => {
+  const model = withCollections(bookModel(), savedModel());
+  for (const level of ['all', 'pokemon']) {
+    const keys = segmentGroups(model, level, {}).flatMap((group) => group.rows.map((row) => row.key));
+    assert.ok(!keys.some((key) => key.startsWith('collection:')), `${level} lists only its own rows`);
+  }
+  // And the level the table opens on stays the book's own.
+  assert.equal(defaultSegmentLevel(model), defaultSegmentLevel(bookModel()));
+});
+
+test('a collection chart compares with the book value of its own days', () => {
+  const model = withCollections(bookModel(), savedModel());
+  const row = segmentGroups(model, COLLECTIONS_LEVEL, {})[0].rows[0];
+  // Matched by date, so the extra day the saved list has does not shift the
+  // dashed line, and a day the book never priced stays unknown instead of 0.
+  assert.deepEqual(collectionSeriesOn(model, row.series), [
+    { date: '2026-11-16', valuePkn: 1000 },
+    { date: '2026-11-17', valuePkn: 1200 },
+    { date: '2026-11-18', valuePkn: null },
+  ]);
+  assert.deepEqual(indexedSeries(collectionSeriesOn(model, row.series)), [0, 20, null]);
+  assert.deepEqual(collectionSeriesOn(model, []), []);
+  assert.deepEqual(collectionSeriesOn(null, row.series).map((point) => point.valuePkn), [null, null, null]);
+  // The other levels keep comparing with the windowed book, as before.
+  assert.deepEqual(collectionSeries(model, { from: '2026-11-17', to: '' }).map((point) => point.valuePkn), [1200]);
 });
