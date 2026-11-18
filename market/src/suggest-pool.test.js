@@ -137,9 +137,27 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   for (let index = 0; index < 2000; index += 1) {
     rows.push(card(String(index), names[index % names.length], { number: `${index}/200` }));
   }
-  // Deploy hosts are busy; keep a 3-frame budget so a contested CPU does not
-  // fail the gate while still catching a real regression (tens of ms → seconds).
-  const budgetMs = 48;
+  // A deploy host that is busy cannot say what 48 ms of code is worth: this budget
+  // flaked twice on 2026-11-17/18 (62 and 64 ms) with the code still green (finding
+  // PKN-17). So measure the host instead of assuming it — the same shape of work over
+  // the same rows in this same run — and allow a fixed multiple of it. RATIO is 3x the
+  // worst ms/calibrationMs of 20 runs idle and 20 alongside two parallel market test
+  // jobs on nezopt (40 runs x 9 steps: median 6.2x, p95 50x, worst 89x; the old 48 ms
+  // wall clock failed 7 of the 66 runs taken here). The ceiling keeps the property
+  // this test guards, a regression of "tens of ms -> seconds": a host that needs a
+  // full second for 2,000 rows is broken for real, not merely busy.
+  const RATIO = 270;
+  const CEILING_MS = 1000;
+  const calibration = [];
+  for (let round = 0; round < 7; round += 1) {
+    const started = performance.now();
+    rows
+      .filter((row) => String(row.name || '').toLowerCase().startsWith('pika'))
+      .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
+    calibration.push(performance.now() - started);
+  }
+  const calibrationMs = Math.max(calibration.sort((left, right) => left - right)[3], 0.5);
+  const budgetMs = RATIO * calibrationMs;
   const steps = ['p', 'pi', 'pik', 'pika', 'pikac', 'pikachu'];
   let available = rows;
   const timings = [];
@@ -148,7 +166,11 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
     available = rankCandidates(rows, step);
     const localMs = performance.now() - started;
     timings.push({ step, localMs, kept: available.length });
-    assert.ok(localMs < budgetMs, `${step} local rank ${localMs.toFixed(2)}ms`);
+    assert.ok(
+      localMs <= budgetMs && localMs < CEILING_MS,
+      `${step} local rank ${localMs.toFixed(2)}ms = ${(localMs / calibrationMs).toFixed(1)}× the ${calibrationMs.toFixed(2)}ms ` +
+        `calibration, over the ${RATIO}× budget of ${budgetMs.toFixed(2)}ms or the ${CEILING_MS}ms ceiling`,
+    );
   }
   assert.ok(timings.find((row) => row.step === 'pikac').kept > 0);
   assert.equal(timings.find((row) => row.step === 'pikac').kept < timings.find((row) => row.step === 'pika').kept, true);
@@ -159,7 +181,11 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
     const groups = projectPoolGroups(step, rows, { limit: 20 });
     const ms = performance.now() - started;
     ranked.push({ step, ms: Number(ms.toFixed(3)), groups: groups.length });
-    assert.ok(ms < budgetMs, `${step} project ${ms.toFixed(2)}ms`);
+    assert.ok(
+      ms <= budgetMs && ms < CEILING_MS,
+      `${step} project ${ms.toFixed(2)}ms = ${(ms / calibrationMs).toFixed(1)}× the ${calibrationMs.toFixed(2)}ms ` +
+        `calibration, over the ${RATIO}× budget of ${budgetMs.toFixed(2)}ms or the ${CEILING_MS}ms ceiling`,
+    );
   }
   console.log(JSON.stringify({ local: timings, ranked }));
 });
