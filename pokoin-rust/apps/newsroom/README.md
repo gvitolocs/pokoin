@@ -46,10 +46,14 @@ budget (default 4, maximum 10 including repairs); retries are not hidden.
 `serve --bind 127.0.0.1:<workspace-port>` serves H42 only. It does not register
 routes in the existing shared API or expose a production health endpoint.
 
-`tools/*.mjs` and `capture-get.py` are development capture tools. They are not
-used by the Rust binary, systemd units or cutover script. Their imports are
-read-only references; the evidence capture injects a GET-only fetch function.
+`tools/*.mjs` are development capture tools. They are not used by the Rust
+binary, systemd units or cutover script. Their imports are read-only
+references; the evidence capture injects a GET-only fetch function.
 `capture-assets.mjs` embeds prompt text/schema data, never JavaScript source.
+The public H42 golden capture is a Rust subcommand instead:
+`capture-h42 --base URL --output FILE` issues the six anonymous GETs itself,
+records status, the three response headers and the JSON body, and writes no
+state.
 
 Secrets: pass `--env-file /absolute/path` after the command. The file must be
 owned by the runtime user, mode 0600, and must not be a symlink. `KEY=value`,

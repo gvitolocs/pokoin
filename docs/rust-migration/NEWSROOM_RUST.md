@@ -127,9 +127,9 @@ publisher is still required; this is a protocol model, not a completion claim.
   parity/integration tests and two Stateright tests pass, zero failures.
 - `cargo fmt --manifest-path pokoin-rust/apps/newsroom/Cargo.toml --check`: clean.
 - `cargo clippy --manifest-path pokoin-rust/apps/newsroom/Cargo.toml --all-targets -- -D warnings`: clean.
-- `python3 -m unittest scripts/tests/test_cutover_newsroom_rust.py`: four
-  local-fake orchestration tests pass (preflight refusal, success, failed
-  health rollback, and refusal to start Node when Rust cannot be stopped).
+- `cargo test -p pokoin-newsroom --test cutover_script`: four local-fake
+  orchestration tests pass (preflight refusal, success, failed health
+  rollback, and refusal to start Node when Rust cannot be stopped).
 - `bash -n scripts/cutover-newsroom-rust.sh`: clean.
 
 ## Required parity gaps before activation

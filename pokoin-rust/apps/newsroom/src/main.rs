@@ -4,10 +4,11 @@ use pokoin_newsroom::{
     model::{Budget, Provider},
     store, templates, website,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     env,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 fn option(args: &[String], key: &str) -> Option<String> {
@@ -59,6 +60,7 @@ async fn run(args: &[String]) -> Result<()> {
                 PathBuf::from(option(args, "--output").context("snapshot requires --output")?);
             println!("{}", handover::snapshot(&dir, &dest)?);
         }
+        "capture-h42" => capture_h42(args).await?,
         "plan" => {
             let stories = store::load_array(&dir.join(store::STORIES));
             let records = store::load_array(&dir.join(store::RECORDS));
@@ -101,11 +103,70 @@ async fn run(args: &[String]) -> Result<()> {
             println!(
                 "pokoin-newsroom status | preflight [--activate] | snapshot --output DIR | plan"
             );
+            println!("capture-h42 --base URL --output FILE; six public GETs of /api/poko/news.");
             println!("dry-run --input FILE --output FILE [--env-file FILE] [--max-model-calls N]");
             println!("serve --bind IP:PORT; use --data-dir DIR and --now RFC3339 for replay.");
             println!("Production run/ready fail closed until J17 parity is complete.");
         }
     }
+    Ok(())
+}
+/// Read-only H42 golden capture: six public GETs, no token, no auth header, no write
+/// to any newsroom state. Non-2xx answers are recorded, never treated as failures.
+async fn capture_h42(args: &[String]) -> Result<()> {
+    let base = option(args, "--base").context("capture-h42 requires --base URL")?;
+    let output = PathBuf::from(
+        option(args, "--output").context("capture-h42 requires --output outside live state")?,
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("capture-h42 needs a plain HTTP client")?;
+    let mut rows = Vec::new();
+    for query in [
+        "",
+        "?slug=missing-rust-parity",
+        "?story=missing-rust-parity",
+        "?export=invalid",
+        "?export=all",
+        "?export=published",
+    ] {
+        let response = client
+            .get(format!("{base}/api/poko/news{query}"))
+            .send()
+            .await
+            .with_context(|| format!("GET /api/poko/news{query}"))?;
+        let status = response.status().as_u16();
+        let mut headers = serde_json::Map::new();
+        for name in [
+            "content-type",
+            "cache-control",
+            "access-control-allow-origin",
+        ] {
+            headers.insert(
+                name.to_string(),
+                response
+                    .headers()
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(Value::from)
+                    .unwrap_or(Value::Null),
+            );
+        }
+        let body: Value = response
+            .json()
+            .await
+            .with_context(|| format!("GET /api/poko/news{query} is not JSON"))?;
+        rows.push(
+            json!({"query": query.strip_prefix('?').unwrap_or(query), "status": status,
+            "headers": Value::Object(headers), "body": body}),
+        );
+    }
+    let captured = rows.len();
+    let document = json!({"base": base, "capturedAt": chrono::Utc::now().to_rfc3339(),
+        "method": "GET", "rows": rows});
+    store::atomic_json(&output, &document)?;
+    println!("captured {captured} public GET responses");
     Ok(())
 }
 async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
