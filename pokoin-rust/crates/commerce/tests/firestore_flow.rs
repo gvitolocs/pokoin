@@ -580,30 +580,86 @@ async fn state_harness_with_store(
 }
 
 async fn harness() -> (Router, FirestoreClient) {
-    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
-    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
-    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
-    let (base, _store) = start_mock_firestore().await;
-    let http = reqwest::Client::new();
-    let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");
-    let mut config = CommerceConfig::default();
-    config.pokoin_treasury_username = "pokoin".into();
-    // Short acquire timeout: the harness has no Postgres, so SQL paths must
-    // fail fast instead of waiting on the driver default.
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_millis(200))
-        .connect_lazy("postgres://127.0.0.1:1/none")
-        .expect("lazy pool");
-    let state = DomainState::with_pools(
-        config,
-        pool.clone(),
-        pool,
-        None,
-        Arc::new(AnyToken),
-        Some(firestore.clone()),
-    )
-    .with_clock(Arc::new(FixedClock(1_700_000_000_000)));
-    (pokoin_commerce::router(state), firestore)
+    let (router, firestore, _) = harness_with_store(|_| {}).await;
+    (router, firestore)
+}
+
+/// The real router over the mock Firestore with a chosen config.
+async fn harness_with_store(
+    configure: impl FnOnce(&mut CommerceConfig),
+) -> (Router, FirestoreClient, MockStore) {
+    let (state, firestore, store) = state_harness_with_store(configure).await;
+    (pokoin_commerce::router(state), firestore, store)
+}
+
+/// A chain RPC that answers the calls a payout makes and records every method,
+/// so a test can count the payouts one request started.
+async fn start_mock_rpc(payout_hash: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+    #[derive(Clone)]
+    struct MockRpc {
+        calls: Arc<Mutex<Vec<String>>>,
+        payout_hash: String,
+    }
+
+    async fn mock_rpc(State(rpc): State<MockRpc>, Json(request): Json<Value>) -> Json<Value> {
+        let method = request
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        rpc.calls.lock().unwrap().push(method.clone());
+        let answered = match method.as_str() {
+            "eth_chainId" => Some(json!("0x38")),
+            "eth_getTransactionCount" => Some(json!("0x1")),
+            "eth_gasPrice" => Some(json!("0x4a817c800")),
+            "eth_estimateGas" => Some(json!("0x5208")),
+            "eth_sendRawTransaction" => Some(json!(rpc.payout_hash.clone())),
+            _ => None,
+        };
+        let Some(result) = answered else {
+            return Json(json!({ "error": { "code": -32601, "message": method } }));
+        };
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        }))
+    }
+
+    let rpc = MockRpc {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        payout_hash: payout_hash.to_string(),
+    };
+    let calls = rpc.calls.clone();
+    let app = Router::new().route("/", post(mock_rpc)).with_state(rpc);
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let address = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), calls)
+}
+
+fn method_calls(calls: &Arc<Mutex<Vec<String>>>, method: &str) -> usize {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|called| *called == method)
+        .count()
+}
+
+/// The bank that pays withdrawals, pointing at `rpc_url`; the address is the
+/// one derived from the key so the payout signs instead of staying manual.
+async fn bank_harness(rpc_url: &str) -> (Router, FirestoreClient, MockStore) {
+    let key = format!("0x{}", "01".repeat(32));
+    let bank = pokoin_commerce::evm::address_from_private_key(&key).expect("derive bank address");
+    harness_with_store(move |config| {
+        config.pokoin_rpc_url = rpc_url.to_string();
+        config.pokoin_bank_private_key = Some(key);
+        config.pokoin_bank_address = bank;
+    })
+    .await
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -3083,4 +3139,345 @@ async fn a_non_eur_escrow_refund_is_handled_by_hand() {
     let mut expected = order.clone();
     expected["id"] = json!("order-escrow-pkn");
     assert_eq!(stored, expected);
+}
+
+// ---------------------------------------------------------------------------
+// Wallet request ids
+// ---------------------------------------------------------------------------
+
+const TRANSFER_ROUTE: &str = "/api/transfer-account-balance";
+const WITHDRAW_ROUTE: &str = "/api/request-pkn-withdraw";
+/// Two client-generated intent names.
+const ONE_REQUEST: &str = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+const ANOTHER_REQUEST: &str = "7c2f3b45-1111-4dae-9f2a-1b2c3d4e5f60";
+const PAYOUT_ADDRESS: &str = "0x3535353535353535353535353535353535353535";
+const OTHER_PAYOUT_ADDRESS: &str = "0x4444444444444444444444444444444444444444";
+const PAYOUT_TX_HASH: &str = "0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b";
+
+fn transfer_body(recipient: &str, amount_pkn: i64, request_id: Option<&str>) -> Value {
+    let mut body = json!({ "recipientUsername": recipient, "amountPkn": amount_pkn });
+    if let Some(request_id) = request_id {
+        body["requestId"] = json!(request_id);
+    }
+    body
+}
+
+fn withdraw_body(address: &str, amount_pkn: i64, request_id: Option<&str>) -> Value {
+    let mut body = json!({ "toAddress": address, "amountPkn": amount_pkn });
+    if let Some(request_id) = request_id {
+        body["requestId"] = json!(request_id);
+    }
+    body
+}
+
+async fn available_pkn(firestore: &FirestoreClient, uid: &str) -> i64 {
+    store::balance(firestore, uid).await.unwrap().available_pkn
+}
+
+/// Alice (`buyer-1`, the harness token's uid) holds 1000 PKN and can address
+/// the two registered accounts the wallet handlers resolve.
+async fn wallet_harness() -> (Router, FirestoreClient, MockStore) {
+    let (app, firestore, mock) = harness_with_store(|_| {}).await;
+    for (username, uid) in [("bob", "bob-1"), ("carol", "carol-1")] {
+        firestore
+            .create_document("usernames", username, &json!({ "uid": uid }))
+            .await
+            .expect("usernames");
+        firestore
+            .create_document(
+                "users",
+                uid,
+                // A local address keeps the email step skipped, so the answer a
+                // request id gets is fixed and can be compared with it.
+                &json!({
+                    "username": username,
+                    "email": format!("{username}@wallet.pokoin.local"),
+                }),
+            )
+            .await
+            .expect("users");
+    }
+    firestore
+        .create_document(
+            "users",
+            "buyer-1",
+            &json!({ "username": "alice", "email": "buyer@wallet.pokoin.local" }),
+        )
+        .await
+        .expect("users/buyer-1");
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    (app, firestore, mock)
+}
+
+#[tokio::test]
+async fn a_transfer_request_id_is_applied_once() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let body = transfer_body("bob", 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["ok"], json!(true));
+    assert_eq!(first["creditedAccountBalance"], json!(true));
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+
+    // What the id was applied for is written with it, in the commit that moved
+    // the PKN.
+    let marker = format!(
+        "{}/{}",
+        store::IDEMPOTENCY,
+        store::idempotency_doc_id(&format!("account_transfer:buyer-1:{ONE_REQUEST}"))
+    );
+    let stored = mock.get(&marker).unwrap();
+    assert_eq!(stored["fingerprint"], json!("bob-1:250"));
+    assert_eq!(stored["result"], first);
+
+    // The same request id, sent again with the request it stands for, is
+    // answered with that answer and moves nothing.
+    let (status, replay) = call(&app, "POST", TRANSFER_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn a_transfer_request_id_stands_for_one_request() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let (status, applied) = call(
+        &app,
+        "POST",
+        TRANSFER_ROUTE,
+        Some(transfer_body("bob", 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+
+    // The same id with another amount, and then with another recipient: one id
+    // answers one request, so neither is applied.
+    for body in [
+        transfer_body("bob", 251, Some(ONE_REQUEST)),
+        transfer_body("carol", 250, Some(ONE_REQUEST)),
+    ] {
+        let (status, payload) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body} -> {payload}");
+        assert_eq!(payload["code"], json!("request_id_reused"));
+    }
+
+    // Nothing after the applied request moved.
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(available_pkn(&firestore, "carol-1").await, 0);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn two_transfer_request_ids_move_the_pkn_of_each_request() {
+    let (app, firestore, mock) = wallet_harness().await;
+    // One intent, one id: two named requests are two moves of 250.
+    for (request_id, left_with) in [(ONE_REQUEST, 750), (ANOTHER_REQUEST, 500)] {
+        let (status, payload) = call(
+            &app,
+            "POST",
+            TRANSFER_ROUTE,
+            Some(transfer_body("bob", 250, Some(request_id))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{payload}");
+        assert_eq!(available_pkn(&firestore, "buyer-1").await, left_with);
+    }
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 5);
+}
+
+#[tokio::test]
+async fn a_wallet_request_without_a_request_id_is_answered_as_before() {
+    let (app, firestore, mock) = wallet_harness().await;
+    // No request id yet: the request is served as it always was, and each call
+    // is its own request.
+    for left_with in [750, 500] {
+        let (status, payload) = call(
+            &app,
+            "POST",
+            TRANSFER_ROUTE,
+            Some(transfer_body("bob", 250, None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{payload}");
+        assert_eq!(available_pkn(&firestore, "buyer-1").await, left_with);
+    }
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    // No bank key in this harness, so the withdraw stays for manual review and
+    // keeps a fresh request id of its own.
+    let (status, withdraw) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 20, None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{withdraw}");
+    assert_eq!(withdraw["status"], json!("pending"));
+    assert_ne!(withdraw["requestId"], json!(null));
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 480);
+    // An unnamed request names nothing, so no key is stored for it.
+    assert!(mock.keys_with_prefix("commerce_idempotency/").is_empty());
+}
+
+#[tokio::test]
+async fn a_wallet_request_id_is_a_uuid() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let malformed = [
+        "",
+        "not-a-uuid",
+        "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5",
+        "6b1f2a3400004c9d8f1e0a1b2c3d4e5f",
+    ];
+    for request_id in malformed {
+        for (route, body) in [
+            (TRANSFER_ROUTE, transfer_body("bob", 250, Some(request_id))),
+            (
+                WITHDRAW_ROUTE,
+                withdraw_body(PAYOUT_ADDRESS, 250, Some(request_id)),
+            ),
+        ] {
+            let (status, payload) = call(&app, "POST", route, Some(body.clone())).await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{body} on {route} -> {payload}"
+            );
+            assert_eq!(payload["code"], json!("request_id_invalid"));
+        }
+    }
+    // A request id that is not a string at all is refused the same way.
+    let (status, payload) = call(
+        &app,
+        "POST",
+        TRANSFER_ROUTE,
+        Some(json!({ "recipientUsername": "bob", "amountPkn": 250, "requestId": 42 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{payload}");
+    assert_eq!(payload["code"], json!("request_id_invalid"));
+    // None of them reached the ledger.
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 1_000);
+    assert!(mock.keys_with_prefix("commerce_idempotency/").is_empty());
+}
+
+#[tokio::test]
+async fn a_transfer_whose_answer_never_reached_the_client_is_answered_from_its_request_id() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let body = transfer_body("bob", 250, Some(ONE_REQUEST));
+    // The commit lands and its answer never arrives; the request id names the
+    // move that landed, so the call recovers it.
+    mock.fail_next_commit(CommitFault::LoseResponse);
+    let (status, landed) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{landed}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+
+    // The client sends the same request id with the same request again: it is
+    // given the answer that landed, and the PKN does not move a second time.
+    let (status, answer) = call(&app, "POST", TRANSFER_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, landed);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn a_withdraw_request_id_pays_once() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["requestId"], json!(ONE_REQUEST));
+    assert_eq!(first["status"], json!("completed"));
+    assert_eq!(first["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+
+    // The same request id again: this intent's PKN is already locked and the
+    // bank was already asked for it, so the call starts no payout and reports
+    // where the first one stands.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["requestId"], json!(ONE_REQUEST));
+    assert_eq!(replay["status"], json!("completed"));
+    assert_eq!(replay["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+
+    // A second request id is a second request: it locks and pays on its own.
+    let (status, second) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ANOTHER_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 2);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 500);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 2);
+}
+
+#[tokio::test]
+async fn a_withdraw_request_id_stands_for_one_request() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let (status, applied) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+
+    // The same id with another amount, and then with another payout address.
+    for body in [
+        withdraw_body(PAYOUT_ADDRESS, 251, Some(ONE_REQUEST)),
+        withdraw_body(OTHER_PAYOUT_ADDRESS, 250, Some(ONE_REQUEST)),
+    ] {
+        let (status, payload) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body} -> {payload}");
+        assert_eq!(payload["code"], json!("request_id_reused"));
+    }
+
+    // One locked intent, one payout, one request document.
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
 }
