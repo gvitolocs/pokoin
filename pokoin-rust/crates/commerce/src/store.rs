@@ -84,6 +84,9 @@ pub struct LedgerOp {
     pub mode: MoveMode,
     /// Reject when the sender balance is short (default `true`).
     pub require_available: bool,
+    /// What the guarded request is, committed with the marker so a replay of
+    /// the key can be compared with the request sent under it.
+    pub fingerprint: Option<String>,
 }
 
 impl LedgerOp {
@@ -101,6 +104,7 @@ impl LedgerOp {
             meta: json!({}),
             mode,
             require_available: true,
+            fingerprint: None,
         }
     }
 
@@ -149,6 +153,11 @@ impl LedgerOp {
         self
     }
 
+    pub fn with_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.fingerprint = Some(fingerprint.into());
+        self
+    }
+
     pub fn with_ref(mut self, reference: impl Into<String>) -> Self {
         self.ref_id = Some(reference.into());
         self
@@ -172,6 +181,11 @@ pub struct LedgerOutcome {
     pub from_available: i64,
     pub to_available: i64,
     pub ledger_ids: Vec<String>,
+    /// A replay: what the call that committed the marker recorded, so the
+    /// handler can tell the same request from a different one under one key.
+    pub fingerprint: Option<String>,
+    /// A replay: the response the first call answered with, when it stored one.
+    pub result: Option<Value>,
 }
 
 /// Firestore document ids cannot contain `/`, so a caller-provided key is
@@ -342,17 +356,20 @@ pub async fn apply_all(
                 let mut writes = build_writes(&client, &uids, &balances, &ops)?;
                 if let (Some(path), Some(key)) = (marker_path, key) {
                     let (from_available, to_available) = party_balances(&balances, &ops[0]);
-                    writes.push(FirestoreWrite::Create {
-                        path,
-                        value: json!({
-                            "key": key,
-                            "applyId": apply_id,
-                            "fromAvailable": from_available,
-                            "toAvailable": to_available,
-                            "applied": true,
-                            "createdAt": now_iso(),
-                        }),
+                    let mut marker = json!({
+                        "key": key,
+                        "applyId": apply_id,
+                        "fromAvailable": from_available,
+                        "toAvailable": to_available,
+                        "applied": true,
+                        "createdAt": now_iso(),
                     });
+                    if let (Some(object), Some(fingerprint)) =
+                        (marker.as_object_mut(), ops[0].fingerprint.as_deref())
+                    {
+                        object.insert("fingerprint".into(), json!(fingerprint));
+                    }
+                    writes.push(FirestoreWrite::Create { path, value: marker });
                 }
                 *seen.lock().unwrap() = Some(TxSeen::Applied(balances));
                 Ok(writes)
@@ -371,6 +388,8 @@ pub async fn apply_all(
                     from_available,
                     to_available,
                     ledger_ids: Vec::new(),
+                    fingerprint: first.fingerprint.clone(),
+                    result: None,
                 })
             }
             None => Err(StoreError::Cache("Ledger transaction returned no result.".into())),
@@ -559,8 +578,16 @@ fn outcome_from_record(record: &Value, apply_id: &str) -> LedgerOutcome {
             .get("fromAvailable")
             .and_then(Value::as_i64)
             .unwrap_or(0),
-        to_available: record.get("toAvailable").and_then(Value::as_i64).unwrap_or(0),
+        to_available: record
+            .get("toAvailable")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
         ledger_ids: Vec::new(),
+        fingerprint: record
+            .get("fingerprint")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        result: record.get("result").cloned(),
     }
 }
 
@@ -651,6 +678,19 @@ pub async fn update_idempotency(
 ) -> Result<(), StoreError> {
     let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
     fs.set_document(&path, fields).await?;
+    Ok(())
+}
+
+/// Record the response a committed key answered with, so the call that comes
+/// back with the same key is answered with exactly the same body.
+pub async fn record_result(
+    fs: &FirestoreClient,
+    key: &str,
+    result: &Value,
+) -> Result<(), StoreError> {
+    let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
+    fs.update_document(&path, &json!({ "result": result }), Some(&["result"]))
+        .await?;
     Ok(())
 }
 

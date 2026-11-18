@@ -10,12 +10,14 @@ pub mod country;
 pub mod crypto;
 pub mod media;
 pub mod money;
+pub mod money_request;
 /// Seller sale notifications (`_marketplace_sale_notifications.js`).
 pub mod notify;
-pub mod money_request;
 pub mod order_refund;
-pub mod shipping;
+/// The wallet request id: one client-generated intent name, applied once.
+pub mod request_id;
 pub mod settlement;
+pub mod shipping;
 pub mod stock_csv;
 pub mod wpkn;
 

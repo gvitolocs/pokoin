@@ -12,12 +12,44 @@ use serde_json::{json, Value};
 use super::{private_json, text_field};
 use crate::auth::Claims;
 use crate::domain::money_request as mr;
+use crate::domain::request_id::{self, RequestId};
 use crate::error::{ApiError, StoreError};
 use crate::firestore::StructuredQuery;
 use crate::state::{AuthedUser, DomainState};
 use crate::store::{self, LedgerOp};
 
 const SILVER_DURATION_MS: i64 = 365 * 24 * 60 * 60 * 1000;
+
+/// A wallet request that carries no `requestId` is applied as it always was.
+/// The web client that names each intent ships first; a follow-up change sets
+/// this to `true` and every client has to name its request.
+const REQUIRE_REQUEST_ID: bool = false;
+
+/// The body's `requestId`: the name the browser gave this intent, so however
+/// often the body arrives the request behind it is applied once.
+/// `None` is a client that names nothing — logged and served as before.
+fn wallet_request_id(body: &Value, route: &str) -> Result<Option<String>, ApiError> {
+    match request_id::resolve(body, REQUIRE_REQUEST_ID) {
+        Ok(RequestId::Id(id)) => Ok(Some(id)),
+        Ok(RequestId::Absent) => {
+            tracing::warn!(route = route, "wallet request without request id");
+            Ok(None)
+        }
+        Err(reject) => Err(ApiError::bad_request(reject.message()).with_code(reject.code())),
+    }
+}
+
+/// A request id belongs to exactly one request: the same id arriving with
+/// another request is refused, and nothing moves.
+fn refuse_reused_id(stored: Option<&str>, current: &str) -> Result<(), ApiError> {
+    if request_id::same_request(stored, current) {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "That request id already stands for another request.",
+    )
+    .with_code("request_id_reused"))
+}
 
 async fn username_for_uid(state: &DomainState, uid: &str) -> Result<String, ApiError> {
     let user = store::read_user(state.firestore()?, uid).await?;
@@ -273,6 +305,7 @@ pub async fn transfer_account_balance(
     AuthedUser(claims): AuthedUser,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
+    let request_id = wallet_request_id(&body, "transfer-account-balance")?;
     let to_username = text_field(&body, &["recipientUsername"], 40).to_ascii_lowercase();
     let amount = body
         .get("amountPkn")
@@ -306,16 +339,36 @@ pub async fn transfer_account_balance(
         .unwrap_or(&to_username)
         .to_string();
 
-    let op = LedgerOp::transfer(&claims.uid, &recipient_uid, amount, "account_transfer_sent")
+    // One request id is one move: the key names the sender's id, and the marker
+    // committed with it records the recipient and amount that id was applied for.
+    let key = request_id
+        .as_ref()
+        .map(|id| format!("account_transfer:{}:{id}", claims.uid));
+    let fingerprint = request_id::fingerprint(&recipient_uid, amount);
+    let mut op = LedgerOp::transfer(&claims.uid, &recipient_uid, amount, "account_transfer_sent")
         .with_meta(json!({}));
-    let mut op = op;
+    if let Some(key) = &key {
+        op = op
+            .with_idempotency(key.clone())
+            .with_fingerprint(fingerprint.clone());
+    }
     op.receive_reason = Some("account_transfer_received".into());
     op.counterparty = Some(recipient_uid.clone());
     op.counterparty_username = Some(to_username.clone());
-    store::apply(state.firestore()?, &op).await?;
+    let outcome = store::apply(state.firestore()?, &op).await?;
+    if !outcome.applied {
+        // The id was applied already: nothing moves again, and the client that
+        // never got the first answer is given it now.
+        refuse_reused_id(outcome.fingerprint.as_deref(), &fingerprint)?;
+        let answer = outcome
+            .result
+            .unwrap_or_else(|| json!({ "ok": true, "creditedAccountBalance": true }));
+        return Ok(private_json(answer));
+    }
 
     // Delivery goes through the real Resend path (`_email.js`); a missing key is
-    // reported as skipped, never as sent.
+    // reported as skipped, never as sent. Only the call that moved the PKN tells
+    // the recipient about it.
     let email_delivery = notify_pkn_received(
         &state,
         &recipient_email,
@@ -324,12 +377,17 @@ pub async fn transfer_account_balance(
         amount,
     )
     .await;
-
-    Ok(private_json(json!({
+    let response = json!({
         "ok": true,
         "creditedAccountBalance": true,
         "emailNotification": email_delivery,
-    })))
+    });
+    if let Some(key) = &key {
+        // Best effort: what this call answered is what a client that never
+        // received the answer is told when it sends the request id again.
+        let _ = store::record_result(state.firestore()?, key, &response).await;
+    }
+    Ok(private_json(response))
 }
 
 async fn notify_pkn_received(
@@ -371,11 +429,21 @@ async fn notify_pkn_received(
 // POST /api/request-pkn-withdraw
 // ---------------------------------------------------------------------------
 
+/// `withdraw_requests/{requestId}` as the bank and the seller desk see it.
+async fn load_withdraw_request(state: &DomainState, request_id: &str) -> Result<Value, ApiError> {
+    let firestore = state.firestore()?;
+    Ok(firestore
+        .get_document(&firestore.document_path(store::WITHDRAW_REQUESTS, request_id)?)
+        .await?
+        .unwrap_or_else(|| json!({})))
+}
+
 pub async fn request_pkn_withdraw(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
+    let intent_id = wallet_request_id(&body, "request-pkn-withdraw")?;
     let address = text_field(&body, &["toAddress"], 80);
     let amount = body
         .get("amountPkn")
@@ -391,11 +459,37 @@ pub async fn request_pkn_withdraw(
         ));
     }
 
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let lock = LedgerOp::lock(&claims.uid, amount, "withdraw_requested")
+    // The request document of a named intent is that intent: the same id names
+    // the same lock and the same payout. An unnamed request keeps a fresh id.
+    let request_id = intent_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let key = intent_id
+        .as_ref()
+        .map(|id| format!("withdraw:{}:{id}", claims.uid));
+    let fingerprint = request_id::fingerprint(&address.to_ascii_lowercase(), amount);
+    let mut lock = LedgerOp::lock(&claims.uid, amount, "withdraw_requested")
         .with_ref(&request_id)
         .with_meta(json!({ "toAddress": address }));
-    store::apply(state.firestore()?, &lock).await?;
+    if let Some(key) = &key {
+        lock = lock
+            .with_idempotency(key.clone())
+            .with_fingerprint(fingerprint.clone());
+    }
+    let outcome = store::apply(state.firestore()?, &lock).await?;
+    if !outcome.applied {
+        refuse_reused_id(outcome.fingerprint.as_deref(), &fingerprint)?;
+        // The PKN of this intent is already locked and the bank was asked for it
+        // by the call that committed the id. The request document says where
+        // that payout stands; this call starts no other.
+        let stored = load_withdraw_request(&state, &request_id).await?;
+        return Ok(private_json(json!({
+            "ok": true,
+            "requestId": request_id,
+            "status": stored.get("status").cloned().unwrap_or(json!("pending")),
+            "payoutTxHash": stored.get("payoutTxHash").cloned().unwrap_or(Value::Null),
+        })));
+    }
 
     let mut request = json!({
         "uid": claims.uid,
