@@ -16,6 +16,11 @@
 //! database; it writes nothing outside them, and the last assertion proves the
 //! statement itself did not write anything at all.
 //!
+//! CI's database job discovers `pokoin-rust/crates/*/tests/*_flow.rs` only
+//! (`scripts/run-flow-tests.sh:49`), so an app-level flow test like this one —
+//! which is where the neighbouring app tests live too — runs when somebody
+//! starts the container above, not in the sharded `cargo test` job.
+//!
 //! The event leg is also given 60,000 synthetic rows over 40 days so the
 //! `EXPLAIN` this test prints reflects a windowed range scan of
 //! `marketplace_card_events_recent_idx` rather than an empty table. The
