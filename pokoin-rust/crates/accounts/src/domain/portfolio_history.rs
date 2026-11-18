@@ -2210,6 +2210,56 @@ mod tests {
     }
 
     #[test]
+    fn a_segment_joins_the_series_only_on_its_own_since_day() {
+        let rows = vec![
+            held_row("100", "base1", 2, "2026-10-01"),
+            // Acquired in the middle of the series, and of another band.
+            held_row("200", "sv1", 1, "2026-10-03"),
+        ];
+        let book = sold_price_book(&[
+            sold_row("100", "2026-10-01", 10.0),
+            sold_row("200", "2026-10-01", 5.0),
+        ]);
+        let wallet = vec![json!({ "date": "2026-10-01", "currencyPkn": 0 })];
+        let days = build_daily_series_with_segments(
+            &wallet,
+            &holding_slices(&rows),
+            &book,
+            &BTreeMap::new(),
+            &segment_holdings(&rows),
+            &BTreeMap::new(),
+            "2026-10-04",
+        );
+        assert_eq!(days.len(), 4);
+
+        // The day before the SV row: its band is not in the day at all, while
+        // the vintage band is.
+        let day = day_of_key(&days, "2026-10-02");
+        assert_eq!(
+            day["segments"],
+            json!({
+                "game:pokemon": [20, 2, 2],
+                "pokemon:era:vintage": [20, 2, 2],
+            })
+        );
+        assert!(day["segments"].get("pokemon:era:sv").is_none());
+
+        // Its since day is the first day it counts, and both bands are there.
+        let day = day_of_key(&days, "2026-10-03");
+        assert_eq!(
+            day["segments"],
+            json!({
+                "game:pokemon": [25, 3, 3],
+                "pokemon:era:sv": [5, 1, 1],
+                "pokemon:era:vintage": [20, 2, 2],
+            })
+        );
+        // The day it joins is the day its value moves the total.
+        assert_eq!(day["segments"]["game:pokemon"][0], day["cardsValuePkn"]);
+        assert_eq!(day["cardsValuePkn"], json!(25));
+    }
+
+    #[test]
     fn frozen_segment_days_keeps_only_a_current_document() {
         let doc = json!({
             "priceBasis": PRICE_BASIS,
