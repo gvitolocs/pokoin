@@ -15,6 +15,7 @@ import {
   soldGraphNearDay,
   soldGraphRangeBounds,
   soldGraphRangeDays,
+  soldGraphRowPrice,
   soldGraphScale,
   soldGraphSpansYears,
   soldGraphTipMods,
@@ -33,6 +34,7 @@ import {
   SOLD_SERIES_PALETTES,
   soldSeriesColor,
 } from './sold-graph.js';
+import { buyerPriceParts } from './seller-currency.js';
 
 test('compared sold series never share a colour across the first three languages', () => {
   const grades = ['NM', 'SP', 'MP', 'PL', 'Poor'];
@@ -322,4 +324,42 @@ test('the hover names every visible series, capped at six rows', () => {
   assert.equal(eight.more, 2);
   assert.deepEqual(eight.rows.map((row) => row.label), ['NM · EN', 'TCGplayer', 'Cardmarket', 'Pokoin now', 'SP', 'PL']);
   assert.equal(soldGraphHoverRows([], '2026-11-10').rows.length, 0);
+});
+
+test('every tooltip row is the visitor currency, a small amount included', () => {
+  // The buyer rule the desk prices with answers what a visitor would pay: with a
+  // PKN balance that covers the price it has no local part at all. A graph row is
+  // a quote, so it reads in the visitor's currency either way, and a sub-cent one
+  // keeps the desk's small-amount format (1 PKN is 0.0375 DKK, not 0.00).
+  const covered = (pricePkn, currency) => buyerPriceParts({
+    pricePkn, currency, balancePkn: 500, sellerAcceptsPkn: true, pinned: '',
+  });
+  const signedOut = (pricePkn, currency) => buyerPriceParts({
+    pricePkn, currency, balancePkn: null, sellerAcceptsPkn: true, pinned: '',
+  });
+  const rows = [];
+  for (const [pkn, dkk, eur, whole] of [
+    [4, '0.15 DKK', '€0.02', '4 PKN'],
+    [1, '0.0375 DKK', '€0.005', '1 PKN'],
+    [20, '0.75 DKK', '€0.1', '20 PKN'],
+    [114.41, '4.28 DKK', '€0.57', '114 PKN'],
+  ]) {
+    for (const [currency, label] of [['DKK', dkk], ['EUR', eur]]) {
+      const row = soldGraphRowPrice(pkn, covered(pkn, currency), currency);
+      assert.equal(row, label, `${pkn} PKN covered, ${currency}`);
+      // The PKN amount joins in brackets only where that rule already shows both.
+      assert.equal(soldGraphRowPrice(pkn, signedOut(pkn, currency), currency), `${label} (${whole})`, `${pkn} PKN signed out, ${currency}`);
+      rows.push(row);
+    }
+  }
+  for (const row of rows) {
+    assert.doesNotMatch(row, /^0(\.0+)?\s*(DKK|USD)$|€0\.00$/, `a positive price never prints zero: ${row}`);
+    assert.doesNotMatch(row, /^[0-9.]+ PKN$/, `a row is never bare PKN: ${row}`);
+  }
+  // A PKN visitor and an amount with no rate do read bare PKN, whole as the rows
+  // always round it; the pending currency stays the empty the desk holds with.
+  assert.equal(soldGraphRowPrice(114.41, covered(114.41, 'PKN'), 'PKN'), '114 PKN');
+  assert.equal(soldGraphRowPrice(4, { local: '', pkn: '' }, ''), '4 PKN');
+  assert.equal(soldGraphRowPrice(1000, { local: '', pkn: '' }, 'GBP'), '1000 PKN');
+  assert.equal(soldGraphRowPrice(4, { local: '', pkn: '', pending: true }, ''), '');
 });
