@@ -17,12 +17,15 @@ use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    add_utc_days, build_daily_series_with_segments, clean_days, frozen_card_days,
+    add_utc_days, build_daily_series_with_segments, clean_days, field_i64, frozen_card_days,
     frozen_segment_days, holding_slices, sold_price_book, stored_is_current, stored_is_fresh,
     top_movers, utc_day_key_ms, wallet_series, Holding, Mover, PricePoint, CARDS_BY_BLUEPRINT_SQL,
     HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION, SOLD_BY_BLUEPRINT_SQL,
 };
-use crate::domain::portfolio_segments::{segment_defs, segment_holdings, SEGMENTS_REVISION};
+use crate::domain::portfolio_segments::{
+    apply_catalog_rows, game_of, merge_segment_labels, segment_defs, segment_holdings, set_labels,
+    POKEMON, SEGMENTS_REVISION,
+};
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
 use crate::sql::{row_text, MarketplaceDb, SqlParam};
@@ -36,12 +39,183 @@ const BALANCES: &str = "balances";
 const LEDGER_PAGE: i64 = 200;
 
 /// What the market read model answers with: the held slices, their sold price
-/// book, and the same rows grouped per dashboard segment.
+/// book, the same rows grouped per dashboard segment, and the set names those
+/// segments are labelled by.
 type CardBook = (
     Vec<Holding>,
     HashMap<String, Vec<PricePoint>>,
     BTreeMap<String, Vec<Holding>>,
+    BTreeMap<String, String>,
 );
+
+/// The most games one seller's collection prices out of their own databases.
+/// Past this, the games with the fewest cards are held and left unpriced; no
+/// collection opens an unbounded number of pools for one request.
+const OTHER_GAME_MAX: usize = 12;
+
+/// What one game's own catalog knows about its held cards, looked up by public
+/// card id. `ct_id` is the CardTrader blueprint its sold prices are filed under,
+/// and those ids are unique across games, so one price book holds them all.
+const GAME_CATALOG_SQL: &str = "\
+  select card_id::text as card_id, ct_id::text as blueprint_id, \
+         coalesce(nullif(expansion_name, ''), set_name, '') as set_name, \
+         coalesce(product_type, 'card') as product_type \
+  from public.marketplace_search_candidates \
+  where card_id = any($1::bigint[])";
+
+/// A `bigint` column that arrived as text, or nothing when it is not an id.
+fn numeric_id(text: &str) -> Option<i64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<i64>().ok()
+}
+
+/// The games whose rows the Pokémon catalog cannot price, each with the card ids
+/// to look up in its own database. The games with the most cards held come
+/// first, ties in id order, and only [`OTHER_GAME_MAX`] of them at all.
+fn other_game_cards(rows: &[Json]) -> Vec<(String, Vec<i64>)> {
+    let mut per_game: BTreeMap<String, (i64, Vec<i64>)> = BTreeMap::new();
+    for row in rows {
+        let game = game_of(row);
+        if game == POKEMON {
+            continue;
+        }
+        let entry = per_game.entry(game).or_default();
+        entry.0 += field_i64(row, "quantity").max(0);
+        if let Some(id) = numeric_id(&row_text(row, "card_id")) {
+            if !entry.1.contains(&id) {
+                entry.1.push(id);
+            }
+        }
+    }
+    let mut games: Vec<(String, (i64, Vec<i64>))> = per_game.into_iter().collect();
+    games.sort_by_key(|entry| std::cmp::Reverse(entry.1 .0));
+    games
+        .into_iter()
+        .take(OTHER_GAME_MAX)
+        .map(|(game, (_, ids))| (game, ids))
+        .collect()
+}
+
+/// One game's catalog rows and the sold prices of the blueprints they named.
+struct GamePrices {
+    catalog: Vec<Json>,
+    sold: Vec<Json>,
+}
+
+/// A game's own database, which is where its catalog and its sold medians live
+/// (see [docs/GAMES.md](docs/GAMES.md)). A card id is only unique inside it.
+async fn read_game_prices(state: &DomainState, game: &str, card_ids: &[i64]) -> Result<GamePrices> {
+    if card_ids.is_empty() {
+        return Ok(GamePrices {
+            catalog: Vec::new(),
+            sold: Vec::new(),
+        });
+    }
+    let db = game_db(state, game)?;
+    let catalog = db
+        .query_json(GAME_CATALOG_SQL, &[SqlParam::IntArray(card_ids.to_vec())])
+        .await
+        .map_err(ApiError::from)?;
+    let mut blueprints: Vec<i64> = Vec::new();
+    for row in &catalog {
+        if let Some(id) = numeric_id(&row_text(row, "blueprint_id")) {
+            if !blueprints.contains(&id) {
+                blueprints.push(id);
+            }
+        }
+    }
+    let sold = if blueprints.is_empty() {
+        Vec::new()
+    } else {
+        db.query_json(SOLD_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(blueprints)])
+            .await
+            .map_err(ApiError::from)?
+    };
+    Ok(GamePrices { catalog, sold })
+}
+
+/// Every game but Pokémon, priced out of its own database: its catalog says which
+/// CardTrader blueprint, set and product type a held card is, and its
+/// `cardtrader_sold_daily` says what that blueprint sold for.
+///
+/// A game whose database is not configured, has no catalog table, or answers with
+/// an error keeps its cards **held and unpriced**: it is logged once with its id,
+/// its rows lose the blueprint id the Pokémon join matched on their card id, and
+/// neither the series nor any other game is affected.
+async fn price_other_games(state: &DomainState, rows: &mut [Json], sold: &mut Vec<Json>) {
+    for (game, ids) in other_game_cards(rows) {
+        match read_game_prices(state, &game, &ids).await {
+            Ok(prices) => {
+                apply_catalog_rows(&game, rows, &prices.catalog);
+                sold.extend(prices.sold);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    game = %game,
+                    "portfolio game prices are unavailable; its cards stay unpriced"
+                );
+                apply_catalog_rows(&game, rows, &[]);
+            }
+        }
+    }
+}
+
+/// The held slices and their sold price book plus the same holdings grouped per
+/// segment, or `None` when the market read model is unavailable (the caller then
+/// serves the last good series).
+async fn read_card_book(state: &DomainState, db: &MarketplaceDb, uid: &str) -> Option<CardBook> {
+    let mut held = match db
+        .query_json(HOLDINGS_SQL, &[SqlParam::Text(uid.to_string())])
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(%error, "portfolio card book failed");
+            return None;
+        }
+    };
+    // The other games first: their rows only carry a priceable blueprint id once
+    // their own catalog has confirmed one, and the sold query below reads them.
+    let mut other_sold: Vec<Json> = Vec::new();
+    price_other_games(state, &mut held, &mut other_sold).await;
+    let mut ids: Vec<i64> = Vec::new();
+    for row in &held {
+        if game_of(row) != POKEMON {
+            continue;
+        }
+        if let Some(value) = numeric_id(&row_text(row, "blueprint_id")) {
+            if !ids.contains(&value) {
+                ids.push(value);
+            }
+        }
+    }
+    let mut sold = if ids.is_empty() {
+        Vec::new()
+    } else {
+        match db
+            .query_json(SOLD_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids)])
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(%error, "portfolio sold book failed");
+                return None;
+            }
+        }
+    };
+    sold.append(&mut other_sold);
+    let segments = segment_holdings(&held);
+    let labels = set_labels(&held);
+    Some((
+        holding_slices(&held),
+        sold_price_book(&sold),
+        segments,
+        labels,
+    ))
+}
 
 /// The stored series read, or `None` when there is nothing saved yet.
 async fn read_stored(firestore: &Firestore, uid: &str) -> Result<Option<Json>> {
@@ -89,49 +263,6 @@ async fn read_balance(firestore: &Firestore, uid: &str) -> f64 {
         .max(0) as f64
 }
 
-/// The held slices and their sold price book plus the same holdings grouped per
-/// segment, or `None` when the market read model is unavailable (the caller then
-/// serves the last good series).
-async fn read_card_book(db: &MarketplaceDb, uid: &str) -> Option<CardBook> {
-    let held = match db
-        .query_json(HOLDINGS_SQL, &[SqlParam::Text(uid.to_string())])
-        .await
-    {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::error!(%error, "portfolio card book failed");
-            return None;
-        }
-    };
-    let mut ids: Vec<i64> = Vec::new();
-    for row in &held {
-        let id = row_text(row, "blueprint_id");
-        if id.bytes().all(|byte| byte.is_ascii_digit()) && !id.is_empty() {
-            if let Ok(value) = id.parse::<i64>() {
-                if !ids.contains(&value) {
-                    ids.push(value);
-                }
-            }
-        }
-    }
-    let sold = if ids.is_empty() {
-        Vec::new()
-    } else {
-        match db
-            .query_json(SOLD_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids)])
-            .await
-        {
-            Ok(rows) => rows,
-            Err(error) => {
-                tracing::error!(%error, "portfolio sold book failed");
-                return None;
-            }
-        }
-    };
-    let segments = segment_holdings(&held);
-    Some((holding_slices(&held), sold_price_book(&sold), segments))
-}
-
 /// `GET /api/marketplace-portfolio-history`.
 pub async fn marketplace_portfolio_history(
     State(state): State<DomainState>,
@@ -160,20 +291,24 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
 
     let stored = read_stored(&firestore, &uid).await?;
     match history_plan(stored.as_ref(), now_ms) {
-        Plan::ServeFresh => Ok(history_body(stored_days(stored.as_ref()))),
+        Plan::ServeFresh => Ok(history_body(
+            stored_days(stored.as_ref()),
+            stored_labels(stored.as_ref()).as_ref(),
+        )),
         Plan::ServeStaleAndRefresh => {
             let days = stored_days(stored.as_ref());
+            let labels = stored_labels(stored.as_ref());
             spawn_history_refresh(state, &uid, stored);
-            Ok(history_body(days))
+            Ok(history_body(days, labels.as_ref()))
         }
         Plan::ComputeNow => {
             // There was no stored series to answer with, so a read model that
             // cannot report one leaves the empty series the Node `readCardBook`
             // catch produced.
-            let days = recompute_series(state, &uid, stored.as_ref())
+            let (days, labels) = recompute_series(state, &uid, stored.as_ref())
                 .await?
                 .unwrap_or_default();
-            Ok(history_body(days))
+            Ok(history_body(days, Some(&labels)))
         }
     }
 }
@@ -207,10 +342,19 @@ fn stored_days(stored: Option<&Json>) -> Vec<Json> {
     clean_days(stored.and_then(|doc| doc.get("days")))
 }
 
+/// The set names a stored series was cut under, or nothing when the document
+/// carries no map of them.
+fn stored_labels(stored: Option<&Json>) -> Option<Json> {
+    stored
+        .and_then(|doc| doc.get("segmentLabels"))
+        .filter(|labels| labels.is_object())
+        .cloned()
+}
+
 /// The response body: the series, and the ordered list of the segments its days
 /// actually carry. A series without segments keeps the old body exactly.
-fn history_body(days: Vec<Json>) -> Response {
-    let defs = segment_defs(&days);
+fn history_body(days: Vec<Json>, labels: Option<&Json>) -> Response {
+    let defs = segment_defs(&days, labels);
     let body = if defs.is_empty() {
         json!({ "ok": true, "days": days })
     } else {
@@ -227,19 +371,19 @@ async fn recompute_series(
     state: &DomainState,
     uid: &str,
     stored: Option<&Json>,
-) -> Result<Option<Vec<Json>>> {
+) -> Result<Option<(Vec<Json>, Json)>> {
     let now_ms = state.clock().now().timestamp_millis();
     let today_key = utc_day_key_ms(now_ms);
     let firestore = state.firestore()?;
 
     let card_book = match state.marketplace_db() {
-        Ok(db) => read_card_book(&db, uid).await,
+        Ok(db) => read_card_book(state, &db, uid).await,
         Err(error) => {
             tracing::debug!(%error, "portfolio read model is not configured");
             None
         }
     };
-    let Some((holdings, book, held_segments)) = card_book else {
+    let Some((holdings, book, held_segments, own_labels)) = card_book else {
         return Ok(None);
     };
 
@@ -258,6 +402,10 @@ async fn recompute_series(
         &today_key,
     );
 
+    // The set names a key was drawn with stay stored: a day frozen two weeks
+    // ago still describes its line with the set it held then.
+    let labels = merge_segment_labels(stored.and_then(|doc| doc.get("segmentLabels")), &own_labels);
+
     firestore
         .doc(format!("{HISTORY}/{uid}"))
         .set(
@@ -266,6 +414,7 @@ async fn recompute_series(
                     "days",
                     Value::Array(days.iter().map(Value::from_plain_json).collect()),
                 )
+                .set("segmentLabels", Value::from_plain_json(&labels))
                 .string("priceBasis", PRICE_BASIS)
                 .int("seriesRevision", SERIES_REVISION)
                 .int("segmentsRevision", SEGMENTS_REVISION)
@@ -274,7 +423,7 @@ async fn recompute_series(
         )
         .await?;
 
-    Ok(Some(days))
+    Ok(Some((days, labels)))
 }
 
 /// Uids with a history refresh running in this process.
@@ -514,8 +663,9 @@ async fn portfolio_movers_inner(
             return no_movers();
         }
     };
-    // The movers rank printings, which no segment grouping changes.
-    let Some((holdings, book, _)) = read_card_book(&db, &claims.uid).await else {
+    // The movers rank printings, which no segment grouping changes; the other
+    // games are priced here too, so a mover can be a Riftbound card.
+    let Some((holdings, book, _, _)) = read_card_book(state, &db, &claims.uid).await else {
         return no_movers();
     };
     let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
@@ -1142,17 +1292,17 @@ mod tests {
         };
 
         // A series without segments keeps the body it always had.
-        let plain = body(history_body(vec![])).await;
+        let plain = body(history_body(vec![], None)).await;
         assert_eq!(plain, json!({ "ok": true, "days": [] }));
         assert_eq!(plain.get("segmentDefs"), None);
-        let plain = body(history_body(vec![json!({ "date": "2026-10-08" })])).await;
+        let plain = body(history_body(vec![json!({ "date": "2026-10-08" })], None)).await;
         assert_eq!(plain.get("segmentDefs"), None);
 
         let days = vec![json!({
             "date": "2026-10-08", "cardsValuePkn": 20,
             "segments": { "game:pokemon": [20, 2, 2], "pokemon:era:vintage": [20, 2, 2] }
         })];
-        let with_segments = body(history_body(days.clone())).await;
+        let with_segments = body(history_body(days.clone(), None)).await;
         assert_eq!(with_segments["ok"], json!(true));
         // The days arrive untouched; the defs only describe them.
         assert_eq!(with_segments["days"], Json::Array(days));
@@ -1169,5 +1319,73 @@ mod tests {
         // The one held game, the two all-game cuts, the eight bands and the two
         // Pokémon cuts.
         assert_eq!(defs.len(), 13);
+    }
+
+    #[tokio::test]
+    async fn the_history_body_labels_a_set_with_the_map_stored_beside_it() {
+        use http_body_util::BodyExt;
+        let body = |response: Response| async move {
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .map(|collected| collected.to_bytes())
+                .unwrap_or_default();
+            serde_json::from_slice::<Json>(&bytes).unwrap_or_default()
+        };
+
+        let days = vec![json!({
+            "date": "2026-10-08", "cardsValuePkn": 20,
+            "segments": {
+                "game:riftbound": [20, 2, 2],
+                "riftbound:set:lost-canon": [20, 2, 2]
+            }
+        })];
+        let drawn = body(history_body(
+            days,
+            Some(&json!({ "riftbound:set:lost-canon": "Lost Canon" })),
+        ))
+        .await;
+        let defs = drawn["segmentDefs"].as_array().cloned().unwrap_or_default();
+        let set = defs
+            .iter()
+            .find(|def| def["key"] == json!("riftbound:set:lost-canon"))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            set["label"],
+            json!("Lost Canon"),
+            "the stored name is what the graph titles its line with"
+        );
+        assert_eq!(
+            set["group"],
+            json!("set"),
+            "and it belongs to the set group of its game"
+        );
+        assert_eq!(
+            set["game"],
+            json!("riftbound"),
+            "and it belongs to the set group of its game"
+        );
+
+        // Without the stored map the key still reads as a set name.
+        let plain = body(history_body(
+            vec![json!({
+                "date": "2026-10-08",
+                "segments": {
+                    "game:riftbound": [20, 2, 2],
+                    "riftbound:set:lost-canon": [20, 2, 2]
+                }
+            })],
+            None,
+        ))
+        .await;
+        let defs = plain["segmentDefs"].as_array().cloned().unwrap_or_default();
+        let set = defs
+            .iter()
+            .find(|def| def["key"] == json!("riftbound:set:lost-canon"))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(set["label"], json!("Lost Canon"));
     }
 }
