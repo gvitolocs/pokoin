@@ -109,6 +109,7 @@ import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import { peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory } from '@market/price-history-cache.js';
 import {
   PRICE_HISTORY_DEFAULT_RANGE,
+  cmOfferFacet,
   fetchCardPriceHistory,
   priceHistoryRange,
   priceSourceSeries,
@@ -495,16 +496,24 @@ function CardDesk(props) {
   // so the graph never waits on a read that is not coming.
   const GRAPH_HISTORY_WAIT_MS = 1500;
   const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
-  // A `fields=graph` answer holds the one TCGplayer series and the one Cardmarket
-  // trend of the facet it was read for, so the Reverse chip is another read and
-  // not just another plot: the facet belongs to the key.
-  const graphAskKey = (range, reverse) => `${cardId}|${range}|${reverse ? 'r' : 'n'}`;
-  const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse());
+  // A `fields=graph` answer holds the one TCGplayer series, the one Cardmarket
+  // trend and the one Cardmarket grade floor of the facet it was read for, so
+  // the Reverse chip is another read and not just another plot: the facet
+  // belongs to the key. The condition and language chips join it the same way —
+  // `salesCondition`/`salesLanguage` are what `pickedCond()`/`pickedLang()`
+  // mirror below, and they are kept in step with the plot by one effect, so the
+  // two words the offers leg answers in are the two the visitor pressed. Read
+  // here, not there, because the history is drawn above the chips.
+  const cmGraphFacet = () => cmOfferFacet(salesCondition(), salesLanguage());
+  const graphAskKey = (range, reverse, facet) => `${cardId}|${range}|${reverse ? 'r' : 'n'}|${facet.condition}.${facet.language}`;
+  const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse(), cmGraphFacet());
   /** This desk's window, of the facet being plotted: fresh, or stale before it. */
   const readGraphHistory = (range) => {
     const reverse = untrack(salesReverse);
-    return peekCardPriceHistory(cardId, range, { reverse })
-      || rememberStaleCardPriceHistory(cardId, range, { reverse });
+    const facet = untrack(cmGraphFacet);
+    const options = { reverse, condition: facet.condition, language: facet.language };
+    return peekCardPriceHistory(cardId, range, options)
+      || rememberStaleCardPriceHistory(cardId, range, options);
   };
   const [priceHistory, setPriceHistory] = createSignal(
     untrack(accountSilver) ? readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE) : null,
@@ -522,7 +531,9 @@ function CardDesk(props) {
   function askGraphHistory(range) {
     if (!untrack(accountSilver)) return;
     const reverse = untrack(salesReverse);
-    const askedFor = graphAskKey(range, reverse);
+    const facet = untrack(cmGraphFacet);
+    const options = { reverse, condition: facet.condition, language: facet.language };
+    const askedFor = graphAskKey(range, reverse, facet);
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
     // A cached window paints at once and is still re-read below: what the desk
@@ -531,14 +542,28 @@ function CardDesk(props) {
     // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
     const known = readGraphHistory(range);
     if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
-    const bounds = { ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)), reverse };
+    const bounds = {
+      ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)),
+      reverse,
+      cmCondition: options.condition,
+      cmLanguage: options.language,
+    };
     fetchCardPriceHistory(cardId, bounds).then((history) => {
       // Dropped if this card, window or facet is not the one asked for anymore.
       if (disposed || untrack(graphHistoryKey) !== askedFor) return;
       // An answer of nothing is not cached, so the next visit asks again.
       if (!history) return;
-      const entry = { range, from: bounds.from, to: bounds.to, history };
-      saveCardPriceHistory(cardId, range, entry, { reverse });
+      // The facet travels with the window: the floor line is named from what
+      // this answer was read for, not from wherever the chips are by then.
+      const entry = {
+        range,
+        from: bounds.from,
+        to: bounds.to,
+        history,
+        condition: options.condition,
+        language: options.language,
+      };
+      saveCardPriceHistory(cardId, range, entry, options);
       // Already drawn from the cache: data that has not changed never redraws.
       setPriceHistory((prev) => (prev && JSON.stringify(prev) === JSON.stringify(entry) ? prev : entry));
     });
@@ -945,7 +970,13 @@ function CardDesk(props) {
     return entry ? { key: entry.range, from: entry.from, to: entry.to } : null;
   };
   const graphSources = createMemo(() => (graphDrawn() && accountSilver()
-    ? priceSourceSeries(priceHistory()?.history, { reverse: salesReverse() })
+    ? priceSourceSeries(priceHistory()?.history, {
+      reverse: salesReverse(),
+      // The Cardmarket floor line is named from the answer it draws, so a chip
+      // pressed while a new facet loads cannot relabel the one on screen.
+      cmCondition: priceHistory()?.condition,
+      cmLanguage: priceHistory()?.language,
+    })
     : []));
   // Pokoin's own price right now: the cheapest live listing, the line's last point.
   const graphNowPoint = () => (graphDrawn() && accountSilver() ? Number(nativeLive()[0]?.pricePkn) || 0 : 0);

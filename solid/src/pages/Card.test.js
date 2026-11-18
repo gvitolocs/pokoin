@@ -405,11 +405,12 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   assert.ok(page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE)') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
   // One read per card, window and facet, kept for the next visit: a fields=graph
-  // answer holds the TCGplayer series of the facet it was read for.
-  assert.match(page, /const graphAskKey = \(range, reverse\) => `\$\{cardId\}\|\$\{range\}\|\$\{reverse \? 'r' : 'n'\}`;/);
-  assert.match(history, /const graphHistoryKey = \(\) => graphAskKey\(graphRange\(\), salesReverse\(\)\);/);
-  assert.match(history, /const bounds = \{ \.\.\.priceHistoryRange\(range, new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\), reverse \};/);
-  assert.match(history, /saveCardPriceHistory\(cardId, range, entry, \{ reverse \}\);/);
+  // answer holds the TCGplayer series, the Cardmarket trend and the Cardmarket
+  // grade floor of the facet it was read for.
+  assert.match(page, /const graphAskKey = \(range, reverse, facet\) => `\$\{cardId\}\|\$\{range\}\|\$\{reverse \? 'r' : 'n'\}\|\$\{facet\.condition\}\.\$\{facet\.language\}`;/);
+  assert.match(history, /const graphHistoryKey = \(\) => graphAskKey\(graphRange\(\), salesReverse\(\), cmGraphFacet\(\)\);/);
+  assert.match(history, /const bounds = \{\n\s*\.\.\.priceHistoryRange\(range, new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\),\n\s*reverse,\n\s*cmCondition: options\.condition,\n\s*cmLanguage: options\.language,\n\s*\};/);
+  assert.match(history, /saveCardPriceHistory\(cardId, range, entry, options\);/);
   // A late answer for a card or window nobody asked for anymore is dropped, and
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
@@ -418,7 +419,9 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   // Pokoin's price right now is the cheapest live listing this desk already has.
   assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
-  assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
+  assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{\n\s*reverse: salesReverse\(\),/);
+  // and every grade in one table: the line is named from the facet that was asked.
+  assert.match(page, /cmCondition: priceHistory\(\)\?\.condition,\n\s*cmLanguage: priceHistory\(\)\?\.language,/);
 });
 
 test('the card graph draws once, complete: no sold line alone while the history loads', () => {
@@ -491,8 +494,9 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
   assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
   // The window is read for the facet the desk plots: a `fields=graph` answer
-  // holds the TCGplayer series and the Cardmarket trend of that facet only.
-  assert.match(history, /const readGraphHistory = \(range\) => \{\n\s*const reverse = untrack\(salesReverse\);\n\s*return peekCardPriceHistory\(cardId, range, \{ reverse \}\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range, \{ reverse \}\);\n\s*\};/);
+  // holds the TCGplayer series, the Cardmarket trend and the Cardmarket grade
+  // floor of that facet only.
+  assert.match(history, /const readGraphHistory = \(range\) => \{\n\s*const reverse = untrack\(salesReverse\);\n\s*const facet = untrack\(cmGraphFacet\);\n\s*const options = \{ reverse, condition: facet\.condition, language: facet\.language \};\n\s*return peekCardPriceHistory\(cardId, range, options\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range, options\);\n\s*\};/);
   assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null,\n\s*\);/);
   assert.match(history, /const known = readGraphHistory\(range\);/);
   // A range button or the Reverse chip is the same read: cached paints at once,
@@ -501,6 +505,41 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\.split\('\|'\)\[0\]\);/);
   // Identical data does not re-render a graph the cache already drew.
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
+});
+
+test('the Cardmarket floor line is asked for, keyed and named by the desk facet', () => {
+  const block = page.slice(
+    page.indexOf('const cmGraphFacet'),
+    page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
+  );
+  // The chips decide what is asked. `salesCondition`/`salesLanguage` are the two
+  // signals the desk keeps in step with `pickedCond()`/`pickedLang()` — read
+  // here because the history is drawn above the chips, where declaring the pick
+  // would put it after the effect that must read it.
+  assert.match(page, /const cmGraphFacet = \(\) => cmOfferFacet\(salesCondition\(\), salesLanguage\(\)\);/);
+  assert.match(page, /setSalesCondition\(cond\);\n\s*setSalesLanguage\(code\);/);
+  assert.match(page, /import \{\n\s*PRICE_HISTORY_DEFAULT_RANGE,\n\s*cmOfferFacet,/);
+  assert.ok(
+    page.indexOf('const cmGraphFacet') < page.indexOf('createEffect(graphHistoryKey'),
+    'the facet is declared before the effect that reads it (Solid 2: TDZ)',
+  );
+  assert.doesNotMatch(block, /pickedCond\(\)|pickedLang\(\)/);
+  // One facet through the read: the key, the request, the cache and the entry.
+  assert.match(block, /const graphAskKey = \(range, reverse, facet\) => `\$\{cardId\}\|\$\{range\}\|\$\{reverse \? 'r' : 'n'\}\|\$\{facet\.condition\}\.\$\{facet\.language\}`;/);
+  assert.match(block, /const options = \{ reverse, condition: facet\.condition, language: facet\.language \};/);
+  assert.match(block, /const bounds = \{\n\s*\.\.\.priceHistoryRange\(range, new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\),\n\s*reverse,\n\s*cmCondition: options\.condition,\n\s*cmLanguage: options\.language,\n\s*\};/);
+  assert.match(block, /saveCardPriceHistory\(cardId, range, entry, options\);/);
+  assert.match(block, /condition: options\.condition,\n\s*language: options\.language,/);
+  // Pressing a grade or a language chip is another window on the one path the
+  // range buttons already use: the guard asks once per window, a cached window
+  // paints at once and is still re-read, and the lines drawn stay until it
+  // answers. Nothing here is a second read, a second cache or a second draw.
+  assert.match(block, /if \(disposed \|\| graphHistoryAsked === askedFor\) return;/);
+  assert.match(block, /const known = readGraphHistory\(range\);/);
+  // Silver owns all of it: without the gate the facet asks nothing and writes
+  // nothing, exactly as the window and the foil facet already did.
+  assert.match(block, /if \(!untrack\(accountSilver\)\) return;/);
+  assert.equal((page.match(/fetchCardPriceHistory\(/g) || []).length, 1, 'the one history read is the gated one');
 });
 
 test('a sold re-read that changed nothing does not re-plot the graph', () => {
