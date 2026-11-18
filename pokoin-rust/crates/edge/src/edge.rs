@@ -130,6 +130,63 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
     headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
 }
 
+/// The longest a homepage rail lives in this cache, whatever its handler asked
+/// for: the publisher rewrites the rails every few minutes and nothing else
+/// notices a publish until this entry is gone.
+const RAIL_MAX_TTL: u64 = 15;
+
+/// The rail URLs the homepage paints, one per rail: the three dedicated
+/// handlers and the shared `?id=` one. The `?id=` is not part of the pathname,
+/// so every rail shares this entry space and is capped the same way.
+fn is_rail_path(pathname: &str) -> bool {
+    pathname.starts_with("/api/marketplace-home/") || pathname == "/api/marketplace-rails"
+}
+
+/// `cache_policy` with the edge's own per-path cap on top (`RAIL_MAX_TTL`).
+/// A rail never has a stale window: this cache must refetch it rather than
+/// replay an order the publisher has already replaced.
+fn policy_for_path(
+    pathname: &str,
+    status: StatusCode,
+    headers: &HeaderMap,
+    max_ttl: u64,
+) -> Option<CachePolicy> {
+    let policy = cache_policy(status, headers, max_ttl)?;
+    if !is_rail_path(pathname) {
+        return Some(policy);
+    }
+    Some(CachePolicy {
+        ttl: policy.ttl.min(RAIL_MAX_TTL),
+        swr: 0,
+    })
+}
+
+/// The `cache-control` of a replayed-stale answer: what the browser may still
+/// use, and nothing a shared cache may store. `s-maxage` is pinned to 0 and
+/// `stale-while-revalidate` is dropped, because an answer that is already stale
+/// must not buy a second freshness window at every cache in front of this one.
+/// Directives this function does not touch keep their spelling.
+fn stale_cache_control(value: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut pinned = false;
+    for part in value.split(',') {
+        let directive = part.trim();
+        let name = directive.split('=').next().unwrap_or("");
+        match name.trim().to_ascii_lowercase().as_str() {
+            "" | "stale-while-revalidate" => {}
+            "s-maxage" => {
+                pinned = true;
+                parts.push("s-maxage=0".to_owned());
+            }
+            _ => parts.push(directive.to_owned()),
+        }
+    }
+    if !pinned {
+        parts.push("s-maxage=0".to_owned());
+    }
+    parts.join(", ")
+}
+
 /// `cacheKey(req, pathname, search)`: `None` when the request is personal.
 /// The key carries `Accept` and the strongest content coding the client can
 /// decode, so a `br` or `dcb` body is only ever replayed to a client that
@@ -500,7 +557,8 @@ impl Edge {
         };
         let response = response.unwrap_or_else(|never| match never {});
         let status = response.status();
-        let policy = cache_policy(status, response.headers(), self.inner.cfg.cache_max_ttl);
+        let max_ttl = self.inner.cfg.cache_max_ttl;
+        let policy = policy_for_path(pathname, status, response.headers(), max_ttl);
         if policy.is_none() && !status.is_server_error() {
             // An error says nothing about the path, so only answers mark it uncacheable.
             if status.as_u16() < 400 && never_storable(response.headers()) {
@@ -578,6 +636,15 @@ fn send_entry(entry: &CacheEntry, label: &'static str) -> Response {
     *response.status_mut() = entry.status;
     let headers = response.headers_mut();
     *headers = entry.headers.clone();
+    if label == "STALE" {
+        let rewritten = headers
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .map(stale_cache_control);
+        if let Some(value) = rewritten.and_then(|v| HeaderValue::from_str(&v).ok()) {
+            headers.insert(header::CACHE_CONTROL, value);
+        }
+    }
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(entry.body.len()));
     headers.insert(header::AGE, HeaderValue::from(entry.stored_at.elapsed().as_secs()));
     headers.insert(HeaderName::from_static("x-pokoin-origin"), HeaderValue::from_static(ORIGIN_LABEL));
@@ -646,6 +713,56 @@ mod tests {
         assert_eq!(policy("public, max-age=120, s-maxage=0", "application/json"), None, "s-maxage=0 is not stored");
         assert_eq!(policy("public, max-age=60", "text/event-stream"), None);
         assert_eq!(policy("publicity, max-age=60", "x"), None);
+    }
+
+    #[test]
+    fn a_stale_replay_keeps_the_browser_and_loses_the_shared_cache() {
+        let cases = [
+            (
+                "public, max-age=30, s-maxage=120, stale-while-revalidate=600",
+                "public, max-age=30, s-maxage=0",
+            ),
+            ("public, max-age=30", "public, max-age=30, s-maxage=0"),
+            ("public, no-store", "public, no-store, s-maxage=0"),
+            (
+                "private, max-age=30, stale-while-revalidate=60",
+                "private, max-age=30, s-maxage=0",
+            ),
+            ("", "s-maxage=0"),
+            (
+                " PUBLIC ,  Max-Age = 30 ,S-MAXAGE=120, Stale-While-Revalidate=600 ",
+                "PUBLIC, Max-Age = 30, s-maxage=0",
+            ),
+        ];
+        for (given, want) in cases {
+            assert_eq!(stale_cache_control(given), want, "{given}");
+        }
+    }
+
+    #[test]
+    fn a_rail_url_lives_fifteen_seconds_at_the_edge() {
+        let rails = "public, max-age=30, s-maxage=120, stale-while-revalidate=600";
+        let headers = |cc: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::CACHE_CONTROL, HeaderValue::from_str(cc).unwrap());
+            h
+        };
+        for path in ["/api/marketplace-home/new-cards", "/api/marketplace-rails"] {
+            let capped = policy_for_path(path, StatusCode::OK, &headers(rails), 300);
+            assert_eq!(capped, Some(CachePolicy { ttl: 15, swr: 0 }), "{path}");
+        }
+        for path in [
+            "/api/marketplace-home",
+            "/api/marketplace-rails-x",
+            "/api/marketplace-search-page",
+        ] {
+            let kept = policy_for_path(path, StatusCode::OK, &headers(rails), 300);
+            assert_eq!(
+                kept,
+                Some(CachePolicy { ttl: 120, swr: 600 }),
+                "{path} is not a rail URL"
+            );
+        }
     }
 
     #[test]
@@ -735,6 +852,32 @@ mod tests {
                 }),
             )
             .route("/api/private", get(|| async { ([(header::CACHE_CONTROL, "private, no-store")], "{}") }))
+    }
+
+    /// The rails' own `cache-control` with a shared window short enough to wait
+    /// out in a test: `RAIL_MAX_TTL` cannot be, and the cap is the same code
+    /// path at any length.
+    const SHORT_LIVED: &str = "public, max-age=30, s-maxage=1, stale-while-revalidate=600";
+
+    fn short_lived_api(counter: Arc<AtomicU64>) -> Router {
+        let c1 = counter.clone();
+        let answer = move || {
+            let c = c1.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                (
+                    [
+                        (header::CACHE_CONTROL, SHORT_LIVED),
+                        (header::CONTENT_TYPE, "application/json"),
+                    ],
+                    "{\"ok\":true}",
+                )
+            }
+        };
+        Router::new()
+            .route("/api/marketplace-home/new-cards", get(answer.clone()))
+            .route("/api/marketplace-rails", get(answer.clone()))
+            .route("/api/other", get(answer))
     }
 
     fn config(seo: PathBuf, flight_timeout: Duration) -> EdgeConfig {
@@ -856,6 +999,74 @@ mod tests {
         assert_eq!(pre.status(), StatusCode::NO_CONTENT);
         assert_eq!(pre.headers()["access-control-allow-credentials"], "true");
         assert_eq!(pre.headers()["vary"], "Origin");
+    }
+
+    #[tokio::test]
+    async fn a_rail_is_refetched_rather_than_replayed_stale() {
+        let counter = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            short_lived_api(counter.clone()),
+            Router::new(),
+        );
+        let rail = "/api/marketplace-rails?id=set%3Adelta-reign";
+        let miss = app.clone().oneshot(req("GET", rail, &[])).await.unwrap();
+        assert_eq!(miss.headers()["x-pokoin-edge-cache"], "MISS");
+        assert_eq!(miss.headers()["cache-control"], SHORT_LIVED);
+        let hit = app.clone().oneshot(req("GET", rail, &[])).await.unwrap();
+        assert_eq!(hit.headers()["x-pokoin-edge-cache"], "HIT");
+        assert_eq!(
+            hit.headers()["cache-control"],
+            SHORT_LIVED,
+            "a HIT keeps the handler's header"
+        );
+        let age: u64 = hit.headers()["age"].to_str().unwrap().parse().unwrap();
+        assert!(
+            age < 2,
+            "a HIT says how long the entry has been stored: {age}"
+        );
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
+        let after = app.clone().oneshot(req("GET", rail, &[])).await.unwrap();
+        assert_eq!(
+            after.headers()["x-pokoin-edge-cache"],
+            "MISS",
+            "the entry is past its cap, so it is fetched again"
+        );
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_stale_replay_says_its_age_and_is_not_for_a_shared_cache() {
+        let counter = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            short_lived_api(counter),
+            Router::new(),
+        );
+        app.clone()
+            .oneshot(req("GET", "/api/other", &[]))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
+        let stale = app
+            .clone()
+            .oneshot(req("GET", "/api/other", &[]))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale.headers()["x-pokoin-edge-cache"],
+            "STALE",
+            "another path keeps its stale window"
+        );
+        let age: u64 = stale.headers()["age"].to_str().unwrap().parse().unwrap();
+        assert!(age >= 1, "a stale replay says how old it is: {age}");
+        assert_eq!(
+            stale.headers()["cache-control"],
+            "public, max-age=30, s-maxage=0",
+            "the browser part stays; nothing downstream may store it"
+        );
     }
 
     #[tokio::test]

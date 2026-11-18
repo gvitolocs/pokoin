@@ -620,6 +620,42 @@ Browsers may keep the JSON 120s fresh and a day stale. The SPA also keeps the
 last public vector in `sessionStorage pokoin.homeVector.{game}.rising` (10 min) so a
 return visit paints rails before the network.
 
+#### Rail urls: what is cached where
+
+Two caches sit in series on every rail url, and both hold a publish back:
+
+| Hop | Header | Cap |
+| --- | --- | --- |
+| `pokoin-rust` in-process edge (`crates/edge`) | `x-pokoin-edge-cache: HIT\|STALE\|MISS`, `age` since stored | rail urls (`/api/marketplace-home/*`, `/api/marketplace-rails`) live **15 s** max and are never replayed stale (`RAIL_MAX_TTL`); everything else keeps `cache_max_ttl` |
+| Cloudflare | the handler's `s-maxage=120, stale-while-revalidate=600` | until purged |
+
+A STALE replay from the edge rewrites its own `cache-control` to
+`public, max-age=30, s-maxage=0`: the browser may still use it, a shared cache
+may not store it, so one stale answer cannot buy a second freshness window at
+every CDN node in front of us (that stack is what served a nine-minute-old
+order at `age: 96`).
+
+`scripts/marketplace-home-purge.sh` clears the second hop: it purges the exact
+urls the homepage asks for, on **`https://api.pokoin.com`** — the host the SPA
+actually fetches from (`publicApiUrl()` → `PUBLIC_API_ORIGIN`,
+`market/src/extension-auth-bridge.js:90`) — the three
+`/api/marketplace-home/<name>` rails, the `/api/marketplace-rails?id=` rails
+those three fall back to plus the grid rail, and one `set:<slug>` per promo-fan
+slide (slugs read from `market/src/promo-banners.js` +
+`market/src/data/featured-set.json`, so featuring a set needs no change here).
+Each path goes five ways: the API host plain, the API host with
+`headers: {"Origin": "https://pokoin.com"}` and again with `"https://www.pokoin.com"`
+because the handlers send `vary: Origin` and Cloudflare keeps one copy per value,
+then the `pokoin.com` and `www.pokoin.com` same-origin paths in case the site
+Worker's `/api/` route answers. Thirty files per Cloudflare request, six paths at
+a time, a path's entries never split.
+`marketplace-home-purge.service` is the unit the publish runs it from, so a new
+order reaches browsers in about a minute instead of up to twenty; installing it
+and firing it from the sync actually in use is the lead's step
+(`marketplace-rails-sync.service` is a system unit, this is a user one). Proofs:
+`scripts/marketplace-home-purge.test.sh` (stub curl, no CDN call) and the
+`edge.rs` tests named in `docs/FEATURES.toml`.
+
 Recently seen is **not** in that cache. Recents are 24 public ids **per
 game**: guest `localStorage pokoin.recentCardIds.{game}` for the list,
 signed-in `GET/PUT/POST /api/marketplace-recents?game=` on the shared Pi
