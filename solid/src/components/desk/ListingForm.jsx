@@ -15,13 +15,22 @@ import {
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation, offerLanguage } from '@market/card-desk.js';
 import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import {
+  CUSTOM_PRICING,
+  drawerChipSplit,
   editListingBody,
+  listingFormEdited,
+  listingFormState,
+  listingSaveOutcome,
+  patchCarriesPrice,
+  pricingAnswerCounts,
   pricingDryRunBody,
   pricingDryRunPrice,
+  pricingFieldPkn,
   pricingGroupOf,
   pricingMenuEntries,
   pricingMenuLabel,
   pricingSavePlan,
+  rowEditorReset,
 } from '@market/listing-row-edit.js';
 import { localizeStrategyName } from '@market/pricer.js';
 import { saveListingPhotos, uploadChatPhoto } from '@market/chat-client.js';
@@ -47,9 +56,6 @@ import ListingLangPick, { dismissWhileOpen } from './ListingLangPick.jsx';
 import ShipFromCountryGate from './ShipFromCountryGate.jsx';
 import QtyStepper from '../QtyStepper.jsx';
 import StrategyEditor, { createStrategyEditor } from '../pricer/StrategyEditor.jsx';
-
-// The drawer's "Custom price" entry: the seller's own number, no rule behind it.
-const CUSTOM_PRICING = { kind: 'custom', id: '', name: 'Custom price', label: 'Custom price' };
 
 function TrashIcon() {
   return (
@@ -244,6 +250,8 @@ export default function ListingForm(props) {
   const [pricingChecked, setPricingChecked] = createSignal(false);
   // "New strategy…" is a second step of the same drawer, the listing behind it.
   const [strategyStep, setStrategyStep] = createSignal(false);
+  // Every pick and every row switch invalidates the dry runs asked before it.
+  let pricingRun = 0;
   const pricingCtx = () => props.pricing?.currencyCtx();
   const originalPkn = () => {
     const value = Number(props.editing?.pricePkn ?? props.editing?.price_pkn);
@@ -302,6 +310,7 @@ export default function ListingForm(props) {
   };
 
   function backToCustom() {
+    pricingRun += 1;
     setPricingPick(null);
     setPricingTarget(null);
     setPricingChecked(false);
@@ -310,24 +319,36 @@ export default function ListingForm(props) {
   /** The seller prices this listing: the field's number is theirs, and a new one leaves the group. */
   function takeOwnPrice() {
     if (!followsPricing()) return;
+    pricingRun += 1;
     setPricingPick(CUSTOM_PRICING);
     setPricingTarget(null);
     setPricingChecked(false);
   }
 
   /** The dry run of the picked entry on this listing alone. */
-  async function priceByPricing(pick) {
+  async function priceByPricing(pick, run) {
     const body = pricingDryRunBody(pick, props.pricing?.groups() || [], editingId());
     setPricingChecked(true);
     if (!body) return;
+    const listing = editingId();
+    // The answer only counts while nothing else took the field over: the check
+    // is `pricingRun` plus the row, both read again after the await.
+    const stillOurs = () => pricingAnswerCounts({
+      token: run,
+      latest: pricingRun,
+      listingId: listing,
+      currentId: editingId(),
+    });
     try {
       const answer = await props.pricing.apply(body);
+      if (!stillOurs()) return;
       const target = pricingDryRunPrice(answer, originalPkn());
       setPricingTarget(target);
       // The field shows the strategy's price; it is not a typed one, so the
       // PATCH leaves the price alone and `apply` sets it.
       if (target) setPrice(presetPrice(target));
     } catch (err) {
+      if (!stillOurs()) return;
       backToCustom();
       setError(err.message || 'The market price was not available.');
     }
@@ -342,7 +363,11 @@ export default function ListingForm(props) {
     setPricingPick(entry);
     setPricingTarget(null);
     setPricingChecked(false);
-    void priceByPricing(entry);
+    // The rule owns the number now, so a price typed before the pick is not the
+    // seller's ask any more and must not ride along in the PATCH.
+    priceTyped = false;
+    pricingRun += 1;
+    void priceByPricing(entry, pricingRun);
   }
 
   /** The menu's choice: custom, a group, a strategy, or a new strategy. */
@@ -355,9 +380,14 @@ export default function ListingForm(props) {
       return;
     }
     if (entry.kind === 'custom') {
+      pricingRun += 1;
       setPricingPick(CUSTOM_PRICING);
       setPricingTarget(null);
       setPricingChecked(false);
+      // A rule's preview was never the seller's number: the field goes back to
+      // the price the listing has, which they may now overwrite.
+      const was = pricingFieldPkn(entry, originalPkn());
+      if (was != null) setPrice(presetPrice(was));
       // The price in the field becomes the seller's own, and a new one leaves the group.
       priceManual = true;
       priceTyped = true;
@@ -373,12 +403,21 @@ export default function ListingForm(props) {
     if (entry) followPricing(entry);
   }
 
-  function applyFields(next) {
+  /**
+   * Put one row's fields into the form, and answer with the snapshot of what
+   * the form now holds. The snapshot is built from these values rather than
+   * read back: within one update the writes are not visible to a read yet, and
+   * a baseline taken from the values before them calls a row that only opened
+   * an edited one.
+   */
+  function applyFields(next, withPhotos = null) {
     // Rows and offers carry PKN; the form lists in the seller's pick or local currency.
     const listIn = untrack(currencyManual ? currency : sellerCurrency);
-    setPrice(listIn === next.currency || !next.price
+    const shown = listIn === next.currency || !next.price
       ? next.price
-      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
+      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn);
+    const pics = withPhotos === null ? untrack(photos) : withPhotos;
+    setPrice(shown);
     setCurrency(listIn);
     setQty(next.qty);
     setCondition(next.condition);
@@ -389,8 +428,23 @@ export default function ListingForm(props) {
     setCompany(next.company);
     setGrade(next.grade);
     setCert(next.cert);
+    setPhotos(pics);
     setError('');
     setDone('');
+    return listingFormState({
+      pricePkn: listingPriceToPkn(shown || untrack(graphPrice), listIn),
+      qty: next.qty,
+      condition: next.condition,
+      language: next.language,
+      foil: next.foil,
+      comment: next.comment,
+      company: next.company,
+      grade: next.grade,
+      cert: next.cert,
+      chips: next.chips,
+      photos: pics,
+      pricing: false,
+    });
   }
 
   // [card.id, editingId]
@@ -401,38 +455,35 @@ export default function ListingForm(props) {
   createEffect(resetKey, () => {
     const editing = untrack(() => props.editing);
     const row = untrack(card);
-    priceTyped = false;
+    // The drawer keeps this form mounted when it moves to another row, so
+    // nothing of the row left behind may survive — its photos above all, since
+    // a save would write them onto the new listing.
+    const fresh = rowEditorReset(editing);
+    priceTyped = fresh.priceTyped;
+    boxTouched = fresh.boxTouched;
+    setOwnLocation(fresh.ownLocation);
+    setStockBoxes(fresh.stockBoxes);
+    setStockReady(fresh.stockReady);
     backToCustom();
+    setPricingTarget(null);
     setStrategyStep(false);
-    if (editing?.id) {
-      const fields = listingFormFromOffer(editing, row);
-      setBaselineForm({ ...fields, photos: untrack(photos).join('|') });
-      applyFields(fields);
-      priceManual = true;
-      formEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
-    }
-    const fields = blankListingForm(row);
-    setBaselineForm({ ...fields, photos: untrack(photos).join('|') });
-    applyFields(fields);
-    priceManual = false;
+    // The baseline is the form as it now stands, after the currency conversion:
+    // the raw fields hold PKN while the field shows the seller's unit, and a
+    // signal written in this pass cannot be read back in it — so applyFields
+    // hands back what it just wrote.
+    setBaselineForm(applyFields(
+      editing?.id ? listingFormFromOffer(editing, row) : blankListingForm(row),
+      fresh.photos,
+    ));
+    priceManual = Boolean(editing?.id);
+    if (editing?.id) formEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
   const edited = createMemo(() => {
+    // A memo runs once the moment it is created, before the row's fields are
+    // applied: without a baseline there is nothing to have changed.
     const base = baselineForm();
-    if (!base) return false;
-    return base.price !== price()
-      || base.qty !== qty()
-      || base.condition !== condition()
-      || base.language !== language()
-      || base.foil !== foil()
-      || base.comment !== comment()
-      || base.company !== company()
-      || base.grade !== grade()
-      || base.cert !== cert()
-      || JSON.stringify(base.chips) !== JSON.stringify(chips())
-      || photos().join('|') !== base.photos
-      || Boolean(pricingPick()) !== Boolean(base.pick);
+    return base ? listingFormEdited(base, formFields()) : false;
   });
   // The drawer asks "Discard your changes?" before it opens another row.
   createEffect(edited, (dirty) => {
@@ -505,6 +556,25 @@ export default function ListingForm(props) {
     return currency() === 'PKN'
       ? formatPknNumber(Math.round(pkn), { maximumFractionDigits: 0 })
       : formatPknNumber(fiatFromPkn(pkn, currency()), { maximumFractionDigits: 2 });
+  });
+
+  // The price the form would send, in PKN: what the field shows, else the suggestion.
+  const amountPkn = () => listingPriceToPkn(price() || graphPrice(), currency());
+  /** The editor's fields as the dirty check compares them, price in PKN. */
+  const formFields = (over = {}) => ({
+    pricePkn: amountPkn(),
+    qty: qty(),
+    condition: condition(),
+    language: language(),
+    foil: foil(),
+    comment: comment(),
+    company: company(),
+    grade: grade(),
+    cert: cert(),
+    chips: chips(),
+    photos: photos(),
+    pricing: pricingPick(),
+    ...over,
   });
 
   // [graphPrice, editingId, card.id, currency]
@@ -584,9 +654,7 @@ export default function ListingForm(props) {
 
   /** The PATCH body of an edit, or null when the form does not validate. */
   function editDraft() {
-    const amount = price()
-      ? listingPriceToPkn(price(), currency())
-      : listingPriceToPkn(graphPrice(), currency());
+    const amount = amountPkn();
     const quantity = Number.parseInt(qty(), 10);
     if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
       setError('Enter a valid price and quantity.');
@@ -611,11 +679,31 @@ export default function ListingForm(props) {
       location: locationValue(),
       // An edit only moves the box slot when the server said where it is.
       sendLocation: stockReady() && ownLocation() !== null,
-      priceTyped,
+      // A chosen rule prices the listing itself, so no price goes with its PATCH.
+      priceTyped: patchCarriesPrice(pricingPick(), priceTyped),
       sellerUid: uid() || props.editing?.sellerUid,
       showSigned: Boolean(props.moreFlags),
       showAltered: Boolean(props.moreFlags),
     }, props.editing);
+  }
+
+  /** The listing saved, the rule behind its price did not: the editor stays open on the seller's own price. */
+  function stayOnOwnPrice(outcome) {
+    setDone('Listing updated.');
+    setError(`Saved, but the price was not applied: ${outcome.pricingFailed}`);
+    setPricingPick(CUSTOM_PRICING);
+    setPricingTarget(null);
+    setPricingChecked(false);
+    priceTyped = false;
+    priceManual = true;
+    setPrice(presetPrice(originalPkn()));
+    // The board's row follows the PATCH answer, and these fields become the
+    // row's starting point: closing over the message is not a discard prompt.
+    if (outcome.row) props.onRowUpdate?.(outcome.row);
+    setBaselineForm(listingFormState(formFields({
+      pricePkn: listingPriceToPkn(presetPrice(originalPkn()), currency()),
+      pricing: CUSTOM_PRICING,
+    })));
   }
 
   async function submit(targets = { pokoin: true, cardtrader: false }) {
@@ -625,6 +713,7 @@ export default function ListingForm(props) {
       const draft = editDraft();
       if (!draft) return;
       let pricedPkn = null;
+      let pricingFailed = '';
       if (pricingPick()) {
         for (const step of pricingSavePlan(pricingPick(), editingId())) {
           if (step.call === 'patch') continue;
@@ -632,17 +721,21 @@ export default function ListingForm(props) {
             if (step.call === 'saveGroup') await props.pricing.saveGroup(step.body);
             else pricedPkn = pricingDryRunPrice(await props.pricing.apply(step.body), originalPkn());
           } catch (err) {
-            setError(err.message || 'The price was not applied.');
-            return;
+            pricingFailed = err.message || 'the price was not applied.';
+            break;
           }
         }
       }
-      props.onListed?.({
-        ...props.editing,
-        ...draft,
-        ...(pricedPkn != null ? { pricePkn: pricedPkn } : {}),
-        id: editingId(),
+      const outcome = listingSaveOutcome({
+        saved: { ...props.editing, ...draft, id: editingId() },
+        pricedPkn,
+        pricingFailed,
       });
+      if (outcome.pricingFailed) {
+        stayOnOwnPrice(outcome);
+        return;
+      }
+      props.onListed?.(outcome.row, outcome.note);
       return;
     }
     if (!signedIn()) {
@@ -659,9 +752,7 @@ export default function ListingForm(props) {
     // An edit builds and validates its body in editDraft; below is the create path.
     const edit = editing ? editDraft() : null;
     if (editing && !edit) return;
-    const amount = price()
-      ? listingPriceToPkn(price(), currency())
-      : listingPriceToPkn(graphPrice(), currency());
+    const amount = amountPkn();
     const quantity = Number.parseInt(qty(), 10);
     if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
       setError('Enter a valid price and quantity.');
@@ -763,21 +854,16 @@ export default function ListingForm(props) {
           }
         }
       }
-      if (pricingFailed) {
-        setDone(editing ? 'Listing updated.' : 'Listing created.');
-        setError(`Saved, but the price was not applied: ${pricingFailed}`);
-        setPricingPick(CUSTOM_PRICING);
-        setPricingTarget(null);
-        setPricingChecked(false);
-        priceTyped = false;
-        priceManual = true;
-        setPrice(priceText(originalPkn()));
+      const outcome = listingSaveOutcome({ saved, pricedPkn, pricingFailed });
+      if (outcome.pricingFailed) {
+        stayOnOwnPrice(outcome);
         return;
       }
-      if (saved?.cardtrader && saved.cardtrader.ok === false) {
+      if (outcome.note) {
         setDone(editing ? 'Listing updated.' : 'Listed on Pokoin.');
-        setError(saved.cardtrader.error || 'CardTrader push failed.');
+        setError(outcome.note);
       } else if (saved?.listing === null && saved?.cardtrader?.ok) {
+        // A CardTrader push that came with the save is the desk's own line.
         setDone('Listed on CardTrader.');
       } else if (editing && leftGroupLine(saved)) {
         // The new price took the listing out of its pricing group.
@@ -788,15 +874,14 @@ export default function ListingForm(props) {
       }
       if (!editing) setQty('1');
       setStockVersion((n) => n + 1);
-      const listingRow = saved?.id ? saved : saved?.listing;
-      // The group or strategy set the price after the PATCH, so the row shows it.
-      if (listingRow && pricedPkn != null) listingRow.pricePkn = pricedPkn;
+      let listingRow = outcome.row;
       if (listingRow?.id && photos().length) {
         const attached = await saveListingPhotos(token, listingRow.id, photos());
-        listingRow.photoUrls = attached?.photoUrls || photos();
+        listingRow = { ...listingRow, photoUrls: attached?.photoUrls || photos() };
       }
       if (listingRow?.id) {
-        props.onListed?.(pendingId ? { ...listingRow, replaceId: pendingId } : listingRow);
+        // The drawer shows the CardTrader side of the save in the board's line.
+        props.onListed?.(pendingId ? { ...listingRow, replaceId: pendingId } : listingRow, outcome.note);
       } else if (pendingId) {
         props.onListed?.({ remove: true, id: pendingId });
       }
@@ -968,11 +1053,10 @@ export default function ListingForm(props) {
   dismissWhileOpen(pricingOpen, setPricingOpen, () => pricingRoot);
 
   const otherCode = () => [...new Set(currencies())].find((code) => code !== currency()) || '';
-  const typedPkn = () => (price() ? listingPriceToPkn(price(), currency()) : listingPriceToPkn(graphPrice(), currency()));
   /** The same price in the unit the field is not using. */
   const otherUnitLine = () => {
     const code = otherCode();
-    const value = typedPkn();
+    const value = amountPkn();
     if (!code || !(value > 0)) return '';
     return code === 'PKN'
       ? `= ${formatPknNumber(Math.round(value), { maximumFractionDigits: 0 })} PKN`
@@ -1072,13 +1156,18 @@ export default function ListingForm(props) {
   const selectFinishes = () => (reverseFoil() ? foils.filter((row) => row.value !== 'reverse') : []);
   const shownFinish = () => (foil() === 'reverse' ? 'standard' : foil());
 
-  function propertyChips() {
+  /** Every chip of the row, in the desk's order with the finishes after 1st Ed. */
+  function chipList() {
     const order = ['firstEd', 'signed', 'altered', 'graded', 'sealed', 'shipping'];
     const byKey = Object.fromEntries(extraChips().map((chip) => [chip.key, chip]));
     const list = order.map((key) => byKey[key]).filter(Boolean);
     const finishes = [reverseFoil(), ...chipFinishes()].filter(Boolean)
       .map((row) => ({ key: `foil:${row.value}`, label: row.label }));
     list.splice(list.findIndex((chip) => chip.key === 'firstEd') + 1, 0, ...finishes);
+    return list;
+  }
+
+  function chipButtons(list) {
     return (
       <For each={list}>
         {(chip) => {
@@ -1099,6 +1188,11 @@ export default function ListingForm(props) {
       </For>
     );
   }
+
+  // The desk lists every chip together; the drawer splits what the card *is*
+  // from what this listing *offers*, since sealed and shipping are the offer.
+  const propertyChips = () => chipButtons(chipList());
+  const drawerChips = createMemo(() => drawerChipSplit(chipList()));
 
   function drawerBody() {
     return (
@@ -1161,8 +1255,8 @@ export default function ListingForm(props) {
           </div>
           <div class="sell-drawer-block">
             <span class="sell-drawer-label">Properties</span>
-            <div class="sell-chip-row" role="group" aria-label="Listing extras">
-              {propertyChips()}
+            <div class="sell-chip-row" role="group" aria-label="Card properties">
+              {chipButtons(drawerChips().property)}
             </div>
             <Show when={selectFinishes().length > 1}>
               <label class="sell-field sell-pick foil-pick">
@@ -1176,6 +1270,14 @@ export default function ListingForm(props) {
             </Show>
             {gradedRow()}
           </div>
+          <Show when={drawerChips().listing.length}>
+            <div class="sell-drawer-block">
+              <span class="sell-drawer-label">Listing</span>
+              <div class="sell-chip-row" role="group" aria-label="Listing offers">
+                {chipButtons(drawerChips().listing)}
+              </div>
+            </div>
+          </Show>
           <label class="sell-drawer-block sell-comment">
             <span class="sell-drawer-label">Seller comment · public</span>
             <input value={comment()} onInput={(event) => setComment(event.currentTarget.value)} />
