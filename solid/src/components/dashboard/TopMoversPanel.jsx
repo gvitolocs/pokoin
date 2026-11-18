@@ -6,6 +6,7 @@ import {
   moverChips,
   moverSpark,
   moverSparkHover,
+  moverSparkTipPlacement,
   moverTileLine,
   moverTitle,
   moverTone,
@@ -30,12 +31,10 @@ function MoverTile(props) {
   // The sparkline day under the pointer, or null. Hover only: the tile itself
   // stays a plain link, so nothing here cancels or stops a click.
   const [sparkPoint, setSparkPoint] = createSignal(null);
-  const sparkPct = () => (sparkPoint().x / SPARK.width) * 100;
-  // The tip sits beside the dot, on the side with room, at the same 55% the
-  // chart above flips at, so it never covers the point it names.
-  const sparkTipStyle = () => (sparkPct() < 55
-    ? { left: `calc(${sparkPct()}% + 8px)` }
-    : { right: `calc(${100 - sparkPct()}% + 8px)` });
+  // The tip lives inside the spark box: anchored to the hovered day,
+  // clamped to the box edges, on the vertical side away from the point, so
+  // it never covers the tile's text above the sparkline.
+  const sparkTipStyle = () => moverSparkTipPlacement(sparkPoint(), spark());
 
   function trackSpark(event) {
     const box = event.currentTarget.getBoundingClientRect();

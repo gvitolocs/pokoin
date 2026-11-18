@@ -9,6 +9,7 @@ import {
   moverDaysForPreset,
   moverSpark,
   moverSparkHover,
+  moverSparkTipPlacement,
   moverTileLine,
   moverTitle,
   moverTone,
@@ -291,4 +292,50 @@ test('a pointer over the sparkline reads a real day, priced like the tile', () =
   assert.equal(moverSparkHover({ line: '', area: '', points: [] }, 0.5), null);
   assert.equal(moverSparkHover(moverSpark(normalizeMover(apiMover({ series: [] }))), 0.5), null);
   assert.equal(moverSparkHover(null, 0.5), null);
+});
+
+test('the spark tip sits inside the spark box, on the side away from the point', () => {
+  const spark = moverSpark(sparkMover([100, 140, 120]));
+  // A point in the lower half pins the tip to the box's top edge, still
+  // anchored to the hovered day.
+  assert.deepEqual(moverSparkTipPlacement({ x: 60, y: 31 }, spark), {
+    top: '0px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+  });
+  // A point in the upper half pins it to the box's bottom edge.
+  assert.deepEqual(moverSparkTipPlacement({ x: 60, y: 3 }, spark), {
+    bottom: '0px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+  });
+  // A flat series sits mid-box; its point reads as upper half.
+  const flat = moverSpark(sparkMover([100, 100, 100]));
+  assert.deepEqual(moverSparkTipPlacement(flat.points[1], flat), {
+    bottom: '0px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+  });
+});
+
+test('the spark tip clamps to the box edges and never leaves the tile', () => {
+  const spark = moverSpark(sparkMover([100, 140, 120]));
+  // Near the left edge the tip pins to the box's left edge, no centering.
+  assert.deepEqual(moverSparkTipPlacement({ x: 3, y: 31 }, spark), { top: '0px', left: '0px' });
+  // Near the right edge it pins to the box's right edge.
+  assert.deepEqual(moverSparkTipPlacement({ x: 117, y: 3 }, spark), { bottom: '0px', right: '0px' });
+  // The pinning bands reach 35% in from each side; their bounds pin too.
+  assert.deepEqual(moverSparkTipPlacement({ x: 42, y: 31 }, spark), { top: '0px', left: '0px' });
+  assert.deepEqual(moverSparkTipPlacement({ x: 78, y: 3 }, spark), { bottom: '0px', right: '0px' });
+  // Between the bands the tip centers on the day, inside the box.
+  assert.deepEqual(moverSparkTipPlacement({ x: 48, y: 31 }, spark), {
+    top: '0px',
+    left: '40%',
+    transform: 'translateX(-50%)',
+  });
+  assert.deepEqual(moverSparkTipPlacement({ x: 72, y: 3 }, spark), {
+    bottom: '0px',
+    left: '60%',
+    transform: 'translateX(-50%)',
+  });
 });

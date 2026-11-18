@@ -221,3 +221,31 @@ export function moverSparkHover(spark, ratio, currency = '') {
     valueLabel: moverAmount(point.pkn, currency),
   };
 }
+
+/**
+ * Half the widest tip as a share of the spark box: past this share from either
+ * edge, centering the tip on the day would push it out of the box, so it pins
+ * to the nearer edge instead.
+ */
+const MOVER_SPARK_TIP_EDGE = 35;
+
+/**
+ * Where the day tip sits inside the sparkline's own box: anchored to the
+ * hovered day horizontally, clamped to the box's left and right edges, and
+ * vertically on the side away from the point — the top edge when the point is
+ * in the lower half, the bottom edge otherwise. The tip never leaves the box,
+ * so it never covers the tile's text above the sparkline.
+ */
+export function moverSparkTipPlacement(point, spark) {
+  const width = numberOrZero(spark?.width) || MOVER_SPARK.width;
+  const height = numberOrZero(spark?.height) || MOVER_SPARK.height;
+  const xPct = Math.min(100, Math.max(0, (numberOrZero(point?.x) / width) * 100));
+  const style = numberOrZero(point?.y) > height / 2 ? { top: '0px' } : { bottom: '0px' };
+  if (xPct <= MOVER_SPARK_TIP_EDGE) style.left = '0px';
+  else if (xPct >= 100 - MOVER_SPARK_TIP_EDGE) style.right = '0px';
+  else {
+    style.left = `${xPct}%`;
+    style.transform = 'translateX(-50%)';
+  }
+  return style;
+}

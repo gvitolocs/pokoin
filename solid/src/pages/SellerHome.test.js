@@ -186,3 +186,14 @@ test('Top movers tiles have no native tooltip, one screen-reader sentence', () =
   // Nothing inside the tile carries a title either.
   assert.doesNotMatch(panelSrc, / title=/);
 });
+
+test('the movers spark tip lives inside the sparkline box', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  const css = read('../../../market/src/seller-home.css');
+  // Placement is the pure helper: anchored to the day, clamped to the box
+  // edges, never over the copy above the sparkline.
+  assert.match(panelSrc, /moverSparkTipPlacement\(sparkPoint\(\), spark\(\)\)/);
+  const tipRule = css.match(/\.mover-spark-tip \{[^}]*\}/)?.[0] || '';
+  assert.doesNotMatch(tipRule, /bottom:/);
+  assert.doesNotMatch(tipRule, /top:/);
+});

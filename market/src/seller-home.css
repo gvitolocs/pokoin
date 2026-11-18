@@ -1142,9 +1142,10 @@
   pointer-events: none;
 }
 
+/* Placed inside this box by moverSparkTipPlacement, so it never rises out of
+   the sparkline onto the tile's text above it. */
 .mover-spark-tip {
   position: absolute;
-  bottom: calc(100% + 6px);
   z-index: 3;
   width: max-content;
   padding: 4px 8px;
