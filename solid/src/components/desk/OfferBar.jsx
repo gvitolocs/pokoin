@@ -75,7 +75,7 @@ export default function OfferBar(props) {
   const buy = props.buy;
   const preview = buy.preview;
   const book = buy.book;
-  const loading = () => book() == null;
+  const loading = () => !buy.known();
   const [open, setOpen] = createSignal(false);
   const [pos, setPos] = createSignal('');
   // Settings the visitor changed in the popup; everything else follows the desk's chips.

@@ -2202,10 +2202,12 @@ export function preloadDeskArt(card) {
 
 /**
  * Warm one card desk before it opens: its page (local store, low priority,
- * abortable by `signal`), with `art` its hero scan, and with `listings` its
- * live listings (the desk adopts a read this recent instead of asking again).
+ * abortable by `signal`), with `art` its hero scan, with `listings` its live
+ * listings (the desk adopts a read this recent instead of asking again) and with
+ * `book` its buy-order book, which the desk otherwise paints from this device's
+ * last answer only — a neighbour it has never opened has no answer.
  */
-export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, listings = false, signal } = {}) {
+export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, listings = false, book = false, signal } = {}) {
   const id = neighborCardId(card);
   if (!id) {
     return Promise.resolve(null);
@@ -2216,6 +2218,18 @@ export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, lis
   if (listings) {
     fetchListings(id).catch(() => {});
   }
+  if (book) {
+    // `buy-orders.js` imports this module, so the book warm cannot be a static
+    // import here: it would run while `card-desk.js` is mid-evaluation and read
+    // `LIST_LANGS` before it exists. The warm is off the critical path anyway.
+    import('./buy-orders.js').then(({ fetchBuyBook, writeBookCache }) =>
+      fetchBuyBook(id, { signal }).then((data) => {
+        // Stored, not just fetched: the desk paints from this device's own copy,
+        // so a warm that is not written to it is a warm the next desk cannot see.
+        writeBookCache(id, Array.isArray(data?.book) ? data.book : []);
+      }),
+    ).catch(() => {});
+  }
   return fetchCard(id, { lang, slug: slug || slugFromCard(card), prefetch: true, signal }).then((data) => {
     if (art) {
       preloadCardArt(data.card);
@@ -2224,15 +2238,15 @@ export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, lis
   });
 }
 
-export function warmupCard(card, { lang = 'en', listings = false } = {}) {
-  prefetchCardDesk(card, { lang, listings }).catch(() => {});
+export function warmupCard(card, { lang = 'en', listings = false, book = false } = {}) {
+  prefetchCardDesk(card, { lang, listings, book }).catch(() => {});
 }
 
 export function warmupNeighbors(neighbors, { lang = 'en' } = {}) {
   const prev = neighbors?.prev || [];
   const next = neighbors?.next || [];
   [next[0], prev[0]].filter(Boolean).forEach((card, index) => {
-    const run = () => warmupCard(card, { lang, listings: true });
+    const run = () => warmupCard(card, { lang, listings: true, book: true });
     if (index === 0) {
       run();
       return;

@@ -1033,7 +1033,7 @@ function CardDesk(props) {
   });
 
   // One book for the desk: the offer bar and the Best Deal rows read this signal.
-  const buy = createBuyBook({ cardId, ready: offersReady, language: shownLang });
+  const buy = createBuyBook({ cardId, language: shownLang });
 
   /** The Shop row's cart path, so the book rows add listings the same way. */
   function addListingToCart(offer, qty = 1) {
@@ -1048,11 +1048,11 @@ function CardDesk(props) {
   /** A Buy offers row is a request for a facet: pick it. A language this printing cannot be listed in stays out. */
   // The sell strip's Sell now: the best open offer for the facet the chips
   // picked when it is not the visitor's own, and Pokoin's starting offer when
-  // no buyer has posted one. So there is always something to sell into.
+  // no buyer has posted one — including when this device has not seen the book
+  // yet, because an unseen book is an empty one. So there is always something to
+  // sell into, in the first frame and not after `marketplace-buy-orders` answers.
   const sellNowRow = () => {
-    const book = buy.book();
-    if (!Array.isArray(book)) return null;
-    const row = selectionBid(book, { condition: shownCond(), language: shownLang() });
+    const row = selectionBid(buy.book(), { condition: shownCond(), language: shownLang() });
     if (!row) return withHouseOffer(null);
     return buyOfferSellable(row, buy.mine()) ? row : null;
   };

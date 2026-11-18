@@ -165,7 +165,9 @@ test('an empty Vault is not a panel at any width: the row is conditional markup'
 });
 
 test('the desk loads one buy book and hands it to the bar and the Buy offers cell', () => {
-  assert.match(page, /const buy = createBuyBook\(\{ cardId, ready: offersReady, language: shownLang \}\)/);
+  // CARD-01 P4: the sell side does not wait for the buy side, so the book is not
+  // gated on the listings landing any more.
+  assert.match(page, /const buy = createBuyBook\(\{ cardId, language: shownLang \}\)/);
   assert.match(page, /<OfferBar\n\s*buy=\{buy\}/);
   assert.match(page, /<BuyOffers\n\s*buy=\{buy\}/);
   // The bar reads the book itself; only the cells need to know the listings landed.
@@ -292,18 +294,20 @@ test('the two listing cells are the third desk row, capped by the viewport and w
   assert.doesNotMatch(bar, /canSellNow|sellToHouse/);
   assert.match(bar, /const cur = \(\) => offerUnit\(unitChoice\(\), currency\(\)\);/);
   assert.match(cells, /props\.buy\.askOffer\(\)/);
-  // The cell is on the page from the first paint: until the book is known it is
-  // a skeleton of the same three row slots, so nothing moves when it answers.
+  // The cell is on the page from the first paint. Since CARD-01 P4 the book it
+  // paints into is never nothing — an unknown book is an empty one, and the
+  // empty branch names Pokoin's own starting offer — so the three-slot skeleton
+  // below is the fallback for a book that is not a row list at all.
   assert.match(cells, /<Show\s+when=\{Array\.isArray\(book\(\)\)\}\s+fallback=\{\(/);
   assert.match(cells, /class="panel desk-cell cell-offers is-loading"[\s\S]*class="cell-rows cell-skel"/);
   // The bar too: always mounted, a skeleton price and waiting buttons while loading.
   const steadyBar = fs.readFileSync(new URL('../components/desk/OfferBar.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(steadyBar, /<Show when=\{book\(\)\}>/);
-  assert.match(steadyBar, /const loading = \(\) => book\(\) == null;/);
+  assert.match(steadyBar, /const loading = \(\) => !buy\.known\(\);/);
   assert.match(steadyBar, /disabled=\{busy\(\) \|\| loading\(\)\}/);
   // A reload paints the book this device last saw, then asks again.
   const bookLib = fs.readFileSync(new URL('../lib/buy-book.js', import.meta.url), 'utf8');
-  assert.match(bookLib, /createSignal\(stored\(\)\)/);
+  assert.match(bookLib, /createSignal\(first \|\| \[\]\)/);
   assert.match(bookLib, /writeBookCache\(id, rows\);/);
   // The graph never shows another grade's sales under the picked one.
   assert.match(page, /series=\{graphSeries\(\)\}/);
