@@ -9,6 +9,7 @@ import {
   defaultSegmentLevel,
   formatSegmentChange,
   indexedSeries,
+  joinedSegments,
   normalizeSegmentDefs,
   normalizeSegments,
   segmentGroups,
@@ -673,4 +674,28 @@ test('a collection chart compares with the book value of its own days', () => {
   assert.deepEqual(collectionSeriesOn(null, row.series).map((point) => point.valuePkn), [null, null, null]);
   // The other levels keep comparing with the windowed book, as before.
   assert.deepEqual(collectionSeries(model, { from: '2026-11-17', to: '' }).map((point) => point.valuePkn), [1200]);
+});
+
+test('the saved lists join the table after the history, whichever answered first', () => {
+  const lists = savedModel();
+  // The lists answered while the history read is still out: there is no model at
+  // all, so the table keeps its skeleton and has no level to open on.
+  assert.equal(joinedSegments({ history: null, pending: true, collections: lists }), null);
+  // A split that is already on screen paints while a fresh one is out; the lists
+  // just wait for it.
+  assert.deepEqual(joinedSegments({ history: bookModel(), pending: true, collections: lists }).defs,
+    bookModel().defs, 'the book paints what it has');
+  // The history answers with its split: the lists nest inside it.
+  const joined = joinedSegments({ history: bookModel(), pending: false, collections: lists });
+  assert.deepEqual(segmentLevels(joined).map((level) => level.id), ['all', 'pokemon', COLLECTIONS_LEVEL]);
+  assert.equal(defaultSegmentLevel(joined), defaultSegmentLevel(bookModel()), 'the history still picks the opening level');
+  // The history is over and brought no split at all — an answer without one, or
+  // a read that failed: the seller's own lists are the whole table now.
+  const alone = joinedSegments({ history: null, pending: false, collections: lists });
+  assert.deepEqual(segmentLevels(alone).map((level) => level.id), [COLLECTIONS_LEVEL]);
+  assert.equal(defaultSegmentLevel(alone), COLLECTIONS_LEVEL);
+  assert.equal(segmentGroups(alone, COLLECTIONS_LEVEL, {}).flatMap((group) => group.rows).length, 2);
+  // Nothing answered on either side: nothing to draw.
+  assert.equal(joinedSegments({ history: null, pending: false, collections: null }), null);
+  assert.equal(joinedSegments(), null);
 });

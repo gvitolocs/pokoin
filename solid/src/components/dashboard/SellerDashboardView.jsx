@@ -12,7 +12,7 @@ import { Alert, EmptyDesk, PageHead } from '../Desk.jsx';
 import MiniCardTile from '../MiniCardTile.jsx';
 import CollectionHistoryPanel from './CollectionHistoryPanel.jsx';
 import CollectionEditor from './CollectionEditor.jsx';
-import { withCollections } from '@market/portfolio-segments.js';
+import { joinedSegments } from '@market/portfolio-segments.js';
 import SegmentTable from './SegmentTable.jsx';
 import TopMoversPanel from './TopMoversPanel.jsx';
 
@@ -288,7 +288,15 @@ export function SellerDashboardView(props) {
   const [segmentsRange, setSegmentsRange] = createSignal({ id: '1M', days: 30 });
   // The saved collections answer as their own model, but the table splits one:
   // nesting is what puts the Collections level next to the five it already has.
-  const segmentModel = createMemo(() => withCollections(props.segments || null, props.collections?.model() || null));
+  // It waits for the history read and never the other way round: while that is
+  // out this table is a skeleton, and a model of lists alone would drop it and
+  // open the desk on Collections. Once the read is over — with a split, without
+  // one, or failed — the saved lists join what the split left.
+  const segmentModel = createMemo(() => joinedSegments({
+    history: props.segments,
+    pending: Boolean(props.historyPending),
+    collections: props.collections?.model() || null,
+  }));
   const listed = () => props.listed;
   const listingRows = () => props.listingRows || [];
   const movers = () => props.movers || [];

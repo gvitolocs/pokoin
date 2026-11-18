@@ -87,7 +87,10 @@ test('one model is split: the levels, then the saved lists inside it', () => {
 });
 
 test('the desk hands the table the nested model, not two sources', () => {
-  assert.match(viewSrc, /withCollections\(props\.segments \|\| null, props\.collections\?\.model\(\) \|\| null\)/);
+  // One call, one rule: the saved lists are nested by the helper that also
+  // decides they wait for the history read to be over.
+  assert.match(viewSrc, /joinedSegments\(\{[\s\S]{0,220}pending: Boolean\(props\.historyPending\),[\s\S]{0,140}collections: props\.collections\?\.model\(\) \|\| null,[\s\S]{0,40}\}\)/);
+  assert.doesNotMatch(viewSrc, /withCollections\(/);
   assert.match(viewSrc, /<SegmentTable[\s\S]{0,40}model=\{segmentModel\(\)\}/);
   assert.doesNotMatch(viewSrc, /<SegmentTable[\s\S]{0,60}model=\{props\.segments \|\| null\}/);
   assert.match(viewSrc, /collections=\{props\.collections \|\| null\}/);

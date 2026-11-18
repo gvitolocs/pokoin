@@ -156,6 +156,17 @@ export function withCollections(model, collections) {
   return { ...(model || { defs: [], days: [] }), collections: collections || null };
 }
 
+/**
+ * The model the table splits: the history's own, with the seller's saved lists
+ * nested on it only once the history question is over. A level that arrives
+ * first would drop the skeleton and open the desk on Collections while the
+ * graph's read is still out; a history that answered without any split at all
+ * (or failed) is the case where the saved lists are the only level there is.
+ */
+export function joinedSegments({ history = null, pending = false, collections = null } = {}) {
+  return withCollections(history || null, pending ? null : (collections || null));
+}
+
 export function segmentLevels(model) {
   const defs = model?.defs;
   const saved = collectionsModel(model);
