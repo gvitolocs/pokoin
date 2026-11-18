@@ -9,6 +9,15 @@ fn re(pattern: &str) -> Regex {
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
 }
+/// The live code reads ids through `String(id)`, so a provider that sends a JSON number means the
+/// same id as one that sends its digits in a string.
+fn id_text(v: &Value, key: &str) -> String {
+    match &v[key] {
+        Value::String(id) => id.clone(),
+        Value::Number(id) => id.to_string(),
+        _ => String::new(),
+    }
+}
 pub fn js_slice(text: &str, count: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(count).collect::<Vec<_>>())
 }
@@ -98,9 +107,9 @@ pub fn pick_tweet<'a>(
     tweets
         .iter()
         .filter(|t| {
-            let id = text(t, "id");
+            let id = id_text(t, "id");
             !id.is_empty()
-                && !replied.iter().any(|v| v.as_str() == Some(id))
+                && !replied.iter().any(|v| v.as_str() == Some(id.as_str()))
                 && is_safe(text(t, "text"), own.is_some())
                 && own.is_none_or(|own| {
                     let author = text(t, "username");
@@ -108,9 +117,10 @@ pub fn pick_tweet<'a>(
                 })
         })
         .max_by(|a, b| {
+            let (a_id, b_id) = (id_text(a, "id"), id_text(b, "id"));
             engagement_score(a)
                 .total_cmp(&engagement_score(b))
-                .then_with(|| id_rank(text(a, "id")).cmp(&id_rank(text(b, "id"))))
+                .then_with(|| id_rank(&a_id).cmp(&id_rank(&b_id)))
                 .then(std::cmp::Ordering::Greater)
         })
 }
@@ -185,10 +195,21 @@ pub fn video_was_tweeted_today(state: &Value, key: &str) -> bool {
     state.as_object().is_some_and(|s| {
         s.iter().any(|(name, v)| {
             name.starts_with("video:")
-                && v["tweetId"].as_str().is_some_and(|id| !id.is_empty())
+                // The live guard was `if (entry.tweetId)`: a numeric id counts, 0 does not.
+                && js_truthy(&v["tweetId"])
                 && js_slice(text(v, "at"), 10) == key
         })
     })
+}
+
+fn js_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64() != Some(0.0),
+        Value::String(value) => !value.is_empty(),
+        _ => true,
+    }
 }
 pub fn decide_friend_action(state: &Value, tweets: &[Value], key: &str) -> Value {
     if text(state, "lastCommentDate") == key && text(state, "pendingTweetId").is_empty() {
@@ -243,9 +264,9 @@ pub fn should_reply_to(tweet: &Value, own_id: &str, own_username: &str) -> bool 
     }
     let user = &tweet["user"];
     let author = if text(user, "id_str").is_empty() {
-        text(user, "id")
+        id_text(user, "id")
     } else {
-        text(user, "id_str")
+        text(user, "id_str").to_string()
     };
     if author.is_empty() || author == own_id {
         return false;

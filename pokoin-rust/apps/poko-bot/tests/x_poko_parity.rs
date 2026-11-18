@@ -250,3 +250,33 @@ fn an_unconfigured_webhook_secret_is_refused_by_both_primitives() {
         assert!(!x::verify_webhook_signature(&attacker, body, secret));
     }
 }
+
+#[test]
+fn ids_that_arrive_as_json_numbers_are_the_same_ids() {
+    let single = vec![
+        json!({"id":9007199254740993u64,"text":"Charizard Base Set forever","username":"fan"}),
+    ];
+    assert_eq!(
+        s::pick_tweet(&single, &[], None).unwrap()["id"],
+        json!(9007199254740993u64)
+    );
+    let tweets = vec![
+        json!({"id":999,"text":"Charizard Base Set forever","username":"fan"}),
+        json!({"id":"111","text":"Lugia card is great","username":"other"}),
+    ];
+    assert_eq!(s::pick_tweet(&tweets, &[], None).unwrap()["id"], json!(999));
+    let state = json!({"video:abc":{"tweetId":1234567890,"at":"2026-10-22T10:00:00Z"}});
+    assert!(s::video_was_tweeted_today(&state, "2026-10-22"));
+    let never = json!({"video:abc":{"tweetId":0,"at":"2026-10-22T10:00:00Z"}});
+    assert!(!s::video_was_tweeted_today(&never, "2026-10-22"));
+    assert!(!s::should_reply_to(
+        &json!({"text":"@poko hi","user":{"id":111}}),
+        "111",
+        "poko"
+    ));
+    assert!(s::should_reply_to(
+        &json!({"text":"@poko hi","user":{"id":222}}),
+        "111",
+        "poko"
+    ));
+}
