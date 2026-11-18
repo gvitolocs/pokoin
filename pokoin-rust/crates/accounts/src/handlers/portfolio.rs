@@ -5,7 +5,7 @@
 //!   live in [`crate::domain::portfolio_history`]. A stored series that is on
 //!   the current basis answers the request at once and is recomputed behind it.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Query, State};
@@ -17,12 +17,15 @@ use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    add_utc_days, build_daily_series_with_segments, clean_days, frozen_card_days,
+    add_utc_days, build_daily_series_with_segments, clean_days, field_i64, frozen_card_days,
     frozen_segment_days, holding_slices, sold_price_book, stored_is_current, stored_is_fresh,
     top_movers, utc_day_key_ms, wallet_series, Holding, Mover, PricePoint, CARDS_BY_BLUEPRINT_SQL,
     HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION, SOLD_BY_BLUEPRINT_SQL,
 };
-use crate::domain::portfolio_segments::{segment_defs, segment_holdings, SEGMENTS_REVISION};
+use crate::domain::portfolio_segments::{
+    apply_catalog_rows, fit_segments_budget, game_of, merge_segment_labels, segment_defs,
+    segment_holdings, set_labels, POKEMON, SEGMENTS_REVISION, UNKNOWN_GAME,
+};
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
 use crate::sql::{row_text, MarketplaceDb, SqlParam};
@@ -36,12 +39,265 @@ const BALANCES: &str = "balances";
 const LEDGER_PAGE: i64 = 200;
 
 /// What the market read model answers with: the held slices, their sold price
-/// book, and the same rows grouped per dashboard segment.
+/// book, the same rows grouped per dashboard segment, and the set names those
+/// segments are labelled by.
 type CardBook = (
     Vec<Holding>,
     HashMap<String, Vec<PricePoint>>,
     BTreeMap<String, Vec<Holding>>,
+    BTreeMap<String, String>,
 );
+
+/// The most games one seller's collection prices out of their own databases.
+/// Past this, the games with the fewest cards are held and left unpriced; no
+/// collection opens an unbounded number of pools for one request.
+const OTHER_GAME_MAX: usize = 8;
+
+/// What the stored `segments` may cost the history document. Firestore refuses a
+/// document past 1 MiB, and a document that cannot be written makes every later
+/// request recompute and fail again, so the series is trimmed well inside it.
+const SEGMENT_BUDGET_BYTES: usize = 600_000;
+
+/// What one game's own catalog knows about its held cards, looked up by public
+/// card id. `ct_id` is the CardTrader blueprint its sold prices are filed under,
+/// and those ids are unique across games, so one price book holds them all.
+/// `set_name` is the display name and `expansion_name` the normalised one
+/// (`Vendetta` and `vendetta`), so the label reads the way the game's own pages
+/// title it and the normalised name is only the fallback.
+const GAME_CATALOG_SQL: &str = "\
+  select card_id::text as card_id, ct_id::text as blueprint_id, \
+         coalesce(nullif(set_name, ''), expansion_name, '') as set_name, \
+         coalesce(product_type, 'card') as product_type \
+  from public.marketplace_search_candidates \
+  where card_id = any($1::bigint[])";
+
+/// A `bigint` column that arrived as text, or nothing when it is not an id.
+fn numeric_id(text: &str) -> Option<i64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<i64>().ok()
+}
+
+/// Every game but Pokémon that the collection holds cards of, each with the card
+/// ids to look up in its own database. The games with the most cards held come
+/// first, ties in id order.
+fn other_game_cards(rows: &[Json]) -> Vec<(String, Vec<i64>)> {
+    let mut per_game: BTreeMap<String, (i64, BTreeSet<i64>)> = BTreeMap::new();
+    for row in rows {
+        let game = game_of(row);
+        if game == POKEMON {
+            continue;
+        }
+        let entry = per_game.entry(game).or_default();
+        entry.0 += field_i64(row, "quantity").max(0);
+        if let Some(id) = numeric_id(&row_text(row, "card_id")) {
+            entry.1.insert(id);
+        }
+    }
+    let mut games: Vec<(String, (i64, BTreeSet<i64>))> = per_game.into_iter().collect();
+    games.sort_by_key(|entry| std::cmp::Reverse(entry.1 .0));
+    games
+        .into_iter()
+        .map(|(game, (_, ids))| (game, ids.into_iter().collect()))
+        .collect()
+}
+
+/// Which games this request asks a database for, and which it leaves alone:
+/// `([game → its card ids], [games with no lookup at all])`.
+///
+/// A nameless game is always in the second list, because there is no database to
+/// ask: [`crate::domain::marketplace_game::normalize_game`] reports any id the game table does not know as Pokémon,
+/// so asking for `unknown` would read the Pokémon catalog. So is every game past
+/// [`OTHER_GAME_MAX`]: its rows keep whatever the Pokémon catalog join matched on
+/// their public card id, which is a foreign card's blueprint, until they are
+/// cleared.
+fn games_to_price(rows: &[Json]) -> (Vec<(String, Vec<i64>)>, Vec<String>) {
+    let mut priced = Vec::new();
+    let mut cleared = Vec::new();
+    for (game, ids) in other_game_cards(rows) {
+        if game == UNKNOWN_GAME || priced.len() >= OTHER_GAME_MAX {
+            cleared.push(game);
+        } else {
+            priced.push((game, ids));
+        }
+    }
+    (priced, cleared)
+}
+
+/// One game's catalog rows and the sold prices of the blueprints they named.
+struct GamePrices {
+    catalog: Vec<Json>,
+    sold: Vec<Json>,
+}
+
+/// How long one game's own database may take. A seller with a Riftbound collection
+/// must not watch their history wait on a Riftbound server: past this the game's
+/// cards are held and unpriced, the way they are when its database errors.
+const OTHER_GAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Which games a read of the card book asks about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameScope {
+    /// Every game the collection holds, each priced out of its own database.
+    AllGames,
+    /// Pokémon rows only: no other game's database is contacted, and a card of
+    /// another game is not in the answer at all.
+    PokemonOnly,
+}
+
+/// One game's own database, which is where its catalog and its sold medians live
+/// (see [docs/GAMES.md](docs/GAMES.md)). A card id is only unique inside it.
+///
+/// The failure is the reason alone, not an [`ApiError`]: the only caller logs it
+/// and holds that game's cards unpriced, so nothing of it ever becomes an HTTP
+/// answer.
+async fn read_game_prices(
+    state: &DomainState,
+    game: &str,
+    card_ids: &[i64],
+) -> std::result::Result<GamePrices, String> {
+    if card_ids.is_empty() {
+        return Ok(GamePrices {
+            catalog: Vec::new(),
+            sold: Vec::new(),
+        });
+    }
+    let db = game_db(state, game).map_err(|error| error.message().to_string())?;
+    let catalog = db
+        .query_json(GAME_CATALOG_SQL, &[SqlParam::IntArray(card_ids.to_vec())])
+        .await
+        .map_err(|error| error.to_string())?;
+    let blueprints: BTreeSet<i64> = catalog
+        .iter()
+        .filter_map(|row| numeric_id(&row_text(row, "blueprint_id")))
+        .collect();
+    let sold = if blueprints.is_empty() {
+        Vec::new()
+    } else {
+        db.query_json(
+            SOLD_BY_BLUEPRINT_SQL,
+            &[SqlParam::IntArray(blueprints.into_iter().collect())],
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    };
+    Ok(GamePrices { catalog, sold })
+}
+
+/// Every game but Pokémon, priced out of its own database: its catalog says which
+/// CardTrader blueprint, set and product type a held card is, and its
+/// `cardtrader_sold_daily` says what that blueprint sold for.
+///
+/// A game whose database is not configured, has no catalog table, answers with an
+/// error, or answers later than [`OTHER_GAME_TIMEOUT`] keeps its cards **held and
+/// unpriced**: it is logged once with its id, its rows lose the blueprint id the
+/// Pokémon join matched on their card id, and neither the series nor any other game
+/// is affected. [`games_to_price`] lists the games that never get asked at all, and
+/// they are cleared the same way.
+async fn price_other_games(state: &DomainState, rows: &mut [Json], sold: &mut Vec<Json>) {
+    let (priced, cleared) = games_to_price(rows);
+    for game in cleared {
+        // This game's database was never asked, so the blueprint, set and product
+        // type the Pokémon catalog join matched on its card ids describe another
+        // game's card. Without them the cards are held and unpriced.
+        apply_catalog_rows(&game, rows, &[]);
+    }
+    for (game, ids) in priced {
+        match tokio::time::timeout(OTHER_GAME_TIMEOUT, read_game_prices(state, &game, &ids)).await {
+            Ok(Ok(prices)) => {
+                apply_catalog_rows(&game, rows, &prices.catalog);
+                sold.extend(prices.sold);
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    %error,
+                    game = %game,
+                    "portfolio game prices are unavailable; its cards stay unpriced"
+                );
+                apply_catalog_rows(&game, rows, &[]);
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    game = %game,
+                    "portfolio game prices timed out; its cards stay unpriced"
+                );
+                apply_catalog_rows(&game, rows, &[]);
+            }
+        }
+    }
+}
+
+/// A card of another game has no Pokémon blueprint to move and no Pokémon picture
+/// to show, so a [`GameScope::PokemonOnly`] read answers without it — and never
+/// asks that game's database.
+fn keep_pokemon_rows(rows: &mut Vec<Json>) {
+    rows.retain(|row| game_of(row) == POKEMON);
+}
+
+/// The held slices and their sold price book plus the same holdings grouped per
+/// segment, or `None` when the market read model is unavailable (the caller then
+/// serves the last good series).
+///
+/// [`GameScope::PokemonOnly`] leaves the other games out of the answer entirely and
+/// never asks one of their databases; it is for the callers that rank Pokémon
+/// printings alone.
+async fn read_card_book(
+    state: &DomainState,
+    db: &MarketplaceDb,
+    uid: &str,
+    scope: GameScope,
+) -> Option<CardBook> {
+    let mut held = match db
+        .query_json(HOLDINGS_SQL, &[SqlParam::Text(uid.to_string())])
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(%error, "portfolio card book failed");
+            return None;
+        }
+    };
+    // The other games first: their rows only carry a priceable blueprint id once
+    // their own catalog has confirmed one, and the sold query below reads them.
+    let mut other_sold: Vec<Json> = Vec::new();
+    if scope == GameScope::AllGames {
+        price_other_games(state, &mut held, &mut other_sold).await;
+    } else {
+        keep_pokemon_rows(&mut held);
+    }
+    let ids: BTreeSet<i64> = held
+        .iter()
+        .filter(|row| game_of(row) == POKEMON)
+        .filter_map(|row| numeric_id(&row_text(row, "blueprint_id")))
+        .collect();
+    let mut sold = if ids.is_empty() {
+        Vec::new()
+    } else {
+        match db
+            .query_json(
+                SOLD_BY_BLUEPRINT_SQL,
+                &[SqlParam::IntArray(ids.into_iter().collect())],
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(%error, "portfolio sold book failed");
+                return None;
+            }
+        }
+    };
+    sold.append(&mut other_sold);
+    let segments = segment_holdings(&held);
+    let labels = set_labels(&held);
+    Some((
+        holding_slices(&held),
+        sold_price_book(&sold),
+        segments,
+        labels,
+    ))
+}
 
 /// The stored series read, or `None` when there is nothing saved yet.
 async fn read_stored(firestore: &Firestore, uid: &str) -> Result<Option<Json>> {
@@ -89,49 +345,6 @@ async fn read_balance(firestore: &Firestore, uid: &str) -> f64 {
         .max(0) as f64
 }
 
-/// The held slices and their sold price book plus the same holdings grouped per
-/// segment, or `None` when the market read model is unavailable (the caller then
-/// serves the last good series).
-async fn read_card_book(db: &MarketplaceDb, uid: &str) -> Option<CardBook> {
-    let held = match db
-        .query_json(HOLDINGS_SQL, &[SqlParam::Text(uid.to_string())])
-        .await
-    {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::error!(%error, "portfolio card book failed");
-            return None;
-        }
-    };
-    let mut ids: Vec<i64> = Vec::new();
-    for row in &held {
-        let id = row_text(row, "blueprint_id");
-        if id.bytes().all(|byte| byte.is_ascii_digit()) && !id.is_empty() {
-            if let Ok(value) = id.parse::<i64>() {
-                if !ids.contains(&value) {
-                    ids.push(value);
-                }
-            }
-        }
-    }
-    let sold = if ids.is_empty() {
-        Vec::new()
-    } else {
-        match db
-            .query_json(SOLD_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids)])
-            .await
-        {
-            Ok(rows) => rows,
-            Err(error) => {
-                tracing::error!(%error, "portfolio sold book failed");
-                return None;
-            }
-        }
-    };
-    let segments = segment_holdings(&held);
-    Some((holding_slices(&held), sold_price_book(&sold), segments))
-}
-
 /// `GET /api/marketplace-portfolio-history`.
 pub async fn marketplace_portfolio_history(
     State(state): State<DomainState>,
@@ -160,20 +373,24 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
 
     let stored = read_stored(&firestore, &uid).await?;
     match history_plan(stored.as_ref(), now_ms) {
-        Plan::ServeFresh => Ok(history_body(stored_days(stored.as_ref()))),
+        Plan::ServeFresh => Ok(history_body(
+            stored_days(stored.as_ref()),
+            stored_labels(stored.as_ref()).as_ref(),
+        )),
         Plan::ServeStaleAndRefresh => {
             let days = stored_days(stored.as_ref());
+            let labels = stored_labels(stored.as_ref());
             spawn_history_refresh(state, &uid, stored);
-            Ok(history_body(days))
+            Ok(history_body(days, labels.as_ref()))
         }
         Plan::ComputeNow => {
             // There was no stored series to answer with, so a read model that
             // cannot report one leaves the empty series the Node `readCardBook`
             // catch produced.
-            let days = recompute_series(state, &uid, stored.as_ref())
+            let (days, labels) = recompute_series(state, &uid, stored.as_ref())
                 .await?
                 .unwrap_or_default();
-            Ok(history_body(days))
+            Ok(history_body(days, Some(&labels)))
         }
     }
 }
@@ -207,10 +424,19 @@ fn stored_days(stored: Option<&Json>) -> Vec<Json> {
     clean_days(stored.and_then(|doc| doc.get("days")))
 }
 
+/// The set names a stored series was cut under, or nothing when the document
+/// carries no map of them.
+fn stored_labels(stored: Option<&Json>) -> Option<Json> {
+    stored
+        .and_then(|doc| doc.get("segmentLabels"))
+        .filter(|labels| labels.is_object())
+        .cloned()
+}
+
 /// The response body: the series, and the ordered list of the segments its days
 /// actually carry. A series without segments keeps the old body exactly.
-fn history_body(days: Vec<Json>) -> Response {
-    let defs = segment_defs(&days);
+fn history_body(days: Vec<Json>, labels: Option<&Json>) -> Response {
+    let defs = segment_defs(&days, labels);
     let body = if defs.is_empty() {
         json!({ "ok": true, "days": days })
     } else {
@@ -227,19 +453,19 @@ async fn recompute_series(
     state: &DomainState,
     uid: &str,
     stored: Option<&Json>,
-) -> Result<Option<Vec<Json>>> {
+) -> Result<Option<(Vec<Json>, Json)>> {
     let now_ms = state.clock().now().timestamp_millis();
     let today_key = utc_day_key_ms(now_ms);
     let firestore = state.firestore()?;
 
     let card_book = match state.marketplace_db() {
-        Ok(db) => read_card_book(&db, uid).await,
+        Ok(db) => read_card_book(state, &db, uid, GameScope::AllGames).await,
         Err(error) => {
             tracing::debug!(%error, "portfolio read model is not configured");
             None
         }
     };
-    let Some((holdings, book, held_segments)) = card_book else {
+    let Some((holdings, book, held_segments, own_labels)) = card_book else {
         return Ok(None);
     };
 
@@ -257,8 +483,15 @@ async fn recompute_series(
         &frozen_segments,
         &today_key,
     );
+    // The same trimmed days are stored and answered with, so what the seller sees
+    // is what the document holds.
+    let days = fit_segments_budget(&days, SEGMENT_BUDGET_BYTES);
 
-    firestore
+    // The set names a key was drawn with stay stored: a day frozen two weeks
+    // ago still describes its line with the set it held then.
+    let labels = merge_segment_labels(stored.and_then(|doc| doc.get("segmentLabels")), &own_labels);
+
+    let stored = firestore
         .doc(format!("{HISTORY}/{uid}"))
         .set(
             DocData::new()
@@ -266,15 +499,22 @@ async fn recompute_series(
                     "days",
                     Value::Array(days.iter().map(Value::from_plain_json).collect()),
                 )
+                .set("segmentLabels", Value::from_plain_json(&labels))
                 .string("priceBasis", PRICE_BASIS)
                 .int("seriesRevision", SERIES_REVISION)
                 .int("segmentsRevision", SEGMENTS_REVISION)
                 .string("updatedAt", utc_iso(now_ms)),
             false,
         )
-        .await?;
+        .await;
+    if let Err(error) = stored {
+        // A series that cannot be written is still the series this collection
+        // holds right now. Answering with it costs a recompute per visit; a 500
+        // would leave the seller without a graph, on every visit, forever.
+        tracing::warn!(%error, "portfolio history was computed but not stored");
+    }
 
-    Ok(Some(days))
+    Ok(Some((days, labels)))
 }
 
 /// Uids with a history refresh running in this process.
@@ -514,20 +754,23 @@ async fn portfolio_movers_inner(
             return no_movers();
         }
     };
-    // The movers rank printings, which no segment grouping changes.
-    let Some((holdings, book, _)) = read_card_book(&db, &claims.uid).await else {
+    // The movers rank Pokémon printings, which no segment grouping changes. They
+    // are a Pokémon leaderboard: another game's database is never asked here, so
+    // a slow or broken Riftbound server cannot hold up this endpoint.
+    let Some((holdings, book, _, _)) =
+        read_card_book(state, &db, &claims.uid, GameScope::PokemonOnly).await
+    else {
         return no_movers();
     };
     let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
 
-    let mut ids: Vec<i64> = Vec::new();
-    for mover in movers.gainers.iter().chain(movers.losers.iter()) {
-        if let Ok(value) = mover.blueprint_id.parse::<i64>() {
-            if !ids.contains(&value) {
-                ids.push(value);
-            }
-        }
-    }
+    let ids: BTreeSet<i64> = movers
+        .gainers
+        .iter()
+        .chain(movers.losers.iter())
+        .filter_map(|mover| mover.blueprint_id.parse::<i64>().ok())
+        .collect();
+    let ids: Vec<i64> = ids.into_iter().collect();
     // The move is the substance; the picture is one join away.
     let cards = if ids.is_empty() {
         Default::default()
@@ -943,6 +1186,97 @@ mod tests {
     use super::*;
     use crate::domain::portfolio_history::PricePoint;
 
+    /// Thirteen games the platform's game table knows, so that one of them is
+    /// always past [`OTHER_GAME_MAX`] however that cap is set.
+    const THIRTEEN_GAMES: [&str; 13] = [
+        "magic",
+        "yugioh",
+        "flesh_and_blood",
+        "digimon",
+        "dragon_ball_super",
+        "vanguard",
+        "one_piece",
+        "lorcana",
+        "star_wars",
+        "union_arena",
+        "riftbound",
+        "gundam",
+        "sorcery",
+    ];
+
+    /// A Pokémon card and one card of each of thirteen games: every row the same
+    /// public card id, which the Pokémon catalog join answers with the same
+    /// blueprint for all of them. Biggest holding first.
+    fn one_card_per_game_across_thirteen() -> Vec<Json> {
+        let mut rows = vec![json!({
+            "card_id": "77", "blueprint_id": "999", "quantity": 4,
+            "game": "pokemon", "set_code": "sv1",
+        })];
+        for (index, game) in THIRTEEN_GAMES.iter().enumerate() {
+            rows.push(json!({
+                "card_id": "77", "blueprint_id": "999",
+                "quantity": 13 - index as i64, "game": game,
+            }));
+        }
+        rows
+    }
+
+    #[test]
+    fn a_game_past_the_cap_loses_what_the_pokemon_join_matched() {
+        let (priced, cleared) = games_to_price(&one_card_per_game_across_thirteen());
+        let asked: Vec<&str> = priced.iter().map(|(game, _)| game.as_str()).collect();
+        let skipped: Vec<&str> = cleared.iter().map(String::as_str).collect();
+        assert_eq!(asked, THIRTEEN_GAMES[..OTHER_GAME_MAX].to_vec());
+        assert_eq!(skipped, THIRTEEN_GAMES[OTHER_GAME_MAX..].to_vec());
+
+        let mut rows = one_card_per_game_across_thirteen();
+        for game in cleared {
+            apply_catalog_rows(&game, &mut rows, &[]);
+        }
+        // The Pokémon card of that id keeps the blueprint that prices it.
+        assert_eq!(rows[0]["blueprint_id"], json!("999"));
+        let groups = segment_holdings(&rows);
+        assert_eq!(groups["game:pokemon"].iter().map(|h| h.qty).sum::<i64>(), 4);
+        // A game nobody asked is still held, and is never priced by a card of
+        // another game that happens to share its id.
+        for game in &THIRTEEN_GAMES[OTHER_GAME_MAX..] {
+            let holdings = &groups[&format!("game:{game}")];
+            assert_eq!(holdings.len(), 1, "{game} lost its holding");
+            assert!(
+                holdings[0].key.starts_with("unpriced|"),
+                "{game} is priced by {}",
+                holdings[0].key
+            );
+        }
+    }
+
+    #[test]
+    fn a_nameless_game_is_never_asked_for_its_database() {
+        // `fbecho` is no game the platform knows, and normalize_game answers
+        // Pokémon for it: asking its database would read the Pokémon catalog.
+        let rows = vec![json!({
+            "card_id": "77", "blueprint_id": "999", "quantity": 1, "game": "fbecho",
+        })];
+        let (priced, cleared) = games_to_price(&rows);
+        assert!(priced.is_empty(), "{priced:?}");
+        assert_eq!(cleared, vec!["unknown".to_string()]);
+    }
+
+    #[test]
+    fn a_pokemon_only_read_leaves_no_game_to_ask() {
+        // Movers share the series' read model. With the other games filtered out
+        // first there is no game left to look a database up for, and no foreign
+        // blueprint in the price book the ranking reads.
+        let mut rows = one_card_per_game_across_thirteen();
+        keep_pokemon_rows(&mut rows);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(row_text(&rows[0], "game"), "pokemon");
+        assert_eq!(row_text(&rows[0], "blueprint_id"), "999");
+        let (priced, cleared) = games_to_price(&rows);
+        assert!(priced.is_empty(), "{priced:?}");
+        assert!(cleared.is_empty(), "{cleared:?}");
+    }
+
     #[test]
     fn utc_iso_renders_milliseconds() {
         assert_eq!(utc_iso(1_791_417_600_000), "2026-10-08T00:00:00.000Z");
@@ -1142,17 +1476,17 @@ mod tests {
         };
 
         // A series without segments keeps the body it always had.
-        let plain = body(history_body(vec![])).await;
+        let plain = body(history_body(vec![], None)).await;
         assert_eq!(plain, json!({ "ok": true, "days": [] }));
         assert_eq!(plain.get("segmentDefs"), None);
-        let plain = body(history_body(vec![json!({ "date": "2026-10-08" })])).await;
+        let plain = body(history_body(vec![json!({ "date": "2026-10-08" })], None)).await;
         assert_eq!(plain.get("segmentDefs"), None);
 
         let days = vec![json!({
             "date": "2026-10-08", "cardsValuePkn": 20,
             "segments": { "game:pokemon": [20, 2, 2], "pokemon:era:vintage": [20, 2, 2] }
         })];
-        let with_segments = body(history_body(days.clone())).await;
+        let with_segments = body(history_body(days.clone(), None)).await;
         assert_eq!(with_segments["ok"], json!(true));
         // The days arrive untouched; the defs only describe them.
         assert_eq!(with_segments["days"], Json::Array(days));
@@ -1169,5 +1503,147 @@ mod tests {
         // The one held game, the two all-game cuts, the eight bands and the two
         // Pokémon cuts.
         assert_eq!(defs.len(), 13);
+    }
+
+    #[tokio::test]
+    async fn the_history_body_labels_a_set_with_the_map_stored_beside_it() {
+        use http_body_util::BodyExt;
+        let body = |response: Response| async move {
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .map(|collected| collected.to_bytes())
+                .unwrap_or_default();
+            serde_json::from_slice::<Json>(&bytes).unwrap_or_default()
+        };
+
+        let days = vec![json!({
+            "date": "2026-10-08", "cardsValuePkn": 20,
+            "segments": {
+                "game:riftbound": [20, 2, 2],
+                "riftbound:set:lost-canon": [20, 2, 2]
+            }
+        })];
+        let drawn = body(history_body(
+            days,
+            Some(&json!({ "riftbound:set:lost-canon": "Lost Canon" })),
+        ))
+        .await;
+        let defs = drawn["segmentDefs"].as_array().cloned().unwrap_or_default();
+        let set = defs
+            .iter()
+            .find(|def| def["key"] == json!("riftbound:set:lost-canon"))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            set["label"],
+            json!("Lost Canon"),
+            "the stored name is what the graph titles its line with"
+        );
+        assert_eq!(
+            set["group"],
+            json!("set"),
+            "and it belongs to the set group of its game"
+        );
+        assert_eq!(
+            set["game"],
+            json!("riftbound"),
+            "and it belongs to the set group of its game"
+        );
+
+        // Without the stored map the key still reads as a set name.
+        let plain = body(history_body(
+            vec![json!({
+                "date": "2026-10-08",
+                "segments": {
+                    "game:riftbound": [20, 2, 2],
+                    "riftbound:set:lost-canon": [20, 2, 2]
+                }
+            })],
+            None,
+        ))
+        .await;
+        let defs = plain["segmentDefs"].as_array().cloned().unwrap_or_default();
+        let set = defs
+            .iter()
+            .find(|def| def["key"] == json!("riftbound:set:lost-canon"))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(set["label"], json!("Lost Canon"));
+    }
+
+    #[tokio::test]
+    async fn a_stale_series_answers_the_segments_it_was_stored_with() {
+        // The path a second request takes: the hours-old document answers at once
+        // while a refresh runs behind the response. What the client is given is the
+        // stored days and the names stored beside them, not what this refresh would
+        // have cut. (The flow binary cannot take this path twice: its clock is
+        // frozen, so a replayed request is `ServeFresh` rather than stale.)
+        use http_body_util::BodyExt;
+        let mut document = stored(
+            "2026-10-07T18:00:00.000Z",
+            json!([{
+                "date": "2026-10-07", "currencyPkn": 100, "cardsValuePkn": 130, "cardsHeld": 2,
+                "segments": {
+                    "game:pokemon": [100, 1, 1],
+                    "game:riftbound": [30, 1, 1],
+                    "riftbound:set:outcast": [30, 1, 1],
+                    "riftbound:sealed": [30, 1, 1]
+                }
+            }]),
+        );
+        document["segmentLabels"] = json!({ "riftbound:set:outcast": "Outcast" });
+        assert_eq!(
+            history_plan(Some(&document), NOON),
+            Plan::ServeStaleAndRefresh,
+            "yesterday's series is served and refreshed"
+        );
+
+        let response = history_body(
+            stored_days(Some(&document)),
+            stored_labels(Some(&document)).as_ref(),
+        );
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .map(|collected| collected.to_bytes())
+            .unwrap_or_default();
+        let body: Json = serde_json::from_slice(&bytes).unwrap_or_default();
+
+        let answered = body["days"].as_array().cloned().unwrap_or_default();
+        assert_eq!(answered.len(), 1, "the stored series is the answer");
+        assert_eq!(answered[0]["cardsValuePkn"], json!(130));
+        assert_eq!(
+            answered[0]["segments"], document["days"][0]["segments"],
+            "the stored segments are drawn as they were stored, not repriced"
+        );
+        let defs = body["segmentDefs"].as_array().cloned().unwrap_or_default();
+        let riftbound: Vec<&str> = defs
+            .iter()
+            .filter_map(|def| def["key"].as_str())
+            .filter(|key| key.starts_with("riftbound") || *key == "game:riftbound")
+            .collect();
+        assert_eq!(
+            riftbound,
+            vec![
+                "game:riftbound",
+                "riftbound:set:outcast",
+                "riftbound:sealed",
+                "riftbound:graded",
+            ],
+            "the lines drawn are the ones the stored days carry, in the stored order"
+        );
+        let set = defs
+            .iter()
+            .find(|def| def["key"] == json!("riftbound:set:outcast"))
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            set["label"],
+            json!("Outcast"),
+            "the name stored beside the days titles the line"
+        );
     }
 }

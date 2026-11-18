@@ -40,9 +40,11 @@ pub const SOLD_BY_BLUEPRINT_SQL: &str = "\
 /// columns change nothing about what a row *is*: they only say which dashboard
 /// segment it belongs to (see [`crate::domain::portfolio_segments`]).
 /// `marketplace_card_versions.card_id` is unique, so the joins cannot duplicate
-/// a row and the totals stay exactly what they were.
+/// a row and the totals stay exactly what they were. The public `card_id` is
+/// what a *non-Pokémon* row is priced by: that join answers with a Pokémon card
+/// of the same id, so the game's own catalog is looked up by it instead.
 pub const HOLDINGS_SQL: &str = "\
-  select a.blueprint_id, a.condition, a.language, a.reverse, a.first_edition, a.graded, \
+  select a.card_id::text as card_id, a.blueprint_id, a.condition, a.language, a.reverse, a.first_edition, a.graded, \
          a.quantity, a.created_at::text as since, \
          'pokemon' as game, \
          coalesce(e.official_id, '') as set_code, \
@@ -54,7 +56,7 @@ pub const HOLDINGS_SQL: &str = "\
   left join public.pokoin_pokemon_expansions e on e.expansion_id = b.expansion_id \
   where a.seller_uid = $1 and a.quantity > 0 \
   union all \
-  select coalesce(v.blueprint_id::text, '') as blueprint_id, l.condition, l.language, \
+  select l.card_id::text as card_id, coalesce(v.blueprint_id::text, '') as blueprint_id, l.condition, l.language, \
          l.reverse, l.first_edition, l.graded, \
          l.quantity_available as quantity, l.created_at::text as since, \
          coalesce(nullif(l.marketplace_game, ''), 'pokemon') as game, \
@@ -207,7 +209,7 @@ pub(crate) fn field_str(row: &Json, key: &str) -> String {
         .to_string()
 }
 
-fn field_i64(row: &Json, key: &str) -> i64 {
+pub(crate) fn field_i64(row: &Json, key: &str) -> i64 {
     row.get(key)
         .and_then(|value| {
             value
@@ -2302,6 +2304,33 @@ mod tests {
         none.as_object_mut().unwrap().remove("segmentsRevision");
         assert!(frozen_segment_days(Some(&none), "2026-10-08").is_empty());
         assert!(frozen_segment_days(None, "2026-10-08").is_empty());
+    }
+
+    #[test]
+    fn a_document_of_an_earlier_segments_revision_rebuilds_only_its_segments() {
+        // What a bump of `SEGMENTS_REVISION` does to a stored series: the
+        // segments of a day written under the previous revision are dropped and
+        // priced again, while that day's frozen card total stays as it was.
+        let doc = json!({
+            "priceBasis": PRICE_BASIS,
+            "seriesRevision": SERIES_REVISION,
+            "segmentsRevision": SEGMENTS_REVISION - 1,
+            "days": [
+                { "date": "2026-10-01", "cardsValuePkn": 10, "cardsHeld": 1,
+                  "segments": { "pokemon:era:vintage": [10, 1, 1] } }
+            ]
+        });
+        assert!(
+            frozen_segment_days(Some(&doc), "2026-10-08").is_empty(),
+            "a day of the previous segments revision is rebuilt"
+        );
+        assert_eq!(
+            frozen_card_days(Some(&doc), "2026-10-08")
+                .get("2026-10-01")
+                .map(|day| day["cardsValuePkn"].clone()),
+            Some(json!(10)),
+            "rebuilding the segments never re-prices the stored total"
+        );
     }
 
     #[test]
