@@ -281,10 +281,8 @@ async fn price_history_never_queries_a_table_the_game_lacks() {
     )
     .fetch_one(&magic)
     .await;
-    assert!(
-        stray.is_err(),
-        "the magic database must not have the table: {stray:?}"
-    );
+    assert!(stray.is_err(), "the magic database must not have the table");
+    drop(stray);
     let after_stray = rollbacks(&admin, "ph02_magic").await;
     assert!(
         after_stray > before_magic,
