@@ -9,6 +9,7 @@ import {
   isTrustedDeskSessionEvent,
 } from '@market/extension-auth-bridge.js';
 import { clearPortfolioHistory } from '@market/portfolio-history-cache.js';
+import { forgetSegments } from '@market/portfolio-segments-cache.js';
 import { authSession, refreshSession } from './session.js';
 
 /**
@@ -46,6 +47,7 @@ function dropSession() {
   // The seller's stored MyPokoin book never outlives the session.
   wipePrivateBooks();
   clearPortfolioHistory(leaving);
+  forgetSegments(leaving);
   refreshSession();
 }
 
