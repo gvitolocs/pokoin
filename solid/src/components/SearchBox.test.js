@@ -120,3 +120,13 @@ test('one typing session: the popup and its rows follow suggest-hold, not each k
   // Visibility no longer re-derives readiness from the raw input on every keystroke.
   assert.doesNotMatch(box, /suggestVisible = \(\) => open\(\) && \(liveReady\(query\(\)\)/);
 });
+
+test('a stale catalog or chip page is bound to the input that asked for it', () => {
+  // PH-05 §5.2: the effect's controller aborts the page and its repaint; the
+  // landing prewarm supersedes the chip the pointer left.
+  assert.match(box, /const controller = new AbortController\(\);\s*onCleanup\(\(\) => controller\.abort\(\)\);\s*hydrateCatalog\(live, text, lang, controller\.signal\);/);
+  assert.match(box, /function hydrateCatalog\(live, text, lang, signal\) \{[\s\S]*?hydrateTarget\(live, target, lang, \{ signal \}\)[\s\S]*?if \(signal\?\.aborted\) return;/);
+  assert.match(box, /if \(prewarmAbort\) prewarmAbort\.abort\(\);/);
+  assert.match(box, /pageUniverse\(live, q, \{ lang, print, signal: controller\.signal \}\),/);
+  assert.match(box, /printLang: print, signal: controller\.signal \}\)\.catch\(\(\) => null\),/);
+});

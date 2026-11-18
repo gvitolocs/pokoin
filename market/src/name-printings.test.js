@@ -69,3 +69,21 @@ test('an empty name does not start an unfiltered catalog request', async () => {
   });
   assert.deepEqual(await fetchCards('  '), []);
 });
+
+test("a superseded keystroke's signal reaches the catalog request (PH-05 §5.2)", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const fetchCards = createNamePrintingsFetcher({
+    fetchRows: async (request) => {
+      calls.push(request);
+      if (request.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      return [];
+    },
+    mapCard: (row) => row,
+  });
+  controller.abort();
+  await assert.rejects(fetchCards('Charizard', { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(calls[0].signal, controller.signal, 'the network hop is told which input this page answers');
+  await fetchCards('Charizard');
+  assert.equal('signal' in calls[1], false, 'a caller that walks away is not copied into an unrelated request');
+});

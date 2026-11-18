@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { useLocation } from '@solidjs/router';
 import { useGameNavigate } from '../lib/game-navigate.js';
@@ -248,7 +248,7 @@ function catalogTargets(live, text, lang) {
 }
 
 /** One catalog's cards, remembered: `{ cards }` once landed. */
-function hydrateTarget(live, target, lang) {
+function hydrateTarget(live, target, lang, { signal } = {}) {
   const landed = (cards, remember) => {
     live.rememberPrintings(target.key, cards);
     if (remember) live.rememberSuggestGroups(live.groupsFromCards(cards));
@@ -256,10 +256,10 @@ function hydrateTarget(live, target, lang) {
     return { cards };
   };
   if (target.kind === 'name') {
-    return fetchNamePrintings(target.name, { lang }).then((cards) => landed(cards, false));
+    return fetchNamePrintings(target.name, { lang, signal }).then((cards) => landed(cards, false));
   }
   if (target.kind === 'artist') {
-    return fetchArtist(target.slug, { limit: 80 }).then((data) => landed(live.cardsWithCatalogArtist(data), true));
+    return fetchArtist(target.slug, { limit: 80, signal }).then((data) => landed(live.cardsWithCatalogArtist(data), true));
   }
   // A matching name may sit beyond the first set page: hydrate the whole catalog.
   return fetchExpansionCards({ slug: target.slug }).then((data) => landed(data?.cards || [], true));
@@ -303,6 +303,8 @@ function loadedImage(url) {
 }
 
 const prewarmed = new Map();
+/** One chip warm at a time: a newer chip supersedes an abandoned one's pages. */
+let prewarmAbort = null;
 
 /**
  * Run a whole query ahead of time (the landing's Popular chips): the engine,
@@ -319,14 +321,19 @@ export function prewarmSuggest(text, { lang, printLang: print = 'all', tab = 'si
   const key = `${lang}\0${print}\0${tab}\0${q}`;
   let entry = prewarmed.get(key);
   if (!entry) {
+    // The chip the pointer left keeps asking for pages nobody will read, and its
+    // rows land in the caches the next chip paints from. Supersede it (PH-05 §5.2).
+    if (prewarmAbort) prewarmAbort.abort();
+    const controller = new AbortController();
+    prewarmAbort = controller;
     entry = {
       data: (async () => {
         const live = await loadSuggestEngine();
         await ensureLocalizedNames(live, lang);
         await Promise.all([
-          pageUniverse(live, q, { lang, print }),
-          ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang).catch(() => null)),
-          prefetchSearchPage(q, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print }).catch(() => null),
+          pageUniverse(live, q, { lang, print, signal: controller.signal }),
+          ...catalogTargets(live, q, lang).map((target) => hydrateTarget(live, target, lang, { signal: controller.signal }).catch(() => null)),
+          prefetchSearchPage(q, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print, signal: controller.signal }).catch(() => null),
         ]);
         return live;
       })(),
@@ -585,7 +592,10 @@ export default function SearchBox(props) {
           setOtherGroups([]);
           setHitCount(null);
         } else if (live) {
-          hydrateCatalog(live, text, lang);
+          // Solid runs a cleanup from an effect only through onCleanup.
+          const controller = new AbortController();
+          onCleanup(() => controller.abort());
+          hydrateCatalog(live, text, lang, controller.signal);
         }
         return undefined;
       }
@@ -624,10 +634,11 @@ export default function SearchBox(props) {
     },
   );
 
-  function hydrateCatalog(live, text, lang) {
+  function hydrateCatalog(live, text, lang, signal) {
     for (const target of catalogTargets(live, text, lang)) {
-      hydrateTarget(live, target, lang)
+      hydrateTarget(live, target, lang, { signal })
         .then(() => {
+          if (signal?.aborted) return;
           if (liveReady(String(untrack(searchTerm) || '').trim())) setLiveTick((tick) => tick + 1);
         })
         .catch(() => {});
