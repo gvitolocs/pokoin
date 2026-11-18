@@ -13,6 +13,7 @@ pub mod poko_bets;
 pub mod poko_chat;
 pub mod poko_market_math;
 pub mod portfolio_catalog;
+pub mod portfolio_collections;
 pub mod portfolio_history;
 pub mod portfolio_segments;
 pub mod referral;

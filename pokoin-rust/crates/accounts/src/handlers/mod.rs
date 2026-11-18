@@ -10,6 +10,7 @@ pub mod news;
 pub mod partner;
 pub mod poko;
 pub mod portfolio;
+pub mod portfolio_collections;
 pub mod poko_bets;
 pub mod poko_bot_chat;
 pub mod poko_chat;

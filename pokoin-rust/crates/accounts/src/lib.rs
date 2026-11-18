@@ -93,6 +93,8 @@ pub const PORTED_ROUTES: &[&str] = &[
     "POST /api/user-current-page",
     "GET /api/marketplace-associate-suggest",
     "GET /api/marketplace-associate",
+    "GET /api/marketplace-portfolio-collections",
+    "POST /api/marketplace-portfolio-collections",
     "GET /api/marketplace-portfolio-history",
     "GET /api/marketplace-portfolio-movers",
     "GET /api/marketplace-portfolio",
@@ -231,6 +233,12 @@ pub fn router(state: DomainState) -> Router {
                 .fallback(handlers::portfolio::portfolio_other),
         )
         .route(
+            "/api/marketplace-portfolio-collections",
+            get(handlers::portfolio_collections::marketplace_portfolio_collections)
+                .post(handlers::portfolio_collections::marketplace_portfolio_collections)
+                .fallback(handlers::portfolio_collections::portfolio_collections_other),
+        )
+        .route(
             "/api/marketplace-portfolio-history",
             get(handlers::portfolio::marketplace_portfolio_history)
                 .fallback(handlers::portfolio::portfolio_history_other),
@@ -308,9 +316,9 @@ mod tests {
 
     #[test]
     fn every_assigned_route_is_accounted_for() {
-        // 44 ported + 0 unported = the 44 (method, path) pairs assigned to this
+        // 46 ported + 0 unported = the 46 (method, path) pairs assigned to this
         // worker; 9 more belong to the external photos/R2/social assistant worker.
-        assert_eq!(PORTED_ROUTES.len(), 44);
+        assert_eq!(PORTED_ROUTES.len(), 46);
         assert_eq!(UNPORTED_ROUTES.len(), 0);
         assert_eq!(EXTERNAL_ROUTES.len(), 9);
     }
