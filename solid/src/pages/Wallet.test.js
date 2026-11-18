@@ -29,15 +29,39 @@ test('a sheet asks its request id from the intent it is sending', () => {
 });
 
 test('a request id is spent only once its request answered', () => {
-  const senders = [
-    ["walletIntent('transfer'", 'await transferAccountBalance('],
-    ["walletIntent('withdraw'", 'await requestPknWithdraw('],
+  const sheets = [
+    {
+      opener: 'onTransfer={',
+      intent: "walletIntent('transfer'",
+      sender: 'await transferAccountBalance(',
+    },
+    {
+      opener: 'onWithdraw={',
+      intent: "walletIntent('withdraw'",
+      sender: 'await requestPknWithdraw(',
+    },
   ];
-  for (const [intent, sender] of senders) {
-    const handler = src.slice(src.indexOf(intent));
-    const sent = handler.indexOf(sender);
+  for (const sheet of sheets) {
+    const opened = src.indexOf(sheet.opener);
+    assert.ok(opened >= 0, `${sheet.opener} is not in the page`);
+    const after = src.slice(opened + sheet.opener.length);
+    // One handler's own body: the slice ends at the next prop of the same
+    // element, or at the element's end. A sheet is judged on its own code, so
+    // another sheet's settle cannot cover a missing one here.
+    const nextProp = after.indexOf('\n            on');
+    const elementEnd = after.indexOf('/>');
+    const ends = [nextProp, elementEnd].filter((edge) => edge > 0);
+    const handler = after.slice(0, ends.length ? Math.min(...ends) : after.length);
+    const sent = handler.indexOf(sheet.sender);
     const settled = handler.indexOf('requestIds.settle()');
-    assert.ok(sent >= 0, `${sender} is not awaited`);
-    assert.ok(settled > sent, `${sender}: its id is spent before the request answered`);
+    assert.ok(handler.includes(sheet.intent), `${sheet.opener}: it names no intent`);
+    assert.ok(sent >= 0, `${sheet.opener}: ${sheet.sender} is not awaited`);
+    assert.ok(settled > sent, `${sheet.opener}: its id is spent before the request answered`);
+    // One id per request: the handler spends exactly the one it took.
+    assert.equal(
+      handler.split('requestIds.settle()').length - 1,
+      1,
+      `${sheet.opener}: it spends more than its own id`,
+    );
   }
 });
