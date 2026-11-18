@@ -148,18 +148,26 @@ enum GameScope {
 
 /// One game's own database, which is where its catalog and its sold medians live
 /// (see [docs/GAMES.md](docs/GAMES.md)). A card id is only unique inside it.
-async fn read_game_prices(state: &DomainState, game: &str, card_ids: &[i64]) -> Result<GamePrices> {
+///
+/// The failure is the reason alone, not an [`ApiError`]: the only caller logs it
+/// and holds that game's cards unpriced, so nothing of it ever becomes an HTTP
+/// answer.
+async fn read_game_prices(
+    state: &DomainState,
+    game: &str,
+    card_ids: &[i64],
+) -> std::result::Result<GamePrices, String> {
     if card_ids.is_empty() {
         return Ok(GamePrices {
             catalog: Vec::new(),
             sold: Vec::new(),
         });
     }
-    let db = game_db(state, game)?;
+    let db = game_db(state, game).map_err(|error| error.message().to_string())?;
     let catalog = db
         .query_json(GAME_CATALOG_SQL, &[SqlParam::IntArray(card_ids.to_vec())])
         .await
-        .map_err(ApiError::from)?;
+        .map_err(|error| error.to_string())?;
     let blueprints: BTreeSet<i64> = catalog
         .iter()
         .filter_map(|row| numeric_id(&row_text(row, "blueprint_id")))
@@ -172,7 +180,7 @@ async fn read_game_prices(state: &DomainState, game: &str, card_ids: &[i64]) -> 
             &[SqlParam::IntArray(blueprints.into_iter().collect())],
         )
         .await
-        .map_err(ApiError::from)?
+        .map_err(|error| error.to_string())?
     };
     Ok(GamePrices { catalog, sold })
 }
