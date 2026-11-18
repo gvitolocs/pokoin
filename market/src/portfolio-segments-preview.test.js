@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import { collectionSeries, normalizeSegments, segmentGroups, segmentLevels } from './portfolio-segments.js';
 import { previewSegmentsFrom } from './portfolio-segments-preview.js';
+
+/** The server's own era table, read as text: the preview may not invent another. */
+const rustSegmentsSrc = fs.readFileSync(
+  new URL('../../pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs', import.meta.url),
+  'utf8',
+);
 
 const API_ORDER = [
   'game:pokemon',
@@ -96,8 +103,68 @@ test('vintage is never held, sealed starts on the 10th card day, graded stays em
     'all:graded': 'empty',
   });
   const era = segmentGroups(model, 'pokemon', {})[0].rows.find((row) => row.key === 'pokemon:era:sv');
-  assert.equal(era.sub, '2023–2026');
+  assert.equal(era.sub, '2023–2025');
   assert.ok(era.held > 30 && era.held < 40, `sv holds ${era.held} of the 100 cards`);
+});
+
+test('the preview says what the server says: the BANDS labels and year ranges', () => {
+  const defs = previewSegmentsFrom(flatCardDays(1)).segmentDefs;
+  const eras = defs.filter((def) => def.group === 'era');
+  assert.deepEqual(eras.map((def) => [def.label, def.years]), [
+    ['Vintage', '1999–2003'],
+    ['Mid era', '2003–2013'],
+    ['XY', '2013–2016'],
+    ['Sun & Moon', '2017–2019'],
+    ['Sword & Shield', '2020–2023'],
+    ['Scarlet & Violet', '2023–2025'],
+    ['After Scarlet & Violet', '2025–'],
+    ['Promos and other', ''],
+  ]);
+  // Every label and every range is a string the Rust table actually sends, so
+  // the preview cannot quietly invent a name or a year the API never answers.
+  const named = [...eras, ...defs.filter((def) => def.group === 'type')];
+  assert.equal(named.length, 12);
+  for (const def of named) {
+    assert.ok(rustSegmentsSrc.includes(`"${def.label}"`), `label ${def.label} is not in portfolio_segments.rs`);
+    if (def.years) {
+      assert.ok(rustSegmentsSrc.includes(`"${def.years}"`), `${def.label}: ${def.years} is not in portfolio_segments.rs`);
+    }
+  }
+  // A game row carries no label of its own, like `segment_defs`.
+  for (const def of defs.filter((def) => def.group === 'game')) {
+    assert.equal(def.label, undefined);
+  }
+});
+
+test('a day of 20 cards or more holds at least one of every band with a share', () => {
+  const bandsOf = (cards) => {
+    const raw = previewSegmentsFrom([{
+      date: '2026-10-01', cardsValuePkn: 5000, cardsHeld: cards, cardsPriced: Math.round(cards * 0.6),
+    }]);
+    const day = raw.days[0];
+    const bands = Object.entries(day.segments)
+      .filter(([key]) => key.startsWith('pokemon:era:'))
+      .map(([key, entry]) => [key.replace('pokemon:era:', ''), entry[1], entry[2]]);
+    return { bands, day };
+  };
+  for (const cards of [20, 24, 227]) {
+    const { bands, day } = bandsOf(cards);
+    // Vintage holds no share at all, so it is the one band that stays away.
+    assert.equal(bands.length, 7, `${cards} cards: ${JSON.stringify(bands)}`);
+    assert.ok(bands.every(([, priced, held]) => priced >= 1 && held >= 1), `${cards} cards: ${JSON.stringify(bands)}`);
+    assert.equal(bands.reduce((acc, [, , held]) => acc + held, 0), cards, 'the held counts still add up');
+    assert.equal(bands.reduce((acc, [, priced]) => acc + priced, 0), Math.round(cards * 0.6), 'and the priced ones');
+  }
+  // The values are untouched by the card floor: the eras still price the day.
+  const big = bandsOf(227);
+  const valueSum = Object.entries(big.day.segments)
+    .filter(([key]) => key.startsWith('pokemon:era:'))
+    .reduce((acc, [, entry]) => acc + entry[0], 0);
+  assert.ok(Math.abs(valueSum - big.day.cardsValuePkn) <= 0.01, `${valueSum} vs ${big.day.cardsValuePkn}`);
+  assert.equal(big.bands.length, 7);
+  // Below the floor a band thinner than one card is simply absent, as the API.
+  assert.ok(bandsOf(19).bands.every(([id]) => id !== 'vintage'));
+  assert.ok(bandsOf(19).bands.length < 7);
 });
 
 test('riftbound holds an unpriced pile on every card day and nothing before', () => {

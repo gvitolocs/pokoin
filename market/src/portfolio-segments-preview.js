@@ -8,15 +8,20 @@
  * preview paint identical sparklines.
  */
 
+/**
+ * The era bands exactly as the server labels them: `pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs`,
+ * table `BANDS`. The years are that file's strings, so the preview and the API
+ * answer say the same thing and a test reads one against the other.
+ */
 const ERA_DEFS = [
-  { key: 'pokemon:era:vintage', id: 'vintage', label: 'Vintage', years: [1996, 2003], share: 0 },
-  { key: 'pokemon:era:mid', id: 'mid', label: 'Mid era', years: [2003, 2013], share: 0.001 },
-  { key: 'pokemon:era:xy', id: 'xy', label: 'XY', years: [2013, 2017], share: 0.012 },
-  { key: 'pokemon:era:sm', id: 'sm', label: 'Sun & Moon', years: [2017, 2019], share: 0.06 },
-  { key: 'pokemon:era:swsh', id: 'swsh', label: 'Sword & Shield', years: [2019, 2023], share: 0.268 },
-  { key: 'pokemon:era:sv', id: 'sv', label: 'Scarlet & Violet', years: [2023, 2026], share: 0.36 },
-  { key: 'pokemon:era:post-sv', id: 'post-sv', label: 'Post Scarlet & Violet', years: [2026], share: 0.295 },
-  { key: 'pokemon:era:other', id: 'other', label: 'Other', years: null, share: 0.004 },
+  { key: 'pokemon:era:vintage', id: 'vintage', label: 'Vintage', years: '1999–2003', share: 0 },
+  { key: 'pokemon:era:mid', id: 'mid', label: 'Mid era', years: '2003–2013', share: 0.001 },
+  { key: 'pokemon:era:xy', id: 'xy', label: 'XY', years: '2013–2016', share: 0.012 },
+  { key: 'pokemon:era:sm', id: 'sm', label: 'Sun & Moon', years: '2017–2019', share: 0.06 },
+  { key: 'pokemon:era:swsh', id: 'swsh', label: 'Sword & Shield', years: '2020–2023', share: 0.268 },
+  { key: 'pokemon:era:sv', id: 'sv', label: 'Scarlet & Violet', years: '2023–2025', share: 0.36 },
+  { key: 'pokemon:era:post-sv', id: 'post-sv', label: 'After Scarlet & Violet', years: '2025–', share: 0.295 },
+  { key: 'pokemon:era:other', id: 'other', label: 'Promos and other', years: '', share: 0.004 },
 ];
 
 /** A fixed per-day wobble, never past ±6 % of an era's own share. */
@@ -71,8 +76,43 @@ function splitWhole(total, weights) {
 }
 
 /**
- * The API's rows in the API's order: games, the cross-game types, the eight
- * Pokémon eras, then Pokémon's own Sealed and Graded.
+ * Below this many cards in the day a band's share is smaller than one card, and
+ * the whole-card split rightly drops it; at or above it every band with a share
+ * of its own holds at least one card, so a preview row reads as held stock.
+ */
+const WHOLE_CARDS_FROM = 20;
+
+/** Index with the most cards that can still give one away and keep its own. */
+function donorIndex(parts) {
+  let best = -1;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index] > 1 && (best < 0 || parts[index] > parts[best])) best = index;
+  }
+  return best;
+}
+
+/**
+ * The whole-card split, plus the one card each held band is owed once the day is
+ * big enough for it. Each card comes back off the largest band, so the counts
+ * still add up to the day's.
+ */
+function splitCards(total, weights, everyBandHeld) {
+  const parts = splitWhole(total, weights);
+  if (!everyBandHeld) return parts;
+  for (let index = 0; index < weights.length; index += 1) {
+    if (!(weights[index] > 0) || parts[index] > 0) continue;
+    const donor = donorIndex(parts);
+    if (donor < 0) return parts;
+    parts[donor] -= 1;
+    parts[index] += 1;
+  }
+  return parts;
+}
+
+/**
+ * The API's rows in the API's order and with the API's own labels: games, the
+ * cross-game types, the eight Pokémon era bands, then Pokémon's own Sealed and
+ * Graded. A game row carries no label, exactly as `segment_defs` answers.
  */
 function previewDefs() {
   const defs = [
@@ -82,13 +122,7 @@ function previewDefs() {
     { key: 'all:graded', group: 'type', game: 'all', label: 'Graded' },
   ];
   for (const era of ERA_DEFS) {
-    defs.push({
-      key: era.key,
-      group: 'era',
-      game: 'pokemon',
-      label: era.label,
-      ...(era.years ? { years: era.years } : {}),
-    });
+    defs.push({ key: era.key, group: 'era', game: 'pokemon', label: era.label, years: era.years });
   }
   defs.push({ key: 'pokemon:sealed', group: 'type', game: 'pokemon', label: 'Sealed' });
   defs.push({ key: 'pokemon:graded', group: 'type', game: 'pokemon', label: 'Graded' });
@@ -124,8 +158,8 @@ export function previewSegmentsFrom(series) {
     const residual = round2(value - eraValues.reduce((acc, part) => acc + part, 0));
     const biggest = weights.indexOf(Math.max(...weights));
     eraValues[biggest] = round2(eraValues[biggest] + residual);
-    const eraHeld = splitWhole(held, weights);
-    const eraPriced = splitWhole(priced, weights);
+    const eraHeld = splitCards(held, weights, held >= WHOLE_CARDS_FROM);
+    const eraPriced = splitCards(priced, weights, held >= WHOLE_CARDS_FROM);
     // A slice with no card in it that day is absent, like the API answers, and
     // its share of the value rides on the biggest era that is held.
     const present = eraValues.map((_, index) => eraHeld[index] > 0 && eraValues[index] > 0);
