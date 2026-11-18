@@ -163,3 +163,26 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   // The desk never offers CardTrader as a target for a 1-Day Ready account.
   assert.match(targetsSrc, /data\?\.status\?\.connected === true && !ready1d/);
 });
+
+test('Top movers tiles never underline on hover', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // The Top movers tile is one link; the global a:hover underline must not
+  // reach into it — the tile's own outline is the hover affordance.
+  const linkRule = css.match(/\.mover-tile-link:hover[^\0]*?\}/)?.[0] || '';
+  assert.match(linkRule, /:focus/);
+  assert.match(linkRule, /:active/);
+  assert.match(linkRule, /text-decoration: none/);
+  // The Trending rail tile keeps its no-underline hover.
+  assert.match(css, /\.seller-mover:hover \{[^}]*text-decoration: none/);
+});
+
+test('Top movers tiles have no native tooltip, one screen-reader sentence', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  // The link carries the whole tile as an aria-label, not a title that
+  // repeats the visible text as a native tooltip over the change line.
+  const linkTag = panelSrc.match(/<a class="mover-tile-link"[^>]*>/)?.[0] || '';
+  assert.match(linkTag, /aria-label=\{moverTitle\(mover\(\), props\.currency\)\}/);
+  assert.doesNotMatch(linkTag, / title=/);
+  // Nothing inside the tile carries a title either.
+  assert.doesNotMatch(panelSrc, / title=/);
+});

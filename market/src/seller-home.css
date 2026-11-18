@@ -1033,9 +1033,13 @@
   text-decoration: none;
 }
 
+/* The global a:hover underline stops here: the whole tile is one link, and
+   its own outline is the hover affordance. */
 .mover-tile-link:hover,
-.mover-tile-link:focus-visible {
+.mover-tile-link:focus,
+.mover-tile-link:active {
   border-color: rgb(255 211 61 / 0.55);
+  text-decoration: none;
 }
 
 .mover-tile-copy {

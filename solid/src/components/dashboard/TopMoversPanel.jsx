@@ -69,11 +69,8 @@ function MoverTile(props) {
         </p>
         <p class={['mover-tile-change', moverTone(mover())]}>{formatMoverChange(mover(), props.currency)}</p>
         <Show when={spark().line}>
-          {/* title="" on the wrap: over the sparkline the link's own title text
-              would otherwise cover the day the pointer is reading. */}
           <span
             class="mover-spark-wrap"
-            title=""
             onPointerMove={trackSpark}
             onPointerDown={trackSpark}
             onPointerLeave={hideSpark}
@@ -122,7 +119,7 @@ function MoverTile(props) {
         when={props.href}
         fallback={<div class="mover-tile-body">{body()}</div>}
       >
-        <a class="mover-tile-link" href={props.href} title={moverTitle(mover(), props.currency)}>
+        <a class="mover-tile-link" href={props.href} aria-label={moverTitle(mover(), props.currency)}>
           {body()}
         </a>
       </Show>
