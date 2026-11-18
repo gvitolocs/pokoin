@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily Cardmarket offer minima load
+# Runs after pokoin-cardmarket-guides.timer (02:45) and pokoin-cm-watchlist.timer
+# (02:35): the day's watchlist is exported, the guides land, then the collector's
+# day file is loaded. The collector's walk itself never stops, so the file this
+# reads is the one the walk left behind it.
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+Unit=pokoin-cm-daily-load.service
+
+[Install]
+WantedBy=timers.target
