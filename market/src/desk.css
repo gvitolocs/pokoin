@@ -5549,41 +5549,303 @@ html.is-pointer-dragging body {
   justify-content: center;
 }
 
-/* The edit dialog: the desk form in the shared shell, so the panel chrome and
-   the editing outline of the card desk are the card's own border. */
+/* The listing drawer: the desk's own form in a panel on the right edge, the
+   board still readable behind a light dim. The panel is a column — head, the
+   scrolling fields, and a footer pinned to its bottom. */
 
-.modal-card.zero-dialog:has(.sell-form) {
-  width: min(46rem, 100%);
-  max-height: min(88vh, 46rem);
+.listing-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(4 6 10 / 0.45);
+}
+
+.listing-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100vw);
+  height: 100dvh;
+  border-left: 1px solid var(--g5);
+  background: var(--desk-bg, #0a0d13);
+  box-shadow: -22px 0 48px rgb(0 0 0 / 0.5);
+}
+
+.listing-drawer-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--g4);
+}
+
+.listing-drawer-id {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.listing-drawer-id .thread-title {
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-drawer-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.listing-drawer-close:hover {
+  border-color: var(--yellow);
+}
+
+.listing-drawer-close:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.listing-drawer-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.listing-drawer-note {
+  flex: none;
+  margin: 10px 16px 0;
+  color: var(--muted);
+}
+
+/* Inside the drawer the form is not a desk panel: no border, no card outline. */
+
+.sell-form.is-drawer {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  outline: 0;
+}
+
+.sell-drawer-fields {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.sell-drawer-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sell-drawer-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sell-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sell-price-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sell-price-eq {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.sell-pricing-note {
+  margin: 0;
+}
+
+/* The pricing menu: one button that says whose rule the price follows. */
+
+.sell-pricing-menu {
+  position: relative;
+}
+
+.sell-pricing-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g3);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-pricing-btn:hover {
+  border-color: var(--yellow);
+}
+
+.sell-pricing-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.sell-pricing-caret {
+  color: var(--muted);
+}
+
+.sell-pricing-list {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: #0d1118;
+  box-shadow: 0 18px 36px rgb(0 0 0 / 0.5);
+  list-style: none;
   overflow-y: auto;
 }
 
-.zero-dialog .sell-form {
+.sell-pricing-list button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-pricing-list button:hover {
+  background: var(--g4);
+}
+
+.sell-pricing-list button[aria-selected='true'] {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.sell-pricing-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--g4);
+}
+
+/* "New strategy…" is the second step of the same panel. */
+
+.sell-drawer-step {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px 16px 18px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sell-drawer-step .pricer-panel {
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
 }
 
-.zero-dialog .sell-form.is-editing {
-  outline: 0;
-}
+/* The footer sits at the bottom of the panel; on phones at the bottom of the sheet. */
 
-.listing-edit-head {
+.sell-drawer-foot {
+  position: sticky;
+  bottom: 0;
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--g4);
+  gap: 10px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--g4);
+  background: var(--desk-bg, #0a0d13);
 }
 
-.listing-edit-id {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
+.sell-drawer-foot .sell-save {
+  flex: 1 1 auto;
+  margin: 0;
 }
 
-.listing-edit-note {
-  margin: 8px 0 0;
+.sell-drawer-foot .sell-delete {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+}
+
+/* A quantity the seller can also type, in the drawer's own row. */
+
+.chat-qty.is-editable {
+  cursor: default;
+}
+
+.chat-qty-input {
+  width: 4ch;
+  padding: 2px 4px;
+  border: 1px solid var(--g5);
+  border-radius: 6px;
+  background: var(--g3);
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.chat-qty-input:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
 }
 
 /* The row's market quotes, one click from the price field. */
@@ -5660,8 +5922,51 @@ button.sell-quote b {
   }
 }
 
-/* The dialog is titled already, so the panel's own heading would repeat it. */
+/* Phone: the drawer becomes a bottom sheet — full width, rounded top, a grab
+   bar, its fields scrolling inside and the footer stuck at the bottom. */
 
-.zero-dialog .sell-form .add-head h2 {
-  display: none;
+@media (max-width: 600px) {
+  .listing-drawer-scrim {
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+
+  .listing-drawer {
+    width: 100vw;
+    max-height: 90vh;
+    height: auto;
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -18px 40px rgb(0 0 0 / 0.55);
+  }
+
+  .listing-drawer::before {
+    content: '';
+    flex: none;
+    width: 44px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 999px;
+    background: var(--g5);
+  }
+
+  .listing-drawer-head {
+    padding: 10px 14px;
+  }
+
+  .listing-drawer-note,
+  .sell-drawer-fields,
+  .sell-drawer-step {
+    padding-inline: 14px;
+  }
+
+  .sell-drawer-foot {
+    position: sticky;
+    padding-inline: 14px;
+  }
+
+  .sell-drawer-foot .sell-save,
+  .sell-drawer-foot .sell-delete {
+    min-height: 44px;
+  }
 }

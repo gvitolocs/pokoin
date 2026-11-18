@@ -22,7 +22,7 @@ import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } 
 import ScanImage from '../ScanImage.jsx';
 import { authUser, getBearer } from '../../stores/auth.js';
 import { authSession } from '../../stores/session.js';
-import ListingEditDialog from './ListingEditDialog.jsx';
+import ListingEditDrawer from './ListingEditDrawer.jsx';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from '../pricer/NewGroupForm.jsx';
 import PricerPopup from '../pricer/PricerPopup.jsx';
@@ -532,10 +532,24 @@ export default function InventoryBoard(props) {
 
   // Row actions: the listing the editor is open on, and the row with a write in flight.
   const [editRow, setEditRow] = createSignal(null);
+  const [editDirty, setEditDirty] = createSignal(false);
   const [busyId, setBusyId] = createSignal('');
   let search;
   const rowId = (row) => String(row?.id ?? '');
   const rowName = (row) => row?.cardName || row?.name || 'listing';
+
+  /**
+   * Open the drawer on a row. Only one drawer is ever open: opening another row
+   * switches it, so unsaved edits in the one already open would be lost — the
+   * seller is asked first.
+   */
+  function openEditRow(row) {
+    const current = editRow();
+    if (current && rowId(current) !== rowId(row) && editDirty()
+      && !window.confirm(`Discard your changes to ${rowName(current)}?`)) return;
+    setEditDirty(false);
+    setEditRow(row);
+  }
 
   /** Keyboard focus back onto a row's Edit button, else the search box. */
   function focusRowEdit(id) {
@@ -734,11 +748,13 @@ export default function InventoryBoard(props) {
       <Show when={actionLine()}><p class="ct-connect-ok pricer-result-line" role="status">{actionLine()}</p></Show>
       <Show when={editRow()}>
         {(row) => (
-          <ListingEditDialog
+          <ListingEditDrawer
             row={row()}
             game={game().id}
             preview={props.preview}
             previewComps={props.previewComps}
+            pricing={props.pricing}
+            onDirty={setEditDirty}
             onClose={() => setEditRow(null)}
             onSaved={saveRow}
             onDelete={() => removeRow(row())}
@@ -785,7 +801,7 @@ export default function InventoryBoard(props) {
                             <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
                             <OriginTags row={row} duplicates={duplicates()} />
                           </a>
-                          <RowActions row={row} busy={busyId() === rowId(row)} onEdit={setEditRow} onDelete={removeRow} />
+                          <RowActions row={row} busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
                         </div>
                       )}
                     </For>
@@ -841,7 +857,7 @@ export default function InventoryBoard(props) {
                               <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
                               <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
                             </a>
-                            <RowActions row={row} busy={busyId() === rowId(row)} onEdit={setEditRow} onDelete={removeRow} />
+                            <RowActions row={row} busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
                           </div>
                         );
                       }}
@@ -859,7 +875,7 @@ export default function InventoryBoard(props) {
                 {(row) => (
                   <div class="inv-tile" data-listing-id={rowId(row)}>
                     <ListingTile row={row} formatPrice={props.formatPrice} duplicates={duplicates()} />
-                    <RowActions row={row} class="inv-tile-actions" busy={busyId() === rowId(row)} onEdit={setEditRow} onDelete={removeRow} />
+                    <RowActions row={row} class="inv-tile-actions" busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
                   </div>
                 )}
               </For>
@@ -955,7 +971,7 @@ export default function InventoryBoard(props) {
                       </label>
                     </Show>
                     <a class="inv-row-link" href={inventoryListingHref(row)}>{cells}</a>
-                    <RowActions row={row} busy={busyId() === id} onEdit={setEditRow} onDelete={removeRow} />
+                    <RowActions row={row} busy={busyId() === id} onEdit={openEditRow} onDelete={removeRow} />
                   </div>
                 );
               }}
