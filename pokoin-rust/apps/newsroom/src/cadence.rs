@@ -188,20 +188,27 @@ pub fn plan(stories: &[Value], records: &[Value], state: &Value, now: i64) -> Va
         .filter_map(|r| {
             let story = stories.iter().find(|s| s["id"] == r["canonicalStoryId"])?;
             // newsroom-publisher.mjs:104-106 compares Math.max over Date.parse,
-            // so one source that cannot be dated, or a record with no
-            // dateModified, fails the whole record closed: no update.
-            let mut newest = None;
-            for source in array(&story["sources"]) {
-                match timestamp(text(source, "added_at")) {
-                    Some(at) => newest = Some(newest.map_or(at, |max: i64| max.max(at))),
-                    None => return None,
-                }
-            }
-            let modified = timestamp(text(r, "dateModified"))?;
+            // and every JS comparison with NaN is false: an undated source or a
+            // record without a readable dateModified does not block the update,
+            // it guarantees one. Math.max over no sources at all is -Infinity.
+            let dates: Vec<_> = array(&story["sources"])
+                .iter()
+                .map(|source| timestamp(text(source, "added_at")))
+                .collect();
+            let newest = if dates.iter().any(Option::is_none) {
+                f64::NAN
+            } else {
+                dates
+                    .iter()
+                    .filter_map(|at| *at)
+                    .fold(f64::NEG_INFINITY, |max, at| max.max(at as f64))
+            };
+            let modified = timestamp(text(r, "dateModified")).map_or(f64::NAN, |at| at as f64);
             // Node Date.parse(0) = 2000-01-01, long before any newsroom record.
             let last = timestamp(state["updates"][text(r, "id")].as_str().unwrap_or(""))
                 .unwrap_or(946684800000);
-            (newest.is_some_and(|newest| newest > modified) && now - last >= 12 * HOUR)
+            let nothing_newer = !newest.is_nan() && !modified.is_nan() && newest <= modified;
+            (!nothing_newer && now - last >= 12 * HOUR)
                 .then(|| json!({"id":r["id"],"storyId":story["id"],"slug":r["slug"]}))
         })
         .collect();

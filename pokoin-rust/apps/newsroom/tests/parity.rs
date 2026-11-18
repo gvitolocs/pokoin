@@ -183,50 +183,104 @@ fn slot_open_fails_closed_on_an_unparseable_date_published() {
     );
 }
 
-/// The living-update rule fails a record closed on any date it cannot read.
+/// The living-update rule is JS arithmetic on Date.parse: every comparison
+/// with NaN is false, so an undated source or an undated article does not block
+/// the update, it guarantees one (newsroom-publisher.mjs:104-106).
 #[test]
-fn a_living_update_needs_every_source_date_to_parse() {
-    let state = json!({"attempts":[],"updates":{}});
-    let story = |added: Value| {
+fn a_living_update_follows_nan_comparisons_and_the_try_gap() {
+    let empty = json!({"attempts":[],"updates":{}});
+    let story = |sources: Value| {
         json!([{"id":"story_1","game":"pokemon",
             "first_seen_at":"2026-10-05T17:00:00Z","last_updated_at":"2026-10-05T17:00:00Z",
-            "sources":added}])
+            "sources":sources}])
     };
     let record = |modified: Value| {
         json!([{"id":"art_1_en","game":"pokemon","status":"published","slug":"a",
             "canonicalStoryId":"story_1","datePublished":"2026-09-01T00:00:00Z",
             "dateModified":modified}])
     };
-    let updates = |stories: Value, records: Value| {
+    let updates = |state: Value, stories: Value, records: Value| {
         cadence::plan(array(&stories), array(&records), &state, now())["updates"].clone()
     };
     let fresh = json!([{"added_at":"2026-10-05T12:00:00Z"}]);
-    // The baseline: a source newer than the article earns the update.
+    let older = json!("2026-10-01T00:00:00Z");
+    let updated = json!([{"id":"art_1_en","storyId":"story_1","slug":"a"}]);
+    // Both dates read and the source is newer: the update is queued.
     assert_eq!(
-        updates(story(fresh.clone()), record(json!("2026-10-01T00:00:00Z"))),
-        json!([{"id":"art_1_en","storyId":"story_1","slug":"a"}])
+        updates(empty.clone(), story(fresh.clone()), record(older.clone())),
+        updated
     );
-    // One unreadable added_at poisons the record, however new the rest are.
+    // A bare-day dateModified is a date too, and the article is older still.
     assert_eq!(
         updates(
-            story(json!([{"added_at":"2026-10-05T12:00:00Z"},{"added_at":"05/10/2026"}])),
-            record(json!("2026-10-01T00:00:00Z"))
+            empty.clone(),
+            story(fresh.clone()),
+            record(json!("2026-10-04"))
+        ),
+        updated
+    );
+    // Both dates read and nothing newer than the article: no update.
+    assert_eq!(
+        updates(
+            empty.clone(),
+            story(json!([{"added_at":"2026-09-01T00:00:00Z"}])),
+            record(older.clone())
         ),
         json!([])
     );
-    // A published record with a null or unreadable dateModified gets no update.
+    // One unreadable added_at makes Math.max NaN, and NaN <= modified is false,
+    // so the record is queued however old the readable sources are.
     assert_eq!(
-        updates(story(fresh.clone()), record(Value::Null)),
+        updates(
+            empty.clone(),
+            story(json!([{"added_at":"2026-10-05T12:00:00Z"},{"added_at":"05/10/2026"}])),
+            record(older.clone())
+        ),
+        updated
+    );
+    assert_eq!(
+        updates(empty.clone(), story(json!([{}])), record(older.clone())),
+        updated
+    );
+    // A null or unreadable dateModified is the same NaN on the other side.
+    assert_eq!(
+        updates(empty.clone(), story(fresh.clone()), record(Value::Null)),
+        updated
+    );
+    assert_eq!(
+        updates(
+            empty.clone(),
+            story(fresh.clone()),
+            record(json!("tomorrow"))
+        ),
+        updated
+    );
+    // Zero sources is Math.max() = -Infinity, which is <= any readable date…
+    assert_eq!(
+        updates(empty.clone(), story(json!([])), record(older.clone())),
+        json!([])
+    );
+    // …unless the article date is unreadable as well, so nothing compares.
+    assert_eq!(
+        updates(empty.clone(), story(json!([])), record(Value::Null)),
+        updated
+    );
+    // The 12-hour gap since the last try still gates it, NaN and all.
+    assert_eq!(
+        updates(
+            json!({"attempts":[],"updates":{"art_1_en":"2026-10-05T07:00:00Z"}}),
+            story(fresh.clone()),
+            record(Value::Null)
+        ),
         json!([])
     );
     assert_eq!(
-        updates(story(fresh.clone()), record(json!("tomorrow"))),
-        json!([])
-    );
-    // A bare-day dateModified is a date: the article is older than the source.
-    assert_eq!(
-        updates(story(fresh.clone()), record(json!("2026-10-04"))),
-        json!([{"id":"art_1_en","storyId":"story_1","slug":"a"}])
+        updates(
+            json!({"attempts":[],"updates":{"art_1_en":"2026-09-28T07:00:00Z"}}),
+            story(fresh),
+            record(Value::Null)
+        ),
+        updated
     );
 }
 
