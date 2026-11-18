@@ -38,12 +38,18 @@ flag, the same truthiness the price slices use.
 
 A non-Pokémon game's sets come from its own catalog (see the next section), slug
 lower-cased: every run outside `[a-z0-9]` becomes one `-`, `-` trimmed from both
-ends, forty characters at most, `unknown` when nothing is left.
+ends, twenty-four characters at most. A name that leaves no ASCII letter at all
+(`拡張パック`) is slugged `s` plus the first eight hex digits of its FNV-1a 32 hash,
+so two Japanese sets of one game draw two lines; only a row with no set name is
+`unknown`, and that line is labelled `Unknown set`.
 
-Only the **six sets with the most cards held** get a key of their own; the rest of
-the game's sets share `<game>:set:other`, labelled `Other sets`. Ties break on the
-slug, so the cut is the same on every request. Six keeps a seller with a
-scattergun collection to lines a screen can actually show.
+Only the **four games whose sellers hold the most cards** are cut by set at all;
+every other game keeps its `game:`, `<game>:sealed` and `<game>:graded` lines.
+Inside one of those four, only the **six sets with the most cards held** get a key
+of their own; the rest of the game's sets share `<game>:set:other`, labelled
+`Other sets`. Ties break on the slug, so the cut is the same on every request. Four
+games and six sets keeps a seller with a scattergun collection to lines a screen can
+actually show, and keeps the stored document inside its budget.
 
 The slug is not the set's name, so the handler stores a `segmentLabels` map
 (key → set name) next to `segmentsRevision` in the Firestore document. It is
@@ -62,15 +68,55 @@ say which CardTrader blueprint, set and product type a held card is, and its
 ids are unique across games, so every game's sold prices join one shared price
 book.
 
-At most twelve games are priced this way — the ones the seller holds the most
-cards in. A game whose database is not configured, has no catalog table, or
-answers with an error is logged once with its id and its cards stay **held and
-unpriced**: their blueprint id is cleared, so they count in `cardsHeld` and in
-their game's line at 0 rather than being priced by a colliding Pokémon blueprint.
-One broken game never fails the series or another game.
+At most **eight** games are priced this way — the ones the seller holds the most
+cards in, biggest first. A game whose id the platform's own game table
+(`domain/marketplace_game.rs`) does not know is called `unknown` and is never
+priced, because `normalize_game` answers Pokémon for a name it cannot place and
+reading the Pokémon catalog for a foreign card is exactly what must not happen;
+same for an id that would collide with the key scheme's reserved words (`all`,
+`game`). Every game is named by the table's id, so a listing written `one-piece`
+or `One Piece` finds the `one_piece` database.
+
+A game that is not priced — past the cap, or `unknown` — is treated like a game
+whose database failed: its rows go through `apply_catalog_rows` with an empty
+answer, so their blueprint id, set name and product type are cleared rather than
+keeping what the Pokémon join matched. Every non-Pokémon row is therefore either
+priced by its own game or held unpriced; nothing is priced, called sealed, or
+given a set line from a Pokémon card.
+
+A game whose database is not configured, has no catalog table, or answers with an
+error is logged once with its id and its cards stay **held and unpriced**: their
+blueprint id is cleared, so they count in `cardsHeld` and in their game's line at
+0 rather than being priced by a colliding Pokémon blueprint. One broken game
+never fails the series or another game.
 
 What is *not* here: the other games' CardTrader **1-Day Ready stock** is still not
 imported, so only what the seller lists themselves is priced and held.
+
+## The stored document's budget
+
+A Firestore document is capped at 1 MiB, and a segments day is a map of long keys,
+so a collection spread over enough games and sets could outgrow it. Before the
+write, `fit_segments_budget(days, 600_000)` estimates the stored size —
+`key len + 1 + 27` bytes per entry, 16 bytes per day — and while the series is over
+budget it drops keys from the **oldest** days first, in this order:
+
+1. `<game>:set:*` keys, oldest day first;
+2. then the non-Pokémon `<game>:sealed` / `<game>:graded` keys;
+3. then the non-Pokémon `game:<id>` keys.
+
+`pokemon:*`, `game:pokemon` and `all:*` keys are never dropped, so every Pokémon
+era band and both cross-game cuts always survive; with a collection of only
+Pokémon the estimate is far under budget and the series comes back untouched.
+Whatever trimming happened is applied **before** the write and before the response
+is built, so the days the client sees are exactly the days that were stored, and a
+seller loses the oldest sets of the least-held games rather than the whole graph.
+The budget is measured on the estimate, not the serialized document: 600 000 is
+comfortably under 1 MiB (1 048 576) with the totals, labels and metadata beside it.
+
+If the Firestore write itself fails, the handler logs it and still answers the days
+it computed: a collection too large to store must not turn into a 500 that repeats
+on every request. Every other error path of the recompute is unchanged.
 
 ## The era table
 

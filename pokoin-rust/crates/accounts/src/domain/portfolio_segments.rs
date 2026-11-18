@@ -103,6 +103,7 @@ const BANDS: [Band; 8] = [
 pub const POKEMON: &str = "pokemon";
 const GAME_PREFIX: &str = "game:";
 const ERA_PREFIX: &str = "pokemon:era:";
+const ALL_GAMES: &str = "all";
 const ALL_SEALED: &str = "all:sealed";
 const ALL_GRADED: &str = "all:graded";
 
@@ -162,13 +163,20 @@ pub fn game_of(row: &Json) -> String {
     game
 }
 
-/// The longest [`set_slug`] a key can carry.
-const SET_SLUG_MAX_LEN: usize = 40;
+/// The longest [`set_slug`] a key can carry. A slug is a name shortened for a
+/// document that holds hundreds of them, so it stays well inside the budget
+/// [`crate::domain::portfolio_segments::fit_segments_budget`] guards.
+const SET_SLUG_MAX_LEN: usize = 24;
 
 /// How many sets of one game get a line of their own. A collector of a hundred
 /// sets wants the handful they actually care about, not a hundred graphs, so the
 /// rest of that game's cards share its `other` segment.
 pub const SETS_PER_GAME: usize = 6;
+
+/// How many games get their sets drawn at all. Each one is six more lines per day
+/// in the same document, so the four games the seller plays most get them and the
+/// rest keep their game, sealed and graded lines.
+pub const SET_SEGMENT_GAME_MAX: usize = 4;
 
 /// A set name as a key can carry it: lower case, every run of characters outside
 /// `[a-z0-9]` one `-`, trimmed of `-`, at most [`SET_SLUG_MAX_LEN`] characters.
@@ -241,11 +249,12 @@ fn set_key_game(key: &str) -> Option<&str> {
     Some(game)
 }
 
-/// Per game how many cards of each set are held, as `<game>` → `<slug>` →
-/// `<set name>` → quantity. Splitting by name is what lets a label be reported
-/// for a key without keeping the rows around.
-fn set_counts(rows: &[Json]) -> BTreeMap<String, BTreeMap<String, BTreeMap<String, i64>>> {
-    let mut counts: BTreeMap<String, BTreeMap<String, BTreeMap<String, i64>>> = BTreeMap::new();
+/// `<game>` → `<slug>` → `<set name>` → quantity held. Splitting by name is what
+/// lets a label be reported for a key without keeping the rows around.
+type SetCounts = BTreeMap<String, BTreeMap<String, BTreeMap<String, i64>>>;
+
+fn set_counts(rows: &[Json]) -> SetCounts {
+    let mut counts: SetCounts = BTreeMap::new();
     for row in rows {
         let Some((game, slug)) = set_of_row(row) else {
             continue;
@@ -267,15 +276,46 @@ fn set_counts(rows: &[Json]) -> BTreeMap<String, BTreeMap<String, BTreeMap<Strin
     counts
 }
 
-/// The set keys this grouping draws its own line for: per game the
-/// [`SETS_PER_GAME`] sets with the most cards held, ties in slug order. A game
-/// of six sets or fewer keeps every one of them, so it has no `other` segment.
+/// The games whose sets are drawn: the [`SET_SEGMENT_GAME_MAX`] with the most
+/// cards held, ties in id order. Every other game keeps its game line and its own
+/// sealed / graded cuts and nothing else, because a set line is six more entries
+/// per day in the same document for one seller's least-played game.
+fn drawn_set_games(counts: &SetCounts) -> BTreeSet<String> {
+    let mut ranked: Vec<(i64, &str)> = counts
+        .iter()
+        .map(|(game, slugs)| {
+            (
+                slugs.values().flat_map(|names| names.values()).sum::<i64>(),
+                game.as_str(),
+            )
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    ranked
+        .into_iter()
+        .take(SET_SEGMENT_GAME_MAX)
+        .map(|(_, game)| game.to_string())
+        .collect()
+}
+
+/// The set keys this grouping draws its own line for: per drawn game the
+/// [`SETS_PER_GAME`] sets with the most cards held, ties in slug order. A game of
+/// six sets or fewer keeps every one of them, so it has no `other` segment, and a
+/// game whose sets are not drawn at all contributes no key.
 pub fn chosen_set_keys(rows: &[Json]) -> BTreeSet<String> {
+    let counts = set_counts(rows);
+    chosen_set_keys_in(&counts, &drawn_set_games(&counts))
+}
+
+fn chosen_set_keys_in(counts: &SetCounts, drawn: &BTreeSet<String>) -> BTreeSet<String> {
     let mut chosen = BTreeSet::new();
-    for (game, slugs) in set_counts(rows) {
+    for game in drawn {
+        let Some(slugs) = counts.get(game) else {
+            continue;
+        };
         let mut ranked: Vec<(i64, String)> = slugs
-            .into_iter()
-            .map(|(slug, names)| (names.into_values().sum(), slug))
+            .iter()
+            .map(|(slug, names)| (names.values().sum(), slug.clone()))
             .collect();
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         chosen.extend(
@@ -435,13 +475,21 @@ pub fn segment_keys(row: &Json) -> Vec<String> {
 
 /// Holdings rows grouped per segment key, each group in the shape the price book
 /// is looked up with. A zero-quantity row drops out in `holding_slices`.
+///
+/// The set keys are the drawn ones: [`SET_SEGMENT_GAME_MAX`] games get set lines,
+/// [`SETS_PER_GAME`] each, and a set outside them collapses into that game's
+/// `other` segment. A game with fewer sets drawn than that has no `other` line.
 pub fn segment_holdings(rows: &[Json]) -> BTreeMap<String, Vec<Holding>> {
-    let chosen = chosen_set_keys(rows);
+    let counts = set_counts(rows);
+    let drawn = drawn_set_games(&counts);
+    let chosen = chosen_set_keys_in(&counts, &drawn);
     let mut grouped: BTreeMap<String, Vec<Json>> = BTreeMap::new();
     for row in rows {
         for key in segment_keys(row) {
-            // A set the dashboard does not draw shares its game's `other` line.
             let key = match set_key_game(&key) {
+                // A game whose sets nobody draws holds no set line of its own.
+                Some(game) if !drawn.contains(game) => continue,
+                // A set the dashboard does not draw shares its game's `other` line.
                 Some(game) if !chosen.contains(&key) => format!("{game}{SET_SEP}{OTHER_SET}"),
                 _ => key,
             };
@@ -596,6 +644,113 @@ pub fn segment_defs(days: &[Json], labels: Option<&Json>) -> Vec<Json> {
         defs.push(type_def(game, &format!("{game}:graded"), "Graded"));
     }
     defs
+}
+
+/// A segment key's standing with [`fit_segments_budget`]: what it is worth giving
+/// up, and in which order. [`SegmentClass::Keep`] is what the collection's own
+/// graph is made of, which never leaves the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SegmentClass {
+    Set,
+    Type,
+    Game,
+    Keep,
+}
+
+/// The bytes one day of the stored series costs the document, however many keys it
+/// carries.
+const SEGMENT_DAY_BYTES: usize = 16;
+
+/// The bytes a stored segment entry costs beyond its own key: one for what follows
+/// it and twenty-seven for the three numbers it carries.
+const SEGMENT_ENTRY_TAIL_BYTES: usize = 1 + 27;
+
+fn segment_class(key: &str) -> SegmentClass {
+    if let Some(game) = key.strip_prefix(GAME_PREFIX) {
+        return if game == POKEMON {
+            SegmentClass::Keep
+        } else {
+            SegmentClass::Game
+        };
+    }
+    let Some((head, rest)) = key.split_once(':') else {
+        return SegmentClass::Keep;
+    };
+    // Pokémon's own bands and cuts, the cross-game cuts, and any key this module
+    // did not build are all kept: what is not understood is never dropped.
+    if head == POKEMON || head == ALL_GAMES {
+        return SegmentClass::Keep;
+    }
+    if rest.starts_with("set:") {
+        SegmentClass::Set
+    } else if rest == "sealed" || rest == "graded" {
+        SegmentClass::Type
+    } else {
+        SegmentClass::Keep
+    }
+}
+
+/// What the `segments` of these days cost the stored document, measured exactly as
+/// [`fit_segments_budget`] decides.
+fn segments_bytes(days: &[Json]) -> usize {
+    let mut bytes = 0;
+    for day in days {
+        bytes += SEGMENT_DAY_BYTES;
+        let Some(segments) = day.get("segments").and_then(Json::as_object) else {
+            continue;
+        };
+        bytes += segments
+            .keys()
+            .map(|key| key.len() + SEGMENT_ENTRY_TAIL_BYTES)
+            .sum::<usize>();
+    }
+    bytes
+}
+
+/// The days to store, with as much given up as `max_bytes` asks for and no more.
+///
+/// Nothing is dropped while the estimate fits. Past it the classes go in the order
+/// a seller reads them least — a game's set lines, then a game's own sealed /
+/// graded cuts, then the game line itself — and inside a class the **oldest** days
+/// give theirs up first, so the line under today's marker keeps its detail as long
+/// as anything can be spared. Pokémon keys and the cross-game `all:` cuts are
+/// never dropped, so a document that cannot fit those stays over budget: that is a
+/// collection with more days than Firestore holds, not one this function can help.
+pub fn fit_segments_budget(days: &[Json], max_bytes: usize) -> Vec<Json> {
+    let mut days: Vec<Json> = days.to_vec();
+    for class in [SegmentClass::Set, SegmentClass::Type, SegmentClass::Game] {
+        let mut index = 0;
+        while segments_bytes(&days) > max_bytes && index < days.len() {
+            if let Some(segments) = days[index]
+                .get_mut("segments")
+                .and_then(Json::as_object_mut)
+            {
+                let doomed: Vec<String> = segments
+                    .keys()
+                    .filter(|key| segment_class(key) == class)
+                    .cloned()
+                    .collect();
+                for key in doomed {
+                    segments.remove(&key);
+                }
+            }
+            index += 1;
+        }
+    }
+    // A day that gave up its last line carries no segments field at all, the way a
+    // day with nothing to slice does.
+    for day in days.iter_mut() {
+        let emptied = day
+            .get("segments")
+            .and_then(Json::as_object)
+            .is_some_and(Map::is_empty);
+        if emptied {
+            if let Some(day) = day.as_object_mut() {
+                day.remove("segments");
+            }
+        }
+    }
+    days
 }
 
 #[cfg(test)]
@@ -1136,8 +1291,12 @@ mod tests {
             assert_eq!(set_slug(name), slug, "{name:?}");
         }
         // The limit is what a key can still carry, cut without a dangling dash.
-        assert_eq!(set_slug(&"x".repeat(80)), "x".repeat(40));
-        assert_eq!(set_slug(&format!("{} y", "z".repeat(40))), "z".repeat(40));
+        assert_eq!(SET_SLUG_MAX_LEN, 24, "a stored key stays short");
+        assert_eq!(set_slug(&"x".repeat(80)), "x".repeat(SET_SLUG_MAX_LEN));
+        assert_eq!(
+            set_slug(&format!("{} y", "z".repeat(SET_SLUG_MAX_LEN))),
+            "z".repeat(SET_SLUG_MAX_LEN)
+        );
         assert_eq!(
             set_key("riftbound", "Dawn of a New Era"),
             "riftbound:set:dawn-of-a-new-era"
@@ -1447,7 +1606,7 @@ mod tests {
             ),
             (30.0, 1, 2)
         );
-        // FBEcho's cards are still held, so the segment reports them at zero.
+        // Gundam's cards are still held, so the segment reports them at zero.
         let unpriced = crate::domain::portfolio_history::value_holdings_on(
             &groups["game:gundam"],
             &book,
@@ -1462,5 +1621,161 @@ mod tests {
             ),
             (0.0, 0, 3)
         );
+    }
+
+    /// A day whose segments are the given keys, each holding one card worth one PKN.
+    fn day_with(date: &str, keys: &[&str]) -> Json {
+        let mut segments = Map::new();
+        for key in keys {
+            segments.insert((*key).to_string(), json!([10, 1, 1]));
+        }
+        json!({ "date": date, "segments": segments })
+    }
+
+    fn segments_of(day: &Json) -> Vec<String> {
+        day.get("segments")
+            .and_then(Json::as_object)
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_series_that_fits_the_budget_is_handed_back_untouched() {
+        let days = vec![
+            day_with("2026-10-07", &["game:pokemon", "riftbound:set:outcast"]),
+            day_with("2026-10-08", &["game:riftbound", "all:sealed"]),
+        ];
+        assert_eq!(fit_segments_budget(&days, segments_bytes(&days)), days);
+        assert_eq!(
+            fit_segments_budget(&days, segments_bytes(&days) + 1_000_000),
+            days
+        );
+        // One byte short of the estimate and the oldest set line is already gone.
+        let trimmed = fit_segments_budget(&days, segments_bytes(&days) - 1);
+        assert_ne!(trimmed, days);
+        assert!(!segments_of(&trimmed[0]).contains(&"riftbound:set:outcast".to_string()));
+    }
+
+    #[test]
+    fn over_budget_the_oldest_days_give_up_their_sets_and_the_newest_keep_them() {
+        let keys = [
+            "game:pokemon",
+            "pokemon:era:sv",
+            "game:riftbound",
+            "riftbound:sealed",
+            "riftbound:set:outcast",
+        ];
+        let days: Vec<Json> = (1..=4)
+            .map(|index| day_with(&format!("2026-10-0{index}"), &keys))
+            .collect();
+        let full = segments_bytes(&days);
+        let set_key = "riftbound:set:outcast";
+        let set_cost = set_key.len() + SEGMENT_ENTRY_TAIL_BYTES;
+
+        let fitted = fit_segments_budget(&days, full - set_cost);
+        assert!(segments_bytes(&fitted) <= full - set_cost);
+        assert!(!segments_of(&fitted[0]).contains(&set_key.to_string()));
+        for day in &fitted[1..] {
+            assert!(segments_of(day).contains(&set_key.to_string()));
+        }
+        // Only set lines go: the type and game lines survive even on that oldest day.
+        assert_eq!(
+            segments_of(&fitted[0]),
+            vec![
+                "game:pokemon".to_string(),
+                "pokemon:era:sv".to_string(),
+                "game:riftbound".to_string(),
+                "riftbound:sealed".to_string(),
+            ]
+        );
+
+        // Three set keys' worth of pressure and only the newest day still draws it.
+        let fitted = fit_segments_budget(&days, full - set_cost * 3);
+        for day in &fitted[..3] {
+            assert!(!segments_of(day).contains(&set_key.to_string()));
+        }
+        assert!(segments_of(&fitted[3]).contains(&set_key.to_string()));
+
+        // Once the sets are gone everywhere, the sealed line goes before the game line,
+        // and the game line before anything of Pokémon's.
+        let after_sets = set_cost * 4;
+        let sealed_cost = "riftbound:sealed".len() + SEGMENT_ENTRY_TAIL_BYTES;
+        let fitted = fit_segments_budget(&days, full - after_sets - sealed_cost);
+        assert_eq!(segments_bytes(&fitted), full - after_sets - sealed_cost);
+        assert!(!segments_of(&fitted[0]).contains(&"riftbound:sealed".to_string()));
+        assert!(segments_of(&fitted[1]).contains(&"riftbound:sealed".to_string()));
+        for day in &fitted {
+            assert!(segments_of(day).contains(&"game:pokemon".to_string()));
+            assert!(segments_of(day).contains(&"game:riftbound".to_string()));
+        }
+    }
+
+    #[test]
+    fn no_budget_ever_costs_the_collection_its_own_lines() {
+        let keys = [
+            "game:pokemon",
+            "pokemon:era:sv",
+            "pokemon:sealed",
+            "all:sealed",
+            "all:graded",
+            "game:riftbound",
+            "riftbound:sealed",
+            "riftbound:set:outcast",
+        ];
+        let days = vec![day_with("2026-10-08", &keys)];
+        assert!(segments_bytes(&days) > 0);
+
+        let fitted = fit_segments_budget(&days, 0);
+        let left = segments_of(&fitted[0]);
+        for key in [
+            "game:pokemon",
+            "pokemon:era:sv",
+            "pokemon:sealed",
+            "all:sealed",
+            "all:graded",
+        ] {
+            assert!(left.contains(&key.to_string()), "{key} was dropped");
+        }
+        for key in [
+            "game:riftbound",
+            "riftbound:sealed",
+            "riftbound:set:outcast",
+        ] {
+            assert!(!left.contains(&key.to_string()), "{key} survived");
+        }
+        assert!(segments_of(&fitted[0]).len() < keys.len());
+    }
+
+    #[test]
+    fn a_budget_as_tight_as_the_kept_lines_still_fits() {
+        let keys = [
+            "game:pokemon",
+            "pokemon:era:vintage",
+            "all:sealed",
+            "game:riftbound",
+            "riftbound:graded",
+            "riftbound:set:alpha",
+        ];
+        let days: Vec<Json> = (0..20)
+            .map(|index| day_with(&format!("2026-09-{:02}", index + 5), &keys))
+            .collect();
+        assert!(segments_bytes(&days) > 0);
+        let keep: Vec<&str> = keys
+            .iter()
+            .copied()
+            .filter(|key| segment_class(key) == SegmentClass::Keep)
+            .collect();
+        let kept_days: Vec<Json> = (0..20)
+            .map(|index| day_with(&format!("2026-09-{:02}", index + 5), &keep))
+            .collect();
+        let floor = segments_bytes(&kept_days);
+        assert!(floor < segments_bytes(&days));
+
+        let fitted = fit_segments_budget(&days, floor);
+        assert_eq!(
+            fitted, kept_days,
+            "the trimmed series is exactly the lines that must survive"
+        );
+        assert!(segments_bytes(&fitted) <= floor);
     }
 }
