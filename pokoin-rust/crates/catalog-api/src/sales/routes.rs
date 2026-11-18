@@ -1,6 +1,8 @@
 //! Card sale/price routes: card-sales, card-last-median, card-cheapest-price,
 //! card-price-history and tcgplayer-history.
 
+use std::future::Future;
+
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
@@ -13,7 +15,7 @@ use super::core::{self, SoldSlice};
 use super::history_sources::{self, FxRates};
 use super::tcgcsv::{self, TcgError};
 use crate::reads::util;
-use crate::shared::{card_versions, js};
+use crate::shared::{card_versions, js, table_presence};
 
 const READ_CORS: [(&str, &str); 3] = [
     ("access-control-allow-origin", "*"),
@@ -698,6 +700,57 @@ const LISTED_SQL: &str = "select observed_day as dump_day,
     and min_price_pkn > 0 and listing_count > 0
   order by refreshed_at, observed_day";
 
+/// The table of `LISTED_SQL`, which only the Pokémon database has.
+const LISTED_TABLE: &str = "public.cardtrader_blueprint_daily_analytics";
+
+/// The `cardtrader` block of the ask days in `rows`.
+async fn listed_block(pool: &PgPool, ct: &str, from: &str, to: &str) -> Value {
+    match pg::pool_rows(
+        pool,
+        LISTED_SQL,
+        &[
+            Bind::Text(ct.to_owned()),
+            Bind::Text(from.to_owned()),
+            Bind::Text(to.to_owned()),
+        ],
+    )
+    .await
+    {
+        Ok(rows) => cardtrader_source(&rows, None),
+        Err(_) => cardtrader_source(&[], Some("unavailable")),
+    }
+}
+
+/// The `cardtrader` block with the probe already answered. `read` queries the
+/// analytics table and is reached only when `presence` says it is there, so a
+/// game database without it never logs a Postgres error (PH-02).
+pub async fn cardtrader_leg<R, Fut>(presence: table_presence::Presence, read: R) -> Value
+where
+    R: FnOnce() -> Fut,
+    Fut: Future<Output = Value>,
+{
+    table_presence::guarded(
+        presence,
+        read,
+        || cardtrader_source(&[], None),
+        || cardtrader_source(&[], Some("unavailable")),
+    )
+    .await
+}
+
+/// The `cardtrader` block of one blueprint: the cached probe of the analytics
+/// table on the game's pool, then `LISTED_SQL`. Without a blueprint the block is
+/// `empty` and the pool is not touched at all.
+async fn cardtrader_history(pool: &PgPool, ct: Option<&str>, from: &str, to: &str) -> Value {
+    let Some(ct) = ct else {
+        return cardtrader_source(&[], None);
+    };
+    cardtrader_leg(table_presence::presence(pool, LISTED_TABLE).await, || {
+        listed_block(pool, ct, from, to)
+    })
+    .await
+}
+
 /// `GET /api/marketplace-card-price-history`.
 pub async fn card_price_history(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     let cors = [("access-control-allow-origin", "*"), ("access-control-allow-methods", "GET, OPTIONS"), ("access-control-allow-headers", "Content-Type")];
@@ -721,21 +774,17 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         return with_headers(StatusCode::NOT_FOUND, json!({ "error": "Card not found." }), &cors, &[]);
     };
     let ct = if card["ct_id"].is_null() { None } else { Some(js::js_string(&card["ct_id"])) };
-    let (listed, tcg, cardmarket, rates) = tokio::join!(
-        async {
-            match &ct {
-                Some(ct) => pg::pool_rows(&pool, LISTED_SQL, &[Bind::Text(ct.clone()), Bind::Text(from.clone()), Bind::Text(to.clone())]).await,
-                None => Ok(Vec::new()),
-            }
-        },
+    // Exchange rates do not depend on the game, and `fx_rates_daily` lives only
+    // in the Pokémon database: read them from the replica `state.api` always
+    // holds, so a satellite game's TCGplayer days get their `marketPkn` too.
+    // For Pokémon that is the very pool the request already uses.
+    let fx_pool = state.api.read();
+    let (cardtrader, tcg, cardmarket, rates) = tokio::join!(
+        cardtrader_history(&pool, ct.as_deref(), &from, &to),
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
         history_sources::cardmarket_history(&pool, &game_id, ct.as_deref(), &from, &to),
-        history_sources::read_fx_rates(&pool, &to),
+        history_sources::read_fx_rates(fx_pool, &to),
     );
-    let cardtrader = match listed {
-        Ok(rows) => cardtrader_source(&rows, None),
-        Err(_) => cardtrader_source(&[], Some("unavailable")),
-    };
     let tcgplayer = match &tcg {
         Ok(result) => tcgplayer_source(tcg_observations(result), &rates, None),
         Err(TcgError::Unconfigured) => tcgplayer_source(&[], &rates, Some(unconfigured_status())),
@@ -778,6 +827,52 @@ pub async fn tcgplayer_history(State(state): State<RouteState>, method: Method, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// One day row of `LISTED_SQL`, enough for `cardtrader_source`.
+    fn ask_row() -> Value {
+        json!({ "day": "2026-11-02", "dump_day": "2026-11-02", "lowest_ask_pkn": 12,
+                "listing_count": 1, "listed_quantity": 1, "seller_count": 1, "refreshed_at": null })
+    }
+
+    /// PH-02: the ask leg reaches Postgres only when the probe found the
+    /// analytics table; otherwise it answers its own no-data block.
+    #[tokio::test]
+    async fn cardtrader_leg_queries_only_a_present_table() {
+        for (presence, expected_status, expected_calls) in [
+            (table_presence::Presence::Present, "available", 1usize),
+            (table_presence::Presence::Missing, "empty", 0),
+            (table_presence::Presence::ProbeFailed, "unavailable", 0),
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let counted = Arc::clone(&calls);
+            let block = cardtrader_leg(presence, move || {
+                let counted = Arc::clone(&counted);
+                async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    cardtrader_source(&[ask_row()], None)
+                }
+            })
+            .await;
+            assert_eq!(block["status"], expected_status, "{presence:?}");
+            assert_eq!(calls.load(Ordering::SeqCst), expected_calls, "{presence:?}");
+        }
+    }
+
+    /// A printing without a blueprint is `empty` before any probe, so the game
+    /// pool is never touched (the lazy pool below cannot answer anything).
+    #[tokio::test]
+    async fn cardtrader_history_without_a_blueprint_never_reaches_the_pool() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://pokoin_test@127.0.0.1:1/pokoin_magic")
+            .expect("lazy pool");
+        let block = cardtrader_history(&pool, None, "2026-10-01", "2026-11-01").await;
+        assert_eq!(block["status"], "empty");
+        assert!(block["days"].as_array().expect("days").is_empty());
+    }
 
     #[test]
     fn ranges() {
