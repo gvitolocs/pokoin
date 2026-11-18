@@ -4,7 +4,7 @@ import { getJson } from './api.js';
  * The price sources the card-desk graph plots beside the CardTrader sold median.
  * The browser never converts a currency: a source is plotted only when the API
  * already answered in PKN, so a response without those fields simply has one
- * line less.
+ * line less. Pokoin is one of them: its own cheapest live listing, per day.
  */
 
 const DAY_MS = 86_400_000;
@@ -30,21 +30,41 @@ export const PRICE_HISTORY_DEFAULT_RANGE = '3m';
  * day the source did not quote: `near` the closest day inside the gap, or
  * `onOrBefore` the last one it published (a weekly trend stands until replaced).
  */
+/**
+ * Pokoin's own listings: the cheapest live one at the end of every day, and the
+ * desk's `nowPoint` as the line's last point. Solid yellow, the desk's colour.
+ */
+export const POKOIN_SOURCE = {
+  key: 'pokoin',
+  label: 'Pokoin',
+  short: 'PK',
+  color: 'var(--yellow)',
+  dashed: false,
+  gapDays: 3,
+  carry: 'near',
+};
+
 export const PRICE_SOURCES = [
   { key: 'tcgplayer', label: 'TCGplayer', short: 'TP', color: '#8ab4ff', dashed: false, gapDays: 10, carry: 'near' },
   { key: 'cardmarket', label: 'Cardmarket', short: 'CM', color: '#ff7a59', dashed: false, gapDays: 99, carry: 'onOrBefore' },
   { key: 'cardtrader_ask', label: 'CT lowest ask', short: 'CT ask', color: '#d6c2ff', dashed: true, gapDays: 3, carry: 'near' },
+  POKOIN_SOURCE,
 ];
 
-/** The cheapest live Pokoin listing: one value, today, nothing to fetch. */
-export const POKOIN_NOW_SOURCE = {
-  key: 'pokoin_now',
-  label: 'Pokoin now',
-  short: 'PK',
-  color: 'var(--yellow)',
-  dashed: true,
-  gapDays: 0,
-};
+/** A `fields=graph` answer of a long window is one point per ISO week. */
+export const PRICE_HISTORY_GRAPH_FIELDS = 'graph';
+const WEEK_DAYS = 7;
+
+/**
+ * How far apart two of a source's plotted days may be. A weekly answer moves
+ * every point 7 days along by itself, so the source's own tolerance moves with
+ * it: a card that quotes daily and is thinned weekly keeps one unbroken line,
+ * and a week that is really missing still breaks it.
+ */
+export function graphGapDays(source, bucket) {
+  const gapDays = Number(source?.gapDays) || 0;
+  return bucket === 'week' ? gapDays + WEEK_DAYS : gapDays;
+}
 
 function isIsoDay(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
@@ -75,8 +95,13 @@ export function priceHistoryRange(rangeKey, todayIso) {
 /**
  * One card's price history over a window, or `null` when it is unavailable: the
  * graph then keeps showing the sold lines alone. Never throws.
+ *
+ * `fields=graph` asks for the small answer: the numbers the graph plots, one per
+ * day (or per ISO week for a long window), with TCGplayer already narrowed to
+ * the one series `reverse` picks. A server that does not know the parameter still
+ * answers the full shape, which reads the same way here.
  */
-export async function fetchCardPriceHistory(cardId, { from, to } = {}) {
+export async function fetchCardPriceHistory(cardId, { from, to, reverse } = {}) {
   const id = String(cardId || '').trim();
   if (!/^\d+$/.test(id)) {
     return null;
@@ -87,6 +112,10 @@ export async function fetchCardPriceHistory(cardId, { from, to } = {}) {
   }
   if (isIsoDay(to)) {
     params.set('to', to);
+  }
+  params.set('fields', PRICE_HISTORY_GRAPH_FIELDS);
+  if (reverse === true) {
+    params.set('reverse', '1');
   }
   try {
     const data = await getJson(`/api/marketplace-card-price-history?${params}`);
@@ -142,6 +171,11 @@ function cardtraderAskDays(cardtrader) {
   return pricedDays(dayRowsOf(cardtrader), (row) => row?.lowestAskPkn);
 }
 
+/** Pokoin's own cheapest live listing per day: `pokoin.days[*].lowestAskPkn`. */
+function pokoinAskDays(pokoin) {
+  return pricedDays(dayRowsOf(pokoin), (row) => row?.lowestAskPkn);
+}
+
 /**
  * The fetched sources the graph can draw, in legend order, each with
  * `days: [{ day, pkn }]` oldest first. A source whose response has no PKN field
@@ -150,12 +184,18 @@ function cardtraderAskDays(cardtrader) {
  */
 export function priceSourceSeries(history, { reverse } = {}) {
   const foil = reverse === true;
+  const bucket = history?.bucket === 'week' ? 'week' : 'day';
   const daysByKey = {
     tcgplayer: tcgplayerDays(history?.tcgplayer, foil),
     cardmarket: cardmarketDays(history?.cardmarket, foil),
     cardtrader_ask: cardtraderAskDays(history?.cardtrader),
+    pokoin: pokoinAskDays(history?.pokoin),
   };
   return PRICE_SOURCES
-    .map((source) => ({ ...source, days: daysByKey[source.key] || [] }))
+    .map((source) => ({
+      ...source,
+      gapDays: graphGapDays(source, bucket),
+      days: daysByKey[source.key] || [],
+    }))
     .filter((source) => source.days.length);
 }

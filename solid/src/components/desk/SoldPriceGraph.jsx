@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import { formatPkn } from '@market/api.js';
-import { POKOIN_NOW_SOURCE, PRICE_SOURCE_RANGES } from '@market/price-history.js';
+import { POKOIN_SOURCE, PRICE_SOURCE_RANGES } from '@market/price-history.js';
 import {
   activeSoldIndex,
   formatSoldAxisTick,
@@ -16,6 +16,7 @@ import {
   soldGraphDateWindow,
   soldGraphGapSegments,
   soldGraphHoverRows,
+  soldGraphNearDay,
   soldGraphRangeBounds,
   soldGraphRangeDays,
   soldGraphScale,
@@ -171,10 +172,11 @@ export default function SoldPriceGraph(props) {
   // props.onRemoveOverlay(key) takes one off, props.color paints the current one.
   const overlays = () => (Array.isArray(props.overlays) ? props.overlays : []).filter((row) => Array.isArray(row?.days) && row.days.length);
   // props.sources = [{ key, label, short, color, dashed, gapDays, carry, days }]:
-  // one line per other price source. props.nowPoint is the cheapest live Pokoin
-  // listing today, props.range the window the history was read for, and
-  // props.onRange(key) asks for another one. Without them the chart is the one
-  // that has always been here: the sold median and its overlays.
+  // one line per other price source, Pokoin's own listings among them.
+  // props.nowPoint is the cheapest live Pokoin listing today, props.range the
+  // window the history was read for, and props.onRange(key) asks for another one.
+  // Without them the chart is the one that has always been here: the sold median
+  // and its overlays.
   const bounds = createMemo(() => soldGraphRangeBounds(props.range));
   const plotDays = createMemo(() => soldGraphRangeDays(days(), bounds()));
   const narrow = createMemo(() => (size()?.w || 0) < 560);
@@ -194,9 +196,11 @@ export default function SoldPriceGraph(props) {
         .map((day) => ({ day: String(day.day), value: Number(day.pkn ?? day.value) || 0 }))
         .filter((day) => day.value > 0),
     })));
-  // Pokoin now is the fourth key: no history, one value, drawn as a dot today.
-  const nowLine = createMemo(() => (nowValue()
-    ? { ...POKOIN_NOW_SOURCE, days: [], isNow: true, hasData: true }
+  // Pokoin's own listings are a line like any other source. What the desk knows
+  // right now is that line's next point; with no line at all it is a dot alone,
+  // and the key stays either way.
+  const nowLine = createMemo(() => (nowValue() && !sourceLines().some((row) => row.key === POKOIN_SOURCE.key)
+    ? { ...POKOIN_SOURCE, days: [], isNow: true, hasData: true }
     : null));
   const sourceKeys = createMemo(() => [...sourceLines(), ...(nowLine() ? [nowLine()] : [])]
     .map((row) => ({ ...row, hasData: row.isNow ? true : row.days.length > 0 })));
@@ -215,21 +219,9 @@ export default function SoldPriceGraph(props) {
     ...sourceLines().filter((row) => row.days.length && shown(row.key)),
     ...facetLines(),
   ]);
-  const nowOn = createMemo(() => Boolean(nowLine()) && shown(POKOIN_NOW_SOURCE.key));
+  const nowOn = createMemo(() => nowValue() > 0 && shown(POKOIN_SOURCE.key));
   // The keys and range buttons take the plot's top line whenever they are there.
   const legendLine = createMemo(() => Boolean(overlays().length || sourceKeys().length || props.onRange));
-  // A keys row that still overflows (overlay keys joined in) fades at its right
-  // edge so it reads as scrollable. Read when the keys or the panel change,
-  // never on a pointer move: scrollWidth forces a layout.
-  const [keysOverflow, setKeysOverflow] = createSignal(false);
-  createEffect(
-    () => [sourceKeys(), overlays(), plot(), narrow()],
-    ([, , , isNarrow]) => {
-      // legendEl is untracked: the keys' change that re-runs this effect is also
-      // what has just rendered it.
-      setKeysOverflow(Boolean(legendEl) && isNarrow && legendEl.scrollWidth > legendEl.clientWidth);
-    },
-  );
   // Several lines on one plot: the hover lists them all instead of one price.
   const compareLines = createMemo(() => Boolean(underLines().length || nowOn()));
   const hasLines = createMemo(() => Boolean(plotDays().length || underLines().length));
@@ -265,6 +257,8 @@ export default function SoldPriceGraph(props) {
     const price = (row) => Number(row.value ?? row.medianPkn) || 0;
     const dayMs = (row) => Date.parse(`${row.day}T00:00:00Z`);
     const values = every.map((row) => price(row) * factor);
+    // Today's Pokoin price is a plotted point like any other, so the scale holds it.
+    if (nowOn()) values.push(nowValue() * factor);
     const scale = soldGraphScale(Math.max(0, ...values), { minStep: factor === 1 ? 10 : 0.01 });
     // The selected range, clipped to the first and last day anything has.
     const window = soldGraphDateWindow(every, bounds());
@@ -325,6 +319,17 @@ export default function SoldPriceGraph(props) {
       marksOfRow.forEach((list, day) => map.set(day, (map.get(day) || []).concat(list)));
       return map;
     }, new Map());
+    // The dot at the right edge is today's Pokoin price. Pokoin's own line is
+    // drawn into it when that line stops today or yesterday — the price right now
+    // is its next point — and the dot stands alone with its stub otherwise.
+    const nowPt = nowOn()
+      ? { x: pad.l + plotW, y: soldGraphY(nowValue() * factor, scale.max, pad.t, plotH) }
+      : null;
+    const pokoinLine = others.find((row) => row.isSource && row.key === POKOIN_SOURCE.key);
+    const reachesNow = nowPt && bounds() && pokoinLine
+      ? soldGraphNearDay(pokoinLine.days, bounds().to, 1)
+      : null;
+    const nowJoin = reachesNow ? join([place(reachesNow), [nowPt.x, nowPt.y]]) : '';
     return {
       width,
       height,
@@ -350,6 +355,7 @@ export default function SoldPriceGraph(props) {
             color: row.color,
             dashed: Boolean(row.dashed),
             isSource: true,
+            join: row.key === POKOIN_SOURCE.key ? nowJoin : '',
             segments: split.segments.map((run) => join(run.map(place))),
             bridges: split.bridges.map((pair) => join(pair.map(place))),
           };
@@ -358,8 +364,8 @@ export default function SoldPriceGraph(props) {
         const endsOf = carry(pts);
         return { key: row.key, color: row.color, dashed: Boolean(row.dashed), isSource: false, line: join(pts), lead: hasSourceLine ? '' : endsOf.lead, tail: endsOf.tail, solo: pts.length === 1 ? pts[0] : null };
       }),
-      // Pokoin now has no history: one dot at the right edge, a stub pointing at it.
-      now: nowOn() ? { x: pad.l + plotW, y: soldGraphY(nowValue() * factor, scale.max, pad.t, plotH) } : null,
+      // Today's Pokoin price at the right edge, joined to the Pokoin line or alone.
+      now: nowPt ? { ...nowPt, joined: Boolean(nowJoin) } : null,
       // The fill follows the line across the whole range it is drawn for.
       area: `${left},${pad.t + plotH} ${lead ? `${pad.l},${points[0][1]} ` : ''}${line}${tail ? ` ${pad.l + plotW},${points[points.length - 1][1]}` : ''} ${right},${pad.t + plotH}`,
       withYear,
@@ -367,6 +373,20 @@ export default function SoldPriceGraph(props) {
       lastLabel: formatSoldDayWithYear(lastDay.day, dateLocale, withYear),
     };
   });
+
+  // A keys row that still overflows (overlay keys joined in) fades at its right
+  // edge so it reads as scrollable. Read when the keys or the panel change,
+  // never on a pointer move: scrollWidth forces a layout. Declared after `plot`
+  // because Solid runs this effect's compute when the effect is created.
+  const [keysOverflow, setKeysOverflow] = createSignal(false);
+  createEffect(
+    () => [sourceKeys(), overlays(), plot(), narrow()],
+    ([, , , isNarrow]) => {
+      // legendEl is untracked: the keys' change that re-runs this effect is also
+      // what has just rendered it.
+      setKeysOverflow(Boolean(legendEl) && isNarrow && legendEl.scrollWidth > legendEl.clientWidth);
+    },
+  );
 
   // The hover is a day, not a row of one series: several lines rarely quote on
   // the same day, and the guide has to stand where all of them can be read.
@@ -422,10 +442,11 @@ export default function SoldPriceGraph(props) {
     const sources = underLines()
       .filter((row) => row.isSource)
       .map((row) => ({ key: row.key, label: row.label, kind: 'source', color: row.color, dashed: row.dashed, gapDays: row.gapDays, carry: row.carry, days: row.days }));
-    // Pokoin now is one value, today: its row is in the list only when the
-    // guide stands on the last day of the range, and is left out before that.
-    const now = nowOn() && hoverDay() && String(hoverDay()) === String(tipEndDay())
-      ? [{ ...POKOIN_NOW_SOURCE, kind: 'now', value: nowValue() }]
+    // Pokoin with a line of its own is one of the source rows above. With none it
+    // is one value, today: its row joins the list only when the guide stands on
+    // the last day of the range, and is left out before that.
+    const now = nowLine() && nowOn() && hoverDay() && String(hoverDay()) === String(tipEndDay())
+      ? [{ ...POKOIN_SOURCE, kind: 'now', value: nowValue() }]
       : [];
     const facets = underLines()
       .filter((row) => !row.isSource)
@@ -673,6 +694,8 @@ export default function SoldPriceGraph(props) {
                       <For each={row.bridges}>
                         {(points) => <polyline points={points} class="sold-graph-gap" />}
                       </For>
+                      {/* Pokoin's last quote into today's dot, in the line's own colour. */}
+                      <Show when={row.join}><polyline points={row.join} /></Show>
                     </Show>
                     <Show when={!row.isSource}>
                       <Show when={row.lead}><polyline points={row.lead} class="sold-graph-carry" /></Show>
@@ -693,7 +716,11 @@ export default function SoldPriceGraph(props) {
               <Show when={geo().now}>
                 {(now) => (
                   <>
-                    <line x1={now().x - 44} x2={now().x} y1={now().y} y2={now().y} class="sold-graph-now-stub" />
+                    {/* The stub points at a dot nothing leads into: a joined line
+                        is already the lead. */}
+                    <Show when={!now().joined}>
+                      <line x1={now().x - 44} x2={now().x} y1={now().y} y2={now().y} class="sold-graph-now-stub" />
+                    </Show>
                     <circle cx={now().x} cy={now().y} r="4" class="sold-graph-now-dot" />
                   </>
                 )}

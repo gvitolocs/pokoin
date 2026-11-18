@@ -449,18 +449,25 @@ function CardDesk(props) {
   // The other price sources join the graph, they do not replace it. Their
   // history is read with the sales, not after the hero, and kept beside them in
   // localStorage (market/src/price-history-cache.js), so a card seen before
-  // draws complete on the first frame. One read per card and window; the lines
-  // already drawn stay while another window loads.
+  // draws complete on the first frame. One read per card, window and facet; the
+  // lines already drawn stay while another window loads.
   // Silver only: everybody else keeps the graph that was here before the
   // sources — the sold median, its facet overlays and its tooltip. For them
   // nothing is asked of the history and its cache is neither read nor written,
   // so the graph never waits on a read that is not coming.
   const GRAPH_HISTORY_WAIT_MS = 1500;
   const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
-  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
-  /** This desk's window: read fresh, or the last one read before it went stale. */
-  const readGraphHistory = (range) => peekCardPriceHistory(cardId, range)
-    || rememberStaleCardPriceHistory(cardId, range);
+  // A `fields=graph` answer holds the one TCGplayer series and the one Cardmarket
+  // trend of the facet it was read for, so the Reverse chip is another read and
+  // not just another plot: the facet belongs to the key.
+  const graphAskKey = (range, reverse) => `${cardId}|${range}|${reverse ? 'r' : 'n'}`;
+  const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse());
+  /** This desk's window, of the facet being plotted: fresh, or stale before it. */
+  const readGraphHistory = (range) => {
+    const reverse = untrack(salesReverse);
+    return peekCardPriceHistory(cardId, range, { reverse })
+      || rememberStaleCardPriceHistory(cardId, range, { reverse });
+  };
   const [priceHistory, setPriceHistory] = createSignal(
     untrack(accountSilver) ? readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE) : null,
   );
@@ -476,7 +483,8 @@ function CardDesk(props) {
 
   function askGraphHistory(range) {
     if (!untrack(accountSilver)) return;
-    const askedFor = `${cardId}|${range}`;
+    const reverse = untrack(salesReverse);
+    const askedFor = graphAskKey(range, reverse);
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
     // A cached window paints at once and is still re-read below: what the desk
@@ -485,14 +493,14 @@ function CardDesk(props) {
     // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
     const known = readGraphHistory(range);
     if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
-    const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
+    const bounds = { ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)), reverse };
     fetchCardPriceHistory(cardId, bounds).then((history) => {
-      // Dropped if this card or window is not the one asked for anymore.
+      // Dropped if this card, window or facet is not the one asked for anymore.
       if (disposed || untrack(graphHistoryKey) !== askedFor) return;
       // An answer of nothing is not cached, so the next visit asks again.
       if (!history) return;
       const entry = { range, from: bounds.from, to: bounds.to, history };
-      saveCardPriceHistory(cardId, range, entry);
+      saveCardPriceHistory(cardId, range, entry, { reverse });
       // Already drawn from the cache: data that has not changed never redraws.
       setPriceHistory((prev) => (prev && JSON.stringify(prev) === JSON.stringify(entry) ? prev : entry));
     });
@@ -500,7 +508,7 @@ function CardDesk(props) {
 
   askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);
   createEffect(graphHistoryKey, (key) => {
-    if (key) askGraphHistory(key.slice(cardId.length + 1));
+    if (key) askGraphHistory(key.slice(cardId.length + 1).split('|')[0]);
   });
   // Silver can arrive after this first paint, with the confirmed profile: the
   // window is asked for then, and its lines join the graph already on screen.

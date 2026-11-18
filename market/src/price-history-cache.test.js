@@ -27,7 +27,8 @@ function fakeStorage() {
   };
 }
 
-const PREFIX = 'pokoin.cardPriceHistory.v1.';
+const PREFIX = 'pokoin.cardPriceHistory.v2.';
+const V1_PREFIX = 'pokoin.cardPriceHistory.v1.';
 
 function entryOf(range = '3m', from = '2026-08-18', to = '2026-11-16') {
   return { range, from, to, history: { cardtrader: { days: [{ day: '2026-11-16', lowestAskPkn: 265 }] } } };
@@ -135,5 +136,48 @@ test('a corrupt value reads as nothing cached', () => {
   store.set(`${PREFIX}813622.3m`, 'null');
   assert.equal(peekCardPriceHistory('813622', '3m'), null);
   assert.equal(saveCardPriceHistory('813622', '3m', entryOf()).range, '3m');
+  assert.deepEqual(peekCardPriceHistory('813622', '3m').range, '3m');
+});
+
+test('the reverse-holo window is a key of its own', () => {
+  // A fields=graph answer holds the one TCGplayer series it was read for, so the
+  // two facets cannot share one cached window.
+  const normal = entryOf();
+  const reverse = {
+    ...entryOf(),
+    history: { pokoin: { status: 'available', days: [{ day: '2026-11-16', lowestAskPkn: 380 }] } },
+  };
+  assert.deepEqual(saveCardPriceHistory('813622', '3m', normal), normal);
+  assert.deepEqual(saveCardPriceHistory('813622', '3m', reverse, { reverse: true }), reverse);
+  assert.ok(store.has(`${PREFIX}813622.3m`), 'the normal window keeps the key it always had');
+  assert.ok(store.has(`${PREFIX}813622.3m.r`), 'the reverse window has its own');
+  assert.deepEqual(peekCardPriceHistory('813622', '3m'), normal);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { reverse: true }), reverse);
+  assert.deepEqual(rememberStaleCardPriceHistory('813622', '3m', { reverse: true }), reverse);
+  // An absent or empty option is the normal facet, not a third key.
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', {}), normal);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { reverse: false }), normal);
+  assert.equal([...store.keys()].filter((key) => key.startsWith(PREFIX)).length, 2);
+  // Other window of the reverse facet: nothing cached, and nothing of the normal one.
+  assert.equal(peekCardPriceHistory('813622', '1y', { reverse: true }), null);
+});
+
+test('a v1 window is never read and goes with the first write', () => {
+  store.set(`${V1_PREFIX}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
+  store.set(`${V1_PREFIX}813622.1y`, 'null');
+  // Another cache's key, a similar-looking one, and a key of the desk's own.
+  const foreign = ['pokoin.cardSales.v12.813622.3m', 'pokoin.cardPage.v1.en:813622', 'pokoin.graph.sources'];
+  for (const key of foreign) {
+    store.set(key, '{}');
+  }
+  assert.equal(peekCardPriceHistory('813622', '3m'), null, 'v1 has no facet in its key');
+  assert.deepEqual(saveCardPriceHistory('813622', '3m', entryOf()).range, '3m');
+  assert.ok(!store.has(`${V1_PREFIX}813622.3m`), 'the v1 window went');
+  assert.ok(!store.has(`${V1_PREFIX}813622.1y`), 'with the corrupt one beside it');
+  assert.deepEqual(
+    [...store.keys()].filter((key) => !key.startsWith(PREFIX)).sort(),
+    foreign.sort(),
+    'and nothing that is not this cache was touched',
+  );
   assert.deepEqual(peekCardPriceHistory('813622', '3m').range, '3m');
 });

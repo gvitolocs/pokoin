@@ -378,7 +378,8 @@ test('every price source is a line inside the graph the desk already had', () =>
   // A source with no sale of its own still draws: the empty message waits for both.
   assert.match(graph, /<Show when=\{!hasLines\(\) && props\.series != null\}>/);
   // Sources are thinner than sold lines, break where they stopped quoting, and
-  // bridge the hole dotted. Pokoin now is one dot today with a stub at it.
+  // bridge the hole dotted. Pokoin's dot today joins its own line or stands with
+  // a stub at it.
   assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
   assert.match(graph, /class="sold-graph-gap"/);
   assert.match(graph, /class="sold-graph-now-dot"/);
@@ -394,15 +395,18 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   assert.ok(page.indexOf('const [graphRange') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.ok(page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE)') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
-  // One read per card and window, kept for the next visit.
-  assert.match(history, /const graphHistoryKey = \(\) => `\$\{cardId\}\|\$\{graphRange\(\)\}`;/);
-  assert.match(history, /saveCardPriceHistory\(cardId, range, entry\);/);
+  // One read per card, window and facet, kept for the next visit: a fields=graph
+  // answer holds the TCGplayer series of the facet it was read for.
+  assert.match(page, /const graphAskKey = \(range, reverse\) => `\$\{cardId\}\|\$\{range\}\|\$\{reverse \? 'r' : 'n'\}`;/);
+  assert.match(history, /const graphHistoryKey = \(\) => graphAskKey\(graphRange\(\), salesReverse\(\)\);/);
+  assert.match(history, /const bounds = \{ \.\.\.priceHistoryRange\(range, new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\), reverse \};/);
+  assert.match(history, /saveCardPriceHistory\(cardId, range, entry, \{ reverse \}\);/);
   // A late answer for a card or window nobody asked for anymore is dropped, and
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
   assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
-  // Pokoin now is the cheapest live listing this desk already has.
+  // Pokoin's price right now is the cheapest live listing this desk already has.
   assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
@@ -477,12 +481,15 @@ test('Silver turning on later asks then; without it the graph waits for nothing'
 test('the desk peeks the persisted history cache, stale included, and redraws only on new data', () => {
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
   assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
-  assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
+  // The window is read for the facet the desk plots: a `fields=graph` answer
+  // holds the TCGplayer series and the Cardmarket trend of that facet only.
+  assert.match(history, /const readGraphHistory = \(range\) => \{\n\s*const reverse = untrack\(salesReverse\);\n\s*return peekCardPriceHistory\(cardId, range, \{ reverse \}\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range, \{ reverse \}\);\n\s*\};/);
   assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null,\n\s*\);/);
   assert.match(history, /const known = readGraphHistory\(range\);/);
-  // A range button is the same read: cached paints at once, uncached keeps the
-  // lines that are drawn until it answers.
-  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\);/);
+  // A range button or the Reverse chip is the same read: cached paints at once,
+  // uncached keeps the lines that are drawn until it answers. The facet is part
+  // of the key, so the window is the part before it.
+  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\.split\('\|'\)\[0\]\);/);
   // Identical data does not re-render a graph the cache already drew.
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
@@ -522,11 +529,14 @@ test('long windows read their dates with the year', () => {
   assert.match(graph, /<strong>\{formatSoldDayWithYear\(day\(\), geo\(\)\.dateLocale, geo\(\)\.withYear\)\}<\/strong>/);
 });
 
-test('tooltip rows: Pokoin now only on the last day, and a whole-number PKN', () => {
+test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN', () => {
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
-  // Pokoin now quotes today only: its row joins when the guide stands on the
-  // last day of the drawn range, and is left out on the days before it.
-  assert.match(graph, /const now = nowOn\(\) && hoverDay\(\) && String\(hoverDay\(\)\) === String\(tipEndDay\(\)\)/);
+  // A Pokoin dot with no line of its own quotes today only: its row joins when
+  // the guide stands on the last day of the drawn range, left out before that.
+  // With a line the one source row already is the Pokoin row, so there is never
+  // a second one.
+  assert.match(graph, /const now = nowLine\(\) && nowOn\(\) && hoverDay\(\) && String\(hoverDay\(\)\) === String\(tipEndDay\(\)\)/);
+  assert.match(graph, /\{ \.\.\.POKOIN_SOURCE, kind: 'now', value: nowValue\(\) \}/);
   // The rows format through the desk's row formatter when the desk gives one.
   assert.match(graph, /props\.formatRowPrice \? props\.formatRowPrice\(pkn\) \|\| formatValue\(pkn\) : formatValue\(pkn\)/);
   assert.match(page, /formatRowPrice=\{graphRowPrice\}/);
@@ -534,6 +544,37 @@ test('tooltip rows: Pokoin now only on the last day, and a whole-number PKN', ()
   assert.match(page, /const graphRowPrice = \(pkn\) => \{/);
   assert.match(page, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
   assert.match(page, /if \(parts\.local && parts\.pkn\) return `\$\{parts\.local\} \(\$\{whole\}\)`;/);
+});
+
+test('Pokoin is one line: its own history, with today as the last point', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  const history = fs.readFileSync(new URL('../../../market/src/price-history.js', import.meta.url), 'utf8');
+  // One key, labelled Pokoin, drawn from pokoin.days like every other source.
+  assert.match(history, /export const POKOIN_SOURCE = \{\n\s*key: 'pokoin',\n\s*label: 'Pokoin',\n\s*short: 'PK',\n\s*color: 'var\(--yellow\)',\n\s*dashed: false,\n\s*gapDays: 3,/);
+  assert.match(history, /pokoin: pokoinAskDays\(history\?\.pokoin\),/);
+  assert.deepEqual(
+    (history.match(/key: 'pokoin'/g) || []).length,
+    1,
+    'Pokoin is one source, not a line and a fourth key beside it',
+  );
+  assert.doesNotMatch(graph, /POKOIN_NOW_SOURCE|pokoin_now|Pokoin now/);
+  // The dot is that line's next point when the line stops today or yesterday…
+  assert.match(graph, /const reachesNow = nowPt && bounds\(\) && pokoinLine\n\s*\? soldGraphNearDay\(pokoinLine\.days, bounds\(\)\.to, 1\)/);
+  assert.match(graph, /const nowJoin = reachesNow \? join\(\[place\(reachesNow\), \[nowPt\.x, nowPt\.y\]\]\) : '';/);
+  assert.match(graph, /join: row\.key === POKOIN_SOURCE\.key \? nowJoin : '',/);
+  assert.match(graph, /<Show when=\{row\.join\}><polyline points=\{row\.join\} \/><\/Show>/);
+  // …and stands alone, stub included, when it does not reach.
+  assert.match(graph, /now: nowPt \? \{ \.\.\.nowPt, joined: Boolean\(nowJoin\) \} : null,/);
+  assert.match(graph, /<Show when=\{!now\(\)\.joined\}>\n\s*<line x1=\{now\(\)\.x - 44\}/);
+  // Today's price is a plotted value, so the scale holds it and no key appears
+  // twice: the dot's own key is there only while there is no Pokoin line.
+  assert.match(graph, /if \(nowOn\(\)\) values\.push\(nowValue\(\) \* factor\);/);
+  assert.match(graph, /const nowLine = createMemo\(\(\) => \(nowValue\(\) && !sourceLines\(\)\.some\(\(row\) => row\.key === POKOIN_SOURCE\.key\)/);
+  assert.match(graph, /const nowOn = createMemo\(\(\) => nowValue\(\) > 0 && shown\(POKOIN_SOURCE\.key\)\);/);
+  // The desk hands the line over through the props the Silver gate guards: the
+  // plot never reads the history, the cache or the live listings of its own, so
+  // without Silver there is no Pokoin line, key or row either.
+  assert.doesNotMatch(graph, /fetchCardPriceHistory|peekCardPriceHistory|priceSourceSeries|nativeLive/);
 });
 
 test('on a narrow panel the keys span it and drop the picked key without overlays', () => {
@@ -550,4 +591,63 @@ test('on a narrow panel the keys span it and drop the picked key without overlay
   assert.match(graph, /'is-overflow': keysOverflow\(\)/);
   assert.match(graph, /legendEl\.scrollWidth > legendEl\.clientWidth/);
   assert.match(css, /\.sold-graph-legend\.is-overflow \{[^}]*mask-image: linear-gradient\(to right, #000 calc\(100% - 16px\), transparent\);/);
+});
+
+/**
+ * Solid 2 runs the first argument of createEffect, createMemo and createRenderEffect
+ * when the call is made, so a value that argument calls has to be declared above it:
+ * a `const` below is still in its temporal dead zone there and the page throws
+ * (PRICE-04, the keys' overflow effect created above the `plot` it read). Reports
+ * every such call of one component, so the next line added is held to it too.
+ */
+function createdBeforeItsDeclaration(src, componentName) {
+  const from = src.indexOf(`export default function ${componentName}(`);
+  const line = (at) => src.slice(0, at).split('\n').length;
+  const pastQuoted = (i) => {                       // index after the '…', "…" or `…` starting at i
+    const quote = src[i];
+    let j = i + 1;
+    while (j < src.length && src[j] !== quote) j += src[j] === '\\' ? 2 : 1;
+    return j + 1;
+  };
+  const firstArgument = (open) => {                 // from the call's `(` to its top-level `,` or `)`
+    let depth = 0;
+    let i = open;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') { i = pastQuoted(i); continue; }
+      if (c === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); i = i < 0 ? src.length : i; continue; }
+      if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i); i = i < 0 ? src.length : i + 2; continue; }
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 1) return src.slice(open + 1, i); depth -= 1; }
+      else if (c === ',' && depth === 1) return src.slice(open + 1, i);
+      i += 1;
+    }
+    return src.slice(open + 1);
+  };
+  const declaredUnder = (name, after) => {          // `const name =` / `const [name` on the component's own line
+    const at = src.slice(after).search(new RegExp(`\\n  const (?:\\[)?(?:[\\w$]+, )?${name.replaceAll('$', '\\$')}[ ,\\]=]`));
+    return at < 0 ? null : after + at;
+  };
+  const late = [];
+  for (const call of ['createEffect(', 'createMemo(', 'createRenderEffect(', 'createComputed(']) {
+    for (let at = src.indexOf(call, from); at >= 0; at = src.indexOf(call, at + 1)) {
+      const arg = firstArgument(at + call.length - 1);
+      const used = [...new Set([...arg.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*\(/g)].map((row) => row[1]))];
+      for (const name of used) {
+        if (arg.includes(`const ${name}`)) continue;   // the argument declares this one itself
+        const under = declaredUnder(name, at);
+        if (under !== null) late.push(`${call.slice(0, -1)} at line ${line(at)} calls ${name}, declared at line ${line(under)}`);
+      }
+    }
+  }
+  return late;
+}
+
+test('what the graph creates at mount reads only what it declared above', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  assert.deepEqual(
+    createdBeforeItsDeclaration(graph, 'SoldPriceGraph'),
+    [],
+    'these functions run when they are created, so every value they call is declared first',
+  );
 });
