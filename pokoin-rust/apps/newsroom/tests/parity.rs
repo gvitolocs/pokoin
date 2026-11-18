@@ -1727,3 +1727,68 @@ fn cli_commands_fail_closed_without_an_explicit_data_directory() {
         String::from_utf8_lossy(&served.stderr)
     );
 }
+
+/// The dry-run reads the CMS records strictly, because they are what decides
+/// whether a story is already covered: an empty book from a missing or corrupt
+/// file would score every story as uncovered instead of failing the run.
+#[test]
+fn dry_run_fails_closed_on_a_corrupt_records_file() {
+    use std::process::Command;
+    let bin = env!("CARGO_BIN_EXE_pokoin-newsroom");
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    fs::create_dir(&data).unwrap();
+    store::atomic_json(&data.join(store::STORIES), &json!([])).unwrap();
+    store::atomic_json(
+        &data.join(store::STATE),
+        &json!({"attempts":[],"updates":{}}),
+    )
+    .unwrap();
+    let captured = fixture("live-evidence.json");
+    let input = root.path().join("input.json");
+    store::atomic_json(&input, &json!({"pack": captured["pack"], "memory": ""})).unwrap();
+    let report = root.path().join("report.json");
+    let run = || {
+        String::from_utf8_lossy(
+            &Command::new(bin)
+                .args(["dry-run", "--input"])
+                .arg(&input)
+                .args(["--data-dir"])
+                .arg(&data)
+                .args(["--output"])
+                .arg(&report)
+                .args(["--now", "2026-10-05T18:00:00Z"])
+                .args(["--max-model-calls", "1"])
+                .env("POKO_NEWSROOM_CLAUDE_PROVIDER", "none")
+                .output()
+                .unwrap()
+                .stderr,
+        )
+        .to_string()
+    };
+    fs::write(data.join(store::RECORDS), "{ not json").unwrap();
+    let corrupt = run();
+    assert!(
+        corrupt.contains("invalid JSON") && corrupt.contains(store::RECORDS),
+        "{corrupt}"
+    );
+    assert!(
+        !report.exists(),
+        "a corrupt records file must write no report: {corrupt}"
+    );
+    fs::remove_file(data.join(store::RECORDS)).unwrap();
+    let missing = run();
+    assert!(missing.contains(store::RECORDS), "{missing}");
+    // Readable records let the run reach the editorial decision it would make
+    // from the real book, with no file error on the way.
+    store::atomic_json(&data.join(store::RECORDS), &json!([])).unwrap();
+    let read = run();
+    assert!(
+        !read.contains(store::RECORDS) && !read.contains("invalid JSON"),
+        "{read}"
+    );
+    assert!(
+        store::strict_read(&report).is_ok(),
+        "the report is written: {read}"
+    );
+}

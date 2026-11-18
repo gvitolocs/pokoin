@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use pokoin_newsroom::{
-    cadence, editorial, game, handover, iso,
+    array, cadence, editorial, game, handover, iso,
     model::{Budget, Provider},
     store, templates, text, website,
 };
@@ -201,7 +201,10 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
     let budget = Budget::new(limit);
     let provider = Provider::from_env(budget.clone())?;
     let stories = store::load_array(&dir.join(store::STORIES));
-    let records = store::load_array(&dir.join(store::RECORDS));
+    // The covered-story decision is the one thing the records file decides
+    // here: an empty array from a missing or corrupt file would score every
+    // story as uncovered, so it is read strictly like the state.
+    let records = store::strict_read(&dir.join(store::RECORDS))?;
     let state = store::strict_read(&dir.join(store::STATE))?;
     let pack = &fixture["pack"];
     // newsroom-publisher.mjs:91 — a daily slot accepts one specialist or official outlet.
@@ -216,7 +219,7 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
             id
         }
     };
-    let existing = store::find_record_by_story(&records, story_id);
+    let existing = store::find_record_by_story(array(&records), story_id);
     let covered = existing.is_some() && pack["isUpdate"] != true;
     let hints = templates::hints(pack, now);
     let valid_templates = templates::valid_templates(&hints);
@@ -237,7 +240,7 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
         )
         .await
     };
-    let plan = cadence::plan(&stories, &records, &state, now);
+    let plan = cadence::plan(&stories, array(&records), &state, now);
     let mut report = json!({"at": iso(now), "dryRun": true, "inputKind": "captured-evidence-pack",
         "productionReady": false, "worthiness": worthiness, "plan": plan, "modelCalls": limit - budget.remaining()});
     let failure = match passes {
