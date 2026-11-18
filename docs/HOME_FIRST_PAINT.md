@@ -163,10 +163,13 @@ case the site Worker's `/api/` route answers. Thirty files per request, so six
 paths at a time and a path's five entries are never split. It reads the fan
 slugs from `market/src/promo-banners.js` and
 `market/src/data/featured-set.json`, needs no credentials, and does not go stale
-when a set is featured. `marketplace-home-purge.service` runs it after the
-publish; the token and zone id come only from `%h/.config/pokoin/cloudflare.env`,
-reach curl through a 0600 config file, and never appear in `ps`, in the log, or in
-an error message. `--dry-run` prints the url list and calls nothing.
+when a set is featured. `marketplace-home-purge.service` is the unit the publish
+runs it from — installing it and firing it from the sync that is actually in use
+is the lead's step, since `marketplace-rails-sync.service` is a system unit and
+this is a user one. The token and zone id come only from
+`%h/.config/pokoin/cloudflare.env`, reach curl through a 0600 config file, and
+never appear in `ps`, in the log, or in an error message. `--dry-run` prints the
+url list and calls nothing.
 
 The rails handlers answer from Postgres per request (`apps/api/src/rails.rs`,
 `catalog-api/src/pages/rails.rs`); there is no memory read model to invalidate.
@@ -194,7 +197,7 @@ The rails handlers answer from Postgres per request (`apps/api/src/rails.rs`,
 | `scripts/sync-marketplace-rails.py` | Writes Pi `marketplace_rails` / `marketplace_card_tiles`. `TILE_SQL` grid/tile → leftover `_homepage.webp`; hero stays leftover JPEG. Image keys are leftover `ct_id`. |
 | `pokoin-rust/crates/edge/src/edge.rs` | Origin-side cache. `RAIL_MAX_TTL` caps rail urls at 15 s with no stale window; `stale_cache_control` rewrites a STALE replay to `s-maxage=0` so a shared cache cannot store it; `age` on every served entry. |
 | `scripts/marketplace-home-purge.sh` | Cloudflare purge of exactly the rail urls above: `https://api.pokoin.com` plain plus one entry per page Origin, and the same-origin site/www copies (five files entries per path), thirty files per request. `--dry-run` prints the list. |
-| `scripts/marketplace-home-purge.service` | Runs it after the publish with the zone and token from `%h/.config/pokoin/cloudflare.env`. |
+| `scripts/marketplace-home-purge.service` | The user unit the publish runs the purge from; zone and token come from `%h/.config/pokoin/cloudflare.env`. Not installed here — installing and wiring it to the live sync is the lead's step. |
 
 Tests: `market/src/home-cache.test.js`, `lists.recents.test.js`,
 `recents.test.js`,

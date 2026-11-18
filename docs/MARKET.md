@@ -649,8 +649,10 @@ because the handlers send `vary: Origin` and Cloudflare keeps one copy per value
 then the `pokoin.com` and `www.pokoin.com` same-origin paths in case the site
 Worker's `/api/` route answers. Thirty files per Cloudflare request, six paths at
 a time, a path's entries never split.
-`marketplace-rails-sync` runs it after a publish, so a new order reaches browsers
-in about a minute instead of up to twenty. Proofs:
+`marketplace-home-purge.service` is the unit the publish runs it from, so a new
+order reaches browsers in about a minute instead of up to twenty; installing it
+and firing it from the sync actually in use is the lead's step
+(`marketplace-rails-sync.service` is a system unit, this is a user one). Proofs:
 `scripts/marketplace-home-purge.test.sh` (stub curl, no CDN call) and the
 `edge.rs` tests named in `docs/FEATURES.toml`.
 

@@ -3,7 +3,8 @@
 #
 # A publish rewrites marketplace_rails; Cloudflare keeps the copy it cached for
 # s-maxage=120 and then a further stale-while-revalidate=600, so a new order took
-# up to twenty minutes to reach browsers. marketplace-rails-sync runs this after it.
+# up to twenty minutes to reach browsers. This is what the rails publish runs to
+# end that wait; marketplace-home-purge.service is its unit.
 #
 # The URLs are exactly the ones the homepage asks for, on the host it asks the API
 # on, spelled the way it spells them (market/src/lists.js): the three dedicated
