@@ -137,39 +137,57 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   for (let index = 0; index < 2000; index += 1) {
     rows.push(card(String(index), names[index % names.length], { number: `${index}/200` }));
   }
-  // A deploy host that is busy cannot say what 48 ms of code is worth: this budget
-  // flaked twice on 2026-11-17/18 (62 and 64 ms) with the code still green (finding
-  // PKN-17). So measure the host instead of assuming it — the same shape of work over
-  // the same rows in this same run — and allow a fixed multiple of it. RATIO is 3x the
-  // worst ms/calibrationMs of 20 runs idle and 20 alongside two parallel market test
-  // jobs on nezopt (40 runs x 9 steps: median 6.2x, p95 50x, worst 89x; the old 48 ms
-  // wall clock failed 7 of the 66 runs taken here). The ceiling keeps the property
-  // this test guards, a regression of "tens of ms -> seconds": a host that needs a
-  // full second for 2,000 rows is broken for real, not merely busy.
-  const RATIO = 270;
+  // Wall time measures the host, not the code: the 48 ms budget this test carried failed
+  // 7 of 66 runs on a busy nezopt while the code stayed green, and a ratio against a
+  // same-run calibration moves with load too (finding PKN-17). What the budget guards is
+  // the algorithm doing far more work per keystroke — a sort comparator that re-filters,
+  // or the dedup of `groupCandidates` (suggest-pool.js:267) growing past its scan of one
+  // name group — and work is countable. So every row is wrapped in a Proxy that counts
+  // its property reads, and READ_BUDGET is a number of reads: 3x each step's count as
+  // measured on nezopt on 2026-11-18 (node v26, three identical `node --test
+  // market/src/suggest-pool.test.js` runs of this file), rounded up to a round number.
+  // CEILING_MS keeps the one case a count cannot see, the comment's "tens of ms ->
+  // seconds": 2,000 rows needing a full second is broken on any host, busy or idle.
+  const READ_BUDGET = {
+    'rank:p': 150000,
+    'rank:pi': 150000,
+    'rank:pik': 150000,
+    'rank:pika': 130000,
+    'rank:pikac': 100000,
+    'rank:pikachu': 85000,
+    'project:pika': 650000,
+    'project:pikac': 440000,
+    'project:pikachu': 425000,
+  };
+  // Doubling the rows may not double-and-a-half the work: linear or n log n reads about
+  // 2.0x, quadratic reads about 4x.
+  const MAX_GROWTH = 2.6;
   const CEILING_MS = 1000;
-  const calibration = [];
-  for (let round = 0; round < 7; round += 1) {
-    const started = performance.now();
-    rows
-      .filter((row) => String(row.name || '').toLowerCase().startsWith('pika'))
-      .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
-    calibration.push(performance.now() - started);
-  }
-  const calibrationMs = Math.max(calibration.sort((left, right) => left - right)[3], 0.5);
-  const budgetMs = RATIO * calibrationMs;
+  let reads = 0;
+  const countingRow = (row) => new Proxy(row, {
+    get(target, key) { reads += 1; return Reflect.get(target, key); },
+    has(target, key) { reads += 1; return Reflect.has(target, key); },
+    ownKeys(target) { reads += 1; return Reflect.ownKeys(target); },
+  });
+  for (let index = 0; index < rows.length; index += 1) rows[index] = countingRow(rows[index]);
+  const work = {};
   const steps = ['p', 'pi', 'pik', 'pika', 'pikac', 'pikachu'];
   let available = rows;
   const timings = [];
   for (const step of steps) {
     const started = performance.now();
+    reads = 0;
     available = rankCandidates(rows, step);
     const localMs = performance.now() - started;
     timings.push({ step, localMs, kept: available.length });
+    work[`rank:${step}`] = reads;
     assert.ok(
-      localMs <= budgetMs && localMs < CEILING_MS,
-      `${step} local rank ${localMs.toFixed(2)}ms = ${(localMs / calibrationMs).toFixed(1)}× the ${calibrationMs.toFixed(2)}ms ` +
-        `calibration, over the ${RATIO}× budget of ${budgetMs.toFixed(2)}ms or the ${CEILING_MS}ms ceiling`,
+      reads <= READ_BUDGET[`rank:${step}`],
+      `${step} local rank read ${reads} row properties, over the ${READ_BUDGET[`rank:${step}`]}-read budget`,
+    );
+    assert.ok(
+      localMs < CEILING_MS,
+      `${step} local rank took ${localMs.toFixed(2)}ms of ${reads} row reads, over the ${CEILING_MS}ms ceiling`,
     );
   }
   assert.ok(timings.find((row) => row.step === 'pikac').kept > 0);
@@ -178,16 +196,55 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   const ranked = [];
   for (const step of ['pika', 'pikac', 'pikachu']) {
     const started = performance.now();
+    reads = 0;
     const groups = projectPoolGroups(step, rows, { limit: 20 });
     const ms = performance.now() - started;
     ranked.push({ step, ms: Number(ms.toFixed(3)), groups: groups.length });
+    work[`project:${step}`] = reads;
     assert.ok(
-      ms <= budgetMs && ms < CEILING_MS,
-      `${step} project ${ms.toFixed(2)}ms = ${(ms / calibrationMs).toFixed(1)}× the ${calibrationMs.toFixed(2)}ms ` +
-        `calibration, over the ${RATIO}× budget of ${budgetMs.toFixed(2)}ms or the ${CEILING_MS}ms ceiling`,
+      reads <= READ_BUDGET[`project:${step}`],
+      `${step} project read ${reads} row properties, over the ${READ_BUDGET[`project:${step}`]}-read budget`,
+    );
+    assert.ok(
+      ms < CEILING_MS,
+      `${step} project took ${ms.toFixed(2)}ms of ${reads} row reads, over the ${CEILING_MS}ms ceiling`,
     );
   }
-  console.log(JSON.stringify({ local: timings, ranked }));
+  // The same nine steps over 4,000 rows built exactly this way: work that is linear or
+  // n log n in the rows about doubles, so a step that grows past MAX_GROWTH has turned
+  // quadratic at one keystroke. `rank:*` is asserted. `project:*` is measured and
+  // printed but not asserted: `groupCandidates` already scans one name group per row
+  // (suggest-pool.js:267) and doubling the rows doubles each group, so the green code
+  // here grows 3.5x (nezopt, 2026-11-18) — a limit that catches a dedup scanning every
+  // group (about 4x) cannot tell that 3.5x apart, so those steps keep only READ_BUDGET,
+  // which is what the every-group dedup breaks.
+  const more = [];
+  for (let index = 2000; index < 4000; index += 1) {
+    more.push(card(String(index), names[index % names.length], { number: `${index}/200` }));
+  }
+  const doubled = rows.concat(more.map(countingRow));
+  const scaled = {};
+  for (const step of steps) {
+    reads = 0;
+    rankCandidates(doubled, step);
+    scaled[`rank:${step}`] = reads;
+  }
+  for (const step of ['pika', 'pikac', 'pikachu']) {
+    reads = 0;
+    projectPoolGroups(step, doubled, { limit: 20 });
+    scaled[`project:${step}`] = reads;
+  }
+  const growth = {};
+  for (const key of Object.keys(work)) {
+    growth[key] = Number((scaled[key] / work[key]).toFixed(3));
+    if (key.startsWith('project:')) continue;
+    assert.ok(
+      growth[key] <= MAX_GROWTH,
+      `${key} grew ${growth[key]}x from ${work[key]} to ${scaled[key]} row reads over twice the rows, ` +
+        `over the ${MAX_GROWTH}x limit (budget ${READ_BUDGET[key]} reads at 2,000 rows)`,
+    );
+  }
+  console.log(JSON.stringify({ local: timings, ranked, reads: work, growth }));
 });
 
 test('recall asks Redis for the stem, plus the full string when a mechanic stays on the name', () => {
