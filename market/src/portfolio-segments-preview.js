@@ -196,8 +196,8 @@ export function previewSegmentsFrom(series) {
     const weightSum = weights.reduce((acc, weight) => acc + weight, 0);
     const scale = value / weightSum;
     const eraValues = weights.map((weight) => round2(scale * weight));
-    // The rounding residual lands on the biggest era, so the eras add up to
-    // the day's card value to the cent.
+    // The rounding residual lands on the biggest era, so the eras add up to the
+    // Pokémon half of the day's card value to the cent.
     const residual = round2(value - eraValues.reduce((acc, part) => acc + part, 0));
     const biggest = weights.indexOf(Math.max(...weights));
     eraValues[biggest] = round2(eraValues[biggest] + residual);
