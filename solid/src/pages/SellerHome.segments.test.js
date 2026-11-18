@@ -116,6 +116,17 @@ test('the desk follows the graph window and keeps the levels switchable', () => 
   assert.match(tableSrc, /Boolean\(props\.currencyPending\)/);
 });
 
+test("the opening level is the book's own, never the header's game", () => {
+  // The desk splits the whole collection, so which catalog the marketplace
+  // header is showing says nothing about the level to open on: that is
+  // `defaultSegmentLevel` reading the held games, and the table does not import
+  // the game module at all.
+  assert.doesNotMatch(tableSrc, /@market\/game\.js/);
+  assert.doesNotMatch(tableSrc, /gameIdFromHost|apiGameParam|\bgame\(\)/);
+  assert.match(tableSrc, /const defaultLevel = \(\) => defaultSegmentLevel\(model\(\)\)/);
+  assert.match(tableSrc, /picked\(\) : defaultLevel\(\)/);
+});
+
 test('a long level switch scrolls inside itself, and the active pill stays seen', () => {
   const css = read('../../../market/src/seller-segments.css');
   const many = /\.segment-levels\.is-many \{([^}]*)\}/.exec(css)?.[1] || '';
