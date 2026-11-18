@@ -94,6 +94,17 @@ test('the drawer body is the fields, then the strategy step, then the footer', (
   assert.match(form, /\{drawer\(\) \? drawerBody\(\) : \(/);
 });
 
+test('a price the seller typed or took leaves the group behind in the menu too', () => {
+  // The rule can be picked in this edit or be the membership the row came with,
+  // and the decision is the helper's: `ownPriceChoice`.
+  assert.match(form, /ownPriceChoice\(\{ picked: pricingPick\(\), inGroup: Boolean\(rowGroup\(\)\) \}\)/);
+  assert.equal(form.match(/takeOwnPrice\(\);/g).length, 3, 'the preset chip, the keystroke and the input');
+  // The group note stays while the row is still in the group.
+  assert.match(form, /<Show when=\{!followsPricing\(\) && rowGroup\(\)\}>[\s\S]{0,140}groupPriceNote\(rowGroup\(\)\)/);
+  // The menu never marks an entry without an id, such as "New strategy…".
+  assert.match(form, /const pricingChosen = \(entry\) => pricingEntryChosen\(\{/);
+});
+
 test('the desk.css styles the drawer and has no centred modal left', () => {
   for (const rule of [
     '.listing-drawer-scrim',

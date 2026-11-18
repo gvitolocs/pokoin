@@ -21,10 +21,12 @@ import {
   listingFormEdited,
   listingFormState,
   listingSaveOutcome,
+  ownPriceChoice,
   patchCarriesPrice,
   pricingAnswerCounts,
   pricingDryRunBody,
   pricingDryRunPrice,
+  pricingEntryChosen,
   pricingFieldPkn,
   pricingGroupOf,
   pricingMenuEntries,
@@ -296,9 +298,11 @@ export default function ListingForm(props) {
     return Boolean(pick) && pick.kind !== 'custom';
   };
   /** Whether a menu row is the one in force. */
-  const pricingChosen = (entry) => (entry.kind === 'custom'
-    ? (pricingPick() ? pricingPick().kind === 'custom' : !rowGroup())
-    : pricingPick()?.id === entry.id);
+  const pricingChosen = (entry) => pricingEntryChosen({
+    entry,
+    picked: pricingPick(),
+    inGroup: Boolean(rowGroup()),
+  });
   /** What a picked group or strategy did to this listing's price. */
   const pricingNoteLine = () => {
     const pick = pricingPick();
@@ -318,9 +322,12 @@ export default function ListingForm(props) {
 
   /** The seller prices this listing: the field's number is theirs, and a new one leaves the group. */
   function takeOwnPrice() {
-    if (!followsPricing()) return;
+    // A rule can sit on the price two ways — picked in this edit, or the group
+    // the listing is already in — and an own number leaves either one.
+    const next = ownPriceChoice({ picked: pricingPick(), inGroup: Boolean(rowGroup()) });
+    if (!next) return;
     pricingRun += 1;
-    setPricingPick(CUSTOM_PRICING);
+    setPricingPick(next);
     setPricingTarget(null);
     setPricingChecked(false);
   }
