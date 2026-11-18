@@ -433,3 +433,99 @@ fn missing_redirect_uri_names_the_variable_the_code_reads() {
     );
     assert!(!error.contains("SECRET_SENTINEL"));
 }
+
+#[tokio::test]
+async fn a_non_json_401_refreshes_once_and_retries() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let yt = client(&server, &dir);
+    write_token(
+        &yt.config.token_path,
+        &json!({"access_token":"rejected","refresh_token":"keep"}),
+    )
+    .await
+    .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/youtube/v3/channels"))
+        .and(header("authorization", "Bearer rejected"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("<html>Unauthorized</html>"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token":"fresh","expires_in":3600})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/youtube/v3/channels"))
+        .and(header("authorization", "Bearer fresh"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items":[]})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert_eq!(
+        yt.request(reqwest::Method::GET, "channels", &[], None)
+            .await
+            .unwrap(),
+        json!({"items":[]})
+    );
+}
+
+#[tokio::test]
+async fn other_non_json_bodies_keep_failing_without_a_refresh() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let yt = client(&server, &dir);
+    write_token(
+        &yt.config.token_path,
+        &json!({"access_token":"live","refresh_token":"keep","expiry_date":poko_bot::history::now_ms() + 600_000}),
+    )
+    .await
+    .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/youtube/v3/channels"))
+        .and(header("authorization", "Bearer live"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = format!(
+        "{:#}",
+        yt.request(reqwest::Method::GET, "channels", &[], None)
+            .await
+            .unwrap_err()
+    );
+    assert!(error.contains("403"), "{error}");
+    assert!(error.contains("api_error"), "{error}");
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/token")
+            .count(),
+        0,
+        "only a 401 may refresh"
+    );
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/youtube/v3/channels"))
+        .and(header("authorization", "Bearer live"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = format!(
+        "{:#}",
+        yt.request(reqwest::Method::GET, "channels", &[], None)
+            .await
+            .unwrap_err()
+    );
+    assert_eq!(error, "YouTube response is not JSON");
+}

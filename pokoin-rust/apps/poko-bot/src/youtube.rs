@@ -375,10 +375,19 @@ impl Youtube {
             .await
             .map_err(|_| anyhow::anyhow!("YouTube transport failed"))?;
         let status = response.status();
-        let data: Value = response
-            .json()
-            .await
-            .map_err(|_| anyhow::anyhow!("YouTube response is not JSON"))?;
+        let data: Value = match response.json().await {
+            Ok(data) => data,
+            // googleapis retries on the status alone, so a non-JSON 401 — a proxy error page, an
+            // empty gateway body — must still reach the refresh path instead of failing as unreadable.
+            Err(_) if !status.is_success() => {
+                return Err(YoutubeError {
+                    status: status.as_u16(),
+                    reason: "api_error".into(),
+                }
+                .into())
+            }
+            Err(_) => return Err(anyhow::anyhow!("YouTube response is not JSON")),
+        };
         if !status.is_success() {
             let reason = data["error"]["errors"][0]["reason"]
                 .as_str()
