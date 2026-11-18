@@ -345,7 +345,7 @@ id = "card-page"
 name = "Visitor opens a card desk with listings, sold data and versions"
 money = false
 entry = ["solid/src/pages/Card.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js"]
+proof = ["pokoin-rust/apps/api/src/catalog_api.rs", "pokoin-rust/crates/catalog-api/tests/graded_versions_flow.rs", "market/src/card-response.test.js", "market/src/listings-cache.test.js", "market/src/api-listings-window.test.js"]
 status = "partial"
 
 [[flow]]

@@ -166,8 +166,16 @@ import { listingSelected } from '../lib/select-band.js';
 import { afterPaint } from '../lib/yield-nav.js';
 import { BUYSELL_PREVIEW_BANNER, previewListings, previewScale } from './buysell-preview-fixture.js';
 
-/** A hover / intent prefetch this recent counts as the desk's own first read. */
-const PREFETCH_FRESH_MS = 10_000;
+/**
+ * A hover / intent prefetch this recent counts as the desk's own first read.
+ * Two minutes and not ten seconds: the desk warms the neighbour it is about to
+ * open, and a visitor who reads a card longer than that still paints from that
+ * warm copy instead of sending a cache-busting `_=` and waiting on it. What
+ * really changes a listing reaches this desk over the live channel
+ * (market/src/listing-live.js), and the visitor's own write re-reads with no
+ * window at all (`onListed`).
+ */
+const PREFETCH_FRESH_MS = 120_000;
 
 const DESK_VARS = ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint'];
 

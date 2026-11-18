@@ -32,8 +32,13 @@ test('desk title, set and artist drag their own bundles without starting a tile 
 test('a desk not painted from a peek shows the stored copy and merges the revalidated page', () => {
   assert.match(page, /fresh: Boolean\(cached\),\n\s+onUpdate: showCard,/);
   assert.match(page, /fetchVersionSet\(cardId, \{ onUpdate: showVersionSet \}\)\.then\(showVersionSet\)/);
-  // Listings stay live: never a stored copy.
+  // The mount read is a forced re-read, and `maxAgeMs` is how recent a warm the
+  // desk adopts instead of sending one (CARD-01 P2: two minutes, so the neighbour
+  // the desk just warmed answers without a `=_` request).
   assert.match(page, /fetchListings\(cardId, \{ fresh: true, maxAgeMs \}\)/);
+  assert.match(page, /const PREFETCH_FRESH_MS = 120_000;/);
+  assert.match(page, /maxAgeMs = 0/);
+  assert.match(page, /refreshListings\(listingsSeq, PREFETCH_FRESH_MS\)/);
   assert.match(page, /includeOffers: false/);
 });
 
