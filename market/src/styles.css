@@ -4781,6 +4781,15 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   cursor: pointer;
 }
 
+/* Out of flow like the chips and the keys above it, so the plot fills the panel
+   and never decides its height. A percentage height inside an auto-height panel
+   is resolved from the svg's own aspect ratio, so the desk row moved when the
+   first frame landed (220 -> 192 -> 214 px at 1440 wide). */
+.sold-graph > svg {
+  position: absolute;
+  inset: 0;
+}
+
 .sold-graph.is-all {
   --sold-line: #f3f4f7;
   --sold-fill: rgb(243 244 247 / 0.14);
