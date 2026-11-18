@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Cardmarket watchlist export
+# Runs before pokoin-cardmarket-guides.timer: the collector is handed the
+# day's product list, the guides load follows it.
+
+[Timer]
+OnCalendar=*-*-* 02:35:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+Unit=pokoin-cm-watchlist.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Cardmarket watchlist — products to price per condition (docs/PRICE_DUMPS.md)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# pokoin_jobs login once migration 139 is applied; until then the binary falls
+# back to the writer container's own login (docker inspect).
+EnvironmentFile=-%h/.config/pokoin/cardmarket-prices.env
+ExecStart=%h/pokoin-cardmarket/current/pokoin-cardmarket-catalog cm-watchlist --days 7 --cap 1200 --out %h/scratch/cm-watchlist/watchlist.jsonl
+Nice=10
+TimeoutStartSec=10min
