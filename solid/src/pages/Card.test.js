@@ -387,25 +387,63 @@ test('every price source is a line inside the graph the desk already had', () =>
   assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
 });
 
-test('the desk reads the other sources after the hero, one window at a time', () => {
+test('the desk reads the other sources with the sales, one window at a time', () => {
   assert.match(page, /const \[graphRange, setGraphRange\] = createSignal\(PRICE_HISTORY_DEFAULT_RANGE\);/);
-  // Not before the hero, not before the sales: idle, then ask.
+  // With the sales, never after the hero and idle: the graph is drawn once.
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
-  assert.match(history, /afterHero\(\(\) => whenIdle\(\(\) => \{/);
-  assert.ok(page.indexOf('const [graphRange') > page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.ok(page.indexOf('const [graphRange') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.ok(page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE)') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
-  // One read per card and window, kept in memory for the next visit.
+  // One read per card and window, kept for the next visit.
   assert.match(history, /const graphHistoryKey = \(\) => `\$\{cardId\}\|\$\{graphRange\(\)\}`;/);
-  assert.match(history, /priceHistoryCache\.set\(askedFor, entry\);/);
+  assert.match(history, /saveCardPriceHistory\(cardId, range, entry\);/);
   // A late answer for a card or window nobody asked for anymore is dropped, and
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
   assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
   // Pokoin now is the cheapest live listing this desk already has.
-  assert.match(page, /const graphNowPoint = \(\) => Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0;/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
+});
+
+test('the card graph draws once, complete: no sold line alone while the history loads', () => {
+  // PH-03: the history read left the hero and idle gate, so the sold line drew
+  // a second before the other sources rewrote the same panel.
+  const history = page.slice(
+    page.indexOf('// The other price sources join the graph'),
+    page.indexOf('fetchCardSales(cardId, { slices: true })'),
+  );
+  assert.ok(history.length > 200, 'the history read is one block, beside the sales');
+  assert.doesNotMatch(history, /whenIdle|afterHero|holdForHero/);
+  assert.match(history, /askGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\);/);
+  // The panel gets nothing at all until both reads are in, so no key, scale or
+  // line arrives after the first draw.
+  assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\)/);
+});
+
+test('an uncached graph waits for both reads, at most 1.5s after the sales', () => {
+  assert.match(page, /const GRAPH_HISTORY_WAIT_MS = 1500;/);
+  assert.match(page, /const \[graphDrawn, setGraphDrawn\] = createSignal\(Boolean\(priceHistory\(\) && salesSlices\(\) != null\)\);/);
+  assert.match(page, /const timer = window\.setTimeout\(\(\) => setGraphDrawn\(true\), GRAPH_HISTORY_WAIT_MS\);/);
+  assert.match(page, /return \(\) => window\.clearTimeout\(timer\);/);
+});
+
+test('the desk peeks the persisted history cache, stale included, and redraws only on new data', () => {
+  const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
+  assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
+  assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
+  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\)\);/);
+  assert.match(history, /const known = readGraphHistory\(range\);/);
+  // A range button is the same read: cached paints at once, uncached keeps the
+  // lines that are drawn until it answers.
+  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\);/);
+  // Identical data does not re-render a graph the cache already drew.
+  assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
 
 test('long windows read their dates with the year', () => {
