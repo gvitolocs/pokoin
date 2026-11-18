@@ -360,8 +360,8 @@ status = "partial"
 id = "home-rails"
 name = "Visitor browses the marketplace home rails"
 money = false
-entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
-proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs"]
+entry = ["solid/src/pages/Home.jsx", "market/src/lists.js", "pokoin-rust/apps/api/src/rails.rs", "pokoin-rust/crates/edge/src/edge.rs", "scripts/marketplace-home-purge.sh"]
+proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs", "pokoin-rust/crates/edge/src/edge.rs::a_rail_is_refetched_rather_than_replayed_stale", "pokoin-rust/crates/edge/src/edge.rs::a_stale_replay_says_its_age_and_is_not_for_a_shared_cache"]
 status = "partial"
 
 [[flow]]
