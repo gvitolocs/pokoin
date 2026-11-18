@@ -15,6 +15,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{json, Map, Value as Json};
 
+use crate::domain::portfolio_segments::SEGMENTS_REVISION;
+
 pub const PRICE_BASIS: &str = "ct-last-sold";
 pub const SERIES_REVISION: i64 = 4;
 pub const HISTORY_DAYS: i64 = 400;
@@ -34,18 +36,35 @@ pub const SOLD_BY_BLUEPRINT_SQL: &str = "\
     and median_pkn > 0 \
     and sold_qty > 0";
 
-/// CardTrader 1-DR stock plus the seller's own Pokoin listings.
+/// CardTrader 1-DR stock plus the seller's own Pokoin listings. The last four
+/// columns change nothing about what a row *is*: they only say which dashboard
+/// segment it belongs to (see [`crate::domain::portfolio_segments`]).
+/// `marketplace_card_versions.card_id` is unique, so the joins cannot duplicate
+/// a row and the totals stay exactly what they were.
 pub const HOLDINGS_SQL: &str = "\
-  select blueprint_id, condition, language, reverse, first_edition, graded, \
-         quantity, created_at::text as since \
-  from public.marketplace_cardtrader_1dr_assets \
-  where seller_uid = $1 and quantity > 0 \
+  select a.blueprint_id, a.condition, a.language, a.reverse, a.first_edition, a.graded, \
+         a.quantity, a.created_at::text as since, \
+         'pokemon' as game, \
+         coalesce(e.official_id, '') as set_code, \
+         coalesce(v.product_type, 'card') as product_type, \
+         false as listed_sealed \
+  from public.marketplace_cardtrader_1dr_assets a \
+  left join public.marketplace_card_versions v on v.card_id::text = a.card_id \
+  left join public.pokoin_pokemon_blueprints b on b.id::text = a.blueprint_id \
+  left join public.pokoin_pokemon_expansions e on e.expansion_id = b.expansion_id \
+  where a.seller_uid = $1 and a.quantity > 0 \
   union all \
   select coalesce(v.blueprint_id::text, '') as blueprint_id, l.condition, l.language, \
          l.reverse, l.first_edition, l.graded, \
-         l.quantity_available as quantity, l.created_at::text as since \
+         l.quantity_available as quantity, l.created_at::text as since, \
+         coalesce(nullif(l.marketplace_game, ''), 'pokemon') as game, \
+         coalesce(e.official_id, '') as set_code, \
+         coalesce(v.product_type, 'card') as product_type, \
+         coalesce(l.sealed, false) as listed_sealed \
   from public.marketplace_user_listings l \
   left join public.marketplace_card_versions v on v.card_id::text = l.card_id \
+  left join public.pokoin_pokemon_blueprints b on b.id = v.blueprint_id \
+  left join public.pokoin_pokemon_expansions e on e.expansion_id = b.expansion_id \
   where l.seller_uid = $1 \
     and l.status in ('active', 'paused') \
     and l.quantity_available > 0 \
@@ -176,12 +195,12 @@ fn field_number(row: &Json, key: &str) -> Option<f64> {
     })
 }
 
-fn field_bool(row: &Json, keys: &[&str]) -> bool {
+pub(crate) fn field_bool(row: &Json, keys: &[&str]) -> bool {
     keys.iter()
         .any(|key| row.get(*key).and_then(Json::as_bool).unwrap_or(false))
 }
 
-fn field_str(row: &Json, key: &str) -> String {
+pub(crate) fn field_str(row: &Json, key: &str) -> String {
     row.get(key)
         .and_then(Json::as_str)
         .unwrap_or("")
@@ -863,6 +882,41 @@ pub fn top_movers(
     TopMovers { gainers, losers }
 }
 
+/// A stored or computed `segments` object, cleaned for the response: every
+/// entry that is an array of exactly three finite non-negative numbers, the
+/// PKN value at two decimals and both counts as integers. `None` when nothing
+/// usable is left, so a day without segments carries no field at all.
+fn clean_segments(value: Option<&Json>) -> Option<Json> {
+    let entries = value?.as_object()?;
+    let mut cleaned = Map::new();
+    for (key, entry) in entries {
+        let Some(parts) = entry.as_array().filter(|parts| parts.len() == 3) else {
+            continue;
+        };
+        let numbers = parts
+            .iter()
+            .map(|part| {
+                part.as_f64()
+                    .filter(|number| number.is_finite() && *number >= 0.0)
+            })
+            .collect::<Option<Vec<f64>>>();
+        let Some(numbers) = numbers else { continue };
+        cleaned.insert(
+            key.clone(),
+            json!([
+                num(round2(numbers[0])),
+                numbers[1] as i64,
+                numbers[2] as i64,
+            ]),
+        );
+    }
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(Json::Object(cleaned))
+    }
+}
+
 /// `compactDay(row)` — the stored public day shape.
 pub fn compact_day(row: &Json) -> Option<Json> {
     let date = day_of(row.get("date"));
@@ -903,7 +957,7 @@ pub fn compact_day(row: &Json) -> Option<Json> {
         None
     };
     let total = currency_pkn + cards_value_pkn.unwrap_or(0.0);
-    Some(json!({
+    let mut day = json!({
         "date": date,
         "currencyPkn": num(currency_pkn),
         "cardsValuePkn": cards_value_pkn.map(num).unwrap_or(Json::Null),
@@ -912,7 +966,14 @@ pub fn compact_day(row: &Json) -> Option<Json> {
         "cardsHeld": if has_cards { held } else { 0 },
         "cardsMove": cards_move.map(num).unwrap_or(Json::Null),
         "totalPkn": num(round2(total)),
-    }))
+    });
+    // A day that never had segments serializes exactly as it did before.
+    if let (Some(segments), Some(object)) =
+        (clean_segments(row.get("segments")), day.as_object_mut())
+    {
+        object.insert("segments".into(), segments);
+    }
+    Some(day)
 }
 
 /// `cleanDays(value)`.
@@ -1064,6 +1125,103 @@ pub fn build_daily_series(
         date = next_date;
     }
     points
+}
+
+/// The stored `segments` of every frozen day, kept only when the document is on
+/// the current basis, series revision *and* [`SEGMENTS_REVISION`]. A day stored
+/// without usable segments is simply absent, so its segments get recomputed
+/// while its card total stays frozen — the totals of past days are never rebuilt.
+pub fn frozen_segment_days(doc: Option<&Json>, today_key: &str) -> BTreeMap<String, Json> {
+    let mut frozen = BTreeMap::new();
+    let Some(doc) = doc else {
+        return frozen;
+    };
+    if doc.get("priceBasis").and_then(Json::as_str) != Some(PRICE_BASIS) {
+        return frozen;
+    }
+    if doc.get("seriesRevision").and_then(Json::as_i64) != Some(SERIES_REVISION) {
+        return frozen;
+    }
+    if doc.get("segmentsRevision").and_then(Json::as_i64) != Some(SEGMENTS_REVISION) {
+        return frozen;
+    }
+    let Some(rows) = doc.get("days").and_then(Json::as_array) else {
+        return frozen;
+    };
+    for row in rows {
+        let date = day_of(row.get("date"));
+        if date.is_empty() || !(date.as_str() < today_key) {
+            continue;
+        }
+        let Some(segments) = clean_segments(row.get("segments")) else {
+            continue;
+        };
+        frozen.insert(date, segments);
+    }
+    frozen
+}
+
+/// Price a day's segments from today's holdings: `[valuePkn, cardsPriced,
+/// cardsHeld]` per key, leaving out a segment with nothing held.
+fn segments_on(
+    segment_holdings: &BTreeMap<String, Vec<Holding>>,
+    book: &HashMap<String, Vec<PricePoint>>,
+    day: &str,
+) -> Option<Json> {
+    let mut segments = Map::new();
+    for (key, holdings) in segment_holdings {
+        if let Some(value) = value_holdings_on(holdings, book, day) {
+            segments.insert(
+                key.clone(),
+                json!([
+                    num(round2(value.cards_value_pkn)),
+                    value.cards_priced,
+                    value.cards_held,
+                ]),
+            );
+        }
+    }
+    if segments.is_empty() {
+        None
+    } else {
+        Some(Json::Object(segments))
+    }
+}
+
+/// `buildDailySeries` plus one value series per segment of the collection.
+///
+/// The totals are built by [`build_daily_series`] and are not looked at again: a
+/// day whose totals are frozen but which has no stored segments gets segments
+/// priced from today's holdings under a frozen total, so for such days the
+/// segments need not add up to the total. Every day still passes through
+/// [`compact_day`], which is where the segment values are cleaned.
+pub fn build_daily_series_with_segments(
+    wallet: &[Json],
+    holdings: &[Holding],
+    book: &HashMap<String, Vec<PricePoint>>,
+    frozen: &BTreeMap<String, Json>,
+    segment_holdings: &BTreeMap<String, Vec<Holding>>,
+    frozen_segments: &BTreeMap<String, Json>,
+    today_key: &str,
+) -> Vec<Json> {
+    build_daily_series(wallet, holdings, book, frozen, today_key)
+        .into_iter()
+        .map(|day| {
+            let date = day.get("date").and_then(Json::as_str).unwrap_or("");
+            let segments = match frozen_segments.get(date) {
+                Some(stored) => Some(stored.clone()),
+                None => segments_on(segment_holdings, book, date),
+            };
+            let Some(segments) = segments else {
+                return day;
+            };
+            let mut row = day;
+            if let Some(object) = row.as_object_mut() {
+                object.insert("segments".into(), segments);
+            }
+            compact_day(&row).unwrap_or(row)
+        })
+        .collect()
 }
 
 /// `storedIsFresh(doc, now)`.
@@ -1893,5 +2051,272 @@ mod tests {
         let movers = top_movers(&holdings, &book, "", "2026-05-25", 6);
         assert_eq!(movers.gainers[0].start_pkn, 100.0);
         assert_eq!(movers.gainers[0].series[0].day, "2026-05-01");
+    }
+
+    // -----------------------------------------------------------------------
+    // Segments
+    // -----------------------------------------------------------------------
+
+    use crate::domain::portfolio_segments::{segment_holdings, SEGMENTS_REVISION};
+
+    /// A held single, as the holdings query reports it.
+    fn held_row(blueprint: &str, set_code: &str, qty: i64, since: &str) -> Json {
+        json!({
+            "blueprint_id": blueprint, "condition": "NM", "language": "EN",
+            "reverse": false, "first_edition": false, "graded": false,
+            "quantity": qty, "since": since, "game": "pokemon", "set_code": set_code,
+            "product_type": "card", "listed_sealed": false
+        })
+    }
+
+    /// One sold median for the slice `held_row` describes.
+    fn sold_row(blueprint: &str, day: &str, pkn: f64) -> Json {
+        json!({
+            "blueprint_id": blueprint, "condition": "NM", "language": "EN",
+            "reverse": false, "first_edition": false, "graded": false,
+            "day": day, "median_pkn": pkn
+        })
+    }
+
+    fn day_of_key(days: &[Json], date: &str) -> Json {
+        days.iter()
+            .find(|day| day["date"] == json!(date))
+            .cloned()
+            .unwrap_or(Json::Null)
+    }
+
+    #[test]
+    fn compact_day_keeps_only_usable_segments() {
+        let day = compact_day(&json!({
+            "date": "2026-10-08", "currencyPkn": 0, "cardsValuePkn": 20.57,
+            "cardsPriced": 3, "cardsHeld": 3,
+            "segments": {
+                "pokemon:era:vintage": [20.567, 2, 2],
+                "pokemon:era:sv": [5, 1.9, 1.9],
+                "short": [1, 2],
+                "long": [1, 2, 3, 4],
+                "negative": [-1, 1, 1],
+                "text": ["a", 1, 1],
+                "nan": [f64::NAN, 1, 1],
+                "object": { "x": 1 },
+                "null": null
+            }
+        }))
+        .unwrap();
+        // The value keeps two decimals, the counts become integers, and only the
+        // well-shaped entries survive.
+        assert_eq!(
+            day["segments"],
+            json!({
+                "pokemon:era:vintage": [20.57, 2, 2],
+                "pokemon:era:sv": [5, 1, 1]
+            })
+        );
+        // It is the last field, so a day without segments is byte for byte what
+        // it always was.
+        assert_eq!(
+            serde_json::to_string(&day).unwrap(),
+            "{\"date\":\"2026-10-08\",\"currencyPkn\":0,\"cardsValuePkn\":20.57,\"cardsKnown\":true,\
+             \"cardsPriced\":3,\"cardsHeld\":3,\"cardsMove\":null,\"totalPkn\":20.57,\
+             \"segments\":{\"pokemon:era:vintage\":[20.57,2,2],\"pokemon:era:sv\":[5,1,1]}}"
+        );
+        let plain = compact_day(&json!({ "date": "2026-10-08", "currencyPkn": 5 })).unwrap();
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            "{\"date\":\"2026-10-08\",\"currencyPkn\":5,\"cardsValuePkn\":null,\"cardsKnown\":false,\
+             \"cardsPriced\":0,\"cardsHeld\":0,\"cardsMove\":null,\"totalPkn\":5}"
+        );
+
+        // An empty, wholly malformed or non-object segments field leaves no field.
+        for segments in [
+            json!({}),
+            json!({ "x": [1] }),
+            json!([1, 2]),
+            json!("segments"),
+            Json::Null,
+        ] {
+            let day = compact_day(&json!({
+                "date": "2026-10-08", "currencyPkn": 5, "segments": segments
+            }))
+            .unwrap();
+            assert!(day.get("segments").is_none(), "{segments} leaked");
+        }
+    }
+
+    #[test]
+    fn series_days_carry_segments_that_add_up_to_the_card_total() {
+        let rows = vec![
+            held_row("100", "base1", 2, "2026-10-02"),
+            held_row("200", "sv1", 1, "2026-10-02"),
+            // Acquired after the series ends: absent from every day.
+            held_row("300", "ex1", 4, "2026-10-05"),
+        ];
+        let book = sold_price_book(&[
+            sold_row("100", "2026-10-01", 10.0),
+            sold_row("200", "2026-10-01", 5.0),
+            sold_row("300", "2026-10-01", 1.0),
+        ]);
+        let wallet = vec![json!({ "date": "2026-10-01", "currencyPkn": 100 })];
+        let days = build_daily_series_with_segments(
+            &wallet,
+            &holding_slices(&rows),
+            &book,
+            &BTreeMap::new(),
+            &segment_holdings(&rows),
+            &BTreeMap::new(),
+            "2026-10-04",
+        );
+        assert_eq!(days.len(), 4);
+
+        // A day before the first holding has no cards and so no segments field.
+        let first = day_of_key(&days, "2026-10-01");
+        assert_eq!(first["cardsHeld"], json!(0));
+        assert!(first.get("segments").is_none());
+
+        let day = day_of_key(&days, "2026-10-03");
+        assert_eq!(
+            day["segments"],
+            json!({
+                "game:pokemon": [25, 3, 3],
+                "pokemon:era:sv": [5, 1, 1],
+                "pokemon:era:vintage": [20, 2, 2],
+            })
+        );
+        // Nothing sealed, graded or of another game is held, so those keys are
+        // not in the day at all.
+        for key in [
+            "all:sealed",
+            "all:graded",
+            "pokemon:era:mid",
+            "game:riftbound",
+        ] {
+            assert!(day["segments"].get(key).is_none(), "{key}");
+        }
+        // The era bands partition the Pokémon holdings: they add up to the total.
+        let eras: f64 = day["segments"]
+            .as_object()
+            .map(|segments| {
+                segments
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("pokemon:era:"))
+                    .map(|(_, value)| value[0].as_f64().unwrap_or(0.0))
+                    .sum()
+            })
+            .unwrap_or_default();
+        let total = day["cardsValuePkn"].as_f64().unwrap_or_default();
+        assert!((eras - total).abs() < 0.01, "{eras} vs {total}");
+        assert_eq!(day["segments"]["game:pokemon"][0], day["cardsValuePkn"]);
+        assert_eq!(total, 25.0);
+    }
+
+    #[test]
+    fn frozen_segment_days_keeps_only_a_current_document() {
+        let doc = json!({
+            "priceBasis": PRICE_BASIS,
+            "seriesRevision": SERIES_REVISION,
+            "segmentsRevision": SEGMENTS_REVISION,
+            "days": [
+                { "date": "2026-10-01", "cardsValuePkn": 10, "segments": { "pokemon:era:vintage": [10, 1, 1] } },
+                // No or empty segments: the day is simply not in the map.
+                { "date": "2026-10-02", "cardsValuePkn": 11 },
+                { "date": "2026-10-03", "cardsValuePkn": 12, "segments": {} },
+                { "date": "2026-10-04", "cardsValuePkn": 13, "segments": { "x": [1] } },
+                // Today is never frozen.
+                { "date": "2026-10-08", "cardsValuePkn": 14, "segments": { "pokemon:era:sv": [1, 1, 1] } }
+            ]
+        });
+        let frozen = frozen_segment_days(Some(&doc), "2026-10-08");
+        assert_eq!(
+            frozen.keys().cloned().collect::<Vec<_>>(),
+            vec!["2026-10-01".to_string()]
+        );
+        assert_eq!(
+            frozen["2026-10-01"],
+            json!({ "pokemon:era:vintage": [10, 1, 1] })
+        );
+
+        for (field, value) in [
+            ("segmentsRevision", json!(SEGMENTS_REVISION + 1)),
+            ("seriesRevision", json!(SERIES_REVISION - 1)),
+            ("priceBasis", json!("something-else")),
+        ] {
+            let mut other = doc.clone();
+            other[field] = value.clone();
+            assert!(
+                frozen_segment_days(Some(&other), "2026-10-08").is_empty(),
+                "{field}={value:?}"
+            );
+        }
+        // A document stored before segments existed has nothing to reuse.
+        let mut none = doc.clone();
+        none.as_object_mut().unwrap().remove("segmentsRevision");
+        assert!(frozen_segment_days(Some(&none), "2026-10-08").is_empty());
+        assert!(frozen_segment_days(None, "2026-10-08").is_empty());
+    }
+
+    #[test]
+    fn a_frozen_day_reuses_its_segments_or_gets_today_without_touching_the_total() {
+        let rows = vec![held_row("100", "base1", 2, "2026-10-01")];
+        let book = sold_price_book(&[sold_row("100", "2026-10-01", 10.0)]);
+        let wallet = vec![json!({ "date": "2026-10-01", "currencyPkn": 0 })];
+        let mut frozen = BTreeMap::new();
+        // The stored card value of the frozen day is deliberately not what today's
+        // holdings would price (20), so the two paths stay distinguishable.
+        frozen.insert(
+            "2026-10-02".to_string(),
+            json!({ "cardsValuePkn": 7, "cardsPriced": 1, "cardsHeld": 1, "cardsMove": Json::Null }),
+        );
+
+        // With a stored segments object, that object wins even though the
+        // holdings have moved on.
+        let mut frozen_segments = BTreeMap::new();
+        frozen_segments.insert(
+            "2026-10-02".to_string(),
+            json!({ "pokemon:era:vintage": [3, 1, 1] }),
+        );
+        let days = build_daily_series_with_segments(
+            &wallet,
+            &holding_slices(&rows),
+            &book,
+            &frozen,
+            &segment_holdings(&rows),
+            &frozen_segments,
+            "2026-10-03",
+        );
+        let stored = day_of_key(&days, "2026-10-02");
+        assert_eq!(stored["cardsValuePkn"], json!(7));
+        assert_eq!(
+            stored["segments"],
+            json!({ "pokemon:era:vintage": [3, 1, 1] })
+        );
+        // Today is priced from the holdings, as always.
+        assert_eq!(
+            day_of_key(&days, "2026-10-03")["segments"],
+            json!({
+                "game:pokemon": [20, 2, 2],
+                "pokemon:era:vintage": [20, 2, 2]
+            })
+        );
+
+        // An old document (missing segmentsRevision) has nothing to reuse: the
+        // day keeps its frozen total while its segments come from today.
+        let days = build_daily_series_with_segments(
+            &wallet,
+            &holding_slices(&rows),
+            &book,
+            &frozen,
+            &segment_holdings(&rows),
+            &BTreeMap::new(),
+            "2026-10-03",
+        );
+        let recomputed = day_of_key(&days, "2026-10-02");
+        assert_eq!(recomputed["cardsValuePkn"], json!(7));
+        assert_eq!(
+            recomputed["segments"],
+            json!({
+                "game:pokemon": [20, 2, 2],
+                "pokemon:era:vintage": [20, 2, 2]
+            })
+        );
     }
 }
