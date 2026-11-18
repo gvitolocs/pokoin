@@ -102,20 +102,53 @@ function SegmentSpark(props) {
   );
 }
 
-/** A row nothing can be plotted for: held stock with no sale, or none at all. */
-function PlainRow(props) {
+/** The cells of a row that has no value to plot. */
+function PlainCells(props) {
   const empty = () => props.row.state === 'empty';
   // A saved list with nothing in it is not a slice the seller happens not to
   // hold, so the Collections level names its empty row for what it is.
   const note = () => (empty() ? props.emptyNote || 'None held' : 'No price data yet');
   return (
-    <div class={['segment-row', 'is-plain', { 'is-empty': empty() }]} data-testid={`segment-row-${props.row.key}`}>
+    <>
       <Label row={props.row} />
       <span class="segment-cards">{empty() ? '0' : cards(props.row.held)}</span>
       <span class="segment-note">{note()}</span>
       <span class="segment-change" />
       <span class="segment-spark" aria-hidden="true" />
-    </div>
+    </>
+  );
+}
+
+/**
+ * A row nothing can be plotted for: held stock with no sale, or none at all.
+ * A saved list opens all the same when the table hands it an `onToggle`: its
+ * Edit and Delete live in the panel under the row, and a list whose cards have
+ * never sold would otherwise be immovable.
+ */
+function PlainRow(props) {
+  const empty = () => props.row.state === 'empty';
+  const cells = () => <PlainCells row={props.row} emptyNote={props.emptyNote} />;
+  return (
+    <Show
+      when={props.onToggle}
+      fallback={(
+        <div class={['segment-row', 'is-plain', { 'is-empty': empty() }]} data-testid={`segment-row-${props.row.key}`}>
+          {cells()}
+        </div>
+      )}
+    >
+      <button
+        type="button"
+        class={['segment-row', 'is-plain', { 'is-empty': empty(), 'is-open': Boolean(props.isOpen) }]}
+        data-testid={`segment-row-${props.row.key}`}
+        aria-expanded={String(Boolean(props.isOpen))}
+        aria-controls={props.isOpen ? `segment-chart-${props.row.key}` : undefined}
+        onClick={() => props.onToggle()}
+      >
+        {cells()}
+        <Chevron />
+      </button>
+    </Show>
   );
 }
 
@@ -328,19 +361,30 @@ export default function SegmentTable(props) {
   const isCollections = () => levelId() === COLLECTIONS_LEVEL;
   // What the row states when it is open: the two counts the value is built
   // from, for the day the window ends on.
-  const collectionsMeta = (row) => `Priced ${cards(row.priced)} of ${cards(row.held)} cards`;
+  const collectionsMeta = (row) => (row.held > 0
+    ? `Priced ${cards(row.priced)} of ${cards(row.held)} cards`
+    : 'No card in this list yet. Edit adds one.');
 
   const groups = createMemo(() => segmentGroups(model(), levelId(), windowRange()));
   const rows = createMemo(() => groups().flatMap((group) => group.rows));
   // Only a row that is on this level and can be plotted holds a chart open:
   // one that leaves the level or loses its prices closes with it, so an open
   // chart never outlives the button that would close it.
-  const openRow = createMemo(() => rows().find((row) => row.key === open() && row.state === 'ok') || null);
+  // A saved list is the exception: with nothing sold there is no chart, but the
+  // row still opens, because Edit and Delete are only in that panel.
+  const openCollection = createMemo(() => (isCollections()
+    ? rows().find((row) => row.key === open()) || null
+    : null));
+  const openRow = createMemo(() => rows().find((row) => row.key === open() && row.state === 'ok') || openCollection());
   const isOpen = (key) => openRow()?.key === key;
 
   function chooseLevel(id) {
     setPicked(id);
     setOpen('');
+  }
+
+  function toggleRow(key) {
+    setOpen((current) => (current === key ? '' : key));
   }
 
   // The compare series: the whole collection on the `all` level, that game's
@@ -514,7 +558,14 @@ export default function SegmentTable(props) {
                   <For each={group().rows} keyed={(row) => row.key}>
                     {(row) => (
                       <>
-                        <Switch fallback={<PlainRow row={row()} emptyNote={isCollections() ? 'No cards yet' : ''} />}>
+                        <Switch fallback={(
+                          <PlainRow
+                            row={row()}
+                            emptyNote={isCollections() ? 'No cards yet' : ''}
+                            isOpen={isOpen(row().key)}
+                            onToggle={isCollections() ? () => toggleRow(row().key) : undefined}
+                          />
+                        )}>
                           <Match when={row().state === 'ok'}>
                             <button
                               type="button"
@@ -522,7 +573,7 @@ export default function SegmentTable(props) {
                               data-testid={`segment-row-${row().key}`}
                               aria-expanded={String(isOpen(row().key))}
                               aria-controls={isOpen(row().key) ? `segment-chart-${row().key}` : undefined}
-                              onClick={() => setOpen((current) => (current === row().key ? '' : row().key))}
+                              onClick={() => toggleRow(row().key)}
                             >
                               <Label row={row()} />
                               <span class="segment-cards">{cards(row().held)}</span>
@@ -535,14 +586,16 @@ export default function SegmentTable(props) {
                         </Switch>
                         <Show when={isOpen(row().key) && chart()}>
                           <div class="segment-open" id={`segment-chart-${row().key}`} ref={chartBox}>
-                            <p class="segment-legend">
-                              <span class="segment-key is-segment" />
-                              {row().label}
-                              <strong class={['mover-tile-change', tone(chart().segmentChange)]}>{formatSegmentChange(chart().segmentChange)}</strong>
-                              <span class="segment-key is-collection" />
-                              {levelName()}
-                              <strong class={['mover-tile-change', tone(chart().collectionChange)]}>{formatSegmentChange(chart().collectionChange)}</strong>
-                            </p>
+                            <Show when={row().state === 'ok'}>
+                              <p class="segment-legend">
+                                <span class="segment-key is-segment" />
+                                {row().label}
+                                <strong class={['mover-tile-change', tone(chart().segmentChange)]}>{formatSegmentChange(chart().segmentChange)}</strong>
+                                <span class="segment-key is-collection" />
+                                {levelName()}
+                                <strong class={['mover-tile-change', tone(chart().collectionChange)]}>{formatSegmentChange(chart().collectionChange)}</strong>
+                              </p>
+                            </Show>
                             <Show when={isCollections()}>
                               <p class="segment-collections-meta" data-testid={`segment-collection-meta-${row().key}`}>
                                 <span>{collectionsMeta(row())}</span>
@@ -552,13 +605,15 @@ export default function SegmentTable(props) {
                               </p>
                               <CollectionActions row={row()} book={book()} />
                             </Show>
-                            <VersusChart
-                              width={chartWidth()}
-                              segmentPct={chart().segmentPct}
-                              collectionPct={chart().collectionPct}
-                              first={chart().first}
-                              last={chart().last}
-                            />
+                            <Show when={row().state === 'ok'}>
+                              <VersusChart
+                                width={chartWidth()}
+                                segmentPct={chart().segmentPct}
+                                collectionPct={chart().collectionPct}
+                                first={chart().first}
+                                last={chart().last}
+                              />
+                            </Show>
                           </div>
                         </Show>
                       </>

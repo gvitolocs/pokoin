@@ -108,6 +108,12 @@
   cursor: default;
 }
 
+/* A saved list with nothing sold is still a row the seller opens: it carries
+   the Edit and Delete of that list. */
+button.segment-row.is-plain {
+  cursor: pointer;
+}
+
 .segment-row.is-empty {
   opacity: 0.72;
 }

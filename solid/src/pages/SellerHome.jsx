@@ -224,8 +224,8 @@ function PreviewDashboard() {
     ),
   });
   // The fixture answers at once, and an answer is a signal write: after this
-  // render, not during it.
-  createEffect(() => collections.load('preview'));
+  // render, not during it. Nothing changes the source, so it answers once.
+  createEffect(() => 'preview', () => { collections.load('preview'); });
   return (
     <SellerDashboardView
       previewBanner

@@ -935,7 +935,9 @@ are the saved lists. An open list plots against the whole book **on the
 collection's own days** (`collectionSeriesOn`): `versusPaths` plots by index, so
 an unaligned pair would compare a Tuesday to a Friday. Delete is one inline
 confirm on the row, naming the list; the cards themselves stay in the
-collection.
+collection. A list with nothing sold opens too — with no chart, just the counts
+and the two buttons — because the row is its only way in, and a seller who
+cannot open it cannot delete it either.
 
 `solid/src/components/dashboard/CollectionEditor.jsx` holds the draft: Escape or
 Cancel throws it away without asking for anything, and a save the server refuses

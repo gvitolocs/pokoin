@@ -7,10 +7,12 @@ import {
   previewCollectionsFrom,
 } from '../../../market/src/portfolio-collections-preview.js';
 import {
+  COLLECTIONS_LEVEL,
   collectionSeriesOn,
   normalizeSegments,
   segmentGroups,
   segmentLevels,
+  segmentWindow,
   withCollections,
 } from '../../../market/src/portfolio-segments.js';
 import { previewSegmentsFrom } from '../../../market/src/portfolio-segments-preview.js';
@@ -22,6 +24,7 @@ const tableSrc = read('../components/dashboard/SegmentTable.jsx');
 const editorSrc = read('../components/dashboard/CollectionEditor.jsx');
 const bookSrc = read('../lib/collections-book.js');
 const css = read('../../../market/src/seller-collections.css');
+const segmentsCss = read('../../../market/src/seller-segments.css');
 
 /** Ten days of book value, enough for a change and a plotted line. */
 function series() {
@@ -129,6 +132,31 @@ test('the Collections level says what it cannot do yet', () => {
   assert.match(tableSrc, /data-testid=\{`segment-collection-confirm-\$\{props\.row\.key\}`\}/);
 });
 
+test('a saved list with nothing sold still opens: Edit and Delete live there', () => {
+  const lists = [
+    { id: 'sealed', name: 'Sealed nobody sold', items: [{ game: 'pokemon', cardId: '176014', name: 'Evolving Skies Booster Bundle', quantity: 2, pricePkn: null }] },
+    { id: 'bare', name: 'List with no card', items: [] },
+  ];
+  const model = withCollections(
+    normalizeSegments(previewSegmentsFrom(series())),
+    normalizeCollections(previewCollectionsFrom(series(), lists)).model,
+  );
+  const rows = segmentGroups(model, COLLECTIONS_LEVEL, segmentWindow(model, { id: '1M', days: 30 }))
+    .flatMap((group) => group.rows);
+  // Neither has a line to plot, which is exactly the case that used to strand a
+  // list: a row with no series is drawn by PlainRow, and only the table decides
+  // whether it opens.
+  assert.deepEqual(rows.map((row) => row.state), ['unpriced', 'empty']);
+  assert.match(tableSrc, /onToggle=\{isCollections\(\) \? \(\) => toggleRow\(row\(\)\.key\) : undefined\}/);
+  assert.match(tableSrc, /&& row\.state === 'ok'\) \|\| openCollection\(\)\);/);
+  // What it opens to is the counts and the two buttons, not an empty chart.
+  assert.match(tableSrc, /<Show when=\{row\(\)\.state === 'ok'\}>\s*<p class="segment-legend">/);
+  assert.match(tableSrc, /<Show when=\{row\(\)\.state === 'ok'\}>\s*<VersusChart/);
+  assert.match(tableSrc, /No card in this list yet\. Edit adds one\./);
+  // The pointer cursor returns only for a plain row that is a button.
+  assert.match(segmentsCss, /button\.segment-row\.is-plain \{\n\s*cursor: pointer;/);
+});
+
 test('the editor keeps its own draft and closes without sending it', () => {
   assert.match(editorSrc, /role="dialog"/);
   assert.match(editorSrc, /aria-modal="true"/);
@@ -208,5 +236,5 @@ test('the preview fixture is the same two lists the API shape carries', () => {
   // Memory only: the fixture answers whoever asks and never reaches for a token.
   assert.match(homeSrc, /previewAnswer: \(rows\) => previewCollectionsFrom\(/);
   assert.match(homeSrc, /rows\.length \? rows : PREVIEW_COLLECTIONS/);
-  assert.match(homeSrc, /createEffect\(\(\) => collections\.load\('preview'\)\);/);
+  assert.match(homeSrc, /createEffect\(\(\) => 'preview', \(\) => \{ collections\.load\('preview'\); \}\);/);
 });
