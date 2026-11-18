@@ -11,7 +11,7 @@ import test from 'node:test';
 import { compactQuery } from './suggest-rank.js';
 import { catalogRecall } from './suggest-pool.js';
 import { createRecallSearch, recallOrder } from './search-recall-core.js';
-import { paintCatalogGroups, rememberSuggestGroups, resetSuggestLive } from './suggest-live.js';
+import { liveSuggestGroups, paintCatalogGroups, rememberSuggestGroups, resetSuggestLive } from './suggest-live.js';
 
 const PAINT = { kind: 'singles', printLang: 'all', searchLang: 'en', limit: 20 };
 
@@ -81,11 +81,34 @@ test('every first-word-is-another-species-prefix name resolves', () => {
   }
 });
 
-test('the popup still fills toward twenty printings of the first word', () => {
+test('the popup fills toward twenty, ordered by how much of the query each row covers', () => {
   const many = group('Darkrai', Array.from({ length: 24 }, (_, index) => [`m${index}`, `Set ${index}`, `${index + 1}/100`]));
-  const rows = paint('dark unknownspecies', [many, DARK_PATCH, DARKNESS_ENERGY]);
+  const rows = paint('dark jolteon', [DARK_JOLTEON, DARK_JOLTEON_JP, many, DARK_PATCH, DARKNESS_ENERGY, JOLTEON]);
+  // Replaces "the popup still fills toward twenty printings of the first word":
+  // the fill still reaches twenty, but the stem is the last tier it widens to.
+  assert.deepEqual(rows.slice(0, 4), ['Dark Jolteon', 'Dark Jolteon Lv.23', 'Jolteon', 'Jolteon'], rows.join(', '));
+  const speciesLast = rows.lastIndexOf('Jolteon');
+  const stemFirst = rows.findIndex((name) => name === 'Darkrai' || name === 'Dark Patch' || name === 'Darkness Energy');
+  assert.ok(speciesLast < stemFirst, `Jolteon at ${speciesLast} sits behind the stem's ${stemFirst}: ${rows.join(', ')}`);
   assert.equal(rows.length, 20, `got ${rows.length}`);
-  assert.ok(rows.every((name) => name.startsWith('Dark')), `got ${rows.join(', ')}`);
+  // A query whose first word is a prefix but whose rest is not a name still
+  // widens to that word: nothing else is known about `dark unknownspecies`.
+  const unknown = paint('dark unknownspecies', [many, DARK_PATCH, DARKNESS_ENERGY]);
+  assert.equal(unknown.length, 20, `got ${unknown.length}`);
+  assert.ok(unknown.every((name) => name.startsWith('Dark')), `got ${unknown.join(', ')}`);
+});
+
+test('a compound answer that arrives after the stem pages still owns the popup', () => {
+  const rows = () => paintCatalogGroups('dark jolteon', PAINT).flatMap((row) => (row.printings || []).map((p) => p.name));
+  // The measured request order (report §2.A1): the stem's pages land first, so
+  // the popup paints them, and only then do the compound's own rows arrive.
+  resetSuggestLive();
+  rememberSuggestGroups([DARKRAI, DARK_PATCH, DARKNESS_ENERGY]);
+  assert.equal(rows()[0], 'Darkrai', 'the stem paints what is known while the compound is in flight');
+  rememberSuggestGroups([DARK_JOLTEON, DARK_JOLTEON_JP, JOLTEON]);
+  const late = rows();
+  assert.equal(late[0], 'Dark Jolteon', late.join(', '));
+  assert.ok(late.lastIndexOf('Jolteon') < late.indexOf('Darkrai'), `species behind the stem: ${late.join(', ')}`);
 });
 
 test('the results page recall lists the exact compound name before the stem', async () => {
@@ -109,4 +132,21 @@ test('the results page recall lists the exact compound name before the stem', as
   const page = await search({ query: 'dark jolteon', offset: 0, limit: 5, productType: 'card' });
   assert.deepEqual(page.recall, ['dark jolteon', 'dark']);
   assert.deepEqual(page.cards.map((card) => card.id), ['dark-jolteon', 'darkrai-1', 'darkrai-2', 'dark-patch']);
+});
+
+test('a cached name from another query is not absorbed into an exact one (PH-05 A2)', () => {
+  resetSuggestLive();
+  // A spelling the server once returned for a different query. It is within the
+  // edit cap of `dark jolteon`, so absorbing it used to make it a candidate.
+  rememberSuggestGroups([group('Dark Jolteau', [['f1', 'Team Rocket', '38/82']])]);
+  assert.deepEqual(
+    liveSuggestGroups('dark jolteon', { kind: 'singles' }).groups.map((row) => row.name),
+    [],
+    'the typed text is already a catalog name: only its own names are candidates',
+  );
+  // An unfinished query still needs the absorbed spelling to show anything.
+  assert.ok(
+    liveSuggestGroups('dark jolte', { kind: 'singles' }).groups.some((row) => row.name === 'Dark Jolteau'),
+    'a partial compound still ranks the cached spellings it collected',
+  );
 });
