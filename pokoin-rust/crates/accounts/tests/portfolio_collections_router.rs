@@ -90,9 +90,7 @@ fn card(id: &str, quantity: i64) -> Json {
 /// A Firestore whose answers come from what it was last told, so a read after a
 /// write is the write.
 fn store_state(seed: Vec<(String, Json)>) -> (pokoin_accounts::state::DomainState, Store) {
-    let store: Store = Arc::new(Mutex::new(
-        seed.into_iter().map(|(path, doc)| (path, doc)).collect(),
-    ));
+    let store: Store = Arc::new(Mutex::new(seed.into_iter().collect()));
     let transport = ScriptedTransport::new();
     transport.on("/oauth", |_| {
         HttpResponse::json(200, json!({ "access_token": "t", "expires_in": 3600 }))
