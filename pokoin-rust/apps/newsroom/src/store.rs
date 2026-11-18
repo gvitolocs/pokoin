@@ -78,6 +78,16 @@ pub fn save_record(dir: &Path, record: &Value) -> Result<()> {
     }
     Ok(())
 }
+/// article-store.js:44 — the English CMS record for a scout story, if there is one.
+pub fn find_record_by_story<'a>(records: &'a [Value], story_id: &str) -> Option<&'a Value> {
+    if story_id.is_empty() {
+        return None;
+    }
+    records.iter().find(|record| {
+        crate::text(record, "canonicalStoryId") == story_id
+            && crate::text(record, "language") == "en"
+    })
+}
 pub fn export_records(records: &[Value], scope: &str, strip: bool) -> Vec<Value> {
     records
         .iter()

@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 use pokoin_newsroom::{
-    cadence, editorial, handover, iso,
+    cadence, editorial, game, handover, iso,
     model::{Budget, Provider},
-    store, templates, website,
+    store, templates, text, website,
 };
 use serde_json::{json, Value};
 use std::{
@@ -191,18 +191,36 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
     }
     let budget = Budget::new(limit);
     let provider = Provider::from_env(budget.clone())?;
-    let hints = templates::hints(&fixture["pack"], now);
+    let stories = store::load_array(&dir.join(store::STORIES));
+    let records = store::load_array(&dir.join(store::RECORDS));
+    let state = store::strict_read(&dir.join(store::STATE))?;
+    let pack = &fixture["pack"];
+    // newsroom-publisher.mjs:91 — a daily slot accepts one specialist or official outlet.
+    let allow_single = cadence::cadence_for(game(pack)).kind == "daily";
+    // pipeline.js:132-134 — an existing record makes the story covered unless the
+    // pack is an update, and a covered story is never skipped for its score.
+    let story_id = {
+        let id = text(pack, "canonicalStoryId");
+        if id.is_empty() {
+            text(pack, "storyId")
+        } else {
+            id
+        }
+    };
+    let existing = store::find_record_by_story(&records, story_id);
+    let covered = existing.is_some() && pack["isUpdate"] != true;
+    let hints = templates::hints(pack, now);
     let valid_templates = templates::valid_templates(&hints);
-    let worthiness = templates::worthiness(&fixture["pack"], &hints, false, true);
-    let passes = if worthiness["decision"] != "article" {
+    let worthiness = templates::worthiness(pack, &hints, covered, allow_single);
+    let passes = if existing.is_none() && worthiness["decision"] != "article" {
         let decision = worthiness["decision"].as_str().unwrap_or("skip");
         Ok(
-            json!({"ok": true, "action": "skip", "reason": format!("editorial_worthiness_{decision}"), "worthiness": worthiness}),
+            json!({"ok": true, "action": "skip", "reason": format!("editorial_worthiness_{decision}"), "worthiness": worthiness.clone()}),
         )
     } else {
         editorial::run_passes(
             &provider,
-            &fixture["pack"],
+            pack,
             &hints,
             &valid_templates,
             fixture["memory"].as_str().unwrap_or(""),
@@ -210,14 +228,9 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
         )
         .await
     };
-    let plan = cadence::plan(
-        &store::load_array(&dir.join(store::STORIES)),
-        &store::load_array(&dir.join(store::RECORDS)),
-        &store::strict_read(&dir.join(store::STATE))?,
-        now,
-    );
+    let plan = cadence::plan(&stories, &records, &state, now);
     let mut report = json!({"at": iso(now), "dryRun": true, "inputKind": "captured-evidence-pack",
-        "productionReady": false, "plan": plan, "modelCalls": limit - budget.remaining()});
+        "productionReady": false, "worthiness": worthiness, "plan": plan, "modelCalls": limit - budget.remaining()});
     match passes {
         Ok(passes) => {
             report["passes"] = passes;

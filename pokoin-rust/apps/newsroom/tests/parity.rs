@@ -591,6 +591,123 @@ async fn full_editorial_passes_repair_malformed_output_using_native_http() {
 }
 
 #[test]
+fn find_record_by_story_is_the_english_cms_record_only() {
+    let records = vec![
+        json!({"id":"a", "canonicalStoryId":"s1", "language":"en"}),
+        json!({"id":"b", "canonicalStoryId":"s1", "language":"ja"}),
+        json!({"id":"c", "canonicalStoryId":"s2"}),
+    ];
+    assert_eq!(
+        store::find_record_by_story(&records, "s1").unwrap()["id"],
+        "a"
+    );
+    assert!(store::find_record_by_story(&records, "s2").is_none());
+    assert!(store::find_record_by_story(&records, "nope").is_none());
+    assert!(store::find_record_by_story(&records, "").is_none());
+}
+
+/// The dry-run must derive the two worthiness flags the live publisher passes:
+/// `allowSingleSpecialist` from the slot cadence kind (newsroom-publisher.mjs:91)
+/// and `covered` from an existing record (pipeline.js:132), and it must not skip a
+/// story that already has one (pipeline.js:133-134).
+#[test]
+fn dry_run_worthiness_flags_follow_cadence_and_existing_record() {
+    use std::process::Command;
+    let bin = env!("CARGO_BIN_EXE_pokoin-newsroom");
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    fs::create_dir(&data).unwrap();
+    store::atomic_json(&data.join(store::STORIES), &json!([])).unwrap();
+    store::atomic_json(
+        &data.join(store::STATE),
+        &json!({"attempts":[],"updates":{}}),
+    )
+    .unwrap();
+    let run = |records: Value, input: &std::path::Path, report: &std::path::Path| {
+        store::atomic_json(&data.join(store::RECORDS), &records).unwrap();
+        let output = Command::new(bin)
+            .args(["dry-run", "--input"])
+            .arg(input)
+            .args(["--data-dir"])
+            .arg(&data)
+            .args(["--output"])
+            .arg(report)
+            .args(["--now", "2026-10-05T18:00:00Z"])
+            .args(["--max-model-calls", "1"])
+            .env("POKO_NEWSROOM_CLAUDE_PROVIDER", "none")
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            store::strict_read(report).unwrap_or(Value::Null),
+        )
+    };
+
+    // A tier-A single-source story scores flash_only; only a daily slot may
+    // promote it to an article. gundam is weekly, so it stays skipped.
+    let weekly = json!({"pack":{"canonicalStoryId":"story_weekly","game":"gundam","status":"confirmed",
+        "angle":"OFFICIAL","firstSeenAt":"2026-10-05T18:00:00Z",
+        "sourceList":[{"id":"s1","outlet":"example.net","tier":"A","addedAt":"2026-10-05T18:00:00Z"}],
+        "claimLedger":[{"claim":"x","kind":"statement"}],"conflicts":[],"images":[]},"memory":""});
+    let weekly_input = root.path().join("weekly.json");
+    store::atomic_json(&weekly_input, &weekly).unwrap();
+    let weekly_report = root.path().join("weekly-report.json");
+    let (ok, report) = run(json!([]), &weekly_input, &weekly_report);
+    assert!(ok, "{report}");
+    assert_eq!(report["worthiness"]["decision"], "flash_only");
+    assert!(report["worthiness"]["components"]
+        .get("singleSpecialist")
+        .is_none());
+    assert_eq!(
+        report["passes"]["reason"],
+        "editorial_worthiness_flash_only"
+    );
+    assert_eq!(report["worthiness"]["components"]["alreadyCovered"], 0);
+
+    // The same story in a daily slot is promoted, exactly as the magic fixture is.
+    let mut daily_pack = weekly["pack"].clone();
+    daily_pack["game"] = json!("magic");
+    let daily = json!({"pack": daily_pack, "memory": ""});
+    let daily_input = root.path().join("daily.json");
+    store::atomic_json(&daily_input, &daily).unwrap();
+    let daily_report = root.path().join("daily-report.json");
+    let (ok, report) = run(json!([]), &daily_input, &daily_report);
+    assert!(!ok, "{report}");
+    assert_eq!(report["worthiness"]["decision"], "article");
+    assert_eq!(report["worthiness"]["components"]["singleSpecialist"], true);
+
+    // A story that already has a CMS record is covered, and is not skipped for it.
+    let captured = fixture("live-evidence.json");
+    let covered_input = root.path().join("covered.json");
+    store::atomic_json(
+        &covered_input,
+        &json!({"pack": captured["pack"], "memory": ""}),
+    )
+    .unwrap();
+    let covered_report = root.path().join("covered-report.json");
+    let story_id = captured["pack"]["canonicalStoryId"].clone();
+    let (ok, report) = run(
+        json!([{"id":"rec","canonicalStoryId":story_id,"language":"en","slug":"already","status":"published","datePublished":"2026-10-05T07:00:00Z"}]),
+        &covered_input,
+        &covered_report,
+    );
+    assert!(!ok, "a covered story must still be worked on: {report}");
+    assert_eq!(report["worthiness"]["components"]["alreadyCovered"], 1);
+    assert!(report.get("passes").is_none());
+    assert_eq!(
+        report["error"], "no native Messages provider configured",
+        "the run has to reach the model passes"
+    );
+
+    // Without a record the same pack skips on worthiness, as the fixture replay does.
+    let bare_report = root.path().join("bare-report.json");
+    let (ok, report) = run(json!([]), &covered_input, &bare_report);
+    assert!(ok, "{report}");
+    assert_eq!(report["worthiness"]["components"]["alreadyCovered"], 0);
+    assert_eq!(report["passes"]["action"], "skip");
+}
+
+#[test]
 fn cli_replay_does_not_mutate_cms_or_claim_production_readiness() {
     use std::process::Command;
     let dir = tempfile::tempdir().unwrap();
