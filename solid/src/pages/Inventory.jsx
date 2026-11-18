@@ -113,7 +113,8 @@ function InventoryDesk(props) {
     equals: (a, b) => a.importTab === b.importTab && a.settingsTab === b.settingsTab && a.pricerTab === b.pricerTab
       && a.collectionTab === b.collectionTab && a.locationName === b.locationName,
   });
-  // Sellers read their prices in local currency.
+  // Sellers read their prices in local currency; the market column of the
+  // board prints in the same unit as the Price cell beside it.
   const formatPrice = (pkn) => formatSellerPrice(pkn, sellerCurrency());
   const [rows, setRows] = createSignal(props.preview ? previewListings() : null);
   // A first load paints page by page; its totals wait for the whole book.
@@ -453,6 +454,7 @@ function InventoryDesk(props) {
           <InventoryBoard
             rows={rows()}
             formatPrice={formatPrice}
+            priceCurrency={sellerCurrency()}
             showSummary={false}
             defaultSource={props.preview ? '' : (pricerDefaults()?.defaultSource || '')}
             autoMarketColumn={pricerDefaults()?.autoMarketColumn === true}

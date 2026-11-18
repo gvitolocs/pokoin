@@ -1,8 +1,9 @@
 import { createMemo, createSignal, Errored, For, Repeat, Show } from 'solid-js';
-import { cardHref, formatPkn, imageSrc } from '@market/api.js';
+import { cardHref, imageSrc } from '@market/api.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { printingIdentity } from '@market/identity.js';
 import { formatPknNumber, tilePricePkn } from '@market/pkn.js';
+import { formatAssetsValue } from '@market/seller-currency.js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
 import { formatDayLabel } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN, goMarket, marketUrl } from '@market/punchouts.js';
@@ -123,13 +124,29 @@ function MixBar(props) {
   );
 }
 
+/**
+ * One PKN amount as these tiles print it: the seller's display currency, the
+ * same rule the movers tiles, the segment table and the history chart follow
+ * (docs/MARKET.md, "Segment graphs"). PKN is the unit the amount is stored
+ * and sorted in, and stays the printed unit when it is also the currency.
+ */
+function amount(pkn, currency) {
+  const value = Number(pkn) || 0;
+  const code = String(currency || 'PKN').trim().toUpperCase() || 'PKN';
+  return code === 'PKN' ? `${formatPknNumber(value)} PKN` : formatAssetsValue(value, code);
+}
+
 function MoverCard(props) {
   // Always punch out to pokoin.com from the dashboard host (same as listings).
   const card = () => props.card;
   const href = () => marketUrl(cardHref(card()));
   const art = () => imageSrc(card(), 'grid') || imageSrc(card(), 'hero');
   const identity = () => printingIdentity(card());
-  const price = () => formatPkn(tilePricePkn(card()));
+  // No price on the card, no chip: the tile says nothing rather than 0.
+  const price = () => {
+    const value = Number(tilePricePkn(card())) || 0;
+    return value > 0 ? amount(value, props.currency) : '';
+  };
   return (
     <a
       class="seller-mover"
@@ -192,7 +209,7 @@ function SellSpreadsheetTile() {
 // Same 12-by-6 miniature sheet as Your listings.
 const ASSET_PREVIEW = 72;
 
-function assetTitle(item) {
+function assetTitle(item, currency) {
   const flags = [item.reverse ? 'Reverse' : '', item.firstEdition ? '1st Ed.' : '', item.graded ? 'Graded' : ''].filter(Boolean);
   const details = [
     item.cardName || 'Card',
@@ -201,7 +218,7 @@ function assetTitle(item) {
     item.language,
     ...flags,
     item.pricePkn > 0
-      ? `last sold ${formatPkn(item.pricePkn)}${item.priceDay ? ` on ${formatDayLabel(item.priceDay)}` : ''}`
+      ? `last sold ${amount(item.pricePkn, currency)}${item.priceDay ? ` on ${formatDayLabel(item.priceDay)}` : ''}`
       : 'never sold',
   ].filter(Boolean).join(' · ');
   return item.quantity > 1 ? `${details} · Qty ${item.quantity}` : details;
@@ -224,7 +241,7 @@ function CardTraderAssetsPanel(props) {
           <h2 id="ct1dr-title">CardTrader 1-DR</h2>
           <Show when={items().length}>
             <span class="ct1dr-totals" title="Stocked and sold by CardTrader 1-Day Ready — not listed on Pokoin">
-              {Number(totals().cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals().valuePkn || 0) || '0 PKN'}
+              {Number(totals().cards || 0).toLocaleString('en-US')} cards · {amount(totals().valuePkn || 0, props.currency)}
             </span>
           </Show>
         </header>
@@ -235,7 +252,7 @@ function CardTraderAssetsPanel(props) {
                 <MiniCardTile
                   imageUrl={item.imageUrl}
                   name={item.cardName || 'Card'}
-                  title={assetTitle(item)}
+                  title={assetTitle(item, props.currency)}
                   cardId={item.cardId || ''}
                   pricePkn={item.pricePkn}
                   href={item.cardId ? marketUrl(inventoryListingHref(item)) : ''}
@@ -362,7 +379,7 @@ export function SellerDashboardView(props) {
               <Show when={listed() && !listed().failed && listed().listedPkn > 0}>
                 <p class="seller-asking" data-testid="total-asking-value">
                   <span>Total asking value</span>
-                  <strong>{formatPkn(listed().listedPkn)}</strong>
+                  <strong>{amount(listed().listedPkn, props.moverCurrency)}</strong>
                 </p>
               </Show>
 
@@ -373,14 +390,14 @@ export function SellerDashboardView(props) {
                     {' · '}
                     {oneDayReadyPriced().toLocaleString('en-US')} with a sale
                   </span>
-                  <strong title="Each card at the last sold median of its condition and language. A card that never sold counts 0 PKN.">
-                    {oneDayReadyValue() > 0 ? formatPkn(oneDayReadyValue()) : '0 PKN'}
+                  <strong title="Each card at the last sold median of its condition and language. A card that never sold adds nothing to the total.">
+                    {amount(oneDayReadyValue(), props.moverCurrency)}
                   </strong>
                 </p>
               </Show>
 
               <HistoryBoundary>
-                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} onRange={(range) => { setSegmentsRange(range || {}); props.onHistoryRange?.(range); }} />
+                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} currency={props.moverCurrency || ''} live={historyLive()} onRange={(range) => { setSegmentsRange(range || {}); props.onHistoryRange?.(range); }} />
               </HistoryBoundary>
 
               <HistoryBoundary>
@@ -441,7 +458,7 @@ export function SellerDashboardView(props) {
           fallback={<p class="seller-panel-empty">{props.loading ? 'Loading marketplace…' : 'Marketplace trending rail is unavailable right now.'}</p>}
         >
           <div class="seller-movers-rail" data-testid="marketplace-movers">
-            <For each={movers()}>{(card) => <MoverCard card={card} />}</For>
+            <For each={movers()}>{(card) => <MoverCard card={card} currency={props.moverCurrency} />}</For>
           </div>
         </Show>
       </section>
@@ -476,7 +493,7 @@ export function SellerDashboardView(props) {
           </Show>
         </section>
 
-        <CardTraderAssetsPanel assets={assets()} />
+        <CardTraderAssetsPanel assets={assets()} currency={props.moverCurrency} />
 
         <section class="seller-panel seller-insights-panel" aria-labelledby="seller-insights-title">
           <header class="seller-panel-head">

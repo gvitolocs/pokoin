@@ -9,6 +9,7 @@
  */
 
 import { formatPknNumber } from './pkn.js';
+import { formatAssetsValue } from './seller-currency.js';
 
 const DAY_MS = 86400000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -204,9 +205,21 @@ export function historyWindowChange(points, presetId = 'custom') {
   };
 }
 
-export function formatHistoryDelta(change) {
+/**
+ * A PKN valuation as the seller reads it: the display currency the panel
+ * already uses for its amounts (docs/MARKET.md, "Segment graphs" — amounts
+ * follow the seller's display currency, like the movers tiles). PKN stays
+ * PKN, because that is what the seller's currency is when they have none.
+ */
+export function formatHistoryAmount(pkn, currency = 'PKN') {
+  const value = Number(pkn) || 0;
+  const code = String(currency || 'PKN').trim().toUpperCase() || 'PKN';
+  return code === 'PKN' ? `${formatPknNumber(value)} PKN` : formatAssetsValue(value, code);
+}
+
+export function formatHistoryDelta(change, currency = 'PKN') {
   if (!change) return '';
-  const body = `${formatPknNumber(Math.abs(change.delta))} PKN`;
+  const body = formatHistoryAmount(Math.abs(change.delta), currency);
   const signed = change.delta > 0 ? `+${body}` : (change.delta < 0 ? `-${body}` : body);
   if (change.pct == null) return `${signed} ${change.phrase}`;
   const pctAbs = Math.abs(Math.round(change.pct * 10) / 10);
@@ -600,7 +613,7 @@ function pricedNote(assets) {
 }
 
 /** Tip for a realized day: total first, then every layer at that day. */
-export function formatHistoryTip(day) {
+export function formatHistoryTip(day, currency = 'PKN') {
   if (!day) return null;
   const assets = day.assets || {};
   const rows = [];
@@ -608,14 +621,14 @@ export function formatHistoryTip(day) {
     rows.push({
       key: 'cards',
       label: 'Cards',
-      value: `${formatPknNumber(assets.cardsValuePkn)} PKN`,
+      value: formatHistoryAmount(assets.cardsValuePkn, currency),
       note: pricedNote(assets),
     });
   }
-  rows.push({ key: 'liquidity', label: 'Liquidity', value: `${formatPknNumber(assets.currencyPkn)} PKN` });
+  rows.push({ key: 'liquidity', label: 'Liquidity', value: formatHistoryAmount(assets.currencyPkn, currency) });
   return {
     dateLabel: formatDayLabel(day.date),
-    totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
+    totalLabel: formatHistoryAmount(day.totalPkn, currency),
     rows,
   };
 }

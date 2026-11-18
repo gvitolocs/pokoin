@@ -5,7 +5,7 @@
  * Pure — no framework, no network — so the rules are testable on their own.
  */
 
-import { inventoryMarketValue } from './inventory-price.js';
+import { inventoryMarketValue, marketAmountLabel } from './inventory-price.js';
 import { editPriceFields } from './pricing-group-note.js';
 import { localizeStrategyName } from './pricer.js';
 import { MAX_LISTING_PHOTOS } from './user-photos.js';
@@ -137,8 +137,9 @@ const PRESET_SOURCES = [
 /** The ask beside the CardTrader net belongs in the hover text. */
 function presetTitle(value) {
   const title = String(value.title || '');
-  if (!value.askLabel || /\bask\b/i.test(title)) return title;
-  return `${title} Ask ${value.askLabel}.`.trim();
+  const ask = marketAmountLabel(value.askPkn);
+  if (!ask || /\bask\b/i.test(title)) return title;
+  return `${title} Ask ${ask}.`.trim();
 }
 
 /**

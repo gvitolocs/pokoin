@@ -150,7 +150,7 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   const tileSrc = read('../components/MiniCardTile.jsx');
   assert.match(homeSrc, /fetchCardTraderAssets\(token\)/);
   assert.match(homeSrc, /cardTraderAssets=\{cardTraderAssets\(\)\}/);
-  assert.match(viewSrc, /<CardTraderAssetsPanel assets=\{assets\(\)\} \/>/);
+  assert.match(viewSrc, /<CardTraderAssetsPanel assets=\{assets\(\)\} currency=\{props\.moverCurrency\} \/>/);
   assert.match(viewSrc, /CardTrader 1-DR assets/);
   assert.match(panelSrc, /<Show when=\{props\.assets\?\.oneDayReady\}>/);
   assert.match(panelSrc, /not listed on Pokoin/);

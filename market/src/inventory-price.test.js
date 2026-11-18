@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups, priceCheckItem, priceCheckKey, priceGame,
+  gamePrices, inventoryMarketLabel, inventoryMarketValue, marketAmountLabel, priceCheckGroups, priceCheckItem, priceCheckKey, priceGame,
 } from './inventory-price.js';
 
 const row = { cardId: '824942' };
@@ -116,9 +116,24 @@ test('the CardTrader column is net of the seller fee and names the ask', () => {
   const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 219.5, ctMatchedGrossPkn: 240, ctBasis: 'zero', ctFee: { pct: 7, vatPct: 22, minCents: 1, channel: 'zero' } } }, { cardId: '801148' }, 'cardtrader');
   assert.equal(value.value, 219.5);
   assert.match(value.title, /Net of CardTrader's 7% seller fee \+ 22% VAT \(ask 240 PKN\)\./);
-  assert.equal(value.askLabel, '240 PKN', 'the ask shows under the net in the cell');
+  assert.equal(value.askPkn, 240, 'the ask shows under the net in the cell, in the cell currency');
   const plain = inventoryMarketValue({ 1: { ctMatchedPkn: 26 } }, { cardId: '1' }, 'cardtrader');
-  assert.equal(plain.askLabel, '');
+  assert.equal(plain.askPkn, null);
+});
+
+test('a market comp prints in the currency the seller reads prices in', () => {
+  const value = inventoryMarketValue({ 801148: { ctMatchedPkn: 63, ctMatchedGrossPkn: 66 } }, { cardId: '801148' }, 'cardtrader');
+  assert.equal(value.value, 63, 'the row itself keeps the PKN the sort and the server read');
+  assert.equal(value.askPkn, 66);
+  assert.equal(inventoryMarketLabel(value, 'DKK'), '2.4 DKK');
+  assert.equal(marketAmountLabel(value.askPkn, 'DKK'), '2.48 DKK');
+  assert.equal(inventoryMarketLabel(value, 'EUR'), '€0.32');
+  assert.equal(inventoryMarketLabel(value), '63 PKN', 'no currency asked: the stored unit');
+  assert.equal(inventoryMarketLabel(value, 'PKN'), '63 PKN');
+  assert.equal(marketAmountLabel(66, 'pkn'), '66 PKN');
+  assert.equal(marketAmountLabel(value.askPkn, 'PKN'), '66 PKN');
+  assert.equal(inventoryMarketLabel(value, 'GBP'), '63 PKN', 'a code with no rate keeps the stored unit');
+  assert.equal(marketAmountLabel(null, 'DKK'), '');
 });
 
 test('a price from the price store says when the store was refilled', () => {
