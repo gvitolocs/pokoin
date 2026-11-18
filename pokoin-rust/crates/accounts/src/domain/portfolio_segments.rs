@@ -114,6 +114,9 @@ const OTHER_SET: &str = "other";
 const UNKNOWN_SET: &str = "unknown";
 /// The label `<game>:set:other` always draws under.
 const OTHER_SETS_LABEL: &str = "Other sets";
+/// The label `<game>:set:unknown` always draws under: its own name is gone,
+/// because the row that made it carried no set name at all.
+const UNKNOWN_SET_LABEL: &str = "Unknown set";
 
 /// A product that is not one of these is sealed. `card` is what a row without a
 /// `product_type` means; jumbo and accessory printings are singles too.
@@ -168,13 +171,18 @@ const SET_SLUG_MAX_LEN: usize = 40;
 pub const SETS_PER_GAME: usize = 6;
 
 /// A set name as a key can carry it: lower case, every run of characters outside
-/// `[a-z0-9]` one `-`, trimmed of `-`, at most [`SET_SLUG_MAX_LEN`] characters,
-/// and `unknown` when nothing is left. Accents are not folded into letters, so
-/// `Pokémon` slugs to `pok-mon` — the same discipline [`game_of`] applies to a
-/// game id, which is why a slug never has to be escaped on its way back out.
+/// `[a-z0-9]` one `-`, trimmed of `-`, at most [`SET_SLUG_MAX_LEN`] characters.
+/// A name that leaves nothing behind is [`hash_slug`] of the name, and only a row
+/// with **no** set name at all slugs to `unknown`. Accents are not folded into
+/// letters, so `Pokémon` slugs to `pok-mon` and `拡張パック` to a hash, which is
+/// why two Japanese sets never share a line.
 pub fn set_slug(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return UNKNOWN_SET.to_string();
+    }
     let mut slug = String::new();
-    for letter in name.trim().chars() {
+    for letter in name.chars() {
         if letter.is_ascii_alphanumeric() {
             slug.push(letter.to_ascii_lowercase());
         } else if !slug.ends_with('-') {
@@ -189,10 +197,23 @@ pub fn set_slug(name: &str) -> String {
         .trim_matches('-')
         .to_string();
     if slug.is_empty() {
-        UNKNOWN_SET.to_string()
+        hash_slug(name)
     } else {
         slug
     }
+}
+
+/// A name no ASCII letter survives in still names a set the seller holds, and
+/// every one of them needs its own line: `s` plus the first 8 hex digits of the
+/// FNV-1a 32 hash of its UTF-8 bytes. Stable in every process and every run, so
+/// a stored key keeps meaning the set it was written for.
+fn hash_slug(name: &str) -> String {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in name.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("s{hash:08x}")
 }
 
 /// `<game>:set:<slug>` for a set name.
@@ -543,7 +564,14 @@ pub fn segment_defs(days: &[Json], labels: Option<&Json>) -> Vec<Json> {
                     key.split_once(SET_SEP)
                         .map(|(_, slug)| (slug, (*key).to_string()))
                 })
-                .map(|(slug, key)| (set_label(labels, &key, slug), key))
+                .map(|(slug, key)| {
+                    let label = if slug == UNKNOWN_SET {
+                        UNKNOWN_SET_LABEL.to_string()
+                    } else {
+                        set_label(labels, &key, slug)
+                    };
+                    (label, key)
+                })
                 .collect();
             // Alphabetical by what the seller reads, not by the slug inside it.
             lines.sort();
@@ -1102,7 +1130,6 @@ mod tests {
             ("Évolus", "volus"),
             // Nothing inside is a run of one dash, and both ends are trimmed.
             ("--evolving--skies--", "evolving-skies"),
-            ("!!!", "unknown"),
             ("", "unknown"),
             ("   ", "unknown"),
         ] {
@@ -1115,6 +1142,81 @@ mod tests {
             set_key("riftbound", "Dawn of a New Era"),
             "riftbound:set:dawn-of-a-new-era"
         );
+    }
+
+    #[test]
+    fn a_name_no_letter_survives_in_is_hashed_not_unknown() {
+        // A name slugs to the hash exactly when no ASCII letter survives in it.
+        assert_eq!(set_slug("!!!"), hash_slug("!!!"));
+        assert_eq!(set_slug("拡張パック"), hash_slug("拡張パック"));
+        assert_ne!(set_slug("拡張パック"), set_slug(""));
+        // `s` and eight hex digits, so a hashed key is shorter than the limit.
+        let slug = set_slug("拡張パック");
+        assert_eq!(slug.chars().count(), 9, "{slug}");
+        assert!(slug.starts_with('s'), "{slug}");
+        assert!(slug[1..].bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    /// The published FNV-1a 32 vectors, so the hash is the algorithm and not a
+    /// number this test agrees with by accident.
+    #[test]
+    fn the_hashed_slug_is_fnv_1a_32() {
+        for (name, expected) in [
+            ("a", "se40c292c"),
+            ("foobar", "sbf9cf968"),
+            ("!!!", "s2d53a722"),
+        ] {
+            assert_eq!(hash_slug(name), expected, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn two_sets_no_ascii_letter_can_name_draw_two_lines() {
+        let dawn = "拡張パック";
+        let decks = "スタートデッキ";
+        let rows = vec![held_set(dawn, 2), held_set(dawn, 1), held_set(decks, 4)];
+        let groups = segment_holdings(&rows);
+        // The same name twice is one line; two names are never one line.
+        assert_eq!(
+            groups[&set_key("riftbound", dawn)]
+                .iter()
+                .map(|h| h.qty)
+                .sum::<i64>(),
+            3
+        );
+        assert_eq!(
+            groups[&set_key("riftbound", decks)]
+                .iter()
+                .map(|h| h.qty)
+                .sum::<i64>(),
+            4
+        );
+        assert_ne!(set_key("riftbound", dawn), set_key("riftbound", decks));
+        // What the seller reads is the name, never the hash.
+        let labels = set_labels(&rows);
+        assert_eq!(labels[&set_key("riftbound", dawn)], dawn);
+        assert_eq!(labels[&set_key("riftbound", decks)], decks);
+        // And only a row with no set name at all lands in `unknown`.
+        assert_eq!(set_key("riftbound", ""), "riftbound:set:unknown");
+    }
+
+    #[test]
+    fn a_row_with_no_set_name_draws_under_unknown_set() {
+        let rows = vec![json!({
+            "card_id": "9001", "blueprint_id": "", "condition": "NM", "language": "EN",
+            "graded": false, "quantity": 1, "since": "2026-10-01", "game": "riftbound",
+        })];
+        let days = vec![json!({ "date": "2026-10-08", "segments": {
+            "game:riftbound": [0, 0, 1], "riftbound:set:unknown": [0, 0, 1],
+        } })];
+        let labels = merge_segment_labels(None, &set_labels(&rows));
+        let defs = segment_defs(&days, Some(&labels));
+        let named: Vec<&str> = defs
+            .iter()
+            .filter(|def| def["group"] == json!("set"))
+            .map(|def| def["label"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(named, vec!["Unknown set"], "{defs:?}");
     }
 
     #[test]
