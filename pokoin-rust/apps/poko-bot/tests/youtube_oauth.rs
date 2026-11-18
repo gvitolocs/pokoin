@@ -352,3 +352,84 @@ async fn denied_callback_replays_readonly_live_get_with_native_cli_recovery_text
     assert_eq!(actual, expected);
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// The env-reading tests share one process environment with the rest of this binary.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn env_guard(names: &[&str]) -> std::sync::MutexGuard<'static, ()> {
+    let guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    for name in names {
+        std::env::remove_var(name);
+    }
+    guard
+}
+
+#[test]
+fn a_handle_that_strips_to_empty_is_the_poko_channel() {
+    let _guard = env_guard(&["POKO_YOUTUBE_CHANNEL_HANDLE"]);
+    let dir = tempfile::tempdir().unwrap();
+    for (value, expected) in [
+        ("", "pokoinpos"),
+        ("   ", "pokoinpos"),
+        ("@", "pokoinpos"),
+        ("@ ", "pokoinpos"),
+        ("@@", "@"),
+        ("@PokoinPoS", "PokoinPoS"),
+        ("pokoinpos", "pokoinpos"),
+    ] {
+        std::env::set_var("POKO_YOUTUBE_CHANNEL_HANDLE", value);
+        assert_eq!(
+            YoutubeConfig::from_env(dir.path()).unwrap().channel_handle,
+            expected,
+            "POKO_YOUTUBE_CHANNEL_HANDLE={value:?}"
+        );
+    }
+}
+
+#[test]
+fn login_hint_never_reaches_the_google_alias() {
+    let _guard = env_guard(&[
+        "CITYHOP_YOUTUBE_LOGIN_HINT",
+        "GMAIL_HINT_PERSONAL",
+        "GOOGLE_OAUTH_LOGIN_HINT",
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    // The Cityhop alias already defaults to the owner address, so Google's is dead code in the live chain.
+    std::env::set_var("GOOGLE_OAUTH_LOGIN_HINT", "someone-else@example.test");
+    assert_eq!(
+        YoutubeConfig::from_env(dir.path()).unwrap().login_hint,
+        "vitologiuseppe17@gmail.com"
+    );
+    std::env::set_var("GMAIL_HINT_PERSONAL", "owner@example.test");
+    assert_eq!(
+        YoutubeConfig::from_env(dir.path()).unwrap().login_hint,
+        "owner@example.test"
+    );
+    std::env::set_var("CITYHOP_YOUTUBE_LOGIN_HINT", "cityhop@example.test");
+    assert_eq!(
+        YoutubeConfig::from_env(dir.path()).unwrap().login_hint,
+        "cityhop@example.test"
+    );
+}
+
+#[test]
+fn missing_redirect_uri_names_the_variable_the_code_reads() {
+    let _guard = env_guard(&[
+        "CITYHOP_YOUTUBE_CLIENT_ID",
+        "CITYHOP_YOUTUBE_CLIENT_SECRET",
+        "CITYHOP_YOUTUBE_REDIRECT_URI",
+        "GMAIL_REDIRECT_URI",
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("CITYHOP_YOUTUBE_CLIENT_ID", "client");
+    std::env::set_var("CITYHOP_YOUTUBE_CLIENT_SECRET", "SECRET_SENTINEL");
+    let mut config = YoutubeConfig::from_env(dir.path()).unwrap();
+    config.redirect_uri.clear();
+    let error = format!("{:#}", config.authorize_url().unwrap_err());
+    assert!(error.contains("CITYHOP_YOUTUBE_REDIRECT_URI"), "{error}");
+    assert!(
+        !error.contains("GOOGLE_OAUTH_REDIRECT_URI"),
+        "names a variable nothing reads: {error}"
+    );
+    assert!(!error.contains("SECRET_SENTINEL"));
+}

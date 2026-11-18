@@ -35,11 +35,7 @@ pub struct YoutubeConfig {
 impl YoutubeConfig {
     pub fn from_env(data_dir: &Path) -> anyhow::Result<Self> {
         let redirect = env_alias(&["CITYHOP_YOUTUBE_REDIRECT_URI", "GMAIL_REDIRECT_URI"]);
-        let hint = env_alias(&[
-            "CITYHOP_YOUTUBE_LOGIN_HINT",
-            "GMAIL_HINT_PERSONAL",
-            "GOOGLE_OAUTH_LOGIN_HINT",
-        ]);
+        let hint = env_alias(&["CITYHOP_YOUTUBE_LOGIN_HINT", "GMAIL_HINT_PERSONAL"]);
         let path = env_alias(&["POKO_YOUTUBE_TOKEN_PATH"]);
         let handle = env_alias(&["POKO_YOUTUBE_CHANNEL_HANDLE"]);
         Ok(Self {
@@ -64,10 +60,14 @@ impl YoutubeConfig {
             } else {
                 hint
             },
-            channel_handle: if handle.is_empty() {
-                "pokoinpos".into()
-            } else {
-                handle.strip_prefix('@').unwrap_or(&handle).into()
+            // The live code is `trim().replace(/^@/, "") || "pokoinpos"`: a bare "@" is no handle.
+            channel_handle: {
+                let handle = handle.strip_prefix('@').unwrap_or(&handle);
+                if handle.is_empty() {
+                    "pokoinpos".into()
+                } else {
+                    handle.into()
+                }
             },
             token_path: if path.is_empty() {
                 data_dir.join("youtube-poko-token.json")
@@ -85,7 +85,7 @@ impl YoutubeConfig {
             bail!("Poko YouTube OAuth: missing GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET in Hermes private/cityhop/.env.local");
         }
         if self.redirect_uri.is_empty() {
-            bail!("Poko YouTube OAuth: missing redirect URI (set GOOGLE_OAUTH_REDIRECT_URI or CITYHOP_YOUTUBE_REDIRECT_URI, e.g. http://127.0.0.1:8788/oauth2callback)");
+            bail!("Poko YouTube OAuth: missing redirect URI (set CITYHOP_YOUTUBE_REDIRECT_URI, e.g. http://127.0.0.1:8788/oauth2callback)");
         }
         Ok(())
     }
