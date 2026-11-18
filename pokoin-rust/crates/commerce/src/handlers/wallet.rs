@@ -190,7 +190,8 @@ pub async fn top_up_account_balance(
             {
                 continue;
             }
-            if credit_verified_top_up(&state, &claims.uid, &tx_hash, &from, tx_amount, true).await? {
+            if credit_verified_top_up(&state, &claims.uid, &tx_hash, &from, tx_amount, true).await?
+            {
                 credited_count += 1;
                 credited_amount += tx_amount as i64;
                 credited_hashes.push(tx_hash);
@@ -255,7 +256,9 @@ pub async fn credit_verified_top_up(
 ) -> Result<bool, ApiError> {
     let amount = amount_pkn.trunc() as i64;
     if amount <= 0 {
-        return Err(ApiError::bad_request("Enter a whole PKN amount greater than zero."));
+        return Err(ApiError::bad_request(
+            "Enter a whole PKN amount greater than zero.",
+        ));
     }
     let firestore = state.firestore()?;
     // A funding hash belongs to exactly one account: claim it (create-only)
@@ -283,7 +286,10 @@ pub async fn credit_verified_top_up(
                 .get_document(&deposit_path)
                 .await?
                 .unwrap_or_else(|| json!({}));
-            let owner = existing.get("uid").and_then(Value::as_str).unwrap_or_default();
+            let owner = existing
+                .get("uid")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             if owner != uid {
                 return Err(ApiError::conflict(
                     "This top-up transaction was already used by another account.",
@@ -349,7 +355,9 @@ pub async fn transfer_account_balance(
         .await?
         .ok_or_else(|| ApiError::not_found("No Pokoin account was found for that username."))?;
     if recipient_uid == claims.uid {
-        return Err(ApiError::bad_request("You cannot send PKN to your own account."));
+        return Err(ApiError::bad_request(
+            "You cannot send PKN to your own account.",
+        ));
     }
     let sender_username = username_for_uid(&state, &claims.uid).await?;
     let recipient = store::read_user(state.firestore()?, &recipient_uid).await?;
@@ -480,6 +488,33 @@ async fn record_withdraw_request(firestore: &FirestoreClient, path: &str, record
     false
 }
 
+/// The request needs the team. The log is written first, with the account and
+/// the request id and nothing about the amount or the address. The note on the
+/// record is best effort: if that write fails too, the log line is all that
+/// remains.
+async fn note_withdraw_needs_review(
+    firestore: &FirestoreClient,
+    path: &str,
+    uid: &str,
+    request_id: &str,
+    reason: &str,
+) {
+    tracing::error!(
+        event = "withdraw_needs_review",
+        uid,
+        request_id,
+        "withdraw needs review"
+    );
+    let note = json!({
+        "needsReview": {
+            "reason": reason,
+            "at": store::now_iso(),
+        }
+    });
+    // Best effort. If this write fails too, the log line above is all that remains.
+    let _ = firestore.set_document(path, &note).await;
+}
+
 pub async fn request_pkn_withdraw(
     State(state): State<DomainState>,
     AuthedUser(claims): AuthedUser,
@@ -604,7 +639,14 @@ pub async fn request_pkn_withdraw(
             object.insert("updatedAt".into(), json!(store::now_iso()));
         }
         if !record_withdraw_request(firestore, &request_path, &record).await {
-            tracing::error!(request_id = %request_id, "withdraw payout state not recorded");
+            note_withdraw_needs_review(
+                firestore,
+                &request_path,
+                &claims.uid,
+                &request_id,
+                "withdraw_paying_not_recorded",
+            )
+            .await;
             return Err(ApiError::unavailable(
                 "Pokoin could not note this payout down. Nothing was sent; try again in a while.",
             )
@@ -634,7 +676,14 @@ pub async fn request_pkn_withdraw(
                     // The payout stands and this answer reports it. Releasing
                     // the lock is a step for the team; the record already holds
                     // the result, so a replay of this id answers from it.
-                    tracing::error!(request_id = %request_id, "withdraw lock not released");
+                    note_withdraw_needs_review(
+                        firestore,
+                        &request_path,
+                        &claims.uid,
+                        &request_id,
+                        "withdraw_unlock_failed",
+                    )
+                    .await;
                 }
                 Ok(private_json(json!({
                     "ok": true, "requestId": request_id, "status": "completed",
@@ -781,7 +830,10 @@ pub async fn money_request_get(
     AuthedUser(claims): AuthedUser,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, ApiError> {
-    let action = query.get("action").cloned().unwrap_or_else(|| "list".into());
+    let action = query
+        .get("action")
+        .cloned()
+        .unwrap_or_else(|| "list".into());
     let firestore = state.firestore()?;
     if action == "notifications" {
         let rows = firestore
@@ -811,7 +863,9 @@ pub async fn money_request_get(
 
     let incoming = load_money_requests(&state, "toUid", &claims.uid).await?;
     let outgoing = load_money_requests(&state, "fromUid", &claims.uid).await?;
-    Ok(private_json(json!({ "incoming": incoming, "outgoing": outgoing })))
+    Ok(private_json(
+        json!({ "incoming": incoming, "outgoing": outgoing }),
+    ))
 }
 
 async fn load_money_requests(
@@ -856,8 +910,14 @@ async fn load_money_requests(
         })
         .collect();
     out.sort_by(|a, b| {
-        let left = a.get("createdAt").and_then(Value::as_str).unwrap_or_default();
-        let right = b.get("createdAt").and_then(Value::as_str).unwrap_or_default();
+        let left = a
+            .get("createdAt")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let right = b
+            .get("createdAt")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         right.cmp(left)
     });
     Ok(out)
@@ -1058,7 +1118,10 @@ async fn money_request_pay(
     if !guard.ok {
         return Err(ApiError::bad_request(guard.error));
     }
-    let amount = request.get("amountPkn").and_then(Value::as_i64).unwrap_or(0);
+    let amount = request
+        .get("amountPkn")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let from_username = request
         .get("fromUsername")
         .and_then(Value::as_str)
@@ -1173,7 +1236,11 @@ async fn money_request_resolve(
             &json!({ "status": new_status, "resolvedAt": store::now_iso() }),
         )
         .await?;
-    let notify_uid = if action == "decline" { &from_uid } else { &to_uid };
+    let notify_uid = if action == "decline" {
+        &from_uid
+    } else {
+        &to_uid
+    };
     let actor = if action == "decline" {
         request
             .get("toUsername")
@@ -1197,7 +1264,10 @@ async fn money_request_resolve(
         },
         &request_id,
         &actor,
-        request.get("amountPkn").and_then(Value::as_i64).unwrap_or(0),
+        request
+            .get("amountPkn")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
     )
     .await;
     Ok(private_json(json!({ "ok": true, "status": new_status })))
@@ -1232,7 +1302,6 @@ pub async fn earn_pkn(
         }))).into_response());
     }
     Ok(axum::Json(json!({ "ok": true, "email": {"ok": true, "id": delivery.id} })).into_response())
-
 }
 
 #[cfg(test)]
