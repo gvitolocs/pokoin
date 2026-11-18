@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# A rule check on the schema migration files in scripts/sql, new and changed files only (PK-C005).
+# A rule check on the schema migration files in scripts/sql and their reverts in scripts/sql-reverts,
+# new and changed files only (PK-C005, PK-C019 rule (g)).
 # The study it implements is PK-R004 sections 1 and 7(d); the rules a new file must follow are in
 # docs/DEPLOY.md ("Writer migrations: the header a new file needs") and docs/CI.md.
 #
@@ -12,6 +13,11 @@
 # carrying `truncate`), and 44 of 109 files that never say which database they target. Nothing checked any of
 # it. A check against the real schema needs a dump of the production schema, which is the owner's step; this
 # check reads file names and file headers only — no database, no network, no credential, about five seconds.
+#
+# The undo work that existed before this was 3 "*.revert.sql" files sitting in scripts/sql beside the
+# migrations they belong to: hand-written recoveries with no header, nothing tying one to the file it undoes
+# or the database it runs on, and no rule making any other migration carry one. Rules (g) to (i) are that:
+# a new migration is undoable or says in its header why it is not, and a revert is a file a rule can read.
 #
 # Rules. Each finding names the file and says what to do:
 #   (a) a file that existed at MIGRATIONS_BASELINE is never modified, deleted or renamed. The exception is a
@@ -34,12 +40,26 @@
 #       change, not a migration.
 #   (f) the whole directory, always: the count of duplicate NNN prefixes at HEAD may not exceed the count at
 #       the base. The collisions already on main are the baseline and may only fall.
+#   (g) a new numbered migration must be undoable: either the tree at HEAD holds
+#       scripts/sql-reverts/NNN_<name>.revert.sql, or the file's first 10 lines carry
+#       "-- revert: irreversible: <reason of at least 15 characters>" saying why nothing can put it back.
+#   (h) a file added or changed under scripts/sql-reverts/ is NNN_<snake_case>.revert.sql, the name of the
+#       migration it undoes; its first 10 lines carry "-- reverts: scripts/sql/NNN_<name>.sql" naming exactly
+#       that file, which must exist at HEAD, and a "-- db:" equal to the migration's (any valid target when the
+#       migration predates rule (c) and has none — the run then says it could not be compared); it refuses a
+#       replica, pg_is_in_recovery() inside a statement that raises, the way the 20261101 artwork revert does;
+#       and it carries "-- destructive: <reason of at least 15 characters>" — a revert drops things by
+#       definition, so rule (d) does not apply to it while the reason still does. A revert that existed at the
+#       base is never edited, renamed or deleted either.
+#   (i) nothing else lives in scripts/sql-reverts/: a name not ending in .revert.sql fails.
+#   Files under scripts/sql-reverts/ are not migrations: rules (b) and (f) never count them.
 #
 # Run it from anywhere inside the repository. It reads the committed tree at HEAD, never the working tree.
 #
 # Usage: scripts/check-migrations.sh [--base <commit>]
 #   --base   the pull request's merge base, or the previous commit of the push (default: MIGRATIONS_BASELINE).
-#            Rules (b) to (e) run on what `git diff --name-status <base> HEAD -- scripts/sql` reports.
+#            Rules (b) to (g) run on what `git diff --name-status <base> HEAD -- scripts/sql` reports, rules
+#            (h) and (i) on the same range under scripts/sql-reverts.
 # Exit: 0 clean, 1 a finding, 2 this check cannot run.
 set -euo pipefail
 
@@ -53,6 +73,7 @@ set -euo pipefail
 MIGRATIONS_BASELINE=c22f9f678f840e777fb1a9b9be3f9b976e067ea7
 
 dir=scripts/sql
+revert_dir=scripts/sql-reverts
 min_reason=15
 
 die() { echo "check-migrations: $*" >&2; exit 2; }
@@ -79,7 +100,7 @@ head=$(git rev-parse HEAD 2>/dev/null) || die "this checkout has no commit whose
 
 for rev in "$base" "$baseline_ref"; do
   git rev-parse --verify --quiet "${rev}^{commit}" >/dev/null \
-    || die "$rev is not a commit in this checkout: rules (a) and (f) need the tree at the baseline and at the base, so a shallow clone will not do (git fetch --unshallow)"
+    || die "$rev is not a commit in this checkout: rules (a) and (f) need the tree at the baseline and at the base, so a shallow clone will not do (git fetch --unshallow); rules (g) to (i) read both trees as well"
 done
 base=$(git rev-parse "$base")
 baseline=$(git rev-parse "$baseline_ref")
@@ -119,6 +140,8 @@ analyze_sql() { # stdin: the file -> fact records "<kind>\t<line>\t<value>"
       if (NR <= 10) {
         if (match(lo, /^[ \t]*--[ \t]*db:[ \t]*/)) printf "db\t%d\t%s\n", NR, value()
         if (match(lo, /^[ \t]*--[ \t]*phase:[ \t]*/)) printf "phase\t%d\t%s\n", NR, value()
+        if (match(lo, /^[ \t]*--[ \t]*reverts:[ \t]*/)) printf "reverts\t%d\t%s\n", NR, value()
+        if (match(lo, /^[ \t]*--[ \t]*revert:[ \t]*irreversible:[ \t]*/)) printf "irreversible\t%d\t%s\n", NR, value()
         if (lo ~ /^[ \t]*--[ \t]*migration:[ \t]*draft[ \t]*$/) printf "draft\t%d\tyes\n", NR
       }
       # the destructive reason may sit in the header or next to the statement, so it is not a header rule
@@ -137,7 +160,8 @@ analyze_sql() { # stdin: the file -> fact records "<kind>\t<line>\t<value>"
           break
         }
       }
-      # rule (d): statements, split at ";" so a multi-line delete from ... where reads correctly
+      # rule (d) and (h): statements, split at ";" so a multi-line delete from ... where reads correctly and a
+      # do $$ ... $$ guard is one statement even when it spans lines
       stmt = ""
       start = 0
       for (i = 1; i <= NR; i++) {
@@ -148,6 +172,10 @@ analyze_sql() { # stdin: the file -> fact records "<kind>\t<line>\t<value>"
         if (index(b, ";") > 0 || i == NR) {
           shape = destructive_shape(stmt)
           if (shape != "") printf "destructive\t%d\t%s\n", start, shape
+          # rule (h): the replica refusal, a pg_is_in_recovery() test inside a statement that raises
+          if (stmt ~ /pg_is_in_recovery[ \t]*\([ \t]*\)/ && stmt ~ /(^|[^a-z0-9_])raise([^a-z0-9_]|$)/) {
+            printf "replica_guard\t%d\traise\n", start
+          }
           stmt = ""
         }
       }
@@ -161,6 +189,27 @@ facts_of() { # <rev> <path>: the fact records of that file in that tree
 
 has_fact() { # <rev> <path> <kind>: 0 when the file in that tree carries that kind of fact
   existed "$1" "$2" && facts_of "$1" "$2" | awk -F'\t' -v k="$3" '$1 == k { found = 1 } END { exit(found ? 0 : 1) }'
+}
+
+fact_value() { # <facts> <kind>: the first value of that kind, empty when the file carries none
+  printf '%s\n' "$1" | awk -F'\t' -v k="$2" '$1 == k { print $3; exit }'
+}
+
+fact_line() { # <facts> <kind>: the line the first fact of that kind sits on
+  printf '%s\n' "$1" | awk -F'\t' -v k="$2" '$1 == k { print $2; exit }'
+}
+
+fact_values() { # <facts> <kind>: every value of that kind, one per line
+  printf '%s\n' "$1" | awk -F'\t' -v k="$2" '$1 == k { print $3 }'
+}
+
+# The "-- db:" targets a migration or a revert may name, shared by rule (c) and rule (h).
+db_value_ok() { # <target>: 0 when this check knows that target
+  case "$1" in
+    writer | every-game | main) ;;
+    satellite:?*) printf '%s\n' "${1#satellite:}" | grep -qE '^[a-z0-9_]+$' ;;
+    *) return 1 ;;
+  esac
 }
 
 # ---- the NNN number space ----------------------------------------------------------------------------------
@@ -199,6 +248,7 @@ next_free_hint() { # <rev>: what to call the new file
 # ---- rule (f): the whole directory, at the base and here -----------------------------------------------------
 read -r base_files base_collisions <<<"$(number_stat "$base")"
 read -r head_files head_collisions <<<"$(number_stat "$head")"
+head_reverts=$(git ls-tree -r --name-only "$head" -- "$revert_dir" | grep -c . || true)
 if [ "$head_collisions" -gt "$base_collisions" ]; then
   while read -r num from to; do
     [ -n "$num" ] || continue
@@ -215,11 +265,12 @@ fi
 # ---- the files in the range ----------------------------------------------------------------------------------
 db_hint='What to do: add a "-- db: writer", "-- db: every-game", "-- db: satellite:<game>" or "-- db: main" line to the first 10 lines. This directory feeds the writer and one satellite database per game, 27 in all, and a file that never says which one it targets is applied by whoever remembers: on the wrong database it either creates an orphan table or succeeds doing nothing.'
 phase_hint='What to do: add "-- phase: expand" (the file only adds, so it may run before or after the code) or "-- phase: contract" (it removes or changes something the previous release used, so the code that stopped using it must ship first) to the first 10 lines.'
+revert_hint='What to do: write the undo as scripts/sql-reverts/<the number>_<the name>.revert.sql, the same number and name as this file — there is no migrator and no down command, so that file is the only record of what to put back, and it is written while the person applying the migration still knows. When the migration really cannot be undone (it overwrites rows it did not copy, or drops something the previous release still reads), say so in a "-- revert: irreversible: <why>" line in the first 10 lines instead: an honest "this one is a ratchet" is worth more than a revert file that would not run.'
 
-check_file() { # <path> <new>: rules (c), (d) and (e), plus (b) when <new> is 1
+check_file() { # <path> <new>: rules (c), (d), (e) and (g), plus (b) when <new> is 1
   local path=$1 is_new=$2
   local name num highest facts db_values db_bad='' phase_values v dest dest_line dest_shape reason reason_len
-  local ddl_line ddl_word found=0
+  local ddl_line ddl_word found=0 revert_path irreversible
 
   files_checked=$((files_checked + 1))
 
@@ -254,8 +305,25 @@ check_file() { # <path> <new>: rules (c), (d) and (e), plus (b) when <new> is 1
     fi
   fi
 
-  db_values=$(printf '%s\n' "$facts" | awk -F'\t' '$1 == "db" { print $3 }')
-  phase_values=$(printf '%s\n' "$facts" | awk -F'\t' '$1 == "phase" { print $3 }')
+  # rule (g): nothing goes onto one of 27 databases by hand without a way back, or a written reason there is none
+  if [ "$is_new" = 1 ] && [[ $name =~ ^[0-9]{3}_[a-z0-9_]+\.sql$ ]]; then
+    revert_path=$revert_dir/${name%.sql}.revert.sql
+    if existed "$head" "$revert_path"; then
+      :
+    else
+      irreversible=$(fact_value "$facts" irreversible)
+      if [ -z "$irreversible" ]; then
+        fail "$path" "nothing undoes it: a new migration needs its revert in $revert_path, or the line \"-- revert: irreversible: <why>\" in its header. $revert_hint"
+        found=1
+      elif [ "${#irreversible}" -lt "$min_reason" ]; then
+        fail "$path" "the \"-- revert: irreversible:\" reason is ${#irreversible} character(s): \"$irreversible\", and there is no $revert_path. It must be at least $min_reason characters and must say what the migration destroys that no file can put back; a new migration needs its revert in $revert_path, or the line \"-- revert: irreversible: <why>\" in its header. $revert_hint"
+        found=1
+      fi
+    fi
+  fi
+
+  db_values=$(fact_values "$facts" db)
+  phase_values=$(fact_values "$facts" phase)
 
   if [ -z "$db_values" ]; then
     fail "$path" "no \"-- db: <target>\" line in its first 10 lines. $db_hint"
@@ -263,11 +331,7 @@ check_file() { # <path> <new>: rules (c), (d) and (e), plus (b) when <new> is 1
   else
     while IFS= read -r v; do
       [ -n "$v" ] || continue
-      case "$v" in
-        writer | every-game | main) ;;
-        satellite:?*) printf '%s\n' "${v#satellite:}" | grep -qE '^[a-z0-9_]+$' || db_bad="$db_bad $v" ;;
-        *) db_bad="$db_bad $v" ;;
-      esac
+      db_value_ok "$v" || db_bad="$db_bad $v"
     done <<<"$db_values"
     for v in $db_bad; do
       fail "$path" "\"-- db: $v\" is not a target this check knows. $db_hint"
@@ -303,7 +367,7 @@ check_file() { # <path> <new>: rules (c), (d) and (e), plus (b) when <new> is 1
       fi
       found=1
     fi
-    reason=$(printf '%s\n' "$facts" | awk -F'\t' '$1 == "destructive_reason" { print $3; exit }')
+    reason=$(fact_value "$facts" destructive_reason)
     reason_len=${#reason}
     if [ -z "$reason" ]; then
       fail "$path" "line $dest_line holds a destructive statement ($dest_shape) and the file carries no \"-- destructive: <reason>\" line. What to do: add one, saying what the statement removes and why nothing that is still running needs it — at least $min_reason characters, because that line is the whole record of why the contract is safe to ship."
@@ -314,20 +378,118 @@ check_file() { # <path> <new>: rules (c), (d) and (e), plus (b) when <new> is 1
     fi
   fi
 
-  ddl_line=$(printf '%s\n' "$facts" | awk -F'\t' '$1 == "ddl" { print $2; exit }')
-  ddl_word=$(printf '%s\n' "$facts" | awk -F'\t' '$1 == "ddl" { print $3; exit }')
+  ddl_line=$(fact_line "$facts" ddl)
+  ddl_word=$(fact_value "$facts" ddl)
   if [ -z "$ddl_line" ]; then
     fail "$path" "it changes no schema: a migration must carry DDL at line start (create, alter, drop, comment on, grant, revoke, or a \\gexec driving them) and this file has none. A file of only insert/update/delete is a data change, not a migration: what to do is move it to scripts/sql-fixes/ (not a migration directory) and run it by hand, or add here the schema change the data depends on."
     found=1
   fi
 
   if [ "$found" = 0 ]; then
-    printf 'ok %s: %s; db: %s; phase: %s; %s at line %s%s\n' "$path" \
+    printf 'ok %s: %s; db: %s; phase: %s; %s at line %s%s%s\n' "$path" \
       "$(if [ "$is_new" = 1 ]; then printf 'new %s above %s' "$name" "$highest"; else printf 'changed in range'; fi)" \
       "$(printf '%s\n' "$db_values" | paste -sd, -)" \
       "$(printf '%s\n' "$phase_values" | paste -sd, -)" \
       "$ddl_word" "$ddl_line" \
-      "$(if [ -n "$dest" ]; then printf '; %s at line %s is marked destructive (\"%s\")' "$dest_shape" "$dest_line" "$reason"; fi)"
+      "$(if [ -n "$dest" ]; then printf '; %s at line %s is marked destructive (\"%s\")' "$dest_shape" "$dest_line" "$reason"; fi)" \
+      "$(if [ -n "$revert_path" ] && existed "$head" "$revert_path"; then printf '; its revert is %s' "$revert_path";
+         elif [ -n "$irreversible" ]; then printf '; marked irreversible (\"%s\")' "$irreversible"; fi)"
+    return 0
+  fi
+  return 1
+}
+
+# ---- rules (h) and (i): a file under scripts/sql-reverts -----------------------------------------------------
+reverts_hint='What to do: add a "-- reverts: scripts/sql/<NNN>_<name>.sql" line to the first 10 lines, naming the migration this file undoes. A revert is read in the middle of an incident, out of a directory of hand-written files: that line and the file name are the only things tying it to a migration and to the reason it exists.'
+rdb_hint='What to do: copy the migration'"'"'s "-- db: <target>" line into the first 10 lines of the revert. Run against another database a revert either stops on the first missing object or, worse, finds a same-named table there and drops it.'
+guard_hint='What to do: put the guard the 20261101 artwork revert carries at the top, ahead of anything that changes data: "do $$ begin if pg_is_in_recovery() then raise exception '"'"'refusing to run on a replica'"'"'; end if; end $$;" The Pi replica is one psql line away from the writer and a revert is run in a hurry: without the raise, every statement fails with "cannot execute ... in a read-only transaction" and the operator cannot tell a replica from a migration that has already been undone.'
+
+check_revert_file() { # <path> <new>: rules (h) and (i) on one file under $revert_dir
+  local path=$1 is_new=$2
+  local name stem mig mig_facts mig_dbs facts reverts rdb_values v db_note='' guard reason reason_len found=0
+
+  files_checked=$((files_checked + 1))
+  name=${path##*/}
+
+  if [[ $name != *.revert.sql ]]; then
+    fail "$path" "only <NNN>_<name>.revert.sql files live in $revert_dir, and \"$name\" does not end in .revert.sql. What to do: a note about a migration belongs in docs/ next to the section that explains it, a data fix beside the tool that runs it, and a revert gets the number and name of the migration it undoes."
+    return 1
+  fi
+  if ! [[ $name =~ ^[0-9]{3}_[a-z0-9_]+\.revert\.sql$ ]]; then
+    fail "$path" "not a revert name: a file in $revert_dir is NNN_<snake_case>.revert.sql — three digits, an underscore, [a-z0-9_]+, then \".revert.sql\". What to do: name it after the migration it undoes, digit for digit; the operator walks from a migration to its revert by that name and no other."
+    return 1
+  fi
+  if ! facts=$(facts_of "$head" "$path"); then
+    fail "$path" "it is not readable in the tree at HEAD, so nothing of it could be checked"
+    return 1
+  fi
+
+  stem=${name%.revert.sql}
+  mig=$dir/$stem.sql
+
+  reverts=$(fact_value "$facts" reverts)
+  if [ -z "$reverts" ]; then
+    fail "$path" "no \"-- reverts: $mig\" line in its first 10 lines. $reverts_hint"
+    found=1
+  elif [ "$reverts" != "$mig" ]; then
+    fail "$path" "its \"-- reverts: $reverts\" line names another migration than its own file name, which promises $mig. What to do: rename the file after the migration it really undoes, or point the line at that file — one of the two is wrong and the file itself cannot say which."
+    found=1
+  elif ! existed "$head" "$reverts"; then
+    fail "$path" "it reverts $reverts, which is not in the tree at HEAD. What to do: put the migration back, or take this file out. A revert whose migration nobody has is applied by whoever finds it, and every statement in it drops or overwrites objects nothing in this repository created."
+    found=1
+  fi
+
+  rdb_values=$(fact_values "$facts" db)
+  if [ -z "$rdb_values" ]; then
+    fail "$path" "no \"-- db: <target>\" line in its first 10 lines. $rdb_hint"
+    found=1
+  else
+    while IFS= read -r v; do
+      [ -n "$v" ] || continue
+      db_value_ok "$v" || {
+        fail "$path" "\"-- db: $v\" is not a target this check knows. $rdb_hint"
+        found=1
+      }
+    done <<<"$rdb_values"
+  fi
+
+  # rule (h): the revert runs on the database its migration ran on. A baseline migration names none.
+  if existed "$head" "$mig" && [ -n "$rdb_values" ]; then
+    mig_facts=$(facts_of "$head" "$mig")
+    mig_dbs=$(fact_values "$mig_facts" db)
+    if [ -z "$mig_dbs" ]; then
+      db_note="; its \"-- db:\" could not be compared: $mig predates the header rule and carries no \"-- db:\" line, so check by hand that the revert runs on the database the migration ran on"
+    else
+      while IFS= read -r v; do
+        [ -n "$v" ] || continue
+        printf '%s\n' "$mig_dbs" | grep -qxF -- "$v" || {
+          fail "$path" "its \"-- db: $v\" is not the \"-- db: $(printf '%s\n' "$mig_dbs" | paste -sd, -)\" of $mig, the migration it reverts. $rdb_hint"
+          found=1
+        }
+      done <<<"$rdb_values"
+    fi
+  fi
+
+  guard=$(fact_line "$facts" replica_guard)
+  if [ -z "$guard" ]; then
+    fail "$path" "no statement raises on pg_is_in_recovery(), so nothing stops this file from being run against the Pi replica. $guard_hint"
+    found=1
+  fi
+
+  reason=$(fact_value "$facts" destructive_reason)
+  reason_len=${#reason}
+  if [ -z "$reason" ]; then
+    fail "$path" "no \"-- destructive: <reason>\" line. Rule (d) does not apply to a revert — dropping is what a revert does — but the reason line still does: it is the record of what this file destroys and why that is safe. What to do: add one of at least $min_reason characters."
+    found=1
+  elif [ "$reason_len" -lt "$min_reason" ]; then
+    fail "$path" "the \"-- destructive:\" reason is $reason_len character(s): \"$reason\". It must be at least $min_reason, and it must say what the revert drops and why nothing that is still running needs what the migration built."
+    found=1
+  fi
+
+  if [ "$found" = 0 ]; then
+    printf 'ok %s: %s of %s; db: %s; replica refusal at line %s; destructive (\"%s\")%s\n' "$path" \
+      "$(if [ "$is_new" = 1 ]; then printf 'new revert'; else printf 'revert changed in range'; fi)" \
+      "$mig" "$(printf '%s\n' "$rdb_values" | paste -sd, -)" "$guard" "$reason" "$db_note"
     return 0
   fi
   return 1
@@ -339,15 +501,8 @@ n_modified=0
 n_deleted=0
 n_renamed=0
 
-while IFS= read -r -d '' st; do
-  kind=${st%%[0-9]*}
-  IFS= read -r -d '' p1 || die "git diff reported status $st with no path"
-  p2=''
-  case "$kind" in
-    R | C) IFS= read -r -d '' p2 || die "git diff reported $st for $p1 with no second path" ;;
-  esac
-  changed=$((changed + 1))
-
+handle_sql_change() { # <status> <path> [<path2>]: rules (a) to (g) on one scripts/sql change
+  local kind=$1 p1=$2 p2=${3:-}
   case "$kind" in
     D)
       n_deleted=$((n_deleted + 1))
@@ -388,18 +543,74 @@ while IFS= read -r -d '' st; do
       n_added=$((n_added + 1))
       check_file "$p1" 1 || true
       ;;
-    *) die "git diff reported status '$st' for $p1: this check does not know how to read it" ;;
+    *) die "git diff reported status '$kind' for $p1: this check does not know how to read it" ;;
   esac
-done < <(git diff --name-status -z -M "$base" "$head" -- "$dir")
+}
 
-echo "check-migrations: $dir holds $head_files numbered file(s) with $head_collisions number collision(s) here; $base had $base_files and $base_collisions: the collisions already on main are the baseline, and rule (f) lets that number only fall"
+handle_revert_change() { # <status> <path> [<path2>]: rules (h) and (i) on one scripts/sql-reverts change
+  local kind=$1 p1=$2 p2=${3:-}
+  # Unlike rule (a), which asks whether the baseline released the file, this asks only whether the base holds it:
+  # a revert is written once, in the same change as the migration it undoes, so being in the base at all means it
+  # is on main, and what was applied to production is not something a later pull request may rewrite.
+  case "$kind" in
+    D)
+      n_deleted=$((n_deleted + 1))
+      if existed "$base" "$p1"; then
+        fail "$p1" "it is in $revert_dir at $base and is deleted here. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration. What to do: git checkout $base -- $p1; if this revert is wrong, say so in docs and land a corrected revert next to it, because the file that was applied in the incident is the record of what actually ran."
+      else
+        printf 'ok %s: deleted in range and not in %s at the base, so it was never merged: removing it is fine\n' "$p1" "$revert_dir"
+        files_checked=$((files_checked + 1))
+      fi
+      ;;
+    M | T)
+      n_modified=$((n_modified + 1))
+      if existed "$base" "$p1"; then
+        fail "$p1" "it is in $revert_dir at $base and has been modified. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration. What to do: git checkout $base -- $p1, then put the correction in a new file — the same rule that stops an edited migration stops an edited revert, because the operator may have run the first one already."
+      else
+        check_revert_file "$p1" 0 || true
+      fi
+      ;;
+    R | C)
+      n_renamed=$((n_renamed + 1))
+      if existed "$base" "$p1"; then
+        fail "$p1" "it is in $revert_dir at $base and has been renamed, to $p2. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration. What to do: undo the rename; a revert is found by the number and name of its migration, so renaming one loses the way back."
+      else
+        check_revert_file "$p2" 1 || true
+      fi
+      ;;
+    A)
+      n_added=$((n_added + 1))
+      check_revert_file "$p1" 1 || true
+      ;;
+    *) die "git diff reported status '$kind' for $p1: this check does not know how to read it" ;;
+  esac
+}
+
+each_change() { # <dir> <handler>: every base..HEAD change under <dir>, as <handler> <status> <path> [<path2>]
+  local d=$1 handler=$2 st kind p1 p2
+  while IFS= read -r -d '' st; do
+    kind=${st%%[0-9]*}
+    IFS= read -r -d '' p1 || die "git diff reported status $st with no path"
+    p2=''
+    case "$kind" in
+      R | C) IFS= read -r -d '' p2 || die "git diff reported $st for $p1 with no second path" ;;
+    esac
+    changed=$((changed + 1))
+    "$handler" "$kind" "$p1" "$p2"
+  done < <(git diff --name-status -z -M "$base" "$head" -- "$d")
+}
+
+each_change "$dir" handle_sql_change
+each_change "$revert_dir" handle_revert_change
+
+echo "check-migrations: $dir holds $head_files numbered file(s) with $head_collisions number collision(s) here and $revert_dir holds $head_reverts revert(s); $base had $base_files and $base_collisions: the collisions already on main are the baseline, and rule (f) lets that number only fall"
 
 if [ "$changed" = 0 ]; then
   if [ "$findings" -gt 0 ]; then
     echo "check-migrations: FAILED, $findings finding(s)"
     exit 1
   fi
-  echo "check-migrations: nothing changed under $dir between $base and HEAD, so there is no new or edited migration to check; the directory rules above still ran"
+  echo "check-migrations: nothing changed under $dir between $base and HEAD, so there is no new or edited migration to check; nothing changed under $revert_dir either; the directory rules above still ran"
   exit 0
 fi
 
@@ -407,4 +618,4 @@ if [ "$findings" -gt 0 ]; then
   echo "check-migrations: $changed changed file(s) in range ($n_added added, $n_modified modified, $n_deleted deleted, $n_renamed renamed), $files_checked checked, $findings finding(s): FAILED"
   exit 1
 fi
-echo "check-migrations: $changed changed file(s) in range ($n_added added, $n_modified modified, $n_deleted deleted, $n_renamed renamed): every one is a numbered migration that says what it changes, on which database and in which phase"
+echo "check-migrations: $changed changed file(s) in range ($n_added added, $n_modified modified, $n_deleted deleted, $n_renamed renamed): every one is a numbered migration that says what it changes, on which database and in which phase, and every revert in $revert_dir names its migration, repeats its database and refuses a replica"
