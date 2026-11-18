@@ -184,8 +184,16 @@ status = "proved"
 id = "listing-edit-stock"
 name = "Seller edits price, quantity or status of a listing"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/pages/Inventory.jsx", "market/src/api.js"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/api.js"]
 proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change"]
+status = "proved"
+
+[[flow]]
+id = "listing-unlist"
+name = "Seller takes a listing off sale, and off CardTrader when linked"
+money = true
+entry = ["solid/src/components/inventory/InventoryBoard.jsx", "solid/src/components/inventory/CollectionHoldings.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/listing_unlist_flow.rs"]
 status = "proved"
 
 [[flow]]
