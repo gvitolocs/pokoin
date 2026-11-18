@@ -17,7 +17,9 @@ import { leftGroupLine } from '@market/pricing-group-note.js';
 import { cardtraderLinked, dropsUnsavedEdits, listingRowNode } from '@market/listing-row-edit.js';
 import { localizeStrategyName } from '@market/pricer.js';
 import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
-import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
+import {
+  gamePrices, inventoryMarketLabel, inventoryMarketValue, marketAmountLabel, priceCheckGroups,
+} from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import ScanImage from '../ScanImage.jsx';
 import { authUser, getBearer } from '../../stores/auth.js';
@@ -114,14 +116,21 @@ function priceRequest(source, rows) {
 const qty = (row) => Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
 const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
 
+/**
+ * One market comp of a row. Both figures — the market price and the ask under
+ * it — print in `props.currency`, the currency the row's own Price cell uses;
+ * PKN is the unit they are stored in, not the one the seller reads.
+ */
 function MarketCell(props) {
   return (
     <Switch
       fallback={(
         <span class="inv-mkt" title={props.value.title}>
-          {inventoryMarketLabel(props.value)}
+          {inventoryMarketLabel(props.value, props.currency)}
           {/* The CardTrader ask beside the net: the net is what a seller keeps. */}
-          <Show when={props.value.askLabel}><small class="inv-mkt-ask">ask {props.value.askLabel}</small></Show>
+          <Show when={props.value.askPkn}>
+            <small class="inv-mkt-ask">ask {marketAmountLabel(props.value.askPkn, props.currency)}</small>
+          </Show>
         </span>
       )}
     >
@@ -845,7 +854,7 @@ export default function InventoryBoard(props) {
                             <span class="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
                             <span class="inv-qty num">{qty(row)}×</span>
                             <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-                            <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
+                            <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} currency={props.priceCurrency} /></Show>
                             <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
                             <OriginTags row={row} duplicates={duplicates()} />
                           </a>
@@ -902,7 +911,7 @@ export default function InventoryBoard(props) {
                               <CondChip condition={row?.condition} />
                               <span class="inv-qty num">{qty(row)}×</span>
                               <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-                              <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
+                              <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} currency={props.priceCurrency} /></Show>
                               <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
                             </a>
                             <RowActions row={row} busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
@@ -997,7 +1006,7 @@ export default function InventoryBoard(props) {
                     </span>
                     <span class="inv-qty num">{qty(row)}</span>
                     <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-                    <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
+                    <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} currency={props.priceCurrency} /></Show>
                     <span><RowStatus status={row?.status} /></span>
                     <span class="inv-date">{inventoryRowDate(row) || '—'}</span>
                     <span class="inv-chev" aria-hidden="true">›</span>

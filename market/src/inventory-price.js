@@ -1,5 +1,5 @@
 import { knownGameId } from './game.js';
-import { formatPknNumber } from './pkn.js';
+import { formatFiatFromPkn, formatPknNumber } from './pkn.js';
 
 function positive(value) {
   const number = Number(value);
@@ -95,6 +95,19 @@ export function gamePrices(pricesByGame, row, fallbackGame) {
   return pricesByGame?.[priceGame(row, fallbackGame)] || {};
 }
 
+/**
+ * One market comp as a person reads it: the stored PKN in the currency their
+ * prices are shown in. PKN is printed only when PKN is that currency, or when
+ * there is no rate to convert with; the amount the row carries stays PKN.
+ */
+export function marketAmountLabel(pkn, currency = 'PKN') {
+  const amount = Number(pkn);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const code = String(currency || 'PKN').trim().toUpperCase();
+  const fiat = code === 'PKN' ? '' : formatFiatFromPkn(amount, code);
+  return fiat || `${formatPknNumber(amount, { maximumFractionDigits: 0 })} PKN`;
+}
+
 export function inventoryMarketValue(prices, row, source) {
   const entry = prices[priceCheckKey(row)] || prices[String(row?.cardId || row?.card_id || '')];
   if (!entry) return null;
@@ -156,7 +169,7 @@ export function inventoryMarketValue(prices, row, source) {
     return {
       currency: 'PKN', value,
       // The CardTrader ask, shown under the net so the two are never confused.
-      askLabel: ask != null && Math.round(ask) !== Math.round(value) ? `${formatPknNumber(ask, { maximumFractionDigits: 0 })} PKN` : '',
+      askPkn: ask != null && Math.round(ask) !== Math.round(value) ? ask : null,
       title: (entry.ctBasis === 'zero'
         ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
         : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).') + fee + asOf,
@@ -171,11 +184,11 @@ export function inventoryMarketValue(prices, row, source) {
   };
 }
 
-export function inventoryMarketLabel(value) {
+export function inventoryMarketLabel(value, currency = 'PKN') {
   if (!value) return '—';
   if (value.currency === 'USD') {
     const format = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
     return `${format(value.low)}${value.high !== value.low ? `–${format(value.high)}` : ''} USD`;
   }
-  return `${formatPknNumber(value.value, { maximumFractionDigits: 0 })} PKN`;
+  return marketAmountLabel(value.value, currency) || '—';
 }
