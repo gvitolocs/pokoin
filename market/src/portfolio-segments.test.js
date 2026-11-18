@@ -426,6 +426,24 @@ test('defaultSegmentLevel opens on All games only when two games hold cards', ()
   assert.equal(defaultSegmentLevel(null), ALL_LEVEL);
 });
 
+test('saved lists never move the level the table opens on', () => {
+  const lists = { defs: [{ key: 'collection:c1', group: 'collection', game: '', label: 'Binder' }], days: [] };
+  // A book whose only rows are the all-games ones, with lists saved on top of
+  // it: the lists are the seller's, not a slice of the book, so they do not
+  // compete for the opening level.
+  const onlyAll = normalizeSegments(answer(
+    [{ date: '2026-11-01', cardsValuePkn: 10, segments: { 'all:sealed': [10, 1, 1] } }],
+    [{ key: 'all:sealed', group: 'type', game: 'all', label: 'Sealed' }],
+  ));
+  assert.deepEqual(segmentLevels(onlyAll).map((level) => level.id), [ALL_LEVEL]);
+  assert.equal(defaultSegmentLevel(onlyAll), ALL_LEVEL);
+  const withLists = withCollections(onlyAll, lists);
+  assert.deepEqual(segmentLevels(withLists).map((level) => level.id), [ALL_LEVEL, COLLECTIONS_LEVEL]);
+  assert.equal(defaultSegmentLevel(withLists), ALL_LEVEL, 'the same book answers the same with lists on it');
+  // Nothing else to open on is the only case collections win.
+  assert.equal(defaultSegmentLevel(withCollections(null, lists)), COLLECTIONS_LEVEL);
+});
+
 test('indexedSeries is percent against the first value above zero', () => {
   assert.deepEqual(indexedSeries([{ valuePkn: 0 }, { valuePkn: 200 }, { valuePkn: 250 }]), [null, 0, 25]);
   assert.deepEqual(indexedSeries([100, 50, 150]), [0, -50, 50]);

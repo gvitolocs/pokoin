@@ -207,17 +207,24 @@ export function segmentWindow(model, range = {}, today = utcDayKey()) {
  * least two games actually hold cards; a one-game collection opens on that
  * game, so a Pokémon-only book starts on Pokémon instead of on a two-row
  * "All games" list of which one row is an empty pile.
+ *
+ * The saved lists are the seller's own level, not a slice of the book, so they
+ * never enter that choice: this answers what it answered before for the same
+ * segments whatever collections exist, and `collections` only when there is no
+ * other level to open on.
  */
 export function defaultSegmentLevel(model) {
   const levels = segmentLevels(model);
+  const book = levels.filter((level) => level.id !== COLLECTIONS_LEVEL);
   const lastDay = (Array.isArray(model?.days) ? model.days : []).at(-1) || null;
   const heldGames = new Set();
   for (const def of model?.defs || []) {
     if (def.group !== 'game') continue;
     if ((lastDay?.segments?.[def.key]?.held || 0) > 0) heldGames.add(def.game);
   }
+  if (!book.length) return levels.length ? COLLECTIONS_LEVEL : ALL_LEVEL;
   if (heldGames.size >= 2) return ALL_LEVEL;
-  const firstGame = levels.find((level) => level.id !== ALL_LEVEL);
+  const firstGame = book.find((level) => level.id !== ALL_LEVEL);
   return firstGame ? firstGame.id : ALL_LEVEL;
 }
 
