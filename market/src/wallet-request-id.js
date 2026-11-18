@@ -1,8 +1,9 @@
 /** The wallet request id — the name one money intent carries to the server.
  *
- * The API applies a request id once, so a Send whose answer never arrived is
- * sent again under the id of that intent instead of becoming another one. A
- * different intent, and the same intent once it has landed, carry a new id. */
+ * The API applies a request id once, so a Send that is pressed again while its
+ * intent is still the one it holds carries the id that intent already had.
+ * The holder keeps one intent for one mount: a changed intent, a press after a
+ * landing, a reload or a new mount gives a new id, and the request it names. */
 
 /** A new intent's id: the v4 UUID text the wallet API accepts. */
 export function newRequestId() {
@@ -10,10 +11,18 @@ export function newRequestId() {
   if (minted) {
     return minted;
   }
-  // A page served outside a secure context has no randomUUID; its wallet still
-  // names every intent it sends.
   const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
+  if (globalThis.crypto?.getRandomValues) {
+    // A page served outside a secure context has no randomUUID; its wallet
+    // still names every intent it sends.
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    // No Web Crypto here either, so the id is drawn from Math.random: one per
+    // intent, which is all an id that names an intent has to be.
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');

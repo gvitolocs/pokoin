@@ -63,3 +63,52 @@ test('a page without randomUUID still mints a valid request id', () => {
     Object.defineProperty(globalThis.crypto, 'randomUUID', { value: minted, configurable: true });
   }
 });
+
+test('a page with only getRandomValues fills its id from it', () => {
+  const stored = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  try {
+    let calls = 0;
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      writable: true,
+      value: {
+        randomUUID: undefined,
+        getRandomValues: (bytes) => {
+          calls += 1;
+          bytes.fill(0);
+          return bytes;
+        },
+      },
+    });
+    // The bytes it is given become the id, with the version and variant bits of
+    // a v4 UUID set by the module.
+    assert.equal(newRequestId(), '00000000-0000-4000-8000-000000000000');
+    assert.equal(calls, 1);
+  } finally {
+    if (stored) Object.defineProperty(globalThis, 'crypto', stored);
+  }
+});
+
+test('a page with no Web Crypto at all still mints valid request ids', () => {
+  const stored = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  try {
+    // Neither call exists in this context: the id is still a v4 UUID text the
+    // wallet API accepts, and no two intents share one.
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      writable: true,
+      value: { randomUUID: undefined, getRandomValues: undefined },
+    });
+    const seen = new Set();
+    for (let index = 0; index < 50; index += 1) {
+      const id = newRequestId();
+      assert.match(id, IS_UUID, id);
+      assert.equal(id.length, 36);
+      seen.add(id);
+    }
+    assert.equal(seen.size, 50);
+    assert.equal(createRequestIds().idFor(walletIntent('transfer', 'bob', 250)).length, 36);
+  } finally {
+    if (stored) Object.defineProperty(globalThis, 'crypto', stored);
+  }
+});
