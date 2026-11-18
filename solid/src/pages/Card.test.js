@@ -401,9 +401,9 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
-  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
+  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
   // Pokoin now is the cheapest live listing this desk already has.
-  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
 });
@@ -422,7 +422,7 @@ test('the card graph draws once, complete: no sold line alone while the history 
   // line arrives after the first draw.
   assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
   assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
-  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\) \|\| !accountSilver\(\)\) return null;/);
   assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\)/);
 });
 
@@ -437,7 +437,7 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
   assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
   assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
-  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\)\);/);
+  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null,\n\s*\);/);
   assert.match(history, /const known = readGraphHistory\(range\);/);
   // A range button is the same read: cached paints at once, uncached keeps the
   // lines that are drawn until it answers.
