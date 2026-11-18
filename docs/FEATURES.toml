@@ -389,6 +389,14 @@ proof = ["pokoin-rust/crates/accounts/tests/router_contract.rs", "pokoin-rust/cr
 status = "partial"
 
 [[flow]]
+id = "dashboard-segment-graphs"
+name = "Seller sees collection value per segment (era, sealed, graded, game)"
+money = false
+entry = ["solid/src/pages/SellerHome.jsx", "solid/src/components/dashboard/SegmentTable.jsx"]
+proof = ["pokoin-rust/crates/accounts/src/handlers/portfolio.rs::the_history_body_describes_the_segments_its_days_carry", "pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs", "market/src/portfolio-segments.test.js", "solid/src/pages/SellerHome.segments.test.js"]
+status = "partial"
+
+[[flow]]
 id = "signup-email"
 name = "Visitor registers with an emailed code"
 money = false
