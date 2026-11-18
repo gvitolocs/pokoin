@@ -451,7 +451,9 @@ async fn a_gone_product_saves_and_asks_for_a_relink() {
         return;
     };
     let id = env.linked_listing().await;
-    let (status, body) = env.edit(id, json!({"firstEdition": true})).await;
+    let (status, body) = env
+        .edit(id, json!({"firstEdition": true, "condition": "LP"}))
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["cardtrader"]["ok"], false, "{body}");
     assert_eq!(
@@ -459,7 +461,12 @@ async fn a_gone_product_saves_and_asks_for_a_relink() {
         "The CardTrader product no longer exists; the next sync relinks it.",
         "{body}"
     );
-    assert_eq!(env.row(id).await["condition"], "NM");
+    let row = env.row(id).await;
+    assert_eq!(row["condition"], "LP", "Pokoin saved the edit");
+    assert_eq!(
+        row["source_listing_id"], "ct:99",
+        "and left the link for the sync"
+    );
     assert_eq!(env.events().await.len(), 1, "the save stands on its own");
 }
 
