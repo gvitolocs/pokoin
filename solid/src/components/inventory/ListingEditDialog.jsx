@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onMount, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import { fetchPriceCheck } from '@market/api.js';
 import { priceCheckItem } from '@market/inventory-price.js';
 import { listingOrigin, originLabel } from '@market/inventory-origin.js';
@@ -36,22 +36,21 @@ export default function ListingEditDialog(props) {
     return origin() === 'cardrails' ? 'Card Rails picks up the change on its next sync.' : '';
   };
 
-  onMount(() => {
-    (async () => {
-      if (props.preview) {
-        setPresets(listingPresets(props.previewComps || {}, row()));
-        return;
-      }
-      try {
-        const token = await getBearer();
-        if (!token) return;
-        const data = await fetchPriceCheck([priceCheckItem(row())], token, { game: props.game });
-        setPresets(listingPresets(data?.prices, row()));
-      } catch {
-        // The quotes are a convenience; the form works without them.
-      }
-    })();
-  });
+  // One price check for the whole dialog, when it opens.
+  void (async () => {
+    if (props.preview) {
+      setPresets(listingPresets(props.previewComps || {}, row()));
+      return;
+    }
+    try {
+      const token = await getBearer();
+      if (!token) return;
+      const data = await fetchPriceCheck([priceCheckItem(row())], token, { game: props.game });
+      setPresets(listingPresets(data?.prices, row()));
+    } catch {
+      // The quotes are a convenience; the form works without them.
+    }
+  })();
 
   async function removeRow() {
     if (await props.onDelete?.()) props.onClose();
