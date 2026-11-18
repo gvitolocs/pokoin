@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
+use sqlx::postgres::{PgConnectOptions, PgConnection, PgPoolOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 
 use crate::cm_offers::Minimum;
@@ -136,6 +136,25 @@ pub async fn cards(pool: &PgPool, schema: &str) -> Result<Vec<Card>, sqlx::Error
         });
     }
     Ok(out)
+}
+
+/// The session a planning read runs under: Postgres refuses to write in it and
+/// stops the statement after `statement_timeout_secs`. Both settings reach
+/// `set_config` as binds rather than as SQL text, and the caller keeps the one
+/// connection the guards were applied to, so a read cannot be handed to a
+/// connection that is neither bounded nor read-only.
+pub async fn read_session(
+    conn: &mut PgConnection,
+    statement_timeout_secs: u64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "select set_config('statement_timeout', $1, false),
+                set_config('default_transaction_read_only', 'on', false)",
+    )
+    .bind(format!("{statement_timeout_secs}s"))
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 pub async fn has_table(pool: &PgPool, name: &str) -> Result<bool, sqlx::Error> {
