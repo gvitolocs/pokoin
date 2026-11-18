@@ -210,17 +210,19 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
       `${step} project took ${ms.toFixed(2)}ms of ${reads} row reads, over the ${CEILING_MS}ms ceiling`,
     );
   }
-  // The same nine steps over 4,000 rows built exactly this way: work that is linear or
-  // n log n in the rows about doubles, so a step that grows past MAX_GROWTH has turned
-  // quadratic at one keystroke. `rank:*` is asserted. `project:*` is measured and
-  // printed but not asserted: `groupCandidates` already scans one name group per row
-  // (suggest-pool.js:267) and doubling the rows doubles each group, so the green code
-  // here grows 3.5x (nezopt, 2026-11-18) — a limit that catches a dedup scanning every
-  // group (about 4x) cannot tell that 3.5x apart, so those steps keep only READ_BUDGET,
-  // which is what the every-group dedup breaks.
+  // The same nine steps over 4,000 rows: work that is linear or n log n in the rows
+  // about doubles, so a step that grows past MAX_GROWTH has turned quadratic inside one
+  // keystroke. The bigger pool is the same shape at twice the rows — every name gets a
+  // twin (`Pika II`), so each name group keeps its ~333 rows and only the rows and the
+  // groups double, the way a real pool grows. Doubling the rows inside the same six
+  // names instead would double each group, and `groupCandidates` already scans one name
+  // group per row (suggest-pool.js:267): that pool grows 3.5x on green code and 3.8x for
+  // a dedup scanning every group (nezopt, 2026-11-18), so no limit separates them, while
+  // at constant shape green code grows 2.0-2.4x and that dedup 3.7-3.9x.
+  const twins = names.map((name) => `${name} II`);
   const more = [];
   for (let index = 2000; index < 4000; index += 1) {
-    more.push(card(String(index), names[index % names.length], { number: `${index}/200` }));
+    more.push(card(String(index), twins[index % twins.length], { number: `${index}/200` }));
   }
   const doubled = rows.concat(more.map(countingRow));
   const scaled = {};
@@ -237,7 +239,6 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   const growth = {};
   for (const key of Object.keys(work)) {
     growth[key] = Number((scaled[key] / work[key]).toFixed(3));
-    if (key.startsWith('project:')) continue;
     assert.ok(
       growth[key] <= MAX_GROWTH,
       `${key} grew ${growth[key]}x from ${work[key]} to ${scaled[key]} row reads over twice the rows, ` +
