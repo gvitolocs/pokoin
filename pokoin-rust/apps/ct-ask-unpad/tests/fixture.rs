@@ -17,8 +17,13 @@ use sqlx::PgPool;
 const BASE: i64 = 9_000_000_000;
 /// Cheap card: 22 PKN asked, 222 stored.
 const CHEAP: i64 = BASE + 1;
-/// A card whose padded price is exactly a Pokoin native ask: skipped.
+/// An expensive card whose price is also that of a CardTrader import listing.
+const IMPORT: i64 = BASE + 2;
+/// A card whose padded price equals a Pokoin native ask that is on the shelf.
 const NATIVE: i64 = BASE + 3;
+/// A card whose padded price equals a Pokoin native ask that ended before the
+/// window, and whose first stored day is inside the window.
+const SOLD: i64 = BASE + 4;
 
 const BACKUP: &str = "ct_ask_unpad_fixture_backup";
 const LIVE: &str = "public.cardtrader_blueprint_daily_analytics";
@@ -29,9 +34,11 @@ const LIVE: &str = "public.cardtrader_blueprint_daily_analytics";
 /// move compares equal to itself down to the last digit.
 ///
 /// The blueprints are `9000000001` a cheap card (222 over a 22 PKN ask),
-/// `…2` an expensive one (40328 over 40128), `…3` the native-priced card,
-/// `…4` a card whose first stored day is inside the window, `…5` a card priced
-/// below the pad, and `…6` a card with no price at all on 2026-09-18.
+/// `…2` an expensive one (40328 over 40128) whose price is also a CardTrader
+/// import listing, `…3` a card with a Pokoin native ask on the shelf at its
+/// padded price, `…4` a card whose first stored day is inside the window and
+/// whose native ask ended before it, `…5` a card priced below the pad, and `…6`
+/// a card with no price at all on 2026-09-18.
 const SEEDED: &str = "
   (date '2026-08-10', 9000000001, 200::numeric,   null::numeric,  null::numeric),
   (date '2026-08-10', 9000000002, 40128::numeric, null::numeric,  null::numeric),
@@ -57,9 +64,9 @@ const SEEDED: &str = "
 ";
 
 /// The same twenty-one rows once the pad is gone: 200 PKN off every priced row
-/// of the window that a native ask does not protect, and `previous_min_price_pkn`
-/// and `price_change_pct` re-derived from the corrected series — which is why
-/// 2026-09-23 moves without its price moving.
+/// of the window, whatever the listing tables say about it, and
+/// `previous_min_price_pkn` and `price_change_pct` re-derived from the corrected
+/// series — which is why 2026-09-23 moves without its price moving.
 const CORRECTED: &str = "
   (date '2026-08-10', 9000000001, 200::numeric,   null::numeric,  null::numeric),
   (date '2026-08-10', 9000000002, 40128::numeric, null::numeric,  null::numeric),
@@ -70,13 +77,13 @@ const CORRECTED: &str = "
   (date '2026-08-31', 9000000002, 40128::numeric, 40128::numeric, ((40128-40128)::numeric/40128)),
   (date '2026-08-31', 9000000005, 150::numeric,   100::numeric,   ((150-100)::numeric/100)),
   (date '2026-09-01', 9000000001, 222::numeric,   22::numeric,    ((222-22)::numeric/22)),
-  (date '2026-09-01', 9000000003, 1200::numeric,  1000::numeric,  ((1200-1000)::numeric/1000)),
+  (date '2026-09-01', 9000000003, 1000::numeric,  1000::numeric,  ((1000-1000)::numeric/1000)),
   (date '2026-09-01', 9000000004, 200::numeric,   null::numeric,  null::numeric),
   (date '2026-09-17', 9000000001, 22::numeric,    222::numeric,   ((22-222)::numeric/222)),
   (date '2026-09-18', 9000000006, null::numeric,  null::numeric,  null::numeric),
   (date '2026-09-19', 9000000001, 222::numeric,   22::numeric,    ((222-22)::numeric/22)),
   (date '2026-09-19', 9000000002, 40128::numeric, 40128::numeric, ((40128-40128)::numeric/40128)),
-  (date '2026-09-19', 9000000003, 700::numeric,   1200::numeric,  ((700-1200)::numeric/1200)),
+  (date '2026-09-19', 9000000003, 700::numeric,   1000::numeric,  ((700-1000)::numeric/1000)),
   (date '2026-09-23', 9000000001, 22::numeric,    222::numeric,   ((22-222)::numeric/222)),
   (date '2026-09-23', 9000000002, 40128::numeric, 40128::numeric, ((40128-40128)::numeric/40128)),
   (date '2026-09-23', 9000000004, 300::numeric,   200::numeric,   ((300-200)::numeric/200)),
@@ -107,19 +114,18 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
     assert_counts(
         &planned,
         &[
-            ("2026-08-31", &[3, 3, 2, 2, 2, 0, 0, 0, 0]),
-            ("2026-09-01", &[3, 3, 3, 3, 2, 1, 1, 0, 0]),
-            ("2026-09-17", &[1, 1, 1, 1, 1, 0, 0, 0, 0]),
-            ("2026-09-18", &[1, 0, 0, 0, 0, 0, 0, 0, 1]),
-            ("2026-09-19", &[3, 3, 3, 3, 3, 0, 0, 0, 0]),
-            ("2026-09-23", &[3, 3, 3, 3, 0, 3, 0, 0, 0]),
-            ("total", &[14, 13, 12, 4, 8, 4, 1, 0, 1]),
+            ("2026-08-31", &[3, 3, 2, 2, 2, 0, 0, 0]),
+            ("2026-09-01", &[3, 3, 3, 3, 3, 0, 0, 0]),
+            ("2026-09-17", &[1, 1, 1, 1, 1, 0, 0, 0]),
+            ("2026-09-18", &[1, 0, 0, 0, 0, 0, 0, 1]),
+            ("2026-09-19", &[3, 3, 3, 3, 3, 0, 0, 0]),
+            ("2026-09-23", &[3, 3, 3, 3, 0, 3, 0, 0]),
+            ("total", &[14, 13, 12, 4, 9, 3, 0, 1]),
         ],
     )?;
     for wanted in [
         "blueprints the change touches across the window: 4",
         "2026-09-23: 3 rows of 3 blueprints change only their previous value",
-        "skipped: 1 rows equal a Pokoin native ask",
         "skipped: 1 rows of the window carry no price at all",
         "outside the change: 2026-08-10 has 5 rows and is never written",
         "2026-09-02  no rows stored that day: nothing to un-pad",
@@ -131,14 +137,32 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
             planned.text()
         );
     }
+    // The one row whose stored ask is also a Pokoin native ask that was on the
+    // shelf that day. It is reported and still corrected: an import at the same
+    // price, and a listing that ended before the window, are not worth a line.
+    let blueprint = NATIVE.to_string();
+    let words = planned.text();
     assert!(
-        planned.text().contains("40328") && planned.text().contains("40128"),
-        "the samples must show the expensive card before and after\n{}",
-        planned.text()
+        words.contains("rows whose padded price equals a Pokoin native listing price: 1"),
+        "the plan did not count the native-priced row\n{words}"
+    );
+    let listed = words
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+        .find(|parts| parts.len() == 4 && parts[0].starts_with("2026-"))
+        .unwrap_or_default();
+    assert_eq!(
+        listed,
+        vec!["2026-09-01", blueprint.as_str(), "1200", "active"],
+        "the native note did not list the listing that was on the shelf\n{words}"
+    );
+    assert!(
+        words.contains("40328") && words.contains("40128"),
+        "the samples must show the expensive card before and after\n{words}"
     );
     // The plan is the operator's decision material, so `container.sh --nocapture`
     // shows the report itself and not only the numbers this test checked.
-    println!("{}", planned.text());
+    println!("{words}");
     assert_rows(&pool, SEEDED).await?;
     let made = count(
         &pool,
@@ -147,7 +171,51 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
     .await?;
     assert_eq!(made, 0, "plan made a table");
 
-    // 2. apply: the change itself, one day per transaction.
+    // 2. One write run at a time: a session that already holds the run lock
+    // makes `apply` refuse at once, without waiting and without changing a row.
+    let mut other = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("cannot take a second connection: {error}"))?;
+    let held: bool = sqlx::query_scalar("select pg_try_advisory_lock($1::bigint)")
+        .bind(ct_ask_unpad::LOCK_KEY)
+        .fetch_one(other.as_mut())
+        .await
+        .map_err(|error| format!("cannot take the run lock by hand: {error}"))?;
+    assert!(held, "the fixture could not take the run lock");
+    let refused = command(&url, &["apply", "--backup-table", BACKUP]).await;
+    let error = match refused {
+        Ok(report) => {
+            return Err(format!(
+                "apply ran while another session held the run lock\n{}",
+                report.text()
+            ))
+        }
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("another apply or revert already holds the run lock"),
+        "the refusal said something else: {error}"
+    );
+    assert_rows(&pool, SEEDED).await?;
+    assert_eq!(
+        count(
+            &pool,
+            &format!("select count(*) from pg_tables where tablename = '{BACKUP}'"),
+        )
+        .await?,
+        0,
+        "a refused apply made the backup table"
+    );
+    let given_back: bool = sqlx::query_scalar("select pg_advisory_unlock($1::bigint)")
+        .bind(ct_ask_unpad::LOCK_KEY)
+        .fetch_one(other.as_mut())
+        .await
+        .map_err(|error| format!("cannot give the run lock back: {error}"))?;
+    assert!(given_back, "the fixture's lock was not its own");
+    drop(other);
+
+    // 3. apply: the change itself, one day per transaction.
     let applied = command(&url, &["apply", "--backup-table", BACKUP]).await?;
     assert_eq!(applied.code(), 0, "{}", applied.text());
     assert!(
@@ -204,20 +272,38 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
         0,
         "every recorded row carries its fixed_at"
     );
-    // The 2026-09-01 row of the native-priced card: its price is the pad's
-    // survivor, its comparison value is not.
+    // Every blueprint that has a listing at exactly the padded price lost the
+    // pad all the same: the ask on the shelf, the ask that ended before the
+    // window, and the CardTrader import that is still active.
     assert_eq!(
         count(
             &pool,
             &format!(
                 "select count(*) from {LIVE}
-              where observed_day = '2026-09-01' and blueprint_id = {NATIVE}
-                and min_price_pkn = 1200 and previous_min_price_pkn = 1000"
+                  where (observed_day = '2026-09-01' and blueprint_id = {NATIVE}
+                         and min_price_pkn = 1000)
+                     or (observed_day = '2026-09-01' and blueprint_id = {SOLD}
+                         and min_price_pkn = 200)
+                     or (observed_day = '2026-08-31' and blueprint_id = {IMPORT}
+                         and min_price_pkn = 40128)"
             )
         )
         .await?,
-        1,
-        "a native-priced row was un-padded, or its previous value was left alone"
+        3,
+        "a row whose price matches a listing kept its pad"
+    );
+    // The padded values themselves: 222 also happens to be what 422 becomes, so
+    // the check names the numbers that only the pad can produce.
+    assert_eq!(
+        count(
+            &pool,
+            "select count(*) from public.cardtrader_blueprint_daily_analytics
+              where observed_day between '2026-08-31' and '2026-09-19'
+                and min_price_pkn in (1200, 400, 40328, 422, 900)"
+        )
+        .await?,
+        0,
+        "a padded price survived the apply"
     );
     // The day after the window: no price moved, the comparison did.
     assert_eq!(
@@ -234,7 +320,7 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
         "the day after the window kept its padded previous value"
     );
 
-    // 3. a second apply changes nothing: the backup table says so.
+    // 4. a second apply changes nothing: the backup table says so.
     let again = command(&url, &["apply", "--backup-table", BACKUP]).await?;
     assert_eq!(again.code(), 0, "{}", again.text());
     for (_, _, _, written) in writes(&again)? {
@@ -253,7 +339,7 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
         "a second apply recorded rows again"
     );
     let replanned = command(&url, &["plan", "--backup-table", BACKUP]).await?;
-    assert_counts(&replanned, &[("total", &[14, 13, 0, 0, 0, 0, 1, 12, 1])])?;
+    assert_counts(&replanned, &[("total", &[14, 13, 0, 0, 0, 0, 12, 1])])?;
     assert!(
         replanned
             .text()
@@ -262,7 +348,7 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
         replanned.text()
     );
 
-    // 4. verify proves the stored state, and notices a lie.
+    // 5. verify proves the stored state, and notices a lie.
     let verified = command(&url, &["verify", "--backup-table", BACKUP]).await?;
     assert!(!verified.failed(), "{}", verified.text());
     assert!(
@@ -291,7 +377,7 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
     let verified = command(&url, &["verify", "--backup-table", BACKUP]).await?;
     assert!(!verified.failed(), "{}", verified.text());
 
-    // 5. revert puts every old value back and empties the backup table.
+    // 6. revert puts every old value back and empties the backup table.
     let reverted = command(&url, &["revert", "--backup-table", BACKUP]).await?;
     assert_eq!(reverted.code(), 0, "{}", reverted.text());
     assert!(
@@ -313,7 +399,7 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
         "revert left a row the fixture never had"
     );
 
-    // 6. and the fix works again afterwards: it is a function of the data, not
+    // 7. and the fix works again afterwards: it is a function of the data, not
     // of a run that already happened.
     let second = command(&url, &["apply", "--backup-table", BACKUP]).await?;
     assert_eq!(second.code(), 0, "{}", second.text());
@@ -321,6 +407,9 @@ async fn the_fix_plan_apply_verify_revert() -> Result<(), String> {
     let verified = command(&url, &["verify", "--backup-table", BACKUP]).await?;
     assert!(!verified.failed(), "{}", verified.text());
 
+    // The gate `tests/container.sh` reads: a run that skipped for want of a URL
+    // says nothing like this, and cargo is just as green either way.
+    println!("fixture ran: plan, lock, apply, apply again, verify, revert, apply again");
     Ok(())
 }
 
@@ -384,7 +473,11 @@ async fn seed(pool: &PgPool) -> Result<(), String> {
            listing_id bigint primary key,
            card_id text not null,
            price_pkn numeric not null,
-           created_at timestamptz not null
+           status text not null,
+           source text not null,
+           quantity_available integer not null,
+           created_at timestamptz not null,
+           updated_at timestamptz not null
          )"
         .to_string(),
         format!(
@@ -395,15 +488,23 @@ async fn seed(pool: &PgPool) -> Result<(), String> {
                     observed_day + time '21:04:00', 'blueprint ' || blueprint_id::text
                from (values {SEEDED}) e (observed_day, blueprint_id, price, previous, change)"
         ),
-        // Two native asks of the same card: one old enough to protect the
-        // 2026-09-01 row, one created after 2026-09-19 and so irrelevant to it.
         "insert into marketplace_search_candidates (card_id, ct_id) values
            (700001, 9000000001), (700002, 9000000002), (700003, 9000000003),
            (700004, 9000000004)"
             .to_string(),
-        "insert into marketplace_user_listings (listing_id, card_id, price_pkn, created_at) values
-           (1, '700003', 1200, '2026-08-20T00:00:00Z'),
-           (2, '700003', 900,  '2026-09-30T00:00:00Z')"
+        // Three listings at the padded price of their own card: a Pokoin native
+        // ask that is on the shelf on 2026-09-01, a Pokoin native ask that ended
+        // before the window, and a CardTrader import that is still active. None
+        // of the three protects its row; only the first is worth a line.
+        "insert into marketplace_user_listings
+           (listing_id, card_id, price_pkn, status, source, quantity_available,
+            created_at, updated_at) values
+           (1, '700003',   1200, 'active', 'pokoin_web',             3,
+            '2026-08-20T00:00:00Z', '2026-09-10T00:00:00Z'),
+           (2, '700004',    400, 'sold',   'pokoin_web',             0,
+            '2026-08-01T00:00:00Z', '2026-08-20T00:00:00Z'),
+           (3, '700002',  40328, 'active', 'cardtrader_seller_import', 5,
+            '2026-09-01T00:00:00Z', '2026-09-18T00:00:00Z')"
             .to_string(),
         "create table fixture_before as select * from cardtrader_blueprint_daily_analytics"
             .to_string(),
@@ -450,15 +551,15 @@ async fn assert_rows(pool: &PgPool, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The nine numbers of a table line of the plan, by its first column.
-fn assert_counts(report: &Report, wanted: &[(&str, &[i64; 9])]) -> Result<(), String> {
+/// The eight numbers of a table line of the plan, by its first column.
+fn assert_counts(report: &Report, wanted: &[(&str, &[i64; 8])]) -> Result<(), String> {
     for (day, values) in wanted {
         let line = report
             .lines()
             .iter()
             .find(|line| {
                 let parts = line.split_whitespace().collect::<Vec<_>>();
-                parts.len() == 10 && parts[0] == *day
+                parts.len() == 9 && parts[0] == *day
             })
             .ok_or_else(|| format!("no line for {day} in\n{}", report.text()))?;
         let seen = line
@@ -471,7 +572,7 @@ fn assert_counts(report: &Report, wanted: &[(&str, &[i64; 9])]) -> Result<(), St
             seen,
             values.to_vec(),
             "the line for {day} counts the wrong rows (rows, priced, to change, \
-             blueprints, un-padded, previous, native, recorded, unpriced)\n{}",
+             blueprints, un-padded, previous, recorded, unpriced)\n{}",
             report.text()
         );
     }
