@@ -47,6 +47,8 @@ const CARD_KEYED_ROUTES = ROUTES.filter((path) => path !== '/api/marketplace-lis
 const PREFETCH_FRESH_MS = 120_000;
 
 const NAME = 'Charizard ex';
+/** One printing the name snapshot carries, so the rail has something to build from. */
+const NEXT_PRINTING = '813601';
 const SLICE = {
   day: '2026-11-10',
   condition: 'NM',
@@ -114,7 +116,9 @@ function payloadFor(route, params) {
     return { sales: [NATIVE_SALE] };
   }
   if (route === '/api/marketplace-list') {
-    return { cards: [], hasMore: false, count: 0 };
+    // The built name snapshot: with rows in it the rail never falls back to a
+    // search read, which is what a production desk has.
+    return { cards: [{ id: NEXT_PRINTING, name: NAME, set: 'Scarlet & Violet', card_number: '123/101' }], hasMore: false, count: 1 };
   }
   return {};
 }
@@ -281,6 +285,7 @@ test('the measured order: hover warms the neighbour, the click finds every panel
     // desk the visitor is on already read. Neither the warm nor the next desk asks it
     // again, so P8's rail paints from the copy this device already has.
     assert.equal(trace.filter((row) => row.route === '/api/marketplace-list').length, 1, 'one name snapshot, at the first mount');
+    assert.equal(trace.filter((row) => row.href.includes('marketplace-search-page')).length, 0, 'the rail answers from the snapshot, not from a search');
     assert.ok(
       inSegment('warm 813624 + 813620').every((row) => trace.indexOf(row) > firstAt('/api/marketplace-card-page', CURRENT)),
       'the warm never pre-empts the desk the visitor is on',
