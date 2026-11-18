@@ -41,7 +41,6 @@ import {
   omitListings,
   peekCanonicalPath,
   peekCard,
-  peekHasListingRows,
   peekListings,
   peekRecentTile,
   postWatchlist,
@@ -103,6 +102,7 @@ import { cardDocumentTitle, displayName, printingIdentity } from '@market/identi
 import { deskLanguageChips, deskLanguageChoice } from '@market/listing-languages.js';
 import { applyListingLive, subscribeListingLive } from '@market/listing-live.js';
 import { conditionChipSrc, publicListingSellerName, sellerHref } from '@market/listing-meta.js';
+import { listingsKnown } from '@market/listings-cache.js';
 import { flagSrc, languagesForNationality } from '@market/locale.js';
 import { currencyFromSearch, fiatFromPkn, formatPkn, pknRateLabel } from '@market/pkn.js';
 import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
@@ -256,9 +256,12 @@ function CardDesk(props) {
 
   const cached = peekCard(cardId, { lang });
   const listed = peekListings(cardId);
+  // An answer of `[]` is an answer — nobody is selling it — so the cell says so
+  // in this frame instead of opening blank and repainting when the read lands.
+  const listedKnown = listingsKnown(cardId);
   // A reload paints the last answer of this desk; the live read reconciles it.
   const deskGame = untrack(() => game().id);
-  const stored = peekHasListingRows(listed) ? null : readDeskListings(deskGame, cardId);
+  const stored = listedKnown ? null : readDeskListings(deskGame, cardId);
   let paintedFromStore = Boolean(stored);
   const firstStub = untrack(stubCard);
   const [page, setPage] = createSignal(
@@ -267,9 +270,9 @@ function CardDesk(props) {
       : (firstStub ? { card: firstStub, versions: [], neighbors: neighborsOrPeek(cardId) } : null),
   );
   const [shop, setShop] = createStore({
-    offers: offerCopies(peekHasListingRows(listed) ? listed.listings : (stored ? stored.rows : (cached?.offers || []))),
+    offers: offerCopies(listedKnown ? listed.listings : (stored ? stored.rows : (cached?.offers || []))),
   });
-  const [offersReady, setOffersReady] = createSignal(peekHasListingRows(listed) || Boolean(stored));
+  const [offersReady, setOffersReady] = createSignal(listedKnown || Boolean(stored));
   const [error, setError] = createSignal('');
   // Same-id cards of other games, offered when a game-less link cannot pick one.
   const [ownerChoices, setOwnerChoices] = createSignal([]);

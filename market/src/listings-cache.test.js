@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   dropListing,
   invalidateListings,
+  listingsKnown,
   mergeCreatedListing,
   mergeListingRows,
   omitListings,
@@ -66,6 +67,20 @@ test('empty listings cache is a hit but does not count as ready rows', () => {
   assert.equal(peekHasListingRows(peekListings('236234')), false);
   rememberListings('236234', { listings: [{ id: '1', pricePkn: 12 }] }, 0);
   assert.equal(peekHasListingRows(peekListings('236234')), true);
+});
+
+test('a known listings answer includes the empty one (CARD-01 P1)', () => {
+  resetListingsCacheForTests();
+  assert.equal(listingsKnown('236234'), false, 'nothing cached is the only unknown');
+  rememberListings('236234', { listings: [] }, 0);
+  assert.equal(listingsKnown('236234'), true, 'nobody selling it is an answer');
+  rememberListings('236234', { listings: [{ id: '1', pricePkn: 12 }] }, 0);
+  assert.equal(listingsKnown('236234'), true);
+  // The same answer from a revalidation never takes the known state away.
+  rememberListings('236234', { listings: [] }, 0);
+  assert.equal(listingsKnown('236234'), true, 'an empty answer keeps an answer');
+  invalidateListings('236234');
+  assert.equal(listingsKnown('236234'), false, 'only the visitors own write forgets it');
 });
 
 test('dropListing removes that ask from the shop cache', () => {

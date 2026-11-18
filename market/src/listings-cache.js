@@ -138,6 +138,16 @@ export function peekHasListingRows(listed) {
   return Array.isArray(listed?.listings) && listed.listings.length > 0;
 }
 
+/**
+ * The cache holds an *answer* for this card. `[]` is an answer — it says nobody
+ * is selling it — so a cell can paint "No listings yet." in its first frame
+ * instead of waiting for a request (`peekHasListingRows` only answers "are there
+ * rows to show", which is the other question).
+ */
+export function listingsKnown(cardId) {
+  return Array.isArray(peekListings(cardId)?.listings);
+}
+
 export function invalidateListings(cardId) {
   const id = String(cardId || '');
   listingsCache.delete(id);
