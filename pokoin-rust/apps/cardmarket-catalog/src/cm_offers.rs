@@ -37,14 +37,16 @@ pub struct Minimum {
 }
 
 /// Cardmarket's facet conditions, in the engine's spelling. `Poor` is its own
-/// bucket; the others are one letter.
-const CONDITIONS: [&str; 6] = ["NM", "SP", "MP", "PL", "Poor", "*"];
+/// bucket; the others are one letter. `cm_daily` loads the same six, because a
+/// daily series whose condition strings differ from the latest-value table's
+/// stops joining it.
+pub(crate) const CONDITIONS: [&str; 6] = ["NM", "SP", "MP", "PL", "Poor", "*"];
 
 /// Cardmarket's language facet codes mapped to the key the pricer matches
 /// listings with. The engine writes Cardmarket's own `ZH-TW`; Pokoin's
 /// `language_key` calls Traditional Chinese `ZHT`, and a floor that never
 /// joins is a floor that never happens.
-const LANGUAGES: [(&str, &str); 14] = [
+pub(crate) const LANGUAGES: [(&str, &str); 14] = [
     ("EN", "EN"),
     ("FR", "FR"),
     ("DE", "DE"),
@@ -61,14 +63,14 @@ const LANGUAGES: [(&str, &str); 14] = [
     ("*", "*"),
 ];
 
-const FLAGS: [&str; 3] = ["Y", "N", "*"];
-const SELLER_TYPES: [&str; 2] = ["pro", "private"];
+pub(crate) const FLAGS: [&str; 3] = ["Y", "N", "*"];
+pub(crate) const SELLER_TYPES: [&str; 2] = ["pro", "private"];
 
 fn text(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(|s| s.trim().to_string())
 }
 
-fn product_id(value: &Value) -> Option<i64> {
+pub(crate) fn product_id(value: &Value) -> Option<i64> {
     let raw = match value.get("idProduct") {
         Some(Value::Number(_)) => value.get("idProduct")?.as_i64(),
         Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
@@ -77,14 +79,14 @@ fn product_id(value: &Value) -> Option<i64> {
     raw.filter(|id| *id > 0)
 }
 
-fn condition_key(raw: &str) -> Option<String> {
+pub(crate) fn condition_key(raw: &str) -> Option<String> {
     CONDITIONS
         .iter()
         .find(|c| c.eq_ignore_ascii_case(raw))
         .map(|c| (*c).to_string())
 }
 
-fn language_key(raw: &str) -> Option<String> {
+pub(crate) fn language_key(raw: &str) -> Option<String> {
     LANGUAGES
         .iter()
         .find(|(code, _)| code.eq_ignore_ascii_case(raw))
