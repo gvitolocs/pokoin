@@ -6,7 +6,8 @@
 #
 # The fixture baseline holds 059_add_draft_table.sql (marked "-- migration: draft", so it is still editable),
 # and three released migrations 060, 061, 062 — the highest number in use is therefore 062 and a new file has
-# to be 063 or above.
+# to be 063 or above. Rule (g) means a new migration is only compliant together with its revert in
+# scripts/sql-reverts (the revert helper) or with a "-- revert: irreversible:" line (the irreversible helper).
 #
 # Usage: bash scripts/check-migrations.test.sh
 set -euo pipefail
@@ -18,6 +19,7 @@ trap 'rm -rf "$tmp"' EXIT
 repo=$tmp/repo
 out=$tmp/out.txt
 dir=scripts/sql
+revert_dir=scripts/sql-reverts
 baseline=''
 
 # g is every git call the fixture makes. core.hooksPath is emptied on purpose: the Paseo lane exports it at
@@ -45,6 +47,28 @@ sql_db() { # sql_db <name> <value of -- db> <line>...: the same, with the target
 }
 
 commit() { g add -A && g commit --allow-empty -qm "$1"; }
+
+revert() { # revert <stem> [db] [reverts-path]: a compliant scripts/sql-reverts/<stem>.revert.sql
+    local stem=$1 db=${2:-writer} reverts=${3:-}
+    [ -n "$reverts" ] || reverts="$dir/$stem.sql"
+    mkdir -p "$repo/$revert_dir"
+    {
+        printf '%s\n' "-- reverts: $reverts" "-- db: $db" \
+            '-- destructive: drops what the migration built and puts back the rows it moved, from the backup table it left' \
+            'begin;' \
+            'do $$ begin' \
+            "  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;" \
+            'end $$;' \
+            'drop table if exists poker.built_by_the_migration;' \
+            'commit;'
+    } >"$repo/$revert_dir/$stem.revert.sql"
+}
+
+irreversible() { # irreversible <name under scripts/sql> [reason]: the line rule (g) takes instead of a revert
+    local name=$1 reason=${2:-}
+    [ -n "$reason" ] || reason='it overwrote rows the file never copied, so nothing can put them back'
+    printf '%s\n' "-- revert: irreversible: $reason" >>"$repo/$dir/$name"
+}
 
 fresh_repo() { # a committed baseline: three released migrations and one draft
     rm -rf "$repo"
@@ -91,11 +115,12 @@ unwant() { if grep -qF -- "$1" "$out"; then bad "$2: '$1' should not be in the o
 # 1. A clean new migration passes, and the run says what it read.
 fresh_repo
 sql 063_new_table.sql 'create table poker.round (id bigint primary key);'
+revert 063_new_table
 commit add-063
 run_check
 expect_rc 0 "a compliant new migration"
-want "ok $dir/063_new_table.sql: new 063_new_table.sql above 062; db: writer; phase: expand; create at line 3" \
-    "the per-file line reports the name, the number it cleared and the header"
+want "ok $dir/063_new_table.sql: new 063_new_table.sql above 062; db: writer; phase: expand; create at line 3; its revert is $revert_dir/063_new_table.revert.sql" \
+    "the per-file line reports the name, the number it cleared, the header and the revert that carries it"
 want "every one is a numbered migration that says what it changes, on which database and in which phase" \
     "the summary states what the run proved"
 
@@ -163,6 +188,7 @@ sql 070_first_name.sql 'create table poker.renamed (id bigint);'
 commit add-070
 mid=$(g rev-parse HEAD)
 g mv "$dir/070_first_name.sql" "$dir/071_second_name.sql"
+irreversible 071_second_name.sql
 commit rename-to-071
 run_check "$mid"
 expect_rc 0 "a rename of a file that is new in the range"
@@ -235,6 +261,8 @@ fresh_repo
 sql_db 063_satellite_target.sql 'satellite:pokomon' 'create table poker.sat (id bigint);'
 printf '%s\n' '-- db: every-game' '-- phase: expand' 'create table poker.ev (id bigint);' \
     >"$repo/$dir/064_every_game_target.sql"
+revert 063_satellite_target 'satellite:pokomon'
+irreversible 064_every_game_target.sql
 commit add-with-legitimate-targets
 run_check
 expect_rc 0 "satellite:<game> and every-game are targets"
@@ -284,6 +312,8 @@ printf '%s\n' '-- db: writer' '-- phase: contract' \
     '-- destructive: the nightly rebuild recomputes this table, nothing running reads its old rows' \
     'truncate poker.seat;' 'drop index poker.seat_id_ix;' >"$repo/$dir/063_honest_contract.sql"
 sql 064_the_word_in_prose.sql '-- we never truncate anything in this file' 'create table poker.prose (id bigint);'
+irreversible 063_honest_contract.sql
+irreversible 064_the_word_in_prose.sql
 commit contract-with-a-reason
 run_check
 expect_rc 0 "a contract that says what it removes and why"
@@ -304,6 +334,7 @@ want "is a data change, not a migration" "where the data change belongs instead"
 fresh_repo
 sql 063_generated_ddl.sql "select format('create table poker.g%s (id bigint)', n) from generate_series(1, 3) n;" \
     '\gexec'
+irreversible 063_generated_ddl.sql
 commit add-a-gexec-migration
 run_check
 expect_rc 0 "a migration whose DDL is emitted through gexec"
@@ -323,6 +354,7 @@ want "What to do: a merge may not add a duplicate number" "the required move is 
 # 24. Rule (f) passing: collisions the baseline already carries are inherited, not held against this change.
 fresh_repo_colliding
 sql 063_above_the_collision.sql 'create table poker.inherited (id bigint);'
+irreversible 063_above_the_collision.sql
 commit add-next-to-a-baseline-collision
 run_check
 expect_rc 0 "a baseline collision this change does not touch"
@@ -333,6 +365,8 @@ unwant "adds a collision" "nothing is blamed for a collision that predates the b
 fresh_repo
 sql 063_one.sql 'truncate poker.seat;'
 printf '%s\n' '-- db: writer' 'create table poker.two (id bigint);' >"$repo/$dir/064_two.sql"
+irreversible 063_one.sql
+irreversible 064_two.sql
 commit add-two-offenders
 run_check
 expect_rc 1 "two offending files"
@@ -358,6 +392,190 @@ rc=0
 expect_rc 0 "bash scripts/check-migrations.sh --base <the migration baseline> on this repository"
 want "$dir holds " "the real scripts/sql was counted, not skipped"
 want "check-migrations: " "the real run says what it did"
+want "ok $revert_dir/144_listing_external_identity.revert.sql: new revert of $dir/144_listing_external_identity.sql" \
+    "the real revert this repository holds is checked by the new rules and passes"
+want "could not be compared" "and its migration's missing -- db: line is reported rather than guessed at"
+
+# 28. Rule (g): a new migration with neither a revert nor a reason. (case 1 is the same rule passing.)
+fresh_repo
+sql 063_unrevertable.sql 'create table poker.no_way_back (id bigint);'
+commit add-without-a-revert
+run_check
+expect_rc 1 "a new migration with no revert and no irreversible line"
+want "$dir/063_unrevertable.sql: nothing undoes it: a new migration needs its revert in $revert_dir/063_unrevertable.revert.sql, or the line \"-- revert: irreversible: <why>\" in its header" \
+    "the finding names the revert path it wants and the header line, in place"
+want "What to do: write the undo as scripts/sql-reverts/<the number>_<the name>.revert.sql" \
+    "and says who is supposed to have written it, while the migration was still fresh"
+
+# 29. Rule (g) passing: the honest ratchet, with a reason that says what it destroyed.
+fresh_repo
+sql 063_one_way.sql 'create table poker.ratchet (id bigint);'
+irreversible 063_one_way.sql 'the update rewrote 1.2 million listing rows from a source that no longer keeps the old values'
+commit add-marked-irreversible
+run_check
+expect_rc 0 "a new migration that says why nothing can undo it"
+want "ok $dir/063_one_way.sql: new 063_one_way.sql above 062; db: writer; phase: expand; create at line 3; marked irreversible (\"the update rewrote 1.2 million listing rows from a source that no longer keeps the old values\")" \
+    "the reason is read back, not just the keyword"
+
+# 30. Rule (g): the irreversible line is not a get-out clause when it says nothing.
+fresh_repo
+sql 063_short_reason.sql 'create table poker.short (id bigint);'
+irreversible 063_short_reason.sql 'trust me'
+commit add-a-short-irreversible-reason
+run_check
+expect_rc 1 "an irreversible reason of 8 characters"
+want "the \"-- revert: irreversible:\" reason is 8 character(s): \"trust me\"" "the length found is printed"
+want "and there is no $revert_dir/063_short_reason.revert.sql" "and the missing revert is named in the same breath"
+
+# 31. Rule (h): a revert naming a migration that is not in the tree.
+fresh_repo
+revert 063_ghost_migration
+commit add-a-revert-with-no-migration
+run_check
+expect_rc 1 "a revert whose migration nobody has"
+want "$revert_dir/063_ghost_migration.revert.sql: it reverts $dir/063_ghost_migration.sql, which is not in the tree at HEAD" \
+    "the missing migration is named, and the file is not silently taken for a self-standing migration"
+
+# 32. Rule (h): a revert whose header names another migration than its own file name.
+fresh_repo
+sql 063_real_migration.sql 'create table poker.real (id bigint);'
+revert 063_real_migration writer "$dir/062_baseline_index.sql"
+commit add-a-mislabelled-revert
+run_check
+expect_rc 1 "a revert labelled with the wrong migration"
+want "its \"-- reverts: $dir/062_baseline_index.sql\" line names another migration than its own file name, which promises $dir/063_real_migration.sql" \
+    "both spellings are printed, because the file itself cannot say which one is wrong"
+
+# 33. Rule (h): the revert runs on the database its migration ran on.
+fresh_repo
+sql_db 063_satellite_only.sql 'satellite:pokomon' 'create table poker.sat2 (id bigint);'
+revert 063_satellite_only 'writer'
+commit add-a-revert-on-the-wrong-database
+run_check
+expect_rc 1 "a revert that targets the writer of a satellite migration"
+want "$revert_dir/063_satellite_only.revert.sql: its \"-- db: writer\" is not the \"-- db: satellite:pokomon\" of $dir/063_satellite_only.sql, the migration it reverts" \
+    "the two targets are printed against each other"
+
+# 34. Rule (h): every revert refuses the replica, the way the 20261101 artwork revert does.
+fresh_repo
+sql 063_needs_a_guard.sql 'create table poker.guarded (id bigint);'
+mkdir -p "$repo/$revert_dir"
+printf '%s\n' "-- reverts: $dir/063_needs_a_guard.sql" '-- db: writer' \
+    '-- destructive: drops the table the migration created, which holds nothing yet' \
+    'begin;' 'drop table if exists poker.guarded;' 'commit;' \
+    >"$repo/$revert_dir/063_needs_a_guard.revert.sql"
+commit add-a-revert-without-the-guard
+run_check
+expect_rc 1 "a revert with no replica refusal in it"
+want "$revert_dir/063_needs_a_guard.revert.sql: no statement raises on pg_is_in_recovery()" "the missing refusal is named"
+want "The Pi replica is one psql line away" "and why a hurry makes it matter"
+
+# 35. Rule (h): a revert still owes the destructive reason, even though rule (d) stays out of it.
+fresh_repo
+sql 063_needs_a_reason.sql 'create table poker.unreasoned (id bigint);'
+mkdir -p "$repo/$revert_dir"
+printf '%s\n' "-- reverts: $dir/063_needs_a_reason.sql" '-- db: writer' 'begin;' \
+    'do $$ begin' "  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;" 'end $$;' \
+    'drop table poker.unreasoned;' 'commit;' \
+    >"$repo/$revert_dir/063_needs_a_reason.revert.sql"
+commit add-a-revert-without-a-reason
+run_check
+expect_rc 1 "a revert with no -- destructive: line"
+want "$revert_dir/063_needs_a_reason.revert.sql: no \"-- destructive: <reason>\" line. Rule (d) does not apply to a revert" \
+    "the finding says which half of rule (d) still holds"
+mkdir -p "$repo/$revert_dir"
+printf '%s\n' "-- reverts: $dir/063_needs_a_reason.sql" '-- db: writer' '-- destructive: drops it' 'begin;' \
+    'do $$ begin' "  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;" 'end $$;' \
+    'drop table poker.unreasoned;' 'commit;' \
+    >"$repo/$revert_dir/063_needs_a_reason.revert.sql"
+commit give-the-revert-an-eight-character-reason
+run_check
+expect_rc 1 "a revert whose reason is 8 characters"
+want "the \"-- destructive:\" reason is 8 character(s): \"drops it\"" "and the length is printed the same way rule (d) prints it"
+
+# 36. Rule (h): a baseline migration names no database, so the comparison is impossible and the run says so.
+fresh_repo
+printf '%s\n' 'create table poker.legacy_no_db (id bigint);' >"$repo/$dir/058_legacy_without_a_header.sql"
+commit a-baseline-migration-without-a-db-line
+baseline=$(g rev-parse HEAD)
+revert 058_legacy_without_a_header
+commit add-a-revert-of-a-baseline-migration
+run_check
+expect_rc 0 "a revert of a migration that predates the -- db: rule"
+want "ok $revert_dir/058_legacy_without_a_header.revert.sql: new revert of $dir/058_legacy_without_a_header.sql; db: writer" \
+    "the revert itself is checked and passes on its own header"
+want "could not be compared: $dir/058_legacy_without_a_header.sql predates the header rule and carries no \"-- db:\" line" \
+    "the run reports the comparison it could not make instead of skipping it quietly"
+
+# 37. Rule (h): a revert that is already on main is never edited, renamed or deleted.
+fresh_repo
+revert 060_baseline_roles
+revert 061_baseline_grants
+commit a-baseline-holding-two-reverts
+base_two=$(g rev-parse HEAD)
+printf 'drop table poker.smuggled_into_a_released_revert;\n' >>"$repo/$revert_dir/060_baseline_roles.revert.sql"
+commit edit-a-released-revert
+g rm -q "$revert_dir/061_baseline_grants.revert.sql"
+commit delete-a-released-revert
+run_check "$base_two"
+expect_rc 1 "an edited and a deleted revert"
+want "$revert_dir/060_baseline_roles.revert.sql: it is in $revert_dir at $base_two and has been modified. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration" \
+    "the edited revert is named with the base it came from, and the required move is stated"
+want "$revert_dir/061_baseline_grants.revert.sql: it is in $revert_dir at $base_two and is deleted here. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration" \
+    "the deleted revert fails the same way"
+revert 062_baseline_index
+commit a-revert-added-after-the-base
+mid=$(g rev-parse HEAD)
+g mv "$revert_dir/062_baseline_index.revert.sql" "$revert_dir/062_renamed_by_hand.revert.sql"
+commit rename-the-revert
+run_check "$mid"
+expect_rc 1 "a renamed revert"
+want "and has been renamed, to $revert_dir/062_renamed_by_hand.revert.sql. A revert on main is never edited: add a corrected one with a new note in docs, or a new migration" \
+    "a rename loses the only way from a migration to its undo"
+
+# 38. Rule (i) and the (h) name shape: anything else in the directory is in the wrong place.
+fresh_repo
+mkdir -p "$repo/$revert_dir"
+printf '%s\n' 'why 063 was applied twice on the Pi, and what was found afterwards' >"$repo/$revert_dir/README.md"
+printf '%s\n' "-- reverts: $dir/1234_five_digits.sql" '-- db: writer' \
+    '-- destructive: drops what the migration built, which is nothing yet in this fixture' 'begin;' \
+    'do $$ begin' "  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;" 'end $$;' \
+    'commit;' >"$repo/$revert_dir/1234_five_digits.revert.sql"
+commit two-files-with-the-wrong-name
+run_check
+expect_rc 1 "a stray file and a mis-shaped revert name"
+want "$revert_dir/README.md: only <NNN>_<name>.revert.sql files live in $revert_dir, and \"README.md\" does not end in .revert.sql" \
+    "rule (i): the directory holds reverts and nothing else"
+want "$revert_dir/1234_five_digits.revert.sql: not a revert name" \
+    "and rule (h): four digits is not the three of the migration it names"
+
+# 39. Rule (h) with rule (d) staying out: a revert is nothing but drops.
+fresh_repo
+sql 063_adds_a_table.sql 'create table poker.temp (id bigint);'
+mkdir -p "$repo/$revert_dir"
+printf '%s\n' "-- reverts: $dir/063_adds_a_table.sql" '-- db: writer' \
+    '-- destructive: drops the table 063 added; no code of the previous release reads it either way' \
+    'begin;' 'do $$ begin' "  if pg_is_in_recovery() then raise exception 'refusing to run on a replica'; end if;" 'end $$;' \
+    'truncate poker.temp;' 'alter table poker.temp drop column if exists extra;' 'drop table poker.temp;' 'commit;' \
+    >"$repo/$revert_dir/063_adds_a_table.revert.sql"
+commit a-revert-full-of-drops
+run_check
+expect_rc 0 "a revert holding a truncate, a drop column and a drop table"
+want "ok $revert_dir/063_adds_a_table.revert.sql: new revert of $dir/063_adds_a_table.sql; db: writer; replica refusal at line 5" \
+    "the guard is found across its two lines, and the file passes with its drops in it"
+unwant "while the file says \"-- phase: expand\"" "rule (d) never fired on the revert"
+unwant "no \"-- phase: expand\" or \"-- phase: contract\" line" "and never asked the revert for a phase"
+
+# 40. A revert is not a migration: rules (b) and (f) never see its number.
+fresh_repo
+revert 062_baseline_index
+commit add-a-revert-for-a-released-migration
+run_check
+expect_rc 0 "a revert of a migration that is already on main, on a number in use"
+want "ok $revert_dir/062_baseline_index.revert.sql: new revert of $dir/062_baseline_index.sql" \
+    "the revert was read by rule (h), which wants that number"
+want "$dir holds 4 numbered file(s) with 0 number collision(s) here and $revert_dir holds 1 revert(s)" \
+    "the number space, the highest number and the collision count never noticed it"
 
 echo
 echo "check-migrations.test: $pass ok, $fail_count fail"
