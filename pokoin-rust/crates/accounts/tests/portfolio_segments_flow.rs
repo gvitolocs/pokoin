@@ -47,7 +47,8 @@ const SELLER: &str = "user-1";
 const TODAY: &str = "2026-10-08T12:00:00Z";
 
 /// Pokémon: two Scarlet & Violet singles (one of them two copies), a sealed box,
-/// a vintage single from the 1-DR stock, and a graded slab.
+/// a vintage single from the 1-DR stock, a graded slab and a second vintage single
+/// on the blueprint every other game's card id collides with.
 const VINTAGE_1DR: f64 = 40.0;
 const SV_SINGLE: f64 = 10.0;
 const SV_BOX: f64 = 100.0;
@@ -56,14 +57,21 @@ const GRADED_SLAB: f64 = 200.0;
 /// and a sealed box, all in the Scarlet & Violet band.
 const SV_SINGLES: f64 = SV_SINGLE * 3.0;
 const POKEMON_SV: f64 = SV_SINGLES + SV_BOX;
-const POKEMON_TOTAL: f64 = POKEMON_SV + VINTAGE_1DR + GRADED_SLAB;
+const POKEMON_TOTAL: f64 = POKEMON_SV + VINTAGE_1DR + GRADED_SLAB + COLLISION;
 
 /// Riftbound, priced by Riftbound's own database: one card of Dawn of a New Era,
-/// one of Outcast, and one sealed box of Outcast.
+/// one of Outcast, one sealed box of Outcast and five single cards of five more
+/// sets — eight cards in seven sets.
 const RIFT_DAWN: f64 = 40.0;
 const RIFT_OUTCAST_SINGLE: f64 = 5.0;
 const RIFT_OUTCAST_BOX: f64 = 30.0;
-const RIFTBOUND_TOTAL: f64 = RIFT_DAWN + RIFT_OUTCAST_SINGLE + RIFT_OUTCAST_BOX;
+/// Aether, Born of Dragon, Cinder and Dominion: each is one of the six sets with
+/// the most cards held, so each draws its own line.
+const RIFT_EXTRA: f64 = 8.0 + 12.0 + 15.0 + 20.0;
+/// Emberfall, the seventh set, is only ever in `Other sets`.
+const RIFT_EMBERFALL: f64 = 6.0;
+const RIFTBOUND_TOTAL: f64 =
+    RIFT_DAWN + RIFT_OUTCAST_SINGLE + RIFT_OUTCAST_BOX + RIFT_EXTRA + RIFT_EMBERFALL;
 
 /// What a Pokémon blueprint of the same public id sold for — the price no line
 /// below is allowed to show.
@@ -195,14 +203,19 @@ insert into public.marketplace_card_versions
   (1002, 101, 'Charizard ex', 'Scarlet & Violet 151', 'card'),
   (1003, 102, 'Scarlet & Violet 151 Set', 'Scarlet & Violet 151', 'booster_box'),
   (1004, 103, 'Charizard', 'Base Set', 'card'),
-  (1005, 104, 'Charizard', 'Base Set', 'card');
+  (1005, 104, 'Charizard', 'Base Set', 'card'),
+  -- The Pokémon side of the collision: this seller really does hold blueprint 999,
+  -- so 1000 PKN belongs in Pokémon's lines and nowhere in Riftbound's.
+  (1006, 999, 'Charizard', 'Base Set', 'card');
 -- The Pokémon holdings: two Scarlet & Violet singles (one of them two copies)
--- and a sealed box as listings, a vintage single as 1-DR stock, a graded slab.
+-- and a sealed box as listings, a vintage single as 1-DR stock, a graded slab,
+-- and a second vintage single on the colliding blueprint.
 insert into public.marketplace_user_listings
   (card_id, seller_uid, price_pkn, quantity_available, created_at) values
   ('1001', 'user-1', 12, 1, '2026-10-06T12:00:00+00'),
   ('1002', 'user-1', 12, 2, '2026-10-06T12:00:00+00'),
-  ('1003', 'user-1', 120, 1, '2026-10-06T12:00:00+00');
+  ('1003', 'user-1', 120, 1, '2026-10-06T12:00:00+00'),
+  ('1006', 'user-1', 900, 1, '2026-10-06T12:00:00+00');
 insert into public.marketplace_cardtrader_1dr_assets
   (seller_uid, ct_product_id, card_id, blueprint_id, condition, language, quantity, price_pkn, created_at) values
   ('user-1', 'ct-1004', '1004', '103', 'NM', 'EN', 1, 45, '2026-10-06T12:00:00+00');
@@ -217,12 +230,22 @@ insert into public.marketplace_card_versions (card_id, blueprint_id, name, expan
   (9001, 999, 'Charizard', 'Base Set'),
   (9002, 999, 'Charizard', 'Base Set'),
   (9003, 999, 'Charizard', 'Base Set'),
-  (9004, 999, 'Charizard', 'Base Set');
+  (9004, 999, 'Charizard', 'Base Set'),
+  (9005, 999, 'Charizard', 'Base Set'),
+  (9006, 999, 'Charizard', 'Base Set'),
+  (9007, 999, 'Charizard', 'Base Set'),
+  (9008, 999, 'Charizard', 'Base Set'),
+  (9009, 999, 'Charizard', 'Base Set');
 insert into public.marketplace_user_listings
   (card_id, seller_uid, marketplace_game, price_pkn, quantity_available, created_at) values
   ('9001', 'user-1', 'riftbound', 45, 1, '2026-10-06T12:00:00+00'),
   ('9002', 'user-1', 'riftbound', 6, 1, '2026-10-06T12:00:00+00'),
   ('9004', 'user-1', 'riftbound', 35, 1, '2026-10-06T12:00:00+00'),
+  ('9005', 'user-1', 'riftbound', 9, 1, '2026-10-06T12:00:00+00'),
+  ('9006', 'user-1', 'riftbound', 14, 1, '2026-10-06T12:00:00+00'),
+  ('9007', 'user-1', 'riftbound', 16, 1, '2026-10-06T12:00:00+00'),
+  ('9008', 'user-1', 'riftbound', 21, 1, '2026-10-06T12:00:00+00'),
+  ('9009', 'user-1', 'riftbound', 7, 1, '2026-10-06T12:00:00+00'),
   ('9003', 'user-1', 'gundam', 7, 1, '2026-10-06T12:00:00+00');
 
 insert into public.cardtrader_sold_daily
@@ -237,18 +260,31 @@ insert into public.cardtrader_sold_daily
   (104, '2026-10-05', 'Near Mint', 'en', true, 200, 190, 210, 2);
 
 -- Riftbound's own database: its catalog names the CardTrader blueprint, the set
--- and the product type, and its sold book prices that blueprint. Outcast is
--- named only in `set_name`, which is the column the catalog falls back to.
+-- and the product type, and its sold book prices that blueprint. A game database
+-- writes `set_name` as the name the seller reads and `expansion_name` normalised
+-- to lower case, so a line titled `Dawn of a New Era` proves the display column
+-- was read. Seven sets: the six with the most cards held draw their own line and
+-- Emberfall, the seventh, falls into `Other sets`.
 insert into public.marketplace_search_candidates
   (card_id, ct_id, name, set_name, expansion_name, product_type) values
-  (9001, 777, 'Caitlyn, Sheriff of Piltover', 'Dawn of a New Era', 'Dawn of a New Era', 'card'),
-  (9002, 778, 'Jinx, the Undertow', 'Outcast', '', 'card'),
-  (9004, 779, 'Outcast Collector Booster', 'Outcast', '', 'booster_box');
+  (9001, 777, 'Caitlyn, Sheriff of Piltover', 'Dawn of a New Era', 'dawn-of-a-new-era', 'card'),
+  (9002, 778, 'Jinx, the Undertow', 'Outcast', 'outcast', 'card'),
+  (9004, 779, 'Outcast Collector Booster', 'Outcast', 'outcast', 'booster_box'),
+  (9005, 780, 'Jayce, Defender of the People', 'Aether', 'aether', 'card'),
+  (9006, 781, 'Heimerdinger, Yordle Inventor', 'Born of Dragon', 'born-of-dragon', 'card'),
+  (9007, 782, 'Smee, Persistent Servant', 'Cinder', 'cinder', 'card'),
+  (9008, 783, 'Zaun, City of Progress', 'Dominion', 'dominion', 'card'),
+  (9009, 784, 'Sevika, Undercity Cruelty', 'Emberfall', 'emberfall', 'card');
 insert into public.cardtrader_sold_daily
   (blueprint_id, observed_day, condition, language, median_pkn, min_pkn, max_pkn, sold_qty) values
   (777, '2026-10-05', 'Near Mint', 'en', 40, 38, 45, 3),
   (778, '2026-10-05', 'Near Mint', 'en', 5, 4, 6, 9),
-  (779, '2026-10-05', 'Near Mint', 'en', 30, 28, 33, 2);
+  (779, '2026-10-05', 'Near Mint', 'en', 30, 28, 33, 2),
+  (780, '2026-10-05', 'Near Mint', 'en', 8, 7, 9, 4),
+  (781, '2026-10-05', 'Near Mint', 'en', 12, 11, 14, 2),
+  (782, '2026-10-05', 'Near Mint', 'en', 15, 13, 17, 6),
+  (783, '2026-10-05', 'Near Mint', 'en', 20, 18, 23, 1),
+  (784, '2026-10-05', 'Near Mint', 'en', 6, 5, 7, 5);
 ";
 
 /// The series is drawn for a fixed day; the token still carries the real clock,
@@ -370,14 +406,16 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
     }
     let today = days.last().cloned().unwrap_or(Json::Null);
 
-    // Every Pokémon line, in the era band its printing belongs to.
+    // Every Pokémon line, in the era band its printing belongs to. The second
+    // vintage single is the Pokémon side of the id collision below, and the only
+    // place in here where the 1000 PKN blueprint 999 sold for is allowed to show.
     assert_eq!(
         segment(&today, "game:pokemon"),
-        vec![POKEMON_TOTAL, 6.0, 6.0]
+        vec![POKEMON_TOTAL, 7.0, 7.0]
     );
     assert_eq!(
         segment(&today, "pokemon:era:vintage"),
-        vec![VINTAGE_1DR + GRADED_SLAB, 2.0, 2.0]
+        vec![VINTAGE_1DR + GRADED_SLAB + COLLISION, 3.0, 3.0]
     );
     assert_eq!(
         segment(&today, "pokemon:era:sv"),
@@ -398,11 +436,11 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
     );
     assert_eq!(segment(&today, "all:graded"), vec![GRADED_SLAB, 1.0, 1.0]);
 
-    // Riftbound is priced by Riftbound — 75 PKN, not the 3000 PKN the Pokémon
-    // blueprints those card ids collide with would have said.
+    // Riftbound is priced by Riftbound — its eight cards' own medians, not the
+    // 8000 PKN the Pokémon blueprint those card ids collide with would have said.
     assert_eq!(
         segment(&today, "game:riftbound"),
-        vec![RIFTBOUND_TOTAL, 3.0, 3.0]
+        vec![RIFTBOUND_TOTAL, 8.0, 8.0]
     );
     assert_eq!(
         segment(&today, "riftbound:set:dawn-of-a-new-era"),
@@ -411,6 +449,30 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
     assert_eq!(
         segment(&today, "riftbound:set:outcast"),
         vec![RIFT_OUTCAST_SINGLE + RIFT_OUTCAST_BOX, 2.0, 2.0]
+    );
+    // Six of the game's seven sets draw a line of their own: Outcast for its two
+    // cards, then the five single-card sets whose slugs sort first.
+    for (slug, value) in [
+        ("aether", 8.0),
+        ("born-of-dragon", 12.0),
+        ("cinder", 15.0),
+        ("dominion", 20.0),
+    ] {
+        assert_eq!(
+            segment(&today, &format!("riftbound:set:{slug}")),
+            vec![value, 1.0, 1.0],
+            "{slug} is one of the six sets drawn"
+        );
+    }
+    // Emberfall, the seventh, is only ever in `Other sets`.
+    assert_eq!(
+        segment(&today, "riftbound:set:other"),
+        vec![RIFT_EMBERFALL, 1.0, 1.0]
+    );
+    assert_eq!(
+        today["segments"].get("riftbound:set:emberfall"),
+        None,
+        "the seventh set gets no key of its own"
     );
     assert_eq!(
         segment(&today, "riftbound:sealed"),
@@ -422,10 +484,6 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
         None,
         "a segment with nothing held is not drawn"
     );
-    assert!(
-        today["segments"].get("riftbound:set:other").is_none(),
-        "two sets of a game are both drawn, so nothing falls into other"
-    );
 
     // The game with no database is held, priced at nothing, and does not touch
     // the games beside it.
@@ -433,8 +491,8 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
     assert_eq!(segment(&today, "gundam:set:unknown"), vec![0.0, 0.0, 1.0]);
     assert_ne!(
         segment(&today, "game:riftbound"),
-        vec![COLLISION * 3.0, 3.0, 3.0],
-        "the Pokémon blueprints those card ids collide with priced nothing"
+        vec![COLLISION * 8.0, 8.0, 8.0],
+        "the Pokémon blueprint those eight card ids collide with priced nothing here"
     );
 
     // What the client draws: both other games, the cuts across every game, then
@@ -462,8 +520,13 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
             "gundam:set:unknown",
             "gundam:sealed",
             "gundam:graded",
+            "riftbound:set:aether",
+            "riftbound:set:born-of-dragon",
+            "riftbound:set:cinder",
             "riftbound:set:dawn-of-a-new-era",
+            "riftbound:set:dominion",
             "riftbound:set:outcast",
+            "riftbound:set:other",
             "riftbound:sealed",
             "riftbound:graded",
         ],
@@ -481,8 +544,18 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
     );
     assert_eq!(
         def_of(&defs, "gundam:set:unknown")["label"],
-        json!("Unknown"),
-        "an unnamed set is read back from its slug"
+        json!("Unknown set"),
+        "a row with no set name at all is the one line that reads Unknown set"
+    );
+    assert_eq!(
+        def_of(&defs, "riftbound:set:aether")["label"],
+        json!("Aether"),
+        "a set line carries the catalog's display name, not its normalised one"
+    );
+    assert_eq!(
+        def_of(&defs, "riftbound:set:other"),
+        json!({ "key": "riftbound:set:other", "group": "set", "game": "riftbound", "label": "Other sets" }),
+        "the seventh set of the game is drawn under its catch-all line"
     );
     assert_eq!(
         def_of(&defs, "riftbound:graded"),
@@ -514,6 +587,16 @@ async fn a_seller_who_plays_three_games_gets_a_line_for_each() {
         labels["riftbound:set:outcast"]["stringValue"],
         json!("Outcast"),
         "labels={labels}"
+    );
+    assert_eq!(
+        labels["riftbound:set:aether"]["stringValue"],
+        json!("Aether"),
+        "labels={labels}"
+    );
+    assert_eq!(
+        labels.get("riftbound:set:emberfall"),
+        None,
+        "a set that is not drawn stores no label"
     );
     assert_eq!(
         labels.get("gundam:set:unknown"),
