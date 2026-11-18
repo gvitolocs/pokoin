@@ -6,6 +6,7 @@ import { readBookCache } from './buy-orders.js';
 import { peekCardPriceHistory, resetCardPriceHistoryCacheForTests } from './price-history-cache.js';
 import { warmCardPriceHistory } from './price-history.js';
 import { peekCardSales, resetCardSalesCacheForTests } from './sold-sales-cache.js';
+import { peekNativeSales, resetNativeSalesCacheForTests } from './native-sales-cache.js';
 
 // PH-R034 P5: one warmer for the card the arrows lead to, so the desk it opens
 // finds every panel already answered. This runs the real `prefetchCardDesk`
@@ -52,6 +53,7 @@ function stubFetch() {
       series: { days: [] },
       printings: [],
       book: [],
+      sales: [{ soldAt: '2026-11-01T09:30:00Z', condition: 'NM', language: 'EN', quantity: 2, unitPricePkn: 240 }],
       cardtrader: { status: 'available', days: [] },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
@@ -71,10 +73,31 @@ function useLocalStorage() {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
 
+/**
+ * A warm read that the desk promise does not own — a fire-and-forget panel, or
+ * one stored behind a dynamic import — lands some time after it was issued, and
+ * how long depends on the machine. `until` waits for the observation itself
+ * instead of a guess at its duration, and still fails when it never lands.
+ */
+async function until(read, limitMs = 2000) {
+  const stop = Date.now() + limitMs;
+  for (;;) {
+    const value = read();
+    if (value) {
+      return value;
+    }
+    if (Date.now() >= stop) {
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test.beforeEach(() => {
   cardSeq += 1;
   resetCardSalesCacheForTests();
   resetCardPriceHistoryCacheForTests();
+  resetNativeSalesCacheForTests();
 });
 
 test('the neighbour warm asks the whole desk once, and busts nothing', async () => {
@@ -89,7 +112,9 @@ test('the neighbour warm asks the whole desk once, and busts nothing', async () 
     names: true,
     native: true,
   });
-  await settle();
+  // The reads the desk promise does not own — a fire-and-forget panel, a book
+  // behind a dynamic import — land after it. Wait for the observation.
+  await until(() => new Set(asked.map((row) => row.route)).size === ROUTES.length);
   const routes = asked.map((row) => row.route);
   assert.deepEqual([...new Set(routes)].sort(), [...ROUTES].sort());
   assert.equal(new Set(routes).size, routes.length, 'no panel is asked twice');
@@ -139,7 +164,7 @@ test('the warm reads are the low-priority ones, and every one is abortable', asy
   await prefetchCardDesk({ id }, {
     listings: true, sales: true, versions: true, book: true, names: true, native: true, signal: controller.signal,
   });
-  await settle();
+  await until(() => new Set(asked.map((row) => row.route)).size === ROUTES.length);
   // `prefetch: true` is what makes a local-storable read low priority
   // (`network()` in market/src/local-read.js). The two private reads carry no
   // priority: the browser cache is not what they are about, `no-store` is.
@@ -158,12 +183,13 @@ test('a warm is only worth what the desk can read back from it', async () => {
   const id = nextId();
   useLocalStorage();
   stubFetch();
-  await prefetchCardDesk({ id, name: 'Charizard' }, { sales: true, book: true });
-  await settle();
-  // The sales and the book paint from this device's own copy, so a warm that is
-  // merely fetched is a warm the next desk cannot see.
+  await prefetchCardDesk({ id, name: 'Charizard' }, { sales: true, book: true, native: true });
+  await until(() => peekCardSales(id) && readBookCache(id) && peekNativeSales(id));
+  // The sales, the book and Pokoin's own sold rows paint from this device's own
+  // copy, so a warm that is merely fetched is a warm the next desk cannot see.
   assert.deepEqual(peekCardSales(id)?.slices, [{ condition: 'NM', pkn: 120 }]);
   assert.deepEqual(readBookCache(id), []);
+  assert.equal(peekNativeSales(id)?.sales[0].unitPricePkn, 240, 'PH-R034 P7: the panel a step must not wait on');
 });
 
 test('a plain desk warm is the page and its scan, nothing else', async () => {

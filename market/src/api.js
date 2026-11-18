@@ -56,6 +56,7 @@ import {
   setListingsInflight,
 } from './listings-cache.js';
 import { saveCardSales } from './sold-sales-cache.js';
+import { saveNativeSales } from './native-sales-cache.js';
 import {
   homepageDerivativeUrl,
   homepageMatchesCatalog,
@@ -2272,7 +2273,11 @@ export function prefetchCardDesk(card, {
       rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
     }
     if (native) {
-      rest.push(fetchNativeSales(id, { signal }).catch(() => {}));
+      // Stored like the sales beside it: the panel paints from this device's copy,
+      // so a warm the next desk cannot read back warmed nothing.
+      rest.push(fetchNativeSales(id, { signal }).then((data) => {
+        if (Array.isArray(data?.sales)) saveNativeSales(id, data.sales);
+      }).catch(() => {}));
     }
     // Awaited, not fired: the caller owns the abort of this warm, and a promise
     // that resolved before the last two reads landed would leave them running
