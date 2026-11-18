@@ -184,7 +184,7 @@ status = "proved"
 id = "listing-edit-stock"
 name = "Seller edits price, quantity or status of a listing"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/desk.css", "market/src/api.js"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/lib/dialog-focus.js", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/desk.css", "market/src/api.js"]
 proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "market/src/listing-row-edit.test.js", "solid/src/components/inventory/row-actions.test.js", "solid/src/components/inventory/listing-edit-drawer.test.js", "solid/src/components/pricer/strategy-editor-shared.test.js"]
 status = "proved"
 
