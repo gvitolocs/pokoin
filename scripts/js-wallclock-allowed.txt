@@ -2,8 +2,8 @@
 # budget below 1000 ms. One line each: path:line<TAB>reason. scripts/js-wallclock-check.sh fails on any such line that
 # is not here, and --base <commit> fails on an added line, so excusing a new wall-clock budget is never something a
 # merge can do quietly.
-# A speed test does not belong here: it measures the host, and it compares against a same-run calibration of the same
-# shape of work instead (finding PKN-17, docs/CI.md "JavaScript tests"). What is listed here times which of two fake
-# promises answered first, so the number is a marker between two delays the test itself set, not a speed budget.
+# A speed test does not belong here: it counts work — operations or property reads — and may keep a one-second ceiling
+# (finding PKN-17, docs/CI.md "JavaScript tests"). What is listed here times which of two fake promises answered first,
+# so the number is a marker between two delays the test itself set, not a speed budget.
 market/src/local-read.test.js:216	the 1000 ms store head start of "the store head start ends when the request in flight lands first": answering under 500 ms proves the landing copy answered, not that it is fast
 market/src/local-read.test.js:357	the fake store of "a slow store does not hold up the network" waits 120 ms: under 110 ms proves the network won the race, not that it is fast

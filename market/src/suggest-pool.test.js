@@ -144,8 +144,10 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   // or the dedup of `groupCandidates` (suggest-pool.js:267) growing past its scan of one
   // name group — and work is countable. So every row is wrapped in a Proxy that counts
   // its property reads, and READ_BUDGET is a number of reads: 3x each step's count as
-  // measured on nezopt on 2026-11-18 (node v26, three identical `node --test
+  // measured on nezopt on 2026-11-18 (node v22.23.4, three identical `node --test
   // market/src/suggest-pool.test.js` runs of this file), rounded up to a round number.
+  // The counts are reads of plain properties and V8's sort; a Node upgrade that changes
+  // them shows here first.
   // CEILING_MS keeps the one case a count cannot see, the comment's "tens of ms ->
   // seconds": 2,000 rows needing a full second is broken on any host, busy or idle.
   const READ_BUDGET = {
