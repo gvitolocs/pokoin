@@ -1,5 +1,9 @@
-use crate::{array, iso, model::Provider, text};
-use anyhow::{bail, Result};
+use crate::{
+    array, iso,
+    model::{Completion, Provider, Reason},
+    text,
+};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 pub fn reporter_schema() -> Value {
@@ -525,49 +529,53 @@ async fn generate_repair(
         include_str!("../assets/reporter-system.txt")
     };
     let mut request = user.clone();
+    let mut errors: Vec<String> = Vec::new();
     for attempt in 0..2 {
-        let response = provider
+        let (value, previous, checked) = match provider
             .generate(
                 if attempt == 0 { pass } else { "repair" },
                 system,
                 &request.to_string(),
                 &schema,
             )
-            .await?;
-        let mut value = coerce(&response["json"], &schema);
-        if pass != "editor" {
-            value = coerce(&normalize_draft(&value), &schema);
-        }
-        let errors = if response["reason"] == "malformed" {
-            vec!["response was not valid JSON".to_owned()]
-        } else if pass == "editor" {
-            validate_editor(&value)
-        } else {
-            validate_reporter(&value, templates, pack)
+            .await?
+        {
+            Completion::Ready { json, .. } => {
+                let mut value = coerce(&json, &schema);
+                if pass != "editor" {
+                    value = coerce(&normalize_draft(&value), &schema);
+                }
+                let checked = if pass == "editor" {
+                    validate_editor(&value)
+                } else {
+                    validate_reporter(&value, templates, pack)
+                };
+                (value, None, checked)
+            }
+            // claude.js:564 — an unparseable text block is the one repairable failure.
+            Completion::Failed(failure) if failure.reason == Reason::Malformed => (
+                Value::Null,
+                Some(json!(failure.raw.chars().take(20000).collect::<String>())),
+                vec!["response was not valid JSON".to_owned()],
+            ),
+            // claude.js:563 — every other reason is fatal, before any repair call.
+            Completion::Failed(failure) => {
+                return Ok(json!({"ok":false,"reason":failure.reason.as_str(),"errors":[]}));
+            }
         };
+        errors = checked;
         if errors.is_empty() {
-            return Ok(value);
+            return Ok(json!({"ok":true,"json":value}));
         }
-        if attempt == 1 {
-            bail!(
-                "model schema/evidence validation failed after repair: {}",
-                errors.join("; ")
-            );
-        }
-        let previous = if response["reason"] == "malformed" {
-            json!(text(&response, "raw")
-                .chars()
-                .take(20000)
-                .collect::<String>())
-        } else {
-            value
-        };
-        request = json!({"task":"repair","errors":errors,"previous":previous,"schema_reminder":"Return only one JSON object matching the schema. Fix every listed error; change nothing else.","original_request":user});
-        if !provider.strict {
-            request["output_schema"] = schema.clone();
+        if attempt == 0 {
+            request = json!({"task":"repair","errors":errors,"previous":previous.unwrap_or_else(||value.clone()),"schema_reminder":"Return only one JSON object matching the schema. Fix every listed error; change nothing else.","original_request":user});
+            if !provider.strict {
+                request["output_schema"] = schema.clone();
+            }
         }
     }
-    bail!("editorial passes exhausted")
+    // claude.js:581 — a draft that still fails after repair is reported malformed.
+    Ok(json!({"ok":false,"reason":"malformed","errors":errors}))
 }
 pub async fn run_passes(
     provider: &Provider,
@@ -578,11 +586,16 @@ pub async fn run_passes(
     now: i64,
 ) -> Result<Value> {
     let user = reporter_request(pack, hints, templates, memory, None, now, provider.strict);
-    let draft = generate_repair(provider, "reporter", &user, pack, templates).await?;
+    let drafted = generate_repair(provider, "reporter", &user, pack, templates).await?;
+    if drafted["ok"] != true {
+        // claude.js:669 — a failed draft carries its reason up unchanged.
+        return Ok(drafted);
+    }
+    let draft = drafted["json"].clone();
     if draft["template"].is_null() {
         return Ok(json!({"ok":true,"skip":true,"reason":"no_template"}));
     }
-    let editor = generate_repair(
+    let edited = generate_repair(
         provider,
         "editor",
         &editor_request(pack, &draft, provider.strict),
@@ -590,6 +603,13 @@ pub async fn run_passes(
         templates,
     )
     .await?;
+    if edited["ok"] != true {
+        // claude.js:694 — an editor call failure surfaces as editor_<reason>.
+        return Ok(
+            json!({"ok":false,"reason":format!("editor_{}",text(&edited,"reason")),"errors":edited["errors"].clone(),"draft":draft}),
+        );
+    }
+    let editor = edited["json"].clone();
     let mut final_draft = draft.clone();
     let mut verdict = text(&editor, "verdict").to_owned();
     let mut reason = editor["reason"].clone();

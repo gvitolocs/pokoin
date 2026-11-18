@@ -2,7 +2,7 @@ use pokoin_newsroom::{
     array,
     cadence::{self, DAY, HOUR},
     editorial, handover, iso,
-    model::{Budget, Provider, Sse},
+    model::{Budget, Completion, Failure, Provider, Reason, Sse},
     moderation, sources, store, timestamp, website,
 };
 use serde_json::{json, Value};
@@ -447,13 +447,40 @@ fn sse_chunks_thinking_multiple_text_refusal_and_truncation() {
         for chunk in raw.as_bytes().chunks(size) {
             s.feed(chunk).unwrap();
         }
-        assert_eq!(s.finish().unwrap()["json"], json!({"ok":true}));
+        let Completion::Ready { json, .. } = s.finish() else {
+            panic!("a text block of valid JSON is ready");
+        };
+        assert_eq!(json, json!({"ok":true}));
     }
-    assert!(Sse::default().finish().is_err());
+    assert_eq!(
+        Sse::default().finish(),
+        Completion::Failed(Failure {
+            reason: Reason::Unavailable,
+            detail: Some("model stream incomplete".into()),
+            raw: String::new(),
+        })
+    );
     for reason in ["refusal", "max_tokens"] {
         let mut s = Sse::default();
         s.feed(format!("data: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"{reason}\"}}}}\ndata: {{\"type\":\"message_stop\"}}\n").as_bytes()).unwrap();
-        assert!(s.finish().is_err());
+        let Completion::Failed(Failure {
+            reason: got,
+            detail,
+            raw,
+        }) = s.finish()
+        else {
+            panic!("stop_reason {reason} must not be ready");
+        };
+        assert_eq!(
+            got,
+            if reason == "refusal" {
+                Reason::Refused
+            } else {
+                Reason::Truncated
+            }
+        );
+        assert_eq!(detail, None);
+        assert!(raw.is_empty());
     }
     let budget = Budget::new(1);
     assert!(budget.take().is_ok());
@@ -477,12 +504,17 @@ async fn reqwest_messages_against_local_fake() {
         p.request("reporter", "system", "user", &json!({}))["max_tokens"],
         32000
     );
-    assert_eq!(
-        p.generate("reporter", "system", "user", &json!({}))
-            .await
-            .unwrap()["json"],
-        json!({"x":1})
-    );
+    let Completion::Ready { json, .. } = p
+        .generate("reporter", "system", "user", &json!({}))
+        .await
+        .unwrap()
+    else {
+        panic!("the fake answered with a text block of JSON");
+    };
+    assert_eq!(json, json!({"x":1}));
+    // The single call is spent, so a second never reaches the API (model.rs takes
+    // the budget before the request); the HTTP classes are covered by
+    // model_http_status_picks_the_failure_class.
     assert!(p
         .generate("reporter", "system", "user", &json!({}))
         .await
@@ -652,6 +684,201 @@ async fn editor_revision_failing_validation_is_an_editor_rejection() {
     assert_eq!(result["draft"]["blocks"][0]["sourceIds"], json!(["s1"]));
 }
 
+/// claude.js:207-214 — the HTTP status alone picks the class, and nothing of the
+/// response body or the credential is ever carried into the failure.
+#[tokio::test]
+async fn model_http_status_picks_the_failure_class() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    for (status, reason) in [
+        (401, Reason::Auth),
+        (403, Reason::Auth),
+        (429, Reason::Unavailable),
+        (500, Reason::Unavailable),
+        (503, Reason::Unavailable),
+        (400, Reason::ApiError),
+        (404, Reason::ApiError),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_string(format!("body of {status} mentioning KEY-NEVER-LEAKS")),
+            )
+            .mount(&server)
+            .await;
+        let mut provider = Provider::from_env(Budget::new(2)).unwrap();
+        provider.name = "anthropic".into();
+        provider.test_endpoint(server.uri());
+        let Completion::Failed(failure) = provider
+            .generate("reporter", "s", "u", &json!({}))
+            .await
+            .unwrap()
+        else {
+            panic!("HTTP {status} must not be a completion");
+        };
+        assert_eq!(failure.reason, reason);
+        assert_eq!(
+            failure.detail.as_deref(),
+            Some(format!("model HTTP {status}").as_str())
+        );
+        assert!(failure.raw.is_empty());
+        let rendered = format!("{failure:?}");
+        for secret in ["NEVER-LEAKS", "local-fake", "body of"] {
+            assert!(!rendered.contains(secret), "{rendered}");
+        }
+    }
+}
+
+#[test]
+fn refusal_detail_is_only_the_stop_details_category() {
+    // claude.js:200 — stop_details?.category || null.
+    for (delta, category) in [
+        (
+            r#""stop_details":{"category":"sensitive_topics"}"#,
+            Some("sensitive_topics"),
+        ),
+        (r#""stop_details":{"category":""}"#, None),
+        (r#""stop_details":null"#, None),
+    ] {
+        let mut s = Sse::default();
+        s.feed(format!("data: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"refusal\",{delta}}}}}\ndata: {{\"type\":\"message_stop\"}}\n").as_bytes()).unwrap();
+        let Completion::Failed(Failure {
+            reason,
+            detail,
+            raw,
+        }) = s.finish()
+        else {
+            panic!("a refusal is never a completion");
+        };
+        assert_eq!(reason, Reason::Refused);
+        assert_eq!(detail.as_deref(), category);
+        assert!(raw.is_empty());
+    }
+    // claude.js:203 — no text block is malformed with an empty raw, 205 — an
+    // unparseable block is malformed with the block itself.
+    for (text, raw) in [("", ""), ("not JSON", "not JSON")] {
+        let mut s = Sse::default();
+        s.feed(format!("data: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"thinking\",\"thinking\":\"reasoning\"}}}}\ndata: {{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{{\"type\":\"text\",\"text\":\"{text}\"}}}}\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\"}}}}\ndata: {{\"type\":\"message_stop\"}}\n").as_bytes()).unwrap();
+        let Completion::Failed(failure) = s.finish() else {
+            panic!("unparseable text is never a completion");
+        };
+        assert_eq!(failure.reason, Reason::Malformed);
+        assert_eq!(failure.raw, raw);
+    }
+}
+
+/// claude.js:563 — a failure that is not malformed ends the passes with its own
+/// reason and never costs a repair call.
+#[tokio::test]
+async fn a_refused_draft_never_costs_a_repair_call() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, Request, ResponseTemplate,
+    };
+    let f = fixture("editorial.json");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(move |r: &Request| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            let request: Value =
+                serde_json::from_str(body["messages"][0]["content"].as_str().unwrap()).unwrap();
+            assert_eq!(request["task"], "draft_article");
+            ResponseTemplate::new(200).set_body_raw(
+                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"category\":\"sensitive_topics\"}}}\ndata: {\"type\":\"message_stop\"}\n\n",
+                "text/event-stream",
+            )
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    let budget = Budget::new(4);
+    let mut provider = Provider::from_env(budget.clone()).unwrap();
+    provider.name = "anthropic".into();
+    provider.test_endpoint(server.uri());
+    let result = editorial::run_passes(
+        &provider,
+        &f["pack"],
+        &f["hints"],
+        &["breaking".into()],
+        "",
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["reason"], "refused");
+    assert_eq!(result["errors"], json!([]));
+    assert!(result.get("draft").is_none());
+    assert_eq!(budget.remaining(), 3);
+}
+
+/// claude.js:694 — a failing editor call is reported as `editor_<reason>`.
+#[tokio::test]
+async fn an_editor_call_failure_is_prefixed_editor() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, Request, ResponseTemplate,
+    };
+    let f = fixture("editorial.json");
+    let mut draft = f["draft"].clone();
+    draft["blocks"] = json!([
+        {"type":"paragraph","text":"A source reports a new set.","sourceIds":["s1"]},
+        {"type":"key_facts","title":null,"items":[{"text":"A new set.","sourceIds":["s1"]}]},
+        {"type":"why_it_matters","text":"Collectors can follow the announcement."}
+    ]);
+    draft["first_reported_source_id"] = json!("s1");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(move |r: &Request| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            let request: Value =
+                serde_json::from_str(body["messages"][0]["content"].as_str().unwrap()).unwrap();
+            match request["task"].as_str().unwrap() {
+                "draft_article" => {
+                    let content = [
+                        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":draft.to_string()}}),
+                        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+                        json!({"type":"message_stop"}),
+                    ]
+                    .iter()
+                    .map(|v| format!("data: {v}\n\n"))
+                    .collect::<String>();
+                    ResponseTemplate::new(200).set_body_raw(content, "text/event-stream")
+                }
+                "edit_article" => ResponseTemplate::new(429).set_body_string("overloaded"),
+                task => panic!("unexpected task {task}"),
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let budget = Budget::new(4);
+    let mut provider = Provider::from_env(budget.clone()).unwrap();
+    provider.name = "anthropic".into();
+    provider.test_endpoint(server.uri());
+    let result = editorial::run_passes(
+        &provider,
+        &f["pack"],
+        &f["hints"],
+        &["breaking".into()],
+        "",
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["reason"], "editor_unavailable");
+    assert_eq!(result["errors"], json!([]));
+    assert_eq!(result["draft"]["template"], "breaking");
+    assert_eq!(budget.remaining(), 2);
+}
+
 #[test]
 fn find_record_by_story_is_the_english_cms_record_only() {
     let records = vec![
@@ -767,6 +994,77 @@ fn dry_run_worthiness_flags_follow_cadence_and_existing_record() {
     assert!(ok, "{report}");
     assert_eq!(report["worthiness"]["components"]["alreadyCovered"], 0);
     assert_eq!(report["passes"]["action"], "skip");
+}
+
+/// The dry-run ends failed with the model failure class, and neither the report
+/// nor stderr ever carries the response body or the credential.
+#[tokio::test]
+async fn dry_run_reports_the_model_failure_class_without_the_body() {
+    use std::process::Command;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let bin = env!("CARGO_BIN_EXE_pokoin-newsroom");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_string("Anthropic error envelope mentioning NEVER-LEAKS"),
+        )
+        .mount(&server)
+        .await;
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    fs::create_dir(&data).unwrap();
+    store::atomic_json(&data.join(store::STORIES), &json!([])).unwrap();
+    store::atomic_json(
+        &data.join(store::STATE),
+        &json!({"attempts":[],"updates":{}}),
+    )
+    .unwrap();
+    let captured = fixture("live-evidence.json");
+    // A covered story is never skipped for worthiness, so the run reaches the model.
+    store::atomic_json(
+        &data.join(store::RECORDS),
+        &json!([{"id":"rec","canonicalStoryId":captured["pack"]["canonicalStoryId"],
+            "language":"en","slug":"already","status":"published","datePublished":"2026-10-05T07:00:00Z"}]),
+    )
+    .unwrap();
+    let input = root.path().join("input.json");
+    store::atomic_json(&input, &json!({"pack": captured["pack"], "memory": ""})).unwrap();
+    let report = root.path().join("report.json");
+    let output = Command::new(bin)
+        .args(["dry-run", "--input"])
+        .arg(&input)
+        .args(["--data-dir"])
+        .arg(&data)
+        .args(["--output"])
+        .arg(&report)
+        .args(["--now", "2026-10-05T18:00:00Z"])
+        .env("POKO_NEWSROOM_CLAUDE_PROVIDER", "anthropic")
+        .env("POKO_NEWSROOM_ANTHROPIC_BASE_URL", server.uri())
+        .env(
+            "POKO_NEWSROOM_ANTHROPIC_API_KEY",
+            "credential-that-must-NEVER-LEAKS",
+        )
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "a failed model call is a failed run"
+    );
+    let report = store::strict_read(&report).unwrap();
+    assert_eq!(report["passes"]["ok"], false);
+    assert_eq!(report["passes"]["reason"], "auth");
+    assert_eq!(report["passes"]["errors"], json!([]));
+    assert_eq!(report["modelCalls"], 1);
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(stderr.contains("auth"), "{stderr}");
+    for written in [stderr, report.to_string()] {
+        assert!(!written.contains("NEVER-LEAKS"), "leaked: {written}");
+    }
 }
 
 #[test]

@@ -12,6 +12,59 @@ use std::{
     time::Duration,
 };
 
+/// Why one Messages call did not yield usable JSON — claude.js:198-214.
+/// Only `Malformed` is worth a repair call (claude.js:563).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    /// stop_reason "refusal"; the detail is stop_details.category.
+    Refused,
+    /// stop_reason "max_tokens".
+    Truncated,
+    /// No text block, or a text block that is not JSON.
+    Malformed,
+    /// HTTP 401 or 403.
+    Auth,
+    /// HTTP 429 or 5xx, a transport failure, or an unusable stream.
+    Unavailable,
+    /// Any other HTTP status.
+    ApiError,
+}
+impl Reason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::Refused => "refused",
+            Reason::Truncated => "truncated",
+            Reason::Malformed => "malformed",
+            Reason::Auth => "auth",
+            Reason::Unavailable => "unavailable",
+            Reason::ApiError => "api_error",
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Failure {
+    pub reason: Reason,
+    /// Refusal category or transport/status text. Never a response body or key.
+    pub detail: Option<String>,
+    /// The text block for a `Malformed` failure, empty for every other reason.
+    pub raw: String,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Completion {
+    Ready {
+        json: Value,
+        raw: String,
+        model: String,
+    },
+    Failed(Failure),
+}
+fn unavailable(detail: impl Into<String>) -> Completion {
+    Completion::Failed(Failure {
+        reason: Reason::Unavailable,
+        detail: Some(detail.into()),
+        raw: String::new(),
+    })
+}
 #[derive(Clone)]
 pub struct Budget(Arc<AtomicUsize>);
 impl Budget {
@@ -142,7 +195,7 @@ impl Provider {
         system: &str,
         user: &str,
         schema: &Value,
-    ) -> Result<Value> {
+    ) -> Result<Completion> {
         if !["anthropic", "deepseek"].contains(&self.name.as_str()) || self.key.is_empty() {
             bail!("no native Messages provider configured");
         }
@@ -165,19 +218,41 @@ impl Provider {
         if body.get("fallbacks").is_some() {
             request = request.header("anthropic-beta", "server-side-fallback-2026-07-01");
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|_| anyhow::anyhow!("model connection unavailable"))?;
+        let response = match request.send().await {
+            Ok(response) => response,
+            // claude.js:208 — an APIConnectionError is an availability failure.
+            Err(_) => return Ok(unavailable("model connection unavailable")),
+        };
+        let status = response.status().as_u16();
         if !response.status().is_success() {
-            bail!("model HTTP {}", response.status().as_u16());
+            // claude.js:207-212 — the status alone picks the class, and the
+            // error body is never read.
+            let reason = if matches!(status, 401 | 403) {
+                Reason::Auth
+            } else if status == 429 || status >= 500 {
+                Reason::Unavailable
+            } else {
+                Reason::ApiError
+            };
+            return Ok(Completion::Failed(Failure {
+                reason,
+                detail: Some(format!("model HTTP {status}")),
+                raw: String::new(),
+            }));
         }
         let mut stream = response.bytes_stream();
         let mut decoder = Sse::default();
         while let Some(chunk) = stream.next().await {
-            decoder.feed(&chunk.map_err(|_| anyhow::anyhow!("model stream interrupted"))?)?;
+            match chunk {
+                Ok(chunk) => {
+                    if let Err(error) = decoder.feed(&chunk) {
+                        return Ok(unavailable(error.to_string()));
+                    }
+                }
+                Err(_) => return Ok(unavailable("model stream interrupted")),
+            }
         }
-        decoder.finish()
+        Ok(decoder.finish())
     }
 }
 #[derive(Default)]
@@ -186,6 +261,7 @@ pub struct Sse {
     blocks: HashMap<u64, String>,
     model: String,
     stop: String,
+    details: Value,
     ended: bool,
 }
 impl Sse {
@@ -219,7 +295,8 @@ impl Sse {
                             .push_str(crate::text(&event["delta"], "text"));
                     }
                     "message_delta" => {
-                        self.stop = crate::text(&event["delta"], "stop_reason").into()
+                        self.stop = crate::text(&event["delta"], "stop_reason").into();
+                        self.details = event["delta"]["stop_details"].clone();
                     }
                     "message_stop" => self.ended = true,
                     "error" => bail!("model streamed error"),
@@ -229,15 +306,29 @@ impl Sse {
         }
         Ok(())
     }
-    pub fn finish(self) -> Result<Value> {
+    pub fn finish(self) -> Completion {
         if !self.ended {
-            bail!("model stream incomplete");
+            return unavailable("model stream incomplete");
         }
         if self.stop == "refusal" {
-            bail!("model refused");
+            // claude.js:200 — stop_details.category, or nothing.
+            return Completion::Failed(Failure {
+                reason: Reason::Refused,
+                detail: self
+                    .details
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .filter(|category| !category.is_empty())
+                    .map(str::to_owned),
+                raw: String::new(),
+            });
         }
         if self.stop == "max_tokens" {
-            bail!("model truncated");
+            return Completion::Failed(Failure {
+                reason: Reason::Truncated,
+                detail: None,
+                raw: String::new(),
+            });
         }
         let raw = self
             .blocks
@@ -247,8 +338,16 @@ impl Sse {
             .cloned()
             .unwrap_or_default();
         match serde_json::from_str::<Value>(&raw) {
-            Ok(value) => Ok(json!({"json":value,"model":self.model})),
-            Err(_) => Ok(json!({"reason":"malformed","raw":raw,"model":self.model})),
+            Ok(json) => Completion::Ready {
+                json,
+                raw,
+                model: self.model,
+            },
+            Err(_) => Completion::Failed(Failure {
+                reason: Reason::Malformed,
+                detail: None,
+                raw,
+            }),
         }
     }
 }

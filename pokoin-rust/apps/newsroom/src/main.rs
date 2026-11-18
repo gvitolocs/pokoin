@@ -231,24 +231,33 @@ async fn dry_run(args: &[String], dir: &Path, now: i64) -> Result<()> {
     let plan = cadence::plan(&stories, &records, &state, now);
     let mut report = json!({"at": iso(now), "dryRun": true, "inputKind": "captured-evidence-pack",
         "productionReady": false, "worthiness": worthiness, "plan": plan, "modelCalls": limit - budget.remaining()});
-    match passes {
+    let failure = match passes {
         Ok(passes) => {
-            report["passes"] = passes;
-            store::atomic_json(&output, &report)?;
-            println!(
-                "{}",
-                json!({"ok": true, "modelCalls": limit - budget.remaining(),
-                "draftProduced": report["passes"]["draft"].is_object()})
-            );
+            report["passes"] = passes.clone();
+            if passes["ok"] == true {
+                None
+            } else {
+                // A model failure is a failed acceptance run, not a draft. Only the
+                // taxonomy reason is reported: never a body, key or raw response.
+                Some(format!("draft not produced: {}", text(&passes, "reason")))
+            }
         }
         Err(error) => {
             report["error"] = json!(error.to_string());
-            store::atomic_json(&output, &report)?;
-            bail!(
-                "draft check failed; report saved ({} calls)",
-                limit - budget.remaining()
-            );
+            Some(error.to_string())
         }
+    };
+    store::atomic_json(&output, &report)?;
+    if let Some(failure) = failure {
+        bail!(
+            "{failure}; report saved ({} calls)",
+            limit - budget.remaining()
+        );
     }
+    println!(
+        "{}",
+        json!({"ok": true, "modelCalls": limit - budget.remaining(),
+        "draftProduced": report["passes"]["draft"].is_object()})
+    );
     Ok(())
 }
