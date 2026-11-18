@@ -42,6 +42,9 @@ use super::{json_with_cors, parse_body, string_field};
 
 /// Everything a tool needs.
 pub struct MarketDeps {
+    /// Always `state.marketplace_db()`, the Pokémon catalog database, whatever
+    /// `game` says: no tool here opens a satellite game database, so the
+    /// price-history tables it queries exist by construction (PH-02).
     pub db: MarketplaceDb,
     /// The TCGplayer history database (`TCGCSV_DATABASE_URL`), when configured.
     pub tcg: Option<MarketplaceDb>,
