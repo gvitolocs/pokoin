@@ -9,7 +9,9 @@ export const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textare
  *
  * Returns the handler for the backdrop's `onKeyDown`; `dialog` gives the
  * dialog element focus is kept inside. options: `onClose`, `first` (element to
- * focus instead of the first control), `trap` (keep Tab inside; on unless off).
+ * focus instead of the first control), `restore` (element to give focus back to
+ * when it closes, for a dialog whose opener is gone), `trap` (keep Tab inside;
+ * on unless off).
  */
 export function useDialogFocus(dialog, options = {}) {
   const trap = options.trap !== false;
@@ -18,7 +20,10 @@ export function useDialogFocus(dialog, options = {}) {
     const box = dialog();
     (options.first?.() || box?.querySelector(FOCUSABLE))?.focus();
     return () => {
-      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+      const live = (node) => node && node.isConnected && typeof node.focus === 'function';
+      // A dialog that outlived its opener (the drawer switched rows) asks where
+      // focus belongs now; the element that had it when it opened is the rest.
+      [options.restore?.(), opener].find(live)?.focus();
     };
   });
   return (event) => {

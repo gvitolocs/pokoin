@@ -41,6 +41,9 @@ export default function ListingEditDrawer(props) {
     onClose: () => props.onClose(),
     // The first thing to act on is the pricing menu, not the close button.
     first: () => box?.querySelector('.sell-pricing-btn'),
+    // After a switch the button that opened this panel belongs to another row,
+    // so the board gives the row last shown by id.
+    restore: () => props.restoreFocus?.() || null,
   });
 
   // One price check for the row the drawer is on. The quotes are a
@@ -64,7 +67,10 @@ export default function ListingEditDrawer(props) {
   );
 
   async function removeRow() {
-    if (await props.onDelete?.()) props.onClose();
+    if (!(await props.onDelete?.())) return;
+    // The listing is gone: the board knows this close is not a discard, since a
+    // flag written here would only be readable after this pass.
+    props.onClose();
   }
 
   return (
@@ -106,10 +112,13 @@ export default function ListingEditDrawer(props) {
             fromPath="/mypokoin/inventory"
             onFieldEdit={(dirty) => props.onDirty?.(dirty)}
             onCancelEdit={() => props.onClose()}
-            onListed={(saved) => {
-              props.onSaved?.(saved);
+            onListed={(saved, note) => {
+              props.onSaved?.(saved, note);
               props.onClose();
             }}
+            // The listing saved but its pricing did not: the row follows while
+            // the seller stays in the panel with the message.
+            onRowUpdate={(saved) => props.onRowUpdated?.(saved)}
             onDelete={removeRow}
           />
         </div>

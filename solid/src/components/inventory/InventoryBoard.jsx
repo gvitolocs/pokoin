@@ -14,7 +14,7 @@ import {
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
 import { leftGroupLine } from '@market/pricing-group-note.js';
-import { cardtraderLinked } from '@market/listing-row-edit.js';
+import { cardtraderLinked, dropsUnsavedEdits, listingRowNode } from '@market/listing-row-edit.js';
 import { localizeStrategyName } from '@market/pricer.js';
 import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
 import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
@@ -533,10 +533,24 @@ export default function InventoryBoard(props) {
   // Row actions: the listing the editor is open on, and the row with a write in flight.
   const [editRow, setEditRow] = createSignal(null);
   const [editDirty, setEditDirty] = createSignal(false);
+  // The row whose Edit button gets the keyboard back: the drawer keeps its panel
+  // across a switch, so the button that opened it is another row's by then.
+  const [editReturnId, setEditReturnId] = createSignal('');
   const [busyId, setBusyId] = createSignal('');
+  // A save or an unlist closes the panel itself, in the same pass that wrote the
+  // row: the dirty flag it reads back is still the one from before the write, so
+  // the close is told not to ask.
+  let closesWithoutAsking = false;
   let search;
   const rowId = (row) => String(row?.id ?? '');
   const rowName = (row) => row?.cardName || row?.name || 'listing';
+
+  /** The one question the drawer asks, whether it is switching rows or closing. */
+  function discardQuestion(next) {
+    const current = editRow();
+    if (!dropsUnsavedEdits({ dirty: editDirty(), openId: rowId(current), nextId: rowId(next) })) return '';
+    return `Discard your changes to ${rowName(current)}?`;
+  }
 
   /**
    * Open the drawer on a row. Only one drawer is ever open: opening another row
@@ -544,26 +558,51 @@ export default function InventoryBoard(props) {
    * seller is asked first.
    */
   function openEditRow(row) {
-    const current = editRow();
-    if (current && rowId(current) !== rowId(row) && editDirty()
-      && !window.confirm(`Discard your changes to ${rowName(current)}?`)) return;
-    setEditDirty(false);
+    closesWithoutAsking = false;
+    const question = discardQuestion(row);
+    if (question && !window.confirm(question)) return;
+    // Opening the row that is already open keeps what the seller typed.
+    if (rowId(editRow()) !== rowId(row)) setEditDirty(false);
     setEditRow(row);
+    setEditReturnId(rowId(row));
+  }
+
+  /** Close the drawer; edits the seller has not saved ask the same thing a switch does. */
+  function closeEditRow() {
+    if (!editRow()) return;
+    const question = closesWithoutAsking ? '' : discardQuestion(null);
+    closesWithoutAsking = false;
+    if (question && !window.confirm(question)) return;
+    setEditDirty(false);
+    setEditRow(null);
+  }
+
+  /** A row's Edit button by listing id, whatever the board re-rendered since. */
+  function rowEditButton(id) {
+    return listingRowNode([...board.querySelectorAll('[data-listing-id]')], id)?.querySelector('.inv-edit') || null;
   }
 
   /** Keyboard focus back onto a row's Edit button, else the search box. */
   function focusRowEdit(id) {
-    const rowNode = id && [...board.querySelectorAll('[data-listing-id]')]
-      .find((node) => node.dataset.listingId === id);
-    (rowNode?.querySelector('.inv-edit') || search)?.focus();
+    (rowEditButton(id) || search)?.focus();
   }
 
-  function saveRow(saved) {
+  /** The board row follows a saved listing; the editor stays where it is. */
+  function applySavedRow(saved) {
     props.onRowSaved?.(saved);
     setActionError('');
+    setActionLine('Listing updated.');
+  }
+
+  function saveRow(saved, note = '') {
+    // The save took what was unsaved, so the close that follows is not a discard.
+    closesWithoutAsking = true;
+    applySavedRow(saved);
     // The new price can take the listing out of its pricing group, as on the desk.
     const left = leftGroupLine(saved);
-    setActionLine(left ? `Listing updated. ${left}` : 'Listing updated.');
+    // The drawer closes on a save, so a CardTrader side that did not go through
+    // belongs in this line: the panel's own message would leave with it.
+    setActionLine(['Listing updated.', left, note].filter(Boolean).join(' '));
     // The dialog closes after this and its focus restore finds a detached
     // button, because the changed row re-rendered: hand the keyboard back to it.
     queueMicrotask(() => focusRowEdit(rowId(saved)));
@@ -604,6 +643,13 @@ export default function InventoryBoard(props) {
     } finally {
       setBusyId('');
     }
+  }
+
+  /** The panel's Delete: a listing that went away has no edits left to discard either. */
+  async function removeRowFromDrawer(row) {
+    const removed = await removeRow(row);
+    if (removed) closesWithoutAsking = true;
+    return removed;
   }
 
   return (
@@ -755,9 +801,11 @@ export default function InventoryBoard(props) {
             previewComps={props.previewComps}
             pricing={props.pricing}
             onDirty={setEditDirty}
-            onClose={() => setEditRow(null)}
+            onClose={closeEditRow}
+            restoreFocus={() => rowEditButton(editReturnId())}
             onSaved={saveRow}
-            onDelete={() => removeRow(row())}
+            onRowUpdated={applySavedRow}
+            onDelete={() => removeRowFromDrawer(row())}
           />
         )}
       </Show>
