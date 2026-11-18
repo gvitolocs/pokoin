@@ -163,7 +163,11 @@ export default function CollectionHistoryPanel(props) {
       // The callback is a prop, not a dependency: a parent re-render must not
       // restart the movers request.
       untrack(() => {
-        if (props.onRange) props.onRange({ id, days, label });
+        // A custom pick carries its own two dates: the segment table below
+        // reads the window the graph is drawing, and only the pair says which.
+        if (props.onRange) {
+          props.onRange(id === 'custom' ? { id, days, label, from, to } : { id, days, label });
+        }
       });
     },
   );
