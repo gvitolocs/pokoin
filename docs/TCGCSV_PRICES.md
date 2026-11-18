@@ -81,6 +81,20 @@ USD decimal strings. It reuses the existing explicit product crosswalk and
 point. Existing `marketplace-card-sales` behavior is unchanged. The authenticated
 TCGplayer inventory history route remains available independently.
 
+`pokoin.days` is Pokoin's own market: the cheapest live native listing at the end
+of every UTC day, `{day, lowestAskPkn, listingCount}`, read with one statement
+from `marketplace_user_listings_events` through the existing
+`marketplace_user_listing_events_card_day_idx`. It is an ask, never a sale, and
+joins no sold calculation. A database without that table answers
+`pokoin.status = "empty"`, the same degradation the other legs use (PH-02
+`table_presence`), with no failed statement.
+
+`?fields=graph` trims the answer to what the desk plots — one number per source
+per day, the one TCGplayer series `reverse` picks and the Cardmarket trend of
+that same facet — and thins a span over 400 days to one point per ISO week,
+marked `"bucket": "week"`. Without the parameter the full shape above is
+unchanged.
+
 Deploy through `scripts/deploy-pokoin-rust.sh` from the exact integrated
 `origin/main` commit. TCGCSV reader configuration is optional to the CardTrader feed.
 
