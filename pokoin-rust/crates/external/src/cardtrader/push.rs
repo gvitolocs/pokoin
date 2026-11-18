@@ -401,11 +401,7 @@ fn facet_properties(
 /// (`pokemon_reverse`, `riftbound_foil`, …). A flag that was never on stays
 /// unnamed: a product whose blueprint has no such property is refused it.
 #[allow(clippy::result_large_err)]
-pub fn facet_body(
-    was: &Value,
-    listing: &Value,
-    editable: Option<&[Value]>,
-) -> ApiResult<Value> {
+pub fn facet_body(was: &Value, listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
     let mut properties = facet_properties(listing, editable)?;
     for (name, value) in facet_properties(was, editable).unwrap_or_default() {
         if value.as_bool() == Some(true) && !properties.contains_key(&name) {
@@ -827,7 +823,11 @@ mod tests {
                          "foil_state": "standard", "first_edition": false, "graded": false,
                          "price_pkn": 200, "quantity_available": 1});
         let body = facet_body(&on, &off, None).unwrap();
-        assert_eq!(body["properties"]["pokemon_reverse"], json!(false), "{body}");
+        assert_eq!(
+            body["properties"]["pokemon_reverse"],
+            json!(false),
+            "{body}"
+        );
         assert_eq!(
             body["properties"]["pokemon_first_edition"],
             json!(false),
@@ -837,7 +837,8 @@ mod tests {
         // one says so in its own key.
         assert_eq!(body["graded"], json!(false), "{body}");
         assert!(
-            body["properties"].get("signed").is_some() && body["properties"].get("altered").is_some(),
+            body["properties"].get("signed").is_some()
+                && body["properties"].get("altered").is_some(),
             "signed and altered are always named: {}",
             body["properties"]
         );
