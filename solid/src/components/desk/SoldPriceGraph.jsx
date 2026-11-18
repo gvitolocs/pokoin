@@ -222,18 +222,6 @@ export default function SoldPriceGraph(props) {
   const nowOn = createMemo(() => nowValue() > 0 && shown(POKOIN_SOURCE.key));
   // The keys and range buttons take the plot's top line whenever they are there.
   const legendLine = createMemo(() => Boolean(overlays().length || sourceKeys().length || props.onRange));
-  // A keys row that still overflows (overlay keys joined in) fades at its right
-  // edge so it reads as scrollable. Read when the keys or the panel change,
-  // never on a pointer move: scrollWidth forces a layout.
-  const [keysOverflow, setKeysOverflow] = createSignal(false);
-  createEffect(
-    () => [sourceKeys(), overlays(), plot(), narrow()],
-    ([, , , isNarrow]) => {
-      // legendEl is untracked: the keys' change that re-runs this effect is also
-      // what has just rendered it.
-      setKeysOverflow(Boolean(legendEl) && isNarrow && legendEl.scrollWidth > legendEl.clientWidth);
-    },
-  );
   // Several lines on one plot: the hover lists them all instead of one price.
   const compareLines = createMemo(() => Boolean(underLines().length || nowOn()));
   const hasLines = createMemo(() => Boolean(plotDays().length || underLines().length));
@@ -385,6 +373,20 @@ export default function SoldPriceGraph(props) {
       lastLabel: formatSoldDayWithYear(lastDay.day, dateLocale, withYear),
     };
   });
+
+  // A keys row that still overflows (overlay keys joined in) fades at its right
+  // edge so it reads as scrollable. Read when the keys or the panel change,
+  // never on a pointer move: scrollWidth forces a layout. Declared after `plot`
+  // because Solid runs this effect's compute when the effect is created.
+  const [keysOverflow, setKeysOverflow] = createSignal(false);
+  createEffect(
+    () => [sourceKeys(), overlays(), plot(), narrow()],
+    ([, , , isNarrow]) => {
+      // legendEl is untracked: the keys' change that re-runs this effect is also
+      // what has just rendered it.
+      setKeysOverflow(Boolean(legendEl) && isNarrow && legendEl.scrollWidth > legendEl.clientWidth);
+    },
+  );
 
   // The hover is a day, not a row of one series: several lines rarely quote on
   // the same day, and the guide has to stand where all of them can be read.

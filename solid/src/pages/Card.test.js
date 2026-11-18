@@ -592,3 +592,62 @@ test('on a narrow panel the keys span it and drop the picked key without overlay
   assert.match(graph, /legendEl\.scrollWidth > legendEl\.clientWidth/);
   assert.match(css, /\.sold-graph-legend\.is-overflow \{[^}]*mask-image: linear-gradient\(to right, #000 calc\(100% - 16px\), transparent\);/);
 });
+
+/**
+ * Solid 2 runs the first argument of createEffect, createMemo and createRenderEffect
+ * when the call is made, so a value that argument calls has to be declared above it:
+ * a `const` below is still in its temporal dead zone there and the page throws
+ * (PRICE-04, the keys' overflow effect created above the `plot` it read). Reports
+ * every such call of one component, so the next line added is held to it too.
+ */
+function createdBeforeItsDeclaration(src, componentName) {
+  const from = src.indexOf(`export default function ${componentName}(`);
+  const line = (at) => src.slice(0, at).split('\n').length;
+  const pastQuoted = (i) => {                       // index after the '…', "…" or `…` starting at i
+    const quote = src[i];
+    let j = i + 1;
+    while (j < src.length && src[j] !== quote) j += src[j] === '\\' ? 2 : 1;
+    return j + 1;
+  };
+  const firstArgument = (open) => {                 // from the call's `(` to its top-level `,` or `)`
+    let depth = 0;
+    let i = open;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') { i = pastQuoted(i); continue; }
+      if (c === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); i = i < 0 ? src.length : i; continue; }
+      if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i); i = i < 0 ? src.length : i + 2; continue; }
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 1) return src.slice(open + 1, i); depth -= 1; }
+      else if (c === ',' && depth === 1) return src.slice(open + 1, i);
+      i += 1;
+    }
+    return src.slice(open + 1);
+  };
+  const declaredUnder = (name, after) => {          // `const name =` / `const [name` on the component's own line
+    const at = src.slice(after).search(new RegExp(`\\n  const (?:\\[)?(?:[\\w$]+, )?${name.replaceAll('$', '\\$')}[ ,\\]=]`));
+    return at < 0 ? null : after + at;
+  };
+  const late = [];
+  for (const call of ['createEffect(', 'createMemo(', 'createRenderEffect(', 'createComputed(']) {
+    for (let at = src.indexOf(call, from); at >= 0; at = src.indexOf(call, at + 1)) {
+      const arg = firstArgument(at + call.length - 1);
+      const used = [...new Set([...arg.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*\(/g)].map((row) => row[1]))];
+      for (const name of used) {
+        if (arg.includes(`const ${name}`)) continue;   // the argument declares this one itself
+        const under = declaredUnder(name, at);
+        if (under !== null) late.push(`${call.slice(0, -1)} at line ${line(at)} calls ${name}, declared at line ${line(under)}`);
+      }
+    }
+  }
+  return late;
+}
+
+test('what the graph creates at mount reads only what it declared above', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  assert.deepEqual(
+    createdBeforeItsDeclaration(graph, 'SoldPriceGraph'),
+    [],
+    'these functions run when they are created, so every value they call is declared first',
+  );
+});
