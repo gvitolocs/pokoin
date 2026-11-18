@@ -95,9 +95,11 @@ The file globs live in `scripts/js-test-groups.txt` — one line per job: group,
 - `solid`, `workers`, `news`, `scripts`, `bench` — the same shape, from their own line of the groups file; `solid` and `bench` run `npm ci` first.
 - `js-gate` — `needs:` all of them, `if: always()`, and it passes only when every job succeeded. A failed, cancelled or skipped job fails it, so the aggregate cannot go green by a job that never ran. It is in `scripts/ci-required-checks`, so no commit ships that it has not marked green.
 
+A speed test asserts how long the code takes relative to how fast this machine is, so it compares against a calibration of the same shape of work run in the same process, as `market/src/suggest-pool.test.js` now does (finding PKN-17); `scripts/js-wallclock-check.sh`, another step of `js-inventory`, is the rule that keeps it that way — it fails on any `assert(`/`assert.ok(` line of a tracked test file that compares a `performance.now()`/`Date.now()` difference against a literal number of milliseconds below 1000 unless that `path:line` is listed with a reason in `scripts/js-wallclock-allowed.txt`, which `--base` lets only shrink, exactly like the two lists above.
+
 Cost: `gvitolocs/pokoin` is public, so these `ubuntu-24.04` runners use no billed minutes; a green run is about 3 minutes of wall time, because the jobs run in parallel and the longest of them (`market`) is about 2 minutes. If the repository becomes private, every job counts against the plan's included minutes.
 
-Locally, from your worktree: `bash scripts/js-run-group.sh market` is exactly the `market` job, and `bash scripts/js-test-inventory.sh --base "$(git merge-base origin/main HEAD)"` is the `js-inventory` job.
+Locally, from your worktree: `bash scripts/js-run-group.sh market` is exactly the `market` job, `bash scripts/js-test-inventory.sh --base "$(git merge-base origin/main HEAD)"` is the `js-inventory` job, and `bash scripts/js-wallclock-check.sh --base "$(git merge-base origin/main HEAD)"` is its wall-clock step.
 ## Unsafe code
 
 Unsafe code is forbidden in every crate of `pokoin-rust/` by the compiler, not by review: each crate manifest carries
