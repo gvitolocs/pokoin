@@ -1,13 +1,14 @@
 import { createMemo, For, onSettled, Show } from 'solid-js';
 import { isFeatureAlbumArt, isLandscapePrintName, resolveArtLayout } from '@market/art-cut.js';
 import { albumShadeStyle } from '@market/art-shade.js';
-import { cardHref, formatPkn, imageSrc, rememberCardId } from '@market/api.js';
+import { cardHref, imageSrc, rememberCardId } from '@market/api.js';
 import { printingIdentity } from '@market/identity.js';
 import { tilePricePkn } from '@market/pkn.js';
 import { pileCardTier } from '@market/search-filters.js';
 import { cardImageAlt } from '@market/seo.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
+import { buyerFormat } from '../stores/buyer.js';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
 import { gameHref } from '@market/game.js';
@@ -143,7 +144,7 @@ export function ArtworkPileOverlay(props) {
         <div class="artwork-pile-row">
           <For each={orderedCards()}>
             {(card, index) => {
-              const price = () => formatPkn(tilePricePkn(card));
+              const price = () => buyerFormat(tilePricePkn(card));
               const identity = () => printingIdentity(card);
               return (
                 <div

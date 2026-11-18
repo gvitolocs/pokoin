@@ -109,3 +109,12 @@ test('the homepage is an unclipped page of plain tiles; era names link the setli
   assert.doesNotMatch(home, /<CardTile[^>]*\scut/);
   assert.match(read('../pages/Sets.jsx'), /headingHref\(/);
 });
+
+test('the opened pile prices a card the way the tiles behind it do', () => {
+  const pile = read('./ArtworkPile.jsx');
+  // buyerFormat is the tiles' own rule: PKN while the balance covers it, local
+  // first when it does not, nothing at all until the buyer is known.
+  assert.match(pile, /const price = \(\) => buyerFormat\(tilePricePkn\(card\)\);/);
+  assert.match(pile, /import \{ buyerFormat \} from '\.\.\/stores\/buyer\.js';/);
+  assert.doesNotMatch(pile, /formatPkn\(/);
+});
