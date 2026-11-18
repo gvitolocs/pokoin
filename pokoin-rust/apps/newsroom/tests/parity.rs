@@ -590,6 +590,68 @@ async fn full_editorial_passes_repair_malformed_output_using_native_http() {
     assert_eq!(budget.remaining(), 0);
 }
 
+/// claude.js:648-663 and 694-706: a revision that breaks the reporter contract
+/// becomes a rejection whose reason is the first three validation errors.
+#[tokio::test]
+async fn editor_revision_failing_validation_is_an_editor_rejection() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, Request, ResponseTemplate,
+    };
+    let f = fixture("editorial.json");
+    let mut draft = f["draft"].clone();
+    draft["blocks"] = json!([
+        {"type":"paragraph","text":"A source reports a new set.","sourceIds":["s1"]},
+        {"type":"key_facts","title":null,"items":[{"text":"A new set.","sourceIds":["s1"]}]},
+        {"type":"why_it_matters","text":"Collectors can follow the announcement."}
+    ]);
+    draft["first_reported_source_id"] = json!("s1");
+    let mut revised = draft.clone();
+    revised["blocks"][0]["sourceIds"] = json!(["a", "d"]);
+    revised["blocks"][1]["items"][0]["sourceIds"] = json!(["b"]);
+    revised["first_reported_source_id"] = json!("c");
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/v1/messages")).respond_with(move |r:&Request| {
+        let body:Value=serde_json::from_slice(&r.body).unwrap();
+        let request:Value=serde_json::from_str(body["messages"][0]["content"].as_str().unwrap()).unwrap();
+        let raw=match request["task"].as_str().unwrap() {
+            "draft_article"=>draft.to_string(),
+            "edit_article"=>json!({"verdict":"revise","reason":"tightened","issues":[{"blockIndex":0,"quote":"A source reports a new set.","problem":"unsupported","fix":"cite s1"}],"revised":{"headline":revised["headline"],"dek":revised["dek"],"blocks":revised["blocks"]}}).to_string(),
+            task=>panic!("unexpected task {task}"),
+        };
+        let content=[json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":raw}}),json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),json!({"type":"message_stop"})]
+            .iter().map(|v|format!("data: {v}\n\n")).collect::<String>();
+        ResponseTemplate::new(200).set_body_raw(content,"text/event-stream")
+    }).expect(2).mount(&server).await;
+    let budget = Budget::new(2);
+    let mut provider = Provider::from_env(budget.clone()).unwrap();
+    provider.name = "anthropic".into();
+    provider.test_endpoint(server.uri());
+    let result = editorial::run_passes(
+        &provider,
+        &f["pack"],
+        &f["hints"],
+        &["breaking".into()],
+        "",
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["reason"], "editor_rejected");
+    assert!(result["finalDraft"].is_null());
+    assert_eq!(result["editor"]["verdict"], "reject");
+    assert_eq!(
+        result["editor"]["reason"],
+        "editor revision failed validation: blocks[0] (paragraph): unknown source id \"a\"; blocks[0] (paragraph): unknown source id \"d\"; blocks[1] (key_facts): unknown source id \"b\""
+    );
+    assert_eq!(
+        result["editor"]["issues"],
+        json!([{"blockIndex":0,"quote":"A source reports a new set.","problem":"unsupported","fix":"cite s1"}])
+    );
+    assert_eq!(result["draft"]["blocks"][0]["sourceIds"], json!(["s1"]));
+}
+
 #[test]
 fn find_record_by_story_is_the_english_cms_record_only() {
     let records = vec![

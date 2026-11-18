@@ -592,15 +592,27 @@ pub async fn run_passes(
     .await?;
     let mut final_draft = draft.clone();
     let mut verdict = text(&editor, "verdict").to_owned();
+    let mut reason = editor["reason"].clone();
     if verdict == "revise" {
         for key in ["headline", "dek", "blocks"] {
             final_draft[key] = editor["revised"][key].clone();
         }
-        if !validate_reporter(&final_draft, &[text(&draft, "template").into()], pack).is_empty() {
+        // claude.js:648-663: a revision that breaks the reporter contract is a
+        // rejection, and its first three errors become the editor's reason.
+        let errors = validate_reporter(&final_draft, &[text(&draft, "template").into()], pack);
+        if !errors.is_empty() {
             verdict = "reject".into();
+            reason = json!(format!(
+                "editor revision failed validation: {}",
+                errors.into_iter().take(3).collect::<Vec<_>>().join("; ")
+            ));
         }
     }
-    Ok(
-        json!({"ok":verdict!="reject","draft":draft,"editor":editor,"finalDraft":if verdict=="reject"{Value::Null}else{final_draft}}),
-    )
+    let editor = json!({"verdict":verdict,"reason":reason,"issues":editor["issues"]});
+    Ok(if verdict == "reject" {
+        // claude.js:699-706
+        json!({"ok":false,"reason":"editor_rejected","draft":draft,"editor":editor,"finalDraft":Value::Null})
+    } else {
+        json!({"ok":true,"draft":draft,"editor":editor,"finalDraft":final_draft})
+    })
 }
