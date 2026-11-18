@@ -1073,7 +1073,7 @@ mod properties {
 
     /// Build one operation the way the handlers build it, with its amount read
     /// from the balance it will meet, and apply it.
-    fn run_step(state: &mut Vec<(String, FirestoreBalance)>, plan: &Planned) -> Step {
+    fn run_step(state: &mut [(String, FirestoreBalance)], plan: &Planned) -> Step {
         let from = plan.from % state.len();
         let to = plan.to % state.len();
         let subject = if plan.mode == MoveMode::Mint {
@@ -1101,7 +1101,7 @@ mod properties {
             }
             MoveMode::RecordOnly => LedgerOp::record(&uid(from), amount, "crypto_pkn_sale_deposit"),
         };
-        let before = state.clone();
+        let before = state.to_vec();
         let supply_before = supply(&before);
         let accepted = apply_mode(state, &op).is_ok();
         Step {
@@ -1112,7 +1112,7 @@ mod properties {
             accepted,
             supply_before,
             before,
-            after: state.clone(),
+            after: state.to_vec(),
         }
     }
 
