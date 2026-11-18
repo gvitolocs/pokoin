@@ -1,7 +1,7 @@
 use crate::{
-    array, iso,
+    array, iso, js_string,
     model::{Completion, Provider, Reason},
-    text,
+    or, text, truthy,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -311,6 +311,16 @@ pub fn validate_reporter(value: &Value, valid_templates: &[String], pack: &Value
     }
     let contains =
         |rows: &Value, key: &str, id: &str| array(rows).iter().any(|s| text(s, key) == id);
+    // claude.js:447,449,456,458 — chart ids and set slugs are compared as the raw
+    // values Node put in the Set, so 3 and "3" are two different ids.
+    let has_value = |rows: &Value, key: &str, id: &Value| array(rows).iter().any(|s| &s[key] == id);
+    // claude.js:448,457 — only the card ids run through String() on both sides, so
+    // a numeric catalog id in the pack matches the decimal string a draft quoted.
+    let has_id = |rows: &Value, key: &str, id: &Value| {
+        array(rows)
+            .iter()
+            .any(|s| js_string(&s[key]) == js_string(id))
+    };
     for (i, b) in blocks.iter().enumerate() {
         let kind = text(b, "type");
         for id in collect_refs(b) {
@@ -318,13 +328,14 @@ pub fn validate_reporter(value: &Value, valid_templates: &[String], pack: &Value
                 errors.push(format!("blocks[{i}] ({kind}): unknown source id \"{id}\""));
             }
         }
-        for (kind, key, rows, id_key, label) in [
+        for (kind, key, rows, id_key, label, as_string) in [
             (
                 "chart",
                 "chartId",
                 &pack["market"]["charts"],
                 "id",
                 "chartId",
+                false,
             ),
             (
                 "related_card",
@@ -332,6 +343,7 @@ pub fn validate_reporter(value: &Value, valid_templates: &[String], pack: &Value
                 &pack["related"]["cards"],
                 "cardId",
                 "cardId",
+                true,
             ),
             (
                 "related_set",
@@ -339,12 +351,22 @@ pub fn validate_reporter(value: &Value, valid_templates: &[String], pack: &Value
                 &pack["related"]["sets"],
                 "slug",
                 "set slug",
+                false,
             ),
         ] {
-            if text(b, "type") == kind && !contains(rows, id_key, text(b, key)) {
+            if text(b, "type") != kind {
+                continue;
+            }
+            let id = &b[key];
+            let known = if as_string {
+                has_id(rows, id_key, id)
+            } else {
+                has_value(rows, id_key, id)
+            };
+            if !known {
                 errors.push(format!(
                     "blocks[{i}]: {label} \"{}\" is not in the evidence pack",
-                    text(b, key)
+                    js_string(id)
                 ));
             }
         }
@@ -395,11 +417,6 @@ fn project(value: &Value, fields: &[&str]) -> Value {
     }
     Value::Object(out)
 }
-fn or<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter()
-        .filter_map(|k| v.get(k))
-        .find(|v| !v.is_null() && **v != false && **v != "")
-}
 pub fn trimmed_pack(pack: &Value) -> Value {
     let game = crate::game(pack);
     let games: Value =
@@ -419,7 +436,9 @@ pub fn trimmed_pack(pack: &Value) -> Value {
             out
         })
         .collect();
-    let market = if pack["market"].is_object() {
+    // claude.js:527 — the market module rides on `pack.market ? …`, not on it
+    // being an object, so any truthy market gets the projected shape.
+    let market = if truthy(&pack["market"]) {
         let m = &pack["market"];
         json!({"sufficient":m["sufficient"]==true,"subject":or(&m["subject"],&["name"]).cloned().unwrap_or(Value::Null),
             "window":if m["window"].is_object(){json!(format!("{} to {}",text(&m["window"],"from"),text(&m["window"],"to")))}else{Value::Null},
@@ -435,9 +454,11 @@ pub fn trimmed_pack(pack: &Value) -> Value {
         "summaryOfEvent":or(pack,&["summaryOfEvent","topic"]).cloned().unwrap_or(json!("")),"status":or(pack,&["status"]).cloned().unwrap_or(Value::Null),"angle":or(pack,&["angle"]).cloned().unwrap_or(Value::Null),
         "sourceList":sources,"claimLedger":array(&pack["claimLedger"]).iter().map(|v|project(v,&["claim","kind","subject","value","variants","supportedBy","contradictedBy","primarySourceId","confidence"])).collect::<Vec<_>>(),
         "conflicts":array(&pack["conflicts"]).iter().map(|c|c["summary"].clone()).collect::<Vec<_>>(),
-        "confirmedClaims":pack.get("confirmedClaims").unwrap_or(&json!([])),"pressClaims":array(&pack["pressClaims"]).iter().take(10).collect::<Vec<_>>(),
-        "unconfirmedClaims":pack.get("unconfirmedClaims").unwrap_or(&json!([])),"dates":pack.get("dates").unwrap_or(&json!([])),"numbers":pack.get("numbers").unwrap_or(&json!([])),
-        "entities":entities.iter().filter(|v|v["resolved"]==true).map(|v|project(v,&["type","name","pokoinId"])).collect::<Vec<_>>(),
+        "confirmedClaims":or(pack,&["confirmedClaims"]).cloned().unwrap_or(json!([])),"pressClaims":array(&pack["pressClaims"]).iter().take(10).collect::<Vec<_>>(),
+        "unconfirmedClaims":or(pack,&["unconfirmedClaims"]).cloned().unwrap_or(json!([])),"dates":or(pack,&["dates"]).cloned().unwrap_or(json!([])),"numbers":or(pack,&["numbers"]).cloned().unwrap_or(json!([])),
+        // claude.js:524 — `entity?.resolved` is a truthiness test, so a resolved flag of
+        // 1 or "yes" keeps the entity.
+        "entities":entities.iter().filter(|v|truthy(&v["resolved"])).map(|v|project(v,&["type","name","pokoinId"])).collect::<Vec<_>>(),
         "isUpdate":pack["isUpdate"]==true,"previousCoverage":or(pack,&["previousCoverage"]).cloned().unwrap_or(Value::Null),"market":market,
         "related":{"cards":array(&pack["related"]["cards"]).iter().map(|v|project(v,&["cardId","name","setName","number"])).collect::<Vec<_>>(),"sets":array(&pack["related"]["sets"]).iter().map(|v|project(v,&["slug","name"])).collect::<Vec<_>>()},
         "images":array(&pack["images"]).iter().map(|v|project(v,&["id","alt","origin"])).collect::<Vec<_>>()})

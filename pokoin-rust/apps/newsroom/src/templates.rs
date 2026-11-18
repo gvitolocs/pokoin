@@ -1,4 +1,4 @@
-use crate::{array, sources::resolve_source_host, text, timestamp};
+use crate::{array, or, sources::resolve_source_host, text, timestamp, truthy};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 fn n(v: &Value, key: &str) -> f64 {
@@ -27,9 +27,9 @@ pub fn hints(pack: &Value, now: i64) -> Value {
         added.iter().min().copied()
     };
     let conflicts = array(&pack["conflicts"]).len();
-    let entities = pack
-        .get("entities")
-        .or_else(|| pack.get("pokoinEntities"))
+    // templates.js:175 — `pack.entities || pack.pokoinEntities || []`, so an
+    // explicit null, false, "" or 0 falls through to the other key.
+    let entities = or(pack, &["entities", "pokoinEntities"])
         .map(array)
         .unwrap_or(&[]);
     json!({"angle":pack.get("angle").unwrap_or(&Value::Null),"storyStatus":pack.get("status").unwrap_or(&Value::Null),
@@ -116,7 +116,9 @@ pub fn worthiness(pack: &Value, hints: &Value, covered: bool, single: bool) -> V
     } else {
         (array(&pack["claimLedger"]).len() as f64 / 6.0).clamp(0.0, 1.0)
     };
-    let value: f64 = if pack["market"]["sufficient"] == true {
+    // publication.js:60 — the market bonus is `sufficient ? 0.6 : 0`, truthy
+    // rather than `=== true` as the request builders keep it.
+    let value: f64 = if truthy(&pack["market"]["sufficient"]) {
         0.6
     } else {
         0.0

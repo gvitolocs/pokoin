@@ -230,6 +230,105 @@ fn a_living_update_needs_every_source_date_to_parse() {
     );
 }
 
+/// Node leans on `||`, truthiness and `String()` where the port used strict
+/// equality: templates.js:175, claude.js:519-527, publication.js:60,
+/// sources.js:89 and comment-moderation.js:152-155.
+#[test]
+fn javascript_truthiness_and_string_coercion() {
+    for falsy in [Value::Null, json!(false), json!(""), json!(0)] {
+        let pack = json!({"entities": falsy, "pokoinEntities": [{"type": "card"}]});
+        assert_eq!(
+            pokoin_newsroom::templates::hints(&pack, now())["entityCount"],
+            1,
+            "{falsy} must fall through to pokoinEntities"
+        );
+    }
+    let trimmed = editorial::trimmed_pack(&json!({
+        "dates": Value::Null,
+        "numbers": false,
+        "unconfirmedClaims": "",
+        "resolvedEntities": [{"type": "card", "name": "Pikachu", "resolved": 1}],
+        "market": [],
+    }));
+    assert_eq!(trimmed["dates"], json!([]));
+    assert_eq!(trimmed["numbers"], json!([]));
+    assert_eq!(trimmed["unconfirmedClaims"], json!([]));
+    assert_eq!(
+        trimmed["entities"],
+        json!([{"type": "card", "name": "Pikachu"}]),
+        "claude.js:524 tests entity.resolved for truthiness"
+    );
+    assert!(
+        trimmed["market"].is_object(),
+        "claude.js:527 builds the market module for any truthy market"
+    );
+    let pack = json!({"market": {"sufficient": 1}, "sourceList": [
+        {"outlet": "pokebeach.com", "tier": "A", "addedAt": "2026-10-05T17:00:00Z"}]});
+    let hints = pokoin_newsroom::templates::hints(&pack, now());
+    assert_eq!(
+        pokoin_newsroom::templates::worthiness(&pack, &hints, false, false)["components"]
+            ["pokoinValue"],
+        json!(0.6),
+        "publication.js:60 pays the bonus for a truthy sufficient"
+    );
+    assert_eq!(
+        editorial::reporter_request(&pack, &hints, &["breaking".into()], "", None, now(), true)
+            ["availableModules"]["market"],
+        json!(false),
+        "claude.js:546 still demands sufficient === true"
+    );
+    assert_eq!(
+        sources::resolve_source_host("www.www.pokebeach.com"),
+        "www.pokebeach.com",
+        "sources.js:89 strips exactly one leading www."
+    );
+    let row = moderation::comment_row(&json!({
+        "name": "projects/p/databases/(default)/documents/news_comments/c1",
+        "fields": {"id": {"stringValue": "stored"}, "body": {"stringValue": "hi"}},
+    }));
+    assert_eq!(row["id"], "stored", "the stored field beats the path");
+    assert_eq!(row["body"], "hi");
+}
+
+/// claude.js:448,457 stringify the card ids on both sides; claude.js:447,449 keep
+/// chart ids and set slugs raw.
+#[test]
+fn evidence_ids_compare_the_way_node_stringifies_them() {
+    let f = fixture("editorial.json");
+    let misses = |kind: &str, key: &str, block_id: Value, pack_id: Value| {
+        let mut pack = f["pack"].clone();
+        pack["related"]["cards"] = json!([{"cardId": pack_id, "name": "Pikachu"}]);
+        pack["market"] = json!({"sufficient": true, "charts": [{"id": pack_id}]});
+        let mut draft = f["draft"].clone();
+        let mut block = serde_json::Map::new();
+        block.insert("type".into(), json!(kind));
+        block.insert(key.into(), block_id);
+        draft["blocks"] = json!([Value::Object(block)]);
+        editorial::validate_reporter(&draft, &["breaking".into()], &pack)
+            .into_iter()
+            .filter(|error| error.contains("is not in the evidence pack"))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        misses("related_card", "cardId", json!("241905"), json!(241905)).is_empty(),
+        "a numeric catalog id is the card the draft quoted"
+    );
+    assert!(
+        misses("related_card", "cardId", json!("241905"), json!("241905")).is_empty(),
+        "the ordinary string id"
+    );
+    assert_eq!(
+        misses("related_card", "cardId", json!("999999"), json!(241905)),
+        ["blocks[0]: cardId \"999999\" is not in the evidence pack"],
+        "a different id is still missing"
+    );
+    assert_eq!(
+        misses("chart", "chartId", json!("3"), json!(3)),
+        ["blocks[0]: chartId \"3\" is not in the evidence pack"],
+        "chart ids stay raw, as claude.js:447 collects them"
+    );
+}
+
 #[test]
 fn live_node_schedule_exact() {
     let f = fixture("schedule.json");

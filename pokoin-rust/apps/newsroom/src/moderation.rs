@@ -1,4 +1,4 @@
-use crate::{array, iso, model::Budget, text, timestamp};
+use crate::{array, iso, js_string, model::Budget, text, timestamp};
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -20,25 +20,6 @@ pub fn precheck(body: &str) -> Option<Value> {
         return Some(json!({"decision":"hold","reason":"several links","categories":["links"]}));
     }
     None
-}
-fn js_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "null".into(),
-        Value::Object(_) => "[object Object]".into(),
-        Value::Array(a) => a
-            .iter()
-            .map(|v| {
-                if v.is_null() {
-                    String::new()
-                } else {
-                    js_string(v)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-        _ => v.to_string(),
-    }
 }
 pub fn parse_decision(raw: &Value) -> Option<Value> {
     let parsed;
@@ -148,6 +129,21 @@ pub fn plain_value(value: &Value) -> Value {
             .collect::<Vec<_>>());
     }
     Value::Null
+}
+/// comment-moderation.js:152-155 — the computed name and id are written first and
+/// the document fields spread last, so a comment that stores its own `id` or
+/// `name` field keeps that value instead of the one derived from the path.
+pub fn comment_row(doc: &Value) -> Value {
+    let name = text(doc, "name");
+    let mut row = serde_json::Map::new();
+    row.insert("name".into(), json!(name));
+    row.insert("id".into(), json!(name.rsplit('/').next().unwrap_or("")));
+    if let Some(fields) = doc.get("fields").and_then(Value::as_object) {
+        for (key, field) in fields {
+            row.insert(key.clone(), plain_value(field));
+        }
+    }
+    Value::Object(row)
 }
 pub fn moderation_request(comment: &Value) -> Value {
     let mut user = serde_json::Map::new();
@@ -262,14 +258,8 @@ impl Firestore {
         let rows: Value = response.json().await?;
         Ok(array(&rows)
             .iter()
-            .filter_map(|row| {
-                let doc = row.get("document")?;
-                let mut value = plain_value(&json!({"mapValue":{"fields":doc["fields"]}}));
-                let name = text(doc, "name");
-                value["name"] = json!(name);
-                value["id"] = json!(name.rsplit('/').next().unwrap_or(""));
-                Some(value)
-            })
+            .filter_map(|row| row.get("document"))
+            .map(comment_row)
             .collect())
     }
     pub async fn set_moderation(&self, name: &str, update: &Value) -> Result<()> {

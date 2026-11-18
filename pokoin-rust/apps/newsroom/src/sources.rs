@@ -31,16 +31,19 @@ pub fn domain_of(source: &str) -> String {
     } else {
         format!("https://{s}")
     };
-    url::Url::parse(&url)
+    // sources.js:82-89 — each replace() drops exactly one leading prefix, and the
+    // unparseable branch loses "www." once in the catch and once more on return.
+    let host = url::Url::parse(&url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
         .unwrap_or_else(|| {
-            s.trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .to_owned()
-        })
-        .trim_start_matches("www.")
-        .to_owned()
+            let without_scheme = strip_once(strip_once(&s, "https://"), "http://");
+            strip_once(without_scheme, "www.").to_owned()
+        });
+    strip_once(&host, "www.").to_owned()
+}
+fn strip_once<'a>(value: &'a str, prefix: &str) -> &'a str {
+    value.strip_prefix(prefix).unwrap_or(value)
 }
 pub fn resolve_source_host(source: &str) -> String {
     let raw = domain_of(source);
