@@ -93,6 +93,40 @@ insert into public.marketplace_user_listing_events
   ('33333333-3333-3333-3333-333333333333', '239324', 'removed',  0, 'cancelled', 190, '2026-09-09 14:00:00+00');
 "#;
 
+/// The pair PH-R026 found undetermined: two writes of one listing inside one
+/// transaction, so the audit trigger stamps both with the transaction's `now()`
+/// and they share `occurred_at` exactly. The ids say which one is the listing's
+/// last event, and that is the only thing that can.
+///
+/// `aaaaaaaa` is listed and sold at the very same instant *inside* a window that
+/// opens on 4 Oct, and `bbbbbbbb` did it the day *before* such a window: the
+/// sold-out has to win both times, or the line draws an ask that left the market
+/// in the same transaction it entered. Printing `239998` is the price tie, in
+/// both directions: `cccc` reprices 220 down to 200 inside the window and `dddd`
+/// repriced 180 up to 300 the day before it, so the cheapest ask is 200 of two
+/// listings — and every one of the four rows read in the wrong order moves that
+/// number.
+///
+/// Written ids, and the guard below reads them back, so that the seed cannot
+/// quietly stop being the case the assertions are about. Neither printing has a
+/// blueprint: the two lines are the only thing these cards are asked for.
+const TIE_SEED: &str = r#"
+insert into public.marketplace_search_candidates (card_id, ct_id, name, expansion_name, card_number)
+  values (239999, null, 'Charizard', 'Base Set', '12'),
+         (239998, null, 'Charizard', 'Base Set', '12');
+insert into public.marketplace_user_listing_events
+  (id, listing_id, card_id, event_type, quantity_after, status_after, price_pkn, occurred_at)
+  values
+  (900001, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '239999', 'listed',  1, 'active',   200, '2026-10-04 12:00:00+00'),
+  (900002, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '239999', 'sold',    0, 'sold_out', 200, '2026-10-04 12:00:00+00'),
+  (900003, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '239999', 'listed',  1, 'active',   200, '2026-10-03 12:00:00+00'),
+  (900004, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '239999', 'sold',    0, 'sold_out', 200, '2026-10-03 12:00:00+00'),
+  (900005, 'cccccccc-cccc-cccc-cccc-cccccccccccc', '239998', 'listed',  1, 'active',   220, '2026-10-04 12:00:00+00'),
+  (900006, 'cccccccc-cccc-cccc-cccc-cccccccccccc', '239998', 'updated', 1, 'active',   200, '2026-10-04 12:00:00+00'),
+  (900007, 'dddddddd-dddd-dddd-dddd-dddddddddddd', '239998', 'listed',  1, 'active',   180, '2026-10-03 12:00:00+00'),
+  (900008, 'dddddddd-dddd-dddd-dddd-dddddddddddd', '239998', 'updated', 1, 'active',   300, '2026-10-03 12:00:00+00');
+"#;
+
 /// Two CardTrader ask days of the asserted printing, so that its `cardtrader`
 /// block is a real one and the graph answer is seen to leave ask days out while
 /// the pokoin line keeps every day.
@@ -412,6 +446,7 @@ async fn price_history_folds_pokoin_listings_and_never_queries_an_absent_table()
     exec_all(&pokemon, PRICE_TABLES).await;
     exec_all(&pokemon, ASK_SEED).await;
     exec_all(&pokemon, EVENT_SEED).await;
+    exec_all(&pokemon, TIE_SEED).await;
     exec_all(&pokemon, BUSY_SEED).await;
     exec_all(&pokemon, FX_SEED).await;
     exec_all(&tcgcsv, TCGCSV_SCHEMA).await;
@@ -795,7 +830,108 @@ async fn price_history_folds_pokoin_listings_and_never_queries_an_absent_table()
         "the rates still come from the marketplace database"
     );
 
-    // 7. Neither database aborted a statement across the requests. The pools this
+    // 7. PH-R026: the audit trigger stamps `occurred_at = now()`, the transaction
+    //    timestamp, so the two writes of one listing inside one transaction are
+    //    indistinguishable by instant and only the event id says which of them the
+    //    listing ends on. First prove the seed really is that pair — one instant
+    //    per listing, the rows in id order — because an assertion about a tie is
+    //    worth nothing if the tie quietly stopped existing.
+    let tied = {
+        let rows = sqlx::query(
+            "select right(listing_id::text, 8) || ': ' || count(*)::text || ' rows at ' \
+                    || count(distinct occurred_at)::text || ' instant, ' \
+                    || string_agg(status_after || ' qty' || quantity_after::text || ' ' \
+                                  || price_pkn::text || ' id' || id::text, ' then ' order by id) \
+                   as tied \
+              from public.marketplace_user_listing_events \
+             where card_id in ('239998', '239999') \
+             group by listing_id \
+             order by listing_id",
+        )
+        .fetch_all(&pokemon)
+        .await
+        .expect("tie seed rows");
+        rows.iter()
+            .map(|row| row.try_get::<String, _>("tied").expect("tied"))
+            .collect::<Vec<String>>()
+    };
+    println!("the seeded same-instant pairs: {tied:?}");
+    assert_eq!(
+        tied,
+        [
+            "aaaaaaaa: 2 rows at 1 instant, active qty1 200 id900001 then sold_out qty0 200 id900002",
+            "bbbbbbbb: 2 rows at 1 instant, active qty1 200 id900003 then sold_out qty0 200 id900004",
+            "cccccccc: 2 rows at 1 instant, active qty1 220 id900005 then active qty1 200 id900006",
+            "dddddddd: 2 rows at 1 instant, active qty1 180 id900007 then active qty1 300 id900008",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        "each listing was written twice at one instant and the higher id is the later write"
+    );
+
+    //    A printing whose only listings sold out in the instant they were written:
+    //    the `in_range` half must end `aaaaaaaa` with the sale, and the
+    //    `before_start` half must carry `bbbbbbbb` into the window already sold, or
+    //    either of them prices both days at 200.
+    let (status, sold, _) = get(
+        &app,
+        "/api/marketplace-card-price-history?cardId=239999&from=2026-10-04&to=2026-10-05",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    println!(
+        "239999 pokoin block, sold out at the instant it was listed: {}",
+        sold["pokoin"]
+    );
+    let sold_days = line(&sold);
+    assert!(
+        sold_days.is_empty(),
+        "a listing that ended inside one transaction of the same instant is not an ask: {sold_days:?}"
+    );
+    assert_eq!(sold["pokoin"]["status"], "empty");
+
+    //    The same instant with a price instead of a sale: `cccc` went 220 → 200 in
+    //    the window and `dddd` went 180 → 300 before it, so the ask of the day is
+    //    200 of two listings. Either pair read backwards moves that number — 220
+    //    with `cccc` backwards, 180 with `dddd` — so neither order can slip.
+    let (status, repriced, _) = get(
+        &app,
+        "/api/marketplace-card-price-history?cardId=239998&from=2026-10-04&to=2026-10-05",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    println!(
+        "239998 pokoin line of the tied reprices: {:?}",
+        line(&repriced)
+    );
+    assert_eq!(
+        line(&repriced),
+        ["2026-10-04 200 2", "2026-10-05 200 2",]
+            .map(str::to_owned)
+            .to_vec(),
+        "the higher id is the state each listing has from that instant, in the window and \
+         in the state the window opens with"
+    );
+
+    //    And the printing the rest of this test asserts, asked over the same two
+    //    days: the tie seed touches no listing of it, so the line is what its
+    //    September events left standing.
+    let (status, tied_span, _) = get(
+        &app,
+        "/api/marketplace-card-price-history?cardId=239324&from=2026-10-04&to=2026-10-05",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        line(&tied_span),
+        ["2026-10-04 240 1", "2026-10-05 240 1",]
+            .map(str::to_owned)
+            .to_vec(),
+        "the September line carries into October untouched: 240 PKN of the one listing that \
+         is still live"
+    );
+
+    // 8. Neither database aborted a statement across the requests. The pools this
     //    test owns are closed first, which reports what they counted; what is left
     //    is the magic satellite pool, which waits out IDLE_SETTLE.
     pokemon.close().await;
