@@ -209,14 +209,14 @@ fn channel_check_and_authorization_contract() {
     let message = format_oauth_error(
         "invalid_grant",
         "test",
-        std::path::Path::new("/tmp/token"),
+        std::path::Path::new("token.json"),
         "pokoinpos",
     );
     assert!(message.contains("code expired"));
     let scope = format_oauth_error(
         "Insufficient authentication scopes",
         "test",
-        std::path::Path::new("/tmp/token"),
+        std::path::Path::new("token.json"),
         "",
     );
     assert!(scope.contains("wrong channel"));
