@@ -143,6 +143,85 @@ equal to the cent, list on Pokoin either:
 - unpriced with the group or strategy, so Pokoin prices it on arrival (see
   `list` below).
 
+### `cm-undercut` (read)
+
+Both Cardmarket undercut prices of many cards at once, for a script or for
+valuing a lot: 1 cent under the cheapest current offer from **private**
+sellers and, apart, under the cheapest one from **professional** sellers. It
+reads the same `sources.cardmarketoffers` comp block the pricer reads
+(docs/PRICING.md, "Cardmarket's seller floor"); it prices nothing and writes
+nothing.
+Pick the rows with **exactly one** of these, else `400`:
+
+- `items`: 1–2 000 connector items, the same shape `price-quote` takes, plus
+  `quantity` (default 1, at least 1). One call answers
+  `items[offset .. offset + limit)`; `offset` defaults to 0 and the answer's
+  `nextOffset` is the offset to ask for the rest (`null` at the end).
+- `pricingGroupId`: the live and paused listings of that group of this
+  account. An unknown group → `400` with code `pricing_group_unknown`.
+- `listings: true`: every live and paused listing of this account.
+
+The last two come back in listing-id order and page with `cursor`: the answer
+carries the last listing id of a full page and `null` at the end; sending an
+absent or invalid cursor starts from the beginning. `limit` is 200 by default,
+clamped to 1–500.
+
+`match` is the switches object every source takes, and a switch you leave out
+is **on**; it picks which comp entry answers, exactly as a strategy's switches
+do. A graded, signed or altered copy is no scanned facet's copy, so it is
+always read at the any-copy key `""`.
+
+```json
+{ "action": "cm-undercut", "pricingGroupId": "pg_…", "limit": 500,
+  "match": { "condition": true, "language": true, "finish": true, "firstEdition": false } }
+```
+
+Answer:
+
+```json
+{ "asOf": "2026-11-10", "pknPerEurCent": 2, "nextOffset": null, "cursor": "0b9c…",
+  "totals": { "private": { "eurCents": 2460, "pkn": 4920, "priced": 180, "missing": 20 },
+              "pro":     { "eurCents": 2214, "pkn": 4428, "priced": 176, "missing": 24 } },
+  "rows": [ { "itemId": "r1", "listingId": null, "cardId": "220962", "game": "riftbound",
+              "condition": "NM", "language": "EN", "finish": "Y", "firstEdition": "N",
+              "quantity": 2, "key": "CLF", "status": "priced",
+              "private": { "minEurCents": 14, "undercutEurCents": 13, "undercutPkn": 26,
+                           "offers": 4, "countsComplete": true,
+                           "facet": { "condition": "NM", "language": "EN", "finish": "*", "firstEdition": "*" } },
+              "pro": null } ] }
+```
+
+- `itemId` is echoed in `items` mode and `null` in the other two; `listingId`
+  is the listing's id there and `null` in `items` mode. `finish` and
+  `firstEdition` are `"Y"` or `"N"`. `quantity` is the item's own, or the
+  listing's available quantity.
+- `minEurCents` is the cheapest offer of that seller type, `undercutEurCents`
+  is 1 cent under it and `undercutPkn` = `undercutEurCents × 2`. A minimum of
+  1 cent has nothing to undercut, and a seller type with no scanned offer for
+  the key has none: that side is `null`, never `0`. `facet` is the facet the
+  scan was filtered at, so a mixed `*` is never mistaken for an exact one.
+- `status`: `priced` (at least one side answers), `no_offers` (the offers were
+  seen and neither side matches the key), `unavailable` (Cardmarket's scanned
+  offers could not be read: nothing fresh, or the feed failed) and
+  `card_unmapped` (no Pokoin card for the row, or no comp).
+- `totals` weight **this page** by each row's quantity; `asOf` is the newest
+  observation day among the page's rows, `null` when none has one.
+
+**Coverage.** These prices exist only for the cards the collector walks:
+cm-price-engine walks the products and the languages Pokoin listings need, on a
+7-day cycle published Mondays 03:00 UTC (docs/PRICE_DUMPS.md), and this call
+queues nothing for a read. A card that is in no Pokoin listing is never walked,
+so an `items` row for it always answers `no_offers`. `no_offers` means "no offer
+in the latest published walk, or not walked at all", never proof that Cardmarket
+has none. What is read is the latest weekly publish: `asOf` is the observation
+day of that snapshot, and the numbers age with it.
+
+```bash
+curl -s https://api.pokoin.com/api/seller-api/v1 \
+  -H "Authorization: Bearer $POKOIN_SELLER_API_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"action":"cm-undercut","listings":true,"limit":500}'
+```
+
 ### `pricing-strategy-save` / `pricing-strategy-delete` (write)
 
 - `{ "action": "pricing-strategy-save", "strategy": <strategy object without id to create> }`

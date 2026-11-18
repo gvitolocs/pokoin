@@ -165,6 +165,12 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = call(&app, "GET", "/api/seller-api-grants", &token, Value::Null).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // The cm-undercut bulk read takes the same grant auth on both paths.
+    let cm = json!({"action":"cm-undercut","listings":true});
+    let (status, _) = connector(&app, "pkn_not-a-real-token", cm.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(&app, "POST", "/api/seller-api/v1", "seller-1", cm.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, info) = connector(&app, &token, json!({"action":"connect"})).await;
     assert_eq!(status, StatusCode::OK, "{info}");
@@ -196,6 +202,15 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     let (status, _) = call(&app, "POST", "/api/seller-api/v1", &other_token, json!({"action":"connect"})).await;
     assert_eq!(status, StatusCode::OK);
+    let (status, refused) = connector(&app, &other_token, cm).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    // Past auth on the generic path, the call is validated: exactly one way to pick rows.
+    let no_picker = json!({"action":"cm-undercut"});
+    let (status, invalid) = call(&app, "POST", "/api/seller-api/v1", &other_token, no_picker).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+    let two_pickers = json!({"action":"cm-undercut","listings":true,"items":[{}]});
+    let (status, invalid) = connector(&app, &token, two_pickers).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
 
     // --- webhook registration, like CardTrader's PATCH /app -----------------
     let (status, _) = connector(&app, &token, json!({"action":"webhook","url":"http://hooks.example.com/x"})).await;
