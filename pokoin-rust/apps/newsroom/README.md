@@ -25,7 +25,9 @@ Implemented modules:
   unavailable hold, Firestore values, key normalization, service-account JWT
   and REST query/patch primitives. No production poller is started.
 - `store`: Node-compatible CMS records/revision snapshots, permanent slugs,
-  exports, native exclusive lock, strict state validation, 0600 env loader.
+  exports, strict state validation, 0600 env loader, and no relative data
+  directory default. `DataLock` is an exclusive lock **primitive** that no
+  command acquires yet, so it stops nothing on its own.
 - `website`: standalone axum H42 handler preserving legacy/v1 distinction,
   export authorization, headers, errors and supported method.
 - `handover`: state digest/snapshot and explicit incomplete-parity gate.
@@ -40,12 +42,22 @@ nice -n 10 cargo clippy --manifest-path pokoin-rust/apps/newsroom/Cargo.toml --a
 nice -n 10 cargo fmt --manifest-path pokoin-rust/apps/newsroom/Cargo.toml --check
 ```
 
-`plan` reads state without changing it. `dry-run` is a **captured-evidence
+`plan` reads state without changing it. Every state-reading command takes its
+directory from `--data-dir DIR` or `NEWSROOM_DATA_DIR` and fails naming both
+when neither is given; there is no relative `data` fallback. `snapshot` also
+refuses a destination at or inside the source directory, because the copy would
+overwrite what it is reading. `dry-run` is a **captured-evidence
 replay**, not the full native publisher cycle: provide a read-only captured
 pack and an output path outside live data. It computes editorial worthiness
-first and does not call a model for skipped stories. Model calls share a hard
+first and does not call a model for skipped stories, deriving the two flags the
+live publisher passes: `allowSingleSpecialist` from the slot's cadence kind
+(daily) and `covered` from an existing English CMS record whose pack is not an
+update. Model calls share a hard
 budget (default 4, maximum 10 including repairs); retries are not hidden.
-`serve --bind 127.0.0.1:<workspace-port>` serves H42 only. It does not register
+`serve --bind 127.0.0.1:<workspace-port> --legacy-data-dir DIR` serves H42 only,
+and refuses to start without `--legacy-data-dir` rather than substituting the
+v2 exports in `--data-dir` for the F16 legacy `newsroom-articles.json` — that
+mount is still an open parity gap (`status` lists it). It does not register
 routes in the existing shared API or expose a production health endpoint.
 
 `tools/*.mjs` are development capture tools. They are not used by the Rust

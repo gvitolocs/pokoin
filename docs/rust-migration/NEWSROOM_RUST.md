@@ -50,8 +50,9 @@ It is still **not deployed** and registers no route in the shared API.
 critical JSON files and hashes them before and after copying. Unknown fields,
 lessons, revisions and media are preserved. Read-only API loads keep Node's
 empty-on-failure behavior; cutover validation is strict so corruption cannot
-reset cadence. An exclusive lock primitive prevents two native owners; the
-unmodified Node publisher does not take that lock, so stopping Node completely
+reset cadence. `store::DataLock` is an exclusive lock **primitive**: no command
+acquires it yet, so today it prevents nothing by itself. The unmodified Node
+publisher does not take that lock either, so stopping Node completely
 is a mandatory protocol precondition.
 
 ## Read-only acceptance evidence (2026-10-22)
@@ -64,8 +65,11 @@ Fixtures are under `pokoin-rust/apps/newsroom/fixtures/`:
 
 - `schedule.json`: Node reference over **276 stories, 22 CMS records, 20 active
   games**, captured at **2026-10-22T19:39:50.083Z**. Rust matches every slot,
-  reason, cadence parameter, remaining attempt count, ordered candidate id and
-  living-story update id exactly. This is the plan over existing scout state;
+  reason, cadence parameter, remaining attempt count and ordered candidate id
+  exactly. Its `updates` list is empty on both sides: the golden has no
+  living-story update ids, so only the **no-update** direction of that rule is
+  matched here (an update that is actually proposed is covered by the
+  `cadence::plan` tests). This is the plan over existing scout state;
   it is not a new native scouting pass.
 - `h42-live.json`: six public **GET** responses from the live Lucina HTTP
   listener `127.0.0.1:8788`: list, absent slug, absent story, invalid export,
@@ -73,7 +77,11 @@ Fixtures are under `pokoin-rust/apps/newsroom/fixtures/`:
   empty. Nonempty contents and authorized exports are tested with local files.
 - `editorial.json`: injected Node provider captures reporter, editor and update
   request JSON, with the clock fixed. Rust requests and trimmed evidence match.
-  No real model call was used to capture these request goldens.
+  No real model call was used to capture these request goldens. They cover
+  `strictSchema=true` requests only: the production DeepSeek provider is
+  non-strict, and where its `output_schema`/`output_rules` sit in the request is
+  matched by the non-strict key-order tests in `tests/parity.rs`, not by this
+  fixture.
 - `live-evidence.json`: the actual open Magic candidate
   `story_20261021_a1lxkm` (“Magic: The Gathering Confirms All Star Trek Set
   Products and Prices”). Node's evidence builder was invoked with **GET-only**
@@ -83,6 +91,11 @@ Fixtures are under `pokoin-rust/apps/newsroom/fixtures/`:
 - `dry-run-report.json`: a Rust replay reading the real live state and that
   captured evidence at the same clock. Exact same plan, hints, templates and
   worthiness; `editorial_worthiness_skip`, **0 model calls**, **no draft**.
+  The replay derives the worthiness flags the way the live publisher passes
+  them instead of hardcoding them: `allowSingleSpecialist` is whether that
+  slot's cadence kind is daily, and `covered` is an existing English CMS record
+  for the story whose pack is not an update. So a story with no record can
+  still skip on its score, and a covered story is never skipped for its score.
 
 The dry-run command used (output was copied into the fixture directory only
 for review; production files were read-only):
@@ -105,7 +118,10 @@ binary consumes only JSON, but has not yet replaced that builder.
 
 `tests/handover_model.rs` uses Stateright BFS and the actual Rust `slot_open`:
 
-- **395875 daily** and **2425 weekly** unique states in the current model.
+- **395875 daily** and **2425 weekly** unique states are what the current model
+  BFS *prints*. Those counts are reported, not asserted: the tests assert the
+  invariants below, so a rule change that moves a count is not a test failure
+  by itself.
 - Two canonical stories, review/published records, generation attempts,
   midnight/rolling-week time steps, stop, start, crash before/after static
   projection, repeated projection and rollback.
@@ -154,6 +170,11 @@ publisher is still required; this is a protocol model, not a completion claim.
    real eligible-draft parity within a shared 10-call budget, no production
    publishing. Existing request equality and local SSE tests are insufficient.
 6. Mount F16 correctly and integrate H42 into the production API router.
+   `serve` now refuses to start without an explicit `--legacy-data-dir`:
+   `--data-dir` holds the v2 CMS exports, and substituting it would serve the
+   wrong v1 records. Nothing passes that mount yet, so
+   `newsroom-articles.json` is still not read by the Rust binary; `status`
+   lists this as a parity gap.
 7. Run crash/rollback acceptance against local fakes and reconcile the
    implementation with the formal model. Only then replace the explicit
    `PARITY_COMPLETE=false` activation gate as part of a reviewed implementation.
