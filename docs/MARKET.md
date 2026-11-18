@@ -905,6 +905,55 @@ preview shows a set level and the `No price data yet` row. The fixture leaves
 out the Sealed and Graded rows of a game that holds neither, so what is reviewed
 is the table a real book would show rather than a list of empty rows.
 
+#### Custom collections
+
+The same table also splits the book the way the seller names it. `GET
+/api/marketplace-portfolio-collections` answers the saved lists with the
+server's own `limits` and, over its day rows, one `collection:<id>` segment per
+list; `POST …?action=save` and `?action=delete` take the draft and answer the
+whole state again, so no read follows a write
+(`market/src/portfolio-collections.js` normalizes an answer,
+`market/src/portfolio-collections-store.js` owns the state machine: whose the
+answer is, what is in flight, and the sentence a refusal says).
+
+A list is `{ name, items }`. An item is the printing — `game` and the public
+`cardId`, the only identity a collection row has — plus the facets a listing
+already carries: `condition` and `language` from the lists in
+`market/src/card-desk.js`, `reverse`, `firstEdition`, `graded`, and 1–999
+copies. Those facets are one slice, so adding the same card with the same ones
+opens no second row. Prices are the server's business (`priceBasis`, resolved
+per answer), so nothing here asks for a quote: a card it has no sold price for
+is held but not priced, and the row says `Priced n of m cards`. The limits are
+the server's too (20 lists, 300 cards, 999 copies, 40 characters);
+`collection_limit`, `collection_name_taken` and the rest become those
+sentences, and the New collection button stays on screen at the limit with the
+reason on it.
+
+`market/src/portfolio-segments.js` nests the answer on the history model
+(`withCollections`) and adds the one level it needs, `collections`, whose rows
+are the saved lists. An open list plots against the whole book **on the
+collection's own days** (`collectionSeriesOn`): `versusPaths` plots by index, so
+an unaligned pair would compare a Tuesday to a Friday. Delete is one inline
+confirm on the row, naming the list; the cards themselves stay in the
+collection.
+
+`solid/src/components/dashboard/CollectionEditor.jsx` holds the draft: Escape or
+Cancel throws it away without asking for anything, and a save the server refuses
+keeps every field and says why. Cards come from the header typeahead
+(`solid/src/lib/live-suggest.js`) in the page's own game and from
+`fetchSearch({ productType: 'card', game })` for any other the game picker
+offers — a result with no public card id is dropped, never substituted.
+`solid/src/lib/collections-book.js` is the Solid wrapper over the store, and
+`SellerHome` loads it on the seller id alone rather than on the history request,
+so a slow or failed collections read cannot delay the graph.
+
+`/dashboard?dashPreview` seeds two lists through
+`market/src/portfolio-collections-preview.js` — a Charizard binder priced
+through, and a sealed list with one product nobody has ever sold — and writes
+them in memory only, so the level, the rows and the editor are reviewable with
+no account behind them. `market/src/seller-collections.css` carries the chrome,
+dashboard tokens only, and the dialog becomes the whole screen under 520px.
+
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
 ```
