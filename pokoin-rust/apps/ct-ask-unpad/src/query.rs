@@ -7,6 +7,7 @@ use sqlx::query::Query;
 use sqlx::Row;
 
 use crate::report::Report;
+use crate::sql;
 use crate::{PAD_FROM, PAD_PKN, PAD_TO, PREVIOUS_DAY};
 
 /// A statement built by [`crate::sql`] with the slots this module binds.
@@ -37,6 +38,28 @@ pub fn bind_calendar<'q>(query: Statement<'q>, day: &'q str) -> Statement<'q> {
         .bind(PAD_FROM)
         .bind(PAD_TO)
         .bind(PREVIOUS_DAY)
+}
+
+/// The informational native-ask statement: the window and the pad, then the row
+/// limit `$6`, the listing sources `$7` and the on-the-shelf statuses `$8`. The
+/// two text arrays are the only place those two lists appear in the SQL.
+pub fn bind_note<'q>(query: Statement<'q>, limit: i64) -> Statement<'q> {
+    bind_scope(query, "")
+        .bind(limit)
+        .bind(sql::NOT_POKOIN_SOURCES.to_vec())
+        .bind(sql::ON_SHELF_STATUSES.to_vec())
+}
+
+/// How many rows of the window have a stored ask equal to the price a Pokoin
+/// native listing asked that day. `plan` prints this with the rows themselves
+/// and `apply` prints it before it starts: neither of them skips a row for it.
+pub async fn native_ask_count(conn: &mut PgConnection) -> Result<i64, String> {
+    count(
+        conn,
+        "counting the rows whose price equals a Pokoin native ask",
+        bind_note(sqlx::query(&sql::native_note_count()), 0),
+    )
+    .await
 }
 
 pub async fn rows(
@@ -110,7 +133,6 @@ pub struct Counts {
     pub blueprints_to_change: i64,
     pub rows_unpadded: i64,
     pub rows_previous_only: i64,
-    pub rows_skipped_native: i64,
     pub rows_already_fixed: i64,
     pub rows_unpriced: i64,
 }
@@ -124,7 +146,6 @@ impl Counts {
             blueprints_to_change: integer(row, "blueprints_to_change")?,
             rows_unpadded: integer(row, "rows_unpadded")?,
             rows_previous_only: integer(row, "rows_previous_only")?,
-            rows_skipped_native: integer(row, "rows_skipped_native")?,
             rows_already_fixed: integer(row, "rows_already_fixed")?,
             rows_unpriced: integer(row, "rows_unpriced")?,
         })
@@ -136,7 +157,6 @@ impl Counts {
         self.rows_to_change += other.rows_to_change;
         self.rows_unpadded += other.rows_unpadded;
         self.rows_previous_only += other.rows_previous_only;
-        self.rows_skipped_native += other.rows_skipped_native;
         self.rows_already_fixed += other.rows_already_fixed;
         self.rows_unpriced += other.rows_unpriced;
     }
@@ -196,7 +216,6 @@ mod tests {
             blueprints_to_change: 1,
             rows_unpadded: 1,
             rows_previous_only: 0,
-            rows_skipped_native: 0,
             rows_already_fixed: 0,
             rows_unpriced: 1,
         };
@@ -207,7 +226,6 @@ mod tests {
             blueprints_to_change: 0,
             rows_unpadded: 0,
             rows_previous_only: 1,
-            rows_skipped_native: 1,
             rows_already_fixed: 2,
             rows_unpriced: 1,
         };

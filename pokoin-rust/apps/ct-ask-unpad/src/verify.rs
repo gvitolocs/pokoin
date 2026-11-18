@@ -25,8 +25,8 @@ pub async fn verify(conn: &mut PgConnection, backup: &str) -> Result<Report, Str
     .await?;
     report.line(format!("the backup table holds {recorded} rows"));
 
-    // A row of the window that carries the pad, is not protected by a native
-    // ask and is not recorded: apply missed it.
+    // A row of the window that still carries the pad and is not recorded: apply
+    // missed it.
     let missed = sql::missing_from_backup(&table);
     let missed = query::scoped_count(
         conn,
@@ -37,7 +37,7 @@ pub async fn verify(conn: &mut PgConnection, backup: &str) -> Result<Report, Str
     .await?;
     query::expect_zero(
         &mut report,
-        "every padded row of the window is recorded or protected by a native ask",
+        "every padded row of the window is recorded",
         missed,
         "rows still holding the pad and unknown to the backup table",
     );

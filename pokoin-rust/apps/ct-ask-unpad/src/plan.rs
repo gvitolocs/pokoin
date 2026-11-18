@@ -13,15 +13,14 @@ use crate::PAD_TO;
 use crate::PREVIOUS_DAY;
 use crate::SAMPLES;
 
-/// The nine count columns of the per-day table, with the header they get.
-const COLUMNS: [(&str, &str); 9] = [
+/// The eight count columns of the per-day table, with the header they get.
+const COLUMNS: [(&str, &str); 8] = [
     ("rows_seen", "rows"),
     ("rows_priced", "priced"),
     ("rows_to_change", "to change"),
     ("blueprints_to_change", "blueprints"),
     ("rows_unpadded", "un-padded"),
     ("rows_previous_only", "previous"),
-    ("rows_skipped_native", "native"),
     ("rows_already_fixed", "recorded"),
     ("rows_unpriced", "unpriced"),
 ];
@@ -67,7 +66,6 @@ fn row_line(day: &str, counts: &query::Counts) -> String {
         counts.blueprints_to_change,
         counts.rows_unpadded,
         counts.rows_previous_only,
-        counts.rows_skipped_native,
         counts.rows_already_fixed,
         counts.rows_unpriced,
     ];
@@ -169,13 +167,10 @@ pub async fn plan(conn: &mut PgConnection, named: Option<&str>) -> Result<Report
 
     report.line(String::new());
     report.line(format!(
-        "skipped: {} rows equal a Pokoin native ask stored on or before that day, and a native ask was never padded",
-        total.rows_skipped_native
-    ));
-    report.line(format!(
         "skipped: {} rows of the window carry no price at all",
         total.rows_unpriced
     ));
+    native_asks(conn, &mut report).await?;
     if let Some(name) = backup {
         report.line(format!(
             "already done: {} rows are recorded in public.\"{name}\" and are never changed twice",
@@ -206,6 +201,56 @@ pub async fn plan(conn: &mut PgConnection, named: Option<&str>) -> Result<Report
 
     samples(conn, backup, &mut report).await?;
     Ok(report)
+}
+
+/// How many of the matching rows the plan lists; the count is always all of them.
+const NOTES: i64 = 10;
+
+/// The window rows whose stored ask equals the price a Pokoin native listing of
+/// the same card asked on that day, read in the strictest way the question can
+/// be asked: not an import of another marketplace's stock, posted on or before
+/// the day, and either on the shelf or touched on or after it.
+///
+/// Nothing is skipped for it. The pad went onto every CardTrader ask, so a row
+/// that matches here is corrected like every other row of the window; the count
+/// is printed because a large one would say the diagnosis behind the fix is
+/// wrong.
+async fn native_asks(conn: &mut PgConnection, report: &mut Report) -> Result<(), String> {
+    let counted = query::native_ask_count(conn).await?;
+    report.line(format!(
+        "rows whose padded price equals a Pokoin native listing price: {counted}"
+    ));
+    if counted == 0 {
+        return Ok(());
+    }
+    let body = sql::native_note_rows();
+    let rows = query::rows(
+        conn,
+        "reading the rows whose price equals a Pokoin native ask",
+        query::bind_note(sqlx::query(&body), NOTES),
+    )
+    .await?;
+    report.line(format!(
+        "every one of them is un-padded like the rest of the window; the {} cheapest are listed",
+        rows.len()
+    ));
+    report.line(format!(
+        "{}{}{}{}",
+        day_column("day"),
+        pad("blueprint"),
+        pad("price"),
+        pad("listing"),
+    ));
+    for row in &rows {
+        report.line(format!(
+            "{}{}{}{}",
+            day_column(&query::text(row, "observed_day")?),
+            pad(&query::integer(row, "blueprint_id")?.to_string()),
+            pad(&price(row, "padded_price")?),
+            pad(&query::text(row, "listing_status")?),
+        ));
+    }
+    Ok(())
 }
 
 /// The rows the change touches at both ends of the price range, before and
@@ -296,7 +341,6 @@ mod tests {
             blueprints_to_change: 1,
             rows_unpadded: 1,
             rows_previous_only: 0,
-            rows_skipped_native: 1,
             rows_already_fixed: 0,
             rows_unpriced: 1,
         };
@@ -315,7 +359,6 @@ mod tests {
             blueprints_to_change: 62_978,
             rows_unpadded: 538_106,
             rows_previous_only: 0,
-            rows_skipped_native: 0,
             rows_already_fixed: 0,
             rows_unpriced: 0,
         };

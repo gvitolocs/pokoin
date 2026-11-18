@@ -5,11 +5,17 @@
 //! Parameters share one numbering so a statement never needs its own bind
 //! order: `$1` the day (an empty string when the statement reads no day),
 //! `$2`/`$3` the padded window, `$4` the previous-value day, `$5` the pad,
-//! `$6` a row limit. A statement binds up to its highest numbered parameter,
-//! which is why the pad is always `$5` even in a statement that reads no day.
+//! `$6` a row limit, `$7` the listing sources that are not Pokoin's own asks,
+//! `$8` the listing statuses that still mean on the shelf. A statement binds up
+//! to its highest numbered parameter, which is why the pad is always `$5` even
+//! in a statement that reads no day.
 //!
 //! One statement, `fix_scoped`, holds the whole rule and is shared by `plan` and
-//! `apply`, so what the plan prints is what the apply writes.
+//! `apply`, so what the plan prints is what the apply writes. Nothing in it
+//! reads the listing tables: the pad was added to every CardTrader ask, so a
+//! card that also costs that number here is not evidence that the stored price
+//! is right. `native_note_count` and `native_note_rows` read those tables for
+//! the operator's information and change nothing.
 
 use crate::ident;
 
@@ -17,6 +23,24 @@ pub const LIVE: &str = "public.cardtrader_blueprint_daily_analytics";
 pub const LISTINGS: &str = "public.marketplace_user_listings";
 pub const CANDIDATES: &str = "public.marketplace_search_candidates";
 pub const TEMP: &str = "unpad_day";
+
+/// Listing sources that are imports of another marketplace's stock, not a Pokoin
+/// seller's ask. A padded CardTrader price that equals one of those is the pad
+/// meeting its own source, not a price a Pokoin buyer could have paid.
+pub const NOT_POKOIN_SOURCES: [&str; 8] = [
+    "cardtrader_seller_import",
+    "cardtrader_csv_import",
+    "cardtrader_live",
+    "cardtrader",
+    "powertools_csv_import",
+    "cardmarket_csv_import",
+    "tcgplayer_csv_import",
+    "stock_csv_import",
+];
+
+/// A listing in one of these states is still on the shelf, so its ask is a price
+/// a buyer could have paid on that day.
+pub const ON_SHELF_STATUSES: [&str; 2] = ["active", "paused"];
 
 /// The six old values the backup table keeps, in this order everywhere.
 pub const OLD_COLUMNS: [&str; 6] = [
@@ -31,6 +55,11 @@ pub const OLD_COLUMNS: [&str; 6] = [
 /// A long lock wait on the live table means something else is writing it; stop
 /// rather than queue behind the nightly job.
 pub const LOCK_TIMEOUT: &str = "set local lock_timeout = '3s'";
+/// Ask for the run lock without waiting, so a second write run is refused at
+/// once instead of queueing behind the first and doubling up. The key is
+/// [`crate::LOCK_KEY`], bound as `$1::bigint`; the session holds it until the
+/// process closes the connection.
+pub const TRY_LOCK: &str = "select pg_try_advisory_lock($1::bigint) as taken";
 pub const READ_ONLY: &str = "set default_transaction_read_only = on";
 pub const IS_REPLICA: &str = "select pg_is_in_recovery()::int as count";
 pub const BACKUP_EXISTS: &str = "select (to_regclass($1::text) is not null)::int as count";
@@ -167,19 +196,6 @@ series_raw as (
      and p.observed_day < l.observed_day
    order by l.observed_day, l.blueprint_id, p.observed_day desc
 ),
-native as (
-  -- A Pokoin native ask that already equalled this row's stored price on that
-  -- day. Native listings were never padded, so such a row may be right as it
-  -- stands and is left alone.
-  select l.observed_day, l.blueprint_id
-    from live l
-    join {CANDIDATES} c on c.ct_id = l.blueprint_id
-    join {LISTINGS} u on u.card_id = c.card_id::text
-   where l.min_price_pkn is not null
-     and u.price_pkn = l.min_price_pkn
-     and (u.created_at at time zone 'utc')::date <= l.observed_day
-   group by 1, 2
-),
 series as (
   -- The neighbour's price as it will stand once the pad is gone, which is the
   -- value this row has to compare itself against. Inside a window run the
@@ -193,24 +209,19 @@ series as (
          case when q.in_pad_window
                    and q.priced
                    and q.min_price_pkn >= $5::int8
-                   and qn.blueprint_id is null
                    and not q.backed_up
               then r.previous_min_price_pkn - $5::int8
               else r.previous_min_price_pkn end                      as previous_min_price_pkn
     from series_raw r
     left join live q
       on q.observed_day = r.previous_day and q.blueprint_id = r.blueprint_id
-    left join native qn
-      on qn.observed_day = r.previous_day and qn.blueprint_id = r.blueprint_id
 ),
 scored as (
   select l.*,
-         n.blueprint_id is not null                                 as native_matched,
          s.previous_min_price_pkn                                   as series_previous_min_price_pkn,
          l.in_pad_window
            and l.priced
            and l.min_price_pkn >= $5::int8
-           and n.blueprint_id is null
            and not l.backed_up                                      as pad_this,
          l.recompute_previous
            and l.priced
@@ -219,8 +230,6 @@ scored as (
     left join series s
       on s.observed_day = l.observed_day
      and s.blueprint_id = l.blueprint_id
-    left join native n
-      on n.observed_day = l.observed_day and n.blueprint_id = l.blueprint_id
 ),
 moved as (
   select s.*,
@@ -252,7 +261,6 @@ select observed_day,
        in_pad_window,
        recompute_previous,
        backed_up,
-       native_matched,
        pad_this,
        previous_this,
        new_min_price_pkn,
@@ -269,14 +277,13 @@ select observed_day,
     )
 }
 
-/// The nine aggregates over the rows of the rule, in this order everywhere.
+/// The eight aggregates over the rows of the rule, in this order everywhere.
 const COUNT_AGGREGATES: &str = r#"count(*)                                                  as rows_seen,
        count(*) filter (where priced)                            as rows_priced,
        count(*) filter (where changed)                           as rows_to_change,
        count(distinct blueprint_id) filter (where changed)       as blueprints_to_change,
        count(*) filter (where pad_this and changed)              as rows_unpadded,
        count(*) filter (where changed and not pad_this)          as rows_previous_only,
-       count(*) filter (where native_matched)                    as rows_skipped_native,
        count(*) filter (where backed_up)                         as rows_already_fixed,
        count(*) filter (where in_pad_window and not priced)      as rows_unpriced"#;
 
@@ -361,6 +368,56 @@ pub fn create_temp(backup: Option<&str>) -> String {
     )
 }
 
+/// The window rows whose stored ask equals a Pokoin native listing price,
+/// counted in the strictest reading of that comparison: a listing that was not
+/// an import of another marketplace's stock (`$7`), posted on or before the day,
+/// and either on the shelf (`$8`) or touched on or after it.
+///
+/// This is the informational count the lead asked for and nothing more: the pad
+/// was added to every CardTrader ask, so a row that matches here is still
+/// corrected. It is worded as one CTE because the count and the printed rows must
+/// be the same rule.
+fn native_matched(projection: &str) -> String {
+    format!(
+        r#"
+with matched as (
+  select distinct on (a.observed_day, a.blueprint_id)
+         a.observed_day::text                                      as observed_day,
+         a.blueprint_id                                            as blueprint_id,
+         a.min_price_pkn                                           as min_price_pkn,
+         coalesce(u.status, '')                                    as listing_status
+    from {LIVE} a
+    join {CANDIDATES} c on c.ct_id = a.blueprint_id
+    join {LISTINGS} u on u.card_id = c.card_id::text
+   where a.observed_day between $2::date and $3::date
+     and a.min_price_pkn is not null
+     and a.min_price_pkn >= $5::int8
+     and u.price_pkn = a.min_price_pkn
+     and coalesce(u.source, '') <> all ($7::text[])
+     and (u.created_at at time zone 'utc')::date <= a.observed_day
+     and (u.status = any ($8::text[])
+          or (u.updated_at at time zone 'utc')::date >= a.observed_day)
+)
+select {projection}
+  from matched
+"#
+    )
+}
+
+pub fn native_note_count() -> String {
+    native_matched("count(*) as count")
+}
+
+/// The same rows for the plan to print, `$6` of them, cheapest first.
+pub fn native_note_rows() -> String {
+    format!(
+        "{} order by min_price_pkn, observed_day, blueprint_id limit $6::bigint",
+        native_matched(
+            "observed_day, blueprint_id, min_price_pkn::text as padded_price, listing_status"
+        )
+    )
+}
+
 pub fn record_old_values(backup: &str) -> String {
     let columns = OLD_COLUMNS.join(", ");
     format!(
@@ -394,8 +451,8 @@ update {LIVE} a
     )
 }
 
-/// Rows of the padded window that still carry the pad, are not protected by a
-/// native ask and are not in the backup table: an apply that missed them.
+/// Rows of the padded window that still carry the pad and are not in the backup
+/// table: an apply that missed them.
 pub fn missing_from_backup(backup: &str) -> String {
     format!(
         r#"
@@ -405,37 +462,24 @@ with live as (
    where a.observed_day between $2::date and $3::date
      and a.min_price_pkn is not null
      and a.min_price_pkn >= $5::int8
-),
-native as (
-  select l.observed_day, l.blueprint_id
-    from live l
-    join {CANDIDATES} c on c.ct_id = l.blueprint_id
-    join {LISTINGS} u on u.card_id = c.card_id::text
-   where u.price_pkn = l.min_price_pkn
-     and (u.created_at at time zone 'utc')::date <= l.observed_day
-   group by 1, 2
 )
 select count(*)
   from live l
  where not exists (select 1 from {backup} kept
                     where kept.observed_day = l.observed_day
                       and kept.blueprint_id = l.blueprint_id)
-   and not exists (select 1 from native n
-                    where n.observed_day = l.observed_day
-                      and n.blueprint_id = l.blueprint_id)
 "#
     )
 }
 
 /// The live price of every backed-up row against the rule: old minus pad when
-/// it was a padded row of the window with no matching native ask, the old value
-/// when it was only its previous value that moved.
+/// it was a padded row of the window, the old value when it was only its
+/// previous value that moved.
 pub fn backup_price_mismatch(backup: &str) -> String {
-    // A row only ever lost the pad if it was in the window, priced at or above
-    // it, and not protected by a native ask of that same price.
+    // A row only ever lost the pad if it was in the window and priced at or
+    // above it.
     let unpadded = "(kept.observed_day between $2::date and $3::date \
-                    and kept.min_price_pkn >= $5::int8 \
-                    and n.blueprint_id is null)";
+                    and kept.min_price_pkn >= $5::int8)";
     let columns = ["min", "median", "average", "max"];
     let expectations = columns
         .iter()
@@ -458,22 +502,11 @@ pub fn backup_price_mismatch(backup: &str) -> String {
         .join("\n    or ");
     format!(
         r#"
-with native as (
-  select kept.observed_day, kept.blueprint_id
-    from {backup} kept
-    join {CANDIDATES} c on c.ct_id = kept.blueprint_id
-    join {LISTINGS} u on u.card_id = c.card_id::text
-   where kept.min_price_pkn = u.price_pkn
-     and (u.created_at at time zone 'utc')::date <= kept.observed_day
-   group by 1, 2
-),
-expected as (
+with expected as (
   select kept.observed_day,
          kept.blueprint_id,
          {expectations}
     from {backup} kept
-    left join native n
-      on n.observed_day = kept.observed_day and n.blueprint_id = kept.blueprint_id
 )
 select count(*)
   from expected e
@@ -830,29 +863,61 @@ mod tests {
     }
 
     #[test]
-    fn the_native_skip_is_pinned_to_the_day() {
-        let sql = per_day(with_backup());
-        assert!(
-            sql.contains("(u.created_at at time zone 'utc')::date <= l.observed_day"),
-            "{sql}"
-        );
-        assert!(sql.contains("u.price_pkn = l.min_price_pkn"), "{sql}");
-        assert!(sql.contains("c.ct_id = l.blueprint_id"), "{sql}");
+    fn the_price_pass_never_reads_the_listing_tables() {
+        // A native ask that happens to equal the padded price is not evidence
+        // that the price is right: the pad went onto every CardTrader ask, and
+        // an ended listing or an import speaks for nothing. Only the
+        // informational note may join those tables.
+        for statement in [
+            per_day(with_backup()),
+            per_day(None),
+            window(with_backup()),
+            missing_from_backup(&qualified()),
+            backup_price_mismatch(&qualified()),
+            write_day(),
+            revert_write(),
+        ] {
+            let sql = flat(&statement);
+            assert!(!sql.contains(LISTINGS), "{sql}");
+            assert!(!sql.contains(CANDIDATES), "{sql}");
+        }
     }
 
     #[test]
-    fn a_row_that_matched_a_native_ask_loses_no_pad() {
-        // `native` is a left join, so the pad decision has to name the missing
-        // row: a price a Pokoin seller really asked is left exactly as it is.
-        let sql = per_day(with_backup());
+    fn the_pad_decision_names_nothing_but_the_row_itself() {
+        // The withdrawn skip used to appear here as `n.blueprint_id is null`.
+        let sql = flat(&per_day(with_backup()));
         assert!(
-            flat(&sql).contains("and n.blueprint_id is null and not l.backed_up as pad_this"),
+            sql.contains("and l.min_price_pkn >= $5::int8 and not l.backed_up as pad_this"),
             "{sql}"
         );
-        assert!(
-            sql.contains("left join native n"),
-            "the skip is a left join, not a filter on the live rows: {sql}"
-        );
+    }
+
+    #[test]
+    fn the_native_note_is_the_stricter_reading() {
+        // An import of another marketplace's stock cannot vouch for a Pokoin
+        // ask, an ended listing speaks only for the days it was on the shelf,
+        // and the card is reached through the candidate's ct_id, whose card_id
+        // is text while the analytics key is a bigint.
+        let count = native_note_count();
+        for clause in [
+            "coalesce(u.source, '') <> all ($7::text[])",
+            "(u.created_at at time zone 'utc')::date <= a.observed_day",
+            "u.status = any ($8::text[])",
+            "(u.updated_at at time zone 'utc')::date >= a.observed_day",
+            "c.ct_id = a.blueprint_id",
+            "u.card_id = c.card_id::text",
+            "a.observed_day between $2::date and $3::date",
+            "a.min_price_pkn >= $5::int8",
+        ] {
+            assert!(count.contains(clause), "{count}");
+        }
+        // The printed rows are the same rule with another projection and a
+        // limit, so the count cannot drift away from what the plan shows.
+        let rows = native_note_rows();
+        assert!(rows.contains("limit $6::bigint"), "{rows}");
+        let shared = count.split("select count(*)").next().unwrap_or_default();
+        assert!(rows.contains(shared), "{rows}");
     }
 
     #[test]
@@ -866,7 +931,6 @@ mod tests {
             sql.contains("left join live q"),
             "the neighbour's own pad decision is not asked: {sql}"
         );
-        assert!(sql.contains("left join native qn"), "{sql}");
         assert!(
             flat(&sql).contains("then r.previous_min_price_pkn - $5::int8"),
             "{sql}"
