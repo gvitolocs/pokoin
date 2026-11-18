@@ -571,7 +571,9 @@ mod tests {
                     "a present table is read"
                 );
             } else {
-                assert_eq!(got, FxRates::default(), "{presence:?}");
+                // `FxRates` has no equality of its own; what the leg must give
+                // back is a reader that finds no rate and an `fx` block of null.
+                assert_eq!(got.rate_for("2026-09-15"), None, "{presence:?}");
                 assert_eq!(fx_json(&got), Value::Null, "{presence:?}");
             }
             assert_eq!(
