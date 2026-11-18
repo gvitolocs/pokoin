@@ -444,14 +444,21 @@ pub(crate) async fn handle_marketplace_order_paid(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    // The hold that funded the discount is only consumable while the ledger
-    // still carries it. Once the order expired, failed or the discount was
-    // released, that PKN is back in the buyer's balance, so a payment that
-    // arrives afterwards is recorded for review instead of being taken again.
-    let discount_returned = matches!(
+    // A return that never reached the ledger left the PKN on its lock, so that
+    // discount is still the order's to consume. Otherwise the hold is back with
+    // the buyer — the order ended, or the discount was released — and a payment
+    // that arrives afterwards is recorded for review instead of taken again.
+    // An order on the settlement model answers this report earlier, in
+    // `validate_versioned_marketplace_session`.
+    let restore_failed = order
+        .get("pknDiscount")
+        .and_then(|discount| discount.get("restoreError"))
+        .is_some();
+    let ended_by_status = matches!(
         payment_status.as_str(),
         "cancelled" | "canceled" | "expired" | "failed"
-    ) || discount_state == "released";
+    );
+    let discount_returned = !restore_failed && (ended_by_status || discount_state == "released");
 
     if order.get("settlementModel").and_then(Value::as_str)
         == Some(crate::domain::settlement::MODEL)

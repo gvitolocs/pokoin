@@ -49,7 +49,7 @@ id = "stripe-webhook-fulfillment"
 name = "Stripe reports payment and the order is fulfilled"
 money = true
 entry = []
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_paid_webhook_preserves_discount_economics_and_consumes_integer_pkn", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_webhook_never_consumes_a_discount_that_was_returned", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_failed_stripe_event_releases_its_claim_so_the_retry_runs", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_abandoned_stripe_claim_is_handled_again"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_paid_webhook_preserves_discount_economics_and_consumes_integer_pkn", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_on_an_ended_unversioned_order_leaves_its_discount_with_the_buyer", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_after_an_unversioned_discount_release_leaves_it_with_the_buyer", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_consumes_an_unversioned_held_discount", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_consumes_an_unversioned_discount_whose_release_was_never_recorded", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_versioned_order_that_ended_answers_a_paid_report_with_a_conflict", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_failed_stripe_event_releases_its_claim_so_the_retry_runs", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_abandoned_stripe_claim_is_handled_again"]
 status = "proved"
 
 [[flow]]
@@ -121,7 +121,7 @@ id = "wpkn-exchange"
 name = "User swaps PKN and wPKN at a quoted price"
 money = true
 entry = ["solid/src/pages/Exchange.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/src/domain/wpkn.rs::quote_applies_spread_plus_size_impact", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_release_returns_no_more_pkn_than_the_lock_holds", "pokoin-rust/crates/commerce/src/store.rs::a_lock_gives_up_only_what_it_holds"]
+proof = ["pokoin-rust/crates/commerce/src/domain/wpkn.rs::quote_applies_spread_plus_size_impact"]
 status = "partial"
 
 [[flow]]
