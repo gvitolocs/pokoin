@@ -23,7 +23,7 @@ Do **not** move `pokoin-peer1`. Do **not** delete boot volumes.
 
 ## What the screenshot is
 
-`market/src/pages/Home.jsx` paints `PromoCarousel` from local data, then waits
+`solid/src/pages/Home.jsx` paints `PromoCarousel` from local data, then waits
 on `GET /api/marketplace-home-page`. Until that JSON arrives, **Recently seen /
 New cards / Best sellers / Featured** are eight skeleton tiles (`placeholders={8}`).
 That is the grey row.

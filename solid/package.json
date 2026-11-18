@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.landing.config.js",
     "preview": "vite preview",
     "test": "node --test \"src/**/*.test.js\""
   },
@@ -14,6 +14,7 @@
     "solid-js": "2.0.0-rc.14"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.9",
     "@solidjs/vite-plugin": "3.0.0-next.49",
     "vite": "8.3.4"
   }

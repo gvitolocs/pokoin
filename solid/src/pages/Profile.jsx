@@ -1,17 +1,18 @@
-import { children, createEffect, createSignal, For, lazy, Loading, Match, Show, Switch } from 'solid-js';
-import { fetchCollectionSummary, fetchSellerListings } from '@market/api.js';
+import { children, createEffect, createSignal, For, lazy, Loading, Match, Show, Switch, untrack } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
+import { fetchAllSellerListings, fetchCollectionSummary } from '@market/api.js';
 import { accountHeading, accountLede } from '@market/auth-session.js';
 import { liveInventoryListings, summarizeLiveInventory } from '@market/inventory-listings.js';
-import { sellerHref } from '@market/listing-meta.js';
 import { formatPknNumber } from '@market/pkn.js';
 import { portfolioTilesFromSummary, readPortfolioTilesCache, writePortfolioTilesCache } from '@market/portfolio-tiles-cache.js';
 import { orderActivity, sellerSetupSteps, timeAgo } from '@market/profile-overview.js';
 import { DASHBOARD_HOME } from '@market/punchouts.js';
 import { endActiveScanSessionForSignOut } from '@market/scan-api.js';
-import { sellerListCurrency } from '@market/seller-currency.js';
+import { formatSellerPrice, sellerListCurrency } from '@market/seller-currency.js';
 import Avatar from '../components/Avatar.jsx';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/profile/CardTraderConnectPanel.jsx';
+import { ctLinkDirection, ctLinkOption } from '../components/profile/cardtrader-link.js';
 import DisplayNameEditor from '../components/profile/DisplayNameEditor.jsx';
 import SellerApiPanel from '../components/profile/SellerApiPanel.jsx';
 import { PknPayoutToggle, ShipFromCountrySelect, StripeConnectButton } from '../components/profile/SellerShippingSettings.jsx';
@@ -19,14 +20,13 @@ import TelegramConnectPanel from '../components/profile/TelegramConnectPanel.jsx
 import UsernameEditor from '../components/profile/UsernameEditor.jsx';
 import WipeAllInventory from '../components/profile/WipeAllInventory.jsx';
 import SignedIn from '../components/SignedIn.jsx';
+import { allowMypokoinPreview, MYPOKOIN_PREVIEW_BANNER } from './mypokoin-preview.js';
 import { accountAdmin, accountProfile, accountSilver, availablePkn } from '../stores/account.js';
 import { authUid, authUser, getBearer } from '../stores/auth.js';
 import { publishSellerSettings, sellerSettings as loadedSellerSettings, sellerSettingsFailed } from '../stores/buyer.js';
 
 // The cropper loads only when someone edits their photo.
 const AvatarEditor = lazy(() => import('../components/profile/AvatarEditor.jsx'));
-
-const LISTINGS_LIMIT = 200;
 
 const ICON = {
   watchlist: 'M12 21.35 10.55 20C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
@@ -60,7 +60,7 @@ function money({ currency, amount }) {
   return currency === 'EUR' ? `€${(amount / 100).toFixed(2)}` : `${formatPknNumber(amount)} PKN`;
 }
 
-/** market/src/wallet.jsx shortAddress. */
+/** 0x1234…abcd for an address. */
 function shortAddress(address) {
   const value = String(address || '');
   if (value.length < 12) return value || '—';
@@ -88,13 +88,13 @@ function createWallet() {
 }
 
 /**
- * Cards owned + live listings, painted from the dashboard tile cache first.
- * `listedCapped` means the listing fetch hit its limit, so the count is a floor.
+ * Cards owned and live listings, painted from the dashboard tile cache first.
+ * The collection summary carries the exact live totals. The listings API is
+ * only the fallback when that summary has no `listed` or the request fails.
  */
 function createPortfolioTiles(uid) {
   const [owned, setOwned] = createSignal(null);
   const [listed, setListed] = createSignal(null);
-  const [listedCapped, setListedCapped] = createSignal(false);
 
   createEffect(uid, (id) => {
     if (!id) return undefined;
@@ -105,29 +105,33 @@ function createPortfolioTiles(uid) {
     setOwned(cached?.uniqueItems || cached?.ownedCards ? cached.ownedCards : null);
     setListed(() => (cached?.listed && !cached.listed.failed ? cached.listed : null));
     getBearer()
-      .then((token) => fetchCollectionSummary(token))
-      .then((data) => {
-        if (cancelled) return;
-        const next = portfolioTilesFromSummary(data);
-        writePortfolioTilesCache(id, next);
-        setOwned(next.ownedCards);
-      })
-      .catch(() => {});
-    getBearer()
-      .then((token) => fetchSellerListings(id, token, { limit: LISTINGS_LIMIT }))
-      .then((data) => {
-        if (cancelled) return;
-        const rows = data.listings || data.items || [];
-        const summary = summarizeLiveInventory(liveInventoryListings(rows));
-        writePortfolioTilesCache(id, { listed: summary });
-        setListed(() => summary);
-        setListedCapped(rows.length >= LISTINGS_LIMIT);
+      .then((token) => fetchCollectionSummary(token)
+        .then((data) => ({ token, data }))
+        .catch(() => ({ token, data: null })))
+      .then(({ token, data }) => {
+        if (cancelled) return undefined;
+        if (data) {
+          const next = portfolioTilesFromSummary(data);
+          writePortfolioTilesCache(id, next);
+          setOwned(next.ownedCards);
+          if (next.listed) {
+            setListed(() => next.listed);
+            return undefined;
+          }
+        }
+        return fetchAllSellerListings(id, token).then((payload) => {
+          if (cancelled) return;
+          const rows = payload.listings || payload.items || [];
+          const summary = summarizeLiveInventory(liveInventoryListings(rows));
+          writePortfolioTilesCache(id, { listed: summary });
+          setListed(() => summary);
+        });
       })
       .catch(() => {});
     return () => { cancelled = true; };
   });
 
-  return { owned, listed, listedCapped };
+  return { owned, listed };
 }
 
 /** Bought + sold orders, live — the same two queries as /orders. */
@@ -242,7 +246,6 @@ function ProfileDesk() {
     const until = profile()?.silverUntil;
     return until ? (until.toISOString?.().slice(0, 10) || until) : '';
   };
-  const shopHref = () => (profile()?.username ? sellerHref({ sellerUsername: profile().username }) : '');
 
   const sellerSettings = () => (loadedSellerSettings() || sellerSettingsPatch()
     ? { ...(loadedSellerSettings() || {}), ...(sellerSettingsPatch() || {}) }
@@ -255,9 +258,10 @@ function ProfileDesk() {
   const setup = () => sellerSetupSteps({ shipFromCountry: shipFromCountry(), stripe: stripeStatus(), cardTrader: cardTrader() });
   const step = () => Object.fromEntries(setup().steps.map((row) => [row.key, row]));
   const activity = () => (orderRows() ? orderActivity(orderRows(), uid()) : null);
-  const listedCount = () => (tiles.listed() ? `${tiles.listed().listings}${tiles.listedCapped() ? '+' : ''}` : '—');
+  const listedCount = () => (tiles.listed() ? `${tiles.listed().listings}` : '—');
   const ctUser = () => cardTrader()?.metadata?.user?.username || cardTrader()?.metadata?.seller?.name || '';
   const ctOneDayReady = () => cardTrader()?.metadata?.oneDayReady === true || cardTrader()?.syncSummary?.mode === 'one_day_ready';
+  const ctLink = () => (ctOneDayReady() ? '1-Day Ready' : `inventory linked ${ctLinkOption(ctLinkDirection(cardTrader())).label}`);
   // Unknown after a failed load = the default (PKN on); the switch still saves.
   const acceptsPkn = () => (sellerSettings() ? sellerSettings().acceptsPkn !== false : (sellerSettingsFailed() ? true : null));
   const localCurrency = () => sellerListCurrency({ acceptsPkn: false, shipFromCountry: shipFromCountry() });
@@ -267,11 +271,11 @@ function ProfileDesk() {
       ? 'Buyers can pay you with site PKN or by card.'
       : `Card payments only — your prices show in ${localCurrency()}.${stripeStatus()?.ready ? '' : ' Connect Stripe to get paid.'}`);
   const stripeMeta = () => (stripeStatus()?.ready
-    ? 'Payouts ready for EUR sales.'
+    ? 'Payouts ready for card sales.'
     : step().stripe.started
       ? 'Onboarding started — finish it on Stripe.'
       : shipFromCountry()
-        ? 'Connect Stripe to receive EUR sales.'
+        ? 'Connect Stripe to get paid for card sales.'
         : 'Choose a ship-from country first.');
 
   async function signOutEverywhere() {
@@ -313,7 +317,9 @@ function ProfileDesk() {
             </button>
           )}
         >
-          <Show when={shopHref()}><a class="btn ghost" href={shopHref()}>View shop</a></Show>
+          <div class="profile-mypokoin">
+            <MyPokoinTile />
+          </div>
         </PageHead>
         <MetricGrid>
           <Metric value={tiles.owned() ?? '—'} label="Cards owned" />
@@ -353,7 +359,7 @@ function ProfileDesk() {
             <SetupRow
               step={step().country}
               title="Ship-from country"
-              meta={shipFromCountry() ? 'Used on your listings and for EUR shipping rates.' : 'Required before your first physical listing.'}
+              meta={shipFromCountry() ? 'Used on your listings and for shipping rates.' : 'Required before your first physical listing.'}
               action={(
                 <ShipFromCountrySelect
                   value={shipFromCountry() || ''}
@@ -370,7 +376,14 @@ function ProfileDesk() {
             <SetupRow
               step={step().stripe}
               title="Stripe payouts"
-              meta={stripeMeta()}
+              meta={(
+                <>
+                  {stripeMeta()}{' '}
+                  <a class="setup-fees-link" href="https://stripe.com/connect/pricing" target="_blank" rel="noopener noreferrer">
+                    Stripe Connect fees ↗
+                  </a>
+                </>
+              )}
               action={(
                 <StripeConnectButton
                   disabled={!shipFromCountry()}
@@ -391,13 +404,13 @@ function ProfileDesk() {
               step={step().cardtrader}
               title="CardTrader"
               meta={cardTrader()?.connected
-                ? `Connected${ctUser() ? ` as ${ctUser()}` : ''}${ctOneDayReady() ? ' · 1-Day Ready' : ''}.`
+                ? `Connected${ctUser() ? ` as ${ctUser()}` : ''} · ${ctLink()}.`
                 : 'Optional — import your CardTrader stock and list there from Scan.'}
               open={ctOpen()}
               action={(
                 <button
                   type="button"
-                  class={cardTrader()?.connected || ctOpen() ? 'btn ghost' : 'btn btn-cardtrader'}
+                  class="btn btn-cardtrader"
                   aria-expanded={String(ctOpen())}
                   onClick={() => {
                     // Connect sends the seller to CardTrader for their API token
@@ -472,7 +485,7 @@ function ProfileDesk() {
                   <span class="snapshot-sub">
                     {[
                       activity().salesEurCents30d ? money({ currency: 'EUR', amount: activity().salesEurCents30d }) : '',
-                      activity().salesPkn30d ? money({ currency: 'PKN', amount: activity().salesPkn30d }) : '',
+                      activity().salesPkn30d ? formatSellerPrice(activity().salesPkn30d, localCurrency()) : '',
                     ].filter(Boolean).join(' · ')}
                   </span>
                 </Show>
@@ -539,12 +552,57 @@ function ProfileDesk() {
   );
 }
 
-/** /profile (market/src/pages/Profile.jsx). The extension side panel frames it (D000040). */
+/** MyPokoin covers every game, so the mark is the Pokoin coin badge, not a Pokéball. */
+function MyPokoinTile() {
+  return (
+    <a class="tile-cta mypokoin-logo-tile" href="/mypokoin" aria-label="MyPokoin">
+      <img class="mypokoin-badge" src="/home/logo.png" alt="" width="72" height="72" />
+      <strong class="mypokoin-logo" aria-hidden="true">
+        <span class="mypokoin-my">My</span>
+        <span class="mypokoin-word">Poko<span class="brand-i">ı</span>n</span>
+      </strong>
+    </a>
+  );
+}
+
+/** Header only. Skips the signed-in desk so the gold tile can be checked without API calls. */
+function ProfilePreview() {
+  return (
+    <div class="page desk profile-page">
+      <p class="seller-preview-banner" role="status">{MYPOKOIN_PREVIEW_BANNER}</p>
+      <section class="profile-hero">
+        <PageHead
+          kicker="Account"
+          title="Preview Seller"
+          meta="@preview-seller"
+          lede="Your shop, listings, and payouts."
+          leading={<Avatar seed="preview-seller" name="Preview Seller" size={88} />}
+        >
+          <div class="profile-mypokoin">
+            <MyPokoinTile />
+          </div>
+        </PageHead>
+        <MetricGrid>
+          <Metric value="42" label="Cards owned" />
+          <Metric value="7" label="Live listings" />
+          <Metric value={formatPknNumber(12840)} label="Site PKN" />
+          <Metric value="3.50" label="Chain PKN" hint="No wallet linked" />
+        </MetricGrid>
+      </section>
+    </div>
+  );
+}
+
+/** /profile. The extension side panel frames it (D000040). */
 export default function Profile() {
   document.title = 'Profile · Pokoin';
+  const [params] = useSearchParams();
   return (
-    <SignedIn from="/profile">
-      <ProfileDesk />
-    </SignedIn>
+    <Show
+      when={untrack(() => allowMypokoinPreview(params))}
+      fallback={<SignedIn from="/profile"><ProfileDesk /></SignedIn>}
+    >
+      <ProfilePreview />
+    </Show>
   );
 }

@@ -465,3 +465,274 @@ marker into `assert(F)` and requires it to fail.
 - **The Rust and JS themselves**: Logika checks Slang ports. Each port follows
   its source (comments name it), states its abstraction at the top, and each
   finding was reproduced by a failing test on the real code.
+
+## Card Rails → CardTrader listing sync (2026-10-20)
+
+[`listing-ct-sync/`](listing-ct-sync/README.md), written against origin/main
+`1259f2c2` after 1,482 Riftbound copies from Card Rails stayed paused and
+never reached CardTrader. TLC 2026.10.06, Java 21 on nezopt.
+
+| Config | Result | Distinct states | Depth |
+| --- | --- | --- | --- |
+| `listing-ct-sync/Model.cfg` | pass | 1,547,148 | 59 |
+| `listing-ct-sync/unquoted.cfg` | pass | 1,548,396 | 60 |
+| `listing-ct-sync/liveness.cfg` | pass (liveness) | 525,264 | 51 |
+| 5 `bugs/*.cfg` | each reports its counterexample on origin/main | | |
+| 1 `design/*.cfg` | reports the accepted residual | | |
+| 4 `witness/*.cfg` | each finds the behaviour reachable | | |
+
+Counts are from 2026-10-21, after the pricer write path (L7, L8) was added
+to the model; the 2026-10-20 model had 200,898 / 201,210 / 68,152 states.
+
+| # | Finding | How | Fix |
+| --- | --- | --- | --- |
+| L1 | A Riftbound (any non-Pokémon) listing is never a push candidate: `PUSH_CANDIDATES_WHERE` filtered Pokémon, and `product_body` only knows Pokémon properties. | TLC (`bugs/other-game-never-pushed.cfg`) | Candidates of every game; other games are created from their blueprint's `editable_properties` (`push::product_body_for_blueprint`); the outbox leaves them to the reconcile (`listing_sync::outbox_pushes`) so there is one create path. |
+| L2 | A copy Card Rails could not quote is listed `paused` at 0, and a later Seller API `update` with a price keeps it paused. The quote read only Pokémon tables, so every Riftbound copy was unquoted. | TLC (`bugs/paused-forever.cfg`) + mapping | `update` puts a listing paused at 0 on sale when it gets a price (`activate_priced`); `sold-prices` quotes every game from the price store (`facet_quote`); `job price-unpriced-listings` prices existing rows. |
+| L3 | An in-doubt CardTrader create that never happened keeps `ct:pending:…` for ever: the listing is never listed and never a candidate again. | TLC (`bugs/stuck-in-doubt-claim.cfg`) | `release_stale_claims`: after a complete export, a claim older than 15 minutes that no exported product and no seller order names goes back to `""`. |
+| L4 | A crash between the Seller API key claim and the insert left the key claimed and unbound; every retry answered `list_in_doubt` for ever. | TLC (`bugs/list-key-in-doubt.cfg`) | The key is bound in the insert's own transaction with a compare-and-set (`BIND_API_KEY_SQL`); a claimed, unbound key is safe to create again. |
+| L5 | A stale claim whose product sold before any export saw it, with the webhook lost, would be left for sale on Pokoin by L3's release. | TLC (while fixing L3) | `SETTLE_SOLD_CLAIMS_SQL` settles it sold out. |
+| L6 | The reconcile read only `pokemon_language` / `mtg_language` / `mtg_foil`: a French foil Riftbound product was EN non-foil, so it matched the wrong listing facets. | mapping | `normalize_product` reads any `*_language`, `*_foil`, `*_first_edition`. |
+| L7 | The push and the outbox edit listed the Pokoin price as the CardTrader ask. The Pokoin price is already net of CardTrader's commission, so CardTrader took it twice (Spiderling: Pokoin 26 PKN listed at €0.13 nets 24 PKN). | user report + TLC (`bugs/double-fee.cfg`, `FeeOnce`) + Verus (`lemma_listing_the_net_loses_the_fee`) | Every write lists the gross-up at the seller's own rate (`FeeRule::gross_cents`, `push::price_body`); `job cardtrader-fee-once` raises the products listed before. |
+| L8 | A reprice while the CardTrader create was in flight was lost: the edit of a `ct:pending:*` listing sends nothing and the link did not re-send, so CardTrader kept the create's old ask. | modelling the pricer write path for L7; TLC checks the fix (`FeeOnce` in `Model.cfg`) | The reconcile re-sent the new ask after `LINK_SQL`; since the grouping of identical copies (2026-10-21) a repriced copy leaves its product after the link and is pushed again at its new price (`group::settle_after_link`). |
+
+Spec correction: the first fixed run broke `NoDuplicateProduct` because time
+could pass the grace while the create request was still being sent; the
+15-minute grace is far longer than the client timeout, so the assumption
+(`LandsInGrace`) now covers a create being sent as well as one in flight.
+Accepted residual: `design/create-lands-after-grace.cfg` (CardTrader applying
+a create more than 15 minutes after it was sent would duplicate it).
+
+## cdn.pokoin.com serving path (`serving`, 2026-10-29)
+
+[`serving/`](serving/README.md), phase 1 of
+[`docs/SERVING_PIPELINE.md`](../../docs/SERVING_PIPELINE.md), written against
+`0ad2a713` after incident `d6c7d1df823051b6`. On 28 Oct (~12:00–17:16 CET) and
+29 Oct (14:16–15:13 CET), each time after a Pi reboot, every `cdn.pokoin.com`
+image answered 502 and no alert fired. The model has no Rust code under test:
+`Fixed = FALSE` with every flag off is the live system, and `Fixed = TRUE` is
+the pipeline design that phases 2–5 must build. TLC 2026.10.06, Java 21,
+12 workers on nezopt.
+
+| Config | Result | Distinct states | Depth / trace |
+| --- | --- | --- | --- |
+| `serving/Model.cfg` | pass (D1, D2, D4, D4b, D5) | 7,580,288 | depth 39 |
+| `serving/liveness.cfg` | pass (D3) | 929,680 | depth 37 |
+| `serving/bugs/hand-hosts.cfg` | `RebootSafety` violated | 19 | 3 states |
+| `serving/bugs/hand-hosts-unavailable.cfg` | `Availability` violated | 86,960 | lasso, 23 states |
+| `serving/bugs/connected-not-healthy.cfg` | `NoFalseFailover` violated | 1,069 | 7 states |
+| `serving/bugs/no-public-probe.cfg` | `Detection` violated | 10,879 | 12 states |
+| `serving/bugs/memo-poison.cfg` | `ClientRecovery` violated | 4,175 | 10 states |
+| `serving/bugs/silent-degradation.cfg` | `RedundancyDetection` violated | 2,560 | 11 states |
+| 5 `serving/witness/*.cfg` | each behaviour reachable | | |
+
+`specs/tla/run.sh --regressions serving` runs all 13 configs in about 5 min (the two fixed configs take 190 s and 65 s; the rest seconds).
+The bug configs allow only Pi reboots and no crashes, which is what happened,
+so each shortest counterexample is the incident. The fixed configs allow both
+hosts to reboot and to lose their origin at any time.
+
+Each fix is necessary. With every flag on except one, TLC violates that flag's
+property and no other (see the serving README for the check).
+
+### CDN1 — A hand-edited /etc/hosts line does not survive a reboot (TLC, D1 + D3)
+`bugs/hand-hosts.cfg`: the binding `127.0.0.1 pokoin-cdn-origin` is typed into
+`/etc/hosts` (28 Oct, or the original setup), and the Pi reboots. cloud-init
+(`manage_etc_hosts: True`) rewrites the file from
+`/etc/cloud/templates/hosts.debian.tmpl`, so the name no longer resolves on the
+Pi. `bugs/hand-hosts-unavailable.cfg` is the liveness side. After the reboot
+the Pi origin is up for good and its connector is connected, but it never
+serves a 200, because nothing that is guaranteed to run puts the line back.
+The 28 Oct repair edited only the live file, so the 29 Oct reboot repeated the
+outage. The 29 Oct repair also edited the template by hand; that holds until
+the next rebuild, and it is still not a binding the system knows about.
+**Resolution** (`PersistBinding`, plan S2 + phases 2–4): the binding lives in
+`infra/topology/`, and `pokoin-infra render pi-home` writes both the live file
+and the template. `RebootSafety` holds for any interleaving of reboots and hand
+edits, and `Availability` holds.
+
+### CDN2 — Cloudflare keeps routing to a connector whose origin is gone (TLC, D2)
+`bugs/connected-not-healthy.cfg`: after the reboot, `cloudflared-cdn.service`
+starts and connects although `pokoin-cdn-origin` does not resolve. Cloudflare
+sees a connected connector and sends it traffic, and every request it gets
+answers 502, for as long as the outage lasts. The k3s connector cannot help,
+because Cloudflare does not move traffic away from a connected connector.
+**Resolution** (`OriginGatedConnector`, phase 3): the connector unit gets an
+`ExecCondition=` that resolves the origin name and fetches an object through it
+(the same pattern as `deploy/ops/nezopt-user/pi-dependent.d-60-pi-up.conf`),
+and a watchdog stops a connected connector whose origin stops answering.
+`NoFalseFailover` then holds up to the watchdog's bound (`WatchdogTicks` = one
+sentinel period). That window is explicit in the property, and it is the
+remaining exposure: a request routed there inside it still gets a 502.
+
+### CDN3 — Hours of public 502s raise no alert (TLC, D4)
+`bugs/no-public-probe.cfg`: the Pi origin is up, its unit is active, and
+`cloudflared-cdn` is active, so every `pokoin-ops sentinel` check passes
+(units, ports, the `api` metrics on `127.0.0.1:18082`). The public path has
+answered 502 for three periods and `alerted` is still false. Both incidents
+were noticed by the owner, not by the sentinel.
+**Resolution** (`PublicProbe`, plan S4 + phase 4): `pokoin-infra verify` runs
+inside both sentinels. It resolves every name on every host and fetches a real
+object through every connector path and through the public URL, so a run of
+5xx longer than `AlertAfter` (the sentinel's `confirm = 2`) alerts. A probe of
+the public URL alone would not be enough, because Cloudflare may route the
+probe to the healthy connector while users reach the broken one. The model's
+probe therefore checks every connector path.
+
+### CDN4 — The outage poisons the browser's image memo for 24 h (TLC, D5)
+`bugs/memo-poison.cfg`: during the outage a page's images fail on every
+sibling, and `CardArt` stores `about:dead` for each with `keepMs` 24 h
+(`solid/src/components/CardArt.jsx:73`, `market/src/image-fallback-memo.js`).
+After the CDN serves everything again, those cards still paint the missing-card
+placeholder without retrying, longer than `DeadTTL`. An `<img>` cannot tell a
+404 from a 502, so the memo has no way to tell a missing file from an outage.
+**Resolution** (`BurstAwareMemo`, phase 5): a page load on which every
+requested image failed is an outage and marks nothing, and a dead mark lives
+`DeadTTL`. A partial outage (some images through the broken Pi, some through
+k3s) can still mark an existing image dead, but `ClientRecovery` bounds that to
+`DeadTTL`. Phase 5 also bumps the key to `pokoin.imgFallback.v2`, so marks
+already poisoned are dropped. `witness/NeverDeadMark.cfg` shows a really
+missing image is still remembered.
+
+### CDN5 — The 28 Oct state: one leg down, site up, nobody told (review, TLC, D4b)
+Found in review of the first model, not by TLC. That model's fixed sentinel
+failed only on a dead origin process or on `PublicBad`, and nothing could break
+a binding after `Apply`, so a silently lost leg was only a transient. The
+review added `Drift` (something outside the pipeline removes the binding from
+the live file and the template), made `Apply` re-runnable on an alert, and
+added the property `RedundancyDetection`.
+`bugs/silent-degradation.cfg` is the pipeline design without `PathProbe`. The
+Pi's binding drifts while its origin process is up. The watchdog correctly
+stops the Pi connector, and K3s serves every request. `PublicBad` is false and
+`up[Pi]` is true, so no probe fails: the site runs on one leg with no alert,
+and nothing will ever prompt the `Apply` that would repair it. That is how
+28 Oct ended: repaired by hand, recorded nowhere, and repeated on 29 Oct.
+**Resolution** (`PathProbe`, phase 4): `verify` checks every connector path on
+its own. It resolves the name on the host, fetches a real object through that
+host's origin, and checks that the connector is connected. One path that does
+not serve for more than `AlertAfter` periods raises the alert even while the
+public URL is fine. A shorter reboot stays silent. Acting on the alert
+(`Apply`'s weak fairness) restores the leg. `witness/NeverDriftRepaired.cfg`
+reaches Drift(Pi) → alert → Apply → the Pi serves a 200 again, and D3 holds
+with drift present, given finitely many drifts.
+
+Spec choices that the facts do not settle are listed in
+[`serving/README.md`](serving/README.md#what-is-abstracted-away): Cloudflare's
+connector choice is nondeterministic, the k3s replicas are one connector, the
+k3s → Pi fallback is not modelled, and the watchdog bound and `DeadTTL` are one
+period each.
+
+## Price ownership: one pricer when Card Rails is connected (`price-ownership`, 2026-11-08)
+
+The owner asked for this model before PR #530 lands ("Yes, spec first"). It
+covers one listing with every writer interleaving:
+- group runs (Apply, daily);
+- market moves;
+- the MyPokoin edit and the Pricer board;
+- Card Rails `update`, its pull and its own CardTrader import;
+- Pokoin's CardTrader sync (link, push, price edits);
+- `list` (item choice, call choice, account default, none).
+
+Card Rails is modelled with the agreed behaviour. Invariants PO1–PO7 and the
+liveness property PO8 are listed in [`price-ownership/README.md`](price-ownership/README.md).
+
+Bounds: two groups, prices 1..2, one market move, two Card Rails edits, one
+MyPokoin edit, two runs, one Card Rails CardTrader import, one board move.
+
+TLC 2026.10.06 ran on nezopt through `verify-gate` with
+`TMPDIR=~/scratch/...`. The state files no longer fit in `/tmp`: the first run
+filled the 31 GB tmpfs at prices 1..3.
+
+| Config | Result | Distinct states | Depth |
+| --- | --- | --- | --- |
+| `price-ownership/Model.cfg` | pass, PO1–PO7 | 6,687,319 | 19 |
+| `price-ownership/default-gone.cfg` | pass, PO1–PO7 | 6,217,379 | 19 |
+| `price-ownership/liveness.cfg` | pass, PO8 | 598,279 | 15 |
+| 7 `bugs/*.cfg` | each reports its violation | | |
+| 4 `witness/*.cfg` | each finds the behaviour reachable | | |
+| two-step manual write (not kept as a config) | pass, PO1–PO7 | 18,203,172 | |
+
+### PO-A: a run overwrote a manual price that left its group meanwhile (TLC, `bugs/unguarded-run.cfg`)
+
+As #530 was first pushed, `run_plan` read the group's rows, and then wrote
+each planned price unconditionally. Card Rails' `update` or a MyPokoin edit
+could take a listing out of the group between that read and that write. The
+run's write then replaced the seller's price. This is a 5-state trace that
+violates `ManualPriceKept`.
+
+Fixed in two places:
+- `pricer::write_run_price` writes through `update_listing_guarded` with
+  `GroupGuard::Run(group)`. The guard checks the membership in the write's
+  own transaction, under the listing's row lock, and refuses with
+  `pricing_group_left`. The run counts such a listing in `left`.
+- Pricer-board add and remove now take the same row locks (`ADD_SQL`,
+  `REMOVE_SQL`, in id order).
+
+Test: `price_ownership_flow::po2_manual_price_kept_a_run_never_writes_a_listing_that_left`.
+
+### PO-B: the MyPokoin edit form resent the price it read (TLC, `bugs/form-resends-stale.cfg`)
+
+This is R5's twin inside Pokoin. `ListingForm.jsx` sent `pricePkn` on every
+save, using the price read when the form opened. After an overnight
+re-price, a quantity-only edit sent the old price. Under the new rule that is
+a manual price, so the listing left its group at the stale price. This
+violates `NoPriceNoChange`.
+
+Fixed: `editPriceFields` (`market/src/pricing-group-note.js`) sends the
+price only when the seller typed a different one, together with
+`pricingGroupId: null`. The PATCH route honours `null` even without a price.
+
+Tests: `pricing-group-note.test.js` and `price_ownership_flow::po3_*`.
+
+### PO-C: "Price myself" at the same price needs `pricingGroupId: null` (TLC, `bugs/price-myself-same-price.cfg`)
+
+A resend and "Price myself" at the same price are indistinguishable without
+`null`. The listing stays in its group, which violates
+`PriceMyselfHonoured`. This confirms the rule "resending the same price
+keeps the group" as long as both clients send `null` with every price the
+seller changed.
+- The contract now says this, and the MyPokoin form does it.
+- Card Rails must do it (reported to the Card Rails session).
+
+Test: `price_ownership_flow::po5_*`.
+
+### Reproduced, Card Rails side and before #530
+
+- `bugs/pre-530-manual-wiped.cfg`: before #530, a manual price stayed in its
+  group and the next run overwrote it (`ManualPriceKept`).
+- `bugs/r5-stale-resend.cfg` (R5): Card Rails resent its cached price on
+  every edit. After a re-price, an edit of another field detached the listing
+  at the stale price (`NoPriceNoChange`).
+- `bugs/r6-import-pingpong.cfg` (R6): Card Rails' CardTrader import wrote the
+  ask into a Pokoin-linked row, and the pull wrote Pokoin's price back
+  (`NoPingPong`). This is fixed by the agreed behaviour: the import never
+  writes the price of a linked row.
+- `bugs/naive-default.cfg`: a `list` that refused over a deleted account
+  default would break `ListNeverRefused`. #530 never refuses.
+
+### Design checked, not changed
+
+- **Two-step manual write.** The group move and the price write as two
+  steps also satisfy PO1–PO7 once runs are guarded (18.2M states). #530
+  still does both in one transaction under the row lock
+  (`pricer::apply_guard`): it is simpler to reason about and needs no
+  retry rule.
+- **Pokoin's CardTrader link** (`link_existing_listing`) writes the
+  product's net price once, when it links an unlinked listing. That is the
+  seller's own CardTrader price, not a group run's. Already-linked products
+  change quantity only, so the CardTrader sync never ping-pongs with groups.
+
+### Spec correction
+
+The first run stopped with "variable `sneaky` is not defined" on the R5 and
+form configs. `sneaky' = sneaky \/ (…)` parses as `(sneaky' = sneaky) \/ (…)`.
+This is a precedence slip in the spec, not a code finding: TLC stopped
+instead of passing silently. It is parenthesised now, and every config was
+re-run.
+
+### Conformance
+
+`Rules.tla` (`Move`, `IsManual`) is the rule both the model and the code
+use:
+- `MoveTable.tla` prints it for every input into
+  `conformance/move-table.txt` (40 rows);
+- `pricer::group_move_matches_the_model_table` asserts that `group_move` and
+  `is_manual_price` agree on every row.

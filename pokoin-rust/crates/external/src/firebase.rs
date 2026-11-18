@@ -18,8 +18,25 @@ use crate::error::{ApiError, ApiResult};
 pub struct DecodedToken {
     pub uid: String,
     pub email: Option<String>,
+    /// `email_verified`, or the `pok_email_verified` custom claim that
+    /// verify-email-signup sets after the code check.
+    pub email_verified: bool,
     pub name: Option<String>,
     pub picture: Option<String>,
+}
+
+impl DecodedToken {
+    /// The lowercased email only when the token proves the user owns it. Any
+    /// check that grants access by email must use this, never `email`.
+    pub fn verified_email(&self) -> Option<String> {
+        if !self.email_verified {
+            return None;
+        }
+        self.email
+            .as_deref()
+            .map(|email| email.trim().to_ascii_lowercase())
+            .filter(|email| !email.is_empty())
+    }
 }
 
 pub const JWKS_URL: &str =
@@ -34,6 +51,25 @@ pub struct FirebaseJwksVerifier {
     project_id: String,
     http: reqwest::Client,
     keys: RwLock<HashMap<String, Value>>,
+    /// Last refetch an unknown `kid` triggered: random kids must not turn every
+    /// request into a Google round trip.
+    last_unknown_kid_fetch: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+/// At most one unknown-`kid` JWKS refetch per this interval.
+pub const UNKNOWN_KID_REFETCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// True (and the stamp moved to now) when an unknown-`kid` refetch may run.
+fn take_refetch_slot(last: &std::sync::Mutex<Option<std::time::Instant>>) -> bool {
+    let mut last = last.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = std::time::Instant::now();
+    match *last {
+        Some(at) if now.duration_since(at) < UNKNOWN_KID_REFETCH_INTERVAL => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
+    }
 }
 
 impl FirebaseJwksVerifier {
@@ -45,6 +81,7 @@ impl FirebaseJwksVerifier {
                 .build()
                 .expect("reqwest client"),
             keys: RwLock::new(HashMap::new()),
+            last_unknown_kid_fetch: std::sync::Mutex::new(None),
         }
     }
 
@@ -74,8 +111,12 @@ impl FirebaseJwksVerifier {
         let kid = header.kid.ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
         {
             let keys = self.keys.read().await;
-            if !keys.contains_key(&kid) {
-                drop(keys);
+            // An empty map is the first load; an unknown kid refetches at most
+            // once per UNKNOWN_KID_REFETCH_INTERVAL (Google rotates keys daily).
+            let refetch = keys.is_empty()
+                || (!keys.contains_key(&kid) && take_refetch_slot(&self.last_unknown_kid_fetch));
+            drop(keys);
+            if refetch {
                 let fresh = self.load_keys().await?;
                 *self.keys.write().await = fresh;
             }
@@ -100,7 +141,14 @@ impl FirebaseJwksVerifier {
             .ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?
             .to_string();
         let pick = |key: &str| claims.get(key).and_then(Value::as_str).map(str::to_string);
-        Ok(DecodedToken { uid, email: pick("email"), name: pick("name"), picture: pick("picture") })
+        let flag = |key: &str| claims.get(key).and_then(Value::as_bool) == Some(true);
+        Ok(DecodedToken {
+            uid,
+            email: pick("email"),
+            email_verified: flag("email_verified") || flag("pok_email_verified"),
+            name: pick("name"),
+            picture: pick("picture"),
+        })
     }
 }
 
@@ -126,26 +174,36 @@ impl TokenVerifier for FirebaseJwksVerifier {
     }
 }
 
-/// Test verifier: any "Bearer test-<uid>" (or configured map) decodes.
+/// Test verifier: any "Bearer test-<uid>" decodes. `uid_email` emails are
+/// verified, `unverified_uid_email` ones are not. Compiled only for tests and
+/// the `test-util` feature, so no production build can accept a forged token.
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Clone, Default)]
 pub struct StaticVerifier {
     pub uid_email: Arc<HashMap<String, String>>,
+    pub unverified_uid_email: Arc<HashMap<String, String>>,
 }
 
+#[cfg(any(test, feature = "test-util"))]
 impl TokenVerifier for StaticVerifier {
     fn verify<'a>(&'a self, authorization: Option<&'a str>) -> futures_util::future::BoxFuture<'a, ApiResult<DecodedToken>> {
         let header = authorization.unwrap_or_default().to_string();
         let map = self.uid_email.clone();
+        let unverified = self.unverified_uid_email.clone();
         Box::pin(async move {
             let token = header.strip_prefix("Bearer ").unwrap_or_default().trim().to_string();
             if token.is_empty() {
                 return Err(ApiError::new(401, "Missing Pokoin bearer token.").with_code("auth/missing-token"));
             }
             let uid = token.strip_prefix("test-").unwrap_or(&token).to_string();
-            let email = map.get(&uid).cloned();
+            let (email, email_verified) = match map.get(&uid) {
+                Some(email) => (Some(email.clone()), true),
+                None => (unverified.get(&uid).cloned(), false),
+            };
             Ok(DecodedToken {
                 uid,
                 email,
+                email_verified,
                 name: None,
                 picture: None,
             })
@@ -165,6 +223,18 @@ pub struct FirestoreDoc {
 /// users. Production talks to the Firestore REST API; tests use Memory.
 pub trait FirestoreStore: Send + Sync {
     fn get_doc<'a>(&'a self, collection: &'a str, id: &'a str) -> futures_util::future::BoxFuture<'a, ApiResult<FirestoreDoc>>;
+    /// Several docs of one collection, in `ids` order (a missing doc has
+    /// `exists: false`). REST answers with one `documents:batchGet` per
+    /// [`BATCH_GET_MAX`] ids instead of a round trip per doc.
+    fn get_docs<'a>(&'a self, collection: &'a str, ids: &'a [String]) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            let mut out = Vec::with_capacity(ids.len());
+            for id in ids {
+                out.push(self.get_doc(collection, id).await?);
+            }
+            Ok(out)
+        })
+    }
     /// set(..., {merge: true})
     fn merge_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>>;
     /// doc.create() — fails with 409-style AlreadyExists when present.
@@ -179,6 +249,24 @@ pub trait FirestoreStore: Send + Sync {
         predicate: &'static (dyn Fn(&Value) -> bool + Send + Sync),
         fields: Value,
     ) -> futures_util::future::BoxFuture<'a, ApiResult<bool>>;
+
+    /// One structured query: the docs of `collection` whose string `field`
+    /// is >= `value`, at most `limit` of them (a `runQuery` with one
+    /// `GREATER_THAN_OR_EQUAL` field filter). The default errors, so stores
+    /// that cannot query keep compiling; the REST and in-memory stores
+    /// implement it.
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let _ = (collection, field, value, limit);
+        Box::pin(async move {
+            Err(ApiError::new(501, "This Firestore store cannot run queries.").with_code("firestore_query_unsupported"))
+        })
+    }
 
     /// False only for the in-memory test store. Production [`crate::state::DomainState`]
     /// construction refuses a non-durable store, so no handler can answer a
@@ -294,6 +382,34 @@ impl FirestoreStore for MemoryFirestore {
             Ok(true)
 })
     }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        let collection = collection.to_string();
+        let field = field.to_string();
+        let value = value.to_string();
+        let docs = self.docs.clone();
+        Box::pin(async move {
+            let guard = docs.read().await;
+            let out: Vec<FirestoreDoc> = guard
+                .iter()
+                .filter(|((doc_collection, _), _)| doc_collection == &collection)
+                .filter(|(_, data)| {
+                    data.get(field.as_str())
+                        .and_then(Value::as_str)
+                        .is_some_and(|stored| stored >= value.as_str())
+                })
+                .take(limit as usize)
+                .map(|(_, data)| FirestoreDoc { exists: true, data: data.clone() })
+                .collect();
+            Ok(out)
+        })
+    }
 }
 
 /// Firestore over the Google REST API. Auth is a service-account JWT
@@ -307,6 +423,41 @@ pub struct FirestoreRest {
 }
 
 const FIRESTORE_SCOPE: &str = "https://www.googleapis.com/auth/datastore";
+
+/// Documents per `documents:batchGet` request.
+pub const BATCH_GET_MAX: usize = 100;
+
+/// A `documents:batchGet` answer (`[{found: doc} | {missing: name}]`, any
+/// order) back in `ids` order. `root` is `projects/<p>/databases/(default)/documents`.
+fn batch_get_docs(root: &str, collection: &str, ids: &[String], entries: &[Value]) -> Vec<FirestoreDoc> {
+    let found: HashMap<&str, &Value> = entries
+        .iter()
+        .filter_map(|entry| entry.get("found"))
+        .filter_map(|doc| Some((doc.get("name")?.as_str()?, doc)))
+        .collect();
+    ids.iter()
+        .map(|id| match found.get(format!("{root}/{collection}/{id}").as_str()) {
+            Some(doc) => FirestoreDoc { exists: true, data: FirestoreRest::unflatten(doc) },
+            None => FirestoreDoc { exists: false, data: json!({}) },
+        })
+        .collect()
+}
+
+/// Percent-encode a query parameter value (everything outside RFC 3986
+/// unreserved characters — field names are plain identifiers today, this keeps
+/// any future `.`/space oddity safe).
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
 
 impl FirestoreRest {
     pub fn from_env() -> Option<Self> {
@@ -383,53 +534,40 @@ impl FirestoreRest {
         )
     }
 
-    /// REST documents use dot paths; we flatten objects into dot paths.
-    fn flatten(fields: &Value, prefix: &str, out: &mut Map<String, Value>) {
-        match fields {
-            Value::Object(map) => {
-                for (key, value) in map {
-                    let path = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
-                    if value.is_object() {
-                        Self::flatten(value, &path, out);
-                    } else {
-                        out.insert(path, firestore_value(value));
-                    }
-                }
-            }
-            other => {
-                out.insert(prefix.to_string(), firestore_value(other));
+    /// Body + update mask for a merge/patch write.
+    ///
+    /// The mask names whole top-level fields and the body carries each one as a
+    /// full nested `mapValue` document. Dotted leaf keys in the body do NOT
+    /// work: Firestore resolves only the mask paths against nested body fields,
+    /// and a body keyed by literal dotted names silently clears every masked
+    /// nested field to an empty map instead of writing it (this destroyed
+    /// stored CardTrader tokens on reconnect, 2026-10-14). Callers pass
+    /// complete sub-objects, so replacing whole top-level fields keeps merge
+    /// semantics.
+    fn patch_body(fields: &Value) -> (Value, String) {
+        let mut body = Map::new();
+        let mut paths = Vec::new();
+        if let Some(map) = fields.as_object() {
+            for (key, value) in map {
+                body.insert(key.clone(), firestore_value(value));
+                paths.push(format!("updateMask.fieldPaths={}", urlencode(key)));
             }
         }
+        (json!({ "fields": Value::Object(body) }), paths.join("&"))
     }
 
+    /// REST GET responses carry each field as a typed wrapper (nested
+    /// `mapValue`s included); `plain_value` decodes them per top-level field.
     fn unflatten(raw: &Value) -> Value {
-        let mut root = Map::new();
         let Some(fields) = raw.get("fields").and_then(Value::as_object) else {
             return json!({});
         };
-        for (path, wrapper) in fields {
-            let segments: Vec<&str> = path.split('.').collect();
-            let mut cursor = &mut root;
-            for segment in &segments[..segments.len().saturating_sub(1)] {
-                cursor = cursor
-                    .entry(segment.to_string())
-                    .or_insert_with(|| Value::Object(Map::new()))
-                    .as_object_mut()
-                    .expect("flattening only creates objects");
-            }
-            cursor.insert(segments[segments.len() - 1].to_string(), plain_value(wrapper));
-        }
-        Value::Object(root)
-    }
-
-    fn update_mask(fields: &Value) -> String {
-        let mut flattened = Map::new();
-        Self::flatten(fields, "", &mut flattened);
-        flattened
-            .keys()
-            .map(|path| format!("updateMask.fieldPaths={path}"))
-            .collect::<Vec<_>>()
-            .join("&")
+        Value::Object(
+            fields
+                .iter()
+                .map(|(key, wrapper)| (key.clone(), plain_value(wrapper)))
+                .collect(),
+        )
     }
 }
 
@@ -527,18 +665,40 @@ impl FirestoreStore for FirestoreRest {
 })
     }
 
+    fn get_docs<'a>(&'a self, collection: &'a str, ids: &'a [String]) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let token = self.access_token().await?;
+            let root = format!("projects/{}/databases/(default)/documents", self.project_id);
+            let url = format!("https://firestore.googleapis.com/v1/{root}:batchGet");
+            let requests = ids.chunks(BATCH_GET_MAX).map(|chunk| {
+                let body = json!({ "documents": chunk.iter().map(|id| format!("{root}/{collection}/{id}")).collect::<Vec<_>>() });
+                let request = self.http.post(&url).bearer_auth(&token).json(&body);
+                async move {
+                    let entries: Vec<Value> = request.send().await?.error_for_status()?.json().await?;
+                    Ok::<_, ApiError>(entries)
+                }
+            });
+            let mut entries = Vec::new();
+            for answer in futures_util::future::join_all(requests).await {
+                entries.extend(answer?);
+            }
+            Ok(batch_get_docs(&root, collection, ids, &entries))
+        })
+    }
+
     fn merge_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>> {
         Box::pin(async move {
             let token = self.access_token().await?;
-            let mut flattened = Map::new();
-            Self::flatten(&fields, "", &mut flattened);
-            let mask = Self::update_mask(&fields);
+            let (body, mask) = Self::patch_body(&fields);
             let url = format!("{}?{}", self.doc_url(collection, id), mask);
             let response = self
                 .http
                 .patch(&url)
                 .bearer_auth(token)
-                .json(&json!({ "fields": Value::Object(flattened) }))
+                .json(&body)
                 .send()
                 .await?
                 .error_for_status()?;
@@ -550,14 +710,13 @@ impl FirestoreStore for FirestoreRest {
     fn create_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>> {
         Box::pin(async move {
             let token = self.access_token().await?;
-            let mut flattened = Map::new();
-            Self::flatten(&fields, "", &mut flattened);
+            let (body, _) = Self::patch_body(&fields);
             let url = format!("{}?currentDocument.exists=false", self.doc_url(collection, id));
             let status = self
                 .http
                 .post(&url)
                 .bearer_auth(token)
-                .json(&json!({ "fields": Value::Object(flattened) }))
+                .json(&body)
                 .send()
                 .await?
                 .status();
@@ -598,6 +757,56 @@ impl FirestoreStore for FirestoreRest {
             self.merge_doc(collection, id, fields).await?;
             Ok(true)
 })
+    }
+
+    fn query_where_gte<'a>(
+        &'a self,
+        collection: &'a str,
+        field: &'a str,
+        value: &'a str,
+        limit: u32,
+    ) -> futures_util::future::BoxFuture<'a, ApiResult<Vec<FirestoreDoc>>> {
+        Box::pin(async move {
+            let token = self.access_token().await?;
+            let url = format!(
+                "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents:runQuery",
+                self.project_id
+            );
+            let body = json!({
+                "structuredQuery": {
+                    "from": [{ "collectionId": collection }],
+                    "where": {
+                        "fieldFilter": {
+                            "field": { "fieldPath": field },
+                            "op": "GREATER_THAN_OR_EQUAL",
+                            "value": { "stringValue": value },
+                        }
+                    },
+                    "limit": limit,
+                }
+            });
+            let response = self
+                .http
+                .post(&url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await?;
+            let status = response.status();
+            let payload: Value = response.json().await?;
+            if !status.is_success() {
+                return Err(ApiError::new(
+                    502,
+                    format!("Firestore runQuery failed ({status}): {payload}"),
+                ));
+            }
+            let entries = payload.as_array().cloned().unwrap_or_default();
+            Ok(entries
+                .iter()
+                .filter_map(|entry| entry.get("document"))
+                .map(|doc| FirestoreDoc { exists: true, data: Self::unflatten(doc) })
+                .collect())
+        })
     }
 }
 
@@ -655,6 +864,67 @@ mod tests {
     }
 
     #[test]
+    fn patch_body_writes_nested_fields_not_dotted_keys() {
+        // The exact payload store_connected_integration sends for a reconnect.
+        // The old writer keyed the body with literal dotted paths; Firestore
+        // ignored them and cleared every masked nested field to an empty map,
+        // which destroyed stored tokens ("CardTrader is not connected for this
+        // seller" while status still said connected). The body must nest
+        // mapValues and the mask must name top-level fields only.
+        let fields = json!({
+            "uid": "u1",
+            "enabled": true,
+            "metadata": {
+                "app": { "id": "7", "name": "App" },
+                "user": { "id": "5", "username": "sel" },
+                "scopes": ["openid"],
+                "seller": { "id": "9", "name": "Sel Shop" },
+                "oneDayReady": false,
+            },
+            "encryptedToken": {
+                "version": 1,
+                "algorithm": "aes-256-gcm",
+                "iv": "IVIVIVIVIVIVIVIV",
+                "tag": "TA==",
+                "ciphertext": "CIPHERTEXT",
+            },
+            "encryptedSharedSecret": Value::Null,
+        });
+        let (body, mask) = FirestoreRest::patch_body(&fields);
+        let body_fields = body.get("fields").and_then(Value::as_object).expect("body fields");
+        for key in body_fields.keys() {
+            assert!(!key.contains('.'), "body key {key} must not be a dotted path");
+        }
+        let token = body_fields
+            .get("encryptedToken")
+            .and_then(|w| w.get("mapValue"))
+            .and_then(|m| m.get("fields"))
+            .and_then(Value::as_object)
+            .expect("encryptedToken stored as a nested mapValue");
+        assert_eq!(token.len(), 5, "envelope fields must survive the write body");
+        assert_eq!(token["ciphertext"]["stringValue"], "CIPHERTEXT");
+
+        let mask_paths: Vec<&str> = mask.split("&").collect();
+        assert_eq!(mask_paths.len(), 5, "one mask path per top-level field");
+        assert!(mask_paths.contains(&"updateMask.fieldPaths=encryptedToken"));
+        assert!(mask_paths.contains(&"updateMask.fieldPaths=metadata"));
+        for path in &mask_paths {
+            let name = path.split('=').nth(1).expect("mask path=value");
+            assert!(!name.contains('.'), "mask path {name} must be top-level");
+        }
+
+        // The stored body reads back to the same data plain_value hands to the
+        // API layer — the write shape and the read shape agree.
+        let read_back: Map<String, Value> = body_fields
+            .iter()
+            .map(|(key, wrapper)| (key.clone(), plain_value(wrapper)))
+            .collect();
+        assert_eq!(read_back["metadata"]["user"]["username"], "sel");
+        assert_eq!(read_back["encryptedToken"]["ciphertext"], "CIPHERTEXT");
+        assert_eq!(read_back["encryptedSharedSecret"], Value::Null);
+    }
+
+    #[test]
     fn static_verifier() {
         let verifier = StaticVerifier::default();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -662,5 +932,72 @@ mod tests {
         assert_eq!(decoded.uid, "user1");
         let err = runtime.block_on(verifier.verify(None)).unwrap_err();
         assert_eq!(err.status, 401);
+    }
+
+    #[test]
+    fn verified_email_requires_the_verified_claim() {
+        let mut token = DecodedToken {
+            uid: "u".into(),
+            email: Some(" Admin@Example.com ".into()),
+            email_verified: false,
+            name: None,
+            picture: None,
+        };
+        assert_eq!(token.verified_email(), None);
+        token.email_verified = true;
+        assert_eq!(token.verified_email().as_deref(), Some("admin@example.com"));
+        token.email = Some("  ".into());
+        assert_eq!(token.verified_email(), None);
+    }
+
+    #[test]
+    fn unknown_kid_refetch_is_throttled() {
+        let last = std::sync::Mutex::new(None);
+        assert!(take_refetch_slot(&last), "the first unknown kid refetches");
+        assert!(!take_refetch_slot(&last), "a second one inside the interval does not");
+        *last.lock().unwrap() = Some(std::time::Instant::now() - UNKNOWN_KID_REFETCH_INTERVAL);
+        assert!(take_refetch_slot(&last), "after the interval it may refetch again");
+    }
+
+    #[tokio::test]
+    async fn unknown_kid_tokens_do_not_hammer_google() {
+        // A verifier with keys loaded, then a burst of tokens with random kids:
+        // only the first may refetch, the rest fail on the cached map.
+        let verifier = FirebaseJwksVerifier::new("proj".into());
+        verifier.keys.write().await.insert("known".into(), json!({"kid": "known"}));
+        *verifier.last_unknown_kid_fetch.lock().unwrap() = Some(std::time::Instant::now());
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"random-kid","typ":"JWT"}"#);
+        let token = format!("{header}.e30.c2ln");
+        for _ in 0..20 {
+            let error = verifier.decode(&token).await.unwrap_err();
+            assert_eq!(error.status, 401);
+        }
+        // No refetch happened: the cached map is untouched.
+        assert_eq!(verifier.keys.read().await.len(), 1);
+    }
+
+    #[test]
+    fn batch_get_answers_come_back_in_id_order() {
+        let root = "projects/p/databases/(default)/documents";
+        let entries = vec![
+            json!({ "missing": format!("{root}/events/b") }),
+            json!({ "found": { "name": format!("{root}/events/c"), "fields": { "n": { "integerValue": "3" } } } }),
+            json!({ "found": { "name": format!("{root}/events/a"), "fields": { "n": { "integerValue": "1" } } } }),
+        ];
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string(), "a".to_string()];
+        let docs = batch_get_docs(root, "events", &ids, &entries);
+        assert_eq!(docs.iter().map(|d| d.exists).collect::<Vec<_>>(), vec![true, false, true, true]);
+        assert_eq!(docs[0].data["n"], 1);
+        assert_eq!(docs[2].data["n"], 3);
+        assert_eq!(docs[3].data["n"], 1);
+    }
+
+    #[tokio::test]
+    async fn default_get_docs_reads_each_doc() {
+        let store = MemoryFirestore::new();
+        store.seed("c", "x", json!({ "v": 1 })).await;
+        let docs = store.get_docs("c", &["x".to_string(), "y".to_string()]).await.unwrap();
+        assert!(docs[0].exists && !docs[1].exists);
+        assert_eq!(docs[0].data["v"], 1);
     }
 }

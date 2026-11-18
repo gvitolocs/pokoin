@@ -73,7 +73,27 @@ impl RedisRateLimiter {
     }
 }
 
+/// The identity a limiter keys on. A bare IPv6 address folds to its /64 (one
+/// host is handed a whole /64, so per-address buckets are free to rotate) and a
+/// v4-mapped address to its IPv4 form; anything else (uids, hashes, composite
+/// keys) is unchanged. Every limiter bucket builder in the workspace calls this,
+/// so IP-keyed limits cannot be sidestepped by walking a /64.
+pub fn rate_identity(identity: &str) -> std::borrow::Cow<'_, str> {
+    match identity.trim().parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
+            Some(v4) => std::borrow::Cow::Owned(v4.to_string()),
+            None => {
+                let s = v6.segments();
+                std::borrow::Cow::Owned(format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3]))
+            }
+        },
+        Ok(std::net::IpAddr::V4(v4)) => std::borrow::Cow::Owned(v4.to_string()),
+        Err(_) => std::borrow::Cow::Borrowed(identity),
+    }
+}
+
 fn window_key(scope: &str, identity: &str, window_seconds: u64) -> (String, u64) {
+    let identity = rate_identity(identity);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -149,6 +169,22 @@ mod tests {
             .await;
         assert!(verdict.allowed);
         assert_eq!(verdict.retry_after_sec, None);
+    }
+
+    #[test]
+    fn ipv6_identities_fold_to_their_64() {
+        assert_eq!(rate_identity("2001:db8:1:2:aaaa::1"), "2001:db8:1:2::/64");
+        assert_eq!(rate_identity("2001:db8:1:2:ffff:ffff:ffff:ffff"), "2001:db8:1:2::/64");
+        assert_ne!(rate_identity("2001:db8:1:3::1"), "2001:db8:1:2::/64");
+        assert_eq!(rate_identity("::ffff:203.0.113.9"), "203.0.113.9");
+        assert_eq!(rate_identity("203.0.113.9"), "203.0.113.9");
+        // Non-IP identities pass through untouched.
+        assert_eq!(rate_identity("uid-123"), "uid-123");
+        assert_eq!(rate_identity("pairfail:global"), "pairfail:global");
+        // Two addresses in one /64 share a Redis window key.
+        let (a, _) = window_key("poko-chat", "2001:db8::1", 60);
+        let (b, _) = window_key("poko-chat", "2001:db8::ffff", 60);
+        assert_eq!(a, b);
     }
 
     #[test]

@@ -1,8 +1,9 @@
+import { loadMypokoinPreview } from '../pages/mypokoin-preview.js';
 import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
 /**
- * Account, seller and onboarding pages (React URL map: market/src/App.jsx).
+ * Account, seller and onboarding pages (the React app's URLs).
  * Every page is its own chunk. React registered each path with and without a
  * trailing slash; the Solid router matches both.
  */
@@ -12,16 +13,19 @@ const Invite = lazy(() => import('../pages/Invite.jsx'));
 const AmbassadorProgram = lazy(() => import('../pages/AmbassadorProgram.jsx'));
 const EmailPreferences = lazy(() => import('../pages/EmailPreferences.jsx'));
 const ExtensionAuthBridge = lazy(() => import('../pages/ExtensionAuthBridge.jsx'));
+const ExtensionDownload = lazy(() => import('../pages/ExtensionDownload.jsx'));
+const ConnectCardRails = lazy(() => import('../pages/ConnectCardRails.jsx'));
 const Auth = lazy(() => import('../pages/Auth.jsx'));
-const CardTraderZero = lazy(() => import('../pages/CardTraderZero.jsx'));
+const CardTraderZero = lazy(async () => { await loadMypokoinPreview(); return import('../pages/CardTraderZero.jsx'); });
 const CardTraderOneDay = lazy(() => import('../pages/CardTraderOneDay.jsx'));
+const ZeroPicked = lazy(async () => { await loadMypokoinPreview(); return import('../pages/ZeroPicked.jsx'); });
 const Messages = lazy(() => import('../pages/Messages.jsx'));
 const Conversation = lazy(() => import('../pages/Messages.jsx').then((m) => ({ default: m.Conversation })));
-const Inventory = lazy(() => import('../pages/Inventory.jsx'));
+const Inventory = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Inventory.jsx'); });
 const SellSpreadsheet = lazy(() => import('../pages/SellSpreadsheet.jsx'));
 const Associate = lazy(() => import('../pages/Associate.jsx'));
 const Portfolio = lazy(() => import('../pages/Portfolio.jsx'));
-const Profile = lazy(() => import('../pages/Profile.jsx'));
+const Profile = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Profile.jsx'); });
 const SellerHome = lazy(() => import('../pages/SellerHome.jsx'));
 
 export default [
@@ -31,14 +35,20 @@ export default [
   { path: '/ambassadorprogram', component: AmbassadorProgram },
   { path: '/email-preferences', component: EmailPreferences },
   { path: '/extension/auth-bridge', component: ExtensionAuthBridge },
+  // Silver-only Chrome extension download; the zip itself is GET /api/extension-download.
+  { path: '/extension', component: ExtensionDownload },
+  { path: '/extension.zip', component: ExtensionDownload },
+  { path: '/connect/cardrails', component: ConnectCardRails },
   { path: '/auth', component: Auth },
   { path: '/mypokoin/zero', component: CardTraderZero },
+  { path: '/mypokoin/picked', component: ZeroPicked },
   { path: '/mypokoin/1dr', component: CardTraderOneDay },
   { path: '/messages', component: Messages },
   { path: '/messages/:username', component: Conversation },
   { path: '/mypokoin/spreadsheet', component: SellSpreadsheet },
   { path: '/mypokoin/import', component: Inventory },
   { path: '/mypokoin/settings', component: Inventory },
+  { path: '/mypokoin/pricer', component: Inventory },
   { path: '/mypokoin/collection', component: Inventory },
   { path: '/mypokoin/location/:location', component: Inventory },
   { path: '/mypokoin', component: Inventory },

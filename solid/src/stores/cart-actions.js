@@ -18,17 +18,19 @@ import {
 import {
   readInsurance,
   readPknDiscount,
+  readParcelServices,
   readShippingCountry,
   readShippingService,
   writeInsurance,
   writePknDiscount,
+  writeParcelServices,
   writeShippingCountry,
   writeShippingService,
 } from '@market/shipping-choice.js';
 import { cartItems, updateCart } from './cart.js';
 
 /**
- * The rest of React useCart() (market/src/cart.jsx) for the cart, checkout,
+ * Cart actions beyond stores/cart.js for the cart, checkout,
  * shipping and orders pages: row edits beyond add/qty/remove, the buyer's
  * shipping/insurance/balance choices and the Stripe checkout bookkeeping.
  * Kept out of stores/cart.js so the header's cart (first paint) stays small.
@@ -46,7 +48,9 @@ export function cartCanNftOnly() {
 // Buyer choices shared by the cart, /shipping and checkout (market/src/shipping-choice.js).
 const [insurance, setInsuranceSignal] = createSignal(browser ? readInsurance() : false);
 const [useBalance, setUseBalanceSignal] = createSignal(browser ? readPknDiscount() : false);
-let choice = browser ? { country: readShippingCountry(), service: readShippingService() } : { country: '', service: '' };
+let choice = browser
+  ? { country: readShippingCountry(), service: readShippingService(), parcels: readParcelServices() }
+  : { country: '', service: '', parcels: {} };
 const [shippingChoice, setShippingChoiceSignal] = createSignal(choice);
 
 export const cartInsurance = insurance;
@@ -64,7 +68,7 @@ export function setCartUseBalance(on) {
   writePknDiscount(Boolean(on));
 }
 
-/** Merge { country?, service? } into the buyer's shipping choice. */
+/** Merge { country?, service?, parcel?: { key, service } } into the buyer's shipping choice. */
 export function setCartShippingChoice(patch) {
   const next = mergeShippingChoice(choice, patch);
   if (next === choice) return;
@@ -72,6 +76,7 @@ export function setCartShippingChoice(patch) {
   setShippingChoiceSignal(next);
   writeShippingCountry(next.country);
   writeShippingService(next.service);
+  writeParcelServices(next.parcels);
 }
 
 export function setCartGift(on) {

@@ -39,7 +39,7 @@ screen with resend.
 
 ## Web SPA surface
 
-- `market/src/pages/Auth.jsx` renders the states: signup → Check-your-email
+- `solid/src/pages/Auth.jsx` renders the states: signup → Check-your-email
   (resend + cooldown) → `/auth?signupToken=…` callback → `signInWithCustomToken`
   → redirect into the app. `?verified=1` (native Firebase action-code return)
   shows "Email verified, sign in".

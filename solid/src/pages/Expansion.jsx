@@ -8,10 +8,10 @@ import { isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } fro
 import { filterExpansionCards } from '@market/expansion-filters.js';
 import { setSeoTitle } from '@market/seo.js';
 import { setDeskSkeletonCount } from '@market/set-desk-preview.js';
-import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '@market/set-logos.js';
+import { expansionLogoSrc, eraHref, tcgEra } from '@market/set-logos.js';
 import { defaultExpansionSort, expansionTilesReady, hasOfficialSetList } from '@market/set-official-lists.js';
 import { Action, track } from '@market/track.js';
-import CardArt from '../components/CardArt.jsx';
+import ExpansionMark from '../components/ExpansionMark.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -71,7 +71,7 @@ function infoOf(payload) {
 }
 
 /**
- * Set desk (market/src/pages/Expansion.jsx). Waits for the whole set walk
+ * Set desk. Waits for the whole set walk
  * (or the prebuilt snapshot) before painting tiles, then renders every loaded
  * card; Official order where a printed checklist exists (D00003F). Back
  * restores the filters and view of that history entry (D00005C).
@@ -221,7 +221,6 @@ function SetDesk(props) {
   const name = () => info()?.expansion?.name || prettySlug(slug);
   const tilesReady = () => expansionTilesReady(info(), slug, name());
   const loading = () => !error() && !tilesReady();
-  const symbol = () => expansionSymbolSrc(info()?.expansion || { slug });
   const wordmark = () => expansionLogoSrc(info()?.expansion || { slug, name: name() });
   const printFlag = () => printFlagFromNationality(resolveExpansionNationality({
     ...(info()?.expansion || {}),
@@ -263,9 +262,10 @@ function SetDesk(props) {
     || sort() !== defaultSort();
   const eraName = () => tcgEra(info()?.expansion || { slug, name: name(), set: name() });
   const eraPath = () => (eraName() ? eraHref(eraName()) : '');
-  const lede = () => (loading()
+  const ledeText = () => (loading()
     ? 'Loading cards…'
     : `${(deskTotal() || shown().length).toLocaleString()} cards${eraName() ? ` in ${eraName()}` : ''}.`);
+  const lede = () => (loading() ? <span class="wait-text">Loading cards…</span> : ledeText());
   // Skeletons only while the set is really loading, at most three rows. Loaded
   // cards always render (images are loading="lazy"); off-screen tiles skip
   // layout via content-visibility (.set-desk .grid > .tile).
@@ -312,7 +312,7 @@ function SetDesk(props) {
 
   return (
     <div class="page desk set-desk" aria-busy={loading() ? 'true' : undefined}>
-      <SeoHead title={setSeoTitle(name())} description={lede()} canonical={`/marketplace/sets/${slug}`} />
+      <SeoHead title={setSeoTitle(name())} description={ledeText()} canonical={`/marketplace/sets/${slug}`} />
       <SeoCrumbs items={crumbs()} />
       <PageHead kicker="Set" title={name()} lede={lede()} printFlag={printFlag()}>
         <Show when={wordmark()}>
@@ -330,11 +330,15 @@ function SetDesk(props) {
             }))}
           />
         </Show>
-        <Show when={symbol()}>
-          <span class="set-shortcut is-on set-sym-wrap" aria-hidden="true">
-            <CardArt class="set-sym set-shortcut-sym" src={symbol()} alt="" fallback="hide" />
-          </span>
-        </Show>
+        {/* Trainer Kit halves: the mascot stamp is the set mark (ExpansionMark). */}
+        <span class="set-shortcut is-on set-sym-wrap" aria-hidden="true">
+          <ExpansionMark
+            class="set-sym"
+            slug={slug}
+            setName={name()}
+            symbolUrl={info()?.expansion?.defaultSymbolUrl || info()?.expansion?.symbolImageUrl}
+          />
+        </span>
       </PageHead>
       <form
         class="set-browse"
@@ -438,7 +442,7 @@ function SetDesk(props) {
           </Show>
         </div>
         <p class="result-count">
-          <Show when={!loading()} fallback="Loading…">
+          <Show when={!loading()} fallback={<span class="wait-text">Loading…</span>}>
             <strong>{shown().length.toLocaleString()}</strong>
             {filtersOn() ? ' matching' : ` of ${deskTotal().toLocaleString()}`}
           </Show>

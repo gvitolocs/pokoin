@@ -1,0 +1,15 @@
+[Unit]
+Description=Mirror the off-site wal-g store to mybook (local PITR copy, read-only key)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/pokoin/backup.env
+ExecStartPre=-%h/.local/bin/pokoin-ops hc-ping --unit %n start
+ExecStartPre=/usr/bin/mountpoint -q /home/nez/mnt/mybook
+ExecStart=%h/.local/bin/rclone sync --fast-list --transfers 4 --checkers 8 ${POKOIN_WALG_RCLONE_REMOTE} ${POKOIN_WALG_MIRROR_DIR}
+ExecStartPost=-%h/.local/bin/pokoin-ops hc-ping --unit %n
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h

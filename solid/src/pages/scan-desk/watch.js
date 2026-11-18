@@ -1,4 +1,4 @@
-import { createEffect, createMemo } from 'solid-js';
+import { createEffect, createMemo, untrack } from 'solid-js';
 
 function sameList(a, b) {
   if (a === b) return true;
@@ -17,5 +17,9 @@ function sameList(a, b) {
  */
 export function watch(deps, apply) {
   const key = createMemo(deps, { equals: sameList });
-  createEffect(key, apply);
+  // Explicitly untracked: reads inside `apply` are snapshots by design.
+  createEffect(key, (value, prev) => {
+    // Returning forwards `apply`'s cleanup, which must survive `untrack`.
+    return untrack(() => apply(value, prev));
+  });
 }

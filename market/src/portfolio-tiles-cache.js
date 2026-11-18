@@ -57,14 +57,25 @@ export function normalizePortfolioTiles(partial = {}) {
   return tiles;
 }
 
-/** Collection-summary fields only — omit `listed` so merges keep the inventory tile. */
+/** Collection-summary fields. Include `listed` when the summary has one
+ * (`copies` → `cards`); omit it when missing or null so a cache merge keeps
+ * the inventory tile.
+ */
 export function portfolioTilesFromSummary(data) {
-  return {
+  const tiles = {
     ownedCards: asNonNegInt(data?.cardsOwned),
     physicalOwned: asNonNegInt(data?.physicalOwned ?? data?.physicalItems),
     nftOwned: asNonNegInt(data?.nftOwned ?? data?.nftItems),
     uniqueItems: asNonNegInt(data?.items),
   };
+  if (data?.listed && typeof data.listed === 'object') {
+    tiles.listed = normalizeListedSummary({
+      listings: data.listed.listings,
+      cards: data.listed.copies,
+      listedPkn: data.listed.listedPkn,
+    });
+  }
+  return tiles;
 }
 
 /** Stable signature so an unchanged refresh does not thrash setState. */

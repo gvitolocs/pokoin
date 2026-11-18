@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/dist-web"
+# Output directory: dist-web by default, or the first argument (emptied first,
+# so never the repo, a folder inside it, or one of its parents).
+OUT="${1:-$ROOT/dist-web}"
+mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
+out_dir="${OUT%/}"
+case "$ROOT/" in "$out_dir"/*) echo "build-web: refusing to empty $OUT" >&2; exit 1 ;; esac
+case "$OUT/" in "$ROOT"/*) [[ "$OUT" == "$ROOT/dist-web" ]] || { echo "build-web: refusing to empty $OUT" >&2; exit 1; } ;; esac
 cd "$ROOT"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 cp "$ROOT/index.html" "$OUT/landing.html"
 cp -a "$ROOT/home" "$OUT/home"
+node "$ROOT/scripts/build-product-pages.mjs" "$OUT"
 cp "$ROOT/home/favicon.ico" "$OUT/favicon.ico"
 cp "$ROOT/home/favicon-32x32.png" "$OUT/favicon-32x32.png"
 cp "$ROOT/home/favicon-48x48.png" "$OUT/favicon-48x48.png"
@@ -71,25 +79,35 @@ t = t.replace('href="home/', 'href="/home/').replace('src="home/', 'src="/home/'
 p.write_text(t)
 print("landing", p)
 PY
-cd "$ROOT/market"
-if [[ -f package-lock.json ]]; then
-  npm ci
-else
-  npm install
-fi
-# Marketplace SPA talks to api.pokoin.com. Do not source supabase-pokoin.env.
-npm run build
+# The marketplace SPA is the Solid app (solid/). Its shared modules live in
+# market/src, so market/ installs their packages (firebase, jsqr); market/public
+# is Solid's publicDir. It talks to api.pokoin.com. Do not source supabase-pokoin.env.
+for pkg in market solid; do
+  if [[ -f "$ROOT/$pkg/package-lock.json" ]]; then
+    (cd "$ROOT/$pkg" && npm ci)
+  else
+    (cd "$ROOT/$pkg" && npm install)
+  fi
+done
+(cd "$ROOT/solid" && npm run build)
 mkdir -p "$OUT/market"
-cp -a "$ROOT/market/dist/." "$OUT/market/"
-# React/Solid switch (docs/frontend-perf/PLAN.md). On when solid/owned-routes.json
-# says "enabled": true, so origin/main decides; POKOIN_UI_SWITCH=0/1 overrides it.
-# Off, the shell and the deployed files are exactly the React build.
-UI_SWITCH_DEFAULT=$(node -e 'process.stdout.write(require(process.argv[1]).enabled ? "1" : "0")' "$ROOT/solid/owned-routes.json")
-if [[ "${POKOIN_UI_SWITCH:-$UI_SWITCH_DEFAULT}" == "1" ]]; then
-  (cd "$ROOT/solid" && npm ci && npm run build)
-  node "$ROOT/scripts/build-ui-shell.mjs" "$OUT"
-fi
+cp -a "$ROOT/solid/dist/." "$OUT/market/"
 # White-edge-pass dumps stay off the production SPA. Keep /review for
 # test.pokoin.com boards (sanitize, espurr, ocr).
 rm -rf "$OUT/market/review/white-edge-pass"
+# The landing loads its Solid island (hero typeahead, Best sellers rail) as
+# /market/landing-island.js; point it at the hashed entry the island build wrote.
+python3 - <<PY
+import json
+from pathlib import Path
+manifest = Path("$OUT/market/landing-manifest.json")
+entry = json.loads(manifest.read_text())["src/landing/island.jsx"]["file"]
+for page in (Path("$OUT/landing.html"),):
+    t = page.read_text()
+    if 'src="/market/landing-island.js"' not in t:
+        raise SystemExit(f"build-web: {page} has no landing island script")
+    page.write_text(t.replace('src="/market/landing-island.js"', f'src="/market/{entry}"'))
+manifest.unlink()
+print("landing island", entry)
+PY
 echo "built $OUT"

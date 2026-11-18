@@ -2,6 +2,7 @@
 
 pub mod ambassador;
 pub mod associate;
+pub mod cardrails;
 pub mod chat;
 pub mod marketplace_game;
 pub mod collection;

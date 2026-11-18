@@ -3,21 +3,38 @@ import {
   cancelListing,
   createListing,
   fetchOwnedCollection,
-  fetchPriceCheck,
-  fetchSellerListings,
+  fetchPriceChecksByGame,
   imageSrc,
   removeCollectionItem,
   requestNftShipping,
 } from '@market/api.js';
 import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '@market/collection-holdings.js';
-import CardArt from '../CardArt.jsx';
+import { formatSellerPrice, pknFromPriceInput, priceInputFromPkn } from '@market/seller-currency.js';
+import { game } from '@market/game.js';
+import { inventoryBooks } from '@market/inventory-book.js';
+import { gamePrices, priceCheckGroups, priceGame } from '@market/inventory-price.js';
+import ScanImage from '../ScanImage.jsx';
 import { Alert, DeskPanel, EmptyDesk } from '../Desk.jsx';
+import { loadOwnerBook } from '../../lib/owner-book.js';
+import { createPointerDrag } from '../../lib/pointer-drag.js';
 import { accountProfile } from '../../stores/account.js';
 import { authUid, authUser, getBearer, signedIn } from '../../stores/auth.js';
 import { sellerCurrency, sellerSettings } from '../../stores/buyer.js';
+import { previewCollection } from '../../pages/mypokoin-preview.js';
+import { createTabCache } from '../../lib/tab-cache.js';
+import { memoizeByRows, memoizePair } from '../../lib/derived-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 
-const DRAG_TYPE = 'application/x-pokoin-collection';
 const ADDRESS_FIELDS = ['name', 'line1', 'city', 'postalCode', 'country'];
+
+// The last holdings read, in memory only: a revisit of the tab repaints them
+// while they refresh instead of blanking to a skeleton.
+const holdingsCache = createTabCache();
+
+// Coming back to the tab rebuilds this desk over the same two arrays, and
+// splitting them is the same answer: both walks are remembered per book.
+const partitionOf = memoizeByRows(partitionHoldings);
+const deskOf = memoizePair(splitOwnedDesk);
 
 function canShip(row) {
   const status = String(row.physicalShippingStatus || '');
@@ -28,21 +45,8 @@ function cardLabel(row) {
   return row?.cardName || row?.name || row?.cardId || 'Card';
 }
 
-function holdingMeta(row) {
-  return [
-    row.setName,
-    row.collectorNumber,
-    row.condition,
-    row.language,
-    isNftHolding(row) ? (row.physicalShippingStatus || 'not_requested') : null,
-    Number(row.quantity) > 1 ? `×${row.quantity}` : null,
-  ].filter(Boolean);
-}
-
 function listingMeta(listing) {
-  const price = Number(listing?.pricePkn ?? listing?.price_pkn ?? 0);
   return [
-    Number.isFinite(price) && price > 0 ? `${price} PKN` : null,
     listing?.condition,
     listing?.language,
     Number(listing?.quantityAvailable ?? listing?.quantity_available) > 1
@@ -60,44 +64,65 @@ function cardPicture(row) {
   }, 'hero');
 }
 
+function setLine(row) {
+  return [row?.setName, row?.collectorNumber].filter(Boolean).join(' · ');
+}
+
+function FacetChips(props) {
+  return (
+    <span class="collection-chips">
+      <For each={props.chips}>{(chip) => <span class="facet-chip">{chip}</span>}</For>
+    </span>
+  );
+}
+
 function HoldingRow(props) {
   const row = () => props.row;
   const nft = () => isNftHolding(row());
-  const meta = () => holdingMeta(row());
+  const chips = () => [
+    nft() ? 'NFT' : 'Physical',
+    row().condition,
+    row().language,
+    nft() ? (row().physicalShippingStatus || 'not_requested') : null,
+    Number(row().quantity) > 1 ? `×${row().quantity}` : null,
+  ].filter(Boolean);
   return (
     <article
-      class="collection-tile"
+      class={['collection-tile', { 'is-draggable': Boolean(props.onPointerDown) }]}
       data-ownership={nft() ? 'nft' : 'physical'}
-      draggable={props.draggable ? 'true' : undefined}
-      onDragStart={(event) => { if (props.draggable) props.onDragCard(event, row()); }}
+      draggable="false"
+      onPointerDown={(event) => props.onPointerDown?.(event, row())}
+      onPointerMove={props.onPointerMove}
+      onPointerUp={props.onPointerUp}
+      onPointerCancel={props.onPointerCancel}
     >
-      <CardArt class="collection-tile-art" src={cardPicture(row())} alt={cardLabel(row())} full />
+      <ScanImage class="collection-tile-art" letterClass="collection-tile-art scan-letter" src={cardPicture(row())} label={cardLabel(row())} alt={cardLabel(row())} />
       <div class="collection-tile-body">
         <strong class="thread-title">{cardLabel(row())}</strong>
-        <span class="thread-meta">
-          <span class="thread-badge">{nft() ? 'NFT' : 'Physical'}</span>
-          {meta().length ? ` · ${meta().join(' · ')}` : ''}
-        </span>
+        <Show when={setLine(row())}><span class="thread-meta">{setLine(row())}</span></Show>
+        <FacetChips chips={chips()} />
         <Show when={props.onAsk}>
           <label class="collection-ask">
             <span>Ask</span>
             <span class="collection-ask-field">
               <input
-                inputmode="numeric"
+                inputmode="decimal"
                 class={{ 'is-suggested': Boolean(props.suggested) }}
-                value={props.ask}
+                value={priceInputFromPkn(props.ask, props.currency)}
                 placeholder="0"
                 aria-label={`Ask price for ${cardLabel(row())}`}
-                onInput={(event) => {
-                  const value = event.target.value.replace(/[^\d]/g, '');
-                  event.target.value = value;
-                  props.onAsk(row().id, value);
+                onChange={(event) => {
+                  props.onAsk(row().id, pknFromPriceInput(event.target.value, props.currency) ?? '');
                 }}
-                onDragStart={(event) => event.preventDefault()}
               />
-              <em class="collection-ask-unit">{props.currency || 'PKN'}</em>
+              <em class="collection-ask-unit">{props.currency || sellerCurrency()}</em>
             </span>
           </label>
+        </Show>
+        <Show when={props.onList}>
+          <button type="button" class="btn ghost collection-move" disabled={props.busy} onClick={() => props.onList(row())}>
+            List →
+          </button>
         </Show>
       </div>
       <Show when={props.onRemove}>
@@ -123,20 +148,29 @@ function ListedRow(props) {
   const listing = () => props.entry.listing;
   const row = () => props.entry.holding || listing();
   const name = () => cardLabel(row());
-  const meta = () => listingMeta(listing()).filter((part) => !String(part).endsWith(' PKN'));
+  const chips = () => listingMeta(listing());
   const price = () => Number(listing()?.pricePkn ?? listing()?.price_pkn ?? 0);
   return (
-    <article class="collection-tile" data-ownership="listed" draggable="true" onDragStart={(event) => props.onDragCard(event, props.entry)}>
-      <CardArt class="collection-tile-art" src={cardPicture(row())} alt={name()} full />
+    <article
+      class="collection-tile is-draggable"
+      data-ownership="listed"
+      draggable="false"
+      onPointerDown={(event) => props.onPointerDown?.(event, props.entry)}
+      onPointerMove={props.onPointerMove}
+      onPointerUp={props.onPointerUp}
+      onPointerCancel={props.onPointerCancel}
+    >
+      <ScanImage class="collection-tile-art" letterClass="collection-tile-art scan-letter" src={cardPicture(row())} label={name()} alt={name()} />
       <div class="collection-tile-body">
         <strong class="thread-title">{name()}</strong>
-        <span class="thread-meta">
-          <span class="thread-badge">Listed</span>
-          {meta().length ? ` · ${meta().join(' · ')}` : ''}
-        </span>
+        <Show when={setLine(row())}><span class="thread-meta">{setLine(row())}</span></Show>
+        <FacetChips chips={['Listed', ...chips()]} />
         <Show when={Number.isFinite(price()) && price() > 0}>
-          <p class="collection-tile-price">{price()} {props.currency || 'PKN'}</p>
+          <p class="collection-tile-price">{formatSellerPrice(price(), props.currency || sellerCurrency())}</p>
         </Show>
+        <button type="button" class="btn ghost collection-move" disabled={props.busy} onClick={() => props.onHold(props.entry)}>
+          ← Hold
+        </button>
       </div>
     </article>
   );
@@ -173,30 +207,22 @@ function facetOptions(rows) {
   };
 }
 
-function readDrag(event) {
-  const raw = event.dataTransfer.getData(DRAG_TYPE) || event.dataTransfer.getData('text/plain');
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 /**
- * MyPokoin Collection tab (market/src/components/CollectionHoldings.jsx):
+ * MyPokoin Collection tab:
  * what you own, physical + NFT. Listed copies stay owned and sit on the
  * right; drag a card across to list it or to hold it.
  */
-export default function CollectionHoldings() {
+export default function CollectionHoldings(props) {
   const uid = () => authUid() || accountProfile()?.uid || '';
-  const [rows, setRows] = createSignal(null);
-  const [listings, setListings] = createSignal([]);
+  const firstUid = untrack(uid);
+  const [rows, setRows] = createSignal(holdingsCache.get(firstUid) ?? null);
+  // Listed copies come from the seller's MyPokoin book (stored, stamp-checked).
+  const [listings, setListings] = createSignal(inventoryBooks.peek(firstUid, game().id)?.rows || []);
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal('');
   const [form, setForm] = createSignal({ name: '', line1: '', city: '', postalCode: '', country: '' });
   const [removingId, setRemovingId] = createSignal(null);
-  const [over, setOver] = createSignal('');
   const [heldQuery, setHeldQuery] = createSignal('');
   const [heldCond, setHeldCond] = createSignal('');
   const [heldLang, setHeldLang] = createSignal('');
@@ -206,19 +232,25 @@ export default function CollectionHoldings() {
   const [asks, setAsks] = createSignal({});
   const [suggestedAsks, setSuggestedAsks] = createSignal({});
   const editedAsks = new Set();
+  const [heldLimit, setHeldLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [listedLimit, setListedLimit] = createSignal(COLLECTION_BATCH_SIZE);
+  const [nftLimit, setNftLimit] = createSignal(COLLECTION_BATCH_SIZE);
 
   async function loadCollection() {
-    setRows(null);
     setError('');
     const seller = untrack(uid);
+    const gameId = game().id;
     try {
       const token = await getBearer();
-      const [owned, stock] = await Promise.all([
+      const [owned] = await Promise.all([
         fetchOwnedCollection(token),
-        seller ? fetchSellerListings(seller, token, { limit: 1000 }).catch(() => ({ listings: [] })) : { listings: [] },
+        seller
+          ? loadOwnerBook(seller, gameId, (next, complete = true) => { if (complete) setListings(next); }).catch(() => null)
+          : null,
       ]);
-      setRows(Array.isArray(owned.items) ? owned.items : []);
-      setListings(stock.listings || stock.items || []);
+      const items = Array.isArray(owned.items) ? owned.items : [];
+      holdingsCache.set(seller, items);
+      setRows(items);
     } catch (err) {
       console.error('collection load failed', err);
       setError("Couldn't load your collection");
@@ -227,23 +259,45 @@ export default function CollectionHoldings() {
   }
 
   createEffect(
-    () => (signedIn() ? uid() || 'signed-in' : ''),
+    () => (props.preview ? 'preview' : (signedIn() ? uid() || 'signed-in' : '')),
     (key) => {
       if (!key) {
         setRows(null);
         return;
       }
+      if (key === 'preview') {
+        const pack = previewCollection();
+        setRows(pack.rows);
+        setListings(pack.listings);
+        setAsks(pack.asks);
+        setError('');
+        return;
+      }
+      // The stored book paints at once and is only asked for again once the
+      // cached one ages: switching tabs back and forth reads the memory copy.
+      const seller = uid();
+      setRows(holdingsCache.get(seller) ?? null);
+      if (holdingsCache.fresh(seller)) return undefined;
       loadCollection().catch(() => setRows([]));
     },
   );
 
-  const nft = createMemo(() => partitionHoldings(rows() || []).nft);
-  const desk = createMemo(() => splitOwnedDesk(rows() || [], listings()));
+  // Listing, holding, dragging and removing update the rows in place of a
+  // refetch; the cache has to carry the same book to the next visit.
+  createEffect(rows, (value) => {
+    const seller = uid();
+    if (seller && Array.isArray(value) && value.length && holdingsCache.get(seller) !== value) {
+      holdingsCache.set(seller, value);
+    }
+  });
+
+  const nft = createMemo(() => partitionOf(rows() || []).nft);
+  const desk = createMemo(() => deskOf(rows() || [], listings()));
   const shippable = () => nft().filter(canShip);
   const heldPhysical = createMemo(() => desk().held.filter((entry) => entry.kind !== 'nft'));
   const heldNft = () => desk().held.filter((entry) => entry.kind === 'nft');
-  const visibleHeld = () => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() }));
-  const visibleListed = () => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() }));
+  const visibleHeld = createMemo(() => heldPhysical().filter((entry) => collectionRowMatches(entry.holding, { query: heldQuery(), condition: heldCond(), language: heldLang() })));
+  const visibleListed = createMemo(() => desk().listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, { query: listedQuery(), condition: listedCond(), language: listedLang() })));
   const heldFacets = () => facetOptions(heldPhysical().map((entry) => entry.holding));
   const listedFacets = () => facetOptions(desk().listed.map((entry) => entry.holding || entry.listing));
   const ownedCards = () => (rows() || []).reduce((sum, row) => sum + (Number(row.quantity) > 0 ? Number(row.quantity) : 0), 0)
@@ -251,6 +305,15 @@ export default function CollectionHoldings() {
       const qty = Number(entry.listing?.quantityAvailable ?? entry.listing?.quantity_available ?? 0);
       return sum + (qty > 0 ? qty : 0);
     }, 0);
+
+  createEffect(
+    () => (rows() ? `${ownedCards()}:${heldPhysical().length}:${desk().listed.length}` : ''),
+    (key) => {
+      if (!key) return;
+      const [owned, held, listed] = key.split(':').map(Number);
+      props.onStats?.({ owned, held, listed });
+    },
+  );
 
   function setAsk(id, value) {
     editedAsks.add(id);
@@ -265,6 +328,7 @@ export default function CollectionHoldings() {
 
   const heldKey = createMemo(() => heldPhysical().map((entry) => [
     entry.holding.id,
+    priceGame(entry.holding, game().id),
     entry.holding.cardId || entry.holding.blueprintId || '',
     entry.holding.condition || '',
     entry.holding.language || '',
@@ -279,21 +343,18 @@ export default function CollectionHoldings() {
       let cancelled = false;
       (async () => {
         try {
-          const items = holdings.map((holding) => ({
-            cardId: String(holding.cardId || holding.blueprintId || ''),
-            condition: String(holding.condition || 'NM').toUpperCase(),
-            language: String(holding.language || '').toUpperCase(),
-          })).filter((item) => /^\d+$/.test(item.cardId));
-          if (!items.length) return;
+          // One price check per game: card ids are per game.
+          const gameId = untrack(game).id;
+          const groups = priceCheckGroups(holdings, gameId);
+          if (!groups.length) return;
           const token = await getBearer();
-          const data = await fetchPriceCheck(items.slice(0, 100), token);
+          const byGame = await fetchPriceChecksByGame(groups, token);
           if (cancelled) return;
-          const prices = data?.prices || {};
           const marks = {};
           const next = { ...untrack(asks) };
           for (const holding of holdings) {
             if (editedAsks.has(holding.id)) continue;
-            const ask = suggestedHoldingAsk(prices, holding);
+            const ask = suggestedHoldingAsk(gamePrices(byGame, holding, gameId), holding);
             if (!ask) continue;
             next[holding.id] = ask;
             marks[holding.id] = true;
@@ -310,24 +371,32 @@ export default function CollectionHoldings() {
     },
   );
 
-  function dragHolding(event, row) {
-    const payload = JSON.stringify({ side: 'held', id: row.id });
-    event.dataTransfer.setData(DRAG_TYPE, payload);
-    event.dataTransfer.setData('text/plain', payload);
-    event.dataTransfer.effectAllowed = 'move';
-  }
-
-  function dragListed(event, entry) {
-    const payload = JSON.stringify({ side: 'listed', id: String(entry.listing?.id || '') });
-    event.dataTransfer.setData(DRAG_TYPE, payload);
-    event.dataTransfer.setData('text/plain', payload);
-    event.dataTransfer.effectAllowed = 'move';
-  }
-
   async function listHolding(holding) {
     const price = Number(asks()[holding.id] || 0);
     if (!Number.isInteger(price) || price <= 0) {
-      setError(`Set an ask in PKN before listing ${cardLabel(holding)}.`);
+      setError(`Set an ask in ${sellerCurrency()} before listing ${cardLabel(holding)}.`);
+      return;
+    }
+    if (props.preview) {
+      const listing = {
+        id: `preview-${holding.id}`,
+        cardId: holding.cardId || holding.blueprintId,
+        cardName: holding.cardName || holding.name,
+        cardImageUrl: holding.cardImageUrl || '',
+        setName: holding.setName || '',
+        collectorNumber: holding.collectorNumber || '',
+        condition: holding.condition || 'NM',
+        language: holding.language || 'EN',
+        pricePkn: price,
+        quantityAvailable: Math.max(1, Number(holding.quantity) || 1),
+        status: 'active',
+        sourceListingId: holding.id,
+      };
+      setListings((current) => [...(current || []), listing]);
+      setRows((current) => (current || []).map((row) => (
+        row.id === holding.id ? { ...row, listingId: listing.id } : row
+      )));
+      setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
       return;
     }
     const shipFrom = String(sellerSettings()?.shipFromCountry || '').trim().toUpperCase();
@@ -368,12 +437,38 @@ export default function CollectionHoldings() {
         row.id === holding.id ? { ...row, listingId: listing.id } : row
       )));
     }
-    setMessage(`${cardLabel(holding)} is listed at ${price} PKN.`);
+    setMessage(`${cardLabel(holding)} is listed at ${formatSellerPrice(price, sellerCurrency())}.`);
   }
 
   async function holdListing(entry) {
     const listingId = String(entry.listing?.id || '');
     if (!listingId) return;
+    if (props.preview) {
+      setListings((current) => (current || []).map((row) => (
+        String(row.id) === listingId ? { ...row, status: 'inactive' } : row
+      )));
+      setRows((current) => {
+        const list = current || [];
+        const cleared = list.map((row) => (
+          String(row.listingId || '') === listingId ? { ...row, listingId: null } : row
+        ));
+        if (entry.holding) return cleared;
+        const listing = entry.listing || {};
+        return [...cleared, {
+          id: `preview-held-${listingId}`,
+          cardId: listing.cardId,
+          cardName: listing.cardName || listing.name,
+          setName: listing.setName || '',
+          collectorNumber: listing.collectorNumber || '',
+          condition: listing.condition || 'NM',
+          language: listing.language || 'EN',
+          quantity: Math.max(1, Number(listing.quantityAvailable) || 1),
+        }];
+      });
+      const name = cardLabel(entry.holding || entry.listing);
+      setMessage(entry.holding ? `${name} is back in your collection.` : `${name} is no longer listed.`);
+      return;
+    }
     const token = await getBearer();
     await cancelListing(listingId, token, uid());
     setListings((current) => current.map((row) => (
@@ -386,23 +481,12 @@ export default function CollectionHoldings() {
     setMessage(entry.holding ? `${name} is back in your collection.` : `${name} is no longer listed.`);
   }
 
-  async function onDrop(side, event) {
-    event.preventDefault();
-    setOver('');
-    const drag = readDrag(event);
-    if (!drag) return;
+  async function runMove(work) {
     setError('');
     setMessage('');
     setBusy(true);
     try {
-      if (side === 'listed' && drag.side === 'held') {
-        const holding = (rows() || []).find((row) => row.id === drag.id);
-        if (holding && !isNftHolding(holding)) await listHolding(holding);
-      }
-      if (side === 'held' && drag.side === 'listed') {
-        const entry = desk().listed.find((row) => String(row.listing?.id || '') === drag.id);
-        if (entry) await holdListing(entry);
-      }
+      await work();
     } catch (err) {
       console.error('collection move failed', err);
       setError(err?.message || "Couldn't move that card. Try again.");
@@ -411,11 +495,34 @@ export default function CollectionHoldings() {
     }
   }
 
+  const pointer = createPointerDrag({
+    onMove(action) {
+      if (action.from === 'held' && action.to === 'listed') {
+        const holding = (untrack(rows) || []).find((row) => row.id === action.payload?.id);
+        if (holding && !isNftHolding(holding)) void runMove(() => listHolding(holding));
+      }
+      if (action.from === 'listed' && action.to === 'held') {
+        const entry = untrack(desk).listed.find((row) => String(row.listing?.id || '') === action.payload?.id);
+        if (entry) void runMove(() => holdListing(entry));
+      }
+    },
+  });
+
+  function dragPayload(row) {
+    return { id: row?.id, image: cardPicture(row), label: cardLabel(row) };
+  }
+
   async function removeItem(row) {
     if (removingId()) return;
     setRemovingId(row.id);
     setError('');
     setMessage('');
+    if (props.preview) {
+      setRows((current) => (current || []).filter((item) => item.id !== row.id));
+      setMessage(`Removed ${cardLabel(row)} from your collection.`);
+      setRemovingId(null);
+      return;
+    }
     try {
       const token = await getBearer();
       const result = await removeCollectionItem({ itemId: row.id }, token);
@@ -441,6 +548,11 @@ export default function CollectionHoldings() {
     setBusy(true);
     setError('');
     setMessage('');
+    if (props.preview) {
+      setMessage(`Requested ${list.length} shipment${list.length === 1 ? '' : 's'}.`);
+      setBusy(false);
+      return;
+    }
     try {
       const token = await getBearer();
       const data = await requestNftShipping({
@@ -460,14 +572,15 @@ export default function CollectionHoldings() {
   const empty = () => rows() && heldPhysical().length === 0 && heldNft().length === 0 && desk().listed.length === 0 && !error();
   const loading = () => rows() == null && !error();
 
+  const columnHot = (side) => pointer.view().phase === 'dragging' && pointer.view().over === side;
+
   function Column(colProps) {
     return (
       <section
-        class={['collection-column', { 'is-over': over() === colProps.side }]}
+        class={['collection-column', { 'is-over': columnHot(colProps.side) }]}
         data-testid={`collection-${colProps.side}`}
-        onDragOver={(event) => { event.preventDefault(); setOver(colProps.side); }}
-        onDragLeave={() => setOver((current) => (current === colProps.side ? '' : current))}
-        onDrop={(event) => { void onDrop(colProps.side, event); }}
+        data-drop-zone={colProps.side}
+        ref={(element) => pointer.setZone(colProps.side, element)}
       >
         {colProps.children}
       </section>
@@ -495,12 +608,12 @@ export default function CollectionHoldings() {
       <Show when={rows() && !empty()}>
         <div class="collection-desk">
           <p class="page-lede">
-            {ownedCards()} card{ownedCards() === 1 ? '' : 's'} owned. Drag a card right to sell it, or left to hold it.
+            {ownedCards()} card{ownedCards() === 1 ? '' : 's'} owned. Drag a card across, or use List and Hold.
           </p>
           <div class="collection-split">
             <Column side="held">
               <DeskPanel flush title="In your collection" extra={<span class="thread-badge">{heldPhysical().length}</span>}>
-                <p class="page-lede">Not for sale. Set an ask, then drag the card to Listed.</p>
+                <p class="page-lede">Not for sale. Set an ask, then press List or drag the card to Listed.</p>
                 <ColumnTools
                   query={heldQuery()}
                   onQuery={setHeldQuery}
@@ -516,7 +629,7 @@ export default function CollectionHoldings() {
                   fallback={<p class="page-lede">{heldPhysical().length ? 'No cards match this search.' : 'Nothing held back. Drop a listed card here to stop selling it.'}</p>}
                 >
                   <div class="collection-tile-grid" data-testid="collection-physical">
-                    <For each={visibleHeld()} keyed={(entry) => entry.holding.id}>
+                    <For each={visibleHeld().slice(0, heldLimit())} keyed={(entry) => entry.holding.id}>
                       {(entry) => (
                         <HoldingRow
                           row={entry().holding}
@@ -524,26 +637,33 @@ export default function CollectionHoldings() {
                           currency={sellerCurrency()}
                           suggested={Boolean(suggestedAsks()[entry().holding.id])}
                           onAsk={setAsk}
-                          draggable
-                          onDragCard={dragHolding}
+                          busy={busy()}
+                          onList={(holding) => { void runMove(() => listHolding(holding)); }}
+                          onPointerDown={(event, card) => pointer.onPointerDown(event, { ...dragPayload(card), id: card.id }, 'held')}
+                          onPointerMove={pointer.onPointerMove}
+                          onPointerUp={pointer.onPointerUp}
+                          onPointerCancel={pointer.onPointerCancel}
                           onRemove={removeItem}
                           removing={removingId() === entry().holding.id}
                         />
                       )}
                     </For>
                   </div>
+                  <Show when={visibleHeld().length > heldLimit()}><button type="button" class="btn ghost" onClick={() => setHeldLimit(nextCollectionBatch(heldLimit(), visibleHeld().length))}>Show more</button></Show>
                 </Show>
                 <Show when={heldNft().length}>
                   <div class="collection-tile-grid" data-testid="collection-nft">
                     <p class="page-lede">NFT · {heldNft().length} holding{heldNft().length === 1 ? '' : 's'}</p>
-                    <For each={heldNft()}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <For each={heldNft().slice(0, nftLimit())}>{(entry) => <HoldingRow row={entry.holding} />}</For>
+                    <Show when={heldNft().length > nftLimit()}><button type="button" class="btn ghost" onClick={() => setNftLimit(nextCollectionBatch(nftLimit(), heldNft().length))}>Show more</button></Show>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>
             <Column side="listed">
               <DeskPanel flush title="Listed" extra={<span class="thread-badge">{desk().listed.length}</span>}>
-                <p class="page-lede">For sale. Drag a card left when you want to hold it.</p>
+                <p class="page-lede">For sale. Press Hold or drag a card left when you want to keep it.</p>
                 <ColumnTools
                   query={listedQuery()}
                   onQuery={setListedQuery}
@@ -559,10 +679,26 @@ export default function CollectionHoldings() {
                   fallback={<p class="page-lede">{desk().listed.length ? 'No cards match this search.' : 'No cards listed. Drop one here to sell it.'}</p>}
                 >
                   <div class="collection-tile-grid">
-                    <For each={visibleListed()} keyed={(entry) => String(entry.listing.id)}>
-                      {(entry) => <ListedRow entry={entry()} currency={sellerCurrency()} onDragCard={dragListed} />}
+                    <For each={visibleListed().slice(0, listedLimit())} keyed={(entry) => String(entry.listing.id)}>
+                      {(entry) => (
+                        <ListedRow
+                          entry={entry()}
+                          currency={sellerCurrency()}
+                          busy={busy()}
+                          onHold={(card) => { void runMove(() => holdListing(card)); }}
+                          onPointerDown={(event, card) => pointer.onPointerDown(
+                            event,
+                            { ...dragPayload(card.holding || card.listing), id: String(card.listing?.id || '') },
+                            'listed',
+                          )}
+                          onPointerMove={pointer.onPointerMove}
+                          onPointerUp={pointer.onPointerUp}
+                          onPointerCancel={pointer.onPointerCancel}
+                        />
+                      )}
                     </For>
                   </div>
+                  <Show when={visibleListed().length > listedLimit()}><button type="button" class="btn ghost" onClick={() => setListedLimit(nextCollectionBatch(listedLimit(), visibleListed().length))}>Show more</button></Show>
                 </Show>
               </DeskPanel>
             </Column>

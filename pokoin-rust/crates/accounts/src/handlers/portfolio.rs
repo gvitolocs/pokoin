@@ -2,7 +2,11 @@
 //!
 //! * `marketplace-portfolio-history` — the stored daily collection-value series.
 //!   Card values come from CardTrader sold medians only, so the pricing rules
-//!   live in [`crate::domain::portfolio_history`].
+//!   live in [`crate::domain::portfolio_history`]. A stored series that is on
+//!   the current basis answers the request at once and is recomputed behind it.
+
+use std::collections::HashSet;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -10,12 +14,13 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value as Json};
 
 use crate::domain::portfolio_catalog::{
-    catalog_select_sql, is_undefined_table, listing_join_sql, urls_join_sql,
+    catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    build_daily_series, clean_days, frozen_card_days, holding_slices,
-    sold_price_book, stored_is_current, stored_is_fresh, utc_day_key_ms, wallet_series,
-    HOLDINGS_SQL, PRICE_BASIS, SOLD_BY_BLUEPRINT_SQL, SERIES_REVISION,
+    add_utc_days, build_daily_series, clean_days, frozen_card_days, holding_slices,
+    sold_price_book, stored_is_current, stored_is_fresh, top_movers, utc_day_key_ms, wallet_series,
+    Mover, CARDS_BY_BLUEPRINT_SQL, HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION,
+    SOLD_BY_BLUEPRINT_SQL,
 };
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
@@ -147,37 +152,88 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
     let uid = claims.uid.clone();
     let firestore = state.firestore()?;
     let now_ms = state.clock().now().timestamp_millis();
-    let today_key = utc_day_key_ms(now_ms);
 
     let stored = read_stored(&firestore, &uid).await?;
-    if stored_is_fresh(stored.as_ref(), now_ms) {
-        let days = clean_days(stored.as_ref().and_then(|doc| doc.get("days")));
-        return Ok(ok_no_store(json!({ "ok": true, "days": days })));
+    match history_plan(stored.as_ref(), now_ms) {
+        Plan::ServeFresh => Ok(history_body(stored_days(stored.as_ref()))),
+        Plan::ServeStaleAndRefresh => {
+            let days = stored_days(stored.as_ref());
+            spawn_history_refresh(state, &uid, stored);
+            Ok(history_body(days))
+        }
+        Plan::ComputeNow => {
+            // There was no stored series to answer with, so a read model that
+            // cannot report one leaves the empty series the Node `readCardBook`
+            // catch produced.
+            let days = recompute_series(state, &uid, stored.as_ref())
+                .await?
+                .unwrap_or_default();
+            Ok(history_body(days))
+        }
     }
+}
 
-    // A missing or failing read model is not fatal: the last good series is
-    // served instead, exactly like the Node `readCardBook` catch.
+/// What a history request does with the series it just read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plan {
+    /// Answer with the stored days: recomputed less than `FRESH_MS` ago.
+    ServeFresh,
+    /// Answer with the stored days at once and recompute behind the response.
+    ServeStaleAndRefresh,
+    /// Nothing to answer with: recompute and wait for it.
+    ComputeNow,
+}
+
+/// Past days are frozen and sold prices arrive once a day, so a stored series
+/// on the current basis is good enough to show immediately even when the last
+/// recompute is hours old. Waiting for one made every visit pay for it.
+fn history_plan(stored: Option<&Json>, now_ms: i64) -> Plan {
+    if stored_is_fresh(stored, now_ms) {
+        return Plan::ServeFresh;
+    }
+    if stored_is_current(stored) && !stored_days(stored).is_empty() {
+        return Plan::ServeStaleAndRefresh;
+    }
+    Plan::ComputeNow
+}
+
+/// The days of a stored series, in the shape the client reads.
+fn stored_days(stored: Option<&Json>) -> Vec<Json> {
+    clean_days(stored.and_then(|doc| doc.get("days")))
+}
+
+fn history_body(days: Vec<Json>) -> Response {
+    ok_no_store(json!({ "ok": true, "days": days }))
+}
+
+/// The recompute and its stored write: card book, ledger, balance, series.
+/// `None` when the market read model is unavailable, which writes nothing so
+/// the stored series survives.
+#[allow(clippy::result_large_err)]
+async fn recompute_series(
+    state: &DomainState,
+    uid: &str,
+    stored: Option<&Json>,
+) -> Result<Option<Vec<Json>>> {
+    let now_ms = state.clock().now().timestamp_millis();
+    let today_key = utc_day_key_ms(now_ms);
+    let firestore = state.firestore()?;
+
     let card_book = match state.marketplace_db() {
-        Ok(db) => read_card_book(&db, &uid).await,
+        Ok(db) => read_card_book(&db, uid).await,
         Err(error) => {
             tracing::debug!(%error, "portfolio read model is not configured");
             None
         }
     };
     let Some((holdings, book)) = card_book else {
-        let stale = stored_is_current(stored.as_ref());
-        let days = if stale {
-            clean_days(stored.as_ref().and_then(|doc| doc.get("days")))
-        } else {
-            Vec::new()
-        };
-        return Ok(ok_no_store(json!({ "ok": true, "days": days })));
+        return Ok(None);
     };
 
-    let movements = read_ledger(&firestore, &uid).await;
-    let balance = read_balance(&firestore, &uid).await;
+    let movements = read_ledger(&firestore, uid).await;
+    let balance = read_balance(&firestore, uid).await;
     let wallet = wallet_series(&movements, balance, &today_key);
-    let frozen = frozen_card_days(stored.as_ref(), &today_key);
+    let frozen = frozen_card_days(stored, &today_key);
     let days = build_daily_series(&wallet, &holdings, &book, &frozen, &today_key);
 
     firestore
@@ -195,7 +251,56 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
         )
         .await?;
 
-    Ok(ok_no_store(json!({ "ok": true, "days": days })))
+    Ok(Some(days))
+}
+
+/// Uids with a history refresh running in this process.
+fn refresh_claims() -> &'static Mutex<HashSet<String>> {
+    static CLAIMS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    CLAIMS.get_or_init(Default::default)
+}
+
+/// One uid held in the in-flight set while its refresh runs. Releasing happens
+/// in `Drop`, so an error return and a panic both free the uid.
+struct RefreshClaim<'a>(&'a Mutex<HashSet<String>>, String);
+
+impl Drop for RefreshClaim<'_> {
+    fn drop(&mut self) {
+        lock_claims(self.0).remove(&self.1);
+    }
+}
+
+/// The in-flight set. A holder that panics already released its uid in `Drop`,
+/// so a poisoned lock is no reason to stop refreshing: take it anyway.
+fn lock_claims(claims: &Mutex<HashSet<String>>) -> MutexGuard<'_, HashSet<String>> {
+    claims
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The uid, when no refresh for it is already running.
+fn claim_uid<'a>(claims: &'a Mutex<HashSet<String>>, uid: &str) -> Option<RefreshClaim<'a>> {
+    if !lock_claims(claims).insert(uid.to_string()) {
+        return None;
+    }
+    Some(RefreshClaim(claims, uid.to_string()))
+}
+
+/// Recompute behind the response, at most once per uid at a time. A request
+/// that finds the uid already refreshing just serves its stored series.
+fn spawn_history_refresh(state: &DomainState, uid: &str, stored: Option<Json>) {
+    let Some(claim) = claim_uid(refresh_claims(), uid) else {
+        return;
+    };
+    let state = state.clone();
+    let uid = uid.to_string();
+    tokio::spawn(async move {
+        let outcome = recompute_series(&state, &uid, stored.as_ref()).await;
+        drop(claim);
+        if let Err(error) = outcome {
+            tracing::warn!(%error, "portfolio history background refresh failed");
+        }
+    });
 }
 
 fn utc_iso(millis: i64) -> String {
@@ -255,29 +360,163 @@ pub async fn portfolio_history_other() -> Response {
     response
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ---------------------------------------------------------------------------
+// marketplace-portfolio-movers
+// ---------------------------------------------------------------------------
 
-    #[test]
-    fn utc_iso_renders_milliseconds() {
-        assert_eq!(utc_iso(1_791_417_600_000), "2026-10-08T00:00:00.000Z");
-        assert_eq!(utc_iso(0), "1970-01-01T00:00:00.000Z");
-    }
+/// The chart opens on a month, so the movers window does too.
+const MOVER_DEFAULT_DAYS: i64 = 30;
+const MOVER_DEFAULT_LIMIT: usize = 6;
+const MOVER_MAX_LIMIT: usize = 12;
 
-    #[test]
-    fn error_bodies_only_carry_a_code_when_there_is_one() {
-        let response = history_error(ApiError::internal("Firestore is not configured."));
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(
-            response.headers().get(axum::http::header::CACHE_CONTROL),
-            Some(&axum::http::HeaderValue::from_static("no-store"))
-        );
-        let response = history_error(
-            ApiError::bad_request("nope").with_code("invalid_token"),
-        );
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+/// `?days=30|90|180|max` — the window is counted back from today; `max` (or no
+/// parameter) prices the whole stored history. The chart's own 1M/3M/6M day
+/// counts are accepted, so a tile always moves over the window it sits under.
+fn movers_window(raw: Option<&str>, today_key: &str) -> (Json, String) {
+    let text = raw.unwrap_or("").trim();
+    if text.eq_ignore_ascii_case("max") {
+        return (json!("max"), String::new());
     }
+    let days = text
+        .parse::<i64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .unwrap_or(MOVER_DEFAULT_DAYS)
+        .clamp(1, HISTORY_DAYS);
+    (json!(days), add_utc_days(today_key, -days))
+}
+
+/// `?limit=6`, bounded so one request cannot ask for the whole collection.
+fn movers_limit(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(MOVER_DEFAULT_LIMIT)
+        .min(MOVER_MAX_LIMIT)
+}
+
+/// Blueprint id → the catalog fields a tile needs. A failed join is logged and
+/// answers with nothing, so the movers still carry their own numbers.
+async fn read_mover_cards(
+    db: &MarketplaceDb,
+    ids: &[i64],
+) -> std::collections::HashMap<String, Json> {
+    let rows = match db
+        .query_json(CARDS_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(ids.to_vec())])
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(%error, "portfolio mover cards failed");
+            return Default::default();
+        }
+    };
+    rows.iter()
+        .filter_map(|row| {
+            let blueprint_id = row_text(row, "blueprint_id");
+            if blueprint_id.is_empty() {
+                return None;
+            }
+            let images = react_image_urls(row);
+            Some((
+                blueprint_id,
+                json!({
+                    "cardId": row_text(row, "card_id"),
+                    "name": row_text(row, "name"),
+                    "setName": row_text(row, "expansion_name"),
+                    "collectorNumber": row_text(row, "expansion_number"),
+                    "imageUrl": images.get("imageUrl").and_then(Json::as_str).unwrap_or(""),
+                }),
+            ))
+        })
+        .collect()
+}
+
+/// A mover plus the card it is a picture of. A printing the catalog lost still
+/// keeps its own numbers; the tile then shows no art rather than a wrong one.
+fn mover_item(mover: &Mover, cards: &std::collections::HashMap<String, Json>) -> Json {
+    let mut row = mover.to_json();
+    if let Some(card) = cards.get(&mover.blueprint_id).and_then(Json::as_object) {
+        if let Some(object) = row.as_object_mut() {
+            for (key, value) in card {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if let Some(object) = row.as_object_mut() {
+        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
+            object
+                .entry(key.to_string())
+                .or_insert_with(|| Json::String(String::new()));
+        }
+    }
+    row
+}
+
+/// `GET /api/marketplace-portfolio-movers`.
+pub async fn marketplace_portfolio_movers(
+    State(state): State<DomainState>,
+    method: axum::http::Method,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if method != axum::http::Method::GET {
+        return portfolio_history_other().await;
+    }
+    portfolio_movers_inner(&state, &headers, &query).await
+}
+
+async fn portfolio_movers_inner(
+    state: &DomainState,
+    headers: &HeaderMap,
+    query: &std::collections::HashMap<String, String>,
+) -> Response {
+    let claims = match require_claims(state, headers).await {
+        Ok(claims) => claims,
+        Err(error) => return history_error(error),
+    };
+    let today_key = utc_day_key_ms(state.clock().now().timestamp_millis());
+    let (days, from_day) = movers_window(query.get("days").map(String::as_str), &today_key);
+    let limit = movers_limit(query.get("limit").map(String::as_str));
+    // The same read model the history series uses; without it there is no
+    // sold book to rank, which is an empty dashboard and not a failure.
+    let no_movers = || {
+        ok_no_store(json!({
+            "ok": true, "days": days, "gainers": [], "losers": [],
+        }))
+    };
+    let db = match state.marketplace_db() {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::debug!(%error, "portfolio movers read model is not configured");
+            return no_movers();
+        }
+    };
+    let Some((holdings, book)) = read_card_book(&db, &claims.uid).await else {
+        return no_movers();
+    };
+    let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
+
+    let mut ids: Vec<i64> = Vec::new();
+    for mover in movers.gainers.iter().chain(movers.losers.iter()) {
+        if let Ok(value) = mover.blueprint_id.parse::<i64>() {
+            if !ids.contains(&value) {
+                ids.push(value);
+            }
+        }
+    }
+    // The move is the substance; the picture is one join away.
+    let cards = if ids.is_empty() {
+        Default::default()
+    } else {
+        read_mover_cards(&db, &ids).await
+    };
+
+    ok_no_store(json!({
+        "ok": true,
+        "days": days,
+        "gainers": movers.gainers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
+        "losers": movers.losers.iter().map(|mover| mover_item(mover, &cards)).collect::<Vec<_>>(),
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -285,19 +524,11 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 const PORTFOLIO_SHORT_CACHE: &str = "public, max-age=15, s-maxage=30";
-const PORTFOLIO_CACHE: &str =
-    "public, max-age=15, s-maxage=30, stale-while-revalidate=60";
+const PORTFOLIO_CACHE: &str = "public, max-age=15, s-maxage=30, stale-while-revalidate=60";
 
 /// Per-game catalog pools. The Pokemon catalog is the configured default; every
 /// other game resolves its own URL (explicit env, else derived from the base
-/// URL's host) and keeps a lazily-created pool.
-fn game_pools() -> &'static std::sync::Mutex<std::collections::HashMap<String, MarketplaceDb>> {
-    static POOLS: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, MarketplaceDb>>,
-    > = std::sync::OnceLock::new();
-    POOLS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
+/// URL's host) and uses the process-wide satellite pool (`pokoin_db` budget).
 fn game_db(state: &DomainState, game: &str) -> Result<MarketplaceDb> {
     use crate::domain::marketplace_game::{database_url_for_game, env_pairs, is_pokemon_game};
     if is_pokemon_game(game) {
@@ -305,21 +536,14 @@ fn game_db(state: &DomainState, game: &str) -> Result<MarketplaceDb> {
     }
     let url = database_url_for_game(game, &env_pairs());
     if url.is_empty() {
-        return Err(ApiError::internal("Marketplace database is not configured."));
+        return Err(ApiError::internal(
+            "Marketplace database is not configured.",
+        ));
     }
-    if let Some(db) = game_pools()
-        .lock()
-        .ok()
-        .and_then(|pools| pools.get(&url).cloned())
-    {
-        return Ok(db);
-    }
-    let db = MarketplaceDb::connect_lazy(&url, 4)
-        .map_err(|error| ApiError::internal(format!("Marketplace database pool failed: {error}")))?;
-    if let Ok(mut pools) = game_pools().lock() {
-        pools.insert(url, db.clone());
-    }
-    Ok(db)
+    let pool = pokoin_db::satellite_pool(&url).map_err(|error| {
+        ApiError::internal(format!("Marketplace database pool failed: {error}"))
+    })?;
+    Ok(MarketplaceDb::from_pool(pool))
 }
 
 /// `relationExists(qualified)`.
@@ -375,7 +599,11 @@ async fn query_pokemon_priced(
     } else {
         "null::float8"
     };
-    let listing_qty = if has_listings { "listings.qty" } else { "null::int" };
+    let listing_qty = if has_listings {
+        "listings.qty"
+    } else {
+        "null::int"
+    };
     let listing_count = if has_listings {
         "coalesce(listings.listing_count, 0)"
     } else {
@@ -386,14 +614,26 @@ async fn query_pokemon_priced(
     } else {
         "c.item_kind = 'product'"
     };
-    let card_name = if has_listings { "listings.card_name" } else { "null::text" };
+    let card_name = if has_listings {
+        "listings.card_name"
+    } else {
+        "null::text"
+    };
     let collector = if has_listings {
         "listings.collector_number"
     } else {
         "null::text"
     };
-    let condition = if has_listings { "listings.condition" } else { "null" };
-    let language = if has_listings { "listings.language" } else { "null" };
+    let condition = if has_listings {
+        "listings.condition"
+    } else {
+        "null"
+    };
+    let language = if has_listings {
+        "listings.language"
+    } else {
+        "null"
+    };
     let sql = format!(
         "select card_id, ct_id, floor_pkn, \
                 coalesce(listing_total, floor_pkn * qty)::float8 as total_pkn, \
@@ -565,9 +805,9 @@ pub async fn marketplace_portfolio(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use crate::domain::marketplace_game::{parse_game_from_request, is_pokemon_game};
+    use crate::domain::marketplace_game::{is_pokemon_game, parse_game_from_request};
     use crate::domain::portfolio_catalog::{
-        empty_payload, limit_for_game, parse_public_card_id, payload_from_rows, game_label,
+        empty_payload, game_label, limit_for_game, parse_public_card_id, payload_from_rows,
     };
 
     if method == axum::http::Method::OPTIONS {
@@ -672,4 +912,195 @@ pub async fn portfolio_other() -> Response {
         axum::http::HeaderValue::from_static("GET, OPTIONS"),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::portfolio_history::PricePoint;
+
+    #[test]
+    fn utc_iso_renders_milliseconds() {
+        assert_eq!(utc_iso(1_791_417_600_000), "2026-10-08T00:00:00.000Z");
+        assert_eq!(utc_iso(0), "1970-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn error_bodies_only_carry_a_code_when_there_is_one() {
+        let response = history_error(ApiError::internal("Firestore is not configured."));
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL),
+            Some(&axum::http::HeaderValue::from_static("no-store"))
+        );
+        let response = history_error(ApiError::bad_request("nope").with_code("invalid_token"));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn the_movers_window_counts_back_from_today() {
+        // The chart presets arrive as their day counts.
+        assert_eq!(
+            movers_window(Some("91"), "2026-10-08"),
+            (json!(91), "2026-07-09".to_string())
+        );
+        // No parameter and junk both mean the month the dashboard opens on.
+        assert_eq!(
+            movers_window(None, "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("0"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        assert_eq!(
+            movers_window(Some("two"), "2026-10-08"),
+            (json!(30), "2026-09-08".to_string())
+        );
+        // A window longer than the stored series is clamped, never refused.
+        assert_eq!(
+            movers_window(Some("4000"), "2026-10-08"),
+            (json!(HISTORY_DAYS), "2025-09-03".to_string())
+        );
+        // MAX asks for everything and prices from the first stored day.
+        assert_eq!(
+            movers_window(Some("MAX"), "2026-10-08"),
+            (json!("max"), String::new())
+        );
+    }
+
+    #[test]
+    fn the_movers_limit_defaults_and_bounds() {
+        assert_eq!(movers_limit(None), 6);
+        assert_eq!(movers_limit(Some("3")), 3);
+        assert_eq!(movers_limit(Some("0")), 6);
+        assert_eq!(movers_limit(Some("60")), 12);
+    }
+
+    #[test]
+    fn a_mover_item_keeps_its_numbers_when_the_catalog_lost_the_card() {
+        let mover = Mover {
+            key: "502874|NM|EN|-|-|-".to_string(),
+            blueprint_id: "502874".to_string(),
+            condition: "NM".to_string(),
+            language: "EN".to_string(),
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            quantity: 2,
+            start_pkn: 1000.0,
+            end_pkn: 1450.0,
+            change_pkn: 450.0,
+            change_pct: 45.0,
+            series: vec![PricePoint {
+                day: "2026-10-01".to_string(),
+                pkn: 1450.0,
+            }],
+        };
+        let cards = std::collections::HashMap::from([(
+            "502874".to_string(),
+            json!({ "cardId": "1234", "name": "Snorlax", "imageUrl": "https://cdn/x.jpg" }),
+        )]);
+        let joined = mover_item(&mover, &cards);
+        assert_eq!(joined["cardId"], json!("1234"));
+        assert_eq!(joined["name"], json!("Snorlax"));
+        assert_eq!(joined["changePct"], json!(45));
+        assert_eq!(joined["endPkn"], json!(1450));
+        assert_eq!(joined["series"].as_array().map(Vec::len), Some(1));
+
+        // A missing join still answers with the empty fields the tile expects.
+        let alone = mover_item(&mover, &std::collections::HashMap::new());
+        for key in ["cardId", "name", "setName", "collectorNumber", "imageUrl"] {
+            assert_eq!(alone[key], json!(""), "{key}");
+        }
+    }
+
+    /// Noon, so an offset of hours still lands on the same UTC day.
+    const NOON: i64 = 1_791_460_800_000;
+
+    fn stored(updated_at: &str, days: Json) -> Json {
+        json!({
+            "priceBasis": PRICE_BASIS,
+            "seriesRevision": SERIES_REVISION,
+            "updatedAt": updated_at,
+            "days": days,
+        })
+    }
+
+    fn one_day() -> Json {
+        json!([{ "date": "2026-10-08", "currencyPkn": 100, "cardsValuePkn": 30, "cardsHeld": 2 }])
+    }
+
+    #[test]
+    fn a_series_recomputed_minutes_ago_is_served_without_a_refresh() {
+        let doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeFresh);
+    }
+
+    #[test]
+    fn a_series_sixteen_minutes_old_answers_at_once_and_refreshes() {
+        let doc = stored("2026-10-08T11:44:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeStaleAndRefresh);
+    }
+
+    #[test]
+    fn yesterdays_series_answers_at_once_and_refreshes() {
+        // Visits are hours apart, so this is the common case the graph pays for.
+        let doc = stored("2026-10-07T18:00:00.000Z", one_day());
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ServeStaleAndRefresh);
+    }
+
+    #[test]
+    fn another_basis_or_revision_is_never_served_stale() {
+        let mut doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        doc["priceBasis"] = json!("old-basis");
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+
+        let mut doc = stored("2026-10-08T11:59:00.000Z", one_day());
+        doc["seriesRevision"] = json!(SERIES_REVISION - 1);
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+    }
+
+    #[test]
+    fn an_empty_or_missing_series_leaves_nothing_to_serve() {
+        let doc = stored("2026-10-07T18:00:00.000Z", json!([]));
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+        // A day row without a date is dropped, which empties the series.
+        let doc = stored("2026-10-07T18:00:00.000Z", json!([{ "currencyPkn": 100 }]));
+        assert_eq!(history_plan(Some(&doc), NOON), Plan::ComputeNow);
+        assert_eq!(history_plan(None, NOON), Plan::ComputeNow);
+    }
+
+    #[test]
+    fn one_refresh_per_uid_runs_at_a_time() {
+        let claims = Mutex::new(HashSet::new());
+        let first = claim_uid(&claims, "u1").expect("the uid is free");
+        assert!(
+            claim_uid(&claims, "u1").is_none(),
+            "a second refresh is refused"
+        );
+        assert!(
+            claim_uid(&claims, "u2").is_some(),
+            "another uid is independent"
+        );
+        drop(first);
+        assert!(
+            claim_uid(&claims, "u1").is_some(),
+            "the uid is free once held ends"
+        );
+    }
+
+    #[test]
+    fn a_refresh_that_panics_still_releases_its_uid() {
+        let claims = Mutex::new(HashSet::new());
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _claim = claim_uid(&claims, "u1").expect("the uid is free");
+            panic!("the refresh blew up");
+        }));
+        assert!(panic.is_err());
+        assert!(
+            claim_uid(&claims, "u1").is_some(),
+            "a panic must not strand the uid forever"
+        );
+    }
 }

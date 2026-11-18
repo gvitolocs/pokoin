@@ -7,12 +7,17 @@
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
-use serde_json::json;
+use serde_json::{json, Value as Json};
 
-use crate::domain::collection::{list_owned_collection, remove_owned_collection_item};
+use crate::domain::collection::{
+    list_owned_collection, live_listings_from_rows, merge_live_listings,
+    remove_owned_collection_item, LiveListings, OwnedCollection, LIVE_LISTINGS_LINKED_SQL,
+    LIVE_LISTINGS_SQL,
+};
 use crate::error::{ApiError, Result};
+use crate::sql::{MarketplaceDb, SqlError, SqlParam};
 use crate::state::DomainState;
 
 use super::{json_cached, number_field, parse_body, require_claims, string_field};
@@ -51,25 +56,64 @@ async fn marketplace_collection_inner(
 }
 
 /// `GET /api/marketplace-collection`.
+///
+/// `?limit=N` sends only the first N holdings in collection order (at most
+/// [`FIRST_PAGE_MAX`]) with the whole collection's totals: the landing binder's
+/// first page. That answer is `private, no-cache` with an `ETag`, so the
+/// browser revalidates it and a page that did not change comes back as a 304.
 pub async fn marketplace_collection_get(
     State(state): State<DomainState>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
-    match collection_list_inner(&state, &headers).await {
+    match collection_list_inner(&state, &query, &headers).await {
         Ok(response) => response,
         Err(error) => collection_error(error, false),
     }
 }
 
-async fn collection_list_inner(state: &DomainState, headers: &HeaderMap) -> Result<Response> {
+/// Largest `?limit=` the first-page read answers with.
+pub const FIRST_PAGE_MAX: usize = 60;
+
+/// `?limit=N`: `None` (the whole collection) when absent, not a number, or 0.
+fn first_page_limit(query: &std::collections::HashMap<String, String>) -> Option<usize> {
+    let limit = query.get("limit")?.trim().parse::<usize>().ok()?;
+    (limit > 0).then(|| limit.min(FIRST_PAGE_MAX))
+}
+
+async fn collection_list_inner(
+    state: &DomainState,
+    query: &std::collections::HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Result<Response> {
     let claims = require_claims(state, headers).await?;
     let firestore = state.firestore()?;
     let listed = list_owned_collection(&firestore, &claims.uid).await?;
-    Ok(json_cached(
-        StatusCode::OK,
-        listed.to_json(),
-        "private, no-store",
-    ))
+    let Some(limit) = first_page_limit(query) else {
+        return Ok(json_cached(
+            StatusCode::OK,
+            listed.to_json(),
+            "private, no-store",
+        ));
+    };
+    let body = listed.first_page_json(limit);
+    let etag = body_etag(&body);
+    let mut response = json_cached(StatusCode::OK, body, "private, no-cache");
+    if let Ok(value) = HeaderValue::from_str(&etag) {
+        response.headers_mut().insert(header::ETAG, value);
+    }
+    Ok(response)
+}
+
+/// FNV-1a 64 over the JSON bytes, with their length (the API's public `ETag` form).
+fn body_etag(body: &Json) -> String {
+    let bytes = serde_json::to_vec(body).unwrap_or_default();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in &bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("\"{hash:016x}-{:x}\"", bytes.len())
 }
 
 /// `GET /api/marketplace-collection-summary`.
@@ -86,12 +130,52 @@ pub async fn marketplace_collection_summary(
 async fn collection_summary_inner(state: &DomainState, headers: &HeaderMap) -> Result<Response> {
     let claims = require_claims(state, headers).await?;
     let firestore = state.firestore()?;
-    let listed = list_owned_collection(&firestore, &claims.uid).await?;
-    Ok(json_cached(
-        StatusCode::OK,
-        listed.to_summary_json(),
-        "private, no-store",
-    ))
+    let uid = claims.uid;
+    // No read pool: the summary stays the collection sum, with `listed: null`.
+    let Ok(db) = state.marketplace_db() else {
+        let owned = list_owned_collection(&firestore, &uid).await?;
+        return Ok(json_cached(
+            StatusCode::OK,
+            owned.to_summary_json(),
+            "private, no-store",
+        ));
+    };
+
+    let params = [SqlParam::Text(uid.clone())];
+    let (owned, totals) = tokio::join!(
+        list_owned_collection(&firestore, &uid),
+        db.query_json(LIVE_LISTINGS_SQL, &params),
+    );
+    let owned = owned?;
+    let body = match read_live_listings(&db, &uid, &owned, totals).await {
+        Ok(live) => merge_live_listings(&owned, &live),
+        Err(error) => {
+            tracing::warn!(%error, "collection summary live listings failed");
+            owned.to_summary_json()
+        }
+    };
+    Ok(json_cached(StatusCode::OK, body, "private, no-store"))
+}
+
+/// First query's totals, then the linked-id query when a collection doc names one.
+async fn read_live_listings(
+    db: &MarketplaceDb,
+    uid: &str,
+    owned: &OwnedCollection,
+    totals: std::result::Result<Vec<Json>, SqlError>,
+) -> std::result::Result<LiveListings, SqlError> {
+    let totals = totals?;
+    let ids = owned.referenced_listing_ids();
+    let linked = if ids.is_empty() {
+        Vec::new()
+    } else {
+        db.query_json(
+            LIVE_LISTINGS_LINKED_SQL,
+            &[SqlParam::Text(uid.to_string()), SqlParam::TextArray(ids)],
+        )
+        .await?
+    };
+    Ok(live_listings_from_rows(&totals, &linked))
 }
 
 /// The Node error mapping: a 401 is always phrased the same way, and a 404 or
@@ -138,6 +222,26 @@ pub async fn marketplace_collection_remove_error(error: ApiError) -> Response {
 mod tests {
     use super::*;
     use axum::http::StatusCode;
+
+    #[test]
+    fn first_page_limit_is_bounded_and_optional() {
+        let query = |value: &str| std::collections::HashMap::from([("limit".to_string(), value.to_string())]);
+        assert_eq!(first_page_limit(&std::collections::HashMap::new()), None);
+        assert_eq!(first_page_limit(&query("9")), Some(9));
+        assert_eq!(first_page_limit(&query(" 9 ")), Some(9));
+        assert_eq!(first_page_limit(&query("5000")), Some(FIRST_PAGE_MAX));
+        assert_eq!(first_page_limit(&query("0")), None);
+        assert_eq!(first_page_limit(&query("-1")), None);
+        assert_eq!(first_page_limit(&query("nine")), None);
+    }
+
+    #[test]
+    fn body_etag_follows_the_bytes() {
+        let a = body_etag(&json!({ "uid": "a", "items": [] }));
+        assert_eq!(a, body_etag(&json!({ "uid": "a", "items": [] })));
+        assert_ne!(a, body_etag(&json!({ "uid": "b", "items": [] })));
+        assert!(a.starts_with('"') && a.ends_with('"'));
+    }
 
     #[test]
     fn error_phrasing_matches_the_node_table() {

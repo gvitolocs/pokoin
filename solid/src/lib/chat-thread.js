@@ -21,7 +21,7 @@ function cachedFor(key) {
 }
 
 /**
- * A person-to-person thread (market/src/use-chat-thread.js): paints this
+ * A person-to-person thread: paints this
  * browser's cached page at once, polls the latest page every 4 s while
  * `enabled`, loads older pages near the top and keeps the log pinned to the
  * bottom unless the reader scrolled up. Options are accessors.

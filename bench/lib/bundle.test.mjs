@@ -43,8 +43,8 @@ test('attributeBytes covers every byte of the chunk exactly once', () => {
 });
 
 test('source normalisation and package attribution', () => {
-  assert.equal(normalizeSource('../../node_modules/react-dom/cjs/react-dom.js'), 'node_modules/react-dom/cjs/react-dom.js');
-  assert.equal(packageOf('node_modules/react-dom/cjs/react-dom.js'), 'react-dom');
+  assert.equal(normalizeSource('../../node_modules/solid-js/dist/solid.js'), 'node_modules/solid-js/dist/solid.js');
+  assert.equal(packageOf('node_modules/solid-js/dist/solid.js'), 'solid-js');
   assert.equal(packageOf('node_modules/.pnpm/x@1/node_modules/@tanstack/query/build/index.js'), '@tanstack/query');
   assert.equal(packageOf(normalizeSource('../../src/components/Chrome.jsx')), 'app:src/components');
   assert.equal(packageOf(normalizeSource('\u0000vite/preload-helper.js')), '(bundler runtime)');
@@ -58,15 +58,15 @@ test('source normalisation and package attribution', () => {
 test('parseHtml and staticImports', () => {
   const html = `<script src="/market/card-url-boot.js"></script>
     <script type="module" crossorigin src="/market/assets/index-AB.js"></script>
-    <link rel="modulepreload" crossorigin href="/market/assets/react-CD.js">
+    <link rel="modulepreload" crossorigin href="/market/s/web-CD.js">
     <link rel="stylesheet" crossorigin href="/market/assets/index-EF.css">`;
   assert.deepEqual(parseHtml(html), {
     entries: ['/market/assets/index-AB.js'],
-    preloads: ['/market/assets/react-CD.js'],
+    preloads: ['/market/s/web-CD.js'],
     styles: ['/market/assets/index-EF.css'],
   });
-  const code = 'import{a as b}from"./react-CD.js";import"./side.js";export{c}from"./re.js";const l=()=>import("./lazy.js");';
-  assert.deepEqual(staticImports(code), ['./react-CD.js', './side.js', './re.js']);
+  const code = 'import{a as b}from"./web-CD.js";import"./side.js";export{c}from"./re.js";const l=()=>import("./lazy.js");';
+  assert.deepEqual(staticImports(code), ['./web-CD.js', './side.js', './re.js']);
 });
 
 test('compare flags only watched p50 regressions above the threshold', () => {

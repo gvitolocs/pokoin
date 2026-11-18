@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Functional parity between two builds of the SPA (React vs Solid), the release
- * gate for the Solid canary:
+ * Functional parity between two builds of the SPA (e.g. origin/main and a
+ * branch, each served by solid/scripts/preview.mjs), a release check:
  *
  *   node parity.mjs --a http://127.0.0.1:28511 --b http://127.0.0.1:28510 [--checks home,suggest] [--queries a,b]
  *

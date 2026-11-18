@@ -3,7 +3,7 @@ import { whenIdle } from './idle.js';
 import { lazyModule } from './lazy-module.js';
 
 /**
- * App-lifetime card selection (market/src/select-band.jsx): Windows Explorer
+ * App-lifetime card selection: Windows Explorer
  * gestures over card tiles and desk listing rows — Ctrl/Cmd toggles, Shift
  * takes a range, a drag box on empty page background selects what it
  * touches, and dragging a selected tile carries the whole group.

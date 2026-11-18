@@ -99,6 +99,14 @@ function cardBootPlan(pathname, hostname) {
 // hit (card-page max-age=10) instead of a second request through the Worker.
 var API_ORIGIN = "https://api.pokoin.com";
 
+// The canonical path replaces the address bar, but the visitor's own query and hash
+// (?mypokoinPreview, ?utm_source=…) belong to the page and ride along.
+function canonicalUrlKeepingQuery(next, search, hash) {
+  var target = String(next);
+  if (/[?#]/.test(target)) return target;
+  return target + (search || "") + (hash || "");
+}
+
 function startCardUrlBoot() {
   if (typeof location === "undefined" || typeof fetch !== "function") return;
   var plan = cardBootPlan(location.pathname, location.hostname);
@@ -112,7 +120,7 @@ function startCardUrlBoot() {
     if (!next) return;
     var clean = String(next).split(/[?#]/)[0].replace(/\/$/, "");
     if (clean && clean !== location.pathname.replace(/\/$/, "")) {
-      history.replaceState(history.state, "", next);
+      history.replaceState(history.state, "", canonicalUrlKeepingQuery(next, location.search, location.hash));
     }
   }).catch(function () {});
   // One card-page prefetch. The desk's fetchCard uses this same URL and
@@ -120,7 +128,23 @@ function startCardUrlBoot() {
   // building the page again.
   fetch(API_ORIGIN + plan.pageUrl, {
     headers: plan.headers
+  }).then(function (res) {
+    return res.ok ? res.json() : null;
+  }).then(function (data) {
+    preloadDeskHero(data && data.card && data.card.deskArtUrl);
   }).catch(function () {});
+}
+
+// The desk hero scan, ~2 s before the entry chunk could name it. The card
+// page computes the exact URL the desk <img> requests (api.js deskArtUrl),
+// so the <img> reuses this download.
+function preloadDeskHero(url) {
+  if (typeof url !== "string" || !/^https:\/\/cdn\.pokoin\.com\//.test(url) || typeof Image !== "function") return;
+  var img = new Image();
+  img.fetchPriority = "high";
+  img.decoding = "async";
+  img.src = url;
+  window.__pokoinDeskHero = img;
 }
 
 if (typeof location !== "undefined" && typeof fetch === "function") {

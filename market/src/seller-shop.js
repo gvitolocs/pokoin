@@ -74,10 +74,31 @@ export function sellerFromPayload(data, handle, sample, previous = null) {
     username,
     displayName,
     photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || previous?.photoUrl || '',
+    country: String(row?.country || '').trim().toUpperCase() || previous?.country || '',
     associate: associateRole
       ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() }
       : (previous?.associate || null),
   };
+}
+
+/** How soon after painting a shop asks `fresh=1`, and the waits while a moved shop's new book is built. */
+export const SELLER_FRESH_FIRST_MS = 1500;
+export const SELLER_FRESH_RETRY_MS = [20_000, 40_000, 80_000, 160_000];
+
+/**
+ * What a painted book does with a `fresh=1` answer
+ * (`{ maxUpdatedAt, book: { stamp, version } | null }`):
+ * - 'current': the shop has not moved since this book;
+ * - 'refetch': a newer book is stored, read it by its `book.version`;
+ * - 'wait': the shop moved and its new book is still being built.
+ */
+export function sellerFreshAction(book, fresh) {
+  const loaded = String(book?.maxUpdatedAt || '');
+  const live = String(fresh?.maxUpdatedAt || '');
+  if (!fresh || !live || live === loaded) return 'current';
+  const stored = fresh.book;
+  if (stored?.version && String(stored.stamp || '') !== loaded) return 'refetch';
+  return 'wait';
 }
 
 /** Card stub + desk path a shop row links to (same shape the cart and drag payloads read). */
@@ -101,4 +122,43 @@ export function sellerOfferRow(offer, lang) {
     gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
   };
   return { cardId, enriched, cardStub };
+}
+
+/**
+ * What the shop shows when the seller request fails. The API message stays off
+ * the page: a missing username is "not found", and every other failure
+ * (5xx, gateway, network) is a temporary outage.
+ */
+export function sellerShopErrorState(err) {
+  if (Number(err?.status) === 404) {
+    return {
+      kind: 'not_found',
+      title: 'Seller not found',
+      lede: 'No Pokoin seller uses this username.',
+    };
+  }
+  return {
+    kind: 'unavailable',
+    title: 'Shop unavailable',
+    lede: 'This shop could not be loaded right now. Try again in a moment.',
+  };
+}
+
+/**
+ * Empty-shop copy. Narrowed filters keep the filter line. An unfiltered
+ * Pokémon shop says there are no live asks. An unfiltered satellite shop names
+ * the game (`gameName`, e.g. "One Piece").
+ */
+export function sellerShopEmptyCopy({ gameName = '', displayName = '', pokemon = false, narrowed = false } = {}) {
+  const name = displayName || '';
+  if (narrowed) {
+    return { title: 'No listings', lede: `${name} has no live asks for these filters.` };
+  }
+  if (pokemon) {
+    return { title: 'No listings', lede: `${name} has no live asks.` };
+  }
+  return {
+    title: `No ${gameName} listings yet`,
+    lede: `${name} has no ${gameName} listings yet.`,
+  };
 }

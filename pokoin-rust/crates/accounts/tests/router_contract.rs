@@ -611,6 +611,55 @@ async fn marketplace_collection_returns_the_owners_holdings() {
 }
 
 #[tokio::test]
+async fn marketplace_collection_limit_sends_the_first_page_with_whole_totals() {
+    let transport = ScriptedTransport::new();
+    let doc = |id: &str, name: &str, quantity: &str| {
+        serde_json::json!({ "document": document(
+            &format!("projects/{TEST_PROJECT}{DOCS}/user_card_collections/{id}"),
+            serde_json::json!({
+                "uid": { "stringValue": "user-1" },
+                "cardId": { "stringValue": "12345" },
+                "cardName": { "stringValue": name },
+                "quantity": { "integerValue": quantity }
+            })
+        ) })
+    };
+    script_run_query(
+        &transport,
+        serde_json::json!([
+            doc("scan:3", "Zapdos", "1"),
+            doc("scan:1", "abra", "2"),
+            doc("scan:2", "Pikachu", "4")
+        ]),
+    );
+    let app = router(test_state(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let (status, body, headers) =
+        call(&app, "GET", "/api/marketplace-collection?limit=2", Some(&token), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["uid"], serde_json::json!("user-1"));
+    // Collection order (case-insensitive name), cut to the limit.
+    let names: Vec<_> = body["items"].as_array().unwrap().iter().map(|item| item["cardName"].clone()).collect();
+    assert_eq!(names, vec![serde_json::json!("abra"), serde_json::json!("Pikachu")]);
+    // Totals stay the whole collection's.
+    assert_eq!(body["itemCount"], serde_json::json!(3));
+    assert_eq!(body["cardsOwned"], serde_json::json!(7));
+    assert_eq!(body["limit"], serde_json::json!(2));
+    assert_eq!(headers["cache-control"], "private, no-cache");
+    assert!(headers.contains_key("etag"));
+
+    // Without a limit the full body and its no-store policy are unchanged.
+    let (_, full, headers) =
+        call(&app, "GET", "/api/marketplace-collection", Some(&token), None).await;
+    assert_eq!(full["items"].as_array().unwrap().len(), 3);
+    assert!(full.get("limit").is_none());
+    assert_eq!(headers["cache-control"], "private, no-store");
+    assert!(!headers.contains_key("etag"));
+}
+
+#[tokio::test]
 async fn marketplace_collection_summary_returns_the_dashboard_shape() {
     let transport = ScriptedTransport::new();
     script_run_query(
@@ -652,6 +701,8 @@ async fn marketplace_collection_summary_returns_the_dashboard_shape() {
     assert_eq!(body["nftItems"], serde_json::json!(1));
     assert_eq!(body["physicalOwned"], serde_json::json!(2));
     assert_eq!(body["nftOwned"], serde_json::json!(1));
+    assert_eq!(body["collectionOwned"], serde_json::json!(3));
+    assert!(body["listed"].is_null());
 }
 
 #[tokio::test]
@@ -1045,6 +1096,83 @@ async fn forum_upload_media_needs_a_topic_or_post() {
     );
 }
 
+fn png_base64(width: u32, height: u32) -> String {
+    use base64::Engine;
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(image::RgbaImage::new(width, height))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    base64::engine::general_purpose::STANDARD.encode(png)
+}
+
+#[tokio::test]
+async fn forum_upload_media_rejects_oversized_dimensions_before_storage() {
+    let transport = ScriptedTransport::new();
+    let app = router(test_state(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/forum-upload-media",
+        Some(&token),
+        Some(serde_json::json!({
+            "topicId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "imageBase64": format!("data:image/png;base64,{}", png_base64(8001, 1)),
+        })),
+    )
+    .await;
+    // The test state has no R2 media store: 413 proves the header check ran first.
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["code"], "image_too_large");
+}
+
+/// Allows the first `allow` checks, then denies; records the scopes seen.
+struct CountingLimiter {
+    allow: usize,
+    seen: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait::async_trait]
+impl pokoin_accounts::rate_limit::RateLimiter for CountingLimiter {
+    async fn check(
+        &self,
+        request: pokoin_accounts::rate_limit::RateLimitRequest<'_>,
+    ) -> pokoin_accounts::rate_limit::RateLimitVerdict {
+        let mut seen = self.seen.lock().unwrap();
+        seen.push((request.scope.to_string(), request.identity.to_string()));
+        if seen.len() <= self.allow {
+            pokoin_accounts::rate_limit::RateLimitVerdict::allowed()
+        } else {
+            pokoin_accounts::rate_limit::RateLimitVerdict::denied(600)
+        }
+    }
+}
+
+#[tokio::test]
+async fn forum_upload_media_is_rate_limited_per_uid() {
+    let transport = ScriptedTransport::new();
+    let limiter = Arc::new(CountingLimiter { allow: 2, seen: Default::default() });
+    let app = router(test_state(&transport).with_limiter(limiter.clone()));
+    let now = chrono::Utc::now().timestamp();
+    let token = sign_id_token(id_token_claims("user-1", "a@b.co", now));
+    let upload = serde_json::json!({
+        "topicId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+        "imageBase64": png_base64(2, 2),
+    });
+    for _ in 0..2 {
+        let (status, _, _) =
+            call(&app, "POST", "/api/forum-upload-media", Some(&token), Some(upload.clone())).await;
+        assert_ne!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+    let (status, body, _) =
+        call(&app, "POST", "/api/forum-upload-media", Some(&token), Some(upload)).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["retryAfterSec"], 600);
+    let seen = limiter.seen.lock().unwrap().clone();
+    assert!(seen.iter().all(|(scope, uid)| scope == "forum-media" && uid == "user-1"));
+}
+
 #[tokio::test]
 async fn the_wrong_method_is_rejected_with_an_allow_header() {
     // axum answers 405 for a method a route does not declare.
@@ -1102,7 +1230,7 @@ async fn poko_market_requires_a_service_token_and_valid_tool() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
         body["error"].as_str().unwrap(),
-        "unknown tool; expected one of resolve_card, card_quote, card_ocr, card_liquidity, collection_quote, suggest_cards, market_snapshot, top_movers, top_sellers, card_sales, deal_check, set_sales, recent_sales, artist_cards, set_info"
+        "unknown tool; expected one of resolve_card, card_quote, card_ocr, card_liquidity, collection_quote, suggest_cards, market_snapshot, top_movers, top_sellers, card_sales, card_price_history, deal_check, set_sales, recent_sales, artist_cards, set_info"
     );
     std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
     std::env::remove_var("POKONTACT_SERVICE_TOKEN");
@@ -2238,6 +2366,28 @@ async fn marketplace_associate_refuses_a_non_associate_with_the_404_body_shape()
 }
 
 #[tokio::test]
+async fn marketplace_associate_ignores_an_unverified_email() {
+    let transport = ScriptedTransport::new();
+    // The roster pool points at a closed port: reaching it is a 500, so a 403
+    // proves the unverified email never matched (or even queried) a roster row.
+    let app = router(test_state_with_db(&transport));
+    let now = chrono::Utc::now().timestamp();
+    let mut claims = id_token_claims("user-1", "associate@pokoin.com", now);
+    claims["email_verified"] = serde_json::json!(false);
+    claims["firebase"]["sign_in_provider"] = serde_json::json!("google.com");
+    let token = sign_id_token(claims.clone());
+    let (status, body, _) = call(&app, "GET", "/api/marketplace-associate", Some(&token), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body={body}");
+    assert_eq!(body, serde_json::json!({ "error": "Not a Pokoin associate.", "associate": null }));
+
+    // The same address, verified, does reach the roster lookup.
+    claims["email_verified"] = serde_json::json!(true);
+    let token = sign_id_token(claims);
+    let (status, body, _) = call(&app, "GET", "/api/marketplace-associate", Some(&token), None).await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "body={body}");
+}
+
+#[tokio::test]
 async fn marketplace_associate_admin_claim_skips_the_profile_lookup() {
     let transport = ScriptedTransport::new();
     let app = router(test_state(&transport));
@@ -2858,6 +3008,118 @@ async fn poko_chat_falls_back_truthfully_when_the_assistant_is_unreachable() {
         assistant_row["update"]["fields"]["source"]["stringValue"],
         serde_json::json!("unavailable")
     );
+}
+
+// ---------------------------------------------------------------------------
+// poko-bot-chat
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn poko_bot_chat_requires_the_service_token_and_a_valid_turn() {
+    let _guard = SERVICE_TOKEN_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
+
+    let transport = ScriptedTransport::new();
+    let app = router(test_state(&transport));
+
+    let (status, body, headers) = call(&app, "GET", "/api/poko-bot-chat", None, None).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(body, serde_json::json!({ "error": "Method not allowed." }));
+    assert_eq!(headers["allow"], "POST");
+
+    let turn = serde_json::json!({
+        "platform": "telegram",
+        "userKey": "telegram:1",
+        "message": "hi",
+    });
+    let (status, body, _) = call(&app, "POST", "/api/poko-bot-chat", None, Some(turn.clone())).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "ok": false,
+            "error": "poko-bot-chat not configured: POKO_MARKET_SERVICE_TOKEN missing"
+        })
+    );
+
+    std::env::set_var("POKO_MARKET_SERVICE_TOKEN", "s3cret");
+    let (status, body, _) =
+        call(&app, "POST", "/api/poko-bot-chat", Some("wrong-token"), Some(turn.clone())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body, serde_json::json!({ "ok": false, "error": "unauthorized" }));
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "irc",
+            "userKey": "irc:1",
+            "message": "hi",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        serde_json::json!({ "ok": false, "error": "platform must be telegram or discord" })
+    );
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "telegram",
+            "userKey": "telegram:1",
+            "message": "  ",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        serde_json::json!({ "ok": false, "error": "message or images required" })
+    );
+
+    // Providers are unreachable from this harness (no keys, or the scripted
+    // transport answers chat completions with 599). The bot must see 502 and
+    // fall back itself — this route does not invent a reply.
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-bot-chat",
+        Some("s3cret"),
+        Some(serde_json::json!({
+            "platform": "telegram",
+            "scope": "group",
+            "userKey": "telegram:1",
+            "firebaseUid": "should-not-load",
+            "message": "hi",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "body={body}");
+    assert_eq!(body["ok"], serde_json::json!(false));
+    assert_eq!(body["error"], serde_json::json!("brain_failed"));
+    assert!(
+        matches!(body["detail"].as_str(), Some("providers") | Some("budget") | Some("empty")),
+        "body={body}"
+    );
+    assert!(
+        transport.requests_to(":runQuery").is_empty(),
+        "a group turn must not read website messages"
+    );
+    assert!(
+        transport.requests_to(":commit").is_empty(),
+        "poko-bot-chat does not persist"
+    );
+
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
 }
 
 // ---------------------------------------------------------------------------

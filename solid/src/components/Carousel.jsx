@@ -2,6 +2,7 @@ import { createEffect, For, Repeat, Show } from 'solid-js';
 import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardSelectGrid from './CardSelectGrid.jsx';
 import CardTile from './CardTile.jsx';
+import { gameHref } from '@market/game.js';
 
 export function SkeletonTile(props) {
   return (
@@ -33,7 +34,7 @@ export function SkeletonTile(props) {
 }
 
 /**
- * Horizontal rail (market/src/components/Carousel.jsx). Tiles are keyed by
+ * Horizontal rail. Tiles are keyed by
  * card identity, so a rail that gains cards (progressive paint, priced
  * refresh) only inserts or patches the changed tiles.
  */
@@ -42,7 +43,10 @@ export default function Carousel(props) {
   const ready = () => Boolean(props.cards?.length);
   createEffect(
     () => [props.cards?.length || 0, props.placeholders || 0],
-    () => bindRailControls(scroller),
+    () => {
+      // Solid uses the returned rail unbind as this effect's cleanup.
+      return bindRailControls(scroller);
+    },
   );
   return (
     <Show when={ready() || (props.placeholders || 0) > 0}>
@@ -52,7 +56,7 @@ export default function Carousel(props) {
             <h2>{props.title}</h2>
             <Show when={props.subtitle}><p>{props.subtitle}</p></Show>
           </div>
-          <Show when={props.href}><a class="see-all" href={props.href}>See more →</a></Show>
+          <Show when={props.href}><a class="see-all" href={gameHref(props.href)}>See more →</a></Show>
         </div>
         <div class="rail-wrap">
           <button class="rail-prev" type="button" onClick={() => stepRail(scroller, -1)} aria-label="Previous">
@@ -62,7 +66,7 @@ export default function Carousel(props) {
             <CardSelectGrid class="carousel-track" cards={ready() ? props.cards : []}>
               <Show when={ready()} fallback={<Repeat count={props.placeholders || 0}>{() => <SkeletonTile />}</Repeat>}>
                 <For each={props.cards}>
-                  {(card, index) => <CardTile card={card} rank={index()} eagerLimit={props.eagerLimit || 0} />}
+                  {(card, index) => <CardTile card={card} rank={index()} eagerLimit={props.eagerLimit || 0} currency={props.currency} />}
                 </For>
               </Show>
             </CardSelectGrid>

@@ -1,4 +1,4 @@
-/** Shared − N + quantity control (market/src/components/QtyStepper.jsx). */
+/** Shared − N + quantity control. */
 
 function stop(event) {
   event.preventDefault();

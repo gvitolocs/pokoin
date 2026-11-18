@@ -1,0 +1,10 @@
+[Unit]
+Description=poko-video mirror backstop (the Pi notifies nezopt when a file lands)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

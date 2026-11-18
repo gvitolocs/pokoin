@@ -1,4 +1,5 @@
 import { appendChatTag, chatQty, dragCardsOf, explicitStock, sellerUserId, tagKey } from './chat-listing.js';
+import { isPokoPeer, reconcilePokoPageChip } from './poko-chat.js';
 
 const DRAFT_KEY = 'pokoin.chatDrafts';
 const DROP_HINT_KEY = 'pokoin.chatDropHint';
@@ -22,7 +23,8 @@ function readDrafts() {
 function writeDrafts(drafts) {
   const compact = {};
   for (const [peer, draft] of Object.entries(drafts || {})) {
-    const tags = Array.isArray(draft?.tags) ? draft.tags.slice(-4) : [];
+    // The page-card chip follows the page; it is never a saved draft.
+    const tags = Array.isArray(draft?.tags) ? draft.tags.filter((row) => !row?.pageCard).slice(-4) : [];
     const text = String(draft?.text || '').slice(0, 1000);
     if (!tags.length && !text.trim()) continue;
     compact[peer] = { tags, text, label: String(draft?.label || '') };
@@ -118,13 +120,24 @@ export function endCardDrag() {
 
 let stagedCards = [];
 
+/** A card the user attaches themselves stops being the page chip (it then survives navigation). */
+function appendExplicit(tags, rows) {
+  let next = tags;
+  for (const row of rows) next = appendChatTag(next, row);
+  const keys = new Set(rows.map(tagKey));
+  return next.map((row) => {
+    if (!row?.pageCard || !keys.has(tagKey(row))) return row;
+    const copy = { ...row };
+    delete copy.pageCard;
+    return copy;
+  });
+}
+
 export function stageChatCards(references) {
   const rows = (references || []).filter((row) => row?.cardName);
   if (!rows.length) return false;
   if (snapshot.open && snapshot.view === 'thread' && snapshot.peer) {
-    let tags = snapshot.tags;
-    for (const row of rows) tags = appendChatTag(tags, row);
-    snapshot = { ...snapshot, tags };
+    snapshot = { ...snapshot, tags: appendExplicit(snapshot.tags, rows) };
     remember(snapshot.peer, snapshot);
     emit();
     return true;
@@ -197,9 +210,7 @@ export function addChatTag(reference, text) {
   }
   if (text !== undefined) snapshot = { ...snapshot, text };
   markChatDrop();
-  let tags = snapshot.tags;
-  for (const row of dragCardsOf(reference)) tags = appendChatTag(tags, row);
-  snapshot = { ...snapshot, tags };
+  snapshot = { ...snapshot, tags: appendExplicit(snapshot.tags, dragCardsOf(reference)) };
   remember(snapshot.peer, snapshot);
   emit();
   return true;
@@ -237,6 +248,21 @@ export function removeChatTag(key) {
     tags: snapshot.tags.filter((row) => `${row.kind}:${row.listingId || row.cardId || row.cardName}` !== key),
   };
   remember(snapshot.peer, snapshot);
+  emit();
+}
+
+/**
+ * Offer or drop the Poko page-card chip for the open thread (rule:
+ * reconcilePokoPageChip). `session` is { pageCard, off, used }.
+ */
+export function syncPokoPageChip(session = {}) {
+  if (!snapshot.peer) return;
+  const tags = reconcilePokoPageChip(snapshot.tags, {
+    ...session,
+    poko: snapshot.open && snapshot.view === 'thread' && isPokoPeer(snapshot.peer),
+  });
+  if (tags === snapshot.tags) return;
+  snapshot = { ...snapshot, tags };
   emit();
 }
 

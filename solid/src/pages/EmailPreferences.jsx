@@ -59,7 +59,7 @@ function ToggleRow(props) {
   );
 }
 
-/** /email-preferences (market/src/pages/EmailPreferences.jsx): per-browser choices. */
+/** /email-preferences: per-browser choices. */
 export default function EmailPreferences() {
   const session = readAuthSession();
   const [prefs, setPrefs] = createSignal(readPrefs());

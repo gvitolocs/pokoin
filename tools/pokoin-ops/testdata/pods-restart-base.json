@@ -1,0 +1,124 @@
+{
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+        "resourceVersion": "8822100"
+    },
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "pokoin-api-6559bc874-zq4vk",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-16T21:04:11Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "api",
+                        "resources": {
+                            "limits": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            },
+                            "requests": {
+                                "cpu": "1",
+                                "memory": "1536Mi"
+                            }
+                        },
+                        "env": [
+                            {
+                                "name": "POKOIN_TEST_ENV_CANARY",
+                                "value": "POKOIN-TEST-ENV-CANARY-8f2b6e"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Running",
+                "conditions": [
+                    {
+                        "type": "Initialized",
+                        "status": "True"
+                    },
+                    {
+                        "type": "Ready",
+                        "status": "True"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "api",
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-11-17T05:58:20Z"
+                            }
+                        },
+                        "lastState": {
+                            "terminated": {
+                                "containerID": "containerd://8a1f2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef",
+                                "exitCode": 137,
+                                "reason": "OOMKilled",
+                                "startedAt": "2026-11-16T21:04:20Z",
+                                "finishedAt": "2026-11-17T05:58:12Z"
+                            }
+                        },
+                        "ready": true,
+                        "restartCount": 4,
+                        "containerID": "containerd://8a1f2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef"
+                    }
+                ]
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "cloudflared-7d4f8b6c95-m2kq1",
+                "namespace": "pokoin-overflow",
+                "creationTimestamp": "2026-11-10T08:12:00Z"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "cloudflared",
+                        "resources": {
+                            "limits": {
+                                "cpu": "500m",
+                                "memory": "256Mi"
+                            },
+                            "requests": {
+                                "cpu": "50m",
+                                "memory": "64Mi"
+                            }
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "phase": "Running",
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "True"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "cloudflared",
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-11-10T08:12:31Z"
+                            }
+                        },
+                        "ready": true,
+                        "restartCount": 0,
+                        "containerID": "containerd://aabbccddeeff00112233445566778899aabbccddeeff001122334455667788"
+                    }
+                ]
+            }
+        }
+    ]
+}

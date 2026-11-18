@@ -2,10 +2,31 @@
 
 > **Done.** Implemented as an opt-in encoding; see
 > [`docs/rust-migration/COMPACT_ENCODING.md`](../../rust-migration/COMPACT_ENCODING.md)
-> for the design, the research and the measurements. The fixtures below are
-> still live: `measure-sizes.py` measures against them, and `c1/` holds the
-> Rust-encoded test vectors the `market/src/compact.test.js` cross-language
-> round trip decodes. The task text is kept as written, for history.
+> for the design, the research and the measurements. `measure-sizes.py`
+> measures against the fixtures here, and `c1/` holds the Rust-encoded test
+> vectors the `market/src/compact.test.js` cross-language round trip decodes.
+> The task text below is kept as written, for history.
+>
+> **The committed fixtures are truncated.** The full captures were 2.0 MB —
+> more than the tests need and more than belongs on `main`. Each file here is
+> the first **16 rows** of its capture, cut by
+> [`truncate-fixtures.py`](truncate-fixtures.py), with the vectors regenerated
+> from them. Two consequences:
+>
+> - **Scalar metadata is as captured, not recomputed.**
+>   `expansion-destined-rivals.json` still says `"total":244` while holding 16
+>   cards. Deliberate — rewriting those counts would invent a response the API
+>   never served. Each file is a faithful *prefix* of a real response. Do not
+>   read them as complete ones, and do not "fix" the counts.
+> - **Size ratios measured here are lower than production.** Per-table overhead
+>   amortises over row count, so this corpus measures **−78.0% raw / −19.5%
+>   after brotli**, where the full captures measure **−81.9% / −33.2%**. The
+>   brotli gap is the wider one: fewer rows leave less repetition for `c1` to
+>   strip before the compressor sees it. `COMPACT_ENCODING.md` §4 reports both
+>   and labels which is which.
+>
+> The full captures stay reproducible: read-only public GETs against
+> `api.pokoin.com` for the routes named in each filename.
 
 Saved from the nezopt session "Compact c1 JSON dictionary encoding" (stopped 2026-10-09 to move the work to a cloud session).
 
@@ -15,7 +36,7 @@ Saved from the nezopt session "Compact c1 JSON dictionary encoding" (stopped 202
 - No Rust code had been written yet.
 
 ## Task (continue from here)
-Repository gvitolocs/pokoin. Rust workspace: pokoin-rust/ (the binary is pokoin-rust/apps/api; route crates are in pokoin-rust/crates). React SPA: market/.
+Repository gvitolocs/pokoin. Rust workspace: pokoin-rust/ (the binary is pokoin-rust/apps/api; route crates are in pokoin-rust/crates). Solid SPA: solid/ (shared modules: market/).
 
 Goal: make the API's big read responses much smaller and faster to load with an OPT-IN compact encoding called "c1". The default JSON must stay byte-for-byte unchanged, because it is a frozen contract shared with the SPA and the CardVault apps.
 

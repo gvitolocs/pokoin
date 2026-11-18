@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Cardmarket price guide → Battle Spirits Saga display prices (docs/CARDMARKET_GAMES.md)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# pokoin_jobs login once migration 124 is applied; until then the binary falls
+# back to the writer container's own login (docker inspect).
+EnvironmentFile=-%h/.config/pokoin/cardmarket-prices.env
+ExecStart=%h/pokoin-cardmarket/current/pokoin-cardmarket-catalog prices --game battle_spirits_saga --apply
+Nice=10
+TimeoutStartSec=15min

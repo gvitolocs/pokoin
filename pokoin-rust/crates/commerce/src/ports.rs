@@ -1812,6 +1812,15 @@ impl StripeClient {
         Ok(payload)
     }
 
+    /// Exact processor costs, including the single fixed-charge component.
+    pub async fn payment_charge_with_fees(&self, intent: &str) -> ApiResult<Value> {
+        let payload = self.get_json(
+            &format!("https://api.stripe.com/v1/payment_intents/{intent}"),
+            &[("expand[]".into(), "latest_charge.balance_transaction".into())],
+        ).await?;
+        Ok(payload.get("latest_charge").cloned().unwrap_or(Value::Null))
+    }
+
     /// The Checkout charge id for a PaymentIntent (`latest_charge`).
     pub async fn retrieve_payment_intent_charge(&self, payment_intent_id: &str) -> ApiResult<String> {
         let payload = self

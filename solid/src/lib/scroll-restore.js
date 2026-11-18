@@ -1,10 +1,9 @@
 /**
- * Back/forward memory for the Solid UI (React: market/src/scroll-restore.js,
- * Codevira D00005C). Browser back restores the window scroll and the page view
+ * Back/forward memory (Codevira D00005C). Browser back restores the window scroll and the page view
  * (filters, shown count) of that history entry; a push starts at the top.
  *
- * The storage and the restore loop are shared with React (scroll-memory.js,
- * same sessionStorage slots). What differs is the router:
+ * The storage and the restore loop are market/src/scroll-memory.js (sessionStorage
+ * slots). This module adapts them to the Solid router:
  *
  * - Solid router 2 has no `location.key`; the entry id is the `_depth` it
  *   stamps on every history entry (`solid:<depth>`). A depth is reused after

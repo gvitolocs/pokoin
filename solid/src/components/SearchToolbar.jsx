@@ -24,13 +24,15 @@ function syncSelect(value, options) {
     el.value = next;
     if (el.selectedIndex < 0 && el.options.length) el.selectedIndex = 0;
   };
-  createEffect(() => [value(), options ? options() : null], ([next]) => apply(next));
+  createEffect(() => [value(), options ? options() : null], ([next]) => {
+    apply(next);
+  });
   return (node) => {
     el = node;
   };
 }
 
-/** Print / Sort / (Type) / Rarity / Set selects (market/src/components/SearchToolbar.jsx). */
+/** Print / Sort / (Type) / Rarity / Set selects. */
 export default function SearchToolbar(props) {
   const rarities = () => props.rarities || [];
   const sets = () => props.sets || [];

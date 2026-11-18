@@ -8,7 +8,7 @@ function day(value) {
 }
 
 /**
- * "Sold on Pokoin" (market/src/components/NativeSales.jsx): paid native
+ * "Sold on Pokoin": paid native
  * orders for this printing. An async memo under its own Loading boundary, so
  * the desk never waits on it; renders nothing until there is a sale.
  */

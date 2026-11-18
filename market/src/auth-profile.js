@@ -23,7 +23,9 @@ export function profileFrom(data = {}, uid = '') {
   const roles = Array.isArray(data.roles) ? data.roles.map((row) => String(row).toLowerCase()) : [];
   const admin = data.admin === true || data.isAdmin === true || role === 'admin' || roles.includes('admin');
   const silverUntil = readDate(data.silverUntil);
-  const silver = admin || role === 'silver' || (silverUntil && silverUntil.getTime() > Date.now());
+  // Silver = admin or an unexpired silverUntil; a legacy `role: 'silver'`
+  // grants nothing (paid Silver expires after a year).
+  const silver = admin || (silverUntil && silverUntil.getTime() > Date.now());
   return {
     uid,
     username: data.username || '',

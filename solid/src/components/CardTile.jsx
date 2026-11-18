@@ -4,22 +4,23 @@ import { albumShadeStyle } from '@market/art-shade.js';
 import { cardHref, deskArtUrl, formatPkn, imageSrc, rememberCardId } from '@market/api.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { displayName, printingIdentity } from '@market/identity.js';
-import { tilePricePkn } from '@market/pkn.js';
+import { tileOfferPricePkn, tilePricePkn } from '@market/pkn.js';
 import { cardImageAlt } from '@market/seo.js';
 import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
-import { buyerParts } from '../stores/buyer.js';
+import { buyerParts, visitorParts } from '../stores/buyer.js';
+import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 import { useCardSelect } from './CardSelectGrid.jsx';
 import PriceStack from './PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
 /**
- * Grid / rail / list tile (market/src/components/CardTile.jsx). A plain anchor:
+ * Grid / rail / list tile. A plain anchor:
  * the router claims the click and intent-preloads the desk chunk + data on
  * hover, focus or touchstart. Inside a CardSelectGrid, Ctrl/Cmd/Shift-click
  * selects instead of opening, and dragging a selected tile carries the whole
- * selection. Not ported yet: the list layout's ArtworkZoom, which falls back
- * to CardArt here.
+ * selection. The list layout (set desk list view) zooms the full scan on hover.
  */
 export default function CardTile(props) {
   const card = () => props.card;
@@ -52,7 +53,13 @@ export default function CardTile(props) {
     }
   }
 
-  const priceLabel = () => (price() ? <PriceStack parts={buyerParts(pricePkn())} /> : 'Out of stock');
+  // `currency` pins the label to one local fiat (the public landing shows the visitor's currency).
+  const parts = () => (props.currency ? visitorParts(pricePkn(), props.currency) : buyerParts(pricePkn()));
+  // The tile price is the lowest ask across marketplaces, not a Pokoin offer
+  // ("from" read as buyable here): the tooltip says which number it is.
+  const fromOffer = () => tileOfferPricePkn(card()) != null;
+  const priceTitle = () => (fromOffer() ? 'Lowest price listed across marketplaces' : 'Median sold price');
+  const priceLabel = () => (price() ? <PriceStack parts={parts()} /> : 'Out of stock');
 
   return (
     <Show when={card()?.id}>
@@ -67,7 +74,7 @@ export default function CardTile(props) {
             'is-selected': picked(),
           },
         ]}
-        href={cardHref(card())}
+        href={gameHref(cardHref(card()))}
         data-card-id={card().id}
         aria-selected={picked() ? 'true' : undefined}
         draggable="true"
@@ -88,16 +95,29 @@ export default function CardTile(props) {
       >
         <span class="tile-art">
           <Show when={art()} fallback={<span class="tile-ph" />}>
-            <CardArt
-              src={art()}
-              alt={cardImageAlt(card())}
-              cut={cut() && !landscape() && !item()}
-              cutSurface="album"
-              full={cut() || list()}
-              card={cut() ? card() : undefined}
-              loading={eager() ? 'eager' : 'lazy'}
-              fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
-            />
+            <Show
+              when={list()}
+              fallback={(
+                <CardArt
+                  src={art()}
+                  alt={cardImageAlt(card())}
+                  cut={cut() && !landscape() && !item()}
+                  cutSurface="album"
+                  full={cut()}
+                  card={cut() ? card() : undefined}
+                  langScans={cut() ? undefined : card().langScans}
+                  loading={eager() ? 'eager' : 'lazy'}
+                  fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
+                />
+              )}
+            >
+              <ArtworkZoom
+                src={hero() || art()}
+                name={card().name}
+                set={card().set || card().expansion || ''}
+                alt={cardImageAlt(card())}
+              />
+            </Show>
           </Show>
         </span>
         <Show
@@ -112,12 +132,12 @@ export default function CardTile(props) {
             <strong>{displayName(card())}</strong>
             <Show when={identity().tileLine}><em class="tile-id">{identity().tileLine}</em></Show>
             <Show when={!list()}>
-              <span class={price() ? 'price' : 'oos'}>{priceLabel()}</span>
+              <span class={price() ? 'price' : 'oos'} title={price() ? priceTitle() : undefined}>{priceLabel()}</span>
             </Show>
           </div>
         </Show>
         <Show when={list() && !cut()}>
-          <span class={price() ? 'price' : 'oos'}>{priceLabel()}</span>
+          <span class={price() ? 'price' : 'oos'} title={price() ? priceTitle() : undefined}>{priceLabel()}</span>
         </Show>
       </a>
     </Show>

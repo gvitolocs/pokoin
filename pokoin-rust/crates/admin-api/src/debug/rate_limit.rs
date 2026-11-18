@@ -76,10 +76,12 @@ pub(crate) fn identity_hash(identity: &str) -> String {
 
 /// `rateLimitBucket(scope, identity)` (`_redis_ns.rateLimitKey`).
 pub(crate) fn rate_limit_bucket(scope: &str, identity: &str) -> String {
+    // IPv6 identities fold to their /64 (see `rate_identity`).
+    let identity = pokoin_accounts::rate_limit::rate_identity(identity);
     format!(
         "pokoin:rl:v1:{}:{}",
         clean_scope(scope),
-        identity_hash(identity)
+        identity_hash(&identity)
     )
 }
 

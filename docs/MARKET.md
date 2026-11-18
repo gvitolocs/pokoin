@@ -1,4 +1,4 @@
-# Pokoin.com React marketplace — pipeline and APIs
+# Pokoin.com marketplace (Solid) — pipeline and APIs
 
 Source of truth for the **public web**: this repo (`gvitolocs/pokoin`).
 Production is Vercel project `web`. Android/iOS CardVault is a separate app:
@@ -90,8 +90,8 @@ then Best Deal.
    `<span>` — no dropdown arrow. **Set-symbol circles** always sit under the
    scan (even a singleton expansion). **More versions...** sits under those
    circles when this card has another rarity or another artwork. When the CLIP
-   group has **more than five** expansions, circles drop and only the link
-   remains. Changing Ultra Rare → Full-Art
+   group has **more than six** expansions, the row caps to six: the current
+   set plus the newest of the others. Changing Ultra Rare → Full-Art
    refetches `marketplace-version-set` so the circles update. Do not feed
    exact-name rows into that row — that kept every expansion of the English
    name and did not move when the select changed. Do not copy CardTrader’s
@@ -185,7 +185,7 @@ then Best Deal.
    **12** leftovers from `cheapest_homepage_cache_blueprint` (not 8). Same-name
    printings stay on that rail above, not a second related row.
 
-Click the scan to zoom (React lightbox). Do not navigate Home on art tap.
+Click the scan to zoom (lightbox). Do not navigate Home on art tap.
 Mount `<dialog>` only while zoom is on; **never** set `display` on a closed
 dialog.
 
@@ -233,7 +233,7 @@ SPA and `/api/marketplace-home?v=rising-month` (Worker strips `?v=`).
 | Art | Prev / next | Same-set sibling via expansion page; do not clear siblings on cardId change |
 | Art | Scan click | Lightbox zoom |
 | Art | Version select | Always in the art column between ‹ ›. Seeded with this printing. Options are **rarity** versions in this set. Singleton is a gold `<span>`, no chevron. |
-| Art | Set shortcuts | Circular set symbols **under the scan**, including a singleton expansion (`GET /api/marketplace-version-set`). Current highlighted. Switching the rarity `<select>` reloads that CLIP group. **More versions...** under the circles → rarity lineup + artwork (gold halo). **More than five** expansions → link only |
+| Art | Set shortcuts | Circular set symbols **under the scan**, including a singleton expansion (`GET /api/marketplace-version-set`). Current highlighted. Switching the rarity `<select>` reloads that CLIP group. **More versions...** under the circles → rarity lineup + artwork (gold halo). **More than six** expansions → the row caps to six (current set + newest others) |
 | Center | Listing fields | Local form state only. Currency PKN / EUR / USD / DKK; EUR and USD convert at `1 PKN = 0.005 USDT` (`DKK` via 7.5 / EUR). POST is always `pricePkn`. |
 | Center | Extra chips | Toggle 1st Ed. / Sealed / Graded / Shipping |
 | Center | Sign in / List card | Sign in → `/auth`; signed-in List card POSTs with Firebase bearer |
@@ -322,7 +322,7 @@ bulk put` on the Free plan. `pokoin.com/card-images/*` stays on
 `pokoin-cdn-card-images`. Do not put shortlinks on a third-party REST host. Do not point
 `news.pokoin.com` at these rewrites. `app.pokoin.com` stays DNS-only.
 
-The React card page still `navigate(canonicalPath, { replace: true })` when a
+The card page still replaces the URL with the canonical path when a
 request reaches the SPA without a slug.
 
 ---
@@ -348,7 +348,7 @@ the detail hero. Zoom softness is the 500px source, not the codec. Ingest
 rounds only the cardboard crescents (3.175 mm circle); it must not punch the
 printed TRAINER / nameplate. Map: [CARD_ART.md](CARD_ART.md) Type D.
 
-Artist is React: `/marketplace/{lang}/artists/{slug}`. **More versions...** is
+Artist is an SPA page: `/marketplace/{lang}/artists/{slug}`. **More versions...** is
 `{canonicalPath}/versions` in this SPA. That page has **Rarity Lineup**
 (rarity pair in this set), then CLIP printings grouped by TCG era (Mega
 Evolution → Original; Platinum and Call of Legends are their own blocks).
@@ -380,6 +380,7 @@ Deal, and Add to cart use `GET /api/marketplace-listings?nativeOnly=1` after
 first paint. Catalog `card.price` is not a buyable ask. Empty native listings:
 Floor `—`, **Unavailable**, “No sellers yet.” Unsigned Best Deal unlock goes
 to `/auth`. Signed-in unlock posts `/api/unlock-silver` (20 site PKN).
+Silver lasts 365 days from that purchase; admins stay Silver permanently.
 CT/CM/VT pills render only when Firestore says Silver (or admin). Silver **VT**
 opens Vinted Italy with Pokemon `{name} {collector}` (`Gumshoos 184`); OP/RB
 keep their game prefix plus collector. English set names zero the catalog.
@@ -421,7 +422,7 @@ A **printing** (SKU in the TCGPlayer *sense*, not a TCGPlayer id) is:
 3. Listings under that printing: **condition + seller + PKN price**.
 
 `includeSameAs` and `liveOffers` are **off** unless the client asks. `includeOffers`
-defaults **off** too: the React card shell paints identity + hero first, then
+defaults **off** too: the card shell paints identity + hero first, then
 `GET /api/marketplace-listings?cardId=&nativeOnly=1` fills the table. In-memory
 `listings-cache.js` treats an empty `[]` as a hit — after **List card**, the
 SPA invalidates that id and fetches `fresh` (`cache: no-store`) so a cached
@@ -496,7 +497,7 @@ those contradict the live contract. Page BFFs are **GET**.
 | `POST /api/marketplace-orders` | Paid checkout. Physical holds PKN (`paymentStatus: escrow`) until `confirm-delivery`. NFT-only credits now. |
 | `POST /api/marketplace-orders?action=nft-shipping-request` | NFT shipping intent. Bearer |
 | `POST /api/create-pkn-checkout-session` | Stripe PKN packages |
-| `POST /api/unlock-silver` | 20 site PKN Silver |
+| `POST /api/unlock-silver` | 20 site PKN Silver, 365 days (admins permanent) |
 | `GET /api/marketplace-expansion-page?slug=` | Set browse walk, 400-row pages (`EXPANSION_PAGE`), leftover `card_id` desc. A normal set finishes in one response and paints; a longer set stays on skeletons until `hasMore === false`. `expansion.nationality` drives the JP/CN title flag ([PRINT_FLAGS.md](PRINT_FLAGS.md)). English `expansion.name` for slugs, official lists, and the desk title. [Set desk first paint](#set-desk-first-paint). |
 | `GET /api/marketplace-suggest?q=` | Header typeahead (grouped printings). Meili from 1 character in the background; popup from 3 compact characters, instant local rank + **cached printings** (not a 120ms blank dump, not `live:` name stubs). One Meili index, English-identity rows for every title language; after grouping the API stamps `localized_name` / `localized_set` / `localized_rarity` so the popup can show a CardTrader-style English title plus translation subtitle. SPA `suggest-rank.js` scores the compact English name against unique blueprint names (`marketplace_card_names`). Popularity is 2 log-capped points, never 428×; a perfect typed `gx`/`ex`/`v` match is 4. `oin` ranks Oinkologne; `pikahc gx` ranks Pikachu GX; `dawe` expands to Dawn; `miikyu ex` scores `Mimikyu ex`, not a peeled EX layer. `sylveon ex il` peels `il` as illustration/full-art and ranks SIR/FA printings first. `061 shieldon` peels the collector token and ranks Shieldon printings (061 first); Meili is not queried for every 061. `Sh1` is the SH1/SH10 collector prefix first, then real name-pool printings (Shinx, Shuppet) fill toward 20; the print-language chip keeps western rows in that 20. Set-code tokens: `hgss energy` peels HeartGold & SoulSilver and ranks elemental energies from that era; `palkai sl` peels Call of Legends (SL secrets) and ranks that set’s Palkia, not LV.X. Set-title phrases with a typo (`flareon call of legendsd`) peel to a name lookup on the search page, then filter printings by TCG era — expansion short codes stay off suggest `attributesToSearchOn`. A bare `expedition` browses Expedition Base Set and fills 20 singles; it is not Expedition Uniform from Chilling Reign. Jumbo / oversized leftovers are Product, not Singles. Not Flutter `marketplace-autocomplete` / token-predict. UI flattens groups into CardTrader-style rows. The “View all N results” number prefers the search-page payload’s `total` (same query object as its rows, same-WHERE window count), so `pikachu gx 30th` no longer reports the broad `pikachu` pool where that total exists; suggest `count` stays the baseline for universes without one. Popup cap 20 is the top real ranked matches; **western is a visual tie-break** on equal Meili points, not a `search_weight` change. After suggest, the SPA prefetches search-page so Enter is hot (`search-hot.js`). **2pikabench** (10 two-insert + keyboard typos, `seed=2`) recovered 10/10 on 2026-09-13: pool rank 2.7 ms avg, `fetchSuggestRanked` search **105 ms avg** (1053 ms / 10). Table: [CHROME.md](CHROME.md). |
 | `GET /api/marketplace-card-sales?cardId=` | Desk header last-day PKN (`series.lastMedianPkn`) + daily median series. Tile/versions last-median uses this thin response (no `slices`). Desk graph uses `?slices=1` once per card: every `cardtrader_sold_daily` combination as camelCase `slices` (day, condition, language, reverse, firstEdition, graded, medianPkn, sampleCount, …). SPA filters locally and caches 15 days. `series.soldQty` is copies sold in the current slice (shown as **n units**); `series.sampleCount` is listing-disappearance events. Each `series.days[]` has `sampleCount` / `soldQty`. Optional `condition` / `language` (`cond` / `lang`), `reverse`, `firstEdition`, `graded` (`0`/`1`) still apply on the series path. `filters` lists keys that exist for the printing on that path. Default has no observation rows (`includeRows=1` for a capped sample). |
@@ -537,7 +538,9 @@ card-page query (no tiles overlay). Artist is denormalized on
 it so in-app navigation first-paints the subtitle. The payload is stored by public card id
 (`pokoin.cardPage.v1.`) so a reload paints them before the hop. That BFF is
 often ~3s on the Frankfurt micro and can stall like expansion-page; a hang
-must **not** become “Card market not found.” Only a real 404 clears the stub.
+must **not** become “Card market not found.” Only a real 404 clears the stub,
+and a Pokémon 404 carrying `ownerGame` reloads the desk under that TCG's slug
+instead ([RUST_RUNTIME.md](RUST_RUNTIME.md) “Catalog identity and caching”).
 Suggest passes `state: { card }` so typeahead already has art.
 
 Live marketplace API/CDN is the **Raspberry Pi**
@@ -632,7 +635,7 @@ after New cards already painted. Nameless stubs are treated as missing:
 do not paint the coin placeholder, and `fetchCard` after tiles miss.
 
 Tiles show `formatPkn` (2642 PKN, no thousands comma) plus `printingIdentity().tileLine`. Grid art is the
-240px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
+480px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
 home promo fan). First eight visible tiles are `loading=eager`; the first
 four use `fetchPriority=high`. `CardTile` is always a **full 63:88 scan**.
 Search suggest (desktop and phone) can show a CSS-cropped illustration
@@ -788,20 +791,20 @@ in that box — scan batches, desk listings and PowerTools CSV imports all write
 occupied one (`maxOccupiedStack`). The API map documents the board's
 `/api/marketplace-price-check` pricer.
 
-### MyPokoin pricing strategies + settings (PowerTools parity)
+### MyPokoin pricer: named strategies and pricing groups
 
-Pricing strategies live on `users/{uid}.pricingStrategies` (Firestore) via
-`/api/marketplace-pricing-strategies` (GET / POST upsert / DELETE ?id=).
-A strategy = comp source (pokoin | cardtrader) + action (match | undercut |
-premium) + amount % + flat PKN + floor + rounding (none | integer) + optional
-condition/language scope. Evaluation is client-side against
-`/api/marketplace-price-check` comps; **Apply** shows a dry-run table
-(current → new, Δ) and reprices through `PATCH /api/marketplace-listings?id=`
-one listing at a time (≤100 per run). Pricer defaults
-(`defaultSource`, `autoMarketColumn`) ride the same endpoint. The board has
-three view modes — Table / Stacks / Titles — persisted in
-`localStorage pokoin.invView`; Settings lives on `/mypokoin/settings`
-(pricer defaults + strategy manager).
+`/mypokoin/pricer` (rebuilt 2026-11-04). Sellers pick listings on the board
+into named **pricing groups**, and each group is priced by one named
+**strategy** (no scope), on Apply or every day. Strategies live on
+`users/{uid}.pricingStrategies` through `/api/marketplace-pricing-strategies`;
+groups live in Postgres through `/api/marketplace-pricing-groups`. Apply
+(`/api/marketplace-pricing-groups/apply`) plans on the server from the same
+comps as `/api/marketplace-price-check` and writes through the listing update.
+The rules, routes, daily job and migration are in [PRICING.md](PRICING.md),
+"The Pricer". Pricer defaults (`defaultSource`, `autoMarketColumn`) ride the
+strategies endpoint and stay in Settings (`/mypokoin/settings`). The board
+has three view modes, Table / Stacks / Titles, persisted in
+`localStorage pokoin.invView`.
 
 ### Buyer display currency (affordability threshold)
 
@@ -872,6 +875,9 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   (continuity reconciliation in `088_seller_stack_continuity.sql`). The copy at
   `scripts/sql/cardtrader-listing-qty-diff.sql` in this repo is a superseded
   snapshot and must never be applied.
+  The other CardTrader games get the same rules from the nightly listing
+  books (`pokoin-cardtrader-sold`, [CARDTRADER_DAILY_DUMP.md](CARDTRADER_DAILY_DUMP.md#sold-graph)):
+  only `cardtrader_sold_daily` is stored in their databases.
 
   **Stack key (the listing identity for “sold?”):**
 
@@ -1087,7 +1093,7 @@ of truth.
 Raspberry Pi (`/srv/pokoin/card-images/objects`). Worker `pokoin-cdn-card-images`
 reads Pi first, R2 only as backup. `api2.pokoin.com` is the same Pi origin as
 `api.pokoin.com`. Do not rewrite DB URLs. See [GAMES.md](GAMES.md).
-Home/search tiles use `_homepage.webp` (240px, q82); desk and promo fan use
+Home/search tiles use `_homepage.webp` (480px, q82, `?v=…t480`); desk and promo fan use
 leftover JPEG (`CardArt full`). Grid 404 falls back to JPEG. Search suggest
 may CSS-crop that same webp into the illustration rectangle on the right of
 the popup (`art-cut.js`); no second download.
@@ -1141,18 +1147,19 @@ env -u VERCEL_TOKEN vercel build --prod --yes
 env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
 ```
 
-`vercel.json` runs `scripts/build-web.sh` into `dist-web/` (landing + hashed
-`market/` assets). Do not deploy the GitHub tree as static files — that ships
-the Vite `src/main.jsx` shell and 404s `/marketplace`. `scripts/sync-market.sh`
+`vercel.json` runs `scripts/build-web.sh` into `dist-web/` (landing + the Solid
+build under `market/`, hashed chunks in `market/s/`). Do not deploy the GitHub tree
+as static files — that ships the unbuilt `solid/index.html` and 404s `/marketplace`. `scripts/sync-market.sh`
 copies into CardVault and is leftover; it is not production. See [APP.md](APP.md).
 
-Local Vite:
+Local Vite (Solid; in your own Paseo worktree):
 
 ```bash
-cd /home/nez/Projects/pokoin-web/market
+(cd market && npm install)
+cd solid
 npm install
 npm run dev
-# http://192.168.178.55:5174/marketplace
+# http://192.168.178.55:5175/marketplace
 # Vite proxies /api → api.pokoin.com, /chain → rpc.pokoin.com,
 # /cardscan/identify → cardscan.pokoin.com/identify (not the SPA).
 ```

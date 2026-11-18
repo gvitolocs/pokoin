@@ -102,7 +102,7 @@ function ExpansionRow(props) {
   );
 }
 
-/** Expansion print-language OCR board (market/src/pages/Ocr.jsx). */
+/** Expansion print-language OCR board. */
 export default function Ocr() {
   const [guides, setGuides] = createSignal(true);
   const [zoom, setZoom] = createSignal(null);

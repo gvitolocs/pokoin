@@ -1,20 +1,37 @@
-import { Show } from 'solid-js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
+import { MISSING_CARD_SRC } from '@market/missing-card.js';
+import ScanImage from '../ScanImage.jsx';
+
+/**
+ * The thumbnail a row shows for its card: rows may carry a stale or missing
+ * scan, so the catalog leftover image for the printing wins. Shared with Quick
+ * Sell, whose dialog paints the same card in a slightly bigger box.
+ */
+export function rowThumbSrc(row) {
+  const advertised = row?.cardImageUrl || row?.card_image_url || '';
+  if (advertised === MISSING_CARD_SRC) return advertised;
+  return homepageDerivativeUrl(ownCatalogImage(
+    { id: row?.cardId || row?.card_id, name: row?.cardName || row?.name || '' },
+    preferFullImage(advertised),
+  ));
+}
 
 /**
  * Listing thumbnail (InventoryBoard / LocationBoard RowThumb): rows may carry a
  * stale or missing scan, so the catalog leftover image for the printing wins.
  */
 export default function RowThumb(props) {
-  const src = () => homepageDerivativeUrl(ownCatalogImage(
-    { id: props.row?.cardId || props.row?.card_id },
-    preferFullImage(props.row?.cardImageUrl || props.row?.card_image_url || ''),
-  ));
+  const src = () => rowThumbSrc(props.row);
   const name = () => props.row?.cardName || props.row?.name || 'Listing';
   return (
-    <Show when={src()} fallback={<span class="inv-thumb is-empty" aria-hidden="true">{String(name()).slice(0, 1).toUpperCase()}</span>}>
-      <img class="inv-thumb" src={src()} alt="" loading="lazy" width="40" height="56" />
-    </Show>
+    <ScanImage
+      class="inv-thumb"
+      letterClass="inv-thumb is-empty"
+      src={src()}
+      label={name()}
+      width="40"
+      height="56"
+    />
   );
 }
 

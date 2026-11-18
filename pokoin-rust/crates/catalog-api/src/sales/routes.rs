@@ -7,8 +7,10 @@ use axum::response::Response;
 use pokoin_api_common::pg::{self, Bind};
 use pokoin_api_common::{game, http, RouteState};
 use serde_json::{json, Map, Value};
+use sqlx::PgPool;
 
 use super::core::{self, SoldSlice};
+use super::history_sources::{self, FxRates};
 use super::tcgcsv::{self, TcgError};
 use crate::reads::util;
 use crate::shared::{card_versions, js};
@@ -121,9 +123,9 @@ fn normalize_sale_item(order_id: &str, paid_at: &Value, item: &Value) -> Value {
 }
 
 /// `readCardSales({ cardId, limit, includeNative, ...slice })`.
-async fn read_card_sales(state: &RouteState, card_id: &str, limit: i64, include_native: bool, slice: &SoldSlice) -> Result<Vec<Value>, Response> {
+async fn read_card_sales(pool: &PgPool, state: &RouteState, card_id: &str, limit: i64, include_native: bool, slice: &SoldSlice) -> Result<Vec<Value>, Response> {
     let id: i64 = card_id.parse().unwrap_or(0);
-    let mut oracle = core::read_oracle_card_sales(state.api.read(), id, limit, slice)
+    let mut oracle = core::read_oracle_card_sales(pool, id, limit, slice)
         .await
         .map_err(|e| db_failure("marketplace-card-sales", &e, "Marketplace card sales failed.", &READ_CORS))?;
     let sort = |rows: &mut Vec<Value>| rows.sort_by(|a, b| js::string_or_empty(a.get("soldAt")).cmp(&js::string_or_empty(b.get("soldAt"))));
@@ -160,7 +162,7 @@ async fn read_card_sales(state: &RouteState, card_id: &str, limit: i64, include_
 }
 
 /// `GET /api/marketplace-card-sales`.
-pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn card_sales(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     if let Some(r) = preflight_or_405(&method, &READ_CORS) {
         return r;
     }
@@ -169,25 +171,42 @@ pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Ur
     if card_id.is_empty() || !card_id.bytes().all(|b| b.is_ascii_digit()) {
         return with_headers(StatusCode::BAD_REQUEST, json!({ "error": "cardId is required." }), &READ_CORS, &[]);
     }
+    let game_id = current_game(&headers, &q);
+    let satellite = !game::is_pokemon_game(&game_id);
+    let pool = if satellite {
+        match state.api.game_pool(&game_id).await {
+            Some(pool) => pool,
+            None => return with_headers(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{game_id} marketplace database URL is not configured.")}), &READ_CORS, &[]),
+        }
+    } else {
+        state.api.read().clone()
+    };
     let id: i64 = card_id.parse().unwrap_or(0);
     let cache = [("cache-control", "public, max-age=20, s-maxage=120")];
     let include_native = q.search_param("includeNative").unwrap_or("").trim() == "1";
     let include_rows = include_native || q.search_param("includeRows").unwrap_or("").trim() == "1";
     if q.search_param("slices").unwrap_or("").trim() == "1" {
-        return match core::read_oracle_sold_daily_rows(state.api.read(), id, &SoldSlice::default()).await {
-            Ok((_, rows)) => with_headers(StatusCode::OK, json!({ "slices": rows.iter().map(core::compact_sold_daily_slice).collect::<Vec<_>>(), "source": "cardtrader_removed_sale" }), &READ_CORS, &cache),
+        return match core::read_oracle_sold_daily_rows(&pool, id, &SoldSlice::default()).await {
+            Ok((missing, rows)) => {
+                let mut body = Map::new();
+                body.insert("slices".into(), Value::Array(rows.iter().map(core::compact_sold_daily_slice).collect::<Vec<_>>()));
+                body.insert("source".into(), json!("cardtrader_removed_sale"));
+                if satellite && missing {
+                    body.insert("soldData".into(), json!("unavailable"));
+                }
+                with_headers(StatusCode::OK, Value::Object(body), &READ_CORS, &cache)
+            }
             Err(e) => db_failure("marketplace-card-sales", &e, "Marketplace card sales failed.", &READ_CORS),
         };
     }
     let slice = SoldSlice::from_query(&q);
     let limit = util::js_limit(q.search_param("limit"), 120, 500);
-    let pool = state.api.read();
     let (rows, series, filters) = tokio::join!(
         async {
-            if include_rows { read_card_sales(&state, &card_id, limit, include_native, &slice).await } else { Ok(Vec::new()) }
+            if include_rows { read_card_sales(&pool, &state, &card_id, limit, include_native && !satellite, &slice).await } else { Ok(Vec::new()) }
         },
-        core::read_oracle_card_sales_series(pool, id, &slice),
-        core::read_oracle_sales_filters(pool, id, &slice),
+        core::read_oracle_card_sales_series(&pool, id, &slice),
+        core::read_oracle_sales_filters(&pool, id, &slice),
     );
     let rows = match rows {
         Ok(rows) => rows,
@@ -203,6 +222,13 @@ pub async fn card_sales(State(state): State<RouteState>, method: Method, uri: Ur
     body.insert("filters".into(), filters);
     body.insert("slice".into(), Value::Object(slice.payload()));
     body.insert("source".into(), json!("cardtrader_removed_sale"));
+    if satellite {
+        if let Ok((missing, _)) = core::read_oracle_sold_daily_rows(&pool, id, &SoldSlice::default()).await {
+            if missing {
+                body.insert("soldData".into(), json!("unavailable"));
+            }
+        }
+    }
     with_headers(StatusCode::OK, Value::Object(body), &READ_CORS, &cache)
 }
 
@@ -214,7 +240,7 @@ const LAST_MEDIAN_CORS: [(&str, &str); 4] = [
 ];
 
 /// `GET /api/marketplace-card-last-median`.
-pub async fn card_last_median(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn card_last_median(State(state): State<RouteState>, method: Method, headers: HeaderMap, uri: Uri) -> Response {
     if let Some(r) = preflight_or_405(&method, &LAST_MEDIAN_CORS) {
         return r;
     }
@@ -243,9 +269,17 @@ pub async fn card_last_median(State(state): State<RouteState>, method: Method, u
     if ids.is_empty() {
         return with_headers(StatusCode::BAD_REQUEST, json!({ "error": "cardId is required." }), &LAST_MEDIAN_CORS, &[]);
     }
+    let game_id = current_game(&headers, &q);
+    let pool = if game::is_pokemon_game(&game_id) {
+        state.api.read().clone()
+    } else {
+        match state.api.game_pool(&game_id).await {
+            Some(pool) => pool,
+            None => return with_headers(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{game_id} marketplace database URL is not configured.")}), &LAST_MEDIAN_CORS, &[]),
+        }
+    };
     let slice = SoldSlice::from_query(&q);
-    let pool = state.api.read();
-    let futures = ids.iter().map(|id| core::read_oracle_last_median(pool, id.parse().unwrap_or(0), &slice));
+    let futures = ids.iter().map(|id| core::read_oracle_last_median(&pool, id.parse().unwrap_or(0), &slice));
     let results = futures_util::future::join_all(futures).await;
     let mut prices = Vec::new();
     for r in results {
@@ -582,6 +616,30 @@ fn day_of(v: &Value) -> String {
     js::string_or_empty(Some(v)).chars().take(10).collect()
 }
 
+/// The `observations` rows of a `read_tcgplayer_history` result.
+fn tcg_observations(result: &Value) -> &[Value] {
+    let rows = result["observations"].as_array();
+    rows.map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The TCGplayer status of an unconfigured history pool: `unconfigured` while
+/// `TCGCSV_DATABASE_URL` is unset or empty, `unavailable` once it is set.
+fn unconfigured_status() -> &'static str {
+    if std::env::var("TCGCSV_DATABASE_URL").map_or(true, |value| value.is_empty()) {
+        "unconfigured"
+    } else {
+        "unavailable"
+    }
+}
+
+/// A source block that did not answer, so the response must not be cached.
+fn status_failed(block: &Value) -> bool {
+    matches!(
+        block["status"].as_str(),
+        Some("unavailable") | Some("unconfigured")
+    )
+}
+
 fn count(v: Option<&Value>) -> i64 {
     let n = js::number(v);
     if n.is_finite() { (n.trunc() as i64).max(0) } else { 0 }
@@ -601,7 +659,7 @@ fn cardtrader_source(rows: &[Value], status: Option<&str>) -> Value {
     })
 }
 
-fn tcgplayer_source(rows: &[Value], status: Option<&str>) -> Value {
+fn tcgplayer_source(rows: &[Value], rates: &FxRates, status: Option<&str>) -> Value {
     let mut order: Vec<String> = Vec::new();
     let mut by: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
     for r in rows {
@@ -611,10 +669,13 @@ fn tcgplayer_source(rows: &[Value], status: Option<&str>) -> Value {
             json!({ "productId": js::js_string(&r["product_id"]), "categoryId": r["category_id"], "groupId": r["group_id"], "subtype": r["subtype"], "days": [] })
         });
         if let Some(days) = entry.get_mut("days").and_then(Value::as_array_mut) {
-            days.push(json!({
-                "day": day_of(&r["observed_on"]), "marketPrice": r["market_price"], "lowPrice": r["low_price"], "midPrice": r["mid_price"],
+            let day = day_of(&r["observed_on"]);
+            let mut market = json!({
+                "day": day, "marketPrice": r["market_price"], "lowPrice": r["low_price"], "midPrice": r["mid_price"],
                 "highPrice": r["high_price"], "directLowPrice": r["direct_low_price"], "sourceTimestamp": if js::truthy(r.get("snapshot_timestamp")) { r["snapshot_timestamp"].clone() } else { Value::Null },
-            }));
+            });
+            history_sources::add_market_pkn(&mut market, r.get("market_price"), &day, rates);
+            days.push(market);
         }
     }
     json!({
@@ -660,7 +721,7 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
         return with_headers(StatusCode::NOT_FOUND, json!({ "error": "Card not found." }), &cors, &[]);
     };
     let ct = if card["ct_id"].is_null() { None } else { Some(js::js_string(&card["ct_id"])) };
-    let (listed, tcg) = tokio::join!(
+    let (listed, tcg, cardmarket, rates) = tokio::join!(
         async {
             match &ct {
                 Some(ct) => pg::pool_rows(&pool, LISTED_SQL, &[Bind::Text(ct.clone()), Bind::Text(from.clone()), Bind::Text(to.clone())]).await,
@@ -668,21 +729,24 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
             }
         },
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
+        history_sources::cardmarket_history(&pool, &game_id, ct.as_deref(), &from, &to),
+        history_sources::read_fx_rates(&pool, &to),
     );
     let cardtrader = match listed {
         Ok(rows) => cardtrader_source(&rows, None),
         Err(_) => cardtrader_source(&[], Some("unavailable")),
     };
-    let tcgplayer = match tcg {
-        Ok(result) => tcgplayer_source(result["observations"].as_array().map(Vec::as_slice).unwrap_or(&[]), None),
-        Err(TcgError::Unconfigured) => tcgplayer_source(&[], Some(if std::env::var("TCGCSV_DATABASE_URL").map_or(true, |v| v.is_empty()) { "unconfigured" } else { "unavailable" })),
-        Err(TcgError::Db(_)) => tcgplayer_source(&[], Some("unavailable")),
+    let tcgplayer = match &tcg {
+        Ok(result) => tcgplayer_source(tcg_observations(result), &rates, None),
+        Err(TcgError::Unconfigured) => tcgplayer_source(&[], &rates, Some(unconfigured_status())),
+        Err(TcgError::Db(_)) => tcgplayer_source(&[], &rates, Some("unavailable")),
     };
-    let degraded = [&cardtrader, &tcgplayer].iter().any(|f| matches!(f["status"].as_str(), Some("unavailable") | Some("unconfigured")));
+    let blocks = [&cardtrader, &tcgplayer, &cardmarket];
+    let degraded = blocks.iter().copied().any(status_failed);
     let body = json!({
         "game": game_id, "cardId": js::js_string(&card["card_id"]), "ctId": ct, "from": from, "to": to,
         "printing": { "name": card["name"], "setName": card["expansion_name"], "number": card["card_number"] },
-        "cardtrader": cardtrader, "tcgplayer": tcgplayer,
+        "cardtrader": cardtrader, "tcgplayer": tcgplayer, "cardmarket": cardmarket, "fx": history_sources::fx_json(&rates),
     });
     with_headers(StatusCode::OK, body, &cors, &[("cache-control", if degraded { "no-store" } else { "public, max-age=20, s-maxage=120" })])
 }
@@ -729,5 +793,16 @@ mod tests {
         assert_eq!(p["pricePkn"], json!(22));
         assert_eq!(p["provider"], "cardtrader");
         assert_eq!(p["available"], json!(true));
+    }
+
+    #[test]
+    fn current_game_from_query_header_or_default() {
+        let q = http::Query::from_uri(&"/api/marketplace-card-sales?cardId=1&game=yugioh".parse().unwrap());
+        assert_eq!(current_game(&HeaderMap::new(), &q), "yugioh");
+        let mut headers = HeaderMap::new();
+        headers.insert("x-pokoin-game", "magic".parse().unwrap());
+        let q = http::Query::from_uri(&"/api/marketplace-card-sales?cardId=1".parse().unwrap());
+        assert_eq!(current_game(&headers, &q), "magic");
+        assert_eq!(current_game(&HeaderMap::new(), &http::Query::parse("cardId=1")), "pokemon");
     }
 }

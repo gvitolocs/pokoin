@@ -14,7 +14,7 @@ import AuthLink from '../components/AuthLink.jsx';
 import { createReferral } from '../lib/referral.js';
 import { signedIn } from '../stores/auth.js';
 
-/** pokoin.com/ambassadorprogram — public; signed-in visitors see their progress (market/src/pages/AmbassadorProgram.jsx). */
+/** pokoin.com/ambassadorprogram — public; signed-in visitors see their progress. */
 export default function AmbassadorProgram() {
   const { data, code } = createReferral(signedIn);
   document.title = 'Ambassador program · Pokoin';

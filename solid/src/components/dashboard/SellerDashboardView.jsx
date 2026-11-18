@@ -3,12 +3,14 @@ import { cardHref, formatPkn, imageSrc } from '@market/api.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { printingIdentity } from '@market/identity.js';
 import { formatPknNumber, tilePricePkn } from '@market/pkn.js';
+import { inventoryListingHref } from '@market/inventory-listings.js';
 import { formatDayLabel } from '@market/portfolio-history.js';
 import { DASHBOARD_SCAN, goMarket, marketUrl } from '@market/punchouts.js';
 import '@market/sell-spreadsheet.css';
 import { Alert, EmptyDesk, PageHead } from '../Desk.jsx';
 import MiniCardTile from '../MiniCardTile.jsx';
 import CollectionHistoryPanel from './CollectionHistoryPanel.jsx';
+import TopMoversPanel from './TopMoversPanel.jsx';
 
 /** React DashboardBoundary: a render error leaves a one-line notice, not a blank page. */
 export function DashboardBoundary(props) {
@@ -176,16 +178,12 @@ function ListingPreviewTile(props) {
 
 function SellSpreadsheetTile() {
   return (
-    <a class="sell-sheet-tile" href="/mypokoin/spreadsheet" data-testid="sell-via-spreadsheet">
-      <span class="sell-sheet-tile-icon">
-        <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
-          <path fill="currentColor" d="M12 6h16l8 8v26a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm14 2v8h8" />
-          <path fill="currentColor" d="M16 24h7v2h-7v-2zm0 5h16v2H16v-2zm0 5h16v2H16v-2z" />
-          <path fill="currentColor" d="M29.2 22.4 33 26.2l3.8-3.8 1.4 1.4-3.8 3.8 3.8 3.8-1.4 1.4-3.8-3.8-3.8 3.8-1.4-1.4 3.8-3.8-3.8-3.8z" />
-        </svg>
-      </span>
-      <strong>Sell via spreadsheet</strong>
-      <span>Start selling by uploading an excel/csv file</span>
+    <a class="seller-spreadsheet-link" href="/mypokoin/spreadsheet" data-testid="sell-via-spreadsheet">
+      <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M12 6h16l8 8v26a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm14 2v8h8" />
+        <path fill="currentColor" d="M16 24h7v2h-7v-2zm0 5h16v2H16v-2zm0 5h16v2H16v-2z" />
+      </svg>
+      Sell via spreadsheet — upload an excel/csv file
     </a>
   );
 }
@@ -209,8 +207,8 @@ function assetTitle(item) {
 }
 
 /**
- * CardTrader 1-Day Ready inventory beside Your listings
- * (market/src/components/CardTraderAssetsPanel.jsx): CardTrader stocks and
+ * CardTrader 1-Day Ready inventory beside Your listings:
+ * CardTrader stocks and
  * sells it, so it shows as assets, never as Pokoin listings.
  */
 function CardTraderAssetsPanel(props) {
@@ -229,7 +227,7 @@ function CardTraderAssetsPanel(props) {
             </span>
           </Show>
         </header>
-        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Run Sync CardTrader in Profile.</p>}>
+        <Show when={items().length} fallback={<p class="seller-panel-empty">No 1-Day Ready cards yet. Press Sync now under CardTrader in Profile.</p>}>
           <div class="seller-listing-list" data-testid="cardtrader-1dr-grid">
             <For each={shown()}>
               {(item) => (
@@ -239,7 +237,7 @@ function CardTraderAssetsPanel(props) {
                   title={assetTitle(item)}
                   cardId={item.cardId || ''}
                   pricePkn={item.pricePkn}
-                  href={item.cardId ? marketUrl(`/marketplace/en/cards/${item.cardId}`) : ''}
+                  href={item.cardId ? marketUrl(inventoryListingHref(item)) : ''}
                   badge={item.quantity > 1 ? `×${item.quantity}` : ''}
                 />
               )}
@@ -258,7 +256,7 @@ function CardTraderAssetsPanel(props) {
 }
 
 /**
- * Presentational seller dashboard (market/src/components/SellerDashboardView.jsx).
+ * Presentational seller dashboard.
  * Data is passed in so the fixture preview renders without Firebase.
  */
 export function SellerDashboardView(props) {
@@ -376,7 +374,7 @@ export function SellerDashboardView(props) {
               </Show>
 
               <HistoryBoundary>
-                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} />
+                <CollectionHistoryPanel series={props.historySeries || []} pending={Boolean(props.historyPending)} live={historyLive()} onRange={props.onHistoryRange} />
               </HistoryBoundary>
 
               <div class="seller-tile-actions">
@@ -393,16 +391,28 @@ export function SellerDashboardView(props) {
           </header>
           <div class="seller-tile-body seller-tile-cta">
             <AddCardsArt />
-            <a class="btn" href={DASHBOARD_SCAN} data-testid="list-cards-scan">Scan cards</a>
+            <div class="seller-tile-cta-stack">
+              <a class="btn" href={DASHBOARD_SCAN} data-testid="list-cards-scan">Scan cards</a>
+              <SellSpreadsheetTile />
+            </div>
           </div>
         </section>
       </div>
 
-      <section class="sell-sheet-hub" aria-labelledby="sell-and-buy-title">
-        <h2 id="sell-and-buy-title">Sell and Buy</h2>
-        <div class="sell-sheet-hub-grid">
-          <SellSpreadsheetTile />
-        </div>
+      {/* The "Sell and Buy" hub is gone: its spreadsheet link moved into Add
+          Cards above and this sheet reads the chart's own window. */}
+      <section class="seller-top-movers-shell" aria-labelledby="top-movers-shell-title">
+        <h2 id="top-movers-shell-title" class="sr-only">Top movers</h2>
+        <TopMoversPanel
+          movers={props.topMovers}
+          pending={Boolean(props.topMoversPending)}
+          currency={props.moverCurrency || ''}
+          currencyPending={Boolean(props.moverCurrencyPending)}
+          windowLabel={props.moverRange?.label || ''}
+          hrefFor={(mover) => (props.moverHrefFor
+            ? props.moverHrefFor(mover)
+            : marketUrl(inventoryListingHref({ cardId: mover.cardId })))}
+        />
       </section>
 
       <section class="seller-panel seller-movers-panel" aria-labelledby="seller-movers-title">
@@ -443,7 +453,7 @@ export function SellerDashboardView(props) {
               {showAllListings() ? 'Show fewer' : `Show all ${listingRows().length}`}
             </button>
           </Show>
-          <Show when={!listed()?.failed && !listingRows().length && !props.loading}>
+          <Show when={!listed()?.failed && !listingRows().length && !props.loading && !props.listingsLoading}>
             <EmptyDesk nested title="No cards listed yet" lede="Scan a pile and list what you want to sell.">
               <a class="btn" href={DASHBOARD_SCAN}>Scan cards</a>
             </EmptyDesk>

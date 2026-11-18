@@ -1,15 +1,18 @@
-import { createSignal, For, Repeat, Show } from 'solid-js';
+import { createSignal, For, Repeat, Show, untrack } from 'solid-js';
 import { setSlug } from '@market/api.js';
 import { bundleReference, writeListingDrag } from '@market/chat-listing.js';
 import { resolveExpansionNationality } from '@market/expansion-print.js';
 import { flagSrc, printFlagFromNationality } from '@market/locale.js';
+import { DEAD_IMAGE, rememberImageFallback, workingImage } from '@market/image-fallback-memo.js';
 import { expansionCode, expansionLogoSrc } from '@market/set-logos.js';
 import ExpansionMark from './ExpansionMark.jsx';
+import { gameHref } from '@market/game.js';
 
 /** Wordmark, or the circular expansion mark when there is none or it fails to load. */
 function SetGuideLogo(props) {
   const logo = () => expansionLogoSrc(props.row);
-  const [wordmarkDead, setWordmarkDead] = createSignal(false);
+  // A wordmark that 404'd here before paints the mark at once, not after a failed load.
+  const [wordmarkDead, setWordmarkDead] = createSignal(untrack(() => workingImage(logo()) === DEAD_IMAGE));
   const showMark = () => !logo() || wordmarkDead();
   return (
     <div class={['set-guide-logo', { 'is-mark': showMark() }]}>
@@ -24,7 +27,15 @@ function SetGuideLogo(props) {
           </span>
         )}
       >
-        <img src={logo()} alt="" draggable="false" onError={() => setWordmarkDead(true)} />
+        <img
+          src={logo()}
+          alt=""
+          draggable="false"
+          onError={() => {
+            rememberImageFallback(logo(), DEAD_IMAGE, { keepMs: 24 * 60 * 60_000 });
+            setWordmarkDead(true);
+          }}
+        />
       </Show>
     </div>
   );
@@ -39,7 +50,7 @@ function SetGuideCard(props) {
   return (
     <a
       class="set-guide-card"
-      href={`/marketplace/sets/${slug()}`}
+      href={gameHref(`/marketplace/sets/${slug()}`)}
       draggable="true"
       onDragStart={(event) => {
         writeListingDrag(event, bundleReference({
@@ -74,7 +85,7 @@ function SetGuideCard(props) {
 }
 
 /**
- * Expansion tiles (market/src/components/SetGuideGrid.jsx). Rows are the
+ * Expansion tiles. Rows are the
  * catalog's own objects, so the keyed list keeps a tile when a filter or era
  * chip only reorders or narrows the set list.
  */

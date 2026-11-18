@@ -12,6 +12,7 @@ export {
 } from './suggest-live.js';
 export { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
 export { resolveSuggestQuery } from './suggest-resolve.js';
+export { loadLocalizedNames, localizedNamesReady } from './localized-names.js';
 export { earlySetPrefixName } from './search-score.js';
 export {
   buildScope,

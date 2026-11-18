@@ -1,21 +1,26 @@
 import { createSignal, onSettled, Show } from 'solid-js';
 import { fetchCardTraderStatus } from '@market/api.js';
 import { defaultInventoryTargets, inventoryTargetsLabel } from '@market/inventory-targets.js';
-import { fiatFromPkn, formatPknNumber } from '@market/pkn.js';
-import { getBearer, signedIn } from '../../stores/auth.js';
+import { readCachedCardTraderStatus, writeCachedCardTraderStatus } from '@market/inventory-book.js';
+import { authUid, getBearer, signedIn } from '../../stores/auth.js';
+import { authSession } from '../../stores/session.js';
 
 /**
- * Pokoin / CardTrader target chips + primary action
- * (market/src/components/InventoryTargets.jsx). `mode` is "add" or "list".
+ * Pokoin / CardTrader target chips + primary action.
+ * `mode` is "add" or "list".
  * Signed-out visitors skip the bearer so the desk never loads Firebase for them.
  */
 export default function InventoryTargets(props) {
-  const [connected, setConnected] = createSignal(false);
+  // The seller's last CardTrader state paints the chips and the enabled button
+  // at once; the status read below only changes them when the link moved.
+  const sessionUid = () => (signedIn() ? String(authUid() || authSession()?.uid || '') : '');
+  const known = readCachedCardTraderStatus(sessionUid());
+  const [connected, setConnected] = createSignal(Boolean(known?.connected && !known?.oneDayReady));
   // A CardTrader 1-Day Ready account: CardTrader lists its own warehouse stock,
   // so Pokoin cards are never pushed there.
-  const [oneDayReady, setOneDayReady] = createSignal(false);
-  const [statusReady, setStatusReady] = createSignal(false);
-  const [targets, setTargets] = createSignal(defaultInventoryTargets(false));
+  const [oneDayReady, setOneDayReady] = createSignal(Boolean(known?.oneDayReady));
+  const [statusReady, setStatusReady] = createSignal(Boolean(known));
+  const [targets, setTargets] = createSignal(defaultInventoryTargets(Boolean(known?.connected && !known?.oneDayReady)));
   let touched = false;
 
   onSettled(() => {
@@ -33,6 +38,7 @@ export default function InventoryTargets(props) {
         const data = await fetchCardTraderStatus(bearer);
         const ready1d = data?.status?.connected === true && data?.status?.metadata?.oneDayReady === true;
         const on = data?.status?.connected === true && !ready1d;
+        writeCachedCardTraderStatus(sessionUid(), { connected: data?.status?.connected === true, oneDayReady: ready1d });
         if (cancelled) return;
         setConnected(on);
         setOneDayReady(ready1d);
@@ -70,9 +76,6 @@ export default function InventoryTargets(props) {
   const verb = () => (mode() === 'list' ? 'List' : 'Add');
   const label = () => (mode() === 'list' ? 'List on' : 'Add to');
   const showTargets = () => intent() !== 'collection';
-  const eur = () => (showTargets() && targets().cardtrader && props.pricePkn != null
-    ? fiatFromPkn(props.pricePkn, 'EUR')
-    : null);
   const actionLabel = () => (props.busy
     ? (props.busyLabel || 'Working…')
     : inventoryTargetsLabel(props.counts || { cards: 1 }, { intent: intent(), targets: targets(), verb: verb() }));
@@ -112,11 +115,6 @@ export default function InventoryTargets(props) {
           </Show>
           <Show when={!connected() && statusReady() && !oneDayReady()}>
             <a class="inventory-targets-hint" href="/profile">Connect in Profile</a>
-          </Show>
-          <Show when={eur() != null}>
-            <span class="inventory-targets-eur">
-              ≈ €{formatPknNumber(eur(), { maximumFractionDigits: 2 })} on CardTrader
-            </span>
           </Show>
         </div>
       </Show>

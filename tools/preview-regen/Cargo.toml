@@ -1,0 +1,24 @@
+[package]
+name = "preview-regen"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Audit and rebuild the derived card previews (_homepage.webp, previews/*.webp) from the leftover master scans"
+
+# Own workspace: image tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "preview-regen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+imagesize = "0.13"
+jpeg-decoder = "0.3"
+rayon = "1"
+webp = "0.3"
+
+[profile.release]
+strip = true

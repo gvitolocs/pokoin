@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   conditionChipSrc,
+  conditionLabel,
   conditionShort,
   conditionTone,
   isReserveSeller,
@@ -66,6 +67,11 @@ test('seller country flag sits next to the username', () => {
   assert.equal(sellerCountryFlag('EU'), null);
   assert.equal(sellerCountryFlag('DK').code, 'dk');
   assert.equal(sellerCountryFlag('DK').emoji, '🇩🇰');
+  // No dk.svg: the emoji, never flagSrc's UK fallback.
+  assert.equal(sellerCountryFlag('DK').src, '');
+  assert.equal(sellerCountryFlag('SE').src, '');
+  assert.match(sellerCountryFlag('IT').src, /flags\/it\.svg$/);
+  assert.match(sellerCountryFlag('GB').src, /flags\/en\.svg$/);
   assert.equal(sellerCountryFlag('US').code, 'us');
 });
 
@@ -136,4 +142,11 @@ test('shop chip prefers handle over displayName/email', () => {
     publicShopSellerLabel({ sellerReputationLabel: 'pknreserve', sellerName: 'pknreserve' }),
     'pknreserve',
   );
+});
+
+test('conditionLabel spells the grade out for chip alt/title', () => {
+  assert.equal(conditionLabel('Poor'), 'Poor');
+  assert.equal(conditionLabel('PO'), 'Poor');
+  assert.equal(conditionLabel('Near Mint'), 'Near Mint');
+  assert.equal(conditionLabel('HP'), 'Played');
 });

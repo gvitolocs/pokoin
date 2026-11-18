@@ -274,6 +274,12 @@ pub fn listing_row(row: &Value, owner: bool) -> Value {
             .cloned()
             .unwrap_or(fallback);
     }
+    // The owner's book read adds `cardrails_key` (seller API connector rows).
+    out["origin"] = json!(crate::listing_origin::listing_origin(
+        out["source"].as_str().unwrap_or(""),
+        out["sourceListingId"].as_str().unwrap_or(""),
+        row["cardrails_key"] == true,
+    ));
     if owner {
         out["location"] = row
             .get("location")
@@ -297,7 +303,7 @@ pub async fn enrich_sellers(state: &DomainState, rows: &mut [Value]) {
     let cache = state.profile_cache();
     let results=futures_util::future::join_all(uids.into_iter().map(|uid|{let cache=&cache;async move{
         if let Some(c)=cache {if let Some(raw)=c.get(&seller_cache::seller_profile_key(&uid)).await {if let Ok(v)=serde_json::from_str::<Value>(&raw){if v.is_object()&&(!v["displayName"].is_null()||!v["username"].is_null()||v["acceptsPkn"].is_boolean()){return Ok::<_,ApiError>((uid,Some(v)));}}}}
-        let fs=state.firestore()?;let doc=fs.get_document(&fs.document_path("users",&uid)).await?;let profile=doc.map(|d|json!({"displayName":field(&d,"displayName",120),"username":first(&d,&["username","usernameLower"],120),"acceptsPkn":d["acceptsPkn"]!=false}));
+        let fs=state.firestore()?;let doc=fs.get_document(&fs.document_path("users",&uid)?).await?;let profile=doc.map(|d|json!({"displayName":field(&d,"displayName",120),"username":first(&d,&["username","usernameLower"],120),"acceptsPkn":d["acceptsPkn"]!=false}));
         if let (Some(c),Some(p))=(cache,&profile){c.set_ex(&seller_cache::seller_profile_key(&uid),&p.to_string(),seller_cache::PUBLIC_PROFILE_TTL_SEC).await;}Ok((uid,profile))
     }})).await;
     let Ok(results) = results.into_iter().collect::<Result<Vec<_>, _>>() else {
@@ -374,7 +380,7 @@ pub async fn seller_profile(
     if uid.is_empty() {
         let fs = state.firestore()?;
         let doc = fs
-            .get_document(&fs.document_path("usernames", &clean))
+            .get_document(&fs.document_path("usernames", &clean)?)
             .await?
             .unwrap_or_else(|| json!({}));
         uid = field(&doc, "uid", 160);
@@ -514,6 +520,16 @@ mod tests {
         assert!(public.get("location").is_none());
         assert_eq!(listing_row(&row, true)["location"], "BIN-07 ");
         assert!(public.get("sellerCountry").is_none());
+        assert_eq!(public["origin"], "pokoin");
+    }
+    #[test]
+    fn row_emits_the_listing_origin() {
+        let origin = |row: Value| listing_row(&row, true)["origin"].clone();
+        assert_eq!(origin(json!({"cardrails_key":true})), "cardrails");
+        assert_eq!(origin(json!({"cardrails_key":false,"source_listing_id":"ct:1"})), "pokoin");
+        assert_eq!(origin(json!({"source":"cardtrader_seller_import","source_listing_id":"ct:1"})), "cardtrader");
+        assert_eq!(origin(json!({"source":"powertools_csv_import","source_listing_id":"pt:7"})), "cardmarket");
+        assert_eq!(origin(json!({"source":"pokoin_scan_batch","source_listing_id":"scan:9"})), "pokoin");
     }
     #[test]
     fn reserve_names_cannot_be_replaced_by_profiles() {

@@ -58,7 +58,27 @@ class CooldownGate:
 
 lock=threading.Lock()
 gate=CooldownGate()
+def listing_book(body):
+    """Keep a listing book as raw bytes: parsing it costs ~10x its size in RAM on this VM.
+    JSON strings cannot contain raw CR/LF, so removing them only drops whitespace and keeps one book per line."""
+    if b"\n" in body or b"\r" in body: body=body.replace(b"\r",b"").replace(b"\n",b"")
+    if body[:64].lstrip()[:1]!=b"{": raise ValueError("Expected listing book")
+    return body
+def emit(request_id,data=None,error=None,raw=None):
+    """Write one reply line; a raw listing book is spliced in as the "data" value without parsing."""
+    with lock:
+        if raw is None:
+            result={"id":request_id,"error":error} if error is not None else {"id":request_id,"data":data}
+            print(json.dumps(result,separators=(",",":")),flush=True)
+            return
+        head='{"id":'+json.dumps(request_id)+',"data":'
+        out=getattr(sys.stdout,"buffer",None)
+        if out is None:
+            sys.stdout.write(head+raw.decode("utf-8")+"}\n");sys.stdout.flush()
+        else:
+            sys.stdout.flush();out.write(head.encode());out.write(raw);out.write(b"}\n");out.flush()
 def fetch(request):
+    data=None;raw=None
     try:
         path=request["path"]
         if path not in ("/games","/categories","/expansions","/blueprints/export","/marketplace/products"):
@@ -70,12 +90,12 @@ def fetch(request):
                 gate.wait(1.05 if path=="/marketplace/products" else 0.3)
                 req=urllib.request.Request(url,headers={"Authorization":"Bearer "+token,"Accept":"application/json","User-Agent":"Pokoin-catalog-refresh/1"})
                 with urllib.request.urlopen(req,timeout=90) as response:
+                    if path=="/marketplace/products":
+                        raw=listing_book(response.read())
+                        break
                     data=json.load(response)
                 if isinstance(data,dict) and "array" in data: data=data["array"]
-                if path=="/marketplace/products":
-                    if not isinstance(data,dict): raise ValueError("Expected listing book")
-                elif not isinstance(data,list): raise ValueError("Expected catalogue array")
-                result={"id":request["id"],"data":data}
+                if not isinstance(data,list): raise ValueError("Expected catalogue array")
                 break
             except Exception as error:
                 if getattr(error,"code",None)==401:raise
@@ -85,9 +105,9 @@ def fetch(request):
                 if attempt==5:raise
                 time.sleep(2**attempt);attempt+=1
     except Exception as error:
-        result={"id":request["id"],"error":type(error).__name__+": "+str(error)}
-    with lock:
-        print(json.dumps(result,separators=(",",":")),flush=True)
+        emit(request["id"],error=type(error).__name__+": "+str(error))
+        return
+    emit(request["id"],data=data,raw=raw)
 def main():
     global token
     token=load_token()

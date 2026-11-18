@@ -255,7 +255,8 @@ pub async fn marketplace_associate(
         &db,
         &firestore,
         &claims.uid,
-        &claims.email,
+        // Associate rows are keyed by email: only a verified one may match.
+        &claims.verified_email(),
         claims.admin_claim(),
         now_ms,
     )

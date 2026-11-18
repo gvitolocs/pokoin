@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  RESEND_COOLDOWN_MS,
+  authErrorMessage,
   classifyVerifyError,
   isNativeVerifiedReturn,
   isPendingLoginError,
+  RESEND_COOLDOWN_MS,
   resendCooldownRemainingMs,
   signupTokenFromSearch,
 } from './email-signup.js';
@@ -67,4 +68,15 @@ test('resend cooldown never goes negative', () => {
   assert.equal(resendCooldownRemainingMs(now - 10_000, now), RESEND_COOLDOWN_MS - 10_000);
   assert.equal(resendCooldownRemainingMs(now - RESEND_COOLDOWN_MS, now), 0);
   assert.equal(resendCooldownRemainingMs(now - 10 * RESEND_COOLDOWN_MS, now), 0);
+});
+
+test('authErrorMessage hides raw Firebase text behind words a person can act on', () => {
+  assert.equal(
+    authErrorMessage({ message: 'Firebase: Error (auth/network-request-failed).' }),
+    'Could not reach the sign-in service. Check your connection and try again.',
+  );
+  assert.equal(authErrorMessage({ code: 'auth/wrong-password', message: 'x' }), 'Email or password is not right.');
+  assert.equal(authErrorMessage({ message: 'Firebase: Error (auth/some-new-code).' }, 'Sign in failed.'), 'Sign in failed.');
+  assert.equal(authErrorMessage({ message: 'Verify your email first.' }), 'Verify your email first.');
+  assert.equal(authErrorMessage(null, 'Registration failed.'), 'Registration failed.');
 });

@@ -1,7 +1,7 @@
 import { fetchVersionSet } from '@market/api.js';
 import { sortArtworkVersions } from '@market/scan-artwork-versions.js';
 
-/** CLIP version-set cache keyed by any member card id (market/src/pages/ScanDesk.jsx). */
+/** CLIP version-set cache keyed by any member card id. */
 export const versionSetCache = new Map();
 
 export function loadVersionSet(cardId) {

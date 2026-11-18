@@ -503,7 +503,9 @@ pub async fn poko_connect(
         );
     }
 
-    let db = match state.marketplace_db() {
+    // `status` only reads; `redeem` and `unlink` write (the writer).
+    let db = if action == "status" { state.marketplace_db() } else { state.marketplace_writer_db() };
+    let db = match db {
         Ok(db) => db,
         Err(error) => return error.into_response(),
     };
@@ -530,7 +532,12 @@ async fn run_firebase_action(
     uid: &str,
     body: &Json,
 ) -> Result<Json> {
-    let db = state.marketplace_db()?;
+    // `create_code` and `unlink_me` write (the writer); `my_status` only reads.
+    let db = if matches!(action, "create_code" | "unlink_me") {
+        state.marketplace_writer_db()?
+    } else {
+        state.marketplace_db()?
+    };
     match action {
         "create_code" => create_code(&db, uid).await,
         "unlink_me" => unlink_me(&db, uid, body).await,
@@ -628,14 +635,17 @@ pub async fn poko_personal_context(
         }
     };
     let overlay = crate::domain::personal_context::overlay_from_body(&body);
-    let persist = action == "sync" && persist_overlay;
+    // Persisting is a write: the writer, never the read pool (Pi standby).
+    let writer = (action == "sync" && persist_overlay)
+        .then(|| state.marketplace_writer_db().ok())
+        .flatten();
 
     match crate::domain::personal_context::build_personal_context(
         &db,
         firestore.as_ref(),
         &uid,
         &overlay,
-        persist,
+        writer.as_ref(),
     )
     .await
     {

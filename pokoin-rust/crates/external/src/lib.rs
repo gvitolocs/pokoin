@@ -16,13 +16,21 @@
 //! never return a fake success.
 
 pub mod crypto;
+pub mod ct_fees;
 pub mod db;
 pub mod error;
+pub mod facet_store;
 pub mod firebase;
 pub mod geo;
 pub mod powertools;
+pub mod powertools_games;
+pub mod pokoin_sold;
+pub mod price_book;
 pub mod price_check;
+pub mod price_sources;
 pub mod pricing;
+pub mod pricing_store;
+pub mod pricing_strategies;
 pub mod r2;
 pub mod redis;
 pub mod redirects;
@@ -33,6 +41,7 @@ pub mod scan_store;
 pub mod social;
 pub mod state;
 pub mod supabase;
+pub mod tcgcsv;
 pub mod time_util;
 
 pub mod cardtrader_listings;
@@ -41,7 +50,9 @@ pub mod cardtrader_live;
 pub mod cardtrader {
     pub mod async_sync;
     pub mod client;
+    pub mod group;
     pub mod integration;
+    pub mod link;
     pub mod push;
     pub mod sync;
     pub mod sync_core;

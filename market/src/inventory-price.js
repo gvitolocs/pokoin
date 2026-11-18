@@ -1,3 +1,4 @@
+import { knownGameId } from './game.js';
 import { formatPknNumber } from './pkn.js';
 
 function positive(value) {
@@ -5,8 +6,97 @@ function positive(value) {
   return value != null && Number.isFinite(number) && number > 0 ? number : null;
 }
 
+/**
+ * Facet flags of a listing or holding, in the server's order
+ * (`price_check_key`): `R` reverse holo (the foil of the other games),
+ * `F` first edition, `H` foil, `G` graded, `S` signed, `A` altered.
+ */
+function finishFlags(row) {
+  const foilState = String(row?.foilState || row?.foil_state || '').toLowerCase();
+  return [
+    [row?.reverse === true || foilState === 'reverse', 'R'],
+    [row?.firstEdition === true || row?.first_edition === true, 'F'],
+    [row?.foil === true || foilState === 'foil', 'H'],
+    [row?.graded === true, 'G'],
+    [row?.signed === true, 'S'],
+    [row?.altered === true, 'A'],
+  ].filter(([on]) => on).map(([, flag]) => flag).join('');
+}
+
+/** The game a row's card id belongs to: card ids are per game. */
+export function priceGame(row, fallback = 'pokemon') {
+  return knownGameId(row?.marketplaceGame || row?.marketplace_game) || knownGameId(fallback) || 'pokemon';
+}
+
+/**
+ * A listing's condition as the pricer's CardTrader condition key: Pokoin's
+ * LP / HP / PO are CardTrader's SP / PL / Poor (server: `condition_key`).
+ */
+export function pricerCondition(raw) {
+  const value = String(raw || '').trim().toUpperCase();
+  if (!value) return '';
+  if (['M', 'MT', 'MINT', 'NM', 'NEAR MINT'].includes(value)) return 'NM';
+  if (['SP', 'LP', 'EX', 'EXCELLENT', 'SLIGHTLY PLAYED', 'LIGHTLY PLAYED'].includes(value)) return 'SP';
+  if (['MP', 'GD', 'GOOD', 'MODERATELY PLAYED'].includes(value)) return 'MP';
+  if (['PL', 'HP', 'PLD', 'PLAYED', 'HEAVILY PLAYED'].includes(value)) return 'PL';
+  if (['PO', 'POOR', 'DMG', 'DAMAGED'].includes(value)) return 'Poor';
+  return value;
+}
+
+/** One price-check item: card, condition, language and facet flags. */
+export function priceCheckItem(row) {
+  const flags = finishFlags(row);
+  return {
+    cardId: String(row?.cardId || row?.card_id || row?.blueprintId || ''),
+    condition: pricerCondition(row?.condition || 'NM'),
+    language: String(row?.language || '').toUpperCase(),
+    reverse: flags.includes('R'),
+    firstEdition: flags.includes('F'),
+    foil: flags.includes('H'),
+    graded: flags.includes('G'),
+    signed: flags.includes('S'),
+    altered: flags.includes('A'),
+  };
+}
+
+/**
+ * `card:CONDITION:LANGUAGE:FLAGS`, the key the price check returns a comp
+ * under (server: `price_check_key`), so a reverse, graded or signed copy
+ * never reads the plain copy's comp.
+ */
+export function priceCheckKey(row) {
+  const item = priceCheckItem(row);
+  return `${item.cardId}:${item.condition}:${item.language}:${finishFlags(item)}`;
+}
+
+/**
+ * The price checks of `rows`, one per game: the first `limit` rows with a
+ * numeric card id, grouped by `priceGame` as `[{ game, items }]`. Card ids
+ * are per game, and a Riftbound or Magic card read from the Pokémon catalog
+ * has no comp (or another card's).
+ */
+export function priceCheckGroups(rows, fallbackGame, { limit = 100 } = {}) {
+  const groups = new Map();
+  let count = 0;
+  for (const row of rows || []) {
+    if (count >= limit) break;
+    const item = priceCheckItem(row);
+    if (!/^\d+$/.test(item.cardId)) continue;
+    count += 1;
+    const id = priceGame(row, fallbackGame);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(item);
+  }
+  return [...groups].map(([game, items]) => ({ game, items }));
+}
+
+/** A row's game's answer in per-game price checks (`{ [game]: prices }`). */
+export function gamePrices(pricesByGame, row, fallbackGame) {
+  return pricesByGame?.[priceGame(row, fallbackGame)] || {};
+}
+
 export function inventoryMarketValue(prices, row, source) {
-  const entry = prices[String(row?.cardId || row?.card_id || '')];
+  const entry = prices[priceCheckKey(row)] || prices[String(row?.cardId || row?.card_id || '')];
   if (!entry) return null;
   if (source === 'tcgplayer') {
     const quotes = (entry.tcgplayer || []).filter((quote) => positive(quote.marketPrice) != null);
@@ -18,23 +108,58 @@ export function inventoryMarketValue(prices, row, source) {
         + '\nTCGplayer aggregate market quotes in USD; condition is unspecified. Variants remain separate; no conversion to PKN.',
     };
   }
-  if (source === 'cardtrader') {
-    const history = (entry.cardtraderListed?.days || [])
-      .filter((day) => positive(day.lowestAskPkn) != null)
-      .sort((a, b) => String(a.day).localeCompare(String(b.day)));
-    const matched = positive(entry.ctMatchedPkn);
-    const overall = positive(entry.ctCheapestPkn);
-    const latest = history.at(-1);
-    const value = matched ?? overall ?? positive(latest?.lowestAskPkn);
+  if (source === 'cardmarketpro' || source === 'cardmarketprivate') {
+    // Our own walk of Cardmarket's listing pages, not its guide: the guide
+    // cannot say who is selling. `CLFE` is the cheapest offer agreeing with
+    // this row on all four attributes; a graded, signed or altered copy is
+    // one of a kind, so only the cheapest copy scanned at all answers it.
+    const scanned = entry.sources?.cardmarketoffers;
+    const seller = source === 'cardmarketpro' ? 'pro' : 'private';
+    const key = /[GSA]/.test(finishFlags(row)) ? '' : 'CLFE';
+    const offer = scanned?.[seller]?.[key];
+    const value = positive(offer?.pkn);
     if (value == null) return null;
-    const label = matched != null ? 'Current CardTrader ask matching condition and language.'
-      : overall != null ? 'Current cheapest CardTrader ask across conditions and languages.'
-        : 'Latest stored daily cheapest CardTrader ask across conditions and languages.';
+    const who = seller === 'pro' ? 'professional or powerseller' : 'private';
+    const facet = key === ''
+      ? `Cheapest ${who} Cardmarket offer scanned for the card, any copy`
+      : `Cheapest ${who} Cardmarket offer with this card's condition, language, finish and 1st edition`;
+    const other = positive(scanned?.[seller === 'pro' ? 'private' : 'pro']?.[key]?.pkn);
+    const compare = other != null
+      ? ` The other kind of seller asks ${formatPknNumber(other, { maximumFractionDigits: 0 })} PKN.`
+      : '';
+    const seen = Number(offer?.offers) > 0 ? ` ${Number(offer.offers)} ${Number(offer.offers) === 1 ? 'offer' : 'offers'} seen.` : '';
+    const short = offer?.countsComplete === false ? ' The scan stopped before the last page, so this is an upper bound.' : '';
+    const asOf = /^\d{4}-\d{2}-\d{2}/.test(String(scanned?.asOf || ''))
+      ? ` Scanned ${String(scanned.asOf).slice(0, 10)}; kept 7 days.`
+      : '';
+    return { currency: 'PKN', value, title: `${facet}, as listed.${seen}${compare}${short}${asOf}` };
+  }
+  if (source === 'cardtrader') {
+    // Only the cheapest professional seller with the same condition,
+    // language and finishes counts: another condition, a private one-off
+    // ask, or the plain copy of a reverse card is not this card's price.
+    // The other games read the extension's price file: CardTrader Zero
+    // sellers, this condition or better.
+    const value = positive(entry.ctMatchedPkn);
+    if (value == null) return null;
+    const ask = positive(entry.ctMatchedGrossPkn);
+    // `ctAsOf`: when the price store was refilled (docs/PRICING.md "Price store").
+    const asOf = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(entry.ctAsOf || ''))
+      ? ` Prices of ${String(entry.ctAsOf).slice(0, 16).replace('T', ' ')} UTC.`
+      : '';
+    // `ctMatchedPkn` is what a seller nets at that ask, after CardTrader's
+    // commission and its VAT (server: ct_fees); `ctMatchedGrossPkn` is the ask.
+    const gross = positive(entry.ctMatchedGrossPkn);
+    const fee = entry.ctFee && Number.isFinite(Number(entry.ctFee.pct))
+      ? ` Net of CardTrader's ${Number(entry.ctFee.pct)}% seller fee + ${Number(entry.ctFee.vatPct) || 0}% VAT${gross != null ? ` (ask ${formatPknNumber(gross, { maximumFractionDigits: 0 })} PKN)` : ''}.`
+      : '';
     return {
       currency: 'PKN', value,
-      title: [label, ...history.map((day) =>
-        `${day.day}: ${formatPknNumber(day.lowestAskPkn)} PKN (refreshed ${day.sourceTimestamp || 'date unavailable'})`),
-      'Daily dump values are listing asks, not sold prices.'].join('\n'),
+      // The CardTrader ask, shown under the net so the two are never confused.
+      askLabel: ask != null && Math.round(ask) !== Math.round(value) ? `${formatPknNumber(ask, { maximumFractionDigits: 0 })} PKN` : '',
+      title: (entry.ctBasis === 'zero'
+        ? 'Cheapest CardTrader Zero seller with the same language and finish, in this condition or better (nightly price file).'
+        : 'Cheapest professional CardTrader seller with the same condition, language and finish (latest daily dump).') + fee + asOf,
     };
   }
   const native = positive(entry.pokoinCheapestPkn);

@@ -3,6 +3,7 @@
 # aarch64 builds need a cross linker; this script records the host target.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
+bash "$root/scripts/require-free-space.sh" "${POKOIN_MIN_FREE_GB:-60}" "$root"
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
 cd "$root/pokoin-rust"

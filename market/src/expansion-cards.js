@@ -2,13 +2,13 @@
 export function createExpansionCardsFetcher({ fetchPage, rememberComplete, pageSize = 48, maxPages = 40 }) {
   const inflight = new Map();
 
-  async function load({ slug, expansionName }) {
+  async function load({ slug, expansionName, game }) {
     const cards = [];
     const seen = new Set();
     let offset = 0;
     let expansion = null;
     for (let page = 0; page < maxPages; page += 1) {
-      const data = await fetchPage({ slug, expansionName, limit: pageSize, offset });
+      const data = await fetchPage({ slug, expansionName, limit: pageSize, offset, ...(game ? { game } : {}) });
       expansion = data.expansion || expansion;
       const chunk = data.cards || [];
       for (const row of chunk) {
@@ -28,13 +28,13 @@ export function createExpansionCardsFetcher({ fetchPage, rememberComplete, pageS
     return { cards, hasMore: true, expansion };
   }
 
-  return function fetchExpansionCards({ slug = '', expansionName = '' } = {}) {
-    const key = JSON.stringify({ slug, expansionName });
+  return function fetchExpansionCards({ slug = '', expansionName = '', game } = {}) {
+    const key = JSON.stringify(game ? { slug, expansionName, game } : { slug, expansionName });
     if (inflight.has(key)) {
       return inflight.get(key);
     }
     // Share later pages too. Releasing on either outcome allows a retry.
-    const pending = load({ slug, expansionName }).finally(() => inflight.delete(key));
+    const pending = load({ slug, expansionName, game }).finally(() => inflight.delete(key));
     inflight.set(key, pending);
     return pending;
   };

@@ -1,0 +1,5 @@
+NAME                               CPU(cores)   MEMORY(bytes)
+cloudflared-7d4f8b6c95-m2kq1       12m          38Mi
+pokoin-api-6559bc874-t7xwl         41m          1213Mi
+pokoin-api-6559bc874-zq4vk         44m          1213Mi
+redis-0                            15m          210Mi

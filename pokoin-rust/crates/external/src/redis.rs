@@ -90,7 +90,8 @@ impl RedisCache {
         let Ok(mut connection) = self.client.get_connection_manager().await else {
             return 0;
         };
-        let key = marketplace_key(&["ratelimit", scope, identity]);
+        let identity = pokoin_api_common::limits::ip_rate_identity(identity);
+        let key = marketplace_key(&["ratelimit", scope, &identity]);
         let window = crate::time_util::now_ms() as u64 / (window_seconds * 1000);
         let key = format!("{key}:{window}");
         let count: Result<i64, _> = redis::Script::new("local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n")

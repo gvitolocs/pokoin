@@ -127,7 +127,6 @@ fn strip_sslmode(url: &str) -> String {
 pub struct DbPools {
     reads: std::sync::Arc<tokio::sync::Mutex<HashMap<String, PgPool>>>,
     writer: Option<PgPool>,
-    writer_game: std::sync::Arc<tokio::sync::Mutex<HashMap<String, PgPool>>>,
 }
 
 impl DbPools {
@@ -139,7 +138,6 @@ impl DbPools {
         Self {
             reads: std::sync::Arc::new(tokio::sync::Mutex::new(reads)),
             writer: Some(writer),
-            writer_game: Default::default(),
         }
     }
 
@@ -148,7 +146,6 @@ impl DbPools {
         Ok(Self {
             reads: Default::default(),
             writer: Some(writer),
-            writer_game: Default::default(),
         })
     }
 
@@ -166,6 +163,13 @@ impl DbPools {
         let url = database_url_for_game(&normalized);
         if url.is_empty() {
             return Err(ApiError::new(503, "marketplace database is not configured."));
+        }
+        if normalized != "pokemon" {
+            // Satellite games share the process-wide pool (pokoin_db budget)
+            // with the catalog/commerce/accounts routes, at the raw URL they use.
+            return pokoin_db::satellite_pool(&url).map_err(|error| {
+                ApiError::new(500, format!("marketplace database pool failed: {error}"))
+            });
         }
         let pool = build_pool(&url, 4).await?;
         self.reads.lock().await.insert(normalized, pool.clone());
@@ -189,19 +193,16 @@ impl DbPools {
     /// URL derived the same way as reads).
     pub async fn write(&self, game: &str, sql: &str, params: &[Value]) -> ApiResult<Vec<Value>> {
         let normalized = normalize_game(game);
-        let cached = self.writer_game.lock().await.get(&normalized).cloned();
         let pool = if normalized == "pokemon" {
             self.writer()?
-        } else if let Some(pool) = cached {
-            pool
         } else {
             let url = writer_url_for_game(&normalized);
             if url.is_empty() {
                 return Err(ApiError::new(503, "marketplace writer database is not configured."));
             }
-            let pool = build_pool(&url, 4).await?;
-            self.writer_game.lock().await.insert(normalized.clone(), pool.clone());
-            pool
+            pokoin_db::satellite_pool(&url).map_err(|error| {
+                ApiError::new(500, format!("marketplace writer pool failed: {error}"))
+            })?
         };
         let rows = bound_query(sql, params).fetch_all(&pool).await?;
         Ok(rows_to_json(&rows))

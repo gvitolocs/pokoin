@@ -8,23 +8,24 @@ const KEY = 'pokoin.searchLanguage';
 const PRINT_KEY = 'pokoin.printLanguage';
 
 /** TCG search languages. Flags: HatScripts/circle-flags (MIT), vendored in public/flags. */
+/** `native` is how the language names itself; the title-language menu shows it. */
 export const SEARCH_LANGS = [
-  { code: 'en', label: 'English' },
-  { code: 'it', label: 'Italiano' },
-  { code: 'fr', label: 'Français' },
-  { code: 'de', label: 'Deutsch' },
-  { code: 'es', label: 'Español' },
-  { code: 'jp', label: 'Japanese' },
-  { code: 'pt', label: 'Português' },
-  { code: 'nl', label: 'Nederlands' },
-  { code: 'pl', label: 'Polski' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'zh', label: 'Chinese (Simplified)' },
-  { code: 'zht', label: 'Chinese (Traditional)' },
-  { code: 'id', label: 'Indonesia' },
-  { code: 'th', label: 'Thai' },
-  { code: 'vi', label: 'Vietnamese' },
+  { code: 'en', label: 'English', native: 'English' },
+  { code: 'it', label: 'Italiano', native: 'Italiano' },
+  { code: 'fr', label: 'Français', native: 'Français' },
+  { code: 'de', label: 'Deutsch', native: 'Deutsch' },
+  { code: 'es', label: 'Español', native: 'Español' },
+  { code: 'jp', label: 'Japanese', native: '日本語' },
+  { code: 'pt', label: 'Português', native: 'Português' },
+  { code: 'nl', label: 'Nederlands', native: 'Nederlands' },
+  { code: 'pl', label: 'Polski', native: 'Polski' },
+  { code: 'ru', label: 'Russian', native: 'Русский' },
+  { code: 'ko', label: 'Korean', native: '한국어' },
+  { code: 'zh', label: 'Chinese (Simplified)', native: '简体中文' },
+  { code: 'zht', label: 'Chinese (Traditional)', native: '繁體中文' },
+  { code: 'id', label: 'Indonesia', native: 'Bahasa Indonesia' },
+  { code: 'th', label: 'Thai', native: 'ไทย' },
+  { code: 'vi', label: 'Vietnamese', native: 'Tiếng Việt' },
 ];
 
 const CODES = new Set(SEARCH_LANGS.map((row) => row.code));
@@ -109,9 +110,15 @@ export function rewriteCatalogLang(pathname, nextLang) {
   return path.replace(CATALOG_PATH, `$1${next}$3`);
 }
 
+/** True when public/flags has an image for this code (flagSrc paints 'en' otherwise). */
+export function hasFlagFile(code) {
+  const raw = String(code || '').toLowerCase();
+  return Boolean(raw) && (isSearchLang(raw) || PRINT_FLAG_CODES.has(raw));
+}
+
 export function flagSrc(code) {
   const raw = String(code || '').toLowerCase();
-  const lang = isSearchLang(raw) || PRINT_FLAG_CODES.has(raw) ? raw : 'en';
+  const lang = hasFlagFile(raw) ? raw : 'en';
   const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
   const file = FLAG_FILE[lang] || `${lang}.svg`;
   return `${base}flags/${file}`;

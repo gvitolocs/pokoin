@@ -13,6 +13,7 @@ hex = { workspace = true }
 sha2 = { workspace = true }
 pokoin-accounts = { path = "../accounts" }
 pokoin-config = { path = "../config" }
+pokoin-db = { path = "../db" }
 redis = { workspace = true }
 regex = "1"
 reqwest = { workspace = true }

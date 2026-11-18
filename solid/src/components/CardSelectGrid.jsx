@@ -9,7 +9,7 @@ export function useCardSelect() {
 }
 
 /**
- * Marks a card grid for multi-select (market/src/components/CardSelectGrid.jsx).
+ * Marks a card grid for multi-select.
  * The gestures live in lib/select-band*.js (installed once by Chrome); this
  * registers `cards` into the page-wide catalog so a drag pile can span every
  * rail on the page, and ranges Shift-clicks over this grid's ids. Same

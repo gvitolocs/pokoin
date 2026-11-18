@@ -1,11 +1,13 @@
-import { createSignal, For, Repeat, Show } from 'solid-js';
+import { createEffect, createSignal, For, onCleanup, Repeat, Show, untrack } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { artCutVars } from '@market/art-cut.js';
 import { openListingChat } from '@market/chat-dock-store.js';
 import { listingReference, listingsReference, writeListingDrag } from '@market/chat-listing.js';
+import { rememberImageFallback, workingImage } from '@market/image-fallback-memo.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '@market/image-urls.js';
 import {
   conditionChipSrc,
-  conditionShort,
+  conditionLabel,
   conditionTone,
   listingExtraTags,
   listingLanguageFlag,
@@ -15,18 +17,34 @@ import {
 } from '@market/listing-meta.js';
 import { listingSelectId } from '@market/shop-marquee.js';
 import { chatPhotoDisplayUrl } from '@market/user-photo-urls.js';
+import { deskDragReference, registerShop, unregisterShop } from '../../lib/select-band.js';
 import { buyerParts } from '../../stores/buyer.js';
 import { ThumbZoom } from '../ArtworkZoom.jsx';
 import PriceStack from '../PriceStack.jsx';
+import { gameHref } from '@market/game.js';
 
-/** Shop rows wrapper (market/src/components/ShopList.jsx, without the select band). */
+/**
+ * Shop rows wrapper. The select band
+ * (lib/select-band*.js) selects rows; `offers` registers them so the desk card,
+ * related tiles and selected listings drag as one pile.
+ */
 export function ShopList(props) {
+  createEffect(
+    () => (props.offers ? { offers: props.offers, deskCard: props.deskCard || null } : null),
+    (shop) => {
+      if (!shop) return undefined;
+      untrack(() => registerShop(shop));
+      return () => unregisterShop();
+    },
+  );
   return <div class={['shop-list', props.class]}>{props.children}</div>;
 }
 
 function ShopScan(props) {
   const full = () => preferFullImage(props.image) || props.image;
-  const thumb = () => homepageDerivativeUrl(props.image) || props.image;
+  const listedThumb = () => homepageDerivativeUrl(props.image) || props.image;
+  // A thumb that 404'd here before paints its full scan at once.
+  const thumb = () => workingImage(listedThumb());
   return (
     <ThumbZoom src={full()} full alt={props.name || ''}>
       <span class="art-cut shop-art" style={artCutVars({ set: props.setName || '', name: props.name })}>
@@ -38,6 +56,7 @@ function ShopScan(props) {
             const img = event.currentTarget;
             if (img.dataset.fallback) return;
             img.dataset.fallback = '1';
+            rememberImageFallback(listedThumb(), full());
             img.src = full();
           }}
         />
@@ -115,13 +134,25 @@ function TrashIcon() {
 }
 
 /**
- * One shop listing (market/src/components/ShopListing.jsx). Same markup and
- * drag payloads; the rubber-band multi-select is not ported yet, so a row
- * drags itself (or `dragOffers` when the desk passes a pile).
+ * One shop listing. Same markup and
+ * drag payloads: a mixed desk pile when tiles and listings are selected, the
+ * selected listings (`dragOffers`), else the row itself. `compact` is the
+ * Cheapest listings line: the seller, its facet, the price and the cart button —
+ * the card face, the seller's own photos and the message button stay with the
+ * full Shop rows.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
   const [added, setAdded] = createSignal(false);
+  // The icon turning green was the only sign a click worked: say it, briefly.
+  const [toast, setToast] = createSignal(false);
+  let toastTimer = 0;
+  onCleanup(() => clearTimeout(toastTimer));
+  function confirmAdded() {
+    setToast(true);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => setToast(false), 3000);
+  }
   const [pick, setPick] = createSignal(1);
   const name = () => publicShopSellerLabel(offer());
   const stock = () => Math.max(0, Math.trunc(Number(offer()?.quantityAvailable ?? offer()?.quantity_available) || 0));
@@ -135,7 +166,7 @@ export default function ShopListingRow(props) {
   const country = () => sellerCountryFlag(offer()?.sellerCountry);
   const language = () => listingLanguageFlag(offer()?.language);
   const tone = () => conditionTone(offer()?.condition) || 'nm';
-  const cond = () => conditionShort(offer()?.condition);
+  const cond = () => conditionLabel(offer()?.condition);
   const tags = () => listingExtraTags(offer());
   const cardPath = () => offer()?.canonicalPath || offer()?.canonical_path || '';
   const cardName = () => offer()?.cardName || offer()?.name || '';
@@ -162,6 +193,22 @@ export default function ShopListingRow(props) {
 
   function dragStart(event) {
     const row = offer();
+    const mixed = deskDragReference({ heldOffer: row, heldCard: props.card });
+    if (mixed) {
+      // Stamp the held row's qty onto the matching listing in the pile.
+      if (mixed.kind === 'cards' && Array.isArray(mixed.cards)) {
+        const heldId = String(row?.id || '');
+        writeListingDrag(event, {
+          ...mixed,
+          cards: mixed.cards.map((item) => (
+            item.listingId === heldId ? { ...item, qty: pick(), stock: choices() } : item
+          )),
+        });
+        return;
+      }
+      writeListingDrag(event, { ...mixed, qty: pick(), stock: choices() });
+      return;
+    }
     const pile = props.dragOffers;
     if (pile?.length > 1) {
       const cards = pile.map((item) => listingReference({
@@ -208,6 +255,7 @@ export default function ShopListingRow(props) {
         'is-profile': props.showCard,
         'is-editing': props.editing,
         'is-selected': props.selected,
+        'is-compact': props.compact,
       }]}
       data-listing-id={listingSelectId(offer())}
       draggable="true"
@@ -217,25 +265,30 @@ export default function ShopListingRow(props) {
       <Show
         when={props.showCard}
         fallback={(
-          <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
-            <a class="shop-seller" href={href()} onClick={(event) => event.stopPropagation()}>
-              {seller()}
-            </a>
+          <Show when={!props.anonymous} fallback={<span class="shop-seller" aria-hidden="true" />}>
+            <Show when={href()} fallback={<span class="shop-seller">{seller()}</span>}>
+              <a class="shop-seller" href={gameHref(href())} onClick={(event) => event.stopPropagation()}>
+                {seller()}
+              </a>
+            </Show>
           </Show>
         )}
       >
         <Show when={cardPath()} fallback={<span class="shop-card">{cardFace()}</span>}>
-          <a class="shop-card" href={cardPath()} onClick={(event) => event.stopPropagation()}>
+          <a class="shop-card" href={gameHref(cardPath())} onClick={(event) => event.stopPropagation()}>
             {cardFace()}
           </a>
         </Show>
       </Show>
       <span class="shop-facets">
-        <span class="shop-txt">
-          <For each={tags()}>
-            {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
-          </For>
-        </span>
+        <Show when={!props.compact}>
+          {/* The tags a full Shop row names: Reverse, 1st Edition, graded. */}
+          <span class="shop-txt">
+            <For each={tags()}>
+              {(tag) => <em class={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>}
+            </For>
+          </span>
+        </Show>
         <img
           class={['shop-cond', `is-${tone()}`]}
           src={conditionChipSrc(offer()?.condition)}
@@ -281,7 +334,8 @@ export default function ShopListingRow(props) {
       </span>
       <Show when={!props.mine}>
         <span class="shop-row-actions">
-          <Show when={reference().sellerUid}>
+          {/* Vault rows (props.anonymous) never name or message the account behind them. */}
+          <Show when={reference().sellerUid && !props.anonymous && !props.compact}>
             <button
               type="button"
               class="shop-icon"
@@ -309,10 +363,18 @@ export default function ShopListingRow(props) {
                 event.stopPropagation();
                 props.onCart?.(pick());
                 setAdded(true);
+                confirmAdded();
               }}
             >
               <CartIcon />
             </button>
+            <Show when={toast()}>
+              <Portal>
+                <div class="cart-toast" role="status">
+                  Added to cart · <a href={gameHref('/cart')}>View cart</a>
+                </div>
+              </Portal>
+            </Show>
           </Show>
         </span>
       </Show>
@@ -349,7 +411,7 @@ export default function ShopListingRow(props) {
           </button>
         </span>
       </Show>
-      <Show when={photos().length}>
+      <Show when={photos().length && !props.compact}>
         <span class="shop-photos">
           <For each={photos()}>
             {(url) => (

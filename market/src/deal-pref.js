@@ -73,8 +73,10 @@ export function writeDealLanguage(lang, uid, storage = globalThis.localStorage) 
 
 /**
  * Language chip for this card. The saved choice (or EN) stays put.
- * It moves only when that language has no listing and the account country
- * has one — Italy → IT. An empty list means the desk is still loading.
+ * It moves when that language has no listing: to the account country's
+ * language when that one is listed (Italy → IT), else to the first listed
+ * language, so Best Deal never reads "Unavailable" while the Shop under it
+ * has an offer. An empty list means the desk is still loading.
  */
 export function resolveDealLanguage({ selected = 'EN', listed = [], country = '' } = {}) {
   const lang = String(selected || 'EN').trim().toUpperCase() || 'EN';
@@ -82,5 +84,5 @@ export function resolveDealLanguage({ selected = 'EN', listed = [], country = ''
   if (!have.size || have.has(lang)) return lang;
   const fromCountry = listingLanguageForCountry(country);
   if (fromCountry && have.has(fromCountry)) return fromCountry;
-  return lang;
+  return [...have][0];
 }

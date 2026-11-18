@@ -282,13 +282,13 @@ def main() -> None:
     parser.add_argument("--csv", default="/tmp/western-leftovers.csv")
     parser.add_argument(
         "--out",
-        default="/home/nez/Projects/pokoin-web/scripts/out/western-full-ocr.jsonl",
+        default="/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-full-ocr.jsonl",
     )
     parser.add_argument("--workers", type=int, default=os.cpu_count() or 12)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
         "--report",
-        default="/home/nez/Projects/pokoin-web/scripts/out/western-leftover-image-report.json",
+        default="/home/nez/Projects/Startup/Pokoin/pokoin-web/scripts/out/western-leftover-image-report.json",
     )
     parser.add_argument("--also-done", action="append", default=[])
     parser.add_argument(

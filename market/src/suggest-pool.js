@@ -14,6 +14,7 @@
  * engine produced the chunk.
  */
 
+import { englishQuery } from './localized-names.js';
 import { filterSuggestByPrintLang } from './locale.js';
 import {
   compactQuery,
@@ -60,10 +61,15 @@ export function queryMode(query) {
  * charizard`), also recall the full query: Meili's bare-species page often
  * omits Tag Team / compound printings (`pikachu` has no Zekrom; `palkia`
  * happens to include LEGEND), while the full string returns them.
+ *
+ * Under a non-English search language a localized name is recalled by its
+ * English identity (`evoli` → `Eevee`), since the index is English (D00001H).
  */
-export function catalogRecall(query, { limit = 6 } = {}) {
+export function catalogRecall(query, { limit = 6, lang = 'en' } = {}) {
   const raw = String(query || '').trim();
   if (!raw) return [];
+  const english = englishQuery(raw, lang);
+  if (english) return catalogRecall(english, { limit });
   const parsed = parseTypedQuery(raw);
   if (isBareCollectorQuery(parsed) || isSetOnlyQuery(parsed)) return [raw];
   const words = String(parsed.nameQuery || raw).trim().split(/\s+/).filter(Boolean);

@@ -1,0 +1,3 @@
+-- Export for version-artwork-audit: every version set with two or more members.
+-- docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace -q < export-members.sql > members.tsv
+\copy (select s.version, s.source, c.card_id, c.ct_id, c.name, c.expansion_name, c.card_number, c.rarity, c.artist, coalesce(c.image_url,''), c.item_kind, c.product_type from marketplace_search_candidates c join pokoin_version_sets s on s.version=c.version where c.version in (select version from marketplace_search_candidates group by version having count(*)>=2) order by s.version, c.card_id) to stdout with (format csv, delimiter E'\t', header true)

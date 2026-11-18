@@ -1040,7 +1040,7 @@ async fn save_listing_photos(state: &DomainState, uid: &str, body: &Json) -> Res
         return Err(http_error(StatusCode::BAD_REQUEST, "Missing listing."));
     }
     let photos = clean_listing_photos(body.get("urls"), uid);
-    let db = state.marketplace_db()?;
+    let db = state.marketplace_writer_db()?;
     let rows = db
         .query_json(
             "update public.marketplace_user_listings \

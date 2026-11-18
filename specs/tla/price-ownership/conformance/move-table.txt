@@ -1,0 +1,40 @@
+<<"move", "none", "null", FALSE, "keep">>
+<<"move", "none", "null", TRUE, "keep">>
+<<"move", "none", "absent", FALSE, "keep">>
+<<"move", "none", "absent", TRUE, "keep">>
+<<"move", "none", "g1", FALSE, "join">>
+<<"move", "none", "g1", TRUE, "join">>
+<<"move", "none", "g2", FALSE, "join">>
+<<"move", "none", "g2", TRUE, "join">>
+<<"move", "g1", "null", FALSE, "leave">>
+<<"move", "g1", "null", TRUE, "leave">>
+<<"move", "g1", "absent", FALSE, "keep">>
+<<"move", "g1", "absent", TRUE, "leave">>
+<<"move", "g1", "g1", FALSE, "keep">>
+<<"move", "g1", "g1", TRUE, "keep">>
+<<"move", "g1", "g2", FALSE, "join">>
+<<"move", "g1", "g2", TRUE, "join">>
+<<"move", "g2", "null", FALSE, "leave">>
+<<"move", "g2", "null", TRUE, "leave">>
+<<"move", "g2", "absent", FALSE, "keep">>
+<<"move", "g2", "absent", TRUE, "leave">>
+<<"move", "g2", "g1", FALSE, "join">>
+<<"move", "g2", "g1", TRUE, "join">>
+<<"move", "g2", "g2", FALSE, "keep">>
+<<"move", "g2", "g2", TRUE, "keep">>
+<<"manual", 0, 0, FALSE>>
+<<"manual", 0, 1, FALSE>>
+<<"manual", 0, 2, FALSE>>
+<<"manual", 0, 3, FALSE>>
+<<"manual", 1, 0, TRUE>>
+<<"manual", 1, 1, FALSE>>
+<<"manual", 1, 2, TRUE>>
+<<"manual", 1, 3, TRUE>>
+<<"manual", 2, 0, TRUE>>
+<<"manual", 2, 1, TRUE>>
+<<"manual", 2, 2, FALSE>>
+<<"manual", 2, 3, TRUE>>
+<<"manual", 3, 0, TRUE>>
+<<"manual", 3, 1, TRUE>>
+<<"manual", 3, 2, TRUE>>
+<<"manual", 3, 3, FALSE>>

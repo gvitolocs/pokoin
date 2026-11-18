@@ -1,3 +1,6 @@
+// Relative so node --test can load this module (it does not apply the Vite @market alias).
+import { gameSwitchReloads, isCrossGameHome } from '../../../market/src/game.js';
+
 /**
  * In-app navigations paint before the new route renders.
  *
@@ -9,6 +12,7 @@
  * frame later. Programmatic navigations from clicks use `afterPaint` directly.
  */
 let navigator = null;
+let publicNavigator = null;
 let pending = 0;
 
 /** Run `fn` after the next paint; a newer call supersedes an older pending one. */
@@ -47,14 +51,32 @@ export function claimedPath(event, anchor, here) {
   return url.pathname + url.search + url.hash;
 }
 
+/** Cross-game decision for a claimed href: full load except into the marketplace home. */
+export function crossGameFullLoad(fromPath, toPath) {
+  return gameSwitchReloads(fromPath, toPath);
+}
+
+/** Claimed href is another game's marketplace home, so it must not gain the current slug. */
+export function crossGameHome(fromPath, toPath) {
+  return isCrossGameHome(fromPath, toPath);
+}
+
 function onClick(event) {
   if (!navigator) return;
   const anchor = event.composedPath().find((el) => el?.nodeName?.toUpperCase?.() === 'A' && !(el instanceof SVGElement));
   const path = claimedPath(event, anchor, window.location);
   if (!path) return;
+  const here = window.location.pathname;
+  if (crossGameFullLoad(here, path)) {
+    event.preventDefault();
+    window.location.assign(path);
+    return;
+  }
   event.preventDefault();
   const state = anchor.getAttribute('state');
-  const go = navigator;
+  // A pokemon home link is the public path `/marketplace`. gameHref would
+  // prefix the current slug onto it; the public navigator leaves it alone.
+  const go = crossGameHome(here, path) && publicNavigator ? publicNavigator : navigator;
   afterPaint(() => go(path, {
     resolve: false,
     replace: anchor.hasAttribute('replace'),
@@ -76,4 +98,9 @@ export function installYieldingLinks() {
 /** The router's navigate (from the root layout); links are left alone until it is set. */
 export function setLinkNavigator(fn) {
   navigator = fn;
+}
+
+/** Navigate a path that is already a public URL (another game's marketplace home). */
+export function setPublicLinkNavigator(fn) {
+  publicNavigator = fn;
 }

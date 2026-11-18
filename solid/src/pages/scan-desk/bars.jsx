@@ -5,6 +5,18 @@ import { phoneConnectUrl } from '@market/scan-api.js';
 import { CONDITIONS, FINISHES, LANGUAGES, STACK_SIZES } from '@market/scan-model.js';
 import { HELP_SECTIONS } from '@market/scan-shortcuts.js';
 import { FIELD_LABEL, perfRows, perfSink } from './version-sets.js';
+import {
+  draftValue,
+  gearState,
+  isLocationOff,
+  LOCATION_OFF_PATCH,
+  locationFieldState,
+  pendingDraft,
+  sizeCommit,
+  STACK_OFF_PATCH,
+  STACK_SETUP_OFF_ENABLED,
+} from './defaults-state.js';
+import { pricingChoicePatch, pricingChoiceValue, pricingHint, pricingOptions } from './pricing.js';
 
 /** Pairing QR: ECC H with a centered Pokoin logo on a white pad (D00006I). */
 export function QrBlock(props) {
@@ -54,9 +66,18 @@ function boxSuggestions(boxes, draft) {
 
 /**
  * Batch defaults strip: game, language, condition, finish, flags, location
- * (+ stack setup behind the gear) and merge repeats. `onChange` patches the
- * batch defaults; `locationRef` / `stackButtonRef` receive the elements the
- * Alt shortcuts focus.
+ * (+ stack setup behind the gear) and merge repeats. `onChange(patch, { stackOff })`
+ * patches the batch defaults and names the stack-setup switch with it;
+ * `locationRef` / `stackButtonRef` receive the elements the Alt shortcuts focus;
+ * `cursorForStack(stack)` answers with the stack and position the desk really
+ * uses (stock in the box plus this batch); `suggestion` is the box the desk
+ * would put in an empty Location, shown as a suggestion and never written by
+ * this bar; `stackOff` is the seller's switch and `onTouched()` tells the desk
+ * the seller has got hold of the Location field; `api` receives
+ * `{ commitLocation }` so the desk can apply what is being typed before it
+ * creates a row with the box from before.
+ * `pricing` (the `fetchPricingStrategies` answer) fills
+ * the Pricing select, last in the row, when `showPricing` (listing for sale).
  */
 export function DefaultsBar(props) {
   const d = () => props.defaults;
@@ -68,7 +89,25 @@ export function DefaultsBar(props) {
   const [posDraft, setPosDraft] = createSignal(untrack(() => String(d().startPosition ?? 1)));
   const [sizeDraft, setSizeDraft] = createSignal(untrack(() => String(size())));
   const [sizeOpen, setSizeOpen] = createSignal(false);
+  /** Which draft field the seller has a hand on; only then does their text win over an answer. */
+  const [editingField, setEditingField] = createSignal('');
   let sizeMenu;
+  const pricingList = createMemo(() => pricingOptions(props.pricing, d(), props.currencyCtx));
+  const stackOff = () => props.stackOff === true;
+  const locationOff = () => isLocationOff(d());
+  const gear = () => gearState({
+    off: stackOff(),
+    size: size(),
+    stack: d().stack ?? 1,
+    startPosition: d().startPosition ?? 1,
+    locationOff: locationOff(),
+  });
+  const locationState = () => locationFieldState({ location: d().location, suggestion: props.suggestion || '' });
+  /** The box the desk would stamp on the next card, as typed here. */
+  const locationPatch = (value) => (String(value || '').trim() ? { location: String(value) } : LOCATION_OFF_PATCH);
+  // What the bar last handed the desk: an answer for a value already on its
+  // way must not re-arm the pause, and neither must a flush from the desk.
+  let locationSent = String(untrack(() => d().location ?? ''));
 
   createEffect(sizeOpen, (open) => {
     if (!open) return undefined;
@@ -78,13 +117,35 @@ export function DefaultsBar(props) {
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   });
-  createEffect(() => d().location, (location) => { setLocationDraft(location); });
-  createEffect(() => [d().stack, d().location], ([stack]) => { setStackDraft(String(stack ?? 1)); });
-  createEffect(() => [d().startPosition, d().location, d().stack], ([start]) => { setPosDraft(String(start ?? 1)); });
-  createEffect(size, (next) => { setSizeDraft(String(next)); });
+  // An answer only repaints a field the seller is not working in. A defaults
+  // write that came back while the box was still being typed used to copy its
+  // own value over the text — the seed did the same, and the seller lost the
+  // location they had chosen. `editingField` is read untracked on purpose: a
+  // focus change must not adopt the batch default, only an answer may.
+  createEffect(() => d().location, (location) => {
+    const focused = untrack(() => editingField()) === 'location';
+    if (!focused) locationSent = String(location ?? '');
+    setLocationDraft((current) => draftValue({ focused, draft: current, serverValue: location }));
+  });
+  createEffect(() => [d().stack, d().location], ([stack]) => {
+    const focused = untrack(() => editingField()) === 'stack';
+    setStackDraft((current) => draftValue({ focused, draft: current, serverValue: String(stack ?? 1) }));
+  });
+  createEffect(() => [d().startPosition, d().location, d().stack], ([start]) => {
+    const focused = untrack(() => editingField()) === 'position';
+    setPosDraft((current) => draftValue({ focused, draft: current, serverValue: String(start ?? 1) }));
+  });
+  createEffect(size, (next) => {
+    const focused = untrack(() => editingField()) === 'size';
+    setSizeDraft((current) => draftValue({ focused, draft: current, serverValue: String(next) }));
+  });
 
-  const commitLocation = () => {
-    if (locationDraft() !== d().location) props.onChange({ location: locationDraft() });
+  const applyLocation = (next) => {
+    const value = String(next ?? '');
+    if (value === locationSent) return undefined;
+    locationSent = value;
+    setLocationDraft(value);
+    return props.onChange(locationPatch(value));
   };
   const suggestions = () => boxSuggestions(props.boxes || [], locationDraft());
   const showBoxMenu = () => {
@@ -95,13 +156,35 @@ export function DefaultsBar(props) {
   const pickBox = (name) => {
     setLocationDraft(name);
     setBoxMenuOpen(false);
-    if (name !== d().location) props.onChange({ location: name });
+    if (name !== d().location) {
+      props.onTouched?.();
+      return applyLocation(name);
+    }
+    return undefined;
   };
+  const commitLocation = () => {
+    const next = pendingDraft({ draft: locationDraft(), applied: locationSent });
+    return next === null ? undefined : applyLocation(next);
+  };
+  /**
+   * Leaving the field: what was typed is applied, and nothing typed at all
+   * accepts the box that was shown in it. The desk applies the same on a scan.
+   */
+  const leaveLocation = () => {
+    setEditingField('');
+    setBoxMenuOpen(false);
+    const suggestion = String(props.suggestion || '');
+    if (suggestion && !String(locationDraft() || '')) return applyLocation(suggestion);
+    return commitLocation();
+  };
+  // The desk applies a typed box before it creates a row: a scan or a card
+  // added from search must not land in the box from before the typing.
+  props.api?.({ commitLocation });
   // Giuseppe 2026-10-04: the location applies while typing — a short pause is
   // enough, no Enter. Blur and Enter still commit immediately.
   createEffect(() => [locationDraft(), d().location], ([draft, location]) => {
-    if (draft === location) return undefined;
-    const t = setTimeout(() => props.onChange({ location: draft }), 700);
+    if (draft === location || draft === locationSent) return undefined;
+    const t = setTimeout(() => applyLocation(draft), 700);
     return () => clearTimeout(t);
   });
   const commitStack = () => {
@@ -116,10 +199,10 @@ export function DefaultsBar(props) {
       return;
     }
     // Typing a stack that already holds cards (even the current one) continues
-    // after them instead of restarting at position 1.
-    const pos = (props.positionForStack && props.positionForStack(n)) || 1;
-    const next = pos > size() ? { stack: Math.min(9999, n + 1), startPosition: 1 } : { stack: n, startPosition: pos };
-    if (next.stack !== stack || next.startPosition !== (d().startPosition ?? 1)) props.onChange(next);
+    // after them; a full one walks on to the next stack with room. The desk
+    // answers with both numbers, so the setup shows the cursor it really took.
+    const cursor = props.cursorForStack(n) || { stack: n, startPosition: 1 };
+    if (cursor.stack !== stack || cursor.startPosition !== (d().startPosition ?? 1)) props.onChange(cursor);
     else setStackDraft(String(stack));
   };
   const commitPos = () => {
@@ -127,28 +210,39 @@ export function DefaultsBar(props) {
     if (n >= 1 && n <= size() && n !== (d().startPosition ?? 1)) props.onChange({ startPosition: n });
     else setPosDraft(String(d().startPosition ?? 1));
   };
-  const pickSize = (nextSize, { keepOpen = true } = {}) => {
-    if (!keepOpen) setSizeOpen(false);
+  const chooseSize = (nextSize) => {
     setSizeDraft(String(nextSize));
-    if (nextSize === size()) return;
+    // Off has to be switched off even when the size it fell back to is the one
+    // being clicked: "1 card" after "Off" is a different choice than "1 card".
+    if (nextSize === size() && !stackOff()) return undefined;
     // Cards per stack is only the divider. Remapping the absolute index
     // sent a stack-4 cursor back into an earlier stack.
-    props.onChange({ stackSize: nextSize });
+    return props.onChange({ stackSize: nextSize }, { stackOff: false });
+  };
+  /** Off: the box name only, no divider and no position, until a size is picked. */
+  const chooseStackOff = () => {
+    if (stackOff()) return undefined;
+    setSizeDraft('');
+    return props.onChange(STACK_OFF_PATCH, { stackOff: true });
   };
   const commitSize = () => {
-    const n = Number.parseInt(sizeDraft(), 10);
-    if (n >= 1 && n <= 9999) pickSize(n, { keepOpen: true });
-    else setSizeDraft(String(size()));
+    // An emptied field and left is the seller asking for no stack setup, not
+    // "keep the number that was there": the server keeps the old size for a
+    // value it cannot parse, so the desk has to say Off itself. Until the
+    // server holds an off value (STACK_SETUP_OFF_ENABLED) an emptied field is
+    // a keep: the bar restores the number it had, Off is not on offer.
+    const decision = sizeCommit(sizeDraft());
+    if (decision.kind === 'off') return chooseStackOff();
+    if (decision.kind !== 'size') {
+      setSizeDraft(String(size()));
+      return undefined;
+    }
+    return chooseSize(decision.size);
   };
   const blurOnEnter = (event) => {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
   const digits = (event) => event.currentTarget.value.replace(/\D/g, '').slice(0, 4);
-  const gearTitle = () => {
-    const n = size();
-    const stack = d().stack ?? 1;
-    return `Stack setup — ${n === 1 ? 'one card per stack' : `${n} cards per stack`}, stack ${stack}${n > 1 ? `, next position ${d().startPosition ?? 1}` : ''}`;
-  };
 
   return (
     <section class={['scan-defaults', { 'is-stack-full': props.stackFull }]} aria-labelledby="scan-defaults-title">
@@ -216,7 +310,7 @@ export function DefaultsBar(props) {
         </div>
         {/* Location + gear: the stack setup (cards per stack, stack, position)
             lives behind the gear, not on the bar. Every scan is one card. */}
-        <div ref={(el) => { sizeMenu = el; }} class={['sd-field grow sd-location', { 'is-full': props.stackFull }]}>
+        <div ref={(el) => { sizeMenu = el; }} class={['sd-field grow sd-location', { 'is-full': props.stackFull, 'is-off': locationState().off }]}>
           <label for="scan-default-location">Location</label>
           <span class="sd-location-input">
             <input
@@ -224,7 +318,8 @@ export function DefaultsBar(props) {
               ref={(el) => props.locationRef?.(el)}
               value={locationDraft()}
               maxlength={64}
-              placeholder={suggestions()[0] && !locationDraft() ? suggestions()[0] : ''}
+              placeholder={locationState().placeholder}
+              title={locationState().title}
               autocomplete="off"
               role="combobox"
               aria-expanded={String(showBoxMenu())}
@@ -234,12 +329,12 @@ export function DefaultsBar(props) {
                 setLocationDraft(e.currentTarget.value);
                 setBoxActive(0);
                 setBoxMenuOpen(true);
+                // Typing here is the seller choosing a box: the seed has had
+                // its say and stays out of the rest of this batch.
+                props.onTouched?.();
               }}
-              onFocus={() => { setBoxMenuOpen(true); setBoxActive(0); }}
-              onBlur={() => {
-                setBoxMenuOpen(false);
-                commitLocation();
-              }}
+              onFocus={() => { setEditingField('location'); setBoxMenuOpen(true); setBoxActive(0); }}
+              onBlur={leaveLocation}
               onKeyDown={(e) => {
                 if (showBoxMenu()) {
                   const list = suggestions();
@@ -269,17 +364,17 @@ export function DefaultsBar(props) {
             <button
               ref={(el) => props.stackButtonRef?.(el)}
               type="button"
-              class="sd-gear"
+              class={['sd-gear', { 'is-off': gear().greyed }]}
               aria-haspopup="dialog"
               aria-expanded={String(sizeOpen())}
               aria-label="Stack setup"
-              title={gearTitle()}
+              title={gear().title}
               onClick={() => setSizeOpen((open) => !open)}
             >
               <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
                 <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
               </svg>
-              <Show when={size() > 1}><b class="sd-gear-size">{size()}</b></Show>
+              <Show when={gear().showSize}><b class="sd-gear-size">{size()}</b></Show>
             </button>
           </span>
           <Show when={showBoxMenu()}>
@@ -305,26 +400,51 @@ export function DefaultsBar(props) {
           </Show>
           <Show when={sizeOpen()}>
             <div class="sd-stack-menu" role="dialog" aria-label="Stack setup">
-              <p class="sd-stack-help">How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.</p>
+              <p class="sd-stack-help">
+                How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.
+                <Show when={STACK_SETUP_OFF_ENABLED}> Off keeps the box name on its own.</Show>
+              </p>
               <label class="sd-stack-row">
                 <span>Cards per stack</span>
                 <input
                   inputmode="numeric"
                   value={sizeDraft()}
                   aria-label="Cards per stack"
+                  title={gear().greyed
+                    ? gear().title
+                    : (STACK_SETUP_OFF_ENABLED
+                      ? 'Leave it empty and Off takes over: no stack, no position.'
+                      : 'How many cards fit in one stack between two dividers.')}
+                  readOnly={gear().greyed}
+                  aria-disabled={String(gear().greyed)}
+                  onFocus={() => setEditingField('size')}
                   onInput={(e) => setSizeDraft(digits(e))}
-                  onBlur={commitSize}
+                  onBlur={(e) => { setEditingField(''); commitSize(); }}
                   onKeyDown={blurOnEnter}
                 />
               </label>
               <div class="sd-stack-chips" role="group" aria-label="Common stack sizes">
+                {/* The Off choice waits for the server to hold an off value. */}
+                <Show when={STACK_SETUP_OFF_ENABLED}>
+                  <button
+                    type="button"
+                    aria-pressed={String(stackOff())}
+                    class={stackOff() ? 'on' : ''}
+                    title={stackOff()
+                      ? 'Stack setup is Off — cards keep the box name only. Pick a size to switch it on.'
+                      : 'Switch the stack setup off: no divider number on any card of this batch.'}
+                    onClick={chooseStackOff}
+                  >
+                    Off
+                  </button>
+                </Show>
                 <For each={STACK_SIZES}>
                   {(n) => (
                     <button
                       type="button"
-                      aria-pressed={String(n === size())}
-                      class={n === size() ? 'on' : ''}
-                      onClick={() => pickSize(n)}
+                      aria-pressed={String(!stackOff() && n === size())}
+                      class={!stackOff() && n === size() ? 'on' : ''}
+                      onClick={() => chooseSize(n)}
                     >
                       {n === 1 ? '1 card' : n}
                     </button>
@@ -337,8 +457,12 @@ export function DefaultsBar(props) {
                   inputmode="numeric"
                   value={stackDraft()}
                   aria-label="Current stack"
+                  title={gear().greyed ? gear().title : 'The divider the next card of this batch goes after.'}
+                  readOnly={gear().greyed}
+                  aria-disabled={String(gear().greyed)}
+                  onFocus={() => setEditingField('stack')}
                   onInput={(e) => setStackDraft(digits(e))}
-                  onBlur={commitStack}
+                  onBlur={(e) => { setEditingField(''); commitStack(); }}
                   onKeyDown={blurOnEnter}
                 />
               </label>
@@ -349,8 +473,12 @@ export function DefaultsBar(props) {
                     inputmode="numeric"
                     value={posDraft()}
                     aria-label="Next position in the stack"
+                    title={gear().greyed ? gear().title : 'The place the next card takes inside that stack.'}
+                    readOnly={gear().greyed}
+                    aria-disabled={String(gear().greyed)}
+                    onFocus={() => setEditingField('position')}
                     onInput={(e) => setPosDraft(digits(e))}
-                    onBlur={commitPos}
+                    onBlur={(e) => { setEditingField(''); commitPos(); }}
                     onKeyDown={blurOnEnter}
                   />
                 </label>
@@ -363,7 +491,36 @@ export function DefaultsBar(props) {
           <input type="checkbox" checked={Boolean(d().mergeRepeats)} onChange={(e) => props.onChange({ mergeRepeats: e.currentTarget.checked })} />
           <span>Merge repeats</span>
         </label>
+        <Show when={props.showPricing}>
+          <label class="sd-field sd-pricing">
+            <span>Pricing</span>
+            <select
+              value={pricingChoiceValue(d())}
+              data-testid="scan-pricing"
+              onChange={(e) => {
+                const next = e.currentTarget.value;
+                if (next !== pricingChoiceValue(d())) props.onChange(pricingChoicePatch(next));
+              }}
+            >
+              <Show when={pricingList().groups.length}>
+                <optgroup label="Add to a group">
+                  <For each={pricingList().groups}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+                </optgroup>
+              </Show>
+              <Show when={pricingList().strategies.length}>
+                <optgroup label="Price once with a strategy">
+                  <For each={pricingList().strategies}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+                </optgroup>
+              </Show>
+              <option value="">Suggested prices</option>
+            </select>
+          </label>
+          <a class="sd-pricing-manage" href={props.pricingHref || '/mypokoin/pricer'}>Manage pricing</a>
+        </Show>
       </div>
+      <Show when={props.showPricing && pricingHint(d())}>
+        <p class="sd-pricing-hint">{pricingHint(d())}</p>
+      </Show>
       <Show when={props.stackFull}>
         <p class="sd-stack-full-msg" role="status">Stack full — next card starts a new divider.</p>
       </Show>

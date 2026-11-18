@@ -5,7 +5,7 @@ import { BoardBar, usePageTitle } from './tools/board.jsx';
 
 /** Visual review of every Jumbo Oversized leftover: homepage thumb with the
  * full-resolution JPEG one click away. A red outline means a broken image.
- * (market/src/pages/JumbosBoard.jsx) */
+ * */
 export default function JumbosBoard() {
   usePageTitle('Jumbos · test.pokoin.com');
 

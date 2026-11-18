@@ -1,0 +1,24 @@
+[Unit]
+Description=Poko Telegram and Discord bot
+After=network-online.target hermes-poko.service
+Wants=network-online.target
+
+[Service]
+User=poko-bot
+EnvironmentFile=/etc/poko-bot/env
+EnvironmentFile=-/etc/poko-bot/switch.env
+ExecStart=/opt/poko-bot/bin/poko-bot
+Restart=always
+RestartSec=5
+StateDirectory=poko-bot
+MemoryMax=128M
+MemorySwapMax=0
+MemoryLow=24M
+CPUWeight=400
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

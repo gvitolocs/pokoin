@@ -693,6 +693,14 @@
   text-align: right;
 }
 
+.bk-sum-lines .bk-sum-total {
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--g5);
+  font-size: 0.95rem;
+}
+
+.bk-sum-lines .bk-sum-total dt { color: var(--text); font-weight: 700; }
+
 .bk-sum-lines dd.is-ok { color: var(--bk-ok); }
 
 .bk-sum-hint {

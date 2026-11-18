@@ -1,8 +1,11 @@
-import { Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
+import { releaseHero } from '@market/hero-gate.js';
 import { isLandscapePrintName } from '@market/art-cut-landscape.js';
 import { getChatDock } from '@market/chat-dock-store.js';
 import { referenceForPeer, writeListingDrag } from '@market/chat-listing.js';
+import { langScanLabel } from '@market/lang-scans.js';
 import { cardImageAlt } from '@market/seo.js';
+import { cardSelected, deskDragReference, dragPayload } from '../../lib/select-band.js';
 import CardArt from '../CardArt.jsx';
 
 /** Drag payload for the desk scan: the open chat peer's listing when there is one. */
@@ -31,17 +34,31 @@ export function Chevron(props) {
 }
 
 /**
- * The large desk scan (market/src/pages/Card.jsx DeskArtFrame): click or
- * Enter/Space zooms; dragging drops the card (or the open chat's listing).
- * Page multi-select (rubber band) is not ported yet, so it drags one card.
+ * The large desk scan: click or
+ * Enter/Space zooms. It joins the page multi-select (data-card-id), so a drag
+ * carries the mixed desk pile or the selected cards when it is part of one,
+ * else the card (or the open chat's listing).
  */
 export default function DeskArtFrame(props) {
   const id = () => String(props.card?.id || '');
+  const picked = () => Boolean(id() && cardSelected().has(id()));
+  // "Italian scan" under a painted language scan; cleared when the leftover
+  // JPEG paints instead (no scan in that language, or it failed).
+  const [langLabel, setLangLabel] = createSignal('');
+  function dragStart(event) {
+    const mixed = deskDragReference({ heldCard: props.card });
+    if (mixed) {
+      writeListingDrag(event, mixed);
+      return;
+    }
+    const group = dragPayload(props.card);
+    writeListingDrag(event, group?.kind === 'cards' ? group : dragThisCard(props.card, props.offers || []));
+  }
   return (
     <div
       role="button"
       tabindex="0"
-      class={['art-frame', { 'is-landscape': isLandscapeDesk(props.card) }]}
+      class={['art-frame', { 'is-selected': picked(), 'is-landscape': isLandscapeDesk(props.card) }]}
       data-card-id={id() || undefined}
       draggable="true"
       onClick={() => props.onZoom?.()}
@@ -50,16 +67,25 @@ export default function DeskArtFrame(props) {
         event.preventDefault();
         props.onZoom?.();
       }}
-      onDragStart={(event) => writeListingDrag(event, dragThisCard(props.card, props.offers || []))}
+      onDragStart={dragStart}
     >
       <Show when={props.art} fallback={<span class="tile-ph" />}>
         <CardArt
           src={props.art}
           card={props.card}
+          // A variant scan (props.note: the reverse holo) is the scan itself, never a language swap.
+          langScans={props.note || isLandscapeDesk(props.card) ? undefined : props.card?.langScans}
           alt={cardImageAlt(props.card)}
           fetchPriority="high"
           full
+          // Only a painted scan opens the gate: the first stub card can name a
+          // guessed file that fails at once, and failures wait for HERO_WAIT_MS.
+          onLoad={(node) => {
+            setLangLabel(langScanLabel(node?.currentSrc || node?.src));
+            releaseHero();
+          }}
           onError={() => {
+            setLangLabel('');
             console.warn('[pokoin:desk-art] hero failed', {
               cardId: props.card?.id,
               art: props.art,
@@ -68,6 +94,9 @@ export default function DeskArtFrame(props) {
             });
           }}
         />
+      </Show>
+      <Show when={props.note || langLabel()}>
+        <span class="lang-scan-note">{props.note || langLabel()}</span>
       </Show>
     </div>
   );

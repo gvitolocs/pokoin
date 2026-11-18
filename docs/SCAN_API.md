@@ -41,3 +41,16 @@ Phone diagnostics (`scan-diag-v2`) are **not ported to Rust**: the native
 **Logs unavailable**. The Node handler and its cross-repository protocol test
 were removed with the Node backend; the port is listed in
 [rust-migration/NODE_REMAINING.md](rust-migration/NODE_REMAINING.md).
+
+## Web scanner (pokoin.com/scan)
+
+`solid/src/pages/Scan.jsx` (also `/cardscan`, `/scancard`) is the browser
+counterpart of the `scan.pokoin.com` phone scanner: live camera identify,
+Single/Multi, flash, camera choice, photo upload / drop / paste, and every
+game in `GET /catalogs`. It sends the same requests as the phone page
+(`live=1`, `top_k` 3/8 live and 5 for a photo, 960 px live frames and
+1280 px photos, JPEG 0.72, tilt-corrected) and accepts matches at the same
+scores. The rules live in `market/src/scan-live.js`, ported from
+`pokoin-scanner/service/web/index.html`; change both together until
+`scan.pokoin.com/` points at `pokoin.com/scan`. Scan Connect pairing stays on
+`scan.pokoin.com/connect`.

@@ -643,6 +643,7 @@ mod tests {
         assert_eq!(policy("public, no-cache, max-age=60", "x"), None);
         assert_eq!(policy("public", "x"), None);
         assert_eq!(policy("public, max-age=0", "x"), None);
+        assert_eq!(policy("public, max-age=120, s-maxage=0", "application/json"), None, "s-maxage=0 is not stored");
         assert_eq!(policy("public, max-age=60", "text/event-stream"), None);
         assert_eq!(policy("publicity, max-age=60", "x"), None);
     }
@@ -785,6 +786,52 @@ mod tests {
             b = b.header(*k, *v);
         }
         b.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn s_maxage_zero_is_not_stored_and_private_marks_the_path() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let n = calls.clone();
+        let api = Router::new().route(
+            "/api/marketplace-list",
+            get(move |uri: Uri| {
+                let n = n.clone();
+                async move {
+                    n.fetch_add(1, Ordering::SeqCst);
+                    let query = uri.query().unwrap_or("");
+                    let cc = if query.contains("private=1") {
+                        "private, max-age=120"
+                    } else if query.contains("zero=1") {
+                        "public, max-age=120, s-maxage=0"
+                    } else {
+                        "public, s-maxage=60"
+                    };
+                    ([(header::CACHE_CONTROL, cc), (header::CONTENT_TYPE, "application/json")], "{\"ok\":true}")
+                }
+            }),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(config(dir.path().to_path_buf(), Duration::from_secs(30)), api, Router::new());
+        let get = |path: &'static str| {
+            let app = app.clone();
+            async move { app.oneshot(req("GET", path, &[])).await.unwrap() }
+        };
+        let zero = get("/api/marketplace-list?zero=1").await;
+        assert_eq!(zero.headers()["x-pokoin-edge-cache"], "BYPASS");
+        assert_eq!(zero.headers()["cache-control"], "public, max-age=120, s-maxage=0");
+        let zero_again = get("/api/marketplace-list?zero=1").await;
+        assert_eq!(zero_again.headers()["x-pokoin-edge-cache"], "BYPASS", "s-maxage=0 is not stored");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let miss = get("/api/marketplace-list?ok=1").await;
+        assert_eq!(miss.headers()["x-pokoin-edge-cache"], "MISS", "the zero answer did not mark the pathname uncacheable");
+        let hit = get("/api/marketplace-list?ok=1").await;
+        assert_eq!(hit.headers()["x-pokoin-edge-cache"], "HIT");
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        let private = get("/api/marketplace-list?private=1").await;
+        assert_eq!(private.headers()["x-pokoin-edge-cache"], "BYPASS");
+        let blocked = get("/api/marketplace-list?ok=1").await;
+        assert!(blocked.headers().get("x-pokoin-edge-cache").is_none(), "a private 200 marks the pathname uncacheable");
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
     }
 
     #[tokio::test]

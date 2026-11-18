@@ -1,17 +1,19 @@
+import { loadMypokoinPreview } from '../pages/mypokoin-preview.js';
 import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
 /**
- * Buying and money pages (React URL map: market/src/App.jsx). Every page is
+ * Buying and money pages (the React app's URLs). Every page is
  * its own chunk; React registered each path with and without a trailing
  * slash, and the Solid router matches both.
  */
 const Cart = lazy(() => import('../pages/Cart.jsx'));
 const Checkout = lazy(() => import('../pages/Checkout.jsx'));
 const Orders = lazy(() => import('../pages/Orders.jsx'));
-const Bought = lazy(() => import('../pages/Bought.jsx'));
+const Bought = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Bought.jsx'); });
 const Buy = lazy(() => import('../pages/Buy.jsx'));
-const Sales = lazy(() => import('../pages/Sales.jsx'));
+const BuySell = lazy(async () => { await loadMypokoinPreview(); return import('../pages/BuySell.jsx'); });
+const Sales = lazy(async () => { await loadMypokoinPreview(); return import('../pages/Sales.jsx'); });
 const Wallet = lazy(() => import('../pages/Wallet.jsx'));
 const Exchange = lazy(() => import('../pages/Exchange.jsx'));
 const Flex = lazy(() => import('../pages/Flex.jsx'));
@@ -25,6 +27,9 @@ export default [
   { path: '/orders', component: Orders },
   { path: '/bought', component: Bought },
   { path: '/buy', component: Buy },
+  // CardGTS (formerly BuySell). /buysell stays so links already sent in emails keep working.
+  { path: '/cardgts', component: BuySell },
+  { path: '/buysell', component: BuySell },
   { path: '/sales', component: Sales },
   { path: '/wallet', component: Wallet },
   { path: '/exchange', component: Exchange },

@@ -57,8 +57,8 @@ export function FounderMedal(props) {
 }
 
 /**
- * Personal welcome for Pokoin's Founder Ambassador on /associate
- * (market/src/components/FounderWelcome.jsx). Confetti plays on the first
+ * Personal welcome for Pokoin's Founder Ambassador on /associate.
+ * Confetti plays on the first
  * visit on this browser, and again on a medal tap.
  */
 export default function FounderWelcome(props) {

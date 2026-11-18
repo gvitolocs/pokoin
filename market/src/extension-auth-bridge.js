@@ -89,13 +89,26 @@ export function framedByChromeExtension(win = typeof window === 'undefined' ? un
 
 export const PUBLIC_API_ORIGIN = 'https://api.pokoin.com';
 
+/**
+ * `vite dev` only: VITE_POKOIN_API_ORIGIN sends /api to a local API (the
+ * checkout e2e harness, a local Rust build). Production builds ignore it.
+ */
+function devApiOrigin() {
+  try {
+    if (!import.meta.env?.DEV) return '';
+    return String(import.meta.env.VITE_POKOIN_API_ORIGIN || '').replace(/\/+$/, '');
+  } catch (_) {
+    return '';
+  }
+}
+
 /** Browser calls go to api.pokoin.com. pokoin.com itself is static files. */
 export function publicApiUrl(path) {
   const raw = String(path || '');
   if (!raw.startsWith('/api')) {
     return raw;
   }
-  return `${PUBLIC_API_ORIGIN}${raw}`;
+  return `${devApiOrigin() || PUBLIC_API_ORIGIN}${raw}`;
 }
 
 export function extensionAuthTokenPayload(user, accessToken, extra = {}) {
@@ -103,7 +116,8 @@ export function extensionAuthTokenPayload(user, accessToken, extra = {}) {
   if (token.length < 20) {
     return null;
   }
-  return {
+  const refreshToken = String(user?.refreshToken || extra.refreshToken || '').trim();
+  const payload = {
     type: EXTENSION_AUTH_TOKEN,
     ok: true,
     token: {
@@ -114,4 +128,9 @@ export function extensionAuthTokenPayload(user, accessToken, extra = {}) {
       email: user?.email || extra.email || '',
     },
   };
+  // Persistable Firebase refresh token for the Chrome extension silent-refresh path.
+  if (refreshToken.length > 20) {
+    payload.token.refreshToken = refreshToken;
+  }
+  return payload;
 }

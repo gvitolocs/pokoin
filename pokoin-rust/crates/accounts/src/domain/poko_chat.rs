@@ -78,6 +78,12 @@ pub fn clean_cards(raw: Option<&Json>) -> Vec<Json> {
             .or_else(|| row.get("minAsk"))
             .and_then(Json::as_f64)
             .unwrap_or(0.0);
+        // Poko replies are Pokémon. A valid attached game (a card dragged in
+        // from another catalog) is kept; a missing or unknown one is Pokémon.
+        let game = crate::domain::marketplace_game::normalize_game(&clean_text(
+            &field_str(row, &["game"]),
+            40,
+        ));
         out.push(json!({
             "kind": "card",
             "cardId": card_id,
@@ -90,6 +96,7 @@ pub fn clean_cards(raw: Option<&Json>) -> Vec<Json> {
             "path": path,
             "imageUrl": clean_text(&field_str(row, &["imageUrl", "cardImageUrl"]), 500),
             "pricePkn": num(price),
+            "game": game,
         }));
     }
     out
@@ -111,7 +118,30 @@ pub fn clean_images(raw: Option<&Json>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `cleanPageContext(raw, cards, images)`.
+/// The card id in a card desk path (`/marketplace/en/cards/250366/slug`).
+fn desk_path_card_id(path: &str) -> Option<&str> {
+    let (_, after) = path.split_once("/cards/")?;
+    let digits = after
+        .find(|ch: char| !ch.is_ascii_digit())
+        .map_or(after, |end| &after[..end]);
+    (!digits.is_empty()).then_some(digits)
+}
+
+/// The page path, unless it is a card desk whose card is not attached: a
+/// removed chip must not reach Poko through the URL either.
+fn attached_page_path(path: &str, cards: &[Json]) -> String {
+    match desk_path_card_id(path) {
+        Some(id) if !cards.iter().any(|card| field_str(card, &["cardId"]) == id) => path
+            .split_once("/cards/")
+            .map(|(prefix, _)| prefix.to_string())
+            .unwrap_or_default(),
+        _ => path.to_string(),
+    }
+}
+
+/// `cleanPageContext(raw, cards, images)`. The desk card is the first
+/// attached card only: the card the user is viewing is context only when the
+/// client sent it as an attachment, never from `deskCard*` fields or the path.
 pub fn clean_page_context(
     raw: Option<&Json>,
     cards: &[Json],
@@ -137,36 +167,13 @@ pub fn clean_page_context(
             raw_channel
         }
     };
-    let desk_card_id = {
-        let raw = clean_text(&field_str(src, &["deskCardId"]), 40);
-        if raw.is_empty() {
-            field_str(&desk, &["cardId"])
-        } else {
-            raw
-        }
-    };
-    let desk_card_name = {
-        let raw = clean_text(&field_str(src, &["deskCardName"]), 120);
-        if raw.is_empty() {
-            field_str(&desk, &["name"])
-        } else {
-            raw
-        }
-    };
-    let desk_set_name = {
-        let raw = clean_text(&field_str(src, &["deskSetName"]), 120);
-        if raw.is_empty() {
-            field_str(&desk, &["setName"])
-        } else {
-            raw
-        }
-    };
+    let path = attached_page_path(&clean_text(&field_str(src, &["path"]), 300), cards);
     json!({
         "channel": channel,
-        "path": clean_text(&field_str(src, &["path"]), 300),
-        "deskCardId": desk_card_id,
-        "deskCardName": desk_card_name,
-        "deskSetName": desk_set_name,
+        "path": path,
+        "deskCardId": field_str(&desk, &["cardId"]),
+        "deskCardName": field_str(&desk, &["name"]),
+        "deskSetName": field_str(&desk, &["setName"]),
         "watchlistIds": watchlist.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
         "cart": cart,
         "attachedCards": cards,
@@ -255,6 +262,46 @@ pub fn is_user_photo_url(value: &str) -> bool {
         .unwrap_or("")
         .to_ascii_lowercase();
     host.ends_with(".r2.dev") && path.starts_with("/user-photos/")
+}
+
+/// The storage key of the caller's OWN chat photo behind the auth-aware proxy
+/// (`https://api.pokoin.com/api/user-photos/chat/<uid>/<hex id>.jpg`, as
+/// `POST /api/chat?action=photo` returns it). Another user's photo, a listing
+/// photo or any other URL is `None`: Poko only reads photos their owner sent.
+pub fn own_chat_photo_key(value: &str, uid: &str) -> Option<String> {
+    let rest = value.trim().strip_prefix("https://")?;
+    let (authority, path) = rest.split_once('/')?;
+    let host = authority
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if host != "pokoin.com" && !host.ends_with(".pokoin.com") {
+        return None;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    let mut parts = path.split('/');
+    if parts.next() != Some("api") || parts.next() != Some("user-photos") || parts.next() != Some("chat") {
+        return None;
+    }
+    let owner = parts.next()?;
+    let file = parts.next()?;
+    if parts.next().is_some() || owner.is_empty() || owner != uid {
+        return None;
+    }
+    if owner.len() < 8 || owner.len() > 128 || !owner.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let id = file
+        .strip_suffix(".jpg")
+        .or_else(|| file.strip_suffix(".JPG"))?;
+    if id.len() < 12 || id.len() > 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!(
+        "user-photos/chat/{owner}/{}.jpg",
+        id.to_ascii_lowercase()
+    ))
 }
 
 /// `hitToPhotoCard(hit)`.
@@ -811,6 +858,7 @@ pub fn card_row(row: &Json) -> Json {
         "name": name,
         "setName": row_text(row, "set_name"),
         "source": "poko",
+        "game": "pokemon",
     })
 }
 
@@ -952,7 +1000,15 @@ mod tests {
         assert_eq!(cards[0]["cardName"], json!("Pikachu"));
         assert_eq!(cards[0]["path"], json!("/marketplace/en/cards/12345"));
         assert_eq!(cards[0]["pricePkn"], json!(12.5));
+        assert_eq!(cards[0]["game"], json!("pokemon"));
         assert_eq!(cards[1]["cardId"], json!("99"));
+        assert_eq!(cards[1]["game"], json!("pokemon"));
+        let kept = clean_cards(Some(&json!([
+            { "cardId": "7", "name": "Nami", "game": "one-piece" },
+            { "cardId": "8", "name": "Bolt", "game": "not-a-game" }
+        ])));
+        assert_eq!(kept[0]["game"], json!("one_piece"));
+        assert_eq!(kept[1]["game"], json!("pokemon"));
         // A card with neither id nor name is dropped.
         assert!(clean_cards(None).is_empty());
         // The 12-card cap.
@@ -981,7 +1037,48 @@ mod tests {
     }
 
     #[test]
-    fn page_context_falls_back_to_the_attached_desk_card() {
+    fn page_context_without_an_attached_card_names_no_card() {
+        // The user removed the page chip: desk fields and the card path the
+        // client still sends must not reach Poko.
+        let context = clean_page_context(
+            Some(&json!({
+                "path": "/marketplace/en/cards/250366/card-foongus-12-135-plasma-storm",
+                "deskCardId": "250366", "deskCardName": "Foongus", "deskSetName": "Plasma Storm"
+            })),
+            &[],
+            &[],
+        );
+        assert_eq!(context["deskCardId"], json!(""));
+        assert_eq!(context["deskCardName"], json!(""));
+        assert_eq!(context["deskSetName"], json!(""));
+        assert_eq!(context["path"], json!("/marketplace/en"));
+        assert_eq!(market_first_directive(&[], &context, &[]), "");
+        assert!(!context.to_string().contains("250366"));
+
+        // Another card attached on that page: still no page card.
+        let other = vec![json!({ "cardId": "7", "name": "Pikachu" })];
+        let context = clean_page_context(
+            Some(&json!({ "path": "/marketplace/en/cards/250366/card-foongus" })),
+            &other,
+            &[],
+        );
+        assert_eq!(context["path"], json!("/marketplace/en"));
+        assert_eq!(context["deskCardId"], json!("7"));
+
+        // The page chip attached: the desk path stays.
+        let chip = vec![json!({ "cardId": "250366", "name": "Foongus" })];
+        let context = clean_page_context(
+            Some(&json!({ "path": "/marketplace/en/cards/250366/card-foongus" })),
+            &chip,
+            &[],
+        );
+        assert_eq!(context["path"], json!("/marketplace/en/cards/250366/card-foongus"));
+        assert_eq!(context["deskCardId"], json!("250366"));
+        assert!(market_first_directive(&chip, &context, &[]).contains("cardId=250366"));
+    }
+
+    #[test]
+    fn page_context_desk_is_the_attached_card() {
         let cards = vec![json!({
             "cardId": "7", "name": "Pikachu", "setName": "Base"
         })];
@@ -992,7 +1089,7 @@ mod tests {
         assert_eq!(context["deskSetName"], json!("Base"));
         assert_eq!(context["attachedCards"].as_array().unwrap().len(), 1);
 
-        // An explicit page context wins over the attached card.
+        // Client desk fields never override the attached card.
         let context = clean_page_context(
             Some(&json!({
                 "channel": " discord ", "path": "/marketplace",
@@ -1003,8 +1100,10 @@ mod tests {
             &[],
         );
         assert_eq!(context["channel"], json!("discord"));
-        assert_eq!(context["deskCardId"], json!("9"));
-        assert_eq!(context["deskCardName"], json!("Eevee"));
+        assert_eq!(context["deskCardId"], json!("7"));
+        assert_eq!(context["deskCardName"], json!("Pikachu"));
+        assert_eq!(context["deskSetName"], json!("Base"));
+        assert_eq!(context["path"], json!("/marketplace"));
         assert_eq!(context["watchlistIds"], json!(["1", "2"]));
         assert_eq!(context["cart"].as_array().unwrap().len(), 1);
         // A non-object page context is treated as empty.
@@ -1043,6 +1142,35 @@ mod tests {
         ));
         assert!(!is_user_photo_url("not a url"));
         assert!(!is_user_photo_url(""));
+    }
+
+    #[test]
+    fn only_the_callers_own_chat_photos_are_read_from_storage() {
+        let uid = "Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2";
+        let url = format!(
+            "https://api.pokoin.com/api/user-photos/chat/{uid}/5962F78B9AACB6BCF053ABAB.jpg"
+        );
+        assert_eq!(
+            own_chat_photo_key(&url, uid).as_deref(),
+            Some("user-photos/chat/Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2/5962f78b9aacb6bcf053abab.jpg")
+        );
+        assert!(own_chat_photo_key(&url, "SomeoneElse1234").is_none());
+        assert!(own_chat_photo_key(&url, "").is_none());
+        assert!(own_chat_photo_key(&url.replace("/chat/", "/listing/"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("https://", "http://"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("api.pokoin.com", "evil.com"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("api.pokoin.com", "evilpokoin.com"), uid).is_none());
+        assert!(own_chat_photo_key(
+            &format!("https://api.pokoin.com/api/user-photos/chat/{uid}/../x/5962f78b9aacb6bcf053abab.jpg"),
+            uid
+        )
+        .is_none());
+        assert!(own_chat_photo_key(
+            &format!("https://api.pokoin.com/api/user-photos/chat/{uid}/not-hex.jpg"),
+            uid
+        )
+        .is_none());
+        assert!(own_chat_photo_key("", uid).is_none());
     }
 
     #[test]
@@ -1253,6 +1381,7 @@ mod tests {
         assert_eq!(card["name"], json!("Pikachu"));
         assert_eq!(card["setName"], json!("Base"));
         assert_eq!(card["source"], json!("poko"));
+        assert_eq!(card["game"], json!("pokemon"));
     }
 
     #[test]

@@ -16,9 +16,9 @@
 --
 -- Built by `pokoin-api job build-lists --kind=set|artist|version|related|related-delta`
 -- (k3s CronJobs build-lists-* in infra/k3s/pokoin-overflow.yaml, run against
--- the nezopt writer; the Pi reads its streaming replica). The job also creates
--- this table itself; apply this file on the writer before deploying so the
--- table exists before the first build. Idempotent.
+-- the nezopt writer; the Pi reads its streaming replica). The job runs no DDL
+-- (since 2026-10-15): apply this file to every game database on the writer, as
+-- pokoin_migrator, before the first build. Idempotent.
 create table if not exists public.marketplace_page_snapshots (
   kind text not null,
   key text not null,

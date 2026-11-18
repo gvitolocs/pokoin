@@ -1,4 +1,4 @@
-import { flagSrc, getSearchLang, isSearchLang } from './locale.js';
+import { flagSrc, getSearchLang, hasFlagFile, isSearchLang } from './locale.js';
 import { countryFlagEmoji, shipFromCountryName } from './ship-countries.js';
 
 const CONDITION_TONE = {
@@ -187,6 +187,20 @@ export function conditionShort(condition) {
   return text || 'NM';
 }
 
+const CONDITION_LABEL = Object.freeze({
+  nm: 'Near Mint',
+  ex: 'Excellent',
+  sp: 'Slightly Played',
+  mp: 'Moderately Played',
+  pl: 'Played',
+  poor: 'Poor',
+});
+
+/** Spelled-out grade for a chip's alt/title: "Poor", not "PO". */
+export function conditionLabel(condition) {
+  return CONDITION_LABEL[conditionTone(condition)] || String(condition || '').trim() || 'Near Mint';
+}
+
 /** CardTrader-style condition chip SVG (one file per grade).
  *
  * Assets live in `market/public/conditions/` (see README there):
@@ -267,7 +281,8 @@ export function sellerCountryFlag(country) {
     code: code || String(short || '').toLowerCase(),
     short: short || String(code || '').toUpperCase(),
     emoji,
-    src: code ? flagSrc(code) : '',
+    // No image for this country (DK, SE, AT…): the emoji, never flagSrc's UK fallback.
+    src: code && hasFlagFile(code) ? flagSrc(code) : '',
     label: sellerCountryLabel(country) || short || String(code || '').toUpperCase(),
   };
 }

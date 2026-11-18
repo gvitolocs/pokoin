@@ -1,34 +1,49 @@
-import { For, Show } from 'solid-js';
-import { groupBoxStacks, listingBox } from '@market/inventory-listings.js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
+import { groupBoxStacks, inventoryListingHref, listingBox } from '@market/inventory-listings.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
+import { memoizePair } from '../../lib/derived-cache.js';
+import { COLLECTION_BATCH_SIZE, nextCollectionBatch } from './collection-batch.js';
 import RowThumb from './RowThumb.jsx';
 
 function stackLabel(stack) {
   return stack === 0 ? 'Cards in the box' : `Stack ${stack}`;
 }
 
-function stackHref(stack) {
-  const id = String(stack.cardId || '');
-  return /^\d+$/.test(id) ? `/marketplace/en/cards/${id}` : '/marketplace';
-}
-
 const paused = (row) => String(row?.status || '').toLowerCase() === 'paused';
 
+const stacksOf = memoizePair(groupBoxStacks);
+
 /**
- * One box (market/src/components/LocationBoard.jsx): every listing stored in
+ * One box: every listing stored in
  * it, grouped per divider stack, then position, then listed date.
  */
 export default function LocationBoard(props) {
   // The URL may carry a full slot string (…/location/megaevoluzionietb·2-4) —
   // the box is the part before the first separator.
   const box = () => listingBox(props.location) || props.location;
-  const stacks = () => groupBoxStacks(props.rows, box());
+  // Six places below read the grouping; without the memo that is six walks of
+  // the box, and a tab switch repeats them over an unchanged book.
+  const stacks = createMemo(() => stacksOf(props.rows, box()));
+  // A box can hold thousands of slots, so each stack paints 40 postings at a
+  // time; the limit is per stack because a tall stack has nothing to do with
+  // the neighbour below it.
+  const [limits, setLimits] = createSignal({});
+  const limitOf = (stack) => limits()[stack.stack] ?? COLLECTION_BATCH_SIZE;
+  const shownPostings = (stack) => stack.postings.slice(0, limitOf(stack));
+  const setLimit = (stack, value) => setLimits((prev) => ({ ...prev, [stack.stack]: value }));
   const dividerCount = () => stacks().filter((stack) => stack.stack > 0).length;
   const postings = () => stacks().reduce((sum, stack) => sum + stack.postingCount, 0);
   const copies = () => stacks().reduce((sum, stack) => sum + stack.copies, 0);
 
   return (
     <section class="inv-board" aria-label={`Cards in ${box()}`}>
+      <div class="mypokoin-panel-head">
+        <div>
+          <h2>{box()}</h2>
+          <p class="mypokoin-help">Listings stored in this box, by stack and position.</p>
+        </div>
+        <a class="btn" href="/inventory/scan">Scan cards</a>
+      </div>
       <div class="inv-summary">
         <Show when={dividerCount() > 0}><div class="inv-stat"><strong>{dividerCount()}</strong><span>Stacks</span></div></Show>
         <div class="inv-stat"><strong>{postings()}</strong><span>Postings</span></div>
@@ -40,7 +55,7 @@ export default function LocationBoard(props) {
         <Show when={box() !== props.location}><span class="loc-box-alt"> (opened as {props.location})</span></Show>
       </p>
 
-      <Show when={stacks().length} fallback={<p class="inv-empty">Nothing stored in this box.</p>}>
+      <Show when={stacks().length} fallback={<div class="mypokoin-empty"><p class="inv-empty">Nothing stored in this box.</p><a class="btn" href="/inventory/scan">Scan cards</a></div>}>
         <div class="loc-list">
           <For each={stacks()}>
             {(stack) => (
@@ -56,12 +71,12 @@ export default function LocationBoard(props) {
                   </span>
                 </div>
                 <div class="loc-postings">
-                  <For each={stack.postings}>
+                  <For each={shownPostings(stack)}>
                     {(row) => {
                       const language = row?.language ? listingLanguageFlag(row.language) : null;
                       const slotPosition = row.slotPosition ? ` · pos ${row.slotPositionText || row.slotPosition}` : '';
                       return (
-                        <a class="loc-posting" href={stackHref(row)}>
+                        <a class="loc-posting" href={inventoryListingHref(row)}>
                           <RowThumb row={row} />
                           <span class="inv-card-txt">
                             <strong>{row?.cardName || row?.name || 'Listing'}</strong>
@@ -90,6 +105,9 @@ export default function LocationBoard(props) {
                     }}
                   </For>
                 </div>
+                <Show when={stack.postings.length > limitOf(stack)}>
+                  <button type="button" class="btn ghost" onClick={() => setLimit(stack, nextCollectionBatch(limitOf(stack), stack.postings.length))}>Show more</button>
+                </Show>
               </div>
             )}
           </For>

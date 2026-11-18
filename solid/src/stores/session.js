@@ -2,8 +2,8 @@ import { createSignal } from 'solid-js';
 import { AUTH_SESSION_KEY, profileFromSession, readAuthSession } from '@market/auth-session.js';
 
 /**
- * First-paint identity from the session the React AuthProvider persists
- * (`pokoin.auth.session`). It is a cache, never authority: Firebase Auth
+ * First-paint identity from the persisted session
+ * (`pokoin.auth.session`, market/src/auth-session.js). It is a cache, never authority: Firebase Auth
  * (loaded lazily, not on the first paint) confirms or clears it, and every
  * write still sends a fresh bearer the API verifies.
  */

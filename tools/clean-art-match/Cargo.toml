@@ -1,0 +1,30 @@
+[package]
+name = "clean-art-match"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Match artofpkm clean artworks to Pokoin printings (CLIP art-box kNN + ORB/RANSAC registration) and warp clean-art figure masks into each leftover scan's frame"
+
+# Own workspace: image tooling must not change the production API lockfile.
+[workspace]
+
+[[bin]]
+name = "clean-art-match"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+jpeg-decoder = "0.3"
+# Pure-Rust OpenCV-compatible ORB + RANSAC homography from the scanner
+# (gvitolocs/pokoin-scanner native/artwork_matcher, checked out on nezopt;
+# ~/.cargo/git is not writable there, so no git dependency).
+pokoin-artwork-matcher = { path = "/home/nez/Projects/pokoin-scanner/native/artwork_matcher" }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+strip = true

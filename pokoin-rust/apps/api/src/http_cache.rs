@@ -5,9 +5,10 @@
 //!   the body) and answers `304` to a matching `If-None-Match`. The header is
 //!   taken off the request first, so the edge micro-cache always stores the
 //!   full 200 and a revalidation is answered from that entry.
-//! - The edge keys its cache on the URL only. A request that asks for `c1`
-//!   with `Accept` is rewritten to `?format=c1` before the edge sees it, so the
-//!   two representations can never share an entry.
+//! - The edge and Cloudflare key their caches on the URL only, so `c1` is
+//!   chosen by `?format=` alone there: a request that asks for it only with
+//!   `Accept` is answered as plain JSON, and the two representations can never
+//!   share an entry.
 
 use std::time::Instant;
 
@@ -46,6 +47,13 @@ pub fn none_match(if_none_match: &str, etag: &str) -> bool {
     if_none_match.split(',').any(|candidate| candidate.trim() == "*" || strong(candidate) == wanted)
 }
 
+/// A `private` answer whose handler set its own `ETag` (the landing binder's
+/// first page): revalidated like a public one, never stored by the edge.
+fn personal_validator(headers: &HeaderMap) -> bool {
+    let cc = headers.get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    headers.contains_key(header::ETAG) && cc.split(',').any(|part| part.trim() == "private") && !cc.split(',').any(|part| part.trim() == "no-store")
+}
+
 fn publicly_cacheable(headers: &HeaderMap) -> bool {
     let cc = headers.get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
     let has = |word: &str| cc.split(',').any(|part| part.trim() == word);
@@ -55,7 +63,7 @@ fn publicly_cacheable(headers: &HeaderMap) -> bool {
 /// Add the validator to a cacheable 200 and turn it into a 304 when the
 /// client already holds that body.
 async fn validate(response: Response, if_none_match: Option<HeaderValue>) -> Response {
-    if response.status() != StatusCode::OK || !publicly_cacheable(response.headers()) {
+    if response.status() != StatusCode::OK || !(publicly_cacheable(response.headers()) || personal_validator(response.headers())) {
         return response;
     }
     let (mut parts, body) = response.into_parts();
@@ -121,18 +129,13 @@ pub async fn conditional(mut req: Request, next: Next) -> Response {
     validate(next.run(req).await, validator).await
 }
 
-/// `Accept: application/vnd.pokoin.c1+json` without `?format=` becomes
-/// `?format=c1` (`?format=c1v2` for `; v=2`), the form every cache keys on.
-pub fn c1_in_url(uri: &Uri, headers: &HeaderMap) -> Option<Uri> {
-    let query = uri.query().unwrap_or("");
-    let parsed = Query::parse(query);
-    let wanted = Wanted::from_request(headers, &parsed);
-    if parsed.first("format").is_some() || !wanted.c1() {
-        return None;
-    }
-    let format = if wanted.templates() { "c1v2" } else { "c1" };
-    let joined = if query.is_empty() { format!("{}?format={format}", uri.path()) } else { format!("{}?{query}&format={format}", uri.path()) };
-    joined.parse().ok()
+/// `Accept: application/vnd.pokoin.c1+json` on a URL without `?format=`.
+/// Cloudflare keys on the URL and ignores `Vary: Accept`, so answering `c1`
+/// there would cache it for every JSON client of that URL; the edge answers
+/// plain JSON instead, which every c1 reader passes through.
+pub fn c1_only_in_accept(uri: &Uri, headers: &HeaderMap) -> bool {
+    let parsed = Query::parse(uri.query().unwrap_or(""));
+    parsed.first("format").is_none() && Wanted::from_request(headers, &parsed).c1()
 }
 
 /// Wraps the edge router (api.pokoin.com origin).
@@ -141,8 +144,8 @@ pub async fn edge(mut req: Request, next: Next) -> Response {
         return next.run(req).await;
     }
     let started = Instant::now();
-    if let Some(uri) = c1_in_url(req.uri(), req.headers()) {
-        *req.uri_mut() = uri;
+    if c1_only_in_accept(req.uri(), req.headers()) {
+        req.headers_mut().insert(header::ACCEPT, HeaderValue::from_static("application/json"));
     }
     let validator = take_validator(&mut req);
     let mut response = validate(next.run(req).await, validator).await;
@@ -172,8 +175,12 @@ mod tests {
         Router::new()
             .route("/api/public", get(|| async { ([(header::CACHE_CONTROL, "public, max-age=60")], "{\"ok\":true}") }))
             .route("/api/private", get(|| async { ([(header::CACHE_CONTROL, "private, no-store")], "{}") }))
+            .route("/api/mine", get(|| async { ([(header::CACHE_CONTROL, "private, no-cache"), (header::ETAG, "\"mine-2\"")], "{}") }))
             .route("/api/big", get(|| async { ([(header::CACHE_CONTROL, "public, max-age=60")], vec![b'x'; ETAG_MAX_BYTES + 1]) }))
-            .route("/api/echo", get(|uri: Uri| async move { ([(header::CACHE_CONTROL, "public, max-age=60")], uri.to_string()) }))
+            .route("/api/echo", get(|uri: Uri, headers: HeaderMap| async move {
+                let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()).unwrap_or("-").to_owned();
+                ([(header::CACHE_CONTROL, "public, max-age=60")], format!("{uri} {accept}"))
+            }))
             .layer(axum::middleware::from_fn(edge))
     }
 
@@ -217,14 +224,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accept_c1_becomes_a_url_the_edge_can_key_on() {
+    async fn a_personal_answer_with_its_own_etag_answers_304() {
+        let first = call(&[], "/api/mine").await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::ETAG], "\"mine-2\"");
+        let again = call(&[("if-none-match", "\"mine-2\"")], "/api/mine").await;
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(again.headers()[header::CACHE_CONTROL], "private, no-cache");
+        let other = call(&[("if-none-match", "\"mine-1\"")], "/api/mine").await;
+        assert_eq!(other.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn only_the_url_chooses_c1_at_the_edge() {
+        // Cloudflare caches the bare URL whatever `Vary` says: an `Accept`-only
+        // ask must not put a c1 body there.
         let body = |r: Response| async move { String::from_utf8(to_bytes(r.into_body(), 1024).await.unwrap().to_vec()).unwrap() };
         let c1 = [("accept", "application/vnd.pokoin.c1+json")];
-        assert_eq!(body(call(&c1, "/api/echo?slug=151").await).await, "/api/echo?slug=151&format=c1");
-        assert_eq!(body(call(&c1, "/api/echo").await).await, "/api/echo?format=c1");
-        assert_eq!(body(call(&c1, "/api/echo?format=c1").await).await, "/api/echo?format=c1");
-        assert_eq!(body(call(&[("accept", "*/*")], "/api/echo?slug=151").await).await, "/api/echo?slug=151");
+        assert_eq!(body(call(&c1, "/api/echo?slug=151").await).await, "/api/echo?slug=151 application/json");
+        assert_eq!(body(call(&c1, "/api/echo").await).await, "/api/echo application/json");
         let v2 = [("accept", "application/vnd.pokoin.c1+json; v=2")];
-        assert_eq!(body(call(&v2, "/api/echo?slug=151").await).await, "/api/echo?slug=151&format=c1v2");
+        assert_eq!(body(call(&v2, "/api/echo?slug=151").await).await, "/api/echo?slug=151 application/json");
+        assert_eq!(body(call(&c1, "/api/echo?format=c1").await).await, "/api/echo?format=c1 application/vnd.pokoin.c1+json");
+        assert_eq!(body(call(&[], "/api/echo?format=c1v2").await).await, "/api/echo?format=c1v2 -");
+        assert_eq!(body(call(&[("accept", "*/*")], "/api/echo?slug=151").await).await, "/api/echo?slug=151 */*");
     }
 }

@@ -1,0 +1,62 @@
+# Stamp plate key → artwork source. Keys must match market/src/expansion-stamps.js.
+# pokeapi:<pokemon> = silhouette of that Pokémon's official artwork (PokeAPI sprites).
+# pokeapi-home:<pokemon> = the Pokémon HOME render, for poses that break apart at 40px.
+# draw:<shape> = drawn here (no Pokémon on the stamp).
+# text:<letters> = a letter-mark logo stamp (Team Rocket R, Team Aqua A, Team Magma M, Play!).
+key	source
+alolan-raichu	pokeapi:raichu-alola
+armarouge	pokeapi:armarouge
+bisharp	pokeapi:bisharp
+bulbasaur	pokeapi:bulbasaur
+charizard	pokeapi:charizard
+charmander	pokeapi:charmander
+chespin	pokeapi:chespin
+cinderace	pokeapi-home:cinderace
+cobalion	pokeapi:cobalion
+darkrai	pokeapi:darkrai
+eevee	pokeapi:eevee
+emboar	pokeapi:emboar
+excadrill	pokeapi:excadrill
+fennekin	pokeapi:fennekin
+froakie	pokeapi:froakie
+genesect	pokeapi:genesect
+greninja	pokeapi-home:greninja
+gyarados	pokeapi:gyarados
+holiday-snowflake	draw:snowflake
+keldeo	pokeapi:keldeo-ordinary
+latias	pokeapi:latias
+latios	pokeapi:latios
+lucario	pokeapi:lucario
+lycanroc	pokeapi:lycanroc-midday
+manaphy	pokeapi:manaphy
+meloetta	pokeapi:meloetta-aria
+mewtwo	pokeapi:mewtwo
+minun	pokeapi:minun
+noivern	pokeapi:noivern
+oshawott	pokeapi:oshawott
+pawniard	pokeapi:pawniard
+pikachu	pokeapi:pikachu
+pikachu-libre	pokeapi:pikachu-libre
+play-pokemon	text:Play!
+plusle	pokeapi:plusle
+poke-ball	draw:poke-ball
+pumpkaboo	pokeapi:pumpkaboo-average
+raichu	pokeapi:raichu
+snivy	pokeapi:snivy
+sprigatito	pokeapi:sprigatito
+squirtle	pokeapi:squirtle
+suicune	pokeapi:suicune
+sylveon	pokeapi:sylveon
+team-aqua	text:A
+team-magma	text:M
+team-rocket	text:R
+tepig	pokeapi:tepig
+terrakion	pokeapi:terrakion
+thundurus	pokeapi:thundurus-incarnate
+togekiss	pokeapi:togekiss
+tornadus	pokeapi:tornadus-incarnate
+tyranitar	pokeapi:tyranitar
+victini	pokeapi:victini
+virizion	pokeapi:virizion
+wigglytuff	pokeapi:wigglytuff
+zoroark	pokeapi:zoroark

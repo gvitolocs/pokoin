@@ -96,10 +96,11 @@ Prices” copy stays on `<title>` / `SeoHead` only.
 
 `pokoin.com/sitemap` is the human site map: a pan/zoom graph of every page
 template, catalog hub and card desk, with the same hubs as plain links
-underneath (`market/src/pages/SiteMap.jsx`). Its data is
+underneath (`solid/src/pages/SiteMap.jsx`). Its data is
 `market/public/data/site-map.json`, built on nezopt by
-`node scripts/build-site-map.mjs`. Page links come from the SPA source
-(routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
+`node scripts/build-site-map.mjs`. Page links come from the Solid app
+(`solid/src/router.js` and the route modules it imports, `<A>` / `<AppLink>`
+`href` and `to`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
 come from a read-only SELECT against the 15T marketplace Postgres and the
 public expansion list. It is not part of the Vercel build, so rerun it and
 commit the JSON when routes or the catalog change. `?focus=set:base-set`
@@ -108,10 +109,14 @@ commit the JSON when routes or the catalog change. `?focus=set:base-set`
 Weekly refresh: `pokoin-site-map-refresh.timer` (systemd user unit on nezopt,
 Mondays 04:30 UTC) runs `scripts/refresh-site-map.sh` inside its own Paseo
 worktree (`~/.paseo/worktrees/2n15xc8c/site-map-refresh`, used by nothing
-else). It checks out `origin/main`, rebuilds the JSON, and only when the map
-changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
-leaves the file alone when only the date would change, so quiet weeks deploy
-nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.
+else). It checks out `origin/main`, rebuilds `site-map.json` and
+`site-map-images.json`, and only when either file changed commits both, pushes
+to `main`, uploads with `scripts/publish-web.sh`, smoke-checks the version
+preview (`/`, `/marketplace`, `/sitemap`, `/market/data/site-map.json`), then
+promotes that version. A failed preview check leaves the version unpromoted and
+the unit fails (OnFailure alert). The builder leaves the files alone when only
+the date would change, so quiet weeks publish nothing. Log:
+`journalctl --user -u pokoin-site-map-refresh`.
 
 Site map v2: **Market** view colours card stars by the cheapest listed PKN
 (`cheapest_homepage_cache_blueprint`, quintile ramp, snapshot date in the
@@ -141,3 +146,117 @@ Phones (≤720px): the header is one compact block (title and counts on one line
 modes full width, compare fields two per row); panels are a bottom sheet that
 peeks at 42% and expands from its grip; legend and zoom hide under the sheet. Market prices take the cheaper of the
 CardTrader cache and every active Pokoin listing, read live at build time.
+
+## Card URLs for crawlers (2026-10-15)
+
+- A card URL never serves the generic SPA shell to a search bot. API failure returns 503 + Retry-After (Google retries); an unknown id returns 404. Identical canonical-less shells were being clustered as duplicates ("Google chose different canonical") and carried no card image.
+- `/marketplace/cards/:id/:slug` (no locale) 301s every client to `/marketplace/en/cards/:id/:slug`. Other `/marketplace/cards/*` shapes still fall through to the SPA shell.
+- The crawler <img> no longer declares 630x880; CDN scans are ~500x703.
+
+## Hub URLs for crawlers (2026-10-15)
+
+- Set/era/artist/species/rarity hubs: API failure returns 503 + Retry-After + noindex (was a cached, indexable thin page). Unknown set/era/artist/species/rarity returns 404 + noindex (was 200, self-canonical soft 404).
+- Crawlers get a 301 to the canonical form: non-en species/rarity/language/guide/artist hubs go to /marketplace/en/..., and locale-prefixed sets/eras go to /marketplace/sets|eras/.... Language-less hubs 301 for every client.
+- Set, artist and species hubs publish the first card scan as og:image and JSON-LD image.
+
+## Language-less marketplace URLs (2026-10-15)
+
+Workers Static Assets served the SPA shell for `/marketplace/pokemon`, `/marketplace/rarities`, `/marketplace/languages`, `/marketplace/guides`, `/marketplace/artists`, and `/marketplace/cards/:id/:slug`, so the `_redirects` 301 never ran. Those paths are in `run_worker_first` now, and the worker 301s every client to the `/marketplace/en/...` form, keeping the query string and any game prefix. The `_redirects` rules stay.
+
+
+## Public product, alternative, and workflow pages (2026-10-17)
+
+The homepage links a public product-discovery layer alongside the catalog:
+
+- `/features`: scanner, seller inventory, collection/portfolio, Poko assistant,
+  Chrome extension, marketplace, and seller fees.
+- `/alternatives`: workflow comparisons with Collectr, Dragon Shield,
+  TCGplayer, and Cardmarket, with primary sources and review dates.
+- `/learn`: scan-to-collection/listing and stock-spreadsheet walkthroughs.
+
+These are complete static HTML pages, identical for visitors and crawlers.
+They do not depend on SPA hydration or the bot-specific catalog Workers.
+The private application URLs remain application actions, rather than the
+indexable descriptions of the features. `robots.txt` gives Googlebot,
+Bingbot, OAI-SearchBot, and other crawlers the same public/private rules.
+The existing AI-training content policy is unchanged. A successful HTTP probe
+with a crawler user-agent does not establish access from every real crawler
+IP; verify production edge logs and URL Inspection after publication.
+
+Author content in `content/product-pages.mjs`; render with
+`node scripts/build-product-pages.mjs <output-directory>`.
+`scripts/build-web.sh` invokes the renderer into `dist-web`, including
+`sitemap-product-pages.xml`. The main sitemap generator includes that child
+sitemap. Flat `.html` assets use the host's extensionless HTML handling;
+these prefixes must stay out of SPA catch-all rewrites. The legacy Vercel
+config has explicit static-page rewrites. Vite serves the same renderer for
+local review, including proper unknown-page 404s for these prefixes.
+
+Each page has its own title, description, canonical, social metadata,
+visible breadcrumbs, WebPage/CollectionPage and BreadcrumbList JSON-LD,
+visible text, related links, and ordinary HTML links to the application.
+FAQs are visible content; no special FAQ search appearance is promised.
+The WebApplication entity has no invented price, rating, or review data.
+`llms.txt` is a supplemental product directory, not a prerequisite for AI
+search discovery or a substitute for crawling and useful content.
+
+Keep comparisons specific and fair. Use current primary sources, state
+Pokoin's authorship, include material limitations, and change `reviewed`
+only after an actual editorial review. Do not create city/keyword doorway
+variants or claim recognition benchmarks without measured evidence.
+The fee page describes the 3% buyer markup and actual seller payment costs, and compares
+named published base rates, not universal lowest all-in selling cost.
+Commission caps, minima, seller programs, VAT, payment/withdrawal/conversion,
+and network costs can change an order's effective cost. The fee-copy test
+fails when the checkout or native seller-settlement rate changes, prompting
+an editorial review rather than silently relabelling stale content.
+
+Checks: `node --test scripts/product-pages.test.mjs scripts/cloudflare-web-routing.test.mjs`
+and `cd solid && npm run build`. Before release, inspect generated HTML and
+the product sitemap in the deployment artifact, check mobile tables/menu,
+and verify unknown public-page paths return 404. No push, crawl submission,
+or deployment is implied by generating the pages.
+
+After an authorised production publish, submit/check the sitemap in Search
+Console and inspect representative feature and comparison URLs. Measure
+impressions and clicks for actual task and alternative queries, and
+referrals from services such as `chatgpt.com`; use the existing analytics
+setup rather than adding an unrelated tracking script. Indexing, ranking,
+and AI recommendations depend on the search systems and are not guaranteed.
+
+### Minimal landing and offer scope (17 October 2026)
+
+The landing keeps a short hero, three task cards, two send-in offers, compact
+assistant/extension panels, and a reduced footer. Detailed articles remain on
+public URLs. Search-demand evidence, raw autocomplete responses and estimated
+keyword volumes are recorded in `docs/research/pokemon-search-2026-10-17/`.
+Volumes are country-specific Semrush estimates; suggestions have no numeric
+volume. Google Trends returned 429, so no trend claims were made.
+
+New intent pages: `/features/pokemon-card-price-checker`,
+`/features/trade-cards-for-pkn`, and `/features/managed-selling`. All are linked
+from the homepage and feature hub and included in the generated product sitemap.
+
+Keep the payout media distinct: 90% of market value (minimum 1 PKN per card)
+is immediate **PKN credit**; managed selling pays **real money after sale** at
+15.5% base commission, one percentage point below CardTrader’s published
+1-Day Ready 16.5% base rate. These send-in offers use Contact for intake; the
+CardTrader 1-DR account route is an external account viewer. The self-service
+marketplace adds a 3% buyer markup. Seller item value is not reduced by that
+markup; actual Stripe costs are allocated across seller proceeds. Contracted
+Stripe rates and external payout/conversion charges are not established by
+repository code. See the research folder’s `SELLING-OFFERS.md` audit.
+
+Market-data copy leads the comparison hub and names **CardTrader + TCGplayer**
+on the landing. Verified against `docs/POKO_MARKET.md` and
+`pokoin-rust/crates/accounts/src/handlers/poko_market.rs`: CardTrader observed
+asks/daily lowest asks; optional matched TCGplayer aggregate USD quotes in Poko
+and inventory price-check. The price-checker page explains coverage, dates,
+currencies and the distinction from inferred/completed sales. Do not describe
+Cardmarket/eBay as integrated price feeds or claim every quote is a settled sale.
+
+The authoritative economic contract is [CHECKOUT_FEES.md](CHECKOUT_FEES.md):
+3% is added to the buyer’s card subtotal; sellers bear only actual allocated
+payment costs, not a Pokoin seller commission. The single cart transaction’s
+fixed fee is shared once with exact-cent allocation. Separately billed Connect
+costs require verified reconciliation rather than guessed per-order deductions.

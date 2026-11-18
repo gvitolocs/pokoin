@@ -21,20 +21,25 @@ V() { env -u VERCEL_TOKEN vercel "$@"; }
 
 REPO="$(git rev-parse --show-toplevel)"
 COMMIT="$(git -C "$REPO" rev-parse "${1:-HEAD}^{commit}")"
-CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/pokoin-web}"
+CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/Startup/Pokoin/pokoin-web}"
 # Gitignored files scripts/build-web.sh needs. Nothing else from any working tree is used.
 UNTRACKED_INPUTS=(download/extension.zip)
 
 command -v vercel >/dev/null \
   || die "vercel CLI not on PATH. Non-interactive shells miss ~/.local/bin: run this through a login shell (bash -lc)."
 
-exec 9>/tmp/pokoin-web-deploy.lock
+exec 9>"${POKOIN_WEB_DEPLOY_LOCK:-/tmp/pokoin-web-deploy.lock}"
 flock -n 9 || die "another pokoin-web production deploy is running"
 
 say "commit $COMMIT — $(git -C "$REPO" log -1 --format=%s "$COMMIT" | cut -c1-80)"
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
 git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
   || die "commit is not on origin/main. Merge it into main and push first."
+# Ships only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate"), and only from a checkout
+# whose own scripts are origin/main's.
+POKOIN_CI_CALLER=deploy-web bash "$REPO/scripts/require-ci-green.sh" --repo-dir "$REPO" \
+  --caller-script "$REPO/scripts/deploy-web.sh" "$COMMIT" \
+  || die "the required CI checks are not green for this commit"
 
 # `vercel inspect --format=json` omits meta; the REST API has it.
 prod_state() {
@@ -64,7 +69,7 @@ else
 fi
 
 # Canonical-checkout preflight (2026-09-19, Paseo isolation):
-# /home/nez/Projects/pokoin-web is the integration/deployment tree, not a dev
+# /home/nez/Projects/Startup/Pokoin/pokoin-web is the integration/deployment tree, not a dev
 # workspace. Staging below is `git archive` of $COMMIT plus the explicit
 # UNTRACKED_INPUTS allowlist, so a dirty tree can never change deployed
 # source — but dirt here means un-integrated agent work exists and the
@@ -100,6 +105,10 @@ say "unit tests"
   node --test --test-force-exit $(ls market/src/*.test.js | grep -v 'search-token-triples\.test\.js$') >"$stage/tests.log" 2>&1) \
   || { tail -30 "$stage/tests.log" >&2; die "tests failed"; }
 grep -E "^# (tests|pass|fail)" "$stage/tests.log"
+# The UI guards live with the Solid app.
+(cd "$stage/solid" && npm ci --no-audit --no-fund >/dev/null && npm test >"$stage/solid-tests.log" 2>&1) \
+  || { tail -30 "$stage/solid-tests.log" >&2; die "solid tests failed"; }
+grep -E "^# (tests|pass|fail)" "$stage/solid-tests.log"
 
 say "vercel build + deploy"
 (cd "$stage" && V build --prod --yes >"$stage/build.log" 2>&1) || { tail -30 "$stage/build.log" >&2; die "build failed"; }

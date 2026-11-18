@@ -15,12 +15,12 @@ import {
   lastOccupiedIndex,
   listingSlotEnd,
   maxOccupiedStack,
-  continueBoxCursor,
-  nextFreeSlot,
   nextPositionInStack,
+  occupancyForScanBoxes,
   recentBoxes,
   occupiedAbsForScanBoxes,
   parseListingLocation,
+  stackOccupancy,
   liveInventoryListings,
   sameListingBox,
   sortInventoryRows,
@@ -50,6 +50,31 @@ test('inventory links prefer canonical desk paths', () => {
   );
   assert.equal(inventoryListingHref({ cardId: '244538' }), '/marketplace/en/cards/244538');
   assert.equal(inventoryListingHref({}), '/marketplace');
+});
+
+test('inventory links open each game on its own desk', () => {
+  // MyPokoin on Battle Spirits Saga linked /marketplace/en/cards/200000874,
+  // which opened the Pokémon catalog: "Card market not found."
+  const bss = { cardId: '200000874', marketplaceGame: 'battle_spirits_saga' };
+  assert.equal(inventoryListingHref(bss), '/battle-spirits-saga/marketplace/en/cards/200000874');
+  assert.equal(
+    inventoryListingHref({ ...bss, canonicalPath: '/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods' }),
+    '/battle-spirits-saga/marketplace/en/cards/200000874/uc-arcana-joker-bss02-065-false-gods',
+  );
+  assert.equal(inventoryListingHref({ card_id: '822658', marketplace_game: 'magic' }), '/magic/marketplace/en/cards/822658');
+  // A row without its game takes the stock desk's selected game; its own game wins.
+  assert.equal(inventoryListingHref({ cardId: '834950' }, 'one_piece'), '/one-piece/marketplace/en/cards/834950');
+  assert.equal(inventoryListingHref(bss, 'one_piece'), '/battle-spirits-saga/marketplace/en/cards/200000874');
+  assert.equal(inventoryListingHref({}, 'one_piece'), '/one-piece/marketplace');
+  // Already-prefixed paths and Pokémon rows stay as they are.
+  assert.equal(
+    inventoryListingHref({ canonicalPath: '/lorcana/marketplace/en/cards/708344/rare-megara', marketplaceGame: 'lorcana' }, 'one_piece'),
+    '/lorcana/marketplace/en/cards/708344/rare-megara',
+  );
+  assert.equal(inventoryListingHref({ cardId: '244538', marketplaceGame: 'pokemon' }, 'magic'), '/marketplace/en/cards/244538');
+  // Stacks view links through the stack, which keeps the rows' game.
+  const [stack] = groupInventoryStacks([{ ...bss, cardName: 'Arcana Joker', quantityAvailable: 1 }]);
+  assert.equal(inventoryListingHref(stack), '/battle-spirits-saga/marketplace/en/cards/200000874');
 });
 
 test('inventory meta marks paused and non-EN language', () => {
@@ -249,6 +274,20 @@ test('box stacks order by stack number then position, unnumbered last', () => {
   assert.equal(maxOccupiedStack(rows, 'other'), 9);
 });
 
+test('flat box positions are one box list; divider positions are stacks (LocationBoard)', () => {
+  const flat = Array.from({ length: 8 }, (_, n) => ({
+    id: String(n + 1),
+    cardId: '633460',
+    location: `box·${n === 7 ? '8-9' : n + 1}`,
+    quantityAvailable: n === 7 ? 2 : 1,
+  }));
+  const one = groupBoxStacks(flat, 'box');
+  assert.deepEqual(one.map((s) => [s.stack, s.postingCount, s.copies]), [[0, 8, 9]]);
+  assert.equal(one[0].postings.at(-1).slotPositionText, '8-9');
+  const dividers = groupBoxStacks(flat.map((row, n) => ({ ...row, location: `box·1·${n + 1}` })), 'box');
+  assert.deepEqual(dividers.map((s) => [s.stack, s.postingCount]), [[1, 8]]);
+});
+
 test('listingSlotEnd reads where a slot string ends', () => {
   assert.deepEqual(listingSlotEnd('box·7'), { box: 'box', stack: 7, position: null });
   assert.deepEqual(listingSlotEnd('box·7-9'), { box: 'box', stack: 9, position: null });
@@ -258,7 +297,7 @@ test('listingSlotEnd reads where a slot string ends', () => {
   assert.deepEqual(listingSlotEnd('box'), { box: 'box', stack: null, position: null });
 });
 
-test('a box continues after its stock: position inside a half-full stack, not stack + 1', () => {
+test('a box continues after its stock: last occupied index', () => {
   const rows = [
     { location: 'megaevoluzionietb·1·1-20' },
     { location: 'megaevoluzionietb·2·1-7' },
@@ -266,12 +305,7 @@ test('a box continues after its stock: position inside a half-full stack, not st
     { location: 'megaevoluzionietb' },
   ];
   assert.equal(lastOccupiedIndex(rows, 'megaevoluzionietb', 20), 27);
-  assert.deepEqual(nextFreeSlot(rows, 'megaevoluzionietb', 20), { stack: 2, startPosition: 8, abs: 28 });
-  // A full stack rolls over to the next divider.
-  assert.deepEqual(nextFreeSlot([{ location: 'b·2·1-20' }], 'b', 20), { stack: 3, startPosition: 1, abs: 41 });
-  // One card per stack: the stack number is the running slot.
-  assert.deepEqual(nextFreeSlot([{ location: 'b·1-41' }, { location: 'b·7' }], 'b', 1), { stack: 42, startPosition: 1, abs: 42 });
-  assert.equal(nextFreeSlot(rows, 'empty-box', 20), null);
+  // The next free slot itself is the server's (pokoin-rust domain/box_slots.rs).
 });
 
 test('typing a stack continues after the cards already in it', () => {
@@ -282,6 +316,46 @@ test('typing a stack continues after the cards already in it', () => {
   assert.equal(nextPositionInStack(rows, 'b', 6, 20), 21); // whole-stack location
   assert.equal(nextPositionInStack(rows, 'b', 7, 20), null);
   assert.equal(nextPositionInStack(rows, 'b', 3, 1), null);
+});
+
+test('stackOccupancy reads what a box holds stack by stack', () => {
+  const rows = [
+    { location: 'box·41·39' },
+    { location: 'box·41·40' },
+    { location: 'box·7-9' },
+    { location: 'box·12' },
+    { location: 'box·4·1–5·2' },
+    { location: 'other·3·50' },
+  ];
+  const tops = stackOccupancy(rows, 'box', 80);
+  assert.equal(tops.get(41), 40, 'the highest card in the stack, not the first gap');
+  assert.equal(tops.get(7), 80); // a stack range fills every stack it names
+  assert.equal(tops.get(9), 80);
+  assert.equal(tops.get(12), 80); // `box·12` names the whole stack
+  assert.equal(tops.get(4), 80); // spilled over: 4 is full
+  assert.equal(tops.get(5), 2);
+  assert.equal(tops.has(3), false, 'another box does not count');
+  // A hand-typed box matches the stored casing, like the server's box match.
+  assert.equal(stackOccupancy([{ location: 'Box·41·7' }], 'box', 80).get(41), 7);
+  assert.equal(stackOccupancy(rows, '', 80).size, 0);
+  assert.equal(stackOccupancy(rows, 'other', 1).get(3), 1);
+});
+
+test('occupancyForScanBoxes seeds the desk cursor box by box', () => {
+  const stock = [
+    { location: 'megaevoluzionietb·40·80' },
+    { location: 'megaevoluzionietb·41·39' },
+    { location: 'megaevoluzionietb·41·40' },
+    { location: 'other·9' },
+  ];
+  const scan = [
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 80 } },
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 80 } },
+  ];
+  const map = occupancyForScanBoxes(scan, stock);
+  assert.equal(map.size, 1, 'one entry per box the batch names');
+  assert.deepEqual([...map.get('megaevoluzionietb')], [[40, 80], [41, 40]]);
+  assert.equal(map.has('other'), false);
 });
 
 test('occupiedAbsForScanBoxes seeds the scan desk from live inventory', () => {
@@ -346,50 +420,4 @@ test('recent boxes follow listing order and keep the newest casing', () => {
     { location: 'MegaEvoluzioniETB·1·1' },
   ]), ['megaevoluzionietb', 'OtherBox']);
   assert.deepEqual(recentBoxes(null), []);
-});
-
-test('the next slot follows the last card added and keeps the divider size', () => {
-  const rows = [
-    { location: 'megaevoluzionietb·1·80', createdAt: '2026-10-05T10:00:00Z' },
-    { location: 'megaevoluzionietb·2·80', createdAt: '2026-10-05T11:00:00Z' },
-    { location: 'megaevoluzionietb·3·30', createdAt: '2026-10-05T12:00:00Z' },
-    { location: 'megaevoluzionietb·8' },
-    { location: 'other·2·9' },
-  ];
-  // A fresh batch is size 1. Adopt the earlier full stack (80) so position
-  // 31 stays on stack 3 instead of counting as a full 31-card stack.
-  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 1), {
-    stack: 3, startPosition: 31, stackSize: 80,
-  });
-  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 80), {
-    stack: 3, startPosition: 31, stackSize: 80,
-  });
-  // Same insert: the higher position is the last slot.
-  assert.deepEqual(continueBoxCursor([
-    { location: 'box·2·80', createdAt: '2026-10-05T11:00:00Z' },
-    { location: 'box·3·30', createdAt: '2026-10-05T12:00:00Z', id: 'a' },
-    { location: 'box·3·38', createdAt: '2026-10-05T12:00:00Z', id: 'b' },
-  ], 'box', 80), {
-    stack: 3, startPosition: 39, stackSize: 80,
-  });
-  // A position past the divider opens the next stack. It does not grow the size.
-  assert.deepEqual(continueBoxCursor([
-    { location: 'megaevoluzionietb·1·79' },
-    { location: 'megaevoluzionietb·2·88' },
-  ], 'megaevoluzionietb', 80), {
-    stack: 3, startPosition: 1, stackSize: 80,
-  });
-  // A half-full stack still continues inside it.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·2·40' }], 'box', 80), {
-    stack: 2, startPosition: 41, stackSize: 80,
-  });
-  // An exactly full stack opens the next divider.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·2·80' }], 'box', 80), {
-    stack: 3, startPosition: 1, stackSize: 80,
-  });
-  // Flat locations keep the size-1 walk and skip a deleted hole via the max.
-  assert.deepEqual(continueBoxCursor([{ location: 'box·7' }, { location: 'box·9' }], 'box', 1), {
-    stack: 10, startPosition: 1, stackSize: 1,
-  });
-  assert.equal(continueBoxCursor([], 'box', 1), null);
 });

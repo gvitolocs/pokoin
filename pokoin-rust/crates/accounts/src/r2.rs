@@ -75,6 +75,52 @@ fn host_of(endpoint: &str) -> String {
         .to_string()
 }
 
+/// AWS Signature V4 `Authorization` value for one request. `headers` holds
+/// every signed header (lowercase names; sorted here). R2 signs with region
+/// `auto`; there is never a query string.
+#[allow(clippy::too_many_arguments)]
+fn sigv4_authorization(
+    access_key_id: &str,
+    secret_access_key: &str,
+    region: &str,
+    method: &str,
+    canonical_uri: &str,
+    headers: &mut [(&str, String)],
+    payload_hash: &str,
+    amz_date: &str,
+) -> String {
+    headers.sort_by(|a, b| a.0.cmp(b.0));
+    let canonical_headers: String = headers
+        .iter()
+        .map(|(name, value)| format!("{name}:{value}\n"))
+        .collect();
+    let signed_headers = headers
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(";");
+    let canonical_request = format!(
+        "{method}\n{canonical_uri}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+    );
+    let date_stamp = &amz_date[..8];
+    let scope = format!("{date_stamp}/{region}/s3/aws4_request");
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+        hex_sha256(canonical_request.as_bytes())
+    );
+    let k_date = hmac(
+        format!("AWS4{secret_access_key}").as_bytes(),
+        date_stamp.as_bytes(),
+    );
+    let k_region = hmac(&k_date, region.as_bytes());
+    let k_service = hmac(&k_region, b"s3");
+    let k_signing = hmac(&k_service, b"aws4_request");
+    let signature = hex::encode(hmac(&k_signing, string_to_sign.as_bytes()));
+    format!(
+        "AWS4-HMAC-SHA256 Credential={access_key_id}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
+    )
+}
+
 impl R2MediaStore {
     pub fn new(
         endpoint: impl Into<String>,
@@ -162,7 +208,6 @@ impl R2MediaStore {
 
         let now = chrono::Utc::now();
         let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-        let date_stamp = now.format("%Y%m%d").to_string();
         let payload_hash = hex_sha256(&body);
 
         // Every header we send (except Authorization and Host, which are handled
@@ -176,37 +221,15 @@ impl R2MediaStore {
         if let Some(cache_control) = cache_control {
             to_sign.push(("cache-control", cache_control.to_string()));
         }
-        to_sign.sort_by(|a, b| a.0.cmp(b.0));
-        let canonical_headers: String = to_sign
-            .iter()
-            .map(|(name, value)| format!("{name}:{value}\n"))
-            .collect();
-        let signed_headers = to_sign
-            .iter()
-            .map(|(name, _)| *name)
-            .collect::<Vec<_>>()
-            .join(";");
-        let canonical_request =
-            format!("PUT\n{canonical_uri}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
-
-        let scope = format!("{date_stamp}/auto/s3/aws4_request");
-        let string_to_sign = format!(
-            "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
-            hex_sha256(canonical_request.as_bytes())
-        );
-
-        let k_date = hmac(
-            format!("AWS4{}", self.inner.secret_access_key).as_bytes(),
-            date_stamp.as_bytes(),
-        );
-        let k_region = hmac(&k_date, b"auto");
-        let k_service = hmac(&k_region, b"s3");
-        let k_signing = hmac(&k_service, b"aws4_request");
-        let signature = hex::encode(hmac(&k_signing, string_to_sign.as_bytes()));
-
-        let authorization = format!(
-            "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
-            self.inner.access_key_id
+        let authorization = sigv4_authorization(
+            &self.inner.access_key_id,
+            &self.inner.secret_access_key,
+            "auto",
+            "PUT",
+            &canonical_uri,
+            &mut to_sign,
+            &payload_hash,
+            &amz_date,
         );
 
         let mut request = HttpRequest::new("PUT", url)
@@ -231,6 +254,52 @@ impl R2MediaStore {
             )));
         }
         Ok(self.public_url_for(key))
+    }
+
+    /// Signed `GET` of one object; `Ok(None)` when it does not exist. Photos
+    /// are at most 4 MB: the read gets 8 s instead of the shared 4 s default,
+    /// and no retries (a failed read only means no photo search).
+    pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let host = host_of(&self.inner.endpoint);
+        let canonical_uri = format!("/{}/{}", self.inner.bucket, encode_key(key));
+        let url = format!("{}{}", self.inner.endpoint, canonical_uri);
+        let amz_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+        let payload_hash = hex_sha256(b"");
+        let mut to_sign: Vec<(&str, String)> = vec![
+            ("host", host.clone()),
+            ("x-amz-content-sha256", payload_hash.clone()),
+            ("x-amz-date", amz_date.clone()),
+        ];
+        let authorization = sigv4_authorization(
+            &self.inner.access_key_id,
+            &self.inner.secret_access_key,
+            "auto",
+            "GET",
+            &canonical_uri,
+            &mut to_sign,
+            &payload_hash,
+            &amz_date,
+        );
+        let request = HttpRequest::new("GET", url)
+            .timeout(std::time::Duration::from_secs(8))
+            .header("Host", host)
+            .header("x-amz-content-sha256", payload_hash)
+            .header("x-amz-date", amz_date)
+            .header("Authorization", authorization);
+        let response = send_with_retry(&self.inner.transport, request, RetryPolicy::none())
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        if response.status == 404 {
+            return Ok(None);
+        }
+        if !response.is_success() {
+            let detail: String = response.text().chars().take(300).collect();
+            return Err(ApiError::internal(format!(
+                "R2 read failed {}: {detail}",
+                response.status
+            )));
+        }
+        Ok(Some(response.body))
     }
 }
 
@@ -337,5 +406,96 @@ mod tests {
             store.public_url_for("forum-media/u/1.webp"),
             "https://cdn.pokoin.com/forum-media/u/1.webp"
         );
+    }
+
+    #[test]
+    fn sigv4_matches_the_aws_s3_get_object_example() {
+        // AWS docs, Signature V4 for S3, "Example: GET Object".
+        let empty = hex_sha256(b"");
+        let mut headers = vec![
+            ("host", "examplebucket.s3.amazonaws.com".to_string()),
+            ("range", "bytes=0-9".to_string()),
+            ("x-amz-content-sha256", empty.clone()),
+            ("x-amz-date", "20130524T000000Z".to_string()),
+        ];
+        let authorization = sigv4_authorization(
+            "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "us-east-1",
+            "GET",
+            "/test.txt",
+            &mut headers,
+            &empty,
+            "20130524T000000Z",
+        );
+        assert_eq!(
+            authorization,
+            "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
+        );
+    }
+
+    struct CannedTransport {
+        status: u16,
+        body: Vec<u8>,
+        seen: std::sync::Mutex<Vec<HttpRequest>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::http::HttpTransport for CannedTransport {
+        async fn execute(
+            &self,
+            request: HttpRequest,
+        ) -> std::result::Result<crate::http::HttpResponse, crate::http::TransportError> {
+            self.seen.lock().unwrap().push(request);
+            Ok(crate::http::HttpResponse::new(self.status, self.body.clone()))
+        }
+    }
+
+    fn photo_store(status: u16, body: &[u8]) -> (Arc<CannedTransport>, R2MediaStore) {
+        let canned = Arc::new(CannedTransport {
+            status,
+            body: body.to_vec(),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let shared: SharedTransport = canned.clone();
+        let store = R2MediaStore::new(
+            "https://acct.r2.cloudflarestorage.com",
+            "pokoin-user-photos",
+            "key",
+            "secret",
+            "https://api.pokoin.com",
+            shared,
+        );
+        (canned, store)
+    }
+
+    #[tokio::test]
+    async fn get_object_signs_a_get_and_returns_the_bytes() {
+        let (canned, store) = photo_store(200, b"\xff\xd8jpeg");
+        let bytes = store
+            .get_object("user-photos/chat/uid12345/abcdefabcdef.jpg")
+            .await
+            .unwrap();
+        assert_eq!(bytes.as_deref(), Some(&b"\xff\xd8jpeg"[..]));
+        let seen = canned.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].method, "GET");
+        assert_eq!(
+            seen[0].url,
+            "https://acct.r2.cloudflarestorage.com/pokoin-user-photos/user-photos/chat/uid12345/abcdefabcdef.jpg"
+        );
+        assert_eq!(seen[0].timeout, Some(std::time::Duration::from_secs(8)));
+        let authorization = seen[0].header_value("Authorization").unwrap();
+        assert!(authorization.starts_with("AWS4-HMAC-SHA256 Credential=key/"));
+        assert!(authorization
+            .contains("/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature="));
+    }
+
+    #[tokio::test]
+    async fn get_object_is_none_for_a_missing_photo_and_errs_otherwise() {
+        let (_, missing) = photo_store(404, b"");
+        assert!(missing.get_object("user-photos/chat/u/1.jpg").await.unwrap().is_none());
+        let (_, broken) = photo_store(500, b"boom");
+        assert!(broken.get_object("user-photos/chat/u/1.jpg").await.is_err());
     }
 }

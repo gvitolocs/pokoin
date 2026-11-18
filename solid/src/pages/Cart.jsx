@@ -95,7 +95,7 @@ function RemovedNote(props) {
 }
 
 /**
- * /cart (market/src/pages/Cart.jsx) in Amazon's basket layout: ticked rows
+ * /cart in Amazon's basket layout: ticked rows
  * check out, unticked rows stay; every row is re-checked against its live
  * listing; one parcel per seller. Signed in, the cart is the account's, and
  * the carousels come from GET /api/marketplace-recommendations — the
@@ -121,6 +121,7 @@ export default function Cart() {
     groups,
     to: country,
     service,
+    parcelPicks: () => cartShippingChoice().parcels || {},
     subtotalPkn: () => totals().selectedSubtotalPkn,
   });
   const nudge = createMemo(() => nudgeFromParcels(groups(), liveShip.shipping().parcels));
@@ -320,6 +321,7 @@ export default function Cart() {
               service={service()}
               onCountry={(code) => setCartShippingChoice({ country: code })}
               onService={(id) => setCartShippingChoice({ service: id })}
+              onParcelService={(key, id) => setCartShippingChoice({ parcel: { key, service: id } })}
               currency={buyerCurrency()}
               signedIn={signedIn()}
               availablePkn={availablePkn()}

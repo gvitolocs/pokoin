@@ -126,6 +126,17 @@ impl Claims {
                 .unwrap_or(false)
     }
 
+    /// The lowercased email only when the token proves ownership
+    /// (`email_verified` or the `pok_email_verified` custom claim); empty
+    /// otherwise. Every lookup that grants access by email must use this.
+    pub fn verified_email(&self) -> String {
+        if self.email_verified || self.pok_email_verified {
+            self.email.trim().to_ascii_lowercase()
+        } else {
+            String::new()
+        }
+    }
+
     /// Exactly the Node `passwordAccountRequiresVerification` predicate.
     pub fn password_account_requires_verification(&self) -> bool {
         if self.firebase.sign_in_provider != "password" {
@@ -217,6 +228,25 @@ pub struct FirebaseVerifier {
     ttl: Duration,
     leeway_secs: u64,
     retry: RetryPolicy,
+    /// Last refetch an unknown `kid` forced; at most one per
+    /// [`UNKNOWN_KID_REFETCH_INTERVAL`].
+    last_forced: std::sync::Mutex<Option<Instant>>,
+}
+
+/// Random `kid`s must not turn every request into a Google JWKS round trip.
+pub const UNKNOWN_KID_REFETCH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// True (and the stamp moved to now) when a forced refetch may run.
+fn take_refetch_slot(last: &std::sync::Mutex<Option<Instant>>) -> bool {
+    let mut last = last.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    match *last {
+        Some(at) if now.duration_since(at) < UNKNOWN_KID_REFETCH_INTERVAL => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
+    }
 }
 
 impl FirebaseVerifier {
@@ -229,6 +259,7 @@ impl FirebaseVerifier {
             ttl: Duration::from_secs(6 * 60 * 60),
             leeway_secs: 60,
             retry: RetryPolicy::default(),
+            last_forced: std::sync::Mutex::new(None),
         }
     }
 
@@ -353,12 +384,13 @@ impl TokenVerifier for FirebaseVerifier {
         let keys = self.keys(false).await?;
         let (n, e) = match keys.get(&kid) {
             Some(pair) => pair.clone(),
-            None => self
+            None if take_refetch_slot(&self.last_forced) => self
                 .keys(true)
                 .await?
                 .get(&kid)
                 .cloned()
                 .ok_or_else(|| AuthError::Invalid("unknown signing key".into()))?,
+            None => return Err(AuthError::Invalid("unknown signing key".into())),
         };
         self.decode_with(token, &n, &e)
     }
@@ -639,6 +671,29 @@ mod tests {
         let mut claims = Claims::default();
         claims.extra.insert("admin".into(), serde_json::json!("yes"));
         assert!(!claims.admin_claim());
+    }
+
+    #[test]
+    fn verified_email_needs_a_verified_claim() {
+        let mut claims = Claims {
+            email: " Ash@Pokoin.com ".into(),
+            ..Default::default()
+        };
+        assert_eq!(claims.verified_email(), "");
+        claims.pok_email_verified = true;
+        assert_eq!(claims.verified_email(), "ash@pokoin.com");
+        claims.pok_email_verified = false;
+        claims.email_verified = true;
+        assert_eq!(claims.verified_email(), "ash@pokoin.com");
+    }
+
+    #[test]
+    fn unknown_kid_refetch_is_throttled() {
+        let last = std::sync::Mutex::new(None);
+        assert!(take_refetch_slot(&last));
+        assert!(!take_refetch_slot(&last));
+        *last.lock().unwrap() = Some(Instant::now() - UNKNOWN_KID_REFETCH_INTERVAL);
+        assert!(take_refetch_slot(&last));
     }
 
     #[test]

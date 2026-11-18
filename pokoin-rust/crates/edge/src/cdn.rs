@@ -3,7 +3,9 @@
 //! Same path/remap contract as the `pokoin-cdn-card-images` Worker: a requested
 //! key is served from `root`, else through the leftover alias index (public id
 //! `ct_id * 2` -> leftover `ct_id`, slug-checked), else through the jpeg/homepage
-//! candidate ladder, else (game prefixes only) from the fallback origin.
+//! candidate ladder, else (game prefixes, plus `POKOIN_CDN_FALLBACK_EXTRA_PREFIXES`) from
+//! the fallback origin. A request that is itself a fallback fetch is never forwarded again,
+//! so two CDNs that fall back to each other cannot loop.
 
 use std::{
     cmp::Ordering,
@@ -32,10 +34,14 @@ pub struct CdnConfig {
     pub index_ms: u64,
     /// `POKOIN_CDN_FALLBACK_ORIGIN` without the trailing slash; empty = off.
     pub fallback_origin: String,
+    /// `POKOIN_CDN_FALLBACK_EXTRA_PREFIXES`, comma-separated key prefixes that also fall back
+    /// (e.g. `poko-video/` on the nezopt mirror, which copies it from the Pi).
+    pub fallback_extra_prefixes: Vec<String>,
 }
 
 impl CdnConfig {
-    /// `POKOIN_CDN_ROOT`, `POKOIN_CDN_NAME`, `POKOIN_CDN_INDEX_MS`, `POKOIN_CDN_FALLBACK_ORIGIN`.
+    /// `POKOIN_CDN_ROOT`, `POKOIN_CDN_NAME`, `POKOIN_CDN_INDEX_MS`, `POKOIN_CDN_FALLBACK_ORIGIN`,
+    /// `POKOIN_CDN_FALLBACK_EXTRA_PREFIXES`.
     pub fn from_env() -> Self {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let root = env("POKOIN_CDN_ROOT").unwrap_or_else(|| "/srv/pokoin/card-images/objects".into());
@@ -46,6 +52,9 @@ impl CdnConfig {
             index_ms: env("POKOIN_CDN_INDEX_MS").and_then(|v| v.parse().ok()).unwrap_or(120_000),
             fallback_origin: env("POKOIN_CDN_FALLBACK_ORIGIN")
                 .map(|v| v.trim_end_matches('/').to_owned())
+                .unwrap_or_default(),
+            fallback_extra_prefixes: env("POKOIN_CDN_FALLBACK_EXTRA_PREFIXES")
+                .map(|v| v.split(',').map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned).collect())
                 .unwrap_or_default(),
         }
     }
@@ -522,16 +531,24 @@ const URI_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-').remove(b'_').remove(b'.').remove(b'!').remove(b'~')
     .remove(b'*').remove(b'\'').remove(b'(').remove(b')');
 
-/// `proxyGamePrefix(req, res, key)`; `None` when the fallback does not apply.
-async fn proxy_game_prefix(inner: &Inner, head: bool, key: &str) -> Option<Response> {
-    if inner.cfg.fallback_origin.is_empty() || !game_prefix_re().is_match(key) {
+const FALLBACK_AGENT: &str = "pokoin-cdn-fallback";
+
+fn falls_back(cfg: &CdnConfig, key: &str) -> bool {
+    !cfg.fallback_origin.is_empty()
+        && (game_prefix_re().is_match(key) || cfg.fallback_extra_prefixes.iter().any(|p| key.starts_with(p.as_str())))
+}
+
+/// `proxyGamePrefix(req, res, key)`; `None` when the fallback does not apply. `nested`: the
+/// request came from another CDN's fallback, which must not be forwarded a second time.
+async fn proxy_game_prefix(inner: &Inner, head: bool, key: &str, nested: bool) -> Option<Response> {
+    if nested || !falls_back(&inner.cfg, key) {
         return None;
     }
     let name = &inner.cfg.name;
     let encoded: Vec<String> = key.split('/').map(|p| utf8_percent_encode(p, URI_COMPONENT).to_string()).collect();
     let target = format!("{}/{}", inner.cfg.fallback_origin, encoded.join("/"));
     let method = if head { reqwest::Method::HEAD } else { reqwest::Method::GET };
-    let upstream = inner.http.request(method, &target).header("user-agent", "pokoin-cdn-fallback").send().await;
+    let upstream = inner.http.request(method, &target).header("user-agent", FALLBACK_AGENT).send().await;
     let no_store = ("cache-control", "private, no-store".to_owned());
     let Ok(up) = upstream else {
         return Some(not_found(name, &[no_store]));
@@ -568,6 +585,7 @@ async fn serve(State(cdn): State<Cdn>, req: Request) -> Response {
         return reply(StatusCode::METHOD_NOT_ALLOWED, name, &[], Body::from("Method Not Allowed"));
     }
     let head = method == Method::HEAD;
+    let nested = req.headers().get("user-agent").is_some_and(|ua| ua.as_bytes() == FALLBACK_AGENT.as_bytes());
     let path = req.uri().path();
     if path == "/health" || path == "/api/health" {
         let index = inner.index.read().await.len();
@@ -594,7 +612,7 @@ async fn serve(State(cdn): State<Cdn>, req: Request) -> Response {
     let lookup_key = key.clone();
     let hit = tokio::task::spawn_blocking(move || resolve_file(&lookup_key, &root, &index)).await.ok().flatten();
     let Some(hit) = hit else {
-        if let Some(response) = proxy_game_prefix(inner, head, &key).await {
+        if let Some(response) = proxy_game_prefix(inner, head, &key, nested).await {
             return response;
         }
         return not_found(name, &[("cache-control", "private, no-store".to_owned())]);
@@ -731,7 +749,7 @@ mod tests {
     async fn serves_files_health_and_errors() {
         use tower::ServiceExt;
         let dir = root_with(&["4_card.jpg"]);
-        let cfg = CdnConfig { root: dir.path().to_path_buf(), name: "test".into(), index_ms: 60_000, fallback_origin: String::new() };
+        let cfg = CdnConfig { root: dir.path().to_path_buf(), name: "test".into(), index_ms: 60_000, fallback_origin: String::new(), fallback_extra_prefixes: vec![] };
         let app = cdn_router(cfg).await;
         let get = |p: &str, m: &str| Request::builder().method(m).uri(p).body(Body::empty()).unwrap();
         let res = app.clone().oneshot(get("/card-images/4_card.png", "GET")).await.unwrap();
@@ -751,5 +769,42 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let res = app.oneshot(get("/4_card.jpg", "HEAD")).await.unwrap();
         assert_eq!(res.headers()["content-length"], "10");
+    }
+
+    #[test]
+    fn fallback_prefixes() {
+        let mut cfg = CdnConfig { root: "/x".into(), name: "t".into(), index_ms: 1_000, fallback_origin: String::new(), fallback_extra_prefixes: vec!["poko-video/".into()] };
+        assert!(!falls_back(&cfg, "magic/a.jpg"), "off without an origin");
+        cfg.fallback_origin = "http://pi:18081".into();
+        assert!(falls_back(&cfg, "magic/a.jpg"));
+        assert!(falls_back(&cfg, "poko-video/ep5/a.mp4"));
+        assert!(!falls_back(&cfg, "poko-videos/a.mp4"));
+        assert!(!falls_back(&cfg, "12_pikachu.jpg"), "Pokemon images stay local");
+    }
+
+    #[tokio::test]
+    async fn a_fallback_fetch_is_not_forwarded_again() {
+        use tower::ServiceExt;
+        // The origin (the Pi CDN) has the file.
+        let origin = Router::new().fallback(|| async { "video" });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, origin).await.unwrap() });
+        let dir = root_with(&["4_card.jpg"]);
+        let cfg = CdnConfig {
+            root: dir.path().to_path_buf(),
+            name: "test".into(),
+            index_ms: 60_000,
+            fallback_origin: format!("http://{addr}"),
+            fallback_extra_prefixes: vec!["poko-video/".into()],
+        };
+        let app = cdn_router(cfg).await;
+        let req = |ua: &str| Request::builder().uri("/poko-video/new.mp4").header("user-agent", ua).body(Body::empty()).unwrap();
+        let direct = app.clone().oneshot(req("Mozilla/5.0")).await.unwrap();
+        assert_eq!(direct.status(), StatusCode::OK);
+        assert_eq!(direct.headers()["x-pokoin-cdn-fallback"], "nezopt");
+        let nested = app.oneshot(req(FALLBACK_AGENT)).await.unwrap();
+        assert_eq!(nested.status(), StatusCode::NOT_FOUND, "another CDN's fallback fetch stops here");
+        assert!(nested.headers().get("x-pokoin-cdn-fallback").is_none());
     }
 }

@@ -23,9 +23,20 @@ import {
 } from '@market/cart-rails-core.js';
 import { syncRemoteRecentCardIds } from '@market/recents.js';
 import { getBearer, signedIn } from '../stores/auth.js';
+import { authSession } from '../stores/session.js';
+
+// Live entries outlive a remount: reopening /cart within RECHECK_AFTER_MS
+// reuses them instead of re-reading every card's listings (checkout
+// re-verifies every price anyway).
+const liveMemo = new Map();
+
+function rememberedLive(id) {
+  const entry = liveMemo.get(id);
+  return entry && Date.now() - entry.at < RECHECK_AFTER_MS ? entry : null;
+}
 
 /**
- * Solid versions of the /cart data hooks in market/src/cart-rails.js. Inputs
+ * The /cart data rails. Inputs
  * are accessors, outputs are accessors; the rules are cart-rails-core.js.
  */
 
@@ -65,13 +76,26 @@ export function createCartLive({ items, saved, applyLive, excludeSellerUid }) {
   createEffect(
     () => [ids(), round(), excludeSellerUid()],
     ([list, , exclude]) => {
-      const todo = list.filter((id) => !asked.has(id));
+      const pending = list.filter((id) => !asked.has(id));
+      if (!pending.length) return;
+      for (const id of pending) asked.add(id);
+      const todo = [];
+      for (const id of pending) {
+        const entry = rememberedLive(id);
+        if (!entry) {
+          todo.push(id);
+          continue;
+        }
+        // Already announced when it was read: patch quietly, no new notes.
+        setLive((current) => ({ ...current, [id]: entry }));
+        applyLive(id, entry, { excludeSellerUid: exclude });
+      }
       if (!todo.length) return;
-      for (const id of todo) asked.add(id);
       lastCheck = Date.now();
       setChecking((n) => n + todo.length);
       void runPool(todo, LIVE_WIDTH, async (id) => {
         const entry = await fetchLiveEntry(id);
+        if (entry) liveMemo.set(id, entry);
         if (!mounted) return;
         setChecking((n) => Math.max(0, n - 1));
         if (!entry) {
@@ -227,6 +251,34 @@ export function createInspired(cards, exclude, { perName = 12 } = {}) {
   };
 }
 
+// The last recommendations answer on this browser, per account and inputs:
+// a reload paints those rails at once instead of the empty layout, and an
+// identical answer then changes nothing.
+const RECS_KEY = 'pokoin.cartRecs.v1';
+const RECS_KEEP_MS = 30 * 60_000;
+
+function recsKey(key) {
+  return `${String(authSession()?.uid || '')}|${key}`;
+}
+
+function readStoredRecs(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RECS_KEY) || 'null');
+    if (!saved || saved.key !== recsKey(key) || !(Date.now() - Number(saved.at || 0) < RECS_KEEP_MS)) return null;
+    return Array.isArray(saved.rails) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeRecs(key, rails, personalized) {
+  try {
+    localStorage.setItem(RECS_KEY, JSON.stringify({ key: recsKey(key), rails, personalized, at: Date.now() }));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /**
  * React useRecommendations: personal rails from GET
  * /api/marketplace-recommendations. `status` is loading | ready | failed —
@@ -239,7 +291,11 @@ export function createRecommendations({ items, recentIds, watchIds }) {
     watchIds: watchIds(),
     signedIn: signedIn(),
   }));
-  const [state, setState] = createSignal({ key: '', status: 'loading', rails: [], personalized: false });
+  const firstKey = untrack(() => inputs().key);
+  const stored = readStoredRecs(firstKey);
+  const [state, setState] = createSignal(stored
+    ? { key: firstKey, status: 'ready', rails: stored.rails, personalized: Boolean(stored.personalized) }
+    : { key: '', status: 'loading', rails: [], personalized: false });
   createEffect(
     () => inputs().key,
     (key) => {
@@ -265,12 +321,14 @@ export function createRecommendations({ items, recentIds, watchIds }) {
             listings: latest.listings,
             signal: controller.signal,
           });
-          setState({
-            key,
-            status: 'ready',
-            rails: Array.isArray(data?.rails) ? data.rails : [],
-            personalized: Boolean(data?.personalized),
-          });
+          const rails = Array.isArray(data?.rails) ? data.rails : [];
+          const personalized = Boolean(data?.personalized);
+          storeRecs(key, rails, personalized);
+          const current = untrack(state);
+          // The same answer as the one painted: keep it, so no rail re-renders.
+          if (current.key === key && current.status === 'ready' && current.personalized === personalized
+            && JSON.stringify(current.rails) === JSON.stringify(rails)) return;
+          setState({ key, status: 'ready', rails, personalized });
         } catch (_) {
           if (controller.signal.aborted) return;
           setState((current) => (current.status === 'ready'

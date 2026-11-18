@@ -5,7 +5,7 @@ import { suggestHoverAllowed } from '@market/suggest-hover.js';
 import CardArt from './CardArt.jsx';
 
 /**
- * CardTrader-style hover zoom (market/src/components/ThumbZoom.jsx): wrap a
+ * CardTrader-style hover zoom: wrap a
  * small thumbnail; on hover (fine pointer, desktop viewports) the full scan
  * floats beside the cursor in a fixed `.suggest-hover` portal. The scroll /
  * blur dismiss listeners exist only while the zoom is shown.
@@ -95,7 +95,13 @@ export default function ThumbZoom(props) {
     window.addEventListener('dragstart', onStart, true);
     window.addEventListener('dragend', onEnd, true);
     return () => {
-      hide();
+      // Teardown runs inside this component's owned scope, where Solid 2.0
+      // rejects a reactive write; the box is going away with the host anyway.
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      document.documentElement.classList.remove('is-card-dragging');
       window.removeEventListener('dragstart', onStart, true);
       window.removeEventListener('dragend', onEnd, true);
     };

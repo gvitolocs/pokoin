@@ -19,8 +19,8 @@ expansion. Changing the rarity select (Ultra Rare → Full-Art) must refetch
 that group — do not build the circles from exact-name search (that is every
 printing of the English name, so the row never moved). **More versions...**
 stays under the circles whenever there is a rarity lineup or other artwork
-(`{canonicalPath}/versions`). More than five expansions drop the circles and
-keep only that link. The versions page then groups that CLIP list by TCG era
+(`{canonicalPath}/versions`). More than six expansions cap the row to six —
+the current set plus the newest of the others — and that link stays beside them. The versions page then groups that CLIP list by TCG era
 (`tcgEra` in `market/src/set-logos.js`, catalog `market/src/tcg-eras.js`).
 Era headings are gold links to `/marketplace/eras/{id}` (Neo →
 `/marketplace/eras/neo`). **Rarity Lineup** is not an era.
@@ -110,8 +110,8 @@ on the Pi):
 ```bash
 # tests → cluster every name → apply Oracle Postgres primary → SQL fixtures
 # (Pi replica follows; do not write version sets on the replica)
-/home/nez/Projects/pokemon-card-extension/scripts/version-sets-pipeline.sh --dry-run
-/home/nez/Projects/pokemon-card-extension/scripts/version-sets-pipeline.sh
+/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/version-sets-pipeline.sh --dry-run
+/home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/version-sets-pipeline.sh
 ```
 
 `--reencode` rebuilds illustration-box CLIP (`scripts/out/artbox-clip.npz`).
@@ -126,7 +126,14 @@ in `scripts/out/artbox-pixel.npz`. `--apply-cached` writes
 
 New CardTrader leftovers: leftover ingest calls this for that expansion.
 Do not leave imported printings on singleton `v{card_id}` until a later
-`--all`. Incremental:
+`--all`. The daily job's `scripts/match-refreshed-pokemon-artwork.py` matches
+the day's imports and also re-tries printings from the last 60 days
+(`POKOIN_ARTWORK_LOOKBACK_DAYS`) that are still on a singleton and now have a
+leftover JPEG in `/home/nez/data/pokoin-leftovers/objects`. A scan recovered
+after the import day used to leave the printing alone for good: CN 30th
+Celebration 028/30th-P Espeon ex (ct 414196) never joined MEP 108 + JP 043.
+That directory is the current leftover store; the cluster script's default
+`PI_OBJECTS` (mybook replica) can lag it by weeks. Incremental:
 
 ```bash
 # from pokoin-web, after leftovers exist on the 15T replica
@@ -137,8 +144,8 @@ scripts/match-imported-version-sets.sh --ids 790994
 One-name probe:
 
 ```bash
-HIP_VISIBLE_DEVICES=0 /home/nez/Projects/ai-toolkit/venv/bin/python \
-  /home/nez/Projects/pokemon-card-extension/scripts/cluster-name-version-sets.py \
+HIP_VISIBLE_DEVICES=0 /home/nez/Projects/AI/ai-toolkit/venv/bin/python \
+  /home/nez/Projects/Startup/Pokoin/pokemon-card-extension/scripts/cluster-name-version-sets.py \
   "Pikachu δ Delta Species" --dry-run
 ```
 
@@ -245,6 +252,105 @@ painting stay together.
 
 ---
 
+## Final stage: singletons that one painting claims (rules A and B)
+
+Added 2026-10-31 to `scripts/cluster-name-version-sets.py` (pokemon-card-extension), after every other stage and after `split_secret_regular_arts`.
+
+
+### Why
+
+A printing that no earlier stage grouped stayed a singleton even when its painting was
+obvious. Two causes:
+
+* Pokémon buckets refuse cluster-level pixel joins below 0.80, and a true reprint under a
+  different frame or foil often sits at 0.55-0.78 (Kyogre ex ADV-P 011 `541598` against
+  v247946; Ocean's Kyogre ex starter deck 006/016 `569140` against `229762`).
+* CLIP does not separate two paintings of one species by the same illustrator, so it
+  cannot be the deciding score there. The final stage lets pixels decide and uses CLIP only as
+  a floor.
+
+### The rules
+
+Run once per name bucket, on the finished groups. Only a **singleton** moves, and only onto an
+existing group (or onto another singleton, which makes a pair). Scores are the best
+member-to-member dot product of the face-weighted equalized pixel vectors, compared in
+thousandths. Singletons are decided one at a time in `card_id` order against the groups as they
+stand, so a printing that has just been joined is no longer a singleton.
+
+| | Rule A: the printing has a credit | Rule B: no credit |
+| --- | --- | --- |
+| target | pixel-best group whose credits are exactly the printing's (token set, so `Shin Nagasawa` = `Nagasawa Shin`) | pixel-best group of all, at most one distinct credit |
+| pixel | >= 0.50, or >= 0.70 when no CLIP score to the target | >= 0.65 |
+| margin | >= 0.05 over the second same-illustrator group | >= 0.12 over every other group |
+| CLIP | >= 0 when present | >= 0.70 when present |
+| rival | no other group closer in pixels by more than 0.10 | |
+
+Guards for both, read on the members of the group actually joined: no pinned printing, same
+`name_key` for every member, no same-set member with another secret/full-art flag or collector
+number, not an Energy card, not a pattern species (Vivillon, Scatterbug, Spewpa, Unown, Spinda,
+Alcremie, Flabébé, Floette, Florges, Deerling, Sawsbuck, Furfrou, Burmy, Shellos, Gastrodon,
+Basculin, Minior, Squawkabilly). Pinned printings never move and never receive a join, but still
+count as the nearest rival.
+
+Calibration (singleton audit, 297 labelled pairs): precision 99.5% over both rules, rule B
+48 of 48. The constants sit next to the other thresholds (`ILLUSTRATOR_*`, `CREDITLESS_*`).
+The decision mirrors the Verus kernel's `attach_decide`; `KernelOracleTests` replays a
+synthetic sweep through `verification/diff` and asserts both agree.
+
+### Credits
+
+The credit comes from `marketplace_blueprint_artists` (join on `card_id`). Rows with
+`source = 'same_artwork'` (`match_reason = 'clip_version_set'`, written by
+`marketplace_copy_same_art_artists`) are copies: they repeat the credit of a printing that was in
+the same version set, so they come from the grouping this stage is judging. The dump keeps them
+apart as `copied_credit` (a printing has `credit` or `copied_credit`, never both).
+
+* The **singleton's own** credit must be a real one. A printing whose only credit is a copy is
+  credit-less and falls under rule B. This keeps out the audit's one false join, Natu e-card
+  `490540`, which rode on a copy of its old group's credit.
+* The credits of the **target cluster's members** may be real or copied, both for rule A's "exactly
+  that one illustrator" match and for rule B's "not mixed" check. A copy there only corroborates a
+  real credit on the other side. Ocean's Kyogre ex starter deck `569140` (copy of Yasuki Watanabe)
+  and EX Crystal Guardians `229762` (real Yasuki Watanabe) therefore join by rule A, and not the
+  other way round: `569140` has no real credit of its own.
+
+At the time of writing 40,605 of 62,549 credits are copies.
+
+### Source values
+
+A group created or extended by rule A is stored with `pokoin_version_sets.source =
+'artbox-illustrator'`, by rule B only with `'artbox-pixel-orphan'`. They are reset and cleaned
+like `artcut` and are not pins, so the next pass recomputes them. To audit or roll back:
+
+```sql
+SELECT version, member_count FROM pokoin_version_sets
+ WHERE source IN ('artbox-illustrator', 'artbox-pixel-orphan');
+```
+
+Every run writes `scripts/out/orphan-joins.csv` (one row per join: pixel, margin, CLIP, target,
+rule) next to `version-groups.json`.
+
+### Caches
+
+`artbox-clip.npz` and `artbox-pixel.npz` now carry `(file name, size, mtime_ns)` per card. A
+leftover replaced in place (the 2026-10-19 HD upscales kept their names) is re-encoded. Caches
+written before the stamp are read as they are and migrated in place: an entry counts only if
+its file is not newer than the old cache file, which stays the cutoff for entries not yet stamped.
+`CLUSTER_SETS_OUT_DIR` redirects caches and outputs for a trial run.
+
+### `--split-secrets`
+
+Respects pins (`respect_pins=True`) and re-applies them afterwards (`apply_artbox_pins()`), so the
+Blacephalon GX pin (199/214 and 219/214 of one set) survives.
+
+### Applying without undoing live groups
+
+Do not assume a plain `--all` / `version-sets-pipeline.sh` apply is safe after a cache refresh. The 2026-11-01 dry run with fresh HD vectors would have joined 1,258 printings but split 573 live groups and undone 928 joins; its CLIP-stage additions were wrong in 2 of 13 sampled cases (Dhelmise SM53 vs Guardians Rising 59, Corviknight V SWSH 200 vs Battle Styles 156). So the 2026-10-31 fix was applied additively: only rule A/B joins whose target's live group equals the cluster they were judged against, plus the EN/JP pairs that `20261101_ex_era_ex_names.sql` moved into one name bucket (`20261101_version_artwork_joins.sql`, with a `.revert.sql`). Those 573 splits and the CLIP-stage additions are still unreviewed. Review them before running a full apply.
+
+After a by-hand apply, clear the touched keys from `marketplace_page_snapshots` (kind `version`), or the route keeps serving the old members until the hourly `build-lists-versions`.
+
+---
+
 ## What not to show
 
 - Every catalog row with the English name of a Pokémon (peer2 Espurr is ~35 cards). Item and trainer names are the exception: same name is the reprint.
@@ -257,3 +363,168 @@ painting stay together.
 Prior chats: [Version work documentation](4cb496e2-2d89-4bb2-856f-03407393ab8e)
 (Cacturne / illustration groups), [Current version zip file](49d5df89-6f9d-4b74-9cd3-035d1383ad1a)
 (PCG-P 112 has an EN printing of that artwork).
+
+
+### Manaphy promo artwork correction (18 October 2026)
+
+SWSH275 (`473078`) and Japanese 286/S-P (`477518`) are the same NC Empire
+painting. They are pinned together as `v473078` with source `artbox-pin`.
+SWSH275 had incorrectly joined `v254856`, the four Shining Legends / GX Ultra
+Shiny / CSMPlC printings with different artwork. The targeted, idempotent writer
+correction is `scripts/sql/20261018_manaphy_espathra.sql`. The ordinary CLIP
+pipeline protects `artbox-pin` membership; do not undo this with a broad
+Manaphy name re-cluster that ignores protected cards.
+
+
+### Wrong-artwork audit (19 October 2026)
+
+Giuseppe's report: Pikachu BW54 (`v221412`) listed BREAKthrough 48/162, a
+different painting (forest, Kouki Saitou), next to BW54 and its JP BW-P 163
+Work Book stamp (Thunder art). Cause: the 2026-09-30 `artcut` pass joined
+48/162 to BW54 by CLIP unique-nearest (0.909). Its true nearest (0.945, another
+Pikachu) was vetoed by pixels, and the 0.40 pixel veto let 0.614 through: two
+yellow Pikachu in the same spot of a green card score 0.6 on equalized 64×64
+pixels. BW-P 163 then joined BW54 at pixels 0.925. The group also copied
+Kouki Saitou onto BW-P 163 as a `same_artwork` illustrator.
+
+`tools/version-artwork-audit` (Rust, own workspace) re-checks every version set
+with two or more singles:
+
+1. `features`: each member's leftover JPEG (15T replica), normalised to 63:88
+   at 108×151 gray. JPEGs are decoded with `jpeg-decoder`: `image`/zune-jpeg
+   decodes the 2026-10-19 HD leftovers as noise.
+2. `score`: every pair inside a group is aligned over the clustering window
+   (0.16 / 0.155 / 0.84 / 0.50) with a scale ±8% and shift search, then scored
+   `0.5 × (median NCC of 4×3 tiles + gradient NCC)`. A stamp or holo pattern
+   spoils a few tiles; another painting spoils most. Single-linkage at 0.45
+   splits a group into paintings. Calibrated on 200k same-group pairs against
+   39.7k medoid pairs of *different* groups of the same name (98.6% of those
+   score under 0.5; a few are real reprints the clusterer left split).
+3. `sheet`: contact sheets, main painting (gold frame, up to 4 cards) next to
+   every other component (red frame).
+4. `match`: for each card to move, the best printing of the same name in any
+   other version set, so a wrong card joins its real painting (CSM2D Chinese
+   prints are mostly Sun & Moon reprints).
+5. `sql`: reviewed `decisions.tsv` → guarded, idempotent migration + revert.
+
+Run 2026-10-19 (`review/2026-10-19/`): 18,702 groups, 281 flagged. Every sheet
+was looked at: **208 wrong groups**, 55 false alarms (rainbow / gold / shiny
+recolours of one full art, Jumbo prints, small M-P photo scans, WotC holo vs
+non-holo, LEGEND 30th reprints), 8 held (Air Balloon and Drifblim pins,
+placeholder leftovers, blank misprints, Pikachu Lv.14 DP-P photo backgrounds,
+Nitro Energy). Ten basic-energy mass groups (14–126 printings: Fire, Water,
+Grass ×2, Fighting, Psychic ×2, Lightning, Metal, DCE) were not reviewed:
+energy designs need their own pass.
+
+`scripts/sql/20261019_version_artwork_splits.sql` moves 365 printings: 99
+paintings join their verified existing group (target sheets reviewed too), the
+rest get their own key. Every key that receives a moved painting becomes
+`artbox-pin`, so `cluster-name-version-sets.py --all` keeps the fix. When the
+moved painting is the key's namesake (48/162 is `v221412`), it keeps the key and
+the rest moves to `v{lowest remaining id}` (BW54 + BW-P 163 → `v222054`).
+167 `same_artwork` illustrator copies that crossed a split are deleted and
+`marketplace_copy_same_art_artists` refills them from the right painting.
+Version page snapshots of the touched keys are deleted (the route answers live
+until `build-lists-versions` rebuilds them). Backups:
+`version_artwork_split_20261019`, `_sets`, `_artists`; revert with
+`scripts/sql/20261019_version_artwork_splits.revert.sql`.
+
+```bash
+# nezopt writer only
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -v ON_ERROR_STOP=1 < scripts/sql/20261019_version_artwork_splits.sql
+```
+
+Re-run the audit after a full `--all` pass:
+
+```bash
+cd tools/version-artwork-audit && cargo build --release
+B=target/release/version-artwork-audit O=/home/nez/mnt/mybook/pokoin-pi-card-images/objects
+$B features --members members.tsv --objects $O --out feats.bin
+$B score --members members.tsv --feats feats.bin --out-dir run --cross 10
+$B sheet --groups run/flagged.tsv --members members.tsv --objects $O --out-dir sheets --rows 6
+```
+
+`members.tsv` is `version, source, card_id, ct_id, name, expansion_name,
+card_number, rarity, artist, image_url, item_kind, product_type` for every
+version with two or more members: `tools/version-artwork-audit/export-members.sql`.
+
+
+### Classic deck joins (20 October 2026)
+
+Giuseppe's report: on the artist album, Ponyta Astral Radiance 021/189 and Pokémon TCG
+Classic Charizard & Ho-Oh ex 004/034 were two tiles of one painting. The English Classic
+printing (`538522`) was a singleton key; CLIP missed it on the decks' textured foil scan.
+Its Japanese twin 004/032 already sat in `v425492`.
+
+`version-artwork-audit match` scored all 204 printings of the six Classic expansions (EN and
+JP Charizard & Ho-Oh ex, Blastoise & Suicune ex, Venusaur & Lugia ex) against every
+printing of the same name, then every flagged name was checked on contact sheets. The miss
+is wider than Classic: the WotC paintings those decks reprint were split over Base Set,
+Base Set 2, Evolutions + JP 20th Anniversary, JP Expansion Pack, 25th Anniversary,
+Celebrations and Pokémon Card★web keys, and each Classic card had joined one fragment
+(Base Set Charizard was eight keys). `scripts/sql/20261020_classic_deck_version_joins.sql`
+folds every fragment of each painting into one key: 31 paintings, 64 keys emptied, 116
+printings moved. The receiving key is the existing `artbox-pin`, else a key with an art
+layout and the most members. Receiving keys become `artbox-pin`; emptied keys keep their
+row with `member_count` 0. Kept apart, as different paintings: Charmander Intense Fight
+UR 90/092, the 25th Anniversary / Celebrations forest Pikachu (`v322298`), and the CSM2D
+Double Colorless Energy (Sun & Moon design). Review files:
+`tools/version-artwork-audit/review/2026-10-20-classic/`. Backups:
+`version_artwork_join_20261020`, `_sets`, `_artists`; revert with the `.revert.sql`
+alongside.
+
+```bash
+# nezopt writer only
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -v ON_ERROR_STOP=1 < scripts/sql/20261020_classic_deck_version_joins.sql
+```
+
+To look for missed joins of other cards the same way, export the same-name pool
+(`review/2026-10-20-classic/export-pool.sql`), run `features` on it, then
+`match --cards ids.txt --pool pool.tsv --feats feats.bin --out match.tsv --top 6`: a card
+whose best score sits in another key (≥ 0.85 here) is a candidate for a sheet.
+
+### Reverse-holo pattern joins (22 October 2026)
+
+Giuseppe's report: Gem Pack Vol.6 (CBB6C) looked missing from versions. Lileep itself was
+fine (the six reverse holos 09-01..06/07 sit with Stellar Crown 005/142 in `v587906`, the
+SIR 09-07/07 with the Stellar Crown IR 145/142 in `v590098`), but across the catalogue the
+reverse-holo pattern blueprints CardTrader lists next to a card were often split from it:
+Black Bolt 049/086 vs its Poké Ball / Master Ball Reverse Holo, CSV9C 002/208 vs
+`CSV9C | Poké Ball Reverse | 002/208`, Ascended Heroes / MEGA Dream ex Energy and Ball &
+Rocket reverses, and Gem Pack slots whose six reverse holos landed on 3–4 keys (13 slots of
+Gem Pack Vol.5). The foil overlay drops CLIP under its thresholds.
+
+`scripts/sql/20261022_reverse_pattern_version_joins.sql` adds
+`marketplace_join_reverse_pattern_versions(p_apply)`. Same name + same set family (set
+name before ` - ` / `:`) + same printed n/m, with at least one reverse label, is one card;
+so are a Gem Pack slot's variants 01..06 (07 is the IR/SIR, another painting). It
+union-finds the version keys of those printings and folds them into one: pinned sources
+first, then the larger set; a singleton receiver becomes `reverse-pattern`. A key or chain
+that would add a second illustrator is skipped (D000095): CardTrader shipped the CSV10C
+Master Ball Reverse Porygon 172/222 with the Porygon2 173 scan, so CLIP filed it with
+Porygon2. First run: 178 receiving keys, 302 keys emptied, 466 printings moved.
+
+`scripts/match-imported-version-sets.sh` and the leftover ingest run it after every CLIP
+match, because re-clustering a name bucket resets those printings. A full
+`version-sets-pipeline.sh` pass does not yet; run the apply after it:
+
+```bash
+# nezopt writer only
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -v ON_ERROR_STOP=1 < scripts/sql/20261022_reverse_pattern_version_joins.sql
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -c "SELECT * FROM public.marketplace_join_reverse_pattern_versions();"      # plan
+docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace \
+  -c "SELECT * FROM public.marketplace_join_reverse_pattern_versions(true);"  # apply
+```
+
+Backups of the first run: `version_reverse_pattern_join_20261022` (card_id, old version)
+and `version_reverse_pattern_join_20261022_sets` (version-set rows before the run).
+
+Not fixed by this, because the CardTrader scan itself is another card: Gem Pack Vol.6
+Clobbopus 22-01..07 shows Munkidori 27, Cufant 23-01..07 shows Fezandipiti 28, Castform
+Sunny Form SIR 10-07 is the Lileep SIR file, Appletun SIR 21-07 shows Okidogi 26-07. Their
+reverse holos now share one key per slot; they cannot join the real painting until the
+scan is right.

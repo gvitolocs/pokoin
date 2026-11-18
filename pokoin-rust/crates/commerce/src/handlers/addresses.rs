@@ -14,7 +14,7 @@ use crate::domain::address::{
 };
 use crate::domain::shipping::{self, RateCatalog};
 use crate::error::ApiError;
-use crate::firestore::StructuredQuery;
+use crate::firestore::{validate_client_id, StructuredQuery};
 use crate::state::{AuthedUser, DomainState};
 use crate::store;
 
@@ -25,15 +25,23 @@ const ADDRESSES_COLLECTION: &str = "shipping_addresses";
 // /api/account-addresses
 // ---------------------------------------------------------------------------
 
-fn address_id(headers_query: &HashMap<String, String>, body: &Value) -> String {
+/// The client's address id (query `id`, else body `id`). Ids are the uuids
+/// `auto_id` minted, so anything else is a 400, never a Firestore path.
+fn address_id(headers_query: &HashMap<String, String>, body: &Value) -> Result<String, ApiError> {
     let from_query = headers_query
         .get("id")
         .map(|value| value.trim().to_string())
         .unwrap_or_default();
-    if !from_query.is_empty() {
-        return from_query;
+    let id = if from_query.is_empty() {
+        text_field(body, &["id"], 80)
+    } else {
+        from_query
+    };
+    if id.is_empty() {
+        return Err(ApiError::bad_request("Address id required."));
     }
-    text_field(body, &["id"], 80)
+    validate_client_id(&id).map_err(|_| ApiError::bad_request("Invalid address id."))?;
+    Ok(id)
 }
 
 fn public_address_row(row: &Value) -> Value {
@@ -81,7 +89,7 @@ pub async fn account_addresses_get(
 ) -> Result<Response, ApiError> {
     let reveal = query.get("reveal").map(String::as_str) == Some("1");
     let firestore = state.firestore()?;
-    let parent = firestore.document_path(store::USERS, &claims.uid);
+    let parent = firestore.document_path(store::USERS, &claims.uid)?;
     let rows = firestore
         .run_query(
             &StructuredQuery::collection(ADDRESSES_COLLECTION)
@@ -123,7 +131,7 @@ pub async fn account_addresses_post(
         .collect();
 
     let firestore = state.firestore()?;
-    let parent = firestore.document_path(store::USERS, &claims.uid);
+    let parent = firestore.document_path(store::USERS, &claims.uid)?;
     if is_default {
         clear_default_address(&state, &parent).await?;
     }
@@ -154,10 +162,7 @@ pub async fn account_addresses_put(
     Query(query): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
-    let id = address_id(&query, &body);
-    if id.is_empty() {
-        return Err(ApiError::bad_request("Address id required."));
-    }
+    let id = address_id(&query, &body)?;
     let fields = validate_address_fields(&body)?;
     let envelope = encrypt_address_payload(
         &fields,
@@ -175,12 +180,12 @@ pub async fn account_addresses_put(
     let make_default = body.get("isDefault").and_then(Value::as_bool) == Some(true);
 
     let firestore = state.firestore()?;
-    let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &id);
+    let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &id)?;
     if firestore.get_document(&path).await?.is_none() {
         return Err(ApiError::not_found("Address not found."));
     }
     if make_default {
-        let parent = firestore.document_path(store::USERS, &claims.uid);
+        let parent = firestore.document_path(store::USERS, &claims.uid)?;
         clear_default_address(&state, &parent).await?;
     }
     let mut patch = json!({
@@ -211,12 +216,9 @@ pub async fn account_addresses_delete(
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     let parsed = parse_json_body(&body)?;
-    let id = address_id(&query, &parsed);
-    if id.is_empty() {
-        return Err(ApiError::bad_request("Address id required."));
-    }
+    let id = address_id(&query, &parsed)?;
     let firestore = state.firestore()?;
-    let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &id);
+    let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &id)?;
     if !firestore.delete_document(&path).await? {
         return Err(ApiError::not_found("Address not found."));
     }
@@ -237,7 +239,9 @@ async fn clear_default_address(state: &DomainState, parent: &str) -> Result<(), 
         let Some(id) = row.get("id").and_then(Value::as_str) else {
             continue;
         };
-        let path = firestore.nested_path((store::USERS, state_uid_of(parent)), ADDRESSES_COLLECTION, id);
+        let Ok(path) = firestore.nested_path((store::USERS, state_uid_of(parent)), ADDRESSES_COLLECTION, id) else {
+            continue;
+        };
         let _ = firestore
             .update_document(&path, &json!({ "isDefault": false }), Some(&["isDefault"]))
             .await;
@@ -394,8 +398,10 @@ pub async fn marketplace_checkout_quote(
     let address_id = text_field(&body, &["shippingAddressId"], 80);
     let to_country;
     if !address_id.is_empty() {
+        validate_client_id(&address_id)
+            .map_err(|_| ApiError::bad_request("Invalid shipping address id."))?;
         let firestore = state.firestore()?;
-        let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &address_id);
+        let path = firestore.nested_path((store::USERS, &claims.uid), ADDRESSES_COLLECTION, &address_id)?;
         let Some(row) = firestore.get_document(&path).await? else {
             return Err(ApiError::not_found("Shipping address not found."));
         };
@@ -438,8 +444,10 @@ pub async fn marketplace_checkout_quote(
     }
 
     let mut seller_origins: HashMap<String, String> = HashMap::new();
+    let mut seller_docs: Vec<(String, Value)> = Vec::new();
     for seller_id in &seller_ids {
         let seller = store::read_user(state.firestore()?, seller_id).await?;
+        seller_docs.push((seller_id.clone(), seller.clone()));
         let profile_country = crate::domain::country::normalize_country(
             seller
                 .get("shipFromCountry")
@@ -470,18 +478,29 @@ pub async fn marketplace_checkout_quote(
         seller_origins.insert(seller_id.clone(), listing_country);
     }
 
-    let tracked = body.get("tracked").and_then(Value::as_bool) != Some(false)
-        && body.get("shippingTracked").and_then(Value::as_bool) != Some(false)
-        && !body
-            .get("shippingService")
-            .and_then(Value::as_str)
-            .map(|value| value.eq_ignore_ascii_case("untracked"))
-            .unwrap_or(false);
+    // One service per seller parcel (`shippingServices`), else the order-wide flag.
+    let plan = shipping::ServicePlan::from_body(&body)?;
     let insurance = body.get("insurance").and_then(Value::as_bool) == Some(true);
 
     let catalog = RateCatalog::default_catalog();
-    let quote = shipping::quote_checkout(&items, &seller_origins, &to_country, tracked, catalog)?;
+    let quote =
+        shipping::quote_checkout_with(&items, &seller_origins, &to_country, &plan, catalog)?;
+    let tracked = quote.tracked;
     let quote = shipping::guard_checkout_quote(quote, tracked, insurance)?;
+
+    // The balance discount is priced here exactly as the Stripe session prices
+    // it: the buyer's own balance, sellers that take PKN, the guarded total.
+    let refused = crate::domain::money::pkn_refused_sellers(
+        seller_docs.iter().map(|(uid, doc)| (uid.as_str(), doc)),
+    );
+    let balance = store::balance(state.firestore()?, &claims.uid).await?;
+    let discount = crate::domain::money::checkout_pkn_discount(
+        balance.available_pkn,
+        &shipping::json_items(&items),
+        &refused,
+        quote.grand_total_cents,
+        crate::domain::money::wants_pkn_discount(&body),
+    );
 
     Ok(private_json(json!({
         "shipments": quote.shipments.iter().map(|shipment| json!({
@@ -493,6 +512,7 @@ pub async fn marketplace_checkout_quote(
             "cardCount": shipment.card_count,
             "packageTier": shipment.package_tier,
             "tracked": shipment.tracked,
+            "serviceId": shipment.service_id(),
             "estimatedWeightGrams": shipment.estimated_weight_grams,
             "carrier": shipment.carrier,
             "serviceName": shipment.service_name,
@@ -504,9 +524,19 @@ pub async fn marketplace_checkout_quote(
         "itemsSubtotalCents": quote.items_subtotal_cents,
         "shippingTotalCents": quote.shipping_total_cents,
         "grandTotalCents": quote.grand_total_cents,
+        "buyerMarkupCents": quote.buyer_markup_cents,
         "currency": quote.currency,
         "tracked": quote.tracked,
+        "shippingServices": quote
+            .shipments
+            .iter()
+            .map(|shipment| (shipment.seller_id.clone(), json!(shipment.service_id())))
+            .collect::<serde_json::Map<String, Value>>(),
         "insuranceCents": quote.insurance_cents,
+        "pknVoucher": discount.voucher_json(),
+        "pknDiscount": discount.applied_json(),
+        "pknRefusedSellers": refused,
+        "chargeCents": discount.charge_cents(quote.grand_total_cents),
         "sellerOrigins": seller_origins,
         "shippingAddressId": if address_id.is_empty() { Value::Null } else { json!(address_id) },
         "toCountry": to_country,

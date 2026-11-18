@@ -13,7 +13,7 @@ const games = Object.values(GAMES).map((game) => game.slug).filter(Boolean);
 
 const spa = [
   'about', 'admin', 'ambassador', 'ambassadorprogram', 'artwork', 'associate', 'auth',
-  'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'contact',
+  'bought', 'buy', 'buysell', 'cardgts', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
   'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',
@@ -27,7 +27,7 @@ const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', '
 /** SPA prefixes that have child routes. Everything else is two static rewrites. */
 const SPA_WILDCARD = new Set([
   'marketplace', 'product', 'extension', 'messages', 'forum', 'mypokoin',
-  'inventory', 'join', 'dashboard',
+  'inventory', 'join', 'dashboard', 'buysell', 'cardgts',
   ...games,
 ]);
 
@@ -51,8 +51,13 @@ export function redirectLines() {
     '# /{game}/careers|contact|privacy|sitemap. The SPA client-navigates those.',
     `# Game private segments: ${GAME_PRIVATE_SEGMENTS.join(', ')}`,
     '# Static exact paths.',
+    '/features/browser-extension /features/cardrails-inventory 301',
+    '/features/browser-extension/ /features/cardrails-inventory 301',
     `/download/extension.zip ${EXTENSION_ZIP} 302`,
     `/download/extention.zip ${EXTENSION_ZIP} 302`,
+    '# The Silver-only extension zip is never a static file: /extension.zip is the SPA page',
+    '# that downloads it from api.pokoin.com /api/extension-download (token + Silver checked there).',
+    '/extension.zip /market/app 200',
   ];
   // Exact /{game}/{private} before any wildcard so they stay static and still
   // win over the later /{game}* SPA catch-all (first match in this file).
@@ -109,17 +114,26 @@ export function redirectLines() {
   return lines;
 }
 
-/**
- * `scriptHashes`: CSP hashes of inline scripts the build emitted (the React/Solid
- * switch, scripts/build-ui-shell.mjs). Without them the policy is unchanged.
- */
-export function headerLines({ scriptHashes = [] } = {}) {
-  const inline = scriptHashes.map((hash) => ` '${hash}'`).join('');
+// Unhashed /home assets that hardly ever change, so a refresh needs no round trip for them.
+// A font is immutable: give a changed one a new file name. CSS and JS stay revalidated.
+const HOME_FONTS = ['satoshi.woff2', 'fredoka-wordmark.ttf'];
+const HOME_IMAGES = [
+  'apple-touch-icon.png', 'bimi.svg', 'favicon-32x32.png', 'favicon-48x48.png', 'favicon-96x96.png',
+  'favicon.ico', 'logo.png', 'missing-card.webp', 'pokoin-192.png', 'pokoin-logo.svg', 'pokoin-mascot.png',
+  'pokoin-product-1200x630.png', 'pokoin-share-1200x630.png', 'working.gif',
+];
+const homeCacheRule = (name, value) => `/home/${name}\n  Cache-Control: ${value}\n`;
+const homeCacheRules = [
+  ...HOME_FONTS.map((name) => homeCacheRule(name, 'public, max-age=31536000, immutable')),
+  ...HOME_IMAGES.map((name) => homeCacheRule(name, 'public, max-age=604800, stale-while-revalidate=604800')),
+].join('\n');
+
+export function headerLines() {
   return `/*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000
-  Content-Security-Policy: base-uri 'self'; object-src 'none'; frame-ancestors 'self' chrome-extension:; script-src 'self' https://apis.google.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://pokoin.firebaseapp.com${inline}
+  Content-Security-Policy: base-uri 'self'; object-src 'none'; frame-ancestors 'self' chrome-extension:; script-src 'self' https://apis.google.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://pokoin.firebaseapp.com
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
@@ -136,12 +150,10 @@ export function headerLines({ scriptHashes = [] } = {}) {
 /working.html
   Cache-Control: public, max-age=0, must-revalidate
 
-/market/assets/*
-  Cache-Control: public, max-age=31536000, immutable
-
 /market/s/*
   Cache-Control: public, max-age=31536000, immutable
 
+${homeCacheRules}
 /auth
   X-Robots-Tag: noindex, nofollow
 
@@ -252,11 +264,8 @@ export function writeCloudflareRouting(root) {
   const counts = assertRedirectBudget(lines);
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, '_redirects'), `${lines.join('\n')}\n`);
-  // The React/Solid switch (scripts/build-ui-shell.mjs) is an inline script: allow its hash.
-  const switchFile = path.join(root, 'market', 'ui-switch.json');
-  const scriptHashes = fs.existsSync(switchFile) ? [JSON.parse(fs.readFileSync(switchFile, 'utf8')).hash] : [];
-  fs.writeFileSync(path.join(root, '_headers'), headerLines({ scriptHashes }));
-  fs.writeFileSync(path.join(root, '.assetsignore'), 'download/*.zip\ndownload/*.ZIP\n');
+  fs.writeFileSync(path.join(root, '_headers'), headerLines());
+  fs.writeFileSync(path.join(root, '.assetsignore'), 'download/*.zip\ndownload/*.ZIP\nextension.zip\nextension/*.zip\n');
 
   const landing = path.join(root, 'landing.html');
   if (fs.existsSync(landing)) {

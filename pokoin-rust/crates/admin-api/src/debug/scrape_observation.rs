@@ -154,84 +154,6 @@ async fn optional_user(state: &RouteState, headers: &HeaderMap) -> (String, Stri
     )
 }
 
-/// `ensureObservationTable()` — the Node handler runs these guards through
-/// `marketplaceQuery` (read pool).
-async fn ensure_observation_table(state: &RouteState) -> Result<(), HandlerError> {
-    for statement in [
-        r#"
-    create table if not exists public.marketplace_cm_scrape_observations (
-      id uuid primary key default gen_random_uuid(),
-      cardmarket_url text not null,
-      cardmarket_locale text not null default 'en',
-      cardmarket_expansion_slug text not null default '',
-      cardmarket_product_slug text not null default '',
-      page_title text not null default '',
-      scraped_name text not null default '',
-      scraped_expansion text not null default '',
-      collector_number text not null default '',
-      collector_prefix text not null default '',
-      numeric_collector_number text not null default '',
-      raw_title text not null default '',
-      structured_payload jsonb not null default '{}'::jsonb,
-      page_context jsonb not null default '{}'::jsonb,
-      matched_blueprint_id bigint references public.cardtrader_pokemon_blueprints(id) on delete set null,
-      match_confidence numeric,
-      match_payload jsonb not null default '{}'::jsonb,
-      source text not null default 'pokemon-card-extension',
-      extension_version text not null default '',
-      user_agent text not null default '',
-      debug_uid text not null default '',
-      debug_email text not null default '',
-      status text not null default 'observed' check (
-        status in ('observed', 'matched', 'verified', 'rejected')
-      ),
-      notes text not null default '',
-      observed_at timestamptz not null default now(),
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
-    )
-  "#,
-        r#"
-    create unique index if not exists marketplace_cm_scrape_observations_url_idx
-      on public.marketplace_cm_scrape_observations (cardmarket_url)
-  "#,
-        r#"
-    create index if not exists marketplace_cm_scrape_observations_status_idx
-      on public.marketplace_cm_scrape_observations (status, observed_at desc)
-  "#,
-        r#"
-    create table if not exists public.marketplace_cm_verified_links (
-      blueprint_id bigint not null references public.cardtrader_pokemon_blueprints(id) on delete cascade,
-      cardmarket_locale text not null default 'en',
-      cardmarket_url text not null,
-      cardmarket_product_slug text not null default '',
-      card_name text not null default '',
-      expansion_name text not null default '',
-      collector_number text not null default '',
-      source text not null default '',
-      confidence text not null default 'verified' check (
-        confidence in ('verified', 'manual')
-      ),
-      notes text not null default '',
-      verified_at timestamptz not null default now(),
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      primary key (blueprint_id, cardmarket_locale)
-    )
-  "#,
-        r#"
-    create unique index if not exists marketplace_cm_verified_links_url_idx
-      on public.marketplace_cm_verified_links (cardmarket_url)
-  "#,
-    ] {
-        sqlx::query(statement)
-            .execute(state.api.read())
-            .await
-            .map_err(|error| db_error(error))?;
-    }
-    Ok(())
-}
-
 pub(crate) struct Observation {
     pub(crate) url: String,
     pub(crate) locale: String,
@@ -532,7 +454,6 @@ async fn save_observation(
     state: &RouteState,
     observation: &Observation,
 ) -> Result<Value, HandlerError> {
-    ensure_observation_table(state).await?;
     let row = sqlx::query(INSERT_OBSERVATION_SQL)
         .bind(&observation.url)
         .bind(&observation.locale)
@@ -557,7 +478,7 @@ async fn save_observation(
         .bind(&observation.debug_email)
         .bind(observation.status)
         .bind(&observation.notes)
-        .fetch_one(state.api.read())
+        .fetch_one(state.api.write())
         .await
         .map_err(db_error)?;
     let observed_at: Option<chrono::DateTime<chrono::Utc>> =
@@ -637,7 +558,7 @@ async fn promote_verified_link(
         "Promoted from scrape observation {}.",
         super::value_get(saved, "id").as_str().unwrap_or("")
     ))
-    .fetch_one(state.api.read())
+    .fetch_one(state.api.write())
     .await
     .map_err(db_error)?;
     sqlx::query(
@@ -650,7 +571,7 @@ async fn promote_verified_link(
     "#,
     )
     .bind(super::value_get(saved, "id").as_str().unwrap_or(""))
-    .execute(state.api.read())
+    .execute(state.api.write())
     .await
     .map_err(db_error)?;
     let text = |column: &str| -> String {

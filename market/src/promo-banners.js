@@ -1,3 +1,5 @@
+import featuredSet from './data/featured-set.json' with { type: 'json' };
+
 /** How many set slides a non-Pokémon homepage hero rotates through. */
 export const SATELLITE_PROMO_LIMIT = 5;
 
@@ -36,6 +38,49 @@ export function satellitePromoBanners(rows, gameName, limit = SATELLITE_PROMO_LI
   return slides;
 }
 
+const STORED_BANNERS_KEY = 'pokoin.promoBanners';
+
+function localStore() {
+  try {
+    const local = globalThis.localStorage;
+    return local && typeof local.getItem === 'function' ? local : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The satellite slides this browser last showed for `gameId`. The hero
+ * paints them in its first frame on a reload: a stage that waited for the
+ * expansions read painted the rails below one row (desktop) or one slide
+ * (phone) too high, then pushed them down when the slides landed.
+ */
+export function readStoredPromoBanners(gameId, store = localStore()) {
+  try {
+    const parsed = JSON.parse(store?.getItem(`${STORED_BANNERS_KEY}.${gameId}`) || 'null');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((slide) => typeof slide?.slug === 'string' && slide.slug && typeof slide.title === 'string' && slide.title)
+      .slice(0, SATELLITE_PROMO_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+/** Keep `slides` (satellitePromoBanners) for the next visit to `gameId`. */
+export function rememberPromoBanners(gameId, slides, store = localStore()) {
+  try {
+    store?.setItem(`${STORED_BANNERS_KEY}.${gameId}`, JSON.stringify((slides || []).slice(0, SATELLITE_PROMO_LIMIT)));
+  } catch {
+    /* quota / private mode: the next visit waits for the read */
+  }
+}
+
+/** True when two slide lists show the same slides (a refresh that changes nothing). */
+export function samePromoBanners(a, b) {
+  return JSON.stringify(a || []) === JSON.stringify(b || []);
+}
+
 /**
  * A western wordmark already writes the expansion name, so the hero
  * does not repeat it as a text title.
@@ -63,10 +108,10 @@ export function promoLogoSrc(banner, { pokemon = false } = {}) {
 /** Current expansions on the home promo carousel (five slides). */
 export const PROMO_BANNERS = [
   {
-    slug: 'storm-emeralda',
-    series: 'Mega Evolution',
-    title: 'Storm Emeralda',
-    lede: 'Japanese M6 is on the floor. Chase Mega Rayquaza ex.',
+    slug: featuredSet.newCardsSet.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    series: 'Pokémon',
+    title: featuredSet.newCardsSet,
+    lede: 'Explore cards from this expansion.',
     cta: 'Explore cards from this expansion',
   },
   {

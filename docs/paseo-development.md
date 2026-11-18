@@ -36,11 +36,11 @@ lockfile are under `market/`.
 
 | Operation | Command |
 | --- | --- |
-| Install | `cd market && npm ci` |
-| Normal development | `cd market && npm run dev` |
-| Build | `bash scripts/build-web.sh` |
-| Marketplace build only | `cd market && npm run build` |
-| Tests | `node --test market/src/*.test.js` |
+| Install | `cd market && npm ci && cd ../solid && npm ci` |
+| Normal development | `cd solid && npm run dev` (Solid app; shared modules in `market/src`) |
+| Build | `bash scripts/build-web.sh [out]` |
+| Marketplace build only | `cd solid && npm run build` |
+| Tests | `node --test market/src/*.test.js && (cd solid && npm test)` |
 | Lint | Not configured |
 | Typecheck | Not configured |
 
@@ -98,10 +98,10 @@ repository.
 | --- | --- | --- |
 | Source files | Yes | Paseo creates a separate Git worktree |
 | Git branch | Yes | Paseo assigns a branch per worktree |
-| `node_modules` | Yes | `npm ci` runs inside each `market/` worktree |
+| `node_modules` | Yes | `npm ci` runs in `market/` and `solid/` of each worktree |
 | Frontend port | Yes | The `web` service binds to `$PASEO_PORT` |
 | Paseo preview URL | Yes | Paseo proxies each service by workspace/branch |
-| Firebase Auth | No | `market/src/auth.jsx` uses the shared `pokoin` Firebase project |
+| Firebase Auth | No | `solid/src/stores/auth.js` uses the shared `pokoin` Firebase project |
 | Firestore | No | Account, order, collection, and wallet-related data use shared backend state |
 | Marketplace API/PostgreSQL | No | `/api` proxies to `api.pokoin.com` unless `POKOIN_API_PROXY` is explicitly set |
 | Meilisearch/Redis/CDN | No | These are remote infrastructure behind the API/image proxies |
