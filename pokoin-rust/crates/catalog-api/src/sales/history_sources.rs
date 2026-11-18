@@ -367,6 +367,17 @@ pub const CM_OFFER_LANGUAGES: [&str; 14] = [
 pub const CM_OFFER_DEFAULT_CONDITION: &str = "NM";
 pub const CM_OFFER_DEFAULT_LANGUAGE: &str = "EN";
 
+/// The printing the daily table is read for: Cardmarket's language plus the two
+/// flags that say which rows of that language are this card. They always travel
+/// together — a request has one of them, and the block it answers names them
+/// back — so they are one argument rather than three.
+#[derive(Debug, Clone, Copy)]
+pub struct CmOfferPrinting<'a> {
+    pub language: &'a str,
+    pub finish: &'a str,
+    pub first_edition: &'a str,
+}
+
 /// `value` as one of the floors, case-insensitively, or `None`; an empty asked
 /// value is the default floor, because the desk's "Any condition" is no filter.
 pub fn cm_offer_condition(value: Option<&str>) -> Option<&'static str> {
@@ -656,10 +667,13 @@ pub async fn cardmarket_offers_history(
     ct_id: Option<&str>,
     from: &str,
     to: &str,
-    language: &str,
-    finish: &str,
-    first_edition: &str,
+    printing: CmOfferPrinting<'_>,
 ) -> Value {
+    let CmOfferPrinting {
+        language,
+        finish,
+        first_edition,
+    } = printing;
     if game != "pokemon" {
         return unsupported_cardmarket_offers(language);
     }
@@ -2778,9 +2792,11 @@ mod tests {
             Some("239324"),
             "2026-10-01",
             "2026-11-01",
-            "JP",
-            "N",
-            "N",
+            CmOfferPrinting {
+                language: "JP",
+                finish: "N",
+                first_edition: "N",
+            },
         )
         .await;
         assert_eq!(block["status"], json!("unsupported_game"));

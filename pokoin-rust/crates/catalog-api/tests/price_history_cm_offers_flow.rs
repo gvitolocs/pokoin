@@ -151,7 +151,8 @@ const OFFER_TABLE: &str = "public.cardmarket_offer_daily";
 const STRAY_OFFER_SQL: &str = "select min_cents from public.cardmarket_offer_daily limit 1";
 /// A table none of these databases has, the control for the Pokémon database
 /// whose offer table is present.
-const STRAY_EVENTS_SQL: &str = "select price_pkn from public.marketplace_user_listing_events limit 1";
+const STRAY_EVENTS_SQL: &str =
+    "select price_pkn from public.marketplace_user_listing_events limit 1";
 
 /// How long a counter read waits for the number it is looking for.
 const STAT_WAIT: Duration = Duration::from_secs(5);
@@ -454,7 +455,10 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    println!("239324 cardmarketOffers block: {}", body["cardmarketOffers"]);
+    println!(
+        "239324 cardmarketOffers block: {}",
+        body["cardmarketOffers"]
+    );
     assert_eq!(keys(&body), FULL_KEYS);
     assert_eq!(body["ctId"], json!("415200"));
     assert_eq!(
@@ -510,7 +514,9 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     assert_eq!(body["pokoin"]["status"], "empty");
     println!(
         "the other legs of the same answer: cardtrader {}, tcgplayer {}, cardmarket {}, pokoin {}",
-        body["cardtrader"]["status"], body["tcgplayer"]["status"], body["cardmarket"]["status"],
+        body["cardtrader"]["status"],
+        body["tcgplayer"]["status"],
+        body["cardmarket"]["status"],
         body["pokoin"]["status"]
     );
     assert_eq!(
@@ -534,7 +540,10 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    println!("239324 cardmarketOffers of jp&reverse=1: {}", jp["cardmarketOffers"]);
+    println!(
+        "239324 cardmarketOffers of jp&reverse=1: {}",
+        jp["cardmarketOffers"]
+    );
     assert_eq!(jp["cardmarketOffers"]["language"], "JP");
     assert_eq!(jp["cardmarketOffers"]["finish"], "Y");
     assert_eq!(jp["cardmarketOffers"]["status"], "available");
@@ -584,7 +593,11 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
         "the graph answer of the same ten days is {graph_bytes} B against the full {body_bytes} B"
     );
     println!("10 days: full {body_bytes} B, fields=graph {graph_bytes} B");
-    assert_eq!(graph["bucket"], json!("day"), "10 days are plotted day by day");
+    assert_eq!(
+        graph["bucket"],
+        json!("day"),
+        "10 days are plotted day by day"
+    );
     assert_eq!(
         keys(&graph["cardmarketOffers"]),
         keys(&body["cardmarketOffers"]),
@@ -608,9 +621,18 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     // 5. A parameter that is not a facet is the 400 this handler gives every other
     //    bad parameter, with the vocabulary it accepts, before any statement runs.
     for (param, wanted) in [
-        ("cmCondition=Mint", "cmCondition must be one of NM, SP, MP, PL, Poor."),
-        ("cmLanguage=ID", "cmLanguage must be one of EN, FR, DE, ES, IT, ZH, JP, PT, RU, KO, ZHT, NL, PL, *."),
-        ("cmLanguage=EN;&drop=1", "cmLanguage must be one of EN, FR, DE, ES, IT, ZH, JP, PT, RU, KO, ZHT, NL, PL, *."),
+        (
+            "cmCondition=Mint",
+            "cmCondition must be one of NM, SP, MP, PL, Poor.",
+        ),
+        (
+            "cmLanguage=ID",
+            "cmLanguage must be one of EN, FR, DE, ES, IT, ZH, JP, PT, RU, KO, ZHT, NL, PL, *.",
+        ),
+        (
+            "cmLanguage=EN;&drop=1",
+            "cmLanguage must be one of EN, FR, DE, ES, IT, ZH, JP, PT, RU, KO, ZHT, NL, PL, *.",
+        ),
     ] {
         let (status, bad, _) = get(
             &app,
@@ -646,7 +668,10 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    println!("a printing with no blueprint id: {}", no_ct["cardmarketOffers"]);
+    println!(
+        "a printing with no blueprint id: {}",
+        no_ct["cardmarketOffers"]
+    );
     assert_eq!(no_ct["cardmarketOffers"]["status"], "empty");
     assert_eq!(
         no_ct["cardmarketOffers"]["idProduct"],
@@ -686,10 +711,16 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    println!("magic cardmarketOffers block: {}", magic_body["cardmarketOffers"]);
+    println!(
+        "magic cardmarketOffers block: {}",
+        magic_body["cardmarketOffers"]
+    );
     assert_eq!(magic_body["game"], "magic");
     assert_eq!(magic_body["cardmarketOffers"]["status"], "unsupported_game");
-    assert_eq!(magic_body["cardmarketOffers"]["source"], "cardmarket_offers");
+    assert_eq!(
+        magic_body["cardmarketOffers"]["source"],
+        "cardmarket_offers"
+    );
     assert_eq!(
         magic_body["cardmarketOffers"]["language"], "DE",
         "the facet asked is still what the block names"
@@ -702,7 +733,14 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
     //    costs: the same request with its block taken back out is what this
     //    endpoint answered before.
     for (label, span, bucket, days, first, last) in [
-        ("3 months", MONTHS, "day", 91, "2026-08-18 1000", "2026-11-16 1140"),
+        (
+            "3 months",
+            MONTHS,
+            "day",
+            91,
+            "2026-08-18 1000",
+            "2026-11-16 1140",
+        ),
         (
             "all time",
             ALL,
@@ -733,7 +771,11 @@ async fn price_history_reads_the_cardmarket_offer_day_and_never_queries_an_absen
             size_without_offers(&small),
             graph_bytes - size_without_offers(&small),
         );
-        assert_eq!(floors(&full), ["NM", "SP"], "both floors of the busy printing");
+        assert_eq!(
+            floors(&full),
+            ["NM", "SP"],
+            "both floors of the busy printing"
+        );
         assert_eq!(
             floors(&small),
             ["NM"],

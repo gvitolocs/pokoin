@@ -829,7 +829,11 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
     let fx_pool = state.api.read();
     // A reverse pick reads the day's offers as sold-with-foil; first editions are
     // not a chip of this desk, so the leg always reads the non-first facet.
-    let finish = if reverse { "Y" } else { "N" };
+    let offers_printing = history_sources::CmOfferPrinting {
+        language: &cm_language,
+        finish: if reverse { "Y" } else { "N" },
+        first_edition: "N",
+    };
     let (cardtrader, tcg, cardmarket, cardmarket_offers, pokoin, rates) = tokio::join!(
         cardtrader_history(&pool, ct.as_deref(), &from, &to),
         tcgcsv::read_tcgplayer_history(&game_id, &card_id, &from, &to),
@@ -840,9 +844,7 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
             ct.as_deref(),
             &from,
             &to,
-            &cm_language,
-            finish,
-            "N",
+            offers_printing,
         ),
         history_sources::pokoin_history(&pool, &card_id, &from, &to),
         history_sources::read_fx_rates(fx_pool, &to),
