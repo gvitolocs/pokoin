@@ -182,10 +182,18 @@ status = "proved"
 
 [[flow]]
 id = "listing-edit-stock"
-name = "Seller edits price, quantity or status of a listing"
+name = "Seller edits price, quantity, status, condition, language or properties of a listing"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/pages/Inventory.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/lib/dialog-focus.js", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/desk.css", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_flag_turned_off_is_sent_as_false", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::an_import_only_seller_is_never_refused_a_facet", "market/src/listing-row-edit.test.js", "solid/src/components/inventory/row-actions.test.js", "solid/src/components/inventory/listing-edit-drawer.test.js", "solid/src/components/pricer/strategy-editor-shared.test.js"]
+status = "proved"
+
+[[flow]]
+id = "listing-unlist"
+name = "Seller takes a listing off sale, and off CardTrader when linked"
+money = true
+entry = ["solid/src/components/inventory/InventoryBoard.jsx", "solid/src/components/inventory/CollectionHoldings.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/listing_unlist_flow.rs"]
 status = "proved"
 
 [[flow]]
@@ -386,6 +394,14 @@ name = "User sees owned cards value, portfolio history and movers"
 money = false
 entry = ["solid/src/pages/Portfolio.jsx", "solid/src/components/inventory/CollectionHoldings.jsx"]
 proof = ["pokoin-rust/crates/accounts/tests/router_contract.rs", "pokoin-rust/crates/accounts/src/handlers/portfolio.rs", "market/src/portfolio-history.test.js", "market/src/collection-holdings.test.js"]
+status = "partial"
+
+[[flow]]
+id = "dashboard-segment-graphs"
+name = "Seller sees collection value per segment (era, sealed, graded, game)"
+money = false
+entry = ["solid/src/pages/SellerHome.jsx", "solid/src/components/dashboard/SegmentTable.jsx", "solid/src/components/dashboard/CollectionHistoryPanel.jsx"]
+proof = ["pokoin-rust/crates/accounts/src/handlers/portfolio.rs::the_history_body_describes_the_segments_its_days_carry", "pokoin-rust/crates/accounts/src/domain/portfolio_segments.rs", "market/src/portfolio-segments.test.js", "market/src/portfolio-segments-cache.test.js", "solid/src/pages/SellerHome.segments.test.js"]
 status = "partial"
 
 [[flow]]

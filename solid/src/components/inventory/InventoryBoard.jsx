@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch, untrack } from 'solid-js';
-import { fetchPriceChecksByGame, imageSrc } from '@market/api.js';
+import { cancelListing, fetchPriceChecksByGame, imageSrc } from '@market/api.js';
 import {
   filterInventoryRows,
   groupInventoryStacks,
@@ -13,12 +13,16 @@ import {
   summarizeLiveInventory,
 } from '@market/inventory-listings.js';
 import { game } from '@market/game.js';
+import { leftGroupLine } from '@market/pricing-group-note.js';
+import { cardtraderLinked, dropsUnsavedEdits, listingRowNode } from '@market/listing-row-edit.js';
 import { localizeStrategyName } from '@market/pricer.js';
 import { describeOrigins, findCrossSourceDuplicates, listingOrigin, originFacets, originLabel } from '@market/inventory-origin.js';
 import { gamePrices, inventoryMarketLabel, inventoryMarketValue, priceCheckGroups } from '@market/inventory-price.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import ScanImage from '../ScanImage.jsx';
-import { getBearer } from '../../stores/auth.js';
+import { authUser, getBearer } from '../../stores/auth.js';
+import { authSession } from '../../stores/session.js';
+import ListingEditDrawer from './ListingEditDrawer.jsx';
 import { Alert } from '../Desk.jsx';
 import NewGroupForm from '../pricer/NewGroupForm.jsx';
 import PricerPopup from '../pricer/PricerPopup.jsx';
@@ -158,11 +162,64 @@ function CondChip(props) {
   );
 }
 
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Edit and Delete for one listing. They sit beside the row's link, never
+ * inside it: a button in an anchor is unclickable and unreachable by keyboard.
+ */
+function RowActions(props) {
+  const name = () => props.row?.cardName || props.row?.name || 'listing';
+  return (
+    <span class={['inv-actions', props.class || ''].filter(Boolean).join(' ')}>
+      <button
+        type="button"
+        class="icon-btn inv-edit"
+        disabled={props.busy}
+        aria-label={`Edit ${name()}`}
+        title={`Edit ${name()}`}
+        onClick={() => props.onEdit(props.row)}
+      >
+        <EditIcon />
+      </button>
+      <button
+        type="button"
+        class="icon-btn inv-del"
+        disabled={props.busy}
+        aria-label={`Delete ${name()}`}
+        title={`Delete ${name()}`}
+        onClick={() => props.onDelete(props.row)}
+      >
+        <TrashIcon />
+      </button>
+    </span>
+  );
+}
+
 /**
  * Where the listing came from, plus the cross-channel duplicate warning.
  * Read-only: the seller decides what to do with a flagged pair.
- */
-function OriginTags(props) {
+ */function OriginTags(props) {
   const origin = () => listingOrigin(props.row);
   const dup = () => props.duplicates?.get(String(props.row?.id ?? ''));
   return (
@@ -473,12 +530,134 @@ export default function InventoryBoard(props) {
     },
   );
 
+  // Row actions: the listing the editor is open on, and the row with a write in flight.
+  const [editRow, setEditRow] = createSignal(null);
+  const [editDirty, setEditDirty] = createSignal(false);
+  // The row whose Edit button gets the keyboard back: the drawer keeps its panel
+  // across a switch, so the button that opened it is another row's by then.
+  const [editReturnId, setEditReturnId] = createSignal('');
+  const [busyId, setBusyId] = createSignal('');
+  // A save or an unlist closes the panel itself, in the same pass that wrote the
+  // row: the dirty flag it reads back is still the one from before the write, so
+  // the close is told not to ask.
+  let closesWithoutAsking = false;
+  let search;
+  const rowId = (row) => String(row?.id ?? '');
+  const rowName = (row) => row?.cardName || row?.name || 'listing';
+
+  /** The one question the drawer asks, whether it is switching rows or closing. */
+  function discardQuestion(next) {
+    const current = editRow();
+    if (!dropsUnsavedEdits({ dirty: editDirty(), openId: rowId(current), nextId: rowId(next) })) return '';
+    return `Discard your changes to ${rowName(current)}?`;
+  }
+
+  /**
+   * Open the drawer on a row. Only one drawer is ever open: opening another row
+   * switches it, so unsaved edits in the one already open would be lost — the
+   * seller is asked first.
+   */
+  function openEditRow(row) {
+    closesWithoutAsking = false;
+    const question = discardQuestion(row);
+    if (question && !window.confirm(question)) return;
+    // Opening the row that is already open keeps what the seller typed.
+    if (rowId(editRow()) !== rowId(row)) setEditDirty(false);
+    setEditRow(row);
+    setEditReturnId(rowId(row));
+  }
+
+  /** Close the drawer; edits the seller has not saved ask the same thing a switch does. */
+  function closeEditRow() {
+    if (!editRow()) return;
+    const question = closesWithoutAsking ? '' : discardQuestion(null);
+    closesWithoutAsking = false;
+    if (question && !window.confirm(question)) return;
+    setEditDirty(false);
+    setEditRow(null);
+  }
+
+  /** A row's Edit button by listing id, whatever the board re-rendered since. */
+  function rowEditButton(id) {
+    return listingRowNode([...board.querySelectorAll('[data-listing-id]')], id)?.querySelector('.inv-edit') || null;
+  }
+
+  /** Keyboard focus back onto a row's Edit button, else the search box. */
+  function focusRowEdit(id) {
+    (rowEditButton(id) || search)?.focus();
+  }
+
+  /** The board row follows a saved listing; the editor stays where it is. */
+  function applySavedRow(saved) {
+    props.onRowSaved?.(saved);
+    setActionError('');
+    setActionLine('Listing updated.');
+  }
+
+  function saveRow(saved, note = '') {
+    // The save took what was unsaved, so the close that follows is not a discard.
+    closesWithoutAsking = true;
+    applySavedRow(saved);
+    // The new price can take the listing out of its pricing group, as on the desk.
+    const left = leftGroupLine(saved);
+    // The drawer closes on a save, so a CardTrader side that did not go through
+    // belongs in this line: the panel's own message would leave with it.
+    setActionLine(['Listing updated.', left, note].filter(Boolean).join(' '));
+    // The dialog closes after this and its focus restore finds a detached
+    // button, because the changed row re-rendered: hand the keyboard back to it.
+    queueMicrotask(() => focusRowEdit(rowId(saved)));
+  }
+
+  /** One confirm, then the soft unlist. True only when the listing went away. */
+  async function removeRow(row) {
+    const id = rowId(row);
+    if (!id) return false;
+    const name = rowName(row);
+    const extra = cardtraderLinked(row) ? ' It is also taken off CardTrader.' : '';
+    if (!window.confirm(`Remove ${name} from your shop?${extra}`)) return false;
+    const list = visibleRows();
+    const at = list.findIndex((entry) => rowId(entry) === id);
+    const neighbour = list[at + 1] || list[at - 1];
+    if (props.preview) {
+      props.onRowRemoved?.(id);
+      setActionLine(`${name} is no longer listed.`);
+      queueMicrotask(() => focusRowEdit(rowId(neighbour)));
+      return true;
+    }
+    setBusyId(id);
+    setActionError('');
+    try {
+      const token = await getBearer();
+      if (!token) {
+        setActionError('Sign in again to remove a listing.');
+        return false;
+      }
+      await cancelListing(id, token, authUser()?.uid || authSession()?.uid || '');
+      props.onRowRemoved?.(id);
+      setActionLine(`${name} is no longer listed.`);
+      queueMicrotask(() => focusRowEdit(rowId(neighbour)));
+      return true;
+    } catch (err) {
+      setActionError(err?.status === 401 ? 'Sign in again to remove a listing.' : (err?.message || 'Could not remove the listing.'));
+      return false;
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /** The panel's Delete: a listing that went away has no edits left to discard either. */
+  async function removeRowFromDrawer(row) {
+    const removed = await removeRow(row);
+    if (removed) closesWithoutAsking = true;
+    return removed;
+  }
+
   return (
-    <section class="inv-board" aria-label="My listings" ref={(node) => { board = node; }}>
+    <section class={['inv-board', { 'has-edit-drawer': editRow() }]} aria-label="My listings" ref={(node) => { board = node; }}>
       <div class="mypokoin-panel-head">
         <div>
           <h2>Live listings</h2>
-          <p class="mypokoin-help">Search the book, then open a card to edit the ask.</p>
+          <p class="mypokoin-help">Search the book; edit or remove a listing from its row, or open the card.</p>
         </div>
         <a class="btn" href="/inventory/scan">Scan cards</a>
       </div>
@@ -499,6 +678,7 @@ export default function InventoryBoard(props) {
           value={query()}
           onInput={(event) => setQuery(event.target.value)}
           aria-label="Search listings"
+          ref={(node) => { search = node; }}
         />
         <div class="inv-layout" role="group" aria-label="Listing view">
           <For each={BOARD_MODES}>
@@ -612,6 +792,23 @@ export default function InventoryBoard(props) {
       </Show>
       <Alert>{actionError()}</Alert>
       <Show when={actionLine()}><p class="ct-connect-ok pricer-result-line" role="status">{actionLine()}</p></Show>
+      <Show when={editRow()}>
+        {(row) => (
+          <ListingEditDrawer
+            row={row()}
+            game={game().id}
+            preview={props.preview}
+            previewComps={props.previewComps}
+            pricing={props.pricing}
+            onDirty={setEditDirty}
+            onClose={closeEditRow}
+            restoreFocus={() => rowEditButton(editReturnId())}
+            onSaved={saveRow}
+            onRowUpdated={applySavedRow}
+            onDelete={() => removeRowFromDrawer(row())}
+          />
+        )}
+      </Show>
 
       <Switch>
         <Match when={mode() === 'stacks'}>
@@ -643,14 +840,17 @@ export default function InventoryBoard(props) {
                   <div class="loc-postings">
                     <For each={stack.postings}>
                       {(row) => (
-                        <a class="loc-posting" href={inventoryListingHref(row)}>
-                          <span class="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
-                          <span class="inv-qty num">{qty(row)}×</span>
-                          <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-                          <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
-                          <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
-                          <OriginTags row={row} duplicates={duplicates()} />
-                        </a>
+                        <div class="loc-posting-line" data-listing-id={rowId(row)}>
+                          <a class="loc-posting" href={inventoryListingHref(row)}>
+                            <span class="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
+                            <span class="inv-qty num">{qty(row)}×</span>
+                            <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
+                            <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
+                            <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
+                            <OriginTags row={row} duplicates={duplicates()} />
+                          </a>
+                          <RowActions row={row} busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
+                        </div>
                       )}
                     </For>
                   </div>
@@ -688,22 +888,25 @@ export default function InventoryBoard(props) {
                         const collector = String(row?.collectorNumber || row?.collector_number || '').trim();
                         const flag = listingLanguageFlag(row?.language);
                         return (
-                          <a class="loc-posting" href={inventoryListingHref(row)}>
-                            <RowThumb row={row} />
-                            <span class="inv-card-txt">
-                              <strong>{setName || group.title}</strong>
-                              <span class="inv-card-sub">
-                                {collector ? `#${collector}` : ''}
-                                {flag ? `${collector ? ' · ' : ''}${flag.code.toUpperCase()}` : ''}
+                          <div class="loc-posting-line" data-listing-id={rowId(row)}>
+                            <a class="loc-posting" href={inventoryListingHref(row)}>
+                              <RowThumb row={row} />
+                              <span class="inv-card-txt">
+                                <strong>{setName || group.title}</strong>
+                                <span class="inv-card-sub">
+                                  {collector ? `#${collector}` : ''}
+                                  {flag ? `${collector ? ' · ' : ''}${flag.code.toUpperCase()}` : ''}
+                                </span>
+                                <OriginTags row={row} duplicates={duplicates()} />
                               </span>
-                              <OriginTags row={row} duplicates={duplicates()} />
-                            </span>
-                            <CondChip condition={row?.condition} />
-                            <span class="inv-qty num">{qty(row)}×</span>
-                            <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-                            <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
-                            <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
-                          </a>
+                              <CondChip condition={row?.condition} />
+                              <span class="inv-qty num">{qty(row)}×</span>
+                              <span class="inv-price num">{props.formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
+                              <Show when={pricerOn()}><MarketCell value={market(row)} pending={pricesPending()} /></Show>
+                              <span class={['inv-status', paused(row) ? 'is-paused' : 'is-live']}>{paused(row) ? 'Paused' : 'Live'}</span>
+                            </a>
+                            <RowActions row={row} busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
+                          </div>
                         );
                       }}
                     </For>
@@ -716,7 +919,14 @@ export default function InventoryBoard(props) {
         <Match when={mode() === 'grid'}>
           <Show when={view().length} fallback={<p class="inv-empty">No listings match the current filters.</p>}>
             <div class="collection-tile-grid inv-grid">
-              <For each={pageEntries()}>{(row) => <ListingTile row={row} formatPrice={props.formatPrice} duplicates={duplicates()} />}</For>
+              <For each={pageEntries()}>
+                {(row) => (
+                  <div class="inv-tile" data-listing-id={rowId(row)}>
+                    <ListingTile row={row} formatPrice={props.formatPrice} duplicates={duplicates()} />
+                    <RowActions row={row} class="inv-tile-actions" busy={busyId() === rowId(row)} onEdit={openEditRow} onDelete={removeRow} />
+                  </div>
+                )}
+              </For>
             </div>
           </Show>
         </Match>
@@ -749,6 +959,7 @@ export default function InventoryBoard(props) {
               <span>Status</span>
               <span>Listed</span>
               <span />
+              <span class="inv-act-head">Actions</span>
             </div>
             <For each={pageEntries()}>
               {(row) => {
@@ -793,8 +1004,11 @@ export default function InventoryBoard(props) {
                   </>
                 );
                 return (
-                  <Show when={props.pricing} fallback={<a class="inv-row" href={inventoryListingHref(row)}>{cells}</a>}>
-                    <div class={['inv-row', 'has-pick', { 'is-picked': selected().has(id) }]}>
+                  <div
+                    class={['inv-row', { 'has-pick': Boolean(props.pricing), 'is-picked': selected().has(id) }]}
+                    data-listing-id={id}
+                  >
+                    <Show when={props.pricing}>
                       <label class="inv-pick">
                         <input
                           type="checkbox"
@@ -803,9 +1017,10 @@ export default function InventoryBoard(props) {
                           onChange={() => setSelected(toggleSelected(selected(), id))}
                         />
                       </label>
-                      <a class="inv-row-link" href={inventoryListingHref(row)}>{cells}</a>
-                    </div>
-                  </Show>
+                    </Show>
+                    <a class="inv-row-link" href={inventoryListingHref(row)}>{cells}</a>
+                    <RowActions row={row} busy={busyId() === id} onEdit={openEditRow} onDelete={removeRow} />
+                  </div>
                 );
               }}
             </For>

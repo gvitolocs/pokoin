@@ -1,0 +1,398 @@
+/* Segment graphs (DG-C002) — the collection split into rows under the value
+   graph. The table lives inside the portfolio tile, so it adds no panel of its
+   own: a separator, then rows. Every colour is a dashboard token; the only
+   literal is the documented liquidity fallback, and the level switch reuses the
+   history range presets' own class rather than restyling it here. */
+
+.segment-table {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--g5);
+}
+
+/* One grid for the head and every row keeps the columns lined up: the
+   sparkline track is the sparkline's own width, not `auto`, because the head
+   has no sparkline of its own and an `auto` track would collapse to zero there
+   and shift every head label one column right. Every column but the name may
+   shrink, so a long amount never pushes the panel into a sideways scroller. */
+.segment-head,
+.segment-row {
+  display: grid;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 4.5rem) minmax(0, 7rem) minmax(0, 5.5rem) 110px 1rem;
+}
+
+.segment-head {
+  margin-top: 0.7rem;
+  padding: 0 0.35rem 0.25rem;
+  border-bottom: 1px solid var(--g5);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.segment-col-cards,
+.segment-col-value,
+.segment-col-change {
+  text-align: right;
+}
+
+.segment-group {
+  margin-top: 0.2rem;
+}
+
+.segment-group-title {
+  margin: 0.7rem 0 0.1rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.segment-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.segment-row {
+  width: 100%;
+  margin: 0;
+  padding: 0.42rem 0.35rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.segment-row.is-plain {
+  cursor: default;
+}
+
+.segment-row.is-empty {
+  opacity: 0.72;
+}
+
+/* The affordance is the dashboard's own: an outline rather than a fill, so no
+   new colour is invented here. */
+button.segment-row:hover,
+button.segment-row:focus-visible,
+.segment-row.is-open {
+  box-shadow: inset 0 0 0 1px var(--g5);
+}
+
+.segment-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem 0.45rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 620;
+}
+
+/* The name is the one cell that cannot grow, so it ellipsizes instead of
+   drawing over the amount beside it. */
+.segment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-sub {
+  color: var(--muted);
+  flex: none;
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.segment-cards,
+.segment-value,
+.segment-change {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-cards {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.segment-value {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.segment-row .segment-change {
+  font-size: 0.8rem;
+}
+
+.segment-note {
+  color: var(--muted);
+  font-size: 0.74rem;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-spark {
+  display: inline-flex;
+  justify-content: flex-end;
+  width: 110px;
+  height: 26px;
+}
+
+.segment-spark-line {
+  stroke: var(--history-cards, var(--yellow));
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.segment-spark-dot {
+  fill: var(--history-cards, var(--yellow));
+}
+
+.segment-chevron {
+  justify-self: end;
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.segment-row.is-open .segment-chevron {
+  transform: rotate(180deg);
+}
+
+/* The opened comparison under its row. */
+.segment-open {
+  margin: 0.15rem 0 0.5rem;
+  padding: 0.5rem 0.6rem 0.35rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+}
+
+.segment-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.4rem;
+  margin: 0 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.segment-legend .mover-tile-change {
+  font-size: 0.74rem;
+  margin: 0 0.5rem 0 0;
+}
+
+.segment-key {
+  display: inline-block;
+  width: 16px;
+  border-top: 2px solid var(--history-cards, var(--yellow));
+}
+
+.segment-key.is-collection {
+  border-top-style: dashed;
+  border-top-color: var(--history-liquidity, #9085e9);
+}
+
+.segment-chart-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.segment-series-line {
+  stroke: var(--history-cards, var(--yellow));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  animation: segment-draw-in 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.segment-collection-line {
+  stroke: var(--history-liquidity, #9085e9);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.segment-end-dot {
+  fill: var(--history-cards, var(--yellow));
+}
+
+.segment-end-ring {
+  fill: var(--history-cards, var(--yellow));
+  opacity: 0.2;
+}
+
+.segment-zero-line {
+  stroke: var(--g5);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.segment-zero-label {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+.segment-chart-days {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.segment-row.is-skeleton {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.35rem;
+  cursor: default;
+}
+
+.segment-row.is-skeleton .skeleton-line {
+  width: 60%;
+}
+
+.segment-row.is-skeleton .skeleton-line.short {
+  width: 25%;
+}
+
+@keyframes segment-draw-in {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Tablet: six columns do not fit below about 700 px, so the cards count gives
+   way first and the two amounts tighten, keeping the name its column. */
+@media (max-width: 700px) {
+  .segment-head,
+  .segment-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 6rem) minmax(0, 4.5rem) 110px 1rem;
+  }
+
+  .segment-head .segment-col-cards,
+  .segment-row .segment-cards {
+    display: none;
+  }
+}
+
+/* Phone: one line per row — the name with its years under it, the sparkline,
+   then the value with the change under it, and the chevron still there. The
+   tracks are the same width in every row, so the columns line down the table,
+   and only the name is flexible: it ellipsizes before anything else shrinks,
+   so nothing at 360 px puts the panel into a sideways scroller. */
+@media (max-width: 520px) {
+  .segment-table {
+    padding: 0.75rem 0.7rem 0.85rem;
+  }
+
+  .segment-head,
+  .segment-row {
+    gap: 0.1rem 0.5rem;
+    grid-template-columns: minmax(0, 1fr) 72px minmax(0, 5.5rem) 1rem;
+  }
+
+  .segment-head .segment-col-cards,
+  .segment-row .segment-cards,
+  .segment-head .segment-col-change,
+  .segment-head-spark {
+    display: none;
+  }
+
+  .segment-row .segment-label {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .segment-row .segment-spark {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .segment-row .segment-value {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .segment-row .segment-change {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .segment-row .segment-chevron {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+
+  /* The years go under the name rather than beside it, and the name keeps the
+     full width of the cell so it ellipsizes instead of being cut off. */
+  .segment-label {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.05rem;
+    font-size: 0.82rem;
+  }
+
+  /* The years stay one line: under a name already ellipsized they are the part
+     that still reads, so they clip rather than wrap the row taller. */
+  .segment-sub {
+    font-size: 0.66rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .segment-head .segment-col-value {
+    grid-column: 3;
+  }
+
+  /* A row with nothing to plot states its case across the sparkline track,
+     where there is no sparkline to make room for, rather than ellipsizing. */
+  .segment-row.is-plain .segment-note {
+    font-size: 0.7rem;
+    grid-column: 2 / span 2;
+    grid-row: 1 / span 2;
+  }
+
+  .segment-row.is-plain .segment-spark,
+  .segment-row.is-plain .segment-change {
+    display: none;
+  }
+
+  .segment-spark {
+    width: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segment-series-line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .segment-chevron {
+    transition: none;
+  }
+}

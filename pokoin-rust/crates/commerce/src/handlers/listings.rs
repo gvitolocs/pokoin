@@ -110,6 +110,18 @@ pub(crate) async fn auth(state: &DomainState, headers: &HeaderMap) -> Result<cra
         .map_err(ApiError::from)?;
     state.verifier().verify(token).await.map_err(ApiError::from)
 }
+/// Error codes the seller keeps in the body: `cardtrader_*` says whether the
+/// edit reached CardTrader at all, which the message alone does not carry.
+const RELAYED_CODES: &[&str] = &[
+    "insufficient_quantity",
+    "GAME_CARD_MISMATCH",
+    "cardtrader_facet_unsupported",
+    "cardtrader_blueprint_unknown",
+    "cardtrader_refused",
+    "cardtrader_unreachable",
+    "cardtrader_integration_unreadable",
+];
+
 pub(crate) fn response(result: Result<Value, ApiError>, private: bool) -> Response {
     match result {
         Ok(v) => {
@@ -121,8 +133,10 @@ pub(crate) fn response(result: Result<Value, ApiError>, private: bool) -> Respon
         }
         Err(e) => {
             let mut v = json!({"error":e.message});
-            if let Some(code @ ("insufficient_quantity" | "GAME_CARD_MISMATCH")) = e.code.as_deref() {
-                v["code"] = json!(code);
+            if let Some(code) = e.code.as_deref() {
+                if RELAYED_CODES.contains(&code) {
+                    v["code"] = json!(code);
+                }
             }
             (e.status, Json(v)).into_response()
         }
@@ -1402,10 +1416,13 @@ pub(crate) async fn update_listing_guarded(
     // The CardTrader product this listing is linked to right now, read on the
     // writer under the row lock. `existing` comes from the replica and can
     // predate the push that linked it: the product then outlived the listing
-    // (specs/tla/listing-outbox NoGhostProduct). Price and quantity too: the
-    // edit CardTrader gets is measured from them, not from the replica.
+    // (specs/tla/listing-outbox NoGhostProduct). Price, quantity and the
+    // facets CardTrader's product carries are measured from these, not from
+    // the replica.
     let before = sqlx::query_scalar::<_, Value>(
-        "select to_jsonb(v) from (select source_listing_id, price_pkn, quantity_available, status from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update) v",
+        "select to_jsonb(v) from (select source_listing_id, price_pkn, quantity_available, status, \
+           card_id, marketplace_game, condition, language, foil_state, reverse, first_edition, signed, altered, graded \
+         from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update) v",
     )
     .bind(uuid)
     .bind(&claims.uid)
@@ -1437,17 +1454,31 @@ pub(crate) async fn update_listing_guarded(
     // A copy that goes off sale or changes price leaves its group; the
     // product stays for the others.
     let leave = sync::group_leave(&before, &row, siblings);
-    if leave.is_some() {
+    let leaving = leave.is_some();
+    if leaving {
         sqlx::query(sync::LEAVE_GROUP_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
         sqlx::query(sync::HAND_OVER_LINK_SQL).bind(uuid).bind(&source).bind(&claims.uid).execute(&mut *tx).await?;
         sqlx::query(sync::DROP_LEFT_LINK_SQL).bind(uuid).bind(&source).execute(&mut *tx).await?;
     }
-    let destroy = inactive && !source.is_empty() && leave.is_none();
+    let destroy = inactive && !source.is_empty() && !leaving;
     let edit = leave.or_else(|| sync::cardtrader_edit(&before, &row));
     let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":destroy,"sourceListingId":source,"cardtraderEdit":edit}),state.now_ms())).await?;
+    // A facet change of a listing that stands alone on its product goes to
+    // CardTrader here: inside the seller's request, under the row lock, before
+    // this transaction commits. The product is what the card is, so a save that
+    // answered `ok` while CardTrader still described the old printing would be
+    // the half-finished state the price sync was built to avoid. A refusal or a
+    // missing answer rolls this write back; a copy that shares its product
+    // never comes here, because `group_leave` took it out of that product
+    // instead (docs/CARDTRADER_SELLER_SYNC.md).
+    let facets = if !leaving && siblings == 0 {
+        sync::push_saved_facets(state, &claims.uid, &before, &row).await?
+    } else {
+        None
+    };
     tx.commit().await?;
     let game = live::field(&row, "marketplace_game", 40);
-    let listing = finish_write(
+    let mut listing = finish_write(
         state,
         &row,
         queued,
@@ -1455,6 +1486,14 @@ pub(crate) async fn update_listing_guarded(
         &claims.uid,
     )
     .await?;
+    if let (Some(write), Some(object)) = (
+        facets.as_ref().and_then(sync::FacetWrite::answer),
+        listing.as_object_mut(),
+    ) {
+        // What CardTrader did with the facets, so the seller reads the answer
+        // of both halves of their save from one reply.
+        object.insert("cardtrader".into(), write);
+    }
     if !queued && destroy {
         let _ = sync::destroy_product(
             state,

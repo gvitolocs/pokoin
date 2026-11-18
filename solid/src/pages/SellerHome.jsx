@@ -18,6 +18,14 @@ import {
   peekPortfolioHistory,
   subscribePortfolioHistory,
 } from '@market/portfolio-history-cache.js';
+import {
+  peekSegments,
+  rememberSegments,
+  segmentsEpoch,
+  subscribeSegments,
+} from '@market/portfolio-segments-cache.js';
+import { normalizeSegments } from '@market/portfolio-segments.js';
+import { previewSegmentsFrom } from '@market/portfolio-segments-preview.js';
 import { normalizeMovers } from '@market/portfolio-movers.js';
 import { loadPortfolioMovers, peekPortfolioMovers } from '@market/portfolio-movers-cache.js';
 import {
@@ -219,6 +227,7 @@ function PreviewDashboard() {
       // currency the owner reviews this desk in.
       moverCurrency="DKK"
       onHistoryRange={setPreviewRange}
+      segments={normalizeSegments(previewSegmentsFrom(previewHistorySeries()))}
       moverHrefFor={moverHref}
       historySeries={previewHistorySeries()}
       loading={false}
@@ -259,6 +268,10 @@ function LiveDashboard() {
   const [historySeries, setHistorySeries] = createSignal(untrack(() => peekPortfolioHistory(uid()) || []));
   const [historyPending, setHistoryPending] = createSignal(untrack(() => Boolean(signedIn() && !peekPortfolioHistory(uid()))));
   const [topMovers, setTopMovers] = createSignal(null);
+  // The same response carries the segment split; the history cache keeps only
+  // the day rows, so the table reads its own side cache.
+  const [segments, setSegments] = createSignal(untrack(() => peekSegments(uid())));
+  const [segmentsPending, setSegmentsPending] = createSignal(untrack(() => Boolean(signedIn() && !peekSegments(uid()))));
   const [moversPending, setMoversPending] = createSignal(true);
   // The chart owns the window; the movers sheet prices whatever it shows.
   const [moverRange, setMoverRange] = createSignal(DEFAULT_MOVER_RANGE);
@@ -350,20 +363,54 @@ function LiveDashboard() {
   });
 
   createEffect(uid, (id) => {
-    if (!id) return undefined;
+    if (!id) {
+      setSegments(null);
+      setSegmentsPending(false);
+      return undefined;
+    }
     let cancelled = false;
     const cached = peekPortfolioHistory(id);
     if (cached) setHistorySeries(cached);
     setHistoryPending(!cached);
+    const cachedSegments = peekSegments(id);
+    // Never carry over what the previous uid was holding: this is either that
+    // user's own copy or nothing at all.
+    setSegments(cachedSegments || null);
+    setSegmentsPending(!cachedSegments);
     const show = (series) => { if (!cancelled) setHistorySeries(series); };
     const unsubscribe = subscribePortfolioHistory(id, show);
-    loadPortfolioHistory(id, () => getBearer().then((token) => fetchPortfolioHistory(token)))
+    const unsubscribeSegments = subscribeSegments(id, (model) => {
+      if (!cancelled) setSegments(model);
+    });
+    loadPortfolioHistory(id, () => {
+      // Read at the start of this request, so a follow-up retry of the history
+      // cache stamps its own epoch and a sign-out between the two drops it.
+      const epoch = segmentsEpoch(id);
+      return getBearer()
+        .then((token) => fetchPortfolioHistory(token))
+        .then((data) => {
+          // Every answer feeds the segment table, mounted here or not: the
+          // history cache retries on its own and this fetcher is what it
+          // retries. Losing the split must never fail the history load.
+          try {
+            rememberSegments(id, data, epoch);
+          } catch {
+            /* the graph still paints */
+          }
+          return data;
+        });
+    })
       .then(show)
       .catch(() => { /* a failed refresh keeps the painted series */ })
-      .finally(() => { if (!cancelled) setHistoryPending(false); });
+      .finally(() => {
+        if (cancelled) return;
+        setHistoryPending(false);
+        setSegmentsPending(!peekSegments(id));
+      });
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeSegments();
     };
   });
 
@@ -433,6 +480,8 @@ function LiveDashboard() {
         cardTraderAssets={cardTraderAssets()}
         historySeries={historySeries()}
         historyPending={historyPending()}
+        segments={segments()}
+        segmentsPending={segmentsPending()}
         listed={listed()}
         listingRows={listingRows()}
         listingsLoading={!listingsLoaded()}
