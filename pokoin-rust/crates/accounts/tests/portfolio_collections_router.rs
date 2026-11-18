@@ -75,7 +75,7 @@ fn card(id: &str, quantity: i64) -> Json {
                 "cardId": { "stringValue": id },
                 "quantity": { "integerValue": quantity.to_string() },
                 "condition": { "stringValue": "NM" },
-                "language": { "stringValue": "ENGLISH" },
+                "language": { "stringValue": "EN" },
                 "reverse": { "booleanValue": false },
                 "firstEdition": { "booleanValue": false },
                 "graded": { "booleanValue": false },

@@ -52,11 +52,11 @@ pub const GROUP: &str = "collection";
 /// the headroom keeps a document written under an older, looser limit readable.
 const READ_LIMIT: i64 = 64;
 
-/// The facet a saved item takes when the client leaves it out. Both are stored as
-/// their own key, and the `*_key` functions are idempotent, so the round trip is
-/// the slice the price book is filed under either way.
+/// The facet a saved item takes when the client leaves it out. Both are already the
+/// key their `*_key` function answers with, and those functions are idempotent, so
+/// the round trip is the slice the price book is filed under either way.
 const DEFAULT_CONDITION: &str = "Near Mint";
-const DEFAULT_LANGUAGE: &str = "English";
+const DEFAULT_LANGUAGE: &str = "EN";
 
 /// Every slice's sold medians, oldest first — the one book the main series and
 /// all of this seller's collections are priced out of.
@@ -210,6 +210,22 @@ fn sanitize_facet(value: Option<&Json>, default_value: &str, key: fn(&str) -> St
     }
 }
 
+/// A language as its price-book key. The code is the marketplace's own vocabulary
+/// ([`crate::domain::poko_market_math::normalize_language`]), so `English`, `english`
+/// and `EN` are one slice: a sold row is stored as `en` and keys as `EN`, and a name
+/// uppercased as it stands would price nothing. Text it does not recognise keeps the
+/// uppercase key of the main series, which files it under a key no sale has.
+fn sanitize_language(value: Option<&Json>) -> String {
+    let raw = text_of(value);
+    let text = if clean_text(&raw).is_empty() {
+        DEFAULT_LANGUAGE.to_string()
+    } else {
+        raw
+    };
+    let guess = crate::domain::poko_market_math::normalize_language(&text);
+    language_key(if guess.matched { guess.code } else { &text })
+}
+
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
 /// cannot exist, and sending it to the REST API would answer a 400 that reads as
 /// a server failure.
@@ -253,7 +269,7 @@ impl Item {
             card_id: sanitize_card_id(object.get("cardId").or_else(|| object.get("card_id")))
                 .ok_or_else(|| item_error(index))?,
             condition: sanitize_facet(object.get("condition"), DEFAULT_CONDITION, condition_key),
-            language: sanitize_facet(object.get("language"), DEFAULT_LANGUAGE, language_key),
+            language: sanitize_language(object.get("language")),
             reverse: bool_of(object, "reverse"),
             first_edition: bool_of(object, "firstEdition") || bool_of(object, "first_edition"),
             graded: bool_of(object, "graded"),
@@ -838,7 +854,7 @@ mod tests {
             "card_id": card,
             "blueprint_id": blueprint,
             "condition": "NM",
-            "language": "ENGLISH",
+            "language": "en",
             "reverse": false,
             "first_edition": false,
             "graded": graded,
@@ -896,7 +912,7 @@ mod tests {
                     "cardId": { "stringValue": card },
                     "quantity": { "integerValue": quantity.to_string() },
                     "condition": { "stringValue": "NM" },
-                    "language": { "stringValue": "ENGLISH" },
+                    "language": { "stringValue": "EN" },
                     "reverse": { "booleanValue": false },
                     "firstEdition": { "booleanValue": false },
                     "graded": { "booleanValue": false },
@@ -964,17 +980,27 @@ mod tests {
     fn items_take_their_facet_defaults_and_ids() {
         let saved = Item::from_input(&json!({ "cardId": "42" }), 0).unwrap();
         assert_eq!(saved.card_id, "42");
-        assert_eq!(saved.condition, condition_key(DEFAULT_CONDITION));
-        assert_eq!(saved.language, language_key(DEFAULT_LANGUAGE));
+        assert_eq!(saved.condition, "NM");
+        assert_eq!(saved.language, "EN");
         assert_eq!(saved.quantity, 1);
         assert_eq!(saved.game, POKEMON);
         assert!(!(saved.reverse || saved.first_edition || saved.graded));
         assert_eq!(saved.name, "");
 
-        // A stored facet key read back is the same key, so the item prices as the
-        // fresh one did.
+        // A facet key read back is the same key, so a stored item prices as the fresh
+        // one did.
         assert_eq!(saved.condition, condition_key(&saved.condition));
         assert_eq!(saved.language, language_key(&saved.language));
+
+        // The price book is filed under `en`, so a list that names the language has to
+        // reach the same slice or every card of it comes back held and unpriced.
+        for named in ["English", "english", "EN", "en"] {
+            let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
+            assert_eq!(item.language, "EN", "{named} is the English slice");
+        }
+        let japanese =
+            Item::from_input(&json!({ "cardId": "42", "language": "Japanese" }), 0).unwrap();
+        assert_eq!(japanese.language, "JP");
 
         let explicit = Item::from_input(
             &json!({
