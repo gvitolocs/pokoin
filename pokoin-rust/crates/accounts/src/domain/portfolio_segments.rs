@@ -366,7 +366,8 @@ mod tests {
             let keys = keys_of(&single("1", code));
             assert_eq!(keys, vec!["game:pokemon", "pokemon:era:other"], "{code:?}");
         }
-        // A row whose set code the catalog cannot place still counts once.
+        // A bare "M" is Mega Evolution's own code, so the catalog does place it
+        // and the row lands in the post-sv band.
         assert_eq!(
             keys_of(&single("1", "M")),
             vec!["game:pokemon", "pokemon:era:post-sv"]
