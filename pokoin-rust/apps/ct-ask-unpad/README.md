@@ -15,12 +15,26 @@ One row per `(observed_day, blueprint_id)`. A row is corrected when
 * `observed_day` is between **2026-08-31** and **2026-09-19** (the days the pad
   covers — 2026-09-20 to 2026-09-22 hold no rows),
 * it carries a price, and
-* `min_price_pkn >= 200`, so no price goes negative, and
-* that stored price is **not** also the price of a Pokoin native listing of the
-  same card that existed on that day (`marketplace_user_listings`, joined to the
-  blueprint through `marketplace_search_candidates.ct_id`). A native ask was
-  never padded, so such a row may be right as it stands and is skipped, counted
-  and printed by `plan`.
+* `min_price_pkn >= 200`, so no price goes negative.
+
+Nothing else exempts a row. An earlier draft also left alone a row whose stored
+price equalled the price of a Pokoin native listing of the same card; that skip is
+withdrawn, because an ended listing still counted as a match, a CardTrader import
+matched its own price at exactly +200 PKN, the comparison read the listing's price
+*today* rather than on that day, and a candidate with no `ct_id` matched nothing.
+The cache padded every CardTrader ask, so every priced row of the window loses the
+pad.
+
+`plan` still asks the question, once, as information: the line
+`rows whose padded price equals a Pokoin native listing price: N` and up to ten of
+them with day, blueprint, price and listing status. It counts a listing only in the
+strictest reading — `source` none of the marketplace imports
+(`cardtrader_seller_import`, `cardtrader_csv_import`, `cardtrader_live`,
+`cardtrader`, `powertools_csv_import`, `cardmarket_csv_import`,
+`tcgplayer_csv_import`, `stock_csv_import`), created on or before the day, and
+either `active` or `paused` or updated on or after it. `apply` prints the same
+count and goes on. It changes no decision; a large number would say the diagnosis
+behind the fix is wrong.
 
 A corrected row loses 200 PKN in all four price columns — `min_price_pkn`,
 `median_price_pkn`, `average_price_pkn`, `max_price_pkn`, which the job always
@@ -71,13 +85,23 @@ cargo run --release -p ct-ask-unpad -- verify --backup-table ct_ask_unpad_backup
 cargo run --release -p ct-ask-unpad -- revert --backup-table ct_ask_unpad_backup
 ```
 
+**One write run at a time.** `apply` and `revert` take a session advisory lock on
+the key `CTASKPAD` (`0x435441534B504144`) before anything is written and hold it
+until the process ends. A second run does not wait behind the first: it names the
+lock, changes nothing and exits 1.
+
+**Each day is printed as it commits.** A run says which day landed while it is
+still running, so you can watch it, and a run that stops names the day that
+failed and how many committed before it. Because the backup table records every
+row it wrote, resuming is the same command again.
+
 `plan` is the default verb and reads exactly the SQL text `apply` writes, so the
 counts and the samples are what the change will do. It reports per day: rows,
-priced rows, rows to change, blueprints, rows un-padded, rows whose previous
-value only is what moves, rows skipped for a native ask, rows already recorded in
-the backup table, and rows with no price. Days of the window that hold no rows at
-all are printed as such, and the ten sample rows are the five cheapest and five
-dearest by the new price, before and after.
+priced rows, rows to change, blueprints, rows un-padded, rows whose previous value
+only is what moves, rows already recorded in the backup table, and rows with no
+price. Days of the window that hold no rows at all are printed as such, and the
+ten sample rows are the five cheapest and five dearest by the new price, before and
+after.
 
 A run that dies half way is continued, not undone: the days already recorded are
 skipped and the rest are still to do. `verify` reads the whole window again, so
@@ -88,7 +112,7 @@ skipped and the rest are still to do. `verify` reads the whole window again, so
 ```bash
 cargo test -p ct-ask-unpad                                  # unit tests only
 apps/ct-ask-unpad/tests/container.sh                        # end to end on Postgres 17
-apps/ct-ask-unpad/tests/container.sh --nocapture            # and show the plan it read
+apps/ct-ask-unpad/tests/container.sh --exact                # extra libtest flags, bare
 ```
 
 On nezopt both go through the build queue:
@@ -96,11 +120,18 @@ On nezopt both go through the build queue:
 
 `container.sh` starts its own throwaway `postgres:17-alpine` on a loopback port,
 runs `tests/fixture.rs` against it and removes the container whichever way the
-test went. The fixture seeds 21 rows over 2026-08-10, 08-31, 09-01, 09-17, 09-18,
-09-19, 09-23 and 09-24 — a cheap card (222 → 22), an expensive one
-(40328 → 40128), a native-priced row that must be left alone, a card that first
-appears on 2026-09-01, a card under the pad, a card with no price — and asserts
-every value of the table after `plan`, after `apply`, after a second `apply`,
-after `verify` on a hand-corrupted row, and after `revert`. It only runs when
-`CT_ASK_UNPAD_TEST_DATABASE_URL` names a database it owns; the unit tests need no
-database.
+test went. The test itself prints the plan it read, and the script insists on the
+`fixture ran:` marker and on `1 passed`: a fixture that skipped for want of a
+database is not a pass, and a green `cargo test` cannot tell the two apart.
+
+The fixture seeds 21 rows over 2026-08-10, 08-31, 09-01, 09-17, 09-18, 09-19,
+09-23 and 09-24 — a cheap card (222 → 22), an expensive one (40328 → 40128) whose
+price is also a CardTrader import listing, a card with a Pokoin native ask on the
+shelf at its padded price, a card that first appears on 2026-09-01 and whose
+native ask ended before the window, a card under the pad, a card with no price —
+and asserts every value of the table after `plan`, while a second session holds
+the run lock, after `apply`, after a second `apply`, after `verify` on a
+hand-corrupted row, and after `revert`. All three listing-priced blueprints are
+un-padded; exactly one of them is worth a line in the plan's informational count.
+It only runs when `CT_ASK_UNPAD_TEST_DATABASE_URL` names a database it owns; the
+unit tests need no database.
