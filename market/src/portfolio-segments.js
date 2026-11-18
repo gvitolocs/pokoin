@@ -261,6 +261,17 @@ export function sparkPoints(values, width, height, pad = 2) {
 }
 
 /**
+ * Where a sparkline's end dot sits: the last of the `sparkPoints` pairs as the
+ * `{x, y}` a `<circle>` binds, or null when nothing was plotted. `sparkPoints`
+ * answers `[x, y]` pairs, so binding its last entry's fields would put the dot
+ * at (0, 0).
+ */
+export function sparkEndPoint(points) {
+  const [x, y] = toXY(Array.isArray(points) ? points[points.length - 1] : null);
+  return x == null || y == null ? null : { x, y };
+}
+
+/**
  * An SVG path through `[x, y]` pairs as a monotone cubic: every control point
  * sits inside its own segment's box, so the curve never rises above the
  * highest or dips below the lowest value it joins.

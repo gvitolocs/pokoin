@@ -9,6 +9,7 @@ import {
   segmentGroups,
   segmentLevels,
   smoothPath,
+  sparkEndPoint,
   sparkPoints,
   versusPaths,
 } from './portfolio-segments.js';
@@ -218,6 +219,21 @@ test('a one-day series is one point, a flat series sits on the middle line', () 
   const rising = sparkPoints([1, 2, 3], 100, 20, 2);
   assert.equal(rising[0][1], 18);
   assert.equal(rising[2][1], 2);
+});
+
+test('sparkEndPoint puts the end dot on the last point of sparkPoints', () => {
+  // sparkPoints answers `[x, y]` pairs: binding `.x`/`.y` off a pair straight
+  // away leaves the circle at (0, 0), the corner rather than the last value.
+  assert.deepEqual(sparkEndPoint(sparkPoints([1, 2, 3], 100, 20, 2)), { x: 98, y: 2 });
+  assert.deepEqual(sparkEndPoint(sparkPoints([700, 700, 700], 100, 20, 2)), { x: 98, y: 10 });
+  assert.deepEqual(sparkEndPoint(sparkPoints([5], 110, 26, 2)), { x: 55, y: 13 });
+  // Nothing plotted, or a last point that is not a coordinate, is no dot at all.
+  assert.equal(sparkEndPoint([]), null);
+  assert.equal(sparkEndPoint(null), null);
+  assert.equal(sparkEndPoint([[10, null]]), null);
+  assert.equal(sparkEndPoint([['a', 'b']]), null);
+  // The point's own shape is not part of the contract.
+  assert.deepEqual(sparkEndPoint([{ x: 3, y: 4 }, { x: 5, y: 6 }]), { x: 5, y: 6 });
 });
 
 test('unpriced is held with no value anywhere, empty is nothing held', () => {

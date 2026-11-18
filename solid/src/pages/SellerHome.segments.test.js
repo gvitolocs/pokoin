@@ -109,6 +109,16 @@ test('the charts are measured, not stretched, and honour reduced motion', () => 
   assert.match(css, /@media \(max-width: 520px\)[\s\S]*width: 72px/);
 });
 
+test('the row sparkline puts its end dot on the line, not the corner', () => {
+  // The dot is a pure helper's job, because `sparkPoints` answers `[x, y]`
+  // pairs: reading `.x`/`.y` off a pair leaves the circle at (0, 0).
+  assert.match(tableSrc, /sparkEndPoint\(/);
+  const circle = tableSrc.match(/<circle\s+class="segment-spark-dot"[^>]*\/>/);
+  assert.ok(circle, 'the row sparkline draws no end dot');
+  assert.match(circle[0], /\bcx=\{[^{}]+\.x\}/);
+  assert.match(circle[0], /\bcy=\{[^{}]+\.y\}/);
+});
+
 test('the fixture preview carries the segment table', () => {
   assert.match(homeSrc, /segments=\{normalizeSegments\(previewSegmentsFrom\(previewHistorySeries\(\)\)\)\}/);
 });

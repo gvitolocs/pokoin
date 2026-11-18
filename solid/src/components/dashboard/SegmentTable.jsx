@@ -10,6 +10,7 @@ import {
   segmentGroups,
   segmentLevels,
   smoothPath,
+  sparkEndPoint,
   sparkPoints,
   versusPaths,
 } from '@market/portfolio-segments.js';
@@ -82,15 +83,15 @@ function SegmentSpark(props) {
     props.size.pad,
   ));
   const line = createMemo(() => smoothPath(points()));
-  const last = createMemo(() => points()[points().length - 1] || null);
+  const dot = createMemo(() => sparkEndPoint(points()));
   return (
     <span class="segment-spark" aria-hidden="true">
       <svg width={props.size.width} height={props.size.height} viewBox={`0 0 ${props.size.width} ${props.size.height}`}>
         <Show when={line()}>
           <path class="segment-spark-line" d={line()} fill="none" />
         </Show>
-        <Show when={last()}>
-          {(dot) => <circle class="segment-spark-dot" cx={dot().x} cy={dot().y} r="2" />}
+        <Show when={dot()}>
+          {(end) => <circle class="segment-spark-dot" cx={end().x} cy={end().y} r="2" />}
         </Show>
       </svg>
     </span>
