@@ -49,7 +49,7 @@ id = "stripe-webhook-fulfillment"
 name = "Stripe reports payment and the order is fulfilled"
 money = true
 entry = []
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_paid_webhook_preserves_discount_economics_and_consumes_integer_pkn", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_failed_stripe_event_releases_its_claim_so_the_retry_runs", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_abandoned_stripe_claim_is_handled_again"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::versioned_paid_webhook_preserves_discount_economics_and_consumes_integer_pkn", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_on_an_ended_unversioned_order_leaves_its_discount_with_the_buyer", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_after_an_unversioned_discount_release_leaves_it_with_the_buyer", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_consumes_an_unversioned_held_discount", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_report_consumes_an_unversioned_discount_whose_release_was_never_recorded", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_versioned_order_that_ended_answers_a_paid_report_with_a_conflict", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_versioned_order_that_has_not_ended_accepts_the_same_paid_report", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_failed_stripe_event_releases_its_claim_so_the_retry_runs", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::an_abandoned_stripe_claim_is_handled_again"]
 status = "proved"
 
 [[flow]]
@@ -73,7 +73,7 @@ id = "order-cancel-release"
 name = "Buyer cancels an unpaid order; expired EUR holds release"
 money = true
 entry = ["solid/src/pages/Orders.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::releasing_an_expired_order_cancels_it_and_returns_the_held_discount_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_order_is_never_released"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::releasing_an_expired_order_cancels_it_and_returns_the_held_discount_once", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_paid_order_is_never_released", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_release_returns_no_more_pkn_than_the_lock_holds"]
 status = "proved"
 
 [[flow]]
@@ -129,7 +129,7 @@ id = "pkn-withdraw"
 name = "User withdraws PKN to an on-chain address"
 money = true
 entry = ["solid/src/pages/Wallet.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal"]
+proof = ["pokoin-rust/crates/commerce/tests/firestore_flow.rs::lock_then_unlock_burn_models_a_withdrawal", "pokoin-rust/crates/commerce/tests/firestore_flow.rs::a_settled_payout_burns_no_more_pkn_than_the_lock_holds", "pokoin-rust/crates/commerce/src/store.rs::a_lock_gives_up_only_what_it_holds"]
 status = "partial"
 
 [[flow]]
