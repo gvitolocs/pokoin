@@ -219,32 +219,30 @@ export default function SegmentTable(props) {
   // an ellipse: the widths come from the measured boxes.
   let box;
   const [sparkSize, setSparkSize] = createSignal(SPARK);
-  createEffect(() => {
-    // Reading the gates keeps this alive until the section itself is mounted.
-    if (!model() && !skeleton()) return undefined;
-    const node = box;
-    if (!node || typeof ResizeObserver !== 'function') return undefined;
+  // The section only exists once there is something to draw, so the observer
+  // is attached when the gate opens rather than once at mount.
+  createEffect(() => (model() || skeleton() ? 1 : 0), (mounted) => {
+    const node = mounted ? box : null;
+    if (!node || typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect?.width;
       if (width > 0) setSparkSize(width <= PHONE_MAX_WIDTH ? SPARK_PHONE : SPARK);
     });
     observer.observe(node);
     onCleanup(() => observer.disconnect());
-    return undefined;
   });
 
   let chartBox;
   const [chartWidth, setChartWidth] = createSignal(CHART_FALLBACK_W);
-  createEffect(() => {
-    const node = open() ? chartBox : null;
-    if (!node || typeof ResizeObserver !== 'function') return undefined;
+  createEffect(open, (key) => {
+    const node = key ? chartBox : null;
+    if (!node || typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect?.width;
       if (width > 0) setChartWidth(Math.round(width));
     });
     observer.observe(node);
     onCleanup(() => observer.disconnect());
-    return undefined;
   });
 
   return (
