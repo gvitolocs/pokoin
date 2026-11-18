@@ -5,7 +5,7 @@
 //!   live in [`crate::domain::portfolio_history`]. A stored series that is on
 //!   the current basis answers the request at once and is recomputed behind it.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Query, State};
@@ -17,11 +17,12 @@ use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    add_utc_days, build_daily_series, clean_days, frozen_card_days, holding_slices,
-    sold_price_book, stored_is_current, stored_is_fresh, top_movers, utc_day_key_ms, wallet_series,
-    Mover, CARDS_BY_BLUEPRINT_SQL, HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION,
-    SOLD_BY_BLUEPRINT_SQL,
+    add_utc_days, build_daily_series_with_segments, clean_days, frozen_card_days,
+    frozen_segment_days, holding_slices, sold_price_book, stored_is_current, stored_is_fresh,
+    top_movers, utc_day_key_ms, wallet_series, Holding, Mover, PricePoint, CARDS_BY_BLUEPRINT_SQL,
+    HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION, SOLD_BY_BLUEPRINT_SQL,
 };
+use crate::domain::portfolio_segments::{segment_defs, segment_holdings, SEGMENTS_REVISION};
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
 use crate::sql::{row_text, MarketplaceDb, SqlParam};
@@ -33,6 +34,14 @@ const HISTORY: &str = "portfolio_history";
 const LEDGER: &str = "ledger_entries";
 const BALANCES: &str = "balances";
 const LEDGER_PAGE: i64 = 200;
+
+/// What the market read model answers with: the held slices, their sold price
+/// book, and the same rows grouped per dashboard segment.
+type CardBook = (
+    Vec<Holding>,
+    HashMap<String, Vec<PricePoint>>,
+    BTreeMap<String, Vec<Holding>>,
+);
 
 /// The stored series read, or `None` when there is nothing saved yet.
 async fn read_stored(firestore: &Firestore, uid: &str) -> Result<Option<Json>> {
@@ -80,15 +89,10 @@ async fn read_balance(firestore: &Firestore, uid: &str) -> f64 {
         .max(0) as f64
 }
 
-/// The held slices and their sold price book, or `None` when the market read
-/// model is unavailable (the caller then serves the last good series).
-async fn read_card_book(
-    db: &MarketplaceDb,
-    uid: &str,
-) -> Option<(
-    Vec<crate::domain::portfolio_history::Holding>,
-    std::collections::HashMap<String, Vec<crate::domain::portfolio_history::PricePoint>>,
-)> {
+/// The held slices and their sold price book plus the same holdings grouped per
+/// segment, or `None` when the market read model is unavailable (the caller then
+/// serves the last good series).
+async fn read_card_book(db: &MarketplaceDb, uid: &str) -> Option<CardBook> {
     let held = match db
         .query_json(HOLDINGS_SQL, &[SqlParam::Text(uid.to_string())])
         .await
@@ -124,7 +128,8 @@ async fn read_card_book(
             }
         }
     };
-    Some((holding_slices(&held), sold_price_book(&sold)))
+    let segments = segment_holdings(&held);
+    Some((holding_slices(&held), sold_price_book(&sold), segments))
 }
 
 /// `GET /api/marketplace-portfolio-history`.
@@ -202,8 +207,16 @@ fn stored_days(stored: Option<&Json>) -> Vec<Json> {
     clean_days(stored.and_then(|doc| doc.get("days")))
 }
 
+/// The response body: the series, and the ordered list of the segments its days
+/// actually carry. A series without segments keeps the old body exactly.
 fn history_body(days: Vec<Json>) -> Response {
-    ok_no_store(json!({ "ok": true, "days": days }))
+    let defs = segment_defs(&days);
+    let body = if defs.is_empty() {
+        json!({ "ok": true, "days": days })
+    } else {
+        json!({ "ok": true, "days": days, "segmentDefs": defs })
+    };
+    ok_no_store(body)
 }
 
 /// The recompute and its stored write: card book, ledger, balance, series.
@@ -226,7 +239,7 @@ async fn recompute_series(
             None
         }
     };
-    let Some((holdings, book)) = card_book else {
+    let Some((holdings, book, held_segments)) = card_book else {
         return Ok(None);
     };
 
@@ -234,7 +247,16 @@ async fn recompute_series(
     let balance = read_balance(&firestore, uid).await;
     let wallet = wallet_series(&movements, balance, &today_key);
     let frozen = frozen_card_days(stored, &today_key);
-    let days = build_daily_series(&wallet, &holdings, &book, &frozen, &today_key);
+    let frozen_segments = frozen_segment_days(stored, &today_key);
+    let days = build_daily_series_with_segments(
+        &wallet,
+        &holdings,
+        &book,
+        &frozen,
+        &held_segments,
+        &frozen_segments,
+        &today_key,
+    );
 
     firestore
         .doc(format!("{HISTORY}/{uid}"))
@@ -246,6 +268,7 @@ async fn recompute_series(
                 )
                 .string("priceBasis", PRICE_BASIS)
                 .int("seriesRevision", SERIES_REVISION)
+                .int("segmentsRevision", SEGMENTS_REVISION)
                 .string("updatedAt", utc_iso(now_ms)),
             false,
         )
@@ -491,7 +514,8 @@ async fn portfolio_movers_inner(
             return no_movers();
         }
     };
-    let Some((holdings, book)) = read_card_book(&db, &claims.uid).await else {
+    // The movers rank printings, which no segment grouping changes.
+    let Some((holdings, book, _)) = read_card_book(&db, &claims.uid).await else {
         return no_movers();
     };
     let movers = top_movers(&holdings, &book, &from_day, &today_key, limit);
@@ -1102,5 +1126,48 @@ mod tests {
             claim_uid(&claims, "u1").is_some(),
             "a panic must not strand the uid forever"
         );
+    }
+
+    #[tokio::test]
+    async fn the_history_body_describes_the_segments_its_days_carry() {
+        use http_body_util::BodyExt;
+        let body = |response: Response| async move {
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .map(|collected| collected.to_bytes())
+                .unwrap_or_default();
+            serde_json::from_slice::<Json>(&bytes).unwrap_or_default()
+        };
+
+        // A series without segments keeps the body it always had.
+        let plain = body(history_body(vec![])).await;
+        assert_eq!(plain, json!({ "ok": true, "days": [] }));
+        assert_eq!(plain.get("segmentDefs"), None);
+        let plain = body(history_body(vec![json!({ "date": "2026-10-08" })])).await;
+        assert_eq!(plain.get("segmentDefs"), None);
+
+        let days = vec![json!({
+            "date": "2026-10-08", "cardsValuePkn": 20,
+            "segments": { "game:pokemon": [20, 2, 2], "pokemon:era:vintage": [20, 2, 2] }
+        })];
+        let with_segments = body(history_body(days.clone())).await;
+        assert_eq!(with_segments["ok"], json!(true));
+        // The days arrive untouched; the defs only describe them.
+        assert_eq!(with_segments["days"], Json::Array(days));
+        let defs = with_segments["segmentDefs"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let keys: Vec<&str> = defs.iter().filter_map(|def| def["key"].as_str()).collect();
+        assert_eq!(keys[0], "game:pokemon");
+        assert_eq!(keys[1], "all:sealed");
+        assert_eq!(keys[2], "all:graded");
+        assert_eq!(keys[3], "pokemon:era:vintage");
+        assert_eq!(keys[defs.len() - 1], "pokemon:graded");
+        // The one held game, the two all-game cuts, the eight bands and the two
+        // Pokémon cuts.
+        assert_eq!(defs.len(), 13);
     }
 }
