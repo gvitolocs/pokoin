@@ -1,7 +1,10 @@
 //! PH-R032 W2 on a real Postgres: the `cm-watchlist` statement run against a
-//! seeded fixture, so the reason precedence, the ranking inside each reason, the
-//! two de-duplications, the guard on non-numeric ids, the windows and the cap are
-//! answers the server gave and not answers the Rust code assumed.
+//! seeded fixture, so the reason per card, the ranking inside each reason, the
+//! interleaved cut, the product two cards asked for, the guard on non-numeric
+//! ids, the windows and the cap are answers the server gave and not answers the
+//! Rust code assumed. The mixing itself (`watchlist::walk`) is unit-tested in
+//! `src/watchlist.rs`; what is proved here is that the numbers it mixes come out
+//! of SQL as the fixture deserves.
 //!
 //! ```text
 //! docker run -d --rm --name pokoin-ph-r032-test-pg -e POSTGRES_PASSWORD=test \
@@ -24,7 +27,9 @@
 //! The event leg is also given 60,000 synthetic rows over 40 days so the
 //! `EXPLAIN` this test prints reflects a windowed range scan of
 //! `marketplace_card_events_recent_idx` rather than an empty table. The
-//! synthetic cards have no catalog row, so they cannot change any assertion.
+//! synthetic cards have no catalog row, so they cannot change any assertion —
+//! and because a card with no product is dropped before it is numbered, they do
+//! not spend a turn of the viewed list either, which is what the cut counts.
 
 use std::time::Duration;
 
@@ -79,8 +84,10 @@ create table public.cardtrader_pokemon_blueprints (
   id bigint primary key, card_market_ids jsonb not null default '[]'::jsonb);
 "#;
 
-/// One card per reason and one card per way of not qualifying. Public card ids
-/// and blueprint ids are the same number so the chain is readable.
+/// One card per reason and one card per way of not qualifying, plus four cards
+/// only guests looked at so the cut has something to interleave with the
+/// listings. Public card ids and blueprint ids are the same number so the chain
+/// is readable.
 const SEED: &str = r#"
 insert into public.cardtrader_pokemon_blueprints (id, card_market_ids) values
   (201, '[900201]'),                       -- one product
@@ -99,12 +106,16 @@ insert into public.cardtrader_pokemon_blueprints (id, card_market_ids) values
   (217, '[900217]'),
   (218, '[900206]'),
   (219, '[900219]'),
-  (221, '[900221]');
+  (221, '[900221]'),
+  (230, '[900230]'),                       -- the four cards only guests viewed
+  (231, '[900231]'),
+  (232, '[900232]'),
+  (233, '[900233]');
 
 insert into public.marketplace_search_candidates (card_id, ct_id) values
   (201, 201), (202, 202), (204, 204), (205, 205), (206, 206), (207, 207), (210, 210),
   (211, 211), (213, 213), (214, 214), (215, 215), (216, 216), (217, 217), (218, 218),
-  (219, 219), (221, 221);                                        -- card 212 has no row
+  (219, 219), (221, 221), (230, 230), (231, 231), (232, 232), (233, 233);   -- no card 212
 
 -- viewed_member: weights 20 > 9 > 1, and card 202 is listed as well.
 insert into public.marketplace_card_events (card_id, user_uid, event_type, weight, occurred_at) values
@@ -114,10 +125,16 @@ insert into public.marketplace_card_events (card_id, user_uid, event_type, weigh
   (201, 'member', 'view',       1, now() - interval '1 hour'),
   (207, 'member', 'view',     100, now() - interval '40 days'),  -- outside --days 7
   (212, 'member', 'view',       9, now() - interval '1 hour');   -- no catalog row
--- viewed: no user_uid at all, which is most of the traffic.
+-- viewed: no user_uid at all, which is most of the traffic. 214 is a listing
+-- that was looked at too, which is what lifts it to the head of its own list.
 insert into public.marketplace_card_events (card_id, user_uid, event_type, weight, occurred_at) values
   (206, null, 'view', 1, now() - interval '5 hours'),
-  (210, null, 'view', 1, now() - interval '6 hours');            -- no Cardmarket product
+  (210, null, 'view', 1, now() - interval '6 hours'),            -- no Cardmarket product
+  (214, null, 'view', 7, now() - interval '3 hours'),            -- listed and viewed
+  (230, null, 'view', 9, now() - interval '2 hours'),
+  (231, null, 'view', 5, now() - interval '3 days'),
+  (232, null, 'view', 5, now() - interval '1 hour'),             -- same weight, more recent
+  (233, null, 'view', 1, now() - interval '8 hours');
 
 insert into public.marketplace_user_listings
   (card_id, seller_uid, status, quantity_available, marketplace_game, updated_at) values
@@ -152,31 +169,90 @@ analyze public.marketplace_search_candidates;
 analyze public.cardtrader_pokemon_blueprints;
 "#;
 
-/// The 12 lines `--days 7` should rank, in order: strongest reason first, then
-/// weight, then activity, then card id, then product id.
-const EXPECTED: [(&str, &str, &str, i64); 12] = [
-    ("900211", "211", "viewed_member", 1),
-    ("900202", "202", "viewed_member", 2),
-    ("900201", "201", "viewed_member", 3),
-    ("900401", "204", "listed", 4),
-    ("900402", "204", "listed", 5),
-    ("900213", "213", "listed", 6),
-    // 900206 goes to the listed card 218, not to the guest-viewed 206.
-    ("900206", "218", "listed", 7),
-    ("900214", "214", "listed", 8),
-    ("900215", "215", "listed", 9),
-    ("900216", "216", "listed", 10),
-    ("900205", "205", "scanned", 11),
-    // Card 206 keeps the product nobody else asked for, under `viewed`.
-    ("900226", "206", "viewed", 12),
+/// A walked line without its rank: product, card, reason.
+type Want = (&'static str, &'static str, &'static str);
+
+/// The 16 lines `--days 7 --cap 100 --viewed-share 50` should walk, in the order
+/// the collector should open them: the head list (`viewed_member` by weight, then
+/// `scanned`) first, then one listing and one viewed card in turn, each in its
+/// own order. Card 214 leads the listings because seven people looked at it, and
+/// 204 spends two of the day's lines on its two products.
+const DAY_HALF: [Want; 16] = [
+    ("900211", "211", "viewed_member"),
+    ("900202", "202", "viewed_member"),
+    ("900201", "201", "viewed_member"),
+    ("900205", "205", "scanned"),
+    // 214 is listed and looked at: its view weight lifts it inside `listed`.
+    ("900214", "214", "listed"),
+    ("900230", "230", "viewed"),
+    ("900401", "204", "listed"),
+    ("900402", "204", "listed"),
+    // 232 and 231 weigh the same; the newer one is walked first.
+    ("900232", "232", "viewed"),
+    // 204 has two listings, so it still outranks the single-listing cards.
+    ("900213", "213", "listed"),
+    ("900231", "231", "viewed"),
+    // 900206 is asked for by the listed 218 and by the viewed 206. The listing's
+    // turn comes first, so it is walked as `listed` and 206 keeps only 900226.
+    ("900206", "218", "listed"),
+    ("900226", "206", "viewed"),
+    // 215 and 216 are equal in every other way; the lower card id goes first.
+    ("900215", "215", "listed"),
+    ("900233", "233", "viewed"),
+    ("900216", "216", "listed"),
 ];
 
-/// One reason's share of those 12 lines, before any cap.
-const EXPECTED_COUNTS: [(&str, i64); 4] = [
+/// The same day with `--viewed-share 0`: no viewed card outranks a listing,
+/// which is the day production showed before the cut was interleaved. The head
+/// list still leads, because its place does not depend on the share.
+const DAY_LISTINGS_FIRST: [Want; 16] = [
+    ("900211", "211", "viewed_member"),
+    ("900202", "202", "viewed_member"),
+    ("900201", "201", "viewed_member"),
+    ("900205", "205", "scanned"),
+    ("900214", "214", "listed"),
+    ("900401", "204", "listed"),
+    ("900402", "204", "listed"),
+    ("900213", "213", "listed"),
+    ("900206", "218", "listed"),
+    ("900215", "215", "listed"),
+    ("900216", "216", "listed"),
+    ("900230", "230", "viewed"),
+    ("900232", "232", "viewed"),
+    ("900231", "231", "viewed"),
+    ("900226", "206", "viewed"),
+    ("900233", "233", "viewed"),
+];
+
+/// The same day with `--viewed-share 100`: the viewers lead and the listings
+/// fill. Card 206 now reaches 900206 before 218 does, so `listed` walks one
+/// product fewer and 218 contributes nothing at all.
+const DAY_VIEWERS_FIRST: [Want; 16] = [
+    ("900211", "211", "viewed_member"),
+    ("900202", "202", "viewed_member"),
+    ("900201", "201", "viewed_member"),
+    ("900205", "205", "scanned"),
+    ("900230", "230", "viewed"),
+    ("900232", "232", "viewed"),
+    ("900231", "231", "viewed"),
+    ("900206", "206", "viewed"),
+    ("900226", "206", "viewed"),
+    ("900233", "233", "viewed"),
+    ("900214", "214", "listed"),
+    ("900401", "204", "listed"),
+    ("900402", "204", "listed"),
+    ("900213", "213", "listed"),
+    ("900215", "215", "listed"),
+    ("900216", "216", "listed"),
+];
+
+/// What each reason held before the cut, at `--days 7`: 17 lines to be had, and
+/// the day walked 16 of them, because 900206 was asked for twice.
+const TOTALS: [(&str, i64); 4] = [
     ("viewed_member", 3),
     ("listed", 7),
     ("scanned", 1),
-    ("viewed", 1),
+    ("viewed", 6),
 ];
 
 async fn pool() -> PgPool {
@@ -211,17 +287,40 @@ async fn counts(pool: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
     Ok(out)
 }
 
-fn entry(id_product: &str, card_id: &str, reason: &str, rank: i64) -> Entry {
+fn entry(product: &str, card: &str, reason: &str, rank: i64) -> Entry {
     Entry {
-        id_product: id_product.parse().unwrap_or_default(),
-        card_id: card_id.to_string(),
+        id_product: product.parse().unwrap_or_default(),
+        card_id: card.to_string(),
         reason: reason.to_string(),
         rank,
     }
 }
 
+/// The day a `want` list describes, numbered from 1: `rank` is the position in
+/// the walked day, whatever list each line came from.
+fn day(wanted: &[Want]) -> Vec<Entry> {
+    wanted
+        .iter()
+        .enumerate()
+        .map(|(index, (product, card, reason))| entry(product, card, reason, index as i64 + 1))
+        .collect()
+}
+
+/// The counts table for a walked day, over the fixture's `TOTALS`.
+fn side(kept: [i64; 4]) -> Vec<ReasonCount> {
+    TOTALS
+        .iter()
+        .zip(kept)
+        .map(|((reason, total), kept)| ReasonCount {
+            reason: (*reason).to_string(),
+            total: *total,
+            kept,
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
+async fn cm_watchlist_interleaves_reasons_caps_and_writes_nothing() {
     if std::env::var("POKOIN_TEST_DATABASE_URL").is_err() {
         eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
         return;
@@ -237,25 +336,30 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
         .await
         .expect("connect one session");
 
-    let list = Watchlist { days: 7, cap: 100 };
+    let list = Watchlist {
+        days: 7,
+        cap: 100,
+        viewed_share: 50,
+    };
     let run = watchlist::fetch_conn(&mut conn, &list)
         .await
         .expect("the watchlist statement");
-
-    let want: Vec<Entry> = EXPECTED
-        .iter()
-        .map(|(product, card, reason, rank)| entry(product, card, reason, *rank))
-        .collect();
-    assert_eq!(run.entries, want, "the ranked list");
-    let want_counts: Vec<ReasonCount> = EXPECTED_COUNTS
-        .iter()
-        .map(|(reason, total)| ReasonCount {
-            reason: (*reason).to_string(),
-            total: *total,
-            kept: *total,
-        })
-        .collect();
-    assert_eq!(run.counts, want_counts, "counts per reason, uncapped");
+    let half = day(&DAY_HALF);
+    assert_eq!(run.entries, half, "the interleaved day");
+    assert_eq!(
+        run.counts,
+        side([3, 7, 1, 5]),
+        "before the cut each reason held what the fixture says; after it, the day's lines"
+    );
+    assert_eq!(
+        run.counts.iter().map(|c| c.kept).sum::<i64>() as usize,
+        run.entries.len(),
+        "the kept counts add up to the lines the day walks"
+    );
+    assert!(
+        run.entries.iter().all(|e| e.rank > 0),
+        "rank is the position in the walked day"
+    );
 
     // The session cannot write, and is bounded: both guards the job needs.
     let timeout: String = sqlx::query_scalar("show statement_timeout")
@@ -280,42 +384,104 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
         "a watchlist session accepted a write: {error}"
     );
 
-    // The same statement with a small cap: the cut happens after the ranking,
-    // and the counts say what each reason lost.
-    let capped = watchlist::fetch_conn(&mut conn, &Watchlist { days: 7, cap: 4 })
-        .await
-        .expect("the capped read");
+    // The two ends of `--viewed-share`, over the same rows.
+    let listings = watchlist::fetch_conn(
+        &mut conn,
+        &Watchlist {
+            days: 7,
+            cap: 100,
+            viewed_share: 0,
+        },
+    )
+    .await
+    .expect("a day of listings");
+    assert_eq!(
+        listings.entries,
+        day(&DAY_LISTINGS_FIRST),
+        "share 0: no viewed card outranks a listing"
+    );
+    assert_eq!(
+        listings.counts,
+        side([3, 7, 1, 5]),
+        "the same 16 lines, so the same kept side"
+    );
+    let viewers = watchlist::fetch_conn(
+        &mut conn,
+        &Watchlist {
+            days: 7,
+            cap: 100,
+            viewed_share: 100,
+        },
+    )
+    .await
+    .expect("a day of viewers");
+    assert_eq!(
+        viewers.entries,
+        day(&DAY_VIEWERS_FIRST),
+        "share 100: the viewers lead and 206 claims 900206"
+    );
+    assert_eq!(
+        viewers.counts,
+        side([3, 6, 1, 6]),
+        "one listing fewer, because 218 lost its only product to card 206 first"
+    );
+
+    // A cap that cuts through both lists, and through one card's own products:
+    // four head lines, then the first listing, then the first viewed card, then
+    // the first of card 204's two products.
+    let capped = watchlist::fetch_conn(
+        &mut conn,
+        &Watchlist {
+            days: 7,
+            cap: 7,
+            viewed_share: 50,
+        },
+    )
+    .await
+    .expect("the capped read");
     assert_eq!(
         capped.entries,
-        want[..4].to_vec(),
-        "the cap keeps the first four lines"
+        half[..7].to_vec(),
+        "the cut is the head of the same day"
     );
     assert_eq!(
-        capped
-            .counts
-            .iter()
-            .map(|c| (c.reason.as_str(), c.total, c.kept))
-            .collect::<Vec<_>>(),
-        vec![
-            ("viewed_member", 3, 3),
-            ("listed", 7, 1),
-            ("scanned", 1, 0),
-            ("viewed", 1, 0),
-        ],
-        "before and after the cap"
+        capped.counts,
+        side([3, 2, 1, 1]),
+        "7 of 17 lines, and each reason's own share of them"
     );
+
+    // A cap shallower than the head list: the statement bounds what it sends by
+    // `--cap` per list, yet the totals still describe the whole day.
+    let tiny = watchlist::fetch_conn(
+        &mut conn,
+        &Watchlist {
+            days: 7,
+            cap: 3,
+            viewed_share: 50,
+        },
+    )
+    .await
+    .expect("the three-line read");
+    assert_eq!(tiny.entries, half[..3].to_vec(), "the head list alone");
     assert_eq!(
-        capped.counts.iter().map(|c| c.kept).sum::<i64>() as usize,
-        capped.entries.len(),
-        "the kept counts add up to the lines the cap left"
+        tiny.counts,
+        side([3, 0, 0, 0]),
+        "the totals are counted before that bound, not after it"
     );
 
     // `--days` is the event window only: the scan window stays 30 days, so a
-    // 60-day read gains the 40-day view (weight 100, first) and still not the
-    // 45-day scan.
-    let wide = watchlist::fetch_conn(&mut conn, &Watchlist { days: 60, cap: 100 })
-        .await
-        .expect("the 60 day read");
+    // 60-day read gains the 40-day member view (weight 100, first in the head)
+    // and still not the 45-day scan.
+    let wide = watchlist::fetch_conn(
+        &mut conn,
+        &Watchlist {
+            days: 60,
+            cap: 100,
+            viewed_share: 50,
+        },
+    )
+    .await
+    .expect("the 60 day read");
     assert_eq!(
         wide.entries
             .first()
@@ -324,13 +490,13 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
         "the 40-day member view weighs 100 and leads when --days covers it"
     );
     let mut want60 = vec![entry("900207", "207", "viewed_member", 1)];
-    want60.extend(want.iter().map(|e| Entry {
+    want60.extend(half.iter().map(|e| Entry {
         rank: e.rank + 1,
         ..e.clone()
     }));
     assert_eq!(
         wide.entries, want60,
-        "--days 60 gains exactly the 40-day view and pushes every later line down one"
+        "--days 60 gains exactly the 40-day view, leads with it, and shifts every later line down one"
     );
     assert_eq!(
         wide.counts
@@ -341,7 +507,7 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
             ("viewed_member", 4, 4),
             ("listed", 7, 7),
             ("scanned", 1, 1),
-            ("viewed", 1, 1),
+            ("viewed", 6, 5),
         ],
         "the scan window stays 30 days: the 45-day scan never lists"
     );
@@ -350,7 +516,7 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
     let text = watchlist::body(&run.entries);
     assert_eq!(
         text,
-        want.iter()
+        half.iter()
             .map(watchlist::line)
             .collect::<Vec<String>>()
             .join("\n")
@@ -362,8 +528,15 @@ async fn cm_watchlist_ranks_reasons_caps_and_writes_nothing() {
     );
     println!("{}", watchlist::report(&list, &run));
     println!(
-        "capped to 4:\n{}",
-        watchlist::report(&Watchlist { days: 7, cap: 4 }, &capped)
+        "capped to 7:\n{}",
+        watchlist::report(
+            &Watchlist {
+                days: 7,
+                cap: 7,
+                viewed_share: 50,
+            },
+            &capped
+        )
     );
 
     // Nothing at all was written by the read.

@@ -56,12 +56,14 @@
 //! `cm-watchlist` asks the writer which Cardmarket products the price
 //! collector (`cm-price-engine`, another repository) should open per condition
 //! tomorrow: the cards that were viewed by a member, listed with stock,
-//! scanned, or viewed by anybody in `--days`, mapped to their idProducts,
-//! ranked within each reason and cut to the `--cap` of products one day of
-//! collecting can afford (`watchlist.rs`). With `--out` it writes one JSON line
-//! per product; without it the read is a dry run that prints how many products
-//! each reason had before the cap and how many it kept. It writes nothing to
-//! the database.
+//! scanned, or viewed by anybody in `--days`, mapped to their idProducts and
+//! cut to the `--cap` of products one day of collecting can afford
+//! (`watchlist.rs`). The cut is not strict precedence — a member view or a scan
+//! holds its place, then listings and viewed cards alternate, `--viewed-share`
+//! percent of the alternation to the viewers, because production's day was
+//! otherwise all listings. With `--out` it writes one JSON line per product;
+//! without it the read is a dry run that prints how many products each reason
+//! had before the cut and how many it kept. It writes nothing to the database.
 //!
 //! `links` pairs printings with Cardmarket product pages (`links.rs`) and
 //! writes `<cache>/raw/cardmarket-links.json`. `--urls` is the harvested pages
@@ -135,6 +137,8 @@ struct Options {
     days: i32,
     /// `cm-watchlist --cap`: how many products one day of collecting is.
     cap: i64,
+    /// `cm-watchlist --viewed-share`: percent of the cut given to viewed cards.
+    viewed_share: i64,
     /// `cm-watchlist --out`: where the ranked list lands for the collector.
     out: Option<PathBuf>,
 }
@@ -156,14 +160,19 @@ fn options() -> Result<Options, String> {
         command.as_str(),
         "match" | "prices" | "links" | "guides" | "tcgnotify" | "cm-offers" | "cm-watchlist"
     ) {
-        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers|cm-watchlist [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--days 7] [--cap 1200] [--out watchlist.jsonl] [--apply]".into());
+        return Err("usage: pokoin-cardmarket-catalog match|prices|links|guides|tcgnotify|cm-offers|cm-watchlist [--game slug] [--cache dir] [--refresh] [--file guide.json] [--urls harvest.json] [--generated] [--days 7] [--cap 1200] [--viewed-share 50] [--out watchlist.jsonl] [--apply]".into());
     }
     let mut slug: Option<String> = None;
     let mut cache = None;
     let (mut refresh, mut apply, mut file) = (false, false, None);
     let (mut urls, mut generated) = (None, false);
     let (mut jp_twins, mut apply_jp, mut images, mut max_art_distance) = (false, false, None, twins::MAX_DISTANCE);
-    let (mut days, mut cap, mut out) = (watchlist::DEFAULT_DAYS, watchlist::DEFAULT_CAP, None);
+    let (mut days, mut cap, mut viewed_share, mut out) = (
+        watchlist::DEFAULT_DAYS,
+        watchlist::DEFAULT_CAP,
+        watchlist::DEFAULT_SHARE,
+        None,
+    );
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--game" => slug = Some(args.next().ok_or("--game needs a slug")?),
@@ -182,6 +191,12 @@ fn options() -> Result<Options, String> {
                     .next()
                     .and_then(|v| v.parse().ok())
                     .ok_or("--cap needs a number of products")?
+            }
+            "--viewed-share" => {
+                viewed_share = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--viewed-share needs a percent from 0 to 100")?
             }
             "--generated" => generated = true,
             "--jp-twins" => jp_twins = true,
@@ -224,6 +239,12 @@ fn options() -> Result<Options, String> {
         if cap < 1 {
             return Err(format!("--cap must be at least 1 product, not {cap}"));
         }
+        if !(0..=watchlist::SHARE_TOTAL).contains(&viewed_share) {
+            return Err(format!(
+                "--viewed-share must be a percent from 0 to {}, not {viewed_share}",
+                watchlist::SHARE_TOTAL
+            ));
+        }
         let cache = cache.unwrap_or_else(|| cache_root().join("cm-watchlist"));
         (None, None, cache)
     } else {
@@ -249,6 +270,7 @@ fn options() -> Result<Options, String> {
         max_art_distance,
         days,
         cap,
+        viewed_share,
         out,
     })
 }
@@ -851,14 +873,18 @@ async fn run_cm_offers(o: &Options) -> Result<i32, String> {
 
 /// Export the day's Cardmarket watchlist (`watchlist.rs`): the products the
 /// price collector can afford to open per condition, ranked by why they matter
-/// and cut to `--cap`. With `--out` the list is written as JSONL; without it
-/// the run is a dry one that only prints the counts per reason, like the other
-/// commands of this app. The read itself is guarded: bounded by
+/// and cut to `--cap`. The cut is not strict precedence: the head list
+/// (`viewed_member`, `scanned`) keeps its place and then listings and viewed
+/// cards alternate, `--viewed-share` percent of the alternation to the viewers.
+/// With `--out` the list is written as JSONL; without it the run is a dry one
+/// that only prints the counts per reason, like the other commands of this app.
+/// The read itself is guarded: bounded by
 /// `watchlist::STATEMENT_TIMEOUT_SECS` and unable to write.
 async fn run_watchlist(o: &Options) -> Result<i32, String> {
     let list = watchlist::Watchlist {
         days: o.days,
         cap: o.cap,
+        viewed_share: o.viewed_share,
     };
     let pool = db::connect("pokoin_marketplace", true).await?;
     let run = watchlist::fetch(&pool, &list)
