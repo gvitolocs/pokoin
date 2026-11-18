@@ -311,9 +311,8 @@ mod tests {
         for band in BANDS {
             for era in band.eras {
                 assert!(
-                    reached.iter().any(|found| *found == *era),
-                    "no representative code reaches {:?} any more",
-                    era
+                    reached.contains(era),
+                    "no representative code reaches {era:?} any more"
                 );
             }
         }
