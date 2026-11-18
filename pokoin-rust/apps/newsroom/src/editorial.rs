@@ -442,6 +442,29 @@ pub fn trimmed_pack(pack: &Value) -> Value {
         "related":{"cards":array(&pack["related"]["cards"]).iter().map(|v|project(v,&["cardId","name","setName","number"])).collect::<Vec<_>>(),"sets":array(&pack["related"]["sets"]).iter().map(|v|project(v,&["slug","name"])).collect::<Vec<_>>()},
         "images":array(&pack["images"]).iter().map(|v|project(v,&["id","alt","origin"])).collect::<Vec<_>>()})
 }
+/// claude.js:603, 636 and 573 — the non-strict extras sit at fixed positions
+/// inside the request. JSON objects keep insertion order here, so appending them
+/// would move them past every key Node put them between.
+fn insert_after(out: &mut Value, anchor: &str, extras: &[(&str, Value)]) {
+    let Some(map) = out.as_object_mut() else {
+        return;
+    };
+    let mut entries: Vec<(String, Value)> = map
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let position = entries
+        .iter()
+        .position(|(key, _)| key == anchor)
+        .map_or(entries.len(), |index| index + 1);
+    entries.splice(
+        position..position,
+        extras
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), value.clone())),
+    );
+    *map = entries.into_iter().collect();
+}
 pub fn reporter_request(
     pack: &Value,
     hints: &Value,
@@ -486,8 +509,14 @@ pub fn reporter_request(
         "relatedSets":array(&pack["related"]["sets"]).iter().map(|v|&v["slug"]).collect::<Vec<_>>(),
         "galleryImages":array(&pack["images"]).iter().map(|v|&v["id"]).collect::<Vec<_>>()});
     if !strict {
-        out["output_schema"] = reporter_schema();
-        out["output_rules"]=json!(["Every timeline item and update_note needs \"at\" as an ISO-8601 date (YYYY-MM-DD or full timestamp) taken from the evidence.","Every listed key is required; use null where the schema allows it."]);
+        insert_after(
+            &mut out,
+            "allowed_values",
+            &[
+                ("output_schema", reporter_schema()),
+                ("output_rules", json!(["Every timeline item and update_note needs \"at\" as an ISO-8601 date (YYYY-MM-DD or full timestamp) taken from the evidence.","Every listed key is required; use null where the schema allows it."])),
+            ],
+        );
     }
     out
 }
@@ -507,7 +536,11 @@ pub fn editor_request(pack: &Value, draft: &Value, strict: bool) -> Value {
         ],
     );
     if !strict {
-        out["output_schema"] = editor_schema();
+        insert_after(
+            &mut out,
+            "instructions",
+            &[("output_schema", editor_schema())],
+        );
     }
     out
 }
@@ -570,7 +603,11 @@ async fn generate_repair(
         if attempt == 0 {
             request = json!({"task":"repair","errors":errors,"previous":previous.unwrap_or_else(||value.clone()),"schema_reminder":"Return only one JSON object matching the schema. Fix every listed error; change nothing else.","original_request":user});
             if !provider.strict {
-                request["output_schema"] = schema.clone();
+                insert_after(
+                    &mut request,
+                    "schema_reminder",
+                    &[("output_schema", schema.clone())],
+                );
             }
         }
     }

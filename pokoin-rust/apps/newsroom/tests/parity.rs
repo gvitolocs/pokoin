@@ -275,6 +275,179 @@ fn editorial_requests_equal_node() {
         f["requests"]["editor"]
     );
 }
+
+/// Value equality ignores key order, so the goldens above cannot see it. The
+/// request is sent as JSON text, which makes Node's key order part of the
+/// contract: claude.js:603 puts output_schema and output_rules between
+/// allowed_values and hints, claude.js:636 puts output_schema between
+/// instructions and evidence_pack.
+#[test]
+fn non_strict_requests_keep_node_key_positions() {
+    let f = fixture("editorial.json");
+    let t: Vec<_> = array(&f["validTemplates"])
+        .iter()
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect();
+    let now = timestamp(f["now"].as_str().unwrap()).unwrap();
+    let memory = f["memory"].as_str().unwrap();
+    let keys = |value: &Value| {
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>()
+    };
+    // Byte-for-byte where the Node golden exists at all: strictSchema is not false.
+    for (request, golden) in [
+        (
+            editorial::reporter_request(&f["pack"], &f["hints"], &t, memory, None, now, true),
+            &f["requests"]["reporter"],
+        ),
+        (
+            editorial::reporter_request(
+                &f["pack"],
+                &f["hints"],
+                &t,
+                memory,
+                Some(&f["previous"]),
+                now,
+                true,
+            ),
+            &f["requests"]["update"],
+        ),
+        (
+            editorial::editor_request(&f["pack"], &f["draft"], true),
+            &f["requests"]["editor"],
+        ),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&request).unwrap(),
+            serde_json::to_string(golden).unwrap()
+        );
+    }
+    assert_eq!(
+        keys(&editorial::reporter_request(
+            &f["pack"],
+            &f["hints"],
+            &t,
+            memory,
+            None,
+            now,
+            false
+        )),
+        [
+            "task",
+            "instructions",
+            "validTemplates",
+            "allowed_values",
+            "output_schema",
+            "output_rules",
+            "hints",
+            "availableModules",
+            "reporter_memory",
+            "now",
+            "previous_article",
+            "evidence_pack"
+        ]
+    );
+    assert_eq!(
+        keys(&editorial::editor_request(&f["pack"], &f["draft"], false)),
+        [
+            "task",
+            "instructions",
+            "output_schema",
+            "evidence_pack",
+            "draft"
+        ]
+    );
+    // Nothing is added at all when the provider is strict.
+    assert_eq!(
+        keys(&editorial::reporter_request(
+            &f["pack"],
+            &f["hints"],
+            &t,
+            memory,
+            None,
+            now,
+            true
+        )),
+        keys(&f["requests"]["reporter"])
+    );
+    assert_eq!(
+        keys(&editorial::editor_request(&f["pack"], &f["draft"], true)),
+        keys(&f["requests"]["editor"])
+    );
+}
+
+/// claude.js:573 — the repair request puts output_schema after schema_reminder
+/// and before original_request.
+#[tokio::test]
+async fn a_non_strict_repair_request_keeps_the_node_key_position() {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, Request, ResponseTemplate,
+    };
+    let f = fixture("editorial.json");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(move |r: &Request| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            let request: Value =
+                serde_json::from_str(body["messages"][0]["content"].as_str().unwrap()).unwrap();
+            let keys = request
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<String>>();
+            match request["task"].as_str().unwrap() {
+                "draft_article" => {}
+                "repair" => assert_eq!(
+                    keys,
+                    [
+                        "task",
+                        "errors",
+                        "previous",
+                        "schema_reminder",
+                        "output_schema",
+                        "original_request"
+                    ]
+                ),
+                task => panic!("unexpected task {task}"),
+            }
+            let content = [
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"still not JSON"}}),
+                json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+                json!({"type":"message_stop"}),
+            ]
+            .iter()
+            .map(|v| format!("data: {v}\n\n"))
+            .collect::<String>();
+            ResponseTemplate::new(200).set_body_raw(content, "text/event-stream")
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let budget = Budget::new(2);
+    let mut provider = Provider::from_env(budget.clone()).unwrap();
+    provider.name = "anthropic".into();
+    provider.strict = false;
+    provider.test_endpoint(server.uri());
+    let result = editorial::run_passes(
+        &provider,
+        &f["pack"],
+        &f["hints"],
+        &["breaking".into()],
+        "",
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["reason"], "malformed");
+}
 #[test]
 fn schemas_coercion_and_evidence_validation() {
     let f = fixture("editorial.json");
