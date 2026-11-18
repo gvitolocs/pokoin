@@ -292,13 +292,19 @@ spec:
           periodSeconds: 5
           successThreshold: 1
           timeoutSeconds: 3
+        # requests == limits puts the pod in the Guaranteed class (oom_score_adj
+        # -997); 500m/128Mi was Burstable (998), the first thing the kernel kills:
+        # 21 OOM kills in 4 days, 5 of them at its own 768Mi limit. Measured
+        # 2026-11-17: 6-8 millicores average, 0 throttled periods at cpu 2. Worst
+        # case = HPA max 4 pods: 4 CPUs and 6144Mi, inside the 12-CPU / 60GiB node
+        # whose other pods request 700m and 972Mi. scripts/k3s-manifest-check.sh.
         resources:
           limits:
-            cpu: '2'
-            memory: 768Mi
+            cpu: '1'
+            memory: 1536Mi
           requests:
-            cpu: 500m
-            memory: 128Mi
+            cpu: '1'
+            memory: 1536Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

@@ -153,6 +153,7 @@ async fn a_listing_is_stored_under_the_catalog_that_holds_its_card() {
     };
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", "11".repeat(32));
     // Only the two catalogs below are mounted, whatever the shell exports.

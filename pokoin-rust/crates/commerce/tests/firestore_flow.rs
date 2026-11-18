@@ -552,6 +552,9 @@ async fn state_harness_with(
 async fn state_harness_with_store(
     configure: impl FnOnce(&mut CommerceConfig),
 ) -> (DomainState, FirestoreClient, MockStore) {
+    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     let (base, store) = start_mock_firestore().await;
     let http = reqwest::Client::new();
     let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");
@@ -577,6 +580,9 @@ async fn state_harness_with_store(
 }
 
 async fn harness() -> (Router, FirestoreClient) {
+    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     let (base, _store) = start_mock_firestore().await;
     let http = reqwest::Client::new();
     let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");

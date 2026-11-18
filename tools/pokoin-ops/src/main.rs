@@ -10,6 +10,7 @@ mod mail;
 mod nezopt;
 mod notify;
 mod pi;
+mod pods;
 mod secretary;
 mod sentinel;
 mod sys;

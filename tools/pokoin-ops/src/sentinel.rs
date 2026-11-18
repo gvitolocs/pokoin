@@ -115,6 +115,13 @@ pub struct State {
     /// Failed k3s Jobs first seen after the previous run, with when they were seen.
     #[serde(default)]
     pub k3s_new_failed: Vec<(String, i64)>,
+    /// pods.rs: restartCount per `pod:<pod>/<container>` of the k3s namespace. Its own map
+    /// so the pod churn of a deploy cannot disturb the unit/container storm trackers.
+    #[serde(default)]
+    pub k3s_pod_restarts: BTreeMap<String, health::RestartTrack>,
+    /// pods.rs: pods of the namespace in phase Failed at the previous run, for the digest line.
+    #[serde(default)]
+    pub k3s_failed_pods_prev: Option<usize>,
     /// CPU Tctl samples (unix seconds, °C) of the last 20 minutes, for the sustained-heat rule.
     #[serde(default)]
     pub temp_samples: Vec<(i64, f64)>,

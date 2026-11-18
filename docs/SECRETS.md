@@ -2,8 +2,9 @@
 
 Every credential of this project lives in **Infisical** and in the runtime
 environment that reads it. Nothing secret is committed — not to a feature
-branch, not "temporarily", not in a test. `.env*` files are gitignored and are
-never a deployment mechanism here.
+branch, not "temporarily", not in a test. `.env*` files are gitignored — the
+`.example`, `.sample` and `.template` templates excepted — and are never a
+deployment mechanism here.
 
 ## Running the scan
 
@@ -15,7 +16,8 @@ gitleaks detect --no-git -s . --redact --no-banner; echo exit=$?   # 0 == clean
 `.githooks/pre-commit` runs `gitleaks protect --staged --redact --no-banner`
 and fails the commit on a finding, when `gitleaks` is on `PATH` (the hook stays
 silent on hosts without it, so nothing else breaks). Enable the hook with
-`scripts/setup-git-hooks.sh`.
+`scripts/setup-git-hooks.sh`. The hook file must stay executable in git (mode
+100755) or git skips it silently; `scripts/ci-secret-scan.test.sh` checks this.
 
 The scan is only a gate while it stays clean: a new real secret must be finding
 number one, not number 190. Do not "fix" a red scan by widening the allowlist.
@@ -59,6 +61,33 @@ public or test-only.
 - Never allowlist a directory of source, a whole `src/` tree, or a rule.
 - Re-run the full scan afterwards and check that removing the new entry brings
   back exactly the findings it is meant to cover.
+
+A change to the allowlist makes `secret-gate` fail by design: it fails on any
+change to `.gitleaks.toml`, on a `.gitleaksignore` file, and on an added inline
+allow comment, and no trailer, label or variable turns it green. An agent never
+changes the allowlist. The owner ships such a commit only with the logged
+override of `scripts/require-ci-green.sh`.
+
+## The scan in CI
+
+`.github/workflows/secrets-ci.yml` runs one job, `secret-gate`, on every pull
+request and every push to `main`. It installs gitleaks 8.30.1 (the version the
+local hook uses) from the release archive, checks its sha256, and runs
+`scripts/ci-secret-scan.sh --base <base>` and then
+`scripts/ci-secret-scan.test.sh`. The scan has three steps, all run:
+
+1. range scan: gitleaks over every commit of `<base>..<head>`, so a secret that
+   was added and removed again inside the range is still found;
+2. tree scan: gitleaks over an export of the tracked files of HEAD
+   (`git archive HEAD` unpacked into a temporary directory, scanned with this
+   repository's `.gitleaks.toml`), so `node_modules/`, `target/`, `dist-web/`
+   and anything else untracked in a work tree are not scanned;
+3. allowlist guard: fails on any change to `.gitleaks.toml` in the range, on a
+   `.gitleaksignore` file, and on an added inline allow comment.
+
+`secret-gate` is in `scripts/ci-required-checks`, which names `rust-gate`,
+`repo-gate`, `secret-gate` and `js-gate`: a commit ships only when all four are
+green.
 
 ## When the scan finds something
 

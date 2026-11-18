@@ -164,6 +164,7 @@ async fn picks_move_inventory_once_and_undo_reverses_them() {
     };
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     let admin = PgPoolOptions::new().max_connections(2).connect(&url).await.expect("test server");
     run_sql(&admin, "drop database if exists zero_picks_flow with (force)").await;
@@ -322,6 +323,7 @@ async fn concurrent_double_click_records_one_pick_and_one_delta() {
     };
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     let admin = PgPoolOptions::new().max_connections(2).connect(&url).await.expect("test server");
     run_sql(&admin, "drop database if exists zero_picks_race with (force)").await;

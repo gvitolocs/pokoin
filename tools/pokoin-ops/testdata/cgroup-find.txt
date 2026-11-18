@@ -1,0 +1,6 @@
+/sys/fs/cgroup/kubepods.slice/kubepods-pod2c1ce8c4_1c0f_4bff_9bb1_6d1cb0d1b0ba.slice/cri-containerd-8a1f2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef.scope/memory.current
+/sys/fs/cgroup/kubepods.slice/kubepods-pod2c1ce8c4_1c0f_4bff_9bb1_6d1cb0d1b0ba.slice/cri-containerd-8a1f2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef.scope/memory.stat
+/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod9b8a7c6d_5e4f_3a2b_1c0d_9e8f7a6b5c4d.slice/cri-containerd-11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff.scope/memory.current
+/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod7d4f8b6c_0000_4a1f_9a1a_1f2e3d4c5b6a.slice/cri-containerd-aabbccddeeff00112233445566778899aabbccddeeff001122334455667788.scope/memory.current
+/sys/fs/cgroup/system.slice/docker-4f5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef.scope/memory.current
+/sys/fs/cgroup/init.scope/memory.current
