@@ -607,7 +607,7 @@ export default function InventoryBoard(props) {
   }
 
   return (
-    <section class="inv-board" aria-label="My listings" ref={(node) => { board = node; }}>
+    <section class={['inv-board', { 'has-edit-drawer': editRow() }]} aria-label="My listings" ref={(node) => { board = node; }}>
       <div class="mypokoin-panel-head">
         <div>
           <h2>Live listings</h2>

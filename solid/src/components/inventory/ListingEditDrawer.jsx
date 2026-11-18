@@ -68,12 +68,7 @@ export default function ListingEditDrawer(props) {
   }
 
   return (
-    <div
-      class="listing-drawer-scrim"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) props.onClose();
-      }}
-    >
+    <div class="listing-drawer-scrim">
       <div
         class="listing-drawer"
         role="dialog"

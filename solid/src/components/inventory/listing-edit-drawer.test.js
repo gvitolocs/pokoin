@@ -47,6 +47,22 @@ test('the board switches the one drawer and asks before discarding', () => {
   assert.doesNotMatch(board, /onEdit=\{setEditRow\}/, 'nothing opens a drawer over unsaved edits');
 });
 
+test('the board stays reachable so another row switches the drawer', () => {
+  // A dim that swallows clicks would make "Edit on another row" unreachable:
+  // the panel is only a dim, and the board gives it its width.
+  assert.match(css, /\.listing-drawer-scrim \{[\s\S]*?pointer-events: none/);
+  // The chat dock's bubble must not sit on the drawer's own controls.
+  assert.match(css, /\.listing-drawer-scrim \{[\s\S]*?z-index: 900/);
+  assert.match(css, /\.listing-drawer \{[\s\S]*?pointer-events: auto/);
+  assert.match(css, /@media \(min-width: 1280px\)[\s\S]*?\.inv-board\.has-edit-drawer \{[\s\S]*?padding-right: min\(460px, 42vw\)/);
+  // The inset must not push the row past the table's own clip: the card column,
+  // the row's only flexible track, absorbs the panel's width.
+  assert.match(css, /\.inv-board\.has-edit-drawer \{\s*--inv-card-min: 96px;/);
+  assert.match(css, /minmax\(var\(--inv-card-min, 150px\), 1fr\)/);
+  assert.match(board, /'has-edit-drawer': editRow\(\)/);
+  assert.doesNotMatch(drawer, /event\.target === event\.currentTarget/, 'the dim is not a close button');
+});
+
 test('one form: the drawer variant shares price, quotes, graded and photos markup', () => {
   // The fields exist once; both layouts call the same builders.
   for (const name of ['priceField', 'quotesRow', 'gradedRow', 'photosRow', 'messages']) {
@@ -69,7 +85,11 @@ test('the drawer body is the fields, then the strategy step, then the footer', (
     'aria-label="Delete listing"',
   ]) assert.ok(body.includes(line), line);
   // Only the row editor makes the price field read-only while a rule owns it.
-  assert.match(form, /readOnly=\{drawer\(\) && Boolean\(pricingPick\(\)\)\}/);
+  assert.match(form, /readOnly=\{drawer\(\) && followsPricing\(\)\}/);
+  // A typed price or a preset is the seller's own again, and says so.
+  assert.match(form, /function takeOwnPrice\(\)[\s\S]*?setPricingPick\(CUSTOM_PRICING\)/);
+  // The read-only number still takes the first keystroke: it switches on keydown.
+  assert.match(form, /onKeyDown=\{[\s\S]*?takeOwnPrice\(\);/);
   // The desk keeps its own markup: the drawer branch cannot leak into it.
   assert.match(form, /\{drawer\(\) \? drawerBody\(\) : \(/);
 });
@@ -85,6 +105,7 @@ test('the desk.css styles the drawer and has no centred modal left', () => {
     '.sell-pricing-btn',
     '.sell-pricing-list',
     '.sell-price-eq',
+    '.sell-qty',
     '.chat-qty-input',
   ]) assert.ok(css.includes(rule), rule);
   assert.match(css, /@media \(max-width: 600px\)[\s\S]*?\.listing-drawer \{[\s\S]*?border-radius: 18px 18px 0 0/);

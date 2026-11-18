@@ -18,6 +18,7 @@ import {
   editListingBody,
   pricingDryRunBody,
   pricingDryRunPrice,
+  pricingGroupOf,
   pricingMenuEntries,
   pricingMenuLabel,
   pricingSavePlan,
@@ -46,6 +47,9 @@ import ListingLangPick, { dismissWhileOpen } from './ListingLangPick.jsx';
 import ShipFromCountryGate from './ShipFromCountryGate.jsx';
 import QtyStepper from '../QtyStepper.jsx';
 import StrategyEditor, { createStrategyEditor } from '../pricer/StrategyEditor.jsx';
+
+// The drawer's "Custom price" entry: the seller's own number, no rule behind it.
+const CUSTOM_PRICING = { kind: 'custom', id: '', name: 'Custom price', label: 'Custom price' };
 
 function TrashIcon() {
   return (
@@ -260,18 +264,37 @@ export default function ListingForm(props) {
     strategies: props.pricing?.strategies() || [],
     ctx: pricingCtx(),
   });
-  /** The menu's button: the picked entry, else the group the listing is in. */
-  const pricingLabel = () => pricingPick()?.label || pricingMenuLabel({
-    memberships: props.pricing?.memberships(),
-    groups: props.pricing?.groups() || [],
-    strategies: props.pricing?.strategies() || [],
-    listingId: editingId(),
-    ctx: pricingCtx(),
-  });
+  /** The menu's button: the entry chosen in this edit, else the group the listing is in. */
+  const pricingLabel = () => {
+    const pick = pricingPick();
+    if (pick) return pick.label;
+    return pricingMenuLabel({
+      memberships: props.pricing?.memberships(),
+      groups: props.pricing?.groups() || [],
+      strategies: props.pricing?.strategies() || [],
+      listingId: editingId(),
+      ctx: pricingCtx(),
+    });
+  };
+  /** The group whose note sits under the price: the store's in the drawer. */
+  const rowGroup = () => {
+    if (!drawer() || !props.pricing) return priceGroup();
+    const groupId = pricingGroupOf(props.pricing.memberships(), editingId());
+    return (props.pricing.groups() || []).find((entry) => String(entry?.id ?? '') === groupId) || null;
+  };
+  // A group or strategy prices the listing; the seller's own price never does.
+  const followsPricing = () => {
+    const pick = pricingPick();
+    return Boolean(pick) && pick.kind !== 'custom';
+  };
+  /** Whether a menu row is the one in force. */
+  const pricingChosen = (entry) => (entry.kind === 'custom'
+    ? (pricingPick() ? pricingPick().kind === 'custom' : !rowGroup())
+    : pricingPick()?.id === entry.id);
   /** What a picked group or strategy did to this listing's price. */
   const pricingNoteLine = () => {
     const pick = pricingPick();
-    if (!pick) return '';
+    if (!followsPricing()) return '';
     const was = priceText(originalPkn());
     if (!pricingChecked()) return `Checking ${pick.name}…`;
     if (pricingTarget() == null) return `No market price for this card; it stays at ${was || 'its current price'}.`;
@@ -284,9 +307,12 @@ export default function ListingForm(props) {
     setPricingChecked(false);
   }
 
-  /** A typed price or a market preset is the seller's own: custom at once. */
+  /** The seller prices this listing: the field's number is theirs, and a new one leaves the group. */
   function takeOwnPrice() {
-    if (pricingPick()) backToCustom();
+    if (!followsPricing()) return;
+    setPricingPick(CUSTOM_PRICING);
+    setPricingTarget(null);
+    setPricingChecked(false);
   }
 
   /** The dry run of the picked entry on this listing alone. */
@@ -329,8 +355,10 @@ export default function ListingForm(props) {
       return;
     }
     if (entry.kind === 'custom') {
-      backToCustom();
-      // The price in the field becomes the seller's own, and leaves the group.
+      setPricingPick(CUSTOM_PRICING);
+      setPricingTarget(null);
+      setPricingChecked(false);
+      // The price in the field becomes the seller's own, and a new one leaves the group.
       priceManual = true;
       priceTyped = true;
       return;
@@ -738,7 +766,9 @@ export default function ListingForm(props) {
       if (pricingFailed) {
         setDone(editing ? 'Listing updated.' : 'Listing created.');
         setError(`Saved, but the price was not applied: ${pricingFailed}`);
-        backToCustom();
+        setPricingPick(CUSTOM_PRICING);
+        setPricingTarget(null);
+        setPricingChecked(false);
         priceTyped = false;
         priceManual = true;
         setPrice(priceText(originalPkn()));
@@ -830,7 +860,12 @@ export default function ListingForm(props) {
           inputmode="decimal"
           value={price()}
           placeholder={hint()}
-          readOnly={drawer() && Boolean(pricingPick())}
+          readOnly={drawer() && followsPricing()}
+          // A rule owns the number until the seller starts typing their own.
+          onKeyDown={(event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') takeOwnPrice();
+          }}
           onFocus={() => {
             priceFocused = true;
             if (!priceManual) setPrice('');
@@ -1017,7 +1052,7 @@ export default function ListingForm(props) {
                   <button
                     type="button"
                     role="option"
-                    aria-selected={String(entry.kind === 'custom' ? !pricingPick() : pricingPick()?.id === entry.id)}
+                    aria-selected={String(pricingChosen(entry))}
                     onClick={() => choosePricing(entry)}
                   >
                     {entry.label}
@@ -1081,13 +1116,13 @@ export default function ListingForm(props) {
               <p class="mypokoin-help sell-pricing-note" role="status">{pricingNoteLine()}</p>
             </Show>
             {quotesRow()}
-            <Show when={!pricingPick() && priceGroup()}>
-              <p class="mypokoin-help listing-group-note">{groupPriceNote(priceGroup())}</p>
+            <Show when={!followsPricing() && rowGroup()}>
+              <p class="mypokoin-help listing-group-note">{groupPriceNote(rowGroup())}</p>
             </Show>
           </div>
           <div class="sell-drawer-block">
             <span class="sell-drawer-label">Quantity</span>
-            <QtyStepper editable class="chat-qty sell-qty" qty={qty()} min={1} max={99} onChange={setQty} />
+            <QtyStepper editable class="sell-qty" qty={qty()} min={1} max={99} onChange={setQty} />
           </div>
           <div class="sell-drawer-block">
             <span class="sell-drawer-label">Condition</span>
@@ -1174,7 +1209,7 @@ export default function ListingForm(props) {
         <Show when={strategyStep() && strategyEditor}>
           <div class="sell-drawer-step">
             <button type="button" class="pricer-back" onClick={() => setStrategyStep(false)}>← Back to the listing</button>
-            <StrategyEditor editor={strategyEditor} heading={false} />
+            <StrategyEditor editor={strategyEditor} />
           </div>
         </Show>
         <footer class="sell-drawer-foot">

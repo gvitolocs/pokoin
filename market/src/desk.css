@@ -3335,7 +3335,7 @@
 .inv-head,
 .inv-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
+  grid-template-columns: minmax(var(--inv-card-min, 170px), 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
   gap: 12px;
   align-items: center;
   padding: 8px 16px;
@@ -4867,12 +4867,12 @@ html.is-pointer-dragging body {
 
 .inv-table.has-pick .inv-head,
 .inv-table.has-pick .inv-row {
-  grid-template-columns: 44px minmax(150px, 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
+  grid-template-columns: 44px minmax(var(--inv-card-min, 150px), 1fr) 56px 72px 52px 110px 84px 64px 18px 72px;
 }
 
 .inv-table.has-pick.has-mkt .inv-head,
 .inv-table.has-pick.has-mkt .inv-row {
-  grid-template-columns: 44px minmax(140px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
+  grid-template-columns: 44px minmax(var(--inv-card-min, 140px), 1fr) 56px 72px 52px 100px 104px 84px 64px 18px 72px;
 }
 
 /* The row link spans every cell but the checkbox. */
@@ -5556,13 +5556,42 @@ html.is-pointer-dragging body {
 .listing-drawer-scrim {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  /* Above the chat dock's bubble (200), which would otherwise sit on the
+     drawer's own controls; below the pricer pop-up (1000). */
+  z-index: 900;
   display: flex;
   justify-content: flex-end;
   background: rgb(4 6 10 / 0.45);
+  /* Only a dim: the board stays clickable, so Edit on another row switches this panel. */
+  pointer-events: none;
+}
+
+/* Wide enough, the board gives the panel its width plus a gutter, so another
+   row's Edit and Delete buttons stay out from under it and switching rows is
+   a click away. The card column is the row's only flexible track: it takes the
+   loss, because a row wider than the table would be clipped by it and its
+   buttons would be unreachable rather than merely covered. With the market
+   columns on the row is wider still, so the inset waits for a larger board. */
+@media (min-width: 1280px) {
+  .inv-board.has-edit-drawer {
+    --inv-card-min: 96px;
+    padding-right: min(460px, 42vw);
+  }
+
+  .inv-board.has-edit-drawer .inv-head,
+  .inv-board.has-edit-drawer .inv-row {
+    gap: 8px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .inv-board.has-edit-drawer:has(.inv-table.has-mkt) {
+    padding-right: 0;
+  }
 }
 
 .listing-drawer {
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   width: min(420px, 100vw);
@@ -5823,12 +5852,43 @@ html.is-pointer-dragging body {
   justify-content: center;
   width: 40px;
   height: 40px;
+  padding: 0;
   margin: 0;
 }
 
-/* A quantity the seller can also type, in the drawer's own row. */
+.sell-drawer-foot .sell-delete svg {
+  flex: none;
+}
 
-.chat-qty.is-editable {
+/* A quantity the seller can also type, in the drawer's own row. The chat dock's
+   .chat-qty is pinned to a card thumb, so this stepper keeps its own class. */
+
+.sell-qty {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g2);
+  color: inherit;
+}
+
+.sell-qty button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sell-qty button:disabled {
+  opacity: 0.35;
   cursor: default;
 }
 

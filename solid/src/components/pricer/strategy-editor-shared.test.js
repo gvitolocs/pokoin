@@ -23,7 +23,10 @@ test('the Pricer tab and the listing drawer both import it', () => {
   assert.match(panel, /import StrategyEditor, \{ createStrategyEditor \} from '\.\/StrategyEditor\.jsx';/);
   assert.match(panel, /<StrategyEditor editor=\{editor\} \/>/);
   assert.match(form, /import StrategyEditor, \{ createStrategyEditor \} from '\.\.\/pricer\/StrategyEditor\.jsx';/);
-  assert.match(form, /<StrategyEditor editor=\{strategyEditor\} heading=\{false\} \/>/);
+  assert.match(form, /<StrategyEditor editor=\{strategyEditor\} \/>/);
+  // The drawer's second step is Back plus the editor's own "New strategy" title.
+  assert.match(form, /class="pricer-back" onClick=\{\(\) => setStrategyStep\(false\)\}/);
+  assert.match(editor, /'New strategy'/);
   // The drawer is that form: it is the only thing that carries the step.
   assert.match(drawer, /variant="drawer"/);
   assert.doesNotMatch(drawer, /StrategyEditor/, 'the step belongs to the form, not the shell');
@@ -49,6 +52,6 @@ test('the drawer prices through the same store and never the network itself', ()
   // The menu is a listbox with one trigger; the row editor's price waits for it.
   assert.match(form, /role="listbox"/);
   assert.match(form, /aria-expanded=\{pricingOpen\(\) \? 'true' : 'false'\}/);
-  assert.match(form, /readOnly=\{drawer\(\) && Boolean\(pricingPick\(\)\)\}/);
+  assert.match(form, /readOnly=\{drawer\(\) && followsPricing\(\)\}/);
   assert.doesNotMatch(form.slice(form.indexOf('async function priceByPricing')), /fetch\(/, 'no request of its own');
 });
