@@ -9,6 +9,7 @@ import {
   fetchBuyBoard,
   fetchBuyOrdersForMyListings,
   fetchMyBuyOrders,
+  offerPriceLabel,
   openBuyOrderIds,
   orderStateLabel,
   updateBuyOrder,
@@ -17,7 +18,6 @@ import { CONDITIONS } from '@market/card-desk.js';
 import { conditionChipSrc } from '@market/listing-meta.js';
 import { flagSrc, getSearchLang } from '@market/locale.js';
 import { authFrom } from '@market/punchouts.js';
-import { formatPkn, formatPknNumber } from '@market/pkn.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import AppLink from '../components/AppLink.jsx';
 import AuthLink from '../components/AuthLink.jsx';
@@ -41,6 +41,7 @@ import {
 } from '../components/buysell/BuySellIcons.jsx';
 import { dismissWhileOpen } from '../lib/dismiss.js';
 import { getBearer, signedIn } from '../stores/auth.js';
+import { buyerCurrency } from '../stores/buyer.js';
 import { allowMypokoinPreview } from './mypokoin-preview.js';
 import { BUYSELL_PREVIEW_BANNER, previewBoard, previewForMyListings, previewMine, previewOwnIds } from './buysell-preview-fixture.js';
 
@@ -55,6 +56,12 @@ const ABOUT_STEPS = [
   'You get an email and buy the listing at your price.',
 ];
 const FINE_PRINT = 'Offers are not binding and no money is taken until you buy.';
+/**
+ * A board price in the currency the visitor reads offers in — the label the
+ * desk's buy panel uses for these very orders (docs/BUYSELL.md, "Currency").
+ * PKN is what an offer is stored and posted in, not what this board is for.
+ */
+const priceLabel = (pkn) => offerPriceLabel(pkn, buyerCurrency() || 'PKN');
 const conditionLabel = (value) => CONDITIONS.find((row) => row.value === value)?.label || value;
 const cardPath = (id) => `/marketplace/${getSearchLang()}/cards/${encodeURIComponent(String(id || ''))}`;
 const toMs = (value) => (typeof value === 'number' ? value : Date.parse(String(value || '')));
@@ -123,8 +130,8 @@ function OfferFacts(props) {
         </span>
       </Show>
       <Show when={item().my_price_pkn}>
-        <span class="buysell-fact" title={`Your listing at ${formatPkn(item().my_price_pkn)}`}>
-          <TagGlyph />{formatPknNumber(item().my_price_pkn)}
+        <span class="buysell-fact" title={`Your listing at ${priceLabel(item().my_price_pkn)}`}>
+          <TagGlyph />{priceLabel(item().my_price_pkn)}
         </span>
       </Show>
     </span>
@@ -341,7 +348,7 @@ function Seek(props) {
                   <OfferFacts item={item} now={now()} />
                 </OfferTitle>
                 <span class="buysell-side">
-                  <strong>{formatPkn(item.price_pkn)}</strong>
+                  <strong>{priceLabel(item.price_pkn)}</strong>
                   <span class="buysell-acts">
                     {/* Sell now is somebody else's offer to take; yours gets Edit and Delete. */}
                     <Show when={!isOwn(item)}>
@@ -510,7 +517,7 @@ function History(props) {
                       <For each={(order.fills || []).filter((fill) => fill.listing_status === 'active' || fill.listing_status === 'sold_out')}>
                         {(fill) => (
                           <span class="buysell-meta">
-                            {fill.quantity} {fill.listing_status === 'sold_out' ? 'sold' : 'listed'} at {formatPkn(fill.price_pkn)}
+                            {fill.quantity} {fill.listing_status === 'sold_out' ? 'sold' : 'listed'} at {priceLabel(fill.price_pkn)}
                             <Show when={fill.listing_status === 'active'}>
                               <AppLink to={cardPath(order.card_id)}>Buy now</AppLink>
                             </Show>
@@ -524,7 +531,7 @@ function History(props) {
                       </For>
                     </OfferTitle>
                     <span class="buysell-side">
-                      <strong>{formatPkn(order.price_pkn)}</strong>
+                      <strong>{priceLabel(order.price_pkn)}</strong>
                       <Show when={group.state === 'open'}>
                         <span class="buysell-acts">
                           <OwnOfferButtons order={order} actions={own} />
@@ -606,7 +613,7 @@ function Offer(props) {
                     <OfferFacts item={item} now={now()} />
                   </OfferTitle>
                   <span class="buysell-side">
-                    <strong>{formatPkn(item.price_pkn)}</strong>
+                    <strong>{priceLabel(item.price_pkn)}</strong>
                     <span class="buysell-acts">
                       <SellNowForm order={item} fromPath="/cardgts?tab=sell" preview={props.preview} onDone={load} />
                       <CardPageLink cardId={item.card_id} />
