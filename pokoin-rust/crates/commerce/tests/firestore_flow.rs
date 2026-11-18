@@ -3070,6 +3070,140 @@ async fn versioned_paid_webhook_preserves_discount_economics_and_consumes_intege
     assert_eq!(balance.locked_pkn, 0);
 }
 
+/// Ledger entries that consumed one order's PKN discount.
+fn discount_consumes(mock: &MockStore, order_id: &str) -> usize {
+    mock.keys_with_prefix("ledger_entries/")
+        .iter()
+        .filter(|key| {
+            mock.get(key).is_some_and(|entry| {
+                entry["type"] == "order_discount_consumed" && entry["ref"] == order_id
+            })
+        })
+        .count()
+}
+
+/// A payment that lands on an order whose discount was already returned takes
+/// no PKN from the buyer a second time: the order is marked for review and the
+/// payment is still recorded. A discount that is still held is consumed once.
+#[tokio::test]
+async fn a_paid_webhook_never_consumes_a_discount_that_was_returned() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 500, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    let fixture = |session_id: &str, payment_status: &str, held: bool| {
+        json!({
+            "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+            "paymentMethod":"stripe", "paymentStatus":payment_status,
+            "status":"pending",
+            "stripeCheckoutSessionId":session_id, "totalEURCents":1030,
+            "pknDiscount":{"pkn":200,"eurCents":100,
+                "state":if held { "held" } else { "released" }},
+            "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                "shippingAmountEURCents":0,"sellerGrossCents":1000,
+                "sellerTransferCents":null}],
+            "items":[{"sellerUid":"seller-1","quantity":1,
+                "unitPriceEURCents":1000}],
+            "inventory":{"state":"committed","lines":[]},
+            "fulfillment":{"state":"done","steps":{}}
+        })
+    };
+    let paid = |order_id: &str, session_id: &str, intent: &str| {
+        json!({
+            "id":format!("evt_{order_id}"), "type":"checkout.session.completed",
+            "data":{"object":{
+                "id":session_id, "mode":"payment", "payment_status":"paid",
+                "currency":"eur", "amount_total":930, "payment_intent":intent,
+                "metadata":{"kind":"marketplace_order_eur",
+                    "pokoinOrderId":order_id, "pokoinUid":"buyer-1"}
+            }}
+        })
+    };
+
+    firestore
+        .create_document(
+            "orders",
+            "order-webhook-returned",
+            &fixture("cs_returned_1", "expired", false),
+        )
+        .await
+        .unwrap();
+    process_verified_event(
+        &state,
+        &paid("order-webhook-returned", "cs_returned_1", "pi_returned_1"),
+    )
+    .await
+    .unwrap();
+    let stored = firestore
+        .get_document(
+            &firestore
+                .document_path("orders", "order-webhook-returned")
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .expect("order");
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(
+        stored["pknDiscount"]["state"],
+        json!("released_before_payment")
+    );
+    assert!(stored["pknDiscount"]["reviewAt"].is_string());
+    assert_eq!(stored["pknDiscount"]["pkn"], json!(200));
+    assert_eq!(stored["pknDiscount"]["eurCents"], json!(100));
+    assert_eq!(
+        discount_consumes(&mock, "order-webhook-returned"),
+        0,
+        "a discount that was returned is not consumed"
+    );
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 500);
+    assert_eq!(balance.locked_pkn, 0);
+
+    // A discount still held at payment time is consumed, once.
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("buyer-1", 200, "order_discount_held").with_ref("order-webhook-held"),
+    )
+    .await
+    .unwrap();
+    firestore
+        .create_document(
+            "orders",
+            "order-webhook-held",
+            &fixture("cs_held_1", "pending_stripe", true),
+        )
+        .await
+        .unwrap();
+    process_verified_event(
+        &state,
+        &paid("order-webhook-held", "cs_held_1", "pi_held_1"),
+    )
+    .await
+    .unwrap();
+    let stored = firestore
+        .get_document(
+            &firestore
+                .document_path("orders", "order-webhook-held")
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .expect("order");
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    assert_eq!(discount_consumes(&mock, "order-webhook-held"), 1);
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
 #[tokio::test]
 async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() {
     let (state, firestore)=state_harness().await;
