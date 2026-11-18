@@ -3056,7 +3056,11 @@ async fn a_non_eur_escrow_refund_is_handled_by_hand() {
         assert_eq!(balance.available_pkn, 0);
     }
     let stored = firestore
-        .get_document(&firestore.document_path("orders", "order-escrow-pkn").unwrap())
+        .get_document(
+            &firestore
+                .document_path("orders", "order-escrow-pkn")
+                .unwrap(),
+        )
         .await
         .unwrap()
         .unwrap();
