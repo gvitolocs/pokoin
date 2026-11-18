@@ -222,6 +222,30 @@ export default function SegmentTable(props) {
   // `onCleanup` registered inside it would land nowhere and leak the observer.
   let box;
   const [sparkSize, setSparkSize] = createSignal(SPARK);
+  // Past four names the pill row no longer fits the tile beside each other, and
+  // on a phone past two: the switch then scrolls sideways inside itself instead
+  // of wrapping into lines or widening the table. The width the sparkline is
+  // measured at is the width the switch has, so one reading decides both.
+  const manyLevels = createMemo(() => levels().length > (sparkSize() === SPARK_PHONE ? 2 : 4));
+  let levelsBox;
+  // A scrolling switch can hide the very level it is painting, so the active
+  // pill is brought back — but only when it is really out of view, because a
+  // click on a half-visible pill must not shove the row around. The two boxes
+  // are compared where they paint rather than by their offset within the page,
+  // since the pill row is not a positioned box, and only the switch's own
+  // scroll is touched: the page never moves. A pill reached by Tab scrolls
+  // itself in in any engine anyway.
+  createEffect(() => (manyLevels() ? levelId() : ''), (active) => {
+    const node = levelsBox;
+    if (!active || !node) return;
+    const button = node.querySelector('[aria-pressed="true"]');
+    if (!button) return;
+    const boxRect = node.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    if (rect.left < boxRect.left) node.scrollLeft -= boxRect.left - rect.left;
+    else if (rect.right > boxRect.right) node.scrollLeft += rect.right - boxRect.right;
+  });
+
   // The section only exists once there is something to draw, so the observer
   // is attached when the gate opens rather than once at mount.
   createEffect(() => (visible() ? 1 : 0), (mounted) => {
@@ -273,7 +297,13 @@ export default function SegmentTable(props) {
 
         <Show when={painting()}>
           <Show when={levels().length > 1}>
-            <div class="segment-levels seller-history-presets" role="group" aria-label="Collection level">
+            <div
+              class="segment-levels seller-history-presets"
+              classList={{ 'is-many': manyLevels() }}
+              role="group"
+              aria-label="Collection level"
+              ref={levelsBox}
+            >
               <For each={levels()}>
                 {(level) => (
                   <button

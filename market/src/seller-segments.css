@@ -10,6 +10,31 @@
   border-top: 1px solid var(--g5);
 }
 
+/* The level switch is the history presets' pill row and lives inside the tile.
+   Up to four names — two on a phone — they sit in one line as they always did.
+   Past that the row stops growing: the pills keep their own width and the
+   switch scrolls sideways in its own frame, so the table is never wider than
+   its tile and the names never stack into second and third lines. The bar is
+   hidden because the active pill is always brought back into view and Tab
+   walks the buttons one by one; containing the axis keeps a flick at the end
+   of the row from dragging the page with it. */
+.segment-levels.is-many {
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.segment-levels.is-many button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.segment-levels.is-many::-webkit-scrollbar {
+  display: none;
+}
+
 /* One grid for the head and every row keeps the columns lined up: the
    sparkline track is the sparkline's own width, not `auto`, because the head
    has no sparkline of its own and an `auto` track would collapse to zero there

@@ -116,6 +116,34 @@ test('the desk follows the graph window and keeps the levels switchable', () => 
   assert.match(tableSrc, /Boolean\(props\.currencyPending\)/);
 });
 
+test('a long level switch scrolls inside itself, and the active pill stays seen', () => {
+  const css = read('../../../market/src/seller-segments.css');
+  const many = /\.segment-levels\.is-many \{([^}]*)\}/.exec(css)?.[1] || '';
+  assert.ok(many, 'the switch has no many-levels rule');
+  // Five names must not become two lines of chips, and must not widen the tile.
+  assert.match(many, /flex-wrap: nowrap;/);
+  assert.match(many, /overflow-x: auto;/);
+  assert.match(many, /max-width: 100%;/);
+  // A flick past either end is the switch's own business, not the page's.
+  assert.match(many, /overscroll-behavior-x: contain;/);
+  assert.match(css, /\.segment-levels\.is-many button \{[^}]*flex: none;[^}]*white-space: nowrap;/);
+  // Four pills on a desktop tile and two on a phone still read as before, so
+  // the threshold is the width the table itself was measured at.
+  assert.match(tableSrc, /levels\(\)\.length > \(sparkSize\(\) === SPARK_PHONE \? 2 : 4\)/);
+  assert.match(tableSrc, /classList=\{\{ 'is-many': manyLevels\(\) \}\}/);
+  // The active level is revealed with `scrollLeft` on the switch and the two
+  // rectangles, not `scrollIntoView` (which takes the page with it, vertically
+  // included) and not `offsetLeft` (the pill row is not a positioned box).
+  assert.match(tableSrc, /if \(rect\.left < boxRect\.left\) node\.scrollLeft -= boxRect\.left - rect\.left;/);
+  assert.match(tableSrc, /else if \(rect\.right > boxRect\.right\) node\.scrollLeft \+= rect\.right - boxRect\.right;/);
+  assert.doesNotMatch(tableSrc, /scrollIntoView|offsetLeft/);
+  // The pills stay plain buttons in tab order: no roving tabindex, no tablist,
+  // and a tabbed pill scrolls itself into view in any engine.
+  assert.doesNotMatch(tableSrc, /tabindex/i);
+  assert.doesNotMatch(tableSrc, /role="tablist"/);
+  assert.match(tableSrc, /role="group"/);
+});
+
 test('the window is anchored to the days the model has, and the level it opens on', () => {
   // The table asks the shared helper for both, instead of counting back from
   // today (an empty tail of "None held") or always opening on "All games".
