@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 pokoin-inventory = { path = "../inventory" }
 thiserror = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# Tests for scripts/ci-secret-scan.sh with real gitleaks, in throwaway git repositories that carry a copy of the real
+# .gitleaks.toml. Secret-shaped strings and the inline allow marker are assembled at run time, so this file scans clean.
+# Usage: bash scripts/ci-secret-scan.test.sh   (exit 2 when gitleaks is not installed: never a skip that looks like a pass)
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/.." && pwd)
+gl=${GITLEAKS:-gitleaks}
+if ! command -v "$gl" >/dev/null 2>&1; then
+  echo "ci-secret-scan.test: gitleaks is not installed; cannot run" >&2
+  exit 2
+fi
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/ci-secret-scan-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+# A GitHub-token-shaped string: "ghp" "_" then 36 characters, built from pieces.
+mk_secret() {
+  local s="" i chars=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+  for i in $(seq 0 35); do s+=${chars:$(((i * 7 + $1) % 62)):1}; done
+  printf '%s_%s' ghp "$s"
+}
+marker="gitleaks"":allow"
+
+fails=0
+n=0
+# core.hooksPath is forced empty on every commit: a host that sets it globally (scripts/setup-git-hooks.sh, or a CI
+# lane that wraps this repository's own hooks) would run the canonical-checkout guard inside the throwaway fixtures
+# below and refuse their base commits, because a fresh `git init` is a main work tree.
+new_repo() { # new_repo <name>: a repo with the real policy and one clean commit; sets $repo
+  n=$((n + 1))
+  repo=$tmp/r$n-$1
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email t@example.invalid
+  git -C "$repo" config user.name t
+  git -C "$repo" config commit.gpgsign false
+  cp "$root/.gitleaks.toml" "$repo/.gitleaks.toml"
+  echo clean >"$repo/a.txt"
+  git -C "$repo" add -A
+  git -C "$repo" -c core.hooksPath= commit -q -m base
+}
+commit_all() { git -C "$repo" add -A && git -C "$repo" -c core.hooksPath= commit -q -m "$1"; }
+run() { # run <expected-exit> <label> [env...]: scan $repo from its commit "base" tag to HEAD
+  local want=$1 label=$2 out rc
+  shift 2
+  set +e
+  out=$(cd "$repo" && env "$@" bash "$root/scripts/ci-secret-scan.sh" --base base 2>&1)
+  rc=$?
+  set -e
+  if [ "$rc" -eq "$want" ]; then
+    echo "ok   $label (exit $rc)"
+  else
+    echo "FAIL $label: expected exit $want, got $rc"
+    echo "$out" | sed 's/^/     | /' | tail -15
+    fails=$((fails + 1))
+  fi
+  LAST_OUT=$out
+}
+mark_base() { git -C "$repo" tag -f base >/dev/null; }
+
+# 1. clean range
+new_repo clean; mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 0 "clean range" GITLEAKS="$gl"
+
+# 2. a commit adds a secret-shaped string
+new_repo add; mark_base
+printf 'token = "%s"\n' "$(mk_secret 3)" >"$repo/cfg.txt"; commit_all add-secret
+run 1 "range adds a secret" GITLEAKS="$gl"
+
+# 3. added in one commit, removed in the next, both inside the range: history scan still finds it
+new_repo addrm; mark_base
+printf 'token = "%s"\n' "$(mk_secret 5)" >"$repo/cfg.txt"; commit_all add-secret
+git -C "$repo" rm -q cfg.txt; commit_all remove-secret
+run 1 "added and removed inside the range" GITLEAKS="$gl"
+
+# 4. a secret that exists only before <base>: the range step passes. The tree step (b) is what protects the tree,
+#    and the tree no longer holds it. Old history is not this gate's job.
+new_repo old
+printf 'token = "%s"\n' "$(mk_secret 9)" >"$repo/cfg.txt"; commit_all add-secret
+git -C "$repo" rm -q cfg.txt; commit_all remove-secret
+mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 0 "secret only before base" GITLEAKS="$gl"
+
+# 5. .gitleaks.toml changed inside the range
+new_repo toml; mark_base
+echo "# a harmless comment" >>"$repo/.gitleaks.toml"; commit_all toml-change
+run 1 ".gitleaks.toml changed" GITLEAKS="$gl"
+case $LAST_OUT in *"the secret-scan allowlist changed"*) echo "ok   allowlist message shown" ;; *) echo "FAIL allowlist message missing"; fails=$((fails + 1)) ;; esac
+
+# 6. a .gitleaksignore added
+new_repo ignore; mark_base
+echo "# nothing" >"$repo/.gitleaksignore"; commit_all ignore-file
+run 1 ".gitleaksignore added" GITLEAKS="$gl"
+
+# 7. a line with the inline allow marker added
+new_repo marker; mark_base
+printf 'x = 1 # %s\n' "$marker" >"$repo/b.txt"; commit_all marker
+run 1 "inline allow marker added" GITLEAKS="$gl"
+
+# 8. gitleaks missing
+new_repo missing; mark_base
+run 2 "gitleaks missing" GITLEAKS=/nonexistent
+
+# ---- step b scans the tracked files of HEAD, not the working copy (docs/SECRETS.md, "The scan in CI") ----------
+# The same secret-shaped string is used for the next two cases, so the difference between them is the path alone.
+SEC=$(mk_secret 13)
+
+# 9. a secret that was never committed is not part of what this repository publishes: neither step sees it
+new_repo tree-untracked; mark_base
+printf 'token = "%s"\n' "$SEC" >"$repo/untracked.txt"
+run 0 "a secret in an untracked file" GITLEAKS="$gl"
+case $LAST_OUT in *"tree scan: PASS"*) echo "ok   step b did not read the untracked working copy" ;; *) echo "FAIL step b reported an untracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+# the history scan is unaffected: it reads commits, and there is no commit holding this file
+case $LAST_OUT in *"range scan: PASS"*) echo "ok   the range scan is not the one that saw the untracked file" ;; *) echo "FAIL the range scan reported the untracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+
+# 10. the same string committed and still in HEAD: step b finds it although step a cannot, because it predates <base>
+new_repo tree-tracked
+printf 'token = "%s"\n' "$SEC" >"$repo/cfg.txt"; commit_all add-secret
+mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 1 "a secret in a tracked file of HEAD" GITLEAKS="$gl"
+case $LAST_OUT in *"range scan: PASS"*) echo "ok   the range scan passed on its own" ;; *) echo "FAIL 10: the range scan did not pass: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+case $LAST_OUT in *"tree scan: FAIL"*) echo "ok   step b reported the tracked secret" ;; *) echo "FAIL step b missed a secret in a tracked file: $LAST_OUT"; fails=$((fails + 1)) ;; esac
+
+# 11. the real policy still applies to the export: that path is allowlisted as a public by-construction data file,
+#     and the finding above shows the same string is reported anywhere else
+new_repo tree-allowlisted
+mkdir -p "$repo/market/src"
+printf 'export const apiKey = "%s"\n' "$SEC" >"$repo/market/src/firebase-client.js"; commit_all add-public-config
+mark_base
+echo more >>"$repo/a.txt"; commit_all more
+run 0 "the same secret on a path the real .gitleaks.toml allowlists" GITLEAKS="$gl"
+
+# 12. the export is a temporary directory and is gone again afterwards
+left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'ci-secret-scan-tree.*' 2> /dev/null | head -5)
+if [ -z "$left" ]; then
+  echo "ok   step b left no temporary directory behind"
+else
+  echo "FAIL step b left a temporary directory behind: $(echo "$left" | tr '\n' ' ')"
+  fails=$((fails + 1))
+fi
+
+# Hook mode: git skips a hook that is not executable, silently, so every tracked file under .githooks/ must be
+# mode 100755 in the index (it was 100644 once: PKN-01).
+hooks_not_executable() { # hooks_not_executable <repo>: prints tracked .githooks files whose index mode is not 100755
+  git -C "$1" ls-files -s .githooks/ | awk '$1 != "100755" { print $4 }'
+}
+bad=$(hooks_not_executable "$root")
+if [ -z "$bad" ]; then
+  echo "ok   .githooks files are mode 100755 in the real repository"
+else
+  echo "FAIL .githooks file(s) not mode 100755 in the index: $bad (git skips a hook that is not executable, so the staged secret scan would not run)"
+  fails=$((fails + 1))
+fi
+# The same check must fail on a repository whose hook is 100644.
+new_repo hookmode
+mkdir -p "$repo/.githooks"
+printf '#!/bin/sh\nexit 0\n' >"$repo/.githooks/pre-commit"
+chmod 644 "$repo/.githooks/pre-commit"
+git -C "$repo" add .githooks/pre-commit
+if [ -n "$(hooks_not_executable "$repo")" ]; then
+  echo "ok   a 100644 hook is detected"
+else
+  echo "FAIL a 100644 hook was not detected"
+  fails=$((fails + 1))
+fi
+
+# The .gitignore promise of docs/SECRETS.md, checked in the real repository that makes it: every .env or .env.<name>
+# in any directory is ignored, so a broad `git add` cannot stage one; the .example/.sample/.template templates and
+# ordinary files stay committable.
+env_ignored() { git -C "$root" check-ignore -q "$1"; }
+for p in .env .env.local .env.production api/.env solid/.env.local pokoin-rust/.env local/.env.production market/.env; do
+  if env_ignored "$p"; then
+    echo "ok   $p is gitignored"
+  else
+    echo "FAIL $p is not gitignored: docs/SECRETS.md promises every .env* is, so a broad git add would stage a secret file into a public push"
+    fails=$((fails + 1))
+  fi
+done
+for p in deploy/ops/x/.env.example market/.env.example README.md; do
+  if env_ignored "$p"; then
+    echo "FAIL $p is gitignored but must stay committable: the .example/.sample/.template shapes are the documented templates to copy, and README.md is not an env file at all"
+    fails=$((fails + 1))
+  else
+    echo "ok   $p is not gitignored"
+  fi
+done
+tracked_ignored=$(git -C "$root" ls-files -ci --exclude-standard)
+if [ -z "$tracked_ignored" ]; then
+  echo "ok   no tracked file is gitignored"
+else
+  printf 'FAIL tracked file(s) are gitignored (%s): the ignore patterns reach committed work, so a later git rm --cached or git clean would silently drop it and docs/SECRETS.md would not be the promise it claims\n' "$(echo "$tracked_ignored" | tr '\n' ' ')"
+  fails=$((fails + 1))
+fi
+
+if [ "$fails" -ne 0 ]; then
+  echo "ci-secret-scan.test: $fails failure(s)"
+  exit 1
+fi
+echo "ci-secret-scan.test: all cases passed"

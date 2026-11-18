@@ -28,13 +28,18 @@ UNTRACKED_INPUTS=(download/extension.zip)
 command -v vercel >/dev/null \
   || die "vercel CLI not on PATH. Non-interactive shells miss ~/.local/bin: run this through a login shell (bash -lc)."
 
-exec 9>/tmp/pokoin-web-deploy.lock
+exec 9>"${POKOIN_WEB_DEPLOY_LOCK:-/tmp/pokoin-web-deploy.lock}"
 flock -n 9 || die "another pokoin-web production deploy is running"
 
 say "commit $COMMIT — $(git -C "$REPO" log -1 --format=%s "$COMMIT" | cut -c1-80)"
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
 git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
   || die "commit is not on origin/main. Merge it into main and push first."
+# Ships only a commit whose required GitHub checks are green (docs/CI.md, "Deploy gate"), and only from a checkout
+# whose own scripts are origin/main's.
+POKOIN_CI_CALLER=deploy-web bash "$REPO/scripts/require-ci-green.sh" --repo-dir "$REPO" \
+  --caller-script "$REPO/scripts/deploy-web.sh" "$COMMIT" \
+  || die "the required CI checks are not green for this commit"
 
 # `vercel inspect --format=json` omits meta; the REST API has it.
 prod_state() {

@@ -182,6 +182,7 @@ async fn a_box_syncs_listings_and_a_channel_sale_is_not_a_pokoin_sale() {
     };
     std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
     std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
+    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
     std::env::set_var("POKOIN_READ_CACHE", "0");
     std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", "11".repeat(32));
 

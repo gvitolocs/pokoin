@@ -1,11 +1,12 @@
 //! nezopt-only sentinel checks for what OnFailure= cannot see: restart storms, expected
-//! units and containers that are not running, failed timers, new failed k3s Jobs, dead
-//! forward targets, silent degradation in logs, disk % and CPU temperature. Each returns
-//! findings with a snapshot `Meta`; the logic lives in `health`.
+//! units and containers that are not running, failed timers, new failed k3s Jobs, the live
+//! k3s API pods (`pods.rs`), dead forward targets, silent degradation in logs, disk % and
+//! CPU temperature. Each returns findings with a snapshot `Meta`; the logic lives in
+//! `health`.
 
 use crate::health::{self, Meta};
 use crate::sentinel::{Cfg, CheckOut, Finding, Sev, State};
-use crate::{env, sys};
+use crate::{env, pods, sys};
 use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, TcpStream};
@@ -278,6 +279,9 @@ pub fn checks(cfg: &Cfg, nz: &NezCfg, state: &mut State, now: i64) -> Vec<CheckO
         };
         Ok(vec![f])
     }));
+
+    // (d2) the live API pods: no ready replica, a restart, memory at its limit, Failed leftovers.
+    outs.push(crate::sentinel::check("pods", 1, || pods::findings(nz, state, now)));
 
     // (e) forwards: the local target of every active `ssh -R` unit, plus extras.
     outs.push(crate::sentinel::check("forward", 1, || {

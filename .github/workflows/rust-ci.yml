@@ -45,7 +45,7 @@ jobs:
             base=$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
           git diff --name-only "$base" HEAD | tee /tmp/changed.txt
-          if grep -qE '^(pokoin-rust/|\.github/workflows/rust-ci\.yml$|scripts/check-fast)' /tmp/changed.txt; then
+          if grep -qE '^(pokoin-rust/|\.github/workflows/rust-ci\.yml$|scripts/check-fast|scripts/run-flow-tests|scripts/rust-lints-check|scripts/rust-unsafe-exceptions\.txt|scripts/flow-test-workers)' /tmp/changed.txt; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -145,10 +145,10 @@ jobs:
           scripts/check-fast --base "$base" --no-test
 
   flow-db:
-    # Informational until green, like Lucina's non-gating tiers; rust-gate does not wait for it.
+    # scripts/run-flow-tests.sh: every `*_flow` binary in a database of its own, so no binary can inherit tables an
+    # earlier one left behind, and a binary that skips itself or runs no test is a failure rather than a pass.
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     defaults:
@@ -167,8 +167,16 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      POKOIN_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+      POKOIN_FLOW_ADMIN_URL: postgres://postgres:test@127.0.0.1:5432/postgres
     steps:
+      - name: psql is available
+        working-directory: .
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            echo "::error::psql is not installed on this runner image, so a database per binary cannot be created"
+            exit 1
+          fi
+          psql --version
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -187,12 +195,12 @@ jobs:
             rustup toolchain install stable --profile minimal --no-self-update
             rustup default stable
           fi
-      - name: flow tests against Postgres 17
-        # --test takes a glob; --no-fail-fast so one red binary does not hide the others.
-        run: cargo test --workspace --locked --no-fail-fast --test '*_flow'
+      - name: flow tests against Postgres 17, one database per binary
+        working-directory: .
+        run: bash scripts/run-flow-tests.sh
 
   rust-gate:
-    needs: [changes, test, changed]
+    needs: [changes, test, changed, flow-db]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -202,10 +210,12 @@ jobs:
           RUST: ${{ needs.changes.outputs.rust }}
           TEST: ${{ needs.test.result }}
           CHANGED: ${{ needs.changed.result }}
+          FLOWDB: ${{ needs.flow-db.result }}
         run: |
-          echo "changes=$CHANGES rust=$RUST test=$TEST changed=$CHANGED"
+          echo "changes=$CHANGES rust=$RUST test=$TEST changed=$CHANGED flowdb=$FLOWDB"
           if [ "$CHANGES" != success ]; then echo "::error::the changes job did not succeed"; exit 1; fi
           if [ "$RUST" = false ]; then echo "rust-gate: no Rust-relevant files changed, nothing to check"; exit 0; fi
           if [ "$TEST" != success ]; then echo "::error::cargo test --workspace failed"; exit 1; fi
           if [ "$CHANGED" != success ]; then echo "::error::scripts/check-fast found something new in the changed lines"; exit 1; fi
-          echo "rust-gate: Rust files changed, test and changed both passed"
+          if [ "$FLOWDB" != success ]; then echo "::error::scripts/run-flow-tests.sh found a flow test that failed, skipped itself or ran no test"; exit 1; fi
+          echo "rust-gate: Rust files changed, test, changed and flow-db all passed"
