@@ -10,7 +10,7 @@ fn matches(pattern: &str, value: &str) -> bool {
 }
 pub fn precheck(body: &str) -> Option<Value> {
     if matches(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", body)
-        || matches(r"(?:\+?\d[\s-]?){9,}", body)
+        || matches(r"(?:\+?[0-9][\s-]?){9,}", body)
     {
         return Some(
             json!({"decision":"hold","reason":"contains contact details","categories":["personal_data"]}),
@@ -20,6 +20,21 @@ pub fn precheck(body: &str) -> Option<Value> {
         return Some(json!({"decision":"hold","reason":"several links","categories":["links"]}));
     }
     None
+}
+/// JS `slice(0, limit)`: the limit counts UTF-16 code units, and where a pair
+/// straddles the edge JS leaves a lone high surrogate behind. A Rust String
+/// cannot hold that, so the incomplete pair is dropped instead.
+fn utf16_cut(value: &str, limit: usize) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut units = 0usize;
+    for ch in value.chars() {
+        if units + ch.len_utf16() > limit {
+            break;
+        }
+        units += ch.len_utf16();
+        out.push(ch);
+    }
+    out
 }
 pub fn parse_decision(raw: &Value) -> Option<Value> {
     let parsed;
@@ -39,7 +54,7 @@ pub fn parse_decision(raw: &Value) -> Option<Value> {
         .map(js_string)
         .unwrap_or_default();
     Some(
-        json!({"decision":decision,"reason":reason.chars().take(200).collect::<String>(),"categories":array(&v["categories"]).iter().take(6).map(js_string).collect::<Vec<_>>()}),
+        json!({"decision":decision,"reason":utf16_cut(&reason,200),"categories":array(&v["categories"]).iter().take(6).map(js_string).collect::<Vec<_>>()}),
     )
 }
 pub fn clean_env(value: &str) -> String {

@@ -412,6 +412,45 @@ fn moderation_node_golden() {
         .unwrap()
         .contains("Never reject a comment only because it criticises Pokoin."));
 }
+
+/// comment-moderation.js:20 reads `\d` as ASCII digits only, and :45 slices the
+/// reason in UTF-16 code units.
+#[test]
+fn moderation_precheck_is_ascii_digits_and_the_reason_cut_is_utf16() {
+    assert_eq!(
+        moderation::precheck("call +39 123 456 7890").unwrap()["reason"],
+        "contains contact details"
+    );
+    for digits in ["٠١٢٣٤٥٦٧٨٩", "０１２３４５６７８", "۰۱۲۳۴۵۶۷۸"] {
+        assert_eq!(
+            moderation::precheck(&format!("dial {digits} now")),
+            None,
+            "{digits} is not ASCII digits"
+        );
+    }
+    let reason = format!("{}😀tail", "a".repeat(199));
+    let cut = moderation::parse_decision(&json!({"decision": "hold", "reason": reason})).unwrap()
+        ["reason"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(cut, "a".repeat(199), "the lone high surrogate goes");
+    assert_eq!(cut.encode_utf16().count(), 199);
+    // A pair inside the window costs two units, so the slice ends mid-word exactly
+    // where JS ends it, and a reason of 200 units is untouched.
+    let long = format!("{}😀ok", "b".repeat(197));
+    assert_eq!(
+        moderation::parse_decision(&json!({"decision": "hold", "reason": &long})).unwrap()
+            ["reason"],
+        format!("{}😀o", "b".repeat(197))
+    );
+    let fits = format!("{}😀o", "b".repeat(197));
+    assert_eq!(
+        moderation::parse_decision(&json!({"decision": "hold", "reason": &fits})).unwrap()
+            ["reason"],
+        fits
+    );
+}
 #[test]
 fn firestore_values_and_key_normalization() {
     let v = json!({"a":[1,2.5,true,null,"x"],"z":{"q":false}});
