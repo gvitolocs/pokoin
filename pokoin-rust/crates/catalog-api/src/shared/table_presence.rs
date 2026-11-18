@@ -151,7 +151,9 @@ async fn probe(pool: &PgPool, table: &str) -> Presence {
 /// [`PROBE_TTL`].
 pub async fn presence(pool: &PgPool, table: &str) -> Presence {
     cache()
-        .resolve(database_key(pool), || probe(pool, table))
+        .resolve((database_key(pool), table.to_owned()), || {
+            probe(pool, table)
+        })
         .await
 }
 
