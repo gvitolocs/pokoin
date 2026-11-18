@@ -9,7 +9,7 @@
  * off `group` and `game`, never off the key's shape.
  */
 
-import { utcDayKey } from './portfolio-history.js';
+import { addUtcDays, utcDayKey } from './portfolio-history.js';
 import { GAMES } from './game.js';
 
 export const ALL_LEVEL = 'all';
@@ -139,6 +139,52 @@ export function segmentLevels(model) {
   return levels;
 }
 
+/** The model's newest day that is not after `dayKey`, or '' when there is none. */
+function lastDayAtOrBefore(model, dayKey) {
+  const days = Array.isArray(model?.days) ? model.days : [];
+  for (let index = days.length - 1; index >= 0; index -= 1) {
+    const date = text(days[index]?.date);
+    if (date && date <= dayKey) return date;
+  }
+  return '';
+}
+
+/**
+ * The window the desk reads. A range that carries its own two dates — the
+ * graph's custom pick — wins as it is. A preset counts `days` backwards from
+ * the model's newest day once that day already sits behind today, so a stored
+ * copy a week old or a server whose series lags shows the days it actually has
+ * instead of an empty tail of "None held".
+ */
+export function segmentWindow(model, range = {}, today = utcDayKey()) {
+  const customFrom = text(range?.from);
+  const customTo = text(range?.to);
+  if (customFrom || customTo) return { from: customFrom, to: customTo };
+  const days = Number(range?.days);
+  if (!Number.isFinite(days) || days <= 0) return { from: '', to: today };
+  const end = lastDayAtOrBefore(model, today) || today;
+  return { from: addUtcDays(end, -days), to: end };
+}
+
+/**
+ * The level the table opens on. "All games" is only worth a switch when at
+ * least two games actually hold cards; a one-game collection opens on that
+ * game, so a Pokémon-only book starts on Pokémon instead of on a two-row
+ * "All games" list of which one row is an empty pile.
+ */
+export function defaultSegmentLevel(model) {
+  const levels = segmentLevels(model);
+  const lastDay = (Array.isArray(model?.days) ? model.days : []).at(-1) || null;
+  const heldGames = new Set();
+  for (const def of model?.defs || []) {
+    if (def.group !== 'game') continue;
+    if ((lastDay?.segments?.[def.key]?.held || 0) > 0) heldGames.add(def.game);
+  }
+  if (heldGames.size >= 2) return ALL_LEVEL;
+  const firstGame = levels.find((level) => level.id !== ALL_LEVEL);
+  return firstGame ? firstGame.id : ALL_LEVEL;
+}
+
 /** Days inside `[from, to]`; an empty bound is open. */
 function windowedDays(model, window) {
   const days = Array.isArray(model?.days) ? model.days : [];
@@ -207,11 +253,15 @@ export function segmentGroups(model, levelId, window = {}) {
   return groups;
 }
 
-/** The whole collection over the window — the compare line of every chart. */
+/**
+ * The whole collection over the window — the compare line of every chart. A
+ * day whose value is unknown stays unknown rather than becoming a 0 that the
+ * chart reads as a total loss: the dashed line bridges that gap.
+ */
 export function collectionSeries(model, window = {}) {
   return windowedDays(model, window).map((day) => ({
     date: day.date,
-    valuePkn: numberOrNull(day.cardsValuePkn) ?? 0,
+    valuePkn: numberOrNull(day.cardsValuePkn),
   }));
 }
 

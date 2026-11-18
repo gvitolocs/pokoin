@@ -3,11 +3,13 @@ import test from 'node:test';
 import {
   ALL_LEVEL,
   collectionSeries,
+  defaultSegmentLevel,
   formatSegmentChange,
   indexedSeries,
   normalizeSegments,
   segmentGroups,
   segmentLevels,
+  segmentWindow,
   smoothPath,
   sparkEndPoint,
   sparkPoints,
@@ -281,7 +283,7 @@ test('the window bounds are inclusive on both edges', () => {
   assert.deepEqual(collectionSeries(model, { from: '2026-10-31', to: '2026-11-01' }).map((p) => p.valuePkn), [2, 3]);
 });
 
-test('collectionSeries reads the whole collection and treats a null value as zero', () => {
+test('collectionSeries reads the whole collection and keeps an unknown day unknown', () => {
   const model = normalizeSegments(answer([
     { date: '2026-11-01', cardsValuePkn: 500, segments: { 'game:pokemon': [500, 1, 1] } },
     { date: '2026-11-02', segments: { 'game:pokemon': [0, 0, 1] } },
@@ -289,10 +291,75 @@ test('collectionSeries reads the whole collection and treats a null value as zer
   ]));
   assert.deepEqual(collectionSeries(model, {}), [
     { date: '2026-11-01', valuePkn: 500 },
-    { date: '2026-11-02', valuePkn: 0 },
+    { date: '2026-11-02', valuePkn: null },
     { date: '2026-11-03', valuePkn: 600 },
   ]);
   assert.deepEqual(collectionSeries(null, {}), []);
+  // An unknown day is a gap, not a day the collection was worth nothing: it
+  // indexes to null, so the compare line bridges it instead of falling to -100.
+  assert.deepEqual(indexedSeries(collectionSeries(model, {})), [0, null, 20]);
+  const drawn = versusPaths([0, null, 20], indexedSeries(collectionSeries(model, {})), 320, 150, 10);
+  assert.equal((drawn.collection.match(/[MC][^MC]*/g) || []).length, 2, 'the gap drew more than one run');
+  assert.equal(pathEnds(drawn.collection).first.x, 10);
+  assert.equal(pathEnds(drawn.collection).last.x, 310);
+  assert.ok(drawn.zeroY > 139, `0 % should sit at the bottom, not above a -100 % floor: ${drawn.zeroY}`);
+});
+
+test('segmentWindow anchors a preset to the newest day the model has', () => {
+  const model = normalizeSegments(answer([
+    { date: '2026-10-31', cardsValuePkn: 700, segments: { 'game:pokemon': [700, 8, 20] } },
+    { date: '2026-11-01', cardsValuePkn: 800, segments: { 'game:pokemon': [800, 9, 20] } },
+  ]));
+  // A copy saved on the 1st read on the 18th with the 1W range: ending the
+  // window on today would leave it empty and paint every row as "None held".
+  const week = segmentWindow(model, { id: '1W', days: 7 }, '2026-11-18');
+  assert.deepEqual(week, { from: '2026-10-25', to: '2026-11-01' });
+  const row = segmentGroups(model, 'all', week)[0].rows[0];
+  assert.deepEqual([row.valuePkn, row.priced, row.held], [800, 9, 20]);
+  assert.equal(row.state, 'ok');
+  // A series that reaches today keeps today as the end: nothing shifts back.
+  assert.deepEqual(segmentWindow(model, { days: 7 }, '2026-11-01'), { from: '2026-10-25', to: '2026-11-01' });
+  // A day newer than today (a clock that ran ahead) is not a day to end on.
+  const ahead = normalizeSegments(answer([
+    { date: '2026-11-01', cardsValuePkn: 800, segments: { 'game:pokemon': [800, 9, 20] } },
+    { date: '2026-11-20', cardsValuePkn: 810, segments: { 'game:pokemon': [810, 9, 20] } },
+  ]));
+  assert.equal(segmentWindow(ahead, { days: 7 }, '2026-11-18').to, '2026-11-01');
+  // MAX has no day count: the whole series, still ending today.
+  assert.deepEqual(segmentWindow(model, { id: 'MAX', days: null }, '2026-11-18'), { from: '', to: '2026-11-18' });
+  // A custom range carries its own two dates and wins over any day count.
+  assert.deepEqual(
+    segmentWindow(model, { id: 'custom', days: 12, from: '2026-10-30', to: '2026-11-01' }, '2026-11-18'),
+    { from: '2026-10-30', to: '2026-11-01' },
+  );
+  // No model at all falls back to the plain count backwards from today.
+  assert.deepEqual(segmentWindow(null, { days: 7 }, '2026-11-18'), { from: '2026-11-11', to: '2026-11-18' });
+});
+
+test('defaultSegmentLevel opens on All games only when two games hold cards', () => {
+  const twoGames = normalizeSegments(answer([
+    { date: '2026-11-01', cardsValuePkn: 900, segments: { 'game:pokemon': [900, 10, 30], 'game:riftbound': [0, 0, 40] } },
+  ]));
+  assert.equal(defaultSegmentLevel(twoGames), ALL_LEVEL);
+  // Riftbound is an empty pile, so All games would be one real row and one
+  // "None held": the desk opens on Pokémon, the only game with cards.
+  const oneGame = normalizeSegments(answer([
+    { date: '2026-11-01', cardsValuePkn: 900, segments: { 'game:pokemon': [900, 10, 30], 'game:riftbound': [0, 0, 0] } },
+  ]));
+  assert.equal(defaultSegmentLevel(oneGame), 'pokemon');
+  // Only the newest day counts.
+  const older = normalizeSegments(answer([
+    { date: '2026-10-31', cardsValuePkn: 900, segments: { 'game:pokemon': [900, 10, 30], 'game:riftbound': [0, 0, 40] } },
+    { date: '2026-11-01', cardsValuePkn: 900, segments: { 'game:pokemon': [900, 10, 30], 'game:riftbound': [0, 0, 0] } },
+  ]));
+  assert.equal(defaultSegmentLevel(older), 'pokemon');
+  // No game rows at all: there is no game to open on but the era's own.
+  const eraOnly = normalizeSegments(answer(
+    [{ date: '2026-11-01', cardsValuePkn: 10, segments: { 'pokemon:era:sv': [10, 1, 1] } }],
+    [{ key: 'pokemon:era:sv', group: 'era', game: 'pokemon', label: 'Scarlet & Violet' }],
+  ));
+  assert.equal(defaultSegmentLevel(eraOnly), 'pokemon');
+  assert.equal(defaultSegmentLevel(null), ALL_LEVEL);
 });
 
 test('indexedSeries is percent against the first value above zero', () => {
