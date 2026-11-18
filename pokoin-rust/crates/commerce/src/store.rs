@@ -87,6 +87,10 @@ pub struct LedgerOp {
     /// What the guarded request is, committed with the marker so a replay of
     /// the key can be compared with the request sent under it.
     pub fingerprint: Option<String>,
+    /// A document created by the same commit as the balances, the ledger
+    /// entries and the marker: the request record and its money move together,
+    /// and an id whose record already exists moves nothing.
+    pub create: Option<(String, Value)>,
 }
 
 impl LedgerOp {
@@ -105,6 +109,7 @@ impl LedgerOp {
             mode,
             require_available: true,
             fingerprint: None,
+            create: None,
         }
     }
 
@@ -158,6 +163,13 @@ impl LedgerOp {
         self
     }
 
+    /// Add a document that this commit creates at `path`, beside the balances,
+    /// the ledger entries and the marker.
+    pub fn with_create(mut self, path: impl Into<String>, value: Value) -> Self {
+        self.create = Some((path.into(), value));
+        self
+    }
+
     pub fn with_ref(mut self, reference: impl Into<String>) -> Self {
         self.ref_id = Some(reference.into());
         self
@@ -181,10 +193,12 @@ pub struct LedgerOutcome {
     pub from_available: i64,
     pub to_available: i64,
     pub ledger_ids: Vec<String>,
-    /// A replay: what the call that committed the marker recorded, so the
-    /// handler can tell the same request from a different one under one key.
+    /// What the guarded request is: this call's own when it committed, the
+    /// marker's when the key was already committed, so the handler can tell the
+    /// same request from a different one under one key.
     pub fingerprint: Option<String>,
-    /// A replay: the response the first call answered with, when it stored one.
+    /// A replay: the response the first call stored under the key, when it
+    /// stored one. `applied` by this call is `None` — this call answers itself.
     pub result: Option<Value>,
 }
 
@@ -291,7 +305,8 @@ pub async fn apply_all(
         }
     }
     uids.sort();
-    if uids.len() + 2 * ops.len() + 1 > MAX_WRITES_PER_COMMIT {
+    let creates = ops.iter().filter(|op| op.create.is_some()).count();
+    if uids.len() + 2 * ops.len() + 1 + creates > MAX_WRITES_PER_COMMIT {
         return Err(StoreError::Invalid(
             "Too many parties in one ledger op.".into(),
         ));
@@ -317,9 +332,18 @@ pub async fn apply_all(
             let seen = seen_for_tx.clone();
             Box::pin(async move {
                 *seen.lock().unwrap() = None;
-                let mut paths = Vec::with_capacity(uids.len() + 1);
+                let mut paths = Vec::with_capacity(uids.len() + 2);
                 for uid in &uids {
                     paths.push(client.document_path(BALANCES, uid)?);
+                }
+                // The record each op creates, read in the same transaction as
+                // the balances and written in the same commit as the marker.
+                let creates = ops
+                    .iter()
+                    .filter_map(|op| op.create.clone())
+                    .collect::<Vec<_>>();
+                for (path, _) in &creates {
+                    paths.push(path.clone());
                 }
                 let marker_path = match &key {
                     Some(key) => Some(client.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?),
@@ -335,6 +359,19 @@ pub async fn apply_all(
                     if let Some(record) = documents.pop().flatten() {
                         *seen.lock().unwrap() = Some(TxSeen::Replayed(merged_record(record)));
                         return Ok(Vec::new());
+                    }
+                }
+                // A record already written under this path is a request that
+                // exists: this call starts nothing, so nothing of it is
+                // committed.
+                if let Some(foreign) = documents[uids.len()..]
+                    .iter()
+                    .position(|document| document.is_some())
+                {
+                    if let Some((path, _)) = creates.get(foreign) {
+                        return Err(StoreError::Conflict(format!(
+                            "That request is already recorded: {path}"
+                        )));
                     }
                 }
                 let mut balances: Vec<(String, FirestoreBalance)> = uids
@@ -354,6 +391,9 @@ pub async fn apply_all(
                     apply_mode(&mut balances, op)?;
                 }
                 let mut writes = build_writes(&client, &uids, &balances, &ops)?;
+                for (path, value) in creates {
+                    writes.push(FirestoreWrite::Create { path, value });
+                }
                 if let (Some(path), Some(key)) = (marker_path, key) {
                     let (from_available, to_available) = party_balances(&balances, &ops[0]);
                     let mut marker = json!({
@@ -369,7 +409,10 @@ pub async fn apply_all(
                     {
                         object.insert("fingerprint".into(), json!(fingerprint));
                     }
-                    writes.push(FirestoreWrite::Create { path, value: marker });
+                    writes.push(FirestoreWrite::Create {
+                        path,
+                        value: marker,
+                    });
                 }
                 *seen.lock().unwrap() = Some(TxSeen::Applied(balances));
                 Ok(writes)
@@ -681,8 +724,9 @@ pub async fn update_idempotency(
     Ok(())
 }
 
-/// Record the response a committed key answered with, so the call that comes
-/// back with the same key is answered with exactly the same body.
+/// Attach the body this key answered to the claim, after the commit that
+/// landed the money, so a later replay can read it. Only a replay needs it:
+/// the call that committed already holds its own answer.
 pub async fn record_result(
     fs: &FirestoreClient,
     key: &str,
