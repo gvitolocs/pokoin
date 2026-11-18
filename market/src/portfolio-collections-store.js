@@ -41,8 +41,10 @@ function snapshot(extra) {
  * `deps`:
  * - `bearer()` — the signed-in seller's token, or '' when there is none;
  * - `fetchCollections(token)` / `saveCollection(token, body)` / `deleteCollection(token, id)`;
- * - `previewAnswer(collections)` — the fixture's own answer for a list of saved
- *   collections: with it the store never asks the network and writes memory.
+ * - `previewAnswer(collections, seeding)` — the fixture's own answer for a list
+ *   of saved collections: with it the store never asks the network and writes
+ *   memory. `seeding` is true on the one ask that has to lay the layout out, and
+ *   false for every ask after it, so an empty desk stays empty.
  */
 export function createCollectionsStore(deps = {}) {
   const preview = typeof deps.previewAnswer === 'function';
@@ -106,7 +108,10 @@ export function createCollectionsStore(deps = {}) {
     const clean = String(uid || '');
     // The fixture has no seller behind it: it answers whoever asks.
     if (preview) {
-      apply(clean, deps.previewAnswer(state.collections));
+      // The fixture seeds itself on the first ask only; after that it answers
+      // what is on the desk, so deleting the last list shows the empty level
+      // instead of the layout refilling itself.
+      apply(clean, deps.previewAnswer(state.collections, !state.settled));
       return Promise.resolve(state);
     }
     if (!clean) {

@@ -377,6 +377,30 @@ test('a write answering after the seller changed never lands on the new one', as
   assert.equal(calls.read, 2, 'the sign-out asked for nothing of its own');
 });
 
+test('the fixture seeds itself once and then answers what the desk holds', async () => {
+  const asked = [];
+  const store = createCollectionsStore({
+    bearer: () => 't',
+    fetchCollections: () => Promise.reject(new Error('the preview asks nothing')),
+    saveCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    deleteCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    previewAnswer: (rows, seeding) => {
+      asked.push({ held: rows.length, seeding: Boolean(seeding) });
+      return answer(seeding ? [binder()] : rows);
+    },
+  });
+  await store.load('preview');
+  assert.deepEqual(asked.at(-1), { held: 0, seeding: true }, 'the empty desk is the layout being laid out');
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Charizard binder']);
+  // Deleting the last list is an answer of its own: empty, and it stays empty.
+  await store.remove('c1');
+  assert.deepEqual(store.get().collections, []);
+  assert.ok(store.model(), 'the empty level is still the level');
+  await store.load('preview');
+  assert.deepEqual(asked.at(-1), { held: 0, seeding: false }, 'nothing is seeding any more');
+  assert.deepEqual(store.get().collections, [], 'and the deleted lists do not come back');
+});
+
 test('a preview list is never given an id that was already used', async () => {
   const store = createCollectionsStore({
     bearer: () => 't',

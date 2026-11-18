@@ -218,9 +218,12 @@ function PreviewDashboard() {
   // A save or a delete writes memory only: the preview asks the API nothing,
   // so the Collections level and the editor are reviewable without an account.
   const collections = createCollectionsBook({
-    previewAnswer: (rows) => previewCollectionsFrom(
+    previewAnswer: (rows, seeding) => previewCollectionsFrom(
       previewHistorySeries(),
-      rows.length ? rows : PREVIEW_COLLECTIONS,
+      // Only the very first ask lays the two fixture lists out. After that the
+      // desk answers with what it holds, so a seller who deletes the last one
+      // sees the empty level instead of the layout refilling itself.
+      seeding ? PREVIEW_COLLECTIONS : rows,
     ),
   });
   // The fixture answers at once, and an answer is a signal write: after this

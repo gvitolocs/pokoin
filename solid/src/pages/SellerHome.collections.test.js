@@ -237,7 +237,10 @@ test('the preview fixture is the same two lists the API shape carries', () => {
   const normalized = normalizeCollections(answer);
   assert.deepEqual(normalized.collections.map((row) => row.id), [binder.id, sealed.id]);
   // Memory only: the fixture answers whoever asks and never reaches for a token.
-  assert.match(homeSrc, /previewAnswer: \(rows\) => previewCollectionsFrom\(/);
-  assert.match(homeSrc, /rows\.length \? rows : PREVIEW_COLLECTIONS/);
+  // It seeds itself on the first ask and then answers with what the desk holds,
+  // so deleting the last list leaves the empty level on screen.
+  assert.match(homeSrc, /previewAnswer: \(rows, seeding\) => previewCollectionsFrom\(/);
+  assert.match(homeSrc, /seeding \? PREVIEW_COLLECTIONS : rows/);
+  assert.doesNotMatch(homeSrc, /rows\.length \? rows : PREVIEW_COLLECTIONS/);
   assert.match(homeSrc, /createEffect\(\(\) => 'preview', \(\) => \{ collections\.load\('preview'\); \}\);/);
 });
