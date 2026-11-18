@@ -24,8 +24,14 @@ const ERA_DEFS = [
   { key: 'pokemon:era:other', id: 'other', label: 'Promos and other', years: '', share: 0.004 },
 ];
 
-/** A fixed per-day wobble, never past ±6 % of an era's own share. */
-const WOBBLE = [0.03, -0.05, 0.015, -0.02, 0.06, -0.035, 0.008, -0.06, 0.042, -0.012, 0.025, -0.045];
+/**
+ * The era shares breathe: a sine of at most ±1.5 % of an era's own share over a
+ * 12-card-day cycle, each era at its own phase. Small and slow on purpose — a
+ * bigger or faster wobble turns the opened chart into a saw and dips the second
+ * day well under 0 %, which is not what a seller's book does.
+ */
+const WOBBLE_AMPLITUDE = 0.015;
+const WOBBLE_PERIOD_DAYS = 12;
 
 /** Sealed appears on the 10th card day and holds 4 cards at 9 % of the value. */
 const SEALED_FROM_CARD_DAY = 10;
@@ -53,8 +59,8 @@ function amountOf(day, field) {
 function wobbledWeights(dayIndex) {
   return ERA_DEFS.map((era, index) => {
     if (!(era.share > 0)) return 0;
-    const wobble = WOBBLE[(dayIndex * 5 + index * 3) % WOBBLE.length];
-    return era.share * (1 + wobble);
+    const angle = ((dayIndex + index) / WOBBLE_PERIOD_DAYS) * Math.PI * 2;
+    return era.share * (1 + WOBBLE_AMPLITUDE * Math.sin(angle));
   });
 }
 

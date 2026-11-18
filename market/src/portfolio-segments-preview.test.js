@@ -72,17 +72,49 @@ test('the split wobbles on a fixed per-day cycle and never runs away', () => {
   const erasOf = (index) => Object.entries(raw.days[index].segments)
     .filter(([key]) => key.startsWith('pokemon:era:sv') || key.startsWith('pokemon:era:swsh'))
     .map(([, entry]) => entry[0]);
-  // Same card every day, so the only movement is the wobble: ±6 % of the share
+  // Same card every day, so the only movement is the wobble: ±1.5 % of the share
   // plus the renormalisation, never a different pile.
   for (const day of raw.days) {
     const sv = day.segments['pokemon:era:sv'][0];
     const swsh = day.segments['pokemon:era:swsh'][0];
-    assert.ok(sv > 300 && sv < 420, `sv ${sv}`);
-    assert.ok(swsh > 220 && swsh < 310, `swsh ${swsh}`);
+    assert.ok(sv > 354 && sv < 366, `sv ${sv}`);
+    assert.ok(swsh > 263 && swsh < 273, `swsh ${swsh}`);
   }
   // The pattern repeats every 12 card days: day 1 and day 13 are identical.
   assert.deepEqual(erasOf(0), erasOf(12));
   assert.notDeepEqual(erasOf(0), erasOf(0 + 1));
+});
+
+test('an era share moves slowly, so the opened chart is a trend and not a saw', () => {
+  const raw = previewSegmentsFrom(flatCardDays(30));
+  const keys = Object.keys(raw.days[0].segments).filter((key) => key.startsWith('pokemon:era:'));
+  const shareOf = (day, key) => (day.segments[key]?.[0] ?? 0) / day.cardsValuePkn;
+  for (let index = 1; index < raw.days.length; index += 1) {
+    for (const key of keys) {
+      const before = shareOf(raw.days[index - 1], key);
+      const step = Math.abs(shareOf(raw.days[index], key) - before);
+      // No band takes or gives a whole percentage point of the day in one day.
+      assert.ok(step <= 0.01, `${key} day ${index + 1}: ${(step * 100).toFixed(3)}pp in one day`);
+      // For the bands that carry the chart, 1 % of their own share is the bound.
+      // A band worth 1 PKN a day is excluded: one cent of rounding already is a
+      // percent of it, and the wobble is not what moves it.
+      if (before >= 0.02) {
+        assert.ok(step / before <= 0.01, `${key} day ${index + 1}: ${((step / before) * 100).toFixed(2)}% of its own share`);
+      }
+    }
+  }
+  // The chart indexes a series on its first priced day; the old ±6 % wobble put
+  // the second day some 10 % under the 0 % line.
+  for (const key of keys) {
+    const values = raw.days.map((day) => day.segments[key]?.[0] ?? 0);
+    const base = values.find((value) => value > 0);
+    assert.ok(base > 0, `${key}: nothing priced`);
+    for (const value of values) {
+      if (!(value > 0)) continue;
+      const pct = ((value - base) / base) * 100;
+      assert.ok(Math.abs(pct) < 5, `${key}: ${pct.toFixed(2)} % off its first day`);
+    }
+  }
 });
 
 test('vintage is never held, sealed starts on the 10th card day, graded stays empty', () => {
