@@ -73,13 +73,11 @@ pub fn snapshot(source: &Path, destination: &Path) -> Result<Value> {
     }
     let manifest = validate_state(source)?;
     // The copy lands inside the destination, so a destination at or inside the
-    // source would have the snapshot overwrite what it is reading. The path does
-    // not exist yet, so it is resolved away from the filesystem instead.
+    // source would have the snapshot overwrite what it is reading. It does not
+    // exist yet, so it is resolved through its deepest existing ancestor: a
+    // symlinked parent must not be allowed to point back into the source.
     let source = source.canonicalize()?;
-    let resolved = match destination.canonicalize() {
-        Ok(existing) => existing,
-        Err(_) => resolve(destination, &env::current_dir()?),
-    };
+    let resolved = resolve(destination)?;
     if resolved == source || resolved.starts_with(&source) {
         bail!(
             "snapshot destination {} is inside the source directory {}",
@@ -96,16 +94,37 @@ pub fn snapshot(source: &Path, destination: &Path) -> Result<Value> {
     }
     Ok(manifest)
 }
-/// `path` made absolute against `base` with `.` and `..` collapsed, for a
-/// destination that does not exist yet and therefore cannot be canonicalized.
-fn resolve(path: &Path, base: &Path) -> PathBuf {
+/// The destination resolved as far as the filesystem allows: the deepest
+/// existing prefix of it canonicalized, so a symlink in the parent chain is
+/// followed rather than trusted, the components below that appended back on,
+/// then `.` and `..` collapsed.
+fn resolve(path: &Path) -> Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        base.join(path)
+        env::current_dir()?.join(path)
     };
+    let parts: Vec<_> = absolute.components().collect();
+    let (depth, mut resolved) = (0..parts.len())
+        .rev()
+        .find_map(|index| {
+            let mut prefix = PathBuf::new();
+            for part in &parts[..=index] {
+                prefix.push(part.as_os_str());
+            }
+            Some((index, prefix.canonicalize().ok()?))
+        })
+        .with_context(|| format!("cannot resolve destination {}", path.display()))?;
+    for part in &parts[depth + 1..] {
+        resolved.push(part.as_os_str());
+    }
+    Ok(collapse(resolved))
+}
+/// `.` dropped and `..` taking the component before it, of an absolute path
+/// whose existing prefix has already been canonicalized.
+fn collapse(path: PathBuf) -> PathBuf {
     let mut out = PathBuf::new();
-    for part in absolute.components() {
+    for part in path.components() {
         match part {
             Component::ParentDir => {
                 out.pop();

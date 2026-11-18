@@ -1616,6 +1616,26 @@ fn snapshot_refuses_a_destination_inside_the_source_and_creates_nothing() {
         .join("..")
         .join(src.file_name().unwrap());
     assert!(handover::snapshot(&src, &back_again).is_err());
+    // A symlinked parent must not smuggle the destination back into the source.
+    let real = root.path().join("real/data");
+    fs::create_dir_all(&real).unwrap();
+    for (name, value) in [
+        (store::RECORDS, &f["records"]),
+        (store::STORIES, &f["stories"]),
+        (store::STATE, &f["state"]),
+    ] {
+        store::atomic_json(&real.join(name), value).unwrap();
+    }
+    let link = root.path().join("link");
+    symlink(&real, &link).unwrap();
+    let error = handover::snapshot(&real, &link.join("snap"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("inside the source directory"), "{error}");
+    assert!(
+        !real.join("snap").exists(),
+        "the refusal must not create the destination through the link"
+    );
     // Only outside the source does the snapshot run.
     let dest = root.path().join("snapshot");
     assert!(handover::snapshot(&src, &dest).is_ok());
