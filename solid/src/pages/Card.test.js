@@ -428,7 +428,7 @@ test('the card graph draws once, complete: no sold line alone while the history 
 
 test('an uncached graph waits for both reads, at most 1.5s after the sales', () => {
   assert.match(page, /const GRAPH_HISTORY_WAIT_MS = 1500;/);
-  assert.match(page, /const \[graphDrawn, setGraphDrawn\] = createSignal\(Boolean\(priceHistory\(\) && salesSlices\(\) != null\)\);/);
+  assert.match(page, /const \[graphDrawn, setGraphDrawn\] = createSignal\(\n\s*Boolean\(untrack\(priceHistory\) && untrack\(salesSlices\) != null\),\n\s*\);/);
   assert.match(page, /const timer = window\.setTimeout\(\(\) => setGraphDrawn\(true\), GRAPH_HISTORY_WAIT_MS\);/);
   assert.match(page, /return \(\) => window\.clearTimeout\(timer\);/);
 });
@@ -460,6 +460,15 @@ test('a cached window is still re-read: the cache paints the first frame, not th
   assert.match(asked, /fetchCardPriceHistory\(cardId, bounds\)/);
   // One read per card and window per page view, whether or not it was cached.
   assert.match(asked, /if \(disposed \|\| graphHistoryAsked === askedFor\) return;/);
+  // PH-R009 round 2: the first call runs in the component scope, where Solid 2
+  // refuses a signal write (WRITE_OWNED_SCOPE), and its cached entry is exactly
+  // what the signal was initialised with: only a different window ever sets.
+  assert.match(
+    asked,
+    /if \(known && known !== untrack\(priceHistory\) && untrack\(graphHistoryKey\) === askedFor\) setPriceHistory\(known\);/,
+  );
+  const firstWrite = between.slice(between.indexOf('const known'));
+  assert.ok(!/setPriceHistory\((?!known\))/.test(firstWrite), 'nothing else is written before the fetch');
 });
 
 test('long windows read their dates with the year', () => {

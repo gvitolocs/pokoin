@@ -459,8 +459,12 @@ function CardDesk(props) {
   const [priceHistory, setPriceHistory] = createSignal(readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE));
   // Nothing is plotted until the sales and the history are both in, at the
   // latest GRAPH_HISTORY_WAIT_MS after the sales: the graph is drawn once, not
-  // twice. A history that lands after that cap still joins it.
-  const [graphDrawn, setGraphDrawn] = createSignal(Boolean(priceHistory() && salesSlices() != null));
+  // twice. A history that lands after that cap still joins it. The two reads
+  // here are the desk's setup values, so they are taken untracked like the rest
+  // of this scope (Solid 2: STRICT_READ_UNTRACKED).
+  const [graphDrawn, setGraphDrawn] = createSignal(
+    Boolean(untrack(priceHistory) && untrack(salesSlices) != null),
+  );
   let graphHistoryAsked = '';
 
   function askGraphHistory(range) {
@@ -468,9 +472,11 @@ function CardDesk(props) {
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
     // A cached window paints at once and is still re-read below: what the desk
-    // knew is only the first frame, never the data it keeps showing.
+    // knew is only the first frame, never the data it keeps showing. The first
+    // call runs in the component scope with the entry the signal was
+    // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
     const known = readGraphHistory(range);
-    if (known && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
+    if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
     const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
     fetchCardPriceHistory(cardId, bounds).then((history) => {
       // Dropped if this card or window is not the one asked for anymore.
@@ -491,7 +497,7 @@ function CardDesk(props) {
   createEffect(
     () => (salesSlices() == null ? 'no-sales' : priceHistory() == null ? 'history' : 'both'),
     (state) => {
-      if (graphDrawn() || state === 'no-sales') return undefined;
+      if (untrack(graphDrawn) || state === 'no-sales') return undefined;
       if (state === 'both') {
         setGraphDrawn(true);
         return undefined;
