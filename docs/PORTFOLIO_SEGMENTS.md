@@ -182,3 +182,62 @@ frozen but which has no stored segments gets segments priced from today's holdin
 under that frozen total** — for those days the segments need not add up to
 `cardsValuePkn`. That is intended: rebuilding the totals of past days is what must
 never happen.
+
+## Custom collections
+
+A seller names lists of cards — a wishlist, a tournament bound, "what I would buy
+back" — and sees each one valued per day as if they had held it all along. Storage
+and maths live in `domain/portfolio_collections.rs`, the HTTP hop and the catalog
+reads in `handlers/portfolio_collections.rs`.
+
+```
+GET  /api/marketplace-portfolio-collections
+POST /api/marketplace-portfolio-collections?action=save    { "id"?, "name", "items": [...] }
+POST /api/marketplace-portfolio-collections?action=delete  { "id" }
+```
+
+All three answer one body — the lists with each card priced as of the last day of
+its series, `segmentDefs` in creation order, and `days` — and a `POST` answers it
+*after* its write, so a save returns the list as it now is. `saved` names the id a
+save wrote and is absent otherwise. `OPTIONS` and any other method are answered as
+the history route answers them; the body of every answer is `private, no-store`,
+which is what makes one read safe to answer from.
+
+The lists are **Firestore only** (`portfolio_collections`, one document per list:
+`uid`, `name`, `items`, `createdAt`, `updatedAt`) — no table, no migration, because
+nothing here is a fact about the market. Limits are what one seller's browser can be
+trusted with: 20 lists, 300 items per list, quantity ≤999, name ≤40 characters, all
+four echoed in `limits`. A write's `id` is a list this seller already has or the read
+of it is a 404, a name another of their lists carries is a 409, a missing name or an
+over-budget list is a 400 that says which limit it hit, and an item whose `cardId` is
+not a positive integer or whose quantity is out of range is a 400 naming its index.
+`?action=` outside those two writes is a 400 too: there is no third verb. An unknown
+id and someone else's id answer byte-identically, so no read of the store can tell a
+list that exists from one that does not.
+
+`priceBasis` is `"ct-last-sold"`, the same as `SERIES_REVISION`'s basis: the last
+CardTrader sold median of the exact slice, carried forward, with the 20× outlier
+filter already applied by the book. Nothing is computed twice. A collection's items
+become holdings rows with an empty `since`, and `value_holdings_on` prices them out
+of the one sold query the request makes. Which blueprint a `cardId` is gets resolved
+**server-side only** — Pokémon through `marketplace_card_versions`, every other game
+through its own catalog and its own sold book — so a client cannot name a blueprint
+and price its graph off a card it does not hold, and a Riftbound card whose public
+id collides with a pricey Pokémon one still answers its own game's price.
+
+An item's facets are keys into that book, so they are stored as the book is filed:
+`Near Mint`, `nm` and `NM` are the one `NM` slice, `English`, `english` and `en` the
+one `EN` one, `ja` and `Japanese` the one `JP`, and a `game` may be written as its id
+or the display name the marketplace uses. Absent means `NM` / `EN`, Pokémon. A `game`
+the platform does not list is read as Pokémon, as every other route reads it; a
+`language` it has no code for keys nothing, and that card comes back held and
+unpriced rather than priced off some other card's sales.
+
+**The series is not stored.** It is a question about a list, not a fact: the day a
+card last sold changes under it, the seller renames or re-orders the list, and a
+stored answer would need a revision bump and a rebuild per collection. So a read
+walks the days itself, from the earliest priced day of any of its slices (never more
+than the 400 days the main graph draws) to today; a card whose slice has never sold
+counts as held, not priced, and shows no `pricePkn`. With no price anywhere in the
+book the series is today alone. An empty collection keeps its `segmentDefs` entry and
+appears in no day's `segments`, exactly as an empty era does.
