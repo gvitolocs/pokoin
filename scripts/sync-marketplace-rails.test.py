@@ -2,7 +2,7 @@
 import io
 import unittest
 from contextlib import redirect_stderr
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -176,7 +176,177 @@ class ConfiguredNewSetTests(unittest.TestCase):
     def test_override_and_collector_order(self):
         self.assertEqual(rails.NEW_CARDS_SET, 'Delta Reign')
         rows = [card(3, 'Raikou', '121', 'Delta Reign'), card(1, 'Meowscarada', '014', 'Delta Reign'), card(2, 'Raikou', '033', 'Delta Reign')]
-        self.assertEqual([c['id'] for c in rails.pick_new_set_cards(rows, 2)], ['1', '2'])
+        # The daily shuffle picks the order; the rail still takes `limit` rows and
+        # keeps two printings of one Pokémon name side by side.
+        picked = rails.pick_new_set_cards(rows, 2, seed='2026-11-18:new_cards')
+        self.assertEqual([c['id'] for c in picked], ['3', '1'])
+        self.assertEqual([c['name'] for c in picked], ['Raikou', 'Meowscarada'])
+
+
+def set_pool(count, above_common_every=0, set_name="Delta Reign", start=1):
+    """Printings numbered from `start`; every `above_common_every`-th of the
+    group is a Rare, `above_common_every=1` makes the whole group a Rare."""
+    rows = []
+    for offset in range(count):
+        at = start + offset
+        number = f"{at:03d}/103"
+        if above_common_every and (offset + 1) % above_common_every == 0:
+            number = f"Rare | {at:03d}/103"
+        rows.append(card(at, f"Card {at}", number, set_name))
+    return rows
+
+
+def rares(count, start=100):
+    return set_pool(count, 1, start=start)
+
+
+class NewCardsDailyShuffleTests(unittest.TestCase):
+    DAY = "2026-11-18"
+
+    def rail(self, pool, limit=20, day=None, rail_id=None):
+        seed = rails.rail_day_seed(rail_id or rails.NEW_CARDS_RAIL_ID, day or self.DAY)
+        return [c["id"] for c in rails.pick_new_set_cards(pool, limit, seed=seed)]
+
+    def test_seed_is_the_utc_calendar_day_and_the_rail(self):
+        self.assertEqual(rails.NEW_CARDS_RAIL_ID, "new_cards")
+        self.assertEqual(
+            rails.utc_day(datetime(2026, 11, 18, 23, 59, tzinfo=timezone.utc)),
+            "2026-11-18",
+        )
+        self.assertEqual(
+            rails.utc_day(datetime(2026, 11, 18, 1, 30, tzinfo=timezone(timedelta(hours=2)))),
+            "2026-11-17",
+        )
+        self.assertEqual(
+            rails.rail_day_seed(rails.NEW_CARDS_RAIL_ID, self.DAY),
+            "2026-11-18:new_cards",
+        )
+
+    def test_same_day_repeats_next_day_reshuffles(self):
+        pool = set_pool(30, 3)
+        today = self.rail(pool)
+        self.assertEqual(len(today), 20)
+        self.assertEqual(today, self.rail(pool))
+        self.assertNotEqual(today, self.rail(pool, day="2026-11-19"))
+
+    def test_the_rail_id_keeps_rails_apart(self):
+        pool = set_pool(30, 3)
+        self.assertNotEqual(self.rail(pool), self.rail(pool, rail_id="featured"))
+
+    def test_shuffle_is_a_permutation(self):
+        pool = set_pool(40, 4)
+        self.assertEqual(sorted(self.rail(pool, 1_000)), sorted(c["id"] for c in pool))
+        head = self.rail(pool)
+        self.assertEqual(len(head), 20)
+        self.assertEqual(len(set(head)), 20)
+
+    def test_empty_and_single_card_pools(self):
+        self.assertEqual(self.rail([]), [])
+        self.assertEqual(self.rail(None), [])
+        self.assertEqual(self.rail(set_pool(1)), ["1"])
+
+    def test_pool_row_order_does_not_move_the_rail(self):
+        # The pool query caps the set without an order of its own; the rail must
+        # not shift when Postgres hands the same printings back in another order.
+        pool = set_pool(30, 3)
+        self.assertEqual(self.rail(pool), self.rail(list(reversed(pool))))
+
+    def test_rail_is_not_the_first_numbers_of_the_set(self):
+        numbers = {int(c["number"].split("/")[0]) for c in rails.pick_new_set_cards(
+            set_pool(100), 20, seed=rails.rail_day_seed(rails.NEW_CARDS_RAIL_ID, self.DAY)
+        )}
+        self.assertNotEqual(numbers, set(range(1, 21)))
+
+    def test_name_variants_stay_separate(self):
+        pool = [
+            card(1, "Pikachu", "025/103", "Delta Reign"),
+            card(2, "Pikachu", "091/103", "Delta Reign"),
+            card(3, "Raichu", "026/103", "Delta Reign"),
+        ]
+        picked = rails.pick_new_set_cards(pool, 20, seed=rails.rail_day_seed(
+            rails.NEW_CARDS_RAIL_ID, self.DAY
+        ))
+        self.assertEqual([c["name"] for c in picked].count("Pikachu"), 2)
+
+
+class NewCardsRaritySpacingTests(unittest.TestCase):
+    @staticmethod
+    def labels(cards):
+        return [rails.rarity_key(item) for item in cards]
+
+    def test_rarity_label_reads_the_number_prefix(self):
+        prefixed = card(1, "Mega Rayquaza ex", "Gold Secret Rare | 113/076")
+        self.assertEqual(rails.rarity_label(prefixed), "Gold Secret Rare")
+        self.assertTrue(rails.is_above_common(prefixed))
+        self.assertFalse(rails.is_above_common(card(2, "Heracross", "Common | 001/103")))
+        self.assertFalse(rails.is_above_common(card(3, "Heracross", "001/103")))
+        self.assertTrue(rails.is_above_common({**card(4, "Haunter", "055/103"), "rarity": "Uncommon"}))
+
+    def test_two_of_one_rarity_max_while_another_is_left(self):
+        out = self.labels(rails.space_rarities(set_pool(12) + rares(5)))
+        self.assertEqual(len(out), 17)
+        for index in range(len(out) - 2):
+            self.assertFalse(
+                out[index] == out[index + 1] == out[index + 2],
+                f"three {out[index]!r} side by side at {index}: {out}",
+            )
+
+    def test_one_in_three_of_the_first_twelve_above_common(self):
+        pool = set_pool(60) + rares(6)
+        out = rails.space_rarities(pool)
+        above = sum(1 for item in out[:12] if rails.is_above_common(item))
+        self.assertGreaterEqual(above, 4)
+        rail = rails.pick_new_set_cards(
+            pool, 20, seed=rails.rail_day_seed(rails.NEW_CARDS_RAIL_ID, "2026-11-18")
+        )
+        self.assertGreaterEqual(sum(1 for item in rail[:12] if rails.is_above_common(item)), 4)
+
+    def test_quota_stops_at_what_the_pool_has(self):
+        out = rails.space_rarities(set_pool(20) + rares(2))
+        above = [item for item in out[:12] if rails.is_above_common(item)]
+        self.assertEqual(len(above), 2)
+
+    def test_single_rarity_pool_keeps_the_shuffle(self):
+        pool = set_pool(25)
+        self.assertEqual(rails.space_rarities(pool), pool)
+        self.assertEqual(rails.space_rarities([]), [])
+
+    def test_generic_rarity_spellings_are_one_group(self):
+        # "" from a bare collector number, "Common |" prefixed by CardTrader and
+        # the generic "Card" column are the same shelf for spacing.
+        for row in (
+            card(1, "Heracross", "001/103"),
+            {**card(2, "Surskit", "002/103"), "rarity": "Common"},
+            {**card(3, "Masquerain", "003/103"), "rarity": "Card"},
+            card(4, "Cacnea", "Common | 004/103"),
+        ):
+            self.assertEqual(rails.rarity_key(row), rails.COMMON_RARITY_KEY)
+        self.assertEqual(rails.rarity_key(card(5, "Garchomp", "Rare | 005/103")), "rare")
+
+    def test_a_run_of_commons_breaks_on_the_group_not_the_spelling(self):
+        commons = [
+            card(1, "Heracross", "001/103"),
+            card(2, "Surskit", "002/103"),
+            {**card(3, "Masquerain", "003/103"), "rarity": "Common"},
+            {**card(4, "Cacnea", "004/103"), "rarity": "Common"},
+            {**card(5, "Cacturne", "005/103"), "rarity": "Card"},
+            {**card(6, "Combee", "006/103"), "rarity": "Card"},
+        ]
+        out = self.labels(rails.space_rarities(commons + rares(3)))
+        self.assertEqual(len(out), 9)
+        for index in range(len(out) - 2):
+            self.assertFalse(
+                out[index] == out[index + 1] == out[index + 2],
+                f"three commons side by side at {index}: {out}",
+            )
+
+    def test_spacing_is_a_permutation(self):
+        pool = set_pool(30, 3)
+        out = rails.space_rarities(pool)
+        self.assertEqual(
+            sorted(c["id"] for c in out),
+            sorted(c["id"] for c in pool),
+        )
 
 
 if __name__ == "__main__":
