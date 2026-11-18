@@ -309,24 +309,23 @@ export function draftErrors(draft, others = [], limits = DEFAULT_LIMITS) {
   return errors;
 }
 
-/** The POST body: only the fields the server reads back, no client slice id. */
+/**
+ * The POST body: only the fields the server reads back, no client slice id.
+ * Each item is normalized first, so a draft assembled by hand sends the same
+ * shape the server answers with — the facets included, a card without a public
+ * id left out (the checks above name it before a save is ever asked).
+ */
 export function saveBody(draft) {
   const clean = draftOf(draft);
   const body = {
     name: clean.name,
-    items: clean.items.map((item) => ({
-      game: item.game,
-      cardId: item.cardId,
-      condition: item.condition,
-      language: item.language,
-      reverse: item.reverse,
-      firstEdition: item.firstEdition,
-      graded: item.graded,
-      quantity: item.quantity,
-      name: item.name,
-      setName: item.setName,
-      pricePkn: item.pricePkn,
-    })),
+    items: clean.items.reduce((acc, item) => {
+      const row = normalizeItem(item, DEFAULT_LIMITS);
+      if (!row) return acc;
+      const { id, ...fields } = row;
+      acc.push(fields);
+      return acc;
+    }, []),
   };
   if (clean.id) body.id = clean.id;
   return body;
@@ -343,10 +342,10 @@ const ERROR_MESSAGES = {
 };
 
 /** The sentence for one API error code, in plain words. */
-export function collectionErrorMessage(code) {
+export function collectionErrorMessage(code, fallback = 'Could not save the collection.') {
   const key = text(code).toLowerCase();
   if (key === '401') return ERROR_MESSAGES.unauthorized;
-  return ERROR_MESSAGES[key] || 'Could not save the collection.';
+  return ERROR_MESSAGES[key] || fallback;
 }
 
 /** The code of a thrown request: the body's, else its status. */
