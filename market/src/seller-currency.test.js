@@ -113,3 +113,18 @@ test('Assets preview value is local currency only, with EUR fallback and no NaN'
     assert.ok(out && !/NaN|PKN/.test(out), String(out));
   }
 });
+
+test('the desk label writes an amount only in the currency it knows', async () => {
+  const { assetsAmountLabel } = await import('./seller-currency.js');
+  // No code read yet is not PKN: a seller desk that guesses the unit shows the
+  // wrong money to a Danish seller, so the amount is simply not written.
+  for (const missing of ['', '   ', null, undefined]) {
+    assert.equal(assetsAmountLabel(480, missing), '');
+  }
+  assert.equal(assetsAmountLabel(2642, 'pkn'), '2642 PKN', 'digits only, never 2,642');
+  assert.equal(assetsAmountLabel(1234567, 'PKN'), '1234567 PKN');
+  assert.equal(assetsAmountLabel(0, 'PKN'), '0 PKN');
+  assert.equal(assetsAmountLabel(undefined, 'PKN'), '0 PKN', 'a missing value reads as nothing, not NaN');
+  assert.match(assetsAmountLabel(65110, 'DKK'), /DKK$/);
+  assert.doesNotMatch(assetsAmountLabel(65110, 'DKK'), /PKN/, 'fiat never carries a PKN half');
+});

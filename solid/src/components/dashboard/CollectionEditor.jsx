@@ -10,8 +10,7 @@ import {
   setItem,
 } from '@market/portfolio-collections.js';
 import { GAMES, game, isPokemonGame } from '@market/game.js';
-import { formatPknNumber } from '@market/pkn.js';
-import { formatAssetsValue } from '@market/seller-currency.js';
+import { assetsAmountLabel as amount } from '@market/seller-currency.js';
 import { createLiveSuggest } from '../../lib/live-suggest.js';
 import { useDialogFocus } from '../../lib/dialog-focus.js';
 import '@market/seller-collections.css';
@@ -24,12 +23,6 @@ const GAME_CHOICES = Object.values(GAMES)
 const SEARCH_LIMIT = 12;
 /** Two hundred ms: the seller is typing a name, not running a query. */
 const SEARCH_DEBOUNCE = 200;
-
-/** A PKN amount in the currency this desk shows, never a bare PKN number. */
-function amount(pkn, code) {
-  const value = Number(pkn) || 0;
-  return code === 'PKN' ? `${formatPknNumber(value)} PKN` : formatAssetsValue(value, code);
-}
 
 function searchRows(rows, gameId) {
   return (rows || []).map((row) => ({
@@ -177,7 +170,12 @@ function CatalogCardSearch(props) {
 function ItemRow(props) {
   const item = () => props.item;
   const patch = (changes) => props.onPatch(item().id, changes);
-  const price = () => (Number(item().pricePkn) > 0 ? amount(item().pricePkn, props.currency) : 'No sold price');
+  // An amount is only an amount in the currency the desk shows. While that read
+  // is out the cell keeps its shape with a dash and guesses no unit at all.
+  const price = () => {
+    if (props.currencyPending) return '—';
+    return Number(item().pricePkn) > 0 ? amount(item().pricePkn, props.currency) : 'No sold price';
+  };
   return (
     <li class="collections-item" data-testid="collections-item">
       <div class="collections-item-identity">
@@ -392,7 +390,8 @@ export default function CollectionEditor(props) {
                   <ItemRow
                     item={item}
                     limits={limits()}
-                    currency={props.currency || 'PKN'}
+                    currency={props.currency}
+                    currencyPending={Boolean(props.currencyPending)}
                     onPatch={(id, changes) => edit(setItem(draft(), id, changes, limits()))}
                     onRemove={(id) => edit(removeItem(draft(), id))}
                   />

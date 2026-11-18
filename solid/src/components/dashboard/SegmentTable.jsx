@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
 import { collectionIdFromKey } from '@market/portfolio-collections.js';
-import { formatPknNumber } from '@market/pkn.js';
-import { formatAssetsValue } from '@market/seller-currency.js';
+import { assetsAmountLabel as amount } from '@market/seller-currency.js';
 import {
   ALL_LEVEL,
   COLLECTIONS_LEVEL,
@@ -36,12 +35,6 @@ function dayLabel(dayKey) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
   if (!m) return '';
   return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
-}
-
-/** A PKN valuation in the seller's display currency, like the movers tiles. */
-function amount(pkn, code) {
-  const value = Number(pkn) || 0;
-  return code === 'PKN' ? `${formatPknNumber(value)} PKN` : formatAssetsValue(value, code);
 }
 
 function cards(count) {

@@ -187,6 +187,18 @@ test('the card search sends the public id of the game the picker shows', () => {
   assert.doesNotMatch(editorSrc, /product_id|listing_id|blueprintId/);
 });
 
+test('an amount is written in the currency the desk shows, or not at all', () => {
+  // The editor and the table share one label rule, and neither defaults to PKN:
+  // while the display currency is still being read the cell keeps its shape with
+  // a placeholder instead of the wrong unit.
+  assert.match(editorSrc, /import \{ assetsAmountLabel as amount \} from '@market\/seller-currency\.js';/);
+  assert.match(tableSrc, /import \{ assetsAmountLabel as amount \} from '@market\/seller-currency\.js';/);
+  assert.doesNotMatch(editorSrc, /formatPknNumber|formatAssetsValue/);
+  assert.doesNotMatch(editorSrc, /props\.currency \|\| 'PKN'/);
+  assert.match(editorSrc, /if \(props\.currencyPending\) return '—';/);
+  assert.match(viewSrc, /currency=\{props\.moverCurrency \|\| ''\}\n\s*currencyPending=\{Boolean\(props\.moverCurrencyPending\)\}/);
+});
+
 test('the item rows use the listing forms vocabulary and clamp copies', () => {
   assert.match(editorSrc, /import \{ LIST_LANGS, MOOD_CONDS \} from '@market\/card-desk\.js';/);
   assert.match(editorSrc, /<For each=\{MOOD_CONDS\}>/);

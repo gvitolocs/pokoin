@@ -429,7 +429,8 @@ export function SellerDashboardView(props) {
               <Show keyed when={props.collections?.editing()}>
                 <CollectionEditor
                   book={props.collections}
-                  currency={props.moverCurrency || 'PKN'}
+                  currency={props.moverCurrency || ''}
+                  currencyPending={Boolean(props.moverCurrencyPending)}
                   onClose={() => props.collections.closeEdit()}
                 />
               </Show>
